@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "kind": "actress",
+  "name": "偶像档案库",
+  "version": "1.0.0",
+  "description": "从偶像档案库(ouxiangdanganku.com)刮削演员资料",
+  "author": "Plugin Dev Agent",
+  "homepage": "https://www.ouxiangdanganku.com/",
+  "supportedFields": [
+    "avatar",
+    "gallery",
+    "birthDate",
+    "nameZh",
+    "nameEn",
+    "debutDate",
+    "heightCm",
+    "measurements",
+    "cupSize",
+    "bloodType",
+    "zodiac",
+    "nationality",
+    "profileSummary",
+    "aliases"
+  ],
+  "entry": "index.cjs"
+}

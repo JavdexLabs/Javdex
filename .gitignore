@@ -1,0 +1,9 @@
+node_modules
+dist
+out
+out-tsc
+*.log
+.DS_Store
+.vite
+todo.md
+/example

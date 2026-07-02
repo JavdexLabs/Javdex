@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "kind": "video",
+  "name": "JAV8",
+  "version": "1.0.0",
+  "description": "JAV8 - AV掌上夜店 刮削插件",
+  "author": "Plugin Dev Agent",
+  "homepage": "https://jav8.me/",
+  "supportedFields": [
+    "title",
+    "summary",
+    "cover",
+    "releaseDate",
+    "maker",
+    "publisher",
+    "series",
+    "director",
+    "actressesFemale",
+    "tags",
+    "source",
+    "samples"
+  ],
+  "entry": "index.cjs"
+}

@@ -1,0 +1,160 @@
+{
+  "$schema": "./packaging.targets.schema.json",
+  "comment": "将需要启用的目标设为 enabled: true，或运行 npm run packaging:configure 交互配置。",
+  "platforms": [
+    {
+      "id": "win-nsis",
+      "enabled": true,
+      "label": "Windows 安装包",
+      "description": "NSIS 向导安装程序 (.exe)，支持开始菜单与卸载",
+      "artifact": "Javdex Setup *.exe",
+      "buildOn": "Windows",
+      "electronBuilder": {
+        "platform": "win",
+        "targets": [
+          {
+            "target": "nsis",
+            "arch": [
+              "x64"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "win-portable",
+      "enabled": false,
+      "label": "Windows 便携版",
+      "description": "单文件便携可执行 (.exe)，不写注册表",
+      "artifact": "Javdex *-portable.exe",
+      "buildOn": "Windows",
+      "electronBuilder": {
+        "platform": "win",
+        "targets": [
+          {
+            "target": "portable",
+            "arch": [
+              "x64"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "win-zip",
+      "enabled": true,
+      "label": "Windows 压缩包",
+      "description": "解压即用的 ZIP 目录包",
+      "artifact": "Javdex *-win.zip",
+      "buildOn": "Windows",
+      "electronBuilder": {
+        "platform": "win",
+        "targets": [
+          {
+            "target": "zip",
+            "arch": [
+              "x64"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "mac-dmg",
+      "enabled": true,
+      "label": "macOS 磁盘映像",
+      "description": "DMG 安装镜像，拖拽安装",
+      "artifact": "Javdex *.dmg",
+      "buildOn": "macOS（或 macOS CI）",
+      "electronBuilder": {
+        "platform": "mac",
+        "targets": [
+          {
+            "target": "dmg",
+            "arch": [
+              "x64",
+              "arm64"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "mac-zip",
+      "enabled": false,
+      "label": "macOS 压缩包",
+      "description": "ZIP 格式的 .app 包",
+      "artifact": "Javdex *-mac.zip",
+      "buildOn": "macOS（或 macOS CI）",
+      "electronBuilder": {
+        "platform": "mac",
+        "targets": [
+          {
+            "target": "zip",
+            "arch": [
+              "x64",
+              "arm64"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "linux-appimage",
+      "enabled": true,
+      "label": "Linux AppImage",
+      "description": "通用可执行镜像，多数发行版可直接运行",
+      "artifact": "Javdex *.AppImage",
+      "buildOn": "Linux（或 Linux CI）",
+      "electronBuilder": {
+        "platform": "linux",
+        "targets": [
+          {
+            "target": "AppImage",
+            "arch": [
+              "x64"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "linux-deb",
+      "enabled": true,
+      "label": "Linux deb",
+      "description": "Debian / Ubuntu 安装包",
+      "artifact": "Javdex_*_amd64.deb",
+      "buildOn": "Linux（或 Linux CI）",
+      "electronBuilder": {
+        "platform": "linux",
+        "targets": [
+          {
+            "target": "deb",
+            "arch": [
+              "x64"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "linux-rpm",
+      "enabled": false,
+      "label": "Linux rpm",
+      "description": "Fedora / RHEL 安装包",
+      "artifact": "Javdex-*.x86_64.rpm",
+      "buildOn": "Linux（或 Linux CI）",
+      "electronBuilder": {
+        "platform": "linux",
+        "targets": [
+          {
+            "target": "rpm",
+            "arch": [
+              "x64"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

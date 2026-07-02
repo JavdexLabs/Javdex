@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "kind": "video",
+  "name": "JavDB",
+  "version": "1.0.0",
+  "description": "JavDB 成人影片数据库刮削插件",
+  "author": "Plugin Dev Agent",
+  "homepage": "https://javdb.com/",
+  "supportedFields": [
+    "title",
+    "summary",
+    "cover",
+    "releaseDate",
+    "maker",
+    "publisher",
+    "series",
+    "director",
+    "duration",
+    "actressesFemale",
+    "actressesMale",
+    "tags",
+    "source",
+    "rating",
+    "samples"
+  ],
+  "entry": "index.cjs"
+}

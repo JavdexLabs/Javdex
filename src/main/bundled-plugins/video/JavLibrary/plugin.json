@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "kind": "video",
+  "name": "JavLibrary",
+  "version": "1.0.0",
+  "description": "JavLibrary - 日本成人影片情报站 刮削插件",
+  "author": "Plugin Dev Agent",
+  "homepage": "https://www.javlibrary.com",
+  "supportedFields": [
+    "title",
+    "summary",
+    "cover",
+    "releaseDate",
+    "maker",
+    "publisher",
+    "director",
+    "duration",
+    "actressesFemale",
+    "tags",
+    "source",
+    "rating",
+    "samples"
+  ],
+  "entry": "index.cjs"
+}

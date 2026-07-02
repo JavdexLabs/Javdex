@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "kind": "actress",
+  "name": "Xslist",
+  "version": "1.0.0",
+  "description": "xslist.org 演员资料刮削插件",
+  "author": "Plugin Dev Agent",
+  "homepage": "https://xslist.org",
+  "supportedFields": [
+    "avatar",
+    "gallery",
+    "birthDate",
+    "nameZh",
+    "nameEn",
+    "debutDate",
+    "heightCm",
+    "measurements",
+    "cupSize",
+    "bloodType",
+    "zodiac",
+    "nationality",
+    "profileSummary",
+    "aliases"
+  ],
+  "entry": "index.cjs"
+}

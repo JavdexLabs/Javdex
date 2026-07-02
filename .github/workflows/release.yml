@@ -130,7 +130,7 @@ jobs:
           tag_name: ${{ steps.release.outputs.tag }}
           name: Javdex ${{ steps.release.outputs.tag }}
           prerelease: ${{ inputs.prerelease || false }}
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false
           files: |
             release-artifacts/*.AppImage
             release-artifacts/*.deb

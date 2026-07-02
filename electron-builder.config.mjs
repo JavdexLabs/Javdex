@@ -47,7 +47,7 @@ const base = {
     target: []
   },
   dmg: {
-    title: '${productName} ${version}',
+    title: '${productName} ${version} ${arch}',
     icon: 'build/icon.icns'
   },
   linux: {

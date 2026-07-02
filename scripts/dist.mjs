@@ -127,6 +127,7 @@ function main() {
   for (const platform of platformFlags) {
     builderArgs.push(`--${platform}`)
   }
+  builderArgs.push('--publish', 'never')
   builderArgs.push('--config.extraMetadata.main=./out/main/index.js')
   builderArgs.push(`-c.extraMetadata.version=${readPackageVersion()}`)
 

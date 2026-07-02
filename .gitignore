@@ -7,3 +7,4 @@ out-tsc
 .vite
 todo.md
 /example
+release-artifacts-*/

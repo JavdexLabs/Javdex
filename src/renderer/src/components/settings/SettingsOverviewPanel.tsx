@@ -7,6 +7,8 @@ import {
   Globe,
   HardDrive,
   Palette,
+  Play,
+  SlidersHorizontal,
   UserRound,
 } from 'lucide-react'
 import type {
@@ -69,6 +71,8 @@ interface SettingsOverviewPanelProps {
   onOpenAgentTool: (toolId: SettingsOverviewAgentToolId) => void
   onStartVideoBatchDefault: () => void
   onStartActressBatchDefault: () => void
+  onOpenVideoBatchAdvanced: () => void
+  onOpenActressBatchAdvanced: () => void
 }
 
 function formatCount(value: number): string {
@@ -162,15 +166,15 @@ function ScrapeCoverageBlock({
   const scrapedPct = scrapePercent(scraped, total)
   const unscrapedPct = scrapePercent(unscraped, total)
   const failedPct = scrapePercent(failed, total)
+  const summary = `${formatCount(scraped)}/${formatCount(total)} · ${scrapedPct}%${
+    failed > 0 ? ` · 失败 ${formatCount(failed)}` : ''
+  }`
 
   return (
     <div className="settings-overview-scrape">
       <div className="settings-overview-scrape-head">
         <span>{title}</span>
-        <span className="settings-overview-scrape-summary">
-          已刮削 {scraped} · 未刮削 {unscraped}
-          {failed > 0 ? ` · 失败 ${failed}` : ''}
-        </span>
+        <span className="settings-overview-scrape-summary">{summary}</span>
       </div>
       <div
         className="settings-overview-scrape-bar"
@@ -196,22 +200,51 @@ function ScrapeCoverageBlock({
           />
         )}
       </div>
-      <div className="settings-overview-scrape-legend">
-        <span>
-          <i className="settings-overview-scrape-dot settings-overview-scrape-dot--scraped" />
-          已刮削
+    </div>
+  )
+}
+
+function BatchOverviewStatus({
+  batch,
+  percent,
+  onOpen
+}: {
+  batch: BatchProgress | null
+  percent: number
+  onOpen: () => void
+}): JSX.Element {
+  const activeBatch = Boolean(batch && batch.status !== 'idle')
+  const status = batchStatusLabel(batch?.status)
+  const safePercent = activeBatch ? Math.max(0, Math.min(percent, 100)) : 0
+  const batchCount = activeBatch ? `${batch?.current ?? 0}/${batch?.total ?? 0}` : '无运行任务'
+  const batchDetail = batch?.currentCode
+    ? `当前：${batch.currentCode}`
+    : batch
+      ? `成功 ${batch.success} · 失败 ${batch.failed}`
+      : '等待下一次批量刮削'
+
+  return (
+    <div
+      className={`settings-overview-batch-inline${activeBatch ? ' is-active' : ' is-idle'}`}
+    >
+      <div className="settings-overview-batch-inline-head">
+        <span className="settings-overview-batch-inline-title">
+          <span>批量任务</span>
+          <strong>{status}</strong>
         </span>
-        <span>
-          <i className="settings-overview-scrape-dot settings-overview-scrape-dot--pending" />
-          未刮削
-        </span>
-        {failed > 0 && (
-          <span>
-            <i className="settings-overview-scrape-dot settings-overview-scrape-dot--failed" />
-            失败
-          </span>
-        )}
+        <span className="settings-overview-batch-inline-count">{batchCount}</span>
+        <button type="button" className="btn btn-sm" onClick={onOpen}>
+          打开
+        </button>
       </div>
+      <div
+        className="settings-overview-batch-progress"
+        role="img"
+        aria-label={`批量任务${status}，进度 ${safePercent}%`}
+      >
+        <span style={{ width: `${safePercent}%` }} />
+      </div>
+      <small>{batchDetail}</small>
     </div>
   )
 }
@@ -234,7 +267,9 @@ export default function SettingsOverviewPanel({
   onNavigateLibraryUnrecognized,
   onOpenAgentTool,
   onStartVideoBatchDefault,
-  onStartActressBatchDefault
+  onStartActressBatchDefault,
+  onOpenVideoBatchAdvanced,
+  onOpenActressBatchAdvanced
 }: SettingsOverviewPanelProps): JSX.Element {
   const [stats, setStats] = useState<LibraryOverviewStats | null>(null)
   const [statsLoading, setStatsLoading] = useState(true)
@@ -310,6 +345,8 @@ export default function SettingsOverviewPanel({
   const videoTotal = stats?.videos.total ?? 0
   const actressTotal = stats?.actresses.total ?? 0
   const actressFemaleTotal = stats?.actresses.female ?? 0
+  const videoScraped = stats?.videos.scraped ?? 0
+  const actressScraped = stats?.actresses.scraped ?? 0
   const videoUnscraped = stats?.videos.unscraped ?? 0
   const actressUnscraped = stats?.actresses.unscraped ?? 0
   const mediaAssetsPath = settings.mediaAssetsResolvedPath ?? settings.mediaAssetsPath
@@ -446,16 +483,13 @@ export default function SettingsOverviewPanel({
       </section>
 
       <div className="settings-overview-media-grid">
-        <section className="settings-overview-media-card" aria-label="影片概览">
+        <section className="settings-overview-media-card" aria-label="影片刮削概览">
           <div className="settings-overview-hero-head">
-            <h3>影片概览</h3>
-            <span className="settings-overview-hero-hint">
-              {statsLoading ? '统计加载中…' : `${formatCount(videoTotal)} 部`}
-            </span>
+            <h3>影片刮削概览</h3>
           </div>
 
           <ScrapeCoverageBlock
-            scraped={stats?.videos.scraped ?? 0}
+            scraped={videoScraped}
             unscraped={stats?.videos.unscraped ?? 0}
             failed={stats?.videos.failed ?? 0}
             total={videoTotal}
@@ -466,39 +500,50 @@ export default function SettingsOverviewPanel({
           ) : null}
 
           <div className="settings-overview-media-action">
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              disabled={
-                anyBatchActive ||
-                statsLoading ||
-                !settings.defaultScraper ||
-                videoUnscraped === 0
-              }
-              onClick={onStartVideoBatchDefault}
-            >
-              按默认配置批量刮削
-            </button>
+            <div className="settings-overview-action-row">
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={
+                  anyBatchActive ||
+                  statsLoading ||
+                  !settings.defaultScraper ||
+                  videoUnscraped === 0
+                }
+                onClick={onStartVideoBatchDefault}
+              >
+                <Play {...UI_ICON_SM} aria-hidden />
+                刮削未刮削项
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={anyBatchActive || statsLoading}
+                onClick={onOpenVideoBatchAdvanced}
+              >
+                <SlidersHorizontal {...UI_ICON_SM} aria-hidden />
+                高级刮削
+              </button>
+            </div>
             <small>
-              {settings.defaultScraper || '未设置插件'} · 未刮削 · 空字段补齐 · 全字段
+              {settings.defaultScraper || '未设置插件'} · 未刮削项 · 空字段补齐 · 全字段
             </small>
           </div>
+
+          <BatchOverviewStatus
+            batch={videoBatch}
+            percent={videoBatchPct}
+            onOpen={() => onNavigate('batch', 'video')}
+          />
         </section>
 
-        <section className="settings-overview-media-card" aria-label="演员概览">
+        <section className="settings-overview-media-card" aria-label="演员刮削概览">
           <div className="settings-overview-hero-head">
-            <h3>演员概览</h3>
-            <span className="settings-overview-hero-hint">
-              {statsLoading
-                ? '统计加载中…'
-                : actressTotal > 0
-                  ? `${formatCount(actressTotal)} 位 · 女 ${stats?.actresses.female ?? 0} / 男 ${stats?.actresses.male ?? 0}`
-                  : '0 位'}
-            </span>
+            <h3>演员刮削概览</h3>
           </div>
 
           <ScrapeCoverageBlock
-            scraped={stats?.actresses.scraped ?? 0}
+            scraped={actressScraped}
             unscraped={stats?.actresses.unscraped ?? 0}
             total={actressFemaleTotal}
             title="刮削覆盖 · 女优"
@@ -509,89 +554,43 @@ export default function SettingsOverviewPanel({
           ) : null}
 
           <div className="settings-overview-media-action">
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              disabled={
-                anyBatchActive ||
-                statsLoading ||
-                !settings.defaultActressScraper ||
-                actressUnscraped === 0
-              }
-              onClick={onStartActressBatchDefault}
-            >
-              按默认配置批量刮削
-            </button>
+            <div className="settings-overview-action-row">
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={
+                  anyBatchActive ||
+                  statsLoading ||
+                  !settings.defaultActressScraper ||
+                  actressUnscraped === 0
+                }
+                onClick={onStartActressBatchDefault}
+              >
+                <Play {...UI_ICON_SM} aria-hidden />
+                刮削未刮削项
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={anyBatchActive || statsLoading}
+                onClick={onOpenActressBatchAdvanced}
+              >
+                <SlidersHorizontal {...UI_ICON_SM} aria-hidden />
+                高级刮削
+              </button>
+            </div>
             <small>
-              {settings.defaultActressScraper || '未设置插件'} · 女优 · 从未刮削 · 空字段补齐 · 全字段
+              {settings.defaultActressScraper || '未设置插件'} · 女优未刮削项 · 空字段补齐 · 全字段
             </small>
           </div>
+
+          <BatchOverviewStatus
+            batch={actressBatch}
+            percent={actressPct}
+            onOpen={() => onNavigate('batch', 'actress')}
+          />
         </section>
       </div>
-
-      <section className="settings-overview-panel" aria-label="批量任务">
-        <div className="settings-overview-panel-head">
-          <h3>批量任务</h3>
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={() => onNavigate('batch', 'video')}
-          >
-            打开
-          </button>
-        </div>
-        <div className="settings-overview-batch-list">
-          <button
-            type="button"
-            className="settings-overview-batch-card"
-            onClick={() => onNavigate('batch', 'video')}
-          >
-            <div className="settings-overview-batch-card-head">
-              <strong>影片刮削</strong>
-              <span>{batchStatusLabel(videoBatch?.status)}</span>
-            </div>
-            {videoBatch && videoBatch.status !== 'idle' ? (
-              <>
-                <div className="settings-overview-batch-progress">
-                  <span style={{ width: `${videoBatchPct}%` }} />
-                </div>
-                <small>
-                  {videoBatch.current}/{videoBatch.total}
-                  {videoBatch.currentCode ? ` · ${videoBatch.currentCode}` : ''}
-                </small>
-              </>
-            ) : (
-              <small>按状态或缺失字段批量补全元数据</small>
-            )}
-          </button>
-          <button
-            type="button"
-            className="settings-overview-batch-card"
-            onClick={() => onNavigate('batch', 'actress')}
-          >
-            <div className="settings-overview-batch-card-head">
-              <strong>演员刮削</strong>
-              <span>{batchStatusLabel(actressBatch?.status)}</span>
-            </div>
-            {actressBatch && actressBatch.status !== 'idle' ? (
-              <>
-                <div className="settings-overview-batch-progress">
-                  <span style={{ width: `${actressPct}%` }} />
-                </div>
-                <small>
-                  {actressBatch.current}/{actressBatch.total}
-                  {actressBatch.currentCode ? ` · ${actressBatch.currentCode}` : ''}
-                </small>
-              </>
-            ) : (
-              <small>按性别与缺失字段批量补全档案</small>
-            )}
-          </button>
-        </div>
-        {!anyBatchActive && (
-          <p className="settings-overview-batch-idle">当前无运行中的批量任务</p>
-        )}
-      </section>
 
       <section className="settings-overview-panel settings-overview-panel--agent-tools" aria-label="Agent 工具">
         <h3>Agent 工具</h3>

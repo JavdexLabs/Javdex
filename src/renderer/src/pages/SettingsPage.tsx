@@ -108,8 +108,8 @@ export default function SettingsPage(): JSX.Element {
   const [actressBatch, setActressBatch] = useState<BatchProgress | null>(null)
   const [showVideoBatchModal, setShowVideoBatchModal] = useState(false)
   const [showActressBatchModal, setShowActressBatchModal] = useState(false)
-  const [videoBatchScopeHint, setVideoBatchScopeHint] = useState('')
-  const [actressBatchScopeHint, setActressBatchScopeHint] = useState('')
+  const [videoBatchScopeCountLabel, setVideoBatchScopeCountLabel] = useState('- 部影片')
+  const [actressBatchScopeCountLabel, setActressBatchScopeCountLabel] = useState('- 位演员')
   const [storageBusy, setStorageBusy] = useState(false)
   const [overviewStatsRefreshKey, setOverviewStatsRefreshKey] = useState(0)
   const videoBatchLogRef = useRef<HTMLDivElement>(null)
@@ -210,17 +210,9 @@ export default function SettingsPage(): JSX.Element {
   ): Promise<void> => {
     try {
       const n = await api.scrape.videoBatchCount({ status, missingFields })
-      const statusLabel =
-        VIDEO_BATCH_SCRAPE_STATUS_OPTIONS.find((o) => o.id === status)?.label ?? String(status)
-      const missingLabel =
-        missingFields.length > 0
-          ? `，缺少任一：${missingFields
-              .map((field) => VIDEO_SCRAPE_FIELD_OPTIONS.find((o) => o.id === field)?.label ?? field)
-              .join('、')}`
-          : ''
-      setVideoBatchScopeHint(`当前范围「${statusLabel}${missingLabel}」共 ${n} 部影片`)
+      setVideoBatchScopeCountLabel(`${n} 部影片`)
     } catch {
-      setVideoBatchScopeHint('')
+      setVideoBatchScopeCountLabel('- 部影片')
     }
   }
 
@@ -236,20 +228,9 @@ export default function SettingsPage(): JSX.Element {
   ): Promise<void> => {
     try {
       const n = await api.actressScrape.batchCount({ scope, scrapeStatus, missingFields })
-      const scopeLabel =
-        ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS.find((o) => o.id === scope)?.label ?? scope
-      const statusLabel =
-        ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS.find((o) => o.id === scrapeStatus)?.label ??
-        scrapeStatus
-      const missingLabel =
-        missingFields.length > 0
-          ? `，缺少任一：${missingFields
-              .map((field) => ACTRESS_SCRAPE_FIELD_OPTIONS.find((o) => o.id === field)?.label ?? field)
-              .join('、')}`
-          : ''
-      setActressBatchScopeHint(`当前范围「${scopeLabel} · ${statusLabel}${missingLabel}」共 ${n} 位演员`)
+      setActressBatchScopeCountLabel(`${n} 位演员`)
     } catch {
-      setActressBatchScopeHint('')
+      setActressBatchScopeCountLabel('- 位演员')
     }
   }
 
@@ -988,6 +969,8 @@ export default function SettingsPage(): JSX.Element {
                   }}
                   onStartVideoBatchDefault={startVideoBatchDefault}
                   onStartActressBatchDefault={startActressBatchDefault}
+                  onOpenVideoBatchAdvanced={() => setShowVideoBatchModal(true)}
+                  onOpenActressBatchAdvanced={() => setShowActressBatchModal(true)}
                 />
               )}
 
@@ -1132,7 +1115,7 @@ export default function SettingsPage(): JSX.Element {
           updateModeOptions={VIDEO_SCRAPE_UPDATE_MODE_OPTIONS}
           scopeOptions={VIDEO_BATCH_SCRAPE_STATUS_OPTIONS}
           initialScope={0}
-          scopeHint={videoBatchScopeHint}
+          scopeCountLabel={videoBatchScopeCountLabel}
           onScopeChange={(status, missingFields) =>
             void refreshVideoBatchScopeHint(status, missingFields)
           }
@@ -1174,7 +1157,7 @@ export default function SettingsPage(): JSX.Element {
           auxScopeOptions={ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS}
           initialAuxScope="unscraped"
           auxScopeTitle="刮削状态"
-          scopeHint={actressBatchScopeHint}
+          scopeCountLabel={actressBatchScopeCountLabel}
           onScopeChange={(scope, missingFields, scrapeStatus) =>
             void refreshActressBatchScopeHint(scope, missingFields, scrapeStatus ?? 'unscraped')
           }

@@ -43,7 +43,6 @@ import type {
 import { resolveActressDetailDisplayBackgroundPath } from '@shared/detailDisplayBackground'
 import {
   ACTRESS_SCRAPE_FIELD_OPTIONS,
-  ACTRESS_SCRAPE_UPDATE_MODE_HINT,
   ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS,
   ALL_ACTRESS_SCRAPE_FIELDS
 } from '@shared/types'

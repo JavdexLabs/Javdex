@@ -23,7 +23,6 @@ import ActressAvatar from '../components/ActressAvatar'
 import type { FacetType, VideoEditInput, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/types'
 import {
   VIDEO_SCRAPE_FIELD_OPTIONS,
-  VIDEO_SCRAPE_UPDATE_MODE_HINT,
   VIDEO_SCRAPE_UPDATE_MODE_OPTIONS,
   ALL_VIDEO_SCRAPE_FIELDS
 } from '@shared/types'
@@ -606,7 +605,6 @@ export default function DetailPage(): JSX.Element {
       {showScrapeFields && (
         <ScrapeFieldsModal
           title="修正匹配"
-          hint={VIDEO_SCRAPE_UPDATE_MODE_HINT}
           options={VIDEO_SCRAPE_FIELD_OPTIONS}
           scrapers={scrapers}
           initialScraperName={scraperName}

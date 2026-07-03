@@ -12,7 +12,6 @@ import type {
 import {
   ALL_VIDEO_SCRAPE_FIELDS,
   VIDEO_SCRAPE_FIELD_OPTIONS,
-  VIDEO_SCRAPE_UPDATE_MODE_HINT,
   VIDEO_SCRAPE_UPDATE_MODE_OPTIONS
 } from '@shared/types'
 import { api } from '../api'
@@ -598,7 +597,6 @@ export default function LibraryPage(): JSX.Element {
       {scrapeTarget && (
         <ScrapeFieldsModal
           title={`刮削元数据 · ${scrapeTarget.code}`}
-          hint={VIDEO_SCRAPE_UPDATE_MODE_HINT}
           options={VIDEO_SCRAPE_FIELD_OPTIONS}
           scrapers={scrapers}
           initialScraperName={scraperName}

@@ -94,7 +94,3 @@ npm run dist     # 打包安装程序（见 scripts/dist.mjs）
 - `docs/PLUGIN_DEV_AGENT.md` — 插件开发 Agent 与 MCP
 - `docs/UI_DESIGN_GUIDELINES.md` — UI 设计规范
 - `CHANGELOG.md` — 版本变更记录
-
-## 规划中的功能
-
-见 `todo.md`（内置播放器、NFO 导入导出、更多主题等）。

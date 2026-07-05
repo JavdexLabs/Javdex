@@ -5,7 +5,7 @@
   "main": "./out/main/index.js",
   "author": "Javdex",
   "license": "MIT",
-  "private": true,
+  "private": false,
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "electron-vite build",

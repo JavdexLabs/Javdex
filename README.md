@@ -537,4 +537,6 @@ npm run mcp:plugin-dev   # 启动插件开发 MCP 服务
 
 ## License
 
-MIT License
+本项目以 [MIT License](LICENSE) 开源。
+
+Copyright (c) 2026 Javdex

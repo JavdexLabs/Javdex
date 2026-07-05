@@ -1,5 +1,6 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import type { VideoQuery, ScrapedStatus } from '@shared/types'
+import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 import SelectControl from './SelectControl'
 import TagFilter from './TagFilter'
 
@@ -40,6 +41,7 @@ export default function LibraryFilterPopover({
       const t = e.target as Node
       if (panelRef.current?.contains(t)) return
       if (anchorRef.current?.contains(t)) return
+      if (isDismissExemptPortaledTarget(t)) return
       onClose()
     }
     const timer = window.setTimeout(() => document.addEventListener('mousedown', onDoc), 0)

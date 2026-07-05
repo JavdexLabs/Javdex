@@ -46,7 +46,8 @@ import {
 import { LIST_PARAM } from '../listView/listQueryParams'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
-import { facetKeys, videoKeys } from '../query/queryKeys'
+import { invalidateVideoLibraryQueries } from '../query/invalidateLibraryQueries'
+import { settingsPath } from '../settings/settingsRoutes'
 
 export default function DetailPage(): JSX.Element {
   const { id, videoId: videoIdParam } = useParams()
@@ -67,8 +68,7 @@ export default function DetailPage(): JSX.Element {
   const { setBackground, clearBackground } = useAppBackground()
 
   const invalidateVideos = (): void => {
-    void queryClient.invalidateQueries({ queryKey: videoKeys.all })
-    void queryClient.invalidateQueries({ queryKey: facetKeys.all })
+    invalidateVideoLibraryQueries(queryClient)
   }
 
   const [video, setVideo] = useState<VideoDetail | null>(null)
@@ -447,6 +447,19 @@ export default function DetailPage(): JSX.Element {
                 >
                   {getVideoScrapeStatusLabel(video.scraped_status)}
                 </span>
+                {video.scraped_status === 0 ? (
+                  <span className="detail-scrape-hint">
+                    可在
+                    <button
+                      type="button"
+                      className="meta-link detail-scrape-hint-link"
+                      onClick={() => navigate(settingsPath('overview', 'status'))}
+                    >
+                      设置 · 概览
+                    </button>
+                    一键刮削所有未刮削影片。
+                  </span>
+                ) : null}
               </div>
             ) : null}
           </div>

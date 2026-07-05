@@ -30,7 +30,7 @@ import {
 } from '@shared/types'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { api } from '../api'
-import { actressKeys, facetKeys, videoKeys } from '../query/queryKeys'
+import { overviewStatsKeys } from '../query/queryKeys'
 import Modal from '../components/Modal'
 import PluginDevPanel from '../components/pluginDev/PluginDevPanel'
 import AppearanceSettingsPanel from '../components/settings/AppearanceSettingsPanel'
@@ -52,6 +52,15 @@ import { SettingsTabBar } from '../components/settings/SettingsPrimitives'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
 import { useToast } from '../components/Toast'
 import { useTheme } from '../components/ThemeProvider'
+import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
+import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
+import {
+  invalidateAllLibraryQueries
+} from '../query/invalidateLibraryQueries'
+import {
+  dismissMaintenanceHint,
+  MAINTENANCE_HINT_KEYS
+} from '../utils/maintenanceHints'
 import {
   SETTINGS_GROUPS,
   resolveSettingsRoute,
@@ -105,19 +114,28 @@ export default function SettingsPage(): JSX.Element {
   const [scanStatus, setScanStatus] = useState('')
   const [scanResult, setScanResult] = useState<ScanResult | null>(null)
   const [unrecognized, setUnrecognized] = useState<string[]>([])
-  const [videoBatch, setVideoBatch] = useState<BatchProgress | null>(null)
-  const [actressBatch, setActressBatch] = useState<BatchProgress | null>(null)
+  const { videoBatch, actressBatch } = useBatchScrapeActivity()
   const [showVideoBatchModal, setShowVideoBatchModal] = useState(false)
   const [showActressBatchModal, setShowActressBatchModal] = useState(false)
   const [videoBatchScopeCountLabel, setVideoBatchScopeCountLabel] = useState('- 部影片')
   const [actressBatchScopeCountLabel, setActressBatchScopeCountLabel] = useState('- 位演员')
   const [storageBusy, setStorageBusy] = useState(false)
   const [overviewStatsRefreshKey, setOverviewStatsRefreshKey] = useState(0)
+  const [scanScrapePrompt, setScanScrapePrompt] = useState<{
+    imported: number
+    unscraped: number
+  } | null>(null)
+  const { stats: overviewStats } = useLibraryOverviewStats(overviewStatsRefreshKey)
   const videoBatchLogRef = useRef<HTMLDivElement>(null)
   const actressLogRef = useRef<HTMLDivElement>(null)
   const libraryUnrecRef = useRef<HTMLDivElement>(null)
   const isPluginDevPage = location.pathname.endsWith('/plugin-dev')
   const { group: activeGroup, tab: activeTab } = resolveSettingsRoute(location.pathname)
+
+  useEffect(() => {
+    if (activeGroup.id !== 'overview') return
+    void queryClient.invalidateQueries({ queryKey: overviewStatsKeys.all })
+  }, [activeGroup.id, queryClient])
 
   const dismissSettingsOverlays = useCallback(() => {
     setEditingPlugin(null)
@@ -170,25 +188,7 @@ export default function SettingsPage(): JSX.Element {
       .catch((e) => toast.show(String(e.message ?? e), 'error'))
     refreshVideoPlugins().catch(() => {})
     refreshActressPlugins().catch(() => {})
-    api.batchScrape
-      .getState()
-      .then((state) => {
-        if (!state.progress || state.progress.status === 'idle') return
-        if (state.kind === 'video') setVideoBatch(state.progress)
-        if (state.kind === 'actress') setActressBatch(state.progress)
-      })
-      .catch(() => {})
   }, [toast])
-
-  useEffect(() => {
-    const off = api.scrape.onVideoBatchProgress((p) => setVideoBatch(p))
-    return off
-  }, [])
-
-  useEffect(() => {
-    const off = api.actressScrape.onBatchProgress((p) => setActressBatch(p))
-    return off
-  }, [])
 
   useEffect(() => {
     const off = api.scan.onProgress((p) => {
@@ -733,10 +733,25 @@ export default function SettingsPage(): JSX.Element {
           'success'
         )
       }
-      void queryClient.invalidateQueries({ queryKey: videoKeys.all })
-      void queryClient.invalidateQueries({ queryKey: actressKeys.all })
-      void queryClient.invalidateQueries({ queryKey: facetKeys.all })
+      invalidateAllLibraryQueries(queryClient)
       setOverviewStatsRefreshKey((key) => key + 1)
+      if (!res.cancelled && res.imported > 0) {
+        try {
+          const stats = await api.settings.getOverviewStats()
+          if (
+            stats.videos.unscraped > 0 &&
+            !sessionStorage.getItem(MAINTENANCE_HINT_KEYS.scanScrapePrompt)
+          ) {
+            setScanScrapePrompt({ imported: res.imported, unscraped: stats.videos.unscraped })
+          } else {
+            setScanScrapePrompt(null)
+          }
+        } catch {
+          /* ignore stats fetch errors */
+        }
+      } else {
+        setScanScrapePrompt(null)
+      }
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
       setScanStatus('')
@@ -758,6 +773,11 @@ export default function SettingsPage(): JSX.Element {
 
   const handleResolved = (oldPath: string): void => {
     setUnrecognized((prev) => prev.filter((p) => p !== oldPath))
+  }
+
+  const dismissScanScrapePrompt = (): void => {
+    dismissMaintenanceHint(MAINTENANCE_HINT_KEYS.scanScrapePrompt)
+    setScanScrapePrompt(null)
   }
 
   const startVideoBatchDefault = (): void => {
@@ -912,6 +932,30 @@ export default function SettingsPage(): JSX.Element {
             actionLabel: '查看'
           }
         ]
+      : []),
+    ...(overviewStats && overviewStats.videos.unscraped > 0
+      ? [
+          {
+            tone: 'info' as const,
+            title: `${overviewStats.videos.unscraped} 部影片尚未刮削`,
+            body: '使用默认刮削插件批量补齐元数据与封面。',
+            action: startVideoBatchDefault,
+            actionLabel: '一键刮削',
+            actionPrimary: true
+          }
+        ]
+      : []),
+    ...(overviewStats && overviewStats.actresses.unscraped > 0
+      ? [
+          {
+            tone: 'info' as const,
+            title: `${overviewStats.actresses.unscraped} 位女优资料未完善`,
+            body: '刮削演员资料可补全头像、简介与身体数据。',
+            action: startActressBatchDefault,
+            actionLabel: '一键刮削',
+            actionPrimary: true
+          }
+        ]
       : [])
   ]
 
@@ -1025,6 +1069,11 @@ export default function SettingsPage(): JSX.Element {
                   onRequestRemovePath={setPathRemoveTarget}
                   onResolvedUnrecognized={handleResolved}
                   onPatchSettings={(patch) => void patchLibrarySettings(patch)}
+                  scanScrapePrompt={scanScrapePrompt}
+                  videoBatchActive={anyBatchActive}
+                  defaultScraper={settings.defaultScraper}
+                  onDismissScanScrapePrompt={dismissScanScrapePrompt}
+                  onStartScanScrapeBatch={startVideoBatchDefault}
                 />
               )}
 

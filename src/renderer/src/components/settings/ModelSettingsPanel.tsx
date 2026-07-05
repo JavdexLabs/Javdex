@@ -12,6 +12,7 @@ import {
   listModelsForProvider,
   maskLlmApiKey,
   normalizeCustomLlmProviderId,
+  normalizeDefaultLlmSelection,
   type CustomLlmProviderDefinition,
   type LlmProviderProtocol,
   type LlmProviderViewModel
@@ -46,9 +47,11 @@ export default function ModelSettingsPanel({
     [settings]
   )
 
+  const savedDefault = useMemo(() => normalizeDefaultLlmSelection(settings), [settings])
+
   const [providerQuery, setProviderQuery] = useState('')
-  const [defaultProviderId, setDefaultProviderId] = useState(settings.defaultLlmProviderId)
-  const [defaultModelId, setDefaultModelId] = useState(settings.defaultLlmModelId)
+  const [defaultProviderId, setDefaultProviderId] = useState(savedDefault.providerId)
+  const [defaultModelId, setDefaultModelId] = useState(savedDefault.modelId)
   const [defaultSaving, setDefaultSaving] = useState(false)
 
   const [settingsTarget, setSettingsTarget] = useState<LlmProviderViewModel | null>(null)
@@ -64,18 +67,19 @@ export default function ModelSettingsPanel({
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
 
   useEffect(() => {
-    setDefaultProviderId(settings.defaultLlmProviderId)
-    setDefaultModelId(settings.defaultLlmModelId)
-  }, [settings.defaultLlmModelId, settings.defaultLlmProviderId])
+    setDefaultProviderId(savedDefault.providerId)
+    setDefaultModelId(savedDefault.modelId)
+  }, [savedDefault.modelId, savedDefault.providerId])
 
   const defaultDirty =
-    defaultProviderId !== settings.defaultLlmProviderId ||
-    defaultModelId !== settings.defaultLlmModelId
+    defaultProviderId !== savedDefault.providerId || defaultModelId !== savedDefault.modelId
 
-  const defaultModels = useMemo(
-    () => listModelsForProvider(defaultProviderId, settings.llmCustomModels),
-    [defaultProviderId, settings.llmCustomModels]
-  )
+  const defaultModels = useMemo(() => {
+    if (!defaultProviderId) return []
+    const provider = findLlmProviderViewModel(settings, defaultProviderId)
+    if (!provider || provider.status !== 'ready') return []
+    return listModelsForProvider(defaultProviderId, settings.llmCustomModels)
+  }, [defaultProviderId, settings])
 
   const filteredProviders = useMemo(() => {
     const q = providerQuery.trim().toLowerCase()
@@ -90,6 +94,10 @@ export default function ModelSettingsPanel({
 
   const saveDefaultLlm = async (): Promise<void> => {
     if (!defaultDirty || defaultSaving) return
+    if (!defaultProviderId.trim() || !defaultModelId.trim()) {
+      toast.show('请先配置并选择可用的提供商与模型', 'error')
+      return
+    }
     const provider = findLlmProviderViewModel(settings, defaultProviderId)
     if (!provider?.agentCompatible) {
       toast.show('请选择支持 Agent 的供应商', 'error')
@@ -148,14 +156,19 @@ export default function ModelSettingsPanel({
     const llmProviderConfigs = { ...settings.llmProviderConfigs }
     delete llmProviderConfigs[providerId]
     const llmCustomModels = settings.llmCustomModels.filter((item) => item.providerId !== providerId)
-    let defaultLlmProviderId = settings.defaultLlmProviderId
-    let defaultLlmModelId = settings.defaultLlmModelId
-    if (defaultLlmProviderId === providerId) {
-      defaultLlmProviderId = 'deepseek'
-      defaultLlmModelId = 'deepseek-v4-flash'
-      setDefaultProviderId(defaultLlmProviderId)
-      setDefaultModelId(defaultLlmModelId)
+    const draft = {
+      defaultLlmProviderId:
+        settings.defaultLlmProviderId === providerId ? '' : settings.defaultLlmProviderId,
+      defaultLlmModelId:
+        settings.defaultLlmProviderId === providerId ? '' : settings.defaultLlmModelId,
+      llmProviderConfigs,
+      customLlmProviders,
+      llmCustomModels
     }
+    const { providerId: defaultLlmProviderId, modelId: defaultLlmModelId } =
+      normalizeDefaultLlmSelection(draft)
+    setDefaultProviderId(defaultLlmProviderId)
+    setDefaultModelId(defaultLlmModelId)
     const next = await api.settings.update({
       customLlmProviders,
       llmProviderConfigs,
@@ -249,15 +262,15 @@ export default function ModelSettingsPanel({
         <div className="llm-default-form">
           <SettingsFormField label="提供商">
             <SelectControl
-              value={
-                readyAgentProviders.some((provider) => provider.id === defaultProviderId)
-                  ? defaultProviderId
-                  : ''
-              }
+              value={defaultProviderId}
               disabled={readyAgentProviders.length === 0}
               onChange={(e) => {
                 const providerId = e.target.value
-                if (!providerId) return
+                if (!providerId) {
+                  setDefaultProviderId('')
+                  setDefaultModelId('')
+                  return
+                }
                 setDefaultProviderId(providerId)
                 const models = listModelsForProvider(providerId, settings.llmCustomModels)
                 setDefaultModelId(models[0]?.id ?? '')
@@ -276,14 +289,19 @@ export default function ModelSettingsPanel({
           </SettingsFormField>
           <SettingsFormField label="模型">
             <SelectControl
-              value={defaultModelId}
+              value={defaultModels.some((model) => model.id === defaultModelId) ? defaultModelId : ''}
+              disabled={defaultModels.length === 0}
               onChange={(e) => setDefaultModelId(e.target.value)}
             >
-              {defaultModels.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.name} ({model.id})
-                </option>
-              ))}
+              {defaultModels.length === 0 ? (
+                <option value="">请先配置并选择提供商</option>
+              ) : (
+                defaultModels.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.name} ({model.id})
+                  </option>
+                ))
+              )}
             </SelectControl>
           </SettingsFormField>
         </div>
@@ -316,7 +334,7 @@ export default function ModelSettingsPanel({
               className={`llm-provider-card${
                 provider.status === 'ready' ? ' llm-provider-card--ready' : ''
               }${provider.status === 'unsupported' ? ' llm-provider-card--unsupported' : ''}${
-                settings.defaultLlmProviderId === provider.id ? ' llm-provider-card--default' : ''
+                savedDefault.providerId === provider.id ? ' llm-provider-card--default' : ''
               }`}
             >
               <header className="llm-provider-card-head">
@@ -325,7 +343,7 @@ export default function ModelSettingsPanel({
                   <span className="llm-provider-card-tag">
                     {provider.source === 'builtin' ? '内置' : '自定义'}
                     {provider.local ? ' · 本地' : ''}
-                    {settings.defaultLlmProviderId === provider.id ? ' · 默认' : ''}
+                    {savedDefault.providerId === provider.id ? ' · 默认' : ''}
                   </span>
                 </div>
                 <span className={`llm-provider-status llm-provider-status--${provider.status}`}>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMatch, useSearchParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ActressListItem, ActressListSortBy } from '@shared/types'
 import { api, assetUrl } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
@@ -23,9 +23,21 @@ import { navigateToActressDetail } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
-import { actressKeys } from '../query/queryKeys'
+import { invalidateActressLibraryQueries } from '../query/invalidateLibraryQueries'
+import { actressKeys, overviewStatsKeys } from '../query/queryKeys'
 import ActressAvatar from '../components/ActressAvatar'
 import MediaTileDeleteButton from '../components/MediaTileDeleteButton'
+import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
+import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
+import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
+import ListMaintenanceBanner from '../components/ListMaintenanceBanner'
+import { startDefaultUnscrapedActressBatch } from '../utils/defaultBatchScrape'
+import {
+  dismissMaintenanceHint,
+  isMaintenanceHintDismissed,
+  MAINTENANCE_HINT_KEYS
+} from '../utils/maintenanceHints'
+import { settingsPath } from '../settings/settingsRoutes'
 
 const ACTRESS_SORT_OPTIONS: SortSwitchOption<ActressListSortBy>[] = [
   { value: 'video_count', label: '影片', title: '本地影片数' },
@@ -35,6 +47,7 @@ const ACTRESS_SORT_OPTIONS: SortSwitchOption<ActressListSortBy>[] = [
 ]
 
 export default function ActressesPage(): JSX.Element {
+  const queryClient = useQueryClient()
   const navigate = useNavigate()
   const location = useLocation()
   const toast = useToast()
@@ -93,15 +106,44 @@ export default function ActressesPage(): JSX.Element {
     }
   }, [listQuery.isError, listQuery.error, toast])
 
-  const refetchSilent = useCallback(() => {
+  const { stats: overviewStats } = useLibraryOverviewStats()
+  const refetchActressSurface = useCallback(() => {
     void listQuery.refetch()
-  }, [listQuery])
+    void queryClient.refetchQueries({ queryKey: overviewStatsKeys.all, type: 'all', stale: true })
+  }, [listQuery, queryClient])
 
-  useListSurfaceRefetch(detailOpen, refetchSilent)
+  useListSurfaceRefetch(detailOpen, refetchActressSurface)
 
   const items = listQuery.data ?? []
   const loading = listQuery.isLoading && items.length === 0
   const isFetching = listQuery.isFetching
+
+  const { defaultScraper } = useScraperPluginCatalog('actress')
+  const [unscrapedBannerHidden, setUnscrapedBannerHidden] = useState(() =>
+    isMaintenanceHintDismissed(MAINTENANCE_HINT_KEYS.actressBanner)
+  )
+  const { actressBatchActive } = useBatchScrapeActivity()
+  const unscrapedCount = overviewStats?.actresses.unscraped ?? 0
+  const showUnscrapedBanner =
+    !unscrapedBannerHidden && genderFilter === 'female' && unscrapedCount > 0
+
+  const dismissUnscrapedBanner = (): void => {
+    dismissMaintenanceHint(MAINTENANCE_HINT_KEYS.actressBanner)
+    setUnscrapedBannerHidden(true)
+  }
+
+  const startUnscrapedBatch = async (): Promise<void> => {
+    if (!defaultScraper) {
+      toast.show('请先在设置中配置默认演员刮削插件', 'error')
+      return
+    }
+    try {
+      await startDefaultUnscrapedActressBatch(defaultScraper)
+      toast.show('已开始演员批量刮削', 'success')
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+    }
+  }
 
   const doDelete = async (): Promise<void> => {
     if (!pendingDelete) return
@@ -109,6 +151,7 @@ export default function ActressesPage(): JSX.Element {
       await api.actresses.remove(pendingDelete.id)
       setPendingDelete(null)
       toast.show(`已删除「${pendingDelete.main_name}」`, 'success')
+      invalidateActressLibraryQueries(queryClient)
       void listQuery.refetch()
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
@@ -117,7 +160,7 @@ export default function ActressesPage(): JSX.Element {
 
   return (
     <div className="list-page">
-      <div className="topbar">
+      <div className="topbar library-header">
         <ListToolbar
           search={{
             value: searchInput,
@@ -176,6 +219,30 @@ export default function ActressesPage(): JSX.Element {
             </span>
           }
         />
+
+        {showUnscrapedBanner ? (
+          <ListMaintenanceBanner
+            title={`${unscrapedCount} 位女优资料未完善`}
+            detail={
+              actressBatchActive
+                ? '批量刮削任务进行中，完成后将自动更新列表。'
+                : '可批量补全头像、简介与身体数据。'
+            }
+            secondaryLabel="前往设置"
+            primaryLabel={actressBatchActive ? '刮削进行中…' : '一键刮削'}
+            onSecondary={() => navigate(settingsPath('overview', 'status'))}
+            onPrimary={() => void startUnscrapedBatch()}
+            onDismiss={dismissUnscrapedBanner}
+            primaryDisabled={actressBatchActive || !defaultScraper}
+            primaryDisabledReason={
+              actressBatchActive
+                ? '批量刮削任务进行中'
+                : !defaultScraper
+                  ? '请先在设置中配置默认演员刮削插件'
+                  : undefined
+            }
+          />
+        ) : null}
       </div>
 
       <div className="list-scroll-region">

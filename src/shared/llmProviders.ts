@@ -381,20 +381,24 @@ export function listAgentCompatibleProviders(settings: LlmSettingsSlice): LlmPro
 export function normalizeDefaultLlmSelection(
   settings: LlmSettingsSlice
 ): { providerId: string; modelId: string } {
-  const compatible = listAgentCompatibleProviders(settings)
-  let providerId = settings.defaultLlmProviderId.trim()
-  let provider = compatible.find((item) => item.id === providerId && item.status === 'ready')
-  if (!provider) {
-    provider =
-      compatible.find((item) => item.id === 'deepseek' && item.status === 'ready') ??
-      compatible.find((item) => item.status === 'ready') ??
-      compatible[0]
+  const readyProviders = listAgentCompatibleProviders(settings).filter(
+    (item) => item.status === 'ready'
+  )
+  if (readyProviders.length === 0) {
+    return { providerId: '', modelId: '' }
   }
-  providerId = provider?.id ?? 'deepseek'
-  const models = listModelsForProvider(providerId, settings.llmCustomModels)
-  let modelId = settings.defaultLlmModelId.trim()
-  if (!models.some((model) => model.id === modelId)) {
-    modelId = models[0]?.id ?? 'deepseek-v4-flash'
-  }
-  return { providerId, modelId }
+
+  const requestedProviderId = settings.defaultLlmProviderId.trim()
+  let provider =
+    readyProviders.find((item) => item.id === requestedProviderId) ??
+    readyProviders.find((item) => item.id === 'deepseek') ??
+    readyProviders[0]
+
+  const models = listModelsForProvider(provider.id, settings.llmCustomModels)
+  const requestedModelId = settings.defaultLlmModelId.trim()
+  const modelId = models.some((model) => model.id === requestedModelId)
+    ? requestedModelId
+    : (models[0]?.id ?? '')
+
+  return { providerId: provider.id, modelId }
 }

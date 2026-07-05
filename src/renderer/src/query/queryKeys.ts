@@ -19,3 +19,8 @@ export const facetKeys = {
   all: ['facets'] as const,
   list: (type: string, queryHash: string) => ['facets', 'list', type, queryHash] as const
 }
+
+export const overviewStatsKeys = {
+  all: ['settings', 'overviewStats'] as const,
+  detail: (refreshKey = 0) => ['settings', 'overviewStats', refreshKey] as const
+}

@@ -980,8 +980,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     video: [],
     actress: []
   },
-  defaultLlmProviderId: 'deepseek',
-  defaultLlmModelId: 'deepseek-v4-flash',
+  defaultLlmProviderId: '',
+  defaultLlmModelId: '',
   llmProviderConfigs: {},
   customLlmProviders: [],
   llmCustomModels: [],

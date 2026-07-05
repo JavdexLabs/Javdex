@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
 import { Ellipsis, Pencil, SearchCheck } from 'lucide-react'
 import {
@@ -9,6 +10,7 @@ import { facetVideoDetailPath, parseFacetVideoPath } from '../listView/facetRout
 import { libraryVideoDetailPath } from '../listView/libraryRoutes'
 import { playlistVideoDetailPath, parsePlaylistVideoPath } from '../listView/playlistRoutes'
 import { navigateToActressList } from '../listView/listNavigation'
+import { invalidateActressLibraryQueries } from '../query/invalidateLibraryQueries'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { ROUTE_MATCH } from '../listView/routePaths'
@@ -67,6 +69,7 @@ export default function ActressDetailPage(): JSX.Element {
   const actressId = Number(actressIdParam ?? id)
 
   const toast = useToast()
+  const queryClient = useQueryClient()
   const toastRef = useRef(toast)
   toastRef.current = toast
   const { setBackground, clearBackground } = useAppBackground()
@@ -190,6 +193,7 @@ export default function ActressDetailPage(): JSX.Element {
         useAliases
       )
       toast.show('匹配完成', 'success')
+      invalidateActressLibraryQueries(queryClient)
       void load({ silent: true })
     } catch (e) {
       toast.show(`匹配失败：${(e as Error).message}`, 'error')

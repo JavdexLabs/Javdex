@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useFloatingLayer } from '../hooks/useFloatingLayer'
+import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 import type { FloatingAlign, FloatingSide } from '../lib/floatingPosition'
 
 interface FloatingLayerProps {
@@ -47,6 +48,7 @@ export default function FloatingLayer({
       if (floatingRef.current?.contains(target)) return
       if (anchorRef.current?.contains(target)) return
       if (ignoreCloseRefs.some((ref) => ref.current?.contains(target))) return
+      if (isDismissExemptPortaledTarget(target)) return
       onClose()
     }
     const timer = window.setTimeout(() => document.addEventListener('mousedown', onDoc), 0)

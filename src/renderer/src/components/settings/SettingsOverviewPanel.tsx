@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import {
   Brain,
   Bot,
@@ -15,15 +15,15 @@ import {
 import type {
   AppSettings,
   BatchProgress,
-  LibraryOverviewStats,
   ThemeId
 } from '@shared/types'
 import {
   findLlmProviderViewModel,
-  listModelsForProvider
+  listModelsForProvider,
+  normalizeDefaultLlmSelection
 } from '@shared/llmProviders'
-import { api } from '../../api'
 import { UI_ICON_SM } from '../iconDefaults'
+import { useLibraryOverviewStats } from '../../hooks/useLibraryOverviewStats'
 import type { SettingsGroup, SettingsTab } from '../../settings/settingsRoutes'
 import { batchStatusLabel, formatCompactPath } from '../../settings/settingsDisplay'
 
@@ -33,6 +33,7 @@ export type SettingsOverviewNotice = {
   body: string
   action?: () => void
   actionLabel?: string
+  actionPrimary?: boolean
 }
 
 export type SettingsOverviewAgentToolId = 'plugin-dev'
@@ -280,76 +281,21 @@ export default function SettingsOverviewPanel({
   onOpenVideoBatchAdvanced,
   onOpenActressBatchAdvanced
 }: SettingsOverviewPanelProps): JSX.Element {
-  const [stats, setStats] = useState<LibraryOverviewStats | null>(null)
-  const [statsLoading, setStatsLoading] = useState(true)
-  const actressBatchProgressRef = useRef<{ current: number; status: BatchProgress['status'] } | null>(
-    null
-  )
-  const videoBatchProgressRef = useRef<{ current: number; status: BatchProgress['status'] } | null>(
-    null
-  )
+  const { stats, isLoading: statsLoading } = useLibraryOverviewStats(statsRefreshKey)
 
-  const loadStats = useCallback(async (options?: { silent?: boolean }): Promise<void> => {
-    if (!options?.silent) setStatsLoading(true)
-    try {
-      setStats(await api.settings.getOverviewStats())
-    } catch {
-      setStats(null)
-    } finally {
-      if (!options?.silent) setStatsLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadStats()
-  }, [loadStats, statsRefreshKey])
-
-  useEffect(() => {
-    if (!actressBatch) return
-    const prev = actressBatchProgressRef.current
-    const finished =
-      prev != null &&
-      prev.status !== 'idle' &&
-      (actressBatch.status === 'idle' ||
-        actressBatch.status === 'done' ||
-        actressBatch.status === 'cancelled')
-    const advanced =
-      actressBatch.status !== 'idle' &&
-      (prev?.current !== actressBatch.current || prev?.status !== actressBatch.status)
-    actressBatchProgressRef.current = {
-      current: actressBatch.current,
-      status: actressBatch.status
-    }
-    if (advanced || finished) void loadStats({ silent: true })
-  }, [actressBatch?.current, actressBatch?.status, loadStats])
-
-  useEffect(() => {
-    if (!videoBatch) return
-    const prev = videoBatchProgressRef.current
-    const finished =
-      prev != null &&
-      prev.status !== 'idle' &&
-      (videoBatch.status === 'idle' ||
-        videoBatch.status === 'done' ||
-        videoBatch.status === 'cancelled')
-    const advanced =
-      videoBatch.status !== 'idle' &&
-      (prev?.current !== videoBatch.current || prev?.status !== videoBatch.status)
-    videoBatchProgressRef.current = {
-      current: videoBatch.current,
-      status: videoBatch.status
-    }
-    if (advanced || finished) void loadStats({ silent: true })
-  }, [videoBatch?.current, videoBatch?.status, loadStats])
-
+  const defaultLlmSelection = useMemo(() => normalizeDefaultLlmSelection(settings), [settings])
   const defaultLlmProvider = useMemo(
-    () => findLlmProviderViewModel(settings, settings.defaultLlmProviderId),
-    [settings]
+    () =>
+      defaultLlmSelection.providerId
+        ? findLlmProviderViewModel(settings, defaultLlmSelection.providerId)
+        : null,
+    [defaultLlmSelection.providerId, settings]
   )
   const defaultLlmModel = useMemo(() => {
-    const models = listModelsForProvider(settings.defaultLlmProviderId, settings.llmCustomModels)
-    return models.find((item) => item.id === settings.defaultLlmModelId)
-  }, [settings.defaultLlmModelId, settings.defaultLlmProviderId, settings.llmCustomModels])
+    if (!defaultLlmSelection.providerId) return null
+    const models = listModelsForProvider(defaultLlmSelection.providerId, settings.llmCustomModels)
+    return models.find((item) => item.id === defaultLlmSelection.modelId) ?? null
+  }, [defaultLlmSelection.modelId, defaultLlmSelection.providerId, settings.llmCustomModels])
 
   const videoTotal = stats?.videos.total ?? 0
   const actressTotal = stats?.actresses.total ?? 0
@@ -387,7 +333,11 @@ export default function SettingsOverviewPanel({
                 <span>{notice.body}</span>
               </div>
               {notice.action && notice.actionLabel && (
-                <button type="button" className="btn btn-sm" onClick={notice.action}>
+                <button
+                  type="button"
+                  className={`btn btn-sm${notice.actionPrimary ? ' btn-primary' : ''}`}
+                  onClick={notice.action}
+                >
                   {notice.actionLabel}
                 </button>
               )}
@@ -461,7 +411,7 @@ export default function SettingsOverviewPanel({
             value={defaultLlmProvider?.name ?? '未配置'}
             detail={
               defaultLlmProvider
-                ? defaultLlmModel?.name ?? settings.defaultLlmModelId ?? '未选择模型'
+                ? defaultLlmModel?.name ?? defaultLlmSelection.modelId ?? '未选择模型'
                 : '未配置供应商'
             }
             emphasizeValue

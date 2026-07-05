@@ -8,6 +8,7 @@ import IconButton from './IconButton'
 import { UI_ICON } from './iconDefaults'
 import { navigateToFacetDetail } from '../listView/listNavigation'
 import { useEscapeKey } from '../hooks/useEscapeKey'
+import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 
 type PrimaryItem =
   | { key: string; label: string; type: 'text'; value: string }
@@ -172,9 +173,10 @@ function VideoFileRow({
   useEffect(() => {
     if (!menuOpen) return
     const onDocClick = (event: MouseEvent): void => {
-      if (!menuRef.current?.contains(event.target as Node)) {
-        setMenuOpen(false)
-      }
+      const target = event.target as Node
+      if (menuRef.current?.contains(target)) return
+      if (isDismissExemptPortaledTarget(target)) return
+      setMenuOpen(false)
     }
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)

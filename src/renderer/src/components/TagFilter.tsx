@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
+import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 
 interface TagItem {
   id: number
@@ -107,9 +108,10 @@ export default function TagFilter({
   useEffect(() => {
     if (!open || isCompact) return
     const onDocClick = (e: MouseEvent): void => {
-      if (addRef.current && !addRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
+      const target = e.target as Node
+      if (addRef.current?.contains(target)) return
+      if (isDismissExemptPortaledTarget(target)) return
+      setOpen(false)
     }
     const timer = window.setTimeout(() => {
       document.addEventListener('mousedown', onDocClick)

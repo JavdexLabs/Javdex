@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { isCloudflareChallengeText } from './challenge'
+import { diagnoseCloudflareChallenge, isCloudflareChallengeText } from './challenge'
 
 const CF_HTML = `
   <html>
@@ -48,6 +48,24 @@ describe('isCloudflareChallengeText', () => {
       isCloudflareChallengeText('<html><div id="challenge-running"></div></html>'),
       true
     )
+  })
+
+  it('ignores passive challenge-platform scripts on normal JavDB detail pages', () => {
+    const javdbDetail = [
+      '<html><head><title>重新發行 美人妻女教師 松下紗栄子 VDD-204 | JavDB</title></head>',
+      '<body><nav class="navbar is-fixed-top is-black main-nav"></nav>',
+      '<section class="video-detail"><h2 class="title"><span class="current-title">VDD-204</span></h2>',
+      '<div class="panel-block"><strong>番號:</strong><span class="value">VDD-204</span></div>',
+      '</section>',
+      '<script src="/cdn-cgi/challenge-platform/h/b/scripts/flow.js"></script>',
+      '</body></html>'
+    ].join('')
+
+    assert.equal(isCloudflareChallengeText(javdbDetail), false)
+    const diagnosis = diagnoseCloudflareChallenge(javdbDetail)
+    assert.equal(diagnosis.challenge, false)
+    assert.equal(diagnosis.hasNormalContent, true)
+    assert.match(diagnosis.reasons.join(' '), /ignored: normal content present/)
   })
 
   it('detects managed challenge markers', () => {

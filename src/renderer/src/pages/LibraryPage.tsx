@@ -44,7 +44,16 @@ import { ROUTE_MATCH } from '../listView/routePaths'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import { useInfiniteVideoList } from '../query/useInfiniteVideoList'
-import { facetKeys, videoKeys } from '../query/queryKeys'
+import { invalidateVideoLibraryQueries } from '../query/invalidateLibraryQueries'
+import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
+import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
+import ListMaintenanceBanner from '../components/ListMaintenanceBanner'
+import { startDefaultUnscrapedVideoBatch } from '../utils/defaultBatchScrape'
+import {
+  dismissMaintenanceHint,
+  isMaintenanceHintDismissed,
+  MAINTENANCE_HINT_KEYS
+} from '../utils/maintenanceHints'
 
 const STATUS_LABELS: Record<string, string> = {
   all: '全部',
@@ -249,7 +258,13 @@ export default function LibraryPage(): JSX.Element {
   const { videos, total, loading, loadingMore, hasMore, loadMore, isFetching, refetchSilent } =
     useInfiniteVideoList(query, queryHash, handlePageError)
 
-  useListSurfaceRefetch(detailOpen, refetchSilent)
+  const { stats: overviewStats, refetch: refetchOverviewStats } = useLibraryOverviewStats()
+  const refetchLibrarySurface = useCallback(() => {
+    refetchSilent()
+    refetchOverviewStats()
+  }, [refetchSilent, refetchOverviewStats])
+
+  useListSurfaceRefetch(detailOpen, refetchLibrarySurface)
 
   useEffect(() => {
     setSelectedIds(new Set())
@@ -261,6 +276,32 @@ export default function LibraryPage(): JSX.Element {
   )
   const selectedCount = selectedIds.size
   const selectionMode = selectedCount > 0
+
+  const [unscrapedBannerHidden, setUnscrapedBannerHidden] = useState(() =>
+    isMaintenanceHintDismissed(MAINTENANCE_HINT_KEYS.videoBanner)
+  )
+  const { videoBatchActive } = useBatchScrapeActivity()
+  const unscrapedCount = overviewStats?.videos.unscraped ?? 0
+  const showUnscrapedBanner =
+    !unscrapedBannerHidden && !selectionMode && status !== 0 && unscrapedCount > 0
+
+  const dismissUnscrapedBanner = (): void => {
+    dismissMaintenanceHint(MAINTENANCE_HINT_KEYS.videoBanner)
+    setUnscrapedBannerHidden(true)
+  }
+
+  const startUnscrapedBatch = async (): Promise<void> => {
+    if (!defaultScraper) {
+      toast.show('请先在设置中配置默认影片刮削插件', 'error')
+      return
+    }
+    try {
+      await startDefaultUnscrapedVideoBatch(defaultScraper)
+      toast.show('已开始批量刮削', 'success')
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+    }
+  }
 
   const toggleVideoSelection = useCallback((video: Video): void => {
     setSelectedIds((prev) => {
@@ -296,9 +337,8 @@ export default function LibraryPage(): JSX.Element {
       await api.videos.edit(editingVideo.id, input)
       setEditingVideo(null)
       toast.show('元数据已保存', 'success')
-      void queryClient.invalidateQueries({ queryKey: videoKeys.all })
-      void queryClient.invalidateQueries({ queryKey: facetKeys.all })
-      refetchSilent()
+      invalidateVideoLibraryQueries(queryClient)
+      refetchLibrarySurface()
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     }
@@ -319,7 +359,10 @@ export default function LibraryPage(): JSX.Element {
         res.applied ? `已更新 ${target.code}` : '所选字段无需写入',
         res.applied ? 'success' : 'info'
       )
-      if (res.applied) refetchSilent()
+      if (res.applied) {
+        invalidateVideoLibraryQueries(queryClient)
+        refetchLibrarySurface()
+      }
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     }
@@ -329,7 +372,8 @@ export default function LibraryPage(): JSX.Element {
     try {
       await api.videos.markScrapeSuccess(video.id)
       toast.show('已标记为刮削成功', 'success')
-      refetchSilent()
+      invalidateVideoLibraryQueries(queryClient)
+      refetchLibrarySurface()
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     }
@@ -376,7 +420,12 @@ export default function LibraryPage(): JSX.Element {
     setDeleteTarget(null)
     setConfirmBulkDelete(false)
     if (targets.length > 1) clearSelection()
-    refetchSilent()
+    if (deleted > 0) {
+      invalidateVideoLibraryQueries(queryClient)
+      refetchLibrarySurface()
+    } else {
+      refetchSilent()
+    }
     if (failed > 0) {
       toast.show(`已删除 ${deleted} 部，${failed} 部失败`, 'error')
     } else {
@@ -542,6 +591,30 @@ export default function LibraryPage(): JSX.Element {
         {!selectionMode && hasAppliedFilters && (
           <AppliedFilterBar items={appliedFilters} onClear={resetFilters} />
         )}
+
+        {showUnscrapedBanner ? (
+          <ListMaintenanceBanner
+            title={`${unscrapedCount} 部影片未刮削`}
+            detail={
+              videoBatchActive
+                ? '批量刮削任务进行中，完成后将自动更新列表。'
+                : '可筛选查看后批量补齐元数据与封面。'
+            }
+            secondaryLabel="查看未刮削"
+            primaryLabel={videoBatchActive ? '刮削进行中…' : '一键刮削'}
+            onSecondary={() => patchFilters({ status: 0 })}
+            onPrimary={() => void startUnscrapedBatch()}
+            onDismiss={dismissUnscrapedBanner}
+            primaryDisabled={videoBatchActive || !defaultScraper}
+            primaryDisabledReason={
+              videoBatchActive
+                ? '批量刮削任务进行中'
+                : !defaultScraper
+                  ? '请先在设置中配置默认影片刮削插件'
+                  : undefined
+            }
+          />
+        ) : null}
       </div>
 
       <div className="scroll-body scroll-body--fill">

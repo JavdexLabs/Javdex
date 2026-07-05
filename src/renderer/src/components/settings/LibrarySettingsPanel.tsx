@@ -9,6 +9,7 @@ import {
   SettingsStatusPill
 } from './SettingsPrimitives'
 import UnrecognizedRow from './UnrecognizedRow'
+import ListMaintenanceBanner from '../ListMaintenanceBanner'
 
 type ScanMetric = {
   key: string
@@ -46,7 +47,12 @@ export default function LibrarySettingsPanel({
   onCancelScan,
   onRequestRemovePath,
   onResolvedUnrecognized,
-  onPatchSettings
+  onPatchSettings,
+  scanScrapePrompt,
+  videoBatchActive = false,
+  defaultScraper = '',
+  onDismissScanScrapePrompt,
+  onStartScanScrapeBatch
 }: {
   settings: AppSettings
   scanning: boolean
@@ -60,6 +66,11 @@ export default function LibrarySettingsPanel({
   onRequestRemovePath: (path: string) => void
   onResolvedUnrecognized: (path: string) => void
   onPatchSettings: (patch: Partial<Pick<AppSettings, 'minScanImportDurationMinutes'>>) => void
+  scanScrapePrompt?: { imported: number; unscraped: number } | null
+  videoBatchActive?: boolean
+  defaultScraper?: string
+  onDismissScanScrapePrompt?: () => void
+  onStartScanScrapeBatch?: () => void
 }): JSX.Element {
   const minDuration = settings.minScanImportDurationMinutes
   const scanMetrics = scanResult ? buildScanMetrics(scanResult) : null
@@ -213,6 +224,27 @@ export default function LibrarySettingsPanel({
               <span>扫描完成后显示导入、跳过和无法识别统计。</span>
             </div>
           )}
+
+          {scanScrapePrompt && !scanning ? (
+            <ListMaintenanceBanner
+              className="library-scan-scrape-prompt"
+              title={`本次导入 ${scanScrapePrompt.imported} 部，库内仍有 ${scanScrapePrompt.unscraped} 部待刮削`}
+              detail="可立即使用默认插件批量补齐元数据与封面。"
+              secondaryLabel="稍后"
+              primaryLabel={videoBatchActive ? '刮削进行中…' : '一键刮削'}
+              onSecondary={() => onDismissScanScrapePrompt?.()}
+              onPrimary={() => onStartScanScrapeBatch?.()}
+              onDismiss={() => onDismissScanScrapePrompt?.()}
+              primaryDisabled={videoBatchActive || !defaultScraper}
+              primaryDisabledReason={
+                videoBatchActive
+                  ? '批量刮削任务进行中'
+                  : !defaultScraper
+                    ? '请先在插件设置中配置默认影片刮削插件'
+                    : undefined
+              }
+            />
+          ) : null}
         </section>
       </div>
 

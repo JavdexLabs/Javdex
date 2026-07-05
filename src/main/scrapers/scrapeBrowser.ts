@@ -1,5 +1,7 @@
-import { BrowserWindow, session, net, type Session, type WebContents } from 'electron'
-import { isCloudflareChallengeText } from './challenge'
+import { BrowserWindow, dialog, session, net, type Session, type WebContents } from 'electron'
+import fs from 'fs/promises'
+import path from 'path'
+import { diagnoseCloudflareChallenge, isCloudflareChallengeText } from './challenge'
 import { cleanUserAgent, getScrapeUaProfile } from './scrapeUaProfile'
 
 const PARTITION = 'persist:scraper'
@@ -29,6 +31,7 @@ const TOOLBAR_JS = `
     + '.actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}'
     + '.btn{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;height:32px;padding:0 16px;margin:0;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;line-height:1;white-space:nowrap}'
     + '.btn-refresh{background:#23232e;color:#f2f2f5;border:1px solid #2c2c38}'
+    + '.btn-save{background:#23232e;color:#d6d6de;border:1px solid #2c2c38}'
     + '.btn-pass{background:#6c5ce7;color:#fff;border:1px solid #6c5ce7;font-weight:600}'
     + '.btn:hover{filter:brightness(1.08)}'
     + '</style>'
@@ -36,11 +39,13 @@ const TOOLBAR_JS = `
     + '<p class="tip">请在下方完成 Cloudflare 人机验证，完成后点击「验证通过」继续</p>'
     + '<div class="actions">'
     + '<button type="button" class="btn btn-refresh" id="cf-refresh">刷新</button>'
+    + '<button type="button" class="btn btn-save" id="cf-save">保存页面</button>'
     + '<button type="button" class="btn btn-pass" id="cf-pass">验证通过</button>'
     + '</div>'
     + '</div>';
 
   shadow.getElementById('cf-refresh').onclick = function(){ console.log('__CF_ACTION__:refresh'); };
+  shadow.getElementById('cf-save').onclick = function(){ console.log('__CF_ACTION__:save'); };
   shadow.getElementById('cf-pass').onclick = function(){ console.log('__CF_ACTION__:pass'); };
 
   (document.documentElement || document.body).appendChild(host);
@@ -221,14 +226,18 @@ class ScrapeBrowser {
     win.webContents.setUserAgent(ua)
 
     // Show the Cloudflare helper toolbar only on real challenge pages.
-    win.webContents.on('dom-ready', () => {
+    const syncToolbar = (): void => {
       void this.syncChallengeToolbar(win)
-    })
+    }
+    win.webContents.on('dom-ready', syncToolbar)
+    win.webContents.on('did-finish-load', syncToolbar)
 
     // Listen for toolbar button clicks signalled via console.log.
     win.webContents.on('console-message', (_e, _level, message) => {
       if (message.includes('__CF_ACTION__:refresh')) {
         win.webContents.reload()
+      } else if (message.includes('__CF_ACTION__:save')) {
+        void this.savePageDebug(win)
       } else if (message.includes('__CF_ACTION__:pass')) {
         this.manualPass = true
       }
@@ -376,14 +385,67 @@ class ScrapeBrowser {
         `(() => {
           const title = document.title || '';
           const bar = document.getElementById('__cf_helper_bar__');
-          if (bar) bar.style.display = 'none';
+          const barParent = bar && bar.parentNode;
+          if (bar) bar.remove();
           const bodyText = ((document.body && document.body.innerText) || '').slice(0, 8000);
           const html = (document.documentElement && document.documentElement.outerHTML || '').slice(0, 30000);
-          if (bar) bar.style.display = '';
+          if (bar && barParent) barParent.appendChild(bar);
           return title + '\\n' + bodyText + '\\n' + html;
         })()`
       )
       .catch(() => '')
+  }
+
+  private async savePageDebug(win: BrowserWindow): Promise<void> {
+    const sample = await this.readPageChallengeSample(win)
+    const diagnosis = diagnoseCloudflareChallenge(sample, {
+      cfMitigated: this.currentMainFrameCfMitigated,
+      allowNormalContentOverride: true
+    })
+    const html = await this.readHtml(win).catch(() => '')
+    const pageUrl = win.webContents.getURL()
+    const suggestedName = (() => {
+      try {
+        const { hostname, pathname } = new URL(pageUrl)
+        const slug = pathname.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '') || 'page'
+        return `${hostname}-${slug}-${Date.now()}.html`
+      } catch {
+        return `challenge-debug-${Date.now()}.html`
+      }
+    })()
+
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      title: '保存页面',
+      defaultPath: suggestedName,
+      filters: [{ name: 'HTML', extensions: ['html'] }]
+    })
+    if (canceled || !filePath) return
+
+    await fs.writeFile(filePath, html, 'utf8')
+    const metaPath = `${filePath.replace(/\.html?$/i, '')}.challenge-meta.json`
+    await fs.writeFile(
+      metaPath,
+      JSON.stringify(
+        {
+          savedAt: new Date().toISOString(),
+          url: pageUrl,
+          cfMitigated: this.currentMainFrameCfMitigated,
+          diagnosis
+        },
+        null,
+        2
+      ),
+      'utf8'
+    )
+
+    const noticePath = path.basename(metaPath)
+    await dialog.showMessageBox(win, {
+      type: 'info',
+      title: '页面已保存',
+      message: '页面 HTML 与 challenge 诊断信息已保存。',
+      detail: `${path.basename(filePath)}\n${noticePath}`,
+      buttons: ['确定']
+    })
   }
 
   private async isPageChallenge(win: BrowserWindow): Promise<boolean> {

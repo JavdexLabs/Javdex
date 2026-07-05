@@ -69,7 +69,7 @@ npm run dist     # 打包安装程序（见 scripts/dist.mjs）
 ## 核心功能
 
 - **扫描导入**：递归扫描常见视频格式，正则提取番号，支持同番号多文件入库。
-- **插件化刮削**：内置 JavDB、JavLibrary、JAV8 等视频插件及演员插件；支持用户自定义插件与插件开发助手。
+- **插件化刮削**：内置 JavDB、JavLibrary、JAV8 等视频插件及演员插件；默认影片插件 **JavDB**、演员插件 **Xslist**；支持用户自定义插件、组合刮削与插件开发助手。
 - **批量刮削**：顺序队列、随机间隔、实时进度与日志；支持空字段补齐 / 有值覆盖 / 覆盖更新。
 - **演员归并**：刮削演员时比对主名与别名，命中别名归入对应主演员。
 - **清单与分类**：播放清单、片商/发行/系列/导演/标签等多维浏览。
@@ -90,9 +90,9 @@ npm run dist     # 打包安装程序（见 scripts/dist.mjs）
 
 ## 文档
 
+- `docs/SCRAPER_PLUGIN_FORMAT.md` — 刮削插件包格式与沙箱 API
+- `docs/PLUGIN_DEV_AGENT.md` — 插件开发 Agent 与 MCP
 - `docs/UI_DESIGN_GUIDELINES.md` — UI 设计规范
-- `docs/SCRAPER_PLUGIN_FORMAT.md` — 刮削插件格式
-- `docs/PLUGIN_DEV_AGENT.md` — 插件开发助手
 - `CHANGELOG.md` — 版本变更记录
 
 ## 规划中的功能

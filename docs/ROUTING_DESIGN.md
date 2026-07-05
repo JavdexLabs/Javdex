@@ -92,6 +92,7 @@
 
 - `App.tsx` route tree、route match pattern、path builder、path parser 同步更新。
 - reload reset 逻辑复用 parser 或 route helper，不新增孤立 regex。
+- route match 常量维护在 `src/renderer/src/listView/routePaths.ts`（`ROUTE_MATCH`）。
 - 打开详情时保留 `location.search`，除非明确进入另一类资源。
 - 关闭详情时回到打开来源，而不是统一回到媒体库。
 - 新增嵌套详情时同时补充 background scope、scroll/refetch 行为和返回按钮行为。

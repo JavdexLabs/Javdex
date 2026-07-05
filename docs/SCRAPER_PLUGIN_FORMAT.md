@@ -1,18 +1,23 @@
-# Scraper Plugin Format
+# 刮削插件格式
 
-This app supports two scraper plugin kinds:
+定义 Javdex **刮削插件**的包结构、沙箱 API 与返回契约。手写插件、导出/导入包、以及插件开发 Agent 产出的代码，均须符合本文。
 
-- `video`: video metadata scraper.
-- `actress`: actress profile scraper.
+> 使用 **插件开发 Agent** 辅助编写时，见 [`PLUGIN_DEV_AGENT.md`](./PLUGIN_DEV_AGENT.md)。本文只描述插件本身，不描述 Agent 工具与工作流。
 
-Custom plugins are imported as a single JSON package file. The recommended
-extension is `.avscraper.json`, with a default export name like
-`{plugin-name}.{kind}.avscraper.json` (for example `tokyolib.video.avscraper.json`).
+## 插件类型
 
-Exported packages include a `kind` field (`video` or `actress`). On import, the app
-uses a unified entry point and routes the plugin to the correct list from `kind`.
+| `kind` | 入口函数 | 用途 |
+|--------|----------|------|
+| `video` | `parseVideo(ctx)` | 影片元数据刮削 |
+| `actress` | `parseActress(ctx)` | 演员资料刮削 |
 
-## Package Shape
+内置插件位于 `src/main/bundled-plugins/`（如 JavDB、JavLibrary、JAV8、Xslist 等），以 `plugin.json` + 入口脚本形式随应用分发。
+
+## 包与安装形态
+
+### 导入包（`.avscraper.json`）
+
+用户通过 **设置 → 刮削插件** 导入的单文件 JSON，推荐命名 `{name}.{kind}.avscraper.json`：
 
 ```json
 {
@@ -20,59 +25,79 @@ uses a unified entry point and routes the plugin to the correct list from `kind`
   "kind": "video",
   "name": "Example Site",
   "version": "1.0.0",
-  "description": "Scrapes example.com video pages",
+  "description": "刮削 example.com 影片详情",
   "author": "optional",
   "homepage": "https://example.com",
+  "supportedFields": ["title", "maker", "cover", "rating"],
   "code": "module.exports = { async parseVideo(ctx) { return null } }"
 }
 ```
 
-Rules:
+规则：
 
-- `schemaVersion` must be `1`.
-- `kind` must be `video` or `actress`.
-- `name` must be unique and cannot reuse a built-in plugin name.
-- `code` must be CommonJS JavaScript.
-- Plugin code runs in a restricted worker sandbox. Do not use `require`,
-  `import`, Node globals, app-internal files, or direct filesystem/network APIs.
-  Use only the provided `ctx` helpers and fetch methods.
+- `schemaVersion` 必须为 `1`
+- `kind` 为 `video` 或 `actress`
+- `code` 为 CommonJS 字符串，导入时校验并写入安装目录
+- `supportedFields` 声明本插件支持的刮削字段 id（见下文）；**未声明的字段即使代码返回也会被忽略**
+- 若与内置插件同名，用户插件会 **覆盖** 同名内置实现（`overridesBuiltIn`）
 
-Imported plugins are stored under:
+### 安装目录（导入后 / Agent 安装后）
 
 ```text
 app.getPath('userData')/scraper_plugins/{video|actress}/{plugin-name}/
+  plugin.json    # 元数据 + supportedFields + entry
+  index.cjs      # 入口脚本（默认 entry 名）
 ```
 
-## Video Plugin Contract
+### 沙箱限制
 
-`code` must export:
+插件在 Worker 沙箱中运行。禁止使用 `require`、`import`、Node 文件系统、应用内部模块。仅可使用 `ctx` 提供的 `fetchPage`、`fetchBuffer`、`browser`、`cheerio` 与 `helpers`。
 
-```js
-module.exports = {
-  async parseVideo(ctx) {
-    return null
-  }
-}
-```
+兼容别名：`parseTask` 仍可作为 `parseVideo` / `parseActress` 的旧名被加载。
 
-`ctx` contains:
+## 影片插件 `parseVideo(ctx)`
 
-- `ctx.code`
-- `ctx.proxyUrl`
-- `ctx.fetchPage(url, { readySelector, timeoutMs, settleWhenText })`
-- `ctx.fetchBuffer(url)`
-- `ctx.cheerio`
-- `ctx.helpers.absoluteUrl(href, baseUrl)`
-- `ctx.helpers.normalizeDate(text)` (returns `YYYY-MM-DD`; month-only
-  source text such as `2021年10月` is normalized to `2021-10-01`)
-- `ctx.helpers.normalizeText(text)`
-- `ctx.helpers.unique(values)`
+### `ctx` 字段
 
-Return `null` or:
+| 成员 | 说明 |
+|------|------|
+| `ctx.code` | 待刮削番号 |
+| `ctx.proxyUrl` | 当前刮削代理（可能为空） |
+| `ctx.fetchPage(url, options?)` | 拉取页面 HTML；`options`: `readySelector`、`timeoutMs`、`settleWhenText`（`RegExp`） |
+| `ctx.fetchBuffer(url)` | 拉取二进制（如图片） |
+| `ctx.cheerio` | Cheerio 模块；**每个 HTML 须先 `const $ = ctx.cheerio.load(html)`**，沙箱内无全局 `$` |
+| `ctx.browser` | 见下方浏览器辅助 |
+| `ctx.helpers.absoluteUrl(href, baseUrl)` | 解析相对链接 |
+| `ctx.helpers.normalizeDate(text)` | 规范为 `YYYY-MM-DD`；仅年月时归为 `YYYY-MM-01` |
+| `ctx.helpers.normalizeText(text)` | 折叠空白 |
+| `ctx.helpers.unique(values)` | 去重字符串数组 |
+
+### `ctx.browser`
+
+用于动态页面或需交互的站点（与 Agent 开发时的 `browser_*` 工具底层均走主进程 `scrapeBrowser`）：
+
+| 方法 | 说明 |
+|------|------|
+| `snapshot(options?)` | 页面快照 |
+| `html()` | 当前 HTML |
+| `url()` | 当前 URL |
+| `inspect(options?)` | 结构探查 |
+| `click(selector)` / `type(selector, text, options?)` / `press(key)` | 交互 |
+| `waitForSelector(selector, options?)` / `wait(timeoutMs)` | 等待 |
+
+### `supportedFields`（video）
+
+字段 id 与 `src/shared/types.ts` 中 `VideoScrapeField` 一致：
+
+`title`、`summary`、`cover`、`releaseDate`、`maker`、`publisher`、`series`、`director`、`duration`、`actressesFemale`、`actressesMale`、`tags`、`source`、`rating`、`samples`
+
+### 返回值
+
+返回 `null` 表示未匹配；否则返回对象（字段均为可选，但须与 `supportedFields` 一致）：
 
 ```js
 {
-  code: ctx.code,
+  code: 'IPX-535',           // 建议大写规范化
   title: '...',
   summary: '...',
   coverUrl: 'https://...',
@@ -81,67 +106,40 @@ Return `null` or:
   publisher: '...',
   series: '...',
   director: '...',
-  durationSeconds: 120,
-  sourceUrl: 'https://...',
-  ratingAverage: 4.2,
-  ratingCount: 100,
+  durationSeconds: 7200,
+  sourceUrl: 'https://...',  // 详情页 URL
+  ratingAverage: 4.2,        // 5 分制，(0, 5]，最多 1 位小数
+  ratingCount: 100,            // 仅在与 ratingAverage 同时有效时返回
   sampleImageUrls: ['https://...'],
-  actresses: [{ name: '...', avatarUrl: 'https://...', gender: 'female' | 'male' }],
+  actresses: [{ name: '...', avatarUrl: '...', gender: 'female' | 'male' }],
   tags: ['...']
 }
 ```
 
-Date fields must be valid `YYYY-MM-DD` strings. If the source page only
-provides year and month, use the first day of that month (`YYYY-MM-01`); never
-return an invalid placeholder such as `YYYY-MM-00`.
+日期必须为合法 `YYYY-MM-DD`，禁止 `YYYY-MM-00`。
 
-Recommended detail-page entry strategies:
+### 推荐抓取策略
 
-- Direct detail mode: use this only when the site's detail URL can be derived
-  reliably from the code, or when a search-by-code URL redirects to a detail page.
-- Search-to-detail mode: use this when detail URLs cannot be derived reliably.
-  Fetch the search page, parse result links, choose a reliable matching result,
-  then fetch and parse the detail page.
+- **直连详情页**：仅当 URL 可由番号可靠推导，或搜索 URL 会跳转到详情页时使用；须用选择器与番号/标题证明命中。
+- **搜索进详情**：搜索页只用于定位详情链接；用 `ctx.helpers.absoluteUrl(href, searchUrl)` 解析链接后再抓详情页，并将 `sourceUrl` 设为详情页 URL。
 
-For direct detail mode, treat the page as a hit only when detail-page selectors
-and the returned code/title prove it matches the requested code. If direct URLs
-fail, switch to search-to-detail mode or return `null`.
+## 演员插件 `parseActress(ctx)`
 
-For search-to-detail mode, convert the result `href` with
-`ctx.helpers.absoluteUrl(href, searchUrl)`, fetch that detail URL, parse fields
-from the detail page, and set `sourceUrl` to the detail URL.
+### `ctx` 字段
 
-The search page should be used only to locate the detail page. Do not return
-metadata from a generic search results page unless the site renders the complete
-detail record there.
+| 成员 | 说明 |
+|------|------|
+| `ctx.mainName` | 主名 |
+| `ctx.aliases` | 别名数组 |
+| 其余 | 与影片相同：`proxyUrl`、`fetchPage`、`fetchBuffer`、`cheerio`、`browser`、`helpers` |
 
-## Actress Plugin Contract
+### `supportedFields`（actress）
 
-`code` must export:
+`avatar`、`gallery`、`birthDate`、`nameZh`、`nameEn`、`debutDate`、`heightCm`、`measurements`、`cupSize`、`bloodType`、`zodiac`、`nationality`、`profileSummary`、`aliases`
 
-```js
-module.exports = {
-  async parseActress(ctx) {
-    return null
-  }
-}
-```
+（`measurements` 对应返回 `bustCm` / `waistCm` / `hipCm`。）
 
-`ctx` contains:
-
-- `ctx.mainName`
-- `ctx.aliases`
-- `ctx.proxyUrl`
-- `ctx.fetchPage(url, { readySelector, timeoutMs, settleWhenText })`
-- `ctx.fetchBuffer(url)`
-- `ctx.cheerio`
-- `ctx.helpers.absoluteUrl(href, baseUrl)`
-- `ctx.helpers.normalizeDate(text)` (returns `YYYY-MM-DD`; month-only
-  source text such as `2021年10月` is normalized to `2021-10-01`)
-- `ctx.helpers.normalizeText(text)`
-- `ctx.helpers.unique(values)`
-
-Return `null` or:
+### 返回值
 
 ```js
 {
@@ -165,37 +163,16 @@ Return `null` or:
 }
 ```
 
-Date fields must be valid `YYYY-MM-DD` strings. If the source page only
-provides year and month, use the first day of that month (`YYYY-MM-01`); never
-return an invalid placeholder such as `YYYY-MM-00`.
+### 推荐抓取策略
 
-Recommended profile-page entry strategies:
+- **直连资料页**：URL 可由名称/slug 可靠推导时使用。
+- **搜索进资料页**：依次尝试 `mainName` 与各 `alias`；搜索页仅用于找资料链接。
+- **动态搜索**：若结果通过 AJAX 更新而 URL 不变，用 `fetchPage` 复现对应请求，勿把未变化的 URL 当作失败。
 
-- Direct profile mode: use this only when the site's profile URL can be derived
-  reliably from the name or slug.
-- Search-to-profile mode: use this when profile URLs cannot be derived reliably.
-  Try `ctx.mainName`, then each `ctx.aliases` entry; fetch the search page, parse
-  result links, choose a reliable matching profile, then fetch and parse it.
-- Dynamic/AJAX search mode: if the visible search UI updates a result container
-  without changing `location.href`, inspect the site's scripts or network-shaped
-  endpoint and reproduce that endpoint with `ctx.fetchPage`. Do not treat an
-  unchanged browser URL as a failed search.
+## 组合刮削器
 
-For direct profile mode, treat the page as a hit only when profile selectors and
-the displayed name prove it matches the requested actress. If direct URLs fail,
-switch to search-to-profile mode or try the next name.
+**设置 → 刮削插件 → 新增组合** 可创建 `composite` 来源的影片刮削器：为每个字段指定不同的内置或用户插件。组合配置保存在 `settings.json` 的 `compositeScrapers` 中，**没有**独立的 `parseVideo` 实现。
 
-For search-to-profile mode, convert the result `href` with
-`ctx.helpers.absoluteUrl(href, searchUrl)`, fetch that profile URL, and parse
-fields from the profile page.
+## 插件管理（UI）
 
-The search page should be used only to locate the profile page. If no reliable
-profile link is found, try the next name or return `null`.
-
-## UI
-
-Settings exposes plugin management for both kinds:
-
-- Import custom plugin package (routes by the package `kind` field).
-- Export imported custom plugin package (JSON includes `kind`; default filename includes kind suffix).
-- Delete imported custom plugin package.
+导入 / 导出 / 删除自定义包、设置默认插件、配置 per-plugin 延迟、编辑内置插件副本——均在 **设置 → 刮削插件**。开发新插件见 [`PLUGIN_DEV_AGENT.md`](./PLUGIN_DEV_AGENT.md)。

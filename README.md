@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>本地优先、插件驱动、可扩展的 JAV 媒体库管理器。</strong>
+  <strong>本地优先、插件驱动、可扩展的本地媒体库管理器。</strong>
 </p>
 
 <p align="center">

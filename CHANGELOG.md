@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2 — 2026-07-05
+
+### 修复
+
+- 安装版刮削失败：Worker 沙箱无法解析 `cheerio` 模块（`Cannot find module 'cheerio'`）
+
 ## 0.2.1 — 2026-07-05
 
 ### 体验

@@ -1,3 +1,4 @@
+import { app } from 'electron'
 import { Worker } from 'node:worker_threads'
 import type {
   ActressScrapeResult,
@@ -20,12 +21,28 @@ interface SandboxWorkerData {
   kind: ScraperPluginKind
   pluginName: string
   code: string
+  appRoot: string
   proxyUrl?: string
   task?: {
     code?: string
     mainName?: string
     aliases?: string[]
   }
+}
+
+/** App root for worker-side createRequire (eval workers cannot resolve asar modules). */
+function sandboxAppRoot(): string {
+  try {
+    const appPath = app?.getAppPath?.()
+    if (appPath) return appPath
+  } catch {
+    /* Electron app may not be ready in tests. */
+  }
+  return process.cwd()
+}
+
+function withSandboxAppRoot(workerData: Omit<SandboxWorkerData, 'appRoot'>): SandboxWorkerData {
+  return { ...workerData, appRoot: sandboxAppRoot() }
 }
 
 type SandboxMessage =
@@ -129,35 +146,37 @@ export function runUserActressPluginWithLogs(
 }
 
 function runSandboxWorker<T = void>(
-  workerData: SandboxWorkerData,
+  workerData: Omit<SandboxWorkerData, 'appRoot'>,
   timeoutMs: number
 ): Promise<T> {
   return runSandboxWorkerInternal<T>(workerData, timeoutMs, false) as Promise<T>
 }
 
 function runSandboxWorkerCollect<T = void>(
-  workerData: SandboxWorkerData,
+  workerData: Omit<SandboxWorkerData, 'appRoot'>,
   timeoutMs: number
 ): Promise<SandboxRunResult<T>> {
   return runSandboxWorkerInternal<T>(workerData, timeoutMs, true) as Promise<SandboxRunResult<T>>
 }
 
 function runSandboxWorkerInternal<T = void>(
-  workerData: SandboxWorkerData,
+  workerData: Omit<SandboxWorkerData, 'appRoot'>,
   timeoutMs: number,
   collectLogs: boolean
 ): Promise<T | SandboxRunResult<T>> {
+  const payload = withSandboxAppRoot(workerData)
+
   return new Promise<T | SandboxRunResult<T>>((resolve, reject) => {
     const worker = new Worker(SANDBOX_WORKER_SOURCE, {
       eval: true,
-      workerData
+      workerData: payload
     })
 
     let settled = false
     const logs: string[] = []
     const timer = setTimeout(() => {
       settle(
-        () => reject(new Error(`Scraper plugin ${workerData.pluginName} timed out`)),
+        () => reject(new Error(`Scraper plugin ${payload.pluginName} timed out`)),
         true
       )
     }, timeoutMs)
@@ -194,10 +213,10 @@ function runSandboxWorkerInternal<T = void>(
         message.type === 'fetchBuffer' ||
         message.type === 'browserAction'
       ) {
-        void handleWorkerRpc(worker, workerData, message)
+        void handleWorkerRpc(worker, payload, message)
       } else if (message.type === 'log') {
         if (collectLogs) logs.push(`[${message.level}] ${message.message}`)
-        console.log(`[scraper:${workerData.pluginName}] ${message.message}`)
+        console.log(`[scraper:${payload.pluginName}] ${message.message}`)
       }
     })
 
@@ -211,7 +230,7 @@ function runSandboxWorkerInternal<T = void>(
         settle(
           () => {
             const err = new Error(
-              `Scraper plugin ${workerData.pluginName} exited with ${code}`
+              `Scraper plugin ${payload.pluginName} exited with ${code}`
             ) as Error & { logs?: string[] }
             if (collectLogs) err.logs = logs
             reject(err)
@@ -300,7 +319,10 @@ function parseFetchPageOptions(value: unknown): FetchPageOptions | undefined {
 const SANDBOX_WORKER_SOURCE = String.raw`
 const { parentPort, workerData } = require('node:worker_threads');
 const vm = require('node:vm');
-const cheerio = require('cheerio');
+const { createRequire } = require('node:module');
+const { join } = require('node:path');
+const requireFromApp = createRequire(join(workerData.appRoot, 'package.json'));
+const cheerio = requireFromApp('cheerio');
 
 let nextRpcId = 1;
 const pending = new Map();

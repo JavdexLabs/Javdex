@@ -882,8 +882,8 @@ export function editVideoRecord(
 
 /**
  * Clear all scraped metadata for a video, resetting it to the un-scraped state.
- * Keeps the code, file path, rating and play stats; deletes the local cover
- * file and removes actress/tag relations.
+ * Keeps the code, file path, custom rating and play stats; deletes the local cover
+ * file, external site links/ratings, and removes actress/scraped-tag relations.
  */
 export function clearVideoMetadataRecord(id: number): void {
   const db = getDb()
@@ -902,6 +902,8 @@ export function clearVideoMetadataRecord(id: number): void {
     ).run(id)
     db.prepare('DELETE FROM video_actress WHERE video_id = ?').run(id)
     db.prepare("DELETE FROM video_tag WHERE video_id = ? AND origin = 'scraped'").run(id)
+    db.prepare('DELETE FROM video_external_ids WHERE video_id = ?').run(id)
+    db.prepare('DELETE FROM video_external_stats WHERE video_id = ?').run(id)
   })
   txn()
   runLibraryCleanup(cleanupHints)

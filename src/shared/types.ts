@@ -963,7 +963,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   proxyUrlEnabled: false,
   llmProxyUrl: '',
   llmProxyUrlEnabled: false,
-  defaultScraper: 'JavLibrary',
+  defaultScraper: 'JavDB',
   defaultActressScraper: 'Xslist',
   batchDelayMinMs: 3000,
   batchDelayMaxMs: 5000,

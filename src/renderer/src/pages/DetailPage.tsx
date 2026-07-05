@@ -773,7 +773,7 @@ export default function DetailPage(): JSX.Element {
           }}
           onCancel={() => setConfirmClear(false)}
         >
-          确定要清除「{video.code}」的所有刮削元数据吗？将清空标题、简介、封面、演员、标签等并恢复为「未刮削」状态（不影响视频文件与评分）。
+          确定要清除「{video.code}」的所有刮削元数据吗？将清空标题、简介、封面、演员、标签、外部评分等并恢复为「未刮削」状态（不影响视频文件与自定义评分）。
         </Modal>
       )}
 

@@ -21,7 +21,7 @@ import type {
   VideoRematchBatchRequest,
   VideoRematchScope
 } from '@shared/types'
-import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/types'
+import { ALL_VIDEO_SCRAPE_FIELDS, DEFAULT_SETTINGS } from '@shared/types'
 import {
   listActressScraperNames,
   listActressScraperPlugins,
@@ -86,7 +86,7 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
   registerHandler(IPC.SCRAPER_PLUGIN_DELETE, (_e, name: string): boolean => {
     const ok = deleteScraperPlugin('video', name)
     if (getSettings().defaultScraper === name) {
-      updateSettings({ defaultScraper: 'JavLibrary' })
+      updateSettings({ defaultScraper: DEFAULT_SETTINGS.defaultScraper })
     }
     return ok
   })
@@ -106,7 +106,7 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
   registerHandler(IPC.SCRAPER_COMPOSITE_DELETE, (_e, name: string): boolean => {
     const ok = deleteCompositeScraper('video', name)
     if (getSettings().defaultScraper === name) {
-      updateSettings({ defaultScraper: 'JavLibrary' })
+      updateSettings({ defaultScraper: DEFAULT_SETTINGS.defaultScraper })
     }
     return ok
   })

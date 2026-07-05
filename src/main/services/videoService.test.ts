@@ -60,6 +60,10 @@ describe('videoService', () => {
     db.prepare(
       `INSERT INTO video_tag (video_id, tag_id, origin) VALUES (1, 2, 'manual')`
     ).run()
+    db.prepare(
+      `INSERT INTO video_external_stats (video_id, source, rating_average, rating_count)
+       VALUES (1, 'JavLibrary', 3.5, 100)`
+    ).run()
 
     clearVideoMetadata(1)
 
@@ -75,6 +79,11 @@ describe('videoService', () => {
       name: string
     }
     assert.equal(kept.name, '收藏')
+    assert.equal(
+      (db.prepare('SELECT COUNT(*) AS c FROM video_external_stats WHERE video_id = 1').get() as { c: number })
+        .c,
+      0
+    )
   })
 
   it('merges into an existing code when the existing file is missing', () => {

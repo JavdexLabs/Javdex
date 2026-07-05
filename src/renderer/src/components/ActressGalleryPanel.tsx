@@ -198,9 +198,7 @@ export default function ActressGalleryPanel({
       </div>
 
       {items.length === 0 ? (
-        <div className="empty-state empty-state--compact sample-empty">
-          <div>暂无写真。</div>
-        </div>
+        <div className="sample-empty">暂无写真</div>
       ) : (
         <div
           className="actress-gallery-masonry"

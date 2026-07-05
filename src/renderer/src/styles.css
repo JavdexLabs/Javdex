@@ -3772,6 +3772,8 @@ button.meta-link:focus-visible {
   display: flex;
   flex-direction: column;
   overflow-y: hidden;
+  padding: 2px;
+  scrollbar-gutter: auto;
 }
 
 .image-import-empty {

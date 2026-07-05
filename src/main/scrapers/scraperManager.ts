@@ -1,5 +1,5 @@
 import type { ScrapeResult } from '@shared/types'
-import { ALL_VIDEO_SCRAPE_FIELDS, resolveScrapeProxyUrl } from '@shared/types'
+import { ALL_VIDEO_SCRAPE_FIELDS, DEFAULT_SETTINGS, resolveScrapeProxyUrl } from '@shared/types'
 import {
   applyScrapeResult,
   getVideoById,
@@ -48,7 +48,7 @@ export function getScraper(name?: string): BaseScraper {
   const settings = getSettings()
   const key = name || settings.defaultScraper
   const registry = buildRegistry()
-  const scraper = registry.get(key) ?? registry.get('JavLibrary')
+  const scraper = registry.get(key) ?? registry.get(DEFAULT_SETTINGS.defaultScraper)
   if (!scraper) throw new Error('No scraper plugin available')
   return scraper
 }

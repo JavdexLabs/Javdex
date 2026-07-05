@@ -2,18 +2,27 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { isVideoFile, parseCode } from './codeParser'
 import {
+  backfillVideoFileFingerprint,
   getVideoByCode,
+  getPrimaryVideoFile,
+  getVideoFileByPath,
   insertScannedVideo,
-  listVideoPaths,
-  purgeVideo,
+  listVideoFileRefs,
+  purgeVideoFile,
   relocateVideo,
+  updateVideoFileAfterProbe,
   videoExistsByPath
 } from '../db/videoRepo'
 import type { ManualImportResult, ScanProgress, ScanResult, RenameImportResult } from '@shared/types'
+import type { NewVideo } from '../db/videoRepo'
+import type { VideoFile } from '@shared/types'
 import {
   isBelowMinImportDuration,
   readLocalVideoDurationSeconds,
-  resolveMinScanImportDurationSeconds
+  resolveMinScanImportDurationSeconds,
+  shouldProbeVideoFileDuration,
+  shouldRefreshVideoFileDuration,
+  type VideoFileFingerprint
 } from './videoDuration'
 import { getSettings } from '../settings/settingsStore'
 
@@ -76,12 +85,87 @@ function isUnderFolder(filePath: string, folders: string[]): boolean {
   })
 }
 
-function statSize(file: string): number | null {
+export function statFileFingerprint(filePath: string): VideoFileFingerprint | null {
   try {
-    return fs.statSync(file).size
+    const stat = fs.statSync(filePath)
+    return { file_size: stat.size, file_mtime_ms: Math.round(stat.mtimeMs) }
   } catch {
     return null
   }
+}
+
+type DurationReader = (filePath: string) => Promise<number | null>
+
+async function resolveImportDurationSeconds(
+  file: string,
+  readDurationSeconds: DurationReader,
+  cached?: number | null
+): Promise<number | null> {
+  if (cached !== undefined) return cached
+  return readDurationSeconds(file)
+}
+
+function buildScannedVideoImport(
+  code: string,
+  file: string,
+  fileDurationSeconds: number | null,
+  fingerprint: VideoFileFingerprint | null
+): NewVideo {
+  return {
+    code,
+    file_path: file,
+    file_size: fingerprint?.file_size ?? null,
+    file_duration_seconds: fileDurationSeconds,
+    file_mtime_ms: fingerprint?.file_mtime_ms ?? null
+  }
+}
+
+function resolveRefreshTarget(file: string): VideoFile | null {
+  const existingFile = getVideoFileByPath(file)
+  if (existingFile) return existingFile
+
+  const base = path.basename(file, path.extname(file))
+  const code = parseCode(base)
+  if (!code) return null
+  const video = getVideoByCode(code)
+  if (!video) return null
+  const primary = getPrimaryVideoFile(video.id)
+  if (primary && samePath(primary.file_path, file)) return primary
+  return null
+}
+
+async function refreshScannedFileDuration(
+  file: string,
+  readDurationSeconds: DurationReader
+): Promise<void> {
+  const fingerprint = statFileFingerprint(file)
+  if (!fingerprint) return
+
+  const record = resolveRefreshTarget(file)
+  if (!record) return
+
+  if (!shouldProbeVideoFileDuration(record, fingerprint)) {
+    if (record.file_mtime_ms == null) {
+      backfillVideoFileFingerprint(record.id, fingerprint)
+    }
+    return
+  }
+
+  const fileDurationSeconds = await readDurationSeconds(file)
+  if (fileDurationSeconds == null || fileDurationSeconds <= 0) return
+
+  const nextDuration = shouldRefreshVideoFileDuration(
+    record.file_duration_seconds,
+    fileDurationSeconds
+  )
+    ? fileDurationSeconds
+    : record.file_duration_seconds
+
+  updateVideoFileAfterProbe(record.id, {
+    file_duration_seconds: nextDuration,
+    file_size: fingerprint.file_size,
+    file_mtime_ms: fingerprint.file_mtime_ms
+  })
 }
 
 /**
@@ -132,15 +216,17 @@ export async function scanFolders(
 
     try {
       if (videoExistsByPath(file)) {
+        await refreshScannedFileDuration(file, readDurationSeconds)
         result.skipped += 1
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
       }
 
+      let probedDuration: number | null | undefined = undefined
       if (minImportDurationSeconds != null) {
-        const durationSeconds = await readDurationSeconds(file)
-        if (isBelowMinImportDuration(durationSeconds, minImportDurationSeconds)) {
+        probedDuration = await readDurationSeconds(file)
+        if (isBelowMinImportDuration(probedDuration, minImportDurationSeconds)) {
           result.skipped += 1
           result.skippedShort += 1
           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
@@ -159,27 +245,51 @@ export async function scanFolders(
         continue
       }
 
+      const fingerprint = statFileFingerprint(file)
       const existing = getVideoByCode(code)
+      const fileDurationSeconds = await resolveImportDurationSeconds(
+        file,
+        readDurationSeconds,
+        probedDuration
+      )
       if (existing) {
-        if (samePath(existing.file_path, file)) {
+        const primary = getPrimaryVideoFile(existing.id)
+        if (primary && samePath(primary.file_path, file)) {
+          await refreshScannedFileDuration(file, readDurationSeconds)
           result.skipped += 1
-        } else if (!fs.existsSync(existing.file_path)) {
-          relocateVideo(existing.id, file, statSize(file))
+        } else if (primary && !fs.existsSync(primary.file_path)) {
+          relocateVideo(
+            existing.id,
+            file,
+            fingerprint?.file_size ?? null,
+            fileDurationSeconds,
+            fingerprint?.file_mtime_ms ?? null
+          )
           result.relocated += 1
         } else {
-          // Same code already tracked at another existing path — keep original metadata.
-          result.skipped += 1
+          const id = insertScannedVideo(
+            buildScannedVideoImport(code, file, fileDurationSeconds, fingerprint)
+          )
+          if (id !== null) {
+            result.imported += 1
+          } else {
+            await refreshScannedFileDuration(file, readDurationSeconds)
+            result.skipped += 1
+          }
         }
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
       }
 
-      const id = insertScannedVideo({ code, file_path: file, file_size: statSize(file) })
+      const id = insertScannedVideo(
+        buildScannedVideoImport(code, file, fileDurationSeconds, fingerprint)
+      )
       if (id !== null) {
         result.imported += 1
         result.newCodes.push(code)
       } else {
+        await refreshScannedFileDuration(file, readDurationSeconds)
         result.skipped += 1
       }
     } catch (err) {
@@ -192,7 +302,7 @@ export async function scanFolders(
   }
 
   let checkedExisting = 0
-  for (const { id, file_path } of listVideoPaths()) {
+  for (const { file_id, file_path } of listVideoFileRefs()) {
     if (options.signal?.aborted) {
       result.cancelled = true
       break
@@ -204,7 +314,7 @@ export async function scanFolders(
       continue
     }
     try {
-      purgeVideo(id)
+      purgeVideoFile(file_id)
       result.removed += 1
     } catch (err) {
       console.error('Purge error for', file_path, err)
@@ -222,7 +332,7 @@ const ILLEGAL_NAME_CHARS = /[\\/:*?"<>|]/
  * already carries one), then attempt to parse a code from the new name and
  * import it. Used to fix up files the scanner couldn't recognize.
  */
-export function renameAndImport(oldPath: string, newNameRaw: string): RenameImportResult {
+export async function renameAndImport(oldPath: string, newNameRaw: string): Promise<RenameImportResult> {
   if (!fs.existsSync(oldPath)) throw new Error('原文件不存在或已被移动')
 
   const newName = newNameRaw.trim()
@@ -248,14 +358,32 @@ export function renameAndImport(oldPath: string, newNameRaw: string): RenameImpo
 
   const base = path.basename(newPath, path.extname(newPath))
   const code = parseCode(base)
+  const fingerprint = statFileFingerprint(newPath)
+  const fileDurationSeconds = await readLocalVideoDurationSeconds(newPath)
   let imported = false
   if (code && !videoExistsByPath(newPath)) {
     const existing = getVideoByCode(code)
-    if (existing && !fs.existsSync(existing.file_path)) {
-      relocateVideo(existing.id, newPath, statSize(newPath))
-      imported = true
-    } else if (!existing) {
-      const id = insertScannedVideo({ code, file_path: newPath, file_size: statSize(newPath) })
+    if (existing) {
+      const primary = getPrimaryVideoFile(existing.id)
+      if (primary && !fs.existsSync(primary.file_path)) {
+        relocateVideo(
+          existing.id,
+          newPath,
+          fingerprint?.file_size ?? null,
+          fileDurationSeconds,
+          fingerprint?.file_mtime_ms ?? null
+        )
+        imported = true
+      } else if (!primary) {
+        const id = insertScannedVideo(
+          buildScannedVideoImport(code, newPath, fileDurationSeconds, fingerprint)
+        )
+        imported = id !== null
+      }
+    } else {
+      const id = insertScannedVideo(
+        buildScannedVideoImport(code, newPath, fileDurationSeconds, fingerprint)
+      )
       imported = id !== null
     }
   }
@@ -267,7 +395,7 @@ export function renameAndImport(oldPath: string, newNameRaw: string): RenameImpo
  * Import a file with a user-supplied code. Does not rename the file and does not
  * validate code format — only trims whitespace and rejects empty strings.
  */
-export function importManual(filePath: string, codeRaw: string): ManualImportResult {
+export async function importManual(filePath: string, codeRaw: string): Promise<ManualImportResult> {
   if (!fs.existsSync(filePath)) throw new Error('原文件不存在或已被移动')
 
   const code = codeRaw.trim()
@@ -277,15 +405,32 @@ export function importManual(filePath: string, codeRaw: string): ManualImportRes
     return { code, imported: false, skippedPath: true }
   }
 
+  const fingerprint = statFileFingerprint(filePath)
+  const fileDurationSeconds = await readLocalVideoDurationSeconds(filePath)
   const existing = getVideoByCode(code)
   if (existing) {
-    if (!fs.existsSync(existing.file_path)) {
-      relocateVideo(existing.id, filePath, statSize(filePath))
+    const primary = getPrimaryVideoFile(existing.id)
+    if (primary && !fs.existsSync(primary.file_path)) {
+      relocateVideo(
+        existing.id,
+        filePath,
+        fingerprint?.file_size ?? null,
+        fileDurationSeconds,
+        fingerprint?.file_mtime_ms ?? null
+      )
       return { code, imported: true, relocated: true }
+    }
+    if (!videoExistsByPath(filePath)) {
+      const id = insertScannedVideo(
+        buildScannedVideoImport(code, filePath, fileDurationSeconds, fingerprint)
+      )
+      return { code, imported: id !== null, relocated: false }
     }
     return { code, imported: false, skippedPath: false }
   }
 
-  const id = insertScannedVideo({ code, file_path: filePath, file_size: statSize(filePath) })
+  const id = insertScannedVideo(
+    buildScannedVideoImport(code, filePath, fileDurationSeconds, fingerprint)
+  )
   return { code, imported: id !== null }
 }

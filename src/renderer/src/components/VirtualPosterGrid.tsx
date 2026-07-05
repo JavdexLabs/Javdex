@@ -26,6 +26,7 @@ interface VirtualPosterGridProps {
   onEdit?: (video: Video) => void
   onAddToPlaylist?: (video: Video) => void
   onScrape?: (video: Video) => void
+  onMarkScrapeSuccess?: (video: Video) => void
   onDelete?: (video: Video) => void
   /** Session-only key for scroll restoration (see listViewMemory). */
   scrollMemoryKey?: string
@@ -46,6 +47,7 @@ export default function VirtualPosterGrid({
   onEdit,
   onAddToPlaylist,
   onScrape,
+  onMarkScrapeSuccess,
   onDelete,
   scrollMemoryKey
 }: VirtualPosterGridProps): JSX.Element {
@@ -188,6 +190,7 @@ export default function VirtualPosterGrid({
           onEdit={onEdit}
           onAddToPlaylist={onAddToPlaylist}
           onScrape={onScrape}
+          onMarkScrapeSuccess={onMarkScrapeSuccess}
           onDelete={onDelete}
         />
       </div>

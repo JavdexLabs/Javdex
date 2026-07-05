@@ -7,17 +7,13 @@ import type {
 import { formatToolLabel, toolCategory } from './pluginDevFormat'
 import { agentPhaseLabel, type PluginDevConversationItem } from './types'
 
-function compactNumber(value: number): string {
-  if (value >= 1000) {
-    const compact = value / 1000
-    return `${compact >= 10 ? compact.toFixed(0) : compact.toFixed(1)}k`
-  }
-  return value.toLocaleString()
-}
-
 function tokenK(value: number): string {
   const compact = value / 1000
   return `${compact >= 10 ? compact.toFixed(0) : compact.toFixed(1)}k`
+}
+
+function tokenWindowRatio(stats: PluginDevAgentContextStats | null): string {
+  return `${tokenK(stats?.estimatedTokens ?? 0)}/${tokenK(stats?.maxTokens ?? 128000)} tokens`
 }
 
 function contextPercent(stats: PluginDevAgentContextStats | null): number {
@@ -195,14 +191,21 @@ export default function PluginDevConversation({
             onChange={(e) => onFeedbackChange(e.target.value)}
             onKeyDown={(e) => {
               if (agentRunning) return
-              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+              if (e.nativeEvent.isComposing) return
+              if (
+                e.key === 'Enter' &&
+                !e.ctrlKey &&
+                !e.metaKey &&
+                !e.shiftKey &&
+                !e.altKey
+              ) {
                 e.preventDefault()
                 onSend()
               }
             }}
           />
           <div className="plugin-dev-chat-actions">
-            <span>{agentRunning ? '任务运行中' : 'Ctrl+Enter 发送'}</span>
+            <span>{agentRunning ? '任务运行中' : 'Enter 发送 · Ctrl+Enter 换行'}</span>
             <div className="plugin-dev-chat-action-end">
               <div
                 className="plugin-dev-context-popover"
@@ -215,16 +218,14 @@ export default function PluginDevConversation({
                 <button
                   type="button"
                   className={`plugin-dev-context-trigger${contextStats?.overBudget ? ' is-warn' : ''}`}
-                  aria-label={`背景信息窗口：${contextPercent(contextStats)}% 已用`}
+                  aria-label={`上下文信息窗口：已用 ${contextPercent(contextStats)}%`}
                 >
                   <span />
                 </button>
                 <div className="plugin-dev-context-card" role="tooltip">
-                  <span className="plugin-dev-context-title">背景信息窗口</span>
-                  <span className="plugin-dev-context-percent">{contextPercent(contextStats)}% 已用</span>
-                  <span className="plugin-dev-context-detail">
-                    已用 {compactNumber(contextStats?.estimatedTokens ?? 0)} 标记，上限 {compactNumber(contextStats?.maxTokens ?? 128000)}
-                  </span>
+                  <span className="plugin-dev-context-title">上下文信息窗口</span>
+                  <span className="plugin-dev-context-percent">已用 {contextPercent(contextStats)}%</span>
+                  <span className="plugin-dev-context-detail">{tokenWindowRatio(contextStats)}</span>
                   <span className="plugin-dev-context-detail">
                     本次对话 {tokenK(contextStats?.totalTokens ?? 0)} token
                   </span>

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { closeDatabase, initDatabaseAtPath } from '../db/database'
+import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import { listVideos } from '../db/videoRepo'
 import { scanFolders } from './scanner'
@@ -129,5 +129,81 @@ describe('scanFolders', () => {
     assert.equal(result.skippedShort, 1)
     assert.equal(result.failed, 0)
     assert.equal(result.unrecognizedFiles.length, 0)
+  })
+
+  it('stores probed duration on import', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const filePath = path.join(library, 'IPX-535.mp4')
+    fs.writeFileSync(filePath, 'video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+
+    await scanFolders([library], undefined, {
+      readDurationSeconds: async () => 3661,
+      minImportDurationSeconds: null
+    })
+
+    const row = getDb()
+      .prepare('SELECT file_duration_seconds FROM video_files WHERE file_path = ?')
+      .get(filePath) as { file_duration_seconds: number | null }
+    assert.equal(row.file_duration_seconds, 3661)
+  })
+
+  it('refreshes duration when the file changes on rescan', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const filePath = path.join(library, 'IPX-535.mp4')
+    fs.writeFileSync(filePath, 'video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+
+    let duration = 1000
+    const scanOptions = {
+      readDurationSeconds: async () => duration,
+      minImportDurationSeconds: null
+    }
+
+    await scanFolders([library], undefined, { ...scanOptions, yieldEvery: 1 })
+    fs.writeFileSync(filePath, 'updated video content')
+    duration = 2000
+    const result = await scanFolders([library], undefined, { ...scanOptions, yieldEvery: 1 })
+
+    assert.equal(result.imported, 0)
+    assert.equal(result.skipped, 1)
+    const row = getDb()
+      .prepare('SELECT file_duration_seconds FROM video_files WHERE file_path = ?')
+      .get(filePath) as { file_duration_seconds: number | null }
+    assert.equal(row.file_duration_seconds, 2000)
+  })
+
+  it('skips duration probe on rescan when file is unchanged', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const filePath = path.join(library, 'IPX-535.mp4')
+    fs.writeFileSync(filePath, 'video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+
+    let probeCount = 0
+    const scanOptions = {
+      readDurationSeconds: async () => {
+        probeCount += 1
+        return 3661
+      },
+      minImportDurationSeconds: null,
+      yieldEvery: 1
+    }
+
+    await scanFolders([library], undefined, scanOptions)
+    const afterFirst = probeCount
+    await scanFolders([library], undefined, scanOptions)
+
+    assert.equal(probeCount, afterFirst)
+    const row = getDb()
+      .prepare('SELECT file_duration_seconds, file_mtime_ms FROM video_files WHERE file_path = ?')
+      .get(filePath) as { file_duration_seconds: number | null; file_mtime_ms: number | null }
+    assert.equal(row.file_duration_seconds, 3661)
+    assert.notEqual(row.file_mtime_ms, null)
   })
 })

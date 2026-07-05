@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
+import { insertTestVideoWithFile } from './testVideoFixtures'
 import {
   collectVideoLibraryCleanupHints,
   isStubActress,
@@ -19,10 +20,7 @@ function setupDb(): void {
   initDatabaseAtPath(path.join(tempRoot, 'library.db'))
 
   const db = getDb()
-  db.prepare('INSERT INTO videos (code, file_path, scraped_status) VALUES (?, ?, 0)').run(
-    'ABC-1',
-    'a.mp4'
-  )
+  insertTestVideoWithFile(db, { code: 'ABC-1', filePath: 'a.mp4', scrapedStatus: 0 })
   db.prepare('INSERT INTO facet_entries (type, value) VALUES (?, ?)').run('maker', 'Old Maker')
   db.prepare('INSERT INTO facet_entries (type, value) VALUES (?, ?)').run('director', 'Old Director')
   db.prepare('INSERT INTO actresses (main_name, gender) VALUES (?, ?)').run('Stub Actress', 'female')
@@ -89,11 +87,12 @@ describe('libraryCleanup', () => {
   it('does not prune facet entries still referenced by another video', () => {
     setupDb()
     const db = getDb()
-    db.prepare('INSERT INTO videos (code, file_path, scraped_status, maker) VALUES (?, ?, 0, ?)').run(
-      'ABC-2',
-      'b.mp4',
-      'Shared Maker'
-    )
+    insertTestVideoWithFile(db, {
+      code: 'ABC-2',
+      filePath: 'b.mp4',
+      scrapedStatus: 0,
+      maker: 'Shared Maker'
+    })
     db.prepare('INSERT OR IGNORE INTO facet_entries (type, value) VALUES (?, ?)').run(
       'maker',
       'Shared Maker'

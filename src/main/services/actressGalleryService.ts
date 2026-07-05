@@ -11,7 +11,7 @@ import {
   readImageDimensionsFromPath,
   readImageDimensionsFromRelPath
 } from './assetService'
-import { scrapeBrowser } from '../scrapers/scrapeBrowser'
+import { fetchRemoteImageBuffer } from './remoteImageFetch'
 
 export async function importActressGalleryImage(
   actressId: number,
@@ -46,9 +46,8 @@ export async function importActressGalleryImage(
   }
 
   const remoteUrl = parsed.toString()
-  const downloaded = await downloadActressGalleryImage(actress.main_name, remoteUrl, (url) =>
-    scrapeBrowser.fetchBuffer(url)
-  )
+  const buf = await fetchRemoteImageBuffer(remoteUrl)
+  const downloaded = await downloadActressGalleryImage(actress.main_name, remoteUrl, async () => buf)
   if (!downloaded) throw new Error('写真链接下载失败')
   return addActressGalleryAsset(actressId, {
     remoteUrl,

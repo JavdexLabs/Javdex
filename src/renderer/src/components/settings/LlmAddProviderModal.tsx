@@ -6,6 +6,7 @@ import {
   type CustomLlmProviderDefinition,
   type LlmProviderProtocol
 } from '@shared/llmProviders'
+import SelectControl from '../SelectControl'
 import { SettingsFormField } from './SettingsPrimitives'
 
 export default function LlmAddProviderModal({
@@ -63,13 +64,13 @@ export default function LlmAddProviderModal({
           label="协议 *"
           hint={protocol === 'anthropic-messages' ? 'Anthropic 协议已支持插件开发 Agent。' : undefined}
         >
-          <select className="select" value={protocol} onChange={(e) => setProtocol(e.target.value as LlmProviderProtocol)}>
+          <SelectControl value={protocol} onChange={(e) => setProtocol(e.target.value as LlmProviderProtocol)}>
             {LLM_PROVIDER_PROTOCOL_OPTIONS.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.label}
               </option>
             ))}
-          </select>
+          </SelectControl>
         </SettingsFormField>
       </div>
     </Modal>

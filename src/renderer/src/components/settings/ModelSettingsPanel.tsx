@@ -4,6 +4,8 @@ import type { AppSettings } from '@shared/types'
 import {
   buildLlmProviderViewModels,
   findLlmProviderViewModel,
+  getLlmProtocolLabel,
+  inferLlmModelKind,
   isReservedLlmProviderId,
   isValidCustomLlmProviderId,
   listAgentCompatibleProviders,
@@ -11,10 +13,12 @@ import {
   maskLlmApiKey,
   normalizeCustomLlmProviderId,
   type CustomLlmProviderDefinition,
+  type LlmProviderProtocol,
   type LlmProviderViewModel
 } from '@shared/llmProviders'
 import { api } from '../../api'
 import { useDismissOverlaysOnNavigate } from '../../hooks/useDismissOverlaysOnNavigate'
+import SelectControl from '../SelectControl'
 import { useToast } from '../Toast'
 import LlmAddProviderModal from './LlmAddProviderModal'
 import LlmProviderModelsModal from './LlmProviderModelsModal'
@@ -88,7 +92,7 @@ export default function ModelSettingsPanel({
     if (!defaultDirty || defaultSaving) return
     const provider = findLlmProviderViewModel(settings, defaultProviderId)
     if (!provider?.agentCompatible) {
-      toast.show('请选择支持 Agent 的 OpenAI 兼容供应商', 'error')
+      toast.show('请选择支持 Agent 的供应商', 'error')
       return
     }
     if (provider.status === 'unconfigured') {
@@ -120,11 +124,13 @@ export default function ModelSettingsPanel({
     providerId: string
     apiKey: string
     baseUrl: string
+    protocol: LlmProviderProtocol
   }): Promise<void> => {
     const configs = { ...settings.llmProviderConfigs }
     const nextConfig = {
       ...(input.apiKey.trim() ? { apiKey: input.apiKey.trim() } : {}),
-      ...(input.baseUrl.trim() ? { baseUrl: input.baseUrl.trim() } : {})
+      ...(input.baseUrl.trim() ? { baseUrl: input.baseUrl.trim() } : {}),
+      protocol: input.protocol
     }
     if (Object.keys(nextConfig).length === 0) {
       delete configs[input.providerId]
@@ -189,6 +195,10 @@ export default function ModelSettingsPanel({
       toast.show('请填写模型 ID', 'error')
       return
     }
+    if (inferLlmModelKind({ id, name }) !== 'chat') {
+      toast.show('嵌入模型不能作为默认生成模型使用', 'error')
+      return
+    }
     const existing = listModelsForProvider(providerId, settings.llmCustomModels)
     if (existing.some((model) => model.id === id)) {
       toast.show('模型 ID 已存在', 'error')
@@ -238,8 +248,7 @@ export default function ModelSettingsPanel({
       >
         <div className="llm-default-form">
           <SettingsFormField label="提供商">
-            <select
-              className="select"
+            <SelectControl
               value={
                 readyAgentProviders.some((provider) => provider.id === defaultProviderId)
                   ? defaultProviderId
@@ -263,11 +272,10 @@ export default function ModelSettingsPanel({
                   </option>
                 ))
               )}
-            </select>
+            </SelectControl>
           </SettingsFormField>
           <SettingsFormField label="模型">
-            <select
-              className="select"
+            <SelectControl
               value={defaultModelId}
               onChange={(e) => setDefaultModelId(e.target.value)}
             >
@@ -276,7 +284,7 @@ export default function ModelSettingsPanel({
                   {model.name} ({model.id})
                 </option>
               ))}
-            </select>
+            </SelectControl>
           </SettingsFormField>
         </div>
       </SettingsCard>
@@ -307,7 +315,9 @@ export default function ModelSettingsPanel({
               key={provider.id}
               className={`llm-provider-card${
                 provider.status === 'ready' ? ' llm-provider-card--ready' : ''
-              }${provider.status === 'unsupported' ? ' llm-provider-card--unsupported' : ''}`}
+              }${provider.status === 'unsupported' ? ' llm-provider-card--unsupported' : ''}${
+                settings.defaultLlmProviderId === provider.id ? ' llm-provider-card--default' : ''
+              }`}
             >
               <header className="llm-provider-card-head">
                 <div>
@@ -315,6 +325,7 @@ export default function ModelSettingsPanel({
                   <span className="llm-provider-card-tag">
                     {provider.source === 'builtin' ? '内置' : '自定义'}
                     {provider.local ? ' · 本地' : ''}
+                    {settings.defaultLlmProviderId === provider.id ? ' · 默认' : ''}
                   </span>
                 </div>
                 <span className={`llm-provider-status llm-provider-status--${provider.status}`}>
@@ -323,16 +334,20 @@ export default function ModelSettingsPanel({
               </header>
               <dl className="llm-provider-card-meta">
                 <div>
-                  <dt>Base URL</dt>
-                  <dd title={provider.baseUrl}>{provider.baseUrl}</dd>
-                </div>
-                <div>
-                  <dt>API Key</dt>
-                  <dd>{provider.local ? '无需' : maskLlmApiKey(provider.apiKey)}</dd>
+                  <dt>协议</dt>
+                  <dd>{getLlmProtocolLabel(provider.protocol)}</dd>
                 </div>
                 <div>
                   <dt>模型</dt>
                   <dd>{provider.modelCount} 个</dd>
+                </div>
+                <div>
+                  <dt>密钥</dt>
+                  <dd>{provider.local ? '无需' : maskLlmApiKey(provider.apiKey)}</dd>
+                </div>
+                <div>
+                  <dt>Base URL</dt>
+                  <dd title={provider.baseUrl}>{provider.baseUrl}</dd>
                 </div>
               </dl>
               <footer className="llm-provider-card-actions">

@@ -35,6 +35,7 @@ import { UI_ICON } from '../components/iconDefaults'
 import { useAppBackground } from '../components/AppBackgroundContext'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
+import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import type {
   ActressEditInput,
   ActressScrapeField,
@@ -78,7 +79,7 @@ export default function ActressDetailPage(): JSX.Element {
   const [moreOpen, setMoreOpen] = useState(false)
   const moreActionsRef = useRef<HTMLDivElement>(null)
   const [scraping, setScraping] = useState(false)
-  const [scrapers, setScrapers] = useState<string[]>([])
+  const { scrapers, pluginDetails, defaultScraper } = useScraperPluginCatalog('actress')
   const [scraperName, setScraperName] = useState('')
   const [actressDetailUseFirstGalleryBackground, setActressDetailUseFirstGalleryBackground] =
     useState(true)
@@ -141,10 +142,15 @@ export default function ActressDetailPage(): JSX.Element {
   }, [actress, actressId, actressDetailUseFirstGalleryBackground, clearBackground, setBackground])
 
   useEffect(() => {
-    Promise.all([api.actressScrape.listPlugins(), api.settings.get()])
-      .then(([list, settings]) => {
-        setScrapers(list)
-        setScraperName(settings.defaultActressScraper || list[0] || '')
+    if (defaultScraper) {
+      setScraperName((prev) => prev || defaultScraper)
+    }
+  }, [defaultScraper])
+
+  useEffect(() => {
+    api.settings
+      .get()
+      .then((settings) => {
         setActressDetailUseFirstGalleryBackground(settings.actressDetailUseFirstGalleryBackground)
       })
       .catch(() => {})
@@ -497,8 +503,10 @@ export default function ActressDetailPage(): JSX.Element {
       {showScrapeFields && (
         <ScrapeFieldsModal
           title="修正匹配"
+          hint="先确定站点与更新方式，再勾选要写入的字段。"
           options={ACTRESS_SCRAPE_FIELD_OPTIONS}
           scrapers={scrapers}
+          pluginDetails={pluginDetails}
           initialScraperName={scraperName}
           initialSelected={ALL_ACTRESS_SCRAPE_FIELDS}
           scraperTitle="演员刮削站点"

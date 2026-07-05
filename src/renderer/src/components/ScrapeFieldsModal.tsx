@@ -5,6 +5,7 @@ import {
 import type { ScraperPluginDescriptor } from '@shared/types'
 import { useEffect, useMemo, useState } from 'react'
 import ScraperSiteSelect from './ScraperSiteSelect'
+import SelectControl from './SelectControl'
 import SettingsSwitchRow from './SettingsSwitchRow'
 import Modal from './Modal'
 
@@ -226,6 +227,7 @@ export default function ScrapeFieldsModal<
     return map
   }, [missingFieldOptions])
   const supportedMissingSet = useMemo(() => new Set(supportedMissingIds), [supportedMissingIds])
+  const selectableFieldCount = supported ? supportedIds.length : options.length
   const hasMissingFilter = Boolean(missingFieldOptions && missingFieldOptions.length > 0)
   const effectiveMissingFields = missingFilterEnabled ? [...missingSelected] : []
   const notifyScopeChange = (
@@ -413,7 +415,7 @@ export default function ScrapeFieldsModal<
     ...(updateModeOptions?.length && updateModeLabel
       ? [{ label: '更新方式', value: updateModeLabel }]
       : []),
-    { label: '写入字段', value: `${selected.size}/${options.length}` },
+    { label: '写入字段', value: `${selected.size}/${selectableFieldCount}` },
     ...(missingFilterEnabled && missingFieldOptions?.length
       ? [
           {
@@ -499,8 +501,7 @@ export default function ScrapeFieldsModal<
             {matchNameOptions && matchNameOptions.length > 0 && (
               <section className="scrape-config-section">
                 <span className="scrape-modal-section-title">{matchNameTitle}</span>
-                <select
-                  className="select"
+                <SelectControl
                   value={matchName}
                   onChange={(e) => setMatchName(e.target.value)}
                   title={matchNameTitle}
@@ -510,7 +511,7 @@ export default function ScrapeFieldsModal<
                       {formatActressScrapeMatchNameLabel(opt)}
                     </option>
                   ))}
-                </select>
+                </SelectControl>
                 {matchNameHint ? <p className="hint scrape-modal-inline-hint">{matchNameHint}</p> : null}
               </section>
             )}
@@ -689,7 +690,7 @@ export default function ScrapeFieldsModal<
               </div>
               <div className="scrape-fields-toolbar scrape-fields-toolbar--inline">
                 <span className="hint">
-                  已选 {selected.size}/{options.length}
+                  已选 {selected.size}/{selectableFieldCount}
                 </span>
                 <div className="btn-segment btn-segment--sm">
                   <button type="button" onClick={selectAll}>

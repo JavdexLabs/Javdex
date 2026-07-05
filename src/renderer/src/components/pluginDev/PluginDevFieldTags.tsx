@@ -2,6 +2,7 @@ import { allFieldIdsForKind, fieldLabelForKind } from '@shared/pluginDevKindProf
 import type { PluginKind } from './types'
 import { X } from 'lucide-react'
 import { UI_ICON_SM } from '../iconDefaults'
+import SelectControl from '../SelectControl'
 
 export { allFieldIdsForKind } from '@shared/pluginDevKindProfile'
 
@@ -110,8 +111,8 @@ export default function PluginDevFieldTags({
         )}
       </div>
       {availableToAdd.length > 0 && (
-        <select
-          className="select plugin-dev-field-add"
+        <SelectControl
+          className="plugin-dev-field-add"
           value=""
           disabled={busy}
           onChange={(e) => {
@@ -127,7 +128,7 @@ export default function PluginDevFieldTags({
               {labelForField(kind, field)}
             </option>
           ))}
-        </select>
+        </SelectControl>
       )}
     </div>
   )

@@ -2,13 +2,23 @@
 
 export type ScrapedStatus = 0 | 1 | 2 // 0-未刮削, 1-刮削成功, 2-刮削失败
 
+export interface VideoFile {
+  id: number
+  video_id: number
+  file_path: string
+  file_size: number | null
+  file_duration_seconds: number | null
+  file_mtime_ms: number | null
+  label: string | null
+  is_primary: number
+  add_time: string
+}
+
 export interface Video {
   id: number
   code: string
   title: string | null
   summary: string | null
-  file_path: string
-  file_size: number | null
   cover_path: string | null
   poster_path: string | null
   original_title: string | null
@@ -23,6 +33,9 @@ export interface Video {
   last_scraped_at: string | null
   updated_at: string | null
   add_time: string
+  /** Joined for list/detail UI; not stored on videos. */
+  primary_file_path?: string | null
+  file_count?: number
 }
 
 export type ActressGender = 'female' | 'male'
@@ -94,6 +107,15 @@ export interface VideoAsset {
   created_at: string | null
 }
 
+export interface VideoExternalStats {
+  id: number
+  video_id: number
+  source: string
+  rating_average: number | null
+  rating_count: number | null
+  fetched_at: string | null
+}
+
 export interface VideoSampleImportInput {
   source: 'file' | 'url'
   /** Absolute local image path, supplied by Electron webUtils.getPathForFile. */
@@ -122,9 +144,13 @@ export interface ActressGalleryImportInput {
 
 /** A video enriched with its related actresses and tags (for detail views). */
 export interface VideoDetail extends Video {
+  files: VideoFile[]
   actresses: Actress[]
   tags: VideoTag[]
   assets: VideoAsset[]
+  external_stats: VideoExternalStats[]
+  /** Resolved for detail UI: scraped duration, else primary file duration. */
+  resolved_duration_seconds?: number | null
 }
 
 export interface Playlist {
@@ -663,10 +689,6 @@ export const VIDEO_SCRAPE_UPDATE_MODE_OPTIONS: ScrapeUpdateModeOption<VideoScrap
   }
 ]
 
-/** @deprecated Prefer per-option `description` on VIDEO_SCRAPE_UPDATE_MODE_OPTIONS. */
-export const VIDEO_SCRAPE_UPDATE_MODE_HINT =
-  '空字段补齐：仅写入缺失字段；有值覆盖：刮削有结果才更新；覆盖更新：按刮削结果整体替换（无结果则清空）。'
-
 /** Which videos to include in a unified batch scrape/update run. */
 export type VideoBatchScrapeStatus = ScrapedStatus | 'all'
 
@@ -819,10 +841,6 @@ export const ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS: ScrapeUpdateModeOption<ActressS
     description: '已选字段按刮削结果整体替换，无结果则清空'
   }
 ]
-
-/** @deprecated Prefer per-option `description` on ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS. */
-export const ACTRESS_SCRAPE_UPDATE_MODE_HINT =
-  '空字段补齐：仅写入缺失字段；有值覆盖：刮削有结果才更新；覆盖更新：按刮削结果整体替换（无结果则清空）。'
 
 export interface ActressBatchScrapeFilter {
   /** Filter by actor gender. Unknown gender is treated as female for compatibility. */

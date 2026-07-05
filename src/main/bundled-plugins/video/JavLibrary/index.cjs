@@ -190,8 +190,11 @@ function parseDetail($, code, html, sourceUrl) {
     const scoreText = scoreEl.text().trim();
     const scoreMatch = scoreText.match(/\(?([\d.]+)\)?/);
     if (scoreMatch) {
-      // Parse as float to preserve decimal precision
-      result.ratingAverage = parseFloat(scoreMatch[1]);
+      const tenPointScore = parseFloat(scoreMatch[1]);
+      const fivePointScore = Math.round((tenPointScore / 2) * 10) / 10;
+      if (fivePointScore > 0 && fivePointScore <= 5) {
+        result.ratingAverage = fivePointScore;
+      }
     }
   }
 

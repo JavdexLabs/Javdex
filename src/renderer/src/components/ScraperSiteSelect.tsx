@@ -1,3 +1,5 @@
+import SelectControl from './SelectControl'
+
 interface Props {
   scrapers: string[]
   value: string
@@ -17,8 +19,7 @@ export default function ScraperSiteSelect({
   if (!scrapers.length) return null
 
   return (
-    <select
-      className="select"
+    <SelectControl
       value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
@@ -29,6 +30,6 @@ export default function ScraperSiteSelect({
           {s}
         </option>
       ))}
-    </select>
+    </SelectControl>
   )
 }

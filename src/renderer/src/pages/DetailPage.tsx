@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
-import { Ellipsis, ListPlus, Pencil, SearchCheck } from 'lucide-react'
-import type { VideoDetail } from '@shared/types'
+import { Ellipsis, ListPlus, Pencil, Play, SearchCheck } from 'lucide-react'
+import type { VideoDetail, VideoFile } from '@shared/types'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
-import StarRating from '../components/StarRating'
 import Modal from '../components/Modal'
 import EditMetadataModal from '../components/EditMetadataModal'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
@@ -15,12 +14,19 @@ import VideoTagPanel from '../components/VideoTagPanel'
 import AddToPlaylistModal from '../components/AddToPlaylistModal'
 import DetailScrollBody from '../components/DetailScrollBody'
 import MetaLink from '../components/MetaLink'
+import {
+  VideoDetailPrimaryMeta,
+  VideoDetailSecondaryMeta,
+  VideoMaintenanceInfo,
+  getVideoScrapeStatusLabel
+} from '../components/VideoDetailMeta'
+import VideoDetailRatings from '../components/VideoDetailRatings'
 import ImagePreviewLightbox from '../components/ImagePreviewLightbox'
 import IconButton from '../components/IconButton'
 import { UI_ICON } from '../components/iconDefaults'
 import { useAppBackground } from '../components/AppBackgroundContext'
 import ActressAvatar from '../components/ActressAvatar'
-import type { FacetType, VideoEditInput, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/types'
+import type { VideoEditInput, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/types'
 import {
   VIDEO_SCRAPE_FIELD_OPTIONS,
   VIDEO_SCRAPE_UPDATE_MODE_OPTIONS,
@@ -34,22 +40,13 @@ import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import {
   navigateBackFromVideoDetail,
   navigateToActressFromVideoDetail,
-  navigateToFacetDetail,
   navigateToLibrary,
   navigateToVideoDetail
 } from '../listView/listNavigation'
 import { LIST_PARAM } from '../listView/listQueryParams'
 import { ROUTE_MATCH } from '../listView/routePaths'
+import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import { facetKeys, videoKeys } from '../query/queryKeys'
-
-/** Renders a maker/publisher/series/director value as a link to its facet detail page. */
-function FacetValue({ type, value }: { type: FacetType; value: string | null }): JSX.Element {
-  const navigate = useNavigate()
-  if (!value) return <span className="meta-val">—</span>
-  return (
-    <MetaLink onClick={() => navigateToFacetDetail(navigate, type, value)}>{value}</MetaLink>
-  )
-}
 
 export default function DetailPage(): JSX.Element {
   const { id, videoId: videoIdParam } = useParams()
@@ -81,18 +78,21 @@ export default function DetailPage(): JSX.Element {
   const [missingPrompt, setMissingPrompt] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
-  const [scrapers, setScrapers] = useState<string[]>([])
+  const { scrapers, pluginDetails, defaultScraper } = useScraperPluginCatalog('video')
   const [videoDetailUseFirstSampleBackground, setVideoDetailUseFirstSampleBackground] =
     useState(false)
   const [scraperName, setScraperName] = useState<string>('')
   const [showScrapeFields, setShowScrapeFields] = useState(false)
   const [showCorrectImport, setShowCorrectImport] = useState(false)
   const [showAddToPlaylist, setShowAddToPlaylist] = useState(false)
+  const [showMaintenanceInfo, setShowMaintenanceInfo] = useState(false)
   const [correctCode, setCorrectCode] = useState('')
   const [correcting, setCorrecting] = useState(false)
   const [tallCover, setTallCover] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const [coverPreviewOpen, setCoverPreviewOpen] = useState(false)
+  const [deleteFileTarget, setDeleteFileTarget] = useState<VideoFile | null>(null)
+  const [deletingFile, setDeletingFile] = useState(false)
   const moreActionsRef = useRef<HTMLDivElement>(null)
 
   const dismissOverlays = useCallback(() => {
@@ -103,7 +103,9 @@ export default function DetailPage(): JSX.Element {
     setShowScrapeFields(false)
     setShowCorrectImport(false)
     setShowAddToPlaylist(false)
+    setShowMaintenanceInfo(false)
     setCoverPreviewOpen(false)
+    setDeleteFileTarget(null)
     setMoreOpen(false)
   }, [])
 
@@ -112,10 +114,15 @@ export default function DetailPage(): JSX.Element {
   useEscapeKey(() => setMoreOpen(false), moreOpen)
 
   useEffect(() => {
-    Promise.all([api.scrape.listPlugins(), api.settings.get()])
-      .then(([list, settings]) => {
-        setScrapers(list)
-        setScraperName(settings.defaultScraper || list[0] || '')
+    if (defaultScraper) {
+      setScraperName((prev) => prev || defaultScraper)
+    }
+  }, [defaultScraper])
+
+  useEffect(() => {
+    api.settings
+      .get()
+      .then((settings) => {
         setVideoDetailUseFirstSampleBackground(settings.videoDetailUseFirstSampleBackground)
       })
       .catch(() => {})
@@ -206,6 +213,22 @@ export default function DetailPage(): JSX.Element {
     }
   }
 
+  const handlePlayFile = async (fileId: number): Promise<void> => {
+    try {
+      const res = await api.player.playFile(fileId)
+      if (res.ok) {
+        toast.show('已唤起系统播放器', 'success')
+        void load({ silent: true })
+      } else if (res.fileMissing) {
+        setMissingPrompt(true)
+      } else {
+        toast.show(res.error ?? '播放失败', 'error')
+      }
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+    }
+  }
+
   const handleReveal = async (): Promise<void> => {
     setMoreOpen(false)
     try {
@@ -213,6 +236,42 @@ export default function DetailPage(): JSX.Element {
       if (!res.ok) toast.show(res.error ?? '打开文件夹失败', 'error')
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
+    }
+  }
+
+  const handleRevealFile = async (fileId: number): Promise<void> => {
+    try {
+      const res = await api.player.revealFile(fileId)
+      if (!res.ok) toast.show(res.error ?? '打开文件夹失败', 'error')
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+    }
+  }
+
+  const handleSetPrimaryFile = async (fileId: number): Promise<void> => {
+    try {
+      await api.videos.setPrimaryFile(videoId, fileId)
+      toast.show('已设为主文件', 'success')
+      invalidateVideos()
+      void load({ silent: true })
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+    }
+  }
+
+  const doDeleteFile = async (): Promise<void> => {
+    if (!deleteFileTarget || deletingFile) return
+    setDeletingFile(true)
+    try {
+      await api.videos.deleteFile(videoId, deleteFileTarget.id)
+      setDeleteFileTarget(null)
+      toast.show('文件已删除', 'success')
+      invalidateVideos()
+      void load({ silent: true })
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+    } finally {
+      setDeletingFile(false)
     }
   }
 
@@ -267,6 +326,18 @@ export default function DetailPage(): JSX.Element {
       await api.videos.clearMeta(videoId)
       setConfirmClear(false)
       toast.show('已清除元数据', 'success')
+      invalidateVideos()
+      void load({ silent: true })
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+    }
+  }
+
+  const handleMarkScrapeSuccess = async (): Promise<void> => {
+    setMoreOpen(false)
+    try {
+      await api.videos.markScrapeSuccess(videoId)
+      toast.show('已标记为刮削成功', 'success')
       invalidateVideos()
       void load({ silent: true })
     } catch (e) {
@@ -343,166 +414,192 @@ export default function DetailPage(): JSX.Element {
   }
 
   const codeParts = splitVideoCode(video.code)
-
   return (
     <div className={`detail-pane${actressStackOpen ? ' detail-pane--stacked' : ''}`}>
       <DetailScrollBody onBack={() => navigateBackFromVideoDetail(navigate, location)}>
-      <div className="detail-top">
-        <div
-          className={`detail-cover landscape${cover ? ' detail-cover--preview' : ''}`}
-          role={cover ? 'button' : undefined}
-          aria-label={cover ? `查看封面：${video.code}` : undefined}
-          tabIndex={cover ? 0 : undefined}
-          title={cover ? '查看封面' : undefined}
-          onClick={() => {
-            if (cover) setCoverPreviewOpen(true)
-          }}
-          onKeyDown={onCoverKeyDown}
-        >
-          {cover ? (
-            <img
-              src={cover}
-              alt={video.code}
-              className={tallCover ? 'cover-tall' : undefined}
-              onLoad={onCoverLoad}
-            />
-          ) : (
-            <div className="poster-placeholder">{video.code}</div>
-          )}
-        </div>
-
-        <div className="detail-info">
-          <h1 className="detail-title">
-            {codeParts ? (
-              <>
-                <MetaLink
-                  className="detail-code"
-                  onClick={() =>
-                    navigateToLibrary(navigate, location, {
-                      [LIST_PARAM.prefix]: codeParts.prefix
-                    })
-                  }
-                  title={`筛选 ${codeParts.prefix} 系列`}
+        <article className="detail-hero">
+          <div className="detail-title-block">
+            <h1 className="detail-title">
+              {codeParts ? (
+                <>
+                  <MetaLink
+                    className="detail-code"
+                    onClick={() =>
+                      navigateToLibrary(navigate, location, {
+                        [LIST_PARAM.prefix]: codeParts.prefix
+                      })
+                    }
+                    title={`筛选 ${codeParts.prefix} 系列`}
+                  >
+                    {codeParts.prefix}
+                  </MetaLink>
+                  <span className="detail-code">{codeParts.suffix}</span>
+                </>
+              ) : (
+                <span className="detail-code">{video.code}</span>
+              )}
+              {video.title ? `  ${video.title}` : ''}
+            </h1>
+            {video.scraped_status !== 1 ? (
+              <div className="detail-title-badges">
+                <span
+                  className={`detail-meta-status detail-meta-status--${video.scraped_status === 2 ? 'failed' : 'unscraped'}`}
                 >
-                  {codeParts.prefix}
-                </MetaLink>
-                <span className="detail-code">{codeParts.suffix}</span>
-              </>
-            ) : (
-              <span className="detail-code">{video.code}</span>
-            )}
-            {video.title ? `  ${video.title}` : ''}
-          </h1>
-
-          <StarRating value={video.rating} onChange={handleRating} size={22} />
-
-          <div className="meta-grid">
-            <span className="meta-key">发行日期</span>
-            <span className="meta-val">{video.release_date || '—'}</span>
-            <span className="meta-key">制作商</span>
-            <FacetValue type="maker" value={video.maker} />
-            <span className="meta-key">发行商</span>
-            <FacetValue type="publisher" value={video.publisher} />
-            <span className="meta-key">系列</span>
-            <FacetValue type="series" value={video.series} />
-            <span className="meta-key">导演</span>
-            <FacetValue type="director" value={video.director} />
-            <span className="meta-key">文件路径</span>
-            <span className="meta-val meta-val--path">{video.file_path}</span>
+                  {getVideoScrapeStatusLabel(video.scraped_status)}
+                </span>
+              </div>
+            ) : null}
           </div>
 
-          <div className="detail-actions">
-            <button className="btn btn-primary detail-play-btn" onClick={handlePlay}>
-              ▶ 播放
-            </button>
-            <div className="detail-action-group detail-action-group--icons" role="group" aria-label="影片操作">
-              <IconButton
-                className="detail-icon-action"
-                icon={<ListPlus {...UI_ICON} />}
-                label="加入清单"
-                onClick={() => setShowAddToPlaylist(true)}
-              />
-              <IconButton
-                className="detail-icon-action"
-                icon={<Pencil {...UI_ICON} />}
-                label="编辑"
-                onClick={() => setShowEdit(true)}
-              />
-              <IconButton
-                className="detail-icon-action"
-                icon={<SearchCheck {...UI_ICON} />}
-                label="修正匹配"
-                title={scraping ? '匹配中…' : '修正匹配'}
-                aria-busy={scraping || undefined}
-                disabled={scraping}
-                onClick={() => setShowScrapeFields(true)}
-              />
-            </div>
-            <div className="detail-more-actions" ref={moreActionsRef}>
-              <IconButton
-                className="detail-icon-action"
-                icon={<Ellipsis {...UI_ICON} />}
-                label="更多"
-                aria-haspopup="menu"
-                aria-expanded={moreOpen}
-                onClick={() => setMoreOpen((open) => !open)}
-              />
-              {moreOpen && (
-                <div className="detail-more-menu" role="menu">
-                  <button
-                    type="button"
-                    className="detail-menu-item"
-                    role="menuitem"
-                    onClick={() => {
-                      setMoreOpen(false)
-                      openCorrectImport()
-                    }}
-                  >
-                    修正番号
-                  </button>
-                  <button
-                    type="button"
-                    className="detail-menu-item"
-                    role="menuitem"
-                    onClick={() => {
-                      void handleReveal()
-                    }}
-                  >
-                    打开所在文件夹
-                  </button>
-                  <div className="detail-menu-separator" />
-                  <button
-                    type="button"
-                    className="detail-menu-item detail-menu-item--danger"
-                    role="menuitem"
-                    onClick={() => {
-                      setMoreOpen(false)
-                      setConfirmClear(true)
-                    }}
-                  >
-                    清除元数据
-                  </button>
-                  <button
-                    type="button"
-                    className="detail-menu-item detail-menu-item--danger"
-                    role="menuitem"
-                    onClick={() => {
-                      setMoreOpen(false)
-                      setConfirmDelete(true)
-                    }}
-                  >
-                    删除影片
-                  </button>
-                </div>
+          <div className="detail-hero-body">
+            <div
+              className={`detail-cover landscape${cover ? ' detail-cover--preview' : ''}`}
+              role={cover ? 'button' : undefined}
+              aria-label={cover ? `查看封面：${video.code}` : undefined}
+              tabIndex={cover ? 0 : undefined}
+              title={cover ? '查看封面' : undefined}
+              onClick={() => {
+                if (cover) setCoverPreviewOpen(true)
+              }}
+              onKeyDown={onCoverKeyDown}
+            >
+              {cover ? (
+                <img
+                  src={cover}
+                  alt={video.code}
+                  className={tallCover ? 'cover-tall' : undefined}
+                  onLoad={onCoverLoad}
+                />
+              ) : (
+                <div className="poster-placeholder">{video.code}</div>
               )}
             </div>
+
+            <div className="detail-info">
+              <VideoDetailRatings video={video} onRatingChange={handleRating} />
+
+              <VideoDetailPrimaryMeta video={video} />
+
+              <div className="detail-actions">
+              <button className="btn btn-primary detail-play-btn" onClick={handlePlay}>
+                <Play {...UI_ICON} />
+                <span>播放</span>
+              </button>
+              <div className="detail-action-group detail-action-group--icons" role="group" aria-label="影片操作">
+                <IconButton
+                  className="detail-icon-action"
+                  icon={<ListPlus {...UI_ICON} />}
+                  label="加入清单"
+                  onClick={() => setShowAddToPlaylist(true)}
+                />
+                <IconButton
+                  className="detail-icon-action"
+                  icon={<Pencil {...UI_ICON} />}
+                  label="编辑"
+                  onClick={() => setShowEdit(true)}
+                />
+                <IconButton
+                  className="detail-icon-action"
+                  icon={<SearchCheck {...UI_ICON} />}
+                  label="修正匹配"
+                  title={scraping ? '匹配中…' : '修正匹配'}
+                  aria-busy={scraping || undefined}
+                  disabled={scraping}
+                  onClick={() => setShowScrapeFields(true)}
+                />
+              </div>
+              <div className="detail-more-actions" ref={moreActionsRef}>
+                <IconButton
+                  className="detail-icon-action"
+                  icon={<Ellipsis {...UI_ICON} />}
+                  label="更多"
+                  aria-haspopup="menu"
+                  aria-expanded={moreOpen}
+                  onClick={() => setMoreOpen((open) => !open)}
+                />
+                {moreOpen && (
+                  <div className="detail-more-menu" role="menu">
+                    <button
+                      type="button"
+                      className="detail-menu-item"
+                      role="menuitem"
+                      onClick={() => {
+                        setMoreOpen(false)
+                        openCorrectImport()
+                      }}
+                    >
+                      修正番号
+                    </button>
+                    <button
+                      type="button"
+                      className="detail-menu-item"
+                      role="menuitem"
+                      onClick={() => {
+                        void handleReveal()
+                      }}
+                    >
+                      打开所在文件夹
+                    </button>
+                    <button
+                      type="button"
+                      className="detail-menu-item"
+                      role="menuitem"
+                      onClick={() => {
+                        setMoreOpen(false)
+                        setShowMaintenanceInfo(true)
+                      }}
+                    >
+                      维护信息
+                    </button>
+                    {video.scraped_status !== 1 && (
+                      <button
+                        type="button"
+                        className="detail-menu-item"
+                        role="menuitem"
+                        onClick={() => {
+                          void handleMarkScrapeSuccess()
+                        }}
+                      >
+                        标记为刮削成功
+                      </button>
+                    )}
+                    <div className="detail-menu-separator" />
+                    <button
+                      type="button"
+                      className="detail-menu-item detail-menu-item--danger"
+                      role="menuitem"
+                      onClick={() => {
+                        setMoreOpen(false)
+                        setConfirmClear(true)
+                      }}
+                    >
+                      清除元数据
+                    </button>
+                    <button
+                      type="button"
+                      className="detail-menu-item detail-menu-item--danger"
+                      role="menuitem"
+                      onClick={() => {
+                        setMoreOpen(false)
+                        setConfirmDelete(true)
+                      }}
+                    >
+                      删除影片
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+        </article>
 
       {video.actresses.length > 0 && (
-        <>
-          <div className="section-title">演员</div>
+        <section className="detail-section detail-section--actresses">
+          <div className="detail-section-head">
+            <h2 className="section-title">演员</h2>
+            <span className="detail-section-count">{video.actresses.length} 位</span>
+          </div>
           <div className="actress-row-avatars">
             {video.actresses.map((a) => {
               const avatar = assetUrl(a.avatar_path)
@@ -521,14 +618,16 @@ export default function DetailPage(): JSX.Element {
               )
             })}
           </div>
-        </>
+        </section>
       )}
 
       {video.summary && (
-        <>
-          <div className="section-title">剧情简介</div>
+        <section className="detail-section detail-section--summary">
+          <div className="detail-section-head">
+            <h2 className="section-title">剧情简介</h2>
+          </div>
           <div className="summary-text">{video.summary}</div>
-        </>
+        </section>
       )}
 
       <VideoTagPanel
@@ -546,6 +645,20 @@ export default function DetailPage(): JSX.Element {
           void load({ silent: true })
           invalidateVideos()
         }}
+      />
+
+      <VideoDetailSecondaryMeta
+        video={video}
+        onPlayFile={(fileId) => {
+          void handlePlayFile(fileId)
+        }}
+        onRevealFile={(fileId) => {
+          void handleRevealFile(fileId)
+        }}
+        onSetPrimaryFile={(fileId) => {
+          void handleSetPrimaryFile(fileId)
+        }}
+        onDeleteFile={setDeleteFileTarget}
       />
 
       <VideoSampleGallery
@@ -605,9 +718,12 @@ export default function DetailPage(): JSX.Element {
       {showScrapeFields && (
         <ScrapeFieldsModal
           title="修正匹配"
+          hint="先确定站点与更新方式，再勾选要写入的字段。"
           options={VIDEO_SCRAPE_FIELD_OPTIONS}
           scrapers={scrapers}
+          pluginDetails={pluginDetails}
           initialScraperName={scraperName}
+          scraperTitle="刮削站点"
           initialSelected={ALL_VIDEO_SCRAPE_FIELDS}
           updateModeOptions={VIDEO_SCRAPE_UPDATE_MODE_OPTIONS}
           initialUpdateMode="fillEmpty"
@@ -632,6 +748,19 @@ export default function DetailPage(): JSX.Element {
           videoCode={video.code}
           onCancel={() => setShowAddToPlaylist(false)}
         />
+      )}
+
+      {showMaintenanceInfo && (
+        <Modal
+          title="维护信息"
+          size="sm"
+          confirmText="关闭"
+          hideCancel
+          onConfirm={() => setShowMaintenanceInfo(false)}
+          onCancel={() => setShowMaintenanceInfo(false)}
+        >
+          <VideoMaintenanceInfo video={video} />
+        </Modal>
       )}
 
       {confirmClear && (
@@ -660,7 +789,30 @@ export default function DetailPage(): JSX.Element {
           onCancel={() => setConfirmDelete(false)}
         >
           确定要永久删除「{video.code}」吗？将同时删除磁盘上的视频文件、封面及所有元数据，此操作不可恢复。
-          <div className="modal-path-text">{video.file_path}</div>
+          {video.files.length > 0 ? (
+            video.files.map((file) => (
+              <div key={file.id} className="modal-path-text">
+                {file.file_path}
+              </div>
+            ))
+          ) : null}
+        </Modal>
+      )}
+
+      {deleteFileTarget && (
+        <Modal
+          title="删除文件"
+          danger
+          confirmText={deletingFile ? '删除中…' : '删除'}
+          onConfirm={() => {
+            void doDeleteFile()
+          }}
+          onCancel={() => {
+            if (!deletingFile) setDeleteFileTarget(null)
+          }}
+        >
+          确定要删除这个非主文件吗？会删除磁盘文件并移除这条文件记录，影片条目、封面和元数据会保留。
+          <div className="modal-path-text">{deleteFileTarget.file_path}</div>
         </Modal>
       )}
 

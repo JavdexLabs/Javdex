@@ -20,6 +20,7 @@ import {
   normalizeDefaultLlmSelection,
   type CustomLlmProviderDefinition,
   type LlmCustomModelDefinition,
+  type LlmProviderProtocol,
   type LlmProviderUserConfig
 } from '@shared/llmProviders'
 import { readTestUserDataPath } from '@shared/appIdentity'
@@ -179,16 +180,23 @@ function normalizeLlmProviderConfigs(
   const out: Record<string, LlmProviderUserConfig> = {}
   for (const [providerId, config] of Object.entries(value as Record<string, unknown>)) {
     if (!providerId.trim() || !config || typeof config !== 'object') continue
-    const item = config as { apiKey?: unknown; baseUrl?: unknown }
+    const item = config as { apiKey?: unknown; baseUrl?: unknown; protocol?: unknown }
     const apiKey = typeof item.apiKey === 'string' ? item.apiKey.trim() : undefined
     const baseUrl = typeof item.baseUrl === 'string' ? item.baseUrl.trim() : undefined
-    if (!apiKey && !baseUrl) continue
+    const protocol = normalizeLlmProviderProtocol(item.protocol)
+    if (!apiKey && !baseUrl && !protocol) continue
     out[providerId.trim()] = {
       ...(apiKey ? { apiKey } : {}),
-      ...(baseUrl ? { baseUrl } : {})
+      ...(baseUrl ? { baseUrl } : {}),
+      ...(protocol ? { protocol } : {})
     }
   }
   return out
+}
+
+function normalizeLlmProviderProtocol(value: unknown): LlmProviderProtocol | undefined {
+  if (value === 'openai-chat' || value === 'anthropic-messages') return value
+  return undefined
 }
 
 function normalizeCustomLlmProviders(value: unknown): CustomLlmProviderDefinition[] {

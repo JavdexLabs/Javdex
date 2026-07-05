@@ -18,7 +18,7 @@ const VIDEO_SUPPORTED_FIELD_RETURN_MAP: Record<string, string> = {
   actressesMale: 'actresses[]，每项 gender 为 male',
   tags: 'tags（标签数组）',
   source: 'sourceUrl（详情页来源链接）',
-  rating: 'ratingAverage、ratingCount',
+  rating: 'ratingAverage（5 分制，最多 1 位小数）、ratingCount',
   samples: 'sampleImageUrls（样张图片 URL 数组）'
 }
 
@@ -66,8 +66,8 @@ export function buildVideoReturnFieldGlossary(): string {
 - director：导演
 - durationSeconds：时长（秒）
 - sourceUrl：详情页来源链接
-- ratingAverage：站点评分均值
-- ratingCount：站点评分人数
+- ratingAverage：站点评分均值，必须换算为 5 分制，范围为 > 0 且 <= 5，最多保留 1 位小数；0 分或不合法评分不要返回
+- ratingCount：站点评分人数；仅在 ratingAverage 有效时返回
 - sampleImageUrls：样张图片 URL 数组
 - actresses：演员数组，每项含 name、可选 avatarUrl、可选 gender（female/male）
 - tags：标签数组`

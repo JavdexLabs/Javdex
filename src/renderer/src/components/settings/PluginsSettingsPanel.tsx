@@ -1,6 +1,8 @@
+import { useMemo, useState } from 'react'
 import type { ScraperPluginDescriptor } from '@shared/types'
 import { ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS } from '@shared/types'
 import PluginCard from '../PluginCard'
+import SelectControl from '../SelectControl'
 import { SettingsCard, SettingsEmptyPanel, SettingsSectionBlock } from './SettingsPrimitives'
 import type { PluginKind } from './PluginConfigModals'
 
@@ -8,6 +10,70 @@ export interface PluginDeleteTarget {
   kind: PluginKind
   name: string
   composite: boolean
+}
+
+type PluginSortMode = 'default' | 'coverage' | 'name'
+
+function normalizeSearch(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function pluginSearchText(plugin: ScraperPluginDescriptor): string {
+  return [
+    plugin.name,
+    plugin.description,
+    plugin.homepage,
+    plugin.source,
+    plugin.version,
+    ...plugin.supportedFields
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+}
+
+function preparePlugins(
+  plugins: ScraperPluginDescriptor[],
+  allFieldCount: number,
+  defaultPluginName: string,
+  query: string,
+  sortMode: PluginSortMode
+): ScraperPluginDescriptor[] {
+  return plugins
+    .map((plugin, index) => ({ plugin, index }))
+    .filter(({ plugin }) => !query || pluginSearchText(plugin).includes(query))
+    .sort((a, b) => {
+      const defaultDelta =
+        Number(b.plugin.name === defaultPluginName) - Number(a.plugin.name === defaultPluginName)
+      if (defaultDelta !== 0) return defaultDelta
+
+      if (sortMode === 'coverage') {
+        const coverageDelta =
+          b.plugin.supportedFields.length / allFieldCount -
+          a.plugin.supportedFields.length / allFieldCount
+        if (coverageDelta !== 0) return coverageDelta
+      }
+
+      if (sortMode === 'name') {
+        const nameDelta = a.plugin.name.localeCompare(b.plugin.name, 'zh-Hans-CN', {
+          numeric: true,
+          sensitivity: 'base'
+        })
+        if (nameDelta !== 0) return nameDelta
+      }
+
+      return a.index - b.index
+    })
+    .map(({ plugin }) => plugin)
+}
+
+function bestCoverageLabel(plugins: ScraperPluginDescriptor[], allFieldCount: number): string {
+  const best = plugins.reduce((max, plugin) => Math.max(max, plugin.supportedFields.length), 0)
+  return `字段最高 ${best}/${allFieldCount}`
+}
+
+function countLabel(filtered: number, total: number): string {
+  return filtered === total ? String(total) : `${filtered}/${total}`
 }
 
 function PluginEmptyState({
@@ -73,6 +139,42 @@ export default function PluginsSettingsPanel({
   onSetDefault: (kind: PluginKind, name: string) => void
   onCreateComposite: (kind: PluginKind) => void
 }): JSX.Element {
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sortMode, setSortMode] = useState<PluginSortMode>('default')
+  const normalizedQuery = normalizeSearch(searchQuery)
+  const videoPlugins = useMemo(
+    () => [...videoUserPlugins, ...videoCompositePlugins],
+    [videoCompositePlugins, videoUserPlugins]
+  )
+  const actressPlugins = useMemo(
+    () => [...actressUserPlugins, ...actressCompositePlugins],
+    [actressCompositePlugins, actressUserPlugins]
+  )
+
+  const filteredVideoPlugins = useMemo(
+    () =>
+      preparePlugins(
+        videoPlugins,
+        ALL_VIDEO_SCRAPE_FIELDS.length,
+        defaultVideoPluginName,
+        normalizedQuery,
+        sortMode
+      ),
+    [defaultVideoPluginName, normalizedQuery, sortMode, videoPlugins]
+  )
+  const filteredActressPlugins = useMemo(
+    () =>
+      preparePlugins(
+        actressPlugins,
+        ALL_ACTRESS_SCRAPE_FIELDS.length,
+        defaultActressPluginName,
+        normalizedQuery,
+        sortMode
+      ),
+    [actressPlugins, defaultActressPluginName, normalizedQuery, sortMode]
+  )
+  const isFiltering = normalizedQuery.length > 0
+
   const renderPluginGrid = (
     kind: PluginKind,
     plugins: ScraperPluginDescriptor[],
@@ -81,15 +183,16 @@ export default function PluginsSettingsPanel({
       scroll?: boolean
       showEmptyActions?: boolean
       emptyHint: string
+      filteredEmptyHint?: string
       defaultPluginName: string
     }
   ): JSX.Element => {
     if (plugins.length === 0) {
       return (
         <PluginEmptyState
-          message={options.emptyHint}
-          onImport={options.showEmptyActions ? onImport : undefined}
-          onDev={options.showEmptyActions ? onOpenDev : undefined}
+          message={isFiltering ? (options.filteredEmptyHint ?? '没有符合筛选的插件') : options.emptyHint}
+          onImport={!isFiltering && options.showEmptyActions ? onImport : undefined}
+          onDev={!isFiltering && options.showEmptyActions ? onOpenDev : undefined}
         />
       )
     }
@@ -129,7 +232,7 @@ export default function PluginsSettingsPanel({
     <SettingsCard
       className="plugins-page"
       title="刮削插件"
-      hint="点击插件卡片右上角「设为默认」设置默认来源；详情页刮削时仍可临时切换其他站点。"
+      hint="管理影片 / 演员刮削来源，默认插件用于自动刮削。"
       actions={
         <>
           <button type="button" className="btn btn-sm" onClick={onOpenDev}>
@@ -146,19 +249,58 @@ export default function PluginsSettingsPanel({
         </>
       }
     >
+      <div className="plugins-toolbar" role="search">
+        <label className="plugins-toolbar-search">
+          <span>搜索</span>
+          <input
+            className="text-input"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="插件名、站点、字段"
+          />
+        </label>
+        <label className="plugins-toolbar-sort">
+          <span>排序</span>
+          <SelectControl
+            value={sortMode}
+            onChange={(event) => setSortMode(event.target.value as PluginSortMode)}
+          >
+            <option value="default">默认优先</option>
+            <option value="coverage">字段覆盖</option>
+            <option value="name">名称</option>
+          </SelectControl>
+        </label>
+        {searchQuery && (
+          <button type="button" className="btn btn-sm" onClick={() => setSearchQuery('')}>
+            清空
+          </button>
+        )}
+      </div>
+
       <SettingsSectionBlock
         title={
           <>
             影片插件
-            <em>{videoUserPlugins.length}</em>
+            <em>{countLabel(filteredVideoPlugins.length, videoPlugins.length)}</em>
           </>
         }
-        hint={`默认 ${defaultVideoPluginName}`}
+        hint={`默认 ${defaultVideoPluginName} · ${bestCoverageLabel(videoPlugins, ALL_VIDEO_SCRAPE_FIELDS.length)}`}
+        actions={
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={pluginBusy !== null}
+            onClick={() => onCreateComposite('video')}
+          >
+            新增组合
+          </button>
+        }
       >
-        {renderPluginGrid('video', videoUserPlugins, ALL_VIDEO_SCRAPE_FIELDS.length, {
+        {renderPluginGrid('video', filteredVideoPlugins, ALL_VIDEO_SCRAPE_FIELDS.length, {
           scroll: true,
           showEmptyActions: true,
           emptyHint: '暂无影片插件，可导入或使用开发助手创建',
+          filteredEmptyHint: '没有符合筛选的影片插件',
           defaultPluginName: defaultVideoPluginName
         })}
       </SettingsSectionBlock>
@@ -168,63 +310,29 @@ export default function PluginsSettingsPanel({
         title={
           <>
             演员插件
-            <em>{actressUserPlugins.length}</em>
+            <em>{countLabel(filteredActressPlugins.length, actressPlugins.length)}</em>
           </>
         }
-        hint={`默认 ${defaultActressPluginName}`}
+        hint={`默认 ${defaultActressPluginName} · ${bestCoverageLabel(actressPlugins, ALL_ACTRESS_SCRAPE_FIELDS.length)}`}
+        actions={
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={pluginBusy !== null}
+            onClick={() => onCreateComposite('actress')}
+          >
+            新增组合
+          </button>
+        }
       >
-        {renderPluginGrid('actress', actressUserPlugins, ALL_ACTRESS_SCRAPE_FIELDS.length, {
+        {renderPluginGrid('actress', filteredActressPlugins, ALL_ACTRESS_SCRAPE_FIELDS.length, {
           scroll: true,
           showEmptyActions: true,
           emptyHint: '暂无演员插件，可导入或使用开发助手创建',
+          filteredEmptyHint: '没有符合筛选的演员插件',
           defaultPluginName: defaultActressPluginName
         })}
       </SettingsSectionBlock>
-
-      <details className="plugins-composite-details settings-section-divider">
-        <summary className="plugins-composite-summary">
-          <span className="settings-section-block-title">组合插件</span>
-          <span className="plugins-composite-meta">
-            影片 {videoCompositePlugins.length} · 演员 {actressCompositePlugins.length}
-          </span>
-        </summary>
-        <div className="plugins-composite-body">
-          <div className="plugins-composite-block">
-            <div className="plugins-composite-head">
-              <span>影片</span>
-              <button
-                type="button"
-                className="btn btn-sm"
-                disabled={pluginBusy !== null}
-                onClick={() => onCreateComposite('video')}
-              >
-                新增
-              </button>
-            </div>
-            {renderPluginGrid('video', videoCompositePlugins, ALL_VIDEO_SCRAPE_FIELDS.length, {
-              emptyHint: '暂无影片组合插件',
-              defaultPluginName: defaultVideoPluginName
-            })}
-          </div>
-          <div className="plugins-composite-block">
-            <div className="plugins-composite-head">
-              <span>演员</span>
-              <button
-                type="button"
-                className="btn btn-sm"
-                disabled={pluginBusy !== null}
-                onClick={() => onCreateComposite('actress')}
-              >
-                新增
-              </button>
-            </div>
-            {renderPluginGrid('actress', actressCompositePlugins, ALL_ACTRESS_SCRAPE_FIELDS.length, {
-              emptyHint: '暂无演员组合插件',
-              defaultPluginName: defaultActressPluginName
-            })}
-          </div>
-        </div>
-      </details>
     </SettingsCard>
   )
 }

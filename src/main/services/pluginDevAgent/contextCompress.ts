@@ -276,23 +276,6 @@ export function summarizeContextStats(
   }
 }
 
-/** @deprecated Use fitTranscriptToContextBudget */
-export function fitMessagesToContextBudget(
-  messages: AgentTranscript,
-  step: number,
-  maxTokens: number,
-  totalTokens = 0
-): { messages: AgentTranscript; stats: PluginDevAgentContextStats } {
-  const fitted = fitTranscriptToContextBudget(messages, step, maxTokens, totalTokens)
-  return { messages: fitted.transcript, stats: fitted.stats }
-}
-
-/** @deprecated Use compressTranscriptIfNeeded */
-export const compressMessagesIfNeeded = compressTranscriptIfNeeded
-
-/** @deprecated Use ensureToolResultResponses */
-export const ensureToolCallResponses = ensureToolResultResponses
-
 export function summarizeToolForProgress(
   toolName: string,
   args: Record<string, unknown>

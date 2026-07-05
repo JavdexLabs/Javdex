@@ -10,7 +10,6 @@ import type {
   VideoQuery
 } from '@shared/types'
 import {
-  getVideoDetail,
   listVideos,
   listYears,
   setRating,
@@ -20,19 +19,23 @@ import {
 import {
   clearVideoMetadata,
   correctVideoCode,
+  deleteVideoFile,
   deleteVideoWithFile,
+  getVideoDetailForUi,
   deleteVideoSample,
   addVideoManualTag,
   editVideo,
   importVideoSample,
-  removeVideoManualTag
+  markVideoScrapeSuccess,
+  removeVideoManualTag,
+  setVideoPrimaryFile
 } from '../services/videoService'
 import { registerHandler } from './shared'
 
 export function registerVideoHandlers(): void {
   registerHandler(IPC.VIDEO_LIST, (_e, q: VideoQuery): VideoListResult => listVideos(q ?? {}))
 
-  registerHandler(IPC.VIDEO_GET, (_e, id: number): VideoDetail | null => getVideoDetail(id))
+  registerHandler(IPC.VIDEO_GET, (_e, id: number) => getVideoDetailForUi(id))
 
   registerHandler(IPC.VIDEO_UPDATE, (_e, id: number, fields: Partial<Video>): boolean => {
     updateVideoFields(id, fields)
@@ -49,6 +52,11 @@ export function registerVideoHandlers(): void {
     return true
   })
 
+  registerHandler(IPC.VIDEO_MARK_SCRAPE_SUCCESS, (_e, id: number): boolean => {
+    markVideoScrapeSuccess(id)
+    return true
+  })
+
   registerHandler(
     IPC.VIDEO_CORRECT_IMPORT,
     (_e, id: number, code: string): CorrectImportResult => correctVideoCode(id, code)
@@ -61,6 +69,16 @@ export function registerVideoHandlers(): void {
 
   registerHandler(IPC.VIDEO_SET_RATING, (_e, id: number, rating: number): boolean => {
     setRating(id, rating)
+    return true
+  })
+
+  registerHandler(IPC.VIDEO_SET_PRIMARY_FILE, (_e, id: number, fileId: number): boolean => {
+    setVideoPrimaryFile(id, fileId)
+    return true
+  })
+
+  registerHandler(IPC.VIDEO_DELETE_FILE, (_e, id: number, fileId: number): boolean => {
+    deleteVideoFile(id, fileId)
     return true
   })
 

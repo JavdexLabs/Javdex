@@ -89,6 +89,7 @@ export default function SettingsPage(): JSX.Element {
   const [scrapeProxyDraft, setScrapeProxyDraft] = useState('')
   const [llmProxyDraft, setLlmProxyDraft] = useState('')
   const [proxySaving, setProxySaving] = useState<'scrape' | 'llm' | null>(null)
+  const [proxyTesting, setProxyTesting] = useState<'scrape' | 'llm' | null>(null)
   const [proxyToggleBusy, setProxyToggleBusy] = useState<'scrape' | 'llm' | null>(null)
   const [scrapers, setScrapers] = useState<string[]>([])
   const [actressScrapers, setActressScrapers] = useState<string[]>([])
@@ -391,6 +392,42 @@ export default function SettingsPage(): JSX.Element {
       return false
     } finally {
       setProxySaving(null)
+    }
+  }
+
+  const testScrapeProxy = async (proxyUrl: string): Promise<void> => {
+    if (proxyTesting) return
+    const trimmed = proxyUrl.trim()
+    if (!trimmed) {
+      toast.show('请填写代理地址', 'error')
+      return
+    }
+    setProxyTesting('scrape')
+    try {
+      const message = await api.settings.testProxy('scrape', trimmed)
+      toast.show(`刮削代理${message}`, 'success')
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+    } finally {
+      setProxyTesting(null)
+    }
+  }
+
+  const testLlmProxy = async (proxyUrl: string): Promise<void> => {
+    if (proxyTesting) return
+    const trimmed = proxyUrl.trim()
+    if (!trimmed) {
+      toast.show('请填写代理地址', 'error')
+      return
+    }
+    setProxyTesting('llm')
+    try {
+      const message = await api.settings.testProxy('llm', trimmed)
+      toast.show(`模型代理${message}`, 'success')
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+    } finally {
+      setProxyTesting(null)
     }
   }
 
@@ -1085,16 +1122,20 @@ export default function SettingsPage(): JSX.Element {
                   scrapeProxyEnabled={settings.proxyUrlEnabled}
                   scrapeProxyToggleBusy={proxyToggleBusy === 'scrape'}
                   scrapeProxySaving={proxySaving === 'scrape'}
+                  scrapeProxyTesting={proxyTesting === 'scrape'}
                   llmProxySaved={settings.llmProxyUrl}
                   llmProxyEnabled={settings.llmProxyUrlEnabled}
                   llmProxyToggleBusy={proxyToggleBusy === 'llm'}
                   llmProxySaving={proxySaving === 'llm'}
+                  llmProxyTesting={proxyTesting === 'llm'}
                   onScrapeProxyDraftChange={setScrapeProxyDraft}
                   onLlmProxyDraftChange={setLlmProxyDraft}
                   onScrapeProxyEnabledChange={(enabled) => void toggleScrapeProxyEnabled(enabled)}
                   onLlmProxyEnabledChange={(enabled) => void toggleLlmProxyEnabled(enabled)}
                   onSaveScrapeProxy={saveScrapeProxyUrl}
                   onSaveLlmProxy={saveLlmProxyUrl}
+                  onTestScrapeProxy={(value) => testScrapeProxy(value)}
+                  onTestLlmProxy={(value) => testLlmProxy(value)}
                 />
               )}
             </section>

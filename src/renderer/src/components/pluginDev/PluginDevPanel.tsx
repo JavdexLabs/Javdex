@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Code2, Settings } from 'lucide-react'
 import { findLlmProviderViewModel, listModelsForProvider } from '@shared/llmProviders'
 import type {
   AppSettings,
@@ -15,7 +16,9 @@ import type {
 } from '@shared/types'
 import { api } from '../../api'
 import { settingsPath } from '../../settings/settingsRoutes'
+import IconButton from '../IconButton'
 import { useToast } from '../Toast'
+import { UI_ICON_MD } from '../iconDefaults'
 import PluginDevAgentRail from './PluginDevAgentRail'
 import PluginDevCodeModal from './PluginDevCodeModal'
 import PluginDevConnectionModal from './PluginDevConnectionModal'
@@ -773,24 +776,26 @@ export default function PluginDevPanel({
           <span className="plugin-source-badge plugin-source-badge--user plugin-dev-source-badge">
             {activeLlmModelLabel || '未配置模型'}
           </span>
-          <button
-            type="button"
-            className="btn btn-sm"
+          <span className="plugin-dev-code-action-slot">
+            {code.trim().length > 0 ? (
+              <IconButton
+                className="plugin-dev-toolbar-icon-btn"
+                icon={<Code2 {...UI_ICON_MD} />}
+                label="查看代码"
+                disabled={busy !== null}
+                onClick={() => setShowCodeModal(true)}
+              />
+            ) : (
+              <span className="plugin-dev-toolbar-icon-placeholder" aria-hidden="true" />
+            )}
+          </span>
+          <IconButton
+            className="plugin-dev-toolbar-icon-btn"
+            icon={<Settings {...UI_ICON_MD} />}
+            label="连接设置"
             disabled={busy !== null}
             onClick={openConnectionModal}
-          >
-            连接设置
-          </button>
-          {code.trim().length > 0 && (
-            <button
-              type="button"
-              className="btn btn-sm"
-              disabled={busy !== null}
-              onClick={() => setShowCodeModal(true)}
-            >
-              查看代码
-            </button>
-          )}
+          />
         </div>
       </header>
 

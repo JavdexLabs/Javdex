@@ -1,5 +1,7 @@
 # Data Structure Optimization Notes
 
+> **注意**：本文档记录开发期的数据结构讨论与方案沉淀。自 **1.0.0** 起，正式 schema 以 `src/main/db/schema.ts` 与 `migrations.ts` 为准；文中部分历史字段/迁移设计已不再适用。
+
 本文档用于先沉淀数据结构现状、优化诉求和执行方案。代码优化只有在本文档完善并确认后再开始执行。
 
 ## Collaboration Rules

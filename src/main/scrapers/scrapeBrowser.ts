@@ -1,5 +1,6 @@
-import { app, BrowserWindow, session, net, type Session } from 'electron'
+import { BrowserWindow, session, net, type Session, type WebContents } from 'electron'
 import { isCloudflareChallengeText } from './challenge'
+import { cleanUserAgent, getScrapeUaProfile } from './scrapeUaProfile'
 
 const PARTITION = 'persist:scraper'
 
@@ -54,11 +55,6 @@ const REMOVE_TOOLBAR_JS = `
   if (document.body) document.body.style.paddingTop = '';
 })();
 `
-
-/** Returns a Chrome-like UA derived from the running Chromium, with Electron tokens stripped. */
-function cleanUserAgent(): string {
-  return app.userAgentFallback.replace(/ (Electron|Javdex)\/[^ ]+/g, '')
-}
 
 interface Brand {
   brand: string
@@ -148,10 +144,8 @@ class ScrapeBrowser {
     if (this.headerStealthInstalled) return
     this.headerStealthInstalled = true
 
-    const ua = cleanUserAgent()
-    const major = (ua.match(/Chrome\/(\d+)/) || [])[1] || '130'
-
     ses.webRequest.onBeforeSendHeaders((details, callback) => {
+      const profile = getScrapeUaProfile()
       const headers = details.requestHeaders
       let secChUa: string | undefined
       let fullVerList: string | undefined
@@ -170,16 +164,16 @@ class ScrapeBrowser {
         }
       }
 
-      headers['User-Agent'] = ua
-      headers['sec-ch-ua'] = injectGoogleChrome(secChUa, major)
+      headers['User-Agent'] = profile.userAgent
+      headers['sec-ch-ua'] = injectGoogleChrome(secChUa, profile.major)
       if (fullVerList) {
-        headers['sec-ch-ua-full-version-list'] = injectGoogleChrome(fullVerList, major, true)
+        headers['sec-ch-ua-full-version-list'] = injectGoogleChrome(fullVerList, profile.major, true)
       }
       if (!Object.keys(headers).some((k) => k.toLowerCase() === 'sec-ch-ua-mobile')) {
         headers['sec-ch-ua-mobile'] = '?0'
       }
       if (!Object.keys(headers).some((k) => k.toLowerCase() === 'sec-ch-ua-platform')) {
-        headers['sec-ch-ua-platform'] = '"Windows"'
+        headers['sec-ch-ua-platform'] = profile.secChUaPlatform
       }
 
       callback({ requestHeaders: headers })
@@ -259,9 +253,17 @@ class ScrapeBrowser {
    * injecting the missing "Google Chrome" brand while preserving Chromium's real
    * GREASE token.
    */
-  private async ensureStealth(win: BrowserWindow): Promise<void> {
-    if (this.stealthApplied) return
+  private detachDebugger(wc: WebContents): void {
+    try {
+      if (wc.debugger.isAttached()) wc.debugger.detach()
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private async applyStealthViaCdp(win: BrowserWindow): Promise<void> {
     const wc = win.webContents
+    const profile = getScrapeUaProfile()
 
     // Load a blank document so navigator.userAgentData is queryable.
     await wc.loadURL('about:blank').catch(() => {})
@@ -298,13 +300,11 @@ class ScrapeBrowser {
       /* fall back to synthesized values below */
     }
 
-    const ua = cleanUserAgent()
-    const major = (ua.match(/Chrome\/(\d+)/) || [])[1] || '130'
-    const fullVersion = (ua.match(/Chrome\/([\d.]+)/) || [])[1] || `${major}.0.0.0`
+    const { userAgent: ua, major, fullVersion } = profile
 
     const withGoogleChrome = (list: Brand[] | undefined, fallbackVer: string): Brand[] => {
       let brands = (list && list.length ? list : [{ brand: 'Chromium', version: fallbackVer }]).filter(
-        (b) => !/electron/i.test(b.brand)
+        (b) => !/electron|javdex/i.test(b.brand)
       )
       if (!brands.some((b) => b.brand === 'Google Chrome')) {
         const chromium = brands.find((b) => /chromium/i.test(b.brand))
@@ -320,34 +320,54 @@ class ScrapeBrowser {
     ).map((b) => ({ brand: b.brand, version: b.version.includes('.') ? b.version : `${b.version}.0.0.0` }))
 
     const high = natural?.high ?? {}
-    try {
-      if (!wc.debugger.isAttached()) wc.debugger.attach('1.3')
-      await wc.debugger.sendCommand('Network.enable').catch(() => {})
-      await wc.debugger.sendCommand('Page.enable').catch(() => {})
-      await wc.debugger
-        .sendCommand('Page.addScriptToEvaluateOnNewDocument', { source: STEALTH_DOC_JS })
-        .catch(() => {})
-      await wc.debugger.sendCommand('Network.setUserAgentOverride', {
-        userAgent: ua,
-        acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8,ja;q=0.7',
-        platform: high.platform || natural?.platform || 'Windows',
-        userAgentMetadata: {
-          brands,
-          fullVersionList,
-          fullVersion: high.uaFullVersion || fullVersion,
-          platform: high.platform || natural?.platform || 'Windows',
-          platformVersion: high.platformVersion || '15.0.0',
-          architecture: high.architecture || 'x86',
-          model: high.model || '',
-          mobile: !!natural?.mobile,
-          bitness: high.bitness || '64',
-          wow64: false
-        }
-      })
-      this.stealthApplied = true
-    } catch {
-      /* CDP unavailable — fall back to plain UA already set on the session */
+    const platform = high.platform || natural?.platform || profile.platform
+    const platformVersion = high.platformVersion || profile.platformVersion
+
+    if (!wc.debugger.isAttached()) wc.debugger.attach('1.3')
+    await wc.debugger.sendCommand('Network.enable')
+    await wc.debugger.sendCommand('Page.enable')
+    await wc.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source: STEALTH_DOC_JS })
+    await wc.debugger.sendCommand('Network.setUserAgentOverride', {
+      userAgent: ua,
+      acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8,ja;q=0.7',
+      platform,
+      userAgentMetadata: {
+        brands,
+        fullVersionList,
+        fullVersion: high.uaFullVersion || fullVersion,
+        platform,
+        platformVersion,
+        architecture: high.architecture || profile.architecture,
+        model: high.model || '',
+        mobile: !!natural?.mobile,
+        bitness: high.bitness || profile.bitness,
+        wow64: false
+      }
+    })
+  }
+
+  private async ensureStealth(win: BrowserWindow): Promise<void> {
+    if (this.stealthApplied) return
+    const wc = win.webContents
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await this.applyStealthViaCdp(win)
+        this.stealthApplied = true
+        return
+      } catch (err) {
+        this.detachDebugger(wc)
+        console.warn(
+          `[scrapeBrowser] CDP stealth attempt ${attempt}/2 failed:`,
+          (err as Error).message
+        )
+        if (attempt < 2) await this.sleep(250)
+      }
     }
+
+    console.warn(
+      '[scrapeBrowser] CDP stealth unavailable after retries; HTTP client hints still rewritten via session hook'
+    )
   }
 
   private async readPageChallengeSample(win: BrowserWindow): Promise<string> {
@@ -585,6 +605,7 @@ class ScrapeBrowser {
 
   async performAction(action: string, params: Record<string, unknown> = {}): Promise<unknown> {
     const win = this.ensureWindow()
+    await this.ensureStealth(win)
     if (!win.isVisible()) win.show()
 
     switch (action) {
@@ -831,15 +852,21 @@ class ScrapeBrowser {
   }
 
   /**
-   * Download a binary asset (cover/avatar) through the scraper session so the
-   * Cloudflare clearance cookie and matching UA are reused.
+   * Download a binary asset through the scraper session (UA, proxy, cookies).
+   * During scraping, use session referer (current page origin). For manual import,
+   * prefer {@link fetchBufferViaNavigation} or `{ referer: 'omit' }`.
    */
-  async fetchBuffer(url: string): Promise<Buffer> {
+  async fetchBuffer(
+    url: string,
+    options?: { referer?: 'omit' | 'session' | string }
+  ): Promise<Buffer> {
     const ses = this.getSession()
+    const profile = getScrapeUaProfile()
+    const referer = resolveFetchReferer(options?.referer, this.lastOrigin)
     return new Promise<Buffer>((resolve, reject) => {
       const request = net.request({ url, session: ses, useSessionCookies: true })
-      request.setHeader('User-Agent', cleanUserAgent())
-      request.setHeader('Referer', `${this.lastOrigin}/`)
+      request.setHeader('User-Agent', profile.userAgent)
+      if (referer) request.setHeader('Referer', referer)
       const chunks: Buffer[] = []
       request.on('response', (response) => {
         if (response.statusCode >= 400) {
@@ -856,6 +883,51 @@ class ScrapeBrowser {
     })
   }
 
+  /**
+   * Load an image URL as a top-level navigation (like pasting into the browser
+   * address bar), then read the bytes back from the hidden window context.
+   */
+  async fetchBufferViaNavigation(url: string, timeoutMs = 20000): Promise<Buffer> {
+    const win = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        partition: PARTITION,
+        offscreen: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true
+      }
+    })
+
+    try {
+      await Promise.race([
+        win.loadURL(url),
+        this.sleep(timeoutMs).then(() => {
+          throw new Error('图片加载超时')
+        })
+      ])
+
+      if (win.webContents.isDestroyed()) {
+        throw new Error('图片加载失败')
+      }
+
+      const bytes = await win.webContents.executeJavaScript(
+        `(async () => {
+          const res = await fetch(${JSON.stringify(url)}, {
+            credentials: 'include',
+            referrerPolicy: 'no-referrer'
+          })
+          if (!res.ok) throw new Error('HTTP ' + res.status)
+          return Array.from(new Uint8Array(await res.arrayBuffer()))
+        })()`,
+        true
+      )
+      return Buffer.from(bytes as number[])
+    } finally {
+      if (!win.isDestroyed()) win.close()
+    }
+  }
+
   close(): void {
     if (this.win && !this.win.isDestroyed()) {
       this.win.close()
@@ -865,6 +937,23 @@ class ScrapeBrowser {
 }
 
 export const scrapeBrowser = new ScrapeBrowser()
+
+function resolveFetchReferer(
+  mode: 'omit' | 'session' | string | undefined,
+  sessionOrigin: string
+): string | null {
+  if (mode === 'omit') return null
+  if (mode === 'session' || mode === undefined) {
+    const origin = sessionOrigin.replace(/\/$/, '')
+    return `${origin}/`
+  }
+  if (typeof mode === 'string' && mode.trim()) {
+    const trimmed = mode.trim()
+    return trimmed.endsWith('/') ? trimmed : `${trimmed}/`
+  }
+  const origin = sessionOrigin.replace(/\/$/, '')
+  return `${origin}/`
+}
 
 function readSelector(params: Record<string, unknown>): string {
   if (typeof params.selector !== 'string' || !params.selector.trim()) {

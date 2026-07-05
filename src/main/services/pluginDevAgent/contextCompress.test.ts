@@ -1,18 +1,18 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  compressTranscriptIfNeeded,
-  ensureToolCallResponses,
-  fitTranscriptToContextBudget,
-  summarizeContextStats
-} from './contextCompress'
-import {
   assistantTurn,
+  ensureToolResultResponses,
   systemTurn,
   toolResultsTurn,
   userTurn,
   type AgentTranscript
 } from './agentMessages'
+import {
+  compressTranscriptIfNeeded,
+  fitTranscriptToContextBudget,
+  summarizeContextStats
+} from './contextCompress'
 
 describe('contextCompress', () => {
   it('fills missing tool responses after assistant tool calls', () => {
@@ -25,7 +25,7 @@ describe('contextCompress', () => {
       toolResultsTurn([{ callId: 'call-a', content: '<html />' }])
     ]
 
-    const repaired = ensureToolCallResponses(transcript)
+    const repaired = ensureToolResultResponses(transcript)
     assert.equal(repaired.length, 3)
     assert.equal(repaired[2]?.kind, 'toolResults')
     if (repaired[2]?.kind === 'toolResults') {

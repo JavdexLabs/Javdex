@@ -146,6 +146,17 @@ async function scrapeCompositeVideo(
   return merged
 }
 
+function resolveRatingSourceName(
+  scraper: { scraperName: string } | null | undefined,
+  scraperName: string | undefined,
+  defaultScraper: string
+): string {
+  if (scraper) return scraper.scraperName
+  const resolvedName = scraperName || defaultScraper
+  const composite = findCompositeScraper('video', resolvedName)
+  return composite?.fieldPluginMap.rating ?? resolvedName
+}
+
 /**
  * Scrape a single video by id: run the plugin, download assets, persist.
  * Image download failures do not abort text data import.
@@ -221,6 +232,13 @@ export async function scrapeVideo(
       sampleRels = await downloadSamples(result.code || video.code, result.sampleImageUrls, fetcher)
     }
 
+    const sourceName = scraper?.scraperName ?? scraperName ?? settings.defaultScraper
+    const ratingSourceName = resolveRatingSourceName(
+      scraper,
+      scraperName,
+      settings.defaultScraper
+    )
+
     const applied = applyScrapeResult(
       videoId,
       result,
@@ -228,8 +246,9 @@ export async function scrapeVideo(
       avatarMap,
       sampleRels,
       requested,
-      scraper?.scraperName ?? scraperName ?? settings.defaultScraper,
-      mode
+      sourceName,
+      mode,
+      ratingSourceName
     )
     return { ok: true, result, skipped: !applied }
   } catch (err) {

@@ -19,6 +19,7 @@ import {
   readScraperPluginPackage,
   readScraperPluginPackageForExport
 } from './scraperPluginService'
+import { normalizeVideoScrapeResult } from './scraperResultValidation'
 
 let tempRoot: string | null = null
 let oldUserData: string | null = null
@@ -144,6 +145,21 @@ describe('scraperPluginService', () => {
     assert.equal(scrapers.length, 1)
     const result = await scrapers[0]!.parseTask('ABC-123')
     assert.deepEqual(result, { code: 'ABC-123', title: 'Plugin Title' })
+  })
+
+  it('normalizes video ratings to valid 5-point records only', () => {
+    assert.deepEqual(
+      normalizeVideoScrapeResult({ code: 'ABC-123', ratingAverage: 4.46, ratingCount: 12 }, 'ABC-123'),
+      { code: 'ABC-123', ratingAverage: 4.5, ratingCount: 12 }
+    )
+    assert.deepEqual(
+      normalizeVideoScrapeResult({ code: 'ABC-123', ratingAverage: 0, ratingCount: 12 }, 'ABC-123'),
+      { code: 'ABC-123' }
+    )
+    assert.deepEqual(
+      normalizeVideoScrapeResult({ code: 'ABC-123', ratingAverage: 9.2, ratingCount: 12 }, 'ABC-123'),
+      { code: 'ABC-123' }
+    )
   })
 
   it('reads an installed custom plugin package for AI debugging', async () => {

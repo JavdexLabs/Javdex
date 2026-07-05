@@ -39,6 +39,11 @@ function buildSupportedFieldsPolicy(input: PluginDevAgentStartInput): string {
 - 测试目标缺少部分字段是正常现象；验证时留空视为正确。`
 }
 
+function buildKindSpecificResultRules(kind: ScraperPluginKind): string {
+  if (kind !== 'video') return ''
+  return `- 影片评分 ratingAverage 必须返回 5 分制数值，范围 > 0 且 <= 5，最多保留 1 位小数；来源为 10 分制时先除以 2。评分为 0、为空、NaN、超出范围或无法判断时，不要返回 ratingAverage/ratingCount。`
+}
+
 export function buildAgentSystemPrompt(kind: ScraperPluginKind): string {
   const profile = getPluginDevKindProfile(kind)
   return `你是 ${APP_DISPLAY_NAME} 刮削插件开发 agent。你必须通过工具完成开发和调试，不要臆测页面结构。
@@ -68,6 +73,7 @@ ${buildCheerioRules()}
 
 关键规则：
 ${profile.buildKindSpecificRules()}
+${buildKindSpecificResultRules(kind)}
 - 修复是否成功以 plugin_dry_run 的 JSON 为准，不是口头判断。
 - 仅当 browser_status.isChallenge 为 true，或 browser_fetch_page 返回 code=CHALLENGE 时，才调用 session_request_user；普通内容页不要因页面加载慢或 404 误判为 Cloudflare。
 

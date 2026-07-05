@@ -2,6 +2,7 @@ import { getDb } from './database'
 import type {
   ActressGender,
   Video,
+  VideoFile,
   VideoAsset,
   VideoDetail,
   VideoQuery,
@@ -27,25 +28,91 @@ export interface NewVideo {
   code: string
   file_path: string
   file_size: number | null
+  file_duration_seconds?: number | null
+  file_mtime_ms?: number | null
+}
+
+const PRIMARY_FILE_ORDER = 'ORDER BY is_primary DESC, id ASC'
+
+function listFileSelectExtras(): string {
+  return `,
+    (SELECT vf.file_path FROM video_files vf WHERE vf.video_id = v.id ${PRIMARY_FILE_ORDER} LIMIT 1) AS primary_file_path,
+    (SELECT COUNT(*) FROM video_files vf WHERE vf.video_id = v.id) AS file_count`
+}
+
+export function insertVideoFile(input: {
+  video_id: number
+  file_path: string
+  file_size: number | null
+  file_duration_seconds?: number | null
+  file_mtime_ms?: number | null
+  label?: string | null
+  is_primary?: boolean
+  add_time?: string
+}): number | null {
+  const db = getDb()
+  const isPrimary = input.is_primary ? 1 : 0
+  if (isPrimary) {
+    db.prepare('UPDATE video_files SET is_primary = 0 WHERE video_id = ?').run(input.video_id)
+  }
+  const info = db
+    .prepare(
+      `INSERT OR IGNORE INTO video_files
+         (video_id, file_path, file_size, file_duration_seconds, file_mtime_ms, label, is_primary, add_time)
+       VALUES (@video_id, @file_path, @file_size, @file_duration_seconds, @file_mtime_ms, @label, @is_primary, @add_time)`
+    )
+    .run({
+      video_id: input.video_id,
+      file_path: input.file_path,
+      file_size: input.file_size,
+      file_duration_seconds: input.file_duration_seconds ?? null,
+      file_mtime_ms: input.file_mtime_ms ?? null,
+      label: input.label ?? null,
+      is_primary: isPrimary,
+      add_time: input.add_time ?? nowIso()
+    })
+  return info.changes > 0 ? Number(info.lastInsertRowid) : null
 }
 
 /**
  * Insert an initial (un-scraped) video record from a scan.
- * Returns the new row id, or null if the code/path already exists.
+ * Returns the video id, or null if the path already exists.
  */
 export function insertScannedVideo(v: NewVideo): number | null {
   const db = getDb()
-  const stmt = db.prepare(
-    `INSERT OR IGNORE INTO videos (code, file_path, file_size, scraped_status)
-     VALUES (@code, @file_path, @file_size, 0)`
-  )
-  const info = stmt.run(v)
-  return info.changes > 0 ? Number(info.lastInsertRowid) : null
+  if (videoExistsByPath(v.file_path)) return null
+
+  const existing = getVideoByCode(v.code)
+  if (existing) {
+    const fileId = insertVideoFile({
+      video_id: existing.id,
+      file_path: v.file_path,
+      file_size: v.file_size,
+      file_duration_seconds: v.file_duration_seconds ?? null,
+      file_mtime_ms: v.file_mtime_ms ?? null,
+      is_primary: false
+    })
+    return fileId != null ? existing.id : null
+  }
+
+  return db.transaction(() => {
+    const info = db.prepare('INSERT INTO videos (code, scraped_status) VALUES (?, 0)').run(v.code)
+    const videoId = Number(info.lastInsertRowid)
+    const fileId = insertVideoFile({
+      video_id: videoId,
+      file_path: v.file_path,
+      file_size: v.file_size,
+      file_duration_seconds: v.file_duration_seconds ?? null,
+      file_mtime_ms: v.file_mtime_ms ?? null,
+      is_primary: true
+    })
+    return fileId != null ? videoId : null
+  })()
 }
 
 export function videoExistsByPath(filePath: string): boolean {
   const db = getDb()
-  const row = db.prepare('SELECT 1 FROM videos WHERE file_path = ?').get(filePath)
+  const row = db.prepare('SELECT 1 FROM video_files WHERE file_path = ?').get(filePath)
   return !!row
 }
 
@@ -55,26 +122,116 @@ export function videoExistsByCode(code: string): boolean {
   return !!row
 }
 
-export function getVideoByCode(code: string): Pick<Video, 'id' | 'code' | 'file_path'> | null {
+export function getVideoByCode(code: string): Pick<Video, 'id' | 'code'> | null {
   const db = getDb()
   return (
-    (db.prepare('SELECT id, code, file_path FROM videos WHERE code = ?').get(code) as
-      | Pick<Video, 'id' | 'code' | 'file_path'>
+    (db.prepare('SELECT id, code FROM videos WHERE code = ?').get(code) as
+      | Pick<Video, 'id' | 'code'>
       | undefined) ?? null
   )
 }
 
-/** Update file path/size after a move/rename; keeps scraped metadata and relations. */
-export function relocateVideo(id: number, filePath: string, fileSize: number | null): void {
+export function getVideoFileById(fileId: number): VideoFile | null {
   const db = getDb()
-  db.prepare('UPDATE videos SET file_path = ?, file_size = ? WHERE id = ?').run(
-    filePath,
-    fileSize,
-    id
+  return (db.prepare('SELECT * FROM video_files WHERE id = ?').get(fileId) as VideoFile) ?? null
+}
+
+export function updateVideoFileAfterProbe(
+  fileId: number,
+  input: {
+    file_duration_seconds: number | null
+    file_size: number | null
+    file_mtime_ms: number | null
+  }
+): void {
+  const db = getDb()
+  db.prepare(
+    `UPDATE video_files
+     SET file_duration_seconds = ?, file_size = ?, file_mtime_ms = ?
+     WHERE id = ?`
+  ).run(input.file_duration_seconds, input.file_size, input.file_mtime_ms, fileId)
+}
+
+export function backfillVideoFileFingerprint(
+  fileId: number,
+  input: { file_size: number | null; file_mtime_ms: number | null }
+): void {
+  const db = getDb()
+  db.prepare('UPDATE video_files SET file_size = ?, file_mtime_ms = ? WHERE id = ?').run(
+    input.file_size,
+    input.file_mtime_ms,
+    fileId
   )
 }
 
-/** Remove a video record and its cover asset (file on disk is already gone). */
+export function getVideoFileByPath(filePath: string): VideoFile | null {
+  const db = getDb()
+  return (db.prepare('SELECT * FROM video_files WHERE file_path = ?').get(filePath) as VideoFile) ?? null
+}
+
+export function getPrimaryVideoFile(videoId: number): VideoFile | null {
+  const db = getDb()
+  return (
+    (db
+      .prepare(`SELECT * FROM video_files WHERE video_id = ? ${PRIMARY_FILE_ORDER} LIMIT 1`)
+      .get(videoId) as VideoFile | undefined) ?? null
+  )
+}
+
+export function listVideoFiles(videoId: number): VideoFile[] {
+  const db = getDb()
+  return db
+    .prepare(`SELECT * FROM video_files WHERE video_id = ? ${PRIMARY_FILE_ORDER}, id ASC`)
+    .all(videoId) as VideoFile[]
+}
+
+export function countVideoFiles(videoId: number): number {
+  const db = getDb()
+  return (db.prepare('SELECT COUNT(*) AS n FROM video_files WHERE video_id = ?').get(videoId) as { n: number })
+    .n
+}
+
+export function setPrimaryVideoFile(videoId: number, fileId: number): void {
+  const db = getDb()
+  const file = getVideoFileById(fileId)
+  if (!file || file.video_id !== videoId) {
+    throw new Error('File not found for this video')
+  }
+  db.transaction(() => {
+    db.prepare('UPDATE video_files SET is_primary = 0 WHERE video_id = ?').run(videoId)
+    db.prepare('UPDATE video_files SET is_primary = 1 WHERE id = ?').run(fileId)
+  })()
+}
+
+/** Update primary file path/size after a move/rename; keeps scraped metadata and relations. */
+export function relocateVideo(
+  id: number,
+  filePath: string,
+  fileSize: number | null,
+  fileDurationSeconds: number | null = null,
+  fileMtimeMs: number | null = null
+): void {
+  const db = getDb()
+  const primary = getPrimaryVideoFile(id)
+  if (primary) {
+    db.prepare(
+      `UPDATE video_files
+       SET file_path = ?, file_size = ?, file_duration_seconds = ?, file_mtime_ms = ?
+       WHERE id = ?`
+    ).run(filePath, fileSize, fileDurationSeconds, fileMtimeMs, primary.id)
+    return
+  }
+  insertVideoFile({
+    video_id: id,
+    file_path: filePath,
+    file_size: fileSize,
+    file_duration_seconds: fileDurationSeconds,
+    file_mtime_ms: fileMtimeMs,
+    is_primary: true
+  })
+}
+
+/** Remove a video record and its cover asset (files on disk are already gone). */
 export function purgeVideo(id: number): void {
   const hints = collectVideoLibraryCleanupHints(id)
   const video = getVideoById(id)
@@ -85,9 +242,29 @@ export function purgeVideo(id: number): void {
   runLibraryCleanup(hints)
 }
 
-export function listVideoPaths(): { id: number; file_path: string }[] {
+/** Remove one file row; purge the video work when no files remain. */
+export function purgeVideoFile(fileId: number): void {
+  const file = getVideoFileById(fileId)
+  if (!file) return
+  const videoId = file.video_id
   const db = getDb()
-  return db.prepare('SELECT id, file_path FROM videos').all() as { id: number; file_path: string }[]
+  db.prepare('DELETE FROM video_files WHERE id = ?').run(fileId)
+  if (countVideoFiles(videoId) === 0) {
+    purgeVideo(videoId)
+  }
+}
+
+export function listVideoFileRefs(): { video_id: number; file_id: number; file_path: string }[] {
+  const db = getDb()
+  return db
+    .prepare('SELECT id AS file_id, video_id, file_path FROM video_files')
+    .all() as { video_id: number; file_id: number; file_path: string }[]
+}
+
+/** Delete a file row without purging the parent video. */
+export function removeVideoFileRecord(fileId: number): void {
+  const db = getDb()
+  db.prepare('DELETE FROM video_files WHERE id = ?').run(fileId)
 }
 
 export function getVideoById(id: number): Video | null {
@@ -126,7 +303,26 @@ export function getVideoDetail(id: number): VideoDetail | null {
     )
     .all(id) as VideoDetail['assets']
 
-  return { ...video, actresses, tags, assets }
+  const external_stats = db
+    .prepare(
+      `SELECT * FROM video_external_stats
+       WHERE video_id = ?
+       ORDER BY fetched_at DESC, source ASC`
+    )
+    .all(id) as VideoDetail['external_stats']
+
+  const files = listVideoFiles(id)
+  const primary = files[0]
+  return {
+    ...video,
+    primary_file_path: primary?.file_path ?? null,
+    file_count: files.length,
+    actresses,
+    tags,
+    assets,
+    external_stats,
+    files
+  }
 }
 
 export function addVideoSampleAsset(
@@ -296,7 +492,7 @@ export function listVideos(q: VideoQuery = {}): VideoListResult {
 
   const items = db
     .prepare(
-      `SELECT DISTINCT v.* FROM videos v ${joins} ${where}
+      `SELECT DISTINCT v.*${listFileSelectExtras()} FROM videos v ${joins} ${where}
        ORDER BY ${orderBy}
        LIMIT ? OFFSET ?`
     )
@@ -716,17 +912,21 @@ export function renameVideoCode(id: number, code: string): void {
   db.prepare('UPDATE videos SET code = ? WHERE id = ?').run(code, id)
 }
 
-export function mergeVideoIntoExistingCode(
-  sourceId: number,
-  targetId: number,
-  filePath: string,
-  fileSize: number | null
-): void {
+export function mergeVideoIntoExistingCode(sourceId: number, targetId: number): void {
   const db = getDb()
   const cleanupHints = collectVideoLibraryCleanupHints(sourceId)
   db.transaction(() => {
+    const targetPrimary = getPrimaryVideoFile(targetId)
+    const files = listVideoFiles(sourceId)
+    for (const file of files) {
+      const isPrimary = !targetPrimary && file.is_primary ? 1 : 0
+      db.prepare('UPDATE video_files SET video_id = ?, is_primary = ? WHERE id = ?').run(
+        targetId,
+        isPrimary,
+        file.id
+      )
+    }
     deleteVideo(sourceId)
-    relocateVideo(targetId, filePath, fileSize)
   })()
   runLibraryCleanup(cleanupHints)
 }
@@ -842,7 +1042,19 @@ export function countVideosForRematch(scope: VideoRematchScope): number {
 
 export function markScrapeFailed(id: number): void {
   const db = getDb()
-  db.prepare('UPDATE videos SET scraped_status = 2 WHERE id = ?').run(id)
+  db.prepare('UPDATE videos SET scraped_status = 2 WHERE id = ? AND scraped_status != 1').run(id)
+}
+
+export function markScrapeSucceeded(id: number): void {
+  const db = getDb()
+  const scrapedAt = nowIso()
+  db.prepare(
+    `UPDATE videos
+        SET scraped_status = 1,
+            last_scraped_at = COALESCE(last_scraped_at, @scrapedAt),
+            updated_at = @scrapedAt
+      WHERE id = @id`
+  ).run({ id, scrapedAt })
 }
 
 /**
@@ -857,7 +1069,8 @@ export function applyScrapeResult(
   sampleRelPaths: Array<string | null> = [],
   fields?: VideoScrapeField[],
   sourceName?: string,
-  mode: VideoScrapeUpdateMode = 'replace'
+  mode: VideoScrapeUpdateMode = 'replace',
+  ratingSourceName?: string
 ): boolean {
   const db = getDb()
   const requested = fields ?? ALL_VIDEO_SCRAPE_FIELDS
@@ -995,11 +1208,12 @@ export function applyScrapeResult(
       upsertVideoExternalId(videoId, sourceName, result, scrapedAt)
     }
 
-    if (sourceName && selected.has('rating')) {
+    const statsSource = ratingSourceName ?? sourceName
+    if (statsSource && selected.has('rating')) {
       if (result.ratingAverage !== undefined || result.ratingCount !== undefined) {
-        upsertVideoExternalStats(videoId, sourceName, result, scrapedAt)
+        upsertVideoExternalStats(videoId, statsSource, result, scrapedAt)
       } else if (!preserveOnNull) {
-        deleteVideoExternalStats(videoId, sourceName)
+        deleteVideoExternalStats(videoId, statsSource)
       }
     }
   })

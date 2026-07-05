@@ -67,6 +67,16 @@ describe('pluginDevAgent prompts', () => {
     assert.doesNotMatch(prompt, /不要依赖人工点击/)
   })
 
+  it('documents the video rating output contract', () => {
+    const prompt = buildAgentSystemPrompt('video')
+
+    assert.match(prompt, /ratingAverage/)
+    assert.match(prompt, /5 分制/)
+    assert.match(prompt, /最多保留 1 位小数/)
+    assert.match(prompt, /除以 2/)
+    assert.match(prompt, /不要返回 ratingAverage\/ratingCount/)
+  })
+
   it('keeps site prompts generic without hard-coded site endpoints', () => {
     const session = makeSession()
     const prompt = buildInitialUserMessage(

@@ -1,5 +1,6 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import type { VideoQuery, ScrapedStatus } from '@shared/types'
+import SelectControl from './SelectControl'
 import TagFilter from './TagFilter'
 
 export interface LibraryFilterState {
@@ -69,8 +70,8 @@ export default function LibraryFilterPopover({
       <div className="library-filter-popover-grid">
         <label className="library-filter-field">
           <span className="library-filter-field-label">刮削状态</span>
-          <select
-            className="select library-filter-input"
+          <SelectControl
+            className="library-filter-input"
             value={String(state.status)}
             onChange={(e) =>
               onChange({
@@ -83,13 +84,13 @@ export default function LibraryFilterPopover({
             <option value="1">已刮削</option>
             <option value="0">未刮削</option>
             <option value="2">刮削失败</option>
-          </select>
+          </SelectControl>
         </label>
 
         <label className="library-filter-field">
           <span className="library-filter-field-label">年份</span>
-          <select
-            className="select library-filter-input"
+          <SelectControl
+            className="library-filter-input"
             value={String(state.year)}
             onChange={(e) =>
               onChange({
@@ -103,7 +104,7 @@ export default function LibraryFilterPopover({
                 {y}
               </option>
             ))}
-          </select>
+          </SelectControl>
         </label>
 
         <label className="library-filter-field library-filter-field--wide">

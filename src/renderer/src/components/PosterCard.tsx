@@ -8,7 +8,7 @@ import { useEscapeKey } from '../hooks/useEscapeKey'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { Ellipsis, ListMinus, Pencil } from 'lucide-react'
 import IconButton from './IconButton'
-import { UI_ICON } from './iconDefaults'
+import { UI_ICON, UI_ICON_SM } from './iconDefaults'
 
 const STATUS_BADGE: Record<number, { text: string; cls: string } | null> = {
   0: { text: '未刮削', cls: 'unscraped' },
@@ -26,6 +26,7 @@ interface PosterCardProps {
   onEdit?: (video: Video) => void
   onAddToPlaylist?: (video: Video) => void
   onScrape?: (video: Video) => void
+  onMarkScrapeSuccess?: (video: Video) => void
   onDelete?: (video: Video) => void
   onRemove?: (video: Video) => void
   removeDisabled?: boolean
@@ -40,6 +41,7 @@ export default function PosterCard({
   onEdit,
   onAddToPlaylist,
   onScrape,
+  onMarkScrapeSuccess,
   onDelete,
   onRemove,
   removeDisabled = false
@@ -52,7 +54,7 @@ export default function PosterCard({
   const [tallCover, setTallCover] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  const hasQuickActions = Boolean(onAddToPlaylist || onScrape || onDelete)
+  const hasQuickActions = Boolean(onAddToPlaylist || onScrape || onMarkScrapeSuccess || onDelete)
 
   const dismissMenu = useCallback(() => {
     setMenuOpen(false)
@@ -140,8 +142,8 @@ export default function PosterCard({
         )}
         {!selectionMode && onRemove && (
           <IconButton
-            className="poster-icon-action poster-remove-action poster-hover-control"
-            icon={<ListMinus {...UI_ICON} />}
+            className="media-tile-delete poster-hover-control"
+            icon={<ListMinus {...UI_ICON_SM} />}
             label={`从清单移出 ${video.code}`}
             title="移出清单"
             disabled={removeDisabled}
@@ -189,6 +191,15 @@ export default function PosterCard({
                 {onScrape && (
                   <button type="button" role="menuitem" onClick={(e) => stopAndRun(e, onScrape)}>
                     刮削元数据
+                  </button>
+                )}
+                {onMarkScrapeSuccess && video.scraped_status !== 1 && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => stopAndRun(e, onMarkScrapeSuccess)}
+                  >
+                    标记为刮削成功
                   </button>
                 )}
                 {onDelete && (

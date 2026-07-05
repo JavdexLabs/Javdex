@@ -9,7 +9,7 @@ function indexNames(db: Database.Database): string[] {
   }[]).map((r) => r.name)
 }
 
-describe('database migrations', () => {
+describe('database schema', () => {
   it('creates the current schema and records user_version', () => {
     const db = new Database(':memory:')
     try {
@@ -19,6 +19,7 @@ describe('database migrations', () => {
       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       const expectedTables = [
         'videos',
+        'video_files',
         'actresses',
         'video_actress',
         'tags',
@@ -44,10 +45,28 @@ describe('database migrations', () => {
         expectedTables.map(() => true)
       )
       assert.equal(indexNames(db).includes('idx_videos_release_date'), true)
+      assert.equal(indexNames(db).includes('idx_video_files_file_path'), true)
       assert.equal(indexNames(db).includes('idx_video_tag_tag_id'), true)
       assert.equal(indexNames(db).includes('idx_videos_maker'), true)
       assert.equal(indexNames(db).includes('idx_playlist_video_video_id'), true)
       assert.equal(indexNames(db).includes('idx_videos_studio'), false)
+      assert.equal(indexNames(db).includes('idx_videos_file_path'), false)
+
+      const fileCols = (db.prepare('PRAGMA table_info(video_files)').all() as { name: string }[]).map(
+        (c) => c.name
+      )
+      assert.equal(fileCols.includes('file_mtime_ms'), true)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('rejects databases newer than the supported schema version', () => {
+    const db = new Database(':memory:')
+    try {
+      db.exec('CREATE TABLE videos (id INTEGER PRIMARY KEY)')
+      db.pragma('user_version = 3')
+      assert.throws(() => migrateDatabase(db), /no longer supported/)
     } finally {
       db.close()
     }

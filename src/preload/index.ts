@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../shared/ipc-channels'
+import type { LlmModelDefinition } from '../shared/llmProviders'
 import type {
   AppSettings,
   LibraryOverviewStats,
@@ -80,7 +81,11 @@ const api = {
     update: (patch: Partial<AppSettings>) => invoke<AppSettings>(IPC.SETTINGS_UPDATE, patch),
     pickFolder: () => invoke<string[]>(IPC.SETTINGS_PICK_FOLDER),
     testLlmModel: (providerId: string, modelId: string) =>
-      invoke<void>(IPC.SETTINGS_LLM_TEST_MODEL, providerId, modelId),
+      invoke<string>(IPC.SETTINGS_LLM_TEST_MODEL, providerId, modelId),
+    listLlmModels: (providerId: string) =>
+      invoke<LlmModelDefinition[]>(IPC.SETTINGS_LLM_LIST_MODELS, providerId),
+    testProxy: (kind: 'scrape' | 'llm', proxyUrl: string) =>
+      invoke<string>(IPC.SETTINGS_PROXY_TEST, kind, proxyUrl),
     getOverviewStats: () => invoke<LibraryOverviewStats>(IPC.SETTINGS_OVERVIEW_STATS)
   },
   scan: {
@@ -104,9 +109,14 @@ const api = {
     update: (id: number, fields: Partial<Video>) => invoke<boolean>(IPC.VIDEO_UPDATE, id, fields),
     edit: (id: number, input: VideoEditInput) => invoke<boolean>(IPC.VIDEO_EDIT, id, input),
     clearMeta: (id: number) => invoke<boolean>(IPC.VIDEO_CLEAR_META, id),
+    markScrapeSuccess: (id: number) => invoke<boolean>(IPC.VIDEO_MARK_SCRAPE_SUCCESS, id),
     remove: (id: number) => invoke<boolean>(IPC.VIDEO_DELETE, id),
     setRating: (id: number, rating: number) =>
       invoke<boolean>(IPC.VIDEO_SET_RATING, id, rating),
+    setPrimaryFile: (id: number, fileId: number) =>
+      invoke<boolean>(IPC.VIDEO_SET_PRIMARY_FILE, id, fileId),
+    deleteFile: (id: number, fileId: number) =>
+      invoke<boolean>(IPC.VIDEO_DELETE_FILE, id, fileId),
     correctImport: (id: number, code: string) =>
       invoke<CorrectImportResult>(IPC.VIDEO_CORRECT_IMPORT, id, code),
     years: () => invoke<number[]>(IPC.VIDEO_YEARS),
@@ -296,7 +306,9 @@ const api = {
   },
   player: {
     play: (videoId: number) => invoke<PlayResult>(IPC.PLAYER_PLAY, videoId),
-    reveal: (videoId: number) => invoke<PlayResult>(IPC.PLAYER_REVEAL, videoId)
+    reveal: (videoId: number) => invoke<PlayResult>(IPC.PLAYER_REVEAL, videoId),
+    playFile: (fileId: number) => invoke<PlayResult>(IPC.PLAYER_PLAY_FILE, fileId),
+    revealFile: (fileId: number) => invoke<PlayResult>(IPC.PLAYER_REVEAL_FILE, fileId)
   },
   assetCrypto: {
     setEnabled: (enabled: boolean) => invoke<AppSettings>(IPC.ASSET_CRYPTO_SET, enabled),
@@ -316,7 +328,9 @@ const api = {
     translateToChinese: (text: string) => invoke<string>(IPC.LLM_TRANSLATE_TO_CHINESE, text)
   },
   assets: {
-    getPathForFile: (file: File) => webUtils.getPathForFile(file)
+    getPathForFile: (file: File) => webUtils.getPathForFile(file),
+    fetchRemoteImagePreview: (url: string) =>
+      invoke<{ mimeType: string; dataBase64: string }>(IPC.ASSET_FETCH_REMOTE_IMAGE, url)
   }
 }
 

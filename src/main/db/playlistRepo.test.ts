@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
+import { insertTestVideoWithFile } from './testVideoFixtures'
 import {
   addVideoToPlaylist,
   createPlaylistRecord,
@@ -20,14 +21,23 @@ function setupDb(): void {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-playlist-repo-'))
   initDatabaseAtPath(path.join(tempRoot, 'library.db'))
   const db = getDb()
-  db.prepare(
-    `INSERT INTO videos (code, title, file_path, cover_path, release_date, scraped_status, add_time)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run('IPX-535', 'First', 'a.mp4', 'covers/ipx-535.jpg', '2024-03-01', 1, '2024-01-01')
-  db.prepare(
-    `INSERT INTO videos (code, title, file_path, cover_path, release_date, scraped_status, add_time)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run('MUKD-501', 'Second', 'b.mp4', null, '2024-04-01', 1, '2024-01-02')
+  insertTestVideoWithFile(db, {
+    code: 'IPX-535',
+    filePath: 'a.mp4',
+    title: 'First',
+    releaseDate: '2024-03-01',
+    scrapedStatus: 1,
+    addTime: '2024-01-01'
+  })
+  db.prepare('UPDATE videos SET cover_path = ? WHERE code = ?').run('covers/ipx-535.jpg', 'IPX-535')
+  insertTestVideoWithFile(db, {
+    code: 'MUKD-501',
+    filePath: 'b.mp4',
+    title: 'Second',
+    releaseDate: '2024-04-01',
+    scrapedStatus: 1,
+    addTime: '2024-01-02'
+  })
 }
 
 afterEach(() => {

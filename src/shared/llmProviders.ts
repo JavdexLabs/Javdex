@@ -1,10 +1,12 @@
 /** LLM provider catalog and helpers shared by main process and renderer. */
 
 export type LlmProviderProtocol = 'openai-chat' | 'anthropic-messages'
+export type LlmModelKind = 'chat' | 'embedding'
 
 export interface LlmModelDefinition {
   id: string
   name: string
+  kind?: LlmModelKind
   /** Shipped with the app; cannot be removed in UI. */
   builtin?: boolean
 }
@@ -37,6 +39,7 @@ export interface LlmCustomModelDefinition {
 export interface LlmProviderUserConfig {
   apiKey?: string
   baseUrl?: string
+  protocol?: LlmProviderProtocol
 }
 
 export type LlmProviderStatus = 'ready' | 'unconfigured' | 'unsupported'
@@ -58,6 +61,7 @@ export interface LlmProviderViewModel {
 const BUILTIN_MODEL = (id: string, name: string): LlmModelDefinition => ({
   id,
   name,
+  kind: 'chat',
   builtin: true
 })
 
@@ -191,9 +195,32 @@ const BUILT_IN_LLM_PROVIDER_ORDER = new Map(
 )
 
 export const LLM_PROVIDER_PROTOCOL_OPTIONS: Array<{ id: LlmProviderProtocol; label: string }> = [
-  { id: 'openai-chat', label: 'OpenAI 兼容 (Chat Completions)' },
-  { id: 'anthropic-messages', label: 'Anthropic (Messages API)' }
+  { id: 'openai-chat', label: 'OpenAI Chat Completions' },
+  { id: 'anthropic-messages', label: 'Anthropic Messages' }
 ]
+
+export function getLlmProtocolLabel(protocol: LlmProviderProtocol): string {
+  return LLM_PROVIDER_PROTOCOL_OPTIONS.find((option) => option.id === protocol)?.label ?? protocol
+}
+
+export function inferLlmModelKind(model: Pick<LlmModelDefinition, 'id' | 'name' | 'kind'>): LlmModelKind {
+  if (model.kind) return model.kind
+  const text = `${model.id} ${model.name}`.toLowerCase()
+  if (
+    /\b(embed|embedding|embeddings|rerank|reranker)\b/.test(text) ||
+    text.includes('text-embedding') ||
+    text.includes('nomic-embed') ||
+    text.includes('bge-') ||
+    text.includes('gte-')
+  ) {
+    return 'embedding'
+  }
+  return 'chat'
+}
+
+export function getLlmModelKindLabel(kind: LlmModelKind): string {
+  return kind === 'embedding' ? '嵌入' : '生成'
+}
 
 export function isValidCustomLlmProviderId(value: string): boolean {
   return /^[a-z][a-z0-9_-]{1,47}$/.test(value.trim())
@@ -239,7 +266,10 @@ export function listModelsForProvider(
   const builtinModels = builtIn?.models ?? []
   const extra = customModels
     .filter((model) => model.providerId === providerId)
-    .map((model) => ({ id: model.id, name: model.name.trim() || model.id }))
+    .map((model) => {
+      const item = { id: model.id, name: model.name.trim() || model.id }
+      return { ...item, kind: inferLlmModelKind(item) }
+    })
   const seen = new Set<string>()
   const merged: LlmModelDefinition[] = []
   for (const model of [...builtinModels, ...extra]) {
@@ -274,13 +304,14 @@ export interface LlmSettingsSlice {
 export function buildLlmProviderViewModels(settings: LlmSettingsSlice): LlmProviderViewModel[] {
   const views: LlmProviderViewModel[] = BUILT_IN_LLM_PROVIDERS.map((provider) => {
     const userConfig = settings.llmProviderConfigs[provider.id]
+    const protocol = userConfig?.protocol ?? provider.protocol
     const models = listModelsForProvider(provider.id, settings.llmCustomModels)
     const apiKey = userConfig?.apiKey?.trim() ?? ''
     const baseUrl = resolveProviderBaseUrl(provider.id, userConfig)
     return {
       id: provider.id,
       name: provider.name,
-      protocol: provider.protocol,
+      protocol,
       baseUrl,
       source: 'builtin',
       local: provider.local === true,
@@ -289,7 +320,7 @@ export function buildLlmProviderViewModels(settings: LlmSettingsSlice): LlmProvi
       models,
       modelCount: models.length,
       status: resolveProviderStatus({
-        protocol: provider.protocol,
+        protocol,
         agentCompatible: provider.agentCompatible,
         local: provider.local,
         apiKey,
@@ -300,13 +331,14 @@ export function buildLlmProviderViewModels(settings: LlmSettingsSlice): LlmProvi
 
   for (const custom of settings.customLlmProviders) {
     const userConfig = settings.llmProviderConfigs[custom.id]
+    const protocol = userConfig?.protocol ?? custom.protocol
     const models = listModelsForProvider(custom.id, settings.llmCustomModels)
     const apiKey = userConfig?.apiKey?.trim() ?? ''
-    const agentCompatible = custom.protocol === 'openai-chat'
+    const agentCompatible = true
     views.push({
       id: custom.id,
       name: custom.name,
-      protocol: custom.protocol,
+      protocol,
       baseUrl: resolveProviderBaseUrl(custom.id, userConfig, custom),
       source: 'custom',
       local: false,
@@ -315,7 +347,7 @@ export function buildLlmProviderViewModels(settings: LlmSettingsSlice): LlmProvi
       models,
       modelCount: models.length,
       status: resolveProviderStatus({
-        protocol: custom.protocol,
+        protocol,
         agentCompatible,
         apiKey,
         modelCount: models.length

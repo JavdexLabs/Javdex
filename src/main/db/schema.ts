@@ -8,8 +8,6 @@ CREATE TABLE IF NOT EXISTS videos (
     code TEXT UNIQUE NOT NULL,
     title TEXT,
     summary TEXT,
-    file_path TEXT NOT NULL,
-    file_size INTEGER,
     cover_path TEXT,
     poster_path TEXT,
     original_title TEXT,
@@ -26,7 +24,6 @@ CREATE TABLE IF NOT EXISTS videos (
     add_time DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_videos_code ON videos(code);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_videos_file_path ON videos(file_path);
 CREATE INDEX IF NOT EXISTS idx_videos_add_time ON videos(add_time);
 CREATE INDEX IF NOT EXISTS idx_videos_release_date ON videos(release_date);
 CREATE INDEX IF NOT EXISTS idx_videos_rating ON videos(rating);
@@ -35,6 +32,22 @@ CREATE INDEX IF NOT EXISTS idx_videos_maker ON videos(maker);
 CREATE INDEX IF NOT EXISTS idx_videos_publisher ON videos(publisher);
 CREATE INDEX IF NOT EXISTS idx_videos_series ON videos(series);
 CREATE INDEX IF NOT EXISTS idx_videos_director ON videos(director);
+
+CREATE TABLE IF NOT EXISTS video_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id INTEGER NOT NULL,
+    file_path TEXT NOT NULL UNIQUE,
+    file_size INTEGER,
+    file_duration_seconds INTEGER,
+    file_mtime_ms INTEGER,
+    label TEXT,
+    is_primary INTEGER NOT NULL DEFAULT 0,
+    add_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_video_files_video_id ON video_files(video_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_video_files_file_path ON video_files(file_path);
+CREATE INDEX IF NOT EXISTS idx_video_files_primary ON video_files(video_id, is_primary);
 
 CREATE TABLE IF NOT EXISTS actresses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -42,6 +42,7 @@ import {
 } from '../listView/listQueryParams'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
+import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import { useInfiniteVideoList } from '../query/useInfiniteVideoList'
 import { facetKeys, videoKeys } from '../query/queryKeys'
 
@@ -85,7 +86,7 @@ export default function LibraryPage(): JSX.Element {
   const [deleteTarget, setDeleteTarget] = useState<Video | null>(null)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [scrapers, setScrapers] = useState<string[]>([])
+  const { scrapers, pluginDetails, defaultScraper } = useScraperPluginCatalog('video')
   const [scraperName, setScraperName] = useState('')
 
   const dismissOverlays = useCallback(() => {
@@ -183,13 +184,10 @@ export default function LibraryPage(): JSX.Element {
   }, [detailOpen, refreshTagNames])
 
   useEffect(() => {
-    Promise.all([api.scrape.listPlugins(), api.settings.get()])
-      .then(([list, settings]) => {
-        setScrapers(list)
-        setScraperName(settings.defaultScraper || list[0] || '')
-      })
-      .catch(() => {})
-  }, [])
+    if (defaultScraper) {
+      setScraperName((prev) => prev || defaultScraper)
+    }
+  }, [defaultScraper])
 
   const filterState: LibraryFilterState = {
     status,
@@ -322,6 +320,16 @@ export default function LibraryPage(): JSX.Element {
         res.applied ? 'success' : 'info'
       )
       if (res.applied) refetchSilent()
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+    }
+  }
+
+  const markScrapeSuccess = async (video: Video): Promise<void> => {
+    try {
+      await api.videos.markScrapeSuccess(video.id)
+      toast.show('已标记为刮削成功', 'success')
+      refetchSilent()
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     }
@@ -562,6 +570,9 @@ export default function LibraryPage(): JSX.Element {
             }}
             onAddToPlaylist={setPlaylistTarget}
             onScrape={setScrapeTarget}
+            onMarkScrapeSuccess={(video) => {
+              void markScrapeSuccess(video)
+            }}
             onDelete={setDeleteTarget}
           />
         )}
@@ -597,9 +608,12 @@ export default function LibraryPage(): JSX.Element {
       {scrapeTarget && (
         <ScrapeFieldsModal
           title={`刮削元数据 · ${scrapeTarget.code}`}
+          hint="先确定站点与更新方式，再勾选要写入的字段。"
           options={VIDEO_SCRAPE_FIELD_OPTIONS}
           scrapers={scrapers}
+          pluginDetails={pluginDetails}
           initialScraperName={scraperName}
+          scraperTitle="刮削站点"
           initialSelected={ALL_VIDEO_SCRAPE_FIELDS}
           updateModeOptions={VIDEO_SCRAPE_UPDATE_MODE_OPTIONS}
           initialUpdateMode="replace"
@@ -614,10 +628,12 @@ export default function LibraryPage(): JSX.Element {
       {showBulkScrape && (
         <ScrapeFieldsModal
           title="批量刮削元数据"
-          hint={`将只处理已选择的 ${selectedCount} 部影片。`}
+          hint={`先确定站点与更新方式，再勾选要写入的字段。将只处理已选择的 ${selectedCount} 部影片。`}
           options={VIDEO_SCRAPE_FIELD_OPTIONS}
           scrapers={scrapers}
+          pluginDetails={pluginDetails}
           initialScraperName={scraperName}
+          scraperTitle="刮削站点"
           initialSelected={ALL_VIDEO_SCRAPE_FIELDS}
           updateModeOptions={VIDEO_SCRAPE_UPDATE_MODE_OPTIONS}
           confirmText="开始批量刮削"
@@ -641,7 +657,12 @@ export default function LibraryPage(): JSX.Element {
           }}
         >
           确定要永久删除「{deleteTarget.code}」吗？将同时删除磁盘上的视频文件、封面及所有元数据，此操作不可恢复。
-          <div className="modal-path-text">{deleteTarget.file_path}</div>
+          {deleteTarget.primary_file_path ? (
+            <div className="modal-path-text">{deleteTarget.primary_file_path}</div>
+          ) : null}
+          {(deleteTarget.file_count ?? 0) > 1 ? (
+            <div className="modal-path-hint">另有 {(deleteTarget.file_count ?? 0) - 1} 个关联文件将一并删除</div>
+          ) : null}
         </Modal>
       )}
 

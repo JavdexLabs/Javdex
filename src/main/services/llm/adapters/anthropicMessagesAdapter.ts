@@ -1,7 +1,7 @@
 import type { AgentLlmResponse, AgentToolCall, AgentTranscript } from '../../pluginDevAgent/agentMessages'
 import { getSystemText } from '../../pluginDevAgent/agentMessages'
 import type { PluginDevToolDefinition } from '../../pluginDevAgent/toolSchemas'
-import type { ResolvedLlmRequestConfig } from '../../llmClient'
+import type { ResolvedLlmModelRequestConfig } from '../../llmClient'
 import { llmFetch } from '../../../utils/llmFetch'
 
 type AnthropicContentBlock =
@@ -153,7 +153,7 @@ function parseAnthropicResponse(payload: AnthropicMessagesPayload): AgentLlmResp
 
 export async function requestAnthropicToolChat(
   transcript: AgentTranscript,
-  config: ResolvedLlmRequestConfig,
+  config: ResolvedLlmModelRequestConfig,
   tools: PluginDevToolDefinition[],
   options?: { retryOnce?: boolean }
 ): Promise<AgentLlmResponse> {
@@ -210,7 +210,7 @@ export async function requestAnthropicToolChat(
 
 export async function requestAnthropicJson<T>(
   messages: Array<{ role: 'system' | 'user'; content: string }>,
-  config: ResolvedLlmRequestConfig
+  config: ResolvedLlmModelRequestConfig
 ): Promise<{ json: T; rawText: string }> {
   if (!config.messagesUrl) {
     throw new Error('Anthropic Messages 端点未配置')

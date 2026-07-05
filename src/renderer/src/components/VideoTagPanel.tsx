@@ -107,8 +107,11 @@ export default function VideoTagPanel({
   }
 
   return (
-    <section className="video-tag-panel" aria-label="影片标签">
-      <div className="section-title">标签</div>
+    <section className="detail-section video-tag-panel" aria-label="影片标签">
+      <div className="detail-section-head">
+        <h2 className="section-title">标签</h2>
+        <span className="detail-section-count">{tags.length} 个</span>
+      </div>
       <div className="tag-list">
         {scrapedTags.map((tag) => (
           <button

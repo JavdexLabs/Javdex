@@ -1,4 +1,5 @@
 import { BrowserWindow } from 'electron'
+import { registerAssetHandlers } from './assetHandlers'
 import { registerActressHandlers } from './actressHandlers'
 import { registerFacetHandlers } from './facetHandlers'
 import { registerPlayerHandlers } from './playerHandlers'
@@ -14,6 +15,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   const ctx: IpcContext = { getWindow }
 
   registerSettingsHandlers(ctx)
+  registerAssetHandlers()
   registerScanHandlers(ctx)
   registerVideoHandlers()
   registerPlaylistHandlers()

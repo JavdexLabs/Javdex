@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import type { ScraperPluginDescriptor } from '@shared/types'
 import FloatingLayer from './FloatingLayer'
 import IconButton from './IconButton'
@@ -11,8 +11,6 @@ function formatPluginVersion(plugin: ScraperPluginDescriptor): string | null {
   if (plugin.source === 'composite' || plugin.version === '组合') return null
   return plugin.version || null
 }
-
-const TOOLTIP_SHOW_DELAY_MS = 140
 
 export default function PluginCard({
   plugin,
@@ -35,31 +33,12 @@ export default function PluginCard({
   onRequestDelete: () => void
   onSetDefault: () => void
 }): JSX.Element {
-  const cardRef = useRef<HTMLElement>(null)
   const menuBtnRef = useRef<HTMLSpanElement>(null)
-  const tooltipTimerRef = useRef<number | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [tooltipOpen, setTooltipOpen] = useState(false)
-  const [isHovered, setIsHovered] = useState(false)
 
   useEscapeKey(() => {
     setMenuOpen(false)
-    setTooltipOpen(false)
-  }, menuOpen || tooltipOpen)
-
-  useEffect(() => {
-    if (!menuOpen) return
-    setTooltipOpen(false)
-  }, [menuOpen])
-
-  useEffect(
-    () => () => {
-      if (tooltipTimerRef.current !== null) {
-        window.clearTimeout(tooltipTimerRef.current)
-      }
-    },
-    []
-  )
+  }, menuOpen)
 
   const showMoreMenu =
     plugin.exportable || plugin.removable || plugin.source === 'builtin' || plugin.source === 'user'
@@ -71,56 +50,23 @@ export default function PluginCard({
   const coverage = allFieldCount > 0 ? plugin.supportedFields.length / allFieldCount : 0
   const coveragePct = Math.round(coverage * 100)
   const versionLabel = formatPluginVersion(plugin)
-  const hasTooltip = Boolean(plugin.description || plugin.homepage)
+  const summaryLabel = plugin.description || plugin.homepage || ''
+  const sourceLabel =
+    plugin.source === 'builtin' || plugin.source === 'composite' ? pluginSourceLabel(plugin) : null
 
   const activateEdit = (): void => {
     if (actionsDisabled) return
-    setIsHovered(false)
     onEdit()
-  }
-
-  const handleMouseEnter = (): void => {
-    setIsHovered(true)
-    openTooltip()
-  }
-
-  const handleMouseLeave = (): void => {
-    setIsHovered(false)
-    closeTooltip()
-  }
-
-  const revealActions = isHovered || menuOpen
-
-  const openTooltip = (): void => {
-    if (menuOpen || !hasTooltip) return
-    if (tooltipTimerRef.current !== null) {
-      window.clearTimeout(tooltipTimerRef.current)
-    }
-    tooltipTimerRef.current = window.setTimeout(() => {
-      setTooltipOpen(true)
-      tooltipTimerRef.current = null
-    }, TOOLTIP_SHOW_DELAY_MS)
-  }
-
-  const closeTooltip = (): void => {
-    if (tooltipTimerRef.current !== null) {
-      window.clearTimeout(tooltipTimerRef.current)
-      tooltipTimerRef.current = null
-    }
-    setTooltipOpen(false)
   }
 
   return (
     <>
       <article
-        ref={cardRef}
         className={`plugin-card plugin-card--${plugin.source}${isDefault ? ' plugin-card--default' : ''}${
-          revealActions ? ' plugin-card--hovered' : ''
+          menuOpen ? ' plugin-card--menu-open' : ''
         }`}
         role="listitem"
         aria-label={`${plugin.name}${isDefault ? '，默认插件' : ''}`}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
       >
         <div className="plugin-card-body">
           <div className="plugin-card-title-row">
@@ -144,17 +90,22 @@ export default function PluginCard({
             )}
           </div>
           <div className="plugin-card-tags">
-            <span className={`plugin-source-badge plugin-source-badge--${plugin.source}`}>
-              {pluginSourceLabel(plugin)}
-            </span>
+            {sourceLabel && (
+              <span className={`plugin-source-badge plugin-source-badge--${plugin.source}`}>
+                {sourceLabel}
+              </span>
+            )}
             {versionLabel && <span className="plugin-version">{versionLabel}</span>}
           </div>
           <div className="plugin-card-meta">
             <span>{delayLabel}</span>
-            <span>
+            <span className="plugin-card-field-count">
               字段 {plugin.supportedFields.length}/{allFieldCount}
             </span>
           </div>
+          <p className="plugin-card-description" title={summaryLabel || undefined}>
+            {summaryLabel || ' '}
+          </p>
           <div
             className="plugin-card-field-bar"
             role="progressbar"
@@ -191,7 +142,6 @@ export default function PluginCard({
                 aria-expanded={menuOpen}
                 onClick={(e) => {
                   e.stopPropagation()
-                  closeTooltip()
                   setMenuOpen((open) => !open)
                 }}
               />
@@ -199,21 +149,6 @@ export default function PluginCard({
           )}
         </div>
       </article>
-
-      {hasTooltip && (
-        <FloatingLayer
-          open={tooltipOpen && !menuOpen}
-          anchorRef={cardRef}
-          side="top"
-          align="center"
-          offset={10}
-          className="plugin-floating-tooltip"
-          role="tooltip"
-        >
-          {plugin.description && <p>{plugin.description}</p>}
-          {plugin.homepage && <span className="plugin-floating-tooltip-url">{plugin.homepage}</span>}
-        </FloatingLayer>
-      )}
 
       {showMoreMenu && (
         <FloatingLayer

@@ -1,4 +1,4 @@
-import { resolveActiveLlmRequestConfig, type ResolvedLlmRequestConfig } from './llmClient'
+import { resolveActiveLlmRequestConfig, type ResolvedLlmModelRequestConfig } from './llmClient'
 import { llmFetch } from '../utils/llmFetch'
 
 const TRANSLATE_TIMEOUT_MS = 60_000
@@ -50,7 +50,7 @@ export async function translateTextToChinese(text: string): Promise<string> {
 
 async function requestOpenAiTranslate(
   text: string,
-  config: ResolvedLlmRequestConfig
+  config: ResolvedLlmModelRequestConfig
 ): Promise<string> {
   if (!config.chatCompletionsUrl) {
     throw new Error('OpenAI 兼容端点未配置')
@@ -103,7 +103,7 @@ async function requestOpenAiTranslate(
 
 async function requestAnthropicTranslate(
   text: string,
-  config: ResolvedLlmRequestConfig
+  config: ResolvedLlmModelRequestConfig
 ): Promise<string> {
   if (!config.messagesUrl) {
     throw new Error('Anthropic Messages 端点未配置')

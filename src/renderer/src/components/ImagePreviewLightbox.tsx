@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useEscapeKey } from '../hooks/useEscapeKey'
-import { Minus, Plus, X } from 'lucide-react'
+import { Minus, Plus, RotateCcw, X } from 'lucide-react'
 import IconButton from './IconButton'
 import { useImagePreviewOverlay } from './ImagePreviewOverlayContext'
 import { UI_ICON } from './iconDefaults'
@@ -425,17 +425,6 @@ export default function ImagePreviewLightbox({
         使用左右方向键切换图片，加号与减号缩放，0 还原视图，Esc 关闭。
       </p>
 
-      <IconButton
-        className={`image-preview-close btn btn-ghost${chromeClass}`}
-        icon={<X {...UI_ICON} />}
-        label="关闭预览"
-        onClick={onClose}
-        onMouseEnter={holdChrome}
-        onMouseLeave={releaseChrome}
-        onFocus={holdChrome}
-        onBlur={releaseChrome}
-      />
-
       <header
         className={`image-preview-chrome image-preview-chrome--top${chromeClass}`}
         onMouseEnter={holdChrome}
@@ -445,7 +434,7 @@ export default function ImagePreviewLightbox({
           if (!e.currentTarget.contains(e.relatedTarget as Node)) releaseChrome()
         }}
       >
-        <span className="image-preview-counter">
+        <span className="image-preview-counter image-preview-toolbar-pill">
           {index + 1} / {items.length}
         </span>
         <div className="image-preview-actions">
@@ -463,31 +452,32 @@ export default function ImagePreviewLightbox({
           {toolbarActions}
           <div className="image-preview-zoom" aria-label="缩放">
             <IconButton
-              className="btn btn-ghost btn-sm image-preview-zoom-btn"
+              className="image-preview-icon-btn image-preview-zoom-btn"
               icon={<Minus {...UI_ICON} />}
               label="缩小"
               onClick={() => zoomBy(-ZOOM_STEP)}
             />
             <span className="image-preview-zoom-label">{Math.round(scale * 100)}%</span>
             <IconButton
-              className="btn btn-ghost btn-sm image-preview-zoom-btn"
+              className="image-preview-icon-btn image-preview-zoom-btn"
               icon={<Plus {...UI_ICON} />}
               label="放大"
               onClick={() => zoomBy(ZOOM_STEP)}
             />
-            <button
-              type="button"
-              className={`btn btn-ghost btn-sm image-preview-reset-btn${
-                canResetView ? '' : ' image-preview-reset-btn--placeholder'
-              }`}
+            <IconButton
+              className="image-preview-icon-btn image-preview-reset-btn"
+              icon={<RotateCcw {...UI_ICON} />}
+              label="还原视图"
               onClick={resetView}
               disabled={!canResetView}
-              tabIndex={canResetView ? 0 : -1}
-              aria-hidden={!canResetView}
-            >
-              还原
-            </button>
+            />
           </div>
+          <IconButton
+            className="image-preview-close image-preview-icon-btn"
+            icon={<X {...UI_ICON} />}
+            label="关闭预览"
+            onClick={onClose}
+          />
         </div>
       </header>
 

@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
+import { insertTestVideoWithFile } from '../db/testVideoFixtures'
 import { clearVideoMetadata, correctVideoCode, deleteVideoWithFile } from './videoService'
 
 let tempRoot: string | null = null
@@ -14,10 +15,18 @@ function setupDb(): { root: string; videoPath: string } {
   fs.writeFileSync(videoPath, 'video')
   initDatabaseAtPath(path.join(tempRoot, 'library.db'))
   const db = getDb()
-  db.prepare(
-    `INSERT INTO videos (code, title, summary, file_path, rating, release_date, maker, series, director, scraped_status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run('IPX-535', 'Title', 'Summary', videoPath, 4, '2024-01-01', 'Maker', 'Series', 'Director', 1)
+  insertTestVideoWithFile(db, {
+    code: 'IPX-535',
+    filePath: videoPath,
+    title: 'Title',
+    summary: 'Summary',
+    rating: 4,
+    releaseDate: '2024-01-01',
+    maker: 'Maker',
+    series: 'Series',
+    director: 'Director',
+    scrapedStatus: 1
+  })
   return { root: tempRoot, videoPath }
 }
 
@@ -37,6 +46,7 @@ describe('videoService', () => {
 
     assert.equal(fs.existsSync(videoPath), false)
     assert.equal((getDb().prepare('SELECT COUNT(*) AS c FROM videos').get() as { c: number }).c, 0)
+    assert.equal((getDb().prepare('SELECT COUNT(*) AS c FROM video_files').get() as { c: number }).c, 0)
   })
 
   it('clears scraped metadata and relations but keeps manual tags', () => {
@@ -71,19 +81,23 @@ describe('videoService', () => {
     const { videoPath } = setupDb()
     const db = getDb()
     const missingPath = path.join(tempRoot!, 'missing.mp4')
-    db.prepare('INSERT INTO videos (code, file_path, scraped_status) VALUES (?, ?, 0)').run(
-      'MUKD-501',
-      missingPath
-    )
+    insertTestVideoWithFile(db, {
+      code: 'MUKD-501',
+      filePath: missingPath,
+      scrapedStatus: 0
+    })
 
     const result = correctVideoCode(1, 'MUKD-501')
 
     assert.equal(result.mergedIntoId, 2)
-    const rows = db.prepare('SELECT id, code, file_path FROM videos ORDER BY id').all() as Array<{
+    const videos = db.prepare('SELECT id, code FROM videos ORDER BY id').all() as Array<{
       id: number
       code: string
-      file_path: string
     }>
-    assert.deepEqual(rows, [{ id: 2, code: 'MUKD-501', file_path: videoPath }])
+    assert.deepEqual(videos, [{ id: 2, code: 'MUKD-501' }])
+    const files = db
+      .prepare('SELECT video_id, file_path FROM video_files ORDER BY id')
+      .all() as Array<{ video_id: number; file_path: string }>
+    assert.deepEqual(files, [{ video_id: 2, file_path: videoPath }])
   })
 })

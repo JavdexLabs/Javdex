@@ -21,6 +21,7 @@ import AliasTagEditor from './AliasTagEditor'
 import EditFieldAiTranslate from './EditFieldAiTranslate'
 import { EditFormField, EditFormSection } from './FormPrimitives'
 import Modal from './Modal'
+import SelectControl from './SelectControl'
 
 interface Props {
   actress: ActressDetail
@@ -245,9 +246,8 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                 </EditFormField>
 
                 <EditFormField label="国籍" htmlFor="actress-nationality">
-                  <select
+                  <SelectControl
                     id="actress-nationality"
-                    className="select"
                     value={nationality}
                     onChange={(e) => setNationality(e.target.value)}
                   >
@@ -256,7 +256,7 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                         {opt.label}
                       </option>
                     ))}
-                  </select>
+                  </SelectControl>
                 </EditFormField>
 
                 <EditFormField label="生日" htmlFor="actress-birth-date">
@@ -280,9 +280,8 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                 </EditFormField>
 
                 <EditFormField label="血型" htmlFor="actress-blood-type">
-                  <select
+                  <SelectControl
                     id="actress-blood-type"
-                    className="select"
                     value={bloodType}
                     onChange={(e) => setBloodType(e.target.value)}
                   >
@@ -291,13 +290,12 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                         {opt.label}
                       </option>
                     ))}
-                  </select>
+                  </SelectControl>
                 </EditFormField>
 
                 <EditFormField label="星座" htmlFor="actress-zodiac">
-                  <select
+                  <SelectControl
                     id="actress-zodiac"
-                    className="select"
                     value={zodiac}
                     onChange={(e) => setZodiac(e.target.value)}
                   >
@@ -306,7 +304,7 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                         {opt.label}
                       </option>
                     ))}
-                  </select>
+                  </SelectControl>
                 </EditFormField>
 
                 <EditFormField
@@ -352,9 +350,8 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                 {!isMaleProfile ? (
                   <>
                     <EditFormField label="罩杯" htmlFor="actress-cup-size">
-                      <select
+                      <SelectControl
                         id="actress-cup-size"
-                        className="select"
                         value={cupSize}
                         onChange={(e) => setCupSize(e.target.value)}
                       >
@@ -364,7 +361,7 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                             {letter} Cup
                           </option>
                         ))}
-                      </select>
+                      </SelectControl>
                     </EditFormField>
 
                     <EditFormField label="三围" span={2}>

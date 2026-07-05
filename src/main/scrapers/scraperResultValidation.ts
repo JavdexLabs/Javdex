@@ -86,6 +86,35 @@ function readNonNegativeNumber(obj: UnknownRecord, key: string): number | undefi
   return value
 }
 
+function readVideoRatingAverage(obj: UnknownRecord): number | undefined {
+  const value = obj.ratingAverage
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  if (value <= 0 || value > 5) return undefined
+
+  const rounded = Math.round(value * 10) / 10
+  return rounded > 0 && rounded <= 5 ? rounded : undefined
+}
+
+function readVideoRatingCount(obj: UnknownRecord): number | undefined {
+  const value = obj.ratingCount
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined
+  return value
+}
+
+function assignVideoRating(result: ScrapeResult, obj: UnknownRecord): void {
+  const ratingAverage = readVideoRatingAverage(obj)
+  if (ratingAverage === undefined) return
+
+  result.ratingAverage = ratingAverage
+
+  const ratingCount = readVideoRatingCount(obj)
+  if (ratingCount !== undefined) {
+    result.ratingCount = ratingCount
+  }
+}
+
 function readFlexibleNumber(obj: UnknownRecord, key: string): number | undefined {
   const value = obj[key]
   if (value === undefined || value === null) return undefined
@@ -239,8 +268,7 @@ export function normalizeVideoScrapeResult(
   assignString(result, value, 'director')
   assignNumber(result, value, 'durationSeconds', 'durationSeconds', true)
   assignString(result, value, 'sourceUrl')
-  assignNumber(result, value, 'ratingAverage')
-  assignNumber(result, value, 'ratingCount', 'ratingCount', true)
+  assignVideoRating(result, value)
 
   const sampleImageUrls = readStringArray(value, 'sampleImageUrls')
   if (sampleImageUrls) result.sampleImageUrls = sampleImageUrls

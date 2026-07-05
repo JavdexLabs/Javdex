@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
+import { insertTestVideoWithFile } from '../db/testVideoFixtures'
 import { resetAssetKeyCacheForTests } from './assetCrypto'
 import { migrateAssetStorage } from './assetMigration'
 import { getPathAlias } from './assetPathAliases'
@@ -42,10 +43,14 @@ describe('assetMigration opaque paths', () => {
     fs.writeFileSync(plainAbs, MIN_JPEG)
 
     const db = getDb()
-    db.prepare(
-      `INSERT INTO videos (code, title, file_path, cover_path, scraped_status, add_time)
-       VALUES ('IPX-535', 't', 'a.mp4', ?, 1, '2024-01-01')`
-    ).run(plainRel)
+    insertTestVideoWithFile(db, {
+      code: 'IPX-535',
+      filePath: 'a.mp4',
+      title: 't',
+      scrapedStatus: 1,
+      addTime: '2024-01-01'
+    })
+    db.prepare('UPDATE videos SET cover_path = ? WHERE code = ?').run(plainRel, 'IPX-535')
 
     await migrateAssetStorage(true, () => {})
 

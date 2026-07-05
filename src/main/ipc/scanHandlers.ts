@@ -39,12 +39,13 @@ export function registerScanHandlers(ctx: IpcContext): void {
 
   registerHandler(
     IPC.FILE_RENAME,
-    (_e, oldPath: string, newName: string): RenameImportResult =>
+    (_e, oldPath: string, newName: string): Promise<RenameImportResult> =>
       renameAndImport(oldPath, newName)
   )
 
   registerHandler(
     IPC.FILE_IMPORT_MANUAL,
-    (_e, filePath: string, code: string): ManualImportResult => importManual(filePath, code)
+    (_e, filePath: string, code: string): Promise<ManualImportResult> =>
+      importManual(filePath, code)
   )
 }

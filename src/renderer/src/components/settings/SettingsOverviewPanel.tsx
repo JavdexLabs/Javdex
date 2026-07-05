@@ -6,6 +6,7 @@ import {
   FolderOpen,
   Globe,
   HardDrive,
+  ListTodo,
   Palette,
   Play,
   SlidersHorizontal,
@@ -222,6 +223,7 @@ function BatchOverviewStatus({
     : batch
       ? `成功 ${batch.success} · 失败 ${batch.failed}`
       : '等待下一次批量刮削'
+  const openLabel = activeBatch ? '查看运行中的批量任务' : '查看批量任务'
 
   return (
     <div
@@ -233,8 +235,15 @@ function BatchOverviewStatus({
           <strong>{status}</strong>
         </span>
         <span className="settings-overview-batch-inline-count">{batchCount}</span>
-        <button type="button" className="btn btn-sm" onClick={onOpen}>
-          打开
+        <button
+          type="button"
+          className="btn btn-sm settings-overview-batch-detail-btn"
+          title={openLabel}
+          aria-label={openLabel}
+          onClick={onOpen}
+        >
+          <ListTodo {...UI_ICON_SM} aria-hidden />
+          任务详情
         </button>
       </div>
       <div

@@ -10,13 +10,18 @@ import {
 export interface ResolvedLlmRequestConfig {
   providerId: string
   providerName: string
-  modelId: string
   protocol: LlmProviderProtocol
   apiKey: string
   baseUrl: string
   local: boolean
   chatCompletionsUrl?: string
+  openAiModelsUrl?: string
   messagesUrl?: string
+  anthropicModelsUrl?: string
+}
+
+export interface ResolvedLlmModelRequestConfig extends ResolvedLlmRequestConfig {
+  modelId: string
 }
 
 function findCustomProvider(id: string): CustomLlmProviderDefinition | undefined {
@@ -28,18 +33,27 @@ function buildOpenAiChatCompletionsUrl(baseUrl: string): string {
   return `${root}/chat/completions`
 }
 
+function buildOpenAiModelsUrl(baseUrl: string): string {
+  const root = baseUrl.replace(/\/+$/, '')
+  return `${root}/models`
+}
+
 function buildAnthropicMessagesUrl(baseUrl: string): string {
   const root = baseUrl.replace(/\/+$/, '')
   if (root.endsWith('/v1')) return `${root}/messages`
   return `${root}/v1/messages`
 }
 
-export function resolveLlmRequestConfig(providerId: string, modelId: string): ResolvedLlmRequestConfig {
+function buildAnthropicModelsUrl(baseUrl: string): string {
+  const root = baseUrl.replace(/\/+$/, '')
+  if (root.endsWith('/v1')) return `${root}/models`
+  return `${root}/v1/models`
+}
+
+export function resolveLlmProviderRequestConfig(providerId: string): ResolvedLlmRequestConfig {
   const settings = getSettings()
   const trimmedProviderId = providerId.trim()
-  const trimmedModelId = modelId.trim()
   if (!trimmedProviderId) throw new Error('未指定模型供应商')
-  if (!trimmedModelId) throw new Error('未指定模型 ID')
 
   const builtIn = BUILT_IN_LLM_PROVIDER_BY_ID.get(trimmedProviderId)
   const custom = findCustomProvider(trimmedProviderId)
@@ -48,7 +62,7 @@ export function resolveLlmRequestConfig(providerId: string, modelId: string): Re
   }
 
   const userConfig = settings.llmProviderConfigs[trimmedProviderId]
-  const protocol = custom?.protocol ?? builtIn?.protocol ?? 'openai-chat'
+  const protocol = userConfig?.protocol ?? custom?.protocol ?? builtIn?.protocol ?? 'openai-chat'
   const providerName = custom?.name ?? builtIn?.name ?? trimmedProviderId
   const apiKey = userConfig?.apiKey?.trim() ?? ''
   const baseUrl = resolveProviderBaseUrl(trimmedProviderId, userConfig, custom)
@@ -61,19 +75,33 @@ export function resolveLlmRequestConfig(providerId: string, modelId: string): Re
   return {
     providerId: trimmedProviderId,
     providerName,
-    modelId: trimmedModelId,
     protocol,
     apiKey,
     baseUrl,
     local,
     chatCompletionsUrl:
       protocol === 'openai-chat' ? buildOpenAiChatCompletionsUrl(baseUrl) : undefined,
+    openAiModelsUrl: protocol === 'openai-chat' ? buildOpenAiModelsUrl(baseUrl) : undefined,
     messagesUrl:
-      protocol === 'anthropic-messages' ? buildAnthropicMessagesUrl(baseUrl) : undefined
+      protocol === 'anthropic-messages' ? buildAnthropicMessagesUrl(baseUrl) : undefined,
+    anthropicModelsUrl:
+      protocol === 'anthropic-messages' ? buildAnthropicModelsUrl(baseUrl) : undefined
   }
 }
 
-export function resolveActiveLlmRequestConfig(): ResolvedLlmRequestConfig {
+export function resolveLlmRequestConfig(
+  providerId: string,
+  modelId: string
+): ResolvedLlmModelRequestConfig {
+  const trimmedModelId = modelId.trim()
+  if (!trimmedModelId) throw new Error('未指定模型 ID')
+  return {
+    ...resolveLlmProviderRequestConfig(providerId),
+    modelId: trimmedModelId
+  }
+}
+
+export function resolveActiveLlmRequestConfig(): ResolvedLlmModelRequestConfig {
   const settings = getSettings()
   const { providerId, modelId } = normalizeDefaultLlmSelection(settings)
   return resolveLlmRequestConfig(providerId, modelId)

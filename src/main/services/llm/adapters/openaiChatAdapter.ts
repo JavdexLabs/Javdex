@@ -5,7 +5,7 @@ import type {
 } from '../../pluginDevAgent/agentMessages'
 import { getSystemText } from '../../pluginDevAgent/agentMessages'
 import type { PluginDevToolDefinition } from '../../pluginDevAgent/toolSchemas'
-import type { ResolvedLlmRequestConfig } from '../../llmClient'
+import type { ResolvedLlmModelRequestConfig } from '../../llmClient'
 import { llmFetch } from '../../../utils/llmFetch'
 
 type OpenAiToolCall = {
@@ -114,7 +114,7 @@ function parseOpenAiResponse(payload: OpenAiChatPayload): AgentLlmResponse {
 
 export async function requestOpenAiToolChat(
   transcript: AgentTranscript,
-  config: ResolvedLlmRequestConfig,
+  config: ResolvedLlmModelRequestConfig,
   tools: PluginDevToolDefinition[],
   options?: { retryOnce?: boolean }
 ): Promise<AgentLlmResponse> {
@@ -177,7 +177,7 @@ export function simpleMessagesToTranscript(messages: SimpleChatMessage[]): Agent
 
 export async function requestOpenAiJson<T>(
   messages: SimpleChatMessage[],
-  config: ResolvedLlmRequestConfig
+  config: ResolvedLlmModelRequestConfig
 ): Promise<{ json: T; rawText: string }> {
   if (!config.chatCompletionsUrl) {
     throw new Error('OpenAI 兼容端点未配置')

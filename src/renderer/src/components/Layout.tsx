@@ -51,6 +51,7 @@ function NavItems({ items }: { items: NavItem[] }): JSX.Element {
           key={n.to}
           to={n.to}
           end={n.end}
+          draggable={false}
           onClick={(event) => handleNavClick(event, n.to)}
           className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
         >

@@ -4,18 +4,23 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
+import { insertTestVideoWithFile } from './testVideoFixtures'
 import {
   addManualVideoTag,
   countVideosForBatchScrape,
   deleteVideoSampleAsset,
   editVideoRecord,
   getVideoDetail,
+  getPrimaryVideoFile,
   listVideos,
   listVideosForBatchScrape,
+  markScrapeFailed,
+  markScrapeSucceeded,
   removeManualVideoTag,
   resolveEffectiveScrapeFields,
   applyScrapeResult,
-  setVideoPosterPath
+  setVideoPosterPath,
+  setPrimaryVideoFile
 } from './videoRepo'
 
 let tempRoot: string | null = null
@@ -25,16 +30,30 @@ function setupDb(): void {
   process.env.JAVDEX_TEST_USER_DATA = tempRoot
   initDatabaseAtPath(path.join(tempRoot, 'library.db'))
   const db = getDb()
-  db.prepare(
-    `INSERT INTO videos
-      (code, title, file_path, rating, release_date, maker, series, director, scraped_status, add_time)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run('IPX-535', 'First', 'a.mp4', 5, '2024-01-02', 'Maker A', 'Series A', 'Director A', 1, '2024-01-03')
-  db.prepare(
-    `INSERT INTO videos
-      (code, title, file_path, rating, release_date, maker, series, director, scraped_status, add_time)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run('MUKD-501', 'Second', 'b.mp4', 3, '2023-05-06', 'Maker B', 'Series B', 'Director B', 0, '2024-01-04')
+  insertTestVideoWithFile(db, {
+    code: 'IPX-535',
+    filePath: 'a.mp4',
+    title: 'First',
+    rating: 5,
+    releaseDate: '2024-01-02',
+    maker: 'Maker A',
+    series: 'Series A',
+    director: 'Director A',
+    scrapedStatus: 1,
+    addTime: '2024-01-03'
+  })
+  insertTestVideoWithFile(db, {
+    code: 'MUKD-501',
+    filePath: 'b.mp4',
+    title: 'Second',
+    rating: 3,
+    releaseDate: '2023-05-06',
+    maker: 'Maker B',
+    series: 'Series B',
+    director: 'Director B',
+    scrapedStatus: 0,
+    addTime: '2024-01-04'
+  })
 
   db.prepare('INSERT INTO tags (name) VALUES (?)').run('Drama')
   db.prepare('INSERT INTO tags (name) VALUES (?)').run('HD')
@@ -126,6 +145,71 @@ describe('videoRepo.applyScrapeResult', () => {
     assert.equal(row.title, 'Updated Title')
     assert.equal(row.summary, 'Keep me')
   })
+
+  it('stores external stats under ratingSourceName when provided', () => {
+    setupDb()
+    const db = getDb()
+
+    applyScrapeResult(
+      1,
+      { code: 'IPX-535', ratingAverage: 4.5, ratingCount: 100 },
+      null,
+      new Map(),
+      [],
+      ['rating'],
+      'MyComposite',
+      'replace',
+      'JavDB'
+    )
+
+    const row = db
+      .prepare('SELECT source, rating_average, rating_count FROM video_external_stats WHERE video_id = 1')
+      .get() as { source: string; rating_average: number; rating_count: number }
+    assert.equal(row.source, 'JavDB')
+    assert.equal(row.rating_average, 4.5)
+    assert.equal(row.rating_count, 100)
+    assert.equal(
+      (
+        db
+          .prepare('SELECT COUNT(*) AS n FROM video_external_stats WHERE video_id = 1')
+          .get() as { n: number }
+      ).n,
+      1
+    )
+  })
+})
+
+describe('videoRepo.scrapeStatus', () => {
+  it('does not downgrade an already scraped video when a later scrape fails', () => {
+    setupDb()
+    const db = getDb()
+
+    markScrapeFailed(1)
+    markScrapeFailed(2)
+
+    const rows = db
+      .prepare('SELECT id, scraped_status FROM videos ORDER BY id')
+      .all() as Array<{ id: number; scraped_status: number }>
+    assert.deepEqual(rows, [
+      { id: 1, scraped_status: 1 },
+      { id: 2, scraped_status: 2 }
+    ])
+  })
+
+  it('can manually mark an unscraped or failed video as scraped', () => {
+    setupDb()
+    const db = getDb()
+    markScrapeFailed(2)
+
+    markScrapeSucceeded(2)
+
+    const row = db
+      .prepare('SELECT scraped_status, last_scraped_at, updated_at FROM videos WHERE id = ?')
+      .get(2) as { scraped_status: number; last_scraped_at: string | null; updated_at: string | null }
+    assert.equal(row.scraped_status, 1)
+    assert.ok(row.last_scraped_at)
+    assert.ok(row.updated_at)
+  })
 })
 
 describe('videoRepo.listVideos', () => {
@@ -141,11 +225,15 @@ describe('videoRepo.listVideos', () => {
   it('sorts facet videos by release date desc with missing dates last', () => {
     setupDb()
     const db = getDb()
-    db.prepare(
-      `INSERT INTO videos
-        (code, title, file_path, director, release_date, scraped_status, add_time)
-       VALUES (?, ?, ?, ?, NULL, 1, '2024-06-01')`
-    ).run('NEW-001', 'No date', 'c.mp4', 'Director A')
+    insertTestVideoWithFile(db, {
+      code: 'NEW-001',
+      filePath: 'c.mp4',
+      title: 'No date',
+      director: 'Director A',
+      releaseDate: null,
+      scrapedStatus: 1,
+      addTime: '2024-06-01'
+    })
 
     const result = listVideos({ director: 'Director A', sortBy: 'release_date', sortDir: 'desc' })
 
@@ -231,6 +319,48 @@ describe('videoRepo.getVideoDetail', () => {
       detail.actresses.map((a) => a.main_name),
       ['Bella', 'Aaron', 'Charlie']
     )
+  })
+
+  it('includes external rating stats', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare(
+      `INSERT INTO video_external_stats
+         (video_id, source, rating_average, rating_count, fetched_at)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run(1, 'JavDB', 8.5, 1234, '2024-06-01T12:00:00.000Z')
+
+    const detail = getVideoDetail(1)
+    assert.ok(detail)
+    assert.equal(detail.external_stats.length, 1)
+    assert.equal(detail.external_stats[0]?.source, 'JavDB')
+    assert.equal(detail.external_stats[0]?.rating_average, 8.5)
+    assert.equal(detail.external_stats[0]?.rating_count, 1234)
+  })
+})
+
+describe('videoRepo.setPrimaryVideoFile', () => {
+  it('marks one file as primary and clears the previous primary', () => {
+    setupDb()
+    const db = getDb()
+    const info = db
+      .prepare(
+        `INSERT INTO video_files (video_id, file_path, file_size, is_primary, add_time)
+         VALUES (?, ?, ?, 0, ?)`
+      )
+      .run(1, 'alt.mp4', 2048, '2024-01-05')
+    const altFileId = Number(info.lastInsertRowid)
+
+    setPrimaryVideoFile(1, altFileId)
+
+    const files = db
+      .prepare('SELECT id, is_primary FROM video_files WHERE video_id = 1 ORDER BY id')
+      .all() as Array<{ id: number; is_primary: number }>
+    assert.deepEqual(files, [
+      { id: 1, is_primary: 0 },
+      { id: altFileId, is_primary: 1 }
+    ])
+    assert.equal(getPrimaryVideoFile(1)?.id, altFileId)
   })
 })
 

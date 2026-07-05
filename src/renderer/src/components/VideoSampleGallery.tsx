@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useImagePreviewById } from '../hooks/useImagePreviewById'
 import type { VideoAsset } from '@shared/types'
 import { prepareVideoSamplesForDisplay, SAMPLE_FALLBACK_RATIO } from '@shared/mediaGalleryDisplay'
@@ -6,6 +6,7 @@ import { api, assetUrl } from '../api'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { useElementSize } from '../hooks/useElementSize'
 import ImagePreviewLightbox, { type ImagePreviewItem } from './ImagePreviewLightbox'
+import ImageImportModal from './ImageImportModal'
 import MediaTileDeleteButton from './MediaTileDeleteButton'
 import Modal from './Modal'
 import IconButton from './IconButton'
@@ -39,12 +40,6 @@ const SAMPLE_PREVIEW_LABELS = {
   posterMissing: '这张样张尚未保存到本地资产目录'
 } as const
 
-interface SampleImportModalProps {
-  videoId: number
-  onCancel: () => void
-  onImported: () => void
-}
-
 interface SampleMasonryColumn {
   height: number
   items: Array<{ asset: VideoAsset; index: number }>
@@ -76,114 +71,6 @@ function createSampleMasonryColumns(
   })
 
   return columns
-}
-
-function SampleImportModal({ videoId, onCancel, onImported }: SampleImportModalProps): JSX.Element {
-  const toast = useToast()
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const [mode, setMode] = useState<'file' | 'url'>('file')
-  const [files, setFiles] = useState<File[]>([])
-  const [urls, setUrls] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  const urlList = urls
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-  const canSave = mode === 'file' ? files.length > 0 : urlList.length > 0
-
-  const handleImport = async (): Promise<void> => {
-    if (!canSave || saving) return
-    setSaving(true)
-    let imported = 0
-    try {
-      if (mode === 'file') {
-        for (const file of files) {
-          await api.videos.importSample(videoId, {
-            source: 'file',
-            sourcePath: api.assets.getPathForFile(file)
-          })
-          imported += 1
-        }
-      } else {
-        for (const remoteUrl of urlList) {
-          await api.videos.importSample(videoId, { source: 'url', remoteUrl })
-          imported += 1
-        }
-      }
-      toast.show(`已导入 ${mode === 'file' ? files.length : urlList.length} 张样张`, 'success')
-      onImported()
-      onCancel()
-    } catch (e) {
-      if (imported > 0) onImported()
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Modal
-      title="导入样张"
-      size="sm"
-      className="sample-import-modal"
-      confirmText={saving ? '导入中…' : '导入'}
-      confirmDisabled={!canSave || saving}
-      onCancel={onCancel}
-      onConfirm={() => void handleImport()}
-    >
-      <div className="sample-import-mode" role="tablist" aria-label="导入方式">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === 'file'}
-          className={mode === 'file' ? 'active' : ''}
-          onClick={() => setMode('file')}
-        >
-          本地文件
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === 'url'}
-          className={mode === 'url' ? 'active' : ''}
-          onClick={() => setMode('url')}
-        >
-          链接
-        </button>
-      </div>
-
-      {mode === 'file' ? (
-        <div className="sample-import-panel">
-          <button type="button" className="btn" onClick={() => fileInputRef.current?.click()}>
-            选择图片
-          </button>
-          <div className="sample-import-hint">
-            {files.length > 0 ? `已选择 ${files.length} 个文件` : '支持 jpg、png、webp、gif、avif'}
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/gif,image/avif,.jpg,.jpeg,.png,.webp,.gif,.avif"
-            multiple
-            hidden
-            onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
-          />
-        </div>
-      ) : (
-        <div className="sample-import-panel">
-          <textarea
-            className="text-input"
-            rows={5}
-            value={urls}
-            onChange={(e) => setUrls(e.target.value)}
-            placeholder="每行一个图片链接"
-          />
-          <div className="sample-import-hint">链接样张会下载到本地资产目录，保存方式与刮削样张一致。</div>
-        </div>
-      )}
-    </Modal>
-  )
 }
 
 function toPreviewItems(samples: VideoAsset[]): ImagePreviewItem[] {
@@ -286,54 +173,57 @@ export default function VideoSampleGallery({
 
   return (
     <>
-      <div className="sample-section-head">
-        <div className="section-title">样张</div>
-        <IconButton
-          className="detail-icon-action"
-          icon={<ImagePlus {...UI_ICON} />}
-          label="导入样张"
-          onClick={() => setShowImport(true)}
-        />
-      </div>
-      {samples.length === 0 ? (
-        <div className="empty-state empty-state--compact sample-empty">
-          <div>暂无样张。</div>
+      <section className="detail-section detail-section--samples">
+        <div className="detail-section-head sample-section-head">
+          <h2 className="section-title">样张</h2>
+          <div className="detail-section-actions">
+            <span className="detail-section-count">{samples.length} 张</span>
+            <IconButton
+              className="detail-icon-action"
+              icon={<ImagePlus {...UI_ICON} />}
+              label="导入样张"
+              onClick={() => setShowImport(true)}
+            />
+          </div>
         </div>
-      ) : (
-        <div className="sample-masonry" ref={masonryRef}>
-          {masonryColumns.map((column, columnIndex) => (
-            <div key={columnIndex} className="sample-masonry-column">
-              {column.items.map(({ asset, index }) => {
-                const src = sampleSrc(asset)
-                if (!src) return null
-                return (
-                  <div key={asset.id} className="sample-masonry-item">
-                    <button
-                      type="button"
-                      className="sample-masonry-btn"
-                      onClick={() => openPreview(asset.id)}
-                      aria-label={`样张 ${index + 1}`}
-                    >
-                      <img
-                        src={src}
-                        alt=""
-                        loading="lazy"
-                        draggable={false}
-                        onLoad={(e) => updateMeasuredRatio(asset.id, e.currentTarget)}
+        {samples.length === 0 ? (
+          <div className="sample-empty">暂无样张</div>
+        ) : (
+          <div className="sample-masonry" ref={masonryRef}>
+            {masonryColumns.map((column, columnIndex) => (
+              <div key={columnIndex} className="sample-masonry-column">
+                {column.items.map(({ asset, index }) => {
+                  const src = sampleSrc(asset)
+                  if (!src) return null
+                  return (
+                    <div key={asset.id} className="sample-masonry-item">
+                      <button
+                        type="button"
+                        className="sample-masonry-btn"
+                        onClick={() => openPreview(asset.id)}
+                        aria-label={`样张 ${index + 1}`}
+                      >
+                        <img
+                          src={src}
+                          alt=""
+                          loading="lazy"
+                          draggable={false}
+                          onLoad={(e) => updateMeasuredRatio(asset.id, e.currentTarget)}
+                        />
+                      </button>
+                      <MediaTileDeleteButton
+                        label={`删除样张 ${index + 1}`}
+                        title="删除样张"
+                        onClick={() => setDeleteTarget(asset)}
                       />
-                    </button>
-                    <MediaTileDeleteButton
-                      label={`删除样张 ${index + 1}`}
-                      title="删除样张"
-                      onClick={() => setDeleteTarget(asset)}
-                    />
-                  </div>
-                )
-              })}
-            </div>
-          ))}
-        </div>
-      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
       {isOpen && previewIndex != null && (
         <ImagePreviewLightbox
           items={previewItems}
@@ -346,10 +236,17 @@ export default function VideoSampleGallery({
         />
       )}
       {showImport && (
-        <SampleImportModal
-          videoId={videoId}
+        <ImageImportModal
+          title="导入样张"
+          itemLabel="样张"
+          emptyText="暂无待导入样张，拖入图片或选择本地文件开始导入。"
+          urlHint="每次输入一个图片链接，加载成功后会加入待导入列表。"
           onCancel={() => setShowImport(false)}
-          onImported={onChanged}
+          onChanged={onChanged}
+          onImportFilePath={(sourcePath) =>
+            api.videos.importSample(videoId, { source: 'file', sourcePath })
+          }
+          onImportUrl={(remoteUrl) => api.videos.importSample(videoId, { source: 'url', remoteUrl })}
         />
       )}
       {deleteTarget && (

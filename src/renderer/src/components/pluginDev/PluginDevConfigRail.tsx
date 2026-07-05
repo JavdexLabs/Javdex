@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { getPluginDevKindProfile, parseTestTargetList } from '@shared/pluginDevKindProfile'
 import type { PluginKind } from './types'
+import SelectControl from '../SelectControl'
 import PluginDevFieldTags from './PluginDevFieldTags'
 import PluginDevMediaTargetPicker from './PluginDevMediaTargetPicker'
 
@@ -149,8 +150,7 @@ export default function PluginDevConfigRail({
         ) : null}
         <label className="plugin-edit-control plugin-dev-control--primary plugin-dev-plugin-select">
           <span>{isDebugMode ? '调试插件' : '插件来源'}</span>
-          <select
-            className="select"
+          <SelectControl
             value={selectedPluginName}
             disabled={busy || pluginsLoading}
             onChange={(e) => onSelectPlugin(e.target.value)}
@@ -161,7 +161,7 @@ export default function PluginDevConfigRail({
                 {name}
               </option>
             ))}
-          </select>
+          </SelectControl>
           {pluginsLoading && <span className="plugin-dev-plugin-select-hint">加载中…</span>}
           {!pluginsLoading && userPluginNames.length === 0 && (
             <span className="plugin-dev-plugin-select-hint">暂无已安装的插件</span>

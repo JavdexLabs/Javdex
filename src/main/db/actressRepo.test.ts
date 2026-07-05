@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
+import { insertTestVideoWithFile } from './testVideoFixtures'
 import {
   applyActressScrapeResult,
   clearActressMetadataRecord,
@@ -138,18 +139,8 @@ describe('actressRepo.listActresses', () => {
   it('sorts by video count descending by default', () => {
     setupDb()
     const db = getDb()
-    db.prepare('INSERT INTO videos (code, title, file_path, add_time) VALUES (?, ?, ?, ?)').run(
-      'A-001',
-      'A',
-      'a.mp4',
-      '2024-01-01'
-    )
-    db.prepare('INSERT INTO videos (code, title, file_path, add_time) VALUES (?, ?, ?, ?)').run(
-      'B-001',
-      'B',
-      'b.mp4',
-      '2024-01-02'
-    )
+    insertTestVideoWithFile(db, { code: 'A-001', filePath: 'a.mp4', title: 'A', addTime: '2024-01-01' })
+    insertTestVideoWithFile(db, { code: 'B-001', filePath: 'b.mp4', title: 'B', addTime: '2024-01-02' })
     db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(1, 1)
     db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(2, 1)
     db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(1, 2)
@@ -165,12 +156,12 @@ describe('actressRepo.clearActressMetadataRecord', () => {
   it('clears scraped profile fields while keeping main name and video links', () => {
     setupDb()
     const db = getDb()
-    db.prepare('INSERT INTO videos (code, title, file_path, add_time) VALUES (?, ?, ?, ?)').run(
-      'CLR-001',
-      'Test',
-      'clr.mp4',
-      '2024-01-01'
-    )
+    insertTestVideoWithFile(db, {
+      code: 'CLR-001',
+      filePath: 'clr.mp4',
+      title: 'Test',
+      addTime: '2024-01-01'
+    })
     db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(1, 1)
 
     clearActressMetadataRecord(1)
@@ -195,18 +186,18 @@ describe('actressRepo.mergeActresses', () => {
   it('merges videos, aliases, and gallery into the keeper', () => {
     setupDb()
     const db = getDb()
-    db.prepare('INSERT INTO videos (code, title, file_path, add_time) VALUES (?, ?, ?, ?)').run(
-      'MERGE-001',
-      'Keeper Video',
-      'keeper.mp4',
-      '2024-01-01'
-    )
-    db.prepare('INSERT INTO videos (code, title, file_path, add_time) VALUES (?, ?, ?, ?)').run(
-      'MERGE-002',
-      'Merge Video',
-      'merge.mp4',
-      '2024-01-02'
-    )
+    insertTestVideoWithFile(db, {
+      code: 'MERGE-001',
+      filePath: 'keeper.mp4',
+      title: 'Keeper Video',
+      addTime: '2024-01-01'
+    })
+    insertTestVideoWithFile(db, {
+      code: 'MERGE-002',
+      filePath: 'merge.mp4',
+      title: 'Merge Video',
+      addTime: '2024-01-02'
+    })
     db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(1, 1)
     db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(2, 2)
     db.prepare(

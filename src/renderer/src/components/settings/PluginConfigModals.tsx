@@ -13,6 +13,7 @@ import {
   VIDEO_SCRAPE_FIELD_OPTIONS
 } from '@shared/types'
 import Modal from '../Modal'
+import SelectControl from '../SelectControl'
 import { defaultPluginDelay, pluginSourceLabel } from '../../settings/settingsDisplay'
 
 export type PluginKind = 'video' | 'actress'
@@ -336,8 +337,7 @@ export function CompositeConfigModal({
             {allFields.map((field) => (
               <label key={field} className="composite-field-row">
                 <span>{fieldLabel(kind, field)}</span>
-                <select
-                  className="select"
+                <SelectControl
                   value={fieldPluginMap[field] ?? ''}
                   onChange={(e) =>
                     setFieldPluginMap((prev) => ({
@@ -357,7 +357,7 @@ export function CompositeConfigModal({
                       {!sourcePlugin.supportedFields.includes(field) ? '（不支持）' : ''}
                     </option>
                   ))}
-                </select>
+                </SelectControl>
               </label>
             ))}
           </div>

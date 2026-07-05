@@ -11,9 +11,11 @@ import {
   resolveMediaAssetsRoot,
   validateMediaAssetsPath
 } from '../services/assetStoragePaths'
-import { testLlmModelConnection } from '../services/llmConnectionTest'
+import { listLlmProviderModels, testLlmModelConnection } from '../services/llmConnectionTest'
+import { testProxyConnection } from '../services/proxyConnectionTest'
 import { translateTextToChinese } from '../services/llmTextTranslate'
 import { registerHandler, type IpcContext } from './shared'
+import type { LlmModelDefinition } from '@shared/llmProviders'
 
 function withResolvedMediaAssetsPath(settings: AppSettings): AppSettings {
   return {
@@ -42,8 +44,24 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
 
   registerHandler(
     IPC.SETTINGS_LLM_TEST_MODEL,
-    async (_e, providerId: string, modelId: string): Promise<void> => {
-      await testLlmModelConnection(providerId, modelId)
+    async (_e, providerId: string, modelId: string): Promise<string> => {
+      return testLlmModelConnection(providerId, modelId)
+    }
+  )
+
+  registerHandler(
+    IPC.SETTINGS_LLM_LIST_MODELS,
+    async (_e, providerId: string): Promise<LlmModelDefinition[]> => {
+      return listLlmProviderModels(providerId)
+    }
+  )
+
+  registerHandler(
+    IPC.SETTINGS_PROXY_TEST,
+    async (_e, kind: unknown, proxyUrl: unknown): Promise<string> => {
+      if (kind !== 'scrape' && kind !== 'llm') throw new Error('无效的代理类型')
+      if (typeof proxyUrl !== 'string') throw new Error('请填写代理地址')
+      return testProxyConnection(kind, proxyUrl)
     }
   )
 

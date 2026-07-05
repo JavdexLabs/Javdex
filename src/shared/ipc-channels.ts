@@ -7,6 +7,8 @@ export const IPC = {
   SETTINGS_UPDATE: 'settings:update',
   SETTINGS_PICK_FOLDER: 'settings:pickFolder',
   SETTINGS_LLM_TEST_MODEL: 'settings:llmTestModel',
+  SETTINGS_LLM_LIST_MODELS: 'settings:llmListModels',
+  SETTINGS_PROXY_TEST: 'settings:proxyTest',
   SETTINGS_OVERVIEW_STATS: 'settings:overviewStats',
 
   // Scan / import
@@ -22,8 +24,11 @@ export const IPC = {
   VIDEO_UPDATE: 'video:update',
   VIDEO_EDIT: 'video:edit',
   VIDEO_CLEAR_META: 'video:clearMeta',
+  VIDEO_MARK_SCRAPE_SUCCESS: 'video:markScrapeSuccess',
   VIDEO_DELETE: 'video:delete',
   VIDEO_SET_RATING: 'video:setRating',
+  VIDEO_SET_PRIMARY_FILE: 'video:setPrimaryFile',
+  VIDEO_DELETE_FILE: 'video:deleteFile',
   VIDEO_CORRECT_IMPORT: 'video:correctImport',
   VIDEO_YEARS: 'video:years',
   VIDEO_SAMPLE_IMPORT: 'video:sampleImport',
@@ -117,11 +122,14 @@ export const IPC = {
   // Player
   PLAYER_PLAY: 'player:play',
   PLAYER_REVEAL: 'player:reveal',
+  PLAYER_PLAY_FILE: 'player:playFile',
+  PLAYER_REVEAL_FILE: 'player:revealFile',
 
   // Asset encryption
   ASSET_CRYPTO_SET: 'assetCrypto:set',
   ASSET_CRYPTO_PROGRESS: 'assetCrypto:progress', // main -> renderer event
   ASSET_STORAGE_RELOCATE: 'assetStorage:relocate',
+  ASSET_FETCH_REMOTE_IMAGE: 'asset:fetchRemoteImage',
 
   // LLM utilities
   LLM_TRANSLATE_TO_CHINESE: 'llm:translateToChinese'

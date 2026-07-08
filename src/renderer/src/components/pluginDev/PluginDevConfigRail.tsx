@@ -111,6 +111,9 @@ export default function PluginDevConfigRail({
   const testTargetCount = parseTestTargetList(testTarget).length
   const siteUrlRequired = !isDebugMode
   const testTargetRequired = isDebugMode
+  const sourceReady = isDebugMode ? Boolean(selectedPluginName || siteName.trim()) : Boolean(siteUrl.trim())
+  const targetReady = !testTargetRequired || hasTestTarget
+  const installReady = hasPackage && !canInstall
   const agentButtonLabel = agentBusy
     ? isDebugMode
       ? '调试中…'
@@ -142,6 +145,21 @@ export default function PluginDevConfigRail({
       </div>
 
       <div className="plugin-dev-config-scroll">
+        <div className="plugin-dev-config-steps" aria-label="开发流程">
+          <span className={sourceReady ? 'is-ready' : 'is-attention'}>
+            <strong>1</strong>
+            {isDebugMode ? '选择插件' : '填写站点'}
+          </span>
+          <span className={targetReady ? 'is-ready' : 'is-attention'}>
+            <strong>2</strong>
+            测试目标
+          </span>
+          <span className={installReady ? 'is-ready' : hasPackage ? 'is-attention' : ''}>
+            <strong>3</strong>
+            安装生效
+          </span>
+        </div>
+
         {agentDisabledReason ? (
           <div className="plugin-dev-config-attention">
             <strong>{activeLlmReady ? '下一步' : '模型未就绪'}</strong>

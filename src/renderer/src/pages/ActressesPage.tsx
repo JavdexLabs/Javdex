@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMatch, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { ActressListItem, ActressListSortBy } from '@shared/types'
+import { ACTRESS_LIST_DEFAULTS, type ActressListItem, type ActressListSortBy } from '@shared/types'
 import { api, assetUrl } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import ScrollToTopButton from '../components/ScrollToTopButton'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useToast } from '../components/Toast'
-import Modal from '../components/Modal'
+import ConfirmModal from '../components/ConfirmModal'
 import ActressName from '../components/ActressName'
+import AppliedFilterBar, { type AppliedFilterItem } from '../components/AppliedFilterBar'
 import ListToolbar from '../components/ListToolbar'
 import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
 import {
@@ -45,6 +46,19 @@ const ACTRESS_SORT_OPTIONS: SortSwitchOption<ActressListSortBy>[] = [
   { value: 'age', label: '年龄', title: '出生日期' },
   { value: 'cup_size', label: '罩杯', title: '罩杯' }
 ]
+
+const ACTRESS_GENDER_LABELS = {
+  female: '女演员',
+  male: '男演员',
+  all: '全部演员'
+}
+
+const ACTRESS_SORT_LABELS: Record<ActressListSortBy, string> = {
+  video_count: '影片数',
+  gallery: '写真数',
+  age: '年龄',
+  cup_size: '罩杯'
+}
 
 export default function ActressesPage(): JSX.Element {
   const queryClient = useQueryClient()
@@ -158,6 +172,36 @@ export default function ActressesPage(): JSX.Element {
     }
   }
 
+  const hasNonDefaultSort =
+    sortBy !== ACTRESS_LIST_DEFAULTS.sortBy || sortDir !== ACTRESS_LIST_DEFAULTS.sortDir
+  const hasAppliedFilters = genderFilter !== ACTRESS_LIST_DEFAULTS.gender || hasNonDefaultSort
+  const resetFilters = (): void => {
+    patchParams({
+      [LIST_PARAM.gender]: null,
+      [LIST_PARAM.sort]: null,
+      [LIST_PARAM.dir]: null
+    })
+  }
+  const appliedFilters: AppliedFilterItem[] = []
+  if (genderFilter !== ACTRESS_LIST_DEFAULTS.gender) {
+    appliedFilters.push({
+      key: 'gender',
+      label: ACTRESS_GENDER_LABELS[genderFilter],
+      onRemove: () => patchParams({ [LIST_PARAM.gender]: null })
+    })
+  }
+  if (hasNonDefaultSort) {
+    appliedFilters.push({
+      key: 'sort',
+      label: `${ACTRESS_SORT_LABELS[sortBy]}${sortDir === 'asc' ? ' ↑' : ' ↓'}`,
+      onRemove: () =>
+        patchParams({
+          [LIST_PARAM.sort]: null,
+          [LIST_PARAM.dir]: null
+        })
+    })
+  }
+
   return (
     <div className="list-page">
       <div className="topbar library-header">
@@ -219,6 +263,10 @@ export default function ActressesPage(): JSX.Element {
             </span>
           }
         />
+
+        {hasAppliedFilters && (
+          <AppliedFilterBar items={appliedFilters} onClear={resetFilters} />
+        )}
 
         {showUnscrapedBanner ? (
           <ListMaintenanceBanner
@@ -290,7 +338,7 @@ export default function ActressesPage(): JSX.Element {
       </div>
 
       {pendingDelete && (
-        <Modal
+        <ConfirmModal
           title="删除演员"
           danger
           confirmText="删除"
@@ -300,7 +348,7 @@ export default function ActressesPage(): JSX.Element {
           <p>
             确定删除「{pendingDelete.main_name}」？仅删除演员档案，不影响已关联影片文件。
           </p>
-        </Modal>
+        </ConfirmModal>
       )}
     </div>
   )

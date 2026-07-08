@@ -24,6 +24,10 @@ type MergeCardActress = {
   gallery_count?: number
 }
 
+function mergeSearchSeed(actress: ActressDetail): string {
+  return actress.main_name.trim()
+}
+
 function MergeActressCard({
   actress,
   badge,
@@ -86,7 +90,7 @@ export default function MergeActressModal({
   onCancel,
   onMerged
 }: Props): JSX.Element {
-  const [searchInput, setSearchInput] = useState('')
+  const [searchInput, setSearchInput] = useState(() => mergeSearchSeed(keepActress))
   const debouncedQ = useDebounce(searchInput, 300)
   const [items, setItems] = useState<ActressListItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -96,10 +100,13 @@ export default function MergeActressModal({
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    let cancelled = false
     setLoading(true)
+    setError(null)
     api.actresses
       .list(debouncedQ.trim(), 'all')
-      .then((list) =>
+      .then((list) => {
+        if (cancelled) return
         setItems(
           list.filter(
             (item) =>
@@ -107,9 +114,17 @@ export default function MergeActressModal({
               canMergeActressGenders(keepActress.gender, item.gender)
           )
         )
-      )
-      .catch((e) => setError(String((e as Error).message ?? e)))
-      .finally(() => setLoading(false))
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String((e as Error).message ?? e))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
   }, [debouncedQ, keepActress.gender, keepActress.id])
 
   useEffect(() => {
@@ -167,13 +182,15 @@ export default function MergeActressModal({
 
   const mergedVideoCount =
     selected == null ? keepActress.videos.length : keepActress.videos.length + selected.video_count
+  const hasSearchQuery = searchInput.trim().length > 0
 
   return (
     <Modal
       title="合并演员"
-      hint={`将另一名${actressGenderMergeLabel(keepActress.gender)}的资料并入当前条目。仅支持同性别合并；影片与写真会保留，对方记录将被删除。`}
+      hint={`将另一名${actressGenderMergeLabel(keepActress.gender)}资料并入当前条目。列表只显示可合并候选；影片与写真会保留，对方记录将被删除。`}
       size="md"
       className="merge-actress-modal"
+      bodyClassName="modal-body--fixed"
       onCancel={onCancel}
       actions={
         <>
@@ -192,26 +209,27 @@ export default function MergeActressModal({
       }
     >
       <div className="merge-actress-body">
-          <div className="merge-actress-flow" aria-label="合并预览">
-            <MergeActressCard actress={keepCard} badge="保留" highlighted />
-            <div className="merge-actress-flow-arrow" aria-hidden="true">
-              <span>并入</span>
-            </div>
-            <MergeActressCard
-              actress={selectedCard}
-              badge="合并"
-              empty={!selected}
-              highlighted={Boolean(selected)}
-            />
+        <div className="merge-actress-flow" aria-label="合并预览">
+          <MergeActressCard actress={keepCard} badge="保留当前" highlighted />
+          <div className="merge-actress-flow-arrow" aria-hidden="true">
+            <span>并入当前</span>
           </div>
+          <MergeActressCard
+            actress={selectedCard}
+            badge={selected ? '并入后删除' : '选择并入'}
+            empty={!selected}
+            highlighted={Boolean(selected)}
+          />
+        </div>
 
-          <section className="merge-actress-section" aria-label="选择演员">
-            <div className="merge-actress-section-head">
-              <span className="merge-actress-section-title">选择要合并的演员</span>
-              {!loading && items.length > 0 && (
-                <span className="merge-actress-section-meta">{items.length} 名候选</span>
-              )}
-            </div>
+        <section className="merge-actress-section merge-actress-picker" aria-label="选择演员">
+          <div className="merge-actress-section-head">
+            <span className="merge-actress-section-title">选择要合并的演员</span>
+            {!loading && items.length > 0 && (
+              <span className="merge-actress-section-meta">{items.length} 名候选</span>
+            )}
+          </div>
+          <div className="merge-actress-search-row">
             <input
               className="search-input merge-actress-search"
               type="search"
@@ -220,54 +238,73 @@ export default function MergeActressModal({
               onChange={(e) => setSearchInput(e.target.value)}
               autoFocus
             />
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={!hasSearchQuery}
+              onClick={() => setSearchInput('')}
+            >
+              查看全部
+            </button>
+          </div>
 
-            <div className="merge-actress-pick-panel">
-              {loading ? (
-                <div className="empty-state empty-state--compact">
-                  <div className="spinner" />
+          <div className="merge-actress-pick-panel">
+            {loading ? (
+              <div className="empty-state empty-state--compact">
+                <div className="spinner" />
+              </div>
+            ) : items.length === 0 ? (
+              <div className="empty-state empty-state--compact">
+                <div>
+                  {debouncedQ.trim()
+                    ? '没有匹配的演员，可查看全部候选'
+                    : '没有可合并的候选演员'}
                 </div>
-              ) : items.length === 0 ? (
-                <div className="empty-state empty-state--compact">
-                  <div>{debouncedQ.trim() ? '没有匹配的演员' : '输入关键词搜索演员'}</div>
-                </div>
-              ) : (
-                <div className="merge-actress-pick-list" role="listbox" aria-label="演员列表">
-                  {items.map((item) => {
-                    const isSelected = selected?.id === item.id
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        role="option"
-                        aria-selected={isSelected}
-                        className={`merge-actress-pick-item${isSelected ? ' is-selected' : ''}`}
-                        onClick={() => setSelected(isSelected ? null : item)}
-                      >
-                        <span className="merge-actress-pick-radio" aria-hidden="true" />
-                        <ActressAvatar
-                          src={assetUrl(item.avatar_path)}
-                          name={item.main_name}
-                          gender={item.gender}
-                          className="merge-actress-pick-avatar"
-                          decorative
-                        />
-                        <span className="merge-actress-pick-main">
-                          <span className="merge-actress-pick-name">
-                            <ActressName name={item.main_name} gender={item.gender} />
-                          </span>
-                          <span className="merge-actress-pick-meta">{item.video_count} 部影片</span>
+              </div>
+            ) : (
+              <div className="merge-actress-pick-list" role="listbox" aria-label="演员列表">
+                {items.map((item) => {
+                  const isSelected = selected?.id === item.id
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      className={`merge-actress-pick-item${isSelected ? ' is-selected' : ''}`}
+                      onClick={() => setSelected(isSelected ? null : item)}
+                    >
+                      <span className="merge-actress-pick-radio" aria-hidden="true" />
+                      <ActressAvatar
+                        src={assetUrl(item.avatar_path)}
+                        name={item.main_name}
+                        gender={item.gender}
+                        className="merge-actress-pick-avatar"
+                        decorative
+                      />
+                      <span className="merge-actress-pick-main">
+                        <span className="merge-actress-pick-name">
+                          <ActressName name={item.main_name} gender={item.gender} />
                         </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          </section>
+                        <span className="merge-actress-pick-meta">{item.video_count} 部影片</span>
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </section>
 
-          {selected && (
-            <section className="merge-actress-section merge-actress-plan" aria-label="合并方案">
-              <div className="merge-actress-section-title">合并后主名</div>
+        <section
+          className={`merge-actress-section merge-actress-plan${
+            selected ? '' : ' merge-actress-plan--empty'
+          }`}
+          aria-label="合并方案"
+        >
+          <div className="merge-actress-section-title">合并方案</div>
+          {selected ? (
+            <>
               <div className="merge-name-options">
                 <label
                   className={`merge-name-option${mainNameFrom === 'keep' ? ' is-active' : ''}`}
@@ -301,19 +338,28 @@ export default function MergeActressModal({
 
               <ul className="merge-actress-summary">
                 <li>
-                  合并后约 <strong>{mergedVideoCount}</strong> 部影片关联到「{finalMainName}」
+                  当前条目保留为「{finalMainName}」，对方记录将删除
                 </li>
-                <li>写真与资料字段将合并到保留条目</li>
+                <li>
+                  影片合并：{keepActress.videos.length} + {selected.video_count}，约{' '}
+                  <strong>{mergedVideoCount}</strong> 部关联到保留条目
+                </li>
+                <li>写真与资料字段将合并到保留条目，已有字段优先保留</li>
                 {demotedName && (
                   <li>
                     「{demotedName}」将写入别名
                   </li>
                 )}
               </ul>
-            </section>
+            </>
+          ) : (
+            <div className="merge-actress-plan-empty">
+              先选择一名要并入的演员，再确认合并后的主名、影片数量和别名处理。
+            </div>
           )}
+        </section>
 
-          {error && <p className="merge-actress-error">{error}</p>}
+        {error && <p className="merge-actress-error">{error}</p>}
       </div>
     </Modal>
   )

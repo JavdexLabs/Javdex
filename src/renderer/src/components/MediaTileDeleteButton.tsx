@@ -22,7 +22,7 @@ export default function MediaTileDeleteButton({
 
   return (
     <IconButton
-      className="media-tile-delete"
+      className="media-tile-delete icon-btn--danger"
       icon={<Trash2 {...UI_ICON_SM} />}
       label={label}
       title={title ?? label}

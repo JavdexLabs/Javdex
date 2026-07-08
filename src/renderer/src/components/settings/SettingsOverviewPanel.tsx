@@ -2,15 +2,13 @@ import { useMemo, type ReactNode } from 'react'
 import {
   Brain,
   Bot,
-  Clapperboard,
   FolderOpen,
   Globe,
   HardDrive,
   ListTodo,
   Palette,
   Play,
-  SlidersHorizontal,
-  UserRound,
+  SlidersHorizontal
 } from 'lucide-react'
 import type {
   AppSettings,
@@ -59,8 +57,6 @@ interface SettingsOverviewPanelProps {
   theme: ThemeId
   themeLabel: string
   notices: SettingsOverviewNotice[]
-  videoPluginCount: number
-  actressPluginCount: number
   videoBatch: BatchProgress | null
   actressBatch: BatchProgress | null
   anyBatchActive: boolean
@@ -259,13 +255,40 @@ function BatchOverviewStatus({
   )
 }
 
+function WorkflowStep({
+  title,
+  value,
+  detail,
+  state,
+  actionLabel,
+  onAction
+}: {
+  title: string
+  value: string
+  detail: string
+  state: 'ready' | 'attention' | 'active' | 'idle'
+  actionLabel: string
+  onAction: () => void
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className={`settings-overview-workflow-step is-${state}`}
+      onClick={onAction}
+    >
+      <span className="settings-overview-workflow-step-title">{title}</span>
+      <strong>{value}</strong>
+      <span className="settings-overview-workflow-step-detail">{detail}</span>
+      <span className="settings-overview-workflow-step-action">{actionLabel}</span>
+    </button>
+  )
+}
+
 export default function SettingsOverviewPanel({
   settings,
   theme,
   themeLabel,
   notices,
-  videoPluginCount,
-  actressPluginCount,
   videoBatch,
   actressBatch,
   anyBatchActive,
@@ -318,6 +341,10 @@ export default function SettingsOverviewPanel({
 
   const scrapeProxy = proxyStatus(settings.proxyUrlEnabled, settings.proxyUrl ?? '')
   const llmProxy = proxyStatus(settings.llmProxyUrlEnabled, settings.llmProxyUrl ?? '')
+  const hasLibrary = settings.libraryPaths.length > 0
+  const videoScraperReady = Boolean(settings.defaultScraper)
+  const actressScraperReady = Boolean(settings.defaultActressScraper)
+  const batchState = anyBatchActive ? 'active' : 'idle'
 
   return (
     <div className="settings-overview">
@@ -346,23 +373,70 @@ export default function SettingsOverviewPanel({
         </div>
       )}
 
+      <section className="settings-overview-workflow" aria-label="整理流程">
+        <WorkflowStep
+          title="媒体库"
+          value={hasLibrary ? `${settings.libraryPaths.length} 个路径` : '待添加'}
+          detail={
+            statsLoading
+              ? '统计加载中'
+              : hasLibrary
+                ? `${formatCount(videoTotal)} 部影片`
+                : '先添加本地文件夹'
+          }
+          state={hasLibrary ? 'ready' : 'attention'}
+          actionLabel={hasLibrary ? '管理路径' : '添加路径'}
+          onAction={() => onNavigate('library')}
+        />
+        <WorkflowStep
+          title="影片刮削"
+          value={videoScraperReady ? settings.defaultScraper : '未设置'}
+          detail={
+            videoUnscraped > 0
+              ? `${formatCount(videoUnscraped)} 部待补齐`
+              : videoScraperReady
+                ? '默认来源已就绪'
+                : '选择默认插件'
+          }
+          state={videoScraperReady ? 'ready' : 'attention'}
+          actionLabel={!videoScraperReady ? '配置插件' : videoUnscraped > 0 ? '开始处理' : '配置插件'}
+          onAction={() =>
+            videoScraperReady && videoUnscraped > 0 ? onStartVideoBatchDefault() : onNavigate('plugins')
+          }
+        />
+        <WorkflowStep
+          title="演员刮削"
+          value={actressScraperReady ? settings.defaultActressScraper : '未设置'}
+          detail={
+            actressUnscraped > 0
+              ? `${formatCount(actressUnscraped)} 位待补齐`
+              : actressScraperReady
+                ? '默认来源已就绪'
+                : '选择默认插件'
+          }
+          state={actressScraperReady ? 'ready' : 'attention'}
+          actionLabel={!actressScraperReady ? '配置插件' : actressUnscraped > 0 ? '开始处理' : '配置插件'}
+          onAction={() =>
+            actressScraperReady && actressUnscraped > 0 ? onStartActressBatchDefault() : onNavigate('plugins')
+          }
+        />
+        <WorkflowStep
+          title="批量任务"
+          value={anyBatchActive ? '运行中' : '空闲'}
+          detail={
+            anyBatchActive
+              ? `影片 ${videoBatchPct}% · 演员 ${actressPct}%`
+              : '可配置高级范围'
+          }
+          state={batchState}
+          actionLabel="任务详情"
+          onAction={() => onNavigate('batch', videoBatch ? 'video' : actressBatch ? 'actress' : 'video')}
+        />
+      </section>
+
       <section className="settings-overview-panel settings-overview-panel--status" aria-label="状态">
         <h3>状态</h3>
         <div className="settings-overview-status-grid">
-          <SettingsStatusCard
-            icon={FolderOpen}
-            label="媒体库"
-            value={`${settings.libraryPaths.length} 个路径`}
-            detail={
-              statsLoading
-                ? '统计加载中…'
-                : settings.libraryPaths.length > 0
-                  ? `${formatCount(videoTotal)} 部影片`
-                  : '点击添加文件夹'
-            }
-            attention={settings.libraryPaths.length === 0}
-            onClick={() => onNavigate('library')}
-          />
           {unrecognizedCount > 0 && (
             <SettingsStatusCard
               icon={FolderOpen}
@@ -373,24 +447,6 @@ export default function SettingsOverviewPanel({
               onClick={onNavigateLibraryUnrecognized}
             />
           )}
-          <SettingsStatusCard
-            icon={Clapperboard}
-            label="影片刮削"
-            value={settings.defaultScraper || '未设置'}
-            detail={`${videoPluginCount} 个插件`}
-            emphasizeValue
-            attention={!settings.defaultScraper}
-            onClick={() => onNavigate('plugins')}
-          />
-          <SettingsStatusCard
-            icon={UserRound}
-            label="演员刮削"
-            value={settings.defaultActressScraper || '未设置'}
-            detail={`${actressPluginCount} 个插件`}
-            emphasizeValue
-            attention={!settings.defaultActressScraper}
-            onClick={() => onNavigate('plugins')}
-          />
           <SettingsStatusCard
             icon={Globe}
             label="刮削代理"

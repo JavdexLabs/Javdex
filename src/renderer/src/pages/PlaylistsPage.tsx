@@ -11,6 +11,8 @@ import { useToast } from '../components/Toast'
 import PlaylistCreateModal from '../components/PlaylistCreateModal'
 import ListToolbar from '../components/ListToolbar'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
+import ScrollToTopButton from '../components/ScrollToTopButton'
+import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 
 function playlistListCover(item: PlaylistListItem): string | null {
   return assetUrl(item.preview_cover_path)
@@ -49,6 +51,9 @@ export default function PlaylistsPage(): JSX.Element {
       { replace: true }
     )
   }, [debouncedQ, urlQ, setSearchParams])
+
+  const scrollMemoryKey = useMemo(() => `playlists:q=${debouncedQ.trim()}`, [debouncedQ])
+  const { ref: scrollRef, showScrollToTop, scrollToTop } = useScrollContainerMemory(scrollMemoryKey)
 
   const filteredItems = useMemo(() => {
     if (!debouncedQ) return items
@@ -177,9 +182,10 @@ export default function PlaylistsPage(): JSX.Element {
       </div>
 
       <div className="list-scroll-region">
-        <div className="scroll-body scroll-body--scroll">
+        <div ref={scrollRef} className="scroll-body scroll-body--scroll">
           <div className="scroll-body-inner">{renderList()}</div>
         </div>
+        <ScrollToTopButton visible={showScrollToTop} onClick={scrollToTop} />
       </div>
 
       {showCreate && (

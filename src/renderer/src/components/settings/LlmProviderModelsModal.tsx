@@ -112,6 +112,7 @@ export default function LlmProviderModelsModal({
       title={`${provider.name} — 模型管理`}
       size="lg"
       className="modal--llm-models"
+      bodyClassName="modal-body--fixed"
       confirmText="关闭"
       cancelText="取消"
       onCancel={onClose}

@@ -11,6 +11,7 @@ interface Props {
   confirmText?: string
   cancelText?: string
   className?: string
+  bodyClassName?: string
   size?: ModalSize
   danger?: boolean
   confirmDisabled?: boolean
@@ -37,6 +38,7 @@ export default function Modal({
   confirmText = '确认',
   cancelText = '取消',
   className = '',
+  bodyClassName = '',
   size = 'compact',
   danger,
   confirmDisabled,
@@ -88,7 +90,7 @@ export default function Modal({
           </h3>
           {hint ? <p className="modal-lead hint">{hint}</p> : null}
         </header>
-        <div className="modal-body">{children}</div>
+        <div className={`modal-body${bodyClassName ? ` ${bodyClassName}` : ''}`}>{children}</div>
         {!hideActions && (
           <div className="modal-actions">
             {actions ?? (

@@ -31,7 +31,7 @@ import {
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { api } from '../api'
 import { overviewStatsKeys } from '../query/queryKeys'
-import Modal from '../components/Modal'
+import ConfirmModal from '../components/ConfirmModal'
 import PluginDevPanel from '../components/pluginDev/PluginDevPanel'
 import AppearanceSettingsPanel from '../components/settings/AppearanceSettingsPanel'
 import BatchSettingsPanel from '../components/settings/BatchSettingsPanel'
@@ -1032,8 +1032,6 @@ export default function SettingsPage(): JSX.Element {
                   theme={theme}
                   themeLabel={THEME_OPTIONS.find((item) => item.id === theme)?.label ?? theme}
                   notices={overviewNotices}
-                  videoPluginCount={videoPluginDetails.length}
-                  actressPluginCount={actressPluginDetails.length}
                   videoBatch={videoBatch}
                   actressBatch={actressBatch}
                   anyBatchActive={anyBatchActive}
@@ -1297,7 +1295,7 @@ export default function SettingsPage(): JSX.Element {
         />
       )}
       {pathRemoveTarget && (
-        <Modal
+        <ConfirmModal
           title="移除媒体库路径"
           confirmText="移除"
           danger
@@ -1307,10 +1305,10 @@ export default function SettingsPage(): JSX.Element {
           <p>确定从媒体库中移除以下路径？</p>
           <div className="modal-path-text">{pathRemoveTarget}</div>
           <p className="modal-field-hint">不会删除磁盘上的文件，仅停止扫描该路径。</p>
-        </Modal>
+        </ConfirmModal>
       )}
       {pluginDeleteTarget && (
-        <Modal
+        <ConfirmModal
           title={pluginDeleteTarget.composite ? '删除组合插件' : '删除插件'}
           confirmText={pluginBusy ? '删除中…' : '删除'}
           danger
@@ -1322,7 +1320,7 @@ export default function SettingsPage(): JSX.Element {
             {pluginDeleteTarget.composite ? '组合配置' : '插件'}
             删除后不可恢复。
           </p>
-        </Modal>
+        </ConfirmModal>
       )}
       </div>
     </div>

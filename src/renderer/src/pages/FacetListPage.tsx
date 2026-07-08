@@ -8,7 +8,7 @@ import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import ScrollToTopButton from '../components/ScrollToTopButton'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useToast } from '../components/Toast'
-import Modal from '../components/Modal'
+import ConfirmModal from '../components/ConfirmModal'
 import ListToolbar from '../components/ListToolbar'
 import { FACET_LABEL, isFacetType } from '../facet'
 import { facetListQueryHash, LIST_PARAM, patchSearchParams } from '../listView/listQueryParams'
@@ -151,7 +151,11 @@ export default function FacetListPage(): JSX.Element {
           ) : filtered.length === 0 ? (
             <div className="empty-state">
               <div className="big">▦</div>
-              <div>暂无{label}数据，刮削影片后将自动归纳。</div>
+              <div>
+                {items.length === 0
+                  ? `暂无${label}数据，刮削影片后将自动归纳。`
+                  : `没有匹配的${label}。`}
+              </div>
             </div>
           ) : (
             <div className="facet-grid">
@@ -189,7 +193,7 @@ export default function FacetListPage(): JSX.Element {
       </div>
 
       {pendingDelete && (
-        <Modal
+        <ConfirmModal
           title={`删除${label}`}
           danger
           confirmText="删除"
@@ -197,7 +201,7 @@ export default function FacetListPage(): JSX.Element {
           onCancel={() => setPendingDelete(null)}
         >
           <p>确定删除「{pendingDelete.value}」？</p>
-        </Modal>
+        </ConfirmModal>
       )}
     </div>
   )

@@ -142,7 +142,7 @@ export default function PosterCard({
         )}
         {!selectionMode && onRemove && (
           <IconButton
-            className="media-tile-delete poster-hover-control"
+            className="media-tile-delete icon-btn--danger poster-hover-control"
             icon={<ListMinus {...UI_ICON_SM} />}
             label={`从清单移出 ${video.code}`}
             title="移出清单"

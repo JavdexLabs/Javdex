@@ -1,34 +1,18 @@
-export const AVATAR_VIEW_SIZE = 180
-export const AVATAR_OUTPUT_SIZE = 512
+import { AVATAR_OUTPUT_SIZE, AVATAR_VIEW_SIZE } from '@shared/avatarCropConstants'
+
+export { AVATAR_OUTPUT_SIZE, AVATAR_VIEW_SIZE }
 
 /** Scale image to cover a square viewport (matches object-fit: cover in the crop UI). */
 export function getBaseScale(iw: number, ih: number, viewSize: number): number {
   return Math.max(viewSize / iw, viewSize / ih)
 }
 
-/** Fit a previously exported square avatar back into the crop viewport. */
+/** Restore a previously exported square avatar without shifting from preview cover layout. */
 export function getSavedAvatarCropTransform(
   iw: number,
   ih: number,
-  viewSize = AVATAR_VIEW_SIZE,
-  outSize = AVATAR_OUTPUT_SIZE
+  viewSize = AVATAR_VIEW_SIZE
 ): { baseScale: number; zoom: number; offsetX: number; offsetY: number } {
-  const isSquareOutput =
-    iw > 0 &&
-    ih > 0 &&
-    Math.abs(iw - ih) <= 2 &&
-    Math.max(iw, ih) >= outSize * 0.5 &&
-    Math.max(iw, ih) <= outSize * 2
-
-  if (isSquareOutput) {
-    return {
-      baseScale: viewSize / Math.max(iw, ih),
-      zoom: 1,
-      offsetX: 0,
-      offsetY: 0
-    }
-  }
-
   return getDefaultCropTransform(iw, ih, viewSize)
 }
 
@@ -44,6 +28,19 @@ export function getDefaultCropTransform(
     offsetX: 0,
     offsetY: 0
   }
+}
+
+export function isDefaultCropTransform(
+  zoom: number,
+  offsetX: number,
+  offsetY: number
+): boolean {
+  const epsilon = 0.000001
+  return (
+    Math.abs(zoom - 1) < epsilon &&
+    Math.abs(offsetX) < epsilon &&
+    Math.abs(offsetY) < epsilon
+  )
 }
 
 /** Keep pan within bounds so the scaled image always covers the square viewport. */

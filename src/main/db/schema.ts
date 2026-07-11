@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS actresses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     main_name TEXT UNIQUE NOT NULL,
     avatar_path TEXT,
+    avatar_source_path TEXT,
+    avatar_crop_json TEXT,
     poster_path TEXT,
     birth_date TEXT,
     debut_date TEXT,

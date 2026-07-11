@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
+import { SearchX } from 'lucide-react'
 import type { ActressListItem, Video } from '@shared/types'
 import { api, resolveMediaSrc } from '../../api'
 import { useDebounce } from '../../hooks/useDebounce'
 import Modal from '../Modal'
 import ActressName from '../ActressName'
 import ActressAvatar from '../ActressAvatar'
+import EmptyState from '../EmptyState'
+import { UI_ICON_SM } from '../iconDefaults'
 import type { PluginKind } from './types'
 
 interface Props {
@@ -181,9 +184,13 @@ export default function PluginDevMediaTargetPicker({
                 )
               })}
           {!loading && !error && resultCount === 0 ? (
-            <div className="plugin-dev-target-picker-empty">
-              {search.trim() ? '没有找到匹配条目。' : '媒体库暂无可选条目。'}
-            </div>
+            <EmptyState
+              variant="modal"
+              className="plugin-dev-target-picker-empty"
+              icon={<SearchX {...UI_ICON_SM} aria-hidden />}
+              title={search.trim() ? '没有找到匹配条目' : '媒体库暂无可选条目'}
+              description={search.trim() ? '调整搜索关键词后再试。' : '导入媒体后可在这里选择测试目标。'}
+            />
           ) : null}
         </div>
       </div>

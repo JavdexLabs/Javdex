@@ -13,6 +13,7 @@ import ImageImportModal from './ImageImportModal'
 import MediaTileDeleteButton from './MediaTileDeleteButton'
 import Modal from './Modal'
 import IconButton from './IconButton'
+import EmptyState from './EmptyState'
 import { useToast } from './Toast'
 import { ImagePlus } from 'lucide-react'
 import { UI_ICON } from './iconDefaults'
@@ -198,7 +199,13 @@ export default function ActressGalleryPanel({
       </div>
 
       {items.length === 0 ? (
-        <div className="sample-empty">暂无写真</div>
+        <EmptyState
+          variant="compact"
+          className="sample-empty"
+          icon={<ImagePlus {...UI_ICON} aria-hidden />}
+          title="暂无写真"
+          description="导入图片后会在这里展示。"
+        />
       ) : (
         <div
           className="actress-gallery-masonry"

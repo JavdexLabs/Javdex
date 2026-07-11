@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import type {
   ActressBatchScrapeScope,
   ActressBatchScrapeStatus,
@@ -32,6 +32,8 @@ import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavig
 import { api } from '../api'
 import { overviewStatsKeys } from '../query/queryKeys'
 import ConfirmModal from '../components/ConfirmModal'
+import EmptyState from '../components/EmptyState'
+import Modal from '../components/Modal'
 import PluginDevPanel from '../components/pluginDev/PluginDevPanel'
 import AppearanceSettingsPanel from '../components/settings/AppearanceSettingsPanel'
 import BatchSettingsPanel from '../components/settings/BatchSettingsPanel'
@@ -41,6 +43,9 @@ import NetworkSettingsPanel from '../components/settings/NetworkSettingsPanel'
 import PluginsSettingsPanel, { type PluginDeleteTarget } from '../components/settings/PluginsSettingsPanel'
 import StorageSettingsPanel from '../components/settings/StorageSettingsPanel'
 import SettingsOverviewPanel from '../components/settings/SettingsOverviewPanel'
+import SettingsWorkspaceShell, {
+  SettingsPluginDevShell
+} from '../components/settings/SettingsWorkspaceShell'
 import {
   CompositeConfigModal,
   PluginConfigModal,
@@ -48,12 +53,12 @@ import {
   type PluginEditState,
   type PluginKind
 } from '../components/settings/PluginConfigModals'
-import { SettingsTabBar } from '../components/settings/SettingsPrimitives'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
 import { useToast } from '../components/Toast'
 import { useTheme } from '../components/ThemeProvider'
 import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
 import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
+import useNetworkSettingsController from '../hooks/useNetworkSettingsController'
 import {
   invalidateAllLibraryQueries
 } from '../query/invalidateLibraryQueries'
@@ -62,11 +67,9 @@ import {
   MAINTENANCE_HINT_KEYS
 } from '../utils/maintenanceHints'
 import {
-  SETTINGS_GROUPS,
   resolveSettingsRoute,
   settingsPath,
-  settingsTabDomId,
-  settingsTabPanelDomId,
+  settingsPluginDevPath,
   type SettingsGroup,
   type SettingsTab
 } from '../settings/settingsRoutes'
@@ -94,12 +97,23 @@ export default function SettingsPage(): JSX.Element {
   const navigate = useNavigate()
   const location = useLocation()
   const { theme, setTheme } = useTheme()
+  const { group: activeGroup, tab: activeTab } = resolveSettingsRoute(location.pathname)
   const [settings, setSettings] = useState<AppSettings | null>(null)
-  const [scrapeProxyDraft, setScrapeProxyDraft] = useState('')
-  const [llmProxyDraft, setLlmProxyDraft] = useState('')
-  const [proxySaving, setProxySaving] = useState<'scrape' | 'llm' | null>(null)
-  const [proxyTesting, setProxyTesting] = useState<'scrape' | 'llm' | null>(null)
-  const [proxyToggleBusy, setProxyToggleBusy] = useState<'scrape' | 'llm' | null>(null)
+  const {
+    scrapeProxyDraft,
+    llmProxyDraft,
+    proxySaving,
+    proxyTesting,
+    proxyToggleBusy,
+    setScrapeProxyDraft,
+    setLlmProxyDraft,
+    toggleScrapeProxyEnabled,
+    toggleLlmProxyEnabled,
+    saveScrapeProxyUrl,
+    saveLlmProxyUrl,
+    testScrapeProxy,
+    testLlmProxy
+  } = useNetworkSettingsController(settings, setSettings)
   const [scrapers, setScrapers] = useState<string[]>([])
   const [actressScrapers, setActressScrapers] = useState<string[]>([])
   const [videoPluginDetails, setVideoPluginDetails] = useState<ScraperPluginDescriptor[]>([])
@@ -117,6 +131,7 @@ export default function SettingsPage(): JSX.Element {
   const { videoBatch, actressBatch } = useBatchScrapeActivity()
   const [showVideoBatchModal, setShowVideoBatchModal] = useState(false)
   const [showActressBatchModal, setShowActressBatchModal] = useState(false)
+  const [batchDetailScope, setBatchDetailScope] = useState<'video' | 'actress' | null>(null)
   const [videoBatchScopeCountLabel, setVideoBatchScopeCountLabel] = useState('- 部影片')
   const [actressBatchScopeCountLabel, setActressBatchScopeCountLabel] = useState('- 位演员')
   const [storageBusy, setStorageBusy] = useState(false)
@@ -125,13 +140,13 @@ export default function SettingsPage(): JSX.Element {
     imported: number
     unscraped: number
   } | null>(null)
-  const { stats: overviewStats } = useLibraryOverviewStats(overviewStatsRefreshKey)
+  const { stats: overviewStats } = useLibraryOverviewStats(
+    overviewStatsRefreshKey,
+    activeGroup.id === 'overview' && location.pathname !== settingsPluginDevPath()
+  )
   const videoBatchLogRef = useRef<HTMLDivElement>(null)
   const actressLogRef = useRef<HTMLDivElement>(null)
   const libraryUnrecRef = useRef<HTMLDivElement>(null)
-  const isPluginDevPage = location.pathname.endsWith('/plugin-dev')
-  const { group: activeGroup, tab: activeTab } = resolveSettingsRoute(location.pathname)
-
   useEffect(() => {
     if (activeGroup.id !== 'overview') return
     void queryClient.invalidateQueries({ queryKey: overviewStatsKeys.all })
@@ -144,6 +159,7 @@ export default function SettingsPage(): JSX.Element {
     setPathRemoveTarget(null)
     setShowVideoBatchModal(false)
     setShowActressBatchModal(false)
+    setBatchDetailScope(null)
   }, [])
 
   useDismissOverlaysOnNavigate(dismissSettingsOverlays, location.pathname)
@@ -180,15 +196,19 @@ export default function SettingsPage(): JSX.Element {
   useEffect(() => {
     api.settings
       .get()
-      .then((s) => {
-        setSettings(s)
-        setScrapeProxyDraft(s.proxyUrl)
-        setLlmProxyDraft(s.llmProxyUrl)
-      })
+      .then(setSettings)
       .catch((e) => toast.show(String(e.message ?? e), 'error'))
+  }, [toast])
+
+  useEffect(() => {
+    const needsPlugins =
+      activeGroup.id === 'overview' ||
+      activeGroup.id === 'plugins' ||
+      location.pathname === settingsPluginDevPath()
+    if (!needsPlugins) return
     refreshVideoPlugins().catch(() => {})
     refreshActressPlugins().catch(() => {})
-  }, [toast])
+  }, [activeGroup.id, location.pathname])
 
   useEffect(() => {
     const off = api.scan.onProgress((p) => {
@@ -265,10 +285,7 @@ export default function SettingsPage(): JSX.Element {
 
   if (!settings) {
     return (
-      <div className="empty-state">
-        <div className="spinner" />
-        <p className="settings-loading-label">加载设置…</p>
-      </div>
+      <EmptyState loading title={<span className="settings-loading-label">加载设置…</span>} />
     )
   }
 
@@ -301,134 +318,6 @@ export default function SettingsPage(): JSX.Element {
     const target = pathRemoveTarget
     setPathRemoveTarget(null)
     await removeFolder(target)
-  }
-
-  const toggleScrapeProxyEnabled = async (enabled: boolean): Promise<void> => {
-    if (!settings || proxyToggleBusy) return
-    const proxyUrl = scrapeProxyDraft.trim()
-    if (enabled && !proxyUrl) {
-      toast.show('请先填写刮削代理地址', 'error')
-      return
-    }
-    setProxyToggleBusy('scrape')
-    try {
-      const patch: Partial<AppSettings> = { proxyUrlEnabled: enabled }
-      if (enabled && proxyUrl !== settings.proxyUrl) {
-        patch.proxyUrl = proxyUrl
-      }
-      const next = await api.settings.update(patch)
-      setSettings(next)
-      setScrapeProxyDraft(next.proxyUrl)
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setProxyToggleBusy(null)
-    }
-  }
-
-  const toggleLlmProxyEnabled = async (enabled: boolean): Promise<void> => {
-    if (!settings || proxyToggleBusy) return
-    const llmProxyUrl = llmProxyDraft.trim()
-    if (enabled && !llmProxyUrl) {
-      toast.show('请先填写模型代理地址', 'error')
-      return
-    }
-    setProxyToggleBusy('llm')
-    try {
-      const patch: Partial<AppSettings> = { llmProxyUrlEnabled: enabled }
-      if (enabled && llmProxyUrl !== settings.llmProxyUrl) {
-        patch.llmProxyUrl = llmProxyUrl
-      }
-      const next = await api.settings.update(patch)
-      setSettings(next)
-      setLlmProxyDraft(next.llmProxyUrl)
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setProxyToggleBusy(null)
-    }
-  }
-
-  const saveScrapeProxyUrl = async (proxyUrl: string): Promise<boolean> => {
-    if (!settings || proxySaving) return false
-    const trimmed = proxyUrl.trim()
-    if (settings.proxyUrlEnabled && !trimmed) {
-      toast.show('刮削代理已启用，请填写代理地址', 'error')
-      return false
-    }
-    if (trimmed === settings.proxyUrl) return true
-    setProxySaving('scrape')
-    try {
-      const next = await api.settings.update({ proxyUrl: trimmed })
-      setSettings(next)
-      setScrapeProxyDraft(next.proxyUrl)
-      toast.show('刮削代理地址已保存', 'success')
-      return true
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-      return false
-    } finally {
-      setProxySaving(null)
-    }
-  }
-
-  const saveLlmProxyUrl = async (llmProxyUrl: string): Promise<boolean> => {
-    if (!settings || proxySaving) return false
-    const trimmed = llmProxyUrl.trim()
-    if (settings.llmProxyUrlEnabled && !trimmed) {
-      toast.show('模型代理已启用，请填写代理地址', 'error')
-      return false
-    }
-    if (trimmed === settings.llmProxyUrl) return true
-    setProxySaving('llm')
-    try {
-      const next = await api.settings.update({ llmProxyUrl: trimmed })
-      setSettings(next)
-      setLlmProxyDraft(next.llmProxyUrl)
-      toast.show('模型代理地址已保存', 'success')
-      return true
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-      return false
-    } finally {
-      setProxySaving(null)
-    }
-  }
-
-  const testScrapeProxy = async (proxyUrl: string): Promise<void> => {
-    if (proxyTesting) return
-    const trimmed = proxyUrl.trim()
-    if (!trimmed) {
-      toast.show('请填写代理地址', 'error')
-      return
-    }
-    setProxyTesting('scrape')
-    try {
-      const message = await api.settings.testProxy('scrape', trimmed)
-      toast.show(`刮削代理${message}`, 'success')
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setProxyTesting(null)
-    }
-  }
-
-  const testLlmProxy = async (proxyUrl: string): Promise<void> => {
-    if (proxyTesting) return
-    const trimmed = proxyUrl.trim()
-    if (!trimmed) {
-      toast.show('请填写代理地址', 'error')
-      return
-    }
-    setProxyTesting('llm')
-    try {
-      const message = await api.settings.testProxy('llm', trimmed)
-      toast.show(`模型代理${message}`, 'success')
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setProxyTesting(null)
-    }
   }
 
   const changeScraper = async (name: string): Promise<void> => {
@@ -478,7 +367,7 @@ export default function SettingsPage(): JSX.Element {
     setPluginBusy(`load-video:${name}`)
     try {
       setDevLoadPackage(await api.scrape.getPluginPackage(name))
-      navigate('/settings/plugin-dev')
+      navigate(settingsPluginDevPath())
       toast.show(`已载入影片插件：${name}`, 'success')
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
@@ -505,7 +394,7 @@ export default function SettingsPage(): JSX.Element {
     setPluginBusy(`load-actress:${name}`)
     try {
       setDevLoadPackage(await api.actressScrape.getPluginPackage(name))
-      navigate('/settings/plugin-dev')
+      navigate(settingsPluginDevPath())
       toast.show(`已载入演员插件：${name}`, 'success')
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
@@ -852,37 +741,45 @@ export default function SettingsPage(): JSX.Element {
     }
   }
 
-  const cancelVideoBatch = async (): Promise<void> => {
+  const cancelVideoBatch = async (): Promise<boolean> => {
     try {
       await api.batchScrape.pause()
+      return true
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
+      return false
     }
   }
 
-  const cancelActressBatch = async (): Promise<void> => {
+  const cancelActressBatch = async (): Promise<boolean> => {
     try {
       await api.batchScrape.pause()
+      return true
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
+      return false
     }
   }
 
-  const resumeBatch = async (): Promise<void> => {
+  const resumeBatch = async (): Promise<boolean> => {
     try {
       await api.batchScrape.resume()
       toast.show('已继续批量刮削', 'success')
+      return true
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
+      return false
     }
   }
 
-  const discardBatch = async (_kind: 'video' | 'actress'): Promise<void> => {
+  const discardBatch = async (_kind: 'video' | 'actress'): Promise<boolean> => {
     try {
       await api.batchScrape.discard()
       toast.show('已终止批量刮削任务', 'success')
+      return true
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
+      return false
     }
   }
 
@@ -959,79 +856,37 @@ export default function SettingsPage(): JSX.Element {
       : [])
   ]
 
-  if (isPluginDevPage) {
-    return (
-      <div className="scroll-body scroll-body--fill">
-        <div className="scroll-body-inner scroll-body-inner--settings settings-dev-page">
-          <PluginDevPanel
-            settings={settings}
-            setSettings={setSettings}
-            loadPackage={devLoadPackage}
-            onLoadConsumed={() => setDevLoadPackage(null)}
-            onInstalled={async (kind) => {
-              await refreshPluginsForKind(kind)
-              setSettings(await api.settings.get())
-            }}
-          />
-        </div>
-      </div>
-    )
-  }
+  const pluginDevPage = (
+    <SettingsPluginDevShell>
+      <PluginDevPanel
+        settings={settings}
+        setSettings={setSettings}
+        loadPackage={devLoadPackage}
+        onLoadConsumed={() => setDevLoadPackage(null)}
+        onInstalled={async (kind) => {
+          await refreshPluginsForKind(kind)
+          setSettings(await api.settings.get())
+        }}
+      />
+    </SettingsPluginDevShell>
+  )
 
-  return (
-    <div className="scroll-body scroll-body--fill">
-      <div className="scroll-body-inner scroll-body-inner--settings settings-overview-page">
-        <nav className="settings-group-tabs" aria-label="设置分类">
-          {SETTINGS_GROUPS.map((group) => (
-            <button
-              key={group.id}
-              type="button"
-              className={`settings-group-tab${
-                activeGroup.id === group.id ? ' is-active' : ''
-              }`}
-              aria-current={activeGroup.id === group.id ? 'page' : undefined}
-              onClick={() => navigateSettings(group.id)}
-            >
-              {group.label}
-            </button>
-          ))}
-        </nav>
-
-        <div className="settings-scroll-region">
-          <main
-            id="settings-main-panel"
-            className="settings-content"
-            role="region"
-            aria-label={`${activeGroup.label}设置`}
-          >
-            {activeGroup.tabs.length > 1 && activeGroup.id !== 'batch' && (
-              <SettingsTabBar
-                group={activeGroup.id}
-                tabs={activeGroup.tabs}
-                activeTab={activeTab}
-                label={`${activeGroup.label}设置页签`}
-                onSelect={(tab) => navigateSettings(activeGroup.id, tab)}
-                onKeyDown={onSettingsTabKeyDown}
-              />
-            )}
-
-            <section
-              className="settings-section"
-              role="tabpanel"
-              id={settingsTabPanelDomId(activeGroup.id, activeTab)}
-              aria-labelledby={
-                activeGroup.tabs.length > 1
-                  ? settingsTabDomId(activeGroup.id, activeTab)
-                  : undefined
-              }
-              aria-label={activeGroup.tabs.length === 1 ? activeGroup.label : undefined}
-            >
+  const settingsPage = (
+    <>
+      <SettingsWorkspaceShell
+        activeGroup={activeGroup}
+        activeTab={activeTab}
+        onNavigate={navigateSettings}
+        onTabKeyDown={onSettingsTabKeyDown}
+      >
               {activeGroup.id === 'overview' && (
                 <SettingsOverviewPanel
                   settings={settings}
                   theme={theme}
                   themeLabel={THEME_OPTIONS.find((item) => item.id === theme)?.label ?? theme}
                   notices={overviewNotices}
+                  videoPluginCount={videoPluginDetails.length}
+                  actressPluginCount={actressPluginDetails.length}
                   videoBatch={videoBatch}
                   actressBatch={actressBatch}
                   anyBatchActive={anyBatchActive}
@@ -1044,12 +899,19 @@ export default function SettingsPage(): JSX.Element {
                     navigate(settingsPath('library'), { state: { libraryFocus: 'unrecognized' } })
                   }
                   onOpenAgentTool={(toolId) => {
-                    if (toolId === 'plugin-dev') navigate('/settings/plugin-dev')
+                    if (toolId === 'plugin-dev') navigate(settingsPluginDevPath())
                   }}
                   onStartVideoBatchDefault={startVideoBatchDefault}
                   onStartActressBatchDefault={startActressBatchDefault}
                   onOpenVideoBatchAdvanced={() => setShowVideoBatchModal(true)}
                   onOpenActressBatchAdvanced={() => setShowActressBatchModal(true)}
+                  onOpenVideoBatchDetails={() => setBatchDetailScope('video')}
+                  onOpenActressBatchDetails={() => setBatchDetailScope('actress')}
+                  onPauseVideoBatch={cancelVideoBatch}
+                  onPauseActressBatch={cancelActressBatch}
+                  onResumeBatch={resumeBatch}
+                  onDiscardVideoBatch={() => discardBatch('video')}
+                  onDiscardActressBatch={() => discardBatch('actress')}
                 />
               )}
 
@@ -1085,7 +947,7 @@ export default function SettingsPage(): JSX.Element {
                   defaultActressPluginName={settings.defaultActressScraper}
                   pluginBusy={pluginBusy}
                   onImport={() => void importPlugin()}
-                  onOpenDev={() => navigate('/settings/plugin-dev')}
+                  onOpenDev={() => navigate(settingsPluginDevPath())}
                   onEdit={(kind, plugin) => {
                     if (plugin.source === 'composite') {
                       setEditingComposite({ kind, plugin })
@@ -1106,37 +968,6 @@ export default function SettingsPage(): JSX.Element {
                     kind === 'video' ? void changeScraper(name) : void changeActressScraper(name)
                   }
                   onCreateComposite={(kind) => setEditingComposite({ kind })}
-                />
-              )}
-
-              {activeGroup.id === 'batch' && (
-                <BatchSettingsPanel
-                  scope={activeTab === 'actress' ? 'actress' : 'video'}
-                  onScopeChange={(scope) => navigateSettings('batch', scope)}
-                  title={activeTab === 'actress' ? '批量刮削（演员）' : '批量更新（影片）'}
-                  hint={
-                    activeTab === 'actress'
-                      ? '按演员范围和缺失字段筛选目标，再选择本次更新字段。'
-                      : '合并批量刮削与修正匹配；范围可按刮削状态、缺失字段收窄。'
-                  }
-                  batch={activeTab === 'actress' ? actressBatch : videoBatch}
-                  percent={activeTab === 'actress' ? actressPct : videoBatchPct}
-                  running={activeTab === 'actress' ? actressBatchRunning : videoBatchRunning}
-                  paused={activeTab === 'actress' ? actressBatchPaused : videoBatchPaused}
-                  anyBatchActive={anyBatchActive}
-                  logRef={activeTab === 'actress' ? actressLogRef : videoBatchLogRef}
-                  emptyLog={activeTab === 'actress' ? '暂无演员任务日志' : '暂无影片任务日志'}
-                  onConfigure={() =>
-                    activeTab === 'actress'
-                      ? setShowActressBatchModal(true)
-                      : setShowVideoBatchModal(true)
-                  }
-                  onPause={() =>
-                    activeTab === 'actress' ? void cancelActressBatch() : void cancelVideoBatch()
-                  }
-                  onResume={() => void resumeBatch()}
-                  onDiscard={() => void discardBatch(activeTab === 'actress' ? 'actress' : 'video')}
-                  onTabKeyDown={onSettingsTabKeyDown}
                 />
               )}
 
@@ -1185,9 +1016,32 @@ export default function SettingsPage(): JSX.Element {
                   onTestLlmProxy={(value) => testLlmProxy(value)}
                 />
               )}
-            </section>
-          </main>
-        </div>
+      </SettingsWorkspaceShell>
+
+      {batchDetailScope && (
+        <Modal
+          title={batchDetailScope === 'actress' ? '批量刮削（演员）' : '批量更新（影片）'}
+          size="xl"
+          className="modal--batch-detail"
+          bodyClassName="modal-body--batch-detail"
+          hideActions
+          onCancel={() => setBatchDetailScope(null)}
+        >
+          <BatchSettingsPanel
+            scope={batchDetailScope}
+            batch={batchDetailScope === 'actress' ? actressBatch : videoBatch}
+            running={batchDetailScope === 'actress' ? actressBatchRunning : videoBatchRunning}
+            paused={batchDetailScope === 'actress' ? actressBatchPaused : videoBatchPaused}
+            logRef={batchDetailScope === 'actress' ? actressLogRef : videoBatchLogRef}
+            emptyLog={batchDetailScope === 'actress' ? '暂无演员任务日志' : '暂无影片任务日志'}
+            onPause={() =>
+              batchDetailScope === 'actress' ? cancelActressBatch() : cancelVideoBatch()
+            }
+            onResume={resumeBatch}
+            onDiscard={() => discardBatch(batchDetailScope)}
+          />
+        </Modal>
+      )}
 
       {showVideoBatchModal && settings && (
         <ScrapeFieldsModal<VideoScrapeField, VideoBatchScrapeStatus>
@@ -1312,6 +1166,7 @@ export default function SettingsPage(): JSX.Element {
           title={pluginDeleteTarget.composite ? '删除组合插件' : '删除插件'}
           confirmText={pluginBusy ? '删除中…' : '删除'}
           danger
+          busy={Boolean(pluginBusy)}
           onCancel={() => setPluginDeleteTarget(null)}
           onConfirm={() => void confirmPluginDelete()}
         >
@@ -1322,7 +1177,8 @@ export default function SettingsPage(): JSX.Element {
           </p>
         </ConfirmModal>
       )}
-      </div>
-    </div>
+    </>
   )
+
+  return <Outlet context={{ settingsPage, pluginDevPage }} />
 }

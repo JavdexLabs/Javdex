@@ -4,7 +4,10 @@ import type {
   PluginDevFieldVerification,
   PluginDevVerificationReport
 } from '@shared/types'
+import { SquareTerminal } from 'lucide-react'
 import { formatParseResultKeyLabel } from '@shared/scrapeFieldPromptDocs'
+import EmptyState from '../EmptyState'
+import { UI_ICON_SM } from '../iconDefaults'
 import type { PluginKind } from './types'
 
 function formatResultValue(key: string, value: unknown): string {
@@ -61,10 +64,13 @@ export default function PluginDevResultPanel({
 }): JSX.Element {
   if (!dryRun) {
     return (
-      <div className="plugin-dev-agent-empty">
-        <strong>暂无调试结果</strong>
-        <span>Agent 调试后，字段摘要会显示在这里。</span>
-      </div>
+      <EmptyState
+        variant="fill"
+        className="plugin-dev-agent-empty"
+        icon={<SquareTerminal {...UI_ICON_SM} aria-hidden />}
+        title="暂无调试结果"
+        description="Agent 调试后，字段摘要会显示在这里。"
+      />
     )
   }
 

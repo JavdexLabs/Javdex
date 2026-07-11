@@ -13,6 +13,7 @@ import {
   toDateInputValue,
   withCurrentSelectOption
 } from '@shared/actressProfileOptions'
+import { parseAvatarCrop, type ActressAvatarCommit } from '@shared/avatarCrop'
 import { normalizeCupSize } from '@shared/cupSizeUtils'
 import type { ActressDetail, ActressEditInput, ActressGender } from '@shared/types'
 import { assetUrl } from '../api'
@@ -49,8 +50,13 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
   const [nationality, setNationality] = useState(actress.nationality?.trim() ?? '')
   const [profileSummary, setProfileSummary] = useState(actress.profile_summary ?? '')
   const [aliases, setAliases] = useState<string[]>([...actress.aliases])
-  const [avatarImageBase64, setAvatarImageBase64] = useState<string | null>(null)
+  const [avatarCommit, setAvatarCommit] = useState<ActressAvatarCommit | null>(null)
   const [saving, setSaving] = useState(false)
+
+  const savedCrop = useMemo(
+    () => parseAvatarCrop(actress.avatar_crop_json),
+    [actress.avatar_crop_json]
+  )
 
   const bloodTypeOptions = useMemo(
     () => withCurrentSelectOption(BLOOD_TYPE_OPTIONS, bloodType),
@@ -75,8 +81,8 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
     }
   }
 
-  const handleAvatarChange = useCallback((base64: string | null) => {
-    setAvatarImageBase64(base64)
+  const handleAvatarChange = useCallback((commit: ActressAvatarCommit | null) => {
+    setAvatarCommit(commit)
   }, [])
 
   const nameKey = useCallback((name: string) => name.toLowerCase().replace(/\s+/g, ''), [])
@@ -125,7 +131,7 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
         nationality: nationality.trim() || null,
         profile_summary: profileSummary.trim() || null,
         aliases,
-        ...(avatarImageBase64 ? { avatarImageBase64 } : {})
+        ...(avatarCommit ? { avatar: avatarCommit } : {})
       })
     } finally {
       setSaving(false)
@@ -151,7 +157,9 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
       <div className="entity-edit-form">
             <EditFormSection title="头像" className="entity-edit-section--media">
               <ActressAvatarEditor
-                currentUrl={assetUrl(actress.avatar_path)}
+                displayUrl={assetUrl(actress.avatar_path)}
+                sourceUrl={assetUrl(actress.avatar_source_path)}
+                savedCrop={savedCrop}
                 videos={actress.videos}
                 gallery={actress.gallery}
                 onAvatarChange={handleAvatarChange}

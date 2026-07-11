@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
-import { Ellipsis, ListPlus, Pencil, Play, SearchCheck } from 'lucide-react'
+import { ListPlus, Pencil, Play, SearchCheck, SearchX } from 'lucide-react'
 import type { VideoDetail, VideoFile } from '@shared/types'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
@@ -22,7 +22,8 @@ import {
 } from '../components/VideoDetailMeta'
 import VideoDetailRatings from '../components/VideoDetailRatings'
 import ImagePreviewLightbox from '../components/ImagePreviewLightbox'
-import IconButton from '../components/IconButton'
+import DetailActionBar from '../components/DetailActionBar'
+import EmptyState from '../components/EmptyState'
 import { UI_ICON } from '../components/iconDefaults'
 import { useAppBackground } from '../components/AppBackgroundContext'
 import ActressAvatar from '../components/ActressAvatar'
@@ -34,7 +35,6 @@ import {
 } from '@shared/types'
 import { splitVideoCode } from '@shared/codeUtils'
 import { resolveVideoDetailDisplayBackgroundPath } from '@shared/detailDisplayBackground'
-import { useEscapeKey } from '../hooks/useEscapeKey'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import {
@@ -89,11 +89,9 @@ export default function DetailPage(): JSX.Element {
   const [correctCode, setCorrectCode] = useState('')
   const [correcting, setCorrecting] = useState(false)
   const [tallCover, setTallCover] = useState(false)
-  const [moreOpen, setMoreOpen] = useState(false)
   const [coverPreviewOpen, setCoverPreviewOpen] = useState(false)
   const [deleteFileTarget, setDeleteFileTarget] = useState<VideoFile | null>(null)
   const [deletingFile, setDeletingFile] = useState(false)
-  const moreActionsRef = useRef<HTMLDivElement>(null)
 
   const dismissOverlays = useCallback(() => {
     setConfirmDelete(false)
@@ -106,12 +104,9 @@ export default function DetailPage(): JSX.Element {
     setShowMaintenanceInfo(false)
     setCoverPreviewOpen(false)
     setDeleteFileTarget(null)
-    setMoreOpen(false)
   }, [])
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
-
-  useEscapeKey(() => setMoreOpen(false), moreOpen)
 
   useEffect(() => {
     if (defaultScraper) {
@@ -167,17 +162,6 @@ export default function DetailPage(): JSX.Element {
     else clearBackground(scope)
   }, [video, videoId, videoDetailUseFirstSampleBackground, clearBackground, setBackground])
 
-  useEffect(() => {
-    if (!moreOpen) return
-    const onPointerDown = (e: PointerEvent): void => {
-      if (!moreActionsRef.current?.contains(e.target as Node)) {
-        setMoreOpen(false)
-      }
-    }
-    window.addEventListener('pointerdown', onPointerDown)
-    return () => window.removeEventListener('pointerdown', onPointerDown)
-  }, [moreOpen])
-
   const cover = assetUrl(video?.cover_path ?? null)
 
   useEffect(() => {
@@ -230,7 +214,6 @@ export default function DetailPage(): JSX.Element {
   }
 
   const handleReveal = async (): Promise<void> => {
-    setMoreOpen(false)
     try {
       const res = await api.player.reveal(videoId)
       if (!res.ok) toast.show(res.error ?? '打开文件夹失败', 'error')
@@ -334,7 +317,6 @@ export default function DetailPage(): JSX.Element {
   }
 
   const handleMarkScrapeSuccess = async (): Promise<void> => {
-    setMoreOpen(false)
     try {
       await api.videos.markScrapeSuccess(videoId)
       toast.show('已标记为刮削成功', 'success')
@@ -394,9 +376,7 @@ export default function DetailPage(): JSX.Element {
     return (
       <div className={`detail-pane${actressStackOpen ? ' detail-pane--stacked' : ''}`}>
         <DetailScrollBody onBack={() => navigateBackFromVideoDetail(navigate, location)}>
-          <div className="empty-state">
-            <div className="spinner" />
-          </div>
+          <EmptyState loading />
         </DetailScrollBody>
       </div>
     )
@@ -405,9 +385,11 @@ export default function DetailPage(): JSX.Element {
     return (
       <div className={`detail-pane${actressStackOpen ? ' detail-pane--stacked' : ''}`}>
         <DetailScrollBody onBack={() => navigateBackFromVideoDetail(navigate, location)}>
-          <div className="empty-state">
-            <div>未找到该影片</div>
-          </div>
+          <EmptyState
+            icon={<SearchX {...UI_ICON} aria-hidden />}
+            title="未找到该影片"
+            description="该影片可能已被删除或移动。"
+          />
         </DetailScrollBody>
       </div>
     )
@@ -493,116 +475,79 @@ export default function DetailPage(): JSX.Element {
 
               <VideoDetailPrimaryMeta video={video} />
 
-              <div className="detail-actions">
-              <button className="btn btn-primary detail-play-btn" onClick={handlePlay}>
-                <Play {...UI_ICON} />
-                <span>播放</span>
-              </button>
-              <div className="detail-action-group detail-action-group--icons" role="group" aria-label="影片操作">
-                <IconButton
-                  className="detail-icon-action"
-                  icon={<ListPlus {...UI_ICON} />}
-                  label="加入清单"
-                  onClick={() => setShowAddToPlaylist(true)}
-                />
-                <IconButton
-                  className="detail-icon-action"
-                  icon={<Pencil {...UI_ICON} />}
-                  label="编辑"
-                  onClick={() => setShowEdit(true)}
-                />
-                <IconButton
-                  className="detail-icon-action"
-                  icon={<SearchCheck {...UI_ICON} />}
-                  label="修正匹配"
-                  title={scraping ? '匹配中…' : '修正匹配'}
-                  aria-busy={scraping || undefined}
-                  disabled={scraping}
-                  onClick={() => setShowScrapeFields(true)}
-                />
-              </div>
-              <div className="detail-more-actions" ref={moreActionsRef}>
-                <IconButton
-                  className="detail-icon-action"
-                  icon={<Ellipsis {...UI_ICON} />}
-                  label="更多"
-                  aria-haspopup="menu"
-                  aria-expanded={moreOpen}
-                  onClick={() => setMoreOpen((open) => !open)}
-                />
-                {moreOpen && (
-                  <div className="detail-more-menu" role="menu">
-                    <button
-                      type="button"
-                      className="detail-menu-item"
-                      role="menuitem"
-                      onClick={() => {
-                        setMoreOpen(false)
-                        openCorrectImport()
-                      }}
-                    >
-                      修正番号
-                    </button>
-                    <button
-                      type="button"
-                      className="detail-menu-item"
-                      role="menuitem"
-                      onClick={() => {
-                        void handleReveal()
-                      }}
-                    >
-                      打开所在文件夹
-                    </button>
-                    <button
-                      type="button"
-                      className="detail-menu-item"
-                      role="menuitem"
-                      onClick={() => {
-                        setMoreOpen(false)
-                        setShowMaintenanceInfo(true)
-                      }}
-                    >
-                      维护信息
-                    </button>
-                    {video.scraped_status !== 1 && (
-                      <button
-                        type="button"
-                        className="detail-menu-item"
-                        role="menuitem"
-                        onClick={() => {
-                          void handleMarkScrapeSuccess()
-                        }}
-                      >
-                        标记为刮削成功
-                      </button>
-                    )}
-                    <div className="detail-menu-separator" />
-                    <button
-                      type="button"
-                      className="detail-menu-item detail-menu-item--danger"
-                      role="menuitem"
-                      onClick={() => {
-                        setMoreOpen(false)
-                        setConfirmClear(true)
-                      }}
-                    >
-                      清除元数据
-                    </button>
-                    <button
-                      type="button"
-                      className="detail-menu-item detail-menu-item--danger"
-                      role="menuitem"
-                      onClick={() => {
-                        setMoreOpen(false)
-                        setConfirmDelete(true)
-                      }}
-                    >
-                      删除影片
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
+              <DetailActionBar
+                ariaLabel="影片操作"
+                primary={{
+                  label: '播放',
+                  icon: <Play {...UI_ICON} aria-hidden />,
+                  onClick: () => {
+                    void handlePlay()
+                  }
+                }}
+                actions={[
+                  {
+                    key: 'playlist',
+                    icon: <ListPlus {...UI_ICON} />,
+                    label: '加入清单',
+                    onClick: () => setShowAddToPlaylist(true)
+                  },
+                  {
+                    key: 'edit',
+                    icon: <Pencil {...UI_ICON} />,
+                    label: '编辑',
+                    onClick: () => setShowEdit(true)
+                  },
+                  {
+                    key: 'scrape',
+                    icon: <SearchCheck {...UI_ICON} />,
+                    label: '修正匹配',
+                    title: scraping ? '匹配中…' : '修正匹配',
+                    busy: scraping,
+                    disabled: scraping,
+                    onClick: () => setShowScrapeFields(true)
+                  }
+                ]}
+                menuItems={[
+                  {
+                    key: 'correct-code',
+                    label: '修正番号',
+                    onClick: openCorrectImport
+                  },
+                  {
+                    key: 'reveal',
+                    label: '打开所在文件夹',
+                    onClick: () => {
+                      void handleReveal()
+                    }
+                  },
+                  {
+                    key: 'maintenance',
+                    label: '维护信息',
+                    onClick: () => setShowMaintenanceInfo(true)
+                  },
+                  {
+                    key: 'mark-success',
+                    label: '标记为刮削成功',
+                    hidden: video.scraped_status === 1,
+                    onClick: () => {
+                      void handleMarkScrapeSuccess()
+                    }
+                  },
+                  { key: 'danger-separator', type: 'separator' },
+                  {
+                    key: 'clear-meta',
+                    label: '清除元数据',
+                    danger: true,
+                    onClick: () => setConfirmClear(true)
+                  },
+                  {
+                    key: 'delete-video',
+                    label: '删除影片',
+                    danger: true,
+                    onClick: () => setConfirmDelete(true)
+                  }
+                ]}
+              />
           </div>
         </div>
         </article>

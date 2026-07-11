@@ -1,0 +1,44 @@
+/* Actress header owns its three-column layout independently from video detail rules. */
+.actress-profile-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 28px;
+}
+
+.actress-profile-head {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.actress-profile-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  min-width: max-content;
+}
+
+.actress-profile-actions .detail-actions--inline {
+  position: sticky;
+  top: 8px;
+  z-index: 30;
+}
+
+.actress-profile-title.detail-title {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.22;
+}
+
+@container detail-page (max-width: 720px) {
+  .actress-profile-header {
+    gap: 16px;
+  }
+}
+
+@container detail-page (max-width: 480px) {
+  .actress-profile-header {
+    gap: 12px;
+  }
+}

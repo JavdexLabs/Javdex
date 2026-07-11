@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ListVideo, SearchX } from 'lucide-react'
 import type { PlaylistVideoMembership } from '@shared/types'
 import { api, assetUrl } from '../api'
 import { useToast } from './Toast'
 import Modal from './Modal'
+import EmptyState from './EmptyState'
+import { UI_ICON_SM } from './iconDefaults'
 
 interface Props {
   videoId: number
@@ -132,9 +135,7 @@ export default function AddToPlaylistModal({
       }
     >
       {loading ? (
-        <div className="empty-state empty-state--compact">
-          <div className="spinner" />
-        </div>
+        <EmptyState variant="modal" loading />
       ) : (
         <div className="playlist-pick-panel">
           <div className="playlist-pick-toolbar">
@@ -163,13 +164,19 @@ export default function AddToPlaylistModal({
             </button>
           </div>
           {items.length === 0 ? (
-            <div className="empty-state empty-state--compact">
-              <div>输入名称创建第一个播放清单。</div>
-            </div>
+            <EmptyState
+              variant="modal"
+              icon={<ListVideo {...UI_ICON_SM} aria-hidden />}
+              title="暂无播放清单"
+              description="输入名称创建第一个播放清单。"
+            />
           ) : filteredItems.length === 0 ? (
-            <div className="empty-state empty-state--compact">
-              <div>没有匹配的清单。</div>
-            </div>
+            <EmptyState
+              variant="modal"
+              icon={<SearchX {...UI_ICON_SM} aria-hidden />}
+              title="没有匹配的清单"
+              description="调整搜索关键词，或直接创建新清单。"
+            />
           ) : (
             <div className="playlist-pick-list">
               {filteredItems.map((item) => {
@@ -177,7 +184,13 @@ export default function AddToPlaylistModal({
                 return (
                   <div key={item.id} className="playlist-pick-row">
                     <div className="playlist-pick-cover">
-                      {cover ? <img src={cover} alt={item.name} /> : <span>▤</span>}
+                      {cover ? (
+                        <img src={cover} alt={item.name} />
+                      ) : (
+                        <span className="playlist-pick-cover-placeholder" aria-hidden="true">
+                          <ListVideo {...UI_ICON_SM} />
+                        </span>
+                      )}
                     </div>
                     <div className="playlist-pick-main">
                       <div className="playlist-pick-name">{item.name}</div>

@@ -5,6 +5,7 @@ import MediaTileDeleteButton from './MediaTileDeleteButton'
 import Modal from './Modal'
 import { useToast } from './Toast'
 import { UI_ICON } from './iconDefaults'
+import EmptyState from './EmptyState'
 
 const IMAGE_ACCEPT =
   'image/jpeg,image/png,image/webp,image/gif,image/avif,.jpg,.jpeg,.png,.webp,.gif,.avif'
@@ -314,7 +315,13 @@ export default function ImageImportModal({
 
           <div className="image-import-gallery" aria-label={`${itemLabel}图片预览`}>
             {queued.length === 0 ? (
-              <div className="image-import-empty">{emptyText}</div>
+              <EmptyState
+                variant="compact"
+                className="image-import-empty"
+                icon={<ImagePlus {...UI_ICON} aria-hidden />}
+                title={'\u6682\u65e0\u5f85\u5bfc\u5165\u56fe\u7247'}
+                description={emptyText}
+              />
             ) : (
               queued.map((item, index) => (
                 <div key={item.key} className="image-import-tile">

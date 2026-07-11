@@ -1,0 +1,197 @@
+/* Typography ownership stays inside the settings workspace. */
+.scroll-body-inner--settings :is(
+  .settings-back-link,
+  .settings-overview-hero-hint,
+  .settings-overview-metric-label,
+  .settings-overview-scrape-head,
+  .settings-overview-scrape-legend,
+  .settings-overview-status-copy small,
+  .settings-overview-batch-card-head span,
+  .settings-overview-batch-card small,
+  .settings-overview-agent-tool-copy small,
+  .settings-overview-strategy-kicker,
+  .settings-overview-strategy-card small,
+  .settings-capability-section-meta,
+  .settings-capability-row span,
+  .settings-interval-row span,
+  .settings-interval-row small,
+  .batch-log-stats,
+  .batch-log-head small,
+  .settings-status-pill,
+  .settings-kv-grid span,
+  .settings-kv-link span,
+  .settings-kv-grid small,
+  .settings-kv-link small,
+  .library-scan-metric-label,
+  .library-scan-note,
+  .library-scan-duration-label,
+  .settings-number-stepper__unit,
+  .llm-provider-card-tag,
+  .llm-provider-status,
+  .llm-provider-card-meta dt,
+  .llm-models-row-copy span,
+  .scan-unrec-rename > summary,
+  .scan-unrec-dir
+) {
+  font-size: var(--settings-fs-caption, 11px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.scroll-body-inner--settings :is(
+  .settings-loading-label,
+  .settings-notice-copy strong,
+  .settings-notice-copy span,
+  .settings-overview-status-copy strong,
+  .settings-overview-status-value,
+  .settings-overview-batch-card-head strong,
+  .settings-result-grid > span,
+  .settings-empty-panel,
+  .settings-run-status,
+  .batch-log-head span,
+  .path-row,
+  .media-path-empty,
+  .library-scan-status,
+  .field-row--stacked label,
+  .llm-provider-card-meta dd,
+  .plugin-empty-state,
+  .scan-unrec-name,
+  .scan-unrec-rename
+) {
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.scroll-body-inner--settings :is(
+  .settings-capability-row strong,
+  .settings-interval-row strong,
+  .settings-overview-agent-tool-copy strong,
+  .llm-models-row-copy strong,
+  .batch-log-stats strong
+) {
+  font-size: var(--settings-fs-body, 13px);
+  font-weight: var(--settings-fw-strong, 700);
+  line-height: var(--settings-lh-tight, 1.35);
+}
+
+.scroll-body-inner--settings .settings-capability-section > summary {
+  font-size: var(--settings-fs-title, 14px);
+  font-weight: var(--settings-fw-title, 700);
+  line-height: var(--settings-lh-tight, 1.35);
+}
+
+.scroll-body-inner--settings .settings-content,
+.scroll-body-inner--settings .settings-section,
+.scroll-body-inner--settings .settings-overview {
+  gap: var(--settings-gap, 12px);
+}
+
+.scroll-body-inner--settings :is(.text-input, .select) {
+  min-height: var(--control-h-sm);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+.scroll-body-inner--settings .btn:not(.btn-icon) {
+  min-height: var(--control-h-sm);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+/* Settings and plugin workspaces respond to usable content width, not window width. */
+@container settings-workspace (max-width: 940px) {
+  .settings-overview-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .settings-overview-strategy-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-overview-status-grid {
+    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  }
+
+  .settings-overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .plugin-dev-main,
+  .settings-dev-page .plugin-dev-main,
+  .plugin-dev-main--agent-focus,
+  .settings-dev-page .plugin-dev-main--agent-focus {
+    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  }
+}
+
+@container settings-workspace (max-width: 740px) {
+  .settings-overview-media-grid,
+  .settings-overview-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .plugin-dev-main,
+  .settings-dev-page .plugin-dev-main,
+  .plugin-dev-main--agent-focus,
+  .settings-dev-page .plugin-dev-main--agent-focus,
+  .plugin-dev-layout,
+  .plugin-dev-key-row,
+  .plugin-dev-connection,
+  .plugin-dev-io-grid,
+  .settings-capability-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@container settings-workspace (max-width: 500px) {
+  .settings-overview-metrics,
+  .settings-overview-strategy-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .settings-overview-grid,
+  .settings-interval-row,
+  .field-row,
+  .settings-default-scraper-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-group-tabs {
+    scrollbar-gutter: stable;
+  }
+
+  .settings-interval-row {
+    display: grid;
+    align-items: start;
+  }
+
+  .field-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .field-row label {
+    width: auto;
+  }
+
+  .batch-log-toolbar {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .batch-log-stats-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .batch-log-stats-current {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .batch-action-row--compact {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .batch-action-row--compact .btn {
+    flex: 1;
+    min-width: 0;
+  }
+}

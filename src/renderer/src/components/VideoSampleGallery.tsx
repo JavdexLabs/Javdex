@@ -10,6 +10,7 @@ import ImageImportModal from './ImageImportModal'
 import MediaTileDeleteButton from './MediaTileDeleteButton'
 import Modal from './Modal'
 import IconButton from './IconButton'
+import EmptyState from './EmptyState'
 import { useToast } from './Toast'
 import { ImagePlus } from 'lucide-react'
 import { UI_ICON } from './iconDefaults'
@@ -187,7 +188,13 @@ export default function VideoSampleGallery({
           </div>
         </div>
         {samples.length === 0 ? (
-          <div className="sample-empty">暂无样张</div>
+          <EmptyState
+            variant="compact"
+            className="sample-empty"
+            icon={<ImagePlus {...UI_ICON} aria-hidden />}
+            title="暂无样张"
+            description="导入图片后会在这里展示。"
+          />
         ) : (
           <div className="sample-masonry" ref={masonryRef}>
             {masonryColumns.map((column, columnIndex) => (

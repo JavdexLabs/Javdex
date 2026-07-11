@@ -17,6 +17,11 @@ describe('database schema', () => {
       migrateDatabase(db)
 
       assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+      const actressCols = (
+        db.prepare('PRAGMA table_info(actresses)').all() as { name: string }[]
+      ).map((c) => c.name)
+      assert.equal(actressCols.includes('avatar_source_path'), true)
+      assert.equal(actressCols.includes('avatar_crop_json'), true)
       const expectedTables = [
         'videos',
         'video_files',
@@ -65,8 +70,58 @@ describe('database schema', () => {
     const db = new Database(':memory:')
     try {
       db.exec('CREATE TABLE videos (id INTEGER PRIMARY KEY)')
-      db.pragma('user_version = 3')
+      db.pragma('user_version = 99')
       assert.throws(() => migrateDatabase(db), /no longer supported/)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('upgrades v1 actresses table with avatar source columns', () => {
+    const db = new Database(':memory:')
+    try {
+      db.exec(`
+        CREATE TABLE actresses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          main_name TEXT UNIQUE NOT NULL,
+          avatar_path TEXT
+        )
+      `)
+      db.pragma('user_version = 1')
+      migrateDatabase(db)
+      assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+      const cols = (db.prepare('PRAGMA table_info(actresses)').all() as { name: string }[]).map(
+        (c) => c.name
+      )
+      assert.equal(cols.includes('avatar_source_path'), true)
+      assert.equal(cols.includes('avatar_crop_json'), true)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('leaves current-version databases unchanged', () => {
+    const db = new Database(':memory:')
+    try {
+      db.exec(`
+        CREATE TABLE actresses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          main_name TEXT UNIQUE NOT NULL,
+          avatar_path TEXT,
+          avatar_source_path TEXT,
+          avatar_crop_json TEXT
+        )
+      `)
+      db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
+      migrateDatabase(db)
+      assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+      const cols = (db.prepare('PRAGMA table_info(actresses)').all() as { name: string }[]).map(
+        (c) => c.name
+      )
+      assert.deepEqual(
+        cols.filter((name) => name === 'avatar_source_path' || name === 'avatar_crop_json'),
+        ['avatar_source_path', 'avatar_crop_json']
+      )
     } finally {
       db.close()
     }

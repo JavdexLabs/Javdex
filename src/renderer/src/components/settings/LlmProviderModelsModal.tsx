@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
-import { Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
+import { Plus, RefreshCw, SearchX, Sparkles, Trash2 } from 'lucide-react'
 import Modal from '../Modal'
 import IconButton from '../IconButton'
 import { UI_ICON_COMPACT } from '../iconDefaults'
 import { useToast } from '../Toast'
+import EmptyState from '../EmptyState'
 import { api } from '../../api'
 import {
   getLlmModelKindLabel,
@@ -196,7 +197,14 @@ export default function LlmProviderModelsModal({
                 </div>
               )
             })}
-          {filtered.length === 0 && <div className="settings-empty-panel">没有匹配的模型</div>}
+          {filtered.length === 0 && (
+            <EmptyState
+              variant="modal"
+              icon={<SearchX {...UI_ICON_COMPACT} aria-hidden />}
+              title="没有匹配的模型"
+              description="调整搜索关键词，或在下方添加自定义模型。"
+            />
+          )}
         </div>
 
         <div className="llm-models-add">

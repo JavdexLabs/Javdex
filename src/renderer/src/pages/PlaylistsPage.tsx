@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useMatch, useNavigate, useSearchParams } from 'react-router-dom'
+import { ListVideo, SearchX } from 'lucide-react'
 import type { PlaylistCreateInput, PlaylistListItem } from '@shared/types'
 import { api, assetUrl } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
@@ -11,8 +12,10 @@ import { useToast } from '../components/Toast'
 import PlaylistCreateModal from '../components/PlaylistCreateModal'
 import ListToolbar from '../components/ListToolbar'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
-import ScrollToTopButton from '../components/ScrollToTopButton'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
+import EmptyState from '../components/EmptyState'
+import ListSurface from '../components/ListSurface'
+import { UI_ICON_SM } from '../components/iconDefaults'
 
 function playlistListCover(item: PlaylistListItem): string | null {
   return assetUrl(item.preview_cover_path)
@@ -101,26 +104,24 @@ export default function PlaylistsPage(): JSX.Element {
 
   const renderList = (): JSX.Element => {
     if (loading) {
-      return (
-        <div className="empty-state">
-          <div className="spinner" />
-        </div>
-      )
+      return <EmptyState loading />
     }
     if (items.length === 0) {
       return (
-        <div className="empty-state">
-          <div className="big">▦</div>
-          <div>暂无清单。</div>
-        </div>
+        <EmptyState
+          icon={<ListVideo {...UI_ICON_SM} aria-hidden />}
+          title="暂无清单"
+          description="创建清单后，可以把影片按主题或待看计划归档。"
+        />
       )
     }
     if (filteredItems.length === 0) {
       return (
-        <div className="empty-state">
-          <div className="big">▦</div>
-          <div>没有匹配的清单。</div>
-        </div>
+        <EmptyState
+          icon={<SearchX {...UI_ICON_SM} aria-hidden />}
+          title="没有匹配的清单"
+          description="调整搜索关键词后再试。"
+        />
       )
     }
     return (
@@ -181,12 +182,14 @@ export default function PlaylistsPage(): JSX.Element {
         />
       </div>
 
-      <div className="list-scroll-region">
-        <div ref={scrollRef} className="scroll-body scroll-body--scroll">
-          <div className="scroll-body-inner">{renderList()}</div>
-        </div>
-        <ScrollToTopButton visible={showScrollToTop} onClick={scrollToTop} />
-      </div>
+      <ListSurface
+        variant="scroll"
+        scrollRef={scrollRef}
+        showScrollToTop={showScrollToTop}
+        onScrollToTop={scrollToTop}
+      >
+        {renderList()}
+      </ListSurface>
 
       {showCreate && (
         <PlaylistCreateModal onCancel={() => setShowCreate(false)} onCreate={createPlaylist} />

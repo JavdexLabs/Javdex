@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMatch, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { SearchX, Users } from 'lucide-react'
 import { ACTRESS_LIST_DEFAULTS, type ActressListItem, type ActressListSortBy } from '@shared/types'
 import { api, assetUrl } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
-import ScrollToTopButton from '../components/ScrollToTopButton'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useToast } from '../components/Toast'
 import ConfirmModal from '../components/ConfirmModal'
@@ -21,7 +21,8 @@ import {
   patchSearchParams
 } from '../listView/listQueryParams'
 import { navigateToActressDetail } from '../listView/listNavigation'
-import { ROUTE_MATCH } from '../listView/routePaths'
+import { forgetPrimaryListLocation } from '../listView/primaryNavigationMemory'
+import { ROUTE_MATCH, ROUTE_PATH } from '../listView/routePaths'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { invalidateActressLibraryQueries } from '../query/invalidateLibraryQueries'
@@ -32,6 +33,9 @@ import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
 import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
 import ListMaintenanceBanner from '../components/ListMaintenanceBanner'
+import EmptyState from '../components/EmptyState'
+import ListSurface from '../components/ListSurface'
+import { UI_ICON_SM } from '../components/iconDefaults'
 import { startDefaultUnscrapedActressBatch } from '../utils/defaultBatchScrape'
 import {
   dismissMaintenanceHint,
@@ -176,6 +180,7 @@ export default function ActressesPage(): JSX.Element {
     sortBy !== ACTRESS_LIST_DEFAULTS.sortBy || sortDir !== ACTRESS_LIST_DEFAULTS.sortDir
   const hasAppliedFilters = genderFilter !== ACTRESS_LIST_DEFAULTS.gender || hasNonDefaultSort
   const resetFilters = (): void => {
+    forgetPrimaryListLocation(ROUTE_PATH.actresses)
     patchParams({
       [LIST_PARAM.gender]: null,
       [LIST_PARAM.sort]: null,
@@ -201,6 +206,7 @@ export default function ActressesPage(): JSX.Element {
         })
     })
   }
+  const emptyDueToFilter = Boolean(debouncedQ.trim()) || hasAppliedFilters
 
   return (
     <div className="list-page">
@@ -293,18 +299,30 @@ export default function ActressesPage(): JSX.Element {
         ) : null}
       </div>
 
-      <div className="list-scroll-region">
-        <div ref={scrollRef} className="scroll-body scroll-body--scroll">
-        <div className="scroll-body-inner">
+      <ListSurface
+        variant="scroll"
+        scrollRef={scrollRef}
+        showScrollToTop={showScrollToTop}
+        onScrollToTop={scrollToTop}
+      >
           {loading ? (
-            <div className="empty-state">
-              <div className="spinner" />
-            </div>
+            <EmptyState loading variant="page" />
           ) : items.length === 0 ? (
-            <div className="empty-state">
-              <div className="big">☻</div>
-              <div>暂无演员数据，刮削影片后将自动归纳演员。</div>
-            </div>
+            <EmptyState
+              icon={
+                emptyDueToFilter ? (
+                  <SearchX {...UI_ICON_SM} aria-hidden />
+                ) : (
+                  <Users {...UI_ICON_SM} aria-hidden />
+                )
+              }
+              title={emptyDueToFilter ? '没有匹配的演员' : '暂无演员数据'}
+              description={
+                emptyDueToFilter
+                  ? '调整搜索、性别或排序条件后再试。'
+                  : '刮削影片后将自动归纳演员。'
+              }
+            />
           ) : (
             <div className="actress-grid">
               {items.map((a) => {
@@ -332,10 +350,7 @@ export default function ActressesPage(): JSX.Element {
               })}
             </div>
           )}
-        </div>
-        </div>
-        <ScrollToTopButton visible={showScrollToTop} onClick={scrollToTop} />
-      </div>
+      </ListSurface>
 
       {pendingDelete && (
         <ConfirmModal

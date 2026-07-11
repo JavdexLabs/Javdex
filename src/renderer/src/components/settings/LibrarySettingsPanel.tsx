@@ -5,6 +5,7 @@ import { UI_ICON_SM } from '../iconDefaults'
 import {
   SettingsCard,
   SettingsEmptyPanel,
+  SettingsNumberStepper,
   SettingsSectionBlock,
   SettingsStatusPill
 } from './SettingsPrimitives'
@@ -174,28 +175,22 @@ export default function LibrarySettingsPanel({
               )}
             </button>
 
-            <label className="library-scan-duration">
+            <div className="library-scan-duration">
               <span className="library-scan-duration-label">
                 <Clock {...UI_ICON_SM} aria-hidden />
                 最短时长
               </span>
-              <input
-                className="text-input library-scan-duration-input"
-                type="number"
+              <SettingsNumberStepper
+                aria-label="最短导入时长（分钟）"
+                value={minDuration}
                 min={0}
                 max={600}
                 step={1}
-                inputMode="numeric"
+                unit="分钟"
                 disabled={scanning}
-                value={minDuration}
-                onChange={(e) => {
-                  const parsed = Number(e.target.value)
-                  if (!Number.isFinite(parsed)) return
-                  onPatchSettings({ minScanImportDurationMinutes: parsed })
-                }}
+                onChange={(next) => onPatchSettings({ minScanImportDurationMinutes: next })}
               />
-              <span className="library-scan-duration-unit">分钟</span>
-            </label>
+            </div>
           </div>
 
           <div className="library-scan-message-row">

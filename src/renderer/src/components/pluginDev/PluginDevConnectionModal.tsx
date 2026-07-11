@@ -1,4 +1,5 @@
 import Modal from '../Modal'
+import { SettingsNumberStepper } from '../settings/SettingsPrimitives'
 
 export default function PluginDevConnectionModal({
   providerLabel,
@@ -46,45 +47,28 @@ export default function PluginDevConnectionModal({
         </div>
         <label className="plugin-edit-control">
           <span>最大步数</span>
-          <input
-            className="text-input"
-            type="number"
+          <SettingsNumberStepper
+            aria-label="最大步数"
+            value={maxSteps}
             min={0}
             max={500}
             step={1}
-            value={maxSteps}
             disabled={busy}
-            onChange={(e) => {
-              const raw = e.target.value
-              if (!raw.trim()) {
-                onMaxStepsChange(0)
-                return
-              }
-              const parsed = Number(raw)
-              onMaxStepsChange(Number.isFinite(parsed) ? Math.max(0, Math.min(500, Math.round(parsed))) : 0)
-            }}
+            onChange={onMaxStepsChange}
           />
           <span className="plugin-dev-connection-hint">0 表示无限制；建议调试时设为 25–50。</span>
         </label>
         <label className="plugin-edit-control">
           <span>最大上下文长度</span>
-          <input
-            className="text-input"
-            type="number"
+          <SettingsNumberStepper
+            aria-label="最大上下文长度（token）"
+            value={maxContextTokens}
             min={8000}
             max={512000}
             step={1000}
-            value={maxContextTokens}
+            unit="tok"
             disabled={busy}
-            onChange={(e) => {
-              const raw = e.target.value
-              if (!raw.trim()) {
-                onMaxContextTokensChange(128000)
-                return
-              }
-              const parsed = Number(raw)
-              onMaxContextTokensChange(Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 128000)
-            }}
+            onChange={onMaxContextTokensChange}
           />
           <span className="plugin-dev-connection-hint">
             按估算 token 控制发送给模型的输入上下文；默认 128000，超出后会自动裁剪旧消息。

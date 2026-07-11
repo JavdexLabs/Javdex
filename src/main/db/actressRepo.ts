@@ -1,4 +1,6 @@
 import type { Database as SqliteDatabase } from 'better-sqlite3'
+import fs from 'node:fs'
+import path from 'node:path'
 import { getDb } from './database'
 import type {
   Actress,
@@ -18,13 +20,22 @@ import type {
   ListSortDir
 } from '@shared/types'
 import { ALL_ACTRESS_SCRAPE_FIELDS, ACTRESS_BATCH_DEFAULT_MISSING_FIELDS } from '@shared/types'
+import {
+  createAvatarCropV1,
+  parseAvatarCrop,
+  type ActressAvatarCommit
+} from '@shared/avatarCrop'
 import { canMergeActressGenders } from '@shared/actressProfileOptions'
 import { normalizeCupSize } from '@shared/cupSizeUtils'
 import {
+  avatarSourceFingerprint,
   deleteAsset,
+  importAvatarDisplayFromBuffer,
   importAvatarFromFile,
-  importAvatarFromBuffer,
+  importAvatarSourceFromBuffer,
   isUsableImageAsset,
+  readAssetBytes,
+  readImageDimensionsFromBuffer,
   readImageDimensionsFromPath,
   readImageDimensionsFromRelPath
 } from '../services/assetService'
@@ -51,7 +62,7 @@ export function findActressByNameOrAlias(name: string): number | null {
 
 /**
  * Find an existing actress (by name/alias) or create a new one.
- * If found via alias, the avatar is only filled in when missing.
+ * Downloaded avatar paths are adopted into source+display+crop (fill-empty only).
  * Returns the main actress id. Must be called inside a transaction by the caller
  * when used as part of a larger unit of work.
  */
@@ -65,24 +76,57 @@ export function upsertActressFromScrape(
 
   const existingId = findActressByNameOrAlias(trimmed)
   if (existingId !== null) {
-    if (avatarRelPath) {
-      // Fill avatar only if not already set.
-      db.prepare(
-        `UPDATE actresses SET avatar_path = COALESCE(avatar_path, ?) WHERE id = ?`
-      ).run(avatarRelPath, existingId)
-    }
     if (gender) {
       db.prepare('UPDATE actresses SET gender = ? WHERE id = ?').run(gender, existingId)
+    }
+    if (avatarRelPath) {
+      adoptDownloadedAvatarIfMissing(existingId, avatarRelPath)
     }
     return existingId
   }
 
   const info = db
     .prepare('INSERT INTO actresses (main_name, avatar_path, gender) VALUES (?, ?, ?)')
-    .run(trimmed, avatarRelPath, gender ?? 'female')
+    .run(trimmed, null, gender ?? 'female')
   const id = Number(info.lastInsertRowid)
   upsertActressName(id, trimmed, 'main', null, null, 1)
+  if (avatarRelPath) {
+    adoptDownloadedAvatarIfMissing(id, avatarRelPath)
+  }
   return id
+}
+
+/**
+ * Promote a scraped download into the avatar bundle when the actress has no usable display avatar.
+ * Unused / failed downloads are deleted so temporary scrape files do not linger.
+ */
+function adoptDownloadedAvatarIfMissing(id: number, downloadedRelPath: string): void {
+  clearBrokenActressAvatarIfNeeded(id)
+  const db = getDb()
+  const actress = db
+    .prepare('SELECT main_name, avatar_path FROM actresses WHERE id = ?')
+    .get(id) as { main_name: string; avatar_path: string | null } | undefined
+  if (!actress) {
+    deleteAsset(downloadedRelPath)
+    return
+  }
+  if (!isBlankText(actress.avatar_path) && isUsableImageAsset(actress.avatar_path)) {
+    if (downloadedRelPath !== actress.avatar_path) deleteAsset(downloadedRelPath)
+    return
+  }
+  try {
+    const adopted = adoptDownloadedAvatarAsBundle(id, actress.main_name, downloadedRelPath)
+    db.prepare(
+      `UPDATE actresses SET
+         avatar_path = ?,
+         avatar_source_path = ?,
+         avatar_crop_json = ?,
+         updated_at = ?
+       WHERE id = ?`
+    ).run(adopted.displayPath, adopted.sourcePath, adopted.cropJson, nowIso(), id)
+  } catch {
+    deleteAsset(downloadedRelPath)
+  }
 }
 
 export function addAlias(actressId: number, aliasName: string): void {
@@ -226,22 +270,255 @@ function mergeBatchActressTargets(
   return merged.sort((a, b) => a.main_name.localeCompare(b.main_name, 'zh-Hans-CN'))
 }
 
-/** Clear avatar_path when the stored file is missing or not a readable image. */
+/** Clear broken avatar display/source files and related crop metadata. */
 export function clearBrokenActressAvatarIfNeeded(actressId: number): boolean {
   const db = getDb()
-  const row = db.prepare('SELECT avatar_path FROM actresses WHERE id = ?').get(actressId) as
-    | { avatar_path: string | null }
+  const row = db
+    .prepare(
+      'SELECT avatar_path, avatar_source_path, avatar_crop_json FROM actresses WHERE id = ?'
+    )
+    .get(actressId) as
+    | {
+        avatar_path: string | null
+        avatar_source_path: string | null
+        avatar_crop_json: string | null
+      }
     | undefined
-  if (!row || isBlankText(row.avatar_path) || isUsableImageAsset(row.avatar_path)) {
-    return false
+  if (!row) return false
+
+  const displayBroken =
+    !isBlankText(row.avatar_path) && !isUsableImageAsset(row.avatar_path)
+  const sourceBroken =
+    !isBlankText(row.avatar_source_path) && !isUsableImageAsset(row.avatar_source_path)
+  const cropOrphan = Boolean(row.avatar_crop_json) && isBlankText(row.avatar_source_path)
+
+  if (!displayBroken && !sourceBroken && !cropOrphan) return false
+
+  if (displayBroken && row.avatar_path) deleteAsset(row.avatar_path)
+  if (sourceBroken && row.avatar_source_path) deleteAsset(row.avatar_source_path)
+
+  db.prepare(
+    `UPDATE actresses SET
+       avatar_path = CASE WHEN @clear_display = 1 THEN NULL ELSE avatar_path END,
+       avatar_source_path = CASE WHEN @clear_source = 1 THEN NULL ELSE avatar_source_path END,
+       avatar_crop_json = CASE
+         WHEN @clear_source = 1 OR @clear_crop = 1 THEN NULL
+         ELSE avatar_crop_json
+       END,
+       updated_at = @updated_at
+     WHERE id = @id`
+  ).run({
+    id: actressId,
+    clear_display: displayBroken ? 1 : 0,
+    clear_source: sourceBroken ? 1 : 0,
+    clear_crop: sourceBroken || cropOrphan ? 1 : 0,
+    updated_at: nowIso()
+  })
+  return true
+}
+
+function readSourceBytesFromCommit(
+  commit: ActressAvatarCommit,
+  currentSourcePath: string | null
+): { bytes: Buffer; ext: string; fingerprint: string } | null {
+  const finish = (
+    bytes: Buffer,
+    ext: string
+  ): { bytes: Buffer; ext: string; fingerprint: string } => {
+    if (!readImageDimensionsFromBuffer(bytes)) {
+      throw new Error('头像原图无效')
+    }
+    return { bytes, ext, fingerprint: avatarSourceFingerprint(bytes) }
   }
 
-  deleteAsset(row.avatar_path)
-  db.prepare('UPDATE actresses SET avatar_path = NULL, updated_at = ? WHERE id = ?').run(
-    nowIso(),
-    actressId
+  if (commit.sourceImageBase64) {
+    const bytes = Buffer.from(commit.sourceImageBase64, 'base64')
+    return finish(bytes, '.jpg')
+  }
+  if (commit.sourceLocalPath) {
+    if (!fs.existsSync(commit.sourceLocalPath)) throw new Error('头像原图文件不存在')
+    const bytes = fs.readFileSync(commit.sourceLocalPath)
+    const ext = path.extname(commit.sourceLocalPath).toLowerCase() || '.jpg'
+    return finish(bytes, ext)
+  }
+  if (commit.sourceAssetPath) {
+    const bytes = readAssetBytes(commit.sourceAssetPath)
+    const ext = path.extname(commit.sourceAssetPath).toLowerCase() || '.jpg'
+    return finish(bytes, ext)
+  }
+  if (currentSourcePath && isUsableImageAsset(currentSourcePath)) {
+    const bytes = readAssetBytes(currentSourcePath)
+    return finish(bytes, path.extname(currentSourcePath).toLowerCase() || '.jpg')
+  }
+  return null
+}
+
+/**
+ * Persist avatar source + display + crop as one bundle.
+ * Fine-tuning keeps source; changing source replaces the whole bundle.
+ */
+export function setActressAvatarBundle(
+  id: number,
+  mainName: string,
+  commit: ActressAvatarCommit
+): void {
+  const db = getDb()
+  const actress = db
+    .prepare(
+      'SELECT avatar_path, avatar_source_path, avatar_crop_json FROM actresses WHERE id = ?'
+    )
+    .get(id) as
+    | {
+        avatar_path: string | null
+        avatar_source_path: string | null
+        avatar_crop_json: string | null
+      }
+    | undefined
+  if (!actress) throw new Error('演员不存在')
+
+  const displayBytes = Buffer.from(commit.displayImageBase64, 'base64')
+  if (!readImageDimensionsFromBuffer(displayBytes)) throw new Error('头像展示图无效')
+
+  const changingSource = Boolean(
+    commit.sourceImageBase64 || commit.sourceLocalPath || commit.sourceAssetPath
   )
-  return true
+  const sourceInfo = readSourceBytesFromCommit(commit, actress.avatar_source_path)
+  if (!sourceInfo) {
+    throw new Error('缺少头像原图，请重新选择图片后再裁剪保存')
+  }
+
+  const crop = parseAvatarCrop(JSON.stringify(commit.crop), sourceInfo.fingerprint)
+  if (!crop) throw new Error('头像裁剪参数无效')
+  if (crop.sourceFingerprint !== sourceInfo.fingerprint) {
+    throw new Error('头像裁剪参数与原图不匹配')
+  }
+
+  let nextSourcePath = actress.avatar_source_path
+  if (changingSource || !actress.avatar_source_path) {
+    nextSourcePath = importAvatarSourceFromBuffer(
+      mainName,
+      id,
+      sourceInfo.bytes,
+      sourceInfo.ext
+    ).relPath
+  } else {
+    const currentFp = avatarSourceFingerprint(readAssetBytes(actress.avatar_source_path))
+    if (currentFp !== sourceInfo.fingerprint) {
+      nextSourcePath = importAvatarSourceFromBuffer(
+        mainName,
+        id,
+        sourceInfo.bytes,
+        sourceInfo.ext
+      ).relPath
+    }
+  }
+
+  const nextDisplayPath = importAvatarDisplayFromBuffer(mainName, id, displayBytes)
+  const cropJson = JSON.stringify(
+    createAvatarCropV1({
+      sourceFingerprint: sourceInfo.fingerprint,
+      zoom: crop.zoom,
+      offsetX: crop.offsetX,
+      offsetY: crop.offsetY,
+      viewSize: crop.viewSize,
+      outputSize: crop.outputSize
+    })
+  )
+
+  const oldDisplay = actress.avatar_path
+  const oldSource = actress.avatar_source_path
+
+  db.prepare(
+    `UPDATE actresses SET
+       avatar_path = ?,
+       avatar_source_path = ?,
+       avatar_crop_json = ?,
+       updated_at = ?
+     WHERE id = ?`
+  ).run(nextDisplayPath, nextSourcePath, cropJson, nowIso(), id)
+
+  if (oldDisplay && oldDisplay !== nextDisplayPath) deleteAsset(oldDisplay)
+  if (oldSource && oldSource !== nextSourcePath) deleteAsset(oldSource)
+}
+
+function clearActressAvatarBundle(id: number): void {
+  const db = getDb()
+  const actress = db
+    .prepare('SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?')
+    .get(id) as { avatar_path: string | null; avatar_source_path: string | null } | undefined
+  if (!actress) throw new Error('演员不存在')
+  deleteAsset(actress.avatar_path)
+  deleteAsset(actress.avatar_source_path)
+  db.prepare(
+    `UPDATE actresses SET
+       avatar_path = NULL,
+       avatar_source_path = NULL,
+       avatar_crop_json = NULL,
+       updated_at = ?
+     WHERE id = ?`
+  ).run(nowIso(), id)
+}
+
+/** Promote a downloaded avatar into source+display+default-crop. */
+export function adoptDownloadedAvatarAsBundle(
+  id: number,
+  mainName: string,
+  downloadedRelPath: string
+): { displayPath: string; sourcePath: string; cropJson: string } {
+  const bytes = readAssetBytes(downloadedRelPath)
+  if (!readImageDimensionsFromBuffer(bytes)) {
+    deleteAsset(downloadedRelPath)
+    throw new Error('下载的头像不是有效图片')
+  }
+  const fingerprint = avatarSourceFingerprint(bytes)
+  const ext = path.extname(downloadedRelPath).toLowerCase() || '.jpg'
+  const source = importAvatarSourceFromBuffer(mainName, id, bytes, ext)
+  const displayPath = importAvatarDisplayFromBuffer(mainName, id, bytes)
+  const cropJson = JSON.stringify(
+    createAvatarCropV1({
+      sourceFingerprint: fingerprint,
+      zoom: 1,
+      offsetX: 0,
+      offsetY: 0
+    })
+  )
+  if (downloadedRelPath !== source.relPath && downloadedRelPath !== displayPath) {
+    deleteAsset(downloadedRelPath)
+  }
+  return { displayPath, sourcePath: source.relPath, cropJson }
+}
+
+/**
+ * True when the scrape download is the same image already stored as this actress's
+ * avatar source (or legacy display when no source exists). Used to keep manual crops.
+ */
+function downloadedAvatarMatchesExistingSource(
+  actress: { avatar_path: string | null; avatar_source_path: string | null },
+  downloadedRelPath: string
+): boolean {
+  if (!isUsableImageAsset(downloadedRelPath)) return false
+  let downloadedFp: string
+  try {
+    downloadedFp = avatarSourceFingerprint(readAssetBytes(downloadedRelPath))
+  } catch {
+    return false
+  }
+  if (actress.avatar_source_path && isUsableImageAsset(actress.avatar_source_path)) {
+    try {
+      return avatarSourceFingerprint(readAssetBytes(actress.avatar_source_path)) === downloadedFp
+    } catch {
+      return false
+    }
+  }
+  // Legacy rows without a source: only skip when display bytes are identical (uncropped).
+  if (actress.avatar_path && isUsableImageAsset(actress.avatar_path)) {
+    try {
+      return avatarSourceFingerprint(readAssetBytes(actress.avatar_path)) === downloadedFp
+    } catch {
+      return false
+    }
+  }
+  return false
 }
 
 export function listActressesForBatchScrape(
@@ -555,6 +832,8 @@ export function mergeActresses(
   }
 
   const mergeAvatarPath = merge.avatar_path
+  const mergeAvatarSourcePath = merge.avatar_source_path
+  const keepHadAvatar = !isBlankText(keep.avatar_path)
 
   const txn = db.transaction(() => {
     db.prepare(
@@ -605,7 +884,18 @@ export function mergeActresses(
          zodiac = COALESCE(NULLIF(trim(zodiac), ''), NULLIF(trim(@zodiac), '')),
          nationality = COALESCE(NULLIF(trim(nationality), ''), NULLIF(trim(@nationality), '')),
          profile_summary = COALESCE(NULLIF(trim(profile_summary), ''), NULLIF(trim(@profile_summary), '')),
-         avatar_path = COALESCE(NULLIF(trim(avatar_path), ''), NULLIF(trim(@avatar_path), '')),
+         avatar_path = CASE
+           WHEN avatar_path IS NULL OR trim(avatar_path) = '' THEN @avatar_path
+           ELSE avatar_path
+         END,
+         avatar_source_path = CASE
+           WHEN @keep_had_avatar = 0 THEN @avatar_source_path
+           ELSE avatar_source_path
+         END,
+         avatar_crop_json = CASE
+           WHEN @keep_had_avatar = 0 THEN @avatar_crop_json
+           ELSE avatar_crop_json
+         END,
          gender = COALESCE(gender, @gender),
          last_scraped_at = CASE
            WHEN last_scraped_at IS NULL THEN @last_scraped_at
@@ -629,6 +919,9 @@ export function mergeActresses(
       nationality: merge.nationality,
       profile_summary: merge.profile_summary,
       avatar_path: merge.avatar_path,
+      avatar_source_path: merge.avatar_source_path,
+      avatar_crop_json: merge.avatar_crop_json,
+      keep_had_avatar: keepHadAvatar ? 1 : 0,
       gender: merge.gender,
       last_scraped_at: merge.last_scraped_at,
       updated_at: nowIso()
@@ -661,8 +954,9 @@ export function mergeActresses(
 
   replaceActressAliases(keepId, Array.from(aliasCandidates), finalMain)
 
-  if (mergeAvatarPath && mergeAvatarPath !== keptAvatar) {
-    deleteAsset(mergeAvatarPath)
+  if (keepHadAvatar) {
+    if (mergeAvatarPath && mergeAvatarPath !== keptAvatar) deleteAsset(mergeAvatarPath)
+    if (mergeAvatarSourcePath) deleteAsset(mergeAvatarSourcePath)
   }
 }
 
@@ -672,13 +966,14 @@ export function mergeActresses(
  */
 export function clearActressMetadataRecord(id: number): void {
   const db = getDb()
-  const actress = db.prepare('SELECT avatar_path FROM actresses WHERE id = ?').get(id) as
-    | { avatar_path: string | null }
-    | undefined
+  const actress = db
+    .prepare('SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?')
+    .get(id) as { avatar_path: string | null; avatar_source_path: string | null } | undefined
   if (!actress) throw new Error('演员不存在')
 
   deleteActressGalleryAssets(id)
   deleteAsset(actress.avatar_path)
+  deleteAsset(actress.avatar_source_path)
 
   const txn = db.transaction(() => {
     db.prepare(
@@ -686,7 +981,8 @@ export function clearActressMetadataRecord(id: number): void {
          birth_date = NULL, debut_date = NULL, height_cm = NULL,
          bust_cm = NULL, waist_cm = NULL, hip_cm = NULL, cup_size = NULL,
          blood_type = NULL, zodiac = NULL, nationality = NULL,
-         profile_summary = NULL, avatar_path = NULL, poster_path = NULL,
+         profile_summary = NULL, avatar_path = NULL, avatar_source_path = NULL,
+         avatar_crop_json = NULL, poster_path = NULL,
          last_scraped_at = NULL, updated_at = ?
        WHERE id = ?`
     ).run(nowIso(), id)
@@ -703,14 +999,15 @@ export function deleteActress(id: number): void {
     .get(id) as { c: number }
   if (count.c > 0) throw new Error('仍有影片关联，无法删除')
 
-  const actress = db.prepare('SELECT avatar_path FROM actresses WHERE id = ?').get(id) as
-    | { avatar_path: string | null }
-    | undefined
+  const actress = db
+    .prepare('SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?')
+    .get(id) as { avatar_path: string | null; avatar_source_path: string | null } | undefined
   if (!actress) throw new Error('演员不存在')
 
   deleteActressGalleryAssets(id)
   db.prepare('DELETE FROM actresses WHERE id = ?').run(id)
   deleteAsset(actress.avatar_path)
+  deleteAsset(actress.avatar_source_path)
 }
 
 function isActressNameAvailable(name: string, exceptId: number): boolean {
@@ -759,8 +1056,10 @@ function replaceActressAliases(
 /** Manually edit actress profile fields. Aliases fully replace when supplied. */
 export function editActress(id: number, input: ActressEditInput): void {
   const db = getDb()
-  const actress = db.prepare('SELECT main_name, avatar_path FROM actresses WHERE id = ?').get(id) as
-    | { main_name: string; avatar_path: string | null }
+  const actress = db
+    .prepare('SELECT main_name, avatar_path, avatar_source_path FROM actresses WHERE id = ?')
+    .get(id) as
+    | { main_name: string; avatar_path: string | null; avatar_source_path: string | null }
     | undefined
   if (!actress) throw new Error('演员不存在')
 
@@ -826,29 +1125,67 @@ export function editActress(id: number, input: ActressEditInput): void {
     }
     if (input.aliases) replaceActressAliases(id, input.aliases, mainName)
 
-    if (input.avatarImageBase64) {
-      const avatarPath = importAvatarFromBuffer(
-        mainName,
-        Buffer.from(input.avatarImageBase64, 'base64')
+    if (input.clearAvatar) {
+      clearActressAvatarBundle(id)
+    } else if (input.avatar) {
+      setActressAvatarBundle(id, mainName, input.avatar)
+    } else if (input.avatarImageBase64) {
+      const bytes = Buffer.from(input.avatarImageBase64, 'base64')
+      if (!readImageDimensionsFromBuffer(bytes)) throw new Error('头像图片无效')
+      const source = importAvatarSourceFromBuffer(mainName, id, bytes, '.jpg')
+      const displayPath = importAvatarDisplayFromBuffer(mainName, id, bytes)
+      const cropJson = JSON.stringify(
+        createAvatarCropV1({
+          sourceFingerprint: source.fingerprint,
+          zoom: 1,
+          offsetX: 0,
+          offsetY: 0
+        })
       )
-      if (actress.avatar_path && actress.avatar_path !== avatarPath) {
-        deleteAsset(actress.avatar_path)
-      }
-      db.prepare('UPDATE actresses SET avatar_path = ?, updated_at = ? WHERE id = ?').run(
-        avatarPath,
-        nowIso(),
-        id
-      )
+      const oldDisplay = actress.avatar_path
+      const oldSource = actress.avatar_source_path
+      db.prepare(
+        `UPDATE actresses SET
+           avatar_path = ?,
+           avatar_source_path = ?,
+           avatar_crop_json = ?,
+           updated_at = ?
+         WHERE id = ?`
+      ).run(displayPath, source.relPath, cropJson, nowIso(), id)
+      if (oldDisplay && oldDisplay !== displayPath) deleteAsset(oldDisplay)
+      if (oldSource && oldSource !== source.relPath) deleteAsset(oldSource)
     } else if (input.avatarSourcePath) {
-      const avatarPath = importAvatarFromFile(mainName, input.avatarSourcePath)
-      if (actress.avatar_path && actress.avatar_path !== avatarPath) {
-        deleteAsset(actress.avatar_path)
-      }
-      db.prepare('UPDATE actresses SET avatar_path = ?, updated_at = ? WHERE id = ?').run(
-        avatarPath,
-        nowIso(),
-        id
+      const imported = importAvatarFromFile(mainName, input.avatarSourcePath, id)
+      const bytes = readAssetBytes(imported)
+      if (!readImageDimensionsFromBuffer(bytes)) throw new Error('头像图片无效')
+      const source = importAvatarSourceFromBuffer(
+        mainName,
+        id,
+        bytes,
+        path.extname(imported).toLowerCase() || '.jpg'
       )
+      const displayPath = importAvatarDisplayFromBuffer(mainName, id, bytes)
+      const cropJson = JSON.stringify(
+        createAvatarCropV1({
+          sourceFingerprint: source.fingerprint,
+          zoom: 1,
+          offsetX: 0,
+          offsetY: 0
+        })
+      )
+      const oldDisplay = actress.avatar_path
+      const oldSource = actress.avatar_source_path
+      db.prepare(
+        `UPDATE actresses SET
+           avatar_path = ?,
+           avatar_source_path = ?,
+           avatar_crop_json = ?,
+           updated_at = ?
+         WHERE id = ?`
+      ).run(displayPath, source.relPath, cropJson, nowIso(), id)
+      if (oldDisplay && oldDisplay !== displayPath) deleteAsset(oldDisplay)
+      if (oldSource && oldSource !== source.relPath) deleteAsset(oldSource)
+      if (imported !== displayPath && imported !== source.relPath) deleteAsset(imported)
     }
   })
   txn()
@@ -974,13 +1311,50 @@ export function applyActressScrapeResult(
   const warnings: string[] = []
   const scrapedAt = nowIso()
   const actress = db
-    .prepare('SELECT main_name, avatar_path FROM actresses WHERE id = ?')
-    .get(actressId) as { main_name: string; avatar_path: string | null } | undefined
+    .prepare(
+      'SELECT main_name, avatar_path, avatar_source_path FROM actresses WHERE id = ?'
+    )
+    .get(actressId) as
+    | { main_name: string; avatar_path: string | null; avatar_source_path: string | null }
+    | undefined
   if (!actress) throw new Error('演员不存在')
   const preserveExistingDb = mode === 'fillEmpty'
   const preserveNullScrape = mode !== 'replace'
   if (preserveExistingDb && selected.has('avatar')) {
     clearBrokenActressAvatarIfNeeded(actressId)
+  }
+
+  let adoptedAvatar:
+    | { displayPath: string; sourcePath: string; cropJson: string }
+    | null = null
+  if (selected.has('avatar') && avatarRelPath) {
+    const shouldAdopt =
+      !preserveExistingDb ||
+      isBlankText(actress.avatar_path) ||
+      !isUsableImageAsset(actress.avatar_path)
+    if (shouldAdopt) {
+      // Same source image again: keep manual crop / display; only drop the temp download.
+      if (
+        isUsableImageAsset(actress.avatar_path) &&
+        downloadedAvatarMatchesExistingSource(actress, avatarRelPath)
+      ) {
+        if (avatarRelPath !== actress.avatar_path && avatarRelPath !== actress.avatar_source_path) {
+          deleteAsset(avatarRelPath)
+        }
+      } else {
+        try {
+          adoptedAvatar = adoptDownloadedAvatarAsBundle(
+            actressId,
+            actress.main_name,
+            avatarRelPath
+          )
+        } catch (err) {
+          warnings.push(`头像未应用：${(err as Error).message}`)
+        }
+      }
+    } else if (avatarRelPath !== actress.avatar_path && avatarRelPath !== actress.avatar_source_path) {
+      deleteAsset(avatarRelPath)
+    }
   }
 
   const txn = db.transaction(() => {
@@ -1040,13 +1414,25 @@ export function applyActressScrapeResult(
     if (selected.has('profileSummary')) {
       setText('profile_summary', 'profile_summary', result.profileSummary?.trim() || null)
     }
-    if (selected.has('avatar') && avatarRelPath) {
+    if (selected.has('avatar') && adoptedAvatar) {
       updates.push(
         preserveExistingDb
           ? `avatar_path = CASE WHEN avatar_path IS NULL OR trim(avatar_path) = '' THEN @avatar_path ELSE avatar_path END`
           : 'avatar_path = @avatar_path'
       )
-      bind.avatar_path = avatarRelPath
+      updates.push(
+        preserveExistingDb
+          ? `avatar_source_path = CASE WHEN avatar_path IS NULL OR trim(avatar_path) = '' THEN @avatar_source_path ELSE avatar_source_path END`
+          : 'avatar_source_path = @avatar_source_path'
+      )
+      updates.push(
+        preserveExistingDb
+          ? `avatar_crop_json = CASE WHEN avatar_path IS NULL OR trim(avatar_path) = '' THEN @avatar_crop_json ELSE avatar_crop_json END`
+          : 'avatar_crop_json = @avatar_crop_json'
+      )
+      bind.avatar_path = adoptedAvatar.displayPath
+      bind.avatar_source_path = adoptedAvatar.sourcePath
+      bind.avatar_crop_json = adoptedAvatar.cropJson
     }
     if (selected.has('nameZh') && result.nameZh !== undefined) {
       const zh = result.nameZh?.trim() || null
@@ -1096,13 +1482,16 @@ export function applyActressScrapeResult(
     }
   }
 
-  if (
-    selected.has('avatar') &&
-    avatarRelPath &&
-    actress.avatar_path &&
-    actress.avatar_path !== avatarRelPath
-  ) {
-    deleteAsset(actress.avatar_path)
+  if (selected.has('avatar') && adoptedAvatar) {
+    if (actress.avatar_path && actress.avatar_path !== adoptedAvatar.displayPath) {
+      deleteAsset(actress.avatar_path)
+    }
+    if (
+      actress.avatar_source_path &&
+      actress.avatar_source_path !== adoptedAvatar.sourcePath
+    ) {
+      deleteAsset(actress.avatar_source_path)
+    }
   }
 
   return { applied: true, warnings }
@@ -1134,11 +1523,13 @@ function normalizeActressNameKey(name: string): string {
 
 function removeMergedActressRecord(id: number): void {
   const db = getDb()
-  const actress = db.prepare('SELECT avatar_path FROM actresses WHERE id = ?').get(id) as
-    | { avatar_path: string | null }
-    | undefined
+  const actress = db
+    .prepare('SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?')
+    .get(id) as { avatar_path: string | null; avatar_source_path: string | null } | undefined
   if (!actress) throw new Error('演员不存在')
   db.prepare('DELETE FROM actresses WHERE id = ?').run(id)
+  // Avatar files for the merged row are deleted by mergeActresses after adoption checks.
+  void actress
 }
 
 function deleteActressGalleryAssets(actressId: number): void {

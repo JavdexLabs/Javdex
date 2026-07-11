@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
-import { Ellipsis, Pencil } from 'lucide-react'
+import { Inbox, Pencil, SearchX } from 'lucide-react'
 import type {
   PlaylistDetail,
   PlaylistUpdateInput,
@@ -17,10 +17,10 @@ import PlaylistCreateModal from '../components/PlaylistCreateModal'
 import PosterCard from '../components/PosterCard'
 import DetailScrollBody from '../components/DetailScrollBody'
 import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
-import IconButton from '../components/IconButton'
+import DetailActionBar from '../components/DetailActionBar'
+import EmptyState from '../components/EmptyState'
 import { UI_ICON } from '../components/iconDefaults'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
-import { useEscapeKey } from '../hooks/useEscapeKey'
 
 const PLAYLIST_VIDEO_SORT_OPTIONS: SortSwitchOption<PlaylistVideoSortBy>[] = [
   { value: 'added_at', label: '加入', title: '加入时间' },
@@ -48,30 +48,14 @@ export default function PlaylistDetailPage(): JSX.Element {
   const [removingVideoId, setRemovingVideoId] = useState<number | null>(null)
   const [videoSortBy, setVideoSortBy] = useState<PlaylistVideoSortBy>('added_at')
   const [videoSortDir, setVideoSortDir] = useState<PlaylistVideoSortDir>('desc')
-  const [moreOpen, setMoreOpen] = useState(false)
-  const moreActionsRef = useRef<HTMLDivElement>(null)
 
   const dismissOverlays = useCallback(() => {
     setShowEdit(false)
     setConfirmDelete(false)
     setVideoRemoveTarget(null)
-    setMoreOpen(false)
   }, [])
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
-
-  useEscapeKey(() => setMoreOpen(false), moreOpen)
-
-  useEffect(() => {
-    if (!moreOpen) return
-    const onPointerDown = (e: PointerEvent): void => {
-      if (!moreActionsRef.current?.contains(e.target as Node)) {
-        setMoreOpen(false)
-      }
-    }
-    window.addEventListener('pointerdown', onPointerDown)
-    return () => window.removeEventListener('pointerdown', onPointerDown)
-  }, [moreOpen])
 
   const loadDetail = useCallback(async (): Promise<void> => {
     if (Number.isNaN(playlistId)) return
@@ -144,9 +128,7 @@ export default function PlaylistDetailPage(): JSX.Element {
   if (loading && !detail) {
     return (
       <div className={`detail-pane${videoStackOpen ? ' detail-pane--stacked' : ''}`}>
-        <div className="empty-state">
-          <div className="spinner" />
-        </div>
+        <EmptyState loading />
         {videoOverlay}
       </div>
     )
@@ -156,9 +138,11 @@ export default function PlaylistDetailPage(): JSX.Element {
     return (
       <div className={`detail-pane${videoStackOpen ? ' detail-pane--stacked' : ''}`}>
         <DetailScrollBody onBack={() => navigateToPlaylistList(navigate, location)}>
-          <div className="empty-state">
-            <div>未找到该清单</div>
-          </div>
+          <EmptyState
+            icon={<SearchX {...UI_ICON} aria-hidden />}
+            title="未找到该清单"
+            description="该播放清单可能已被删除。"
+          />
         </DetailScrollBody>
         {videoOverlay}
       </div>
@@ -188,43 +172,26 @@ export default function PlaylistDetailPage(): JSX.Element {
                 )}
               </div>
               <div className="playlist-detail-actions">
-                <div
-                  className="detail-action-group detail-action-group--icons"
-                  role="group"
-                  aria-label="清单操作"
-                >
-                  <IconButton
-                    className="detail-icon-action"
-                    icon={<Pencil {...UI_ICON} />}
-                    label="编辑"
-                    onClick={() => setShowEdit(true)}
-                  />
-                </div>
-                <div className="detail-more-actions" ref={moreActionsRef}>
-                  <IconButton
-                    className="detail-icon-action"
-                    icon={<Ellipsis {...UI_ICON} />}
-                    label="更多"
-                    aria-haspopup="menu"
-                    aria-expanded={moreOpen}
-                    onClick={() => setMoreOpen((open) => !open)}
-                  />
-                  {moreOpen && (
-                    <div className="detail-more-menu" role="menu">
-                      <button
-                        type="button"
-                        className="detail-menu-item detail-menu-item--danger"
-                        role="menuitem"
-                        onClick={() => {
-                          setMoreOpen(false)
-                          setConfirmDelete(true)
-                        }}
-                      >
-                        删除播放清单
-                      </button>
-                    </div>
-                  )}
-                </div>
+                <DetailActionBar
+                  ariaLabel="清单操作"
+                  variant="inline"
+                  actions={[
+                    {
+                      key: 'edit',
+                      icon: <Pencil {...UI_ICON} />,
+                      label: '编辑',
+                      onClick: () => setShowEdit(true)
+                    }
+                  ]}
+                  menuItems={[
+                    {
+                      key: 'delete',
+                      label: '删除播放清单',
+                      danger: true,
+                      onClick: () => setConfirmDelete(true)
+                    }
+                  ]}
+                />
               </div>
             </div>
 
@@ -247,9 +214,12 @@ export default function PlaylistDetailPage(): JSX.Element {
             </div>
 
             {detail.videos.length === 0 ? (
-              <div className="empty-state empty-state--compact">
-                <div>清单内暂无影片。可在影片详情页通过「加入清单」添加。</div>
-              </div>
+              <EmptyState
+                variant="compact"
+                icon={<Inbox {...UI_ICON} aria-hidden />}
+                title="清单内暂无影片"
+                description="可在影片详情页通过「加入清单」添加。"
+              />
             ) : (
               <div className="playlist-video-grid">
                 {detail.videos.map((video) => (

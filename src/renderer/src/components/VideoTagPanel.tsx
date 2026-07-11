@@ -4,9 +4,10 @@ import { api } from '../api'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import Modal from './Modal'
 import { useToast } from './Toast'
-import { Plus, X } from 'lucide-react'
+import { Plus, SearchX, Tags, X } from 'lucide-react'
 import IconButton from './IconButton'
 import { UI_ICON, UI_ICON_SM } from './iconDefaults'
+import EmptyState from './EmptyState'
 
 interface Props {
   videoId: number
@@ -199,9 +200,21 @@ export default function VideoTagPanel({
               </div>
               <div className="video-tag-add-modal-catalog-scroll">
                 {manualCatalog.length === 0 ? (
-                  <p className="video-tag-add-modal-empty">尚无已有标签，可在上方输入新名称。</p>
+                  <EmptyState
+                    variant="modal"
+                    className="video-tag-add-modal-empty"
+                    icon={<Tags {...UI_ICON_SM} aria-hidden />}
+                    title={'\u6682\u65e0\u5df2\u6709\u6807\u7b7e'}
+                    description={'\u53ef\u5728\u4e0a\u65b9\u8f93\u5165\u65b0\u540d\u79f0\u521b\u5efa\u6807\u7b7e\u3002'}
+                  />
                 ) : filteredManualCatalog.length === 0 ? (
-                  <p className="video-tag-add-modal-empty">没有匹配的标签。</p>
+                  <EmptyState
+                    variant="modal"
+                    className="video-tag-add-modal-empty"
+                    icon={<SearchX {...UI_ICON_SM} aria-hidden />}
+                    title={'\u6ca1\u6709\u5339\u914d\u7684\u6807\u7b7e'}
+                    description={'\u8c03\u6574\u5173\u952e\u8bcd\uff0c\u6216\u5728\u4e0a\u65b9\u76f4\u63a5\u521b\u5efa\u65b0\u6807\u7b7e\u3002'}
+                  />
                 ) : (
                   <div className="video-tag-add-modal-catalog-list">
                     {filteredManualCatalog.map((tag) => {

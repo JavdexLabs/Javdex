@@ -18,6 +18,12 @@ import { ThemeProvider } from './components/ThemeProvider'
 import { AppBackgroundProvider } from './components/AppBackgroundContext'
 import { ImagePreviewOverlayProvider } from './components/ImagePreviewOverlayContext'
 import { installDisableInputSpellcheck } from './installDisableInputSpellcheck'
+import { ROUTE_PATH, ROUTE_SEGMENT } from './listView/routePaths'
+import { SETTINGS_GROUPS, settingsPath } from './settings/settingsRoutes'
+import {
+  SettingsPluginDevOutlet,
+  SettingsSectionOutlet
+} from './settings/SettingsRouteOutlet'
 
 export default function App(): JSX.Element {
   useEffect(() => installDisableInputSpellcheck(), [])
@@ -32,38 +38,51 @@ export default function App(): JSX.Element {
             <Layout>
               <ResetListStateOnReload />
               <Routes>
-                <Route path="/" element={<LibraryShell />}>
+                <Route path={ROUTE_PATH.library} element={<LibraryShell />}>
                   <Route index element={null} />
-                  <Route path="detail/:id" element={<DetailPage />}>
-                    <Route path="actress/:actressId" element={<ActressDetailPage />} />
+                  <Route path={ROUTE_SEGMENT.libraryDetail} element={<DetailPage />}>
+                    <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
                   </Route>
                 </Route>
-                <Route path="/actresses" element={<ActressShell />}>
+                <Route path={ROUTE_PATH.actresses} element={<ActressShell />}>
                   <Route index element={null} />
-                  <Route path=":id" element={<ActressDetailPage />}>
-                    <Route path=":videoId" element={<DetailPage />}>
-                      <Route path="actress/:actressId" element={<ActressDetailPage />} />
+                  <Route path={ROUTE_SEGMENT.actressDetail} element={<ActressDetailPage />}>
+                    <Route path={ROUTE_SEGMENT.actressVideo} element={<DetailPage />}>
+                      <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
                     </Route>
                   </Route>
                 </Route>
-                <Route path="/playlists" element={<PlaylistShell />}>
+                <Route path={ROUTE_PATH.playlists} element={<PlaylistShell />}>
                   <Route index element={null} />
-                  <Route path=":playlistId" element={<PlaylistDetailPage />}>
-                    <Route path=":id" element={<DetailPage />}>
-                      <Route path="actress/:actressId" element={<ActressDetailPage />} />
+                  <Route path={ROUTE_SEGMENT.playlistDetail} element={<PlaylistDetailPage />}>
+                    <Route path={ROUTE_SEGMENT.playlistVideo} element={<DetailPage />}>
+                      <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
                     </Route>
                   </Route>
                 </Route>
-                <Route path="/facet/:type" element={<FacetShell />}>
+                <Route path={ROUTE_PATH.facetList} element={<FacetShell />}>
                   <Route index element={null} />
-                  <Route path="v/:valueKey" element={<FacetDetailPage />}>
-                    <Route path=":id" element={<DetailPage />}>
-                      <Route path="actress/:actressId" element={<ActressDetailPage />} />
+                  <Route path={ROUTE_SEGMENT.facetDetail} element={<FacetDetailPage />}>
+                    <Route path={ROUTE_SEGMENT.facetVideo} element={<DetailPage />}>
+                      <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
                     </Route>
                   </Route>
                 </Route>
-                <Route path="/settings/*" element={<SettingsPage />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
+                <Route path={ROUTE_PATH.settings} element={<SettingsPage />}>
+                  <Route index element={<Navigate to={settingsPath('overview')} replace />} />
+                  {SETTINGS_GROUPS.flatMap((group) =>
+                    group.tabs.map((tab) => (
+                      <Route
+                        key={`${group.id}:${tab.id}`}
+                        path={`${group.id}/${tab.id}`}
+                        element={<SettingsSectionOutlet />}
+                      />
+                    ))
+                  )}
+                  <Route path="plugin-dev" element={<SettingsPluginDevOutlet />} />
+                  <Route path="*" element={<Navigate to={settingsPath('overview')} replace />} />
+                </Route>
+                <Route path="*" element={<Navigate to={ROUTE_PATH.library} replace />} />
               </Routes>
             </Layout>
             </PluginDevLeaveGuardProvider>

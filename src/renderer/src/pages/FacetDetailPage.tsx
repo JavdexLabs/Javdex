@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Outlet, useLocation, useMatch, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Inbox, SearchX } from 'lucide-react'
 import type { VideoQuery } from '@shared/types'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api'
@@ -9,6 +10,9 @@ import Modal from '../components/Modal'
 import ListToolbar from '../components/ListToolbar'
 import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
 import VirtualPosterGrid from '../components/VirtualPosterGrid'
+import EmptyState from '../components/EmptyState'
+import ListSurface from '../components/ListSurface'
+import { UI_ICON_SM } from '../components/iconDefaults'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { FACET_LABEL, isFacetType } from '../facet'
 import {
@@ -112,9 +116,11 @@ export default function FacetDetailPage(): JSX.Element {
 
   if (!facetType || !value) {
     return (
-      <div className="empty-state">
-        <div>参数无效</div>
-      </div>
+      <EmptyState
+        icon={<SearchX {...UI_ICON_SM} aria-hidden />}
+        title="参数无效"
+        description="当前分类详情参数无法识别。"
+      />
     )
   }
 
@@ -166,14 +172,18 @@ export default function FacetDetailPage(): JSX.Element {
         />
       </div>
 
-      <div className="scroll-body scroll-body--fill">
+      <ListSurface variant="fill" withInner={false}>
         {loading ? (
-          <div className="scroll-body-inner empty-state">
-            <div className="spinner" />
+          <div className="scroll-body-inner">
+            <EmptyState loading />
           </div>
         ) : videos.length === 0 ? (
-          <div className="scroll-body-inner empty-state">
-            <div>暂无关联影片</div>
+          <div className="scroll-body-inner">
+            <EmptyState
+              icon={<Inbox {...UI_ICON_SM} aria-hidden />}
+              title="暂无关联影片"
+              description={`该${label}当前没有关联影片。`}
+            />
           </div>
         ) : (
           <VirtualPosterGrid
@@ -184,7 +194,7 @@ export default function FacetDetailPage(): JSX.Element {
             onLoadMore={loadMore}
           />
         )}
-      </div>
+      </ListSurface>
 
       {confirmDelete && (
         <Modal

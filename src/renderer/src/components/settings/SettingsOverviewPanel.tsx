@@ -2,13 +2,15 @@ import { useMemo, type ReactNode } from 'react'
 import {
   Brain,
   Bot,
+  Clapperboard,
   FolderOpen,
   Globe,
   HardDrive,
-  ListTodo,
   Palette,
   Play,
-  SlidersHorizontal
+  SlidersHorizontal,
+  SquareTerminal,
+  UserRound
 } from 'lucide-react'
 import type {
   AppSettings,
@@ -21,9 +23,12 @@ import {
   normalizeDefaultLlmSelection
 } from '@shared/llmProviders'
 import { UI_ICON_SM } from '../iconDefaults'
+import { useToast } from '../Toast'
 import { useLibraryOverviewStats } from '../../hooks/useLibraryOverviewStats'
 import type { SettingsGroup, SettingsTab } from '../../settings/settingsRoutes'
 import { batchStatusLabel, formatCompactPath } from '../../settings/settingsDisplay'
+import IconButton from '../IconButton'
+import BatchTaskControls, { type BatchControlHandler } from './BatchTaskControls'
 
 export type SettingsOverviewNotice = {
   tone: 'warning' | 'info'
@@ -43,6 +48,26 @@ type SettingsOverviewAgentTool = {
   icon: typeof Bot
 }
 
+function scrapeActionBlockReason(input: {
+  anyBatchActive: boolean
+  statsLoading: boolean
+  defaultScraper?: string | null
+  unscraped?: number
+  requireUnscraped?: boolean
+  requireDefaultScraper?: boolean
+  scopeLabel: string
+}): string | null {
+  if (input.statsLoading) return '统计加载中，请稍后再试'
+  if (input.anyBatchActive) return '已有批量任务在运行，请先完成或终止后再启动'
+  if (input.requireDefaultScraper && !input.defaultScraper) {
+    return `请先设置默认${input.scopeLabel}刮削插件`
+  }
+  if (input.requireUnscraped && (input.unscraped ?? 0) <= 0) {
+    return `当前没有未刮削的${input.scopeLabel}`
+  }
+  return null
+}
+
 const SETTINGS_OVERVIEW_AGENT_TOOLS: SettingsOverviewAgentTool[] = [
   {
     id: 'plugin-dev',
@@ -57,6 +82,8 @@ interface SettingsOverviewPanelProps {
   theme: ThemeId
   themeLabel: string
   notices: SettingsOverviewNotice[]
+  videoPluginCount: number
+  actressPluginCount: number
   videoBatch: BatchProgress | null
   actressBatch: BatchProgress | null
   anyBatchActive: boolean
@@ -71,6 +98,13 @@ interface SettingsOverviewPanelProps {
   onStartActressBatchDefault: () => void
   onOpenVideoBatchAdvanced: () => void
   onOpenActressBatchAdvanced: () => void
+  onOpenVideoBatchDetails: () => void
+  onOpenActressBatchDetails: () => void
+  onPauseVideoBatch: BatchControlHandler
+  onPauseActressBatch: BatchControlHandler
+  onResumeBatch: BatchControlHandler
+  onDiscardVideoBatch: BatchControlHandler
+  onDiscardActressBatch: BatchControlHandler
 }
 
 function formatCount(value: number): string {
@@ -205,22 +239,33 @@ function ScrapeCoverageBlock({
 function BatchOverviewStatus({
   batch,
   percent,
-  onOpen
+  scopeLabel,
+  onOpen,
+  onPause,
+  onResume,
+  onDiscard
 }: {
   batch: BatchProgress | null
   percent: number
+  scopeLabel: string
   onOpen: () => void
+  onPause: BatchControlHandler
+  onResume: BatchControlHandler
+  onDiscard: BatchControlHandler
 }): JSX.Element {
   const activeBatch = Boolean(batch && batch.status !== 'idle')
-  const status = batchStatusLabel(batch?.status)
+  const batchRunning = batch?.status === 'running'
+  const batchPaused = batch?.status === 'paused'
+  const batchControllable = batchRunning || batchPaused
+  const status = activeBatch ? batchStatusLabel(batch?.status) : '空闲'
   const safePercent = activeBatch ? Math.max(0, Math.min(percent, 100)) : 0
-  const batchCount = activeBatch ? `${batch?.current ?? 0}/${batch?.total ?? 0}` : '无运行任务'
-  const batchDetail = batch?.currentCode
-    ? `当前：${batch.currentCode}`
-    : batch
-      ? `成功 ${batch.success} · 失败 ${batch.failed}`
-      : '等待下一次批量刮削'
-  const openLabel = activeBatch ? '查看运行中的批量任务' : '查看批量任务'
+  const batchCount = activeBatch ? `${batch?.current ?? 0}/${batch?.total ?? 0}` : ''
+  const batchDetail = activeBatch
+    ? batch?.currentCode
+      ? `当前：${batch.currentCode}`
+      : `成功 ${batch?.success ?? 0} · 失败 ${batch?.failed ?? 0}`
+    : '上方可启动未刮削项或高级刮削'
+  const openLabel = `查看${scopeLabel}批量任务详情`
 
   return (
     <div
@@ -231,56 +276,42 @@ function BatchOverviewStatus({
           <span>批量任务</span>
           <strong>{status}</strong>
         </span>
-        <span className="settings-overview-batch-inline-count">{batchCount}</span>
-        <button
-          type="button"
-          className="btn btn-sm settings-overview-batch-detail-btn"
-          title={openLabel}
-          aria-label={openLabel}
-          onClick={onOpen}
-        >
-          <ListTodo {...UI_ICON_SM} aria-hidden />
-          任务详情
-        </button>
+        {batchControllable ? (
+          <BatchTaskControls
+            scopeLabel={scopeLabel}
+            running={batchRunning}
+            paused={batchPaused}
+            status={batch?.status ?? 'idle'}
+            variant="icon"
+            showDisabled={false}
+            onPause={onPause}
+            onResume={onResume}
+            onDiscard={onDiscard}
+          />
+        ) : null}
+        {activeBatch ? (
+          <IconButton
+            className="settings-overview-batch-icon-btn settings-overview-batch-detail-btn"
+            icon={<SquareTerminal {...UI_ICON_SM} />}
+            label={openLabel}
+            onClick={onOpen}
+          />
+        ) : null}
       </div>
       <div
         className="settings-overview-batch-progress"
         role="img"
-        aria-label={`批量任务${status}，进度 ${safePercent}%`}
+        aria-label={activeBatch ? `批量任务${status}，进度 ${safePercent}%` : '批量任务空闲'}
       >
         <span style={{ width: `${safePercent}%` }} />
       </div>
-      <small>{batchDetail}</small>
+      <div className="settings-overview-batch-meta">
+        <small>{batchDetail}</small>
+        {activeBatch ? (
+          <span className="settings-overview-batch-inline-count">{batchCount}</span>
+        ) : null}
+      </div>
     </div>
-  )
-}
-
-function WorkflowStep({
-  title,
-  value,
-  detail,
-  state,
-  actionLabel,
-  onAction
-}: {
-  title: string
-  value: string
-  detail: string
-  state: 'ready' | 'attention' | 'active' | 'idle'
-  actionLabel: string
-  onAction: () => void
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      className={`settings-overview-workflow-step is-${state}`}
-      onClick={onAction}
-    >
-      <span className="settings-overview-workflow-step-title">{title}</span>
-      <strong>{value}</strong>
-      <span className="settings-overview-workflow-step-detail">{detail}</span>
-      <span className="settings-overview-workflow-step-action">{actionLabel}</span>
-    </button>
   )
 }
 
@@ -289,6 +320,8 @@ export default function SettingsOverviewPanel({
   theme,
   themeLabel,
   notices,
+  videoPluginCount,
+  actressPluginCount,
   videoBatch,
   actressBatch,
   anyBatchActive,
@@ -302,8 +335,16 @@ export default function SettingsOverviewPanel({
   onStartVideoBatchDefault,
   onStartActressBatchDefault,
   onOpenVideoBatchAdvanced,
-  onOpenActressBatchAdvanced
+  onOpenActressBatchAdvanced,
+  onOpenVideoBatchDetails,
+  onOpenActressBatchDetails,
+  onPauseVideoBatch,
+  onPauseActressBatch,
+  onResumeBatch,
+  onDiscardVideoBatch,
+  onDiscardActressBatch
 }: SettingsOverviewPanelProps): JSX.Element {
+  const toast = useToast()
   const { stats, isLoading: statsLoading } = useLibraryOverviewStats(statsRefreshKey)
 
   const defaultLlmSelection = useMemo(() => normalizeDefaultLlmSelection(settings), [settings])
@@ -341,10 +382,43 @@ export default function SettingsOverviewPanel({
 
   const scrapeProxy = proxyStatus(settings.proxyUrlEnabled, settings.proxyUrl ?? '')
   const llmProxy = proxyStatus(settings.llmProxyUrlEnabled, settings.llmProxyUrl ?? '')
-  const hasLibrary = settings.libraryPaths.length > 0
-  const videoScraperReady = Boolean(settings.defaultScraper)
-  const actressScraperReady = Boolean(settings.defaultActressScraper)
-  const batchState = anyBatchActive ? 'active' : 'idle'
+
+  const videoDefaultBlockReason = scrapeActionBlockReason({
+    anyBatchActive,
+    statsLoading,
+    defaultScraper: settings.defaultScraper,
+    unscraped: videoUnscraped,
+    requireUnscraped: true,
+    requireDefaultScraper: true,
+    scopeLabel: '影片'
+  })
+  const videoAdvancedBlockReason = scrapeActionBlockReason({
+    anyBatchActive,
+    statsLoading,
+    scopeLabel: '影片'
+  })
+  const actressDefaultBlockReason = scrapeActionBlockReason({
+    anyBatchActive,
+    statsLoading,
+    defaultScraper: settings.defaultActressScraper,
+    unscraped: actressUnscraped,
+    requireUnscraped: true,
+    requireDefaultScraper: true,
+    scopeLabel: '演员'
+  })
+  const actressAdvancedBlockReason = scrapeActionBlockReason({
+    anyBatchActive,
+    statsLoading,
+    scopeLabel: '演员'
+  })
+
+  const runOrExplain = (blockReason: string | null, action: () => void): void => {
+    if (blockReason) {
+      toast.show(blockReason, 'info')
+      return
+    }
+    action()
+  }
 
   return (
     <div className="settings-overview">
@@ -373,70 +447,23 @@ export default function SettingsOverviewPanel({
         </div>
       )}
 
-      <section className="settings-overview-workflow" aria-label="整理流程">
-        <WorkflowStep
-          title="媒体库"
-          value={hasLibrary ? `${settings.libraryPaths.length} 个路径` : '待添加'}
-          detail={
-            statsLoading
-              ? '统计加载中'
-              : hasLibrary
-                ? `${formatCount(videoTotal)} 部影片`
-                : '先添加本地文件夹'
-          }
-          state={hasLibrary ? 'ready' : 'attention'}
-          actionLabel={hasLibrary ? '管理路径' : '添加路径'}
-          onAction={() => onNavigate('library')}
-        />
-        <WorkflowStep
-          title="影片刮削"
-          value={videoScraperReady ? settings.defaultScraper : '未设置'}
-          detail={
-            videoUnscraped > 0
-              ? `${formatCount(videoUnscraped)} 部待补齐`
-              : videoScraperReady
-                ? '默认来源已就绪'
-                : '选择默认插件'
-          }
-          state={videoScraperReady ? 'ready' : 'attention'}
-          actionLabel={!videoScraperReady ? '配置插件' : videoUnscraped > 0 ? '开始处理' : '配置插件'}
-          onAction={() =>
-            videoScraperReady && videoUnscraped > 0 ? onStartVideoBatchDefault() : onNavigate('plugins')
-          }
-        />
-        <WorkflowStep
-          title="演员刮削"
-          value={actressScraperReady ? settings.defaultActressScraper : '未设置'}
-          detail={
-            actressUnscraped > 0
-              ? `${formatCount(actressUnscraped)} 位待补齐`
-              : actressScraperReady
-                ? '默认来源已就绪'
-                : '选择默认插件'
-          }
-          state={actressScraperReady ? 'ready' : 'attention'}
-          actionLabel={!actressScraperReady ? '配置插件' : actressUnscraped > 0 ? '开始处理' : '配置插件'}
-          onAction={() =>
-            actressScraperReady && actressUnscraped > 0 ? onStartActressBatchDefault() : onNavigate('plugins')
-          }
-        />
-        <WorkflowStep
-          title="批量任务"
-          value={anyBatchActive ? '运行中' : '空闲'}
-          detail={
-            anyBatchActive
-              ? `影片 ${videoBatchPct}% · 演员 ${actressPct}%`
-              : '可配置高级范围'
-          }
-          state={batchState}
-          actionLabel="任务详情"
-          onAction={() => onNavigate('batch', videoBatch ? 'video' : actressBatch ? 'actress' : 'video')}
-        />
-      </section>
-
       <section className="settings-overview-panel settings-overview-panel--status" aria-label="状态">
         <h3>状态</h3>
         <div className="settings-overview-status-grid">
+          <SettingsStatusCard
+            icon={FolderOpen}
+            label="媒体库"
+            value={`${settings.libraryPaths.length} 个路径`}
+            detail={
+              statsLoading
+                ? '统计加载中…'
+                : settings.libraryPaths.length > 0
+                  ? `${formatCount(videoTotal)} 部影片`
+                  : '点击添加文件夹'
+            }
+            attention={settings.libraryPaths.length === 0}
+            onClick={() => onNavigate('library')}
+          />
           {unrecognizedCount > 0 && (
             <SettingsStatusCard
               icon={FolderOpen}
@@ -447,6 +474,24 @@ export default function SettingsOverviewPanel({
               onClick={onNavigateLibraryUnrecognized}
             />
           )}
+          <SettingsStatusCard
+            icon={Clapperboard}
+            label="影片刮削"
+            value={settings.defaultScraper || '未设置'}
+            detail={`${videoPluginCount} 个插件`}
+            emphasizeValue
+            attention={!settings.defaultScraper}
+            onClick={() => onNavigate('plugins')}
+          />
+          <SettingsStatusCard
+            icon={UserRound}
+            label="演员刮削"
+            value={settings.defaultActressScraper || '未设置'}
+            detail={`${actressPluginCount} 个插件`}
+            emphasizeValue
+            attention={!settings.defaultActressScraper}
+            onClick={() => onNavigate('plugins')}
+          />
           <SettingsStatusCard
             icon={Globe}
             label="刮削代理"
@@ -519,13 +564,9 @@ export default function SettingsOverviewPanel({
               <button
                 type="button"
                 className="btn btn-primary btn-sm"
-                disabled={
-                  anyBatchActive ||
-                  statsLoading ||
-                  !settings.defaultScraper ||
-                  videoUnscraped === 0
-                }
-                onClick={onStartVideoBatchDefault}
+                aria-disabled={videoDefaultBlockReason ? true : undefined}
+                title={videoDefaultBlockReason ?? undefined}
+                onClick={() => runOrExplain(videoDefaultBlockReason, onStartVideoBatchDefault)}
               >
                 <Play {...UI_ICON_SM} aria-hidden />
                 刮削未刮削项
@@ -533,8 +574,9 @@ export default function SettingsOverviewPanel({
               <button
                 type="button"
                 className="btn btn-sm"
-                disabled={anyBatchActive || statsLoading}
-                onClick={onOpenVideoBatchAdvanced}
+                aria-disabled={videoAdvancedBlockReason ? true : undefined}
+                title={videoAdvancedBlockReason ?? undefined}
+                onClick={() => runOrExplain(videoAdvancedBlockReason, onOpenVideoBatchAdvanced)}
               >
                 <SlidersHorizontal {...UI_ICON_SM} aria-hidden />
                 高级刮削
@@ -548,7 +590,11 @@ export default function SettingsOverviewPanel({
           <BatchOverviewStatus
             batch={videoBatch}
             percent={videoBatchPct}
-            onOpen={() => onNavigate('batch', 'video')}
+            scopeLabel="影片"
+            onOpen={onOpenVideoBatchDetails}
+            onPause={onPauseVideoBatch}
+            onResume={onResumeBatch}
+            onDiscard={onDiscardVideoBatch}
           />
         </section>
 
@@ -573,13 +619,9 @@ export default function SettingsOverviewPanel({
               <button
                 type="button"
                 className="btn btn-primary btn-sm"
-                disabled={
-                  anyBatchActive ||
-                  statsLoading ||
-                  !settings.defaultActressScraper ||
-                  actressUnscraped === 0
-                }
-                onClick={onStartActressBatchDefault}
+                aria-disabled={actressDefaultBlockReason ? true : undefined}
+                title={actressDefaultBlockReason ?? undefined}
+                onClick={() => runOrExplain(actressDefaultBlockReason, onStartActressBatchDefault)}
               >
                 <Play {...UI_ICON_SM} aria-hidden />
                 刮削未刮削项
@@ -587,8 +629,9 @@ export default function SettingsOverviewPanel({
               <button
                 type="button"
                 className="btn btn-sm"
-                disabled={anyBatchActive || statsLoading}
-                onClick={onOpenActressBatchAdvanced}
+                aria-disabled={actressAdvancedBlockReason ? true : undefined}
+                title={actressAdvancedBlockReason ?? undefined}
+                onClick={() => runOrExplain(actressAdvancedBlockReason, onOpenActressBatchAdvanced)}
               >
                 <SlidersHorizontal {...UI_ICON_SM} aria-hidden />
                 高级刮削
@@ -602,7 +645,11 @@ export default function SettingsOverviewPanel({
           <BatchOverviewStatus
             batch={actressBatch}
             percent={actressPct}
-            onOpen={() => onNavigate('batch', 'actress')}
+            scopeLabel="演员"
+            onOpen={onOpenActressBatchDetails}
+            onPause={onPauseActressBatch}
+            onResume={onResumeBatch}
+            onDiscard={onDiscardActressBatch}
           />
         </section>
       </div>

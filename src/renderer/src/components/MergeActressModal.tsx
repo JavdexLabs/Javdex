@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { SearchX, UserRound } from 'lucide-react'
 import {
   actressGenderMergeLabel,
   canMergeActressGenders
@@ -9,6 +10,8 @@ import { useDebounce } from '../hooks/useDebounce'
 import ActressName from './ActressName'
 import ActressAvatar from './ActressAvatar'
 import Modal from './Modal'
+import EmptyState from './EmptyState'
+import { UI_ICON_SM } from './iconDefaults'
 
 interface Props {
   keepActress: ActressDetail
@@ -22,10 +25,6 @@ type MergeCardActress = {
   avatar_path: string | null
   video_count: number
   gallery_count?: number
-}
-
-function mergeSearchSeed(actress: ActressDetail): string {
-  return actress.main_name.trim()
 }
 
 function MergeActressCard({
@@ -50,7 +49,9 @@ function MergeActressCard({
       <span className="merge-actress-card-badge">{badge}</span>
       {empty ? (
         <div className="merge-actress-card-avatar" aria-hidden="true">
-          <span className="merge-actress-card-placeholder">?</span>
+          <span className="merge-actress-card-placeholder">
+            <UserRound {...UI_ICON_SM} />
+          </span>
         </div>
       ) : (
         <ActressAvatar
@@ -90,7 +91,7 @@ export default function MergeActressModal({
   onCancel,
   onMerged
 }: Props): JSX.Element {
-  const [searchInput, setSearchInput] = useState(() => mergeSearchSeed(keepActress))
+  const [searchInput, setSearchInput] = useState('')
   const debouncedQ = useDebounce(searchInput, 300)
   const [items, setItems] = useState<ActressListItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -182,8 +183,6 @@ export default function MergeActressModal({
 
   const mergedVideoCount =
     selected == null ? keepActress.videos.length : keepActress.videos.length + selected.video_count
-  const hasSearchQuery = searchInput.trim().length > 0
-
   return (
     <Modal
       title="合并演员"
@@ -229,38 +228,29 @@ export default function MergeActressModal({
               <span className="merge-actress-section-meta">{items.length} 名候选</span>
             )}
           </div>
-          <div className="merge-actress-search-row">
-            <input
-              className="search-input merge-actress-search"
-              type="search"
-              placeholder="搜索主名或别名…"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              autoFocus
-            />
-            <button
-              type="button"
-              className="btn btn-sm"
-              disabled={!hasSearchQuery}
-              onClick={() => setSearchInput('')}
-            >
-              查看全部
-            </button>
-          </div>
+          <input
+            className="search-input merge-actress-search"
+            type="search"
+            placeholder="搜索主名或别名…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            autoFocus
+          />
 
           <div className="merge-actress-pick-panel">
             {loading ? (
-              <div className="empty-state empty-state--compact">
-                <div className="spinner" />
-              </div>
+              <EmptyState variant="modal" loading />
             ) : items.length === 0 ? (
-              <div className="empty-state empty-state--compact">
-                <div>
-                  {debouncedQ.trim()
-                    ? '没有匹配的演员，可查看全部候选'
-                    : '没有可合并的候选演员'}
-                </div>
-              </div>
+              <EmptyState
+                variant="modal"
+                icon={<SearchX {...UI_ICON_SM} aria-hidden />}
+                title={debouncedQ.trim() ? '没有匹配的演员' : '没有可合并的候选演员'}
+                description={
+                  debouncedQ.trim()
+                    ? '调整搜索关键词后再试。'
+                    : '当前演员没有同组可合并候选。'
+                }
+              />
             ) : (
               <div className="merge-actress-pick-list" role="listbox" aria-label="演员列表">
                 {items.map((item) => {

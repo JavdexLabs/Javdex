@@ -1,10 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, type CSSProperties } from 'react'
+import { Bot } from 'lucide-react'
 import type {
   PluginDevAgentContextStats,
   PluginDevAgentPhase,
   PluginDevSessionStatus
 } from '@shared/types'
 import { formatToolLabel, toolCategory } from './pluginDevFormat'
+import EmptyState from '../EmptyState'
+import { UI_ICON_SM } from '../iconDefaults'
 import { agentPhaseLabel, type PluginDevConversationItem } from './types'
 
 function tokenK(value: number): string {
@@ -103,10 +106,13 @@ export default function PluginDevConversation({
     <div className="plugin-dev-conversation">
       <div ref={logRef} className="plugin-dev-conversation-log">
         {items.length === 0 && !running ? (
-          <div className="plugin-dev-agent-empty plugin-dev-agent-empty--compact">
-            <strong>开始与 Agent 对话</strong>
-            <span>填写配置后点击「AI开发 / AI调试」，或在底部输入指示开始调试。</span>
-          </div>
+          <EmptyState
+            variant="fill"
+            className="plugin-dev-agent-empty"
+            icon={<Bot {...UI_ICON_SM} aria-hidden />}
+            title="开始与 Agent 对话"
+            description="填写配置后点击「AI开发 / AI调试」，或在底部输入指示开始调试。"
+          />
         ) : (
           items.map((item) => {
             if (item.type === 'user') {

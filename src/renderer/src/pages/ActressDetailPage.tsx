@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
-import { Ellipsis, Pencil, SearchCheck } from 'lucide-react'
+import { Inbox, Pencil, SearchCheck, SearchX } from 'lucide-react'
 import {
   actressVideoDetailPath,
   parseActressVideoPath
@@ -32,10 +32,10 @@ import ActressProfileMeta, {
 } from '../components/ActressProfileMeta'
 import DetailScrollBody from '../components/DetailScrollBody'
 import ImagePreviewLightbox from '../components/ImagePreviewLightbox'
-import IconButton from '../components/IconButton'
+import DetailActionBar from '../components/DetailActionBar'
+import EmptyState from '../components/EmptyState'
 import { UI_ICON } from '../components/iconDefaults'
 import { useAppBackground } from '../components/AppBackgroundContext'
-import { useEscapeKey } from '../hooks/useEscapeKey'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import type {
@@ -79,8 +79,6 @@ export default function ActressDetailPage(): JSX.Element {
   const [confirmClear, setConfirmClear] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [showMerge, setShowMerge] = useState(false)
-  const [moreOpen, setMoreOpen] = useState(false)
-  const moreActionsRef = useRef<HTMLDivElement>(null)
   const [scraping, setScraping] = useState(false)
   const { scrapers, pluginDetails, defaultScraper } = useScraperPluginCatalog('actress')
   const [scraperName, setScraperName] = useState('')
@@ -95,7 +93,6 @@ export default function ActressDetailPage(): JSX.Element {
     setConfirmClear(false)
     setShowEdit(false)
     setShowMerge(false)
-    setMoreOpen(false)
     setShowScrapeFields(false)
     setAvatarPreviewOpen(false)
   }, [])
@@ -158,19 +155,6 @@ export default function ActressDetailPage(): JSX.Element {
       })
       .catch(() => {})
   }, [])
-
-  useEscapeKey(() => setMoreOpen(false), moreOpen)
-
-  useEffect(() => {
-    if (!moreOpen) return
-    const onPointerDown = (e: PointerEvent): void => {
-      if (!moreActionsRef.current?.contains(e.target as Node)) {
-        setMoreOpen(false)
-      }
-    }
-    window.addEventListener('pointerdown', onPointerDown)
-    return () => window.removeEventListener('pointerdown', onPointerDown)
-  }, [moreOpen])
 
   const handleScrape = async (
     fields: ActressScrapeField[],
@@ -291,9 +275,7 @@ export default function ActressDetailPage(): JSX.Element {
     return (
       <div className={`detail-pane${videoStackOpen ? ' detail-pane--stacked' : ''}`}>
         <DetailScrollBody scrollRef={scrollRef} onBack={handleBack}>
-          <div className="empty-state">
-            <div className="spinner" />
-          </div>
+          <EmptyState loading />
         </DetailScrollBody>
         {videoOverlay}
       </div>
@@ -303,9 +285,11 @@ export default function ActressDetailPage(): JSX.Element {
     return (
       <div className={`detail-pane${videoStackOpen ? ' detail-pane--stacked' : ''}`}>
         <DetailScrollBody scrollRef={scrollRef} onBack={handleBack}>
-          <div className="empty-state">
-            <div>未找到该演员</div>
-          </div>
+          <EmptyState
+            icon={<SearchX {...UI_ICON} aria-hidden />}
+            title="未找到该演员"
+            description="该演员可能已被删除或合并。"
+          />
         </DetailScrollBody>
         {videoOverlay}
       </div>
@@ -326,75 +310,48 @@ export default function ActressDetailPage(): JSX.Element {
   }
 
   const profileActions = (
-    <>
-      <div className="detail-action-group detail-action-group--icons" role="group" aria-label="演员操作">
-        <IconButton
-          className="detail-icon-action"
-          icon={<Pencil {...UI_ICON} />}
-          label="编辑"
-          onClick={() => setShowEdit(true)}
-        />
-        <IconButton
-          className="detail-icon-action"
-          icon={<SearchCheck {...UI_ICON} />}
-          label="修正匹配"
-          title={scraping ? '匹配中…' : '修正匹配'}
-          aria-busy={scraping || undefined}
-          disabled={scraping}
-          onClick={() => setShowScrapeFields(true)}
-        />
-      </div>
-      <div className="detail-more-actions" ref={moreActionsRef}>
-        <IconButton
-          className="detail-icon-action"
-          icon={<Ellipsis {...UI_ICON} />}
-          label="更多"
-          aria-haspopup="menu"
-          aria-expanded={moreOpen}
-          onClick={() => setMoreOpen((open) => !open)}
-        />
-        {moreOpen && (
-          <div className="detail-more-menu" role="menu">
-            <button
-              type="button"
-              className="detail-menu-item"
-              role="menuitem"
-              onClick={() => {
-                setMoreOpen(false)
-                setShowMerge(true)
-              }}
-            >
-              合并演员
-            </button>
-            <div className="detail-menu-separator" />
-            <button
-              type="button"
-              className="detail-menu-item detail-menu-item--danger"
-              role="menuitem"
-              onClick={() => {
-                setMoreOpen(false)
-                setConfirmClear(true)
-              }}
-            >
-              清除元数据
-            </button>
-            {canDelete && (
-              <button
-                type="button"
-                className="detail-menu-item detail-menu-item--danger"
-                role="menuitem"
-                onClick={() => {
-                  setMoreOpen(false)
-                  setConfirmDelete(true)
-                }}
-              >
-                删除演员
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    </>
+    <DetailActionBar
+      ariaLabel="演员操作"
+      variant="inline"
+      actions={[
+        {
+          key: 'edit',
+          icon: <Pencil {...UI_ICON} />,
+          label: '编辑',
+          onClick: () => setShowEdit(true)
+        },
+        {
+          key: 'scrape',
+          icon: <SearchCheck {...UI_ICON} />,
+          label: '修正匹配',
+          title: scraping ? '匹配中…' : '修正匹配',
+          busy: scraping,
+          disabled: scraping,
+          onClick: () => setShowScrapeFields(true)
+        }
+      ]}
+      menuItems={[
+        {
+          key: 'merge',
+          label: '合并演员',
+          onClick: () => setShowMerge(true)
+        },
+        { key: 'danger-separator', type: 'separator' },
+        {
+          key: 'clear-meta',
+          label: '清除元数据',
+          danger: true,
+          onClick: () => setConfirmClear(true)
+        },
+        {
+          key: 'delete',
+          label: '删除演员',
+          danger: true,
+          hidden: !canDelete,
+          onClick: () => setConfirmDelete(true)
+        }
+      ]}
+    />
   )
 
   return (
@@ -421,12 +378,9 @@ export default function ActressDetailPage(): JSX.Element {
             />
           </div>
           <div className="actress-profile-head">
-            <div className="actress-profile-title-row">
-              <h1 className="detail-title actress-profile-title">
-                <ActressName name={actress.main_name} gender={actress.gender} />
-              </h1>
-              <div className="actress-profile-actions">{profileActions}</div>
-            </div>
+            <h1 className="detail-title actress-profile-title">
+              <ActressName name={actress.main_name} gender={actress.gender} />
+            </h1>
             {profileSubtitle && <p className="actress-profile-subtitle">{profileSubtitle}</p>}
             {profileStats.length > 0 && (
               <div className="actress-profile-stats" aria-label="概要">
@@ -438,6 +392,7 @@ export default function ActressDetailPage(): JSX.Element {
               </div>
             )}
           </div>
+          <div className="actress-profile-actions">{profileActions}</div>
         </div>
 
         <ActressProfileMeta actress={actress} />
@@ -466,9 +421,12 @@ export default function ActressDetailPage(): JSX.Element {
 
       {activeTab === 'videos' ? (
         actress.videos.length === 0 ? (
-          <div className="empty-state empty-state--compact">
-            <div>暂无关联影片</div>
-          </div>
+          <EmptyState
+            variant="compact"
+            icon={<Inbox {...UI_ICON} aria-hidden />}
+            title="暂无关联影片"
+            description="影片刮削后会自动建立关联。"
+          />
         ) : (
           <div className="poster-grid">
             {actress.videos.map((v) => (

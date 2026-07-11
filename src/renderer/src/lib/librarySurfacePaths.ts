@@ -25,10 +25,10 @@
 
 /** True only for list roots — not detail/stack overlays that keep the list mounted. */
 export function isLibraryListSurfacePath(pathname: string): boolean {
-  if (pathname === '/') return true
-  if (pathname === '/actresses') return true
-  if (pathname === '/playlists') return true
-  return /^\/facet\/[^/]+$/.test(pathname)
+  if (pathname === ROUTE_PATH.library) return true
+  if (pathname === ROUTE_PATH.actresses) return true
+  if (pathname === ROUTE_PATH.playlists) return true
+  return Boolean(matchPath({ path: ROUTE_PATH.facetList, end: true }, pathname))
 }
 
 /**
@@ -44,3 +44,5 @@ export function shouldRefetchLibraryOnRouteChange(
     isLibraryListSurfacePath(nextPathname) && !isLibraryListSurfacePath(previousPathname)
   )
 }
+import { matchPath } from 'react-router-dom'
+import { ROUTE_PATH } from '../listView/routePaths'

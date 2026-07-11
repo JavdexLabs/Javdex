@@ -49,6 +49,15 @@
 
 一级列表之间导航时，应保留当前列表自己的 query。切换到不同资源类型时，不继承不相关 query。分类类型切换是资源类型切换，应清空旧分类的 query，避免把导演搜索词带到制作商列表。
 
+### Primary nav memory
+
+侧栏主导航与列表 query 的约定：
+
+- **跨一级列表**：恢复该列表上次*离开时*的 query（写入发生在离开根路径时，而不是每次 search 变化）。
+- **再点当前一级列表**：不修改 query。已在列表根时仅清除滚动记忆（回顶）；若在详情栈则回到列表根并保留当前 `location.search`。
+- **清空 query**：只通过列表筛选重置；重置时应 `forget` 该根的导航记忆，避免之后跨分区又带回旧筛选。
+- 分类类型之间切换仍不继承对方 query。
+
 清单列表搜索也属于 Shareable state；它虽然是本地过滤，但会改变用户看到的结果集，应使用 `q` query。
 
 搜索词虽然使用 `q` query，但它属于 toolbar search state，不属于 `AppliedFilterBar` 的筛选 chip state。

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { createAvatarCropV1, parseAvatarCrop } from '@shared/avatarCrop'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
 import { insertTestVideoWithFile } from './testVideoFixtures'
 import {
@@ -18,9 +19,12 @@ import {
   getActressDetail,
   replaceActressGalleryAssets,
   resolveEffectiveActressScrapeFields,
+  setActressAvatarBundle,
   setActressPosterPath,
-  touchActressLastScrapedAt
+  touchActressLastScrapedAt,
+  upsertActressFromScrape
 } from './actressRepo'
+import { avatarSourceFingerprint } from '../services/assetService'
 
 let tempRoot: string | null = null
 
@@ -35,6 +39,18 @@ function writeTestAvatar(relPath: string): void {
   const abs = path.join(tempRoot, 'media_assets', relPath)
   fs.mkdirSync(path.dirname(abs), { recursive: true })
   fs.writeFileSync(abs, MINIMAL_JPEG)
+}
+
+function writeTestAsset(relPath: string, data: Buffer | string): void {
+  if (!tempRoot) throw new Error('test root not initialized')
+  const abs = path.join(tempRoot, 'media_assets', relPath)
+  fs.mkdirSync(path.dirname(abs), { recursive: true })
+  fs.writeFileSync(abs, data)
+}
+
+function assetExists(relPath: string | null): boolean {
+  if (!tempRoot || !relPath) return false
+  return fs.existsSync(path.join(tempRoot, 'media_assets', relPath))
 }
 
 function setupDb(): void {
@@ -388,6 +404,198 @@ describe('actressRepo.clearBrokenActressAvatarIfNeeded', () => {
       ['Complete', 'Missing Female', 'Unknown Gender']
     )
   })
+
+  it('clears broken avatar source and crop while keeping a usable display avatar', () => {
+    setupDb()
+    const db = getDb()
+    const fingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+    db.prepare(
+      `UPDATE actresses
+       SET avatar_source_path = ?, avatar_crop_json = ?
+       WHERE id = ?`
+    ).run(
+      'avatars/missing-source.jpg',
+      JSON.stringify(
+        createAvatarCropV1({
+          sourceFingerprint: fingerprint,
+          zoom: 1.2,
+          offsetX: 4,
+          offsetY: -3
+        })
+      ),
+      1
+    )
+
+    assert.equal(clearBrokenActressAvatarIfNeeded(1), true)
+    assert.deepEqual(
+      db
+        .prepare(
+          'SELECT avatar_path, avatar_source_path, avatar_crop_json FROM actresses WHERE id = ?'
+        )
+        .get(1),
+      {
+        avatar_path: 'avatars/complete.jpg',
+        avatar_source_path: null,
+        avatar_crop_json: null
+      }
+    )
+  })
+})
+
+describe('actressRepo.setActressAvatarBundle', () => {
+  it('persists avatar source, display, and crop; recrops without replacing the source', () => {
+    setupDb()
+    const db = getDb()
+    const displayImageBase64 = MINIMAL_JPEG.toString('base64')
+    const sourceImageBase64 = MINIMAL_JPEG.toString('base64')
+    const sourceFingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+
+    setActressAvatarBundle(1, 'Complete', {
+      displayImageBase64,
+      sourceImageBase64,
+      crop: createAvatarCropV1({
+        sourceFingerprint,
+        zoom: 1.25,
+        offsetX: 5,
+        offsetY: -2
+      })
+    })
+
+    const first = db
+      .prepare(
+        'SELECT avatar_path, avatar_source_path, avatar_crop_json FROM actresses WHERE id = ?'
+      )
+      .get(1) as {
+      avatar_path: string | null
+      avatar_source_path: string | null
+      avatar_crop_json: string | null
+    }
+    assert.equal(assetExists(first.avatar_path), true)
+    assert.equal(assetExists(first.avatar_source_path), true)
+    assert.equal(parseAvatarCrop(first.avatar_crop_json, sourceFingerprint)?.zoom, 1.25)
+
+    setActressAvatarBundle(1, 'Complete', {
+      displayImageBase64,
+      crop: createAvatarCropV1({
+        sourceFingerprint,
+        zoom: 2,
+        offsetX: -6,
+        offsetY: 3
+      })
+    })
+
+    const second = db
+      .prepare(
+        'SELECT avatar_path, avatar_source_path, avatar_crop_json FROM actresses WHERE id = ?'
+      )
+      .get(1) as {
+      avatar_path: string | null
+      avatar_source_path: string | null
+      avatar_crop_json: string | null
+    }
+    assert.equal(second.avatar_source_path, first.avatar_source_path)
+    assert.equal(parseAvatarCrop(second.avatar_crop_json, sourceFingerprint)?.zoom, 2)
+    assert.equal(parseAvatarCrop(second.avatar_crop_json, sourceFingerprint)?.offsetX, -6)
+  })
+
+  it('rejects invalid display bytes before writing the avatar bundle', () => {
+    setupDb()
+    const sourceFingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+
+    assert.throws(
+      () =>
+        setActressAvatarBundle(1, 'Complete', {
+          displayImageBase64: Buffer.from('not an image').toString('base64'),
+          sourceImageBase64: MINIMAL_JPEG.toString('base64'),
+          crop: createAvatarCropV1({
+            sourceFingerprint,
+            zoom: 1,
+            offsetX: 0,
+            offsetY: 0
+          })
+        }),
+      /头像展示图无效/
+    )
+  })
+
+  it('keeps source paths distinct for equal-length Chinese names with identical bytes', () => {
+    setupDb()
+    const db = getDb()
+    const idA = upsertActressFromScrape('三上悠亚', null, 'female')
+    const idB = upsertActressFromScrape('桥本有菜', null, 'female')
+    const payload = {
+      displayImageBase64: MINIMAL_JPEG.toString('base64'),
+      sourceImageBase64: MINIMAL_JPEG.toString('base64'),
+      crop: createAvatarCropV1({
+        sourceFingerprint: avatarSourceFingerprint(MINIMAL_JPEG),
+        zoom: 1,
+        offsetX: 0,
+        offsetY: 0
+      })
+    }
+    setActressAvatarBundle(idA, '三上悠亚', payload)
+    setActressAvatarBundle(idB, '桥本有菜', payload)
+
+    const a = db
+      .prepare('SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?')
+      .get(idA) as { avatar_path: string; avatar_source_path: string }
+    const b = db
+      .prepare('SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?')
+      .get(idB) as { avatar_path: string; avatar_source_path: string }
+    assert.notEqual(a.avatar_path, b.avatar_path)
+    assert.notEqual(a.avatar_source_path, b.avatar_source_path)
+    assert.equal(assetExists(a.avatar_source_path), true)
+    assert.equal(assetExists(b.avatar_source_path), true)
+  })
+})
+
+describe('actressRepo.upsertActressFromScrape avatar adopt', () => {
+  it('adopts a downloaded avatar into source+display+crop and drops the temp path', () => {
+    setupDb()
+    writeTestAvatar('avatars/download-temp.jpg')
+    const id = upsertActressFromScrape('三上悠亚', 'avatars/download-temp.jpg', 'female')
+    const row = getDb()
+      .prepare(
+        'SELECT avatar_path, avatar_source_path, avatar_crop_json FROM actresses WHERE id = ?'
+      )
+      .get(id) as {
+      avatar_path: string | null
+      avatar_source_path: string | null
+      avatar_crop_json: string | null
+    }
+    assert.notEqual(row.avatar_path, 'avatars/download-temp.jpg')
+    assert.equal(assetExists(row.avatar_path), true)
+    assert.equal(assetExists(row.avatar_source_path), true)
+    assert.ok(row.avatar_crop_json)
+    assert.equal(assetExists('avatars/download-temp.jpg'), false)
+  })
+
+  it('gives equal-length Chinese names distinct avatar files from the same download bytes', () => {
+    setupDb()
+    writeTestAvatar('avatars/dl-a.jpg')
+    writeTestAvatar('avatars/dl-b.jpg')
+    const idA = upsertActressFromScrape('三上悠亚', 'avatars/dl-a.jpg', 'female')
+    const idB = upsertActressFromScrape('桥本有菜', 'avatars/dl-b.jpg', 'female')
+    const a = getDb()
+      .prepare('SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?')
+      .get(idA) as { avatar_path: string; avatar_source_path: string }
+    const b = getDb()
+      .prepare('SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?')
+      .get(idB) as { avatar_path: string; avatar_source_path: string }
+    assert.notEqual(a.avatar_path, b.avatar_path)
+    assert.notEqual(a.avatar_source_path, b.avatar_source_path)
+  })
+
+  it('does not replace an existing usable avatar', () => {
+    setupDb()
+    writeTestAvatar('avatars/new-download.jpg')
+    upsertActressFromScrape('Complete', 'avatars/new-download.jpg', 'female')
+    const row = getDb()
+      .prepare('SELECT avatar_path FROM actresses WHERE id = ?')
+      .get(1) as { avatar_path: string | null }
+    assert.equal(row.avatar_path, 'avatars/complete.jpg')
+    assert.equal(assetExists('avatars/new-download.jpg'), false)
+  })
 })
 
 describe('actressRepo.backfillActressGalleryAssetDimensions', () => {
@@ -469,6 +677,125 @@ describe('actressRepo.touchActressLastScrapedAt', () => {
 })
 
 describe('actressRepo.applyActressScrapeResult', () => {
+  it('skips invalid downloaded avatars while applying other profile fields', () => {
+    setupDb()
+    const db = getDb()
+    writeTestAsset('avatars/not-image.jpg', '<html>not an image</html>')
+
+    const { applied, warnings } = applyActressScrapeResult(
+      2,
+      { birthDate: '2000-02-03' },
+      'avatars/not-image.jpg',
+      [],
+      ['avatar', 'birthDate'],
+      'replace'
+    )
+
+    assert.equal(applied, true)
+    assert.equal(warnings.some((warning) => warning.includes('头像未应用')), true)
+    const row = db
+      .prepare('SELECT birth_date, avatar_path FROM actresses WHERE id = ?')
+      .get(2) as { birth_date: string | null; avatar_path: string | null }
+    assert.equal(row.birth_date, '2000-02-03')
+    assert.equal(row.avatar_path, null)
+    assert.equal(assetExists('avatars/not-image.jpg'), false)
+  })
+
+  it('replace keeps manual crop when scraped avatar bytes match existing source', () => {
+    setupDb()
+    const db = getDb()
+    const sourceFingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+    setActressAvatarBundle(1, 'Complete', {
+      displayImageBase64: MINIMAL_JPEG.toString('base64'),
+      sourceImageBase64: MINIMAL_JPEG.toString('base64'),
+      crop: createAvatarCropV1({
+        sourceFingerprint,
+        zoom: 1.8,
+        offsetX: -12,
+        offsetY: 4
+      })
+    })
+    const before = db
+      .prepare(
+        'SELECT avatar_path, avatar_source_path, avatar_crop_json FROM actresses WHERE id = ?'
+      )
+      .get(1) as {
+      avatar_path: string
+      avatar_source_path: string
+      avatar_crop_json: string
+    }
+
+    writeTestAvatar('avatars/same-source-again.jpg')
+    const { applied } = applyActressScrapeResult(
+      1,
+      { birthDate: '1991-02-03' },
+      'avatars/same-source-again.jpg',
+      [],
+      ['avatar', 'birthDate'],
+      'replace'
+    )
+
+    assert.equal(applied, true)
+    const after = db
+      .prepare(
+        'SELECT birth_date, avatar_path, avatar_source_path, avatar_crop_json FROM actresses WHERE id = ?'
+      )
+      .get(1) as {
+      birth_date: string | null
+      avatar_path: string
+      avatar_source_path: string
+      avatar_crop_json: string
+    }
+    assert.equal(after.birth_date, '1991-02-03')
+    assert.equal(after.avatar_path, before.avatar_path)
+    assert.equal(after.avatar_source_path, before.avatar_source_path)
+    assert.equal(after.avatar_crop_json, before.avatar_crop_json)
+    assert.equal(parseAvatarCrop(after.avatar_crop_json, sourceFingerprint)?.zoom, 1.8)
+    assert.equal(assetExists('avatars/same-source-again.jpg'), false)
+  })
+
+  it('replace adopts a new avatar when scraped bytes differ from existing source', () => {
+    setupDb()
+    const db = getDb()
+    const sourceFingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+    setActressAvatarBundle(1, 'Complete', {
+      displayImageBase64: MINIMAL_JPEG.toString('base64'),
+      sourceImageBase64: MINIMAL_JPEG.toString('base64'),
+      crop: createAvatarCropV1({
+        sourceFingerprint,
+        zoom: 1.8,
+        offsetX: -12,
+        offsetY: 4
+      })
+    })
+    const before = db
+      .prepare('SELECT avatar_path, avatar_crop_json FROM actresses WHERE id = ?')
+      .get(1) as { avatar_path: string; avatar_crop_json: string }
+
+    // Minimal valid 1x1 PNG — different fingerprint from MINIMAL_JPEG
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64'
+    )
+    writeTestAsset('avatars/different-source.png', png)
+    const { applied } = applyActressScrapeResult(
+      1,
+      {},
+      'avatars/different-source.png',
+      [],
+      ['avatar'],
+      'replace'
+    )
+
+    assert.equal(applied, true)
+    const after = db
+      .prepare('SELECT avatar_path, avatar_crop_json FROM actresses WHERE id = ?')
+      .get(1) as { avatar_path: string; avatar_crop_json: string }
+    assert.notEqual(after.avatar_path, before.avatar_path)
+    assert.notEqual(after.avatar_crop_json, before.avatar_crop_json)
+    assert.equal(parseAvatarCrop(after.avatar_crop_json)?.zoom, 1)
+  })
+
   it('fillEmpty preserves existing measurement values while filling missing ones', () => {
     setupDb()
     const { applied } = applyActressScrapeResult(

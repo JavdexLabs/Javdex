@@ -177,6 +177,64 @@ describe('videoRepo.applyScrapeResult', () => {
       1
     )
   })
+
+  it('adopts cast avatars into per-actress bundles instead of sharing download paths', () => {
+    setupDb()
+    if (!tempRoot) throw new Error('test root not initialized')
+    const mediaRoot = path.join(tempRoot, 'media_assets', 'avatars')
+    fs.mkdirSync(mediaRoot, { recursive: true })
+    const jpeg = Buffer.from(
+      'ffd8ffe000104a4649460000010101004800480000ffdb004300080606070605080707070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d1a1c1c20242e2720222c231c1c2837292c30313434341f27393d38323c2e333432ffc0000b080001000101011100ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191082242b1c11552d1f0243362728292a35363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffda0008010100003f007b941100ffd9',
+      'hex'
+    )
+    fs.writeFileSync(path.join(mediaRoot, 'cast-a.jpg'), jpeg)
+    fs.writeFileSync(path.join(mediaRoot, 'cast-b.jpg'), jpeg)
+
+    const avatars = new Map<string, string | null>([
+      ['三上悠亚', 'avatars/cast-a.jpg'],
+      ['桥本有菜', 'avatars/cast-b.jpg']
+    ])
+    applyScrapeResult(
+      1,
+      {
+        code: 'IPX-535',
+        actresses: [
+          { name: '三上悠亚', gender: 'female' },
+          { name: '桥本有菜', gender: 'female' }
+        ]
+      },
+      null,
+      avatars,
+      [],
+      ['actressesFemale'],
+      undefined,
+      'replace'
+    )
+
+    const db = getDb()
+    const rows = db
+      .prepare(
+        `SELECT main_name, avatar_path, avatar_source_path, avatar_crop_json
+         FROM actresses
+         WHERE main_name IN ('三上悠亚', '桥本有菜')
+         ORDER BY main_name`
+      )
+      .all() as Array<{
+      main_name: string
+      avatar_path: string | null
+      avatar_source_path: string | null
+      avatar_crop_json: string | null
+    }>
+    assert.equal(rows.length, 2)
+    assert.ok(rows[0].avatar_path)
+    assert.ok(rows[1].avatar_path)
+    assert.notEqual(rows[0].avatar_path, rows[1].avatar_path)
+    assert.notEqual(rows[0].avatar_source_path, rows[1].avatar_source_path)
+    assert.ok(rows[0].avatar_crop_json)
+    assert.ok(rows[1].avatar_crop_json)
+    assert.notEqual(rows[0].avatar_path, 'avatars/cast-a.jpg')
+    assert.notEqual(rows[1].avatar_path, 'avatars/cast-b.jpg')
+  })
 })
 
 describe('videoRepo.scrapeStatus', () => {

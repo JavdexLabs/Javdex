@@ -23,7 +23,7 @@ export async function importActressGalleryImage(
   if (input.source === 'file') {
     const sourcePath = input.sourcePath?.trim()
     if (!sourcePath) throw new Error('请选择本地图片文件')
-    const localPath = importActressGalleryFromFile(actress.main_name, sourcePath)
+    const localPath = importActressGalleryFromFile(actress.main_name, sourcePath, actressId)
     const dims =
       readImageDimensionsFromRelPath(localPath) ?? readImageDimensionsFromPath(sourcePath)
     return addActressGalleryAsset(actressId, {
@@ -47,7 +47,12 @@ export async function importActressGalleryImage(
 
   const remoteUrl = parsed.toString()
   const buf = await fetchRemoteImageBuffer(remoteUrl)
-  const downloaded = await downloadActressGalleryImage(actress.main_name, remoteUrl, async () => buf)
+  const downloaded = await downloadActressGalleryImage(
+    actress.main_name,
+    remoteUrl,
+    async () => buf,
+    actressId
+  )
   if (!downloaded) throw new Error('写真链接下载失败')
   return addActressGalleryAsset(actressId, {
     remoteUrl,

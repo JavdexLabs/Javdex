@@ -1,11 +1,15 @@
-const PLAYLIST_IN_TREE = /^\/playlists\/(\d+)(?:\/(\d+)(?:\/actress\/(\d+))?)?\/?$/
+import { generatePath, matchPath } from 'react-router-dom'
+import { ROUTE_PATH } from './routePaths'
 
 export function playlistDetailPath(playlistId: number): string {
-  return `/playlists/${playlistId}`
+  return generatePath(ROUTE_PATH.playlistDetail, { playlistId: String(playlistId) })
 }
 
 export function playlistVideoDetailPath(playlistId: number, videoId: number): string {
-  return `/playlists/${playlistId}/${videoId}`
+  return generatePath(ROUTE_PATH.playlistVideoStack, {
+    playlistId: String(playlistId),
+    id: String(videoId)
+  })
 }
 
 export function parsePlaylistVideoPath(pathname: string): {
@@ -13,12 +17,16 @@ export function parsePlaylistVideoPath(pathname: string): {
   videoId?: number
   actressId?: number
 } | null {
-  const m = pathname.match(PLAYLIST_IN_TREE)
+  const m =
+    matchPath({ path: ROUTE_PATH.playlistActressStack, end: true }, pathname) ??
+    matchPath({ path: ROUTE_PATH.playlistVideoStack, end: true }, pathname) ??
+    matchPath({ path: ROUTE_PATH.playlistDetail, end: true }, pathname)
   if (!m) return null
-  const playlistId = Number(m[1])
+  const params = m.params as Record<string, string | undefined>
+  const playlistId = Number(params.playlistId)
   if (Number.isNaN(playlistId)) return null
-  const videoId = m[2] ? Number(m[2]) : undefined
-  const actressId = m[3] ? Number(m[3]) : undefined
+  const videoId = params.id ? Number(params.id) : undefined
+  const actressId = params.actressId ? Number(params.actressId) : undefined
   return {
     playlistId,
     videoId: videoId != null && !Number.isNaN(videoId) ? videoId : undefined,

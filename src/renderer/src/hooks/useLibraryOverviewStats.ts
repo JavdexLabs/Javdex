@@ -3,7 +3,7 @@ import type { LibraryOverviewStats } from '@shared/types'
 import { api } from '../api'
 import { overviewStatsKeys } from '../query/queryKeys'
 
-export function useLibraryOverviewStats(refreshKey = 0): {
+export function useLibraryOverviewStats(refreshKey = 0, enabled = true): {
   stats: LibraryOverviewStats | undefined
   isLoading: boolean
   refetch: () => void
@@ -11,6 +11,7 @@ export function useLibraryOverviewStats(refreshKey = 0): {
   const query = useQuery({
     queryKey: overviewStatsKeys.detail(refreshKey),
     queryFn: () => api.settings.getOverviewStats(),
+    enabled,
     staleTime: 5_000
   })
 

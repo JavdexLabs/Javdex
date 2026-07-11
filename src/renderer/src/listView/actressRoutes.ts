@@ -1,9 +1,15 @@
+import { generatePath, matchPath } from 'react-router-dom'
+import { ROUTE_PATH } from './routePaths'
+
 export function actressDetailPath(actressId: number): string {
-  return `/actresses/${actressId}`
+  return generatePath(ROUTE_PATH.actressDetail, { id: String(actressId) })
 }
 
 export function actressVideoDetailPath(actressId: number, videoId: number): string {
-  return `/actresses/${actressId}/${videoId}`
+  return generatePath(ROUTE_PATH.actressVideoStack, {
+    id: String(actressId),
+    videoId: String(videoId)
+  })
 }
 
 export function actressVideoActressPath(
@@ -11,26 +17,32 @@ export function actressVideoActressPath(
   videoId: number,
   stackedActressId: number
 ): string {
-  return `/actresses/${actressId}/${videoId}/actress/${stackedActressId}`
+  return generatePath(ROUTE_PATH.actressActressStack, {
+    id: String(actressId),
+    videoId: String(videoId),
+    actressId: String(stackedActressId)
+  })
 }
-
-const ACTRESS_VIDEO_PATH = /^\/actresses\/(\d+)(?:\/(\d+)(?:\/actress\/(\d+))?)?\/?$/
 
 export function parseActressVideoPath(pathname: string): {
   actressId: number
   videoId?: number
   stackedActressId?: number
 } | null {
-  const match = pathname.match(ACTRESS_VIDEO_PATH)
+  const match =
+    matchPath({ path: ROUTE_PATH.actressActressStack, end: true }, pathname) ??
+    matchPath({ path: ROUTE_PATH.actressVideoStack, end: true }, pathname) ??
+    matchPath({ path: ROUTE_PATH.actressDetail, end: true }, pathname)
   if (!match) return null
+  const params = match.params as Record<string, string | undefined>
 
-  const actressId = Number(match[1])
+  const actressId = Number(params.id)
   if (Number.isNaN(actressId)) return null
 
-  const videoId = match[2] ? Number(match[2]) : undefined
+  const videoId = params.videoId ? Number(params.videoId) : undefined
   if (videoId != null && Number.isNaN(videoId)) return null
 
-  const stackedActressId = match[3] ? Number(match[3]) : undefined
+  const stackedActressId = params.actressId ? Number(params.actressId) : undefined
   if (stackedActressId != null && Number.isNaN(stackedActressId)) return null
 
   return { actressId, videoId, stackedActressId }

@@ -9,6 +9,9 @@ interface ConfirmModalProps {
   size?: ModalSize
   danger?: boolean
   confirmDisabled?: boolean
+  busy?: boolean
+  dismissible?: boolean
+  closeDisabled?: boolean
   onConfirm: () => void
   onCancel: () => void
 }
@@ -21,6 +24,9 @@ export default function ConfirmModal({
   size,
   danger = false,
   confirmDisabled,
+  busy,
+  dismissible,
+  closeDisabled,
   onConfirm,
   onCancel
 }: ConfirmModalProps): JSX.Element {
@@ -32,6 +38,9 @@ export default function ConfirmModal({
       confirmText={confirmText}
       cancelText={cancelText}
       confirmDisabled={confirmDisabled}
+      busy={busy}
+      dismissible={dismissible}
+      closeDisabled={closeDisabled}
       onConfirm={onConfirm}
       onCancel={onCancel}
     >

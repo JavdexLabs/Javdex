@@ -16,7 +16,13 @@ let mainWindow: BrowserWindow | null = null
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'media',
-    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      corsEnabled: true
+    }
   }
 ])
 
@@ -82,15 +88,25 @@ function registerAssetProtocol(): void {
     const root = assetsRoot()
     const abs = resolveMediaAssetPath(request.url, root)
 
+    const corsHeaders = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      'Access-Control-Allow-Headers': '*'
+    }
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: corsHeaders })
+    }
     if (!abs) {
-      return new Response('Forbidden', { status: 403 })
+      return new Response('Forbidden', { status: 403, headers: corsHeaders })
     }
     try {
       const relPosix = toStoredAssetPath(abs, root)
       const { body, mime } = readAssetForServe(relPosix)
-      return new Response(body, { headers: { 'Content-Type': mime } })
+      return new Response(body, {
+        headers: { 'Content-Type': mime, ...corsHeaders }
+      })
     } catch {
-      return new Response('Not Found', { status: 404 })
+      return new Response('Not Found', { status: 404, headers: corsHeaders })
     }
   })
 }

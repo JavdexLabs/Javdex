@@ -1,8 +1,10 @@
+import { generatePath, matchPath } from 'react-router-dom'
+import { ROUTE_PATH } from '../listView/routePaths'
+
 export type SettingsGroup =
   | 'overview'
   | 'library'
   | 'plugins'
-  | 'batch'
   | 'models'
   | 'appearance'
   | 'storage'
@@ -12,7 +14,6 @@ export type SettingsTab =
   | 'status'
   | 'paths'
   | 'video'
-  | 'actress'
   | 'providers'
   | 'theme'
   | 'assets'
@@ -58,17 +59,6 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
     tabs: [{ id: 'video', label: '刮削插件' }]
   },
   {
-    id: 'batch',
-    label: '批量任务',
-    hint: '运行与日志',
-    description: '配置并监控影片与演员批量刮削任务。',
-    defaultTab: 'video',
-    tabs: [
-      { id: 'video', label: '影片任务' },
-      { id: 'actress', label: '演员任务' }
-    ]
-  },
-  {
     id: 'models',
     label: '模型',
     hint: 'LLM 供应商',
@@ -105,17 +95,24 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
 export const SETTINGS_GROUP_BY_ID = new Map(SETTINGS_GROUPS.map((group) => [group.id, group]))
 
 export function resolveSettingsRoute(pathname: string): { group: SettingsGroupItem; tab: SettingsTab } {
-  const parts = pathname.split('/').filter(Boolean)
-  const groupId = parts[1] as SettingsGroup | undefined
+  const match = matchPath({ path: ROUTE_PATH.settingsGroup, end: true }, pathname)
+  const groupId = match?.params.group as SettingsGroup | undefined
   const group = (groupId && SETTINGS_GROUP_BY_ID.get(groupId)) || SETTINGS_GROUPS[0]
-  const tabId = parts[2] as SettingsTab | undefined
+  const tabId = match?.params.tab as SettingsTab | undefined
   const tab = tabId && group.tabs.some((item) => item.id === tabId) ? tabId : group.defaultTab
   return { group, tab }
 }
 
 export function settingsPath(group: SettingsGroup, tab?: SettingsTab): string {
   const config = SETTINGS_GROUP_BY_ID.get(group) ?? SETTINGS_GROUPS[0]
-  return `/settings/${config.id}/${tab ?? config.defaultTab}`
+  return generatePath(ROUTE_PATH.settingsGroup, {
+    group: config.id,
+    tab: tab ?? config.defaultTab
+  })
+}
+
+export function settingsPluginDevPath(): string {
+  return ROUTE_PATH.settingsPluginDev
 }
 
 export function settingsTabDomId(group: SettingsGroup, tab: SettingsTab): string {

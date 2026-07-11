@@ -246,9 +246,10 @@ export async function scrapeActress(
     if (selected.has('gallery') && galleryUrls.length) {
       for (let index = 0; index < galleryUrls.length; index++) {
         const downloaded = await downloadActressGalleryImage(
-          `${detail.main_name}_${index}`,
+          detail.main_name,
           galleryUrls[index],
-          fetcher
+          fetcher,
+          actressId
         )
         galleryAssets.push({
           remoteUrl: galleryUrls[index],

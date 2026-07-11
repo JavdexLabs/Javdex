@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useMatch, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { Inbox, SearchX } from 'lucide-react'
 import type { FacetItem } from '@shared/types'
 import { api, assetUrl } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
-import ScrollToTopButton from '../components/ScrollToTopButton'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useToast } from '../components/Toast'
 import ConfirmModal from '../components/ConfirmModal'
@@ -17,6 +17,9 @@ import { ROUTE_MATCH } from '../listView/routePaths'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { facetKeys } from '../query/queryKeys'
 import MediaTileDeleteButton from '../components/MediaTileDeleteButton'
+import EmptyState from '../components/EmptyState'
+import ListSurface from '../components/ListSurface'
+import { UI_ICON_SM } from '../components/iconDefaults'
 
 export default function FacetListPage(): JSX.Element {
   const { type } = useParams()
@@ -88,12 +91,6 @@ export default function FacetListPage(): JSX.Element {
     return q ? items.filter((i) => i.value.toLowerCase().includes(q)) : items
   }, [items, debouncedQ])
 
-  useEffect(() => {
-    if (!facetType) return
-    setSearchParams(new URLSearchParams(), { replace: true })
-    setSearchInput('')
-  }, [facetType])
-
   const doDelete = async (): Promise<void> => {
     if (!facetType || !pendingDelete) return
     try {
@@ -108,9 +105,11 @@ export default function FacetListPage(): JSX.Element {
 
   if (!facetType) {
     return (
-      <div className="empty-state">
-        <div>未知分类</div>
-      </div>
+      <EmptyState
+        icon={<SearchX {...UI_ICON_SM} aria-hidden />}
+        title="未知分类"
+        description="当前分类参数无效。"
+      />
     )
   }
 
@@ -141,22 +140,30 @@ export default function FacetListPage(): JSX.Element {
         />
       </div>
 
-      <div className="list-scroll-region">
-        <div ref={scrollRef} className="scroll-body scroll-body--scroll">
-        <div className="scroll-body-inner">
+      <ListSurface
+        variant="scroll"
+        scrollRef={scrollRef}
+        showScrollToTop={showScrollToTop}
+        onScrollToTop={scrollToTop}
+      >
           {loading ? (
-            <div className="empty-state">
-              <div className="spinner" />
-            </div>
+            <EmptyState loading />
           ) : filtered.length === 0 ? (
-            <div className="empty-state">
-              <div className="big">▦</div>
-              <div>
-                {items.length === 0
-                  ? `暂无${label}数据，刮削影片后将自动归纳。`
-                  : `没有匹配的${label}。`}
-              </div>
-            </div>
+            <EmptyState
+              icon={
+                items.length === 0 ? (
+                  <Inbox {...UI_ICON_SM} aria-hidden />
+                ) : (
+                  <SearchX {...UI_ICON_SM} aria-hidden />
+                )
+              }
+              title={items.length === 0 ? `暂无${label}数据` : `没有匹配的${label}`}
+              description={
+                items.length === 0
+                  ? '刮削影片后将自动归纳。'
+                  : '调整搜索关键词后再试。'
+              }
+            />
           ) : (
             <div className="facet-grid">
               {filtered.map((it) => {
@@ -166,11 +173,17 @@ export default function FacetListPage(): JSX.Element {
                     <button
                       type="button"
                       className="facet-card card-interactive"
-                      onClick={() => navigateToFacetDetail(navigate, facetType, it.value)}
+                      onClick={() => navigateToFacetDetail(navigate, location, facetType, it.value)}
                       title={it.value}
                     >
                       <div className="facet-thumb">
-                        {cover ? <img src={cover} alt={it.value} loading="lazy" /> : <span>▦</span>}
+                        {cover ? (
+                          <img src={cover} alt={it.value} loading="lazy" />
+                        ) : (
+                          <span className="facet-thumb-placeholder" aria-hidden="true">
+                            <Inbox {...UI_ICON_SM} />
+                          </span>
+                        )}
                       </div>
                       <div className="facet-name">{it.value}</div>
                       <div className="facet-count">{it.video_count} 部</div>
@@ -187,10 +200,7 @@ export default function FacetListPage(): JSX.Element {
               })}
             </div>
           )}
-        </div>
-        </div>
-        <ScrollToTopButton visible={showScrollToTop} onClick={scrollToTop} />
-      </div>
+      </ListSurface>
 
       {pendingDelete && (
         <ConfirmModal

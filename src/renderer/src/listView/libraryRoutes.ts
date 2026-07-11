@@ -1,26 +1,28 @@
+import { generatePath, matchPath } from 'react-router-dom'
+import { ROUTE_PATH } from './routePaths'
+
 export function libraryVideoDetailPath(videoId: number): string {
-  return `/detail/${videoId}`
+  return generatePath(ROUTE_PATH.libraryDetail, { id: String(videoId) })
 }
 
 export function libraryVideoActressPath(videoId: number, actressId: number): string {
   return `${libraryVideoDetailPath(videoId)}/actress/${actressId}`
 }
 
-const LIBRARY_VIDEO_PATH = /^\/detail\/(\d+)(?:\/actress\/(\d+))?\/?$/
-
 export function parseLibraryVideoPath(pathname: string): {
   videoId: number
   actressId?: number
 } | null {
-  const match = pathname.match(LIBRARY_VIDEO_PATH)
-  if (!match) return null
+  const stacked = matchPath({ path: ROUTE_PATH.libraryActressStack, end: true }, pathname)
+  const detail = stacked ?? matchPath({ path: ROUTE_PATH.libraryDetail, end: true }, pathname)
+  if (!detail) return null
+  const params = detail.params as Record<string, string | undefined>
 
-  const videoId = Number(match[1])
+  const videoId = Number(params.id)
   if (Number.isNaN(videoId)) return null
 
-  const actressId = match[2] ? Number(match[2]) : undefined
+  const actressId = params.actressId ? Number(params.actressId) : undefined
   if (actressId != null && Number.isNaN(actressId)) return null
 
   return { videoId, actressId }
 }
-

@@ -1,0 +1,20 @@
+/* The desktop shell releases space before page-level responsive rules engage. */
+@media (max-width: 1120px) {
+  .sidebar {
+    width: 176px;
+    padding-inline: 10px;
+  }
+
+  .brand-wordmark {
+    font-size: 22px;
+  }
+
+  .nav-item {
+    gap: 8px;
+    padding-inline: 10px;
+  }
+
+  .nav-group-label {
+    padding-inline: 10px;
+  }
+}

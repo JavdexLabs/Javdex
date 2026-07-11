@@ -14,6 +14,7 @@ import {
 } from '@shared/types'
 import Modal from '../Modal'
 import SelectControl from '../SelectControl'
+import { SettingsNumberStepper } from './SettingsPrimitives'
 import { defaultPluginDelay, pluginSourceLabel } from '../../settings/settingsDisplay'
 
 export type PluginKind = 'video' | 'actress'
@@ -60,8 +61,8 @@ export function PluginConfigModal({
   const delay = defaultPluginDelay(plugin.delay)
   const initialRef = useRef({
     description: plugin.description,
-    minSeconds: String(Math.round(delay.minMs / 1000)),
-    maxSeconds: String(Math.round(delay.maxMs / 1000))
+    minSeconds: Math.round(delay.minMs / 1000),
+    maxSeconds: Math.round(delay.maxMs / 1000)
   })
   const [description, setDescription] = useState(initialRef.current.description)
   const [minSeconds, setMinSeconds] = useState(initialRef.current.minSeconds)
@@ -96,8 +97,8 @@ export function PluginConfigModal({
         onSave(kind, plugin.name, {
           description: editableMeta ? description : undefined,
           delay: {
-            minMs: Math.max(0, Number(minSeconds) || 0) * 1000,
-            maxMs: Math.max(Number(minSeconds) || 0, Number(maxSeconds) || 0) * 1000
+            minMs: Math.max(0, minSeconds) * 1000,
+            maxMs: Math.max(minSeconds, maxSeconds) * 1000
           }
         })
       }
@@ -187,26 +188,35 @@ export function PluginConfigModal({
           </div>
           <div className="plugin-config-delay">
             <label className="plugin-config-delay-field">
-              <span>最小（秒）</span>
-              <input
-                className="text-input"
-                type="number"
-                min={0}
+              <span>最小</span>
+              <SettingsNumberStepper
+                aria-label="最小访问间隔（秒）"
                 value={minSeconds}
-                onChange={(e) => setMinSeconds(e.target.value)}
+                min={0}
+                max={600}
+                step={1}
+                unit="秒"
+                disabled={saving}
+                onChange={(next) => {
+                  setMinSeconds(next)
+                  if (next > maxSeconds) setMaxSeconds(next)
+                }}
               />
             </label>
             <span className="plugin-config-delay-sep" aria-hidden>
               —
             </span>
             <label className="plugin-config-delay-field">
-              <span>最大（秒）</span>
-              <input
-                className="text-input"
-                type="number"
-                min={0}
+              <span>最大</span>
+              <SettingsNumberStepper
+                aria-label="最大访问间隔（秒）"
                 value={maxSeconds}
-                onChange={(e) => setMaxSeconds(e.target.value)}
+                min={0}
+                max={600}
+                step={1}
+                unit="秒"
+                disabled={saving}
+                onChange={(next) => setMaxSeconds(Math.max(next, minSeconds))}
               />
             </label>
           </div>

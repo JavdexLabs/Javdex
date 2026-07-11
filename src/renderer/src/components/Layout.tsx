@@ -1,8 +1,14 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { type MouseEvent, type ReactNode } from 'react'
+import { useEffect, type MouseEvent, type ReactNode } from 'react'
 import { resolveMediaSrc } from '../api'
 import { getDetailPosterScope } from '../listView/detailPosterScope'
 import { clearListScrollForPrimaryNav } from '../listView/listViewMemory'
+import {
+  primaryListRoot,
+  primaryNavLinkTo,
+  resolvePrimaryNavTarget,
+  syncPrimaryNavigationMemory
+} from '../listView/primaryNavigationMemory'
 import AppBrand from './AppBrand'
 import AssetCryptoOverlay from './AssetCryptoOverlay'
 import AppBackgroundLayer from './AppBackgroundLayer'
@@ -10,13 +16,14 @@ import { useAppBackground } from './AppBackgroundContext'
 import { useImagePreviewOverlay } from './ImagePreviewOverlayContext'
 import { usePluginDevLeaveGuard } from './pluginDev/PluginDevLeaveGuard'
 import { NavIcon, type NavIconName } from './NavIcons'
+import { ROUTE_PATH } from '../listView/routePaths'
 
 type NavItem = { to: string; label: string; icon: NavIconName; end?: boolean }
 
 const NAV_MAIN: NavItem[] = [
-  { to: '/', label: '媒体库', icon: 'library', end: true },
-  { to: '/playlists', label: '清单', icon: 'playlist' },
-  { to: '/actresses', label: '演员', icon: 'actress' }
+  { to: ROUTE_PATH.library, label: '媒体库', icon: 'library', end: true },
+  { to: ROUTE_PATH.playlists, label: '清单', icon: 'playlist' },
+  { to: ROUTE_PATH.actresses, label: '演员', icon: 'actress' }
 ]
 
 const NAV_FACETS: NavItem[] = [
@@ -26,22 +33,33 @@ const NAV_FACETS: NavItem[] = [
   { to: '/facet/series', label: '系列', icon: 'series' }
 ]
 
-const NAV_BOTTOM: NavItem[] = [{ to: '/settings', label: '设置', icon: 'settings' }]
+const NAV_BOTTOM: NavItem[] = [{ to: ROUTE_PATH.settings, label: '设置', icon: 'settings' }]
 
 function isPluginDevPath(pathname: string): boolean {
-  return pathname.endsWith('/plugin-dev')
+  return pathname === ROUTE_PATH.settingsPluginDev
 }
 
 function NavItems({ items }: { items: NavItem[] }): JSX.Element {
   const location = useLocation()
   const navigate = useNavigate()
   const { requestLeave } = usePluginDevLeaveGuard()
+  const activeListRoot = primaryListRoot(location.pathname)
 
   const handleNavClick = (event: MouseEvent<HTMLAnchorElement>, to: string): void => {
-    clearListScrollForPrimaryNav(to)
-    if (!isPluginDevPath(location.pathname) || to === location.pathname) return
     event.preventDefault()
-    requestLeave(() => navigate(to))
+    if (to === activeListRoot) clearListScrollForPrimaryNav(to)
+
+    const target = resolvePrimaryNavTarget(to, location.pathname, location.search)
+    if (target == null) return
+
+    const go = (): void => {
+      navigate(target)
+    }
+    if (isPluginDevPath(location.pathname) && to !== location.pathname) {
+      requestLeave(go)
+      return
+    }
+    go()
   }
 
   return (
@@ -49,7 +67,7 @@ function NavItems({ items }: { items: NavItem[] }): JSX.Element {
       {items.map((n) => (
         <NavLink
           key={n.to}
-          to={n.to}
+          to={primaryNavLinkTo(n.to, location.pathname, location.search)}
           end={n.end}
           draggable={false}
           onClick={(event) => handleNavClick(event, n.to)}
@@ -73,6 +91,10 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
   const background = getBackground(getDetailPosterScope(location.pathname))
   const backgroundSrc = imagePreviewOpen ? null : resolveMediaSrc(background?.path)
   const hasBackgroundLayer = Boolean(backgroundSrc)
+
+  useEffect(() => {
+    syncPrimaryNavigationMemory(location.pathname, location.search)
+  }, [location.pathname, location.search])
 
   return (
     <div className={`app-shell${hasBackgroundLayer ? ' app-shell--with-background' : ''}`}>

@@ -54,6 +54,8 @@ export interface Actress {
   id: number
   main_name: string
   avatar_path: string | null
+  avatar_source_path: string | null
+  avatar_crop_json: string | null
   poster_path: string | null
   birth_date: string | null
   debut_date: string | null
@@ -213,6 +215,8 @@ export interface ActressMergeInput {
 }
 
 /** Payload for manual actress profile editing. Aliases, when present, fully replace existing. */
+export type { ActressAvatarCommit, AvatarCropV1 } from './avatarCrop'
+
 export interface ActressEditInput {
   main_name?: string
   name_zh?: string | null
@@ -234,6 +238,10 @@ export interface ActressEditInput {
   avatarSourcePath?: string
   /** JPEG avatar bytes (base64) exported from the crop editor. */
   avatarImageBase64?: string
+  /** Preferred avatar bundle commit (source + display + crop). */
+  avatar?: import('./avatarCrop').ActressAvatarCommit
+  /** Clear display/source/crop together. */
+  clearAvatar?: boolean
 }
 
 /** Result returned by a scraper plugin after parsing a remote page. */

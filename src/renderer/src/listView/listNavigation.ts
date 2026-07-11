@@ -1,4 +1,5 @@
 import type { NavigateFunction, Location } from 'react-router-dom'
+import { matchPath } from 'react-router-dom'
 import {
   actressDetailPath,
   actressVideoActressPath,
@@ -13,6 +14,7 @@ import {
   playlistVideoDetailPath
 } from './playlistRoutes'
 import { patchSearchParams } from './listQueryParams'
+import { ROUTE_PATH } from './routePaths'
 
 /** Open video detail; nested under facet list when already in that flow. */
 export function navigateToVideoDetail(
@@ -184,7 +186,7 @@ export function navigateToActressDetail(
   actressId: number
 ): void {
   navigate({
-    pathname: `/actresses/${actressId}`,
+    pathname: actressDetailPath(actressId),
     search: location.search
   })
 }
@@ -198,18 +200,30 @@ export function navigateToActressList(
     ? patchSearchParams(new URLSearchParams(location.search), patch)
     : new URLSearchParams(location.search)
   navigate({
-    pathname: '/actresses',
+    pathname: ROUTE_PATH.actresses,
     search: nextSearch.toString()
   })
 }
 
-/** Facet video list for one maker/publisher/series/director. */
+/**
+ * Facet video list for one maker/publisher/series/director.
+ * From the facet list, keep search (e.g. q) so returning to the list stays coherent.
+ * From anywhere else (library/actress/playlist/facet video detail), start clean —
+ * do not carry library filters or sort into the facet video list.
+ */
 export function navigateToFacetDetail(
   navigate: NavigateFunction,
+  location: Location,
   facetType: string,
   value: string
 ): void {
-  navigate(facetVideoListPath(facetType, value))
+  const fromFacetList = Boolean(
+    matchPath({ path: ROUTE_PATH.facetList, end: true }, location.pathname)
+  )
+  navigate({
+    pathname: facetVideoListPath(facetType, value),
+    search: fromFacetList ? location.search : ''
+  })
 }
 
 export function navigateToFacetList(
@@ -233,7 +247,7 @@ export function navigateToPlaylistDetail(
   playlistId: number
 ): void {
   navigate({
-    pathname: `/playlists/${playlistId}`,
+    pathname: playlistDetailPath(playlistId),
     search: location.search
   })
 }
@@ -243,7 +257,7 @@ export function navigateToPlaylistList(
   location: Location
 ): void {
   navigate({
-    pathname: '/playlists',
+    pathname: ROUTE_PATH.playlists,
     search: location.search
   })
 }

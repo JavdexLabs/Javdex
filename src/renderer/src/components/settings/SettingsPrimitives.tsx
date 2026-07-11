@@ -1,7 +1,11 @@
 import type { KeyboardEventHandler, ReactNode, RefObject } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Minus, Plus } from 'lucide-react'
 import type { SettingsGroup, SettingsTab, SettingsTabItem } from '../../settings/settingsRoutes'
 import { settingsTabDomId, settingsTabPanelDomId } from '../../settings/settingsRoutes'
+import EmptyState from '../EmptyState'
 import { AppFormField } from '../FormPrimitives'
+import { UI_ICON_SM } from '../iconDefaults'
 
 type CardProps = {
   title?: ReactNode
@@ -158,12 +162,13 @@ export function SettingsEmptyPanel({
   variant?: 'plain' | 'dashed' | 'compact'
   className?: string
 }): JSX.Element {
+  const emptyVariant = variant === 'compact' ? 'compact' : 'panel'
   return (
-    <div
+    <EmptyState
+      variant={emptyVariant}
       className={`settings-empty-panel settings-empty-panel--${variant}${className ? ` ${className}` : ''}`}
-    >
-      {children}
-    </div>
+      description={children}
+    />
   )
 }
 
@@ -182,5 +187,156 @@ export function SettingsStatusPill({
     <span className={`settings-status-pill${status ? ` settings-status-pill--${status}` : ''}${className ? ` ${className}` : ''}`}>
       {children}
     </span>
+  )
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+/** Compact − value + stepper for dense settings rows. */
+export function SettingsNumberStepper({
+  value,
+  min = 0,
+  max = Number.MAX_SAFE_INTEGER,
+  step = 1,
+  unit,
+  disabled = false,
+  'aria-label': ariaLabel,
+  onChange
+}: {
+  value: number
+  min?: number
+  max?: number
+  step?: number
+  unit?: string
+  disabled?: boolean
+  'aria-label'?: string
+  onChange: (value: number) => void
+}): JSX.Element {
+  const [draft, setDraft] = useState(String(value))
+  const [focused, setFocused] = useState(false)
+  const valueRef = useRef(value)
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const holdIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  valueRef.current = value
+
+  useEffect(() => {
+    if (!focused) setDraft(String(value))
+  }, [focused, value])
+
+  useEffect(() => {
+    return () => {
+      if (holdTimerRef.current) clearTimeout(holdTimerRef.current)
+      if (holdIntervalRef.current) clearInterval(holdIntervalRef.current)
+    }
+  }, [])
+
+  const commit = (next: number): void => {
+    const clamped = clampNumber(Math.round(next), min, max)
+    setDraft(String(clamped))
+    if (clamped !== valueRef.current) onChange(clamped)
+  }
+
+  const nudge = (direction: 1 | -1): void => {
+    commit(valueRef.current + direction * step)
+  }
+
+  const stopHold = (): void => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current)
+      holdTimerRef.current = null
+    }
+    if (holdIntervalRef.current) {
+      clearInterval(holdIntervalRef.current)
+      holdIntervalRef.current = null
+    }
+  }
+
+  const startHold = (direction: 1 | -1): void => {
+    if (disabled) return
+    nudge(direction)
+    stopHold()
+    holdTimerRef.current = setTimeout(() => {
+      holdIntervalRef.current = setInterval(() => nudge(direction), 60)
+    }, 380)
+  }
+
+  const atMin = value <= min
+  const atMax = value >= max
+
+  return (
+    <div
+      className={`settings-number-stepper${disabled ? ' settings-number-stepper--disabled' : ''}`}
+      role="group"
+      aria-label={ariaLabel}
+    >
+      <button
+        type="button"
+        className="settings-number-stepper__btn"
+        aria-label="减少"
+        disabled={disabled || atMin}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return
+          e.preventDefault()
+          startHold(-1)
+        }}
+        onPointerUp={stopHold}
+        onPointerCancel={stopHold}
+        onPointerLeave={stopHold}
+      >
+        <Minus {...UI_ICON_SM} aria-hidden />
+      </button>
+      <input
+        className="settings-number-stepper__value"
+        type="text"
+        inputMode="numeric"
+        disabled={disabled}
+        value={draft}
+        aria-label={ariaLabel}
+        onFocus={() => setFocused(true)}
+        onChange={(e) => {
+          const raw = e.target.value.trim()
+          setDraft(raw)
+          if (raw === '' || raw === '-') return
+          const parsed = Number(raw)
+          if (!Number.isFinite(parsed)) return
+          commit(parsed)
+        }}
+        onBlur={() => {
+          setFocused(false)
+          const parsed = Number(draft)
+          commit(Number.isFinite(parsed) ? parsed : value)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            nudge(1)
+          } else if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            nudge(-1)
+          } else if (e.key === 'Enter') {
+            e.currentTarget.blur()
+          }
+        }}
+      />
+      <button
+        type="button"
+        className="settings-number-stepper__btn"
+        aria-label="增加"
+        disabled={disabled || atMax}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return
+          e.preventDefault()
+          startHold(1)
+        }}
+        onPointerUp={stopHold}
+        onPointerCancel={stopHold}
+        onPointerLeave={stopHold}
+      >
+        <Plus {...UI_ICON_SM} aria-hidden />
+      </button>
+      {unit ? <span className="settings-number-stepper__unit">{unit}</span> : null}
+    </div>
   )
 }

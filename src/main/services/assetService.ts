@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { app, nativeImage } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -9,6 +10,7 @@ import {
   resolveMediaAssetsRoot
 } from './assetStoragePaths'
 import {
+  buildActressAssetSeed,
   buildOpaqueAssetBase,
   buildReadableAssetBase
 } from './assetPathNaming'
@@ -354,19 +356,93 @@ export function importSampleFromFile(code: string, sourcePath: string): string {
 }
 
 /** Import a local image file as an actress avatar. Returns relative asset path. */
-export function importAvatarFromFile(name: string, sourcePath: string): string {
-  return importImageFromFile('avatars', name, sourcePath)
+export function importAvatarFromFile(
+  name: string,
+  sourcePath: string,
+  actressId?: number | null
+): string {
+  return importImageFromFile('avatars', buildActressAssetSeed(name, actressId), sourcePath)
 }
 
 /** Import a local image file as an actress gallery image. Returns relative asset path. */
-export function importActressGalleryFromFile(name: string, sourcePath: string): string {
-  return importImageFromFile('actress_gallery', name, sourcePath)
+export function importActressGalleryFromFile(
+  name: string,
+  sourcePath: string,
+  actressId?: number | null
+): string {
+  return importImageFromFile(
+    'actress_gallery',
+    buildActressAssetSeed(name, actressId),
+    sourcePath
+  )
 }
 
 /** Import cropped avatar bytes (JPEG). Returns relative asset path. */
-export function importAvatarFromBuffer(name: string, data: Buffer): string {
+export function importAvatarFromBuffer(
+  name: string,
+  data: Buffer,
+  actressId?: number | null
+): string {
   const urlKey = `crop:${Date.now()}`
-  const rel = writeImageAsset('avatars', name, urlKey, '.jpg', data)
+  const rel = writeImageAsset(
+    'avatars',
+    buildActressAssetSeed(name, actressId),
+    urlKey,
+    '.jpg',
+    data
+  )
+  invalidateAssetCache(rel)
+  return rel
+}
+
+/** Content fingerprint for avatar source bytes (first 16 hex of sha256). */
+export function avatarSourceFingerprint(data: Buffer): string {
+  return createHash('sha256').update(data).digest('hex').slice(0, 16)
+}
+
+/** Read plaintext bytes for a stored relative asset path. */
+export function readAssetBytes(relPath: string): Buffer {
+  return readAssetForServe(relPath).body
+}
+
+/**
+ * Import (or reuse) an avatar source image for one actress.
+ * urlKey is content-addressed so re-imports of the same bytes stay stable per actress.
+ */
+export function importAvatarSourceFromBuffer(
+  name: string,
+  actressId: number,
+  data: Buffer,
+  ext = '.jpg'
+): { relPath: string; fingerprint: string } {
+  const fingerprint = avatarSourceFingerprint(data)
+  const normalizedExt = IMAGE_EXTENSIONS.includes(ext.toLowerCase()) ? ext.toLowerCase() : '.jpg'
+  const urlKey = `avatar-source:${fingerprint}`
+  const rel = writeImageAsset(
+    'avatars',
+    buildActressAssetSeed(name, actressId),
+    urlKey,
+    normalizedExt,
+    data
+  )
+  invalidateAssetCache(rel)
+  return { relPath: rel, fingerprint }
+}
+
+/** Import a display (cropped 512 JPEG) avatar. */
+export function importAvatarDisplayFromBuffer(
+  name: string,
+  actressId: number,
+  data: Buffer
+): string {
+  const urlKey = `avatar-display:${actressId}:${Date.now()}`
+  const rel = writeImageAsset(
+    'avatars',
+    buildActressAssetSeed(name, actressId),
+    urlKey,
+    '.jpg',
+    data
+  )
   invalidateAssetCache(rel)
   return rel
 }
@@ -400,7 +476,8 @@ export async function downloadAvatar(
   try {
     const ext = extFromUrl(url)
     const buf = await fetcher(url)
-    return writeImageAsset('avatars', name, url, ext, buf)
+    // Name-hash seed only: actress id may not exist yet; adopt later scopes permanent files.
+    return writeImageAsset('avatars', buildActressAssetSeed(name), url, ext, buf)
   } catch (err) {
     console.error('downloadAvatar failed:', name, url, (err as Error).message)
     return null
@@ -411,12 +488,19 @@ export async function downloadAvatar(
 export async function downloadActressGalleryImage(
   name: string,
   url: string,
-  fetcher: AssetFetcher
+  fetcher: AssetFetcher,
+  actressId?: number | null
 ): Promise<DownloadedImageAsset | null> {
   try {
     const ext = extFromUrl(url)
     const buf = await fetcher(url)
-    const localPath = writeImageAsset('actress_gallery', name, url, ext, buf)
+    const localPath = writeImageAsset(
+      'actress_gallery',
+      buildActressAssetSeed(name, actressId),
+      url,
+      ext,
+      buf
+    )
     const dims =
       readImageDimensionsFromRelPath(localPath) ?? readImageDimensionsFromBuffer(buf)
     return {

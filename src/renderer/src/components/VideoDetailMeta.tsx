@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { Ellipsis, Play } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import type { FacetType, ScrapedStatus, VideoDetail, VideoFile } from '@shared/types'
 import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS } from '@shared/types'
 import MetaLink from './MetaLink'
@@ -273,6 +273,7 @@ function VideoFileRow({
 
 export function VideoDetailPrimaryMeta({ video }: { video: VideoDetail }): JSX.Element | null {
   const navigate = useNavigate()
+  const location = useLocation()
   const items = buildPrimaryItems(video)
   if (items.length === 0) return null
 
@@ -283,7 +284,9 @@ export function VideoDetailPrimaryMeta({ video }: { video: VideoDetail }): JSX.E
           <span className="meta-key">{item.label}</span>
           <span className="meta-val">
             {item.type === 'facet' ? (
-              <MetaLink onClick={() => navigateToFacetDetail(navigate, item.facet, item.value)}>
+              <MetaLink
+                onClick={() => navigateToFacetDetail(navigate, location, item.facet, item.value)}
+              >
                 {item.value}
               </MetaLink>
             ) : (

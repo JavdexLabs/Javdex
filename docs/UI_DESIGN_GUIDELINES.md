@@ -13,6 +13,7 @@
 7. 选中克制。交互控件、图片、卡片和导航默认不可选中；详情文本、元数据、路径、输入框等明确可复制内容必须可选中。
 8. 滚动稳定。任何会在交互中出现或消失纵向滚动条的容器，都必须预留滚动槽，避免内容宽度变化造成页面、弹窗或卡片跳动。
 9. 主题克制。每个主题必须保持中性色为主体、强调色为点缀；避免整套界面被单一色相统治，尤其避免大面积紫蓝渐变、棕橙、深蓝或米色倾向。
+10. 空状态高度看父容器。固定高度面板内的空状态应铺满可用高度；会随页面正常滚动的区块空状态只用中等固定带高，避免把详情页撑出大片空白。
 
 ## Token Model
 
@@ -35,6 +36,7 @@
 - Scroll containers: use `scrollbar-gutter: stable` for scrollable panes, lists, logs, code blocks, and popovers. Avoid `stable both-edges` inside dense panels because it creates unnecessary left/right whitespace; reserve it only for rare centered layouts that truly need symmetric gutters. Pair stable gutters with fixed min/max dimensions so loading, filtering, or expanding content never changes the container width. When a scroll container contains bordered cards, sections, logs, or code blocks, keep only a small inner gap between content and the scrollbar track so the thumb never visually covers borders.
 - Text areas: multiline text inputs must reserve a stable scrollbar gutter by default. The readable text column must not rewrap or become narrower when the user types enough content to make the textarea scroll.
 - Empty/loading states: concise, centered, and task-oriented; no decorative hero treatment.
+- Empty height: `fill` inside fixed-height panes; `compact` (~140px via `--empty-inline-min-h`) inside scrolling detail sections such as samples/gallery.
 
 ## Reference Basis
 

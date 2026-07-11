@@ -1,6 +1,16 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMatch, useLocation, useSearchParams } from 'react-router-dom'
+import {
+  ChevronDown,
+  Film,
+  ListPlus,
+  RectangleHorizontal,
+  RectangleVertical,
+  SearchCheck,
+  SearchX,
+  Trash2
+} from 'lucide-react'
 import type {
   Video,
   VideoDetail,
@@ -40,7 +50,8 @@ import {
   parseYear,
   patchSearchParams
 } from '../listView/listQueryParams'
-import { ROUTE_MATCH } from '../listView/routePaths'
+import { ROUTE_MATCH, ROUTE_PATH } from '../listView/routePaths'
+import { forgetPrimaryListLocation } from '../listView/primaryNavigationMemory'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import { useInfiniteVideoList } from '../query/useInfiniteVideoList'
@@ -48,6 +59,10 @@ import { invalidateVideoLibraryQueries } from '../query/invalidateLibraryQueries
 import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
 import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
 import ListMaintenanceBanner from '../components/ListMaintenanceBanner'
+import EmptyState from '../components/EmptyState'
+import ListSurface from '../components/ListSurface'
+import SelectionToolbar from '../components/SelectionToolbar'
+import { UI_ICON_SM } from '../components/iconDefaults'
 import { startDefaultUnscrapedVideoBatch } from '../utils/defaultBatchScrape'
 import {
   dismissMaintenanceHint,
@@ -227,6 +242,7 @@ export default function LibraryPage(): JSX.Element {
   }
 
   const resetFilters = (): void => {
+    forgetPrimaryListLocation(ROUTE_PATH.library)
     setSearchParams(
       (prev) =>
         patchSearchParams(prev, {
@@ -473,40 +489,37 @@ export default function LibraryPage(): JSX.Element {
       onRemove: () => patchFilters({ tagIds: tagIds.filter((x) => x !== id) })
     })
   }
+  const emptyDueToFilter = Boolean(debouncedQ.trim()) || hasAppliedFilters
 
   return (
     <div className="list-page">
       <div className="topbar library-header">
         {selectionMode ? (
-          <div className="library-selection-toolbar" role="toolbar" aria-label="多选操作">
-            <div className="library-selection-count">✓ 已选择 {selectedCount} 部影片</div>
-            <div className="library-selection-actions">
-              <button
-                type="button"
-                className="btn btn-sm"
-                onClick={() => setShowBulkPlaylist(true)}
-              >
-                加入清单
-              </button>
-              <button
-                type="button"
-                className="btn btn-sm"
-                onClick={() => setShowBulkScrape(true)}
-              >
-                刮削元数据
-              </button>
-              <button
-                type="button"
-                className="btn btn-sm btn-danger"
-                onClick={() => setConfirmBulkDelete(true)}
-              >
-                删除影片
-              </button>
-            </div>
-            <button type="button" className="library-selection-clear" onClick={clearSelection}>
-              取消全选
-            </button>
-          </div>
+          <SelectionToolbar
+            countLabel={`已选择 ${selectedCount} 部影片`}
+            onClear={clearSelection}
+            actions={[
+              {
+                key: 'playlist',
+                label: '加入清单',
+                icon: <ListPlus {...UI_ICON_SM} aria-hidden />,
+                onClick: () => setShowBulkPlaylist(true)
+              },
+              {
+                key: 'scrape',
+                label: '刮削元数据',
+                icon: <SearchCheck {...UI_ICON_SM} aria-hidden />,
+                onClick: () => setShowBulkScrape(true)
+              },
+              {
+                key: 'delete',
+                label: '删除影片',
+                icon: <Trash2 {...UI_ICON_SM} aria-hidden />,
+                danger: true,
+                onClick: () => setConfirmBulkDelete(true)
+              }
+            ]}
+          />
         ) : (
           <ListToolbar
             search={{
@@ -527,9 +540,11 @@ export default function LibraryPage(): JSX.Element {
                     aria-haspopup="dialog"
                   >
                     <span className="library-filter-btn-label">筛选</span>
-                    <span className={`library-filter-chevron${filterOpen ? ' is-open' : ''}`} aria-hidden>
-                      ▾
-                    </span>
+                    <ChevronDown
+                      {...UI_ICON_SM}
+                      className={`library-filter-chevron${filterOpen ? ' is-open' : ''}`}
+                      aria-hidden
+                    />
                   </button>
 
                   <LibraryFilterPopover
@@ -562,14 +577,16 @@ export default function LibraryPage(): JSX.Element {
                     className={mode === 'portrait' ? 'active' : ''}
                     onClick={() => setMode('portrait')}
                   >
-                    竖版
+                    <RectangleVertical {...UI_ICON_SM} aria-hidden />
+                    <span>竖版</span>
                   </button>
                   <button
                     type="button"
                     className={mode === 'landscape' ? 'active' : ''}
                     onClick={() => setMode('landscape')}
                   >
-                    横板
+                    <RectangleHorizontal {...UI_ICON_SM} aria-hidden />
+                    <span>横板</span>
                   </button>
                 </div>
               </>
@@ -617,16 +634,28 @@ export default function LibraryPage(): JSX.Element {
         ) : null}
       </div>
 
-      <div className="scroll-body scroll-body--fill">
+      <ListSurface variant="fill" withInner={false}>
         {loading ? (
-          <div className="scroll-body-inner empty-state">
-            <div className="spinner" />
-            <div>加载中…</div>
+          <div className="scroll-body-inner">
+            <EmptyState loading title="加载中…" />
           </div>
         ) : videos.length === 0 ? (
-          <div className="scroll-body-inner empty-state">
-            <div className="big">▦</div>
-            <div>媒体库为空。请前往「设置」添加媒体库路径并扫描导入。</div>
+          <div className="scroll-body-inner">
+            <EmptyState
+              icon={
+                emptyDueToFilter ? (
+                  <SearchX {...UI_ICON_SM} aria-hidden />
+                ) : (
+                  <Film {...UI_ICON_SM} aria-hidden />
+                )
+              }
+              title={emptyDueToFilter ? '没有匹配的影片' : '媒体库为空'}
+              description={
+                emptyDueToFilter
+                  ? '调整搜索或筛选条件后再试。'
+                  : '请前往「设置」添加媒体库路径并扫描导入。'
+              }
+            />
           </div>
         ) : (
           <VirtualPosterGrid
@@ -649,7 +678,7 @@ export default function LibraryPage(): JSX.Element {
             onDelete={setDeleteTarget}
           />
         )}
-      </div>
+      </ListSurface>
 
       {playlistTarget && (
         <AddToPlaylistModal

@@ -10,7 +10,7 @@ const base = {
     buildResources: 'build',
     output: 'dist'
   },
-  files: ['out/**/*'],
+  files: ['out/**/*', '!node_modules/@mediapipe/tasks-vision/**/*'],
   asar: true,
   npmRebuild: true,
   nodeGypRebuild: false,

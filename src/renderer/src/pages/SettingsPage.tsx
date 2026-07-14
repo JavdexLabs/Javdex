@@ -36,6 +36,7 @@ import EmptyState from '../components/EmptyState'
 import Modal from '../components/Modal'
 import PluginDevPanel from '../components/pluginDev/PluginDevPanel'
 import AppearanceSettingsPanel from '../components/settings/AppearanceSettingsPanel'
+import AboutSettingsPanel from '../components/settings/AboutSettingsPanel'
 import BatchSettingsPanel from '../components/settings/BatchSettingsPanel'
 import LibrarySettingsPanel from '../components/settings/LibrarySettingsPanel'
 import ModelSettingsPanel from '../components/settings/ModelSettingsPanel'
@@ -75,6 +76,7 @@ import {
 } from '../settings/settingsRoutes'
 import { THEME_OPTIONS } from '../theme'
 import type { ThemeId } from '@shared/types'
+import type { UpdateCheckState } from '@shared/updateTypes'
 
 function shouldAutoScrollBatchLog(container: HTMLDivElement): boolean {
   const selection = window.getSelection()
@@ -91,6 +93,15 @@ function scrollBatchLogToBottom(ref: RefObject<HTMLDivElement>): void {
   el.scrollTop = el.scrollHeight
 }
 
+function summarizeReleaseNotes(notes: string): string {
+  const summary = notes
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^#+\s*|^[-*]\s*/, '').trim())
+    .find(Boolean)
+  if (!summary) return '新版本可用，前往关于页面查看更新说明和下载地址。'
+  return summary.length > 96 ? `${summary.slice(0, 96)}…` : summary
+}
+
 export default function SettingsPage(): JSX.Element {
   const queryClient = useQueryClient()
   const toast = useToast()
@@ -99,6 +110,7 @@ export default function SettingsPage(): JSX.Element {
   const { theme, setTheme } = useTheme()
   const { group: activeGroup, tab: activeTab } = resolveSettingsRoute(location.pathname)
   const [settings, setSettings] = useState<AppSettings | null>(null)
+  const [updateCheckState, setUpdateCheckState] = useState<UpdateCheckState | null>(null)
   const {
     scrapeProxyDraft,
     llmProxyDraft,
@@ -199,6 +211,18 @@ export default function SettingsPage(): JSX.Element {
       .then(setSettings)
       .catch((e) => toast.show(String(e.message ?? e), 'error'))
   }, [toast])
+
+  useEffect(() => {
+    let active = true
+    void api.appUpdate.getState().then((state) => {
+      if (active) setUpdateCheckState(state)
+    })
+    const unsubscribe = api.appUpdate.onStateChanged(setUpdateCheckState)
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [])
 
   useEffect(() => {
     const needsPlugins =
@@ -549,15 +573,20 @@ export default function SettingsPage(): JSX.Element {
         AppSettings,
         | 'videoDetailUseFirstSampleBackground'
         | 'actressDetailUseFirstGalleryBackground'
+        | 'avatarFaceRatio'
+        | 'avatarCenteringMode'
+        | 'avatarPreserveFullHead'
       >
     >
-  ): Promise<void> => {
-    if (!settings) return
+  ): Promise<boolean> => {
+    if (!settings) return false
     try {
       const next = await api.settings.update(patch)
       setSettings(next)
+      return true
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
+      return false
     }
   }
 
@@ -807,7 +836,24 @@ export default function SettingsPage(): JSX.Element {
     batch && batch.total > 0 ? Math.round((batch.current / batch.total) * 100) : 0
   const videoBatchPct = batchPercent(videoBatch)
   const actressPct = batchPercent(actressBatch)
+  const updateRelease = updateCheckState?.latestRelease
+  const shouldShowUpdateNotice =
+    updateCheckState?.status === 'available' &&
+    Boolean(updateRelease) &&
+    updateRelease?.version !== updateCheckState.ignoredVersion
   const overviewNotices = [
+    ...(shouldShowUpdateNotice && updateRelease
+      ? [
+          {
+            tone: 'info' as const,
+            title: `Javdex ${updateRelease.version} 已发布`,
+            body: summarizeReleaseNotes(updateRelease.releaseNotes),
+            action: () => navigateSettings('about'),
+            actionLabel: '查看更新',
+            actionPrimary: true
+          }
+        ]
+      : []),
     ...(settings.libraryPaths.length === 0
       ? [
           {
@@ -976,7 +1022,7 @@ export default function SettingsPage(): JSX.Element {
                   settings={settings}
                   theme={theme}
                   onThemeChange={changeTheme}
-                  onPatchSettings={(patch) => void patchAppearanceSettings(patch)}
+                  onPatchSettings={patchAppearanceSettings}
                 />
               )}
 
@@ -1016,6 +1062,8 @@ export default function SettingsPage(): JSX.Element {
                   onTestLlmProxy={(value) => testLlmProxy(value)}
                 />
               )}
+
+              {activeGroup.id === 'about' && activeTab === 'info' && <AboutSettingsPanel />}
       </SettingsWorkspaceShell>
 
       {batchDetailScope && (

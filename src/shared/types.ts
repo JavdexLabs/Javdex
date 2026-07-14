@@ -1,5 +1,18 @@
 // Shared domain types used across main / preload / renderer processes.
 
+import {
+  DEFAULT_AVATAR_FACE_RATIO,
+  DEFAULT_AVATAR_FACE_SCALE_PRESET,
+  type AvatarFaceScalePreset
+} from './avatarFaceScale'
+import {
+  DEFAULT_AVATAR_CENTERING_MODE,
+  type AvatarCenteringMode
+} from './avatarCentering'
+
+export type { AvatarFaceScalePreset } from './avatarFaceScale'
+export type { AvatarCenteringMode } from './avatarCentering'
+
 export type ScrapedStatus = 0 | 1 | 2 // 0-未刮削, 1-刮削成功, 2-刮削失败
 
 export interface VideoFile {
@@ -898,6 +911,14 @@ export interface AppSettings {
   batchDelayMaxMs: number
   /** Interface color theme. */
   theme: ThemeId
+  /** Default face size used by local smart avatar composition. */
+  avatarFaceRatio: number
+  /** @deprecated Retained to migrate settings written before the continuous face-ratio control. */
+  avatarFaceScalePreset: AvatarFaceScalePreset
+  /** Default anchor used by local smart avatar composition. */
+  avatarCenteringMode: AvatarCenteringMode
+  /** Keep detected hair crown and chin inside the avatar crop. */
+  avatarPreserveFullHead: boolean
   /** Display-only: use first local sample as video detail background when no poster is set. */
   videoDetailUseFirstSampleBackground: boolean
   /** Display-only: use first local gallery photo as actress detail background when no poster is set. */
@@ -976,6 +997,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   batchDelayMinMs: 3000,
   batchDelayMaxMs: 5000,
   theme: 'graphite',
+  avatarFaceRatio: DEFAULT_AVATAR_FACE_RATIO,
+  avatarFaceScalePreset: DEFAULT_AVATAR_FACE_SCALE_PRESET,
+  avatarCenteringMode: DEFAULT_AVATAR_CENTERING_MODE,
+  avatarPreserveFullHead: false,
   videoDetailUseFirstSampleBackground: false,
   actressDetailUseFirstGalleryBackground: true,
   assetEncryption: false,

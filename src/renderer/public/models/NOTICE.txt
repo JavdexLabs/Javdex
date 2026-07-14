@@ -1,0 +1,27 @@
+Javdex smart avatar crop third-party notice
+
+MediaPipe Tasks Vision 0.10.35
+Copyright 2023 The MediaPipe Authors
+License: Apache License 2.0
+Source: https://www.npmjs.com/package/@mediapipe/tasks-vision/v/0.10.35
+License text: LICENSE-APACHE-2.0.txt
+
+BlazeFace Full Range face detector model
+Source: https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_full_range/float16/latest/blaze_face_full_range.tflite
+License: Apache License 2.0
+SHA-256: 3698b18f063835bc609069ef052228fbe86d9c9a6dc8dcb7c7c2d69aed2b181b
+
+MediaPipe Face Landmarker model bundle
+Source: https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
+License: Apache License 2.0
+SHA-256: 64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff
+
+MediaPipe Hair Segmenter model
+Source: https://storage.googleapis.com/mediapipe-models/image_segmenter/hair_segmenter/float32/latest/hair_segmenter.tflite
+License: Apache License 2.0
+SHA-256: 2628cf3ce5f695f604cbea2841e00befcaa3624bf80caf3664bef2656d59bf84
+
+The resources above are used locally for face detection, landmark inference,
+and optional hair-boundary segmentation.
+They are redistributed without modification except for their placement in the
+application package. Apache License 2.0 terms apply to these third-party works.

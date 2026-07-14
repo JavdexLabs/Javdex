@@ -9,6 +9,7 @@ export type SettingsGroup =
   | 'appearance'
   | 'storage'
   | 'network'
+  | 'about'
 
 export type SettingsTab =
   | 'status'
@@ -18,6 +19,7 @@ export type SettingsTab =
   | 'theme'
   | 'assets'
   | 'proxy'
+  | 'info'
 
 export interface SettingsTabItem {
   id: SettingsTab
@@ -89,6 +91,14 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
     description: '刮削与 LLM 请求的 HTTP/HTTPS 代理设置。',
     defaultTab: 'proxy',
     tabs: [{ id: 'proxy', label: '代理' }]
+  },
+  {
+    id: 'about',
+    label: '关于',
+    hint: '版本与项目信息',
+    description: '查看应用信息、版本更新、项目主页与开源许可。',
+    defaultTab: 'info',
+    tabs: [{ id: 'info', label: '关于 Javdex' }]
   }
 ]
 

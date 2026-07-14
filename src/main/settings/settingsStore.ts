@@ -24,6 +24,13 @@ import {
   type LlmProviderUserConfig
 } from '@shared/llmProviders'
 import { readTestUserDataPath } from '@shared/appIdentity'
+import {
+  AVATAR_FACE_SCALE_PRESETS,
+  AVATAR_FACE_OVAL_HEIGHT_RATIO,
+  normalizeAvatarFaceRatio,
+  normalizeAvatarFaceScalePreset
+} from '@shared/avatarFaceScale'
+import { normalizeAvatarCenteringMode } from '@shared/avatarCentering'
 
 let cache: AppSettings | null = null
 
@@ -82,6 +89,12 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
     typeof parsed.defaultActressScraper === 'string' && parsed.defaultActressScraper.trim()
       ? parsed.defaultActressScraper.trim()
       : DEFAULT_SETTINGS.defaultActressScraper
+  const legacyAvatarFaceScalePreset = normalizeAvatarFaceScalePreset(
+    parsed.avatarFaceScalePreset
+  )
+  const hasLegacyAvatarFaceScalePreset = AVATAR_FACE_SCALE_PRESETS.includes(
+    parsed.avatarFaceScalePreset as (typeof AVATAR_FACE_SCALE_PRESETS)[number]
+  )
   const llm = normalizeLlmSettings(parsed)
   return {
     ...DEFAULT_SETTINGS,
@@ -89,6 +102,18 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
     defaultScraper,
     defaultActressScraper,
     theme: normalizeTheme(parsed.theme),
+    avatarFaceRatio: normalizeAvatarFaceRatio(
+      parsed.avatarFaceRatio,
+      hasLegacyAvatarFaceScalePreset
+        ? AVATAR_FACE_OVAL_HEIGHT_RATIO[legacyAvatarFaceScalePreset]
+        : DEFAULT_SETTINGS.avatarFaceRatio
+    ),
+    avatarFaceScalePreset: legacyAvatarFaceScalePreset,
+    avatarCenteringMode: normalizeAvatarCenteringMode(parsed.avatarCenteringMode),
+    avatarPreserveFullHead: normalizeBooleanSetting(
+      parsed.avatarPreserveFullHead,
+      DEFAULT_SETTINGS.avatarPreserveFullHead
+    ),
     videoDetailUseFirstSampleBackground: normalizeBooleanSetting(
       parsed.videoDetailUseFirstSampleBackground,
       DEFAULT_SETTINGS.videoDetailUseFirstSampleBackground

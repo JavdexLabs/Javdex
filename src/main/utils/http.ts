@@ -2,11 +2,6 @@ import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 import { cleanUserAgent } from '../scrapers/scrapeUaProfile'
 
-const DEFAULT_HEADERS = {
-  'User-Agent': cleanUserAgent(),
-  'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8,zh-CN;q=0.7'
-}
-
 /**
  * Build an axios instance. When a proxy URL is supplied, all requests are
  * routed through an https-proxy-agent; otherwise a direct connection is used.
@@ -14,7 +9,10 @@ const DEFAULT_HEADERS = {
 export function createHttpClient(proxyUrl?: string): AxiosInstance {
   const config: AxiosRequestConfig = {
     timeout: 20000,
-    headers: { ...DEFAULT_HEADERS },
+    headers: {
+      'User-Agent': cleanUserAgent(),
+      'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8,zh-CN;q=0.7'
+    },
     maxRedirects: 5,
     // We handle non-2xx ourselves where needed.
     validateStatus: (s) => s >= 200 && s < 400

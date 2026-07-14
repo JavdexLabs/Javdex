@@ -105,3 +105,7 @@
 - 打开详情时保留 `location.search`，除非明确进入另一类资源。
 - 关闭详情时回到打开来源，而不是统一回到媒体库。
 - 新增嵌套详情时同时补充 background scope、scroll/refetch 行为和返回按钮行为。
+
+## Overlay History
+
+需要响应系统后退、鼠标返回键或 macOS 返回手势的全屏 overlay，不能在组件 Effect cleanup 中直接调用 `history.back()`。History 所有权、实例 token、关闭来源和跨平台测试规范见 [`IMAGE_PREVIEW_HISTORY_DESIGN.md`](IMAGE_PREVIEW_HISTORY_DESIGN.md)。

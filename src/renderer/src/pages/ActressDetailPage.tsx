@@ -32,6 +32,7 @@ import ActressProfileMeta, {
 } from '../components/ActressProfileMeta'
 import DetailScrollBody from '../components/DetailScrollBody'
 import ImagePreviewLightbox from '../components/ImagePreviewLightbox'
+import { useHistoryBackedImagePreviewState } from '../components/ImagePreviewOverlayContext'
 import DetailActionBar from '../components/DetailActionBar'
 import EmptyState from '../components/EmptyState'
 import { UI_ICON } from '../components/iconDefaults'
@@ -86,7 +87,11 @@ export default function ActressDetailPage(): JSX.Element {
     useState(true)
   const [showScrapeFields, setShowScrapeFields] = useState(false)
   const [activeTab, setActiveTab] = useState<'gallery' | 'videos'>('videos')
-  const [avatarPreviewOpen, setAvatarPreviewOpen] = useState(false)
+  const {
+    isOpen: avatarPreviewOpen,
+    open: openAvatarPreview,
+    close: closeAvatarPreview
+  } = useHistoryBackedImagePreviewState()
 
   const dismissOverlays = useCallback(() => {
     setConfirmDelete(false)
@@ -94,8 +99,8 @@ export default function ActressDetailPage(): JSX.Element {
     setShowEdit(false)
     setShowMerge(false)
     setShowScrapeFields(false)
-    setAvatarPreviewOpen(false)
-  }, [])
+    closeAvatarPreview()
+  }, [closeAvatarPreview])
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
 
@@ -305,7 +310,7 @@ export default function ActressDetailPage(): JSX.Element {
     if (!avatar || e.defaultPrevented) return
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
-      setAvatarPreviewOpen(true)
+      openAvatarPreview()
     }
   }
 
@@ -366,7 +371,7 @@ export default function ActressDetailPage(): JSX.Element {
             tabIndex={avatar ? 0 : undefined}
             title={avatar ? '查看头像' : undefined}
             onClick={() => {
-              if (avatar) setAvatarPreviewOpen(true)
+              if (avatar) openAvatarPreview()
             }}
             onKeyDown={onAvatarKeyDown}
           >
@@ -450,7 +455,7 @@ export default function ActressDetailPage(): JSX.Element {
         <ImagePreviewLightbox
           items={[{ id: actress.id, src: avatar }]}
           index={0}
-          onClose={() => setAvatarPreviewOpen(false)}
+          onClose={closeAvatarPreview}
           onIndexChange={() => {}}
           labels={{
             dialog: '查看演员头像',

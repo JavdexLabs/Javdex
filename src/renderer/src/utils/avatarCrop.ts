@@ -1,4 +1,13 @@
 import { AVATAR_OUTPUT_SIZE, AVATAR_VIEW_SIZE } from '@shared/avatarCropConstants'
+import {
+  DEFAULT_AVATAR_FACE_RATIO,
+  getAvatarFaceScaleFactor
+} from '@shared/avatarFaceScale'
+import {
+  DEFAULT_AVATAR_CENTERING_MODE,
+  type AvatarCenteringMode
+} from '@shared/avatarCentering'
+import type { AvatarFaceCandidate, NormalizedPoint } from '../avatarAutoCrop/types'
 
 export { AVATAR_OUTPUT_SIZE, AVATAR_VIEW_SIZE }
 
@@ -82,6 +91,195 @@ export function getCropImageLayout(
     top: (viewSize - height) / 2 + offsetY,
     width,
     height
+  }
+}
+
+export type SmartCropConstraint = 'source-too-tight' | 'source-edge' | 'zoom-limit'
+
+export interface SmartAvatarCropTransform {
+  baseScale: number
+  zoom: number
+  offsetX: number
+  offsetY: number
+  constrained: boolean
+  constraint: SmartCropConstraint | null
+  geometrySource: AvatarFaceCandidate['geometrySource']
+}
+
+const TARGET_EYE_CENTER_Y = 0.45
+const TARGET_HEAD_CENTER_Y = 0.5
+const ESTIMATED_CROWN_EXTENSION_RATIO = 0.35
+const TARGET_EYE_DISTANCE_RATIO = 0.25
+const TARGET_OVAL_HEIGHT_RATIO = 0.7
+const TARGET_CHEEK_WIDTH_RATIO = 0.52
+const TARGET_DETECTOR_BOX_HEIGHT_RATIO = 0.74
+const MAX_HEAD_BOUNDS_RATIO = 0.94
+
+function pointToPixels(point: NormalizedPoint, iw: number, ih: number): { x: number; y: number } {
+  return { x: point.x * iw, y: point.y * ih }
+}
+
+function pointDistance(
+  a: NormalizedPoint,
+  b: NormalizedPoint,
+  iw: number,
+  ih: number
+): number {
+  return Math.hypot((a.x - b.x) * iw, (a.y - b.y) * ih)
+}
+
+function clampNear(value: number, reference: number, tolerance: number): number {
+  return Math.min(reference * (1 + tolerance), Math.max(reference * (1 - tolerance), value))
+}
+
+function desiredCropSide(
+  candidate: AvatarFaceCandidate,
+  iw: number,
+  ih: number,
+  faceRatio: number,
+  preserveFullHead: boolean
+): number {
+  const faceScale = getAvatarFaceScaleFactor(faceRatio)
+  let faceSide: number
+  if (
+    candidate.geometrySource === 'mesh' &&
+    candidate.leftEye &&
+    candidate.rightEye &&
+    candidate.ovalTop &&
+    candidate.chin &&
+    candidate.leftCheek &&
+    candidate.rightCheek
+  ) {
+    const ovalSide =
+      pointDistance(candidate.ovalTop, candidate.chin, iw, ih) /
+      (TARGET_OVAL_HEIGHT_RATIO * faceScale)
+    const eyeSide =
+      pointDistance(candidate.leftEye, candidate.rightEye, iw, ih) /
+      (TARGET_EYE_DISTANCE_RATIO * faceScale)
+    const cheekSide =
+      pointDistance(candidate.leftCheek, candidate.rightCheek, iw, ih) /
+      (TARGET_CHEEK_WIDTH_RATIO * faceScale)
+    // The face oval has the most stable semantics. Other measures correct mild
+    // pose/landmark drift but cannot move the final size far away on their own.
+    faceSide =
+      ovalSide * 0.6 +
+      clampNear(eyeSide, ovalSide, 0.18) * 0.22 +
+      clampNear(cheekSide, ovalSide, 0.18) * 0.18
+  } else {
+    faceSide = (candidate.box.height * ih) / (TARGET_DETECTOR_BOX_HEIGHT_RATIO * faceScale)
+  }
+  if (preserveFullHead && candidate.headBounds) {
+    const headSide =
+      Math.max(candidate.headBounds.width * iw, candidate.headBounds.height * ih) /
+      MAX_HEAD_BOUNDS_RATIO
+    return Math.max(faceSide, headSide)
+  }
+  return faceSide
+}
+
+function compositionAnchor(
+  candidate: AvatarFaceCandidate,
+  iw: number,
+  ih: number,
+  centeringMode: AvatarCenteringMode
+): { x: number; y: number; targetY: number } {
+  if (centeringMode === 'head') {
+    if (candidate.headBounds) {
+      return {
+        x: (candidate.headBounds.x + candidate.headBounds.width / 2) * iw,
+        y: (candidate.headBounds.y + candidate.headBounds.height / 2) * ih,
+        targetY: TARGET_HEAD_CENTER_Y
+      }
+    }
+    if (candidate.ovalTop && candidate.chin) {
+      const ovalTop = pointToPixels(candidate.ovalTop, iw, ih)
+      const chin = pointToPixels(candidate.chin, iw, ih)
+      // Face Mesh does not include the hair crown. Extend the stable face-oval
+      // axis upward by a conservative amount, then center crown-to-chin.
+      const crown = {
+        x: ovalTop.x - (chin.x - ovalTop.x) * ESTIMATED_CROWN_EXTENSION_RATIO,
+        y: ovalTop.y - (chin.y - ovalTop.y) * ESTIMATED_CROWN_EXTENSION_RATIO
+      }
+      return {
+        x: (crown.x + chin.x) / 2,
+        y: (crown.y + chin.y) / 2,
+        targetY: TARGET_HEAD_CENTER_Y
+      }
+    }
+    return {
+      x: (candidate.box.x + candidate.box.width / 2) * iw,
+      y:
+        (candidate.box.y +
+          candidate.box.height * (0.5 - ESTIMATED_CROWN_EXTENSION_RATIO / 2)) *
+        ih,
+      targetY: TARGET_HEAD_CENTER_Y
+    }
+  }
+  if (candidate.leftEye && candidate.rightEye) {
+    const left = pointToPixels(candidate.leftEye, iw, ih)
+    const right = pointToPixels(candidate.rightEye, iw, ih)
+    return {
+      x: (left.x + right.x) / 2,
+      y: (left.y + right.y) / 2,
+      targetY: TARGET_EYE_CENTER_Y
+    }
+  }
+  return {
+    x: (candidate.box.x + candidate.box.width / 2) * iw,
+    y: (candidate.box.y + candidate.box.height * 0.42) * ih,
+    targetY: TARGET_EYE_CENTER_Y
+  }
+}
+
+/** Deterministic face composition using validated local detector/landmark geometry. */
+export function getSmartAvatarCropTransform(
+  iw: number,
+  ih: number,
+  candidate: AvatarFaceCandidate,
+  viewSize = AVATAR_VIEW_SIZE,
+  faceRatio: number = DEFAULT_AVATAR_FACE_RATIO,
+  centeringMode: AvatarCenteringMode = DEFAULT_AVATAR_CENTERING_MODE,
+  preserveFullHead = false
+): SmartAvatarCropTransform {
+  const baseScale = getBaseScale(iw, ih, viewSize)
+  const requestedSide = Math.max(
+    1,
+    desiredCropSide(candidate, iw, ih, faceRatio, preserveFullHead)
+  )
+  const requestedZoom = viewSize / requestedSide / baseScale
+  const zoom = Math.min(4, Math.max(1, requestedZoom))
+  const scale = baseScale * zoom
+  const anchor = compositionAnchor(candidate, iw, ih, centeringMode)
+  const requestedOffset = {
+    x: (iw / 2 - anchor.x) * scale,
+    y: (anchor.targetY - 0.5) * viewSize + (ih / 2 - anchor.y) * scale
+  }
+  const offset = clampCropOffset(
+    requestedOffset.x,
+    requestedOffset.y,
+    iw,
+    ih,
+    baseScale,
+    zoom,
+    viewSize
+  )
+  let constraint: SmartCropConstraint | null = null
+  if (requestedZoom < 1 - 1e-6) constraint = 'source-too-tight'
+  else if (requestedZoom > 4 + 1e-6) constraint = 'zoom-limit'
+  else if (
+    Math.abs(offset.x - requestedOffset.x) > 0.5 ||
+    Math.abs(offset.y - requestedOffset.y) > 0.5
+  ) {
+    constraint = 'source-edge'
+  }
+  return {
+    baseScale,
+    zoom,
+    offsetX: offset.x,
+    offsetY: offset.y,
+    constrained: constraint !== null,
+    constraint,
+    geometrySource: candidate.geometrySource
   }
 }
 

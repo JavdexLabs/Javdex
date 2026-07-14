@@ -22,6 +22,7 @@ import {
 } from '../components/VideoDetailMeta'
 import VideoDetailRatings from '../components/VideoDetailRatings'
 import ImagePreviewLightbox from '../components/ImagePreviewLightbox'
+import { useHistoryBackedImagePreviewState } from '../components/ImagePreviewOverlayContext'
 import DetailActionBar from '../components/DetailActionBar'
 import EmptyState from '../components/EmptyState'
 import { UI_ICON } from '../components/iconDefaults'
@@ -89,7 +90,11 @@ export default function DetailPage(): JSX.Element {
   const [correctCode, setCorrectCode] = useState('')
   const [correcting, setCorrecting] = useState(false)
   const [tallCover, setTallCover] = useState(false)
-  const [coverPreviewOpen, setCoverPreviewOpen] = useState(false)
+  const {
+    isOpen: coverPreviewOpen,
+    open: openCoverPreview,
+    close: closeCoverPreview
+  } = useHistoryBackedImagePreviewState()
   const [deleteFileTarget, setDeleteFileTarget] = useState<VideoFile | null>(null)
   const [deletingFile, setDeletingFile] = useState(false)
 
@@ -102,9 +107,9 @@ export default function DetailPage(): JSX.Element {
     setShowCorrectImport(false)
     setShowAddToPlaylist(false)
     setShowMaintenanceInfo(false)
-    setCoverPreviewOpen(false)
+    closeCoverPreview()
     setDeleteFileTarget(null)
-  }, [])
+  }, [closeCoverPreview])
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
 
@@ -177,7 +182,7 @@ export default function DetailPage(): JSX.Element {
     if (!cover || e.defaultPrevented) return
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
-      setCoverPreviewOpen(true)
+      openCoverPreview()
     }
   }
 
@@ -454,7 +459,7 @@ export default function DetailPage(): JSX.Element {
               tabIndex={cover ? 0 : undefined}
               title={cover ? '查看封面' : undefined}
               onClick={() => {
-                if (cover) setCoverPreviewOpen(true)
+                if (cover) openCoverPreview()
               }}
               onKeyDown={onCoverKeyDown}
             >
@@ -634,7 +639,7 @@ export default function DetailPage(): JSX.Element {
         <ImagePreviewLightbox
           items={[{ id: video.id, src: cover }]}
           index={0}
-          onClose={() => setCoverPreviewOpen(false)}
+          onClose={closeCoverPreview}
           onIndexChange={() => {}}
           labels={{
             dialog: '查看影片封面',

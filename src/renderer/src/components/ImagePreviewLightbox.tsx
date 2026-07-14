@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { Minus, Plus, RotateCcw, X } from 'lucide-react'
 import IconButton from './IconButton'
@@ -12,12 +13,6 @@ const CHROME_IDLE_MS = 1000
 /** Ignore passive pointer/focus events right after open so chrome stays hidden until interaction. */
 const CHROME_OPEN_GRACE_MS = 200
 const FILMSTRIP_DRAG_THRESHOLD = 5
-const IMAGE_PREVIEW_HISTORY_KEY = 'avImagePreview'
-
-function isImagePreviewHistoryState(state: unknown): boolean {
-  return Boolean(state && typeof state === 'object' && IMAGE_PREVIEW_HISTORY_KEY in state)
-}
-
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
@@ -80,7 +75,6 @@ export default function ImagePreviewLightbox({
     startX: number
     originScrollLeft: number
   } | null>(null)
-  const suppressHistoryPopCloseRef = useRef(false)
   const dragRef = useRef<{
     pointerId: number
     startX: number
@@ -205,28 +199,6 @@ export default function ImagePreviewLightbox({
       document.body.style.overflow = ''
     }
   }, [])
-
-  useEffect(() => {
-    suppressHistoryPopCloseRef.current = false
-    window.history.pushState({ [IMAGE_PREVIEW_HISTORY_KEY]: true }, '', window.location.href)
-
-    const onPopState = (): void => {
-      if (suppressHistoryPopCloseRef.current) {
-        suppressHistoryPopCloseRef.current = false
-        return
-      }
-      onClose()
-    }
-
-    window.addEventListener('popstate', onPopState)
-    return () => {
-      window.removeEventListener('popstate', onPopState)
-      if (isImagePreviewHistoryState(window.history.state)) {
-        suppressHistoryPopCloseRef.current = true
-        window.history.back()
-      }
-    }
-  }, [onClose])
 
   useEffect(() => {
     activeThumbRef.current?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' })
@@ -411,7 +383,8 @@ export default function ImagePreviewLightbox({
     }
   }
 
-  return (
+  return createPortal(
+    (
     <div
       className="image-preview"
       role="dialog"
@@ -564,5 +537,7 @@ export default function ImagePreviewLightbox({
         </div>
       </footer>
     </div>
+    ),
+    document.body
   )
 }

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ActressGalleryAsset, Video } from '@shared/types'
+import { DEFAULT_AVATAR_FACE_RATIO } from '@shared/avatarFaceScale'
+import {
+  DEFAULT_AVATAR_CENTERING_MODE,
+  type AvatarCenteringMode
+} from '@shared/avatarCentering'
 import {
   createAvatarCropV1,
   parseAvatarCrop,
@@ -9,7 +14,15 @@ import {
 } from '@shared/avatarCrop'
 import { prepareActressGalleryForDisplay } from '@shared/mediaGalleryDisplay'
 import { assetUrl, api } from '../api'
+import {
+  analyzeAvatarBitmap,
+  cancelPendingAvatarAutoCrop,
+  disposeAvatarAutoCropWorker
+} from '../avatarAutoCrop/service'
+import { createAvatarAnalysisBitmap } from '../avatarAutoCrop/image'
+import type { AvatarFaceCandidate } from '../avatarAutoCrop/types'
 import { useHorizontalDragScroll } from '../hooks/useHorizontalDragScroll'
+import { useToast } from './Toast'
 import {
   AVATAR_VIEW_SIZE,
   clampCropOffset,
@@ -17,6 +30,7 @@ import {
   getCropImageLayout,
   getDefaultCropTransform,
   getSavedAvatarCropTransform,
+  getSmartAvatarCropTransform,
   isDefaultCropTransform
 } from '../utils/avatarCrop'
 
@@ -163,12 +177,14 @@ export default function ActressAvatarEditor({
   gallery,
   onAvatarChange
 }: Props): JSX.Element {
+  const toast = useToast()
   const fileRef = useRef<HTMLInputElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<DragState | null>(null)
   const loadSeqRef = useRef(0)
   const previewSeqRef = useRef(0)
+  const autoCropSeqRef = useRef(0)
   const initialCropRef = useRef<AvatarCropV1 | null>(null)
   const coverScroll = useHorizontalDragScroll()
   const galleryScroll = useHorizontalDragScroll()
@@ -203,6 +219,13 @@ export default function ActressAvatarEditor({
   const [openingSourceKey, setOpeningSourceKey] = useState<string | null>(null)
   const [openError, setOpenError] = useState<string | null>(null)
   const [previewSourceSize, setPreviewSourceSize] = useState<{ w: number; h: number } | null>(null)
+  const [smartCropping, setSmartCropping] = useState(false)
+  const [autoCropCandidates, setAutoCropCandidates] = useState<AvatarFaceCandidate[]>([])
+  const [activeAutoCropCandidate, setActiveAutoCropCandidate] = useState<string | null>(null)
+  const [autoCropFaceRatio, setAutoCropFaceRatio] = useState(DEFAULT_AVATAR_FACE_RATIO)
+  const [autoCropCenteringMode, setAutoCropCenteringMode] =
+    useState<AvatarCenteringMode>(DEFAULT_AVATAR_CENTERING_MODE)
+  const [autoCropPreserveFullHead, setAutoCropPreserveFullHead] = useState(false)
 
   const applyTransform = useCallback(
     (
@@ -263,8 +286,13 @@ export default function ActressAvatarEditor({
       forceLegacy?: boolean
     }) => {
       const seq = ++loadSeqRef.current
+      autoCropSeqRef.current += 1
+      cancelPendingAvatarAutoCrop()
+      setSmartCropping(false)
       setOpeningSourceKey(input.sourceKey)
       setOpenError(null)
+      setAutoCropCandidates([])
+      setActiveAutoCropCandidate(null)
       try {
         const { width, height } = await probeImage(input.url)
         if (seq !== loadSeqRef.current) return
@@ -373,8 +401,20 @@ export default function ActressAvatarEditor({
       })
   }, [savedCrop, sourceUrl])
 
+  useEffect(
+    () => () => {
+      autoCropSeqRef.current += 1
+      disposeAvatarAutoCropWorker()
+    },
+    []
+  )
+
   const resetTransform = useCallback((): void => {
     if (!imageSize) return
+    autoCropSeqRef.current += 1
+    cancelPendingAvatarAutoCrop()
+    setSmartCropping(false)
+    setActiveAutoCropCandidate(null)
     if (initialCropRef.current && sourceFingerprint) {
       applyTransform(imageSize.w, imageSize.h, initialCropRef.current, 'restore')
       return
@@ -388,6 +428,9 @@ export default function ActressAvatarEditor({
 
   const clearSource = useCallback((): void => {
     loadSeqRef.current += 1
+    autoCropSeqRef.current += 1
+    cancelPendingAvatarAutoCrop()
+    setSmartCropping(false)
     setEditUrl((prev) => {
       if (prev?.startsWith('blob:')) URL.revokeObjectURL(prev)
       return null
@@ -405,6 +448,8 @@ export default function ActressAvatarEditor({
     setSourceChanged(false)
     setLegacyNoSource(false)
     setOpenError(null)
+    setAutoCropCandidates([])
+    setActiveAutoCropCandidate(null)
     initialCropRef.current = null
     onAvatarChange(null)
     if (fileRef.current) fileRef.current.value = ''
@@ -548,6 +593,87 @@ export default function ActressAvatarEditor({
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>): void => {
     if (dragRef.current?.pointerId === e.pointerId) {
       dragRef.current = null
+    }
+  }
+
+  const applyAutoCropCandidate = (
+    candidate: AvatarFaceCandidate,
+    faceRatio = autoCropFaceRatio,
+    centeringMode = autoCropCenteringMode,
+    preserveFullHead = autoCropPreserveFullHead
+  ): void => {
+    if (!imageSize) return
+    const transform = getSmartAvatarCropTransform(
+      imageSize.w,
+      imageSize.h,
+      candidate,
+      AVATAR_VIEW_SIZE,
+      faceRatio,
+      centeringMode,
+      preserveFullHead
+    )
+    setBaseScale(transform.baseScale)
+    setZoom(transform.zoom)
+    setOffset({ x: transform.offsetX, y: transform.offsetY })
+    setActiveAutoCropCandidate(candidate.id)
+
+    const constraintMessage =
+      transform.constraint === 'source-too-tight'
+        ? '原图留白不足，已使用可行的最小裁剪，可继续手动微调'
+        : transform.constraint === 'source-edge'
+          ? '人脸靠近图片边缘，已在不露出空白的范围内居中'
+          : transform.constraint === 'zoom-limit'
+            ? '原图中的人脸较小，已放大到上限，可继续手动微调'
+            : null
+    const headFallbackMessage = !candidate.headBounds
+      ? preserveFullHead
+        ? '未识别到完整头发轮廓，完整头部保护未生效，可继续手动微调'
+        : centeringMode === 'head'
+          ? '未识别到完整头发轮廓，已按脸部比例估算头部中心，可继续手动微调'
+          : null
+      : null
+    const message = constraintMessage ?? headFallbackMessage
+    toast.show(message ?? '已完成智能构图，可继续拖动微调', message ? 'info' : 'success')
+  }
+
+  const applySmartCrop = async (): Promise<void> => {
+    const img = imgRef.current
+    if (!img || !imageSize || smartCropping) return
+    const seq = ++autoCropSeqRef.current
+    setSmartCropping(true)
+    try {
+      const [bitmap, appSettings] = await Promise.all([
+        createAvatarAnalysisBitmap(img),
+        api.settings.get()
+      ])
+      const result = await analyzeAvatarBitmap(
+        bitmap,
+        appSettings.avatarCenteringMode,
+        appSettings.avatarPreserveFullHead
+      )
+      if (seq !== autoCropSeqRef.current) return
+      setAutoCropCandidates(result.candidates)
+      setActiveAutoCropCandidate(null)
+      setAutoCropFaceRatio(appSettings.avatarFaceRatio)
+      setAutoCropCenteringMode(appSettings.avatarCenteringMode)
+      setAutoCropPreserveFullHead(appSettings.avatarPreserveFullHead)
+      if (result.ambiguous) {
+        toast.show(`检测到 ${result.candidates.length} 张可能的人脸，请选择目标`, 'info')
+        return
+      }
+      applyAutoCropCandidate(
+        result.candidates[0],
+        appSettings.avatarFaceRatio,
+        appSettings.avatarCenteringMode,
+        appSettings.avatarPreserveFullHead
+      )
+    } catch (error) {
+      if (seq !== autoCropSeqRef.current) return
+      setAutoCropCandidates([])
+      setActiveAutoCropCandidate(null)
+      toast.show(String((error as Error).message || '智能构图失败'), 'error')
+    } finally {
+      if (seq === autoCropSeqRef.current) setSmartCropping(false)
     }
   }
 
@@ -862,7 +988,36 @@ export default function ActressAvatarEditor({
                   onChange={(e) => setZoom(Number(e.target.value))}
                 />
               </label>
+              {autoCropCandidates.length > 1 ? (
+                <div className="avatar-face-candidates" role="group" aria-label="选择检测到的人脸">
+                  <span className="avatar-face-candidates-label">人脸</span>
+                  {autoCropCandidates.map((candidate, index) => (
+                    <button
+                      key={candidate.id}
+                      type="button"
+                      className={`avatar-face-candidate${activeAutoCropCandidate === candidate.id ? ' active' : ''}`}
+                      aria-pressed={activeAutoCropCandidate === candidate.id}
+                      aria-label={`选择第 ${index + 1} 张人脸`}
+                      title={`人脸 ${index + 1}`}
+                      onClick={() => applyAutoCropCandidate(candidate)}
+                    >
+                      {index + 1}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <div className="avatar-editor-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm avatar-smart-crop-button"
+                  tabIndex={editing ? 0 : -1}
+                  disabled={!editing || smartCropping}
+                  aria-busy={smartCropping || undefined}
+                  onClick={() => void applySmartCrop()}
+                >
+                  {smartCropping ? <span className="avatar-smart-crop-spinner" aria-hidden /> : null}
+                  <span>{smartCropping ? '构图中' : '智能构图'}</span>
+                </button>
                 <button
                   type="button"
                   className="btn btn-sm"

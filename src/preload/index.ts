@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../shared/ipc-channels'
 import type { LlmModelDefinition } from '../shared/llmProviders'
+import type { UpdateCheckState } from '../shared/updateTypes'
 import type {
   AppSettings,
   LibraryOverviewStats,
@@ -76,6 +77,23 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 }
 
 const api = {
+  appUpdate: {
+    getState: () => invoke<UpdateCheckState>(IPC.APP_UPDATE_GET_STATE),
+    check: () => invoke<UpdateCheckState>(IPC.APP_UPDATE_CHECK),
+    openRelease: () => invoke<boolean>(IPC.APP_UPDATE_OPEN_RELEASE),
+    openProjectPage: (page: 'project' | 'releases' | 'license') =>
+      invoke<boolean>(IPC.APP_UPDATE_OPEN_PROJECT_PAGE, page),
+    openExternalLink: (url: string) => invoke<boolean>(IPC.APP_UPDATE_OPEN_EXTERNAL_LINK, url),
+    ignoreVersion: (version: string) =>
+      invoke<UpdateCheckState>(IPC.APP_UPDATE_IGNORE_VERSION, version),
+    onStateChanged: (cb: (state: UpdateCheckState) => void) => {
+      const listener = (_event: unknown, state: UpdateCheckState): void => cb(state)
+      ipcRenderer.on(IPC.APP_UPDATE_STATE_CHANGED, listener)
+      return (): void => {
+        ipcRenderer.removeListener(IPC.APP_UPDATE_STATE_CHANGED, listener)
+      }
+    }
+  },
   settings: {
     get: () => invoke<AppSettings>(IPC.SETTINGS_GET),
     update: (patch: Partial<AppSettings>) => invoke<AppSettings>(IPC.SETTINGS_UPDATE, patch),

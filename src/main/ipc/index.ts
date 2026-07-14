@@ -9,12 +9,14 @@ import { registerScanHandlers } from './scanHandlers'
 import { registerScrapeHandlers } from './scrapeHandlers'
 import { registerSettingsHandlers } from './settingsHandlers'
 import { registerVideoHandlers } from './videoHandlers'
+import { registerUpdateHandlers } from './updateHandlers'
 import type { IpcContext } from './shared'
 
 export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {
   const ctx: IpcContext = { getWindow }
 
   registerSettingsHandlers(ctx)
+  registerUpdateHandlers(ctx)
   registerAssetHandlers()
   registerScanHandlers(ctx)
   registerVideoHandlers()

@@ -8,6 +8,7 @@ import { ensureAssetDirs, assetsRoot, readAssetForServe } from './services/asset
 import { registerIpcHandlers } from './ipc'
 import { scrapeBrowser } from './scrapers/scrapeBrowser'
 import { resolveMediaAssetPath, toStoredAssetPath } from './services/mediaProtocol'
+import { checkForLatestRelease, shouldRunAutomaticCheck } from './services/appReleaseService'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -119,6 +120,9 @@ if (gotSingleInstanceLock) {
     registerAssetProtocol()
     registerIpcHandlers(() => mainWindow)
     createWindow()
+    setTimeout(() => {
+      if (shouldRunAutomaticCheck()) void checkForLatestRelease()
+    }, 15_000)
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()

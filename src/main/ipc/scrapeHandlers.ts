@@ -1,6 +1,10 @@
 import { dialog } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { IPC } from '@shared/ipc-channels'
 import type {
+  ActressAvatarAutoCropOutcome,
+  ActressAvatarAutoCropResponse,
+  ActressAvatarAutoCropTarget,
   ActressBatchScrapeFilter,
   ActressBatchScrapeRequest,
   ActressScrapeField,
@@ -47,16 +51,69 @@ import {
 import { loadBatchScrapeJob, saveBatchScrapeJob } from '../services/batchScrapeJobStore'
 import { scrapeRunCoordinator } from '../services/scrapeRunCoordinator'
 import { videoBatchScrapeQueue } from '../services/videoBatchScrapeQueue'
-import { countActressesForBatchScrape } from '../db/actressRepo'
+import { countActressesForBatchScrape, getActressDetail } from '../db/actressRepo'
 import { countVideosForBatchScrape, countVideosForRematch } from '../db/videoRepo'
 import { getSettings, updateSettings } from '../settings/settingsStore'
 import { registerHandler, type IpcContext } from './shared'
 
+const AVATAR_AUTO_CROP_TIMEOUT_MS = 5_000
+let avatarAutoCropBatchToken: string | null = null
+
 export function registerScrapeHandlers(ctx: IpcContext): void {
+  avatarAutoCropBatchToken = null
+  const webContents = ctx.getWindow()?.webContents
+  const releaseAvatarAutoCropBatchLock = (): void => {
+    avatarAutoCropBatchToken = null
+  }
+  webContents?.on('render-process-gone', releaseAvatarAutoCropBatchLock)
+  webContents?.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) releaseAvatarAutoCropBatchLock()
+  })
   const interrupted = loadBatchScrapeJob()
   if (interrupted?.status === 'running') {
     saveBatchScrapeJob({ ...interrupted, status: 'paused' })
   }
+
+  const pendingAvatarAutoCrops = new Map<
+    string,
+    {
+      resolve: (outcome: ActressAvatarAutoCropOutcome) => void
+      timeout: ReturnType<typeof setTimeout>
+    }
+  >()
+
+  registerHandler(
+    IPC.ACTRESS_AVATAR_AUTO_CROP_RESULT,
+    (_event, response: ActressAvatarAutoCropResponse): boolean => {
+      const pending = pendingAvatarAutoCrops.get(response.requestId)
+      if (!pending) return false
+      clearTimeout(pending.timeout)
+      pendingAvatarAutoCrops.delete(response.requestId)
+      pending.resolve({ status: response.status, message: response.message })
+      return true
+    }
+  )
+
+  const requestAvatarAutoCrop = (
+    target: ActressAvatarAutoCropTarget
+  ): Promise<ActressAvatarAutoCropOutcome> => {
+    const window = ctx.getWindow()
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) {
+      return Promise.resolve({ status: 'failed', message: '应用窗口不可用' })
+    }
+
+    const requestId = randomUUID()
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        pendingAvatarAutoCrops.delete(requestId)
+        resolve({ status: 'failed', message: '智能构图等待超时' })
+      }, AVATAR_AUTO_CROP_TIMEOUT_MS)
+      pendingAvatarAutoCrops.set(requestId, { resolve, timeout })
+      window.webContents.send(IPC.ACTRESS_AVATAR_AUTO_CROP_REQUEST, { ...target, requestId })
+    })
+  }
+
+  actressScrapeQueue.setAvatarAutoCropListener(requestAvatarAutoCrop)
 
   registerHandler(IPC.SCRAPER_LIST, (): string[] => listScraperNames())
 
@@ -148,6 +205,19 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
 
   registerHandler(IPC.BATCH_SCRAPE_DISCARD, (): boolean => discardActiveBatch(ctx))
 
+  registerHandler(IPC.AVATAR_AUTO_CROP_BATCH_BEGIN, (): string => {
+    assertCanStartNewBatch()
+    const token = randomUUID()
+    avatarAutoCropBatchToken = token
+    return token
+  })
+
+  registerHandler(IPC.AVATAR_AUTO_CROP_BATCH_END, (_event, token: string): boolean => {
+    if (token !== avatarAutoCropBatchToken) return false
+    avatarAutoCropBatchToken = null
+    return true
+  })
+
   registerHandler(
     IPC.SCRAPE_VIDEO_BATCH_COUNT,
     (_e, filter: VideoBatchScrapeFilter): number => countVideosForBatchScrape(filter)
@@ -235,12 +305,33 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
       fields?: ActressScrapeField[],
       mode?: ActressScrapeUpdateMode,
       queryName?: string,
-      useAliases?: boolean
+      useAliases?: boolean,
+      autoCropAvatar?: boolean
     ): Promise<ActressScrapeResult> => {
       assertBatchScrapeAvailable()
-      const outcome = await scrapeRunCoordinator.runExclusive('演员刮削', () =>
-        scrapeActress(actressId, scraperName, { fields, mode, queryName, useAliases })
-      )
+      const outcome = await scrapeRunCoordinator.runExclusive('演员刮削', async () => {
+        const result = await scrapeActress(actressId, scraperName, {
+          fields,
+          mode,
+          queryName,
+          useAliases
+        })
+        if (
+          autoCropAvatar &&
+          fields?.includes('avatar') &&
+          result.avatarUpdated &&
+          !result.skipped
+        ) {
+          const actress = getActressDetail(actressId)
+          if (actress) {
+            await requestAvatarAutoCrop({
+              actressId,
+              mainName: actress.main_name
+            })
+          }
+        }
+        return result
+      })
       if (!outcome.ok || !outcome.result) throw new Error(outcome.error)
       return outcome.result
     }
@@ -400,12 +491,18 @@ async function exportPluginWithDialog(
 }
 
 function assertCanStartNewBatch(): void {
+  if (avatarAutoCropBatchToken) {
+    throw new Error('批量智能构图正在进行中，请完成或停止后再试')
+  }
   assertBatchScrapeAvailable()
   if (videoBatchScrapeQueue.isRunning()) throw new Error('影片批量更新已在进行中')
   if (actressScrapeQueue.isRunning()) throw new Error('演员批量刮削已在进行中')
 }
 
 function assertCanResumeBatch(): void {
+  if (avatarAutoCropBatchToken) {
+    throw new Error('批量智能构图正在进行中，请完成或停止后再试')
+  }
   if (scrapeRunCoordinator.isRunning()) {
     throw new Error(`${scrapeRunCoordinator.getActiveLabel()}进行中，请稍后再试`)
   }

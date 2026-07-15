@@ -16,6 +16,7 @@ import type {
   ActressGenderFilter,
   ActressListItem,
   ActressListSortBy,
+  ActressAvatarSourceInfo,
   ActressMergeMainNameFrom,
   ListSortDir
 } from '@shared/types'
@@ -30,15 +31,18 @@ import { normalizeCupSize } from '@shared/cupSizeUtils'
 import {
   avatarSourceFingerprint,
   deleteAsset,
+  detectImageExtensionFromBuffer,
   importAvatarDisplayFromBuffer,
   importAvatarFromFile,
   importAvatarSourceFromBuffer,
   isUsableImageAsset,
   readAssetBytes,
+  readAssetForServe,
   readImageDimensionsFromBuffer,
   readImageDimensionsFromPath,
   readImageDimensionsFromRelPath
 } from '../services/assetService'
+import { mimeFromExt } from '../services/assetCrypto'
 import { actressSearchLikeParams, actressTextSearchSql } from './actressSearchSql'
 import {
   ACTRESS_NAME_TYPE,
@@ -58,6 +62,26 @@ import {
  */
 export function findActressByNameOrAlias(name: string): number | null {
   return findActressIdByStoredName(name)
+}
+
+/** Return a usable avatar source and its exact plaintext-byte fingerprint. */
+export function getActressAvatarSourceInfo(id: number): ActressAvatarSourceInfo | null {
+  const actress = getDb()
+    .prepare('SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?')
+    .get(id) as
+    | { avatar_path: string | null; avatar_source_path: string | null }
+    | undefined
+  if (!actress) return null
+
+  const sourceUsable = isUsableImageAsset(actress.avatar_source_path)
+  const assetPath = sourceUsable ? actress.avatar_source_path : actress.avatar_path
+  if (!assetPath || !isUsableImageAsset(assetPath)) return null
+
+  return {
+    assetPath,
+    sourceFingerprint: avatarSourceFingerprint(readAssetBytes(assetPath)),
+    requiresSourceAdoption: !sourceUsable
+  }
 }
 
 /**
@@ -325,10 +349,18 @@ function readSourceBytesFromCommit(
     bytes: Buffer,
     ext: string
   ): { bytes: Buffer; ext: string; fingerprint: string } => {
-    if (!readImageDimensionsFromBuffer(bytes)) {
+    const detectedExt = detectImageExtensionFromBuffer(bytes)
+    // Chromium can decode formats (and some loosely encoded JPEGs) that Electron's
+    // nativeImage dimension probe cannot. The editor already decoded this source
+    // to produce the display image, so recognized source bytes remain valid.
+    if (!readImageDimensionsFromBuffer(bytes) && !detectedExt) {
       throw new Error('头像原图无效')
     }
-    return { bytes, ext, fingerprint: avatarSourceFingerprint(bytes) }
+    return {
+      bytes,
+      ext: detectedExt ?? ext,
+      fingerprint: avatarSourceFingerprint(bytes)
+    }
   }
 
   if (commit.sourceImageBase64) {
@@ -402,8 +434,10 @@ export function setActressAvatarBundle(
       sourceInfo.ext
     ).relPath
   } else {
-    const currentFp = avatarSourceFingerprint(readAssetBytes(actress.avatar_source_path))
-    if (currentFp !== sourceInfo.fingerprint) {
+    const currentAsset = readAssetForServe(actress.avatar_source_path)
+    const currentFp = avatarSourceFingerprint(currentAsset.body)
+    const storedFormatMismatch = currentAsset.mime !== mimeFromExt(sourceInfo.ext)
+    if (currentFp !== sourceInfo.fingerprint || storedFormatMismatch) {
       nextSourcePath = importAvatarSourceFromBuffer(
         mainName,
         id,
@@ -1302,11 +1336,11 @@ export function applyActressScrapeResult(
   }>,
   fields?: ActressScrapeField[],
   mode: ActressScrapeUpdateMode = 'replace'
-): { applied: boolean; warnings: string[] } {
+): { applied: boolean; warnings: string[]; avatarApplied: boolean } {
   const db = getDb()
   const requested = fields ?? ALL_ACTRESS_SCRAPE_FIELDS
   const effective = resolveEffectiveActressScrapeFields(actressId, requested, mode)
-  if (effective.length === 0) return { applied: false, warnings: [] }
+  if (effective.length === 0) return { applied: false, warnings: [], avatarApplied: false }
   const selected = new Set(effective)
   const warnings: string[] = []
   const scrapedAt = nowIso()
@@ -1327,6 +1361,7 @@ export function applyActressScrapeResult(
   let adoptedAvatar:
     | { displayPath: string; sourcePath: string; cropJson: string }
     | null = null
+  let avatarApplied = false
   if (selected.has('avatar') && avatarRelPath) {
     const shouldAdopt =
       !preserveExistingDb ||
@@ -1338,6 +1373,7 @@ export function applyActressScrapeResult(
         isUsableImageAsset(actress.avatar_path) &&
         downloadedAvatarMatchesExistingSource(actress, avatarRelPath)
       ) {
+        avatarApplied = true
         if (avatarRelPath !== actress.avatar_path && avatarRelPath !== actress.avatar_source_path) {
           deleteAsset(avatarRelPath)
         }
@@ -1348,6 +1384,7 @@ export function applyActressScrapeResult(
             actress.main_name,
             avatarRelPath
           )
+          avatarApplied = true
         } catch (err) {
           warnings.push(`头像未应用：${(err as Error).message}`)
         }
@@ -1494,7 +1531,7 @@ export function applyActressScrapeResult(
     }
   }
 
-  return { applied: true, warnings }
+  return { applied: true, warnings, avatarApplied }
 }
 
 function dedupeUrls(urls: string[]): string[] {

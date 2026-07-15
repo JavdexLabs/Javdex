@@ -34,6 +34,8 @@ export type SettingsOverviewNotice = {
   tone: 'warning' | 'info'
   title: string
   body: string
+  secondaryAction?: () => void
+  secondaryActionLabel?: string
   action?: () => void
   actionLabel?: string
   actionPrimary?: boolean
@@ -433,15 +435,29 @@ export default function SettingsOverviewPanel({
                 <strong>{notice.title}</strong>
                 <span>{notice.body}</span>
               </div>
-              {notice.action && notice.actionLabel && (
-                <button
-                  type="button"
-                  className={`btn btn-sm${notice.actionPrimary ? ' btn-primary' : ''}`}
-                  onClick={notice.action}
-                >
-                  {notice.actionLabel}
-                </button>
-              )}
+              {(notice.secondaryAction && notice.secondaryActionLabel) ||
+              (notice.action && notice.actionLabel) ? (
+                <div className="settings-notice-actions">
+                  {notice.secondaryAction && notice.secondaryActionLabel ? (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost"
+                      onClick={notice.secondaryAction}
+                    >
+                      {notice.secondaryActionLabel}
+                    </button>
+                  ) : null}
+                  {notice.action && notice.actionLabel ? (
+                    <button
+                      type="button"
+                      className={`btn btn-sm${notice.actionPrimary ? ' btn-primary' : ''}`}
+                      onClick={notice.action}
+                    >
+                      {notice.actionLabel}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ))}
         </div>

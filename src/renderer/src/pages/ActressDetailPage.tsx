@@ -39,6 +39,7 @@ import { UI_ICON } from '../components/iconDefaults'
 import { useAppBackground } from '../components/AppBackgroundContext'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
+import { onAvatarAutoCropSaved } from '../avatarAutoCrop/events'
 import type {
   ActressEditInput,
   ActressScrapeField,
@@ -123,6 +124,14 @@ export default function ActressDetailPage(): JSX.Element {
     void load()
   }, [actressId, load])
 
+  useEffect(
+    () =>
+      onAvatarAutoCropSaved((updatedActressId) => {
+        if (updatedActressId === actressId) void load({ silent: true })
+      }),
+    [actressId, load]
+  )
+
   const scrollMemoryKey = `actress-detail:${actressId}`
   const { ref: scrollRef } = useScrollContainerMemory(scrollMemoryKey)
 
@@ -167,7 +176,8 @@ export default function ActressDetailPage(): JSX.Element {
     mode?: ActressScrapeUpdateMode,
     queryName?: string,
     _missingFields?: ActressScrapeField[],
-    useAliases?: boolean
+    useAliases?: boolean,
+    autoCropAvatar = false
   ): Promise<void> => {
     setShowScrapeFields(false)
     setScraperName(site)
@@ -179,7 +189,8 @@ export default function ActressDetailPage(): JSX.Element {
         fields,
         mode,
         queryName,
-        useAliases
+        useAliases,
+        autoCropAvatar
       )
       toast.show('匹配完成', 'success')
       invalidateActressLibraryQueries(queryClient)
@@ -486,15 +497,28 @@ export default function ActressDetailPage(): JSX.Element {
           matchNameHint="默认使用主名在站点搜索资料，也可改用别名尝试匹配。"
           showUseAliasesToggle
           useAliasesHint="开启后，主名未匹配时会依次尝试中文名、英文名及已存别名。"
+          showAutoCropAvatarToggle
+          autoCropAvatarHint="头像保存后立即按“外观”中的智能构图设置完成裁切。"
           onCancel={() => setShowScrapeFields(false)}
-          onConfirm={(fields, site, _scope, mode, _missing, queryName, useAliases) => {
+          onConfirm={(
+            fields,
+            site,
+            _scope,
+            mode,
+            _missing,
+            queryName,
+            useAliases,
+            _auxScope,
+            autoCropAvatar
+          ) => {
             void handleScrape(
               fields,
               site,
               mode as ActressScrapeUpdateMode | undefined,
               queryName,
               undefined,
-              useAliases
+              useAliases,
+              autoCropAvatar
             )
           }}
         />

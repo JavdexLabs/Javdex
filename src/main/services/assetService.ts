@@ -71,20 +71,38 @@ export function readAssetForServe(relPath: string): { body: Buffer; mime: string
   return { body: raw, mime: mimeFromExt(path.extname(relPath)) }
 }
 
-function hasImageMagicBytes(buf: Buffer): boolean {
-  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true
-  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
-    return true
+export function detectImageExtensionFromBuffer(buf: Buffer): string | null {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
+    return '.jpg'
   }
-  if (buf.length >= 6 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return true
+  if (
+    buf.length >= 8 &&
+    buf[0] === 0x89 &&
+    buf[1] === 0x50 &&
+    buf[2] === 0x4e &&
+    buf[3] === 0x47
+  ) {
+    return '.png'
+  }
+  if (buf.length >= 6 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) {
+    return '.gif'
+  }
   if (
     buf.length >= 12 &&
     buf.toString('ascii', 0, 4) === 'RIFF' &&
     buf.toString('ascii', 8, 12) === 'WEBP'
   ) {
-    return true
+    return '.webp'
   }
-  return false
+  if (buf.length >= 16 && buf.toString('ascii', 4, 8) === 'ftyp') {
+    const brands = buf.toString('ascii', 8, Math.min(buf.length, 40))
+    if (brands.includes('avif') || brands.includes('avis')) return '.avif'
+  }
+  return null
+}
+
+function hasImageMagicBytes(buf: Buffer): boolean {
+  return detectImageExtensionFromBuffer(buf) !== null
 }
 
 /** True when a stored relative asset path resolves to a readable non-empty image. */
@@ -416,7 +434,9 @@ export function importAvatarSourceFromBuffer(
   ext = '.jpg'
 ): { relPath: string; fingerprint: string } {
   const fingerprint = avatarSourceFingerprint(data)
-  const normalizedExt = IMAGE_EXTENSIONS.includes(ext.toLowerCase()) ? ext.toLowerCase() : '.jpg'
+  const detectedExt = detectImageExtensionFromBuffer(data)
+  const normalizedExt =
+    detectedExt ?? (IMAGE_EXTENSIONS.includes(ext.toLowerCase()) ? ext.toLowerCase() : '.jpg')
   const urlKey = `avatar-source:${fingerprint}`
   const rel = writeImageAsset(
     'avatars',

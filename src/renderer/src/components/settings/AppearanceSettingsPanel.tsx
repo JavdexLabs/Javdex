@@ -16,7 +16,10 @@ import {
 } from '../../avatarAutoCrop/previewCache'
 import { analyzeAvatarBitmap } from '../../avatarAutoCrop/service'
 import { getCropImageLayout, getSmartAvatarCropTransform } from '../../utils/avatarCrop'
+import { useAvatarAutoCropBatch } from '../../contexts/AvatarAutoCropBatchContext'
+import ConfirmModal from '../ConfirmModal'
 import SettingsSwitchRow from '../SettingsSwitchRow'
+import { useToast } from '../Toast'
 import { SettingsCard } from './SettingsPrimitives'
 
 const AVATAR_COMPOSITION_PREVIEW_SIZE = 172
@@ -175,15 +178,23 @@ export default function AppearanceSettingsPanel({
   settings,
   theme,
   onThemeChange,
-  onPatchSettings
+  onPatchSettings,
+  onOpenAvatarBatchDetails,
+  scrapeBatchActive
 }: {
   settings: AppSettings
   theme: ThemeId
   onThemeChange: (theme: ThemeId) => void
   onPatchSettings: (patch: Partial<AppSettings>) => boolean | void | Promise<boolean | void>
+  onOpenAvatarBatchDetails: () => void
+  scrapeBatchActive: boolean
 }): JSX.Element {
+  const toast = useToast()
+  const avatarAutoCropBatch = useAvatarAutoCropBatch()
   const [isEditingAvatarComposition, setIsEditingAvatarComposition] = useState(false)
   const [isSavingAvatarComposition, setIsSavingAvatarComposition] = useState(false)
+  const [isCountingBatchAvatars, setIsCountingBatchAvatars] = useState(false)
+  const [batchConfirmCount, setBatchConfirmCount] = useState<number | null>(null)
   const [avatarCompositionDraft, setAvatarCompositionDraft] = useState<AvatarCompositionDraft>(() =>
     avatarCompositionDraftFromSettings(settings)
   )
@@ -229,6 +240,43 @@ export default function AppearanceSettingsPanel({
   }
 
   const draftFacePercent = Math.round(avatarCompositionDraft.avatarFaceRatio * 100)
+  const batchRunning =
+    avatarAutoCropBatch.state.status === 'running' ||
+    avatarAutoCropBatch.state.status === 'cancelling'
+
+  const prepareBatchAvatarCrop = async (): Promise<void> => {
+    if (scrapeBatchActive) {
+      toast.show('请先完成或终止当前批量刮削任务', 'info')
+      return
+    }
+    setIsCountingBatchAvatars(true)
+    try {
+      const count = await avatarAutoCropBatch.countAllAvatars()
+      if (count === 0) {
+        toast.show('当前没有可智能构图的演员头像', 'info')
+        return
+      }
+      setBatchConfirmCount(count)
+    } catch (error) {
+      toast.show((error as Error).message, 'error')
+    } finally {
+      setIsCountingBatchAvatars(false)
+    }
+  }
+
+  const startBatchAvatarCrop = async (): Promise<void> => {
+    setBatchConfirmCount(null)
+    if (scrapeBatchActive) {
+      toast.show('请先完成或终止当前批量刮削任务', 'info')
+      return
+    }
+    try {
+      const count = await avatarAutoCropBatch.startAllAvatars()
+      if (count === 0) toast.show('当前没有可智能构图的演员头像', 'info')
+    } catch (error) {
+      toast.show((error as Error).message, 'error')
+    }
+  }
 
   return (
     <>
@@ -253,8 +301,8 @@ export default function AppearanceSettingsPanel({
         title="智能头像构图"
         hint={
           isEditingAvatarComposition
-            ? '正在预览未保存的设置；保存后仅影响新头像，已有头像和手动裁剪不会改变。'
-            : '使用本地模型预览实际构图；点击编辑后调整，保存才会生效。'
+            ? '设置手动、批量和刮削自动构图使用的居中位置、画面松紧与头部完整性；保存后生效。'
+            : '决定手动、批量和刮削自动构图的画面效果；修改设置不会立即重裁已有头像。'
         }
         actions={
           isEditingAvatarComposition ? (
@@ -382,7 +430,98 @@ export default function AppearanceSettingsPanel({
             </div>
           </div>
         </div>
+
+        <div className="avatar-auto-crop-batch-row">
+          <div className="avatar-auto-crop-batch-copy">
+            <strong>批量智能构图</strong>
+            <span>
+              {batchRunning
+                ? avatarAutoCropBatch.state.currentName
+                  ? `正在处理 ${avatarAutoCropBatch.state.currentName}`
+                  : '正在准备头像原图'
+                : avatarAutoCropBatch.state.status === 'done' &&
+                    avatarAutoCropBatch.state.total > 0
+                  ? `${avatarAutoCropBatch.state.cancelled ? '已停止' : '已完成'}：成功 ${avatarAutoCropBatch.state.success}，失败 ${avatarAutoCropBatch.state.failed}，跳过 ${avatarAutoCropBatch.state.skipped}`
+                  : '按当前已保存设置，一次性重新构图所有演员头像。'}
+            </span>
+          </div>
+
+          {batchRunning ? (
+            <div className="avatar-auto-crop-batch-progress" aria-live="polite">
+              <progress
+                max={Math.max(1, avatarAutoCropBatch.state.total)}
+                value={avatarAutoCropBatch.state.current}
+                aria-label="批量智能构图进度"
+              />
+              <span>
+                {avatarAutoCropBatch.state.current}/{avatarAutoCropBatch.state.total}
+              </span>
+              <div className="avatar-auto-crop-batch-actions">
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  onClick={onOpenAvatarBatchDetails}
+                >
+                  查看日志
+                </button>
+                {avatarAutoCropBatch.state.source === 'manual' ? (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    disabled={avatarAutoCropBatch.state.status === 'cancelling'}
+                    onClick={avatarAutoCropBatch.cancel}
+                  >
+                    {avatarAutoCropBatch.state.status === 'cancelling' ? '正在停止…' : '停止'}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <div className="avatar-auto-crop-batch-actions">
+              {avatarAutoCropBatch.state.logs.length > 0 ? (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  onClick={onOpenAvatarBatchDetails}
+                >
+                  查看日志
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={
+                  isEditingAvatarComposition || isCountingBatchAvatars || scrapeBatchActive
+                }
+                title={
+                  isEditingAvatarComposition
+                    ? '请先保存或取消当前构图设置'
+                    : scrapeBatchActive
+                      ? '请先完成或终止当前批量刮削任务'
+                      : undefined
+                }
+                onClick={() => void prepareBatchAvatarCrop()}
+              >
+                {isCountingBatchAvatars ? '统计中…' : '构图全部头像'}
+              </button>
+            </div>
+          )}
+        </div>
       </SettingsCard>
+
+      {batchConfirmCount !== null ? (
+        <ConfirmModal
+          title="批量智能构图"
+          confirmText="开始构图"
+          onConfirm={() => void startBatchAvatarCrop()}
+          onCancel={() => setBatchConfirmCount(null)}
+        >
+          <p>
+            将按当前已保存的智能构图设置处理 {batchConfirmCount} 张演员头像。
+            现有手动裁切结果也会被覆盖，此操作无法自动撤销。
+          </p>
+        </ConfirmModal>
+      ) : null}
 
       <SettingsCard
         title="详情页背景"

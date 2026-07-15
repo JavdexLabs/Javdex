@@ -5,6 +5,7 @@ import type {
   ActressGalleryAsset,
   ActressGalleryImportInput,
   ActressGenderFilter,
+  ActressAvatarSourceInfo,
   ActressListItem,
   ActressListSortBy,
   ActressMergeInput,
@@ -15,6 +16,7 @@ import {
   clearActressMetadataRecord,
   editActress,
   getActressDetail,
+  getActressAvatarSourceInfo,
   listActresses,
   mergeActresses,
   setActressPosterPath
@@ -39,6 +41,11 @@ export function registerActressHandlers(): void {
 
   registerHandler(IPC.ACTRESS_GET, (_e, id: number): ActressDetail | null =>
     getActressDetail(id)
+  )
+
+  registerHandler(
+    IPC.ACTRESS_AVATAR_SOURCE_INFO,
+    (_e, id: number): ActressAvatarSourceInfo | null => getActressAvatarSourceInfo(id)
   )
 
   registerHandler(IPC.ACTRESS_EDIT, (_e, id: number, input: ActressEditInput): boolean => {

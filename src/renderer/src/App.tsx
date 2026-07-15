@@ -17,6 +17,7 @@ import { DisplayModeProvider } from './components/DisplayModeContext'
 import { ThemeProvider } from './components/ThemeProvider'
 import { AppBackgroundProvider } from './components/AppBackgroundContext'
 import { ImagePreviewOverlayProvider } from './components/ImagePreviewOverlayContext'
+import { AvatarAutoCropBatchProvider } from './contexts/AvatarAutoCropBatchContext'
 import { installDisableInputSpellcheck } from './installDisableInputSpellcheck'
 import { ROUTE_PATH, ROUTE_SEGMENT } from './listView/routePaths'
 import { SETTINGS_GROUPS, settingsPath } from './settings/settingsRoutes'
@@ -31,6 +32,7 @@ export default function App(): JSX.Element {
   return (
     <ThemeProvider>
       <ToastProvider>
+        <AvatarAutoCropBatchProvider>
         <DisplayModeProvider>
           <AppBackgroundProvider>
             <ImagePreviewOverlayProvider>
@@ -89,6 +91,7 @@ export default function App(): JSX.Element {
             </ImagePreviewOverlayProvider>
           </AppBackgroundProvider>
         </DisplayModeProvider>
+        </AvatarAutoCropBatchProvider>
       </ToastProvider>
     </ThemeProvider>
   )

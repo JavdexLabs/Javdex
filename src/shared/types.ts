@@ -218,6 +218,14 @@ export interface ActressListItem extends Actress {
   video_count: number
 }
 
+/** Read-only source metadata used by renderer-side smart avatar composition. */
+export interface ActressAvatarSourceInfo {
+  assetPath: string
+  sourceFingerprint: string
+  /** True when the selected asset is a legacy display avatar that must become the source. */
+  requiresSourceAdoption: boolean
+}
+
 /** Which actress supplies the surviving main_name after a merge. */
 export type ActressMergeMainNameFrom = 'keep' | 'merge'
 
@@ -878,6 +886,31 @@ export interface ActressBatchScrapeRequest extends ActressBatchScrapeFilter {
   mode?: ActressScrapeUpdateMode
   /** When true, scrapers also try stored aliases / zh / en names. Default false. */
   useAliases?: boolean
+  /** Smart-crop newly downloaded avatars with the saved local composition settings. */
+  autoCropAvatar?: boolean
+}
+
+/** Actress whose newly stored avatar should be smart-cropped before scraping continues. */
+export interface ActressAvatarAutoCropTarget {
+  actressId: number
+  mainName: string
+}
+
+export type ActressAvatarAutoCropStatus = 'success' | 'skipped' | 'failed'
+
+export interface ActressAvatarAutoCropOutcome {
+  status: ActressAvatarAutoCropStatus
+  message?: string
+}
+
+/** Main-to-renderer request for one scrape-integrated avatar crop. */
+export interface ActressAvatarAutoCropRequest extends ActressAvatarAutoCropTarget {
+  requestId: string
+}
+
+/** Renderer acknowledgement that lets the actress scrape queue continue. */
+export interface ActressAvatarAutoCropResponse extends ActressAvatarAutoCropOutcome {
+  requestId: string
 }
 
 /** UI color theme id (maps to CSS variables on html[data-theme]). */

@@ -59,6 +59,7 @@ export const IPC = {
   // Actresses
   ACTRESS_LIST: 'actress:list',
   ACTRESS_GET: 'actress:get',
+  ACTRESS_AVATAR_SOURCE_INFO: 'actress:avatarSourceInfo',
   ACTRESS_EDIT: 'actress:edit',
   ACTRESS_DELETE: 'actress:delete',
   ACTRESS_CLEAR_META: 'actress:clearMeta',
@@ -92,6 +93,8 @@ export const IPC = {
   BATCH_SCRAPE_PAUSE: 'batchScrape:pause',
   BATCH_SCRAPE_RESUME: 'batchScrape:resume',
   BATCH_SCRAPE_DISCARD: 'batchScrape:discard',
+  AVATAR_AUTO_CROP_BATCH_BEGIN: 'avatarAutoCropBatch:begin',
+  AVATAR_AUTO_CROP_BATCH_END: 'avatarAutoCropBatch:end',
   SCRAPER_LIST: 'scrape:listPlugins',
   SCRAPER_PLUGIN_DETAILS: 'scrape:pluginDetails',
   PLUGIN_IMPORT: 'plugin:import',
@@ -118,6 +121,8 @@ export const IPC = {
   ACTRESS_SCRAPE_BATCH_START: 'actressScrape:batchStart',
   ACTRESS_SCRAPE_BATCH_CANCEL: 'actressScrape:batchCancel',
   ACTRESS_SCRAPE_BATCH_PROGRESS: 'actressScrape:batchProgress', // main -> renderer event
+  ACTRESS_AVATAR_AUTO_CROP_REQUEST: 'actressScrape:avatarAutoCropRequest', // main -> renderer event
+  ACTRESS_AVATAR_AUTO_CROP_RESULT: 'actressScrape:avatarAutoCropResult', // renderer -> main reply
 
   // Plugin development agent
   PLUGIN_DEV_AGENT_START: 'pluginDev:agentStart',

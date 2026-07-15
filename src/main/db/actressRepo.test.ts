@@ -16,6 +16,7 @@ import {
   listActresses,
   listActressesForBatchScrape,
   mergeActresses,
+  getActressAvatarSourceInfo,
   getActressDetail,
   replaceActressGalleryAssets,
   resolveEffectiveActressScrapeFields,
@@ -31,6 +32,12 @@ let tempRoot: string | null = null
 /** Smallest valid JPEG (1x1) for asset readability checks in tests. */
 const MINIMAL_JPEG = Buffer.from(
   'ffd8ffe000104a4649460000010101004800480000ffdb004300080606070605080707070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d1a1c1c20242e2720222c231c1c2837292c30313434341f27393d38323c2e333432ffc0000b080001000101011100ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191082242b1c11552d1f0243362728292a35363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffda0008010100003f007b941100ffd9',
+  'hex'
+)
+
+/** Recognized WebP container whose dimensions are intentionally unavailable to nativeImage. */
+const WEBP_CONTAINER = Buffer.from(
+  '524946461600000057454250565038580a0000000000000000000000000000',
   'hex'
 )
 
@@ -442,6 +449,39 @@ describe('actressRepo.clearBrokenActressAvatarIfNeeded', () => {
   })
 })
 
+describe('actressRepo.getActressAvatarSourceInfo', () => {
+  it('uses a legacy display avatar as the source without renderer fetch', () => {
+    setupDb()
+
+    assert.deepEqual(getActressAvatarSourceInfo(1), {
+      assetPath: 'avatars/complete.jpg',
+      sourceFingerprint: avatarSourceFingerprint(MINIMAL_JPEG),
+      requiresSourceAdoption: true
+    })
+  })
+
+  it('prefers the saved original source after an avatar bundle is created', () => {
+    setupDb()
+    const fingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+    setActressAvatarBundle(2, 'Missing Female', {
+      displayImageBase64: MINIMAL_JPEG.toString('base64'),
+      sourceImageBase64: MINIMAL_JPEG.toString('base64'),
+      crop: createAvatarCropV1({
+        sourceFingerprint: fingerprint,
+        zoom: 1,
+        offsetX: 0,
+        offsetY: 0
+      })
+    })
+
+    const info = getActressAvatarSourceInfo(2)
+    assert.ok(info)
+    assert.equal(info.sourceFingerprint, fingerprint)
+    assert.equal(info.requiresSourceAdoption, false)
+    assert.match(info.assetPath, /^avatars\//)
+  })
+})
+
 describe('actressRepo.setActressAvatarBundle', () => {
   it('persists avatar source, display, and crop; recrops without replacing the source', () => {
     setupDb()
@@ -496,6 +536,78 @@ describe('actressRepo.setActressAvatarBundle', () => {
     assert.equal(second.avatar_source_path, first.avatar_source_path)
     assert.equal(parseAvatarCrop(second.avatar_crop_json, sourceFingerprint)?.zoom, 2)
     assert.equal(parseAvatarCrop(second.avatar_crop_json, sourceFingerprint)?.offsetX, -6)
+  })
+
+  it('adopts recognized legacy image bytes when native dimension probing is unavailable', () => {
+    setupDb()
+    const db = getDb()
+    writeTestAsset('avatars/legacy.webp', WEBP_CONTAINER)
+    db.prepare(
+      `UPDATE actresses
+       SET avatar_path = ?, avatar_source_path = NULL, avatar_crop_json = NULL
+       WHERE id = ?`
+    ).run('avatars/legacy.webp', 1)
+
+    const source = getActressAvatarSourceInfo(1)
+    assert.ok(source)
+    assert.equal(source.requiresSourceAdoption, true)
+
+    setActressAvatarBundle(1, 'Complete', {
+      displayImageBase64: MINIMAL_JPEG.toString('base64'),
+      sourceAssetPath: source.assetPath,
+      crop: createAvatarCropV1({
+        sourceFingerprint: source.sourceFingerprint,
+        zoom: 1.2,
+        offsetX: 2,
+        offsetY: -3
+      })
+    })
+
+    const saved = db
+      .prepare('SELECT avatar_source_path FROM actresses WHERE id = ?')
+      .get(1) as { avatar_source_path: string }
+    assert.match(saved.avatar_source_path, /\.webp$/)
+    assert.equal(assetExists(saved.avatar_source_path), true)
+  })
+
+  it('repairs an existing source whose stored extension does not match its bytes', () => {
+    setupDb()
+    const db = getDb()
+    const sourceFingerprint = avatarSourceFingerprint(WEBP_CONTAINER)
+    writeTestAsset('avatars/mislabeled.jpg', WEBP_CONTAINER)
+    db.prepare(
+      `UPDATE actresses
+       SET avatar_source_path = ?, avatar_crop_json = ?
+       WHERE id = ?`
+    ).run(
+      'avatars/mislabeled.jpg',
+      JSON.stringify(
+        createAvatarCropV1({
+          sourceFingerprint,
+          zoom: 1.1,
+          offsetX: 0,
+          offsetY: 0
+        })
+      ),
+      1
+    )
+
+    setActressAvatarBundle(1, 'Complete', {
+      displayImageBase64: MINIMAL_JPEG.toString('base64'),
+      crop: createAvatarCropV1({
+        sourceFingerprint,
+        zoom: 1.3,
+        offsetX: 4,
+        offsetY: -2
+      })
+    })
+
+    const saved = db
+      .prepare('SELECT avatar_source_path FROM actresses WHERE id = ?')
+      .get(1) as { avatar_source_path: string }
+    assert.match(saved.avatar_source_path, /\.webp$/)
+    assert.equal(assetExists('avatars/mislabeled.jpg'), false)
+    assert.equal(assetExists(saved.avatar_source_path), true)
   })
 
   it('rejects invalid display bytes before writing the avatar bundle', () => {
@@ -682,7 +794,7 @@ describe('actressRepo.applyActressScrapeResult', () => {
     const db = getDb()
     writeTestAsset('avatars/not-image.jpg', '<html>not an image</html>')
 
-    const { applied, warnings } = applyActressScrapeResult(
+    const { applied, warnings, avatarApplied } = applyActressScrapeResult(
       2,
       { birthDate: '2000-02-03' },
       'avatars/not-image.jpg',
@@ -692,6 +804,7 @@ describe('actressRepo.applyActressScrapeResult', () => {
     )
 
     assert.equal(applied, true)
+    assert.equal(avatarApplied, false)
     assert.equal(warnings.some((warning) => warning.includes('头像未应用')), true)
     const row = db
       .prepare('SELECT birth_date, avatar_path FROM actresses WHERE id = ?')
@@ -726,7 +839,7 @@ describe('actressRepo.applyActressScrapeResult', () => {
     }
 
     writeTestAvatar('avatars/same-source-again.jpg')
-    const { applied } = applyActressScrapeResult(
+    const { applied, avatarApplied } = applyActressScrapeResult(
       1,
       { birthDate: '1991-02-03' },
       'avatars/same-source-again.jpg',
@@ -736,6 +849,7 @@ describe('actressRepo.applyActressScrapeResult', () => {
     )
 
     assert.equal(applied, true)
+    assert.equal(avatarApplied, true)
     const after = db
       .prepare(
         'SELECT birth_date, avatar_path, avatar_source_path, avatar_crop_json FROM actresses WHERE id = ?'
@@ -778,7 +892,7 @@ describe('actressRepo.applyActressScrapeResult', () => {
       'base64'
     )
     writeTestAsset('avatars/different-source.png', png)
-    const { applied } = applyActressScrapeResult(
+    const { applied, avatarApplied } = applyActressScrapeResult(
       1,
       {},
       'avatars/different-source.png',
@@ -788,6 +902,7 @@ describe('actressRepo.applyActressScrapeResult', () => {
     )
 
     assert.equal(applied, true)
+    assert.equal(avatarApplied, true)
     const after = db
       .prepare('SELECT avatar_path, avatar_crop_json FROM actresses WHERE id = ?')
       .get(1) as { avatar_path: string; avatar_crop_json: string }

@@ -1,4 +1,6 @@
 import type {
+  ActressAvatarAutoCropOutcome,
+  ActressAvatarAutoCropTarget,
   ActressBatchScrapeRequest,
   ActressBatchScrapeScope,
   ActressBatchScrapeStatus,
@@ -33,6 +35,9 @@ import { ScraperDelayController } from './scraperDelayController'
 import { SequentialBatchQueue } from './sequentialBatchQueue'
 
 type ProgressListener = (progress: BatchProgress) => void
+type AvatarAutoCropListener = (
+  target: ActressAvatarAutoCropTarget
+) => Promise<ActressAvatarAutoCropOutcome>
 
 const MODE_LABEL: Record<ActressScrapeUpdateMode, string> = {
   replace: '覆盖更新',
@@ -73,9 +78,14 @@ function defaultRequest(scraperName?: string): ActressBatchScrapeRequest {
 class ActressScrapeQueue {
   private readonly queue = new SequentialBatchQueue<{ id: number; main_name: string }>()
   private activeJob: PersistedBatchScrapeJob | null = null
+  private avatarAutoCropListener: AvatarAutoCropListener | null = null
 
   setListener(fn: ProgressListener | null): void {
     this.queue.setListener(fn)
+  }
+
+  setAvatarAutoCropListener(fn: AvatarAutoCropListener | null): void {
+    this.avatarAutoCropListener = fn
   }
 
   getProgress(): BatchProgress {
@@ -198,11 +208,31 @@ class ActressScrapeQueue {
                 message: '跳过：所选更新字段无需写入'
               }
             }
-            if (itemOutcome.warnings?.length) {
+            let avatarAutoCropOutcome: ActressAvatarAutoCropOutcome | null = null
+            if (
+              request.autoCropAvatar &&
+              fields.includes('avatar') &&
+              itemOutcome.avatarUpdated
+            ) {
+              avatarAutoCropOutcome = this.avatarAutoCropListener
+                ? await this.avatarAutoCropListener({ actressId: id, mainName: main_name })
+                : { status: 'failed', message: '智能构图服务不可用' }
+            }
+
+            const details = [...(itemOutcome.warnings ?? [])]
+            if (avatarAutoCropOutcome?.status === 'success') {
+              details.push('头像智能构图完成')
+            } else if (avatarAutoCropOutcome?.status === 'skipped') {
+              details.push(`头像智能构图已跳过：${avatarAutoCropOutcome.message ?? '没有可用原图'}`)
+            } else if (avatarAutoCropOutcome?.status === 'failed') {
+              details.push(`头像智能构图失败：${avatarAutoCropOutcome.message ?? '未知错误'}`)
+            }
+
+            if (details.length > 0) {
               return {
                 success: true,
                 level: 'info',
-                message: `刮削成功；${itemOutcome.warnings.join('；')}`
+                message: `刮削成功；${details.join('；')}`
               }
             }
             return {

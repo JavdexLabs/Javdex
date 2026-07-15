@@ -5835,6 +5835,14 @@ button.actress-mini:focus-visible .actress-avatar {
   line-height: 1.45;
 }
 
+.settings-notice-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .list-maintenance-banner {
   display: flex;
   align-items: center;
@@ -15056,6 +15064,86 @@ button.alias-tag-chip-name:disabled {
   cursor: pointer;
 }
 
+.avatar-auto-crop-batch-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.avatar-auto-crop-batch-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.avatar-auto-crop-batch-copy strong {
+  color: var(--text-primary);
+  font-size: var(--settings-fs-body, 13px);
+  font-weight: var(--settings-fw-label, 600);
+}
+
+.avatar-auto-crop-batch-copy span {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.avatar-auto-crop-batch-progress {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) max-content max-content;
+  align-items: center;
+  gap: 9px;
+  flex: 0 1 520px;
+  min-width: 0;
+}
+
+.avatar-auto-crop-batch-progress progress {
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-control);
+  accent-color: var(--accent);
+}
+
+.avatar-auto-crop-batch-progress progress::-webkit-progress-bar {
+  border-radius: 999px;
+  background: var(--surface-control);
+}
+
+.avatar-auto-crop-batch-progress progress::-webkit-progress-value {
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.avatar-auto-crop-batch-progress > span {
+  min-width: 44px;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption, 11px);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.avatar-auto-crop-batch-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.avatar-auto-crop-batch-actions .btn {
+  flex: 0 0 auto;
+  min-width: max-content;
+  white-space: nowrap;
+}
+
 @media (max-width: 900px) {
   .avatar-composition-layout {
     grid-template-columns: 160px minmax(0, 1fr);
@@ -15076,6 +15164,28 @@ button.alias-tag-chip-name:disabled {
   .avatar-composition-control-row {
     grid-template-columns: 1fr;
     gap: 8px;
+  }
+
+  .avatar-auto-crop-batch-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .avatar-auto-crop-batch-actions {
+    align-self: flex-start;
+  }
+
+  .avatar-auto-crop-batch-progress {
+    width: 100%;
+    flex-basis: auto;
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+
+  .avatar-auto-crop-batch-progress .avatar-auto-crop-batch-actions {
+    grid-column: 1 / -1;
+    justify-self: end;
+    align-self: auto;
   }
 }
 

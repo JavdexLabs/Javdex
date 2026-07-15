@@ -11,6 +11,7 @@ import type {
   VideoDetail,
   Video,
   ActressDetail,
+  ActressAvatarSourceInfo,
   ActressGalleryAsset,
   ActressGalleryImportInput,
   IpcResponse,
@@ -36,6 +37,9 @@ import type {
   PlaylistVideoMembership,
   ActressBatchScrapeFilter,
   ActressBatchScrapeRequest,
+  ActressAvatarAutoCropOutcome,
+  ActressAvatarAutoCropRequest,
+  ActressAvatarAutoCropResponse,
   FacetType,
   FacetItem,
   VideoEditInput,
@@ -172,6 +176,8 @@ const api = {
       sortDir?: ListSortDir
     ) => invoke<ActressListItem[]>(IPC.ACTRESS_LIST, search, gender, sortBy, sortDir),
     get: (id: number) => invoke<ActressDetail | null>(IPC.ACTRESS_GET, id),
+    getAvatarSourceInfo: (id: number) =>
+      invoke<ActressAvatarSourceInfo | null>(IPC.ACTRESS_AVATAR_SOURCE_INFO, id),
     edit: (id: number, input: ActressEditInput) => invoke<boolean>(IPC.ACTRESS_EDIT, id, input),
     remove: (id: number) => invoke<boolean>(IPC.ACTRESS_DELETE, id),
     clearMeta: (id: number) => invoke<boolean>(IPC.ACTRESS_CLEAR_META, id),
@@ -253,7 +259,8 @@ const api = {
       fields?: ActressScrapeField[],
       mode?: ActressScrapeUpdateMode,
       queryName?: string,
-      useAliases?: boolean
+      useAliases?: boolean,
+      autoCropAvatar?: boolean
     ) =>
       invoke<ActressScrapeResult>(
         IPC.ACTRESS_SCRAPE_ONE,
@@ -262,7 +269,8 @@ const api = {
         fields,
         mode,
         queryName,
-        useAliases
+        useAliases,
+        autoCropAvatar
       ),
     batchCount: (filter: ActressBatchScrapeFilter) =>
       invoke<number>(IPC.ACTRESS_SCRAPE_BATCH_COUNT, filter),
@@ -290,6 +298,30 @@ const api = {
       ipcRenderer.on(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, listener)
       return (): void => {
         ipcRenderer.removeListener(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, listener)
+      }
+    },
+    onAvatarAutoCropRequest: (
+      cb: (request: ActressAvatarAutoCropRequest) => Promise<ActressAvatarAutoCropOutcome>
+    ) => {
+      const listener = (_e: unknown, request: ActressAvatarAutoCropRequest): void => {
+        void Promise.resolve(cb(request))
+          .catch(
+            (error): ActressAvatarAutoCropOutcome => ({
+              status: 'failed',
+              message: error instanceof Error ? error.message : String(error)
+            })
+          )
+          .then((outcome) =>
+            invoke<boolean>(IPC.ACTRESS_AVATAR_AUTO_CROP_RESULT, {
+              requestId: request.requestId,
+              ...outcome
+            } satisfies ActressAvatarAutoCropResponse)
+          )
+          .catch(() => undefined)
+      }
+      ipcRenderer.on(IPC.ACTRESS_AVATAR_AUTO_CROP_REQUEST, listener)
+      return (): void => {
+        ipcRenderer.removeListener(IPC.ACTRESS_AVATAR_AUTO_CROP_REQUEST, listener)
       }
     }
   },
@@ -321,6 +353,10 @@ const api = {
     pause: () => invoke<boolean>(IPC.BATCH_SCRAPE_PAUSE),
     resume: () => invoke<boolean>(IPC.BATCH_SCRAPE_RESUME),
     discard: () => invoke<boolean>(IPC.BATCH_SCRAPE_DISCARD)
+  },
+  avatarAutoCropBatch: {
+    begin: () => invoke<string>(IPC.AVATAR_AUTO_CROP_BATCH_BEGIN),
+    end: (token: string) => invoke<boolean>(IPC.AVATAR_AUTO_CROP_BATCH_END, token)
   },
   player: {
     play: (videoId: number) => invoke<PlayResult>(IPC.PLAYER_PLAY, videoId),

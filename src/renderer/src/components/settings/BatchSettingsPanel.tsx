@@ -1,10 +1,10 @@
-import { useLayoutEffect, useRef, type RefObject } from 'react'
+import { useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react'
 import type { BatchProgress } from '@shared/types'
 import { batchStatusLabel } from '../../settings/settingsDisplay'
 import { SettingsEmptyPanel, SettingsStatusPill } from './SettingsPrimitives'
 import BatchTaskControls, { type BatchControlHandler } from './BatchTaskControls'
 
-type BatchScope = 'video' | 'actress'
+type BatchScope = 'video' | 'actress' | 'avatar'
 
 export default function BatchSettingsPanel({
   scope,
@@ -13,6 +13,8 @@ export default function BatchSettingsPanel({
   paused,
   logRef,
   emptyLog,
+  skipped,
+  customControls,
   onPause,
   onResume,
   onDiscard
@@ -23,6 +25,8 @@ export default function BatchSettingsPanel({
   paused: boolean
   logRef: RefObject<HTMLDivElement>
   emptyLog: string
+  skipped?: number
+  customControls?: ReactNode
   onPause: BatchControlHandler
   onResume: BatchControlHandler
   onDiscard: BatchControlHandler
@@ -33,7 +37,7 @@ export default function BatchSettingsPanel({
   const expandBatchCard = hasBatch || hasBatchLogs
   const status = batch?.status ?? 'idle'
   const remaining = batch ? Math.max(0, batch.total - batch.current) : null
-  const taskNoun = scope === 'actress' ? '演员' : '影片'
+  const taskNoun = scope === 'actress' ? '演员' : scope === 'avatar' ? '头像构图' : '影片'
   const progressCount = batch ? `${batch.current}/${batch.total}` : '未开始'
   const percent =
     batch && batch.total > 0 ? Math.round((batch.current / batch.total) * 100) : 0
@@ -63,15 +67,19 @@ export default function BatchSettingsPanel({
         <SettingsStatusPill status={status}>
           {batch ? batchStatusLabel(status) : '空闲'}
         </SettingsStatusPill>
-        <BatchTaskControls
-          scopeLabel={taskNoun}
-          running={running}
-          paused={paused}
-          status={status}
-          onPause={onPause}
-          onResume={onResume}
-          onDiscard={onDiscard}
-        />
+        {customControls !== undefined ? (
+          customControls
+        ) : (
+          <BatchTaskControls
+            scopeLabel={taskNoun}
+            running={running}
+            paused={paused}
+            status={status}
+            onPause={onPause}
+            onResume={onResume}
+            onDiscard={onDiscard}
+          />
+        )}
       </div>
 
       <div className="batch-log-stats" aria-label="运行统计">
@@ -89,8 +97,8 @@ export default function BatchSettingsPanel({
             <strong className="text-danger">{batch?.failed ?? 0}</strong>
           </span>
           <span className="batch-log-stat">
-            <span className="batch-log-stat-label">剩余</span>
-            <strong>{remaining ?? '-'}</strong>
+            <span className="batch-log-stat-label">{skipped === undefined ? '剩余' : '跳过'}</span>
+            <strong>{skipped ?? remaining ?? '-'}</strong>
           </span>
           <span className="batch-log-stats-current" title={currentDetail}>
             {currentDetail}

@@ -59,6 +59,7 @@ import { useToast } from '../components/Toast'
 import { useTheme } from '../components/ThemeProvider'
 import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
 import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
+import { useAvatarAutoCropBatch } from '../contexts/AvatarAutoCropBatchContext'
 import useNetworkSettingsController from '../hooks/useNetworkSettingsController'
 import {
   invalidateAllLibraryQueries
@@ -141,9 +142,12 @@ export default function SettingsPage(): JSX.Element {
   const [scanResult, setScanResult] = useState<ScanResult | null>(null)
   const [unrecognized, setUnrecognized] = useState<string[]>([])
   const { videoBatch, actressBatch } = useBatchScrapeActivity()
+  const avatarAutoCropBatch = useAvatarAutoCropBatch()
   const [showVideoBatchModal, setShowVideoBatchModal] = useState(false)
   const [showActressBatchModal, setShowActressBatchModal] = useState(false)
-  const [batchDetailScope, setBatchDetailScope] = useState<'video' | 'actress' | null>(null)
+  const [batchDetailScope, setBatchDetailScope] = useState<
+    'video' | 'actress' | 'avatar' | null
+  >(null)
   const [videoBatchScopeCountLabel, setVideoBatchScopeCountLabel] = useState('- 部影片')
   const [actressBatchScopeCountLabel, setActressBatchScopeCountLabel] = useState('- 位演员')
   const [storageBusy, setStorageBusy] = useState(false)
@@ -158,6 +162,7 @@ export default function SettingsPage(): JSX.Element {
   )
   const videoBatchLogRef = useRef<HTMLDivElement>(null)
   const actressLogRef = useRef<HTMLDivElement>(null)
+  const avatarBatchLogRef = useRef<HTMLDivElement>(null)
   const libraryUnrecRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (activeGroup.id !== 'overview') return
@@ -248,6 +253,10 @@ export default function SettingsPage(): JSX.Element {
   useEffect(() => {
     scrollBatchLogToBottom(actressLogRef)
   }, [actressBatch?.logs.length])
+
+  useEffect(() => {
+    scrollBatchLogToBottom(avatarBatchLogRef)
+  }, [avatarAutoCropBatch.state.logs.length])
 
   const refreshVideoBatchScopeHint = async (
     status: VideoBatchScrapeStatus,
@@ -729,7 +738,8 @@ export default function SettingsPage(): JSX.Element {
     mode?: ActressScrapeUpdateMode,
     missingFields: ActressScrapeField[] = [],
     useAliases?: boolean,
-    scrapeStatus: ActressBatchScrapeStatus = 'unscraped'
+    scrapeStatus: ActressBatchScrapeStatus = 'unscraped',
+    autoCropAvatar = false
   ): Promise<void> => {
     setShowActressBatchModal(false)
     try {
@@ -740,7 +750,8 @@ export default function SettingsPage(): JSX.Element {
         scrapeStatus,
         missingFields,
         mode,
-        useAliases
+        useAliases,
+        autoCropAvatar
       })
       toast.show('已开始演员批量刮削', 'success')
     } catch (e) {
@@ -830,13 +841,46 @@ export default function SettingsPage(): JSX.Element {
   const actressBatchRunning = actressBatch?.status === 'running'
   const videoBatchPaused = videoBatch?.status === 'paused'
   const actressBatchPaused = actressBatch?.status === 'paused'
-  const anyBatchActive =
+  const avatarBatchRunning =
+    avatarAutoCropBatch.state.status === 'running' ||
+    avatarAutoCropBatch.state.status === 'cancelling'
+  const avatarBatchStatus: BatchProgress['status'] =
+    avatarAutoCropBatch.state.status === 'done'
+      ? avatarAutoCropBatch.state.cancelled
+        ? 'cancelled'
+        : 'done'
+      : avatarBatchRunning
+        ? 'running'
+        : 'idle'
+  const avatarBatchProgress: BatchProgress | null =
+    avatarAutoCropBatch.state.total > 0 || avatarAutoCropBatch.state.logs.length > 0
+      ? {
+          total: avatarAutoCropBatch.state.total,
+          current: avatarAutoCropBatch.state.current,
+          success: avatarAutoCropBatch.state.success,
+          failed: avatarAutoCropBatch.state.failed,
+          currentCode:
+            avatarAutoCropBatch.state.status === 'cancelling'
+              ? '正在停止…'
+              : avatarAutoCropBatch.state.currentName,
+          status: avatarBatchStatus,
+          logs: avatarAutoCropBatch.state.logs
+        }
+      : null
+  const scrapeBatchActive =
     videoBatchRunning || actressBatchRunning || videoBatchPaused || actressBatchPaused
+  const anyBatchActive = scrapeBatchActive || avatarBatchRunning
   const batchPercent = (batch: BatchProgress | null): number =>
     batch && batch.total > 0 ? Math.round((batch.current / batch.total) * 100) : 0
   const videoBatchPct = batchPercent(videoBatch)
   const actressPct = batchPercent(actressBatch)
   const updateRelease = updateCheckState?.latestRelease
+  const ignoreOverviewUpdate = (version: string): void => {
+    void api.appUpdate
+      .ignoreVersion(version)
+      .then(setUpdateCheckState)
+      .catch((error) => toast.show(String((error as Error).message ?? error), 'error'))
+  }
   const shouldShowUpdateNotice =
     updateCheckState?.status === 'available' &&
     Boolean(updateRelease) &&
@@ -848,6 +892,8 @@ export default function SettingsPage(): JSX.Element {
             tone: 'info' as const,
             title: `Javdex ${updateRelease.version} 已发布`,
             body: summarizeReleaseNotes(updateRelease.releaseNotes),
+            secondaryAction: () => ignoreOverviewUpdate(updateRelease.version),
+            secondaryActionLabel: '忽略此版本',
             action: () => navigateSettings('about'),
             actionLabel: '查看更新',
             actionPrimary: true
@@ -1023,6 +1069,8 @@ export default function SettingsPage(): JSX.Element {
                   theme={theme}
                   onThemeChange={changeTheme}
                   onPatchSettings={patchAppearanceSettings}
+                  onOpenAvatarBatchDetails={() => setBatchDetailScope('avatar')}
+                  scrapeBatchActive={scrapeBatchActive}
                 />
               )}
 
@@ -1068,7 +1116,13 @@ export default function SettingsPage(): JSX.Element {
 
       {batchDetailScope && (
         <Modal
-          title={batchDetailScope === 'actress' ? '批量刮削（演员）' : '批量更新（影片）'}
+          title={
+            batchDetailScope === 'actress'
+              ? '批量刮削（演员）'
+              : batchDetailScope === 'avatar'
+                ? '批量智能构图（头像）'
+                : '批量更新（影片）'
+          }
           size="xl"
           className="modal--batch-detail"
           bodyClassName="modal-body--batch-detail"
@@ -1077,16 +1131,71 @@ export default function SettingsPage(): JSX.Element {
         >
           <BatchSettingsPanel
             scope={batchDetailScope}
-            batch={batchDetailScope === 'actress' ? actressBatch : videoBatch}
-            running={batchDetailScope === 'actress' ? actressBatchRunning : videoBatchRunning}
-            paused={batchDetailScope === 'actress' ? actressBatchPaused : videoBatchPaused}
-            logRef={batchDetailScope === 'actress' ? actressLogRef : videoBatchLogRef}
-            emptyLog={batchDetailScope === 'actress' ? '暂无演员任务日志' : '暂无影片任务日志'}
-            onPause={() =>
-              batchDetailScope === 'actress' ? cancelActressBatch() : cancelVideoBatch()
+            batch={
+              batchDetailScope === 'actress'
+                ? actressBatch
+                : batchDetailScope === 'avatar'
+                  ? avatarBatchProgress
+                  : videoBatch
             }
-            onResume={resumeBatch}
-            onDiscard={() => discardBatch(batchDetailScope)}
+            running={
+              batchDetailScope === 'actress'
+                ? actressBatchRunning
+                : batchDetailScope === 'avatar'
+                  ? avatarBatchRunning
+                  : videoBatchRunning
+            }
+            paused={
+              batchDetailScope === 'actress'
+                ? actressBatchPaused
+                : batchDetailScope === 'avatar'
+                  ? false
+                  : videoBatchPaused
+            }
+            logRef={
+              batchDetailScope === 'actress'
+                ? actressLogRef
+                : batchDetailScope === 'avatar'
+                  ? avatarBatchLogRef
+                  : videoBatchLogRef
+            }
+            emptyLog={
+              batchDetailScope === 'actress'
+                ? '暂无演员任务日志'
+                : batchDetailScope === 'avatar'
+                  ? '暂无头像构图任务日志'
+                  : '暂无影片任务日志'
+            }
+            skipped={
+              batchDetailScope === 'avatar' ? avatarAutoCropBatch.state.skipped : undefined
+            }
+            customControls={
+              batchDetailScope === 'avatar' ? (
+                avatarBatchRunning && avatarAutoCropBatch.state.source === 'manual' ? (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-danger"
+                    disabled={avatarAutoCropBatch.state.status === 'cancelling'}
+                    onClick={avatarAutoCropBatch.cancel}
+                  >
+                    {avatarAutoCropBatch.state.status === 'cancelling'
+                      ? '正在停止…'
+                      : '停止任务'}
+                  </button>
+                ) : null
+              ) : undefined
+            }
+            onPause={() => {
+              if (batchDetailScope === 'avatar') {
+                avatarAutoCropBatch.cancel()
+                return true
+              }
+              return batchDetailScope === 'actress' ? cancelActressBatch() : cancelVideoBatch()
+            }}
+            onResume={() => (batchDetailScope === 'avatar' ? false : resumeBatch())}
+            onDiscard={() =>
+              batchDetailScope === 'avatar' ? false : discardBatch(batchDetailScope)
+            }
           />
         </Modal>
       )}
@@ -1155,13 +1264,25 @@ export default function SettingsPage(): JSX.Element {
           missingFieldHint="选择后包含缺少任一所选字段的演员。"
           showUseAliasesToggle
           useAliasesHint="开启后，主名未匹配时会依次尝试中文名、英文名及已存别名。"
+          showAutoCropAvatarToggle
+          autoCropAvatarHint="头像保存后立即按“外观”设置构图，完成后再继续下一位演员。"
           onMissingFieldsChange={(missingFields, scope, scrapeStatus) => {
             if (scope !== undefined) {
               void refreshActressBatchScopeHint(scope, missingFields, scrapeStatus ?? 'unscraped')
             }
           }}
           onCancel={() => setShowActressBatchModal(false)}
-          onConfirm={(fields, site, scope, mode, missingFields, _matchName, useAliases, scrapeStatus) => {
+          onConfirm={(
+            fields,
+            site,
+            scope,
+            mode,
+            missingFields,
+            _matchName,
+            useAliases,
+            scrapeStatus,
+            autoCropAvatar
+          ) => {
             if (scope !== undefined) {
               void startActressBatch(
                 fields,
@@ -1170,7 +1291,8 @@ export default function SettingsPage(): JSX.Element {
                 mode as ActressScrapeUpdateMode,
                 missingFields ?? [],
                 useAliases,
-                scrapeStatus ?? 'unscraped'
+                scrapeStatus ?? 'unscraped',
+                autoCropAvatar
               )
             }
           }}

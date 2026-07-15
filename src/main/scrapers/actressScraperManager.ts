@@ -60,6 +60,8 @@ export interface ActressScrapeOutcome {
   error?: string
   skipped?: boolean
   warnings?: string[]
+  /** The requested avatar was downloaded, validated, and is ready for smart crop. */
+  avatarUpdated?: boolean
 }
 
 export interface ScrapeActressOptions {
@@ -260,7 +262,7 @@ export async function scrapeActress(
       }
     }
 
-    const { applied, warnings } = applyActressScrapeResult(
+    const { applied, warnings, avatarApplied } = applyActressScrapeResult(
       actressId,
       { ...result, galleryImageUrls: galleryUrls },
       avatarRel,
@@ -272,7 +274,8 @@ export async function scrapeActress(
       ok: true,
       result,
       skipped: !applied,
-      warnings: warnings.length > 0 ? warnings : undefined
+      warnings: warnings.length > 0 ? warnings : undefined,
+      avatarUpdated: avatarApplied
     }
   } catch (err) {
     return { ok: false, error: (err as Error).message }

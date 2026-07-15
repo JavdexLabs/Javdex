@@ -126,6 +126,9 @@ interface Props<T extends string, S extends string | number = never, A extends s
   showUseAliasesToggle?: boolean
   initialUseAliases?: boolean
   useAliasesHint?: string
+  showAutoCropAvatarToggle?: boolean
+  initialAutoCropAvatar?: boolean
+  autoCropAvatarHint?: string
   onCancel: () => void
   onConfirm: (
     selected: T[],
@@ -135,7 +138,8 @@ interface Props<T extends string, S extends string | number = never, A extends s
     missingFields?: T[],
     matchName?: string,
     useAliases?: boolean,
-    auxScope?: A
+    auxScope?: A,
+    autoCropAvatar?: boolean
   ) => void
 }
 
@@ -176,6 +180,9 @@ export default function ScrapeFieldsModal<
   showUseAliasesToggle = false,
   initialUseAliases = false,
   useAliasesHint,
+  showAutoCropAvatarToggle = false,
+  initialAutoCropAvatar = false,
+  autoCropAvatarHint,
   onCancel,
   onConfirm
 }: Props<T, S, A>): JSX.Element {
@@ -212,6 +219,7 @@ export default function ScrapeFieldsModal<
     () => initialMatchName ?? matchNameOptions?.[0]?.value ?? ''
   )
   const [useAliases, setUseAliases] = useState(initialUseAliases)
+  const [autoCropAvatar, setAutoCropAvatar] = useState(initialAutoCropAvatar)
   const supportedMissingIds = missingIds.filter((id) => !supported || supported.has(id))
   const unsupportedCount = allIds.length - supportedIds.length
   const fieldGroups = useMemo(() => groupFieldOptions(options), [options])
@@ -402,7 +410,8 @@ export default function ScrapeFieldsModal<
     (!scopeOptions?.length || scope !== undefined) &&
     (!missingFilterEnabled || missingSelected.size > 0)
 
-  const hasOptionalToggles = showUseAliasesToggle
+  const avatarFieldSelected = selected.has('avatar' as T)
+  const hasOptionalToggles = showUseAliasesToggle || showAutoCropAvatarToggle
   const scopeLabel = scopeOptionLabel(scopeOptions, scope)
   const auxScopeLabel = scopeOptionLabel(auxScopeOptions, auxScope)
   const updateModeLabel = scopeOptionLabel(updateModeOptions, updateMode)
@@ -429,6 +438,9 @@ export default function ScrapeFieldsModal<
                 : '未选择字段'
           }
         ]
+      : []),
+    ...(showAutoCropAvatarToggle
+      ? [{ label: '头像构图', value: autoCropAvatar && avatarFieldSelected ? '自动' : '关闭' }]
       : [])
   ]
 
@@ -457,7 +469,8 @@ export default function ScrapeFieldsModal<
                 effectiveMissingFields,
                 matchNameOptions?.length ? matchName : undefined,
                 showUseAliasesToggle ? useAliases : undefined,
-                auxScope
+                auxScope,
+                showAutoCropAvatarToggle && avatarFieldSelected ? autoCropAvatar : undefined
               )
             }
           >
@@ -675,6 +688,19 @@ export default function ScrapeFieldsModal<
                       description={useAliasesHint}
                       checked={useAliases}
                       onChange={setUseAliases}
+                    />
+                  )}
+                  {showAutoCropAvatarToggle && (
+                    <SettingsSwitchRow
+                      title="自动智能构图头像"
+                      description={
+                        avatarFieldSelected
+                          ? autoCropAvatarHint
+                          : '勾选“头像”写入字段后可用。'
+                      }
+                      checked={autoCropAvatar && avatarFieldSelected}
+                      disabled={!avatarFieldSelected}
+                      onChange={setAutoCropAvatar}
                     />
                   )}
                 </div>

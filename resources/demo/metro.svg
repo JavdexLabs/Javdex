@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1800">
+  <defs><linearGradient id="n" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#160d28"/><stop offset=".62" stop-color="#3e2454"/><stop offset="1" stop-color="#e07962"/></linearGradient></defs>
+  <rect width="1200" height="1800" fill="url(#n)"/>
+  <circle cx="800" cy="430" r="250" fill="#ffbf79" opacity=".24"/>
+  <path d="M0 1180 L1200 780 V1800 H0Z" fill="#100c20"/>
+  <path d="M0 1370 L1200 940" stroke="#f6cd94" stroke-width="24" opacity=".68"/>
+  <path d="M0 1510 L1200 1080" stroke="#e16f72" stroke-width="9" opacity=".8"/>
+  <g transform="translate(250 790) rotate(-20)"><rect width="720" height="310" rx="44" fill="#d8d5ce"/><rect x="34" y="55" width="652" height="116" rx="18" fill="#1d324c"/><path d="M110 55V171M270 55V171M430 55V171M590 55V171" stroke="#f3d0a7" stroke-width="12"/><circle cx="150" cy="255" r="42" fill="#272332"/><circle cx="580" cy="255" r="42" fill="#272332"/></g>
+  <text x="88" y="1590" fill="#fff2dc" font-family="Georgia, serif" font-size="76" letter-spacing="10">LAST TRAIN</text>
+  <text x="95" y="1660" fill="#edb8a5" font-family="Arial, sans-serif" font-size="25" letter-spacing="8">CITY AFTER MIDNIGHT</text>
+</svg>

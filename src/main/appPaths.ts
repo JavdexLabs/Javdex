@@ -5,5 +5,6 @@ import { APP_DISPLAY_NAME, APP_PACKAGE_NAME } from '@shared/appIdentity'
 /** Configure display name and userData before the app becomes ready. */
 export function configureAppIdentity(): void {
   app.setName(APP_DISPLAY_NAME)
-  app.setPath('userData', path.join(app.getPath('appData'), APP_PACKAGE_NAME))
+  const userDataName = process.env.JAVDEX_DEMO_MODE === '1' ? `${APP_PACKAGE_NAME} Demo` : APP_PACKAGE_NAME
+  app.setPath('userData', path.join(app.getPath('appData'), userDataName))
 }

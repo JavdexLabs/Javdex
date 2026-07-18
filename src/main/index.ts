@@ -9,6 +9,7 @@ import { registerIpcHandlers } from './ipc'
 import { scrapeBrowser } from './scrapers/scrapeBrowser'
 import { resolveMediaAssetPath, toStoredAssetPath } from './services/mediaProtocol'
 import { checkForLatestRelease, shouldRunAutomaticCheck } from './services/appReleaseService'
+import { prepareDemoUserData, seedDemoLibrary } from './demo/demoSeed'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -115,8 +116,10 @@ function registerAssetProtocol(): void {
 if (gotSingleInstanceLock) {
   app.whenReady().then(() => {
     applyAppIcons()
+    prepareDemoUserData()
     initDatabase()
     ensureAssetDirs()
+    seedDemoLibrary()
     registerAssetProtocol()
     registerIpcHandlers(() => mainWindow)
     createWindow()

@@ -8,6 +8,7 @@
   "private": false,
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:demo": "node scripts/dev-demo.mjs",
     "build": "electron-vite build && node scripts/check-mediapipe-assets.mjs",
     "generate:icons": "python scripts/generate-app-icons.py",
     "packaging:list": "node scripts/dist.mjs --list",

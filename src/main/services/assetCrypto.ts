@@ -88,6 +88,8 @@ export function mimeFromExt(ext: string): string {
       return 'image/gif'
     case '.avif':
       return 'image/avif'
+    case '.svg':
+      return 'image/svg+xml'
     default:
       return 'application/octet-stream'
   }

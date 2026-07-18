@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Javdex 是一款本地优先、插件驱动、可扩展的桌面媒体库管理器，支持 Windows、macOS 和 Linux。"
+    />
+    <meta name="theme-color" content="#101417" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:site_name" content="Javdex" />
+    <meta property="og:title" content="Javdex · 把媒体库留在本地" />
+    <meta
+      property="og:description"
+      content="扫描、整理、刮削和维护本地媒体库。支持 Windows、macOS 与 Linux。"
+    />
+    <meta
+      property="og:image"
+      content="https://javdexlabs.github.io/Javdex/assets/screenshots/library.jpg"
+    />
+    <link rel="canonical" href="https://javdexlabs.github.io/Javdex/" />
+    <link rel="icon" href="./assets/icon.png" />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>Javdex · 本地媒体库管理器</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到主要内容</a>
+
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Javdex 首页">
+        <img src="./assets/icon.png" alt="" width="38" height="38" />
+        <span>JAVDEX</span>
+      </a>
+      <nav class="site-nav" aria-label="主导航">
+        <a href="#features">功能</a>
+        <a href="#screenshots">截图</a>
+        <a href="#download">下载</a>
+      </nav>
+      <a
+        class="header-github"
+        href="https://github.com/JavdexLabs/Javdex"
+        target="_blank"
+        rel="noreferrer"
+      >
+        GitHub
+        <span aria-hidden="true">↗</span>
+      </a>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="hero-copy reveal">
+          <div class="eyebrow">
+            <span class="eyebrow-dot" aria-hidden="true"></span>
+            开源桌面应用
+            <span class="release-pill" data-release-version>读取最新版本…</span>
+          </div>
+          <h1>把媒体库整理好，<br /><em>也把它留在本地。</em></h1>
+          <p class="hero-lead">
+            Javdex 将扫描、元数据刮削、演员资料与图片资产管理收进一个安静的桌面工作区。
+            数据默认保存在你的设备上。
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#download">
+              下载最新版
+              <span aria-hidden="true">↓</span>
+            </a>
+            <a
+              class="button button-secondary"
+              href="https://github.com/JavdexLabs/Javdex"
+              target="_blank"
+              rel="noreferrer"
+            >
+              查看源代码
+            </a>
+          </div>
+          <ul class="hero-facts" aria-label="产品特点">
+            <li>MIT 开源</li>
+            <li>本地 SQLite</li>
+            <li>插件化刮削</li>
+            <li>无内置媒体内容</li>
+          </ul>
+        </div>
+
+        <div class="hero-visual reveal reveal-delay-1" aria-label="Javdex 媒体库界面预览">
+          <div class="window-frame">
+            <div class="window-bar" aria-hidden="true">
+              <div class="window-lights"><i></i><i></i><i></i></div>
+              <span>Javdex · 媒体库</span>
+              <b>LOCAL</b>
+            </div>
+            <img
+              src="./assets/screenshots/library.jpg"
+              alt="Javdex 媒体库界面，展示本地影片网格和筛选面板"
+              width="1280"
+              height="792"
+            />
+          </div>
+          <div class="visual-note visual-note-top">
+            <span>01</span>
+            本地建立索引
+          </div>
+          <div class="visual-note visual-note-bottom">
+            <span>02</span>
+            元数据可维护
+          </div>
+        </div>
+      </section>
+
+      <section class="download-section section-shell" id="download">
+        <div class="section-heading reveal">
+          <div>
+            <p class="section-index">01 / DOWNLOAD</p>
+            <h2>选择你的平台</h2>
+          </div>
+          <p>
+            当前正式版 <strong data-release-version>最新版</strong>
+            <span class="release-date" data-release-date></span>
+          </p>
+        </div>
+
+        <div class="download-grid">
+          <article class="download-card reveal" data-platform-card="windows">
+            <div class="platform-head">
+              <span class="platform-mark">WIN</span>
+              <span class="recommended-badge" data-recommended-badge hidden>适合此设备</span>
+            </div>
+            <h3>Windows</h3>
+            <p>Windows 10 / 11 · x64</p>
+            <a
+              class="download-link"
+              data-download="windowsX64"
+              href="https://github.com/JavdexLabs/Javdex/releases/latest"
+            >
+              <span>
+                <b>下载安装程序</b>
+                <small data-download-meta>EXE · 前往最新 Release</small>
+              </span>
+              <i aria-hidden="true">↓</i>
+            </a>
+          </article>
+
+          <article class="download-card reveal reveal-delay-1" data-platform-card="macos">
+            <div class="platform-head">
+              <span class="platform-mark">MAC</span>
+              <span class="recommended-badge" data-recommended-badge hidden>适合此设备</span>
+            </div>
+            <h3>macOS</h3>
+            <p>macOS 11+ · 选择芯片架构</p>
+            <div class="download-stack">
+              <a
+                class="download-link"
+                data-download="macArm64"
+                href="https://github.com/JavdexLabs/Javdex/releases/latest"
+              >
+                <span>
+                  <b>Apple Silicon</b>
+                  <small data-download-meta>DMG · M1 / M2 / M3 / M4</small>
+                </span>
+                <i aria-hidden="true">↓</i>
+              </a>
+              <a
+                class="download-link download-link-muted"
+                data-download="macX64"
+                href="https://github.com/JavdexLabs/Javdex/releases/latest"
+              >
+                <span>
+                  <b>Intel Mac</b>
+                  <small data-download-meta>DMG · x64</small>
+                </span>
+                <i aria-hidden="true">↓</i>
+              </a>
+            </div>
+          </article>
+
+          <article class="download-card reveal reveal-delay-2" data-platform-card="linux">
+            <div class="platform-head">
+              <span class="platform-mark">LNX</span>
+              <span class="recommended-badge" data-recommended-badge hidden>适合此设备</span>
+            </div>
+            <h3>Linux</h3>
+            <p>x86_64 · 通用或 Debian 系</p>
+            <div class="download-stack">
+              <a
+                class="download-link"
+                data-download="linuxAppImage"
+                href="https://github.com/JavdexLabs/Javdex/releases/latest"
+              >
+                <span>
+                  <b>AppImage</b>
+                  <small data-download-meta>通用可执行镜像</small>
+                </span>
+                <i aria-hidden="true">↓</i>
+              </a>
+              <a
+                class="download-link download-link-muted"
+                data-download="linuxDeb"
+                href="https://github.com/JavdexLabs/Javdex/releases/latest"
+              >
+                <span>
+                  <b>Debian / Ubuntu</b>
+                  <small data-download-meta>DEB · amd64</small>
+                </span>
+                <i aria-hidden="true">↓</i>
+              </a>
+            </div>
+          </article>
+        </div>
+
+        <div class="download-foot reveal">
+          <p class="download-status" data-release-status aria-live="polite">
+            正在读取 GitHub 最新正式版…
+          </p>
+          <a
+            href="https://github.com/JavdexLabs/Javdex/releases/latest"
+            target="_blank"
+            rel="noreferrer"
+          >
+            查看校验值、更新说明与全部文件 ↗
+          </a>
+        </div>
+
+        <aside class="signing-note reveal" aria-labelledby="signing-title">
+          <span class="signing-icon" aria-hidden="true">!</span>
+          <div>
+            <h3 id="signing-title">关于首次启动提示</h3>
+            <p>
+              当前安装包尚未进行商业代码签名。Windows 可能显示“未知发布者”；macOS
+              可在“系统设置 → 隐私与安全性”中确认打开。请只从本项目 GitHub Release 下载。
+            </p>
+          </div>
+        </aside>
+      </section>
+
+      <section class="screenshots-section section-shell" id="screenshots">
+        <div class="section-heading reveal">
+          <div>
+            <p class="section-index">02 / INTERFACE</p>
+            <h2>为大型媒体库设计的工作区</h2>
+          </div>
+          <p>高密度但不嘈杂，让筛选、检查和维护都保持在视线内。</p>
+        </div>
+
+        <div class="screenshot-grid">
+          <button
+            class="screenshot-card screenshot-card-wide reveal"
+            type="button"
+            data-lightbox-src="./assets/screenshots/library.jpg"
+            data-lightbox-alt="媒体库网格与筛选界面"
+          >
+            <span class="screenshot-media">
+              <img
+                src="./assets/screenshots/library.jpg"
+                alt="媒体库网格与筛选界面"
+                width="1280"
+                height="792"
+                loading="lazy"
+              />
+            </span>
+            <span class="screenshot-caption">
+              <span><b>媒体库</b><small>搜索、筛选与多种浏览维度</small></span>
+              <i aria-hidden="true">↗</i>
+            </span>
+          </button>
+
+          <button
+            class="screenshot-card reveal reveal-delay-1"
+            type="button"
+            data-lightbox-src="./assets/screenshots/video-detail.jpg"
+            data-lightbox-alt="影片详情与元数据界面"
+          >
+            <span class="screenshot-media">
+              <img
+                src="./assets/screenshots/video-detail.jpg"
+                alt="影片详情与元数据界面"
+                width="1280"
+                height="792"
+                loading="lazy"
+              />
+            </span>
+            <span class="screenshot-caption">
+              <span><b>详情与关联</b><small>文件、演员、标签和评分集中呈现</small></span>
+              <i aria-hidden="true">↗</i>
+            </span>
+          </button>
+
+          <button
+            class="screenshot-card reveal reveal-delay-2"
+            type="button"
+            data-lightbox-src="./assets/screenshots/settings.jpg"
+            data-lightbox-alt="设置与刮削任务概览界面"
+          >
+            <span class="screenshot-media">
+              <img
+                src="./assets/screenshots/settings.jpg"
+                alt="设置与刮削任务概览界面"
+                width="1280"
+                height="792"
+                loading="lazy"
+              />
+            </span>
+            <span class="screenshot-caption">
+              <span><b>任务与设置</b><small>插件、模型、网络与存储状态</small></span>
+              <i aria-hidden="true">↗</i>
+            </span>
+          </button>
+        </div>
+      </section>
+
+      <section class="features-section section-shell" id="features">
+        <div class="section-heading reveal">
+          <div>
+            <p class="section-index">03 / CAPABILITIES</p>
+            <h2>从文件夹到可维护的资料库</h2>
+          </div>
+          <p>围绕本地文件建立索引，元数据和图片资产始终由你掌控。</p>
+        </div>
+
+        <div class="feature-grid">
+          <article class="feature-card reveal">
+            <span>01</span>
+            <h3>扫描与识别</h3>
+            <p>递归扫描本地目录，识别常见视频格式和复杂文件名中的番号。</p>
+          </article>
+          <article class="feature-card reveal reveal-delay-1">
+            <span>02</span>
+            <h3>插件化刮削</h3>
+            <p>按字段组合影片与演员插件，获取封面、样张、写真和结构化资料。</p>
+          </article>
+          <article class="feature-card reveal reveal-delay-2">
+            <span>03</span>
+            <h3>批量任务</h3>
+            <p>暂停、恢复或取消批量刮削，并选择补齐、覆盖或重匹配策略。</p>
+          </article>
+          <article class="feature-card reveal">
+            <span>04</span>
+            <h3>演员资料</h3>
+            <p>维护演员头像、写真、别名与关联影片，并支持本地头像构图。</p>
+          </article>
+          <article class="feature-card reveal reveal-delay-1">
+            <span>05</span>
+            <h3>本地资产</h3>
+            <p>SQLite 数据库与图片资产保存在设备中，支持图片加密存储。</p>
+          </article>
+          <article class="feature-card reveal reveal-delay-2">
+            <span>06</span>
+            <h3>可扩展工作流</h3>
+            <p>内置插件开发助手，并提供可选 MCP 服务连接外部开发工具。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="local-section section-shell">
+        <div class="local-panel reveal">
+          <div class="local-copy">
+            <p class="section-index">LOCAL FIRST</p>
+            <h2>你的文件、数据库和图片，<br />都在你的设备里。</h2>
+            <p>
+              Javdex 不提供任何媒体内容，也不内置在线播放服务。播放时调用系统默认播放器，
+              本地人脸检测同样无需上传图片。
+            </p>
+            <a
+              href="https://github.com/JavdexLabs/Javdex#数据存储"
+              target="_blank"
+              rel="noreferrer"
+            >
+              阅读数据存储说明 ↗
+            </a>
+          </div>
+          <ol class="local-flow" aria-label="Javdex 本地工作流程">
+            <li><span>1</span><div><b>扫描目录</b><small>只读取你选择的位置</small></div></li>
+            <li><span>2</span><div><b>建立索引</b><small>写入本地 SQLite</small></div></li>
+            <li><span>3</span><div><b>完善资料</b><small>按需运行刮削插件</small></div></li>
+            <li><span>4</span><div><b>本地播放</b><small>交给系统默认播放器</small></div></li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="final-cta section-shell reveal">
+        <img src="./assets/icon.png" alt="" width="86" height="86" loading="lazy" />
+        <p class="section-index">READY WHEN YOU ARE</p>
+        <h2>从一个文件夹开始。</h2>
+        <p>下载 Javdex，建立属于自己的本地媒体索引。</p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="#download">选择安装包</a>
+          <a
+            class="button button-secondary"
+            href="https://github.com/JavdexLabs/Javdex/issues"
+            target="_blank"
+            rel="noreferrer"
+          >
+            提交问题
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="brand brand-footer">
+        <img src="./assets/icon.png" alt="" width="34" height="34" loading="lazy" />
+        <span>JAVDEX</span>
+      </div>
+      <p>本地优先的开源媒体库管理器。</p>
+      <div>
+        <a href="https://github.com/JavdexLabs/Javdex">GitHub</a>
+        <a href="https://github.com/JavdexLabs/Javdex/releases/latest">Releases</a>
+        <a href="https://github.com/JavdexLabs/Javdex/blob/main/LICENSE">MIT License</a>
+      </div>
+    </footer>
+
+    <dialog class="lightbox" aria-label="软件截图预览">
+      <button class="lightbox-close" type="button" aria-label="关闭截图预览">×</button>
+      <img src="" alt="" />
+      <p></p>
+    </dialog>
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Javdex",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Windows, macOS, Linux",
+        "license": "https://github.com/JavdexLabs/Javdex/blob/main/LICENSE",
+        "downloadUrl": "https://github.com/JavdexLabs/Javdex/releases/latest"
+      }
+    </script>
+    <script src="./app.js" defer></script>
+  </body>
+</html>

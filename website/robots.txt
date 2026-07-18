@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://javdexlabs.github.io/Javdex/sitemap.xml

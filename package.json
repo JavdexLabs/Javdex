@@ -8,6 +8,9 @@
   "private": false,
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "pages:build": "node website/scripts/build.mjs",
+    "pages:build:offline": "node website/scripts/build.mjs --offline",
+    "pages:preview": "npm run pages:build && vite dist-pages",
     "build": "electron-vite build && node scripts/check-mediapipe-assets.mjs",
     "generate:icons": "python scripts/generate-app-icons.py",
     "packaging:list": "node scripts/dist.mjs --list",

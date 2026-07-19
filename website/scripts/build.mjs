@@ -14,6 +14,7 @@ const releaseApi = `https://api.github.com/repos/${repository}/releases/latest`
 
 const assetMatchers = {
   windowsX64: /^Javdex-Setup-.+-x64\.exe$/i,
+  windowsZip: /^(?:Javdex-Setup-.+-x64|Javdex[ -].+-win)\.zip$/i,
   macArm64: /^Javdex-.+-arm64\.dmg$/i,
   macX64: /^Javdex-.+-x64\.dmg$/i,
   linuxAppImage: /^Javdex-.+-x86_64\.AppImage$/i,
@@ -83,16 +84,23 @@ async function resolveReleaseManifest() {
 async function copyWebsite() {
   await rm(outputDir, { recursive: true, force: true })
   await mkdir(path.join(outputDir, 'assets', 'screenshots'), { recursive: true })
+  await mkdir(path.join(outputDir, 'assets', 'platforms'), { recursive: true })
 
   for (const file of ['index.html', 'styles.css', 'app.js', 'robots.txt', 'sitemap.xml']) {
     await cp(path.join(websiteDir, file), path.join(outputDir, file))
   }
 
   await cp(path.join(rootDir, 'build', 'icon-1024.png'), path.join(outputDir, 'assets', 'icon.png'))
-  for (const screenshot of ['library.jpg', 'video-detail.jpg', 'settings.jpg']) {
+  for (const screenshot of ['library.png', 'video-detail.png', 'actor.png']) {
     await cp(
       path.join(rootDir, 'docs', 'images', screenshot),
       path.join(outputDir, 'assets', 'screenshots', screenshot)
+    )
+  }
+  for (const icon of ['windows.svg', 'apple.svg', 'linux.svg']) {
+    await cp(
+      path.join(websiteDir, 'assets', 'platforms', icon),
+      path.join(outputDir, 'assets', 'platforms', icon)
     )
   }
 
@@ -105,7 +113,10 @@ async function validateOutput(manifest) {
     './styles.css',
     './app.js',
     './assets/icon.png',
-    './assets/screenshots/library.jpg'
+    './assets/screenshots/library.png',
+    './assets/platforms/windows.svg',
+    './assets/platforms/apple.svg',
+    './assets/platforms/linux.svg'
   ]
   for (const reference of requiredReferences) {
     if (!html.includes(reference)) throw new Error(`index.html is missing ${reference}`)

@@ -1,0 +1,7 @@
+Platform brand icons are from Font Awesome Free Brands 7.3.1.
+Source: https://fontawesome.com/
+License: CC BY 4.0 (see LICENSE.txt in this directory)
+
+Windows is a trademark of Microsoft Corporation.
+Apple and macOS are trademarks of Apple Inc.
+Linux is a registered trademark of Linus Torvalds.

@@ -26,7 +26,7 @@
 
 html {
   scroll-behavior: smooth;
-  scroll-padding-top: calc(var(--header-h) + 28px);
+  scroll-padding-top: clamp(32px, 5vh, 56px);
 }
 
 body {

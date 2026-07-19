@@ -147,15 +147,15 @@ Javdex 内置 ReAct 风格插件开发助手，可辅助开发刮削插件：
 ## 截图
 
 <p align="center">
-  <img src="docs/images/library.jpg" alt="媒体库" width="800">
+  <img src="docs/images/library.png" alt="媒体库" width="800">
 </p>
 
 <p align="center">
-  <img src="docs/images/video-detail.jpg" alt="影片详情" width="800">
+  <img src="docs/images/video-detail.png" alt="影片详情" width="800">
 </p>
 
 <p align="center">
-  <img src="docs/images/settings.jpg" alt="设置" width="800">
+  <img src="docs/images/actor.png" alt="演员详情" width="800">
 </p>
 
 ---

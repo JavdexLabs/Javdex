@@ -80,6 +80,21 @@ jobs:
       - name: Package
         run: npm run dist -- --platform ${{ matrix.platform }}
 
+      - name: Verify macOS application signatures
+        if: matrix.platform == 'mac'
+        shell: bash
+        run: |
+          set -euo pipefail
+          found=0
+          while IFS= read -r -d '' app; do
+            codesign --verify --deep --strict --verbose=4 "$app"
+            found=1
+          done < <(find dist -type d -name '*.app' -prune -print0)
+          if [[ $found -eq 0 ]]; then
+            echo "No macOS application bundles were produced." >&2
+            exit 1
+          fi
+
       - name: Upload packaged artifacts
         uses: actions/upload-artifact@v4
         with:

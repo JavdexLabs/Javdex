@@ -1,3 +1,27 @@
+import { signAsync } from '@electron/osx-sign'
+import { resolve } from 'node:path'
+
+const adHocEntitlements = resolve('build/entitlements.mac.adhoc.plist')
+
+async function signMacApp(options) {
+  const identity = options.identity ?? '-'
+  const signOptions = {
+    ...options,
+    identity,
+    identityValidation: identity === '-' ? false : options.identityValidation
+  }
+
+  if (identity === '-') {
+    const optionsForFile = options.optionsForFile
+    signOptions.optionsForFile = (filePath) => ({
+      ...(optionsForFile?.(filePath) ?? {}),
+      entitlements: adHocEntitlements
+    })
+  }
+
+  await signAsync(signOptions)
+}
+
 /** @type {import('electron-builder').Configuration} */
 const base = {
   appId: 'com.javdex.app',
@@ -72,6 +96,8 @@ function readSelectedTargets() {
 export default function buildConfig() {
   const selected = readSelectedTargets()
   const config = structuredClone(base)
+
+  config.mac.sign = signMacApp
 
   if (selected?.win) config.win.target = selected.win
   if (selected?.mac) config.mac.target = selected.mac

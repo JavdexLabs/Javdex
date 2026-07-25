@@ -60,14 +60,14 @@ export function registerPluginDevHandlers(ctx: IpcContext): void {
     async (_e, sessionId: string): Promise<string | null> => {
       const session = getSession(sessionId)
       if (!session) throw new Error('会话不存在或已过期，无法导出工作日志')
-      const options = {
+      const options: Electron.SaveDialogOptions = {
         title: '导出 Agent 工作日志',
         defaultPath: workLogDefaultFileName(session),
         filters: [
           { name: 'JSON', extensions: ['json'] },
           { name: 'All Files', extensions: ['*'] }
         ]
-      } as const
+      }
       const win = ctx.getWindow()
       const res = win
         ? await dialog.showSaveDialog(win, options)

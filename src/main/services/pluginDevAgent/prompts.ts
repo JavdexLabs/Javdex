@@ -74,6 +74,7 @@ ${buildCheerioRules()}
 关键规则：
 ${profile.buildKindSpecificRules()}
 ${buildKindSpecificResultRules(kind)}
+- 自定义插件不得与内置插件同名；从内置插件调试时 package.name 必须使用新名称，plugin_install 也不会覆盖内置插件。
 - 修复是否成功以 plugin_dry_run 的 JSON 为准，不是口头判断。
 - 仅当 browser_status.isChallenge 为 true，或 browser_fetch_page 返回 code=CHALLENGE 时，才调用 session_request_user；普通内容页不要因页面加载慢或 404 误判为 Cloudflare。
 

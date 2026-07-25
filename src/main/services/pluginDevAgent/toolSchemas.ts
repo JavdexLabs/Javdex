@@ -142,9 +142,13 @@ export const PLUGIN_DEV_TOOL_SCHEMAS: PluginDevToolDefinition[] = [
     type: 'function',
     function: {
       name: 'plugin_install',
-      description: '将当前插件安装到 userData',
+      description:
+        '将当前插件安装到 userData；不可与内置插件同名，也不会覆盖内置插件；overwriteUser 仅用于覆盖同名自定义插件',
       parameters: obj({
-        overwriteUser: { type: 'boolean', description: '是否覆盖同名用户插件' }
+        overwriteUser: {
+          type: 'boolean',
+          description: '是否覆盖同名自定义插件（不能覆盖内置插件）'
+        }
       })
     }
   },

@@ -16,10 +16,12 @@ import {
   listUserPluginDescriptors,
   loadUserActressScrapers,
   loadUserVideoScrapers,
+  migrateUserPluginsAwayFromBuiltInNames,
   readScraperPluginPackage,
   readScraperPluginPackageForExport
 } from './scraperPluginService'
 import { normalizeVideoScrapeResult } from './scraperResultValidation'
+import { getSettings, resetSettingsCacheForTests, updateSettings } from '../settings/settingsStore'
 
 let tempRoot: string | null = null
 let oldUserData: string | null = null
@@ -31,9 +33,11 @@ beforeEach(() => {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-scraper-plugins-'))
   process.env.JAVDEX_TEST_USER_DATA = tempRoot
   process.env.JAVDEX_BUNDLED_PLUGINS_ROOT = path.join(process.cwd(), 'src/main/bundled-plugins')
+  resetSettingsCacheForTests()
 })
 
 afterEach(() => {
+  resetSettingsCacheForTests()
   if (oldUserData) {
     process.env.JAVDEX_TEST_USER_DATA = oldUserData
     oldUserData = null
@@ -51,6 +55,36 @@ afterEach(() => {
     tempRoot = null
   }
 })
+
+/** Simulate a pre-ban install that reused a built-in plugin name. */
+function writeLegacyBuiltInOverride(
+  kind: ScraperPluginKind,
+  name: string,
+  code = kind === 'video'
+    ? "module.exports = { async parseVideo(ctx) { return { code: ctx.code, title: 'Legacy Override' } } }"
+    : "module.exports = { async parseActress(ctx) { return { mainName: ctx.mainName, nameEn: 'Legacy' } } }"
+): void {
+  const dir = path.join(tempRoot!, 'scraper_plugins', kind, name)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'plugin.json'),
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        kind,
+        name,
+        version: '1.0.0',
+        description: 'Legacy override',
+        supportedFields: [],
+        entry: 'index.cjs'
+      },
+      null,
+      2
+    ),
+    'utf-8'
+  )
+  fs.writeFileSync(path.join(dir, 'index.cjs'), code, 'utf-8')
+}
 
 function writePackage(pkg: ScraperPluginPackage): string {
   const name = pkg.name?.replace(/[^\w.-]+/g, '_') || 'plugin'
@@ -115,7 +149,7 @@ describe('scraperPluginService', () => {
     )
     assert.deepEqual(
       listBundledPluginDescriptors('actress').map((item) => item.name).sort(),
-      ['Xslist', '偶像档案库']
+      ['Xslist']
     )
   })
 
@@ -178,22 +212,98 @@ describe('scraperPluginService', () => {
     assert.deepEqual(result, { mainName: 'Alice', nameEn: 'Alice Example' })
   })
 
-  it('allows a custom plugin to override a built-in name', async () => {
-    await importScraperPluginPackage(writePackage(pluginPackage('video', 'JavDB')))
-    const scrapers = loadUserVideoScrapers()
-    assert.equal(scrapers.some((item) => item.scraperName === 'JavDB'), true)
+  it('rejects custom plugins that reuse a built-in name', async () => {
+    await assert.rejects(
+      importScraperPluginPackage(writePackage(pluginPackage('video', 'JavDB'))),
+      /不能与内置插件同名/
+    )
+    assert.equal(
+      loadUserVideoScrapers().some((item) => item.scraperName === 'JavDB'),
+      false
+    )
   })
 
-  it('lists only the custom plugin when it overrides a bundled name', async () => {
+  it('renames legacy user plugins that override built-in names to -custom', () => {
+    writeLegacyBuiltInOverride('video', 'JavDB')
+    writeLegacyBuiltInOverride('actress', 'Xslist')
+    updateSettings({
+      defaultScraper: 'JavDB',
+      defaultActressScraper: 'Xslist',
+      scraperPluginDelays: {
+        video: { JavDB: { minMs: 1000, maxMs: 2000 } },
+        actress: { Xslist: { minMs: 500, maxMs: 800 } }
+      },
+      compositeScrapers: {
+        video: [
+          {
+            kind: 'video',
+            name: 'Combo',
+            fieldPluginMap: { title: 'JavDB', cover: 'JAV8' }
+          }
+        ],
+        actress: [
+          {
+            kind: 'actress',
+            name: 'Actress Combo',
+            fieldPluginMap: { avatar: 'Xslist' }
+          }
+        ]
+      }
+    })
+
+    migrateUserPluginsAwayFromBuiltInNames()
+
+    const userVideo = listUserPluginDescriptors('video')
+    assert.equal(userVideo.some((item) => item.name === 'JavDB'), false)
+    assert.equal(userVideo.some((item) => item.name === 'JavDB-custom'), true)
+    assert.equal(
+      loadUserVideoScrapers().some((item) => item.scraperName === 'JavDB-custom'),
+      true
+    )
+
+    const userActress = listUserPluginDescriptors('actress')
+    assert.equal(userActress.some((item) => item.name === 'Xslist'), false)
+    assert.equal(userActress.some((item) => item.name === 'Xslist-custom'), true)
+
+    const settings = getSettings()
+    assert.equal(settings.defaultScraper, 'JavDB-custom')
+    assert.equal(settings.defaultActressScraper, 'Xslist-custom')
+    assert.deepEqual(settings.scraperPluginDelays.video['JavDB-custom'], {
+      minMs: 1000,
+      maxMs: 2000
+    })
+    assert.equal(settings.scraperPluginDelays.video.JavDB, undefined)
+    assert.equal(settings.compositeScrapers.video[0]?.fieldPluginMap.title, 'JavDB-custom')
+    assert.equal(settings.compositeScrapers.video[0]?.fieldPluginMap.cover, 'JAV8')
+    assert.equal(settings.compositeScrapers.actress[0]?.fieldPluginMap.avatar, 'Xslist-custom')
+
+    const merged = listMergedPluginDescriptors('video').filter((item) => item.name === 'JavDB')
+    assert.equal(merged.length, 1)
+    assert.equal(merged[0]?.source, 'builtin')
+  })
+
+  it('uses -custom-2 when -custom is already taken', () => {
+    writeLegacyBuiltInOverride('video', 'JavDB')
+    writeLegacyBuiltInOverride('video', 'JavDB-custom')
+
+    migrateUserPluginsAwayFromBuiltInNames()
+
+    const names = listUserPluginDescriptors('video').map((item) => item.name).sort()
+    assert.deepEqual(names, ['JavDB-custom', 'JavDB-custom-2'])
+  })
+
+  it('keeps bundled plugins visible after rejecting a same-name custom install', async () => {
     const before = listMergedPluginDescriptors('video').filter((item) => item.name === 'JavDB')
     assert.equal(before.some((item) => item.source === 'builtin'), true)
 
-    await importScraperPluginPackage(writePackage(pluginPackage('video', 'JavDB')))
+    await assert.rejects(
+      importScraperPluginPackage(writePackage(pluginPackage('video', 'JavDB'))),
+      /不能与内置插件同名/
+    )
 
     const after = listMergedPluginDescriptors('video').filter((item) => item.name === 'JavDB')
     assert.equal(after.length, 1)
-    assert.equal(after[0]?.source, 'user')
-    assert.equal(after[0]?.overridesBuiltIn, true)
+    assert.equal(after[0]?.source, 'builtin')
   })
 
   it('rejects duplicate custom plugin names', async () => {

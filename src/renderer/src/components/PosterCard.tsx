@@ -22,7 +22,7 @@ interface PosterCardProps {
   thumbHeight?: number
   selected?: boolean
   selectionMode?: boolean
-  onToggleSelect?: (video: Video) => void
+  onToggleSelect?: (video: Video, event?: React.MouseEvent) => void
   onEdit?: (video: Video) => void
   onAddToPlaylist?: (video: Video) => void
   onScrape?: (video: Video) => void
@@ -82,9 +82,10 @@ export default function PosterCard({
     setTallCover(mode === 'landscape' && img.naturalHeight > img.naturalWidth)
   }
 
-  const openVideo = (): void => {
+  const openVideo = (event?: React.MouseEvent): void => {
     if (selectionMode && onToggleSelect) {
-      onToggleSelect(video)
+      if (event?.shiftKey) event.preventDefault()
+      onToggleSelect(video, event)
       return
     }
     navigateToVideoDetail(navigate, location, video.id)
@@ -105,6 +106,13 @@ export default function PosterCard({
     e.stopPropagation()
     setMenuOpen(false)
     action?.(video)
+  }
+
+  const stopAndToggleSelect = (e: React.MouseEvent): void => {
+    e.stopPropagation()
+    if (e.shiftKey) e.preventDefault()
+    setMenuOpen(false)
+    onToggleSelect?.(video, e)
   }
 
   return (
@@ -137,7 +145,7 @@ export default function PosterCard({
             className={`poster-select-toggle poster-hover-control${selected || selectionMode ? ' is-visible' : ''}${selected ? ' is-checked' : ''}`}
             aria-label={selected ? `取消选择 ${video.code}` : `选择 ${video.code}`}
             aria-pressed={selected}
-            onClick={(e) => stopAndRun(e, onToggleSelect)}
+            onClick={stopAndToggleSelect}
           />
         )}
         {!selectionMode && onRemove && (

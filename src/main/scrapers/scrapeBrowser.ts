@@ -2,6 +2,12 @@ import { BrowserWindow, dialog, session, net, type Session, type WebContents } f
 import fs from 'fs/promises'
 import path from 'path'
 import { diagnoseCloudflareChallenge, isCloudflareChallengeText } from './challenge'
+import {
+  hasImageMagicBytes,
+  ImageBodyLruCache,
+  isImageNetworkResource,
+  normalizeNetworkUrl
+} from './scrapeBrowserImageCache'
 import { cleanUserAgent, getScrapeUaProfile } from './scrapeUaProfile'
 
 const PARTITION = 'persist:scraper'
@@ -127,6 +133,26 @@ class ScrapeBrowser {
   /** Origin of the most recently loaded page, used as the image Referer. */
   private lastOrigin = 'https://javdb.com'
 
+  /** Image bodies captured from the scraper window via CDP Network. */
+  private readonly imageBodyCache = new ImageBodyLruCache()
+  private networkCaptureWc: WebContents | null = null
+  /** Bumped on cache clear so in-flight getResponseBody cannot write stale pages. */
+  private networkCacheGeneration = 0
+  /** requestId → URLs seen on that request (including redirects). */
+  private readonly networkRequestUrls = new Map<string, Set<string>>()
+  /** requestId → metadata for in-flight image responses awaiting body. */
+  private readonly pendingImageRequests = new Map<
+    string,
+    { mimeType: string; status: number; type: string }
+  >()
+  private readonly onDebuggerMessage = (
+    _event: Electron.Event,
+    method: string,
+    params: unknown
+  ): void => {
+    this.handleDebuggerNetworkMessage(method, params)
+  }
+
   private getSession(): Session {
     if (!this.ses) {
       this.ses = session.fromPartition(PARTITION)
@@ -244,6 +270,8 @@ class ScrapeBrowser {
     })
 
     win.on('closed', () => {
+      this.teardownNetworkBodyCapture()
+      this.clearNetworkImageCache()
       this.win = null
       this.stealthApplied = false
     })
@@ -263,10 +291,118 @@ class ScrapeBrowser {
    * GREASE token.
    */
   private detachDebugger(wc: WebContents): void {
+    this.teardownNetworkBodyCapture()
     try {
       if (wc.debugger.isAttached()) wc.debugger.detach()
     } catch {
       /* ignore */
+    }
+  }
+
+  private clearNetworkImageCache(): void {
+    this.networkCacheGeneration += 1
+    this.imageBodyCache.clear()
+    this.networkRequestUrls.clear()
+    this.pendingImageRequests.clear()
+  }
+
+  private teardownNetworkBodyCapture(): void {
+    const wc = this.networkCaptureWc
+    this.networkCaptureWc = null
+    if (!wc || wc.isDestroyed()) return
+    try {
+      wc.debugger.removeListener('message', this.onDebuggerMessage)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private installNetworkBodyCapture(wc: WebContents): void {
+    if (this.networkCaptureWc === wc) return
+    this.teardownNetworkBodyCapture()
+    this.networkCaptureWc = wc
+    wc.debugger.on('message', this.onDebuggerMessage)
+  }
+
+  private rememberNetworkRequestUrl(requestId: string, url: string | undefined): void {
+    if (!url || !normalizeNetworkUrl(url)) return
+    let urls = this.networkRequestUrls.get(requestId)
+    if (!urls) {
+      urls = new Set()
+      this.networkRequestUrls.set(requestId, urls)
+    }
+    urls.add(url)
+  }
+
+  private handleDebuggerNetworkMessage(method: string, params: unknown): void {
+    if (!params || typeof params !== 'object') return
+    const p = params as Record<string, unknown>
+    const requestId = typeof p.requestId === 'string' ? p.requestId : ''
+    if (!requestId) return
+
+    if (method === 'Network.requestWillBeSent') {
+      const request = p.request as { url?: string } | undefined
+      this.rememberNetworkRequestUrl(requestId, request?.url)
+      const redirect = p.redirectResponse as { url?: string } | undefined
+      this.rememberNetworkRequestUrl(requestId, redirect?.url)
+      return
+    }
+
+    if (method === 'Network.responseReceived') {
+      const response = p.response as
+        | { url?: string; status?: number; mimeType?: string }
+        | undefined
+      this.rememberNetworkRequestUrl(requestId, response?.url)
+      const type = typeof p.type === 'string' ? p.type : ''
+      const status = typeof response?.status === 'number' ? response.status : 0
+      const mimeType = typeof response?.mimeType === 'string' ? response.mimeType : ''
+      if (!isImageNetworkResource({ type, mimeType, status })) {
+        return
+      }
+      this.pendingImageRequests.set(requestId, { mimeType, status, type })
+      return
+    }
+
+    if (method === 'Network.loadingFinished') {
+      if (!this.pendingImageRequests.has(requestId)) {
+        this.networkRequestUrls.delete(requestId)
+        return
+      }
+      void this.captureNetworkImageBody(requestId)
+      return
+    }
+
+    if (method === 'Network.loadingFailed') {
+      this.pendingImageRequests.delete(requestId)
+      this.networkRequestUrls.delete(requestId)
+    }
+  }
+
+  private async captureNetworkImageBody(requestId: string): Promise<void> {
+    const wc = this.networkCaptureWc
+    if (!wc || wc.isDestroyed()) return
+    if (!wc.debugger.isAttached()) return
+
+    const urls = this.networkRequestUrls.get(requestId)
+    this.pendingImageRequests.delete(requestId)
+    this.networkRequestUrls.delete(requestId)
+    if (!urls?.size) return
+
+    const generation = this.networkCacheGeneration
+    try {
+      const result = (await wc.debugger.sendCommand('Network.getResponseBody', {
+        requestId
+      })) as { body?: string; base64Encoded?: boolean }
+      if (generation !== this.networkCacheGeneration) return
+      const raw = typeof result.body === 'string' ? result.body : ''
+      if (!raw) return
+      const buf = result.base64Encoded
+        ? Buffer.from(raw, 'base64')
+        : Buffer.from(raw, 'binary')
+      if (!hasImageMagicBytes(buf)) return
+      this.imageBodyCache.set(urls, buf)
+    } catch {
+      /* Body may already be evicted from the debugger; fetchBuffer will fall back. */
     }
   }
 
@@ -334,6 +470,7 @@ class ScrapeBrowser {
 
     if (!wc.debugger.isAttached()) wc.debugger.attach('1.3')
     await wc.debugger.sendCommand('Network.enable')
+    this.installNetworkBodyCapture(wc)
     await wc.debugger.sendCommand('Page.enable')
     await wc.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source: STEALTH_DOC_JS })
     await wc.debugger.sendCommand('Network.setUserAgentOverride', {
@@ -501,6 +638,9 @@ class ScrapeBrowser {
     }
 
     if (!win.isVisible()) win.show()
+
+    // Drop previous page images so cover/sample downloads cannot reuse a stale body.
+    this.clearNetworkImageCache()
 
     await win.loadURL(url).catch(() => {
       /* navigation errors are tolerated; we poll the document state below */
@@ -915,6 +1055,8 @@ class ScrapeBrowser {
 
   /**
    * Download a binary asset through the scraper session (UA, proxy, cookies).
+   * Prefers image bodies already loaded in the scraper window (CDP Network cache)
+   * to avoid a second HTTP fetch. Falls back to session net.request.
    * During scraping, use session referer (current page origin). For manual import,
    * prefer {@link fetchBufferViaNavigation} or `{ referer: 'omit' }`.
    */
@@ -922,6 +1064,9 @@ class ScrapeBrowser {
     url: string,
     options?: { referer?: 'omit' | 'session' | string }
   ): Promise<Buffer> {
+    const cached = this.imageBodyCache.get(url)
+    if (cached) return cached
+
     const ses = this.getSession()
     const profile = getScrapeUaProfile()
     const referer = resolveFetchReferer(options?.referer, this.lastOrigin)
@@ -991,10 +1136,15 @@ class ScrapeBrowser {
   }
 
   close(): void {
+    this.clearNetworkImageCache()
     if (this.win && !this.win.isDestroyed()) {
+      this.detachDebugger(this.win.webContents)
       this.win.close()
+    } else {
+      this.teardownNetworkBodyCapture()
     }
     this.win = null
+    this.stealthApplied = false
   }
 }
 

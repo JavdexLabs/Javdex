@@ -533,6 +533,49 @@ export type PluginDevAgentEvent =
     }
   | { type: 'error'; sessionId: string; step: number; message: string }
 
+/** One row in the exportable plugin-dev agent work log (full fidelity for workflow analysis). */
+export type PluginDevAgentWorkLogEntry =
+  | {
+      at: string
+      kind: 'event'
+      event: PluginDevAgentEvent
+    }
+  | {
+      at: string
+      kind: 'user_message'
+      sessionId: string
+      source: 'start' | 'continue'
+      text: string
+    }
+
+export interface PluginDevAgentWorkLogExport {
+  schemaVersion: 1
+  kind: 'pluginDevAgentWorkLog'
+  exportedAt: string
+  sessionId: string
+  meta: {
+    mode: PluginDevAgentMode
+    pluginKind: ScraperPluginKind
+    siteName: string
+    siteUrl?: string
+    status: PluginDevSessionStatus
+    phase: PluginDevAgentPhase
+    step: number
+    totalTokens: number
+    maxSteps: number
+    maxContextTokens: number
+    testTargets: string[]
+    supportedFields: string[]
+    endedAt?: string
+  }
+  /** Compact human-readable timeline derived from entries. */
+  timeline: string[]
+  entries: PluginDevAgentWorkLogEntry[]
+  package: ScraperPluginPackage
+  lastDryRun?: PluginDevDryRunResult
+  lastVerification?: PluginDevVerificationReport
+}
+
 export interface PluginDevAgentSessionResult {
   sessionId: string
   status: PluginDevSessionStatus

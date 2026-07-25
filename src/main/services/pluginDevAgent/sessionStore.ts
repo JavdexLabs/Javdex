@@ -120,7 +120,8 @@ export function createSession(input: PluginDevAgentStartInput): PluginDevSession
       isDebugLikeMode(input) &&
       Boolean(input.package?.code?.trim()) &&
       hasSubstantialPluginCode(input.kind, input.package!.code),
-    lastUserInstruction: input.userMessage?.trim() || undefined
+    lastUserInstruction: input.userMessage?.trim() || undefined,
+    workLog: []
   }
   sessions.set(session.id, session)
   return session

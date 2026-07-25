@@ -26,7 +26,12 @@ import {
 } from './sessionStore'
 import { executeTool } from './toolExecutor'
 import { isBlockingVerificationFailure } from '../pluginDevVerification'
+import {
+  appendWorkLogEvent,
+  appendWorkLogUserMessage
+} from './workLog'
 import type {
+  PluginDevAgentEvent,
   PluginDevAgentMessageInput,
   PluginDevAgentPhase,
   PluginDevAgentProgressCallback,
@@ -71,6 +76,19 @@ function canFinishSuccess(session: NonNullable<ReturnType<typeof getSession>>): 
 
 function isDebugLikeMode(input: Pick<PluginDevAgentStartInput, 'mode'>): boolean {
   return input.mode !== 'create'
+}
+
+/** Record non-tool events on the session work log; tool_start/result are logged with full detail separately. */
+function trackProgress(
+  sessionId: string,
+  onProgress?: PluginDevAgentProgressCallback
+): PluginDevAgentProgressCallback {
+  return (event: PluginDevAgentEvent) => {
+    if (event.type !== 'tool_start' && event.type !== 'tool_result') {
+      appendWorkLogEvent(sessionId, event)
+    }
+    onProgress?.(event)
+  }
 }
 
 function verificationFailurePrompt(
@@ -135,13 +153,15 @@ async function executeToolWithProgress(
 ): Promise<import('./types').ToolExecutionResult> {
   const args = parseToolArgs(rawArgs)
   updatePhase(sessionId, step, phaseForTool(toolName), onProgress)
-  onProgress?.({
-    type: 'tool_start',
+  const toolStartEvent = {
+    type: 'tool_start' as const,
     sessionId,
     step,
     tool: toolName,
     args
-  })
+  }
+  appendWorkLogEvent(sessionId, toolStartEvent)
+  onProgress?.(toolStartEvent)
 
   const result = await runnerDeps
     .executeToolFn(sessionId, toolName, rawArgs, step)
@@ -154,14 +174,20 @@ async function executeToolWithProgress(
       ? String(result.structured.summary)
       : result.content.slice(0, 240)
 
-  onProgress?.({
-    type: 'tool_result',
+  const fullToolResultEvent = {
+    type: 'tool_result' as const,
     sessionId,
     step,
     tool: toolName,
     ok: result.ok,
     summary: summaryText,
-    detail: result.content.length > 500 ? result.content.slice(0, 500) + '…' : result.content
+    detail: result.content
+  }
+  appendWorkLogEvent(sessionId, fullToolResultEvent)
+  onProgress?.({
+    ...fullToolResultEvent,
+    detail:
+      result.content.length > 500 ? `${result.content.slice(0, 500)}…` : result.content
   })
 
   for (const event of result.events ?? []) {
@@ -495,6 +521,13 @@ export async function startPluginDevAgent(
   onProgress?: PluginDevAgentProgressCallback
 ): Promise<PluginDevAgentSessionResult> {
   const session = createSession(input)
+  const tracked = trackProgress(session.id, onProgress)
+  appendWorkLogUserMessage(
+    session.id,
+    input.userMessage?.trim() ||
+      `mode=${input.mode}; site=${input.siteName || '(auto)'}; targets=${(input.testTargets ?? []).join(', ') || '无'}`,
+    'start'
+  )
   if (input.lastDryRun) {
     session.lastDryRun = input.lastDryRun
     session.lastDryRunCodeHash = hashCode(session.package.code)
@@ -506,7 +539,7 @@ export async function startPluginDevAgent(
     session.incrementalEditOnly = true
   }
   const initialDebugDryRun =
-    isDebugLikeMode(input) ? await runInitialDebugDryRun(session.id, onProgress) : null
+    isDebugLikeMode(input) ? await runInitialDebugDryRun(session.id, tracked) : null
   const transcript: AgentTranscript = [
     systemTurn(buildAgentSystemPrompt(input.kind)),
     userTurn(
@@ -515,11 +548,11 @@ export async function startPluginDevAgent(
   ]
 
   try {
-    return await runAgentLoop(session.id, transcript, onProgress)
+    return await runAgentLoop(session.id, transcript, tracked)
   } catch (err) {
     session.status = 'failed'
     const message = err instanceof Error ? err.message : String(err)
-    onProgress?.({
+    tracked({
       type: 'error',
       sessionId: session.id,
       step: session.step,
@@ -541,6 +574,7 @@ export async function continuePluginDevAgent(
   session.status = 'running'
   session.cancelRequested = false
   session.endedAt = undefined
+  const tracked = trackProgress(session.id, onProgress)
 
   if (input.lastDryRun) {
     session.lastDryRun = input.lastDryRun
@@ -548,6 +582,7 @@ export async function continuePluginDevAgent(
   }
 
   session.lastUserInstruction = input.text.trim() || session.lastUserInstruction
+  appendWorkLogUserMessage(session.id, input.text, 'continue')
 
   if (hasSubstantialPluginCode(session.kind, session.package.code)) {
     session.incrementalEditOnly = true
@@ -561,11 +596,11 @@ export async function continuePluginDevAgent(
     : [systemTurn(buildAgentSystemPrompt(session.kind)), userTurn(userContent)]
 
   try {
-    return await runAgentLoop(session.id, transcript, onProgress)
+    return await runAgentLoop(session.id, transcript, tracked)
   } catch (err) {
     session.status = 'failed'
     const message = err instanceof Error ? err.message : String(err)
-    onProgress?.({
+    tracked({
       type: 'error',
       sessionId: session.id,
       step: session.step,

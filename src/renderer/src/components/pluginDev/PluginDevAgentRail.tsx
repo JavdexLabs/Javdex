@@ -29,11 +29,14 @@ export default function PluginDevAgentRail({
   busy,
   canSend,
   canCancelAgent,
+  canExportWorkLog,
+  exportWorkLogBusy,
   onTabChange,
   onFeedbackChange,
   onSend,
   onCancelAgent,
-  onContinueChallenge
+  onContinueChallenge,
+  onExportWorkLog
 }: {
   kind: PluginKind
   tab: PluginDevAgentTab
@@ -54,11 +57,14 @@ export default function PluginDevAgentRail({
   busy: boolean
   canSend: boolean
   canCancelAgent: boolean
+  canExportWorkLog: boolean
+  exportWorkLogBusy: boolean
   onTabChange: (tab: PluginDevAgentTab) => void
   onFeedbackChange: (value: string) => void
   onSend: () => void
   onCancelAgent: () => void
   onContinueChallenge: () => void
+  onExportWorkLog: () => void
 }): JSX.Element {
   const running = agentStatus === 'running' && busy
   const phaseItems: PluginDevAgentPhase[] = [
@@ -133,11 +139,14 @@ export default function PluginDevAgentRail({
             busy={busy}
             canSend={canSend}
             canCancelAgent={canCancelAgent}
+            canExportWorkLog={canExportWorkLog}
+            exportWorkLogBusy={exportWorkLogBusy}
             waitingUserReason={waitingUserReason}
             onFeedbackChange={onFeedbackChange}
             onSend={onSend}
             onCancelAgent={onCancelAgent}
             onContinueChallenge={onContinueChallenge}
+            onExportWorkLog={onExportWorkLog}
           />
         </div>
         <div

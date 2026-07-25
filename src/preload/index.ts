@@ -334,6 +334,8 @@ const api = {
     message: (input: PluginDevAgentMessageInput) =>
       invoke<PluginDevAgentSessionResult>(IPC.PLUGIN_DEV_AGENT_MESSAGE, input),
     cancel: (sessionId: string) => invoke<void>(IPC.PLUGIN_DEV_AGENT_CANCEL, sessionId),
+    exportWorkLog: (sessionId: string) =>
+      invoke<string | null>(IPC.PLUGIN_DEV_AGENT_EXPORT_WORK_LOG, sessionId),
     dryRun: (input: PluginDevDryRunInput) =>
       invoke<PluginDevDryRunResult>(IPC.PLUGIN_DEV_DRY_RUN, input),
     verify: (input: PluginDevVerifyInput) =>

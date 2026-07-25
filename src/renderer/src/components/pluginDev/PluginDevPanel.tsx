@@ -25,6 +25,7 @@ import PluginDevConnectionModal from './PluginDevConnectionModal'
 import PluginDevConfigRail from './PluginDevConfigRail'
 import { usePluginDevLeaveGuard } from './PluginDevLeaveGuard'
 import { fingerprintPluginPackage } from './pluginDevPackageSnapshot'
+import { suggestForkedPluginName } from './pluginDevName'
 import { agentStatusLabel, type PluginDevAgentTab, type PluginDevConversationItem, type PluginKind } from './types'
 import {
   allFieldsForKind,
@@ -119,6 +120,7 @@ export default function PluginDevPanel({
   const [supportedFieldIds, setSupportedFieldIds] = useState<string[]>([])
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState<'save-key' | 'agent' | 'install' | null>(null)
+  const [exportWorkLogBusy, setExportWorkLogBusy] = useState(false)
   const [dryRun, setDryRun] = useState<PluginDevDryRunResult | null>(null)
   const [dryRunPackageFingerprint, setDryRunPackageFingerprint] = useState<string | null>(null)
   const [verification, setVerification] = useState<PluginDevVerificationReport | null>(null)
@@ -131,9 +133,13 @@ export default function PluginDevPanel({
   const [conversationItems, setConversationItems] = useState<PluginDevConversationItem[]>([])
   const [waitingUserReason, setWaitingUserReason] = useState<string | null>(null)
   const [loadedInstalledName, setLoadedInstalledName] = useState<string | null>(null)
+  /** Non-null while editing a draft forked from a built-in plugin (not yet installed as custom). */
+  const [forkedFromBuiltIn, setForkedFromBuiltIn] = useState<string | null>(null)
   const [installedBaseline, setInstalledBaseline] = useState<string | null>(null)
   const [selectedPluginName, setSelectedPluginName] = useState('')
-  const [userPluginNames, setUserPluginNames] = useState<string[]>([])
+  const [selectablePlugins, setSelectablePlugins] = useState<
+    Array<{ name: string; source: 'user' | 'builtin' }>
+  >([])
   const [pluginsLoading, setPluginsLoading] = useState(false)
   const [feedbackText, setFeedbackText] = useState('')
   const agentSessionIdRef = useRef<string | null>(null)
@@ -257,6 +263,7 @@ export default function PluginDevPanel({
       if (event.type === 'plugin_installed') {
         applyGeneratedPackage(event.package)
         setLoadedInstalledName(event.descriptor.name)
+        setForkedFromBuiltIn(null)
         setSelectedPluginName(event.descriptor.name)
         setInstalledBaseline(fingerprintPluginPackage(event.package))
         void onInstalled(event.package.kind)
@@ -322,6 +329,7 @@ export default function PluginDevPanel({
     setInstalledBaseline(fingerprintPluginPackage(pkg))
     setSelectedPluginName(pkg.name)
     setLoadedInstalledName(pkg.name)
+    setForkedFromBuiltIn(null)
     setDryRun(null)
     setDryRunPackageFingerprint(null)
     setVerification(null)
@@ -341,6 +349,7 @@ export default function PluginDevPanel({
     setCode('')
     setSelectedPluginName('')
     setLoadedInstalledName(null)
+    setForkedFromBuiltIn(null)
     setInstalledBaseline(null)
     setDryRun(null)
     setDryRunPackageFingerprint(null)
@@ -356,15 +365,18 @@ export default function PluginDevPanel({
         pluginKind === 'video'
           ? await api.scrape.listPluginDetails()
           : await api.actressScrape.listPluginDetails()
-      setUserPluginNames(
+      setSelectablePlugins(
         details
-          .filter((plugin) => plugin.source === 'user' || plugin.source === 'builtin')
-          .map((plugin) => plugin.name)
-          .sort((a, b) => a.localeCompare(b, 'zh-CN'))
+          .filter(
+            (plugin): plugin is typeof plugin & { source: 'user' | 'builtin' } =>
+              plugin.source === 'user' || plugin.source === 'builtin'
+          )
+          .map((plugin) => ({ name: plugin.name, source: plugin.source }))
+          .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
       )
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
-      setUserPluginNames([])
+      setSelectablePlugins([])
     } finally {
       setPluginsLoading(false)
     }
@@ -382,6 +394,22 @@ export default function PluginDevPanel({
         kind === 'video'
           ? await api.scrape.getPluginPackage(name)
           : await api.actressScrape.getPluginPackage(name)
+      const source = selectablePlugins.find((plugin) => plugin.name === name)?.source
+      if (source === 'builtin') {
+        const forkedName = suggestForkedPluginName(
+          pkg.name,
+          selectablePlugins.map((plugin) => plugin.name)
+        )
+        applyLoadedPackage({ ...pkg, name: forkedName })
+        setLoadedInstalledName(null)
+        setForkedFromBuiltIn(pkg.name)
+        setSelectedPluginName('')
+        toast.show(
+          `已载入内置插件「${pkg.name}」为草稿「${forkedName}」，安装时不会覆盖内置插件`,
+          'info'
+        )
+        return
+      }
       applyLoadedPackage(pkg)
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
@@ -663,7 +691,12 @@ export default function PluginDevPanel({
       if (await continueAgent(feedback)) setFeedbackText('')
       return
     }
-    if (await startAgent(loadedInstalledName ? 'debug' : 'feedback', feedback)) {
+    if (
+      await startAgent(
+        Boolean(loadedInstalledName || forkedFromBuiltIn) ? 'debug' : 'feedback',
+        feedback
+      )
+    ) {
       setFeedbackText('')
     }
   }
@@ -681,7 +714,13 @@ export default function PluginDevPanel({
       await continueAgent('请继续当前插件开发/调试任务。')
       return
     }
-    await startAgent(hasPackage ? (loadedInstalledName ? 'debug' : 'feedback') : 'create')
+    const debuggingExisting = Boolean(loadedInstalledName || forkedFromBuiltIn)
+    const mode: 'create' | 'debug' | 'feedback' = !hasPackage
+      ? 'create'
+      : debuggingExisting
+        ? 'debug'
+        : 'feedback'
+    await startAgent(mode)
   }
 
   const install = async (): Promise<void> => {
@@ -691,6 +730,7 @@ export default function PluginDevPanel({
       const descriptor = await api.pluginDev.install({ package: buildPackage(), overwriteUser: true })
       await onInstalled(kind)
       setLoadedInstalledName(descriptor.name)
+      setForkedFromBuiltIn(null)
       setSelectedPluginName(descriptor.name)
       setInstalledBaseline(fingerprintPluginPackage(buildPackage()))
       void refreshUserPlugins(kind)
@@ -702,6 +742,19 @@ export default function PluginDevPanel({
       toast.show(String((e as Error).message), 'error')
     } finally {
       setBusy(null)
+    }
+  }
+
+  const exportAgentWorkLog = async (): Promise<void> => {
+    if (!agentSessionId || exportWorkLogBusy) return
+    setExportWorkLogBusy(true)
+    try {
+      const savedPath = await api.pluginDev.exportWorkLog(agentSessionId)
+      if (savedPath) toast.show(`已导出工作日志：${savedPath}`, 'success')
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+    } finally {
+      setExportWorkLogBusy(false)
     }
   }
 
@@ -812,7 +865,8 @@ export default function PluginDevPanel({
           fieldLabel={fieldLabelForKind}
           loadedInstalledName={loadedInstalledName}
           selectedPluginName={selectedPluginName}
-          userPluginNames={userPluginNames}
+          selectablePlugins={selectablePlugins}
+          forkedFromBuiltIn={forkedFromBuiltIn}
           pluginsLoading={pluginsLoading}
           busy={busy !== null}
           canUseAgent={canResumeAgent ? canUseAgent : canStartAgent}
@@ -858,11 +912,14 @@ export default function PluginDevPanel({
           busy={busy !== null}
           canSend={canSendAgentFeedback}
           canCancelAgent={canCancelAgent}
+          canExportWorkLog={Boolean(agentSessionId)}
+          exportWorkLogBusy={exportWorkLogBusy}
           onTabChange={setAgentTab}
           onFeedbackChange={setFeedbackText}
           onSend={() => void sendAgentFeedback()}
           onCancelAgent={cancelAgent}
           onContinueChallenge={() => void continueAfterChallenge()}
+          onExportWorkLog={() => void exportAgentWorkLog()}
         />
       </div>
 

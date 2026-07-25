@@ -54,6 +54,34 @@ describe('settingsStore avatar composition defaults', () => {
   })
 })
 
+describe('settingsStore retired actress scrapers', () => {
+  it('rewrites the retired idol archive default to Xslist', () => {
+    writeSettings({ defaultActressScraper: '偶像档案库' })
+    assert.equal(getSettings().defaultActressScraper, 'Xslist')
+  })
+
+  it('rewrites composite actress field mappings that pointed at the idol archive', () => {
+    writeSettings({
+      compositeScrapers: {
+        video: [],
+        actress: [
+          {
+            kind: 'actress',
+            name: 'Legacy Composite',
+            fieldPluginMap: {
+              avatar: '偶像档案库',
+              measurements: 'Xslist'
+            }
+          }
+        ]
+      }
+    })
+    const [composite] = getSettings().compositeScrapers.actress
+    assert.equal(composite?.fieldPluginMap.avatar, 'Xslist')
+    assert.equal(composite?.fieldPluginMap.measurements, 'Xslist')
+  })
+})
+
 describe('settingsStore privacy mode', () => {
   it('defaults to disabled with every image scope selected', () => {
     writeSettings({})

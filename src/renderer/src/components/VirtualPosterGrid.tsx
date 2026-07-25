@@ -22,7 +22,7 @@ interface VirtualPosterGridProps {
   onLoadMore?: () => void
   selectedIds?: Set<number>
   selectionMode?: boolean
-  onToggleSelect?: (video: Video) => void
+  onToggleSelect?: (video: Video, index: number, event?: React.MouseEvent) => void
   onEdit?: (video: Video) => void
   onAddToPlaylist?: (video: Video) => void
   onScrape?: (video: Video) => void
@@ -186,7 +186,11 @@ export default function VirtualPosterGrid({
           thumbHeight={posterHeight}
           selected={selectedIds.has(video.id)}
           selectionMode={selectionMode}
-          onToggleSelect={onToggleSelect}
+          onToggleSelect={
+            onToggleSelect
+              ? (selectedVideo, event) => onToggleSelect(selectedVideo, index, event)
+              : undefined
+          }
           onEdit={onEdit}
           onAddToPlaylist={onAddToPlaylist}
           onScrape={onScrape}

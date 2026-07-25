@@ -97,8 +97,15 @@ export default function VideoSampleGallery({
   const { ref: masonryRef, width: masonryWidth } = useElementSize<HTMLDivElement>()
   const samples = useMemo(() => prepareVideoSamplesForDisplay(assets), [assets])
   const previewItems = useMemo(() => toPreviewItems(samples), [samples])
-  const { previewIndex, isOpen, openPreview, closePreview, closePreviewIf, setPreviewIndex } =
-    useImagePreviewById(previewItems)
+  const {
+    previewIndex,
+    isOpen,
+    isEnabled: previewEnabled,
+    openPreview,
+    closePreview,
+    closePreviewIf,
+    setPreviewIndex
+  } = useImagePreviewById(previewItems)
 
   const dismissOverlays = useCallback(() => {
     setShowImport(false)
@@ -207,6 +214,7 @@ export default function VideoSampleGallery({
                       <button
                         type="button"
                         className="sample-masonry-btn"
+                        disabled={!previewEnabled}
                         onClick={() => openPreview(asset.id)}
                         aria-label={`样张 ${index + 1}`}
                       >

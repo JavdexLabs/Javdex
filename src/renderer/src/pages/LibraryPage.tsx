@@ -282,8 +282,11 @@ export default function LibraryPage(): JSX.Element {
 
   useListSurfaceRefetch(detailOpen, refetchLibrarySurface)
 
+  const selectionAnchorIndexRef = useRef<number | null>(null)
+
   useEffect(() => {
     setSelectedIds(new Set())
+    selectionAnchorIndexRef.current = null
   }, [queryHash])
 
   const selectedVideos = useMemo(
@@ -319,16 +322,46 @@ export default function LibraryPage(): JSX.Element {
     }
   }
 
-  const toggleVideoSelection = useCallback((video: Video): void => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(video.id)) next.delete(video.id)
-      else next.add(video.id)
-      return next
-    })
-  }, [])
+  const toggleVideoSelection = useCallback(
+    (video: Video, index: number, event?: React.MouseEvent): void => {
+      const anchor = selectionAnchorIndexRef.current
+      if (
+        event?.shiftKey &&
+        anchor != null &&
+        anchor >= 0 &&
+        anchor < videos.length &&
+        index >= 0 &&
+        index < videos.length
+      ) {
+        event.preventDefault()
+        const start = Math.min(anchor, index)
+        const end = Math.max(anchor, index)
+        setSelectedIds((prev) => {
+          const next = new Set(prev)
+          for (let i = start; i <= end; i += 1) {
+            const id = videos[i]?.id
+            if (id != null) next.add(id)
+          }
+          return next
+        })
+        return
+      }
 
-  const clearSelection = (): void => setSelectedIds(new Set())
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(video.id)) next.delete(video.id)
+        else next.add(video.id)
+        return next
+      })
+      selectionAnchorIndexRef.current = index
+    },
+    [videos]
+  )
+
+  const clearSelection = (): void => {
+    setSelectedIds(new Set())
+    selectionAnchorIndexRef.current = null
+  }
 
   const openEdit = async (video: Video): Promise<void> => {
     if (editLoadingId !== null) return
@@ -496,7 +529,7 @@ export default function LibraryPage(): JSX.Element {
       <div className="topbar library-header">
         {selectionMode ? (
           <SelectionToolbar
-            countLabel={`已选择 ${selectedCount} 部影片`}
+            countLabel={`已选择 ${selectedCount} 部影片 · Shift 连选`}
             onClear={clearSelection}
             actions={[
               {

@@ -129,6 +129,7 @@ export const IPC = {
   PLUGIN_DEV_AGENT_MESSAGE: 'pluginDev:agentMessage',
   PLUGIN_DEV_AGENT_CANCEL: 'pluginDev:agentCancel',
   PLUGIN_DEV_AGENT_EVENT: 'pluginDev:agentEvent', // main -> renderer event
+  PLUGIN_DEV_AGENT_EXPORT_WORK_LOG: 'pluginDev:agentExportWorkLog',
   PLUGIN_DEV_DRY_RUN: 'pluginDev:dryRun',
   PLUGIN_DEV_VERIFY: 'pluginDev:verify',
   PLUGIN_DEV_INSTALL: 'pluginDev:install',

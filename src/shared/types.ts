@@ -533,6 +533,49 @@ export type PluginDevAgentEvent =
     }
   | { type: 'error'; sessionId: string; step: number; message: string }
 
+/** One row in the exportable plugin-dev agent work log (full fidelity for workflow analysis). */
+export type PluginDevAgentWorkLogEntry =
+  | {
+      at: string
+      kind: 'event'
+      event: PluginDevAgentEvent
+    }
+  | {
+      at: string
+      kind: 'user_message'
+      sessionId: string
+      source: 'start' | 'continue'
+      text: string
+    }
+
+export interface PluginDevAgentWorkLogExport {
+  schemaVersion: 1
+  kind: 'pluginDevAgentWorkLog'
+  exportedAt: string
+  sessionId: string
+  meta: {
+    mode: PluginDevAgentMode
+    pluginKind: ScraperPluginKind
+    siteName: string
+    siteUrl?: string
+    status: PluginDevSessionStatus
+    phase: PluginDevAgentPhase
+    step: number
+    totalTokens: number
+    maxSteps: number
+    maxContextTokens: number
+    testTargets: string[]
+    supportedFields: string[]
+    endedAt?: string
+  }
+  /** Compact human-readable timeline derived from entries. */
+  timeline: string[]
+  entries: PluginDevAgentWorkLogEntry[]
+  package: ScraperPluginPackage
+  lastDryRun?: PluginDevDryRunResult
+  lastVerification?: PluginDevVerificationReport
+}
+
 export interface PluginDevAgentSessionResult {
   sessionId: string
   status: PluginDevSessionStatus
@@ -922,6 +965,26 @@ export function normalizeTheme(value: unknown): ThemeId {
   return VALID_THEMES.includes(value as ThemeId) ? (value as ThemeId) : 'graphite'
 }
 
+export const PRIVACY_MODE_SCOPES = [
+  'covers',
+  'videoSamples',
+  'actressGallery',
+  'actressDefaultAvatar',
+  'imagePreview',
+  'mediaEditors',
+  'globalBackground'
+] as const
+
+export type PrivacyModeScope = (typeof PRIVACY_MODE_SCOPES)[number]
+
+export function normalizePrivacyModeScopes(value: unknown): PrivacyModeScope[] {
+  if (!Array.isArray(value)) return [...PRIVACY_MODE_SCOPES]
+  const validScopes = new Set<unknown>(PRIVACY_MODE_SCOPES)
+  return Array.from(
+    new Set(value.filter((scope): scope is PrivacyModeScope => validScopes.has(scope)))
+  )
+}
+
 export interface AppSettings {
   /** Folders to scan for media files. */
   libraryPaths: string[]
@@ -944,6 +1007,10 @@ export interface AppSettings {
   batchDelayMaxMs: number
   /** Interface color theme. */
   theme: ThemeId
+  /** Apply display-only anti-peep protection to selected UI surfaces and interactions. */
+  privacyModeEnabled: boolean
+  /** UI surfaces and interactions protected while anti-peep mode is enabled. */
+  privacyModeScopes: PrivacyModeScope[]
   /** Default face size used by local smart avatar composition. */
   avatarFaceRatio: number
   /** @deprecated Retained to migrate settings written before the continuous face-ratio control. */
@@ -1030,6 +1097,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   batchDelayMinMs: 3000,
   batchDelayMaxMs: 5000,
   theme: 'graphite',
+  privacyModeEnabled: false,
+  privacyModeScopes: [...PRIVACY_MODE_SCOPES],
   avatarFaceRatio: DEFAULT_AVATAR_FACE_RATIO,
   avatarFaceScalePreset: DEFAULT_AVATAR_FACE_SCALE_PRESET,
   avatarCenteringMode: DEFAULT_AVATAR_CENTERING_MODE,

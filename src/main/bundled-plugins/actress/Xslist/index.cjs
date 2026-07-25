@@ -38,10 +38,16 @@ function parseDetail($, ctx) {
   if (mainName) result.mainName = mainName;
   
   // --- 英文名 (nameEn) - from h1 text like "三上悠亜(Yua Mikami/32岁)" or "伊藤舞雪(Mayuki Ito)" ---
+  // Formats: "演员名(English/年龄)" or "演员名(English)" or just "演员名(年龄)"
   const h1Text = $('h1').first().text().trim();
-  const nameEnMatch = h1Text.match(/\(([^)\/]+)(?:\/|\))/);
+  // Match content inside parentheses that starts with Latin letters (English name)
+  const nameEnMatch = h1Text.match(/\(([A-Za-z].*?)(?:\/|\))/);
   if (nameEnMatch) {
-    result.nameEn = nameEnMatch[1].trim();
+    const potentialName = nameEnMatch[1].trim();
+    // Only set if it looks like an English name (contains at least one Latin letter)
+    if (/[A-Za-z]/.test(potentialName)) {
+      result.nameEn = potentialName;
+    }
   }
   
   // --- 别名 (aliases) ---

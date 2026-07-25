@@ -90,6 +90,7 @@ export default function ActressDetailPage(): JSX.Element {
   const [activeTab, setActiveTab] = useState<'gallery' | 'videos'>('videos')
   const {
     isOpen: avatarPreviewOpen,
+    isEnabled: avatarPreviewEnabled,
     open: openAvatarPreview,
     close: closeAvatarPreview
   } = useHistoryBackedImagePreviewState()
@@ -318,7 +319,7 @@ export default function ActressDetailPage(): JSX.Element {
   const profileStats = buildActressProfileStats(actress)
 
   const onAvatarKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (!avatar || e.defaultPrevented) return
+    if (!avatar || !avatarPreviewEnabled || e.defaultPrevented) return
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
       openAvatarPreview()
@@ -376,13 +377,19 @@ export default function ActressDetailPage(): JSX.Element {
       <div className="actress-profile-layout">
         <div className="actress-profile-header">
           <div
-            className={`detail-avatar-frame${avatar ? ' detail-avatar-frame--preview' : ''}`}
-            role={avatar ? 'button' : undefined}
-            aria-label={avatar ? `查看头像：${actress.main_name}` : undefined}
-            tabIndex={avatar ? 0 : undefined}
-            title={avatar ? '查看头像' : undefined}
+            className={`detail-avatar-frame${
+              avatar && avatarPreviewEnabled ? ' detail-avatar-frame--preview' : ''
+            }`}
+            role={avatar && avatarPreviewEnabled ? 'button' : undefined}
+            aria-label={
+              avatar && avatarPreviewEnabled
+                ? `查看头像：${actress.main_name}`
+                : undefined
+            }
+            tabIndex={avatar && avatarPreviewEnabled ? 0 : undefined}
+            title={avatar && avatarPreviewEnabled ? '查看头像' : undefined}
             onClick={() => {
-              if (avatar) openAvatarPreview()
+              if (avatar && avatarPreviewEnabled) openAvatarPreview()
             }}
             onKeyDown={onAvatarKeyDown}
           >

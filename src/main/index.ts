@@ -7,6 +7,7 @@ import { initDatabase, closeDatabase } from './db/database'
 import { ensureAssetDirs, assetsRoot, readAssetForServe } from './services/assetService'
 import { registerIpcHandlers } from './ipc'
 import { scrapeBrowser } from './scrapers/scrapeBrowser'
+import { migrateUserPluginsAwayFromBuiltInNames } from './scrapers/scraperPluginService'
 import { resolveMediaAssetPath, toStoredAssetPath } from './services/mediaProtocol'
 import { checkForLatestRelease, shouldRunAutomaticCheck } from './services/appReleaseService'
 
@@ -117,6 +118,7 @@ if (gotSingleInstanceLock) {
     applyAppIcons()
     initDatabase()
     ensureAssetDirs()
+    migrateUserPluginsAwayFromBuiltInNames()
     registerAssetProtocol()
     registerIpcHandlers(() => mainWindow)
     createWindow()

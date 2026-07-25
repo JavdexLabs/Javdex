@@ -3,6 +3,7 @@ import type { PlaylistCreateInput, PlaylistDetail, PlaylistUpdateInput } from '@
 import { AppFormField } from './FormPrimitives'
 import ImageImportField from './ImageImportField'
 import Modal from './Modal'
+import { useTheme } from './ThemeProvider'
 
 interface Props {
   playlist?: PlaylistDetail
@@ -19,12 +20,16 @@ export default function PlaylistCreateModal({
   onCreate,
   onUpdate
 }: Props): JSX.Element {
+  const { privacyMode } = useTheme()
   const editing = Boolean(playlist)
   const [name, setName] = useState(playlist?.name ?? '')
   const [description, setDescription] = useState(playlist?.description ?? '')
   const [coverSourcePath, setCoverSourcePath] = useState<string | null>(null)
   const [removeCover, setRemoveCover] = useState(false)
   const [saving, setSaving] = useState(false)
+  const mediaEditorsHidden =
+    privacyMode.privacyModeEnabled &&
+    privacyMode.privacyModeScopes.includes('mediaEditors')
 
   const canSave = name.trim().length > 0
 
@@ -35,11 +40,11 @@ export default function PlaylistCreateModal({
       const input = {
         name: name.trim(),
         description: description.trim() || null,
-        ...(coverSourcePath ? { coverSourcePath } : {})
+        ...(coverSourcePath && !mediaEditorsHidden ? { coverSourcePath } : {})
       }
 
       if (editing) {
-        await onUpdate?.({ ...input, removeCover })
+        await onUpdate?.({ ...input, removeCover: mediaEditorsHidden ? false : removeCover })
       } else {
         await onCreate?.(input)
       }
@@ -63,24 +68,26 @@ export default function PlaylistCreateModal({
       onConfirm={() => void handleSave()}
     >
       <div className="form-grid playlist-form-grid">
-        <ImageImportField
-          key={removeCover ? 'cover-removed' : 'cover-active'}
-          label="封面"
-          currentUrl={removeCover ? null : currentCoverUrl}
-          onSourcePathChange={handleCoverChange}
-          previewShape="square"
-          extraActions={
-            editing && playlist?.cover_path ? (
-              <button
-                type="button"
-                className="btn btn-sm btn-ghost"
-                onClick={() => setRemoveCover((value) => !value)}
-              >
-                {removeCover ? '撤销移除封面' : '移除当前封面'}
-              </button>
-            ) : undefined
-          }
-        />
+        {!mediaEditorsHidden ? (
+          <ImageImportField
+            key={removeCover ? 'cover-removed' : 'cover-active'}
+            label="封面"
+            currentUrl={removeCover ? null : currentCoverUrl}
+            onSourcePathChange={handleCoverChange}
+            previewShape="square"
+            extraActions={
+              editing && playlist?.cover_path ? (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => setRemoveCover((value) => !value)}
+                >
+                  {removeCover ? '撤销移除封面' : '移除当前封面'}
+                </button>
+              ) : undefined
+            }
+          />
+        ) : null}
 
         <AppFormField label="名称">
           <input

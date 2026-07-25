@@ -43,7 +43,7 @@ LLM 须在 **设置 → 模型** 中配置为支持 **工具调用**（`agentCom
 | `plugin_update_package` | 更新元数据（含 `supportedFields`） |
 | `plugin_dry_run` | 沙箱试跑；`testTarget` / `testTargets` |
 | `plugin_verify` | 结构 + 语义验证 |
-| `plugin_install` | 安装到 `userData/scraper_plugins/` |
+| `plugin_install` | 安装到 `userData/scraper_plugins/`；不可与内置插件同名，不会覆盖内置插件 |
 | `plugin_finish` | 结束会话；`success=true` 要求 dry-run 与 verify 均通过 |
 
 ### 浏览器
@@ -66,6 +66,7 @@ LLM 须在 **设置 → 模型** 中配置为支持 **工具调用**（`agentCom
 3. **AI开发**（无代码）或 **AI调试**（已有包）启动；也可在对话区输入指示
 4. 右侧工具时间线展示每步调用；`package_updated` 同步左侧编辑器
 5. Cloudflare 拦截时完成验证后点击 **验证完成，继续**
+6. 对话区 **导出日志** 可保存完整 Agent 工作日志（JSON：时间线、未截断工具输出、包快照、dry-run/verify），用于分析工作流是否合理。会话结束后约 1 小时内仍可导出。
 
 Agent 配置（最大步数、上下文 token 上限）可在工作台内保存至 `settings.json`（`pluginDevAgentMaxSteps`、`pluginDevAgentMaxContextTokens`）。
 

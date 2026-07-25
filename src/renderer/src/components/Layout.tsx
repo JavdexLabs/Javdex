@@ -14,6 +14,7 @@ import AssetCryptoOverlay from './AssetCryptoOverlay'
 import AppBackgroundLayer from './AppBackgroundLayer'
 import { useAppBackground } from './AppBackgroundContext'
 import { useImagePreviewOverlay } from './ImagePreviewOverlayContext'
+import { useTheme } from './ThemeProvider'
 import { usePluginDevLeaveGuard } from './pluginDev/PluginDevLeaveGuard'
 import { NavIcon, type NavIconName } from './NavIcons'
 import { ROUTE_PATH } from '../listView/routePaths'
@@ -87,9 +88,14 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
   const location = useLocation()
   const { getBackground } = useAppBackground()
   const { isOpen: imagePreviewOpen } = useImagePreviewOverlay()
+  const { privacyMode } = useTheme()
   const facetActive = NAV_FACETS.some((n) => location.pathname.startsWith(n.to))
   const background = getBackground(getDetailPosterScope(location.pathname))
-  const backgroundSrc = imagePreviewOpen ? null : resolveMediaSrc(background?.path)
+  const privacyHidesBackground =
+    privacyMode.privacyModeEnabled &&
+    privacyMode.privacyModeScopes.includes('globalBackground')
+  const backgroundSrc =
+    imagePreviewOpen || privacyHidesBackground ? null : resolveMediaSrc(background?.path)
   const hasBackgroundLayer = Boolean(backgroundSrc)
 
   useEffect(() => {

@@ -141,8 +141,15 @@ export default function ActressGalleryPanel({
   const items = useMemo(() => prepareActressGalleryForDisplay(gallery), [gallery])
 
   const previewItems = useMemo(() => toPreviewItems(items), [items])
-  const { previewIndex, isOpen, openPreview, closePreview, closePreviewIf, setPreviewIndex } =
-    useImagePreviewById(previewItems)
+  const {
+    previewIndex,
+    isOpen,
+    isEnabled: previewEnabled,
+    openPreview,
+    closePreview,
+    closePreviewIf,
+    setPreviewIndex
+  } = useImagePreviewById(previewItems)
 
   const dismissOverlays = useCallback(() => {
     setShowImport(false)
@@ -228,6 +235,7 @@ export default function ActressGalleryPanel({
                 <button
                   type="button"
                   className="sample-masonry-btn actress-gallery-masonry-btn"
+                  disabled={!previewEnabled}
                   onClick={() => openPreview(asset.id)}
                   aria-label={`写真 ${index + 1}`}
                 >

@@ -42,8 +42,9 @@ export default function PluginDevConfigRail({
   supportedFields,
   fieldLabel,
   loadedInstalledName,
+  forkedFromBuiltIn,
   selectedPluginName,
-  userPluginNames,
+  selectablePlugins,
   pluginsLoading,
   busy,
   canUseAgent,
@@ -78,8 +79,9 @@ export default function PluginDevConfigRail({
   supportedFields: string[]
   fieldLabel: (kind: PluginKind, field: string) => string
   loadedInstalledName: string | null
+  forkedFromBuiltIn: string | null
   selectedPluginName: string
-  userPluginNames: string[]
+  selectablePlugins: Array<{ name: string; source: 'user' | 'builtin' }>
   pluginsLoading: boolean
   busy: boolean
   canUseAgent: boolean
@@ -106,7 +108,7 @@ export default function PluginDevConfigRail({
 }): JSX.Element {
   const [showTargetPicker, setShowTargetPicker] = useState(false)
   const profile = getPluginDevKindProfile(kind)
-  const isDebugMode = Boolean(loadedInstalledName)
+  const isDebugMode = Boolean(loadedInstalledName || forkedFromBuiltIn)
   const hasTestTarget = parseTestTargetList(testTarget).length > 0
   const testTargetCount = parseTestTargetList(testTarget).length
   const siteUrlRequired = !isDebugMode
@@ -156,16 +158,21 @@ export default function PluginDevConfigRail({
             onChange={(e) => onSelectPlugin(e.target.value)}
           >
             <option value="">新建插件</option>
-            {userPluginNames.map((name) => (
-              <option key={name} value={name}>
-                {name}
+            {selectablePlugins.map((plugin) => (
+              <option key={plugin.name} value={plugin.name}>
+                {plugin.source === 'builtin' ? `${plugin.name}（内置）` : plugin.name}
               </option>
             ))}
           </SelectControl>
           {pluginsLoading && <span className="plugin-dev-plugin-select-hint">加载中…</span>}
-          {!pluginsLoading && userPluginNames.length === 0 && (
+          {!pluginsLoading && selectablePlugins.length === 0 && (
             <span className="plugin-dev-plugin-select-hint">暂无已安装的插件</span>
           )}
+          {forkedFromBuiltIn ? (
+            <span className="plugin-dev-plugin-select-hint">
+              来自内置「{forkedFromBuiltIn}」的草稿，须使用新名称安装，不会覆盖原插件
+            </span>
+          ) : null}
         </label>
 
         <label className="plugin-edit-control plugin-dev-control--primary">

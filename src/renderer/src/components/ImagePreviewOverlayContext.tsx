@@ -50,6 +50,7 @@ export function withImagePreviewHistoryMarker(
 
 interface ImagePreviewOverlayContextValue {
   isOpen: boolean
+  previewEnabled: boolean
   register: () => () => void
   beginHistoryEntry: (close: () => void) => string
   requestHistoryClose: (token: string, close: () => void) => void
@@ -58,7 +59,13 @@ interface ImagePreviewOverlayContextValue {
 
 const ImagePreviewOverlayContext = createContext<ImagePreviewOverlayContextValue | null>(null)
 
-export function ImagePreviewOverlayProvider({ children }: { children: ReactNode }): JSX.Element {
+export function ImagePreviewOverlayProvider({
+  children,
+  previewEnabled = true
+}: {
+  children: ReactNode
+  previewEnabled?: boolean
+}): JSX.Element {
   const [openCount, setOpenCount] = useState(0)
   const activeHistoryRef = useRef<ActiveHistoryPreview | null>(null)
   const fallbackTimerRef = useRef<number | null>(null)
@@ -146,12 +153,20 @@ export function ImagePreviewOverlayProvider({ children }: { children: ReactNode 
   const value = useMemo(
     () => ({
       isOpen: openCount > 0,
+      previewEnabled,
       register,
       beginHistoryEntry,
       requestHistoryClose,
       abandonHistoryEntry
     }),
-    [abandonHistoryEntry, beginHistoryEntry, openCount, register, requestHistoryClose]
+    [
+      abandonHistoryEntry,
+      beginHistoryEntry,
+      openCount,
+      previewEnabled,
+      register,
+      requestHistoryClose
+    ]
   )
 
   return (
@@ -161,10 +176,11 @@ export function ImagePreviewOverlayProvider({ children }: { children: ReactNode 
 
 export function useHistoryBackedImagePreviewState(): {
   isOpen: boolean
+  isEnabled: boolean
   open: () => void
   close: () => void
 } {
-  const { beginHistoryEntry, requestHistoryClose, abandonHistoryEntry } =
+  const { previewEnabled, beginHistoryEntry, requestHistoryClose, abandonHistoryEntry } =
     useImagePreviewOverlay()
   const [isOpen, setIsOpen] = useState(false)
   const tokenRef = useRef<string | null>(null)
@@ -175,10 +191,10 @@ export function useHistoryBackedImagePreviewState(): {
   }, [])
 
   const open = useCallback(() => {
-    if (tokenRef.current) return
+    if (!previewEnabled || tokenRef.current) return
     tokenRef.current = beginHistoryEntry(finish)
     setIsOpen(true)
-  }, [beginHistoryEntry, finish])
+  }, [beginHistoryEntry, finish, previewEnabled])
 
   const close = useCallback(() => {
     const token = tokenRef.current
@@ -190,13 +206,17 @@ export function useHistoryBackedImagePreviewState(): {
   }, [finish, requestHistoryClose])
 
   useEffect(() => {
+    if (!previewEnabled && isOpen) close()
+  }, [close, isOpen, previewEnabled])
+
+  useEffect(() => {
     return () => {
       const token = tokenRef.current
       if (token) abandonHistoryEntry(token)
     }
   }, [abandonHistoryEntry])
 
-  return { isOpen, open, close }
+  return { isOpen, isEnabled: previewEnabled, open, close }
 }
 
 export function useImagePreviewOverlay(): ImagePreviewOverlayContextValue {

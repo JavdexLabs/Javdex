@@ -134,6 +134,21 @@ export function loadUserActressScrapers(): BaseActressScraper[] {
   )
 }
 
+/**
+ * Older builds allowed user plugins to override built-in names. Rename those
+ * installs to `{name}-custom` (or `-custom-N`) and remap settings references.
+ * Safe to call repeatedly.
+ */
+export function migrateUserPluginsAwayFromBuiltInNames(): void {
+  const renames: Array<{ kind: ScraperPluginKind; from: string; to: string }> = []
+  for (const kind of ['video', 'actress'] as const) {
+    renames.push(...migrateConflictingUserPluginsForKind(kind))
+  }
+  if (renames.length > 0) {
+    remapSettingsPluginNames(renames)
+  }
+}
+
 export async function importScraperPluginPackage(
   filePath: string
 ): Promise<ScraperPluginDescriptor> {
@@ -268,7 +283,10 @@ export function createCompositeScraper(
 ): ScraperPluginDescriptor {
   const name = input.name.trim()
   if (!name) throw new Error('组合插件名称不能为空')
-  if (isBuiltInScraperName(kind, name) || findStoredPlugin(kind, name)) {
+  if (
+    isReservedBuiltInPluginName(kind, name) ||
+    findStoredPlugin(kind, name)
+  ) {
     throw new Error('组合插件名称不能和已有插件重名')
   }
 
@@ -305,7 +323,7 @@ export function updateCompositeScraper(
   if (index < 0) throw new Error('组合插件不存在')
   if (
     nextName !== name &&
-    (isBuiltInScraperName(kind, nextName) ||
+    (isReservedBuiltInPluginName(kind, nextName) ||
       findStoredPlugin(kind, nextName) ||
       current.some((item) => item.name === nextName))
   ) {
@@ -351,6 +369,16 @@ function readStoredPlugins(kind: ScraperPluginKind): {
   dir: string
   entryPath: string
 }[] {
+  // Lazily migrate legacy same-name overrides before any listing/load path.
+  migrateUserPluginsAwayFromBuiltInNames()
+  return readStoredPluginsRaw(kind)
+}
+
+function readStoredPluginsRaw(kind: ScraperPluginKind): {
+  manifest: StoredPluginManifest
+  dir: string
+  entryPath: string
+}[] {
   const root = pluginsRoot(kind)
   if (!fs.existsSync(root)) return []
   const entries = fs.readdirSync(root, { withFileTypes: true })
@@ -369,6 +397,121 @@ function readStoredPlugins(kind: ScraperPluginKind): {
     }
   }
   return plugins.sort((a, b) => a.manifest.name.localeCompare(b.manifest.name))
+}
+
+function suggestCustomSuffixPluginName(baseName: string, takenNames: Set<string>): string {
+  const base = baseName.trim() || 'plugin'
+  const candidates = [`${base}-custom`]
+  for (const candidate of candidates) {
+    if (!takenNames.has(candidate)) return candidate
+  }
+  let index = 2
+  while (takenNames.has(`${base}-custom-${index}`)) index += 1
+  return `${base}-custom-${index}`
+}
+
+function migrateConflictingUserPluginsForKind(
+  kind: ScraperPluginKind
+): Array<{ kind: ScraperPluginKind; from: string; to: string }> {
+  const plugins = readStoredPluginsRaw(kind)
+  const taken = new Set(plugins.map((plugin) => plugin.manifest.name))
+  const renames: Array<{ kind: ScraperPluginKind; from: string; to: string }> = []
+
+  for (const plugin of plugins) {
+    const from = plugin.manifest.name
+    if (!isReservedBuiltInPluginName(kind, from)) continue
+
+    let to = suggestCustomSuffixPluginName(from, taken)
+    while (fs.existsSync(pluginInstallDir(kind, to))) {
+      taken.add(to)
+      to = suggestCustomSuffixPluginName(from, taken)
+    }
+
+    renameStoredPlugin(plugin, to)
+    taken.delete(from)
+    taken.add(to)
+    renames.push({ kind, from, to })
+  }
+
+  return renames
+}
+
+function renameStoredPlugin(
+  plugin: { manifest: StoredPluginManifest; dir: string; entryPath: string },
+  nextName: string
+): void {
+  const nextManifest: StoredPluginManifest = {
+    ...plugin.manifest,
+    name: nextName
+  }
+  const targetDir = pluginInstallDir(plugin.manifest.kind, nextName)
+  const manifestPath = path.join(plugin.dir, 'plugin.json')
+  fs.writeFileSync(manifestPath, JSON.stringify(nextManifest, null, 2), 'utf-8')
+
+  if (path.resolve(plugin.dir) !== path.resolve(targetDir)) {
+    fs.mkdirSync(path.dirname(targetDir), { recursive: true })
+    fs.renameSync(plugin.dir, targetDir)
+  }
+}
+
+function remapSettingsPluginNames(
+  renames: Array<{ kind: ScraperPluginKind; from: string; to: string }>
+): void {
+  if (renames.length === 0) return
+  const settings = getSettings()
+  const videoMap = new Map(
+    renames.filter((item) => item.kind === 'video').map((item) => [item.from, item.to])
+  )
+  const actressMap = new Map(
+    renames.filter((item) => item.kind === 'actress').map((item) => [item.from, item.to])
+  )
+
+  const mapName = (kind: ScraperPluginKind, name: string): string => {
+    const mapped = kind === 'video' ? videoMap.get(name) : actressMap.get(name)
+    return mapped ?? name
+  }
+
+  const nextDelays = {
+    video: { ...settings.scraperPluginDelays.video },
+    actress: { ...settings.scraperPluginDelays.actress }
+  }
+  for (const { kind, from, to } of renames) {
+    const bucket = nextDelays[kind]
+    if (Object.prototype.hasOwnProperty.call(bucket, from)) {
+      if (!Object.prototype.hasOwnProperty.call(bucket, to)) {
+        bucket[to] = bucket[from]!
+      }
+      delete bucket[from]
+    }
+  }
+
+  const nextComposites = {
+    video: settings.compositeScrapers.video.map((item) => ({
+      ...item,
+      fieldPluginMap: Object.fromEntries(
+        Object.entries(item.fieldPluginMap).map(([field, pluginName]) => [
+          field,
+          mapName('video', pluginName)
+        ])
+      ) as typeof item.fieldPluginMap
+    })),
+    actress: settings.compositeScrapers.actress.map((item) => ({
+      ...item,
+      fieldPluginMap: Object.fromEntries(
+        Object.entries(item.fieldPluginMap).map(([field, pluginName]) => [
+          field,
+          mapName('actress', pluginName)
+        ])
+      ) as typeof item.fieldPluginMap
+    }))
+  }
+
+  updateSettings({
+    defaultScraper: mapName('video', settings.defaultScraper),
+    defaultActressScraper: mapName('actress', settings.defaultActressScraper),
+    scraperPluginDelays: nextDelays,
+    compositeScrapers: nextComposites
+  })
 }
 
 function findInstalledPlugin(
@@ -460,11 +603,18 @@ function normalizePackage(pkg: ScraperPluginPackageImport): ScraperPluginPackage
   }
 }
 
+function isReservedBuiltInPluginName(kind: ScraperPluginKind, name: string): boolean {
+  return isBuiltInScraperName(kind, name) || Boolean(findBundledPluginRecord(kind, name))
+}
+
 function validatePluginNameAvailable(
   kind: ScraperPluginKind,
   name: string,
   overwriteUser = false
 ): void {
+  if (isReservedBuiltInPluginName(kind, name)) {
+    throw new Error('不能与内置插件同名；请改用新名称安装为自定义插件')
+  }
   if (findStoredPlugin(kind, name)) {
     if (overwriteUser) return
     throw new Error('已存在同名自定义插件')

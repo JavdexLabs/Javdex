@@ -6,13 +6,15 @@ import { useImagePreviewOverlay } from '../components/ImagePreviewOverlayContext
 export function useImagePreviewById(items: ImagePreviewItem[]): {
   previewIndex: number | null
   isOpen: boolean
+  isEnabled: boolean
   openPreview: (assetId: number) => void
   closePreview: () => void
   closePreviewIf: (assetId: number) => void
   setPreviewIndex: (index: number) => void
 } {
   const [previewAssetId, setPreviewAssetId] = useState<number | null>(null)
-  const { beginHistoryEntry, requestHistoryClose, abandonHistoryEntry } = useImagePreviewOverlay()
+  const { previewEnabled, beginHistoryEntry, requestHistoryClose, abandonHistoryEntry } =
+    useImagePreviewOverlay()
   const historyTokenRef = useRef<string | null>(null)
 
   const previewIndex = useMemo(() => {
@@ -28,11 +30,11 @@ export function useImagePreviewById(items: ImagePreviewItem[]): {
 
   const openPreview = useCallback(
     (assetId: number) => {
-      if (historyTokenRef.current) return
+      if (!previewEnabled || historyTokenRef.current) return
       historyTokenRef.current = beginHistoryEntry(finishPreview)
       setPreviewAssetId(assetId)
     },
-    [beginHistoryEntry, finishPreview]
+    [beginHistoryEntry, finishPreview, previewEnabled]
   )
 
   const closePreview = useCallback(() => {
@@ -43,6 +45,10 @@ export function useImagePreviewById(items: ImagePreviewItem[]): {
     }
     requestHistoryClose(token, finishPreview)
   }, [finishPreview, requestHistoryClose])
+
+  useEffect(() => {
+    if (!previewEnabled && previewAssetId != null) closePreview()
+  }, [closePreview, previewAssetId, previewEnabled])
 
   useEffect(() => {
     if (previewAssetId != null && previewIndex == null) closePreview()
@@ -73,6 +79,7 @@ export function useImagePreviewById(items: ImagePreviewItem[]): {
   return {
     previewIndex,
     isOpen: previewIndex != null,
+    isEnabled: previewEnabled,
     openPreview,
     closePreview,
     closePreviewIf,

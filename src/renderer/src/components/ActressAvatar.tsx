@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ActressGender } from '@shared/types'
+import { useTheme } from './ThemeProvider'
 
 interface Props {
   src: string | null | undefined
@@ -22,15 +23,19 @@ export default function ActressAvatar({
   className,
   decorative = false
 }: Props): JSX.Element {
+  const { privacyMode } = useTheme()
   const [failed, setFailed] = useState(false)
   const resolvedSrc = src?.trim() || null
+  const useDefaultAvatar =
+    privacyMode.privacyModeEnabled &&
+    privacyMode.privacyModeScopes.includes('actressDefaultAvatar')
 
   useEffect(() => {
     setFailed(false)
   }, [resolvedSrc])
 
   const classes = ['actress-avatar', className].filter(Boolean).join(' ')
-  const showImage = Boolean(resolvedSrc && !failed)
+  const showImage = Boolean(resolvedSrc && !failed && !useDefaultAvatar)
 
   return (
     <span

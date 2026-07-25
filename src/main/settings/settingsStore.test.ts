@@ -53,3 +53,71 @@ describe('settingsStore avatar composition defaults', () => {
     assert.equal(settings.avatarPreserveFullHead, true)
   })
 })
+
+describe('settingsStore retired actress scrapers', () => {
+  it('rewrites the retired idol archive default to Xslist', () => {
+    writeSettings({ defaultActressScraper: '偶像档案库' })
+    assert.equal(getSettings().defaultActressScraper, 'Xslist')
+  })
+
+  it('rewrites composite actress field mappings that pointed at the idol archive', () => {
+    writeSettings({
+      compositeScrapers: {
+        video: [],
+        actress: [
+          {
+            kind: 'actress',
+            name: 'Legacy Composite',
+            fieldPluginMap: {
+              avatar: '偶像档案库',
+              measurements: 'Xslist'
+            }
+          }
+        ]
+      }
+    })
+    const [composite] = getSettings().compositeScrapers.actress
+    assert.equal(composite?.fieldPluginMap.avatar, 'Xslist')
+    assert.equal(composite?.fieldPluginMap.measurements, 'Xslist')
+  })
+})
+
+describe('settingsStore privacy mode', () => {
+  it('defaults to disabled with every image scope selected', () => {
+    writeSettings({})
+    const settings = getSettings()
+    assert.equal(settings.privacyModeEnabled, false)
+    assert.deepEqual(settings.privacyModeScopes, [
+      'covers',
+      'videoSamples',
+      'actressGallery',
+      'actressDefaultAvatar',
+      'imagePreview',
+      'mediaEditors',
+      'globalBackground'
+    ])
+  })
+
+  it('keeps valid unique scopes and discards unknown values', () => {
+    writeSettings({
+      privacyModeEnabled: true,
+      privacyModeScopes: ['videoSamples', 'unknown', 'videoSamples', 'covers']
+    })
+    const settings = getSettings()
+    assert.equal(settings.privacyModeEnabled, true)
+    assert.deepEqual(settings.privacyModeScopes, ['videoSamples', 'covers'])
+  })
+
+  it('keeps samples and actress galleries independently selectable', () => {
+    writeSettings({
+      privacyModeEnabled: true,
+      privacyModeScopes: ['videoSamples']
+    })
+    assert.deepEqual(getSettings().privacyModeScopes, ['videoSamples'])
+  })
+
+  it('allows all privacy scopes to be cleared explicitly', () => {
+    writeSettings({ privacyModeEnabled: true, privacyModeScopes: [] })
+    assert.deepEqual(getSettings().privacyModeScopes, [])
+  })
+})

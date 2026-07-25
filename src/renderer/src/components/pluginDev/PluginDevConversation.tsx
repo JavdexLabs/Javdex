@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, type CSSProperties } from 'react'
-import { Bot } from 'lucide-react'
+import { Bot, Download } from 'lucide-react'
 import type {
   PluginDevAgentContextStats,
   PluginDevAgentPhase,
@@ -37,11 +37,14 @@ export default function PluginDevConversation({
   busy,
   canSend,
   canCancelAgent,
+  canExportWorkLog,
+  exportWorkLogBusy,
   waitingUserReason,
   onFeedbackChange,
   onSend,
   onCancelAgent,
-  onContinueChallenge
+  onContinueChallenge,
+  onExportWorkLog
 }: {
   visible: boolean
   items: PluginDevConversationItem[]
@@ -55,11 +58,14 @@ export default function PluginDevConversation({
   busy: boolean
   canSend: boolean
   canCancelAgent: boolean
+  canExportWorkLog: boolean
+  exportWorkLogBusy: boolean
   waitingUserReason: string | null
   onFeedbackChange: (value: string) => void
   onSend: () => void
   onCancelAgent: () => void
   onContinueChallenge: () => void
+  onExportWorkLog: () => void
 }): JSX.Element {
   const logRef = useRef<HTMLDivElement | null>(null)
   const visibleRef = useRef(visible)
@@ -240,6 +246,16 @@ export default function PluginDevConversation({
                   ) : null}
                 </div>
               </div>
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost"
+                disabled={!canExportWorkLog || exportWorkLogBusy}
+                title="导出完整 Agent 工作日志（JSON）"
+                onClick={onExportWorkLog}
+              >
+                <Download {...UI_ICON_SM} aria-hidden />
+                {exportWorkLogBusy ? '导出中…' : '导出日志'}
+              </button>
               {agentRunning ? (
                 <button
                   type="button"

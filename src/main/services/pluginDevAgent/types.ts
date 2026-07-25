@@ -52,6 +52,8 @@ export interface PluginDevSession extends PluginDevAgentStartInput {
   lastUserInstruction?: string
   /** Protocol-neutral conversation persisted across continue/resume. */
   transcript?: import('./agentMessages').AgentTranscript
+  /** Full agent work log for export / workflow analysis (tool details untruncated). */
+  workLog?: import('@shared/types').PluginDevAgentWorkLogEntry[]
 }
 
 export interface ToolExecutionResult {

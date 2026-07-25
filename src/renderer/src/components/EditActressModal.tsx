@@ -23,6 +23,7 @@ import EditFieldAiTranslate from './EditFieldAiTranslate'
 import { EditFormField, EditFormSection } from './FormPrimitives'
 import Modal from './Modal'
 import SelectControl from './SelectControl'
+import { useTheme } from './ThemeProvider'
 
 interface Props {
   actress: ActressDetail
@@ -32,6 +33,7 @@ interface Props {
 
 /** Modal form for manually editing an actress profile. */
 export default function EditActressModal({ actress, onCancel, onSave }: Props): JSX.Element {
+  const { privacyMode } = useTheme()
   const [mainName, setMainName] = useState(actress.main_name)
   const [nameZh, setNameZh] = useState(actress.name_zh ?? '')
   const [nameEn, setNameEn] = useState(actress.name_en ?? '')
@@ -52,6 +54,9 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
   const [aliases, setAliases] = useState<string[]>([...actress.aliases])
   const [avatarCommit, setAvatarCommit] = useState<ActressAvatarCommit | null>(null)
   const [saving, setSaving] = useState(false)
+  const mediaEditorsHidden =
+    privacyMode.privacyModeEnabled &&
+    privacyMode.privacyModeScopes.includes('mediaEditors')
 
   const savedCrop = useMemo(
     () => parseAvatarCrop(actress.avatar_crop_json),
@@ -131,7 +136,7 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
         nationality: nationality.trim() || null,
         profile_summary: profileSummary.trim() || null,
         aliases,
-        ...(avatarCommit ? { avatar: avatarCommit } : {})
+        ...(avatarCommit && !mediaEditorsHidden ? { avatar: avatarCommit } : {})
       })
     } finally {
       setSaving(false)
@@ -155,16 +160,18 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
       onConfirm={() => void handleSave()}
     >
       <div className="entity-edit-form">
-            <EditFormSection title="头像" className="entity-edit-section--media">
-              <ActressAvatarEditor
-                displayUrl={assetUrl(actress.avatar_path)}
-                sourceUrl={assetUrl(actress.avatar_source_path)}
-                savedCrop={savedCrop}
-                videos={actress.videos}
-                gallery={actress.gallery}
-                onAvatarChange={handleAvatarChange}
-              />
-            </EditFormSection>
+            {!mediaEditorsHidden ? (
+              <EditFormSection title="头像" className="entity-edit-section--media">
+                <ActressAvatarEditor
+                  displayUrl={assetUrl(actress.avatar_path)}
+                  sourceUrl={assetUrl(actress.avatar_source_path)}
+                  savedCrop={savedCrop}
+                  videos={actress.videos}
+                  gallery={actress.gallery}
+                  onAvatarChange={handleAvatarChange}
+                />
+              </EditFormSection>
+            ) : null}
 
             <EditFormSection title="姓名">
               <div className="entity-edit-fields">

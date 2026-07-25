@@ -10,6 +10,7 @@ import {
   expandActressScrapeFields,
   normalizePluginDevAgentMaxContextTokens,
   normalizePluginDevAgentMaxSteps,
+  normalizePrivacyModeScopes,
   normalizeTheme,
   normalizeMinScanImportDurationMinutes
 } from '@shared/types'
@@ -85,10 +86,15 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
     typeof parsed.defaultScraper === 'string' && parsed.defaultScraper.trim()
       ? parsed.defaultScraper.trim()
       : DEFAULT_SETTINGS.defaultScraper
-  const defaultActressScraper =
+  const rawDefaultActressScraper =
     typeof parsed.defaultActressScraper === 'string' && parsed.defaultActressScraper.trim()
       ? parsed.defaultActressScraper.trim()
       : DEFAULT_SETTINGS.defaultActressScraper
+  // Retired bundled actress scraper; keep existing installs pointed at a valid default.
+  const defaultActressScraper =
+    rawDefaultActressScraper === '偶像档案库'
+      ? DEFAULT_SETTINGS.defaultActressScraper
+      : rawDefaultActressScraper
   const legacyAvatarFaceScalePreset = normalizeAvatarFaceScalePreset(
     parsed.avatarFaceScalePreset
   )
@@ -102,6 +108,11 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
     defaultScraper,
     defaultActressScraper,
     theme: normalizeTheme(parsed.theme),
+    privacyModeEnabled: normalizeBooleanSetting(
+      parsed.privacyModeEnabled,
+      DEFAULT_SETTINGS.privacyModeEnabled
+    ),
+    privacyModeScopes: normalizePrivacyModeScopes(parsed.privacyModeScopes),
     avatarFaceRatio: normalizeAvatarFaceRatio(
       parsed.avatarFaceRatio,
       hasLegacyAvatarFaceScalePreset
@@ -311,10 +322,14 @@ function normalizeCompositeScrapers(
     const fieldPluginMap: CompositeScraperDefinition['fieldPluginMap'] = {}
     for (const [field, pluginName] of Object.entries(rawMap)) {
       if (typeof pluginName !== 'string' || !pluginName.trim()) continue
+      const resolvedPluginName =
+        kind === 'actress' && pluginName.trim() === '偶像档案库'
+          ? DEFAULT_SETTINGS.defaultActressScraper
+          : pluginName.trim()
       const mappedFields =
         kind === 'actress' ? expandActressScrapeFields([field]) : [field]
       for (const mappedField of mappedFields) {
-        fieldPluginMap[mappedField as keyof typeof fieldPluginMap] = pluginName.trim()
+        fieldPluginMap[mappedField as keyof typeof fieldPluginMap] = resolvedPluginName
       }
     }
     out.push({

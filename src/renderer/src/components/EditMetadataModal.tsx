@@ -6,6 +6,7 @@ import EditFieldAiTranslate from './EditFieldAiTranslate'
 import { EditFormField, EditFormSection } from './FormPrimitives'
 import ImageImportField from './ImageImportField'
 import Modal from './Modal'
+import { useTheme } from './ThemeProvider'
 
 interface Props {
   video: VideoDetail
@@ -22,6 +23,7 @@ function castNamesByGender(actresses: Actress[], gender: 'female' | 'male'): str
 
 /** Modal form for manually editing a video's metadata. */
 export default function EditMetadataModal({ video, onCancel, onSave }: Props): JSX.Element {
+  const { privacyMode } = useTheme()
   const [title, setTitle] = useState(video.title ?? '')
   const [releaseDate, setReleaseDate] = useState(toDateInputValue(video.release_date))
   const [director, setDirector] = useState(video.director ?? '')
@@ -47,6 +49,9 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
   const [actressesMale, setActressesMale] = useState(initialActressesMale)
   const [coverSourcePath, setCoverSourcePath] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const mediaEditorsHidden =
+    privacyMode.privacyModeEnabled &&
+    privacyMode.privacyModeScopes.includes('mediaEditors')
 
   const splitList = (s: string): string[] =>
     s
@@ -68,7 +73,7 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
         tags: splitList(tags),
         actressesFemale: splitList(actressesFemale),
         actressesMale: splitList(actressesMale),
-        ...(coverSourcePath ? { coverSourcePath } : {})
+        ...(coverSourcePath && !mediaEditorsHidden ? { coverSourcePath } : {})
       })
     } finally {
       setSaving(false)
@@ -90,16 +95,18 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
       onConfirm={() => void handleSave()}
     >
       <div className="entity-edit-form">
-        <EditFormSection title="封面" className="entity-edit-section--media">
-          <ImageImportField
-            label="封面"
-            hideLabel
-            layout="inline"
-            hint="从本地选择图片替换当前封面；保存后生效。支持 JPG、PNG、WebP。"
-            currentUrl={assetUrl(video.cover_path)}
-            onSourcePathChange={setCoverSourcePath}
-          />
-        </EditFormSection>
+        {!mediaEditorsHidden ? (
+          <EditFormSection title="封面" className="entity-edit-section--media">
+            <ImageImportField
+              label="封面"
+              hideLabel
+              layout="inline"
+              hint="从本地选择图片替换当前封面；保存后生效。支持 JPG、PNG、WebP。"
+              currentUrl={assetUrl(video.cover_path)}
+              onSourcePathChange={setCoverSourcePath}
+            />
+          </EditFormSection>
+        ) : null}
 
         <EditFormSection title="基本信息">
           <div className="entity-edit-fields">

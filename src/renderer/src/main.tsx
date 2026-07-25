@@ -3,10 +3,13 @@ import ReactDOM from 'react-dom/client'
 import { HashRouter } from 'react-router-dom'
 import App from './App'
 import QueryProvider from './query/QueryProvider'
+import { restoreCachedPrivacyMode } from './privacyMode'
 import './styles.css'
 import './styles/shell.css'
 import './styles/detail-surfaces.css'
 import './styles/workspaces.css'
+
+restoreCachedPrivacyMode()
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

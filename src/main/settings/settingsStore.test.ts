@@ -53,3 +53,43 @@ describe('settingsStore avatar composition defaults', () => {
     assert.equal(settings.avatarPreserveFullHead, true)
   })
 })
+
+describe('settingsStore privacy mode', () => {
+  it('defaults to disabled with every image scope selected', () => {
+    writeSettings({})
+    const settings = getSettings()
+    assert.equal(settings.privacyModeEnabled, false)
+    assert.deepEqual(settings.privacyModeScopes, [
+      'covers',
+      'videoSamples',
+      'actressGallery',
+      'actressDefaultAvatar',
+      'imagePreview',
+      'mediaEditors',
+      'globalBackground'
+    ])
+  })
+
+  it('keeps valid unique scopes and discards unknown values', () => {
+    writeSettings({
+      privacyModeEnabled: true,
+      privacyModeScopes: ['videoSamples', 'unknown', 'videoSamples', 'covers']
+    })
+    const settings = getSettings()
+    assert.equal(settings.privacyModeEnabled, true)
+    assert.deepEqual(settings.privacyModeScopes, ['videoSamples', 'covers'])
+  })
+
+  it('keeps samples and actress galleries independently selectable', () => {
+    writeSettings({
+      privacyModeEnabled: true,
+      privacyModeScopes: ['videoSamples']
+    })
+    assert.deepEqual(getSettings().privacyModeScopes, ['videoSamples'])
+  })
+
+  it('allows all privacy scopes to be cleared explicitly', () => {
+    writeSettings({ privacyModeEnabled: true, privacyModeScopes: [] })
+    assert.deepEqual(getSettings().privacyModeScopes, [])
+  })
+})

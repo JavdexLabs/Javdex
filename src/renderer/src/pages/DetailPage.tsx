@@ -92,6 +92,7 @@ export default function DetailPage(): JSX.Element {
   const [tallCover, setTallCover] = useState(false)
   const {
     isOpen: coverPreviewOpen,
+    isEnabled: coverPreviewEnabled,
     open: openCoverPreview,
     close: closeCoverPreview
   } = useHistoryBackedImagePreviewState()
@@ -179,7 +180,7 @@ export default function DetailPage(): JSX.Element {
   }
 
   const onCoverKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (!cover || e.defaultPrevented) return
+    if (!cover || !coverPreviewEnabled || e.defaultPrevented) return
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
       openCoverPreview()
@@ -453,13 +454,17 @@ export default function DetailPage(): JSX.Element {
 
           <div className="detail-hero-body">
             <div
-              className={`detail-cover landscape${cover ? ' detail-cover--preview' : ''}`}
-              role={cover ? 'button' : undefined}
-              aria-label={cover ? `查看封面：${video.code}` : undefined}
-              tabIndex={cover ? 0 : undefined}
-              title={cover ? '查看封面' : undefined}
+              className={`detail-cover landscape${
+                cover && coverPreviewEnabled ? ' detail-cover--preview' : ''
+              }`}
+              role={cover && coverPreviewEnabled ? 'button' : undefined}
+              aria-label={
+                cover && coverPreviewEnabled ? `查看封面：${video.code}` : undefined
+              }
+              tabIndex={cover && coverPreviewEnabled ? 0 : undefined}
+              title={cover && coverPreviewEnabled ? '查看封面' : undefined}
               onClick={() => {
-                if (cover) openCoverPreview()
+                if (cover && coverPreviewEnabled) openCoverPreview()
               }}
               onKeyDown={onCoverKeyDown}
             >

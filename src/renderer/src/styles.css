@@ -142,6 +142,10 @@
   --radius-overlay: 12px;
   --focus-outline: 2px solid var(--accent);
   --focus-ring: 0 0 0 3px var(--accent-soft);
+  --privacy-glass-background: color-mix(in srgb, var(--surface-base) 42%, transparent);
+  --privacy-image-filter: blur(16px) saturate(0.48);
+  --privacy-image-scale: 1.22;
+  --privacy-image-scale-compact: 1.5;
   --code-keyword: #9b6fd6;
   --code-string: #b58900;
   --code-comment: var(--text-muted);
@@ -1824,6 +1828,86 @@ textarea.text-input {
   left: 50%;
   transform: translateX(-50%);
   object-fit: contain;
+}
+
+/*
+ * Display-only privacy cover. Blur the enlarged source instead of sampling the backdrop:
+ * this avoids bright seams at clipped and rounded edges on high-contrast images.
+ */
+:root[data-privacy-mode='true'][data-privacy-covers='true']
+  .poster-thumb
+  > img,
+:root[data-privacy-mode='true'][data-privacy-covers='true']
+  .playlist-card-cover
+  > img,
+:root[data-privacy-mode='true'][data-privacy-covers='true']
+  .playlist-detail-cover
+  > img,
+:root[data-privacy-mode='true'][data-privacy-covers='true']
+  .playlist-pick-cover
+  > img,
+:root[data-privacy-mode='true'][data-privacy-covers='true'] .facet-thumb > img,
+:root[data-privacy-mode='true'][data-privacy-covers='true']
+  .detail-cover
+  > img,
+:root[data-privacy-mode='true'][data-privacy-covers='true']
+  .plugin-dev-target-picker-poster
+  > img,
+:root[data-privacy-mode='true'][data-privacy-video-samples='true']
+  .detail-section--samples
+  .sample-masonry-btn
+  > img,
+:root[data-privacy-mode='true'][data-privacy-actress-gallery='true']
+  .actress-gallery-masonry-btn
+  > img {
+  filter: var(--privacy-image-filter);
+  scale: var(--privacy-image-scale);
+}
+
+:root[data-privacy-mode='true'][data-privacy-covers='true']
+  .playlist-card-cover
+  > img,
+:root[data-privacy-mode='true'][data-privacy-covers='true']
+  .playlist-pick-cover
+  > img,
+:root[data-privacy-mode='true'][data-privacy-covers='true']
+  .plugin-dev-target-picker-poster
+  > img {
+  scale: var(--privacy-image-scale-compact);
+}
+
+/* Controls and status badges stay visible above the tint layer. */
+:root[data-privacy-mode='true'][data-privacy-covers='true']
+  .poster-thumb:has(> img)::after,
+:root[data-privacy-mode='true'][data-privacy-covers='true']
+  .playlist-card-cover:has(> img)::after,
+:root[data-privacy-mode='true'][data-privacy-covers='true']
+  .playlist-detail-cover:has(> img)::after,
+:root[data-privacy-mode='true'][data-privacy-covers='true']
+  .playlist-pick-cover:has(> img)::after,
+:root[data-privacy-mode='true'][data-privacy-covers='true']
+  .facet-thumb:has(> img)::after,
+:root[data-privacy-mode='true'][data-privacy-covers='true']
+  .detail-cover:has(> img)::after,
+:root[data-privacy-mode='true'][data-privacy-covers='true']
+  .plugin-dev-target-picker-poster:has(> img)::after,
+:root[data-privacy-mode='true'][data-privacy-video-samples='true']
+  .detail-section--samples
+  .sample-masonry-btn:has(> img)::after,
+:root[data-privacy-mode='true'][data-privacy-actress-gallery='true']
+  .actress-gallery-masonry-btn:has(> img)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: var(--privacy-glass-background);
+}
+
+:root[data-privacy-mode='true'][data-privacy-covers='true'] .poster-badge,
+:root[data-privacy-mode='true'][data-privacy-covers='true'] .poster-hover-control,
+:root[data-privacy-mode='true'][data-privacy-covers='true'] .playlist-card-count {
+  z-index: 2;
 }
 
 /* Display-mode toggle (segmented control). */
@@ -3634,13 +3718,16 @@ button.meta-link:focus-visible {
     box-shadow var(--motion-fast),
     transform var(--motion-fast);
 }
-.sample-masonry-item:hover .sample-masonry-btn,
-.sample-masonry-item:focus-within .sample-masonry-btn,
-.sample-masonry-btn:focus-visible {
+.sample-masonry-item:hover .sample-masonry-btn:not(:disabled),
+.sample-masonry-item:focus-within .sample-masonry-btn:not(:disabled),
+.sample-masonry-btn:focus-visible:not(:disabled) {
   border-color: var(--border-accent);
   box-shadow: var(--shadow);
   transform: translateY(-2px);
   outline: none;
+}
+.sample-masonry-btn:disabled {
+  cursor: default;
 }
 .sample-masonry-btn img {
   display: block;
@@ -4032,29 +4119,15 @@ button.meta-link:focus-visible {
   flex-direction: column;
   overflow: hidden;
   color: var(--text-primary);
-  --preview-glass-blur: blur(24px) saturate(1.45);
-  --preview-glass-bg: linear-gradient(
-    145deg,
-    color-mix(in srgb, #fff 18%, transparent) 0%,
-    color-mix(in srgb, #fff 4%, transparent) 46%,
-    color-mix(in srgb, #fff 11%, transparent) 100%
+  --preview-control-background: color-mix(
+    in srgb,
+    var(--surface-elevated) 92%,
+    var(--surface-base)
   );
-  --preview-glass-bg-hover: linear-gradient(
-    145deg,
-    color-mix(in srgb, #fff 24%, transparent) 0%,
-    color-mix(in srgb, #fff 8%, transparent) 46%,
-    color-mix(in srgb, #fff 16%, transparent) 100%
-  );
-  --preview-glass-border: color-mix(in srgb, #fff 22%, transparent);
-  --preview-glass-border-hover: color-mix(in srgb, #fff 34%, transparent);
-  --preview-glass-shadow:
-    0 4px 18px color-mix(in srgb, #000 14%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #fff 34%, transparent),
-    inset 0 -0.5px 0 color-mix(in srgb, #fff 8%, transparent);
-  --preview-glass-shadow-hover:
-    0 8px 24px color-mix(in srgb, #000 18%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #fff 42%, transparent),
-    inset 0 -0.5px 0 color-mix(in srgb, #fff 10%, transparent);
+  --preview-control-background-hover: var(--surface-control-hover);
+  --preview-control-border: var(--border-strong);
+  --preview-control-border-hover: var(--border-accent);
+  --preview-control-shadow: var(--shadow);
 }
 .image-preview-backdrop {
   position: absolute;
@@ -4098,15 +4171,12 @@ button.meta-link:focus-visible {
     transparent 100%
   );
 }
-.image-preview-glass,
 .image-preview-toolbar-pill,
 .image-preview-poster-chip,
 .image-preview-zoom {
-  border: 1px solid var(--preview-glass-border);
-  background: var(--preview-glass-bg);
-  box-shadow: var(--preview-glass-shadow);
-  backdrop-filter: var(--preview-glass-blur);
-  -webkit-backdrop-filter: var(--preview-glass-blur);
+  border: 1px solid var(--preview-control-border);
+  background: var(--preview-control-background);
+  box-shadow: var(--preview-control-shadow);
   transition:
     background var(--motion-fast),
     border-color var(--motion-fast),
@@ -4123,12 +4193,11 @@ button.meta-link:focus-visible {
   display: inline-flex;
   align-items: center;
   padding: 0 12px;
-  color: color-mix(in srgb, #fff 90%, var(--text-secondary));
+  color: var(--text-secondary);
   font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
-  text-shadow: 0 1px 8px color-mix(in srgb, #000 28%, transparent);
 }
 .image-preview-actions {
   display: flex;
@@ -4143,33 +4212,24 @@ button.meta-link:focus-visible {
   height: 34px;
   padding: 0 12px;
   border-radius: 999px;
-  color: color-mix(in srgb, #fff 92%, var(--text-primary));
+  color: var(--text-primary);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  text-shadow: 0 1px 8px color-mix(in srgb, #000 24%, transparent);
 }
 .image-preview-poster-chip:hover:not(:disabled),
 .image-preview-poster-chip:focus-visible {
-  background: var(--preview-glass-bg-hover);
-  border-color: var(--preview-glass-border-hover);
-  color: #fff;
+  background: var(--preview-control-background-hover);
+  border-color: var(--preview-control-border-hover);
+  color: var(--text-primary);
   outline: none;
-  box-shadow: var(--preview-glass-shadow-hover);
+  box-shadow: var(--focus-ring);
 }
 .image-preview-poster-chip.is-active {
-  border-color: color-mix(in srgb, var(--border-accent) 72%, transparent);
-  color: color-mix(in srgb, #fff 88%, var(--text-accent));
-  background: linear-gradient(
-    145deg,
-    color-mix(in srgb, var(--accent) 22%, transparent) 0%,
-    color-mix(in srgb, #fff 6%, transparent) 52%,
-    color-mix(in srgb, var(--accent) 14%, transparent) 100%
-  );
-  box-shadow:
-    0 4px 18px color-mix(in srgb, var(--accent) 16%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #fff 30%, transparent),
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: var(--border-accent);
+  color: var(--text-accent);
+  background: var(--surface-selected);
+  box-shadow: var(--focus-ring);
 }
 .image-preview-poster-chip:disabled {
   opacity: 0.35;
@@ -4192,26 +4252,24 @@ button.meta-link:focus-visible {
   border: none;
   border-radius: 999px;
   background: transparent;
-  color: color-mix(in srgb, #fff 88%, var(--text-secondary));
+  color: var(--text-secondary);
   box-shadow: none;
-  filter: drop-shadow(0 1px 6px color-mix(in srgb, #000 22%, transparent));
   transition:
     background var(--motion-fast),
     color var(--motion-fast),
-    opacity var(--motion-fast),
-    filter var(--motion-fast);
+    opacity var(--motion-fast);
 }
 .image-preview-icon-btn.icon-btn:hover:not(:disabled),
 .image-preview-icon-btn.icon-btn:focus-visible:not(:disabled) {
-  background: color-mix(in srgb, #fff 16%, transparent);
-  color: #fff;
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
   outline: none;
 }
 .image-preview-icon-btn.icon-btn:focus-visible:not(:disabled) {
   box-shadow: var(--focus-ring);
 }
 .image-preview-icon-btn.icon-btn:active:not(:disabled) {
-  background: color-mix(in srgb, #fff 22%, transparent);
+  background: var(--surface-selected);
 }
 .image-preview-icon-btn.icon-btn:disabled {
   opacity: 0.35;
@@ -4223,13 +4281,12 @@ button.meta-link:focus-visible {
 .image-preview-zoom-label {
   min-width: 44px;
   padding: 0 2px;
-  color: color-mix(in srgb, #fff 84%, var(--text-muted));
+  color: var(--text-muted);
   font-size: 11px;
   font-weight: 600;
   text-align: center;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
-  text-shadow: 0 1px 8px color-mix(in srgb, #000 28%, transparent);
 }
 .image-preview-reset-btn {
   flex-shrink: 0;
@@ -4259,12 +4316,9 @@ button.meta-link:focus-visible {
   flex-shrink: 0;
   --icon-glyph-size: 16px;
   border-radius: 999px;
-  border: 1px solid var(--preview-glass-border);
-  background: var(--preview-glass-bg);
-  box-shadow: var(--preview-glass-shadow);
-  backdrop-filter: var(--preview-glass-blur);
-  -webkit-backdrop-filter: var(--preview-glass-blur);
-  filter: none;
+  border: 1px solid var(--preview-control-border);
+  background: var(--preview-control-background);
+  box-shadow: var(--preview-control-shadow);
   transition:
     background var(--motion-fast),
     border-color var(--motion-fast),
@@ -4274,17 +4328,17 @@ button.meta-link:focus-visible {
 }
 .image-preview-close.image-preview-icon-btn:hover:not(:disabled),
 .image-preview-close.image-preview-icon-btn:focus-visible:not(:disabled) {
-  border-color: var(--preview-glass-border-hover);
-  background: var(--preview-glass-bg-hover);
-  box-shadow: var(--preview-glass-shadow-hover);
-  color: #fff;
+  border-color: var(--preview-control-border-hover);
+  background: var(--preview-control-background-hover);
+  box-shadow: var(--focus-ring);
+  color: var(--text-primary);
   outline: none;
 }
 .image-preview-close.image-preview-icon-btn:focus-visible:not(:disabled) {
-  box-shadow: var(--preview-glass-shadow-hover), var(--focus-ring);
+  box-shadow: var(--focus-ring);
 }
 .image-preview-close.image-preview-icon-btn:active:not(:disabled) {
-  background: var(--preview-glass-bg-hover);
+  background: var(--surface-selected);
 }
 .image-preview-stage {
   position: absolute;
@@ -4429,6 +4483,7 @@ button.meta-link:focus-visible {
   font-size: 10px;
   font-weight: 600;
   line-height: 1.3;
+  z-index: 2;
 }
 .tag-list {
   display: flex;
@@ -5481,6 +5536,7 @@ button.tag-chip--custom-pick {
   box-shadow: var(--shadow-elevated);
 }
 .facet-thumb {
+  position: relative;
   width: 100%;
   aspect-ratio: 1.49 / 1;
   background: linear-gradient(135deg, var(--thumb-gradient-start), var(--thumb-gradient-end));
@@ -10315,6 +10371,7 @@ button.actress-mini:focus-visible .actress-avatar {
 
 .plugin-dev-target-picker-poster,
 .plugin-dev-target-picker-avatar {
+  position: relative;
   width: 38px;
   height: 38px;
   display: inline-flex;
@@ -15202,6 +15259,81 @@ button.alias-tag-chip-name:disabled {
 
 .settings-toggle-list--compact {
   margin-top: 10px;
+}
+
+.privacy-mode-card {
+  overflow: hidden;
+}
+
+.privacy-mode-card .settings-card-head {
+  margin-bottom: 0;
+}
+
+.privacy-mode-disclosure {
+  margin:
+    12px calc(var(--settings-card-pad-x, 18px) * -1)
+    calc(var(--settings-card-pad-y, 16px) * -1);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.privacy-mode-disclosure-trigger {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content 16px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--target-min);
+  padding: 9px var(--settings-card-pad-x, 18px);
+  border: 0;
+  background: color-mix(in srgb, var(--surface-control) 26%, transparent);
+  color: var(--text-primary);
+  text-align: left;
+  transition: background var(--motion-fast);
+}
+
+.privacy-mode-disclosure-trigger:hover {
+  background: color-mix(in srgb, var(--surface-control-hover) 55%, transparent);
+}
+
+.privacy-mode-disclosure-trigger:focus-visible {
+  position: relative;
+  z-index: 1;
+  box-shadow: inset var(--focus-ring);
+}
+
+.privacy-mode-disclosure-title {
+  min-width: 0;
+  font-size: var(--settings-fs-body, 13px);
+  font-weight: var(--settings-fw-label, 600);
+}
+
+.privacy-mode-disclosure-meta {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  font-variant-numeric: tabular-nums;
+}
+
+.privacy-mode-disclosure-chevron {
+  justify-self: end;
+  color: var(--text-muted);
+  transition: transform var(--motion-fast);
+}
+
+.privacy-mode-disclosure.is-expanded .privacy-mode-disclosure-chevron {
+  transform: rotate(180deg);
+}
+
+.privacy-mode-scope-list.settings-toggle-list {
+  margin-top: 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--surface-control) 18%, transparent);
+}
+
+.privacy-mode-scope-list .settings-toggle-item {
+  padding-right: var(--settings-card-pad-x, 18px);
+  padding-left: var(--settings-card-pad-x, 18px);
 }
 
 .settings-toggle-item {

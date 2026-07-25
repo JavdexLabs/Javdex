@@ -10,6 +10,7 @@ import {
   expandActressScrapeFields,
   normalizePluginDevAgentMaxContextTokens,
   normalizePluginDevAgentMaxSteps,
+  normalizePrivacyModeScopes,
   normalizeTheme,
   normalizeMinScanImportDurationMinutes
 } from '@shared/types'
@@ -102,6 +103,11 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
     defaultScraper,
     defaultActressScraper,
     theme: normalizeTheme(parsed.theme),
+    privacyModeEnabled: normalizeBooleanSetting(
+      parsed.privacyModeEnabled,
+      DEFAULT_SETTINGS.privacyModeEnabled
+    ),
+    privacyModeScopes: normalizePrivacyModeScopes(parsed.privacyModeScopes),
     avatarFaceRatio: normalizeAvatarFaceRatio(
       parsed.avatarFaceRatio,
       hasLegacyAvatarFaceScalePreset

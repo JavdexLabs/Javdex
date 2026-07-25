@@ -108,7 +108,7 @@ export default function SettingsPage(): JSX.Element {
   const toast = useToast()
   const navigate = useNavigate()
   const location = useLocation()
-  const { theme, setTheme } = useTheme()
+  const { theme, setTheme, syncPrivacyMode } = useTheme()
   const { group: activeGroup, tab: activeTab } = resolveSettingsRoute(location.pathname)
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [updateCheckState, setUpdateCheckState] = useState<UpdateCheckState | null>(null)
@@ -582,6 +582,8 @@ export default function SettingsPage(): JSX.Element {
         AppSettings,
         | 'videoDetailUseFirstSampleBackground'
         | 'actressDetailUseFirstGalleryBackground'
+        | 'privacyModeEnabled'
+        | 'privacyModeScopes'
         | 'avatarFaceRatio'
         | 'avatarCenteringMode'
         | 'avatarPreserveFullHead'
@@ -592,6 +594,9 @@ export default function SettingsPage(): JSX.Element {
     try {
       const next = await api.settings.update(patch)
       setSettings(next)
+      if (patch.privacyModeEnabled !== undefined || patch.privacyModeScopes !== undefined) {
+        syncPrivacyMode(next)
+      }
       return true
     } catch (e) {
       toast.show(String((e as Error).message), 'error')

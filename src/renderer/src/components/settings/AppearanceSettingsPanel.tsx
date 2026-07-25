@@ -1,11 +1,18 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { AppSettings, ThemeId } from '@shared/types'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronDown } from 'lucide-react'
+import {
+  PRIVACY_MODE_SCOPES,
+  type AppSettings,
+  type PrivacyModeScope,
+  type ThemeId
+} from '@shared/types'
 import {
   MAX_AVATAR_FACE_RATIO,
   MIN_AVATAR_FACE_RATIO,
   normalizeAvatarFaceRatio
 } from '@shared/avatarFaceScale'
 import type { AvatarCenteringMode } from '@shared/avatarCentering'
+import type { PrivacyModeSettings } from '../../privacyMode'
 import { THEME_OPTIONS } from '../../theme'
 import avatarCompositionLonghairUrl from '../../assets/avatar-composition-longhair.png'
 import { createAvatarAnalysisBitmap } from '../../avatarAutoCrop/image'
@@ -19,8 +26,10 @@ import { getCropImageLayout, getSmartAvatarCropTransform } from '../../utils/ava
 import { useAvatarAutoCropBatch } from '../../contexts/AvatarAutoCropBatchContext'
 import ConfirmModal from '../ConfirmModal'
 import SettingsSwitchRow from '../SettingsSwitchRow'
+import { useTheme } from '../ThemeProvider'
 import { useToast } from '../Toast'
-import { SettingsCard } from './SettingsPrimitives'
+import { UI_ICON_SM } from '../iconDefaults'
+import { SettingsCard, SettingsHeaderSwitch } from './SettingsPrimitives'
 
 const AVATAR_COMPOSITION_PREVIEW_SIZE = 172
 
@@ -32,10 +41,67 @@ const CENTERING_MODE_OPTIONS: Array<{
   { id: 'head', label: '头部' }
 ]
 
+const PRIVACY_SCOPE_OPTIONS: Array<{
+  scope: PrivacyModeScope
+  label: string
+  description: string
+}> = [
+  {
+    scope: 'covers',
+    label: '封面',
+    description: '遮盖影片卡片、影片详情页、清单、分类与插件开发选片封面'
+  },
+  {
+    scope: 'actressDefaultAvatar',
+    label: '头像',
+    description: '使用内置默认头像替换所有真实演员头像'
+  },
+  {
+    scope: 'videoSamples',
+    label: '样张',
+    description: '遮盖影片详情页中的样张缩略图'
+  },
+  {
+    scope: 'actressGallery',
+    label: '写真',
+    description: '遮盖演员详情页中的写真缩略图'
+  },
+  {
+    scope: 'globalBackground',
+    label: '背景',
+    description: '临时隐藏详情背景；关闭后恢复用户原来的背景设置'
+  },
+  {
+    scope: 'imagePreview',
+    label: '图片预览',
+    description: '禁用封面、头像、样张与写真的全屏图片预览'
+  },
+  {
+    scope: 'mediaEditors',
+    label: '图片编辑',
+    description: '隐藏影片与清单封面、演员头像的图片编辑模块'
+  }
+]
+
 type AvatarCompositionDraft = Pick<
   AppSettings,
   'avatarFaceRatio' | 'avatarCenteringMode' | 'avatarPreserveFullHead'
 >
+
+function clonePrivacySettings(settings: PrivacyModeSettings): PrivacyModeSettings {
+  return {
+    privacyModeEnabled: settings.privacyModeEnabled,
+    privacyModeScopes: [...settings.privacyModeScopes]
+  }
+}
+
+function privacySettingsEqual(a: PrivacyModeSettings, b: PrivacyModeSettings): boolean {
+  return (
+    a.privacyModeEnabled === b.privacyModeEnabled &&
+    a.privacyModeScopes.length === b.privacyModeScopes.length &&
+    a.privacyModeScopes.every((scope, index) => scope === b.privacyModeScopes[index])
+  )
+}
 
 function avatarCompositionDraftFromSettings(settings: AppSettings): AvatarCompositionDraft {
   return {
@@ -190,14 +256,23 @@ export default function AppearanceSettingsPanel({
   scrapeBatchActive: boolean
 }): JSX.Element {
   const toast = useToast()
+  const { syncPrivacyMode } = useTheme()
   const avatarAutoCropBatch = useAvatarAutoCropBatch()
   const [isEditingAvatarComposition, setIsEditingAvatarComposition] = useState(false)
   const [isSavingAvatarComposition, setIsSavingAvatarComposition] = useState(false)
   const [isCountingBatchAvatars, setIsCountingBatchAvatars] = useState(false)
+  const [privacyScopesExpanded, setPrivacyScopesExpanded] = useState(false)
   const [batchConfirmCount, setBatchConfirmCount] = useState<number | null>(null)
   const [avatarCompositionDraft, setAvatarCompositionDraft] = useState<AvatarCompositionDraft>(() =>
     avatarCompositionDraftFromSettings(settings)
   )
+  const [privacyDraft, setPrivacyDraft] = useState<PrivacyModeSettings>(() =>
+    clonePrivacySettings(settings)
+  )
+  const privacyDraftRef = useRef(privacyDraft)
+  const lastPersistedPrivacyRef = useRef(clonePrivacySettings(settings))
+  const privacyPersistQueueRef = useRef(Promise.resolve())
+  const privacyPersistPendingRef = useRef(0)
 
   useEffect(() => {
     if (!isEditingAvatarComposition) {
@@ -209,6 +284,19 @@ export default function AppearanceSettingsPanel({
     settings.avatarFaceRatio,
     settings.avatarPreserveFullHead
   ])
+
+  useEffect(() => {
+    if (privacyPersistPendingRef.current > 0) return
+    const incoming = clonePrivacySettings(settings)
+    lastPersistedPrivacyRef.current = incoming
+    if (privacySettingsEqual(privacyDraftRef.current, incoming)) return
+    privacyDraftRef.current = incoming
+    setPrivacyDraft(incoming)
+  }, [settings.privacyModeEnabled, settings.privacyModeScopes])
+
+  useEffect(() => {
+    if (!privacyDraft.privacyModeEnabled) setPrivacyScopesExpanded(false)
+  }, [privacyDraft.privacyModeEnabled])
 
   const updateAvatarCompositionDraft = (patch: Partial<AvatarCompositionDraft>): void => {
     setAvatarCompositionDraft((current) => ({ ...current, ...patch }))
@@ -243,6 +331,62 @@ export default function AppearanceSettingsPanel({
   const batchRunning =
     avatarAutoCropBatch.state.status === 'running' ||
     avatarAutoCropBatch.state.status === 'cancelling'
+  const privacyScopes = new Set(privacyDraft.privacyModeScopes)
+  const enabledPrivacyScopeCount = PRIVACY_SCOPE_OPTIONS.filter((option) =>
+    privacyScopes.has(option.scope)
+  ).length
+
+  const persistPrivacyDraft = (next: PrivacyModeSettings): void => {
+    const draft = clonePrivacySettings(next)
+    privacyDraftRef.current = draft
+    setPrivacyDraft(draft)
+    syncPrivacyMode(draft)
+    privacyPersistPendingRef.current += 1
+    privacyPersistQueueRef.current = privacyPersistQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const snapshot = clonePrivacySettings(privacyDraftRef.current)
+        const saved = await onPatchSettings({
+          privacyModeEnabled: snapshot.privacyModeEnabled,
+          privacyModeScopes: snapshot.privacyModeScopes
+        })
+        if (saved === false) {
+          // A newer optimistic toggle may already supersede this snapshot; leave it alone.
+          if (!privacySettingsEqual(privacyDraftRef.current, snapshot)) return
+          const revert = clonePrivacySettings(lastPersistedPrivacyRef.current)
+          privacyDraftRef.current = revert
+          setPrivacyDraft(revert)
+          syncPrivacyMode(revert)
+          return
+        }
+        lastPersistedPrivacyRef.current = snapshot
+      })
+      .finally(() => {
+        privacyPersistPendingRef.current = Math.max(0, privacyPersistPendingRef.current - 1)
+      })
+  }
+
+  const togglePrivacyMode = (enabled: boolean): void => {
+    setPrivacyScopesExpanded(enabled)
+    const current = privacyDraftRef.current
+    persistPrivacyDraft({
+      privacyModeEnabled: enabled,
+      privacyModeScopes:
+        enabled && current.privacyModeScopes.length === 0
+          ? [...PRIVACY_MODE_SCOPES]
+          : [...current.privacyModeScopes]
+    })
+  }
+
+  const togglePrivacyScope = (scope: PrivacyModeScope, enabled: boolean): void => {
+    const nextScopes = new Set(privacyDraftRef.current.privacyModeScopes)
+    if (enabled) nextScopes.add(scope)
+    else nextScopes.delete(scope)
+    persistPrivacyDraft({
+      privacyModeScopes: Array.from(nextScopes),
+      privacyModeEnabled: nextScopes.size === 0 ? false : privacyDraftRef.current.privacyModeEnabled
+    })
+  }
 
   const prepareBatchAvatarCrop = async (): Promise<void> => {
     if (scrapeBatchActive) {
@@ -541,6 +685,60 @@ export default function AppearanceSettingsPanel({
             onChange={(checked) => onPatchSettings({ actressDetailUseFirstGalleryBackground: checked })}
           />
         </div>
+      </SettingsCard>
+
+      <SettingsCard
+        className="privacy-mode-card"
+        title="防窥模式"
+        hint="遮盖或隐藏敏感图片；仅影响显示，不修改本地文件。"
+        actions={
+          <SettingsHeaderSwitch
+            label="防窥模式"
+            checked={privacyDraft.privacyModeEnabled}
+            onChange={togglePrivacyMode}
+          />
+        }
+      >
+        {privacyDraft.privacyModeEnabled ? (
+          <div
+            className={`privacy-mode-disclosure${
+              privacyScopesExpanded ? ' is-expanded' : ''
+            }`}
+          >
+            <button
+              type="button"
+              className="privacy-mode-disclosure-trigger"
+              aria-expanded={privacyScopesExpanded}
+              aria-controls="privacy-mode-scope-list"
+              onClick={() => setPrivacyScopesExpanded((expanded) => !expanded)}
+            >
+              <span className="privacy-mode-disclosure-title">保护范围</span>
+              <span className="privacy-mode-disclosure-meta">
+                已启用 {enabledPrivacyScopeCount} 项
+              </span>
+              <ChevronDown
+                {...UI_ICON_SM}
+                className="privacy-mode-disclosure-chevron"
+              />
+            </button>
+            {privacyScopesExpanded ? (
+              <div
+                id="privacy-mode-scope-list"
+                className="settings-toggle-list privacy-mode-scope-list"
+              >
+                {PRIVACY_SCOPE_OPTIONS.map((option) => (
+                  <SettingsSwitchRow
+                    key={option.scope}
+                    title={option.label}
+                    description={option.description}
+                    checked={privacyScopes.has(option.scope)}
+                    onChange={(checked) => togglePrivacyScope(option.scope, checked)}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </SettingsCard>
     </>
   )

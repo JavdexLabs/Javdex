@@ -69,6 +69,13 @@ async function collectVideoFiles(
       await collectVideoFiles(full, acc, signal)
     } else if (entry.isFile() && isVideoFile(full)) {
       acc.push(full)
+    } else if (entry.isSymbolicLink() && isVideoFile(full)) {
+      try {
+        const target = await fs.promises.stat(full)
+        if (target.isFile()) acc.push(full)
+      } catch {
+        // Broken or inaccessible symbolic link — skip.
+      }
     }
   }
 }

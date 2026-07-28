@@ -32,3 +32,17 @@
 - **`PLUGIN_DEV_AGENT.md`** — 开发助手工作流与工具说明（生产工具）。
 
 产品功能与版本说明见根目录 `README.md`、`CHANGELOG.md`。
+
+## Agent skills
+
+### Issue tracker
+
+Issue 与 PRD 统一记录在 GitHub Issues。详见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+使用五个默认分类标签。详见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+采用单上下文领域文档布局。详见 `docs/agents/domain.md`。

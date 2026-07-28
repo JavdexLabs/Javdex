@@ -28,7 +28,7 @@ import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavig
 import { invalidateActressLibraryQueries } from '../query/invalidateLibraryQueries'
 import { actressKeys, overviewStatsKeys } from '../query/queryKeys'
 import ActressAvatar from '../components/ActressAvatar'
-import MediaTileDeleteButton from '../components/MediaTileDeleteButton'
+import MediaTileActionButton from '../components/MediaTileActionButton'
 import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
 import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
@@ -339,7 +339,7 @@ export default function ActressesPage(): JSX.Element {
                       <div className="actress-count">{a.video_count} 部</div>
                     </button>
                     {a.video_count === 0 && (
-                      <MediaTileDeleteButton
+                      <MediaTileActionButton
                         label={`删除演员 ${a.main_name}`}
                         title="删除"
                         onClick={() => setPendingDelete(a)}

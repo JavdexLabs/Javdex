@@ -16,7 +16,7 @@ import { navigateToFacetDetail } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { facetKeys } from '../query/queryKeys'
-import MediaTileDeleteButton from '../components/MediaTileDeleteButton'
+import MediaTileActionButton from '../components/MediaTileActionButton'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import { UI_ICON_SM } from '../components/iconDefaults'
@@ -189,7 +189,7 @@ export default function FacetListPage(): JSX.Element {
                       <div className="facet-count">{it.video_count} 部</div>
                     </button>
                     {it.video_count === 0 && (
-                      <MediaTileDeleteButton
+                      <MediaTileActionButton
                         label={`删除${label} ${it.value}`}
                         title="删除"
                         onClick={() => setPendingDelete(it)}

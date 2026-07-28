@@ -3734,8 +3734,8 @@ button.meta-link:focus-visible {
   width: 100%;
   height: auto;
 }
-/* Overlay delete on masonry / gallery image tiles */
-.media-tile-delete.icon-btn {
+/* Overlay actions on masonry, gallery, person, and facet tiles. */
+.media-tile-action.icon-btn {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -3745,12 +3745,9 @@ button.meta-link:focus-visible {
   min-width: 26px;
   min-height: 26px;
   --icon-glyph-size: 12px;
-  border: 1px solid color-mix(in srgb, #fff 12%, transparent);
   border-radius: 6px;
-  background: color-mix(in srgb, var(--surface-base) 62%, transparent);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  color: color-mix(in srgb, #fff 92%, var(--text-primary));
   box-shadow:
     0 1px 2px color-mix(in srgb, #000 28%, transparent),
     inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
@@ -3765,38 +3762,61 @@ button.meta-link:focus-visible {
     transform var(--motion-fast);
 }
 
-.sample-masonry-item:hover .media-tile-delete,
-.sample-masonry-item:focus-within .media-tile-delete,
-.image-import-tile:hover .media-tile-delete,
-.image-import-tile:focus-within .media-tile-delete,
-.actress-card-wrap:hover .media-tile-delete,
-.actress-card-wrap:focus-within .media-tile-delete,
-.facet-card-wrap:hover .media-tile-delete,
-.facet-card-wrap:focus-within .media-tile-delete,
-.media-tile-delete:focus-visible {
+.media-tile-action--delete.icon-btn {
+  border-color: var(--border-danger);
+  background: color-mix(in srgb, var(--surface-danger) 76%, transparent);
+  color: var(--text-danger);
+}
+
+.media-tile-action--remove.icon-btn {
+  border-color: color-mix(in srgb, var(--border-strong) 54%, transparent);
+  background: color-mix(in srgb, var(--surface-base) 72%, transparent);
+  color: var(--text-secondary);
+}
+
+.sample-masonry-item:hover .media-tile-action,
+.sample-masonry-item:focus-within .media-tile-action,
+.image-import-tile:hover .media-tile-action,
+.image-import-tile:focus-within .media-tile-action,
+.actress-card-wrap:hover .media-tile-action,
+.actress-card-wrap:focus-within .media-tile-action,
+.facet-card-wrap:hover .media-tile-action,
+.facet-card-wrap:focus-within .media-tile-action,
+.media-tile-action:focus-visible {
   opacity: 1;
   pointer-events: auto;
 }
 
-.media-tile-delete.icon-btn:hover:not(:disabled),
-.media-tile-delete.icon-btn:focus-visible:not(:disabled) {
-  background: color-mix(in srgb, var(--surface-base) 78%, transparent);
-  border-color: color-mix(in srgb, #fff 22%, transparent);
-  color: #fff;
+.media-tile-action--delete.icon-btn:hover:not(:disabled),
+.media-tile-action--delete.icon-btn:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--surface-danger) 88%, var(--surface-base));
+  border-color: color-mix(in srgb, var(--danger) 58%, var(--border-subtle));
+  color: var(--danger);
   box-shadow:
     0 2px 8px color-mix(in srgb, #000 34%, transparent),
     inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent);
   outline: none;
 }
 
-.media-tile-delete.icon-btn:focus-visible:not(:disabled) {
+.media-tile-action--remove.icon-btn:hover:not(:disabled),
+.media-tile-action--remove.icon-btn:focus-visible:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.media-tile-action.icon-btn:focus-visible:not(:disabled) {
   box-shadow:
     var(--focus-ring),
     0 1px 2px color-mix(in srgb, #000 28%, transparent);
 }
 
-.media-tile-delete.icon-btn:active:not(:disabled) {
+.media-tile-action.icon-btn:active:not(:disabled) {
   transform: scale(0.94);
+}
+
+.media-tile-action--delete.icon-btn:active:not(:disabled) {
   background: color-mix(in srgb, var(--danger) 48%, var(--surface-base));
   border-color: color-mix(in srgb, var(--danger) 35%, transparent);
 }
@@ -5106,8 +5126,8 @@ button.tag-chip--custom-pick {
 .facet-card-wrap {
   position: relative;
 }
-.actress-card-wrap .media-tile-delete,
-.facet-card-wrap .media-tile-delete {
+.actress-card-wrap .media-tile-action,
+.facet-card-wrap .media-tile-action {
   top: 6px;
   right: 6px;
 }

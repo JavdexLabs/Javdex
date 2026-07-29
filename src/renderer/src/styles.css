@@ -5132,7 +5132,8 @@ button.tag-chip--custom-pick {
   right: 6px;
 }
 .actress-card-wrap:hover .poster-hover-control,
-.actress-card-wrap:focus-within .poster-hover-control,
+.actress-card-wrap:has(.actress-card:focus-visible) .poster-hover-control,
+.actress-card-wrap .poster-hover-control:focus-visible,
 .actress-card-wrap .poster-hover-control.is-visible {
   opacity: 1;
   pointer-events: auto;

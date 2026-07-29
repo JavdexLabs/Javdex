@@ -131,6 +131,7 @@ describe('scraperPluginService', () => {
     assert.equal(xslist.supportedFields.includes('bustCm' as never), false)
     const gfriends = builtInDescriptor('actress', 'Gfriends')
     assert.deepEqual(gfriends.supportedFields, ['avatar'])
+    assert.deepEqual(gfriends.delay, { minMs: 0, maxMs: 0 })
   })
 
   it('drops unknown actress supported field ids from packages', async () => {

@@ -32,6 +32,13 @@ import { getSettings, updateSettings } from '../settings/settingsStore'
 import { readTestUserDataPath } from '@shared/appIdentity'
 
 const PLUGIN_SCHEMA_VERSION = 1
+const PLUGIN_DEFAULT_DELAYS: Partial<
+  Record<ScraperPluginKind, Record<string, ScraperPluginDelay>>
+> = {
+  actress: {
+    Gfriends: { minMs: 0, maxMs: 0 }
+  }
+}
 
 interface StoredPluginManifest {
   schemaVersion: 1
@@ -740,7 +747,8 @@ function normalizeCompositeFieldMap(
 function delayForPlugin(kind: ScraperPluginKind, name: string): ScraperPluginDelay {
   const settings = getSettings()
   return (
-    settings.scraperPluginDelays[kind][name] ?? {
+    settings.scraperPluginDelays[kind][name] ??
+    PLUGIN_DEFAULT_DELAYS[kind]?.[name] ?? {
       minMs: settings.batchDelayMinMs,
       maxMs: settings.batchDelayMaxMs
     }

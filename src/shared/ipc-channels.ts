@@ -62,6 +62,7 @@ export const IPC = {
   ACTRESS_AVATAR_SOURCE_INFO: 'actress:avatarSourceInfo',
   ACTRESS_EDIT: 'actress:edit',
   ACTRESS_DELETE: 'actress:delete',
+  ACTRESS_DELETE_BATCH: 'actress:deleteBatch',
   ACTRESS_CLEAR_META: 'actress:clearMeta',
   ACTRESS_GALLERY_IMPORT: 'actress:galleryImport',
   ACTRESS_GALLERY_DELETE: 'actress:galleryDelete',

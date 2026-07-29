@@ -61,6 +61,12 @@ function fieldListLabel(fields: ActressScrapeField[]): string {
   return fields.map((field) => FIELD_LABEL.get(field) ?? field).join('、')
 }
 
+function explicitActressIds(request: ActressBatchScrapeRequest): number[] {
+  return request.actressIds
+    ? Array.from(new Set(request.actressIds.filter((id) => Number.isFinite(id))))
+    : []
+}
+
 function defaultRequest(scraperName?: string): ActressBatchScrapeRequest {
   return {
     scraperName,
@@ -132,7 +138,9 @@ class ActressScrapeQueue {
       typeof requestOrScraperName === 'string'
         ? defaultRequest(requestOrScraperName)
         : (requestOrScraperName ?? defaultRequest())
+    const explicitIds = explicitActressIds(request)
     const targets = listActressesForBatchScrape({
+      actressIds: explicitIds.length > 0 ? explicitIds : request.actressIds,
       scope: request.scope,
       scrapeStatus: request.scrapeStatus,
       missingFields: request.missingFields
@@ -163,7 +171,11 @@ class ActressScrapeQueue {
         )
       }
     })
-    const scopeLabel = SCOPE_LABEL.get(request.scope) ?? request.scope
+    const selectedIds = explicitActressIds(request)
+    const scopeLabel =
+      selectedIds.length > 0
+        ? `已选 ${selectedIds.length} 位演员`
+        : (SCOPE_LABEL.get(request.scope) ?? request.scope)
     const statusLabel =
       STATUS_LABEL.get(request.scrapeStatus ?? 'all') ?? request.scrapeStatus ?? '全部'
     const missingLabel =

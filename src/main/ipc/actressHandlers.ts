@@ -13,6 +13,7 @@ import type {
 } from '@shared/types'
 import {
   deleteActress,
+  deleteUnlinkedActresses,
   clearActressMetadataRecord,
   editActress,
   getActressDetail,
@@ -57,6 +58,10 @@ export function registerActressHandlers(): void {
     deleteActress(id)
     return true
   })
+
+  registerHandler(IPC.ACTRESS_DELETE_BATCH, (_e, ids: number[]): number =>
+    deleteUnlinkedActresses(ids)
+  )
 
   registerHandler(IPC.ACTRESS_CLEAR_META, (_e, id: number): boolean => {
     clearActressMetadataRecord(id)

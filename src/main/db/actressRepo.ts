@@ -214,10 +214,22 @@ function actressScrapedCondition(): string {
 }
 
 function buildActressBatchConditions(
-  filter: Pick<ActressBatchScrapeFilter, 'scope' | 'scrapeStatus'>
+  filter: Pick<ActressBatchScrapeFilter, 'actressIds' | 'scope' | 'scrapeStatus'>
 ): { conditions: string[]; params: unknown[] } {
   const conditions: string[] = []
   const params: unknown[] = []
+
+  if (filter.actressIds) {
+    const actressIds = Array.from(
+      new Set(filter.actressIds.map((id) => Number(id)).filter((id) => Number.isFinite(id)))
+    )
+    if (actressIds.length === 0) {
+      conditions.push('0')
+    } else {
+      conditions.push(`a.id IN (${actressIds.map(() => '?').join(', ')})`)
+      params.push(...actressIds)
+    }
+  }
 
   if (filter.scope === 'female') {
     conditions.push("(a.gender IS NULL OR a.gender = 'female')")
@@ -253,7 +265,7 @@ function buildBatchActressWhere(filter: ActressBatchScrapeFilter): {
 }
 
 function actressBatchScopeSql(
-  filter: Pick<ActressBatchScrapeFilter, 'scope' | 'scrapeStatus'>
+  filter: Pick<ActressBatchScrapeFilter, 'actressIds' | 'scope' | 'scrapeStatus'>
 ): {
   sql: string
   params: unknown[]
@@ -266,7 +278,7 @@ function actressBatchScopeSql(
 }
 
 function listActressesWithBrokenAvatars(
-  filter: Pick<ActressBatchScrapeFilter, 'scope' | 'scrapeStatus'>
+  filter: Pick<ActressBatchScrapeFilter, 'actressIds' | 'scope' | 'scrapeStatus'>
 ): ActressBatchTarget[] {
   const db = getDb()
   const { sql: scopeSql, params } = actressBatchScopeSql(filter)
@@ -1027,21 +1039,52 @@ export function clearActressMetadataRecord(id: number): void {
 
 /** Delete an actress that has no linked videos. Removes aliases and avatar. */
 export function deleteActress(id: number): void {
+  deleteUnlinkedActresses([id])
+}
+
+/** Atomically delete actress records only when every selected actress has no linked videos. */
+export function deleteUnlinkedActresses(ids: number[]): number {
   const db = getDb()
-  const count = db
-    .prepare('SELECT COUNT(*) AS c FROM video_actress WHERE actress_id = ?')
-    .get(id) as { c: number }
-  if (count.c > 0) throw new Error('仍有影片关联，无法删除')
+  const uniqueIds = Array.from(
+    new Set(ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))
+  )
+  if (uniqueIds.length === 0) return 0
 
-  const actress = db
-    .prepare('SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?')
-    .get(id) as { avatar_path: string | null; avatar_source_path: string | null } | undefined
-  if (!actress) throw new Error('演员不存在')
+  const assets = db.transaction(() => {
+    const findActress = db.prepare(
+      'SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?'
+    )
+    const countLinks = db.prepare(
+      'SELECT COUNT(*) AS c FROM video_actress WHERE actress_id = ?'
+    )
+    const listGallery = db.prepare(
+      'SELECT local_path FROM actress_gallery_assets WHERE actress_id = ?'
+    )
+    const removeActress = db.prepare('DELETE FROM actresses WHERE id = ?')
+    const paths: Array<string | null> = []
+    let linkedCount = 0
 
-  deleteActressGalleryAssets(id)
-  db.prepare('DELETE FROM actresses WHERE id = ?').run(id)
-  deleteAsset(actress.avatar_path)
-  deleteAsset(actress.avatar_source_path)
+    for (const id of uniqueIds) {
+      const actress = findActress.get(id) as
+        | { avatar_path: string | null; avatar_source_path: string | null }
+        | undefined
+      if (!actress) throw new Error('选中的演员不存在，请刷新列表后重试')
+      const links = countLinks.get(id) as { c: number }
+      if (links.c > 0) linkedCount += 1
+      paths.push(actress.avatar_path, actress.avatar_source_path)
+      const gallery = listGallery.all(id) as { local_path: string | null }[]
+      paths.push(...gallery.map((item) => item.local_path))
+    }
+
+    if (linkedCount > 0) {
+      throw new Error(`${linkedCount} 位演员仍有关联影片，整批未删除`)
+    }
+    for (const id of uniqueIds) removeActress.run(id)
+    return paths
+  })()
+
+  for (const assetPath of assets) deleteAsset(assetPath)
+  return uniqueIds.length
 }
 
 function isActressNameAvailable(name: string, exceptId: number): boolean {

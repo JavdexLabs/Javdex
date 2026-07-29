@@ -28,7 +28,7 @@
 
 ## Component Rules
 
-- Toolbar: search on the left, global actions on the right, result count stable and right aligned.
+- Toolbar: normal browsing mode keeps search on the left, global actions on the right, and the result count stable and right aligned. Contextual card-selection mode may temporarily replace this row with `SelectionToolbar`.
 - Filter popover: grouped fields, short labels, reset/apply actions at the bottom, selected filters mirrored as removable chips.
 - Cards: 8px radius maximum for repeated media/facet cards, hover may change border/elevation but must not resize layout.
 - Buttons: primary only for committing or starting major actions; ghost for low-emphasis actions; danger never filled unless destructive confirmation is explicit.

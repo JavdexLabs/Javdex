@@ -11,6 +11,7 @@ export type SelectionToolbarAction = {
   primary?: boolean
   danger?: boolean
   disabled?: boolean
+  title?: string
 }
 
 interface SelectionToolbarProps {
@@ -36,6 +37,7 @@ export default function SelectionToolbar({
             type="button"
             className={`btn btn-sm${action.primary ? ' btn-primary' : ''}${action.danger ? ' btn-danger' : ''}`}
             disabled={action.disabled}
+            title={action.title}
             onClick={action.onClick}
           >
             {action.icon}

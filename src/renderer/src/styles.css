@@ -5131,6 +5131,16 @@ button.tag-chip--custom-pick {
   top: 6px;
   right: 6px;
 }
+.actress-card-wrap:hover .poster-hover-control,
+.actress-card-wrap:focus-within .poster-hover-control,
+.actress-card-wrap .poster-hover-control.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.actress-card-wrap.is-selected .actress-card {
+  border-color: var(--border-accent);
+  box-shadow: var(--focus-ring);
+}
 
 .actress-card {
   position: relative;

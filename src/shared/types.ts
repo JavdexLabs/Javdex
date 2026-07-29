@@ -915,6 +915,8 @@ export const ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS: ScrapeUpdateModeOption<ActressS
 ]
 
 export interface ActressBatchScrapeFilter {
+  /** Optional explicit target ids. An empty array matches no actresses. */
+  actressIds?: number[]
   /** Filter by actor gender. Unknown gender is treated as female for compatibility. */
   scope: ActressBatchScrapeScope
   /** Filter by profile scrape history. Default: all. */

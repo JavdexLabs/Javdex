@@ -1,18 +1,30 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMatch, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { SearchX, Users } from 'lucide-react'
-import { ACTRESS_LIST_DEFAULTS, type ActressListItem, type ActressListSortBy } from '@shared/types'
+import { SearchCheck, SearchX, Trash2, Users } from 'lucide-react'
+import {
+  ACTRESS_LIST_DEFAULTS,
+  ACTRESS_SCRAPE_FIELD_OPTIONS,
+  ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS,
+  ALL_ACTRESS_SCRAPE_FIELDS,
+  type ActressListItem,
+  type ActressListSortBy,
+  type ActressScrapeField,
+  type ActressScrapeUpdateMode
+} from '@shared/types'
 import { api, assetUrl } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
+import { useRangeSelection } from '../hooks/useRangeSelection'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useToast } from '../components/Toast'
 import ConfirmModal from '../components/ConfirmModal'
 import ActressName from '../components/ActressName'
 import AppliedFilterBar, { type AppliedFilterItem } from '../components/AppliedFilterBar'
 import ListToolbar from '../components/ListToolbar'
+import SelectionToolbar from '../components/SelectionToolbar'
 import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
+import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
 import {
   actressQueryHash,
   LIST_PARAM,
@@ -105,9 +117,14 @@ export default function ActressesPage(): JSX.Element {
   )
 
   const [pendingDelete, setPendingDelete] = useState<ActressListItem | null>(null)
+  const [showBulkScrape, setShowBulkScrape] = useState(false)
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const dismissOverlays = useCallback(() => {
     setPendingDelete(null)
+    setShowBulkScrape(false)
+    setConfirmBulkDelete(false)
   }, [])
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
@@ -136,14 +153,42 @@ export default function ActressesPage(): JSX.Element {
   const loading = listQuery.isLoading && items.length === 0
   const isFetching = listQuery.isFetching
 
-  const { defaultScraper } = useScraperPluginCatalog('actress')
+  const { scrapers, pluginDetails, defaultScraper } = useScraperPluginCatalog('actress')
+  const [scraperName, setScraperName] = useState('')
+  useEffect(() => {
+    if (defaultScraper) setScraperName((current) => current || defaultScraper)
+  }, [defaultScraper])
+
+  const {
+    selectedIds,
+    selectedCount,
+    selectionMode,
+    toggleSelection: toggleActressSelection,
+    clearSelection
+  } = useRangeSelection(items, queryHash)
+
+  const selectedItems = useMemo(
+    () => items.filter((item) => selectedIds.has(item.id)),
+    [items, selectedIds]
+  )
+  const unavailableDeleteCount =
+    selectedItems.filter((item) => item.video_count > 0).length +
+    Math.max(0, selectedCount - selectedItems.length)
+  const canDeleteSelection =
+    selectedCount > 0 &&
+    selectedItems.length === selectedCount &&
+    selectedItems.every((item) => item.video_count === 0)
+
   const [unscrapedBannerHidden, setUnscrapedBannerHidden] = useState(() =>
     isMaintenanceHintDismissed(MAINTENANCE_HINT_KEYS.actressBanner)
   )
-  const { actressBatchActive } = useBatchScrapeActivity()
+  const { actressBatchActive, anyBatchActive } = useBatchScrapeActivity()
   const unscrapedCount = overviewStats?.actresses.unscraped ?? 0
   const showUnscrapedBanner =
-    !unscrapedBannerHidden && genderFilter === 'female' && unscrapedCount > 0
+    !unscrapedBannerHidden &&
+    !selectionMode &&
+    genderFilter === 'female' &&
+    unscrapedCount > 0
 
   const dismissUnscrapedBanner = (): void => {
     dismissMaintenanceHint(MAINTENANCE_HINT_KEYS.actressBanner)
@@ -173,6 +218,53 @@ export default function ActressesPage(): JSX.Element {
       void listQuery.refetch()
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
+    }
+  }
+
+  const startSelectedBatch = async (
+    fields: ActressScrapeField[],
+    site: string,
+    mode?: ActressScrapeUpdateMode,
+    useAliases?: boolean,
+    autoCropAvatar?: boolean
+  ): Promise<void> => {
+    const actressIds = [...selectedIds]
+    if (actressIds.length === 0) return
+    setShowBulkScrape(false)
+    setScraperName(site)
+    try {
+      await api.actressScrape.batchStart({
+        actressIds,
+        scope: 'all',
+        scrapeStatus: 'all',
+        fields,
+        scraperName: site || undefined,
+        mode,
+        useAliases,
+        autoCropAvatar
+      })
+      toast.show(`已开始批量刮削 ${actressIds.length} 位演员`, 'success')
+      clearSelection()
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+    }
+  }
+
+  const deleteSelectedActresses = async (): Promise<void> => {
+    if (deleting || selectedIds.size === 0) return
+    setDeleting(true)
+    try {
+      const deleted = await api.actresses.removeBatch([...selectedIds])
+      setConfirmBulkDelete(false)
+      clearSelection()
+      toast.show(`已删除 ${deleted} 位无关联演员`, 'success')
+      invalidateActressLibraryQueries(queryClient)
+      refetchActressSurface()
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+      void listQuery.refetch()
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -211,66 +303,101 @@ export default function ActressesPage(): JSX.Element {
   return (
     <div className="list-page">
       <div className="topbar library-header">
-        <ListToolbar
-          search={{
-            value: searchInput,
-            placeholder: '搜索演员名或别名…',
-            ariaLabel: '搜索演员',
-            onChange: setSearchInput
-          }}
-          controls={
-            <>
-              <div className="mode-toggle" role="group" aria-label="性别筛选">
-                <button
-                  type="button"
-                  className={genderFilter === 'female' ? 'active' : ''}
-                  onClick={() => patchParams({ [LIST_PARAM.gender]: null })}
-                >
-                  女
-                </button>
-                <button
-                  type="button"
-                  className={genderFilter === 'male' ? 'active' : ''}
-                  onClick={() => patchParams({ [LIST_PARAM.gender]: 'male' })}
-                >
-                  男
-                </button>
-                <button
-                  type="button"
-                  className={genderFilter === 'all' ? 'active' : ''}
-                  onClick={() => patchParams({ [LIST_PARAM.gender]: 'all' })}
-                >
-                  全部
-                </button>
-              </div>
-              <SortSwitch
-                label="排序"
-                options={ACTRESS_SORT_OPTIONS}
-                value={sortBy}
-                dir={sortDir}
-                onChange={(nextSortBy, nextSortDir) =>
-                  patchParams({
-                    [LIST_PARAM.sort]: nextSortBy,
-                    [LIST_PARAM.dir]: nextSortDir
-                  })
-                }
-              />
-            </>
-          }
-          resultCount={
-            <span className="count-badge count-badge--stable count-badge--people" aria-live="polite">
-              共 {items.length} 位
-              {isFetching && !loading && items.length > 0 ? (
-                <span className="library-fetch-hint" aria-hidden>
-                  {' '}
-                  ↻
-                </span>
-              ) : null}
-            </span>
-          }
-        />
+        {selectionMode ? (
+          <SelectionToolbar
+            countLabel={`已选择 ${selectedCount} 位演员 · Shift 连选`}
+            onClear={clearSelection}
+            actions={[
+              {
+                key: 'scrape',
+                label: '刮削元数据',
+                icon: <SearchCheck {...UI_ICON_SM} aria-hidden />,
+                disabled: anyBatchActive || !defaultScraper,
+                title: anyBatchActive
+                  ? '请先完成或终止当前批量刮削任务'
+                  : !defaultScraper
+                    ? '请先在设置中配置默认演员刮削插件'
+                    : undefined,
+                onClick: () => setShowBulkScrape(true)
+              },
+              {
+                key: 'delete',
+                label: '删除演员',
+                icon: <Trash2 {...UI_ICON_SM} aria-hidden />,
+                danger: true,
+                disabled: !canDeleteSelection,
+                title: canDeleteSelection
+                  ? undefined
+                  : `只能批量删除无关联演员；当前有 ${unavailableDeleteCount} 位仍关联影片`,
+                onClick: () => setConfirmBulkDelete(true)
+              }
+            ]}
+          />
+        ) : (
+          <ListToolbar
+            search={{
+              value: searchInput,
+              placeholder: '搜索演员名或别名…',
+              ariaLabel: '搜索演员',
+              onChange: setSearchInput
+            }}
+            controls={
+              <>
+                <div className="mode-toggle" role="group" aria-label="性别筛选">
+                  <button
+                    type="button"
+                    className={genderFilter === 'female' ? 'active' : ''}
+                    onClick={() => patchParams({ [LIST_PARAM.gender]: null })}
+                  >
+                    女
+                  </button>
+                  <button
+                    type="button"
+                    className={genderFilter === 'male' ? 'active' : ''}
+                    onClick={() => patchParams({ [LIST_PARAM.gender]: 'male' })}
+                  >
+                    男
+                  </button>
+                  <button
+                    type="button"
+                    className={genderFilter === 'all' ? 'active' : ''}
+                    onClick={() => patchParams({ [LIST_PARAM.gender]: 'all' })}
+                  >
+                    全部
+                  </button>
+                </div>
+                <SortSwitch
+                  label="排序"
+                  options={ACTRESS_SORT_OPTIONS}
+                  value={sortBy}
+                  dir={sortDir}
+                  onChange={(nextSortBy, nextSortDir) =>
+                    patchParams({
+                      [LIST_PARAM.sort]: nextSortBy,
+                      [LIST_PARAM.dir]: nextSortDir
+                    })
+                  }
+                />
+              </>
+            }
+            resultCount={
+              <span
+                className="count-badge count-badge--stable count-badge--people"
+                aria-live="polite"
+              >
+                共 {items.length} 位
+                {isFetching && !loading && items.length > 0 ? (
+                  <span className="library-fetch-hint" aria-hidden>
+                    {' '}
+                    ↻
+                  </span>
+                ) : null}
+              </span>
+            }
+          />
+        )}
 
-        {hasAppliedFilters && (
+        {!selectionMode && hasAppliedFilters && (
           <AppliedFilterBar items={appliedFilters} onClear={resetFilters} />
         )}
 
@@ -325,20 +452,41 @@ export default function ActressesPage(): JSX.Element {
             />
           ) : (
             <div className="actress-grid">
-              {items.map((a) => {
+              {items.map((a, index) => {
                 const avatar = assetUrl(a.avatar_path)
+                const selected = selectedIds.has(a.id)
                 return (
-                  <div key={a.id} className="actress-card-wrap">
+                  <div
+                    key={a.id}
+                    className={`actress-card-wrap${selected ? ' is-selected' : ''}${selectionMode ? ' is-selection-mode' : ''}`}
+                  >
+                    <button
+                      type="button"
+                      className={`poster-select-toggle poster-hover-control${selected || selectionMode ? ' is-visible' : ''}${selected ? ' is-checked' : ''}`}
+                      aria-label={selected ? `取消选择 ${a.main_name}` : `选择 ${a.main_name}`}
+                      aria-pressed={selected}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        toggleActressSelection(a, index, event)
+                      }}
+                    />
                     <button
                       type="button"
                       className="actress-card card-interactive"
-                      onClick={() => navigateToActressDetail(navigate, location, a.id)}
+                      aria-pressed={selectionMode ? selected : undefined}
+                      onClick={(event) => {
+                        if (selectionMode) {
+                          toggleActressSelection(a, index, event)
+                          return
+                        }
+                        navigateToActressDetail(navigate, location, a.id)
+                      }}
                     >
                       <ActressAvatar src={avatar} name={a.main_name} gender={a.gender} />
                       <ActressName name={a.main_name} gender={a.gender} className="actress-name" />
                       <div className="actress-count">{a.video_count} 部</div>
                     </button>
-                    {a.video_count === 0 && (
+                    {!selectionMode && a.video_count === 0 && (
                       <MediaTileActionButton
                         label={`删除演员 ${a.main_name}`}
                         title="删除"
@@ -362,6 +510,66 @@ export default function ActressesPage(): JSX.Element {
         >
           <p>
             确定删除「{pendingDelete.main_name}」？仅删除演员档案，不影响已关联影片文件。
+          </p>
+        </ConfirmModal>
+      )}
+
+      {showBulkScrape && (
+        <ScrapeFieldsModal
+          title="批量刮削元数据"
+          hint={`先确定站点与更新方式，再勾选要写入的字段。将只处理已选择的 ${selectedCount} 位演员。`}
+          options={ACTRESS_SCRAPE_FIELD_OPTIONS}
+          scrapers={scrapers}
+          pluginDetails={pluginDetails}
+          initialScraperName={scraperName || defaultScraper}
+          scraperTitle="演员刮削站点"
+          initialSelected={ALL_ACTRESS_SCRAPE_FIELDS}
+          updateModeOptions={ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS}
+          initialUpdateMode="fillEmpty"
+          showUseAliasesToggle
+          useAliasesHint="开启后，主名未匹配时会依次尝试中文名、英文名及已存别名。"
+          showAutoCropAvatarToggle
+          autoCropAvatarHint="头像保存后立即按“外观”设置构图，完成后再继续下一位演员。"
+          confirmText="开始批量刮削"
+          onCancel={() => setShowBulkScrape(false)}
+          onConfirm={(
+            fields,
+            site,
+            _scope,
+            mode,
+            _missing,
+            _matchName,
+            useAliases,
+            _auxScope,
+            autoCropAvatar
+          ) => {
+            void startSelectedBatch(
+              fields,
+              site,
+              mode as ActressScrapeUpdateMode | undefined,
+              useAliases,
+              autoCropAvatar
+            )
+          }}
+        />
+      )}
+
+      {confirmBulkDelete && (
+        <ConfirmModal
+          title="批量删除演员"
+          danger
+          confirmText={deleting ? '删除中…' : '删除'}
+          busy={deleting}
+          closeDisabled={deleting}
+          onConfirm={() => {
+            if (!deleting) void deleteSelectedActresses()
+          }}
+          onCancel={() => {
+            if (!deleting) setConfirmBulkDelete(false)
+          }}
+        >
+          <p>
+            确定删除已选择的 {selectedCount} 位无关联演员吗？将删除演员档案、头像与写真，不会删除任何影片文件。
           </p>
         </ConfirmModal>
       )}

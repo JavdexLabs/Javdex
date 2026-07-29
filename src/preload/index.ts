@@ -180,6 +180,7 @@ const api = {
       invoke<ActressAvatarSourceInfo | null>(IPC.ACTRESS_AVATAR_SOURCE_INFO, id),
     edit: (id: number, input: ActressEditInput) => invoke<boolean>(IPC.ACTRESS_EDIT, id, input),
     remove: (id: number) => invoke<boolean>(IPC.ACTRESS_DELETE, id),
+    removeBatch: (ids: number[]) => invoke<number>(IPC.ACTRESS_DELETE_BATCH, ids),
     clearMeta: (id: number) => invoke<boolean>(IPC.ACTRESS_CLEAR_META, id),
     importGalleryImage: (id: number, input: ActressGalleryImportInput) =>
       invoke<ActressGalleryAsset>(IPC.ACTRESS_GALLERY_IMPORT, id, input),

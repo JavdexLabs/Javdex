@@ -12,6 +12,7 @@ import {
   clearBrokenActressAvatarIfNeeded,
   countActressesForBatchScrape,
   deleteActressGalleryAsset,
+  deleteUnlinkedActresses,
   backfillActressGalleryAssetDimensions,
   editActress,
   listActresses,
@@ -255,6 +256,35 @@ describe('actressRepo.clearActressMetadataRecord', () => {
   })
 })
 
+describe('actressRepo.deleteUnlinkedActresses', () => {
+  it('deletes every selected unlinked actress and cleans their stored assets', () => {
+    setupDb()
+    writeTestAsset('actress_gallery/complete.jpg', MINIMAL_JPEG)
+
+    assert.equal(deleteUnlinkedActresses([1, 2, 2]), 2)
+    assert.equal(getActressDetail(1), null)
+    assert.equal(getActressDetail(2), null)
+    assert.equal(assetExists('avatars/complete.jpg'), false)
+    assert.equal(assetExists('actress_gallery/complete.jpg'), false)
+  })
+
+  it('rejects the whole batch when any selected actress still has a linked video', () => {
+    setupDb()
+    const db = getDb()
+    insertTestVideoWithFile(db, {
+      code: 'DELETE-001',
+      filePath: 'delete.mp4',
+      title: 'Linked',
+      addTime: '2024-01-01'
+    })
+    db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(1, 1)
+
+    assert.throws(() => deleteUnlinkedActresses([1, 2]), /1 位演员仍有关联影片/)
+    assert.ok(getActressDetail(1))
+    assert.ok(getActressDetail(2))
+  })
+})
+
 describe('actressRepo.mergeActresses', () => {
   it('merges videos, aliases, and gallery into the keeper', () => {
     setupDb()
@@ -380,6 +410,24 @@ describe('actressRepo.listActressesForBatchScrape', () => {
     assert.deepEqual(
       targets.map((target) => target.main_name),
       ['Missing Female', 'Missing Male', 'Unknown Gender']
+    )
+  })
+
+  it('limits batch targets to the explicitly selected actress ids', () => {
+    setupDb()
+
+    const targets = listActressesForBatchScrape({
+      scope: 'all',
+      actressIds: [4, 2, 2]
+    })
+
+    assert.deepEqual(
+      targets.map((target) => target.main_name),
+      ['Missing Female', 'Unknown Gender']
+    )
+    assert.equal(
+      countActressesForBatchScrape({ scope: 'all', actressIds: [] }),
+      0
     )
   })
 })

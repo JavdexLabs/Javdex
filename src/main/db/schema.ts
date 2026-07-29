@@ -183,6 +183,9 @@ CREATE TABLE IF NOT EXISTS actress_names (
     UNIQUE (actress_id, name, type)
 );
 CREATE INDEX IF NOT EXISTS idx_actress_names_name ON actress_names(name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_actress_names_one_main
+    ON actress_names(actress_id)
+    WHERE type = 'main';
 
 CREATE TABLE IF NOT EXISTS actress_tags (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

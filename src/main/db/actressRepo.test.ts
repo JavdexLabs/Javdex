@@ -13,6 +13,7 @@ import {
   countActressesForBatchScrape,
   deleteActressGalleryAsset,
   backfillActressGalleryAssetDimensions,
+  editActress,
   listActresses,
   listActressesForBatchScrape,
   mergeActresses,
@@ -118,6 +119,23 @@ afterEach(() => {
 })
 
 describe('actressRepo.listActresses', () => {
+  it('does not match a replaced main name that is not kept as an explicit alias', () => {
+    setupDb()
+    const actressId = upsertActressFromScrape('Former (Name)', null)
+    editActress(actressId, { main_name: 'Current Name' })
+
+    assert.deepEqual(
+      listActresses('(', 'all').map((actress) => actress.main_name),
+      []
+    )
+
+    const db = getDb()
+    const mainNames = db
+      .prepare("SELECT name, is_primary FROM actress_names WHERE actress_id = ? AND type = 'main'")
+      .all(actressId)
+    assert.deepEqual(mainNames, [{ name: 'Current Name', is_primary: 1 }])
+  })
+
   it('matches main name, alias, and typed names', () => {
     setupDb()
     const db = getDb()
@@ -157,6 +175,38 @@ describe('actressRepo.listActresses', () => {
     assert.deepEqual(listActresses('Missing Female', 'all').map((a) => a.main_name), [
       'Missing Female'
     ])
+  })
+
+  it('treats SQL LIKE metacharacters as literal search text', () => {
+    setupDb()
+    upsertActressFromScrape('Percent % Name', null)
+    const aliasActressId = upsertActressFromScrape('Alias Holder', null)
+    const englishNameActressId = upsertActressFromScrape('English Name Holder', null)
+    editActress(aliasActressId, { aliases: ['Under_score'] })
+    editActress(englishNameActressId, { name_en: String.raw`Back\slash` })
+
+    assert.deepEqual(
+      listActresses('%', 'all').map((actress) => actress.main_name),
+      ['Percent % Name']
+    )
+    assert.deepEqual(
+      listActresses('_', 'all').map((actress) => actress.main_name),
+      ['Alias Holder']
+    )
+    assert.deepEqual(
+      listActresses('\\', 'all').map((actress) => actress.main_name),
+      ['English Name Holder']
+    )
+  })
+
+  it('ignores stored names that are not visible name types', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare(
+      'INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, ?, ?)'
+    ).run(1, 'Invisible Historical Name', 'historical', 0)
+
+    assert.deepEqual(listActresses('Invisible', 'all'), [])
   })
 
   it('sorts by video count descending by default', () => {

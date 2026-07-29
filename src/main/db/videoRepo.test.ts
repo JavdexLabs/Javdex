@@ -349,6 +349,24 @@ describe('videoRepo.listVideos', () => {
     assert.equal(byAlias.total, 1)
     assert.equal(byAlias.items[0].code, 'IPX-535')
   })
+
+  it('preserves SQL LIKE pattern matching in the video search actress branch', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare('INSERT INTO actresses (main_name, gender) VALUES (?, ?)').run(
+      'Pattern Actress',
+      'female'
+    )
+    const actress = db
+      .prepare('SELECT id FROM actresses WHERE main_name = ?')
+      .get('Pattern Actress') as { id: number }
+    db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(2, actress.id)
+
+    const result = listVideos({ search: 'Pattern_Actress' })
+
+    assert.equal(result.total, 1)
+    assert.equal(result.items[0].code, 'MUKD-501')
+  })
 })
 
 describe('videoRepo.getVideoDetail', () => {

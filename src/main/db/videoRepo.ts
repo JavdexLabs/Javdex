@@ -18,7 +18,7 @@ import type {
 } from '@shared/types'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/types'
 import { upsertActressFromScrape } from './actressRepo'
-import { actressSearchLikeParams, actressTextSearchSql } from './actressSearchSql'
+import { actressStoredNamePatternSearchSql } from './actressSearchSql'
 import { ensureTag, pruneTagIfUnused } from './tagRepo'
 import { ensureFacetEntries } from './facetRepo'
 import { collectVideoLibraryCleanupHints, runLibraryCleanup } from './libraryCleanup'
@@ -383,12 +383,12 @@ function buildWhere(q: VideoQuery): { sql: string; params: unknown[]; joins: str
     const like = `%${q.search.trim()}%`
     conditions.push(
       `(v.code LIKE ? OR v.title LIKE ? OR v.id IN (
-         SELECT va.video_id FROM video_actress va
+       SELECT va.video_id FROM video_actress va
          JOIN actresses a ON a.id = va.actress_id
-         WHERE ${actressTextSearchSql('a')}
+         WHERE ${actressStoredNamePatternSearchSql('a')}
        ))`
     )
-    params.push(like, like, ...actressSearchLikeParams(q.search))
+    params.push(like, like, like, like)
   }
 
   if (q.scrapedStatus !== undefined && q.scrapedStatus !== 'all') {

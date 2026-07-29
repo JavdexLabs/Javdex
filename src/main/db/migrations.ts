@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import { SCHEMA_SQL } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 2
+export const CURRENT_SCHEMA_VERSION = 3
 
 type Migration = {
   version: number
@@ -11,6 +11,14 @@ type Migration = {
 function columnNames(database: Database.Database, table: string): Set<string> {
   return new Set(
     (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name)
+  )
+}
+
+function tableExists(database: Database.Database, table: string): boolean {
+  return Boolean(
+    database
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(table)
   )
 }
 
@@ -24,10 +32,44 @@ function migrateToV2(database: Database.Database): void {
   }
 }
 
+function migrateToV3(database: Database.Database): void {
+  if (!tableExists(database, 'actresses') || !tableExists(database, 'actress_names')) return
+
+  const migrateNames = database.transaction(() => {
+    database.exec(`
+      DELETE FROM actress_names
+      WHERE type = 'main'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM actresses
+          WHERE actresses.id = actress_names.actress_id
+            AND actresses.main_name = actress_names.name
+        );
+
+      INSERT OR IGNORE INTO actress_names (actress_id, name, type, is_primary)
+      SELECT id, main_name, 'main', 1
+      FROM actresses;
+
+      UPDATE actress_names
+      SET is_primary = 1
+      WHERE type = 'main';
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_actress_names_one_main
+      ON actress_names(actress_id)
+      WHERE type = 'main';
+    `)
+  })
+  migrateNames()
+}
+
 const MIGRATIONS: Migration[] = [
   {
     version: 2,
     migrate: migrateToV2
+  },
+  {
+    version: 3,
+    migrate: migrateToV3
   }
 ]
 

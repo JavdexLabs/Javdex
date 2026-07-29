@@ -1,11 +1,17 @@
 import { app } from 'electron'
 import { Worker } from 'node:worker_threads'
+import path from 'node:path'
 import type {
   ActressScrapeResult,
   ScrapeResult,
   ScraperPluginKind
 } from '@shared/types'
+import { readTestUserDataPath } from '@shared/appIdentity'
 import { scrapeBrowser } from './scrapeBrowser'
+import {
+  ScraperResourceCache,
+  type ScraperResourceResponse
+} from './scraperResourceCache'
 
 const PLUGIN_VALIDATE_TIMEOUT_MS = 10_000
 const PLUGIN_PARSE_TIMEOUT_MS = 5 * 60_000
@@ -14,6 +20,14 @@ interface FetchPageOptions {
   readySelector?: string
   timeoutMs?: number
   settleWhenText?: RegExp
+}
+
+interface FetchBufferOptions {
+  cache?: {
+    mode: 'persistent'
+    maxAgeMs: number
+    staleIfError: boolean
+  }
 }
 
 interface SandboxWorkerData {
@@ -49,7 +63,7 @@ type SandboxMessage =
   | { type: 'done'; result?: unknown }
   | { type: 'error'; error: string }
   | { type: 'fetchPage'; id: number; url: unknown; options?: unknown }
-  | { type: 'fetchBuffer'; id: number; url: unknown }
+  | { type: 'fetchBuffer'; id: number; url: unknown; options?: unknown }
   | { type: 'browserAction'; id: number; action: unknown; params?: unknown }
   | { type: 'log'; level: string; message: string }
 
@@ -64,6 +78,20 @@ interface RpcReply {
 interface SandboxRunResult<T> {
   result: T
   logs: string[]
+}
+
+type SandboxBufferFetcher = (
+  url: string,
+  proxyUrl: string | undefined,
+  headers: Readonly<Record<string, string>>
+) => Promise<ScraperResourceResponse>
+
+let resourceCache: ScraperResourceCache | null = null
+let sandboxBufferFetcher: SandboxBufferFetcher = defaultSandboxBufferFetcher
+
+export function setSandboxBufferFetcherForTests(fetcher?: SandboxBufferFetcher): void {
+  sandboxBufferFetcher = fetcher ?? defaultSandboxBufferFetcher
+  resourceCache = null
 }
 
 export async function validateUserPluginCode(
@@ -252,18 +280,31 @@ async function handleWorkerRpc(
   }
 
   try {
-    await scrapeBrowser.setProxy(workerData.proxyUrl)
-
     if (message.type === 'fetchPage') {
+      await scrapeBrowser.setProxy(workerData.proxyUrl)
       const url = parseHttpUrl(message.url)
       const options = parseFetchPageOptions(message.options)
       const html = await scrapeBrowser.fetchPage(url, options)
       reply({ ok: true, value: html })
     } else if (message.type === 'fetchBuffer') {
       const url = parseHttpUrl(message.url)
-      const buf = await scrapeBrowser.fetchBuffer(url)
+      const options = parseFetchBufferOptions(message.options)
+      const buf = options?.cache
+        ? await getResourceCache().fetch(
+            {
+              kind: workerData.kind,
+              pluginName: workerData.pluginName,
+              url,
+              maxAgeMs: options.cache.maxAgeMs,
+              staleIfError: options.cache.staleIfError
+            },
+            (resourceUrl, headers) =>
+              sandboxBufferFetcher(resourceUrl, workerData.proxyUrl, headers)
+          )
+        : await fetchUncachedSandboxBuffer(url, workerData.proxyUrl)
       reply({ ok: true, value: buf.toString('base64') })
     } else {
+      await scrapeBrowser.setProxy(workerData.proxyUrl)
       const value = await scrapeBrowser.performAction(
         parseBrowserAction(message.action),
         parseBrowserActionParams(message.params)
@@ -273,6 +314,38 @@ async function handleWorkerRpc(
   } catch (err) {
     reply({ ok: false, error: (err as Error).message })
   }
+}
+
+async function fetchUncachedSandboxBuffer(
+  url: string,
+  proxyUrl: string | undefined
+): Promise<Buffer> {
+  await scrapeBrowser.setProxy(proxyUrl)
+  return scrapeBrowser.fetchBuffer(url)
+}
+
+async function defaultSandboxBufferFetcher(
+  url: string,
+  proxyUrl: string | undefined,
+  headers: Readonly<Record<string, string>>
+): Promise<ScraperResourceResponse> {
+  await scrapeBrowser.setProxy(proxyUrl)
+  return scrapeBrowser.fetchBufferResponse(url, {
+    headers,
+    referer: 'omit'
+  })
+}
+
+function getResourceCache(): ScraperResourceCache {
+  if (resourceCache) return resourceCache
+  const userData =
+    readTestUserDataPath() ??
+    (typeof app?.getPath === 'function' ? app.getPath('userData') : undefined)
+  if (!userData) throw new Error('Electron app userData path is unavailable')
+  resourceCache = new ScraperResourceCache({
+    rootDir: path.join(userData, 'scraper_resource_cache')
+  })
+  return resourceCache
 }
 
 function parseBrowserAction(value: unknown): string {
@@ -316,6 +389,26 @@ function parseFetchPageOptions(value: unknown): FetchPageOptions | undefined {
   return out
 }
 
+function parseFetchBufferOptions(value: unknown): FetchBufferOptions | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const input = value as Record<string, unknown>
+  if (!input.cache || typeof input.cache !== 'object') return undefined
+  const cache = input.cache as Record<string, unknown>
+  if (cache.mode !== 'persistent') {
+    throw new Error('Plugin fetchBuffer cache mode must be persistent')
+  }
+  if (typeof cache.maxAgeMs !== 'number' || !Number.isFinite(cache.maxAgeMs)) {
+    throw new Error('Plugin fetchBuffer cache maxAgeMs must be a finite number')
+  }
+  return {
+    cache: {
+      mode: 'persistent',
+      maxAgeMs: Math.max(0, Math.min(30 * 24 * 60 * 60 * 1000, Math.round(cache.maxAgeMs))),
+      staleIfError: cache.staleIfError === true
+    }
+  }
+}
+
 const SANDBOX_WORKER_SOURCE = String.raw`
 const { parentPort, workerData } = require('node:worker_threads');
 const vm = require('node:vm');
@@ -355,8 +448,8 @@ function fetchPage(url, options) {
   return rpc('fetchPage', { url, options });
 }
 
-async function fetchBuffer(url) {
-  const base64 = await rpc('fetchBuffer', { url });
+async function fetchBuffer(url, options) {
+  const base64 = await rpc('fetchBuffer', { url, options });
   return Buffer.from(String(base64 || ''), 'base64');
 }
 

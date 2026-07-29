@@ -115,6 +115,23 @@ function mergeActressResults(
   }
 }
 
+function hasScrapedValueForField(
+  result: ActressScrapeResult,
+  field: ActressScrapeField
+): boolean {
+  const selected = pickActressFields(result, new Set([field]))
+  return Object.values(selected).some((value) => {
+    if (Array.isArray(value)) return value.length > 0
+    if (typeof value === 'string') return value.trim().length > 0
+    return value !== undefined && value !== null
+  })
+}
+
+interface CompositeActressScrapeOutcome {
+  result: ActressScrapeResult | null
+  warnings: string[]
+}
+
 async function scrapeCompositeActress(
   compositeName: string,
   fields: ActressScrapeField[],
@@ -122,9 +139,9 @@ async function scrapeCompositeActress(
   aliases: string[],
   proxyUrl: string,
   delayController?: ScrapeActressOptions['delayController']
-): Promise<ActressScrapeResult | null> {
+): Promise<CompositeActressScrapeOutcome> {
   const composite = findCompositeScraper('actress', compositeName)
-  if (!composite) return null
+  if (!composite) return { result: null, warnings: [] }
   const grouped = new Map<string, ActressScrapeField[]>()
   for (const field of fields) {
     const pluginName = composite.fieldPluginMap[field]
@@ -132,18 +149,28 @@ async function scrapeCompositeActress(
     grouped.set(pluginName, [...(grouped.get(pluginName) ?? []), field])
   }
   let merged: ActressScrapeResult | null = null
+  let failedSources = 0
+  const warnings: string[] = []
   for (const [pluginName, pluginFields] of grouped) {
-    const scraper = getActressScraper(pluginName)
-    const rawResult = delayController
-      ? await delayController.run('actress', pluginName, () =>
-          scraper.parseTask(queryName, aliases, proxyUrl)
-        )
-      : await scraper.parseTask(queryName, aliases, proxyUrl)
-    const result = normalizeActressScrapeResult(rawResult)
-    if (!result) continue
-    merged = mergeActressResults(merged, pickActressFields(result, new Set(pluginFields)))
+    try {
+      const scraper = getActressScraper(pluginName)
+      const rawResult = delayController
+        ? await delayController.run('actress', pluginName, () =>
+            scraper.parseTask(queryName, aliases, proxyUrl)
+          )
+        : await scraper.parseTask(queryName, aliases, proxyUrl)
+      const result = normalizeActressScrapeResult(rawResult)
+      if (!result) continue
+      merged = mergeActressResults(merged, pickActressFields(result, new Set(pluginFields)))
+    } catch (error) {
+      failedSources += 1
+      warnings.push(`字段源「${pluginName}」失败：${(error as Error).message}`)
+    }
   }
-  return merged
+  if (grouped.size > 0 && failedSources === grouped.size) {
+    throw new Error(warnings.join('；'))
+  }
+  return { result: merged, warnings }
 }
 
 function dedupeActressNameList(names: string[]): string[] {
@@ -197,38 +224,50 @@ export async function scrapeActress(
   const selected = new Set(effective)
   const settings = getSettings()
   const proxyUrl = resolveScrapeProxyUrl(settings)
-  const scraper = findCompositeScraper('actress', scraperName || settings.defaultActressScraper)
-    ? null
-    : getActressScraper(scraperName)
+  const selectedScraperName = scraperName || settings.defaultActressScraper
+  const composite = findCompositeScraper('actress', selectedScraperName)
+  const scraper = composite ? null : getActressScraper(scraperName)
+  const gfriendsSelected =
+    scraper?.scraperName === 'Gfriends' ||
+    effective.some((field) => composite?.fieldPluginMap[field] === 'Gfriends')
 
   const { queryName, aliases } = resolveActressScrapeQuery(
     detail.main_name,
     detail.aliases,
     options?.queryName,
     [detail.name_zh, detail.name_en].filter((name): name is string => Boolean(name?.trim())),
-    options?.useAliases ?? false
+    (options?.useAliases ?? false) || gfriendsSelected
   )
 
   try {
-    const result = normalizeActressScrapeResult(
-      scraper
-        ? (options?.delayController
-            ? await options.delayController.run('actress', scraper.scraperName, () =>
-                scraper.parseTask(queryName, aliases, proxyUrl)
-              )
-            : await scraper.parseTask(queryName, aliases, proxyUrl))
-        : await scrapeCompositeActress(
-            scraperName || settings.defaultActressScraper,
-            effective,
-            queryName,
-            aliases,
-            proxyUrl,
-            options?.delayController
+    let rawResult: ActressScrapeResult | null
+    let sourceWarnings: string[] = []
+    if (scraper) {
+      rawResult = options?.delayController
+        ? await options.delayController.run('actress', scraper.scraperName, () =>
+            scraper.parseTask(queryName, aliases, proxyUrl)
           )
-    )
+        : await scraper.parseTask(queryName, aliases, proxyUrl)
+    } else {
+      const compositeOutcome = await scrapeCompositeActress(
+        selectedScraperName,
+        effective,
+        queryName,
+        aliases,
+        proxyUrl,
+        options?.delayController
+      )
+      rawResult = compositeOutcome.result
+      sourceWarnings = compositeOutcome.warnings
+    }
+    const result = normalizeActressScrapeResult(rawResult)
     if (!result) {
       touchActressLastScrapedAt(actressId)
-      return { ok: false, error: '未找到匹配的演员资料' }
+      return {
+        ok: false,
+        error: '未找到匹配的演员资料',
+        warnings: sourceWarnings.length > 0 ? sourceWarnings : undefined
+      }
     }
     if (effective.length === 0) return { ok: true, result, skipped: true }
 
@@ -236,6 +275,10 @@ export async function scrapeActress(
     let avatarRel: string | null = null
     if (selected.has('avatar') && result.avatarUrl) {
       avatarRel = await downloadAvatar(detail.main_name, result.avatarUrl, fetcher)
+      const sourceName = composite?.fieldPluginMap.avatar
+      if (!avatarRel && sourceName) {
+        sourceWarnings.push(`字段源「${sourceName}」失败：头像下载失败`)
+      }
     }
 
     const galleryUrls = dedupeUrls(result.galleryImageUrls ?? [])
@@ -246,6 +289,7 @@ export async function scrapeActress(
       height: number | null
     }> = []
     if (selected.has('gallery') && galleryUrls.length) {
+      let failedDownloads = 0
       for (let index = 0; index < galleryUrls.length; index++) {
         const downloaded = await downloadActressGalleryImage(
           detail.main_name,
@@ -253,6 +297,7 @@ export async function scrapeActress(
           fetcher,
           actressId
         )
+        if (!downloaded) failedDownloads += 1
         galleryAssets.push({
           remoteUrl: galleryUrls[index],
           localPath: downloaded?.localPath ?? null,
@@ -260,9 +305,29 @@ export async function scrapeActress(
           height: downloaded?.height ?? null
         })
       }
+      const sourceName = composite?.fieldPluginMap.gallery
+      if (failedDownloads > 0 && sourceName) {
+        sourceWarnings.push(
+          `字段源「${sourceName}」失败：${failedDownloads} 张写真下载失败`
+        )
+      }
     }
 
-    const { applied, warnings, avatarApplied } = applyActressScrapeResult(
+    if (composite && sourceWarnings.length > 0) {
+      const hasSuccessfulOutput = effective.some((field) => {
+        if (!composite.fieldPluginMap[field]) return false
+        if (field === 'avatar') return avatarRel !== null
+        if (field === 'gallery') {
+          return galleryAssets.some((asset) => asset.localPath !== null)
+        }
+        return hasScrapedValueForField(result, field)
+      })
+      if (!hasSuccessfulOutput) {
+        throw new Error(sourceWarnings.join('；'))
+      }
+    }
+
+    const { applied, warnings: applyWarnings, avatarApplied } = applyActressScrapeResult(
       actressId,
       { ...result, galleryImageUrls: galleryUrls },
       avatarRel,
@@ -270,6 +335,7 @@ export async function scrapeActress(
       requested,
       mode
     )
+    const warnings = [...sourceWarnings, ...applyWarnings]
     return {
       ok: true,
       result,

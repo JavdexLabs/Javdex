@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "kind": "actress",
+  "name": "Gfriends",
+  "version": "1.0.0",
+  "description": "从 Gfriends 女友头像仓库精确匹配演员头像",
+  "author": "Javdex",
+  "homepage": "https://github.com/gfriends/gfriends",
+  "supportedFields": ["avatar"],
+  "entry": "index.cjs"
+}

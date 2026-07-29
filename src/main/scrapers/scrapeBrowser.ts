@@ -1066,14 +1066,26 @@ class ScrapeBrowser {
   ): Promise<Buffer> {
     const cached = this.imageBodyCache.get(url)
     if (cached) return cached
+    return (await this.fetchBufferResponse(url, options)).body
+  }
 
+  async fetchBufferResponse(
+    url: string,
+    options?: {
+      referer?: 'omit' | 'session' | string
+      headers?: Readonly<Record<string, string>>
+    }
+  ): Promise<{ statusCode: number; body: Buffer; etag?: string }> {
     const ses = this.getSession()
     const profile = getScrapeUaProfile()
     const referer = resolveFetchReferer(options?.referer, this.lastOrigin)
-    return new Promise<Buffer>((resolve, reject) => {
+    return new Promise<{ statusCode: number; body: Buffer; etag?: string }>((resolve, reject) => {
       const request = net.request({ url, session: ses, useSessionCookies: true })
       request.setHeader('User-Agent', profile.userAgent)
       if (referer) request.setHeader('Referer', referer)
+      for (const [name, value] of Object.entries(options?.headers ?? {})) {
+        request.setHeader(name, value)
+      }
       const chunks: Buffer[] = []
       request.on('response', (response) => {
         if (response.statusCode >= 400) {
@@ -1082,7 +1094,13 @@ class ScrapeBrowser {
           return
         }
         response.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
-        response.on('end', () => resolve(Buffer.concat(chunks)))
+        response.on('end', () =>
+          resolve({
+            statusCode: response.statusCode,
+            body: Buffer.concat(chunks),
+            etag: response.headers.etag?.[0]
+          })
+        )
         response.on('error', reject)
       })
       request.on('error', reject)

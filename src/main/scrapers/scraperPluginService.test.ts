@@ -129,6 +129,8 @@ describe('scraperPluginService', () => {
     assert.equal(xslist.supportedFields.includes('measurements'), true)
     assert.equal(xslist.supportedFields.includes('profile' as never), false)
     assert.equal(xslist.supportedFields.includes('bustCm' as never), false)
+    const gfriends = builtInDescriptor('actress', 'Gfriends')
+    assert.deepEqual(gfriends.supportedFields, ['avatar'])
   })
 
   it('drops unknown actress supported field ids from packages', async () => {
@@ -149,7 +151,7 @@ describe('scraperPluginService', () => {
     )
     assert.deepEqual(
       listBundledPluginDescriptors('actress').map((item) => item.name).sort(),
-      ['Xslist']
+      ['Gfriends', 'Xslist']
     )
   })
 

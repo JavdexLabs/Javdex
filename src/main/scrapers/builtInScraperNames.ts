@@ -1,7 +1,7 @@
 import type { ScraperPluginKind } from '@shared/types'
 
 export const BUILT_IN_VIDEO_SCRAPER_NAMES = ['JavDB', 'JavLibrary', 'JAV8'] as const
-export const BUILT_IN_ACTRESS_SCRAPER_NAMES = ['Xslist'] as const
+export const BUILT_IN_ACTRESS_SCRAPER_NAMES = ['Xslist', 'Gfriends'] as const
 
 export function builtInScraperNames(kind: ScraperPluginKind): readonly string[] {
   return kind === 'video' ? BUILT_IN_VIDEO_SCRAPER_NAMES : BUILT_IN_ACTRESS_SCRAPER_NAMES

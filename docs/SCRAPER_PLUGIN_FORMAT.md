@@ -11,7 +11,7 @@
 | `video` | `parseVideo(ctx)` | 影片元数据刮削 |
 | `actress` | `parseActress(ctx)` | 演员资料刮削 |
 
-内置插件位于 `src/main/bundled-plugins/`（如 JavDB、JavLibrary、JAV8、Xslist 等），以 `plugin.json` + 入口脚本形式随应用分发。
+内置插件位于 `src/main/bundled-plugins/`（如 JavDB、JavLibrary、JAV8、Xslist、Gfriends 等），以 `plugin.json` + 入口脚本形式随应用分发。
 
 ## 包与安装形态
 
@@ -39,7 +39,7 @@
 - `kind` 为 `video` 或 `actress`
 - `code` 为 CommonJS 字符串，导入时校验并写入安装目录
 - `supportedFields` 声明本插件支持的刮削字段 id（见下文）；**未声明的字段即使代码返回也会被忽略**
-- 若与内置插件同名，用户插件会 **覆盖** 同名内置实现（`overridesBuiltIn`）
+- 内置插件名称为保留名称；同名用户插件会被拒绝安装。编辑内置插件时应另存为不同名称的自定义插件
 
 ### 安装目录（导入后 / Agent 安装后）
 
@@ -64,13 +64,36 @@ app.getPath('userData')/scraper_plugins/{video|actress}/{plugin-name}/
 | `ctx.code` | 待刮削番号 |
 | `ctx.proxyUrl` | 当前刮削代理（可能为空） |
 | `ctx.fetchPage(url, options?)` | 拉取页面 HTML；`options`: `readySelector`、`timeoutMs`、`settleWhenText`（`RegExp`） |
-| `ctx.fetchBuffer(url)` | 拉取二进制（如图片） |
+| `ctx.fetchBuffer(url, options?)` | 拉取二进制（如图片）；持久缓存选项见下文 |
 | `ctx.cheerio` | Cheerio 模块；**每个 HTML 须先 `const $ = ctx.cheerio.load(html)`**，沙箱内无全局 `$` |
 | `ctx.browser` | 见下方浏览器辅助 |
 | `ctx.helpers.absoluteUrl(href, baseUrl)` | 解析相对链接 |
 | `ctx.helpers.normalizeDate(text)` | 规范为 `YYYY-MM-DD`；仅年月时归为 `YYYY-MM-01` |
 | `ctx.helpers.normalizeText(text)` | 折叠空白 |
 | `ctx.helpers.unique(values)` | 去重字符串数组 |
+
+### `ctx.fetchBuffer` 持久缓存
+
+设计决定见 [ADR-0001](./adr/0001-integrate-gfriends-as-actress-avatar-source.md)。
+
+大体积、低频更新的远程资源可请求由主进程管理的插件级持久缓存：
+
+```js
+const body = await ctx.fetchBuffer(url, {
+  cache: {
+    mode: 'persistent',
+    maxAgeMs: 24 * 60 * 60 * 1000,
+    staleIfError: true
+  }
+})
+```
+
+- 不传 `cache` 时保持现有一次性拉取语义。
+- 缓存按插件与规范化 URL 隔离，插件不能指定磁盘路径。
+- 主进程强制限制单项与单插件总容量，防止插件无限占用磁盘。
+- 超过 `maxAgeMs` 后优先使用 `ETag` 条件请求；`304` 保留原内容，成功的新内容以原子方式替换。
+- `staleIfError: true` 表示更新失败时返回最后一次成功内容；没有旧内容时仍抛出原始网络错误。
+- 代理、请求校验和 HTTP(S) 限制与普通 `fetchBuffer` 相同。
 
 ### `ctx.browser`
 
@@ -168,10 +191,13 @@ app.getPath('userData')/scraper_plugins/{video|actress}/{plugin-name}/
 - **直连资料页**：URL 可由名称/slug 可靠推导时使用。
 - **搜索进资料页**：依次尝试 `mainName` 与各 `alias`；搜索页仅用于找资料链接。
 - **动态搜索**：若结果通过 AJAX 更新而 URL 不变，用 `fetchPage` 复现对应请求，勿把未变化的 URL 当作失败。
+- **头像专用来源**：只提供头像的演员头像源应仅声明 `avatar`，不返回别名或其他资料，也不据此改变演员身份；未精确命中时返回 `null`。
 
 ## 组合刮削器
 
-**设置 → 刮削插件 → 新增组合** 可创建 `composite` 来源的影片刮削器：为每个字段指定不同的内置或用户插件。组合配置保存在 `settings.json` 的 `compositeScrapers` 中，**没有**独立的 `parseVideo` 实现。
+**设置 → 刮削插件 → 新增组合** 可创建 `composite` 来源的影片或演员刮削器：为每个字段指定不同的内置或用户插件。组合配置保存在 `settings.json` 的 `compositeScrapers` 中，**没有**独立的 `parseVideo` / `parseActress` 实现。
+
+演员组合刮削按字段源隔离故障：单个来源失败时记录警告并继续应用其他来源；只有所有已请求来源都失败时整次失败。见 [ADR-0001](./adr/0001-integrate-gfriends-as-actress-avatar-source.md)。
 
 ## 插件管理（UI）
 

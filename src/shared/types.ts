@@ -231,6 +231,25 @@ export const ACTRESS_LIST_STATUS_SCRAPED_STATUS: Record<
   failed: 2
 }
 
+const ACTRESS_LIST_STATUS_BY_SCRAPED_STATUS = new Map<
+  ScrapedStatus,
+  Exclude<ActressListStatusFilter, 'all'>
+>(
+  (
+    Object.entries(ACTRESS_LIST_STATUS_SCRAPED_STATUS) as [
+      Exclude<ActressListStatusFilter, 'all'>,
+      ScrapedStatus
+    ][]
+  ).map(([filter, status]) => [status, filter])
+)
+
+/** Filter vocabulary for a stored cumulative status value. */
+export function actressStatusFilterOf(
+  status: ScrapedStatus
+): Exclude<ActressListStatusFilter, 'all'> {
+  return ACTRESS_LIST_STATUS_BY_SCRAPED_STATUS.get(status) ?? 'unscraped'
+}
+
 export interface ActressListQuery {
   search?: string
   gender?: ActressGenderFilter

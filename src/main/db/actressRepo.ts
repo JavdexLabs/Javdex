@@ -26,7 +26,7 @@ import type {
   ScrapedStatus
 } from '@shared/types'
 import { ALL_ACTRESS_SCRAPE_FIELDS, ACTRESS_BATCH_DEFAULT_MISSING_FIELDS } from '@shared/types'
-import { ACTRESS_LIST_STATUS_SCRAPED_STATUS } from '@shared/types'
+import { ACTRESS_LIST_STATUS_SCRAPED_STATUS, actressStatusFilterOf } from '@shared/types'
 import {
   createAvatarCropV1,
   parseAvatarCrop,
@@ -681,18 +681,6 @@ function buildActressListOrderBy(sortBy: ActressListSortBy, sortDir: ListSortDir
   }
 }
 
-const ACTRESS_LIST_STATUS_BY_SCRAPED_STATUS = new Map<
-  ScrapedStatus,
-  Exclude<ActressListStatusFilter, 'all'>
->(
-  (
-    Object.entries(ACTRESS_LIST_STATUS_SCRAPED_STATUS) as [
-      Exclude<ActressListStatusFilter, 'all'>,
-      ScrapedStatus
-    ][]
-  ).map(([filter, status]) => [status, filter])
-)
-
 /** Actresses per cumulative status, scoped by search and gender but not by the status filter. */
 function countActressListStatuses(
   search: string | undefined,
@@ -711,9 +699,7 @@ function countActressListStatuses(
 
   const counts: ActressListStatusCounts = { all: 0, success: 0, unscraped: 0, failed: 0 }
   for (const row of rows) {
-    const filter = ACTRESS_LIST_STATUS_BY_SCRAPED_STATUS.get(row.status)
-    if (!filter) continue
-    counts[filter] += row.n
+    counts[actressStatusFilterOf(row.status)] += row.n
     counts.all += row.n
   }
   return counts

@@ -1248,7 +1248,8 @@ textarea.text-input {
   position: relative;
 }
 
-.library-filter-btn {
+.library-filter-btn,
+.list-filter-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1256,17 +1257,21 @@ textarea.text-input {
 }
 
 .library-filter-btn--active,
-.library-filter-btn--open {
+.library-filter-btn--open,
+.list-filter-btn--active,
+.list-filter-btn--open {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent-hover);
 }
 
-.library-filter-btn-label {
+.library-filter-btn-label,
+.list-filter-btn-label {
   font-weight: 500;
 }
 
-.library-filter-chevron {
+.library-filter-chevron,
+.list-filter-chevron {
   display: inline-flex;
   align-items: center;
   margin-left: 2px;
@@ -1276,9 +1281,66 @@ textarea.text-input {
   transition: transform 0.18s ease, color 0.15s;
 }
 .library-filter-btn--open .library-filter-chevron,
-.library-filter-chevron.is-open {
+.library-filter-chevron.is-open,
+.list-filter-btn--open .list-filter-chevron,
+.list-filter-chevron.is-open {
   transform: rotate(180deg);
   color: var(--accent-hover);
+}
+
+/* Single-choice filter popover (actress cumulative scrape status). */
+.status-filter-popover {
+  width: 188px;
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-elevated);
+}
+
+.status-filter-options {
+  display: grid;
+  gap: 2px;
+}
+
+.status-filter-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: var(--control-h-sm);
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+}
+
+.status-filter-option:hover {
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+}
+
+.status-filter-option:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
+}
+
+.status-filter-option.is-active {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+  color: var(--text-accent);
+}
+
+.status-filter-option-count {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.status-filter-option.is-active .status-filter-option-count {
+  color: inherit;
 }
 
 .sort-switch {
@@ -5190,6 +5252,42 @@ button.tag-chip--custom-pick {
 }
 .actress-card:hover .actress-avatar {
   border-color: color-mix(in srgb, var(--accent) 42%, var(--border-subtle));
+}
+/* Avatar-anchored status corner: never overlaps the select / delete controls. */
+.actress-card-avatar {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+}
+.actress-status-badge {
+  position: absolute;
+  right: -8px;
+  bottom: -2px;
+  max-width: calc(100% + 16px);
+  padding: 0 5px;
+  border: 2px solid var(--surface-panel);
+  border-radius: 999px;
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.actress-status-badge--unscraped {
+  background: var(--surface-warning);
+  border-color: var(--surface-panel);
+  color: var(--text-warning);
+}
+.actress-status-badge--failed {
+  background: var(--surface-danger);
+  border-color: var(--surface-panel);
+  color: var(--text-danger);
+}
+.actress-card:hover .actress-status-badge {
+  border-color: var(--surface-elevated);
 }
 .actress-card .actress-avatar {
   position: relative;

@@ -358,17 +358,11 @@ describe('actressRepo.listActressesForBatchScrape', () => {
     assert.equal(countActressesForBatchScrape({ scope: 'male', missingFields: [] }), 1)
   })
 
-  it('filters never-scraped actresses by scrape status', () => {
+  it('filters actresses by cumulative scrape status', () => {
     setupDb()
     const db = getDb()
-    db.prepare('UPDATE actresses SET last_scraped_at = ? WHERE main_name = ?').run(
-      '2024-01-01T00:00:00.000Z',
-      'Complete'
-    )
-    db.prepare('UPDATE actresses SET last_scraped_at = ? WHERE main_name = ?').run(
-      '2024-01-01T00:00:00.000Z',
-      'Missing Male'
-    )
+    db.prepare('UPDATE actresses SET scraped_status = 1 WHERE main_name = ?').run('Complete')
+    db.prepare('UPDATE actresses SET scraped_status = 2 WHERE main_name = ?').run('Missing Male')
 
     const targets = listActressesForBatchScrape({ scope: 'all', scrapeStatus: 'unscraped' })
 
@@ -377,15 +371,14 @@ describe('actressRepo.listActressesForBatchScrape', () => {
       ['Missing Female', 'Unknown Gender']
     )
     assert.equal(countActressesForBatchScrape({ scope: 'all', scrapeStatus: 'unscraped' }), 2)
+    assert.equal(countActressesForBatchScrape({ scope: 'all', scrapeStatus: 'success' }), 1)
+    assert.equal(countActressesForBatchScrape({ scope: 'all', scrapeStatus: 'failed' }), 1)
   })
 
   it('combines gender and scrape status filters', () => {
     setupDb()
     const db = getDb()
-    db.prepare('UPDATE actresses SET last_scraped_at = ? WHERE main_name = ?').run(
-      '2024-01-01T00:00:00.000Z',
-      'Complete'
-    )
+    db.prepare('UPDATE actresses SET scraped_status = 1 WHERE main_name = ?').run('Complete')
 
     const targets = listActressesForBatchScrape({ scope: 'female', scrapeStatus: 'unscraped' })
 
@@ -394,7 +387,7 @@ describe('actressRepo.listActressesForBatchScrape', () => {
       ['Missing Female', 'Unknown Gender']
     )
     assert.equal(
-      countActressesForBatchScrape({ scope: 'female', scrapeStatus: 'scraped' }),
+      countActressesForBatchScrape({ scope: 'female', scrapeStatus: 'success' }),
       1
     )
   })

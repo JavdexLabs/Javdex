@@ -875,7 +875,11 @@ export const ACTRESS_BATCH_DEFAULT_MISSING_FIELDS: ActressScrapeField[] = [
 
 export type ActressBatchScrapeScope = ActressGenderFilter
 
-export type ActressBatchScrapeStatus = 'unscraped' | 'scraped' | 'all'
+/** Cumulative profile-scrape scopes for advanced actress batch scrape. */
+export type ActressBatchScrapeStatus = 'unscraped' | 'success' | 'failed' | 'all'
+
+/** Pre-cumulative two-state scope, accepted only as compatibility input. */
+export type LegacyActressBatchScrapeStatus = 'scraped'
 
 export const ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS: {
   id: ActressBatchScrapeScope
@@ -890,8 +894,9 @@ export const ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS: {
   id: ActressBatchScrapeStatus
   label: string
 }[] = [
-  { id: 'unscraped', label: '从未刮削' },
-  { id: 'scraped', label: '已刮削' },
+  { id: 'unscraped', label: '未刮削' },
+  { id: 'success', label: '刮削成功' },
+  { id: 'failed', label: '刮削失败' },
   { id: 'all', label: '全部' }
 ]
 
@@ -916,11 +921,14 @@ export const ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS: ScrapeUpdateModeOption<ActressS
 ]
 
 export interface ActressBatchScrapeFilter {
-  /** Optional explicit target ids. An empty array matches no actresses. */
+  /**
+   * Optional explicit target ids. When present they are the authoritative target set;
+   * an empty array matches no actresses.
+   */
   actressIds?: number[]
   /** Filter by actor gender. Unknown gender is treated as female for compatibility. */
   scope: ActressBatchScrapeScope
-  /** Filter by profile scrape history. Default: all. */
+  /** Filter by cumulative profile-scrape status. Default: all. */
   scrapeStatus?: ActressBatchScrapeStatus
   /** Optional range filter: include actresses missing any selected profile field. */
   missingFields?: ActressScrapeField[]

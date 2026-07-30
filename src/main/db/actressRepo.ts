@@ -12,13 +12,15 @@ import type {
   ActressScrapeField,
   ActressScrapeUpdateMode,
   ActressBatchScrapeFilter,
+  ActressBatchScrapeStatus,
   ActressGender,
   ActressGenderFilter,
   ActressListItem,
   ActressListSortBy,
   ActressAvatarSourceInfo,
   ActressMergeMainNameFrom,
-  ListSortDir
+  ListSortDir,
+  ScrapedStatus
 } from '@shared/types'
 import { ALL_ACTRESS_SCRAPE_FIELDS, ACTRESS_BATCH_DEFAULT_MISSING_FIELDS } from '@shared/types'
 import {
@@ -164,7 +166,7 @@ export function addAlias(actressId: number, aliasName: string): void {
   upsertActressName(actressId, aliasName.trim(), ACTRESS_NAME_TYPE.ALIAS, null, null, 0)
 }
 
-type ActressBatchTarget = { id: number; main_name: string }
+export type ActressBatchTarget = { id: number; main_name: string }
 
 function actressMissingFieldCondition(field: ActressScrapeField): string {
   switch (field) {
@@ -212,12 +214,14 @@ function actressMissingFieldCondition(field: ActressScrapeField): string {
   }
 }
 
-function actressNeverScrapedCondition(): string {
-  return "(a.last_scraped_at IS NULL OR trim(a.last_scraped_at) = '')"
-}
-
-function actressScrapedCondition(): string {
-  return "(a.last_scraped_at IS NOT NULL AND trim(a.last_scraped_at) != '')"
+/** Cumulative scrape status stored on the actress row, per batch scope. */
+const ACTRESS_BATCH_STATUS_VALUE: Record<
+  Exclude<ActressBatchScrapeStatus, 'all'>,
+  ScrapedStatus
+> = {
+  unscraped: 0,
+  success: 1,
+  failed: 2
 }
 
 function buildActressBatchConditions(
@@ -245,10 +249,9 @@ function buildActressBatchConditions(
   }
 
   const scrapeStatus = filter.scrapeStatus ?? 'all'
-  if (scrapeStatus === 'unscraped') {
-    conditions.push(actressNeverScrapedCondition())
-  } else if (scrapeStatus === 'scraped') {
-    conditions.push(actressScrapedCondition())
+  if (scrapeStatus !== 'all') {
+    conditions.push('a.scraped_status = ?')
+    params.push(ACTRESS_BATCH_STATUS_VALUE[scrapeStatus])
   }
 
   return { conditions, params }

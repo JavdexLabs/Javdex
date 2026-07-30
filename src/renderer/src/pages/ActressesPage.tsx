@@ -63,6 +63,7 @@ import {
   isMaintenanceHintDismissed,
   MAINTENANCE_HINT_KEYS
 } from '../utils/maintenanceHints'
+
 const ACTRESS_SORT_OPTIONS: SortSwitchOption<ActressListSortBy>[] = [
   { value: 'video_count', label: '影片', title: '本地影片数' },
   { value: 'gallery', label: '写真', title: '写真数量' },
@@ -300,10 +301,9 @@ export default function ActressesPage(): JSX.Element {
 
   const hasNonDefaultSort =
     sortBy !== ACTRESS_LIST_DEFAULTS.sortBy || sortDir !== ACTRESS_LIST_DEFAULTS.sortDir
+  const hasStatusFilter = statusFilter !== ACTRESS_DEFAULT_STATUS
   const hasAppliedFilters =
-    genderFilter !== ACTRESS_LIST_DEFAULTS.gender ||
-    statusFilter !== ACTRESS_DEFAULT_STATUS ||
-    hasNonDefaultSort
+    genderFilter !== ACTRESS_LIST_DEFAULTS.gender || hasStatusFilter || hasNonDefaultSort
   const resetFilters = (): void => {
     forgetPrimaryListLocation(ROUTE_PATH.actresses)
     patchParams({
@@ -314,7 +314,7 @@ export default function ActressesPage(): JSX.Element {
     })
   }
   const appliedFilters: AppliedFilterItem[] = []
-  if (statusFilter !== ACTRESS_DEFAULT_STATUS) {
+  if (hasStatusFilter) {
     appliedFilters.push({
       key: 'status',
       label: ACTRESS_STATUS_FILTER_LABELS[statusFilter],
@@ -387,16 +387,12 @@ export default function ActressesPage(): JSX.Element {
                 <button
                   ref={statusFilterBtnRef}
                   type="button"
-                  className={`btn btn-sm list-filter-btn${statusFilterOpen ? ' list-filter-btn--open' : ''}${statusFilter !== ACTRESS_DEFAULT_STATUS ? ' list-filter-btn--active' : ''}`}
+                  className={`btn btn-sm list-filter-btn${statusFilterOpen ? ' list-filter-btn--open' : ''}${hasStatusFilter ? ' list-filter-btn--active' : ''}`}
                   onClick={() => setStatusFilterOpen((open) => !open)}
                   aria-expanded={statusFilterOpen}
                   aria-haspopup="dialog"
                 >
-                  <span className="list-filter-btn-label">
-                    {statusFilter === ACTRESS_DEFAULT_STATUS
-                      ? '筛选'
-                      : ACTRESS_STATUS_FILTER_LABELS[statusFilter]}
-                  </span>
+                  <span className="list-filter-btn-label">筛选</span>
                   <ChevronDown
                     {...UI_ICON_SM}
                     className={`list-filter-chevron${statusFilterOpen ? ' is-open' : ''}`}

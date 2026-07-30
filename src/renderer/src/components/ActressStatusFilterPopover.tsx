@@ -45,9 +45,12 @@ export default function ActressStatusFilterPopover({
       align="end"
       offset={6}
       className="status-filter-popover"
+      role="dialog"
+      ariaLabel="刮削状态"
       onClose={onClose}
     >
-      <div className="status-filter-options" role="group" aria-label="刮削状态">
+      <h3 className="status-filter-popover-title">刮削状态</h3>
+      <div className="status-filter-options">
         {ACTRESS_STATUS_FILTER_ORDER.map((status) => (
           <button
             key={status}

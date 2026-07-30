@@ -7,6 +7,8 @@ import type {
   ActressGenderFilter,
   ActressAvatarSourceInfo,
   ActressListItem,
+  ActressListPage,
+  ActressListQuery,
   ActressListSortBy,
   ActressMergeInput,
   ListSortDir
@@ -19,6 +21,7 @@ import {
   getActressDetail,
   getActressAvatarSourceInfo,
   listActresses,
+  listActressPage,
   mergeActresses,
   setActressPosterPath
 } from '../db/actressRepo'
@@ -38,6 +41,11 @@ export function registerActressHandlers(): void {
       sortBy?: ActressListSortBy,
       sortDir?: ListSortDir
     ): ActressListItem[] => listActresses(search, gender, sortBy, sortDir)
+  )
+
+  registerHandler(
+    IPC.ACTRESS_LIST_PAGE,
+    (_e, query?: ActressListQuery): ActressListPage => listActressPage(query)
   )
 
   registerHandler(IPC.ACTRESS_GET, (_e, id: number): ActressDetail | null =>

@@ -1031,14 +1031,12 @@ function mergeActressScrapeRecords(
     ACTRESS_SCRAPE_STATUS_STRENGTH[keep.scraped_status]
       ? merge.scraped_status
       : keep.scraped_status
-  const successTimes = [keep, merge]
-    .filter((record) => record.scraped_status === 1 && !isBlankText(record.last_scraped_at))
-    .map((record) => record.last_scraped_at as string)
-  const lastScrapedAt = successTimes.reduce<string | null>(
-    (newest, time) => (newest === null || time > newest ? time : newest),
-    null
-  )
-  return { scrapedStatus, lastScrapedAt }
+  const [newestSuccessTime] = [keep, merge]
+    .filter((record) => record.scraped_status === 1)
+    .map((record) => record.last_scraped_at)
+    .filter((time): time is string => !isBlankText(time))
+    .sort((a, b) => (a > b ? -1 : 1))
+  return { scrapedStatus, lastScrapedAt: newestSuccessTime ?? null }
 }
 
 /**

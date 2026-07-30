@@ -8,6 +8,7 @@ import type { ScrapedStatus } from '@shared/types'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
 import { insertTestVideoWithFile } from './testVideoFixtures'
 import {
+  addActressGalleryAsset,
   applyActressScrapeResult,
   clearActressMetadataRecord,
   clearBrokenActressAvatarIfNeeded,
@@ -869,6 +870,54 @@ describe('actressRepo cumulative scrape status', () => {
     assert.equal(detail.last_scraped_at, null)
     assert.ok(detail.avatar_path)
   })
+})
+
+describe('actressRepo cumulative scrape status maintenance invariants', () => {
+  for (const status of [0, 1, 2] as ScrapedStatus[]) {
+    const successTime = status === 1 ? '2022-02-02T00:00:00.000Z' : null
+    it(`keeps ${ACTRESS_SCRAPE_STATUS_LABEL[status]} and its success time through manual maintenance`, () => {
+      setupDb()
+      const db = getDb()
+      setActressScrapeRecord(1, status, successTime)
+      writeTestAsset('actress_gallery/maintenance.jpg', MINIMAL_JPEG)
+
+      editActress(1, {
+        main_name: 'Maintained',
+        birth_date: '1991-02-03',
+        profile_summary: 'Manually maintained',
+        aliases: ['Maintained Alias']
+      })
+      setActressAvatarBundle(1, 'Maintained', {
+        displayImageBase64: MINIMAL_JPEG.toString('base64'),
+        sourceImageBase64: MINIMAL_JPEG.toString('base64'),
+        crop: createAvatarCropV1({
+          sourceFingerprint: avatarSourceFingerprint(MINIMAL_JPEG),
+          zoom: 1.4,
+          offsetX: 2,
+          offsetY: -2
+        })
+      })
+      const added = addActressGalleryAsset(1, {
+        remoteUrl: 'https://example.test/maintenance.jpg',
+        localPath: 'actress_gallery/maintenance.jpg'
+      })
+      setActressPosterPath(1, 'actress_gallery/maintenance.jpg')
+      setActressPosterPath(1, null)
+      deleteActressGalleryAsset(1, added.id)
+      insertTestVideoWithFile(db, {
+        code: 'MAINT-001',
+        filePath: 'maint.mp4',
+        title: 'Maintenance',
+        addTime: '2024-01-01'
+      })
+      db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(1, 1)
+      upsertActressFromScrape('Maintained', null, 'female')
+
+      const detail = getActressDetail(1)
+      assert.equal(detail?.scraped_status, status)
+      assert.equal(detail?.last_scraped_at, successTime)
+    })
+  }
 })
 
 describe('actressRepo.upsertActressFromScrape avatar adopt', () => {

@@ -58,6 +58,7 @@ export const IPC = {
 
   // Actresses
   ACTRESS_LIST: 'actress:list',
+  ACTRESS_LIST_PAGE: 'actress:listPage',
   ACTRESS_GET: 'actress:get',
   ACTRESS_AVATAR_SOURCE_INFO: 'actress:avatarSourceInfo',
   ACTRESS_EDIT: 'actress:edit',

@@ -16,13 +16,22 @@ import type {
   ActressGender,
   ActressGenderFilter,
   ActressListItem,
+  ActressListPage,
+  ActressListQuery,
   ActressListSortBy,
+  ActressListStatusCounts,
+  ActressListStatusFilter,
   ActressAvatarSourceInfo,
   ActressMergeMainNameFrom,
   ListSortDir,
   ScrapedStatus
 } from '@shared/types'
-import { ALL_ACTRESS_SCRAPE_FIELDS, ACTRESS_BATCH_DEFAULT_MISSING_FIELDS } from '@shared/types'
+import {
+  ALL_ACTRESS_SCRAPE_FIELDS,
+  ACTRESS_BATCH_DEFAULT_MISSING_FIELDS,
+  ACTRESS_LIST_STATUS_SCRAPED_STATUS,
+  actressStatusFilterOf
+} from '@shared/types'
 import {
   createAvatarCropV1,
   parseAvatarCrop,
@@ -609,13 +618,11 @@ export function listIncompleteProfileActresses(
   })
 }
 
-export function listActresses(
-  search?: string,
-  gender: ActressGenderFilter = 'female',
-  sortBy: ActressListSortBy = 'video_count',
-  sortDir: ListSortDir = 'desc'
-): ActressListItem[] {
-  const db = getDb()
+function buildActressListWhere(
+  search: string | undefined,
+  gender: ActressGenderFilter,
+  status: ActressListStatusFilter
+): { sql: string; params: unknown[] } {
   const conditions: string[] = []
   const params: unknown[] = []
 
@@ -627,8 +634,23 @@ export function listActresses(
     conditions.push('a.gender = ?')
     params.push(gender)
   }
+  if (status !== 'all') {
+    conditions.push('a.scraped_status = ?')
+    params.push(ACTRESS_LIST_STATUS_SCRAPED_STATUS[status])
+  }
 
-  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+  return { sql: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', params }
+}
+
+export function listActresses(
+  search?: string,
+  gender: ActressGenderFilter = 'female',
+  sortBy: ActressListSortBy = 'video_count',
+  sortDir: ListSortDir = 'desc',
+  status: ActressListStatusFilter = 'all'
+): ActressListItem[] {
+  const db = getDb()
+  const { sql: where, params } = buildActressListWhere(search, gender, status)
   const orderBy = buildActressListOrderBy(sortBy, sortDir)
   return db
     .prepare(
@@ -662,6 +684,39 @@ function buildActressListOrderBy(sortBy: ActressListSortBy, sortDir: ListSortDir
     case 'video_count':
     default:
       return `video_count ${dir}, ${tie}`
+  }
+}
+
+/** Actresses per cumulative status, scoped by search and gender but not by the status filter. */
+function countActressListStatuses(
+  search: string | undefined,
+  gender: ActressGenderFilter
+): ActressListStatusCounts {
+  const db = getDb()
+  const { sql: where, params } = buildActressListWhere(search, gender, 'all')
+  const rows = db
+    .prepare(
+      `SELECT a.scraped_status AS status, COUNT(*) AS n
+       FROM actresses a
+       ${where}
+       GROUP BY a.scraped_status`
+    )
+    .all(...params) as Array<{ status: ScrapedStatus; n: number }>
+
+  const counts: ActressListStatusCounts = { all: 0, success: 0, unscraped: 0, failed: 0 }
+  for (const row of rows) {
+    counts[actressStatusFilterOf(row.status)] += row.n
+    counts.all += row.n
+  }
+  return counts
+}
+
+/** Actress list read contract: filtered rows plus the status counts the toolbar shows. */
+export function listActressPage(query: ActressListQuery = {}): ActressListPage {
+  const gender = query.gender ?? 'female'
+  return {
+    items: listActresses(query.search, gender, query.sortBy, query.sortDir, query.status ?? 'all'),
+    statusCounts: countActressListStatuses(query.search, gender)
   }
 }
 

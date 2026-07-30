@@ -17,6 +17,7 @@ import {
   editActress,
   listActresses,
   listActressesForBatchScrape,
+  listActressPage,
   mergeActresses,
   getActressAvatarSourceInfo,
   getActressDetail,
@@ -223,6 +224,100 @@ describe('actressRepo.listActresses', () => {
     assert.equal(sorted[0]?.main_name, 'Complete')
     assert.equal(sorted[0]?.video_count, 2)
     assert.equal(sorted.find((a) => a.main_name === 'Missing Female')?.video_count, 1)
+  })
+})
+
+describe('actressRepo.listActressPage', () => {
+  /** Complete: success, Missing Female: failed, Missing Male: success, Unknown Gender: unscraped. */
+  function setupStatuses(): void {
+    setupDb()
+    const update = getDb().prepare('UPDATE actresses SET scraped_status = ? WHERE id = ?')
+    update.run(1, 1)
+    update.run(2, 2)
+    update.run(1, 3)
+  }
+
+  it('returns the cumulative status of every actress with per-status counts', () => {
+    setupStatuses()
+
+    const page = listActressPage({ gender: 'all' })
+
+    assert.deepEqual(
+      page.items.map((item) => [item.main_name, item.scraped_status]),
+      [
+        ['Complete', 1],
+        ['Missing Female', 2],
+        ['Missing Male', 1],
+        ['Unknown Gender', 0]
+      ]
+    )
+    assert.deepEqual(page.statusCounts, { all: 4, success: 2, unscraped: 1, failed: 1 })
+  })
+
+  it('filters by each status while keeping the counts of the unfiltered scope', () => {
+    setupStatuses()
+
+    const success = listActressPage({ gender: 'all', status: 'success' })
+    const unscraped = listActressPage({ gender: 'all', status: 'unscraped' })
+    const failed = listActressPage({ gender: 'all', status: 'failed' })
+
+    assert.deepEqual(success.items.map((item) => item.main_name), ['Complete', 'Missing Male'])
+    assert.deepEqual(unscraped.items.map((item) => item.main_name), ['Unknown Gender'])
+    assert.deepEqual(failed.items.map((item) => item.main_name), ['Missing Female'])
+    assert.deepEqual(failed.statusCounts, success.statusCounts)
+  })
+
+  it('combines the status filter with search, gender and sort', () => {
+    setupStatuses()
+    const db = getDb()
+    insertTestVideoWithFile(db, { code: 'A-001', filePath: 'a.mp4', title: 'A', addTime: '2024-01-01' })
+    db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(1, 2)
+    db.prepare('UPDATE actresses SET scraped_status = 1 WHERE id = 4').run()
+
+    assert.deepEqual(
+      listActressPage({ search: 'Missing', gender: 'all', status: 'success' }).items.map(
+        (item) => item.main_name
+      ),
+      ['Missing Male']
+    )
+    assert.deepEqual(
+      listActressPage({ gender: 'female', status: 'failed' }).items.map((item) => [
+        item.main_name,
+        item.video_count
+      ]),
+      [['Missing Female', 1]]
+    )
+    assert.deepEqual(
+      listActressPage({ gender: 'all', status: 'success', sortBy: 'video_count', sortDir: 'asc' })
+        .items.map((item) => item.main_name),
+      ['Complete', 'Missing Male', 'Unknown Gender']
+    )
+  })
+
+  it('counts statuses within the current search and gender scope', () => {
+    setupStatuses()
+
+    assert.deepEqual(listActressPage({ gender: 'female' }).statusCounts, {
+      all: 2,
+      success: 1,
+      unscraped: 0,
+      failed: 1
+    })
+    assert.deepEqual(listActressPage({ search: 'Missing', gender: 'all' }).statusCounts, {
+      all: 2,
+      success: 1,
+      unscraped: 0,
+      failed: 1
+    })
+  })
+
+  it('treats a missing status as all statuses', () => {
+    setupStatuses()
+
+    assert.deepEqual(
+      listActressPage({ gender: 'all', status: 'all' }).items.map((item) => item.main_name),
+      listActressPage({ gender: 'all' }).items.map((item) => item.main_name)
+    )
   })
 })
 

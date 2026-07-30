@@ -219,6 +219,53 @@ export interface ActressListItem extends Actress {
   video_count: number
 }
 
+/** Canonical actress library status filter vocabulary (also the URL values). */
+export type ActressListStatusFilter = 'all' | 'success' | 'unscraped' | 'failed'
+
+export const ACTRESS_LIST_STATUS_SCRAPED_STATUS: Record<
+  Exclude<ActressListStatusFilter, 'all'>,
+  ScrapedStatus
+> = {
+  unscraped: 0,
+  success: 1,
+  failed: 2
+}
+
+const ACTRESS_LIST_STATUS_BY_SCRAPED_STATUS = new Map<
+  ScrapedStatus,
+  Exclude<ActressListStatusFilter, 'all'>
+>(
+  (
+    Object.entries(ACTRESS_LIST_STATUS_SCRAPED_STATUS) as [
+      Exclude<ActressListStatusFilter, 'all'>,
+      ScrapedStatus
+    ][]
+  ).map(([filter, status]) => [status, filter])
+)
+
+/** Filter vocabulary for a stored cumulative status value. */
+export function actressStatusFilterOf(
+  status: ScrapedStatus
+): Exclude<ActressListStatusFilter, 'all'> {
+  return ACTRESS_LIST_STATUS_BY_SCRAPED_STATUS.get(status) ?? 'unscraped'
+}
+
+export interface ActressListQuery {
+  search?: string
+  gender?: ActressGenderFilter
+  status?: ActressListStatusFilter
+  sortBy?: ActressListSortBy
+  sortDir?: ListSortDir
+}
+
+/** Actresses per cumulative status within the current search and gender scope. */
+export type ActressListStatusCounts = Record<ActressListStatusFilter, number>
+
+export interface ActressListPage {
+  items: ActressListItem[]
+  statusCounts: ActressListStatusCounts
+}
+
 /** Read-only source metadata used by renderer-side smart avatar composition. */
 export interface ActressAvatarSourceInfo {
   assetPath: string

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMatch, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { SearchCheck, SearchX, Trash2, Users } from 'lucide-react'
+import { ChevronDown, SearchCheck, SearchX, Trash2, Users } from 'lucide-react'
 import {
   ACTRESS_LIST_DEFAULTS,
   ACTRESS_SCRAPE_FIELD_OPTIONS,
@@ -9,6 +9,8 @@ import {
   ALL_ACTRESS_SCRAPE_FIELDS,
   type ActressListItem,
   type ActressListSortBy,
+  type ActressListStatusCounts,
+  type ActressListStatusFilter,
   type ActressScrapeField,
   type ActressScrapeUpdateMode
 } from '@shared/types'
@@ -25,10 +27,17 @@ import ListToolbar from '../components/ListToolbar'
 import SelectionToolbar from '../components/SelectionToolbar'
 import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
+import ActressStatusBadge from '../components/ActressStatusBadge'
+import ActressStatusFilterPopover, {
+  ACTRESS_STATUS_FILTER_LABELS
+} from '../components/ActressStatusFilterPopover'
 import {
   actressQueryHash,
+  actressStatusParam,
+  ACTRESS_DEFAULT_STATUS,
   LIST_PARAM,
   parseActressSort,
+  parseActressStatus,
   parseGender,
   patchSearchParams
 } from '../listView/listQueryParams'
@@ -54,7 +63,6 @@ import {
   isMaintenanceHintDismissed,
   MAINTENANCE_HINT_KEYS
 } from '../utils/maintenanceHints'
-import { settingsPath } from '../settings/settingsRoutes'
 
 const ACTRESS_SORT_OPTIONS: SortSwitchOption<ActressListSortBy>[] = [
   { value: 'video_count', label: '影片', title: '本地影片数' },
@@ -74,6 +82,13 @@ const ACTRESS_SORT_LABELS: Record<ActressListSortBy, string> = {
   gallery: '写真数',
   age: '年龄',
   cup_size: '罩杯'
+}
+
+const EMPTY_STATUS_COUNTS: ActressListStatusCounts = {
+  all: 0,
+  success: 0,
+  unscraped: 0,
+  failed: 0
 }
 
 export default function ActressesPage(): JSX.Element {
@@ -101,6 +116,7 @@ export default function ActressesPage(): JSX.Element {
   }, [debouncedQ, urlQ, setSearchParams])
 
   const genderFilter = parseGender(searchParams.get(LIST_PARAM.gender))
+  const statusFilter = parseActressStatus(searchParams.get(LIST_PARAM.status))
   const { sortBy, sortDir } = parseActressSort(
     searchParams.get(LIST_PARAM.sort),
     searchParams.get(LIST_PARAM.dir)
@@ -120,18 +136,28 @@ export default function ActressesPage(): JSX.Element {
   const [showBulkScrape, setShowBulkScrape] = useState(false)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const statusFilterBtnRef = useRef<HTMLButtonElement>(null)
+  const [statusFilterOpen, setStatusFilterOpen] = useState(false)
 
   const dismissOverlays = useCallback(() => {
     setPendingDelete(null)
     setShowBulkScrape(false)
     setConfirmBulkDelete(false)
+    setStatusFilterOpen(false)
   }, [])
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
 
   const listQuery = useQuery({
     queryKey: actressKeys.list(queryHash, debouncedQ.trim(), genderFilter, sortBy, sortDir),
-    queryFn: () => api.actresses.list(debouncedQ.trim(), genderFilter, sortBy, sortDir),
+    queryFn: () =>
+      api.actresses.listPage({
+        search: debouncedQ.trim(),
+        gender: genderFilter,
+        status: statusFilter,
+        sortBy,
+        sortDir
+      }),
     placeholderData: (prev) => prev
   })
 
@@ -149,7 +175,8 @@ export default function ActressesPage(): JSX.Element {
 
   useListSurfaceRefetch(detailOpen, refetchActressSurface)
 
-  const items = listQuery.data ?? []
+  const items = listQuery.data?.items ?? []
+  const statusCounts = listQuery.data?.statusCounts ?? EMPTY_STATUS_COUNTS
   const loading = listQuery.isLoading && items.length === 0
   const isFetching = listQuery.isFetching
 
@@ -268,18 +295,32 @@ export default function ActressesPage(): JSX.Element {
     }
   }
 
+  const setStatusFilter = (status: ActressListStatusFilter): void => {
+    patchParams({ [LIST_PARAM.status]: actressStatusParam(status) })
+  }
+
   const hasNonDefaultSort =
     sortBy !== ACTRESS_LIST_DEFAULTS.sortBy || sortDir !== ACTRESS_LIST_DEFAULTS.sortDir
-  const hasAppliedFilters = genderFilter !== ACTRESS_LIST_DEFAULTS.gender || hasNonDefaultSort
+  const hasStatusFilter = statusFilter !== ACTRESS_DEFAULT_STATUS
+  const hasAppliedFilters =
+    genderFilter !== ACTRESS_LIST_DEFAULTS.gender || hasStatusFilter || hasNonDefaultSort
   const resetFilters = (): void => {
     forgetPrimaryListLocation(ROUTE_PATH.actresses)
     patchParams({
       [LIST_PARAM.gender]: null,
+      [LIST_PARAM.status]: null,
       [LIST_PARAM.sort]: null,
       [LIST_PARAM.dir]: null
     })
   }
   const appliedFilters: AppliedFilterItem[] = []
+  if (hasStatusFilter) {
+    appliedFilters.push({
+      key: 'status',
+      label: ACTRESS_STATUS_FILTER_LABELS[statusFilter],
+      onRemove: () => setStatusFilter(ACTRESS_DEFAULT_STATUS)
+    })
+  }
   if (genderFilter !== ACTRESS_LIST_DEFAULTS.gender) {
     appliedFilters.push({
       key: 'gender',
@@ -343,6 +384,29 @@ export default function ActressesPage(): JSX.Element {
             }}
             controls={
               <>
+                <button
+                  ref={statusFilterBtnRef}
+                  type="button"
+                  className={`btn btn-sm list-filter-btn${statusFilterOpen ? ' list-filter-btn--open' : ''}${hasStatusFilter ? ' list-filter-btn--active' : ''}`}
+                  onClick={() => setStatusFilterOpen((open) => !open)}
+                  aria-expanded={statusFilterOpen}
+                  aria-haspopup="dialog"
+                >
+                  <span className="list-filter-btn-label">筛选</span>
+                  <ChevronDown
+                    {...UI_ICON_SM}
+                    className={`list-filter-chevron${statusFilterOpen ? ' is-open' : ''}`}
+                    aria-hidden
+                  />
+                </button>
+                <ActressStatusFilterPopover
+                  open={statusFilterOpen}
+                  anchorRef={statusFilterBtnRef}
+                  value={statusFilter}
+                  counts={statusCounts}
+                  onChange={setStatusFilter}
+                  onClose={() => setStatusFilterOpen(false)}
+                />
                 <div className="mode-toggle" role="group" aria-label="性别筛选">
                   <button
                     type="button"
@@ -409,9 +473,9 @@ export default function ActressesPage(): JSX.Element {
                 ? '批量刮削任务进行中，完成后将自动更新列表。'
                 : '可批量补全头像、简介与身体数据。'
             }
-            secondaryLabel="前往设置"
+            secondaryLabel="查看未刮削"
             primaryLabel={actressBatchActive ? '刮削进行中…' : '一键刮削'}
-            onSecondary={() => navigate(settingsPath('overview', 'status'))}
+            onSecondary={() => setStatusFilter('unscraped')}
             onPrimary={() => void startUnscrapedBatch()}
             onDismiss={dismissUnscrapedBanner}
             primaryDisabled={actressBatchActive || !defaultScraper}
@@ -446,7 +510,7 @@ export default function ActressesPage(): JSX.Element {
               title={emptyDueToFilter ? '没有匹配的演员' : '暂无演员数据'}
               description={
                 emptyDueToFilter
-                  ? '调整搜索、性别或排序条件后再试。'
+                  ? '调整搜索、刮削状态、性别或排序条件后再试。'
                   : '刮削影片后将自动归纳演员。'
               }
             />
@@ -482,7 +546,10 @@ export default function ActressesPage(): JSX.Element {
                         navigateToActressDetail(navigate, location, a.id)
                       }}
                     >
-                      <ActressAvatar src={avatar} name={a.main_name} gender={a.gender} />
+                      <span className="actress-card-avatar">
+                        <ActressAvatar src={avatar} name={a.main_name} gender={a.gender} />
+                        <ActressStatusBadge status={a.scraped_status} />
+                      </span>
                       <ActressName name={a.main_name} gender={a.gender} className="actress-name" />
                       <div className="actress-count">{a.video_count} 部</div>
                     </button>

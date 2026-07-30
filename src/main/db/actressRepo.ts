@@ -18,7 +18,8 @@ import type {
   ActressListSortBy,
   ActressAvatarSourceInfo,
   ActressMergeMainNameFrom,
-  ListSortDir
+  ListSortDir,
+  ScrapedStatus
 } from '@shared/types'
 import { ALL_ACTRESS_SCRAPE_FIELDS, ACTRESS_BATCH_DEFAULT_MISSING_FIELDS } from '@shared/types'
 import {
@@ -891,6 +892,7 @@ export function mergeActresses(
   const mergeAvatarPath = merge.avatar_path
   const mergeAvatarSourcePath = merge.avatar_source_path
   const keepHadAvatar = !isBlankText(keep.avatar_path)
+  const mergedScrapeRecord = mergeActressScrapeRecords(keep, merge)
 
   const txn = db.transaction(() => {
     db.prepare(
@@ -954,12 +956,8 @@ export function mergeActresses(
            ELSE avatar_crop_json
          END,
          gender = COALESCE(gender, @gender),
-         last_scraped_at = CASE
-           WHEN last_scraped_at IS NULL THEN @last_scraped_at
-           WHEN @last_scraped_at IS NULL THEN last_scraped_at
-           WHEN last_scraped_at > @last_scraped_at THEN last_scraped_at
-           ELSE @last_scraped_at
-         END,
+         scraped_status = @scraped_status,
+         last_scraped_at = @last_scraped_at,
          updated_at = @updated_at
        WHERE id = @keepId`
     ).run({
@@ -980,7 +978,8 @@ export function mergeActresses(
       avatar_crop_json: merge.avatar_crop_json,
       keep_had_avatar: keepHadAvatar ? 1 : 0,
       gender: merge.gender,
-      last_scraped_at: merge.last_scraped_at,
+      scraped_status: mergedScrapeRecord.scrapedStatus,
+      last_scraped_at: mergedScrapeRecord.lastScrapedAt,
       updated_at: nowIso()
     })
 
@@ -1015,6 +1014,31 @@ export function mergeActresses(
     if (mergeAvatarPath && mergeAvatarPath !== keptAvatar) deleteAsset(mergeAvatarPath)
     if (mergeAvatarSourcePath) deleteAsset(mergeAvatarSourcePath)
   }
+}
+
+/** Cumulative history is strongest for a success, then a failure, and weakest when never scraped. */
+const ACTRESS_SCRAPE_STATUS_STRENGTH: Record<ScrapedStatus, number> = { 0: 0, 2: 1, 1: 2 }
+
+type ActressScrapeRecord = Pick<Actress, 'scraped_status' | 'last_scraped_at'>
+
+/** Combine two cumulative histories: the strongest state wins, and only successes contribute a time. */
+function mergeActressScrapeRecords(
+  keep: ActressScrapeRecord,
+  merge: ActressScrapeRecord
+): { scrapedStatus: ScrapedStatus; lastScrapedAt: string | null } {
+  const scrapedStatus =
+    ACTRESS_SCRAPE_STATUS_STRENGTH[merge.scraped_status] >
+    ACTRESS_SCRAPE_STATUS_STRENGTH[keep.scraped_status]
+      ? merge.scraped_status
+      : keep.scraped_status
+  const successTimes = [keep, merge]
+    .filter((record) => record.scraped_status === 1 && !isBlankText(record.last_scraped_at))
+    .map((record) => record.last_scraped_at as string)
+  const lastScrapedAt = successTimes.reduce<string | null>(
+    (newest, time) => (newest === null || time > newest ? time : newest),
+    null
+  )
+  return { scrapedStatus, lastScrapedAt }
 }
 
 /**

@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createAvatarCropV1, parseAvatarCrop } from '@shared/avatarCrop'
+import type { ScrapedStatus } from '@shared/types'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
 import { insertTestVideoWithFile } from './testVideoFixtures'
 import {
@@ -110,6 +111,43 @@ function setupDb(): void {
      VALUES (?, 'gallery', 0, ?, ?, ?)`
   ).run(1, 'https://example.test/complete.jpg', 'actress_gallery/complete.jpg', 'now')
 }
+
+function setActressScrapeRecord(
+  id: number,
+  status: ScrapedStatus,
+  lastScrapedAt: string | null
+): void {
+  getDb()
+    .prepare('UPDATE actresses SET scraped_status = ?, last_scraped_at = ? WHERE id = ?')
+    .run(status, lastScrapedAt, id)
+}
+
+const ACTRESS_SCRAPE_STATUS_LABEL: Record<ScrapedStatus, string> = {
+  0: '未刮削',
+  1: '刮削成功',
+  2: '刮削失败'
+}
+
+const KEEPER_SUCCESS_TIME = '2023-03-03T00:00:00.000Z'
+const MERGED_SUCCESS_TIME = '2024-04-04T00:00:00.000Z'
+
+/** Every pairing of cumulative states, with the history the keeper must end up with. */
+const MERGE_SCRAPE_STATUS_MATRIX: Array<{
+  keep: ScrapedStatus
+  merge: ScrapedStatus
+  status: ScrapedStatus
+  lastScrapedAt: string | null
+}> = [
+  { keep: 0, merge: 0, status: 0, lastScrapedAt: null },
+  { keep: 0, merge: 2, status: 2, lastScrapedAt: null },
+  { keep: 0, merge: 1, status: 1, lastScrapedAt: MERGED_SUCCESS_TIME },
+  { keep: 2, merge: 0, status: 2, lastScrapedAt: null },
+  { keep: 2, merge: 2, status: 2, lastScrapedAt: null },
+  { keep: 2, merge: 1, status: 1, lastScrapedAt: MERGED_SUCCESS_TIME },
+  { keep: 1, merge: 0, status: 1, lastScrapedAt: KEEPER_SUCCESS_TIME },
+  { keep: 1, merge: 2, status: 1, lastScrapedAt: KEEPER_SUCCESS_TIME },
+  { keep: 1, merge: 1, status: 1, lastScrapedAt: MERGED_SUCCESS_TIME }
+]
 
 afterEach(() => {
   closeDatabase()
@@ -356,6 +394,44 @@ describe('actressRepo.mergeActresses', () => {
     assert.ok(detail)
     assert.equal(detail.main_name, 'Missing Female')
     assert.ok(detail.aliases.includes('Complete'))
+  })
+
+  for (const merged of MERGE_SCRAPE_STATUS_MATRIX) {
+    const keeperLabel = ACTRESS_SCRAPE_STATUS_LABEL[merged.keep]
+    const mergedLabel = ACTRESS_SCRAPE_STATUS_LABEL[merged.merge]
+    it(`keeps ${ACTRESS_SCRAPE_STATUS_LABEL[merged.status]} when merging ${mergedLabel} into ${keeperLabel}`, () => {
+      setupDb()
+      setActressScrapeRecord(1, merged.keep, merged.keep === 1 ? KEEPER_SUCCESS_TIME : null)
+      setActressScrapeRecord(2, merged.merge, merged.merge === 1 ? MERGED_SUCCESS_TIME : null)
+
+      mergeActresses(1, 2, 'keep')
+
+      const detail = getActressDetail(1)
+      assert.equal(detail?.scraped_status, merged.status)
+      assert.equal(detail?.last_scraped_at, merged.lastScrapedAt)
+    })
+  }
+
+  it('keeps the newer success time when the keeper succeeded more recently', () => {
+    setupDb()
+    setActressScrapeRecord(1, 1, '2025-05-05T00:00:00.000Z')
+    setActressScrapeRecord(2, 1, '2024-04-04T00:00:00.000Z')
+
+    mergeActresses(1, 2, 'keep')
+
+    assert.equal(getActressDetail(1)?.last_scraped_at, '2025-05-05T00:00:00.000Z')
+  })
+
+  it('ignores a success time left on a record that is not scraped successfully', () => {
+    setupDb()
+    setActressScrapeRecord(1, 2, '2019-09-09T00:00:00.000Z')
+    setActressScrapeRecord(2, 1, '2018-08-08T00:00:00.000Z')
+
+    mergeActresses(1, 2, 'keep')
+
+    const detail = getActressDetail(1)
+    assert.equal(detail?.scraped_status, 1)
+    assert.equal(detail?.last_scraped_at, '2018-08-08T00:00:00.000Z')
   })
 })
 

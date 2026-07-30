@@ -14,7 +14,14 @@ import {
   parseFacetVideoPath
 } from './facetRoutes'
 import { libraryVideoActressPath, libraryVideoDetailPath, parseLibraryVideoPath } from './libraryRoutes'
-import { navigateToFacetDetail } from './listNavigation'
+import { navigateToActressDetail, navigateToActressList, navigateToFacetDetail } from './listNavigation'
+import {
+  actressQueryHash,
+  actressStatusParam,
+  LIST_PARAM,
+  parseActressStatus,
+  patchSearchParams
+} from './listQueryParams'
 import {
   clearPrimaryNavigationMemory,
   forgetPrimaryListLocation,
@@ -77,6 +84,91 @@ describe('route builders and parsers', () => {
     assert.equal(parseLibraryVideoPath('/detail/not-a-number'), null)
     assert.equal(parseActressVideoPath('/actresses/x'), null)
     assert.equal(parsePlaylistVideoPath('/playlists/x'), null)
+  })
+})
+
+describe('actress status filter query contract', () => {
+  it('parses the canonical status values and treats anything else as all', () => {
+    assert.equal(parseActressStatus('success'), 'success')
+    assert.equal(parseActressStatus('unscraped'), 'unscraped')
+    assert.equal(parseActressStatus('failed'), 'failed')
+    assert.equal(parseActressStatus(null), 'all')
+    assert.equal(parseActressStatus('all'), 'all')
+    assert.equal(parseActressStatus('1'), 'all')
+    assert.equal(parseActressStatus('scraped'), 'all')
+  })
+
+  it('omits the param for all and writes the canonical value otherwise', () => {
+    assert.equal(actressStatusParam('all'), null)
+    assert.equal(actressStatusParam('unscraped'), 'unscraped')
+
+    const applied = patchSearchParams(new URLSearchParams('q=sara&gender=all'), {
+      [LIST_PARAM.status]: actressStatusParam('failed')
+    })
+    assert.equal(applied.toString(), 'q=sara&gender=all&status=failed')
+
+    const removed = patchSearchParams(applied, {
+      [LIST_PARAM.status]: actressStatusParam('all')
+    })
+    assert.equal(removed.toString(), 'q=sara&gender=all')
+  })
+
+  it('includes status in the list query identity and ignores invalid values', () => {
+    const unscraped = actressQueryHash(new URLSearchParams('status=unscraped'))
+    const failed = actressQueryHash(new URLSearchParams('status=failed'))
+    const invalid = actressQueryHash(new URLSearchParams('status=bogus'))
+    const all = actressQueryHash(new URLSearchParams(''))
+
+    assert.notEqual(unscraped, failed)
+    assert.notEqual(unscraped, all)
+    assert.equal(invalid, all)
+  })
+
+  it('keeps search, gender and sort identity while only the status changes', () => {
+    const base = new URLSearchParams('q=sara&gender=all&sort=age&dir=asc')
+    const withStatus = patchSearchParams(base, { [LIST_PARAM.status]: 'unscraped' })
+
+    assert.equal(withStatus.get(LIST_PARAM.q), 'sara')
+    assert.equal(withStatus.get(LIST_PARAM.gender), 'all')
+    assert.equal(withStatus.get(LIST_PARAM.sort), 'age')
+    assert.equal(withStatus.get(LIST_PARAM.dir), 'asc')
+    assert.notEqual(actressQueryHash(withStatus), actressQueryHash(base))
+  })
+
+  it('round-trips the status query through actress detail and back', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
+    const listLocation = {
+      pathname: '/actresses',
+      search: '?q=sara&gender=all&status=failed',
+      hash: '',
+      state: null,
+      key: 'test'
+    } as Location
+
+    navigateToActressDetail(navigate, listLocation, 8)
+    assert.deepEqual(destinations[0], {
+      pathname: '/actresses/8',
+      search: '?q=sara&gender=all&status=failed'
+    })
+
+    navigateToActressList(navigate, { ...listLocation, pathname: '/actresses/8' } as Location)
+    assert.deepEqual(destinations[1], {
+      pathname: '/actresses',
+      search: 'q=sara&gender=all&status=failed'
+    })
+  })
+
+  it('remembers the actress status filter across primary navigation', () => {
+    clearPrimaryNavigationMemory()
+    rememberPrimaryListLocation('/actresses/8', '?q=sara&status=unscraped')
+
+    assert.deepEqual(primaryNavigationTarget('/actresses'), {
+      pathname: '/actresses',
+      search: '?q=sara&status=unscraped'
+    })
   })
 })
 

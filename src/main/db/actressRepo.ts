@@ -12,15 +12,26 @@ import type {
   ActressScrapeField,
   ActressScrapeUpdateMode,
   ActressBatchScrapeFilter,
+  ActressBatchScrapeStatus,
   ActressGender,
   ActressGenderFilter,
   ActressListItem,
+  ActressListPage,
+  ActressListQuery,
   ActressListSortBy,
+  ActressListStatusCounts,
+  ActressListStatusFilter,
   ActressAvatarSourceInfo,
   ActressMergeMainNameFrom,
-  ListSortDir
+  ListSortDir,
+  ScrapedStatus
 } from '@shared/types'
-import { ALL_ACTRESS_SCRAPE_FIELDS, ACTRESS_BATCH_DEFAULT_MISSING_FIELDS } from '@shared/types'
+import {
+  ALL_ACTRESS_SCRAPE_FIELDS,
+  ACTRESS_BATCH_DEFAULT_MISSING_FIELDS,
+  ACTRESS_LIST_STATUS_SCRAPED_STATUS,
+  actressStatusFilterOf
+} from '@shared/types'
 import {
   createAvatarCropV1,
   parseAvatarCrop,
@@ -164,7 +175,7 @@ export function addAlias(actressId: number, aliasName: string): void {
   upsertActressName(actressId, aliasName.trim(), ACTRESS_NAME_TYPE.ALIAS, null, null, 0)
 }
 
-type ActressBatchTarget = { id: number; main_name: string }
+export type ActressBatchTarget = { id: number; main_name: string }
 
 function actressMissingFieldCondition(field: ActressScrapeField): string {
   switch (field) {
@@ -212,12 +223,14 @@ function actressMissingFieldCondition(field: ActressScrapeField): string {
   }
 }
 
-function actressNeverScrapedCondition(): string {
-  return "(a.last_scraped_at IS NULL OR trim(a.last_scraped_at) = '')"
-}
-
-function actressScrapedCondition(): string {
-  return "(a.last_scraped_at IS NOT NULL AND trim(a.last_scraped_at) != '')"
+/** Cumulative scrape status stored on the actress row, per batch scope. */
+const ACTRESS_BATCH_STATUS_VALUE: Record<
+  Exclude<ActressBatchScrapeStatus, 'all'>,
+  ScrapedStatus
+> = {
+  unscraped: 0,
+  success: 1,
+  failed: 2
 }
 
 function buildActressBatchConditions(
@@ -245,10 +258,9 @@ function buildActressBatchConditions(
   }
 
   const scrapeStatus = filter.scrapeStatus ?? 'all'
-  if (scrapeStatus === 'unscraped') {
-    conditions.push(actressNeverScrapedCondition())
-  } else if (scrapeStatus === 'scraped') {
-    conditions.push(actressScrapedCondition())
+  if (scrapeStatus !== 'all') {
+    conditions.push('a.scraped_status = ?')
+    params.push(ACTRESS_BATCH_STATUS_VALUE[scrapeStatus])
   }
 
   return { conditions, params }
@@ -606,13 +618,11 @@ export function listIncompleteProfileActresses(
   })
 }
 
-export function listActresses(
-  search?: string,
-  gender: ActressGenderFilter = 'female',
-  sortBy: ActressListSortBy = 'video_count',
-  sortDir: ListSortDir = 'desc'
-): ActressListItem[] {
-  const db = getDb()
+function buildActressListWhere(
+  search: string | undefined,
+  gender: ActressGenderFilter,
+  status: ActressListStatusFilter
+): { sql: string; params: unknown[] } {
   const conditions: string[] = []
   const params: unknown[] = []
 
@@ -624,8 +634,23 @@ export function listActresses(
     conditions.push('a.gender = ?')
     params.push(gender)
   }
+  if (status !== 'all') {
+    conditions.push('a.scraped_status = ?')
+    params.push(ACTRESS_LIST_STATUS_SCRAPED_STATUS[status])
+  }
 
-  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+  return { sql: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', params }
+}
+
+export function listActresses(
+  search?: string,
+  gender: ActressGenderFilter = 'female',
+  sortBy: ActressListSortBy = 'video_count',
+  sortDir: ListSortDir = 'desc',
+  status: ActressListStatusFilter = 'all'
+): ActressListItem[] {
+  const db = getDb()
+  const { sql: where, params } = buildActressListWhere(search, gender, status)
   const orderBy = buildActressListOrderBy(sortBy, sortDir)
   return db
     .prepare(
@@ -659,6 +684,39 @@ function buildActressListOrderBy(sortBy: ActressListSortBy, sortDir: ListSortDir
     case 'video_count':
     default:
       return `video_count ${dir}, ${tie}`
+  }
+}
+
+/** Actresses per cumulative status, scoped by search and gender but not by the status filter. */
+function countActressListStatuses(
+  search: string | undefined,
+  gender: ActressGenderFilter
+): ActressListStatusCounts {
+  const db = getDb()
+  const { sql: where, params } = buildActressListWhere(search, gender, 'all')
+  const rows = db
+    .prepare(
+      `SELECT a.scraped_status AS status, COUNT(*) AS n
+       FROM actresses a
+       ${where}
+       GROUP BY a.scraped_status`
+    )
+    .all(...params) as Array<{ status: ScrapedStatus; n: number }>
+
+  const counts: ActressListStatusCounts = { all: 0, success: 0, unscraped: 0, failed: 0 }
+  for (const row of rows) {
+    counts[actressStatusFilterOf(row.status)] += row.n
+    counts.all += row.n
+  }
+  return counts
+}
+
+/** Actress list read contract: filtered rows plus the status counts the toolbar shows. */
+export function listActressPage(query: ActressListQuery = {}): ActressListPage {
+  const gender = query.gender ?? 'female'
+  return {
+    items: listActresses(query.search, gender, query.sortBy, query.sortDir, query.status ?? 'all'),
+    statusCounts: countActressListStatuses(query.search, gender)
   }
 }
 
@@ -891,6 +949,7 @@ export function mergeActresses(
   const mergeAvatarPath = merge.avatar_path
   const mergeAvatarSourcePath = merge.avatar_source_path
   const keepHadAvatar = !isBlankText(keep.avatar_path)
+  const mergedScrapeRecord = mergeActressScrapeRecords(keep, merge)
 
   const txn = db.transaction(() => {
     db.prepare(
@@ -954,12 +1013,8 @@ export function mergeActresses(
            ELSE avatar_crop_json
          END,
          gender = COALESCE(gender, @gender),
-         last_scraped_at = CASE
-           WHEN last_scraped_at IS NULL THEN @last_scraped_at
-           WHEN @last_scraped_at IS NULL THEN last_scraped_at
-           WHEN last_scraped_at > @last_scraped_at THEN last_scraped_at
-           ELSE @last_scraped_at
-         END,
+         scraped_status = @scraped_status,
+         last_scraped_at = @last_scraped_at,
          updated_at = @updated_at
        WHERE id = @keepId`
     ).run({
@@ -980,7 +1035,8 @@ export function mergeActresses(
       avatar_crop_json: merge.avatar_crop_json,
       keep_had_avatar: keepHadAvatar ? 1 : 0,
       gender: merge.gender,
-      last_scraped_at: merge.last_scraped_at,
+      scraped_status: mergedScrapeRecord.scrapedStatus,
+      last_scraped_at: mergedScrapeRecord.lastScrapedAt,
       updated_at: nowIso()
     })
 
@@ -1017,6 +1073,29 @@ export function mergeActresses(
   }
 }
 
+/** Cumulative history is strongest for a success, then a failure, and weakest when never scraped. */
+const ACTRESS_SCRAPE_STATUS_STRENGTH: Record<ScrapedStatus, number> = { 0: 0, 2: 1, 1: 2 }
+
+type ActressScrapeRecord = Pick<Actress, 'scraped_status' | 'last_scraped_at'>
+
+/** Combine two cumulative histories: the strongest state wins, and only successes contribute a time. */
+function mergeActressScrapeRecords(
+  keep: ActressScrapeRecord,
+  merge: ActressScrapeRecord
+): { scrapedStatus: ScrapedStatus; lastScrapedAt: string | null } {
+  const scrapedStatus =
+    ACTRESS_SCRAPE_STATUS_STRENGTH[merge.scraped_status] >
+    ACTRESS_SCRAPE_STATUS_STRENGTH[keep.scraped_status]
+      ? merge.scraped_status
+      : keep.scraped_status
+  const [newestSuccessTime] = [keep, merge]
+    .filter((record) => record.scraped_status === 1)
+    .map((record) => record.last_scraped_at)
+    .filter((time): time is string => !isBlankText(time))
+    .sort((a, b) => (a > b ? -1 : 1))
+  return { scrapedStatus, lastScrapedAt: newestSuccessTime ?? null }
+}
+
 /**
  * Clear scraped actress metadata while keeping main name, gender, and video links.
  * Removes avatar, gallery, poster, profile fields, and non-main name rows.
@@ -1040,7 +1119,7 @@ export function clearActressMetadataRecord(id: number): void {
          blood_type = NULL, zodiac = NULL, nationality = NULL,
          profile_summary = NULL, avatar_path = NULL, avatar_source_path = NULL,
          avatar_crop_json = NULL, poster_path = NULL,
-         last_scraped_at = NULL, updated_at = ?
+         scraped_status = 0, last_scraped_at = NULL, updated_at = ?
        WHERE id = ?`
     ).run(nowIso(), id)
     db.prepare("DELETE FROM actress_names WHERE actress_id = ? AND type != 'main'").run(id)
@@ -1375,6 +1454,22 @@ export function recordActressScrapeFailure(actressId: number): void {
          updated_at = ?
      WHERE id = ?`
   ).run(nowIso(), actressId)
+}
+
+/** Manually confirm a scrape succeeded. An earlier success time is kept, a missing one is stamped. */
+export function markActressScrapeSucceeded(actressId: number): void {
+  const db = getDb()
+  const scrapedAt = nowIso()
+  const result = db
+    .prepare(
+      `UPDATE actresses
+       SET scraped_status = 1,
+           last_scraped_at = COALESCE(NULLIF(trim(last_scraped_at), ''), @scrapedAt),
+           updated_at = @scrapedAt
+       WHERE id = @actressId`
+    )
+    .run({ actressId, scrapedAt })
+  if (result.changes === 0) throw new Error('演员不存在')
 }
 
 function hasValidActressScrapeValue(

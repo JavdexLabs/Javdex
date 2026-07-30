@@ -12,6 +12,7 @@ interface FloatingLayerProps {
   offset?: number
   className?: string
   role?: string
+  ariaLabel?: string
   id?: string
   onClose?: () => void
   ignoreCloseRefs?: Array<RefObject<HTMLElement | null>>
@@ -26,6 +27,7 @@ export default function FloatingLayer({
   offset,
   className,
   role,
+  ariaLabel,
   id,
   onClose,
   ignoreCloseRefs = [],
@@ -66,6 +68,7 @@ export default function FloatingLayer({
       id={id}
       className={className}
       role={role}
+      aria-label={ariaLabel}
       style={{
         position: 'fixed',
         top: coords?.top ?? -10000,

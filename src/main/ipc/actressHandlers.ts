@@ -7,6 +7,8 @@ import type {
   ActressGenderFilter,
   ActressAvatarSourceInfo,
   ActressListItem,
+  ActressListPage,
+  ActressListQuery,
   ActressListSortBy,
   ActressMergeInput,
   ListSortDir
@@ -19,6 +21,8 @@ import {
   getActressDetail,
   getActressAvatarSourceInfo,
   listActresses,
+  listActressPage,
+  markActressScrapeSucceeded,
   mergeActresses,
   setActressPosterPath
 } from '../db/actressRepo'
@@ -38,6 +42,11 @@ export function registerActressHandlers(): void {
       sortBy?: ActressListSortBy,
       sortDir?: ListSortDir
     ): ActressListItem[] => listActresses(search, gender, sortBy, sortDir)
+  )
+
+  registerHandler(
+    IPC.ACTRESS_LIST_PAGE,
+    (_e, query?: ActressListQuery): ActressListPage => listActressPage(query)
   )
 
   registerHandler(IPC.ACTRESS_GET, (_e, id: number): ActressDetail | null =>
@@ -70,6 +79,11 @@ export function registerActressHandlers(): void {
 
   registerHandler(IPC.ACTRESS_MERGE, (_e, input: ActressMergeInput): boolean => {
     mergeActresses(input.keepId, input.mergeId, input.mainNameFrom)
+    return true
+  })
+
+  registerHandler(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, (_e, id: number): boolean => {
+    markActressScrapeSucceeded(id)
     return true
   })
 

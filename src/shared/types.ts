@@ -219,6 +219,53 @@ export interface ActressListItem extends Actress {
   video_count: number
 }
 
+/** Canonical actress library status filter vocabulary (also the URL values). */
+export type ActressListStatusFilter = 'all' | 'success' | 'unscraped' | 'failed'
+
+export const ACTRESS_LIST_STATUS_SCRAPED_STATUS: Record<
+  Exclude<ActressListStatusFilter, 'all'>,
+  ScrapedStatus
+> = {
+  unscraped: 0,
+  success: 1,
+  failed: 2
+}
+
+const ACTRESS_LIST_STATUS_BY_SCRAPED_STATUS = new Map<
+  ScrapedStatus,
+  Exclude<ActressListStatusFilter, 'all'>
+>(
+  (
+    Object.entries(ACTRESS_LIST_STATUS_SCRAPED_STATUS) as [
+      Exclude<ActressListStatusFilter, 'all'>,
+      ScrapedStatus
+    ][]
+  ).map(([filter, status]) => [status, filter])
+)
+
+/** Filter vocabulary for a stored cumulative status value. */
+export function actressStatusFilterOf(
+  status: ScrapedStatus
+): Exclude<ActressListStatusFilter, 'all'> {
+  return ACTRESS_LIST_STATUS_BY_SCRAPED_STATUS.get(status) ?? 'unscraped'
+}
+
+export interface ActressListQuery {
+  search?: string
+  gender?: ActressGenderFilter
+  status?: ActressListStatusFilter
+  sortBy?: ActressListSortBy
+  sortDir?: ListSortDir
+}
+
+/** Actresses per cumulative status within the current search and gender scope. */
+export type ActressListStatusCounts = Record<ActressListStatusFilter, number>
+
+export interface ActressListPage {
+  items: ActressListItem[]
+  statusCounts: ActressListStatusCounts
+}
+
 /** Read-only source metadata used by renderer-side smart avatar composition. */
 export interface ActressAvatarSourceInfo {
   assetPath: string
@@ -875,7 +922,11 @@ export const ACTRESS_BATCH_DEFAULT_MISSING_FIELDS: ActressScrapeField[] = [
 
 export type ActressBatchScrapeScope = ActressGenderFilter
 
-export type ActressBatchScrapeStatus = 'unscraped' | 'scraped' | 'all'
+/** Cumulative profile-scrape scopes for advanced actress batch scrape. */
+export type ActressBatchScrapeStatus = 'unscraped' | 'success' | 'failed' | 'all'
+
+/** Pre-cumulative two-state scope, accepted only as compatibility input. */
+export type LegacyActressBatchScrapeStatus = 'scraped'
 
 export const ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS: {
   id: ActressBatchScrapeScope
@@ -890,8 +941,9 @@ export const ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS: {
   id: ActressBatchScrapeStatus
   label: string
 }[] = [
-  { id: 'unscraped', label: '从未刮削' },
-  { id: 'scraped', label: '已刮削' },
+  { id: 'unscraped', label: '未刮削' },
+  { id: 'success', label: '刮削成功' },
+  { id: 'failed', label: '刮削失败' },
   { id: 'all', label: '全部' }
 ]
 
@@ -916,11 +968,14 @@ export const ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS: ScrapeUpdateModeOption<ActressS
 ]
 
 export interface ActressBatchScrapeFilter {
-  /** Optional explicit target ids. An empty array matches no actresses. */
+  /**
+   * Optional explicit target ids. When present they are the authoritative target set;
+   * an empty array matches no actresses.
+   */
   actressIds?: number[]
   /** Filter by actor gender. Unknown gender is treated as female for compatibility. */
   scope: ActressBatchScrapeScope
-  /** Filter by profile scrape history. Default: all. */
+  /** Filter by cumulative profile-scrape status. Default: all. */
   scrapeStatus?: ActressBatchScrapeStatus
   /** Optional range filter: include actresses missing any selected profile field. */
   missingFields?: ActressScrapeField[]

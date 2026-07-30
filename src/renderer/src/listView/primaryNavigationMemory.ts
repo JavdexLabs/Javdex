@@ -18,7 +18,13 @@ const SEARCH_KEYS_BY_ROOT: Record<string, readonly string[]> = {
     LIST_PARAM.status,
     LIST_PARAM.year
   ],
-  '/actresses': [LIST_PARAM.q, LIST_PARAM.gender, LIST_PARAM.sort, LIST_PARAM.dir],
+  '/actresses': [
+    LIST_PARAM.q,
+    LIST_PARAM.gender,
+    LIST_PARAM.status,
+    LIST_PARAM.sort,
+    LIST_PARAM.dir
+  ],
   '/playlists': [LIST_PARAM.q]
 }
 

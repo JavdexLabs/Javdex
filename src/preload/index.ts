@@ -25,6 +25,8 @@ import type {
   ActressEditInput,
   ActressGenderFilter,
   ActressListItem,
+  ActressListPage,
+  ActressListQuery,
   ActressListSortBy,
   ActressMergeInput,
   ListSortDir,
@@ -175,6 +177,7 @@ const api = {
       sortBy?: ActressListSortBy,
       sortDir?: ListSortDir
     ) => invoke<ActressListItem[]>(IPC.ACTRESS_LIST, search, gender, sortBy, sortDir),
+    listPage: (query: ActressListQuery) => invoke<ActressListPage>(IPC.ACTRESS_LIST_PAGE, query),
     get: (id: number) => invoke<ActressDetail | null>(IPC.ACTRESS_GET, id),
     getAvatarSourceInfo: (id: number) =>
       invoke<ActressAvatarSourceInfo | null>(IPC.ACTRESS_AVATAR_SOURCE_INFO, id),
@@ -188,7 +191,8 @@ const api = {
       invoke<boolean>(IPC.ACTRESS_GALLERY_DELETE, id, assetId),
     setPoster: (id: number, posterPath: string | null) =>
       invoke<boolean>(IPC.ACTRESS_POSTER_SET, id, posterPath),
-    merge: (input: ActressMergeInput) => invoke<boolean>(IPC.ACTRESS_MERGE, input)
+    merge: (input: ActressMergeInput) => invoke<boolean>(IPC.ACTRESS_MERGE, input),
+    markScrapeSuccess: (id: number) => invoke<boolean>(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id)
   },
   tags: {
     list: () =>

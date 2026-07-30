@@ -4,9 +4,11 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createAvatarCropV1, parseAvatarCrop } from '@shared/avatarCrop'
+import type { ScrapedStatus } from '@shared/types'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
 import { insertTestVideoWithFile } from './testVideoFixtures'
 import {
+  addActressGalleryAsset,
   applyActressScrapeResult,
   clearActressMetadataRecord,
   clearBrokenActressAvatarIfNeeded,
@@ -17,6 +19,8 @@ import {
   editActress,
   listActresses,
   listActressesForBatchScrape,
+  listActressPage,
+  markActressScrapeSucceeded,
   mergeActresses,
   getActressAvatarSourceInfo,
   getActressDetail,
@@ -109,6 +113,43 @@ function setupDb(): void {
      VALUES (?, 'gallery', 0, ?, ?, ?)`
   ).run(1, 'https://example.test/complete.jpg', 'actress_gallery/complete.jpg', 'now')
 }
+
+function setActressScrapeRecord(
+  id: number,
+  status: ScrapedStatus,
+  lastScrapedAt: string | null
+): void {
+  getDb()
+    .prepare('UPDATE actresses SET scraped_status = ?, last_scraped_at = ? WHERE id = ?')
+    .run(status, lastScrapedAt, id)
+}
+
+const ACTRESS_SCRAPE_STATUS_LABEL: Record<ScrapedStatus, string> = {
+  0: '未刮削',
+  1: '刮削成功',
+  2: '刮削失败'
+}
+
+const KEEPER_SUCCESS_TIME = '2023-03-03T00:00:00.000Z'
+const MERGED_SUCCESS_TIME = '2024-04-04T00:00:00.000Z'
+
+/** Every pairing of cumulative states, with the history the keeper must end up with. */
+const MERGE_SCRAPE_STATUS_MATRIX: Array<{
+  keep: ScrapedStatus
+  merge: ScrapedStatus
+  status: ScrapedStatus
+  lastScrapedAt: string | null
+}> = [
+  { keep: 0, merge: 0, status: 0, lastScrapedAt: null },
+  { keep: 0, merge: 2, status: 2, lastScrapedAt: null },
+  { keep: 0, merge: 1, status: 1, lastScrapedAt: MERGED_SUCCESS_TIME },
+  { keep: 2, merge: 0, status: 2, lastScrapedAt: null },
+  { keep: 2, merge: 2, status: 2, lastScrapedAt: null },
+  { keep: 2, merge: 1, status: 1, lastScrapedAt: MERGED_SUCCESS_TIME },
+  { keep: 1, merge: 0, status: 1, lastScrapedAt: KEEPER_SUCCESS_TIME },
+  { keep: 1, merge: 2, status: 1, lastScrapedAt: KEEPER_SUCCESS_TIME },
+  { keep: 1, merge: 1, status: 1, lastScrapedAt: MERGED_SUCCESS_TIME }
+]
 
 afterEach(() => {
   closeDatabase()
@@ -226,6 +267,100 @@ describe('actressRepo.listActresses', () => {
   })
 })
 
+describe('actressRepo.listActressPage', () => {
+  /** Complete: success, Missing Female: failed, Missing Male: success, Unknown Gender: unscraped. */
+  function setupStatuses(): void {
+    setupDb()
+    const update = getDb().prepare('UPDATE actresses SET scraped_status = ? WHERE id = ?')
+    update.run(1, 1)
+    update.run(2, 2)
+    update.run(1, 3)
+  }
+
+  it('returns the cumulative status of every actress with per-status counts', () => {
+    setupStatuses()
+
+    const page = listActressPage({ gender: 'all' })
+
+    assert.deepEqual(
+      page.items.map((item) => [item.main_name, item.scraped_status]),
+      [
+        ['Complete', 1],
+        ['Missing Female', 2],
+        ['Missing Male', 1],
+        ['Unknown Gender', 0]
+      ]
+    )
+    assert.deepEqual(page.statusCounts, { all: 4, success: 2, unscraped: 1, failed: 1 })
+  })
+
+  it('filters by each status while keeping the counts of the unfiltered scope', () => {
+    setupStatuses()
+
+    const success = listActressPage({ gender: 'all', status: 'success' })
+    const unscraped = listActressPage({ gender: 'all', status: 'unscraped' })
+    const failed = listActressPage({ gender: 'all', status: 'failed' })
+
+    assert.deepEqual(success.items.map((item) => item.main_name), ['Complete', 'Missing Male'])
+    assert.deepEqual(unscraped.items.map((item) => item.main_name), ['Unknown Gender'])
+    assert.deepEqual(failed.items.map((item) => item.main_name), ['Missing Female'])
+    assert.deepEqual(failed.statusCounts, success.statusCounts)
+  })
+
+  it('combines the status filter with search, gender and sort', () => {
+    setupStatuses()
+    const db = getDb()
+    insertTestVideoWithFile(db, { code: 'A-001', filePath: 'a.mp4', title: 'A', addTime: '2024-01-01' })
+    db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(1, 2)
+    db.prepare('UPDATE actresses SET scraped_status = 1 WHERE id = 4').run()
+
+    assert.deepEqual(
+      listActressPage({ search: 'Missing', gender: 'all', status: 'success' }).items.map(
+        (item) => item.main_name
+      ),
+      ['Missing Male']
+    )
+    assert.deepEqual(
+      listActressPage({ gender: 'female', status: 'failed' }).items.map((item) => [
+        item.main_name,
+        item.video_count
+      ]),
+      [['Missing Female', 1]]
+    )
+    assert.deepEqual(
+      listActressPage({ gender: 'all', status: 'success', sortBy: 'video_count', sortDir: 'asc' })
+        .items.map((item) => item.main_name),
+      ['Complete', 'Missing Male', 'Unknown Gender']
+    )
+  })
+
+  it('counts statuses within the current search and gender scope', () => {
+    setupStatuses()
+
+    assert.deepEqual(listActressPage({ gender: 'female' }).statusCounts, {
+      all: 2,
+      success: 1,
+      unscraped: 0,
+      failed: 1
+    })
+    assert.deepEqual(listActressPage({ search: 'Missing', gender: 'all' }).statusCounts, {
+      all: 2,
+      success: 1,
+      unscraped: 0,
+      failed: 1
+    })
+  })
+
+  it('treats a missing status as all statuses', () => {
+    setupStatuses()
+
+    assert.deepEqual(
+      listActressPage({ gender: 'all', status: 'all' }).items.map((item) => item.main_name),
+      listActressPage({ gender: 'all' }).items.map((item) => item.main_name)
+    )
+  })
+})
+
 describe('actressRepo.clearActressMetadataRecord', () => {
   it('clears scraped profile fields while keeping main name and video links', () => {
     setupDb()
@@ -253,6 +388,22 @@ describe('actressRepo.clearActressMetadataRecord', () => {
       .prepare('SELECT COUNT(*) AS c FROM video_actress WHERE actress_id = 1')
       .get() as { c: number }
     assert.equal(links.c, 1)
+  })
+
+  it('resets every cumulative state to unscraped and drops the success time', () => {
+    setupDb()
+    markActressScrapeSucceeded(1)
+    recordActressScrapeFailure(2)
+
+    clearActressMetadataRecord(1)
+    clearActressMetadataRecord(2)
+    clearActressMetadataRecord(3)
+
+    for (const id of [1, 2, 3]) {
+      const detail = getActressDetail(id)
+      assert.equal(detail?.scraped_status, 0)
+      assert.equal(detail?.last_scraped_at, null)
+    }
   })
 })
 
@@ -340,6 +491,44 @@ describe('actressRepo.mergeActresses', () => {
     assert.equal(detail.main_name, 'Missing Female')
     assert.ok(detail.aliases.includes('Complete'))
   })
+
+  for (const merged of MERGE_SCRAPE_STATUS_MATRIX) {
+    const keeperLabel = ACTRESS_SCRAPE_STATUS_LABEL[merged.keep]
+    const mergedLabel = ACTRESS_SCRAPE_STATUS_LABEL[merged.merge]
+    it(`keeps ${ACTRESS_SCRAPE_STATUS_LABEL[merged.status]} when merging ${mergedLabel} into ${keeperLabel}`, () => {
+      setupDb()
+      setActressScrapeRecord(1, merged.keep, merged.keep === 1 ? KEEPER_SUCCESS_TIME : null)
+      setActressScrapeRecord(2, merged.merge, merged.merge === 1 ? MERGED_SUCCESS_TIME : null)
+
+      mergeActresses(1, 2, 'keep')
+
+      const detail = getActressDetail(1)
+      assert.equal(detail?.scraped_status, merged.status)
+      assert.equal(detail?.last_scraped_at, merged.lastScrapedAt)
+    })
+  }
+
+  it('keeps the newer success time when the keeper succeeded more recently', () => {
+    setupDb()
+    setActressScrapeRecord(1, 1, '2025-05-05T00:00:00.000Z')
+    setActressScrapeRecord(2, 1, '2024-04-04T00:00:00.000Z')
+
+    mergeActresses(1, 2, 'keep')
+
+    assert.equal(getActressDetail(1)?.last_scraped_at, '2025-05-05T00:00:00.000Z')
+  })
+
+  it('ignores a success time left on a record that is not scraped successfully', () => {
+    setupDb()
+    setActressScrapeRecord(1, 2, '2019-09-09T00:00:00.000Z')
+    setActressScrapeRecord(2, 1, '2018-08-08T00:00:00.000Z')
+
+    mergeActresses(1, 2, 'keep')
+
+    const detail = getActressDetail(1)
+    assert.equal(detail?.scraped_status, 1)
+    assert.equal(detail?.last_scraped_at, '2018-08-08T00:00:00.000Z')
+  })
 })
 
 describe('actressRepo.listActressesForBatchScrape', () => {
@@ -358,17 +547,11 @@ describe('actressRepo.listActressesForBatchScrape', () => {
     assert.equal(countActressesForBatchScrape({ scope: 'male', missingFields: [] }), 1)
   })
 
-  it('filters never-scraped actresses by scrape status', () => {
+  it('filters actresses by cumulative scrape status', () => {
     setupDb()
     const db = getDb()
-    db.prepare('UPDATE actresses SET last_scraped_at = ? WHERE main_name = ?').run(
-      '2024-01-01T00:00:00.000Z',
-      'Complete'
-    )
-    db.prepare('UPDATE actresses SET last_scraped_at = ? WHERE main_name = ?').run(
-      '2024-01-01T00:00:00.000Z',
-      'Missing Male'
-    )
+    db.prepare('UPDATE actresses SET scraped_status = 1 WHERE main_name = ?').run('Complete')
+    db.prepare('UPDATE actresses SET scraped_status = 2 WHERE main_name = ?').run('Missing Male')
 
     const targets = listActressesForBatchScrape({ scope: 'all', scrapeStatus: 'unscraped' })
 
@@ -377,15 +560,14 @@ describe('actressRepo.listActressesForBatchScrape', () => {
       ['Missing Female', 'Unknown Gender']
     )
     assert.equal(countActressesForBatchScrape({ scope: 'all', scrapeStatus: 'unscraped' }), 2)
+    assert.equal(countActressesForBatchScrape({ scope: 'all', scrapeStatus: 'success' }), 1)
+    assert.equal(countActressesForBatchScrape({ scope: 'all', scrapeStatus: 'failed' }), 1)
   })
 
   it('combines gender and scrape status filters', () => {
     setupDb()
     const db = getDb()
-    db.prepare('UPDATE actresses SET last_scraped_at = ? WHERE main_name = ?').run(
-      '2024-01-01T00:00:00.000Z',
-      'Complete'
-    )
+    db.prepare('UPDATE actresses SET scraped_status = 1 WHERE main_name = ?').run('Complete')
 
     const targets = listActressesForBatchScrape({ scope: 'female', scrapeStatus: 'unscraped' })
 
@@ -394,7 +576,7 @@ describe('actressRepo.listActressesForBatchScrape', () => {
       ['Missing Female', 'Unknown Gender']
     )
     assert.equal(
-      countActressesForBatchScrape({ scope: 'female', scrapeStatus: 'scraped' }),
+      countActressesForBatchScrape({ scope: 'female', scrapeStatus: 'success' }),
       1
     )
   })
@@ -778,6 +960,54 @@ describe('actressRepo cumulative scrape status', () => {
   })
 })
 
+describe('actressRepo cumulative scrape status maintenance invariants', () => {
+  for (const status of [0, 1, 2] as ScrapedStatus[]) {
+    const successTime = status === 1 ? '2022-02-02T00:00:00.000Z' : null
+    it(`keeps ${ACTRESS_SCRAPE_STATUS_LABEL[status]} and its success time through manual maintenance`, () => {
+      setupDb()
+      const db = getDb()
+      setActressScrapeRecord(1, status, successTime)
+      writeTestAsset('actress_gallery/maintenance.jpg', MINIMAL_JPEG)
+
+      editActress(1, {
+        main_name: 'Maintained',
+        birth_date: '1991-02-03',
+        profile_summary: 'Manually maintained',
+        aliases: ['Maintained Alias']
+      })
+      setActressAvatarBundle(1, 'Maintained', {
+        displayImageBase64: MINIMAL_JPEG.toString('base64'),
+        sourceImageBase64: MINIMAL_JPEG.toString('base64'),
+        crop: createAvatarCropV1({
+          sourceFingerprint: avatarSourceFingerprint(MINIMAL_JPEG),
+          zoom: 1.4,
+          offsetX: 2,
+          offsetY: -2
+        })
+      })
+      const added = addActressGalleryAsset(1, {
+        remoteUrl: 'https://example.test/maintenance.jpg',
+        localPath: 'actress_gallery/maintenance.jpg'
+      })
+      setActressPosterPath(1, 'actress_gallery/maintenance.jpg')
+      setActressPosterPath(1, null)
+      deleteActressGalleryAsset(1, added.id)
+      insertTestVideoWithFile(db, {
+        code: 'MAINT-001',
+        filePath: 'maint.mp4',
+        title: 'Maintenance',
+        addTime: '2024-01-01'
+      })
+      db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(1, 1)
+      upsertActressFromScrape('Maintained', null, 'female')
+
+      const detail = getActressDetail(1)
+      assert.equal(detail?.scraped_status, status)
+      assert.equal(detail?.last_scraped_at, successTime)
+    })
+  }
+})
+
 describe('actressRepo.upsertActressFromScrape avatar adopt', () => {
   it('adopts a downloaded avatar into source+display+crop and drops the temp path', () => {
     setupDb()
@@ -900,6 +1130,59 @@ describe('actressRepo.recordActressScrapeFailure', () => {
     assert.equal(detail?.scraped_status, 2)
     assert.equal(detail?.last_scraped_at, null)
     assert.equal(detail?.birth_date, null)
+  })
+})
+
+describe('actressRepo.markActressScrapeSucceeded', () => {
+  it('promotes an unscraped actress and stamps the missing success time', () => {
+    setupDb()
+
+    markActressScrapeSucceeded(2)
+
+    const detail = getActressDetail(2)
+    assert.equal(detail?.scraped_status, 1)
+    assert.ok(detail?.last_scraped_at)
+  })
+
+  it('promotes a failed actress and stamps the missing success time', () => {
+    setupDb()
+    recordActressScrapeFailure(2)
+
+    markActressScrapeSucceeded(2)
+
+    const detail = getActressDetail(2)
+    assert.equal(detail?.scraped_status, 1)
+    assert.ok(detail?.last_scraped_at)
+  })
+
+  it('keeps an existing success time instead of restamping it', () => {
+    setupDb()
+    getDb()
+      .prepare('UPDATE actresses SET scraped_status = 1, last_scraped_at = ? WHERE id = ?')
+      .run('2020-01-02T03:04:05.000Z', 2)
+
+    markActressScrapeSucceeded(2)
+
+    const detail = getActressDetail(2)
+    assert.equal(detail?.scraped_status, 1)
+    assert.equal(detail?.last_scraped_at, '2020-01-02T03:04:05.000Z')
+  })
+
+  it('stamps a success time over a blank stored time', () => {
+    setupDb()
+    getDb().prepare('UPDATE actresses SET last_scraped_at = ? WHERE id = ?').run('   ', 2)
+
+    markActressScrapeSucceeded(2)
+
+    const detail = getActressDetail(2)
+    assert.equal(detail?.scraped_status, 1)
+    assert.ok(detail?.last_scraped_at?.trim())
+  })
+
+  it('rejects marking an actress that does not exist', () => {
+    setupDb()
+
+    assert.throws(() => markActressScrapeSucceeded(9999), /演员不存在/)
   })
 })
 

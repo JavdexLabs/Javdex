@@ -1040,7 +1040,7 @@ export function clearActressMetadataRecord(id: number): void {
          blood_type = NULL, zodiac = NULL, nationality = NULL,
          profile_summary = NULL, avatar_path = NULL, avatar_source_path = NULL,
          avatar_crop_json = NULL, poster_path = NULL,
-         last_scraped_at = NULL, updated_at = ?
+         scraped_status = 0, last_scraped_at = NULL, updated_at = ?
        WHERE id = ?`
     ).run(nowIso(), id)
     db.prepare("DELETE FROM actress_names WHERE actress_id = ? AND type != 'main'").run(id)

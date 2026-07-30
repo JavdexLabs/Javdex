@@ -255,6 +255,22 @@ describe('actressRepo.clearActressMetadataRecord', () => {
       .get() as { c: number }
     assert.equal(links.c, 1)
   })
+
+  it('resets every cumulative state to unscraped and drops the success time', () => {
+    setupDb()
+    markActressScrapeSucceeded(1)
+    recordActressScrapeFailure(2)
+
+    clearActressMetadataRecord(1)
+    clearActressMetadataRecord(2)
+    clearActressMetadataRecord(3)
+
+    for (const id of [1, 2, 3]) {
+      const detail = getActressDetail(id)
+      assert.equal(detail?.scraped_status, 0)
+      assert.equal(detail?.last_scraped_at, null)
+    }
+  })
 })
 
 describe('actressRepo.deleteUnlinkedActresses', () => {

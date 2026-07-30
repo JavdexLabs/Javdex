@@ -25,8 +25,12 @@ import type {
   ListSortDir,
   ScrapedStatus
 } from '@shared/types'
-import { ALL_ACTRESS_SCRAPE_FIELDS, ACTRESS_BATCH_DEFAULT_MISSING_FIELDS } from '@shared/types'
-import { ACTRESS_LIST_STATUS_SCRAPED_STATUS, actressStatusFilterOf } from '@shared/types'
+import {
+  ALL_ACTRESS_SCRAPE_FIELDS,
+  ACTRESS_BATCH_DEFAULT_MISSING_FIELDS,
+  ACTRESS_LIST_STATUS_SCRAPED_STATUS,
+  actressStatusFilterOf
+} from '@shared/types'
 import {
   createAvatarCropV1,
   parseAvatarCrop,

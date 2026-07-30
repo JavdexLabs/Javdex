@@ -949,6 +949,7 @@ export function mergeActresses(
   const mergeAvatarPath = merge.avatar_path
   const mergeAvatarSourcePath = merge.avatar_source_path
   const keepHadAvatar = !isBlankText(keep.avatar_path)
+  const mergedScrapeRecord = mergeActressScrapeRecords(keep, merge)
 
   const txn = db.transaction(() => {
     db.prepare(
@@ -1012,12 +1013,8 @@ export function mergeActresses(
            ELSE avatar_crop_json
          END,
          gender = COALESCE(gender, @gender),
-         last_scraped_at = CASE
-           WHEN last_scraped_at IS NULL THEN @last_scraped_at
-           WHEN @last_scraped_at IS NULL THEN last_scraped_at
-           WHEN last_scraped_at > @last_scraped_at THEN last_scraped_at
-           ELSE @last_scraped_at
-         END,
+         scraped_status = @scraped_status,
+         last_scraped_at = @last_scraped_at,
          updated_at = @updated_at
        WHERE id = @keepId`
     ).run({
@@ -1038,7 +1035,8 @@ export function mergeActresses(
       avatar_crop_json: merge.avatar_crop_json,
       keep_had_avatar: keepHadAvatar ? 1 : 0,
       gender: merge.gender,
-      last_scraped_at: merge.last_scraped_at,
+      scraped_status: mergedScrapeRecord.scrapedStatus,
+      last_scraped_at: mergedScrapeRecord.lastScrapedAt,
       updated_at: nowIso()
     })
 
@@ -1075,6 +1073,29 @@ export function mergeActresses(
   }
 }
 
+/** Cumulative history is strongest for a success, then a failure, and weakest when never scraped. */
+const ACTRESS_SCRAPE_STATUS_STRENGTH: Record<ScrapedStatus, number> = { 0: 0, 2: 1, 1: 2 }
+
+type ActressScrapeRecord = Pick<Actress, 'scraped_status' | 'last_scraped_at'>
+
+/** Combine two cumulative histories: the strongest state wins, and only successes contribute a time. */
+function mergeActressScrapeRecords(
+  keep: ActressScrapeRecord,
+  merge: ActressScrapeRecord
+): { scrapedStatus: ScrapedStatus; lastScrapedAt: string | null } {
+  const scrapedStatus =
+    ACTRESS_SCRAPE_STATUS_STRENGTH[merge.scraped_status] >
+    ACTRESS_SCRAPE_STATUS_STRENGTH[keep.scraped_status]
+      ? merge.scraped_status
+      : keep.scraped_status
+  const [newestSuccessTime] = [keep, merge]
+    .filter((record) => record.scraped_status === 1)
+    .map((record) => record.last_scraped_at)
+    .filter((time): time is string => !isBlankText(time))
+    .sort((a, b) => (a > b ? -1 : 1))
+  return { scrapedStatus, lastScrapedAt: newestSuccessTime ?? null }
+}
+
 /**
  * Clear scraped actress metadata while keeping main name, gender, and video links.
  * Removes avatar, gallery, poster, profile fields, and non-main name rows.
@@ -1098,7 +1119,7 @@ export function clearActressMetadataRecord(id: number): void {
          blood_type = NULL, zodiac = NULL, nationality = NULL,
          profile_summary = NULL, avatar_path = NULL, avatar_source_path = NULL,
          avatar_crop_json = NULL, poster_path = NULL,
-         last_scraped_at = NULL, updated_at = ?
+         scraped_status = 0, last_scraped_at = NULL, updated_at = ?
        WHERE id = ?`
     ).run(nowIso(), id)
     db.prepare("DELETE FROM actress_names WHERE actress_id = ? AND type != 'main'").run(id)
@@ -1433,6 +1454,22 @@ export function recordActressScrapeFailure(actressId: number): void {
          updated_at = ?
      WHERE id = ?`
   ).run(nowIso(), actressId)
+}
+
+/** Manually confirm a scrape succeeded. An earlier success time is kept, a missing one is stamped. */
+export function markActressScrapeSucceeded(actressId: number): void {
+  const db = getDb()
+  const scrapedAt = nowIso()
+  const result = db
+    .prepare(
+      `UPDATE actresses
+       SET scraped_status = 1,
+           last_scraped_at = COALESCE(NULLIF(trim(last_scraped_at), ''), @scrapedAt),
+           updated_at = @scrapedAt
+       WHERE id = @actressId`
+    )
+    .run({ actressId, scrapedAt })
+  if (result.changes === 0) throw new Error('演员不存在')
 }
 
 function hasValidActressScrapeValue(

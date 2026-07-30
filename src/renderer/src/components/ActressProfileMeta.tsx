@@ -65,6 +65,11 @@ const ACTRESS_SCRAPE_STATUS_PRESENTATION: Record<
   2: { label: '刮削失败', className: 'detail-meta-status--failed' }
 }
 
+/** Cumulative success is sticky, so only unscraped and failed records can be marked manually. */
+export function canMarkActressScrapeSuccess(status: ScrapedStatus): boolean {
+  return status !== 1
+}
+
 export function buildActressScrapeMetaItems(
   actress: Pick<ActressDetail, 'scraped_status' | 'last_scraped_at'>
 ): MetaItem[] {

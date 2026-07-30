@@ -22,6 +22,7 @@ import {
   getActressAvatarSourceInfo,
   listActresses,
   listActressPage,
+  markActressScrapeSucceeded,
   mergeActresses,
   setActressPosterPath
 } from '../db/actressRepo'
@@ -78,6 +79,11 @@ export function registerActressHandlers(): void {
 
   registerHandler(IPC.ACTRESS_MERGE, (_e, input: ActressMergeInput): boolean => {
     mergeActresses(input.keepId, input.mergeId, input.mainNameFrom)
+    return true
+  })
+
+  registerHandler(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, (_e, id: number): boolean => {
+    markActressScrapeSucceeded(id)
     return true
   })
 

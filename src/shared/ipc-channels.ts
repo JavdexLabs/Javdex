@@ -68,6 +68,7 @@ export const IPC = {
   ACTRESS_GALLERY_DELETE: 'actress:galleryDelete',
   ACTRESS_POSTER_SET: 'actress:posterSet',
   ACTRESS_MERGE: 'actress:merge',
+  ACTRESS_MARK_SCRAPE_SUCCESS: 'actress:markScrapeSuccess',
 
   // Tags
   TAG_LIST: 'tag:list',

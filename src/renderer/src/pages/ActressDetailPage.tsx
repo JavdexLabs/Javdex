@@ -28,7 +28,8 @@ import ActressAvatar from '../components/ActressAvatar'
 import ActressGalleryPanel from '../components/ActressGalleryPanel'
 import ActressProfileMeta, {
   buildActressProfileStats,
-  buildActressProfileSubtitle
+  buildActressProfileSubtitle,
+  canMarkActressScrapeSuccess
 } from '../components/ActressProfileMeta'
 import DetailScrollBody from '../components/DetailScrollBody'
 import ImagePreviewLightbox from '../components/ImagePreviewLightbox'
@@ -243,6 +244,17 @@ export default function ActressDetailPage(): JSX.Element {
     }
   }
 
+  const handleMarkScrapeSuccess = async (): Promise<void> => {
+    try {
+      await api.actresses.markScrapeSuccess(actressId)
+      toast.show('已标记为刮削成功', 'success')
+      invalidateActressLibraryQueries(queryClient)
+      await load({ silent: true })
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+    }
+  }
+
   const doClearMeta = async (): Promise<void> => {
     try {
       await api.actresses.clearMeta(actressId)
@@ -352,6 +364,14 @@ export default function ActressDetailPage(): JSX.Element {
           key: 'merge',
           label: '合并演员',
           onClick: () => setShowMerge(true)
+        },
+        {
+          key: 'mark-success',
+          label: '标记为刮削成功',
+          hidden: !canMarkActressScrapeSuccess(actress.scraped_status),
+          onClick: () => {
+            void handleMarkScrapeSuccess()
+          }
         },
         { key: 'danger-separator', type: 'separator' },
         {

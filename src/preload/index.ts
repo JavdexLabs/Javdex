@@ -188,7 +188,8 @@ const api = {
       invoke<boolean>(IPC.ACTRESS_GALLERY_DELETE, id, assetId),
     setPoster: (id: number, posterPath: string | null) =>
       invoke<boolean>(IPC.ACTRESS_POSTER_SET, id, posterPath),
-    merge: (input: ActressMergeInput) => invoke<boolean>(IPC.ACTRESS_MERGE, input)
+    merge: (input: ActressMergeInput) => invoke<boolean>(IPC.ACTRESS_MERGE, input),
+    markScrapeSuccess: (id: number) => invoke<boolean>(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id)
   },
   tags: {
     list: () =>

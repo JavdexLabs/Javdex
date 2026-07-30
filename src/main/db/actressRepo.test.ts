@@ -17,6 +17,7 @@ import {
   editActress,
   listActresses,
   listActressesForBatchScrape,
+  markActressScrapeSucceeded,
   mergeActresses,
   getActressAvatarSourceInfo,
   getActressDetail,
@@ -900,6 +901,59 @@ describe('actressRepo.recordActressScrapeFailure', () => {
     assert.equal(detail?.scraped_status, 2)
     assert.equal(detail?.last_scraped_at, null)
     assert.equal(detail?.birth_date, null)
+  })
+})
+
+describe('actressRepo.markActressScrapeSucceeded', () => {
+  it('promotes an unscraped actress and stamps the missing success time', () => {
+    setupDb()
+
+    markActressScrapeSucceeded(2)
+
+    const detail = getActressDetail(2)
+    assert.equal(detail?.scraped_status, 1)
+    assert.ok(detail?.last_scraped_at)
+  })
+
+  it('promotes a failed actress and stamps the missing success time', () => {
+    setupDb()
+    recordActressScrapeFailure(2)
+
+    markActressScrapeSucceeded(2)
+
+    const detail = getActressDetail(2)
+    assert.equal(detail?.scraped_status, 1)
+    assert.ok(detail?.last_scraped_at)
+  })
+
+  it('keeps an existing success time instead of restamping it', () => {
+    setupDb()
+    getDb()
+      .prepare('UPDATE actresses SET scraped_status = 1, last_scraped_at = ? WHERE id = ?')
+      .run('2020-01-02T03:04:05.000Z', 2)
+
+    markActressScrapeSucceeded(2)
+
+    const detail = getActressDetail(2)
+    assert.equal(detail?.scraped_status, 1)
+    assert.equal(detail?.last_scraped_at, '2020-01-02T03:04:05.000Z')
+  })
+
+  it('stamps a success time over a blank stored time', () => {
+    setupDb()
+    getDb().prepare('UPDATE actresses SET last_scraped_at = ? WHERE id = ?').run('   ', 2)
+
+    markActressScrapeSucceeded(2)
+
+    const detail = getActressDetail(2)
+    assert.equal(detail?.scraped_status, 1)
+    assert.ok(detail?.last_scraped_at?.trim())
+  })
+
+  it('rejects marking an actress that does not exist', () => {
+    setupDb()
+
+    assert.throws(() => markActressScrapeSucceeded(9999), /演员不存在/)
   })
 })
 

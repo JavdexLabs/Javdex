@@ -1377,6 +1377,22 @@ export function recordActressScrapeFailure(actressId: number): void {
   ).run(nowIso(), actressId)
 }
 
+/** Manually confirm a scrape succeeded. An earlier success time is kept, a missing one is stamped. */
+export function markActressScrapeSucceeded(actressId: number): void {
+  const db = getDb()
+  const scrapedAt = nowIso()
+  const result = db
+    .prepare(
+      `UPDATE actresses
+       SET scraped_status = 1,
+           last_scraped_at = COALESCE(NULLIF(trim(last_scraped_at), ''), @scrapedAt),
+           updated_at = @scrapedAt
+       WHERE id = @actressId`
+    )
+    .run({ actressId, scrapedAt })
+  if (result.changes === 0) throw new Error('演员不存在')
+}
+
 function hasValidActressScrapeValue(
   result: ActressScrapeResult,
   field: ActressScrapeField,

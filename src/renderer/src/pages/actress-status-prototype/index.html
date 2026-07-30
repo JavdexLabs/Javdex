@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PROTOTYPE — 演员刮削状态</title>
+    <!--
+      PROTOTYPE — THROWAWAY.
+      Three variants of actress scrape-status presentation, switchable via ?variant=.
+      Run: npx vite src/renderer/src/pages/actress-status-prototype --host 127.0.0.1 --port 4178
+    -->
+    <style>
+      :root {
+        color-scheme: light;
+        --surface-base: #f4f6f9;
+        --surface-panel: #ffffff;
+        --surface-elevated: #ffffff;
+        --surface-control: #f7f8fa;
+        --surface-control-hover: #eef1f5;
+        --surface-selected: #edf3ff;
+        --text-primary: #20242b;
+        --text-secondary: #687182;
+        --text-muted: #8b94a3;
+        --text-accent: #316ee8;
+        --border-subtle: #dce1e9;
+        --border-strong: #b6bfcd;
+        --border-accent: #5b83dc;
+        --surface-danger: #fff0f2;
+        --text-danger: #c4394b;
+        --surface-warning: #fff7e4;
+        --text-warning: #a66a08;
+        --focus-ring: 0 0 0 3px rgba(49, 110, 232, 0.18);
+        --shadow: 0 8px 24px rgba(32, 36, 43, 0.08);
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-width: 980px;
+        min-height: 100vh;
+        overflow: hidden;
+        background: var(--surface-base);
+        color: var(--text-primary);
+        font: 13px/1.45 Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+      }
+      button, input { font: inherit; }
+      button { color: inherit; }
+
+      .app {
+        display: grid;
+        grid-template-columns: 190px minmax(0, 1fr);
+        height: 100vh;
+      }
+      .sidebar {
+        padding: 16px 12px;
+        border-right: 1px solid var(--border-subtle);
+        background: #eef1f5;
+      }
+      .brand {
+        margin: 0 8px 20px;
+        font-size: 16px;
+        font-weight: 750;
+      }
+      .nav {
+        display: grid;
+        gap: 4px;
+      }
+      .nav-item {
+        padding: 9px 11px;
+        border-radius: 7px;
+        color: var(--text-secondary);
+      }
+      .nav-item.active {
+        background: var(--surface-panel);
+        color: var(--text-primary);
+        font-weight: 650;
+        box-shadow: 0 1px 3px rgba(32, 36, 43, 0.08);
+      }
+
+      .page {
+        min-width: 0;
+        overflow: auto;
+        scrollbar-gutter: stable;
+      }
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 8;
+        padding: 16px 22px 12px;
+        border-bottom: 1px solid var(--border-subtle);
+        background: color-mix(in srgb, var(--surface-base) 92%, transparent);
+        backdrop-filter: blur(12px);
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .search {
+        width: min(390px, 38vw);
+        height: 36px;
+        padding: 0 12px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 8px;
+        outline: none;
+        background: var(--surface-panel);
+        color: var(--text-primary);
+      }
+      .search:focus { border-color: var(--border-accent); box-shadow: var(--focus-ring); }
+      .toolbar-spacer { flex: 1; }
+      .control, .segment button {
+        height: 34px;
+        border: 1px solid var(--border-subtle);
+        background: var(--surface-panel);
+        cursor: pointer;
+      }
+      .control {
+        padding: 0 11px;
+        border-radius: 7px;
+      }
+      .control:hover, .segment button:hover { background: var(--surface-control-hover); }
+      .segment {
+        display: inline-flex;
+      }
+      .segment button {
+        min-width: 42px;
+        padding: 0 10px;
+        border-right: 0;
+      }
+      .segment button:first-child { border-radius: 7px 0 0 7px; }
+      .segment button:last-child { border-right: 1px solid var(--border-subtle); border-radius: 0 7px 7px 0; }
+      .segment button.active {
+        border-color: var(--border-accent);
+        background: var(--surface-selected);
+        color: var(--text-accent);
+        font-weight: 650;
+      }
+      .count { min-width: 66px; text-align: right; color: var(--text-secondary); }
+
+      .applied {
+        display: none;
+        align-items: center;
+        gap: 7px;
+        margin-top: 10px;
+      }
+      .applied.visible { display: flex; }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 28px;
+        padding: 0 9px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 999px;
+        background: var(--surface-panel);
+        color: var(--text-secondary);
+      }
+      .chip button {
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--text-muted);
+        cursor: pointer;
+      }
+      .clear-filters {
+        border: 0;
+        background: transparent;
+        color: var(--text-accent);
+        cursor: pointer;
+      }
+
+      .banner {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 10px;
+        padding: 9px 11px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 8px;
+        background: var(--surface-panel);
+      }
+      .banner-copy { min-width: 0; }
+      .banner-title { font-weight: 700; }
+      .banner-detail { margin-left: 6px; color: var(--text-secondary); }
+      .banner-actions { display: flex; gap: 6px; margin-left: auto; }
+      .banner-link {
+        padding: 5px 8px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text-accent);
+        cursor: pointer;
+      }
+      .banner-primary {
+        padding: 5px 9px;
+        border: 1px solid var(--border-accent);
+        border-radius: 6px;
+        background: var(--surface-selected);
+        color: var(--text-accent);
+        cursor: pointer;
+      }
+
+      .filter-anchor { position: relative; }
+      .popover {
+        position: absolute;
+        top: 40px;
+        right: 0;
+        z-index: 12;
+        display: none;
+        width: 250px;
+        padding: 12px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 10px;
+        background: var(--surface-elevated);
+        box-shadow: var(--shadow);
+      }
+      .popover.open { display: block; }
+      .popover-title { margin: 0 0 10px; font-size: 13px; }
+      .popover-options { display: grid; gap: 5px; }
+      .popover-option {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        padding: 8px 9px;
+        border: 1px solid transparent;
+        border-radius: 7px;
+        background: transparent;
+        cursor: pointer;
+      }
+      .popover-option:hover { background: var(--surface-control-hover); }
+      .popover-option.active {
+        border-color: var(--border-accent);
+        background: var(--surface-selected);
+        color: var(--text-accent);
+      }
+      .option-count { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+      .content { padding: 18px 22px 90px; }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+        gap: 16px;
+      }
+      .card-wrap { position: relative; min-width: 0; }
+      .card {
+        position: relative;
+        display: flex;
+        min-height: 260px;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        border: 1px solid var(--border-subtle);
+        border-radius: 8px;
+        background: var(--surface-panel);
+        cursor: pointer;
+        transition: border-color 120ms, box-shadow 120ms, transform 120ms;
+      }
+      .card:hover {
+        border-color: var(--border-strong);
+        box-shadow: var(--shadow);
+        transform: translateY(-1px);
+      }
+      .avatar-wrap { position: relative; }
+      .avatar {
+        display: grid;
+        width: 104px;
+        height: 104px;
+        place-items: center;
+        overflow: hidden;
+        border: 4px solid #d9dee6;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #dfe5ee, #aeb8c7);
+        color: #ffffff;
+        font-size: 28px;
+        font-weight: 750;
+        user-select: none;
+      }
+      .actor-name {
+        max-width: calc(100% - 28px);
+        margin-top: 18px;
+        overflow: hidden;
+        font-size: 17px;
+        font-weight: 750;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .video-count { margin-top: 5px; color: var(--text-secondary); font-size: 14px; }
+      .select-control, .delete-control {
+        position: absolute;
+        z-index: 4;
+        display: grid;
+        width: 26px;
+        height: 26px;
+        place-items: center;
+        border: 1px solid var(--border-strong);
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.9);
+        color: var(--text-secondary);
+      }
+      .select-control { top: 8px; left: 8px; }
+      .delete-control { top: 8px; right: 8px; }
+      .reserved-note {
+        position: absolute;
+        top: 39px;
+        z-index: 3;
+        color: var(--text-muted);
+        font-size: 10px;
+      }
+      .reserved-note.left { left: 8px; }
+      .reserved-note.right { right: 8px; }
+
+      .status {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+      .status.unscraped { color: var(--text-warning); }
+      .status.failed { color: var(--text-danger); }
+
+      /* Variant A — inline metadata badge + popover filter. */
+      .variant-a .card-meta {
+        display: flex;
+        min-height: 25px;
+        align-items: center;
+        gap: 7px;
+        margin-top: 8px;
+      }
+      .variant-a .status {
+        padding: 3px 7px;
+        border: 1px solid currentColor;
+        border-radius: 999px;
+      }
+      .variant-a .status.success { visibility: hidden; }
+
+      /* Variant B — status footer + persistent segmented filter. */
+      .variant-b .card { justify-content: flex-start; padding-top: 42px; }
+      .variant-b .status-footer {
+        display: flex;
+        width: 100%;
+        min-height: 38px;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: auto;
+        padding: 0 12px;
+        border-top: 1px solid var(--border-subtle);
+        background: var(--surface-control);
+      }
+      .variant-b .status-footer.success .status { visibility: hidden; }
+      .variant-b .status-footer.unscraped { background: var(--surface-warning); }
+      .variant-b .status-footer.failed { background: var(--surface-danger); }
+      .variant-b .status-filter-segment button { min-width: 74px; }
+      .variant-b .banner-stat {
+        padding: 5px 8px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 6px;
+        background: var(--surface-control);
+        cursor: pointer;
+      }
+
+      /* Variant C — accepted hybrid: avatar overlay badge + popover filter. */
+      .variant-c .avatar-status {
+        position: absolute;
+        right: -13px;
+        bottom: 3px;
+        min-width: 22px;
+        padding: 4px 7px;
+        border: 3px solid var(--surface-panel);
+        border-radius: 999px;
+        background: var(--surface-control);
+        box-shadow: 0 2px 7px rgba(32, 36, 43, 0.13);
+        white-space: nowrap;
+      }
+      .variant-c .avatar-status.success { display: none; }
+      .prototype-switcher {
+        position: fixed;
+        bottom: 18px;
+        left: 50%;
+        z-index: 40;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px;
+        border: 1px solid #1f2937;
+        border-radius: 999px;
+        background: #111827;
+        color: #f9fafb;
+        box-shadow: 0 12px 30px rgba(17, 24, 39, 0.28);
+      }
+      .prototype-switcher button {
+        width: 31px;
+        height: 31px;
+        border: 0;
+        border-radius: 50%;
+        background: #273244;
+        color: inherit;
+        cursor: pointer;
+      }
+      .variant-label {
+        min-width: 200px;
+        padding: 0 8px;
+        text-align: center;
+        font-weight: 650;
+      }
+      .prototype-tag {
+        position: fixed;
+        right: 14px;
+        bottom: 14px;
+        z-index: 35;
+        padding: 5px 8px;
+        border-radius: 6px;
+        background: #111827;
+        color: #ffffff;
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      const variants = {
+        A: '页内徽标 + 弹层筛选',
+        B: '状态页脚 + 常驻切换',
+        C: '已接受 · 头像角标 + 弹层筛选'
+      }
+      const actors = [
+        { name: '加賀美さら', videos: 7, status: 'success', linked: true },
+        { name: '小野六花', videos: 12, status: 'unscraped', linked: true },
+        { name: '石川澪', videos: 4, status: 'failed', linked: true },
+        { name: '美谷朱音', videos: 9, status: 'success', linked: true },
+        { name: '八木奈々', videos: 3, status: 'unscraped', linked: true },
+        { name: '倉本すみれ', videos: 0, status: 'failed', linked: false },
+        { name: '宮下玲奈', videos: 5, status: 'success', linked: true },
+        { name: '瀬戸環奈', videos: 1, status: 'success', linked: true }
+      ]
+      const statusLabels = {
+        all: '全部状态',
+        success: '刮削成功',
+        unscraped: '未刮削',
+        failed: '刮削失败'
+      }
+      const state = {
+        variant: new URLSearchParams(location.search).get('variant') || 'A',
+        status: new URLSearchParams(location.search).get('status') || 'all',
+        query: '',
+        popoverOpen: false
+      }
+      if (!variants[state.variant]) state.variant = 'A'
+
+      function setQuery(patch) {
+        Object.assign(state, patch)
+        const params = new URLSearchParams(location.search)
+        params.set('variant', state.variant)
+        if (state.status === 'all') params.delete('status')
+        else params.set('status', state.status)
+        history.replaceState(null, '', `${location.pathname}?${params}`)
+        render()
+      }
+
+      function statusControl() {
+        if (state.variant === 'A' || state.variant === 'C') {
+          const options = ['all', 'success', 'unscraped', 'failed']
+          return `
+            <div class="filter-anchor">
+              <button class="control" data-action="toggle-popover">筛选 ${state.status === 'all' ? '⌄' : '· 1'}</button>
+              <div class="popover ${state.popoverOpen ? 'open' : ''}">
+                <h3 class="popover-title">刮削状态</h3>
+                <div class="popover-options">
+                  ${options.map((status) => `
+                    <button class="popover-option ${state.status === status ? 'active' : ''}" data-status="${status}">
+                      <span>${statusLabels[status]}</span>
+                      <span class="option-count">${status === 'all' ? actors.length : actors.filter((actor) => actor.status === status).length}</span>
+                    </button>
+                  `).join('')}
+                </div>
+              </div>
+            </div>
+          `
+        }
+        if (state.variant === 'B') {
+          return `
+            <div class="segment status-filter-segment" role="group" aria-label="刮削状态">
+              ${['all', 'success', 'unscraped', 'failed'].map((status) => `
+                <button class="${state.status === status ? 'active' : ''}" data-status="${status}">
+                  ${status === 'all' ? '全部' : statusLabels[status]}
+                </button>
+              `).join('')}
+            </div>
+          `
+        }
+        return ''
+      }
+
+      function statusMarkup(actor) {
+        const label = statusLabels[actor.status]
+        if (state.variant === 'A') {
+          return `<div class="card-meta"><span class="status ${actor.status}">${label}</span><span class="video-count">${actor.videos} 部</span></div>`
+        }
+        if (state.variant === 'B') {
+          return `<div class="status-footer ${actor.status}"><span class="status ${actor.status}">${label}</span><span>${actor.videos} 部</span></div>`
+        }
+        return `
+          <span class="avatar-status status ${actor.status}">${label}</span>
+        `
+      }
+
+      function actorCard(actor, index) {
+        const initials = actor.name.slice(0, 1)
+        return `
+          <div class="card-wrap">
+            <span class="select-control" aria-label="选择演员">○</span>
+            ${!actor.linked ? '<span class="delete-control" aria-label="删除演员">×</span>' : ''}
+            ${index === 1 ? '<span class="reserved-note left">多选区</span>' : ''}
+            ${index === 5 ? '<span class="reserved-note right">删除区</span>' : ''}
+            <article class="card">
+              <div class="avatar-wrap">
+                <div class="avatar">${initials}</div>
+                ${state.variant === 'C' ? statusMarkup(actor) : ''}
+              </div>
+              <div class="actor-name">${actor.name}</div>
+              ${state.variant === 'C' ? `<div class="video-count">${actor.videos} 部</div>` : ''}
+              ${state.variant !== 'C' ? statusMarkup(actor) : ''}
+            </article>
+          </div>
+        `
+      }
+
+      function bannerMarkup() {
+        if (state.variant === 'B') {
+          return `
+            <div class="banner">
+              <div class="banner-copy">
+                <span class="banner-title">演员资料维护</span>
+                <span class="banner-detail">按状态快速处理待维护演员。</span>
+              </div>
+              <div class="banner-actions">
+                <button class="banner-stat" data-status="unscraped">未刮削 2</button>
+                <button class="banner-stat" data-status="failed">失败 2</button>
+                <button class="banner-primary">一键刮削</button>
+              </div>
+            </div>
+          `
+        }
+        return `
+          <div class="banner">
+            <div class="banner-copy">
+              <span class="banner-title">2 位女优尚未刮削</span>
+              <span class="banner-detail">可筛选查看后批量补齐资料。</span>
+            </div>
+            <div class="banner-actions">
+              <button class="banner-link" data-status="unscraped">查看未刮削</button>
+              <button class="banner-primary">一键刮削</button>
+            </div>
+          </div>
+        `
+      }
+
+      function render() {
+        const filtered = actors.filter((actor) => {
+          const statusMatches = state.status === 'all' || actor.status === state.status
+          const queryMatches = !state.query || actor.name.includes(state.query)
+          return statusMatches && queryMatches
+        })
+        const appliedVisible = state.status !== 'all'
+        document.querySelector('#root').innerHTML = `
+          <div class="app variant-${state.variant.toLowerCase()}">
+            <aside class="sidebar">
+              <div class="brand">Javdex</div>
+              <nav class="nav">
+                <div class="nav-item">媒体库</div>
+                <div class="nav-item active">演员</div>
+                <div class="nav-item">清单</div>
+                <div class="nav-item">设置</div>
+              </nav>
+            </aside>
+            <main class="page">
+              <header class="topbar">
+                <div class="toolbar">
+                  <input class="search" value="${state.query}" placeholder="搜索演员名或别名…" aria-label="搜索演员" />
+                  <div class="toolbar-spacer"></div>
+                  ${statusControl()}
+                  <div class="segment" role="group" aria-label="性别筛选">
+                    <button class="active">女</button><button>男</button><button>全部</button>
+                  </div>
+                  <button class="control">排序：影片数</button>
+                  <span class="count">共 ${filtered.length} 位</span>
+                </div>
+                <div class="applied ${appliedVisible ? 'visible' : ''}">
+                  ${appliedVisible ? `<span class="chip">刮削状态：${statusLabels[state.status]} <button data-status="all" aria-label="移除筛选">×</button></span>` : ''}
+                  ${appliedVisible ? '<button class="clear-filters" data-status="all">清除全部</button>' : ''}
+                </div>
+                ${bannerMarkup()}
+              </header>
+              <section class="content">
+                <div class="grid">
+                  ${filtered.map(actorCard).join('') || '<p>没有匹配的演员</p>'}
+                </div>
+              </section>
+            </main>
+          </div>
+          <div class="prototype-switcher">
+            <button data-action="prev" aria-label="上一个方案">←</button>
+            <span class="variant-label">${state.variant} — ${variants[state.variant]}</span>
+            <button data-action="next" aria-label="下一个方案">→</button>
+          </div>
+          <span class="prototype-tag">PROTOTYPE · 非生产界面</span>
+        `
+
+        document.querySelector('.search').addEventListener('input', (event) => {
+          state.query = event.target.value
+          render()
+          document.querySelector('.search').focus()
+        })
+        document.querySelectorAll('[data-status]').forEach((element) => {
+          element.addEventListener('click', () => setQuery({ status: element.dataset.status, popoverOpen: false }))
+        })
+        document.querySelector('[data-action="toggle-popover"]')?.addEventListener('click', () => {
+          state.popoverOpen = !state.popoverOpen
+          render()
+        })
+        document.querySelector('[data-action="prev"]').addEventListener('click', () => cycle(-1))
+        document.querySelector('[data-action="next"]').addEventListener('click', () => cycle(1))
+      }
+
+      function cycle(direction) {
+        const keys = Object.keys(variants)
+        const index = keys.indexOf(state.variant)
+        state.variant = keys[(index + direction + keys.length) % keys.length]
+        state.popoverOpen = false
+        setQuery({})
+      }
+
+      addEventListener('keydown', (event) => {
+        const tag = document.activeElement?.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return
+        if (event.key === 'ArrowLeft') cycle(-1)
+        if (event.key === 'ArrowRight') cycle(1)
+      })
+      render()
+    </script>
+  </body>
+</html>

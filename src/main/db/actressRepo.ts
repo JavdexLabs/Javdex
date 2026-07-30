@@ -12,6 +12,7 @@ import type {
   ActressScrapeField,
   ActressScrapeUpdateMode,
   ActressBatchScrapeFilter,
+  ActressBatchScrapeStatus,
   ActressGender,
   ActressGenderFilter,
   ActressListItem,
@@ -214,7 +215,10 @@ function actressMissingFieldCondition(field: ActressScrapeField): string {
 }
 
 /** Cumulative scrape status stored on the actress row, per batch scope. */
-const ACTRESS_BATCH_STATUS_VALUE: Record<'unscraped' | 'success' | 'failed', ScrapedStatus> = {
+const ACTRESS_BATCH_STATUS_VALUE: Record<
+  Exclude<ActressBatchScrapeStatus, 'all'>,
+  ScrapedStatus
+> = {
   unscraped: 0,
   success: 1,
   failed: 2

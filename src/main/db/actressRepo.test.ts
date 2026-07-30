@@ -759,6 +759,25 @@ describe('actressRepo.setActressAvatarBundle', () => {
   })
 })
 
+describe('actressRepo cumulative scrape status', () => {
+  it('keeps an actress created by video scraping unscraped and exposes the status in detail', () => {
+    setupDb()
+    writeTestAvatar('avatars/video-scrape-download.jpg')
+
+    const actressId = upsertActressFromScrape(
+      'Created From Video Scrape',
+      'avatars/video-scrape-download.jpg',
+      'female'
+    )
+
+    const detail = getActressDetail(actressId)
+    assert.ok(detail)
+    assert.equal(detail.scraped_status, 0)
+    assert.equal(detail.last_scraped_at, null)
+    assert.ok(detail.avatar_path)
+  })
+})
+
 describe('actressRepo.upsertActressFromScrape avatar adopt', () => {
   it('adopts a downloaded avatar into source+display+crop and drops the temp path', () => {
     setupDb()

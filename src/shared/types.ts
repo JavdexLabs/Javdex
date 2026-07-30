@@ -82,6 +82,7 @@ export interface Actress {
   zodiac: string | null
   nationality: string | null
   profile_summary: string | null
+  scraped_status: ScrapedStatus
   last_scraped_at: string | null
   updated_at: string | null
   gender: ActressGender | null

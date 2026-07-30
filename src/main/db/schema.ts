@@ -67,10 +67,12 @@ CREATE TABLE IF NOT EXISTS actresses (
     zodiac TEXT,
     nationality TEXT,
     profile_summary TEXT,
+    scraped_status INTEGER NOT NULL DEFAULT 0 CHECK(scraped_status IN (0, 1, 2)),
     last_scraped_at TEXT,
     updated_at TEXT,
     gender TEXT CHECK(gender IN ('female', 'male'))
 );
+CREATE INDEX IF NOT EXISTS idx_actresses_scraped_status ON actresses(scraped_status);
 
 CREATE TABLE IF NOT EXISTS video_actress (
     video_id INTEGER NOT NULL,

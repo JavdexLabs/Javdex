@@ -3221,6 +3221,8 @@ textarea.text-input {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
+  -webkit-user-select: none;
+  user-select: none;
   justify-self: start;
   width: fit-content;
   max-width: 100%;
@@ -5452,6 +5454,11 @@ button.tag-chip--custom-pick {
   -webkit-user-select: text;
   user-select: text;
   word-break: break-word;
+}
+
+.actress-profile-meta-item dd.detail-meta-status {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .actress-profile-alias-list {

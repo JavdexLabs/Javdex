@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import { SCHEMA_SQL } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 3
+export const CURRENT_SCHEMA_VERSION = 4
 
 type Migration = {
   version: number
@@ -62,6 +62,90 @@ function migrateToV3(database: Database.Database): void {
   migrateNames()
 }
 
+function migrateToV4(database: Database.Database): void {
+  if (!tableExists(database, 'actresses')) return
+
+  const migrateScrapeStatus = database.transaction(() => {
+    let cols = columnNames(database, 'actresses')
+    if (!cols.has('scraped_status')) {
+      database.exec(
+        `ALTER TABLE actresses
+         ADD COLUMN scraped_status INTEGER NOT NULL DEFAULT 0
+         CHECK(scraped_status IN (0, 1, 2))`
+      )
+      cols = columnNames(database, 'actresses')
+    }
+
+    const evidenceConditions: string[] = []
+    for (const column of [
+      'avatar_path',
+      'avatar_source_path',
+      'poster_path',
+      'birth_date',
+      'debut_date',
+      'cup_size',
+      'blood_type',
+      'zodiac',
+      'nationality',
+      'profile_summary'
+    ]) {
+      if (cols.has(column)) {
+        evidenceConditions.push(`(${column} IS NOT NULL AND trim(${column}) != '')`)
+      }
+    }
+    for (const column of ['height_cm', 'bust_cm', 'waist_cm', 'hip_cm']) {
+      if (cols.has(column)) evidenceConditions.push(`${column} IS NOT NULL`)
+    }
+    if (tableExists(database, 'actress_gallery_assets')) {
+      const galleryCols = columnNames(database, 'actress_gallery_assets')
+      const galleryAssetConditions = ['remote_url', 'local_path']
+        .filter((column) => galleryCols.has(column))
+        .map((column) => `(${column} IS NOT NULL AND trim(${column}) != '')`)
+      if (galleryAssetConditions.length > 0) {
+        evidenceConditions.push(
+          `EXISTS (
+             SELECT 1
+             FROM actress_gallery_assets
+             WHERE actress_id = actresses.id
+               AND (${galleryAssetConditions.join(' OR ')})
+           )`
+        )
+      }
+    }
+    if (tableExists(database, 'actress_names')) {
+      evidenceConditions.push(
+        `EXISTS (
+           SELECT 1
+           FROM actress_names
+           WHERE actress_id = actresses.id
+             AND type != 'main'
+             AND trim(name) != ''
+         )`
+      )
+    }
+
+    if (cols.has('last_scraped_at')) {
+      const hasSuccessTime =
+        "(last_scraped_at IS NOT NULL AND trim(last_scraped_at) != '')"
+      const hasEvidence =
+        evidenceConditions.length > 0 ? `(${evidenceConditions.join(' OR ')})` : '0'
+      const isMigratedSuccess = `(${hasSuccessTime} AND ${hasEvidence})`
+      database.exec(`
+        UPDATE actresses
+        SET scraped_status = CASE WHEN ${isMigratedSuccess} THEN 1 ELSE 0 END,
+            last_scraped_at = CASE WHEN ${isMigratedSuccess} THEN last_scraped_at ELSE NULL END
+      `)
+    } else {
+      database.exec('UPDATE actresses SET scraped_status = 0')
+    }
+
+    database.exec(
+      'CREATE INDEX IF NOT EXISTS idx_actresses_scraped_status ON actresses(scraped_status)'
+    )
+  })
+  migrateScrapeStatus()
+}
+
 const MIGRATIONS: Migration[] = [
   {
     version: 2,
@@ -70,6 +154,10 @@ const MIGRATIONS: Migration[] = [
   {
     version: 3,
     migrate: migrateToV3
+  },
+  {
+    version: 4,
+    migrate: migrateToV4
   }
 ]
 

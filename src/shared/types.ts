@@ -219,6 +219,34 @@ export interface ActressListItem extends Actress {
   video_count: number
 }
 
+/** Canonical actress library status filter vocabulary (also the URL values). */
+export type ActressListStatusFilter = 'all' | 'success' | 'unscraped' | 'failed'
+
+export const ACTRESS_LIST_STATUS_SCRAPED_STATUS: Record<
+  Exclude<ActressListStatusFilter, 'all'>,
+  ScrapedStatus
+> = {
+  unscraped: 0,
+  success: 1,
+  failed: 2
+}
+
+export interface ActressListQuery {
+  search?: string
+  gender?: ActressGenderFilter
+  status?: ActressListStatusFilter
+  sortBy?: ActressListSortBy
+  sortDir?: ListSortDir
+}
+
+/** Actresses per cumulative status within the current search and gender scope. */
+export type ActressListStatusCounts = Record<ActressListStatusFilter, number>
+
+export interface ActressListPage {
+  items: ActressListItem[]
+  statusCounts: ActressListStatusCounts
+}
+
 /** Read-only source metadata used by renderer-side smart avatar composition. */
 export interface ActressAvatarSourceInfo {
   assetPath: string

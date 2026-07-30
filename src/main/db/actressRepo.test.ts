@@ -21,10 +21,10 @@ import {
   getActressAvatarSourceInfo,
   getActressDetail,
   replaceActressGalleryAssets,
+  recordActressScrapeFailure,
   resolveEffectiveActressScrapeFields,
   setActressAvatarBundle,
   setActressPosterPath,
-  touchActressLastScrapedAt,
   upsertActressFromScrape
 } from './actressRepo'
 import { avatarSourceFingerprint } from '../services/assetService'
@@ -892,20 +892,70 @@ describe('actressRepo.replaceActressGalleryAssets', () => {
   })
 })
 
-describe('actressRepo.touchActressLastScrapedAt', () => {
-  it('updates last_scraped_at without changing profile fields', () => {
+describe('actressRepo.recordActressScrapeFailure', () => {
+  it('records failure without writing a success time or changing profile fields', () => {
     setupDb()
-    touchActressLastScrapedAt(2)
-    const row = getDb().prepare('SELECT last_scraped_at, birth_date FROM actresses WHERE id = ?').get(2) as {
-      last_scraped_at: string | null
-      birth_date: string | null
-    }
-    assert.ok(row.last_scraped_at)
-    assert.equal(row.birth_date, null)
+    recordActressScrapeFailure(2)
+    const detail = getActressDetail(2)
+    assert.equal(detail?.scraped_status, 2)
+    assert.equal(detail?.last_scraped_at, null)
+    assert.equal(detail?.birth_date, null)
   })
 })
 
 describe('actressRepo.applyActressScrapeResult', () => {
+  it('does not claim a scrape was applied when every returned alias is unusable', () => {
+    setupDb()
+
+    const outcome = applyActressScrapeResult(
+      2,
+      { aliases: ['Missing Female', 'Complete Alias'] },
+      null,
+      [],
+      ['aliases'],
+      'replace'
+    )
+
+    const detail = getActressDetail(2)
+    assert.equal(outcome.applied, false)
+    assert.deepEqual(detail?.aliases, [])
+    assert.equal(detail?.scraped_status, 0)
+    assert.equal(detail?.last_scraped_at, null)
+  })
+
+  it('rolls back profile data and cumulative success when gallery persistence fails', () => {
+    setupDb()
+    getDb().exec(`
+      CREATE TRIGGER fail_scraped_gallery_insert
+      BEFORE INSERT ON actress_gallery_assets
+      BEGIN
+        SELECT RAISE(ABORT, 'gallery persistence failed');
+      END;
+    `)
+
+    assert.throws(
+      () =>
+        applyActressScrapeResult(
+          2,
+          {
+            birthDate: '2001-02-03',
+            galleryImageUrls: ['https://example.test/new-gallery.jpg']
+          },
+          null,
+          [{ remoteUrl: 'https://example.test/new-gallery.jpg' }],
+          ['birthDate', 'gallery'],
+          'replace'
+        ),
+      /gallery persistence failed/
+    )
+
+    const detail = getActressDetail(2)
+    assert.equal(detail?.birth_date, null)
+    assert.equal(detail?.scraped_status, 0)
+    assert.equal(detail?.last_scraped_at, null)
+    assert.deepEqual(detail?.gallery, [])
+  })
+
   it('skips invalid downloaded avatars while applying other profile fields', () => {
     setupDb()
     const db = getDb()

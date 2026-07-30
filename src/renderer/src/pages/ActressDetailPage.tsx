@@ -194,11 +194,11 @@ export default function ActressDetailPage(): JSX.Element {
         autoCropAvatar
       )
       toast.show('匹配完成', 'success')
-      invalidateActressLibraryQueries(queryClient)
-      void load({ silent: true })
     } catch (e) {
       toast.show(`匹配失败：${(e as Error).message}`, 'error')
     } finally {
+      invalidateActressLibraryQueries(queryClient)
+      await load({ silent: true })
       setScraping(false)
     }
   }

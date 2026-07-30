@@ -65,6 +65,251 @@ afterEach(() => {
 })
 
 describe('actressScraperManager', () => {
+  it('promotes an unscraped actress to scrape success when a profile field is applied', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'Successful Profile Source',
+      version: '1.0.0',
+      description: 'Returns one valid profile field',
+      supportedFields: ['birthDate'],
+      code: `
+module.exports = {
+  async parseActress() {
+    return { birthDate: '1992-03-04' };
+  }
+};
+`
+    })
+    const inserted = getDb()
+      .prepare('INSERT INTO actresses (main_name, gender) VALUES (?, ?)')
+      .run('Status Success Actress', 'female')
+    const actressId = Number(inserted.lastInsertRowid)
+
+    const outcome = await scrapeActress(actressId, 'Successful Profile Source', {
+      fields: ['birthDate'],
+      closeBrowser: false
+    })
+
+    const detail = getActressDetail(actressId)
+    assert.equal(outcome.ok, true)
+    assert.equal(detail?.birth_date, '1992-03-04')
+    assert.equal(detail?.scraped_status, 1)
+    assert.ok(detail?.last_scraped_at)
+  })
+
+  it('records a failed scrape without a success time when no profile matches', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'No Match Profile Source',
+      version: '1.0.0',
+      description: 'Returns no matching profile',
+      supportedFields: ['birthDate'],
+      code: `
+module.exports = {
+  async parseActress() {
+    return null;
+  }
+};
+`
+    })
+    const inserted = getDb()
+      .prepare('INSERT INTO actresses (main_name, gender) VALUES (?, ?)')
+      .run('No Match Actress', 'female')
+    const actressId = Number(inserted.lastInsertRowid)
+
+    const outcome = await scrapeActress(actressId, 'No Match Profile Source', {
+      fields: ['birthDate'],
+      closeBrowser: false
+    })
+
+    const detail = getActressDetail(actressId)
+    assert.equal(outcome.ok, false)
+    assert.match(outcome.error ?? '', /未找到匹配/)
+    assert.equal(detail?.scraped_status, 2)
+    assert.equal(detail?.last_scraped_at, null)
+  })
+
+  it('records a failed scrape without a success time when the source throws', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'Throwing Profile Source',
+      version: '1.0.0',
+      description: 'Throws while scraping a profile',
+      supportedFields: ['birthDate'],
+      code: `
+module.exports = {
+  async parseActress() {
+    throw new Error('profile source offline');
+  }
+};
+`
+    })
+    const inserted = getDb()
+      .prepare('INSERT INTO actresses (main_name, gender) VALUES (?, ?)')
+      .run('Exception Actress', 'female')
+    const actressId = Number(inserted.lastInsertRowid)
+
+    const outcome = await scrapeActress(actressId, 'Throwing Profile Source', {
+      fields: ['birthDate'],
+      closeBrowser: false
+    })
+
+    const detail = getActressDetail(actressId)
+    assert.equal(outcome.ok, false)
+    assert.match(outcome.error ?? '', /profile source offline/)
+    assert.equal(detail?.scraped_status, 2)
+    assert.equal(detail?.last_scraped_at, null)
+  })
+
+  it('records failure when a matched profile has no valid selected field', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'Empty Profile Source',
+      version: '1.0.0',
+      description: 'Returns a profile without usable fields',
+      supportedFields: ['birthDate'],
+      code: `
+module.exports = {
+  async parseActress() {
+    return {};
+  }
+};
+`
+    })
+    const inserted = getDb()
+      .prepare('INSERT INTO actresses (main_name, gender) VALUES (?, ?)')
+      .run('Empty Result Actress', 'female')
+    const actressId = Number(inserted.lastInsertRowid)
+
+    const outcome = await scrapeActress(actressId, 'Empty Profile Source', {
+      fields: ['birthDate'],
+      closeBrowser: false
+    })
+
+    const detail = getActressDetail(actressId)
+    assert.equal(outcome.ok, false)
+    assert.match(outcome.error ?? '', /有效/)
+    assert.equal(detail?.scraped_status, 2)
+    assert.equal(detail?.last_scraped_at, null)
+    assert.equal(detail?.birth_date, null)
+  })
+
+  it('promotes a previously failed actress when a later scrape applies valid data', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'Recovery Profile Source',
+      version: '1.0.0',
+      description: 'Returns valid data after an earlier failed attempt',
+      supportedFields: ['birthDate'],
+      code: `
+module.exports = {
+  async parseActress() {
+    return { birthDate: '1993-04-05' };
+  }
+};
+`
+    })
+    const inserted = getDb()
+      .prepare(
+        'INSERT INTO actresses (main_name, gender, scraped_status) VALUES (?, ?, ?)'
+      )
+      .run('Recovered Actress', 'female', 2)
+    const actressId = Number(inserted.lastInsertRowid)
+
+    const outcome = await scrapeActress(actressId, 'Recovery Profile Source', {
+      fields: ['birthDate'],
+      closeBrowser: false
+    })
+
+    const detail = getActressDetail(actressId)
+    assert.equal(outcome.ok, true)
+    assert.equal(detail?.scraped_status, 1)
+    assert.ok(detail?.last_scraped_at)
+    assert.equal(detail?.birth_date, '1993-04-05')
+  })
+
+  it('skips fill-empty scraping without changing cumulative status when no selected field is missing', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'Must Not Run Profile Source',
+      version: '1.0.0',
+      description: 'Throws if an already-complete field is scraped',
+      supportedFields: ['birthDate'],
+      code: `
+module.exports = {
+  async parseActress() {
+    throw new Error('completed fields should have been skipped');
+  }
+};
+`
+    })
+    const inserted = getDb()
+      .prepare(
+        `INSERT INTO actresses
+          (main_name, gender, birth_date, scraped_status, last_scraped_at)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      .run('Skipped Actress', 'female', '1994-05-06', 2, null)
+    const actressId = Number(inserted.lastInsertRowid)
+
+    const outcome = await scrapeActress(actressId, 'Must Not Run Profile Source', {
+      fields: ['birthDate'],
+      mode: 'fillEmpty',
+      closeBrowser: false
+    })
+
+    const detail = getActressDetail(actressId)
+    assert.equal(outcome.ok, true)
+    assert.equal(outcome.skipped, true)
+    assert.equal(detail?.birth_date, '1994-05-06')
+    assert.equal(detail?.scraped_status, 2)
+    assert.equal(detail?.last_scraped_at, null)
+  })
+
+  it('keeps cumulative success and its timestamp when a later scrape fails', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'Later Failure Profile Source',
+      version: '1.0.0',
+      description: 'Returns no match after an earlier success',
+      supportedFields: ['birthDate'],
+      code: `
+module.exports = {
+  async parseActress() {
+    return null;
+  }
+};
+`
+    })
+    const successfulAt = '2025-06-07T08:09:10.000Z'
+    const inserted = getDb()
+      .prepare(
+        `INSERT INTO actresses
+          (main_name, gender, birth_date, scraped_status, last_scraped_at)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      .run('Cumulative Success Actress', 'female', '1995-06-07', 1, successfulAt)
+    const actressId = Number(inserted.lastInsertRowid)
+
+    const outcome = await scrapeActress(actressId, 'Later Failure Profile Source', {
+      fields: ['birthDate'],
+      closeBrowser: false
+    })
+
+    const detail = getActressDetail(actressId)
+    assert.equal(outcome.ok, false)
+    assert.equal(detail?.scraped_status, 1)
+    assert.equal(detail?.last_scraped_at, successfulAt)
+    assert.equal(detail?.birth_date, '1995-06-07')
+  })
+
   it('lets Gfriends try stored aliases after the main name without enabling global alias search', async () => {
     seedGfriendsIndex({
       Studio: {
@@ -142,7 +387,66 @@ module.exports = {
 
     assert.equal(outcome.ok, true)
     assert.equal(outcome.warnings?.some((warning) => warning.includes('avatar source offline')), true)
-    assert.equal(getActressDetail(actressId)?.birth_date, '1990-01-02')
+    const detail = getActressDetail(actressId)
+    assert.equal(detail?.birth_date, '1990-01-02')
+    assert.equal(detail?.scraped_status, 1)
+    assert.ok(detail?.last_scraped_at)
+  })
+
+  it('records failure when every configured composite source fails', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'Broken Composite Avatar Source',
+      version: '1.0.0',
+      description: 'Fails while fetching avatars',
+      supportedFields: ['avatar'],
+      code: `
+module.exports = {
+  async parseActress() {
+    throw new Error('avatar source offline');
+  }
+};
+`
+    })
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'Broken Composite Profile Source',
+      version: '1.0.0',
+      description: 'Fails while fetching profile fields',
+      supportedFields: ['birthDate'],
+      code: `
+module.exports = {
+  async parseActress() {
+    throw new Error('profile source offline');
+  }
+};
+`
+    })
+    createCompositeScraper('actress', {
+      name: 'All Broken Composite',
+      fieldPluginMap: {
+        avatar: 'Broken Composite Avatar Source',
+        birthDate: 'Broken Composite Profile Source'
+      }
+    })
+    const inserted = getDb()
+      .prepare('INSERT INTO actresses (main_name, gender) VALUES (?, ?)')
+      .run('All Sources Failed Actress', 'female')
+    const actressId = Number(inserted.lastInsertRowid)
+
+    const outcome = await scrapeActress(actressId, 'All Broken Composite', {
+      fields: ['avatar', 'birthDate'],
+      closeBrowser: false
+    })
+
+    const detail = getActressDetail(actressId)
+    assert.equal(outcome.ok, false)
+    assert.match(outcome.error ?? '', /avatar source offline/)
+    assert.match(outcome.error ?? '', /profile source offline/)
+    assert.equal(detail?.scraped_status, 2)
+    assert.equal(detail?.last_scraped_at, null)
   })
 
   it('warns when a composite avatar source cannot download its result', async () => {
@@ -208,6 +512,60 @@ module.exports = {
         true
       )
       assert.equal(getActressDetail(actressId)?.birth_date, '1991-02-03')
+    } finally {
+      scrapeBrowser.fetchBuffer = originalFetchBuffer
+    }
+  })
+
+  it('keeps a composite scrape successful when a remote gallery is stored despite download warnings', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'Remote Gallery Source',
+      version: '1.0.0',
+      description: 'Returns a gallery whose local download is unavailable',
+      supportedFields: ['gallery'],
+      code: `
+module.exports = {
+  async parseActress() {
+    return { galleryImageUrls: ['https://example.invalid/gallery.jpg'] };
+  }
+};
+`
+    })
+    createCompositeScraper('actress', {
+      name: 'Remote Gallery Composite',
+      fieldPluginMap: {
+        gallery: 'Remote Gallery Source'
+      }
+    })
+    const inserted = getDb()
+      .prepare('INSERT INTO actresses (main_name, gender) VALUES (?, ?)')
+      .run('Remote Gallery Actress', 'female')
+    const actressId = Number(inserted.lastInsertRowid)
+    const originalFetchBuffer = scrapeBrowser.fetchBuffer
+    scrapeBrowser.fetchBuffer = async () => {
+      throw new Error('gallery host offline')
+    }
+
+    try {
+      const outcome = await scrapeActress(actressId, 'Remote Gallery Composite', {
+        fields: ['gallery'],
+        closeBrowser: false
+      })
+
+      const detail = getActressDetail(actressId)
+      assert.equal(outcome.ok, true)
+      assert.equal(outcome.warnings?.some((warning) => warning.includes('写真下载失败')), true)
+      assert.equal(detail?.scraped_status, 1)
+      assert.ok(detail?.last_scraped_at)
+      assert.deepEqual(
+        detail?.gallery.map((asset) => ({
+          remoteUrl: asset.remote_url,
+          localPath: asset.local_path
+        })),
+        [{ remoteUrl: 'https://example.invalid/gallery.jpg', localPath: null }]
+      )
     } finally {
       scrapeBrowser.fetchBuffer = originalFetchBuffer
     }

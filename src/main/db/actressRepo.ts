@@ -44,6 +44,13 @@ import {
 } from '../services/assetService'
 import { mimeFromExt } from '../services/assetCrypto'
 import { actressSearchLikeParams, actressTextSearchSql } from './actressSearchSql'
+
+interface ActressGalleryAssetWriteInput {
+  remoteUrl?: string | null
+  localPath?: string | null
+  width?: number | null
+  height?: number | null
+}
 import {
   ACTRESS_NAME_TYPE,
   findActressIdByStoredName,
@@ -732,12 +739,7 @@ export function getActressDetail(id: number): ActressDetail | null {
 
 export function addActressGalleryAsset(
   actressId: number,
-  input: {
-    remoteUrl?: string | null
-    localPath?: string | null
-    width?: number | null
-    height?: number | null
-  }
+  input: ActressGalleryAssetWriteInput
 ): ActressGalleryAsset {
   if (!input.remoteUrl && !input.localPath) throw new Error('写真来源不能为空')
   const db = getDb()
@@ -771,52 +773,61 @@ export function addActressGalleryAsset(
 
 export function replaceActressGalleryAssets(
   actressId: number,
-  assets: Array<{
-    remoteUrl?: string | null
-    localPath?: string | null
-    width?: number | null
-    height?: number | null
-  }>
+  assets: ActressGalleryAssetWriteInput[]
 ): void {
+  const db = getDb()
+  const obsoleteLocalPaths = db.transaction(() =>
+    replaceActressGalleryAssetRows(actressId, assets)
+  )()
+  deleteObsoleteActressGalleryAssets(obsoleteLocalPaths)
+}
+
+function replaceActressGalleryAssetRows(
+  actressId: number,
+  assets: ActressGalleryAssetWriteInput[]
+): string[] {
   const db = getDb()
   const existing = db
     .prepare('SELECT local_path FROM actress_gallery_assets WHERE actress_id = ?')
     .all(actressId) as { local_path: string | null }[]
   const createdAt = nowIso()
 
-  const txn = db.transaction(() => {
-    clearActressPosterForPaths(
+  clearActressPosterForPaths(
+    actressId,
+    existing.map((row) => row.local_path)
+  )
+  db.prepare('DELETE FROM actress_gallery_assets WHERE actress_id = ?').run(actressId)
+  const insert = db.prepare(
+    `INSERT INTO actress_gallery_assets
+       (actress_id, type, position, remote_url, local_path, width, height, created_at)
+     VALUES (@actressId, 'gallery', @position, @remoteUrl, @localPath, @width, @height, @createdAt)`
+  )
+  assets.forEach((asset, position) => {
+    if (!asset.remoteUrl && !asset.localPath) return
+    insert.run({
       actressId,
-      existing.map((row) => row.local_path)
-    )
-    db.prepare('DELETE FROM actress_gallery_assets WHERE actress_id = ?').run(actressId)
-    const insert = db.prepare(
-      `INSERT INTO actress_gallery_assets
-         (actress_id, type, position, remote_url, local_path, width, height, created_at)
-       VALUES (@actressId, 'gallery', @position, @remoteUrl, @localPath, @width, @height, @createdAt)`
-    )
-    assets.forEach((asset, position) => {
-      if (!asset.remoteUrl && !asset.localPath) return
-      insert.run({
-        actressId,
-        position,
-        remoteUrl: asset.remoteUrl ?? null,
-        localPath: asset.localPath ?? null,
-        width: asset.width ?? null,
-        height: asset.height ?? null,
-        createdAt
-      })
+      position,
+      remoteUrl: asset.remoteUrl ?? null,
+      localPath: asset.localPath ?? null,
+      width: asset.width ?? null,
+      height: asset.height ?? null,
+      createdAt
     })
   })
-  txn()
 
   const retainedLocalPaths = new Set(
     assets.map((asset) => asset.localPath).filter((localPath): localPath is string => !!localPath)
   )
-  for (const row of existing) {
-    if (!row.local_path || retainedLocalPaths.has(row.local_path)) continue
-    deleteAsset(row.local_path)
-  }
+  return existing
+    .map((row) => row.local_path)
+    .filter(
+      (localPath): localPath is string =>
+        Boolean(localPath) && !retainedLocalPaths.has(localPath as string)
+    )
+}
+
+function deleteObsoleteActressGalleryAssets(localPaths: string[]): void {
+  for (const localPath of localPaths) deleteAsset(localPath)
 }
 
 export function deleteActressGalleryAsset(actressId: number, assetId: number): string | null {
@@ -1355,15 +1366,69 @@ export function resolveEffectiveActressScrapeFields(
   )
 }
 
-/** Record that a scrape attempt finished, even when no profile data was applied. */
-export function touchActressLastScrapedAt(actressId: number): void {
+/** Record a failed scrape without degrading actresses that have succeeded before. */
+export function recordActressScrapeFailure(actressId: number): void {
   const db = getDb()
-  const scrapedAt = nowIso()
-  db.prepare('UPDATE actresses SET last_scraped_at = ?, updated_at = ? WHERE id = ?').run(
-    scrapedAt,
-    scrapedAt,
-    actressId
-  )
+  db.prepare(
+    `UPDATE actresses
+     SET scraped_status = CASE WHEN scraped_status = 1 THEN 1 ELSE 2 END,
+         updated_at = ?
+     WHERE id = ?`
+  ).run(nowIso(), actressId)
+}
+
+function hasValidActressScrapeValue(
+  result: ActressScrapeResult,
+  field: ActressScrapeField,
+  avatarApplied: boolean,
+  galleryAssets: ActressGalleryAssetWriteInput[],
+  actressId: number,
+  mainName: string
+): boolean {
+  switch (field) {
+    case 'avatar':
+      return avatarApplied
+    case 'gallery':
+      return galleryAssets.some(
+        (asset) => Boolean(asset.remoteUrl?.trim()) || Boolean(asset.localPath?.trim())
+      )
+    case 'birthDate':
+      return Boolean(result.birthDate?.trim())
+    case 'nameZh':
+      return Boolean(result.nameZh?.trim())
+    case 'nameEn':
+      return Boolean(result.nameEn?.trim())
+    case 'debutDate':
+      return Boolean(result.debutDate?.trim())
+    case 'heightCm':
+      return result.heightCm !== undefined && result.heightCm !== null
+    case 'measurements':
+      return [result.bustCm, result.waistCm, result.hipCm].some(
+        (value) => value !== undefined && value !== null
+      )
+    case 'cupSize':
+      return Boolean(normalizeCupSize(result.cupSize))
+    case 'bloodType':
+      return Boolean(result.bloodType?.trim())
+    case 'zodiac':
+      return Boolean(result.zodiac?.trim())
+    case 'nationality':
+      return Boolean(result.nationality?.trim())
+    case 'profileSummary':
+      return Boolean(result.profileSummary?.trim())
+    case 'aliases':
+      return (result.aliases ?? []).some((name) => {
+        const trimmed = name.trim()
+        return (
+          Boolean(trimmed) &&
+          isValidActressAlias(trimmed) &&
+          normalizeActressNameKey(trimmed) !== normalizeActressNameKey(mainName) &&
+          isActressNameAvailable(trimmed, actressId)
+        )
+      })
+    default:
+      return false
+  }
 }
 
 /** Apply actress profile scrape result (avatar, gallery, profile fields, measurements, aliases). */
@@ -1371,12 +1436,7 @@ export function applyActressScrapeResult(
   actressId: number,
   result: ActressScrapeResult,
   avatarRelPath: string | null,
-  galleryAssets: Array<{
-    remoteUrl?: string | null
-    localPath?: string | null
-    width?: number | null
-    height?: number | null
-  }>,
+  galleryAssets: ActressGalleryAssetWriteInput[],
   fields?: ActressScrapeField[],
   mode: ActressScrapeUpdateMode = 'replace'
 ): { applied: boolean; warnings: string[]; avatarApplied: boolean } {
@@ -1437,6 +1497,21 @@ export function applyActressScrapeResult(
     }
   }
 
+  const hasValidValue = effective.some((field) =>
+    hasValidActressScrapeValue(
+      result,
+      field,
+      avatarApplied,
+      galleryAssets,
+      actressId,
+      actress.main_name
+    )
+  )
+  if (!hasValidValue) {
+    return { applied: false, warnings, avatarApplied: false }
+  }
+
+  let obsoleteGalleryLocalPaths: string[] = []
   const txn = db.transaction(() => {
     const updates: string[] = []
     const bind: Record<string, unknown> = { id: actressId }
@@ -1532,6 +1607,7 @@ export function applyActressScrapeResult(
         setActressTypedName(actressId, 'en', en)
       }
     }
+    updates.push('scraped_status = 1')
     updates.push('last_scraped_at = @last_scraped_at')
     updates.push('updated_at = @updated_at')
     bind.last_scraped_at = scrapedAt
@@ -1551,16 +1627,12 @@ export function applyActressScrapeResult(
         }
       }
     }
+    if (selected.has('gallery') && (galleryAssets.length > 0 || mode === 'replace')) {
+      obsoleteGalleryLocalPaths = replaceActressGalleryAssetRows(actressId, galleryAssets)
+    }
   })
   txn()
-
-  if (selected.has('gallery')) {
-    if (galleryAssets.length) {
-      replaceActressGalleryAssets(actressId, galleryAssets)
-    } else if (mode === 'replace') {
-      replaceActressGalleryAssets(actressId, [])
-    }
-  }
+  deleteObsoleteActressGalleryAssets(obsoleteGalleryLocalPaths)
 
   if (selected.has('avatar') && adoptedAvatar) {
     if (actress.avatar_path && actress.avatar_path !== adoptedAvatar.displayPath) {

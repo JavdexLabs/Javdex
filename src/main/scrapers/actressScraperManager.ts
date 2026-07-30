@@ -8,8 +8,8 @@ import { ALL_ACTRESS_SCRAPE_FIELDS, resolveScrapeProxyUrl } from '@shared/types'
 import {
   applyActressScrapeResult,
   getActressDetail,
+  recordActressScrapeFailure,
   resolveEffectiveActressScrapeFields,
-  touchActressLastScrapedAt
 } from '../db/actressRepo'
 import { downloadActressGalleryImage, downloadAvatar } from '../services/assetService'
 import { getSettings } from '../settings/settingsStore'
@@ -115,18 +115,6 @@ function mergeActressResults(
   }
 }
 
-function hasScrapedValueForField(
-  result: ActressScrapeResult,
-  field: ActressScrapeField
-): boolean {
-  const selected = pickActressFields(result, new Set([field]))
-  return Object.values(selected).some((value) => {
-    if (Array.isArray(value)) return value.length > 0
-    if (typeof value === 'string') return value.trim().length > 0
-    return value !== undefined && value !== null
-  })
-}
-
 interface CompositeActressScrapeOutcome {
   result: ActressScrapeResult | null
   warnings: string[]
@@ -221,25 +209,31 @@ export async function scrapeActress(
   const requested = fields ?? ALL_ACTRESS_SCRAPE_FIELDS
   const mode = options?.mode ?? 'replace'
   const effective = resolveEffectiveActressScrapeFields(actressId, requested, mode)
+  if (effective.length === 0) {
+    return { ok: true, result: {}, skipped: true }
+  }
   const selected = new Set(effective)
-  const settings = getSettings()
-  const proxyUrl = resolveScrapeProxyUrl(settings)
-  const selectedScraperName = scraperName || settings.defaultActressScraper
-  const composite = findCompositeScraper('actress', selectedScraperName)
-  const scraper = composite ? null : getActressScraper(scraperName)
-  const gfriendsSelected =
-    scraper?.scraperName === 'Gfriends' ||
-    effective.some((field) => composite?.fieldPluginMap[field] === 'Gfriends')
-
-  const { queryName, aliases } = resolveActressScrapeQuery(
-    detail.main_name,
-    detail.aliases,
-    options?.queryName,
-    [detail.name_zh, detail.name_en].filter((name): name is string => Boolean(name?.trim())),
-    (options?.useAliases ?? false) || gfriendsSelected
-  )
 
   try {
+    const settings = getSettings()
+    const proxyUrl = resolveScrapeProxyUrl(settings)
+    const selectedScraperName = scraperName || settings.defaultActressScraper
+    const composite = findCompositeScraper('actress', selectedScraperName)
+    const scraper = composite ? null : getActressScraper(scraperName)
+    const gfriendsSelected =
+      scraper?.scraperName === 'Gfriends' ||
+      effective.some((field) => composite?.fieldPluginMap[field] === 'Gfriends')
+
+    const { queryName, aliases } = resolveActressScrapeQuery(
+      detail.main_name,
+      detail.aliases,
+      options?.queryName,
+      [detail.name_zh, detail.name_en].filter((name): name is string =>
+        Boolean(name?.trim())
+      ),
+      (options?.useAliases ?? false) || gfriendsSelected
+    )
+
     let rawResult: ActressScrapeResult | null
     let sourceWarnings: string[] = []
     if (scraper) {
@@ -262,15 +256,13 @@ export async function scrapeActress(
     }
     const result = normalizeActressScrapeResult(rawResult)
     if (!result) {
-      touchActressLastScrapedAt(actressId)
+      recordActressScrapeFailure(actressId)
       return {
         ok: false,
         error: '未找到匹配的演员资料',
         warnings: sourceWarnings.length > 0 ? sourceWarnings : undefined
       }
     }
-    if (effective.length === 0) return { ok: true, result, skipped: true }
-
     const fetcher = (url: string): Promise<Buffer> => scrapeBrowser.fetchBuffer(url)
     let avatarRel: string | null = null
     if (selected.has('avatar') && result.avatarUrl) {
@@ -313,20 +305,6 @@ export async function scrapeActress(
       }
     }
 
-    if (composite && sourceWarnings.length > 0) {
-      const hasSuccessfulOutput = effective.some((field) => {
-        if (!composite.fieldPluginMap[field]) return false
-        if (field === 'avatar') return avatarRel !== null
-        if (field === 'gallery') {
-          return galleryAssets.some((asset) => asset.localPath !== null)
-        }
-        return hasScrapedValueForField(result, field)
-      })
-      if (!hasSuccessfulOutput) {
-        throw new Error(sourceWarnings.join('；'))
-      }
-    }
-
     const { applied, warnings: applyWarnings, avatarApplied } = applyActressScrapeResult(
       actressId,
       { ...result, galleryImageUrls: galleryUrls },
@@ -336,6 +314,14 @@ export async function scrapeActress(
       mode
     )
     const warnings = [...sourceWarnings, ...applyWarnings]
+    if (!applied) {
+      recordActressScrapeFailure(actressId)
+      return {
+        ok: false,
+        error: '未找到有效的演员资料',
+        warnings: warnings.length > 0 ? warnings : undefined
+      }
+    }
     return {
       ok: true,
       result,
@@ -344,6 +330,7 @@ export async function scrapeActress(
       avatarUpdated: avatarApplied
     }
   } catch (err) {
+    recordActressScrapeFailure(actressId)
     return { ok: false, error: (err as Error).message }
   } finally {
     if (options?.closeBrowser !== false) {

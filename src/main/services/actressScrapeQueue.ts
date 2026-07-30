@@ -15,7 +15,11 @@ import {
   ACTRESS_SCRAPE_FIELD_OPTIONS,
   ALL_ACTRESS_SCRAPE_FIELDS
 } from '@shared/types'
-import { listActressesForBatchScrape } from '../db/actressRepo'
+import {
+  normalizeActressBatchScrapeRequest,
+  parseActressBatchScrapeStatus,
+  resolveActressBatchScrapeTargets
+} from './actressBatchScrapeTargets'
 import { scrapeActress } from '../scrapers/actressScraperManager'
 import { scrapeBrowser } from '../scrapers/scrapeBrowser'
 import {
@@ -59,12 +63,6 @@ const FIELD_LABEL = new Map<ActressScrapeField, string>(
 
 function fieldListLabel(fields: ActressScrapeField[]): string {
   return fields.map((field) => FIELD_LABEL.get(field) ?? field).join('、')
-}
-
-function explicitActressIds(request: ActressBatchScrapeRequest): number[] {
-  return request.actressIds
-    ? Array.from(new Set(request.actressIds.filter((id) => Number.isFinite(id))))
-    : []
 }
 
 function defaultRequest(scraperName?: string): ActressBatchScrapeRequest {
@@ -134,17 +132,12 @@ class ActressScrapeQueue {
   }
 
   async start(requestOrScraperName?: ActressBatchScrapeRequest | string): Promise<void> {
-    const request =
+    const request = normalizeActressBatchScrapeRequest(
       typeof requestOrScraperName === 'string'
         ? defaultRequest(requestOrScraperName)
         : (requestOrScraperName ?? defaultRequest())
-    const explicitIds = explicitActressIds(request)
-    const targets = listActressesForBatchScrape({
-      actressIds: explicitIds.length > 0 ? explicitIds : request.actressIds,
-      scope: request.scope,
-      scrapeStatus: request.scrapeStatus,
-      missingFields: request.missingFields
-    })
+    )
+    const targets = resolveActressBatchScrapeTargets(request)
     const job = createBatchScrapeJob('actress', request, targets, (target) => target.main_name)
     this.activeJob = job
     persistBatchScrapeCheckpoint(job, jobToBatchProgress(job), 0, 'running')
@@ -171,13 +164,13 @@ class ActressScrapeQueue {
         )
       }
     })
-    const selectedIds = explicitActressIds(request)
-    const scopeLabel =
-      selectedIds.length > 0
-        ? `已选 ${selectedIds.length} 位演员`
-        : (SCOPE_LABEL.get(request.scope) ?? request.scope)
-    const statusLabel =
-      STATUS_LABEL.get(request.scrapeStatus ?? 'all') ?? request.scrapeStatus ?? '全部'
+    const scopeLabel = request.actressIds
+      ? `已选 ${targets.length} 位演员`
+      : (SCOPE_LABEL.get(request.scope) ?? request.scope)
+    const parsedStatus = parseActressBatchScrapeStatus(request.scrapeStatus)
+    const statusLabel = parsedStatus.ok
+      ? (STATUS_LABEL.get(parsedStatus.status) ?? parsedStatus.status)
+      : parsedStatus.value
     const missingLabel =
       missingFields.length > 0 ? `缺少任一：${fieldListLabel(missingFields)}` : '不按缺失字段筛选'
 

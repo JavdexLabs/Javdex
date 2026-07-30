@@ -43,6 +43,7 @@ import {
   updateCompositeScraper,
   updateScraperPluginConfig
 } from '../scrapers/scraperPluginService'
+import { estimateActressBatchScrapeTargetCount } from '../services/actressBatchScrapeTargets'
 import { actressScrapeQueue } from '../services/actressScrapeQueue'
 import {
   assertBatchScrapeAvailable,
@@ -51,7 +52,7 @@ import {
 import { loadBatchScrapeJob, saveBatchScrapeJob } from '../services/batchScrapeJobStore'
 import { scrapeRunCoordinator } from '../services/scrapeRunCoordinator'
 import { videoBatchScrapeQueue } from '../services/videoBatchScrapeQueue'
-import { countActressesForBatchScrape, getActressDetail } from '../db/actressRepo'
+import { getActressDetail } from '../db/actressRepo'
 import { countVideosForBatchScrape, countVideosForRematch } from '../db/videoRepo'
 import { getSettings, updateSettings } from '../settings/settingsStore'
 import { registerHandler, type IpcContext } from './shared'
@@ -339,7 +340,8 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
 
   registerHandler(
     IPC.ACTRESS_SCRAPE_BATCH_COUNT,
-    (_e, filter: ActressBatchScrapeFilter): number => countActressesForBatchScrape(filter)
+    (_e, filter: ActressBatchScrapeFilter): number =>
+      estimateActressBatchScrapeTargetCount(filter)
   )
 
   registerHandler(

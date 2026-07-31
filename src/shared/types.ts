@@ -1282,9 +1282,11 @@ export interface LibraryOverviewStats {
     total: number
     female: number
     male: number
-    /** Female performers with a scrape timestamp. */
+    /** Female performers with cumulative 刮削成功. */
     scraped: number
-    /** Female performers without a scrape timestamp. */
+    /** Female performers with cumulative 刮削失败. */
+    failed: number
+    /** Female performers with cumulative 未刮削. */
     unscraped: number
   }
   playlists: number

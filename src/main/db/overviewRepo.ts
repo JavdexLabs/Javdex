@@ -23,16 +23,32 @@ export function getLibraryOverviewStats(): LibraryOverviewStats {
               SUM(CASE WHEN gender IS NULL OR gender = 'female' THEN 1 ELSE 0 END) AS female,
               SUM(
                 CASE
-                  WHEN (gender IS NULL OR gender = 'female')
-                    AND last_scraped_at IS NOT NULL
-                    AND trim(last_scraped_at) != ''
-                  THEN 1
+                  WHEN (gender IS NULL OR gender = 'female') AND scraped_status = 1 THEN 1
                   ELSE 0
                 END
-              ) AS scraped
+              ) AS scraped,
+              SUM(
+                CASE
+                  WHEN (gender IS NULL OR gender = 'female') AND scraped_status = 2 THEN 1
+                  ELSE 0
+                END
+              ) AS failed,
+              SUM(
+                CASE
+                  WHEN (gender IS NULL OR gender = 'female') AND scraped_status = 0 THEN 1
+                  ELSE 0
+                END
+              ) AS unscraped
        FROM actresses`
     )
-    .get() as { total: number; male: number; female: number; scraped: number }
+    .get() as {
+    total: number
+    male: number
+    female: number
+    scraped: number
+    failed: number
+    unscraped: number
+  }
 
   const playlists = (db.prepare('SELECT COUNT(*) AS n FROM playlists').get() as { n: number }).n
   const tags = (db.prepare('SELECT COUNT(*) AS n FROM tags').get() as { n: number }).n
@@ -60,7 +76,8 @@ export function getLibraryOverviewStats(): LibraryOverviewStats {
       female: actressRow.female,
       male: actressRow.male,
       scraped: actressRow.scraped,
-      unscraped: actressRow.female - actressRow.scraped
+      failed: actressRow.failed,
+      unscraped: actressRow.unscraped
     },
     playlists,
     tags,

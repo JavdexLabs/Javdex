@@ -638,6 +638,7 @@ export default function SettingsOverviewPanel({
           <ScrapeCoverageBlock
             scraped={actressScraped}
             unscraped={stats?.actresses.unscraped ?? 0}
+            failed={stats?.actresses.failed ?? 0}
             total={actressFemaleTotal}
             title="刮削覆盖 · 女优"
           />

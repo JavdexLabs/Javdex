@@ -141,7 +141,12 @@ export default function SettingsPage(): JSX.Element {
   const [scanStatus, setScanStatus] = useState('')
   const [scanResult, setScanResult] = useState<ScanResult | null>(null)
   const [unrecognized, setUnrecognized] = useState<string[]>([])
-  const { videoBatch, actressBatch } = useBatchScrapeActivity()
+  const {
+    videoBatch,
+    actressBatch,
+    actressBatchRecoverable,
+    actressBatchUnrecoverableReason
+  } = useBatchScrapeActivity()
   const avatarAutoCropBatch = useAvatarAutoCropBatch()
   const [showVideoBatchModal, setShowVideoBatchModal] = useState(false)
   const [showActressBatchModal, setShowActressBatchModal] = useState(false)
@@ -1009,6 +1014,8 @@ export default function SettingsPage(): JSX.Element {
                   onResumeBatch={resumeBatch}
                   onDiscardVideoBatch={() => discardBatch('video')}
                   onDiscardActressBatch={() => discardBatch('actress')}
+                  actressBatchRecoverable={actressBatchRecoverable}
+                  actressBatchUnrecoverableReason={actressBatchUnrecoverableReason}
                 />
               )}
 
@@ -1156,6 +1163,10 @@ export default function SettingsPage(): JSX.Element {
                 : batchDetailScope === 'avatar'
                   ? false
                   : videoBatchPaused
+            }
+            canResume={batchDetailScope !== 'actress' || actressBatchRecoverable}
+            resumeDisabledReason={
+              batchDetailScope === 'actress' ? actressBatchUnrecoverableReason : null
             }
             logRef={
               batchDetailScope === 'actress'

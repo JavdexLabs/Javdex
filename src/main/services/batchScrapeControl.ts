@@ -1,4 +1,5 @@
-import type { BatchProgress } from '@shared/types'
+import type { BatchProgress, BatchScrapeState } from '@shared/types'
+import { reconcilePersistedActressBatchJob } from './actressBatchScrapeTargets'
 import {
   clearBatchScrapeJob,
   hasPausedBatchScrapeJob,
@@ -21,17 +22,57 @@ export function assertBatchScrapeAvailable(): void {
   }
 }
 
-export function getBatchScrapeState(): {
-  kind: BatchScrapeJobKind | null
-  progress: BatchProgress | null
+/**
+ * Apply actress load-time status reconciliation and persist rewritten scopes.
+ * Returns the job that callers should use for viewing or resume decisions.
+ */
+export function prepareLoadedBatchScrapeJob(
+  job: PersistedBatchScrapeJob
+): {
+  job: PersistedBatchScrapeJob
+  recoverable: boolean
+  unrecoverableReason?: string
 } {
+  if (job.kind !== 'actress') {
+    return { job, recoverable: true }
+  }
+  const reconciled = reconcilePersistedActressBatchJob(job)
+  if (reconciled.rewritten) {
+    saveBatchScrapeJob(reconciled.job)
+  }
+  if (!reconciled.recoverable) {
+    return {
+      job: reconciled.job,
+      recoverable: false,
+      unrecoverableReason: reconciled.reason
+    }
+  }
+  return { job: reconciled.job, recoverable: true }
+}
+
+/** Throws when an actress batch job cannot be resumed safely. */
+export function assertActressBatchJobRecoverable(job: PersistedBatchScrapeJob): PersistedBatchScrapeJob {
+  const prepared = prepareLoadedBatchScrapeJob(job)
+  if (!prepared.recoverable) {
+    throw new Error(prepared.unrecoverableReason ?? '该演员批量任务不可恢复')
+  }
+  return prepared.job
+}
+
+export function getBatchScrapeState(): BatchScrapeState {
   let job = loadBatchScrapeJob()
-  if (!job) return { kind: null, progress: null }
+  if (!job) return { kind: null, progress: null, recoverable: true }
   if (job.status === 'running') {
     job = { ...job, status: 'paused' }
     saveBatchScrapeJob(job)
   }
-  return { kind: job.kind, progress: jobToBatchProgress(job) }
+  const prepared = prepareLoadedBatchScrapeJob(job)
+  return {
+    kind: prepared.job.kind,
+    progress: jobToBatchProgress(prepared.job),
+    recoverable: prepared.recoverable,
+    unrecoverableReason: prepared.unrecoverableReason
+  }
 }
 
 export function createBatchScrapeJob<TTarget extends { id: number }>(

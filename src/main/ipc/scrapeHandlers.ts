@@ -46,6 +46,7 @@ import {
 import { estimateActressBatchScrapeTargetCount } from '../services/actressBatchScrapeTargets'
 import { actressScrapeQueue } from '../services/actressScrapeQueue'
 import {
+  assertActressBatchJobRecoverable,
   assertBatchScrapeAvailable,
   getBatchScrapeState
 } from '../services/batchScrapeControl'
@@ -511,7 +512,11 @@ function assertCanResumeBatch(): void {
   if (videoBatchScrapeQueue.isRunning() || actressScrapeQueue.isRunning()) {
     throw new Error('批量刮削已在进行中')
   }
-  if (!loadBatchScrapeJob()) {
+  const job = loadBatchScrapeJob()
+  if (!job) {
     throw new Error('没有可继续的批量刮削任务')
+  }
+  if (job.kind === 'actress') {
+    assertActressBatchJobRecoverable(job)
   }
 }

@@ -10,10 +10,12 @@ import {
   normalizeActressBatchScrapeRequest,
   normalizeActressBatchScrapeStatus,
   parseActressBatchScrapeStatus,
+  reconcilePersistedActressBatchJob,
   resolveActressBatchScrapeTargets,
   type ActressBatchScrapeFilterInput
 } from './actressBatchScrapeTargets'
 import { createBatchScrapeJob } from './batchScrapeControl'
+import type { PersistedBatchScrapeJob } from './batchScrapeJobStore'
 import { ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/types'
 
 let tempRoot: string | null = null
@@ -88,6 +90,69 @@ describe('actressBatchScrapeTargets status normalization', () => {
     })
 
     assert.equal(request.scrapeStatus, 'success')
+  })
+})
+
+describe('reconcilePersistedActressBatchJob', () => {
+  function pausedActressJob(scrapeStatus?: string): PersistedBatchScrapeJob {
+    return {
+      kind: 'actress',
+      request: {
+        scope: 'female',
+        ...(scrapeStatus === undefined ? {} : { scrapeStatus }),
+        fields: ['birthDate'],
+        mode: 'replace'
+      } as PersistedBatchScrapeJob['request'],
+      targets: [
+        { id: 1, label: 'One' },
+        { id: 2, label: 'Two' }
+      ],
+      nextIndex: 1,
+      success: 1,
+      failed: 0,
+      logs: [
+        {
+          time: '2026-01-01T00:00:00.000Z',
+          code: '-',
+          level: 'info',
+          message: 'kept'
+        }
+      ],
+      total: 2,
+      status: 'paused',
+      updatedAt: '2026-01-01T00:00:00.000Z'
+    }
+  }
+
+  it('rewrites scraped to success and omitted to all without touching progress', () => {
+    const scraped = reconcilePersistedActressBatchJob(pausedActressJob('scraped'))
+    assert.equal(scraped.recoverable, true)
+    assert.equal(scraped.rewritten, true)
+    assert.equal(
+      (scraped.job.request as { scrapeStatus?: string }).scrapeStatus,
+      'success'
+    )
+    assert.equal(scraped.job.nextIndex, 1)
+    assert.equal(scraped.job.success, 1)
+    assert.deepEqual(scraped.job.targets.map((target) => target.id), [1, 2])
+
+    const omitted = reconcilePersistedActressBatchJob(pausedActressJob(undefined))
+    assert.equal(omitted.recoverable, true)
+    assert.equal(omitted.rewritten, true)
+    assert.equal((omitted.job.request as { scrapeStatus?: string }).scrapeStatus, 'all')
+    assert.deepEqual(omitted.job.logs, pausedActressJob().logs)
+  })
+
+  it('keeps unrecognized scopes unrecoverable and does not widen to all', () => {
+    const result = reconcilePersistedActressBatchJob(pausedActressJob('everything'))
+    assert.equal(result.recoverable, false)
+    if (result.recoverable) throw new Error('expected unrecoverable')
+    assert.match(result.reason, /everything/)
+    assert.equal(
+      (result.job.request as { scrapeStatus?: string }).scrapeStatus,
+      'everything'
+    )
+    assert.equal(result.job.nextIndex, 1)
   })
 })
 

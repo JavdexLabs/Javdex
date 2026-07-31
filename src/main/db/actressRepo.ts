@@ -223,14 +223,18 @@ function actressMissingFieldCondition(field: ActressScrapeField): string {
   }
 }
 
-/** Cumulative scrape status stored on the actress row, per batch scope. */
-const ACTRESS_BATCH_STATUS_VALUE: Record<
-  Exclude<ActressBatchScrapeStatus, 'all'>,
-  ScrapedStatus
-> = {
-  unscraped: 0,
-  success: 1,
-  failed: 2
+/**
+ * Append a cumulative scrape-status condition. The list filter and the batch scope share the
+ * same status vocabulary and column mapping, so both go through one place.
+ */
+function pushScrapeStatusCondition(
+  conditions: string[],
+  params: unknown[],
+  status: ActressListStatusFilter | ActressBatchScrapeStatus
+): void {
+  if (status === 'all') return
+  conditions.push('a.scraped_status = ?')
+  params.push(ACTRESS_LIST_STATUS_SCRAPED_STATUS[status])
 }
 
 function buildActressBatchConditions(
@@ -257,11 +261,7 @@ function buildActressBatchConditions(
     conditions.push("a.gender = 'male'")
   }
 
-  const scrapeStatus = filter.scrapeStatus ?? 'all'
-  if (scrapeStatus !== 'all') {
-    conditions.push('a.scraped_status = ?')
-    params.push(ACTRESS_BATCH_STATUS_VALUE[scrapeStatus])
-  }
+  pushScrapeStatusCondition(conditions, params, filter.scrapeStatus ?? 'all')
 
   return { conditions, params }
 }
@@ -634,10 +634,7 @@ function buildActressListWhere(
     conditions.push('a.gender = ?')
     params.push(gender)
   }
-  if (status !== 'all') {
-    conditions.push('a.scraped_status = ?')
-    params.push(ACTRESS_LIST_STATUS_SCRAPED_STATUS[status])
-  }
+  pushScrapeStatusCondition(conditions, params, status)
 
   return { sql: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', params }
 }

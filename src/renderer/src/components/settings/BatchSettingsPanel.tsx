@@ -68,8 +68,8 @@ export default function BatchSettingsPanel({
       }`}
     >
       <div className="batch-log-toolbar">
-        <SettingsStatusPill status={status}>
-          {batch ? batchStatusLabel(status) : '空闲'}
+        <SettingsStatusPill status={!canResume && paused ? 'paused' : status}>
+          {batch ? (!canResume && paused ? '不可恢复' : batchStatusLabel(status)) : '空闲'}
         </SettingsStatusPill>
         {customControls !== undefined ? (
           customControls
@@ -89,9 +89,8 @@ export default function BatchSettingsPanel({
       </div>
 
       {!canResume && paused ? (
-        <p className="settings-overview-batch-unrecoverable" role="status">
-          不可恢复
-          {resumeDisabledReason ? `：${resumeDisabledReason}` : '，请终止后重新启动任务'}
+        <p className="batch-task-unrecoverable" role="status">
+          {resumeDisabledReason ?? '状态范围无法识别，请终止后重新启动任务'}
         </p>
       ) : null}
 

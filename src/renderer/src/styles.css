@@ -7097,11 +7097,11 @@ button.actress-mini:focus-visible .actress-avatar {
   color: var(--text-primary);
 }
 
-.settings-overview-batch-unrecoverable {
-  margin: var(--space-2) 0 0;
+.batch-task-unrecoverable {
+  margin: 6px 0 0;
   color: var(--text-warning);
-  font-size: var(--font-size-sm);
-  line-height: 1.4;
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .settings-overview-batch-inline.is-idle {

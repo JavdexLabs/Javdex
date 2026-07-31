@@ -141,10 +141,6 @@ export type ReconciledActressBatchJob =
 export function reconcilePersistedActressBatchJob(
   job: PersistedBatchScrapeJob
 ): ReconciledActressBatchJob {
-  if (job.kind !== 'actress') {
-    return { recoverable: true, job, rewritten: false }
-  }
-
   const request = job.request as ActressBatchScrapeRequestInput
   const parsed = parseActressBatchScrapeStatus(request.scrapeStatus)
   if (!parsed.ok) {

@@ -46,9 +46,9 @@ import {
 import { estimateActressBatchScrapeTargetCount } from '../services/actressBatchScrapeTargets'
 import { actressScrapeQueue } from '../services/actressScrapeQueue'
 import {
+  assertActressBatchJobRecoverable,
   assertBatchScrapeAvailable,
-  getBatchScrapeState,
-  prepareLoadedBatchScrapeJob
+  getBatchScrapeState
 } from '../services/batchScrapeControl'
 import { loadBatchScrapeJob, saveBatchScrapeJob } from '../services/batchScrapeJobStore'
 import { scrapeRunCoordinator } from '../services/scrapeRunCoordinator'
@@ -517,9 +517,6 @@ function assertCanResumeBatch(): void {
     throw new Error('没有可继续的批量刮削任务')
   }
   if (job.kind === 'actress') {
-    const prepared = prepareLoadedBatchScrapeJob(job)
-    if (!prepared.recoverable) {
-      throw new Error(prepared.unrecoverableReason ?? '该演员批量任务不可恢复')
-    }
+    assertActressBatchJobRecoverable(job)
   }
 }

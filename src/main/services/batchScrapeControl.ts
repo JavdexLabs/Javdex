@@ -50,6 +50,15 @@ export function prepareLoadedBatchScrapeJob(
   return { job: reconciled.job, recoverable: true }
 }
 
+/** Throws when an actress batch job cannot be resumed safely. */
+export function assertActressBatchJobRecoverable(job: PersistedBatchScrapeJob): PersistedBatchScrapeJob {
+  const prepared = prepareLoadedBatchScrapeJob(job)
+  if (!prepared.recoverable) {
+    throw new Error(prepared.unrecoverableReason ?? '该演员批量任务不可恢复')
+  }
+  return prepared.job
+}
+
 export function getBatchScrapeState(): BatchScrapeState {
   let job = loadBatchScrapeJob()
   if (!job) return { kind: null, progress: null, recoverable: true }

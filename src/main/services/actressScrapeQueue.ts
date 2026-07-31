@@ -28,7 +28,7 @@ import {
   finishBatchScrapeJob,
   markBatchScrapePaused,
   persistBatchScrapeCheckpoint,
-  prepareLoadedBatchScrapeJob,
+  assertActressBatchJobRecoverable,
   restoreTargetsFromJob
 } from './batchScrapeControl'
 import {
@@ -129,11 +129,7 @@ class ActressScrapeQueue {
     if (!job || job.kind !== 'actress') {
       throw new Error('没有可继续的演员批量任务')
     }
-    const prepared = prepareLoadedBatchScrapeJob(job)
-    if (!prepared.recoverable) {
-      throw new Error(prepared.unrecoverableReason ?? '该演员批量任务不可恢复')
-    }
-    await this.runJob(prepared.job)
+    await this.runJob(assertActressBatchJobRecoverable(job))
   }
 
   async start(requestOrScraperName?: ActressBatchScrapeRequest | string): Promise<void> {

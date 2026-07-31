@@ -4,7 +4,7 @@ status: accepted
 
 # 演员页采用媒体库式组合筛选面板
 
-演员页筛选入口与媒体库统一为“筛选”按钮和即时应用的面板，面板包含累计刮削状态与演员头像两个条件，性别和排序继续留在面板外。条件分别使用 `status=success|unscraped|failed` 与 `avatar=with|without` 持久化到 URL，跨字段按 AND 组合；头像筛选只把当前已保存且文件可读的头像视为“有头像”，从而保持列表导航、筛选标签和多选模式的一致性。
+演员页筛选入口与媒体库统一为“筛选”按钮和即时应用的面板，面板包含累计刮削状态与演员头像两个条件，性别和排序继续留在面板外。条件分别使用 `status=success|unscraped|failed` 与 `avatar=with|without|without-face` 持久化到 URL，跨字段按 AND 组合；头像筛选只把当前已保存且文件可读的头像视为“有头像”，其中 `without-face` 的本地检测规则与会话缓存见 ADR-0005，从而保持列表导航、筛选标签和多选模式的一致性。
 
 ## Consequences
 

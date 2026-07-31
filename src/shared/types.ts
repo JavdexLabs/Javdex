@@ -217,13 +217,15 @@ export interface ActressDetail extends Actress {
 
 export interface ActressListItem extends Actress {
   video_count: number
+  /** SHA-256 fingerprint of the current readable display avatar, when available. */
+  avatar_fingerprint?: string | null
 }
 
 /** Canonical actress library status filter vocabulary (also the URL values). */
 export type ActressListStatusFilter = 'all' | 'success' | 'unscraped' | 'failed'
 
-/** Whether the actress has a currently usable saved avatar. */
-export type ActressAvatarFilter = 'all' | 'with' | 'without'
+/** Actress avatar filter, including the renderer-only local face-detection state. */
+export type ActressAvatarFilter = 'all' | 'with' | 'without' | 'without-face'
 
 export const ACTRESS_LIST_STATUS_SCRAPED_STATUS: Record<
   Exclude<ActressListStatusFilter, 'all'>,

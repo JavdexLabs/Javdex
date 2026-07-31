@@ -377,6 +377,12 @@ describe('actressRepo.listActressPage', () => {
       ['Missing Female', 'Missing Male', 'Unknown Gender']
     )
     assert.deepEqual(
+      listActressPage({ gender: 'all', avatar: 'without-face' }).items.map(
+        (item) => item.main_name
+      ),
+      ['Complete']
+    )
+    assert.deepEqual(
       listActressPage({ gender: 'all', status: 'success', avatar: 'without' }).items.map(
         (item) => item.main_name
       ),

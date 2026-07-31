@@ -7,6 +7,7 @@ import {
   ACTRESS_SCRAPE_FIELD_OPTIONS,
   ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS,
   ALL_ACTRESS_SCRAPE_FIELDS,
+  type ActressAvatarFilter,
   type ActressListItem,
   type ActressListSortBy,
   type ActressScrapeField,
@@ -27,6 +28,7 @@ import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
 import ActressStatusBadge from '../components/ActressStatusBadge'
 import ActressFilterPopover, { type ActressFilterState } from '../components/ActressFilterPopover'
+import ActressFaceScanModal from '../components/ActressFaceScanModal'
 import { ACTRESS_STATUS_FILTER_LABELS } from '@shared/types'
 import {
   actressQueryHash,
@@ -63,6 +65,12 @@ import {
   isMaintenanceHintDismissed,
   MAINTENANCE_HINT_KEYS
 } from '../utils/maintenanceHints'
+import {
+  actressesWithoutFace,
+  uncachedActressFaceScanIdentity
+} from '../actressFaceFilter/cache'
+import { useActressFaceScan, previousAvatarAfterFaceScan } from '../actressFaceFilter/useActressFaceScan'
+import { useAvatarAutoCropBatch } from '../contexts/AvatarAutoCropBatchContext'
 
 const ACTRESS_SORT_OPTIONS: SortSwitchOption<ActressListSortBy>[] = [
   { value: 'video_count', label: '影片', title: '本地影片数' },
@@ -132,6 +140,8 @@ export default function ActressesPage(): JSX.Element {
   const [deleting, setDeleting] = useState(false)
   const filterBtnRef = useRef<HTMLButtonElement>(null)
   const [filterOpen, setFilterOpen] = useState(false)
+  const faceScan = useActressFaceScan()
+  const avatarAutoCropBatch = useAvatarAutoCropBatch()
 
   const dismissOverlays = useCallback(() => {
     setPendingDelete(null)
@@ -149,7 +159,7 @@ export default function ActressesPage(): JSX.Element {
         search: debouncedQ.trim(),
         gender: genderFilter,
         status: statusFilter,
-        avatar: avatarFilter,
+        avatar: avatarFilter === 'without-face' ? 'with' : avatarFilter,
         sortBy,
         sortDir
       }),
@@ -170,7 +180,12 @@ export default function ActressesPage(): JSX.Element {
 
   useListSurfaceRefetch(detailOpen, refetchActressSurface)
 
-  const items = listQuery.data?.items ?? []
+  const fetchedItems = listQuery.data?.items ?? []
+  const items =
+    avatarFilter === 'without-face'
+      ? actressesWithoutFace(fetchedItems, faceScan.cache)
+      : fetchedItems
+  const faceScanMissingIdentity = uncachedActressFaceScanIdentity(fetchedItems, faceScan.cache)
   const loading = listQuery.isLoading && items.length === 0
   const isFetching = listQuery.isFetching
 
@@ -204,6 +219,71 @@ export default function ActressesPage(): JSX.Element {
     isMaintenanceHintDismissed(MAINTENANCE_HINT_KEYS.actressBanner)
   )
   const { actressBatchActive, anyBatchActive } = useBatchScrapeActivity()
+  const avatarBatchActive =
+    avatarAutoCropBatch.state.status === 'running' ||
+    avatarAutoCropBatch.state.status === 'cancelling'
+  const faceScanAutoStartedRef = useRef(false)
+
+  const startFaceScan = useCallback(
+    async (previousAvatar: ActressAvatarFilter, silentBlocked = false): Promise<void> => {
+      if (actressBatchActive || avatarBatchActive) {
+        if (!silentBlocked) {
+          toast.show(
+            actressBatchActive
+              ? '演员批量刮削进行中，请先完成或终止任务'
+              : '头像智能构图进行中，请先完成或终止任务',
+            'info'
+          )
+        }
+        return
+      }
+
+      const summary = await faceScan.start()
+      if (!summary) return
+
+      if (summary.cancelled) {
+        patchParams({
+          [LIST_PARAM.avatar]: actressAvatarParam(previousAvatarAfterFaceScan(previousAvatar))
+        })
+        toast.show('已取消人脸筛选', 'info')
+        return
+      }
+
+      if (summary.total === 0 && summary.failed > 0) {
+        patchParams({ [LIST_PARAM.avatar]: actressAvatarParam(previousAvatar) })
+        toast.show(`人脸识别失败：${summary.failures[0]?.message ?? '无法读取头像'}`, 'error')
+        return
+      }
+
+      patchParams({ [LIST_PARAM.avatar]: actressAvatarParam('without-face') })
+      toast.show(
+        `找到 ${summary.withoutFace} 位头像未识别到人脸的演员${
+          summary.failed > 0 ? `，另有 ${summary.failed} 位识别失败` : ''
+        }`,
+        summary.failed > 0 ? 'info' : 'success'
+      )
+    },
+    [actressBatchActive, avatarBatchActive, faceScan, patchParams, toast]
+  )
+
+  useEffect(() => {
+    if (avatarFilter !== 'without-face') {
+      faceScanAutoStartedRef.current = false
+      return
+    }
+    if (faceScanAutoStartedRef.current) return
+    if (!faceScanMissingIdentity) return
+    if (actressBatchActive || avatarBatchActive) return
+    faceScanAutoStartedRef.current = true
+    void startFaceScan('all', true)
+  }, [
+    actressBatchActive,
+    avatarBatchActive,
+    avatarFilter,
+    faceScanMissingIdentity,
+    startFaceScan
+  ])
+
   const unscrapedCount = overviewStats?.actresses.unscraped ?? 0
   const showUnscrapedBanner =
     !unscrapedBannerHidden &&
@@ -319,7 +399,12 @@ export default function ActressesPage(): JSX.Element {
   if (hasAvatarFilter) {
     appliedFilters.push({
       key: 'avatar',
-      label: avatarFilter === 'with' ? '有头像' : '无头像',
+      label:
+        avatarFilter === 'with'
+          ? '有头像'
+          : avatarFilter === 'without'
+            ? '无头像'
+            : '无人脸',
       onRemove: () => patchParams({ [LIST_PARAM.avatar]: null })
     })
   }
@@ -412,9 +497,15 @@ export default function ActressesPage(): JSX.Element {
                         updates[LIST_PARAM.status] = actressStatusParam(patch.status)
                       }
                       if (patch.avatar !== undefined) {
-                        updates[LIST_PARAM.avatar] = actressAvatarParam(patch.avatar)
+                        if (patch.avatar === 'without-face') {
+                          faceScanAutoStartedRef.current = true
+                          setFilterOpen(false)
+                          void startFaceScan(avatarFilter)
+                        } else {
+                          updates[LIST_PARAM.avatar] = actressAvatarParam(patch.avatar)
+                        }
                       }
-                      patchParams(updates)
+                      if (Object.keys(updates).length > 0) patchParams(updates)
                     }}
                     onReset={resetFilters}
                     onClose={() => setFilterOpen(false)}
@@ -652,6 +743,15 @@ export default function ActressesPage(): JSX.Element {
             确定删除已选择的 {selectedCount} 位无关联演员吗？将删除演员档案、头像与写真，不会删除任何影片文件。
           </p>
         </ConfirmModal>
+      )}
+
+      {faceScan.state && (
+        <ActressFaceScanModal
+          progress={faceScan.state.progress}
+          summary={faceScan.state.summary}
+          onCancel={faceScan.cancel}
+          onDone={faceScan.close}
+        />
       )}
     </div>
   )

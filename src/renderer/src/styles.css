@@ -12150,6 +12150,33 @@ button.actress-mini:focus-visible .actress-avatar {
   font-size: 13px;
   color: var(--text-1);
 }
+.actress-face-scan-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.actress-face-scan-progress progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--accent);
+}
+.actress-face-scan-progress-meta,
+.actress-face-scan-stats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.actress-face-scan-stats {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  color: var(--text-primary);
+}
+.actress-face-scan-progress .hint {
+  margin: 0;
+}
 .log-box {
   margin-top: 14px;
   background: var(--bg-0);

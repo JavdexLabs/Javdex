@@ -93,18 +93,22 @@ describe('actress avatar filter query contract', () => {
   it('normalizes avatar filter values and omits the all default', () => {
     assert.equal(parseActressAvatar('with'), 'with')
     assert.equal(parseActressAvatar('without'), 'without')
+    assert.equal(parseActressAvatar('without-face'), 'without-face')
     assert.equal(parseActressAvatar('invalid'), 'all')
     assert.equal(parseActressAvatar(null), 'all')
     assert.equal(actressAvatarParam('with'), 'with')
     assert.equal(actressAvatarParam('without'), 'without')
+    assert.equal(actressAvatarParam('without-face'), 'without-face')
     assert.equal(actressAvatarParam('all'), null)
   })
 
   it('keeps avatar filters distinct in the actress query hash', () => {
     const withAvatar = new URLSearchParams(`${LIST_PARAM.avatar}=with`)
     const withoutAvatar = new URLSearchParams(`${LIST_PARAM.avatar}=without`)
+    const withoutFaceAvatar = new URLSearchParams(`${LIST_PARAM.avatar}=without-face`)
 
     assert.notEqual(actressQueryHash(withAvatar), actressQueryHash(withoutAvatar))
+    assert.notEqual(actressQueryHash(withoutAvatar), actressQueryHash(withoutFaceAvatar))
     assert.equal(actressQueryHash(new URLSearchParams()), actressQueryHash(new URLSearchParams()))
   })
 })

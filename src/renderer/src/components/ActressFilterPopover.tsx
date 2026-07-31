@@ -22,7 +22,7 @@ function isActressStatus(value: string): value is ActressListStatusFilter {
 }
 
 function isActressAvatarFilter(value: string): value is ActressAvatarFilter {
-  return value === 'all' || value === 'with' || value === 'without'
+  return value === 'all' || value === 'with' || value === 'without' || value === 'without-face'
 }
 
 /** Media-library-style filter panel for actress status and saved avatars. */
@@ -104,6 +104,7 @@ export default function ActressFilterPopover({
               <option value="all">全部</option>
               <option value="with">有头像</option>
               <option value="without">无头像</option>
+              <option value="without-face">无人脸</option>
             </SelectControl>
           </label>
         </div>

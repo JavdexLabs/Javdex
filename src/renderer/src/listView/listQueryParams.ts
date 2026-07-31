@@ -48,7 +48,7 @@ export function actressStatusParam(status: ActressListStatusFilter): string | nu
 }
 
 export function parseActressAvatar(raw: string | null): ActressAvatarFilter {
-  if (raw === 'with' || raw === 'without') return raw
+  if (raw === 'with' || raw === 'without' || raw === 'without-face') return raw
   return ACTRESS_DEFAULT_AVATAR
 }
 

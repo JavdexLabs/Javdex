@@ -644,11 +644,32 @@ function actressHasUsableAvatar(actress: Pick<ActressListItem, 'avatar_path'>): 
   return !isBlankText(actress.avatar_path) && isUsableImageAsset(actress.avatar_path)
 }
 
+function actressDisplayAvatarFingerprint(
+  actress: Pick<ActressListItem, 'avatar_path'>
+): string | null {
+  if (!actressHasUsableAvatar(actress) || !actress.avatar_path) return null
+  try {
+    return avatarSourceFingerprint(readAssetBytes(actress.avatar_path))
+  } catch {
+    return null
+  }
+}
+
+function enrichActressListItems(actresses: ActressListItem[]): ActressListItem[] {
+  return actresses.map((actress) => ({
+    ...actress,
+    avatar_fingerprint: actressDisplayAvatarFingerprint(actress)
+  }))
+}
+
 function filterActressAvatars(
   actresses: ActressListItem[],
   avatar: ActressAvatarFilter
 ): ActressListItem[] {
   if (avatar === 'all') return actresses
+  // "without-face" is resolved by the renderer's local model. The main process
+  // still returns the usable-avatar candidate set so the renderer can scan it.
+  if (avatar === 'without-face') return actresses.filter((actress) => actressHasUsableAvatar(actress))
   const wantsAvatar = avatar === 'with'
   return actresses.filter((actress) => actressHasUsableAvatar(actress) === wantsAvatar)
 }
@@ -727,14 +748,10 @@ function countActressListStatuses(
 /** Actress list read contract: filtered rows plus the status counts the toolbar shows. */
 export function listActressPage(query: ActressListQuery = {}): ActressListPage {
   const gender = query.gender ?? 'female'
+  const avatar = query.avatar === 'without-face' ? 'with' : query.avatar ?? 'all'
   return {
-    items: listActresses(
-      query.search,
-      gender,
-      query.sortBy,
-      query.sortDir,
-      query.status ?? 'all',
-      query.avatar ?? 'all'
+    items: enrichActressListItems(
+      listActresses(query.search, gender, query.sortBy, query.sortDir, query.status ?? 'all', avatar)
     ),
     statusCounts: countActressListStatuses(query.search, gender)
   }

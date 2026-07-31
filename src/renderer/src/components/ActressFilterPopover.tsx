@@ -64,7 +64,12 @@ export default function ActressFilterPopover({
   if (!open) return null
 
   return (
-    <div ref={panelRef} className="library-filter-popover" role="dialog" aria-label="筛选">
+    <div
+      ref={panelRef}
+      className="library-filter-popover library-filter-popover--actress"
+      role="dialog"
+      aria-label="筛选"
+    >
       <header className="library-filter-popover-head">
         <h3 className="library-filter-popover-title">筛选</h3>
       </header>

@@ -1395,6 +1395,10 @@ textarea.text-input {
   scrollbar-gutter: stable;
 }
 
+.library-filter-popover--actress .library-filter-popover-body {
+  padding-bottom: 14px;
+}
+
 @keyframes library-popover-in {
   from {
     opacity: 0;

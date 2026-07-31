@@ -260,6 +260,7 @@ export default function ActressDetailPage(): JSX.Element {
       await api.actresses.clearMeta(actressId)
       setConfirmClear(false)
       toast.show('已清除元数据', 'success')
+      invalidateActressLibraryQueries(queryClient)
       void load({ silent: true })
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
@@ -566,6 +567,7 @@ export default function ActressDetailPage(): JSX.Element {
           onMerged={() => {
             setShowMerge(false)
             toast.show('演员已合并', 'success')
+            invalidateActressLibraryQueries(queryClient)
             void load({ silent: true })
           }}
         />

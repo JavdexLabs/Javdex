@@ -1,14 +1,8 @@
 import type { RefObject } from 'react'
 import type { ActressListStatusCounts, ActressListStatusFilter } from '@shared/types'
+import { ACTRESS_STATUS_FILTER_LABELS } from '@shared/types'
 import FloatingLayer from './FloatingLayer'
 import { useEscapeKey } from '../hooks/useEscapeKey'
-
-export const ACTRESS_STATUS_FILTER_LABELS: Record<ActressListStatusFilter, string> = {
-  all: '全部状态',
-  success: '刮削成功',
-  unscraped: '未刮削',
-  failed: '刮削失败'
-}
 
 const ACTRESS_STATUS_FILTER_ORDER: ActressListStatusFilter[] = [
   'all',

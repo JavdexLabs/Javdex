@@ -6,6 +6,7 @@ import {
 } from '@shared/actressProfileOptions'
 import { formatCupSizeDisplay, normalizeCupSize } from '@shared/cupSizeUtils'
 import type { ActressDetail, ScrapedStatus } from '@shared/types'
+import { ACTRESS_SCRAPE_STATUS_LABELS, actressStatusFilterOf } from '@shared/types'
 
 type MetaItem = { key: string; label: string; value: string; status?: ScrapedStatus }
 
@@ -56,13 +57,10 @@ function formatTimestamp(value: string | null | undefined): string | null {
   return date.toLocaleString('zh-CN', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-const ACTRESS_SCRAPE_STATUS_PRESENTATION: Record<
-  ScrapedStatus,
-  { label: string; className: string }
-> = {
-  0: { label: '未刮削', className: 'detail-meta-status--unscraped' },
-  1: { label: '刮削成功', className: 'detail-meta-status--success' },
-  2: { label: '刮削失败', className: 'detail-meta-status--failed' }
+const ACTRESS_SCRAPE_STATUS_PRESENTATION: Record<ScrapedStatus, { className: string }> = {
+  0: { className: 'detail-meta-status--unscraped' },
+  1: { className: 'detail-meta-status--success' },
+  2: { className: 'detail-meta-status--failed' }
 }
 
 /** Cumulative success is sticky, so only unscraped and failed records can be marked manually. */
@@ -77,7 +75,7 @@ export function buildActressScrapeMetaItems(
     {
       key: 'scraped_status',
       label: '刮削状态',
-      value: ACTRESS_SCRAPE_STATUS_PRESENTATION[actress.scraped_status].label,
+      value: ACTRESS_SCRAPE_STATUS_LABELS[actressStatusFilterOf(actress.scraped_status)],
       status: actress.scraped_status
     }
   ]

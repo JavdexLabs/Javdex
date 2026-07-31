@@ -250,6 +250,22 @@ export function actressStatusFilterOf(
   return ACTRESS_LIST_STATUS_BY_SCRAPED_STATUS.get(status) ?? 'unscraped'
 }
 
+/**
+ * Single label source for the three concrete cumulative scrape states, shared by the
+ * library filter, avatar badge, detail page, and batch scope so the strings never drift.
+ */
+export const ACTRESS_SCRAPE_STATUS_LABELS: Record<Exclude<ActressListStatusFilter, 'all'>, string> = {
+  unscraped: '未刮削',
+  success: '刮削成功',
+  failed: '刮削失败'
+}
+
+/** Actress library status-filter labels; the "all" option is filter-specific ("全部状态"). */
+export const ACTRESS_STATUS_FILTER_LABELS: Record<ActressListStatusFilter, string> = {
+  all: '全部状态',
+  ...ACTRESS_SCRAPE_STATUS_LABELS
+}
+
 export interface ActressListQuery {
   search?: string
   gender?: ActressGenderFilter
@@ -941,9 +957,9 @@ export const ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS: {
   id: ActressBatchScrapeStatus
   label: string
 }[] = [
-  { id: 'unscraped', label: '未刮削' },
-  { id: 'success', label: '刮削成功' },
-  { id: 'failed', label: '刮削失败' },
+  { id: 'unscraped', label: ACTRESS_SCRAPE_STATUS_LABELS.unscraped },
+  { id: 'success', label: ACTRESS_SCRAPE_STATUS_LABELS.success },
+  { id: 'failed', label: ACTRESS_SCRAPE_STATUS_LABELS.failed },
   { id: 'all', label: '全部' }
 ]
 

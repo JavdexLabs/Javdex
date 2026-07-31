@@ -1,6 +1,5 @@
 import type { ScrapedStatus } from '@shared/types'
-import { actressStatusFilterOf } from '@shared/types'
-import { ACTRESS_STATUS_FILTER_LABELS } from './ActressStatusFilterPopover'
+import { actressStatusFilterOf, ACTRESS_STATUS_FILTER_LABELS } from '@shared/types'
 
 /**
  * Corner badge for actresses that still need attention.

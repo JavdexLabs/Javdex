@@ -28,9 +28,8 @@ import SelectionToolbar from '../components/SelectionToolbar'
 import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
 import ActressStatusBadge from '../components/ActressStatusBadge'
-import ActressStatusFilterPopover, {
-  ACTRESS_STATUS_FILTER_LABELS
-} from '../components/ActressStatusFilterPopover'
+import ActressStatusFilterPopover from '../components/ActressStatusFilterPopover'
+import { ACTRESS_STATUS_FILTER_LABELS } from '@shared/types'
 import {
   actressQueryHash,
   actressStatusParam,
@@ -392,7 +391,7 @@ export default function ActressesPage(): JSX.Element {
                   aria-expanded={statusFilterOpen}
                   aria-haspopup="dialog"
                 >
-                  <span className="list-filter-btn-label">筛选</span>
+                  <span className="list-filter-btn-label">刮削状态</span>
                   <ChevronDown
                     {...UI_ICON_SM}
                     className={`list-filter-chevron${statusFilterOpen ? ' is-open' : ''}`}

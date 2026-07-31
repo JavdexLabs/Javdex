@@ -9,3 +9,5 @@ out-tsc
 todo.md
 /example
 release-artifacts-*/
+.agents/
+skills-lock.json

@@ -11,6 +11,8 @@ export default function BatchSettingsPanel({
   batch,
   running,
   paused,
+  canResume = true,
+  resumeDisabledReason = null,
   logRef,
   emptyLog,
   skipped,
@@ -23,6 +25,8 @@ export default function BatchSettingsPanel({
   batch: BatchProgress | null
   running: boolean
   paused: boolean
+  canResume?: boolean
+  resumeDisabledReason?: string | null
   logRef: RefObject<HTMLDivElement>
   emptyLog: string
   skipped?: number
@@ -75,12 +79,21 @@ export default function BatchSettingsPanel({
             running={running}
             paused={paused}
             status={status}
+            canResume={canResume}
+            resumeDisabledReason={resumeDisabledReason}
             onPause={onPause}
             onResume={onResume}
             onDiscard={onDiscard}
           />
         )}
       </div>
+
+      {!canResume && paused ? (
+        <p className="settings-overview-batch-unrecoverable" role="status">
+          不可恢复
+          {resumeDisabledReason ? `：${resumeDisabledReason}` : '，请终止后重新启动任务'}
+        </p>
+      ) : null}
 
       <div className="batch-log-stats" aria-label="运行统计">
         <div className="batch-log-stats-row">

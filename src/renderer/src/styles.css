@@ -7097,6 +7097,13 @@ button.actress-mini:focus-visible .actress-avatar {
   color: var(--text-primary);
 }
 
+.settings-overview-batch-unrecoverable {
+  margin: var(--space-2) 0 0;
+  color: var(--text-warning);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+}
+
 .settings-overview-batch-inline.is-idle {
   border-top-color: color-mix(in srgb, var(--border-subtle) 72%, transparent);
 }

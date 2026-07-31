@@ -1369,6 +1369,13 @@ export interface BatchProgress {
 export interface BatchScrapeState {
   kind: 'video' | 'actress' | null
   progress: BatchProgress | null
+  /**
+   * False when a persisted actress batch carries an unrecognized scrape-status
+   * scope. The task remains viewable and discardable, but resume is blocked.
+   */
+  recoverable: boolean
+  /** Present when recoverable is false. */
+  unrecoverableReason?: string
 }
 
 export interface BatchLogEntry {

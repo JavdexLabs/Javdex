@@ -5,6 +5,7 @@ import type {
   LegacyActressBatchScrapeStatus
 } from '@shared/types'
 import { listActressesForBatchScrape, type ActressBatchTarget } from '../db/actressRepo'
+import type { PersistedBatchScrapeJob } from './batchScrapeJobStore'
 
 /** Batch filter as received over IPC or read back from a persisted job snapshot. */
 export type ActressBatchScrapeFilterInput = Omit<ActressBatchScrapeFilter, 'scrapeStatus'> & {
@@ -115,4 +116,59 @@ export function estimateActressBatchScrapeTargetCount(
   input: ActressBatchScrapeFilterInput
 ): number {
   return resolveActressBatchScrapeTargets(normalizeActressBatchScrapeFilter(input)).length
+}
+
+/**
+ * Load-time reconciliation for a persisted actress batch job.
+ * Recoverable legacy/omitted scopes are rewritten to canonical values while the
+ * target snapshot, totals, next position, counters and logs stay untouched.
+ * Unrecognized scopes stay as-is and mark the job unrecoverable so resume cannot
+ * silently widen the batch.
+ */
+export type ReconciledActressBatchJob =
+  | {
+      recoverable: true
+      job: PersistedBatchScrapeJob
+      rewritten: boolean
+    }
+  | {
+      recoverable: false
+      job: PersistedBatchScrapeJob
+      rewritten: false
+      reason: string
+    }
+
+export function reconcilePersistedActressBatchJob(
+  job: PersistedBatchScrapeJob
+): ReconciledActressBatchJob {
+  if (job.kind !== 'actress') {
+    return { recoverable: true, job, rewritten: false }
+  }
+
+  const request = job.request as ActressBatchScrapeRequestInput
+  const parsed = parseActressBatchScrapeStatus(request.scrapeStatus)
+  if (!parsed.ok) {
+    return {
+      recoverable: false,
+      job,
+      rewritten: false,
+      reason: `无法识别的演员刮削状态范围：${parsed.value}`
+    }
+  }
+
+  if (request.scrapeStatus === parsed.status) {
+    return { recoverable: true, job, rewritten: false }
+  }
+
+  return {
+    recoverable: true,
+    rewritten: true,
+    job: {
+      ...job,
+      request: {
+        ...request,
+        scrapeStatus: parsed.status
+      }
+    }
+  }
 }

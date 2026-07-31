@@ -222,7 +222,8 @@ export default function ActressesPage(): JSX.Element {
   const avatarBatchActive =
     avatarAutoCropBatch.state.status === 'running' ||
     avatarAutoCropBatch.state.status === 'cancelling'
-  const faceScanAutoStartedRef = useRef(false)
+  const faceScanAutoStartKey = `${urlQ.trim()}\u0000${genderFilter}\u0000${statusFilter}`
+  const faceScanAutoStartedKeyRef = useRef<string | null>(null)
 
   const startFaceScan = useCallback(
     async (previousAvatar: ActressAvatarFilter, silentBlocked = false): Promise<void> => {
@@ -238,6 +239,7 @@ export default function ActressesPage(): JSX.Element {
         return
       }
 
+      faceScanAutoStartedKeyRef.current = faceScanAutoStartKey
       const summary = await faceScan.start()
       if (!summary) return
 
@@ -263,24 +265,26 @@ export default function ActressesPage(): JSX.Element {
         summary.failed > 0 ? 'info' : 'success'
       )
     },
-    [actressBatchActive, avatarBatchActive, faceScan, patchParams, toast]
+    [actressBatchActive, avatarBatchActive, faceScan, faceScanAutoStartKey, patchParams, toast]
   )
 
   useEffect(() => {
     if (avatarFilter !== 'without-face') {
-      faceScanAutoStartedRef.current = false
+      faceScanAutoStartedKeyRef.current = null
       return
     }
-    if (faceScanAutoStartedRef.current) return
-    if (!faceScanMissingIdentity) return
+    if (!faceScan.needsScan && !faceScanMissingIdentity) return
+    if (faceScanAutoStartedKeyRef.current === faceScanAutoStartKey) return
     if (actressBatchActive || avatarBatchActive) return
-    faceScanAutoStartedRef.current = true
+    faceScanAutoStartedKeyRef.current = faceScanAutoStartKey
     void startFaceScan('all', true)
   }, [
     actressBatchActive,
     avatarBatchActive,
     avatarFilter,
+    faceScanAutoStartKey,
     faceScanMissingIdentity,
+    faceScan.needsScan,
     startFaceScan
   ])
 
@@ -498,7 +502,6 @@ export default function ActressesPage(): JSX.Element {
                       }
                       if (patch.avatar !== undefined) {
                         if (patch.avatar === 'without-face') {
-                          faceScanAutoStartedRef.current = true
                           setFilterOpen(false)
                           void startFaceScan(avatarFilter)
                         } else {

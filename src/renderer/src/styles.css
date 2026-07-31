@@ -12158,7 +12158,7 @@ button.actress-mini:focus-visible .actress-avatar {
 .actress-face-scan-progress progress {
   width: 100%;
   height: 8px;
-  accent-color: var(--accent);
+  accent-color: var(--text-accent);
 }
 .actress-face-scan-progress-meta,
 .actress-face-scan-stats {

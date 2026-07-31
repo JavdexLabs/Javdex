@@ -749,10 +749,20 @@ function countActressListStatuses(
 export function listActressPage(query: ActressListQuery = {}): ActressListPage {
   const gender = query.gender ?? 'female'
   const avatar = query.avatar === 'without-face' ? 'with' : query.avatar ?? 'all'
+  const actresses = listActresses(
+    query.search,
+    gender,
+    query.sortBy,
+    query.sortDir,
+    query.status ?? 'all',
+    avatar
+  )
   return {
-    items: enrichActressListItems(
-      listActresses(query.search, gender, query.sortBy, query.sortDir, query.status ?? 'all', avatar)
-    ),
+    // Fingerprints are only needed when the renderer may run or apply the
+    // local face filter. Avoid probing every avatar for ordinary list views.
+    items: query.avatar === 'with' || query.avatar === 'without-face'
+      ? enrichActressListItems(actresses)
+      : actresses,
     statusCounts: countActressListStatuses(query.search, gender)
   }
 }

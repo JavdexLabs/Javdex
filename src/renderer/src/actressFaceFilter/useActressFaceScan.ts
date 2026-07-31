@@ -21,6 +21,7 @@ export interface ActressFaceScanState {
 
 export interface UseActressFaceScanResult {
   cache: ActressFaceScanCache
+  needsScan: boolean
   state: ActressFaceScanState | null
   start: () => Promise<ActressFaceScanSummary | null>
   cancel: () => void
@@ -42,6 +43,7 @@ export function useActressFaceScan(): UseActressFaceScanResult {
   const runningRef = useRef(false)
   const cancelRequestedRef = useRef(false)
   const runSequenceRef = useRef(0)
+  const [needsScan, setNeedsScan] = useState(true)
   const [state, setState] = useState<ActressFaceScanState | null>(null)
 
   useEffect(
@@ -99,6 +101,7 @@ export function useActressFaceScan(): UseActressFaceScanResult {
       )
       if (!mountedRef.current || runId !== runSequenceRef.current) return null
       setState({ progress: { ...lastProgress(summary), status: 'done' }, summary })
+      setNeedsScan(summary.cancelled || summary.failed > 0)
       return summary
     } catch (error) {
       if (!mountedRef.current || runId !== runSequenceRef.current) return null
@@ -127,6 +130,7 @@ export function useActressFaceScan(): UseActressFaceScanResult {
         },
         summary
       })
+      setNeedsScan(true)
       return summary
     } finally {
       if (runId === runSequenceRef.current) {
@@ -154,7 +158,7 @@ export function useActressFaceScan(): UseActressFaceScanResult {
     setState(null)
   }, [])
 
-  return { cache: cacheRef.current, state, start, cancel, close }
+  return { cache: cacheRef.current, needsScan, state, start, cancel, close }
 }
 
 function lastProgress(summary: ActressFaceScanSummary): ActressFaceScanProgress {

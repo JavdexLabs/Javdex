@@ -22,6 +22,7 @@ import type {
   ActressListStatusCounts,
   ActressListStatusFilter,
   ActressAvatarSourceInfo,
+  ActressAvatarFilter,
   ActressMergeMainNameFrom,
   ListSortDir,
   ScrapedStatus
@@ -639,17 +640,31 @@ function buildActressListWhere(
   return { sql: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', params }
 }
 
+function actressHasUsableAvatar(actress: Pick<ActressListItem, 'avatar_path'>): boolean {
+  return !isBlankText(actress.avatar_path) && isUsableImageAsset(actress.avatar_path)
+}
+
+function filterActressAvatars(
+  actresses: ActressListItem[],
+  avatar: ActressAvatarFilter
+): ActressListItem[] {
+  if (avatar === 'all') return actresses
+  const wantsAvatar = avatar === 'with'
+  return actresses.filter((actress) => actressHasUsableAvatar(actress) === wantsAvatar)
+}
+
 export function listActresses(
   search?: string,
   gender: ActressGenderFilter = 'female',
   sortBy: ActressListSortBy = 'video_count',
   sortDir: ListSortDir = 'desc',
-  status: ActressListStatusFilter = 'all'
+  status: ActressListStatusFilter = 'all',
+  avatar: ActressAvatarFilter = 'all'
 ): ActressListItem[] {
   const db = getDb()
   const { sql: where, params } = buildActressListWhere(search, gender, status)
   const orderBy = buildActressListOrderBy(sortBy, sortDir)
-  return db
+  const actresses = db
     .prepare(
       `SELECT a.*,
               COUNT(va.video_id) AS video_count,
@@ -661,6 +676,7 @@ export function listActresses(
        ORDER BY ${orderBy}`
     )
     .all(...params) as ActressListItem[]
+  return filterActressAvatars(actresses, avatar)
 }
 
 function buildActressListOrderBy(sortBy: ActressListSortBy, sortDir: ListSortDir): string {
@@ -712,7 +728,14 @@ function countActressListStatuses(
 export function listActressPage(query: ActressListQuery = {}): ActressListPage {
   const gender = query.gender ?? 'female'
   return {
-    items: listActresses(query.search, gender, query.sortBy, query.sortDir, query.status ?? 'all'),
+    items: listActresses(
+      query.search,
+      gender,
+      query.sortBy,
+      query.sortDir,
+      query.status ?? 'all',
+      query.avatar ?? 'all'
+    ),
     statusCounts: countActressListStatuses(query.search, gender)
   }
 }

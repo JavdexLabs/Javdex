@@ -359,6 +359,30 @@ describe('actressRepo.listActressPage', () => {
       listActressPage({ gender: 'all' }).items.map((item) => item.main_name)
     )
   })
+
+  it('filters by actual readable avatar files and treats broken paths as no avatar', () => {
+    setupStatuses()
+    const db = getDb()
+    db.prepare('UPDATE actresses SET avatar_path = ? WHERE id = ?').run(
+      'avatars/missing.jpg',
+      2
+    )
+
+    assert.deepEqual(
+      listActressPage({ gender: 'all', avatar: 'with' }).items.map((item) => item.main_name),
+      ['Complete']
+    )
+    assert.deepEqual(
+      listActressPage({ gender: 'all', avatar: 'without' }).items.map((item) => item.main_name),
+      ['Missing Female', 'Missing Male', 'Unknown Gender']
+    )
+    assert.deepEqual(
+      listActressPage({ gender: 'all', status: 'success', avatar: 'without' }).items.map(
+        (item) => item.main_name
+      ),
+      ['Missing Male']
+    )
+  })
 })
 
 describe('actressRepo.clearActressMetadataRecord', () => {

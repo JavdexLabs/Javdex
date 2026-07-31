@@ -17,8 +17,10 @@ import { libraryVideoActressPath, libraryVideoDetailPath, parseLibraryVideoPath 
 import { navigateToActressDetail, navigateToActressList, navigateToFacetDetail } from './listNavigation'
 import {
   actressQueryHash,
+  actressAvatarParam,
   actressStatusParam,
   LIST_PARAM,
+  parseActressAvatar,
   parseActressStatus,
   patchSearchParams
 } from './listQueryParams'
@@ -84,6 +86,26 @@ describe('route builders and parsers', () => {
     assert.equal(parseLibraryVideoPath('/detail/not-a-number'), null)
     assert.equal(parseActressVideoPath('/actresses/x'), null)
     assert.equal(parsePlaylistVideoPath('/playlists/x'), null)
+  })
+})
+
+describe('actress avatar filter query contract', () => {
+  it('normalizes avatar filter values and omits the all default', () => {
+    assert.equal(parseActressAvatar('with'), 'with')
+    assert.equal(parseActressAvatar('without'), 'without')
+    assert.equal(parseActressAvatar('invalid'), 'all')
+    assert.equal(parseActressAvatar(null), 'all')
+    assert.equal(actressAvatarParam('with'), 'with')
+    assert.equal(actressAvatarParam('without'), 'without')
+    assert.equal(actressAvatarParam('all'), null)
+  })
+
+  it('keeps avatar filters distinct in the actress query hash', () => {
+    const withAvatar = new URLSearchParams(`${LIST_PARAM.avatar}=with`)
+    const withoutAvatar = new URLSearchParams(`${LIST_PARAM.avatar}=without`)
+
+    assert.notEqual(actressQueryHash(withAvatar), actressQueryHash(withoutAvatar))
+    assert.equal(actressQueryHash(new URLSearchParams()), actressQueryHash(new URLSearchParams()))
   })
 })
 
@@ -163,11 +185,11 @@ describe('actress status filter query contract', () => {
 
   it('remembers the actress status filter across primary navigation', () => {
     clearPrimaryNavigationMemory()
-    rememberPrimaryListLocation('/actresses/8', '?q=sara&status=unscraped')
+    rememberPrimaryListLocation('/actresses/8', '?q=sara&status=unscraped&avatar=without')
 
     assert.deepEqual(primaryNavigationTarget('/actresses'), {
       pathname: '/actresses',
-      search: '?q=sara&status=unscraped'
+      search: '?q=sara&status=unscraped&avatar=without'
     })
   })
 })

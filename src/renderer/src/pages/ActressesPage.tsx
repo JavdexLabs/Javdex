@@ -9,8 +9,6 @@ import {
   ALL_ACTRESS_SCRAPE_FIELDS,
   type ActressListItem,
   type ActressListSortBy,
-  type ActressListStatusCounts,
-  type ActressListStatusFilter,
   type ActressScrapeField,
   type ActressScrapeUpdateMode
 } from '@shared/types'
@@ -28,13 +26,16 @@ import SelectionToolbar from '../components/SelectionToolbar'
 import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
 import ActressStatusBadge from '../components/ActressStatusBadge'
-import ActressStatusFilterPopover from '../components/ActressStatusFilterPopover'
+import ActressFilterPopover, { type ActressFilterState } from '../components/ActressFilterPopover'
 import { ACTRESS_STATUS_FILTER_LABELS } from '@shared/types'
 import {
   actressQueryHash,
+  actressAvatarParam,
   actressStatusParam,
+  ACTRESS_DEFAULT_AVATAR,
   ACTRESS_DEFAULT_STATUS,
   LIST_PARAM,
+  parseActressAvatar,
   parseActressSort,
   parseActressStatus,
   parseGender,
@@ -83,13 +84,6 @@ const ACTRESS_SORT_LABELS: Record<ActressListSortBy, string> = {
   cup_size: '罩杯'
 }
 
-const EMPTY_STATUS_COUNTS: ActressListStatusCounts = {
-  all: 0,
-  success: 0,
-  unscraped: 0,
-  failed: 0
-}
-
 export default function ActressesPage(): JSX.Element {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -116,6 +110,7 @@ export default function ActressesPage(): JSX.Element {
 
   const genderFilter = parseGender(searchParams.get(LIST_PARAM.gender))
   const statusFilter = parseActressStatus(searchParams.get(LIST_PARAM.status))
+  const avatarFilter = parseActressAvatar(searchParams.get(LIST_PARAM.avatar))
   const { sortBy, sortDir } = parseActressSort(
     searchParams.get(LIST_PARAM.sort),
     searchParams.get(LIST_PARAM.dir)
@@ -135,14 +130,14 @@ export default function ActressesPage(): JSX.Element {
   const [showBulkScrape, setShowBulkScrape] = useState(false)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const statusFilterBtnRef = useRef<HTMLButtonElement>(null)
-  const [statusFilterOpen, setStatusFilterOpen] = useState(false)
+  const filterBtnRef = useRef<HTMLButtonElement>(null)
+  const [filterOpen, setFilterOpen] = useState(false)
 
   const dismissOverlays = useCallback(() => {
     setPendingDelete(null)
     setShowBulkScrape(false)
     setConfirmBulkDelete(false)
-    setStatusFilterOpen(false)
+    setFilterOpen(false)
   }, [])
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
@@ -154,6 +149,7 @@ export default function ActressesPage(): JSX.Element {
         search: debouncedQ.trim(),
         gender: genderFilter,
         status: statusFilter,
+        avatar: avatarFilter,
         sortBy,
         sortDir
       }),
@@ -175,7 +171,6 @@ export default function ActressesPage(): JSX.Element {
   useListSurfaceRefetch(detailOpen, refetchActressSurface)
 
   const items = listQuery.data?.items ?? []
-  const statusCounts = listQuery.data?.statusCounts ?? EMPTY_STATUS_COUNTS
   const loading = listQuery.isLoading && items.length === 0
   const isFetching = listQuery.isFetching
 
@@ -294,20 +289,21 @@ export default function ActressesPage(): JSX.Element {
     }
   }
 
-  const setStatusFilter = (status: ActressListStatusFilter): void => {
-    patchParams({ [LIST_PARAM.status]: actressStatusParam(status) })
-  }
-
   const hasNonDefaultSort =
     sortBy !== ACTRESS_LIST_DEFAULTS.sortBy || sortDir !== ACTRESS_LIST_DEFAULTS.sortDir
   const hasStatusFilter = statusFilter !== ACTRESS_DEFAULT_STATUS
+  const hasAvatarFilter = avatarFilter !== ACTRESS_DEFAULT_AVATAR
   const hasAppliedFilters =
-    genderFilter !== ACTRESS_LIST_DEFAULTS.gender || hasStatusFilter || hasNonDefaultSort
+    genderFilter !== ACTRESS_LIST_DEFAULTS.gender ||
+    hasStatusFilter ||
+    hasAvatarFilter ||
+    hasNonDefaultSort
   const resetFilters = (): void => {
     forgetPrimaryListLocation(ROUTE_PATH.actresses)
     patchParams({
       [LIST_PARAM.gender]: null,
       [LIST_PARAM.status]: null,
+      [LIST_PARAM.avatar]: null,
       [LIST_PARAM.sort]: null,
       [LIST_PARAM.dir]: null
     })
@@ -317,7 +313,14 @@ export default function ActressesPage(): JSX.Element {
     appliedFilters.push({
       key: 'status',
       label: ACTRESS_STATUS_FILTER_LABELS[statusFilter],
-      onRemove: () => setStatusFilter(ACTRESS_DEFAULT_STATUS)
+      onRemove: () => patchParams({ [LIST_PARAM.status]: null })
+    })
+  }
+  if (hasAvatarFilter) {
+    appliedFilters.push({
+      key: 'avatar',
+      label: avatarFilter === 'with' ? '有头像' : '无头像',
+      onRemove: () => patchParams({ [LIST_PARAM.avatar]: null })
     })
   }
   if (genderFilter !== ACTRESS_LIST_DEFAULTS.gender) {
@@ -383,29 +386,40 @@ export default function ActressesPage(): JSX.Element {
             }}
             controls={
               <>
-                <button
-                  ref={statusFilterBtnRef}
-                  type="button"
-                  className={`btn btn-sm list-filter-btn${statusFilterOpen ? ' list-filter-btn--open' : ''}${hasStatusFilter ? ' list-filter-btn--active' : ''}`}
-                  onClick={() => setStatusFilterOpen((open) => !open)}
-                  aria-expanded={statusFilterOpen}
-                  aria-haspopup="dialog"
-                >
-                  <span className="list-filter-btn-label">刮削状态</span>
-                  <ChevronDown
-                    {...UI_ICON_SM}
-                    className={`list-filter-chevron${statusFilterOpen ? ' is-open' : ''}`}
-                    aria-hidden
+                <div className="library-filter-anchor">
+                  <button
+                    ref={filterBtnRef}
+                    type="button"
+                    className={`btn btn-sm library-filter-btn${filterOpen ? ' library-filter-btn--open' : ''}${hasAppliedFilters ? ' library-filter-btn--active' : ''}`}
+                    onClick={() => setFilterOpen((open) => !open)}
+                    aria-expanded={filterOpen}
+                    aria-haspopup="dialog"
+                  >
+                    <span className="library-filter-btn-label">筛选</span>
+                    <ChevronDown
+                      {...UI_ICON_SM}
+                      className={`library-filter-chevron${filterOpen ? ' is-open' : ''}`}
+                      aria-hidden
+                    />
+                  </button>
+                  <ActressFilterPopover
+                    open={filterOpen}
+                    anchorRef={filterBtnRef}
+                    state={{ status: statusFilter, avatar: avatarFilter }}
+                    onChange={(patch: Partial<ActressFilterState>) => {
+                      const updates: Record<string, string | null | undefined> = {}
+                      if (patch.status !== undefined) {
+                        updates[LIST_PARAM.status] = actressStatusParam(patch.status)
+                      }
+                      if (patch.avatar !== undefined) {
+                        updates[LIST_PARAM.avatar] = actressAvatarParam(patch.avatar)
+                      }
+                      patchParams(updates)
+                    }}
+                    onReset={resetFilters}
+                    onClose={() => setFilterOpen(false)}
                   />
-                </button>
-                <ActressStatusFilterPopover
-                  open={statusFilterOpen}
-                  anchorRef={statusFilterBtnRef}
-                  value={statusFilter}
-                  counts={statusCounts}
-                  onChange={setStatusFilter}
-                  onClose={() => setStatusFilterOpen(false)}
-                />
+                </div>
                 <div className="mode-toggle" role="group" aria-label="性别筛选">
                   <button
                     type="button"
@@ -474,7 +488,7 @@ export default function ActressesPage(): JSX.Element {
             }
             secondaryLabel="查看未刮削"
             primaryLabel={actressBatchActive ? '刮削进行中…' : '一键刮削'}
-            onSecondary={() => setStatusFilter('unscraped')}
+            onSecondary={() => patchParams({ [LIST_PARAM.status]: actressStatusParam('unscraped') })}
             onPrimary={() => void startUnscrapedBatch()}
             onDismiss={dismissUnscrapedBanner}
             primaryDisabled={actressBatchActive || !defaultScraper}
@@ -509,7 +523,7 @@ export default function ActressesPage(): JSX.Element {
               title={emptyDueToFilter ? '没有匹配的演员' : '暂无演员数据'}
               description={
                 emptyDueToFilter
-                  ? '调整搜索、刮削状态、性别或排序条件后再试。'
+                  ? '调整搜索、筛选、性别或排序条件后再试。'
                   : '刮削影片后将自动归纳演员。'
               }
             />

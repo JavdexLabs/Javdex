@@ -222,6 +222,9 @@ export interface ActressListItem extends Actress {
 /** Canonical actress library status filter vocabulary (also the URL values). */
 export type ActressListStatusFilter = 'all' | 'success' | 'unscraped' | 'failed'
 
+/** Whether the actress has a currently usable saved avatar. */
+export type ActressAvatarFilter = 'all' | 'with' | 'without'
+
 export const ACTRESS_LIST_STATUS_SCRAPED_STATUS: Record<
   Exclude<ActressListStatusFilter, 'all'>,
   ScrapedStatus
@@ -270,6 +273,7 @@ export interface ActressListQuery {
   search?: string
   gender?: ActressGenderFilter
   status?: ActressListStatusFilter
+  avatar?: ActressAvatarFilter
   sortBy?: ActressListSortBy
   sortDir?: ListSortDir
 }

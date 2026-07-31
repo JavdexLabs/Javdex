@@ -22,6 +22,7 @@ const SEARCH_KEYS_BY_ROOT: Record<string, readonly string[]> = {
     LIST_PARAM.q,
     LIST_PARAM.gender,
     LIST_PARAM.status,
+    LIST_PARAM.avatar,
     LIST_PARAM.sort,
     LIST_PARAM.dir
   ],

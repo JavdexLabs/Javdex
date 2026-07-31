@@ -1288,70 +1288,6 @@ textarea.text-input {
   color: var(--accent-hover);
 }
 
-/* Single-choice filter popover (actress cumulative scrape status). */
-.status-filter-popover {
-  width: 188px;
-  padding: 4px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-panel);
-  box-shadow: var(--shadow-elevated);
-}
-
-.status-filter-popover-title {
-  margin: 0;
-  padding: 6px 10px 4px;
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-}
-
-.status-filter-options {
-  display: grid;
-  gap: 2px;
-}
-
-.status-filter-option {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: var(--control-h-sm);
-  padding: 0 10px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  text-align: left;
-}
-
-.status-filter-option:hover {
-  background: var(--surface-elevated);
-  color: var(--text-primary);
-}
-
-.status-filter-option:focus-visible {
-  outline: var(--focus-outline);
-  outline-offset: -2px;
-}
-
-.status-filter-option.is-active {
-  border-color: var(--border-accent);
-  background: var(--surface-selected);
-  color: var(--text-accent);
-}
-
-.status-filter-option-count {
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.status-filter-option.is-active .status-filter-option-count {
-  color: inherit;
-}
-
 .sort-switch {
   display: inline-flex;
   align-items: center;
@@ -5270,6 +5206,7 @@ button.tag-chip--custom-pick {
 }
 .actress-status-badge {
   position: absolute;
+  z-index: 2;
   right: -8px;
   bottom: -2px;
   max-width: calc(100% + 16px);
@@ -5286,12 +5223,12 @@ button.tag-chip--custom-pick {
   text-overflow: ellipsis;
 }
 .actress-status-badge--unscraped {
-  background: var(--surface-warning);
+  background: color-mix(in srgb, var(--warning) 16%, var(--surface-panel));
   border-color: var(--surface-panel);
   color: var(--text-warning);
 }
 .actress-status-badge--failed {
-  background: var(--surface-danger);
+  background: color-mix(in srgb, var(--danger) 16%, var(--surface-panel));
   border-color: var(--surface-panel);
   color: var(--text-danger);
 }

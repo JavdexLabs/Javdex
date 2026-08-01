@@ -1088,6 +1088,15 @@ export type ResolveActressConflictInput = ActressConflictDecisionBase &
         ownerActressId: number
         ownerActressRevision: number
       }
+    | {
+        kind: 'mergeActresses'
+        pendingId: number
+        keepActressId: number
+        keepActressRevision: number
+        mergeActressId: number
+        mergeActressRevision: number
+        finalMainName: string
+      }
     | { kind: 'markIllegalName' }
     | { kind: 'applyPending'; pendingId: number }
   )

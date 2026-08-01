@@ -3,8 +3,11 @@ import assert from 'node:assert/strict'
 import type { ActressNameConflictGroup } from '@shared/types'
 import {
   buildActressConflictDecisionSnapshot,
+  buildActressConflictMergeActors,
   canConfirmIllegalName,
-  conflictClaimantsNeedingReplacement
+  canConfirmMergeActresses,
+  conflictClaimantsNeedingReplacement,
+  selectConflictGroupAfterRefresh
 } from './actressConflictReviewState'
 
 const group: ActressNameConflictGroup = {
@@ -100,5 +103,58 @@ describe('actress conflict review state', () => {
       canConfirmIllegalName(group.claimants, { 1: 'Owner Replacement' }, 'valid'),
       true
     )
+  })
+
+  it('requires an explicit partner, keeper, and final main name for conflict merges', () => {
+    const actors = buildActressConflictMergeActors(group)
+    assert.deepEqual(actors, [
+      {
+        actressId: 1,
+        revision: 7,
+        mainName: 'Collision',
+        avatarPath: null,
+        hasPending: false
+      },
+      {
+        actressId: 2,
+        revision: 9,
+        mainName: 'Target',
+        avatarPath: null,
+        hasPending: true
+      }
+    ])
+    assert.equal(canConfirmMergeActresses(actors, 2, null, null, null), false)
+    assert.equal(canConfirmMergeActresses(actors, 2, 1, null, null), false)
+    assert.equal(canConfirmMergeActresses(actors, 2, 1, 1, null), false)
+    assert.equal(canConfirmMergeActresses(actors, 2, 1, 1, 1), true)
+    assert.equal(canConfirmMergeActresses(actors, 2, 1, 1, 3), false)
+    assert.equal(
+      canConfirmMergeActresses(
+        actors.map((actor) => ({ ...actor, hasPending: true })),
+        2,
+        1,
+        1,
+        1
+      ),
+      false
+    )
+  })
+
+  it('keeps the current group or selects its next neighbor after refresh', () => {
+    const before = [
+      { ...group, normalizedName: 'a' },
+      { ...group, normalizedName: 'b' },
+      { ...group, normalizedName: 'c' }
+    ]
+    assert.equal(selectConflictGroupAfterRefresh(before, before, 'b'), 'b')
+    assert.equal(
+      selectConflictGroupAfterRefresh(before, [before[0], before[2]], 'b'),
+      'c'
+    )
+    assert.equal(
+      selectConflictGroupAfterRefresh(before, [before[0], before[1]], 'c'),
+      'b'
+    )
+    assert.equal(selectConflictGroupAfterRefresh(before, [], 'b'), null)
   })
 })

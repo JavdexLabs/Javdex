@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Ban, CircleAlert, Trash2, UserRoundCheck, UsersRound } from 'lucide-react'
+import {
+  ArrowLeft,
+  Ban,
+  CircleAlert,
+  GitMerge,
+  Trash2,
+  UserRoundCheck,
+  UsersRound
+} from 'lucide-react'
 import type {
   ActressNameConflictGroup,
   ActressPendingNameType,
@@ -23,11 +31,16 @@ import { actressKeys } from '../query/queryKeys'
 import { useDebounce } from '../hooks/useDebounce'
 import {
   buildActressConflictDecisionSnapshot,
+  buildActressConflictMergeActors,
   canConfirmIllegalName,
   conflictClaimantsNeedingReplacement,
+  selectConflictGroupAfterRefresh,
   type ActressOwnershipDecision,
   type IllegalNameReplacementValidationStatus
 } from './actressConflictReviewState'
+import ConflictMergeActressesModal, {
+  type ConflictMergeActressesDecision
+} from './ConflictMergeActressesModal'
 
 const FIELD_LABEL = new Map(ACTRESS_SCRAPE_FIELD_OPTIONS.map((option) => [option.id, option.label]))
 
@@ -132,6 +145,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
     revision: number
   } | null>(null)
   const [illegalNameOpen, setIllegalNameOpen] = useState(false)
+  const [mergeOpen, setMergeOpen] = useState(false)
   const [illegalValidationStatus, setIllegalValidationStatus] =
     useState<IllegalNameReplacementValidationStatus>('idle')
   const [illegalValidationErrors, setIllegalValidationErrors] = useState<Record<number, string>>({})
@@ -158,6 +172,10 @@ export default function ActressConflictReviewPage(): JSX.Element {
     selectedGroup?.candidates.find((candidate) => candidate.pendingId === selectedPendingId) ??
     selectedGroup?.candidates[0] ??
     null
+  const mergeActors = useMemo(
+    () => (selectedGroup ? buildActressConflictMergeActors(selectedGroup) : []),
+    [selectedGroup]
+  )
   const selectedConflicts =
     selectedCandidate?.conflicts.filter(
       (conflict) => conflict.normalizedName === selectedGroup?.normalizedName
@@ -302,6 +320,8 @@ export default function ActressConflictReviewPage(): JSX.Element {
 
   const discard = async (): Promise<void> => {
     if (!discardCandidate || discarding) return
+    const previousGroups = groups
+    const previousSelectedName = selectedGroup?.normalizedName ?? null
     setDiscarding(true)
     try {
       await api.actressScrape.discardConflict({
@@ -311,7 +331,14 @@ export default function ActressConflictReviewPage(): JSX.Element {
       setDiscardCandidate(null)
       setSelectedPendingId(null)
       await queryClient.invalidateQueries({ queryKey: actressKeys.all })
-      await groupsQuery.refetch()
+      const refreshed = await groupsQuery.refetch()
+      setSelectedName(
+        selectConflictGroupAfterRefresh(
+          previousGroups,
+          refreshed.data ?? [],
+          previousSelectedName
+        )
+      )
       toast.show('已丢弃错误匹配并清理暂存资源', 'success')
     } catch (error) {
       toast.show(String((error as Error).message), 'error')
@@ -324,6 +351,8 @@ export default function ActressConflictReviewPage(): JSX.Element {
 
   const resolveDecision = async (input: ResolveActressConflictInput): Promise<void> => {
     if (resolving) return
+    const previousGroups = groups
+    const previousSelectedName = selectedGroup?.normalizedName ?? null
     setResolving(true)
     try {
       const outcome = await api.actressScrape.resolveConflict(input)
@@ -333,12 +362,20 @@ export default function ActressConflictReviewPage(): JSX.Element {
         toast.show('名称冲突已处理', 'success')
         setSelectedPendingId(null)
       }
+      setMergeOpen(false)
       setOwnershipDecision(null)
       resetIllegalNameDialog()
       setExistingOwnerSearch('')
       setSelectedExistingOwner(null)
       await queryClient.invalidateQueries({ queryKey: actressKeys.all })
-      await groupsQuery.refetch()
+      const refreshed = await groupsQuery.refetch()
+      setSelectedName(
+        selectConflictGroupAfterRefresh(
+          previousGroups,
+          refreshed.data ?? [],
+          previousSelectedName
+        )
+      )
     } catch (error) {
       toast.show(String((error as Error).message), 'error')
       await groupsQuery.refetch()
@@ -412,6 +449,17 @@ export default function ActressConflictReviewPage(): JSX.Element {
         actressId: claimant.actressId,
         mainName: replacementMainNames[claimant.actressId] ?? ''
       }))
+    })
+  }
+
+  const confirmMergeActresses = (decision: ConflictMergeActressesDecision): void => {
+    if (!selectedGroup || !selectedCandidate) return
+    void resolveDecision({
+      kind: 'mergeActresses',
+      snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
+      pendingId: selectedCandidate.pendingId,
+      ...decision,
+      replacementMainNames: []
     })
   }
 
@@ -668,6 +716,23 @@ export default function ActressConflictReviewPage(): JSX.Element {
                         </button>
                         <button
                           type="button"
+                          className="btn btn-sm btn-ghost"
+                          disabled={resolving || mergeActors.length < 2}
+                          title={
+                            mergeActors.length < 2
+                              ? '当前组没有另一条可合并演员档案'
+                              : undefined
+                          }
+                          onClick={() => {
+                            setOwnershipDecision(null)
+                            setMergeOpen(true)
+                          }}
+                        >
+                          <GitMerge {...UI_ICON_SM} aria-hidden />
+                          合并演员…
+                        </button>
+                        <button
+                          type="button"
                           className="btn btn-sm btn-ghost conflict-review-illegal"
                           disabled={resolving}
                           onClick={() => {
@@ -864,6 +929,17 @@ export default function ActressConflictReviewPage(): JSX.Element {
             </p>
           ) : null}
         </ConfirmModal>
+      ) : null}
+
+      {mergeOpen && selectedGroup && selectedCandidate ? (
+        <ConflictMergeActressesModal
+          key={`${selectedGroup.normalizedName}-${selectedCandidate.pendingId}`}
+          actors={mergeActors}
+          selectedActressId={selectedCandidate.actressId}
+          busy={resolving}
+          onConfirm={confirmMergeActresses}
+          onCancel={() => setMergeOpen(false)}
+        />
       ) : null}
 
       {discardCandidate ? (

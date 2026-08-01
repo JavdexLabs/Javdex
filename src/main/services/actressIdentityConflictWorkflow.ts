@@ -25,6 +25,7 @@ import { normalizeActressName } from '../db/actressNameNormalization'
 import {
   applyActressScrapeResult,
   markActressScrapeSucceeded,
+  mergeActresses,
   recordActressScrapeFailure
 } from '../db/actressRepo'
 import { synchronizeActressNameOwnership } from '../db/actressNameOwnership'
@@ -1159,6 +1160,41 @@ export class ActressIdentityConflictWorkflow {
           .get(input.ownerActressId) as { revision: number } | undefined
         if (chosen?.revision !== input.ownerActressRevision) return false
       }
+      if (input.kind === 'mergeActresses') {
+        if (input.keepActressId === input.mergeActressId) return false
+        const selectedCandidate = input.snapshot.candidates.find(
+          (candidate) => candidate.pendingId === input.pendingId
+        )
+        if (
+          !selectedCandidate ||
+          (selectedCandidate.actressId !== input.keepActressId &&
+            selectedCandidate.actressId !== input.mergeActressId)
+        ) {
+          return false
+        }
+        const involvedVersions = new Map<number, number>()
+        for (const claimant of input.snapshot.claimants) {
+          involvedVersions.set(claimant.actressId, claimant.revision)
+        }
+        for (const candidate of input.snapshot.candidates) {
+          involvedVersions.set(candidate.actressId, candidate.actressRevision)
+        }
+        if (
+          involvedVersions.get(input.keepActressId) !== input.keepActressRevision ||
+          involvedVersions.get(input.mergeActressId) !== input.mergeActressRevision
+        ) {
+          return false
+        }
+        const readRevision = db.prepare('SELECT revision FROM actresses WHERE id = ?')
+        const keep = readRevision.get(input.keepActressId) as { revision: number } | undefined
+        const merge = readRevision.get(input.mergeActressId) as { revision: number } | undefined
+        if (
+          keep?.revision !== input.keepActressRevision ||
+          merge?.revision !== input.mergeActressRevision
+        ) {
+          return false
+        }
+      }
       return true
     }
 
@@ -1194,6 +1230,84 @@ export class ActressIdentityConflictWorkflow {
           name: conflict.name,
           nameType: conflict.name_type
         }))
+    }
+    const pendingConflictWithThirdActress = (
+      pendingId: number,
+      mergedActressIds: readonly number[]
+    ): { name: string } | null => {
+      const allowedIds = new Set(mergedActressIds)
+      const findOwner = db.prepare(
+        'SELECT actress_id FROM actress_name_ownership WHERE normalized_name = ?'
+      )
+      const listClaimants = db.prepare(
+        'SELECT DISTINCT actress_id FROM pending_actress_name_claims WHERE normalized_name = ?'
+      )
+      const listOtherPendingTargets = db.prepare(
+        `SELECT DISTINCT p.actress_id
+         FROM pending_actress_scrape_conflicts c
+         JOIN pending_actress_scrapes p ON p.id = c.pending_scrape_id
+         WHERE c.normalized_name = ? AND c.pending_scrape_id != ?`
+      )
+      for (const conflict of activePendingConflicts(pendingId)) {
+        const owner = findOwner.get(conflict.normalizedName) as
+          | { actress_id: number }
+          | undefined
+        const claimants = listClaimants.all(conflict.normalizedName) as Array<{
+          actress_id: number
+        }>
+        const otherPendingTargets = listOtherPendingTargets.all(
+          conflict.normalizedName,
+          pendingId
+        ) as Array<{ actress_id: number }>
+        if (
+          (owner && !allowedIds.has(owner.actress_id)) ||
+          claimants.some((claimant) => !allowedIds.has(claimant.actress_id)) ||
+          otherPendingTargets.some((target) => !allowedIds.has(target.actress_id))
+        ) {
+          return conflict
+        }
+      }
+      return null
+    }
+    const mergedNameConflictWithThirdPending = (
+      pendingId: number,
+      mergedActressIds: readonly number[]
+    ): { name: string } | null => {
+      const placeholders = mergedActressIds.map(() => '?').join(', ')
+      const conflicts = db
+        .prepare(
+          `SELECT DISTINCT
+             c.pending_scrape_id,
+             c.normalized_name,
+             c.name,
+             p.actress_id
+           FROM pending_actress_scrape_conflicts c
+           JOIN pending_actress_scrapes p ON p.id = c.pending_scrape_id
+           WHERE c.pending_scrape_id != ?
+             AND p.actress_id NOT IN (${placeholders})
+             AND EXISTS (
+               SELECT 1
+               FROM actress_names an
+               WHERE an.actress_id IN (${placeholders})
+                 AND normalize_actress_name(an.name) = c.normalized_name
+             )
+           ORDER BY c.normalized_name, c.pending_scrape_id`
+        )
+        .all(pendingId, ...mergedActressIds, ...mergedActressIds) as Array<{
+        pending_scrape_id: number
+        normalized_name: string
+        name: string
+        actress_id: number
+      }>
+      return (
+        conflicts.find((conflict) =>
+          isPendingConflictActive(
+            conflict.pending_scrape_id,
+            conflict.actress_id,
+            conflict.normalized_name
+          )
+        ) ?? null
+      )
     }
     const remainingConflictCount = (pendingId: number, excludingNormalizedName: string): number =>
       activePendingConflicts(pendingId).filter(
@@ -1494,6 +1608,85 @@ export class ActressIdentityConflictWorkflow {
             )
           }
           synchronizeActressNameOwnership(input.ownerActressId)
+        } else if (input.kind === 'mergeActresses') {
+          const actresses = db
+            .prepare(
+              `SELECT id, main_name
+               FROM actresses
+               WHERE id IN (?, ?)
+               ORDER BY id`
+            )
+            .all(input.keepActressId, input.mergeActressId) as Array<{
+            id: number
+            main_name: string
+          }>
+          if (actresses.length !== 2) throw new Error('STALE_CONFLICT_SNAPSHOT')
+          const keep = actresses.find((actress) => actress.id === input.keepActressId)!
+          const merge = actresses.find((actress) => actress.id === input.mergeActressId)!
+          const finalMainName = input.finalMainName.trim()
+          const mainNameFrom =
+            finalMainName === keep.main_name
+              ? 'keep'
+              : finalMainName === merge.main_name
+                ? 'merge'
+                : null
+          if (!mainNameFrom) throw new Error('最终主名必须从两位演员的当前主名中明确选择')
+
+          const pendingRows = db
+            .prepare(
+              `SELECT id, actress_id
+               FROM pending_actress_scrapes
+               WHERE actress_id IN (?, ?)
+               ORDER BY id`
+            )
+            .all(input.keepActressId, input.mergeActressId) as Array<{
+            id: number
+            actress_id: number
+          }>
+          if (pendingRows.length > 1) {
+            throw new Error('两位演员都有待确认刮削结果，请先处理其中一份')
+          }
+          const pending = pendingRows.find((row) => row.id === input.pendingId)
+          if (!pending) throw new Error('STALE_CONFLICT_SNAPSHOT')
+          const mergedActressIds = [input.keepActressId, input.mergeActressId]
+          const thirdPartyConflict = pendingConflictWithThirdActress(
+            pending.id,
+            mergedActressIds
+          )
+          if (thirdPartyConflict) {
+            throw new Error(
+              `名称「${thirdPartyConflict.name}」还与第三位演员冲突，请先处理该冲突`
+            )
+          }
+          const thirdPartyPendingConflict = mergedNameConflictWithThirdPending(
+            pending.id,
+            mergedActressIds
+          )
+          if (thirdPartyPendingConflict) {
+            throw new Error(
+              `名称「${thirdPartyPendingConflict.name}」还与第三位演员的待确认结果冲突，请先处理该冲突`
+            )
+          }
+          if (pending.actress_id === input.mergeActressId) {
+            db.prepare(
+              'UPDATE pending_actress_scrapes SET actress_id = ? WHERE id = ?'
+            ).run(input.keepActressId, pending.id)
+          }
+          const merged = mergeActresses(
+            input.keepActressId,
+            input.mergeActressId,
+            mainNameFrom,
+            { deferFileCleanup: true }
+          )
+          obsoleteAfterCommit.push(...(merged.fileChanges?.obsoletePaths ?? []))
+          const keeper = db
+            .prepare('SELECT revision FROM actresses WHERE id = ?')
+            .get(input.keepActressId) as { revision: number }
+          db.prepare(
+            `UPDATE pending_actress_scrapes
+             SET target_actress_revision = ?, revision = revision + 1
+             WHERE id = ?`
+          ).run(keeper.revision, pending.id)
         } else if (input.kind === 'markIllegalName') {
           const claimantIds = readNameClaimants(input.snapshot.normalizedName).map(
             (claimant) => claimant.actressId

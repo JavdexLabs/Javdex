@@ -983,8 +983,9 @@ export function setActressPosterPath(id: number, posterPath: string | null): voi
 export function mergeActresses(
   keepId: number,
   mergeId: number,
-  mainNameFrom: ActressMergeMainNameFrom = 'keep'
-): void {
+  mainNameFrom: ActressMergeMainNameFrom = 'keep',
+  options?: { deferFileCleanup?: boolean }
+): { fileChanges?: { obsoletePaths: string[] } } {
   if (keepId === mergeId) throw new Error('不能合并同一演员')
 
   const db = getDb()
@@ -1021,7 +1022,25 @@ export function mergeActresses(
       [keepId, mergeId]
     )
 
-    const keepHadAvatar = isUsableImageAsset(keep.avatar_path)
+    const avatarOwner = isUsableImageAsset(keep.avatar_path)
+      ? keep
+      : isUsableImageAsset(merge.avatar_path)
+        ? merge
+        : null
+    const avatarPath = avatarOwner?.avatar_path ?? null
+    const avatarSourcePath =
+      avatarOwner && isUsableImageAsset(avatarOwner.avatar_source_path)
+        ? avatarOwner.avatar_source_path
+        : null
+    const avatarCropJson =
+      avatarOwner?.avatar_crop_json &&
+      avatarSourcePath &&
+      parseAvatarCrop(
+        avatarOwner.avatar_crop_json,
+        avatarSourceFingerprint(readAssetBytes(avatarSourcePath))
+      )
+        ? avatarOwner.avatar_crop_json
+        : null
     const mergedScrapeRecord = mergeActressScrapeRecords(keep, merge)
 
     db.prepare(
@@ -1079,15 +1098,9 @@ export function mergeActresses(
          zodiac = COALESCE(NULLIF(trim(zodiac), ''), NULLIF(trim(@zodiac), '')),
          nationality = COALESCE(NULLIF(trim(nationality), ''), NULLIF(trim(@nationality), '')),
          profile_summary = COALESCE(NULLIF(trim(profile_summary), ''), NULLIF(trim(@profile_summary), '')),
-         avatar_path = CASE WHEN @keep_had_avatar = 0 THEN @avatar_path ELSE avatar_path END,
-         avatar_source_path = CASE
-           WHEN @keep_had_avatar = 0 THEN @avatar_source_path
-           ELSE avatar_source_path
-         END,
-         avatar_crop_json = CASE
-           WHEN @keep_had_avatar = 0 THEN @avatar_crop_json
-           ELSE avatar_crop_json
-         END,
+         avatar_path = @avatar_path,
+         avatar_source_path = @avatar_source_path,
+         avatar_crop_json = @avatar_crop_json,
          gender = COALESCE(gender, @gender),
          scraped_status = @scraped_status,
          last_scraped_at = @last_scraped_at,
@@ -1107,10 +1120,9 @@ export function mergeActresses(
       zodiac: merge.zodiac,
       nationality: merge.nationality,
       profile_summary: merge.profile_summary,
-      avatar_path: merge.avatar_path,
-      avatar_source_path: merge.avatar_source_path,
-      avatar_crop_json: merge.avatar_crop_json,
-      keep_had_avatar: keepHadAvatar ? 1 : 0,
+      avatar_path: avatarPath,
+      avatar_source_path: avatarSourcePath,
+      avatar_crop_json: avatarCropJson,
       gender: merge.gender,
       scraped_status: mergedScrapeRecord.scrapedStatus,
       last_scraped_at: mergedScrapeRecord.lastScrapedAt,
@@ -1153,7 +1165,12 @@ export function mergeActresses(
     }
   })()
 
-  for (const assetPath of cleanup.obsoleteAvatarPaths) deleteAsset(assetPath)
+  if (!options?.deferFileCleanup) {
+    for (const assetPath of cleanup.obsoleteAvatarPaths) deleteAsset(assetPath)
+  }
+  return options?.deferFileCleanup
+    ? { fileChanges: { obsoletePaths: cleanup.obsoleteAvatarPaths } }
+    : {}
 }
 
 /** Cumulative history is strongest for a success, then a failure, and weakest when never scraped. */

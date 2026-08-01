@@ -71,6 +71,433 @@ function decisionSnapshot(group: ActressNameConflictGroup) {
 }
 
 describe('ActressIdentityConflictWorkflow', () => {
+  it('reassigns the only pending scrape to the explicit keeper after a merge', () => {
+    const ownerId = createActress('Owner')
+    const targetId = createActress('Target')
+    editActress(ownerId, { aliases: ['Collision'] })
+    const workflow = new ActressIdentityConflictWorkflow()
+    assert.equal(
+      workflow.processPreparedScrape({
+        actressId: targetId,
+        plugin: { name: 'Fixture Source', source: 'builtin' },
+        queryName: 'Target',
+        selectedFields: ['birthDate', 'aliases'],
+        applicableFields: ['birthDate', 'aliases'],
+        mode: 'replace',
+        result: { birthDate: '1992-02-02', aliases: ['Collision'] },
+        warnings: [],
+        resources: []
+      }).status,
+      'pending'
+    )
+    const group = workflow.listConflictGroups()[0]
+    const candidate = group.candidates[0]
+
+    const outcome = workflow.resolveConflict({
+      kind: 'mergeActresses',
+      snapshot: decisionSnapshot(group),
+      pendingId: candidate.pendingId,
+      keepActressId: ownerId,
+      keepActressRevision: group.currentOwner!.revision,
+      mergeActressId: targetId,
+      mergeActressRevision: candidate.actressRevision,
+      finalMainName: 'Owner',
+      replacementMainNames: []
+    })
+
+    assert.deepEqual(outcome, { status: 'success', remainingPending: 1 })
+    assert.equal(getActressDetail(targetId), null)
+    assert.equal(getActressDetail(ownerId)?.birth_date, null)
+    const applicable = workflow.listConflictGroups()[0]
+    assert.equal(applicable.status, 'applicable')
+    assert.equal(applicable.candidates[0].pendingId, candidate.pendingId)
+    assert.equal(applicable.candidates[0].actressId, ownerId)
+    assert.equal(applicable.candidates[0].revision, candidate.revision + 1)
+  })
+
+  it('keeps a usable keeper avatar while clearing its missing source and crop state', () => {
+    const ownerId = createActress('Owner')
+    const targetId = createActress('Target')
+    const avatarDirectory = path.join(tempRoot, 'media_assets', 'avatars')
+    fs.mkdirSync(avatarDirectory, { recursive: true })
+    fs.writeFileSync(path.join(avatarDirectory, 'owner.jpg'), MINIMAL_JPEG)
+    fs.writeFileSync(path.join(avatarDirectory, 'target.jpg'), MINIMAL_JPEG)
+    getDb()
+      .prepare(
+        `UPDATE actresses
+         SET avatar_path = ?, avatar_source_path = ?, avatar_crop_json = ?
+         WHERE id = ?`
+      )
+      .run('avatars/owner.jpg', 'avatars/missing-source.jpg', '{"version":1}', ownerId)
+    getDb()
+      .prepare('UPDATE actresses SET avatar_path = ? WHERE id = ?')
+      .run('avatars/target.jpg', targetId)
+    editActress(ownerId, { aliases: ['Collision'] })
+    const workflow = new ActressIdentityConflictWorkflow()
+    workflow.processPreparedScrape({
+      actressId: targetId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Target',
+      selectedFields: ['aliases'],
+      applicableFields: ['aliases'],
+      mode: 'replace',
+      result: { aliases: ['Collision'] },
+      warnings: [],
+      resources: []
+    })
+    const group = workflow.listConflictGroups()[0]
+    const candidate = group.candidates[0]
+
+    workflow.resolveConflict({
+      kind: 'mergeActresses',
+      snapshot: decisionSnapshot(group),
+      pendingId: candidate.pendingId,
+      keepActressId: ownerId,
+      keepActressRevision: group.currentOwner!.revision,
+      mergeActressId: targetId,
+      mergeActressRevision: candidate.actressRevision,
+      finalMainName: 'Owner',
+      replacementMainNames: []
+    })
+
+    const keeper = getActressDetail(ownerId)
+    assert.equal(keeper?.avatar_path, 'avatars/owner.jpg')
+    assert.equal(keeper?.avatar_source_path, null)
+    assert.equal(keeper?.avatar_crop_json, null)
+    assert.equal(fs.existsSync(path.join(avatarDirectory, 'owner.jpg')), true)
+    assert.equal(fs.existsSync(path.join(avatarDirectory, 'target.jpg')), false)
+  })
+
+  it('uses the explicitly selected pending actress as keeper and the other current main name', () => {
+    const ownerId = createActress('Owner')
+    const targetId = createActress('Target')
+    editActress(ownerId, { aliases: ['Collision'], birth_date: '1988-08-08', cup_size: 'F' })
+    editActress(targetId, { cup_size: 'C' })
+    const workflow = new ActressIdentityConflictWorkflow()
+    workflow.processPreparedScrape({
+      actressId: targetId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Target',
+      selectedFields: ['aliases'],
+      applicableFields: ['aliases'],
+      mode: 'replace',
+      result: { aliases: ['Collision'] },
+      warnings: [],
+      resources: []
+    })
+    const group = workflow.listConflictGroups()[0]
+    const candidate = group.candidates[0]
+
+    workflow.resolveConflict({
+      kind: 'mergeActresses',
+      snapshot: decisionSnapshot(group),
+      pendingId: candidate.pendingId,
+      keepActressId: targetId,
+      keepActressRevision: candidate.actressRevision,
+      mergeActressId: ownerId,
+      mergeActressRevision: group.currentOwner!.revision,
+      finalMainName: 'Owner',
+      replacementMainNames: []
+    })
+
+    const keeper = getActressDetail(targetId)
+    assert.equal(getActressDetail(ownerId), null)
+    assert.equal(keeper?.main_name, 'Owner')
+    assert.equal(keeper?.birth_date, '1988-08-08')
+    assert.equal(keeper?.cup_size, 'C')
+    assert.ok(keeper?.aliases.includes('Target'))
+    const applicable = workflow.listConflictGroups()[0]
+    assert.equal(applicable.status, 'applicable')
+    assert.equal(applicable.candidates[0].actressId, targetId)
+    assert.equal(applicable.candidates[0].revision, candidate.revision + 1)
+  })
+
+  it('rejects merging when both actresses own pending scrape snapshots', () => {
+    const ownerId = createActress('Owner')
+    const targetId = createActress('Target')
+    const thirdId = createActress('Third')
+    editActress(ownerId, { aliases: ['Collision'] })
+    editActress(thirdId, { aliases: ['Other Collision'] })
+    const workflow = new ActressIdentityConflictWorkflow()
+    workflow.processPreparedScrape({
+      actressId: ownerId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Owner',
+      selectedFields: ['aliases'],
+      applicableFields: ['aliases'],
+      mode: 'replace',
+      result: { aliases: ['Other Collision'] },
+      warnings: [],
+      resources: []
+    })
+    workflow.processPreparedScrape({
+      actressId: targetId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Target',
+      selectedFields: ['aliases'],
+      applicableFields: ['aliases'],
+      mode: 'replace',
+      result: { aliases: ['Collision'] },
+      warnings: [],
+      resources: []
+    })
+    const group = workflow
+      .listConflictGroups()
+      .find((item) => item.normalizedName === 'collision')!
+    const candidate = group.candidates[0]
+
+    assert.throws(
+      () =>
+        workflow.resolveConflict({
+          kind: 'mergeActresses',
+          snapshot: decisionSnapshot(group),
+          pendingId: candidate.pendingId,
+          keepActressId: ownerId,
+          keepActressRevision: group.currentOwner!.revision,
+          mergeActressId: targetId,
+          mergeActressRevision: candidate.actressRevision,
+          finalMainName: 'Owner',
+          replacementMainNames: []
+        }),
+      /两位演员都有待确认刮削结果/
+    )
+    assert.ok(getActressDetail(ownerId))
+    assert.ok(getActressDetail(targetId))
+    assert.equal(workflow.countPendingScrapes(), 2)
+  })
+
+  it('rejects the whole workbench merge when a resulting name belongs to a third actress', () => {
+    const ownerId = createActress('Owner')
+    const targetId = createActress('Target')
+    const thirdId = createActress('Third')
+    editActress(ownerId, { aliases: ['Collision'] })
+    editActress(thirdId, { aliases: ['Third-party Name'] })
+    const workflow = new ActressIdentityConflictWorkflow()
+    workflow.processPreparedScrape({
+      actressId: targetId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Target',
+      selectedFields: ['aliases'],
+      applicableFields: ['aliases'],
+      mode: 'replace',
+      result: { aliases: ['Collision'] },
+      warnings: [],
+      resources: []
+    })
+    const group = workflow.listConflictGroups()[0]
+    const candidate = group.candidates[0]
+    getDb()
+      .prepare(
+        "INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, 'alias', 0)"
+      )
+      .run(targetId, 'Third-party Name')
+
+    assert.throws(
+      () =>
+        workflow.resolveConflict({
+          kind: 'mergeActresses',
+          snapshot: decisionSnapshot(group),
+          pendingId: candidate.pendingId,
+          keepActressId: ownerId,
+          keepActressRevision: group.currentOwner!.revision,
+          mergeActressId: targetId,
+          mergeActressRevision: candidate.actressRevision,
+          finalMainName: 'Owner',
+          replacementMainNames: []
+        }),
+      /名称「Third-party Name」已被其他演员使用/
+    )
+    assert.ok(getActressDetail(ownerId))
+    assert.ok(getActressDetail(targetId))
+    assert.equal(workflow.countPendingScrapes(), 1)
+  })
+
+  it('rejects the whole merge when the pending scrape also conflicts with a third actress', () => {
+    const ownerId = createActress('Owner')
+    const targetId = createActress('Target')
+    const thirdId = createActress('Third')
+    editActress(ownerId, { aliases: ['Pair Collision'] })
+    editActress(thirdId, { aliases: ['Third Collision'] })
+    const workflow = new ActressIdentityConflictWorkflow()
+    workflow.processPreparedScrape({
+      actressId: targetId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Target',
+      selectedFields: ['aliases'],
+      applicableFields: ['aliases'],
+      mode: 'replace',
+      result: { aliases: ['Pair Collision', 'Third Collision'] },
+      warnings: [],
+      resources: []
+    })
+    const group = workflow
+      .listConflictGroups()
+      .find((item) => item.normalizedName === 'paircollision')!
+    const candidate = group.candidates[0]
+
+    assert.throws(
+      () =>
+        workflow.resolveConflict({
+          kind: 'mergeActresses',
+          snapshot: decisionSnapshot(group),
+          pendingId: candidate.pendingId,
+          keepActressId: ownerId,
+          keepActressRevision: group.currentOwner!.revision,
+          mergeActressId: targetId,
+          mergeActressRevision: candidate.actressRevision,
+          finalMainName: 'Owner',
+          replacementMainNames: []
+        }),
+      /名称「Third Collision」还与第三位演员冲突/
+    )
+    assert.ok(getActressDetail(ownerId))
+    assert.ok(getActressDetail(targetId))
+    assert.equal(workflow.countPendingScrapes(), 1)
+  })
+
+  it('rejects merging a persisted name claimed by a third actress pending scrape', () => {
+    const ownerId = createActress('Owner')
+    const targetId = createActress('Target')
+    const thirdId = createActress('Third')
+    editActress(ownerId, { aliases: ['Pair Collision'] })
+    editActress(targetId, { aliases: ['Future Conflict'] })
+    const workflow = new ActressIdentityConflictWorkflow()
+    workflow.processPreparedScrape({
+      actressId: targetId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Target',
+      selectedFields: ['aliases'],
+      applicableFields: ['aliases'],
+      mode: 'replace',
+      result: { aliases: ['Pair Collision'] },
+      warnings: [],
+      resources: []
+    })
+    workflow.processPreparedScrape({
+      actressId: thirdId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Third',
+      selectedFields: ['aliases'],
+      applicableFields: ['aliases'],
+      mode: 'replace',
+      result: { aliases: ['Future Conflict'] },
+      warnings: [],
+      resources: []
+    })
+    const group = workflow
+      .listConflictGroups()
+      .find((item) => item.normalizedName === 'paircollision')!
+    const candidate = group.candidates.find((item) => item.actressId === targetId)!
+
+    assert.throws(
+      () =>
+        workflow.resolveConflict({
+          kind: 'mergeActresses',
+          snapshot: decisionSnapshot(group),
+          pendingId: candidate.pendingId,
+          keepActressId: ownerId,
+          keepActressRevision: group.currentOwner!.revision,
+          mergeActressId: targetId,
+          mergeActressRevision: candidate.actressRevision,
+          finalMainName: 'Owner',
+          replacementMainNames: []
+        }),
+      /名称「Future Conflict」还与第三位演员的待确认结果冲突/
+    )
+    assert.ok(getActressDetail(ownerId))
+    assert.ok(getActressDetail(targetId))
+    assert.ok(getActressDetail(thirdId))
+    assert.equal(workflow.countPendingScrapes(), 2)
+  })
+
+  it('returns stale without merging when either actress changed after confirmation was shown', () => {
+    const ownerId = createActress('Owner')
+    const targetId = createActress('Target')
+    editActress(ownerId, { aliases: ['Collision'] })
+    const workflow = new ActressIdentityConflictWorkflow()
+    workflow.processPreparedScrape({
+      actressId: targetId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Target',
+      selectedFields: ['aliases'],
+      applicableFields: ['aliases'],
+      mode: 'replace',
+      result: { aliases: ['Collision'] },
+      warnings: [],
+      resources: []
+    })
+    const group = workflow.listConflictGroups()[0]
+    const candidate = group.candidates[0]
+    editActress(ownerId, { profile_summary: 'Changed after the merge dialog opened' })
+
+    assert.deepEqual(
+      workflow.resolveConflict({
+        kind: 'mergeActresses',
+        snapshot: decisionSnapshot(group),
+        pendingId: candidate.pendingId,
+        keepActressId: ownerId,
+        keepActressRevision: group.currentOwner!.revision,
+        mergeActressId: targetId,
+        mergeActressRevision: candidate.actressRevision,
+        finalMainName: 'Owner',
+        replacementMainNames: []
+      }),
+      { status: 'stale', message: '数据已变化，请刷新后重新确认' }
+    )
+    assert.equal(getActressDetail(ownerId)?.profile_summary, 'Changed after the merge dialog opened')
+    assert.ok(getActressDetail(targetId))
+    assert.equal(workflow.countPendingScrapes(), 1)
+  })
+
+  it('rolls back the actress merge when pending reassociation fails', () => {
+    const ownerId = createActress('Owner')
+    const targetId = createActress('Target')
+    editActress(ownerId, { aliases: ['Collision'] })
+    editActress(targetId, { birth_date: '1990-01-01' })
+    const workflow = new ActressIdentityConflictWorkflow()
+    workflow.processPreparedScrape({
+      actressId: targetId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Target',
+      selectedFields: ['aliases'],
+      applicableFields: ['aliases'],
+      mode: 'replace',
+      result: { aliases: ['Collision'] },
+      warnings: [],
+      resources: []
+    })
+    const group = workflow.listConflictGroups()[0]
+    const candidate = group.candidates[0]
+    getDb().exec(`
+      CREATE TRIGGER fail_pending_merge_reassociation
+      BEFORE UPDATE OF target_actress_revision ON pending_actress_scrapes
+      BEGIN
+        SELECT RAISE(ABORT, 'forced pending reassociation failure');
+      END;
+    `)
+
+    assert.throws(
+      () =>
+        workflow.resolveConflict({
+          kind: 'mergeActresses',
+          snapshot: decisionSnapshot(group),
+          pendingId: candidate.pendingId,
+          keepActressId: ownerId,
+          keepActressRevision: group.currentOwner!.revision,
+          mergeActressId: targetId,
+          mergeActressRevision: candidate.actressRevision,
+          finalMainName: 'Owner',
+          replacementMainNames: []
+        }),
+      /forced pending reassociation failure/
+    )
+    assert.equal(getActressDetail(ownerId)?.birth_date, null)
+    assert.equal(getActressDetail(targetId)?.birth_date, '1990-01-01')
+    assert.equal(findActressByNameOrAlias('Owner'), ownerId)
+    assert.equal(findActressByNameOrAlias('Target'), targetId)
+    assert.equal(workflow.listConflictGroups()[0].candidates[0].actressId, targetId)
+  })
+
   it('edits only the selected conflicting name and applies the unlocked scrape atomically', () => {
     const ownerId = createActress('Owner')
     const targetId = createActress('Target')

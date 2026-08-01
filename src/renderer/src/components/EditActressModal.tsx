@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   BLOOD_TYPE_OPTIONS,
   CUP_SIZE_LETTERS,
@@ -62,6 +62,11 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
     () => parseAvatarCrop(actress.avatar_crop_json),
     [actress.avatar_crop_json]
   )
+  const avatarRevisionKey = `${actress.avatar_path ?? ''}\0${actress.avatar_source_path ?? ''}\0${actress.avatar_crop_json ?? ''}`
+
+  useEffect(() => {
+    setAvatarCommit(null)
+  }, [avatarRevisionKey])
 
   const bloodTypeOptions = useMemo(
     () => withCurrentSelectOption(BLOOD_TYPE_OPTIONS, bloodType),
@@ -163,6 +168,7 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
             {!mediaEditorsHidden ? (
               <EditFormSection title="头像" className="entity-edit-section--media">
                 <ActressAvatarEditor
+                  key={avatarRevisionKey}
                   displayUrl={assetUrl(actress.avatar_path)}
                   sourceUrl={assetUrl(actress.avatar_source_path)}
                   savedCrop={savedCrop}

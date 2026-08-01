@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "kind": "actress",
   "name": "Xslist",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "xslist.org 演员资料刮削插件",
   "author": "Plugin Dev Agent",
   "homepage": "https://xslist.org",

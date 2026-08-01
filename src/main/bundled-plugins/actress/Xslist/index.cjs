@@ -4,6 +4,7 @@
  */
 
 const BASE_URL = 'https://xslist.org';
+const ANONYMOUS_AVATAR_URL = `${BASE_URL}/assets/images/anonymous2.png`;
 
 /**
  * 搜索演员，返回资料页 URL
@@ -60,7 +61,7 @@ function parseDetail($, ctx) {
   
   // --- 头像 (avatarUrl) ---
   const avatarUrl = $('.profile_img_c img').first().attr('src');
-  if (avatarUrl) result.avatarUrl = avatarUrl;
+  if (avatarUrl && avatarUrl !== ANONYMOUS_AVATAR_URL) result.avatarUrl = avatarUrl;
   
   // --- 个人资料文本解析 ---
   const pageText = $('#layout').text();

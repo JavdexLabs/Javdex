@@ -31,13 +31,16 @@ export function actressTextSearchSql(alias: string): string {
   )`
 }
 
-/** Existing pattern-based actress predicate retained for video free-text search compatibility. */
-export function actressStoredNamePatternSearchSql(alias: string): string {
-  return `(
-    ${alias}.main_name LIKE ?
-    OR EXISTS (
-      SELECT 1 FROM actress_names an
-      WHERE an.actress_id = ${alias}.id AND an.name LIKE ?
-    )
+/** SQL predicate for video free-text search through uniquely owned actress names. */
+export function actressOwnedNamePatternSearchSql(alias: string): string {
+  return `EXISTS (
+    SELECT 1
+    FROM actress_names an
+    JOIN actress_name_ownership ano
+      ON ano.actress_id = an.actress_id
+     AND ano.normalized_name = normalize_actress_name(an.name)
+    WHERE an.actress_id = ${alias}.id
+      AND an.type IN (${SEARCHABLE_NAME_TYPES_SQL})
+      AND an.name LIKE ?
   )`
 }

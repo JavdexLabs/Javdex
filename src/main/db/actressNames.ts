@@ -119,32 +119,3 @@ export function setActressTypedNameIfEmpty(
   if (getActressTypedName(actressId, kind)) return
   setActressTypedName(actressId, kind, name)
 }
-
-export function findActressIdByStoredName(name: string): number | null {
-  const db = getDb()
-  const trimmed = name.trim()
-  if (!trimmed) return null
-
-  const main = db.prepare('SELECT id FROM actresses WHERE main_name = ?').get(trimmed) as
-    | { id: number }
-    | undefined
-  if (main) return main.id
-
-  const typed = db
-    .prepare('SELECT actress_id FROM actress_names WHERE name = ? LIMIT 1')
-    .get(trimmed) as { actress_id: number } | undefined
-  return typed?.actress_id ?? null
-}
-
-export function mergeActressNameRows(keepId: number, mergeId: number): void {
-  const db = getDb()
-  setActressTypedNameIfEmpty(keepId, 'zh', getActressTypedName(mergeId, 'zh'))
-  setActressTypedNameIfEmpty(keepId, 'en', getActressTypedName(mergeId, 'en'))
-
-  db.prepare(
-    `INSERT OR IGNORE INTO actress_names (actress_id, name, type, locale, source, is_primary)
-     SELECT ?, name, type, locale, source, is_primary
-     FROM actress_names
-     WHERE actress_id = ? AND type NOT IN ('main')`
-  ).run(keepId, mergeId)
-}

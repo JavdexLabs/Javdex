@@ -61,6 +61,7 @@ import { actressSearchLikeParams, actressTextSearchSql } from './actressSearchSq
 import {
   findActressIdByOwnedName,
   isActressNameOwnershipAvailable as isActressNameAvailable,
+  validateAndReleaseActressNameOwnershipForMerge,
   synchronizeActressNameOwnership
 } from './actressNameOwnership'
 
@@ -75,7 +76,6 @@ import {
   getActressTypedName,
   listActressAliasNames,
   listActressNameRows,
-  mergeActressNameRows,
   setActressTypedName,
   setActressTypedNameIfEmpty,
   upsertActressName
@@ -979,7 +979,7 @@ export function setActressPosterPath(id: number, posterPath: string | null): voi
   )
 }
 
-/** Merge mergeId into keepId. The merged record is removed; videos, gallery, and aliases combine. */
+/** Merge mergeId into keepId as one database transaction. */
 export function mergeActresses(
   keepId: number,
   mergeId: number,
@@ -988,29 +988,42 @@ export function mergeActresses(
   if (keepId === mergeId) throw new Error('不能合并同一演员')
 
   const db = getDb()
-  const keep = db.prepare('SELECT * FROM actresses WHERE id = ?').get(keepId) as Actress | undefined
-  const merge = db.prepare('SELECT * FROM actresses WHERE id = ?').get(mergeId) as Actress | undefined
-  if (!keep || !merge) throw new Error('演员不存在')
-  if (!canMergeActressGenders(keep.gender, merge.gender)) {
-    throw new Error('不能合并不同性别的演员')
-  }
+  const cleanup = db.transaction(() => {
+    const keep = db.prepare('SELECT * FROM actresses WHERE id = ?').get(keepId) as
+      | Actress
+      | undefined
+    const merge = db.prepare('SELECT * FROM actresses WHERE id = ?').get(mergeId) as
+      | Actress
+      | undefined
+    if (!keep || !merge) throw new Error('演员不存在')
+    if (!canMergeActressGenders(keep.gender, merge.gender)) {
+      throw new Error('不能合并不同性别的演员')
+    }
 
-  const finalMain = mainNameFrom === 'keep' ? keep.main_name : merge.main_name
-  const aliasCandidates = new Set<string>()
-  for (const alias of [...listActressAliasNames(keepId), ...listActressAliasNames(mergeId)]) {
-    aliasCandidates.add(alias)
-  }
-  if (merge.main_name.trim() !== finalMain) aliasCandidates.add(merge.main_name.trim())
-  if (mainNameFrom === 'merge' && keep.main_name.trim() !== finalMain) {
-    aliasCandidates.add(keep.main_name.trim())
-  }
+    const finalMain = mainNameFrom === 'keep' ? keep.main_name : merge.main_name
+    const keepNameRows = listActressNameRows(keepId)
+    const mergeNameRows = listActressNameRows(mergeId)
+    const allNameRows = [...keepNameRows, ...mergeNameRows]
+    const aliases = dedupeActressAliases(
+      [
+        ...listActressAliasNames(keepId, keepNameRows),
+        ...listActressAliasNames(mergeId, mergeNameRows),
+        ...(keep.main_name === finalMain ? [] : [keep.main_name]),
+        ...(merge.main_name === finalMain ? [] : [merge.main_name])
+      ],
+      finalMain
+    )
+    const typedNameRows = allNameRows.filter(
+      (row) => row.type !== ACTRESS_NAME_TYPE.MAIN && row.type !== ACTRESS_NAME_TYPE.ALIAS
+    )
+    validateAndReleaseActressNameOwnershipForMerge(
+      [finalMain, ...aliases, ...typedNameRows.map((row) => row.name)],
+      [keepId, mergeId]
+    )
 
-  const mergeAvatarPath = merge.avatar_path
-  const mergeAvatarSourcePath = merge.avatar_source_path
-  const keepHadAvatar = !isBlankText(keep.avatar_path)
-  const mergedScrapeRecord = mergeActressScrapeRecords(keep, merge)
+    const keepHadAvatar = isUsableImageAsset(keep.avatar_path)
+    const mergedScrapeRecord = mergeActressScrapeRecords(keep, merge)
 
-  const txn = db.transaction(() => {
     db.prepare(
       `INSERT OR IGNORE INTO video_actress (video_id, actress_id)
        SELECT video_id, ? FROM video_actress WHERE actress_id = ?`
@@ -1044,10 +1057,17 @@ export function mergeActresses(
       }
     }
 
-    mergeActressNameRows(keepId, mergeId)
+    db.prepare(
+      `INSERT OR IGNORE INTO actress_tag (actress_id, tag_id)
+       SELECT ?, tag_id FROM actress_tag WHERE actress_id = ?`
+    ).run(keepId, mergeId)
+
+    db.prepare('DELETE FROM actress_names WHERE actress_id = ?').run(keepId)
+    removeMergedActressRecord(mergeId)
 
     db.prepare(
       `UPDATE actresses SET
+         main_name = @main_name,
          birth_date = COALESCE(NULLIF(trim(birth_date), ''), NULLIF(trim(@birth_date), '')),
          debut_date = COALESCE(NULLIF(trim(debut_date), ''), NULLIF(trim(@debut_date), '')),
          height_cm = COALESCE(height_cm, @height_cm),
@@ -1059,10 +1079,7 @@ export function mergeActresses(
          zodiac = COALESCE(NULLIF(trim(zodiac), ''), NULLIF(trim(@zodiac), '')),
          nationality = COALESCE(NULLIF(trim(nationality), ''), NULLIF(trim(@nationality), '')),
          profile_summary = COALESCE(NULLIF(trim(profile_summary), ''), NULLIF(trim(@profile_summary), '')),
-         avatar_path = CASE
-           WHEN avatar_path IS NULL OR trim(avatar_path) = '' THEN @avatar_path
-           ELSE avatar_path
-         END,
+         avatar_path = CASE WHEN @keep_had_avatar = 0 THEN @avatar_path ELSE avatar_path END,
          avatar_source_path = CASE
            WHEN @keep_had_avatar = 0 THEN @avatar_source_path
            ELSE avatar_source_path
@@ -1078,6 +1095,7 @@ export function mergeActresses(
        WHERE id = @keepId`
     ).run({
       keepId,
+      main_name: finalMain,
       birth_date: merge.birth_date,
       debut_date: merge.debut_date,
       height_cm: merge.height_cm,
@@ -1099,41 +1117,43 @@ export function mergeActresses(
       updated_at: nowIso()
     })
 
-    db.prepare(
-      `INSERT OR IGNORE INTO actress_tag (actress_id, tag_id)
-       SELECT ?, tag_id FROM actress_tag WHERE actress_id = ?`
-    ).run(keepId, mergeId)
-
-    db.prepare('UPDATE actress_name_ownership SET actress_id = ? WHERE actress_id = ?').run(
-      keepId,
-      mergeId
+    upsertActressName(keepId, finalMain, ACTRESS_NAME_TYPE.MAIN, null, null, 1)
+    const insertTypedName = db.prepare(
+      `INSERT OR IGNORE INTO actress_names
+         (actress_id, name, type, locale, source, is_primary)
+       VALUES (?, ?, ?, ?, ?, ?)`
     )
-    removeMergedActressRecord(mergeId)
-  })
-  txn()
-
-  const keptAvatar = (
-    db.prepare('SELECT avatar_path FROM actresses WHERE id = ?').get(keepId) as {
-      avatar_path: string | null
+    for (const row of typedNameRows) {
+      insertTypedName.run(keepId, row.name, row.type, row.locale, row.source, row.is_primary)
     }
-  ).avatar_path
+    replacePreparedActressAliases(keepId, aliases)
+    synchronizeActressNameOwnership(keepId)
 
-  if (finalMain !== keep.main_name) {
-    assertActressNameAvailable(finalMain, keepId)
-    db.prepare('UPDATE actresses SET main_name = ?, updated_at = ? WHERE id = ?').run(
-      finalMain,
-      nowIso(),
-      keepId
+    const keptAvatar = db
+      .prepare('SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?')
+      .get(keepId) as { avatar_path: string | null; avatar_source_path: string | null }
+    const retainedAvatarPaths = new Set(
+      [keptAvatar.avatar_path, keptAvatar.avatar_source_path].filter(
+        (assetPath): assetPath is string => Boolean(assetPath)
+      )
     )
-    upsertActressName(keepId, finalMain, 'main', null, null, 1)
-  }
+    const obsoleteAvatarPaths = Array.from(
+      new Set([
+        keep.avatar_path,
+        keep.avatar_source_path,
+        merge.avatar_path,
+        merge.avatar_source_path
+      ])
+    ).filter(
+      (assetPath): assetPath is string =>
+        Boolean(assetPath) && !retainedAvatarPaths.has(assetPath as string)
+    )
+    return {
+      obsoleteAvatarPaths
+    }
+  })()
 
-  replaceActressAliases(keepId, Array.from(aliasCandidates), finalMain)
-
-  if (keepHadAvatar) {
-    if (mergeAvatarPath && mergeAvatarPath !== keptAvatar) deleteAsset(mergeAvatarPath)
-    if (mergeAvatarSourcePath) deleteAsset(mergeAvatarSourcePath)
-  }
+  for (const assetPath of cleanup.obsoleteAvatarPaths) deleteAsset(assetPath)
 }
 
 /** Cumulative history is strongest for a success, then a failure, and weakest when never scraped. */
@@ -1248,36 +1268,43 @@ function assertActressNameAvailable(name: string, exceptId: number): void {
   }
 }
 
+function dedupeActressAliases(aliases: string[], mainName: string): string[] {
+  const prepared: string[] = []
+  const seen = new Set<string>()
+  const mainKey = normalizeActressNameKey(mainName)
+  for (const alias of aliases) {
+    const trimmed = alias.trim()
+    if (!trimmed) continue
+    const key = normalizeActressNameKey(trimmed)
+    if (key === mainKey || seen.has(key)) continue
+    seen.add(key)
+    prepared.push(trimmed)
+  }
+  return prepared
+}
+
+function prepareActressAliases(aliases: string[], mainName: string): string[] {
+  return dedupeActressAliases(aliases, mainName).filter(isValidActressAlias)
+}
+
 function replaceActressAliases(
   actressId: number,
   aliases: string[],
-  mainName: string,
-  options?: { onNameConflict?: 'throw' | 'skip' }
-): string[] {
-  const onNameConflict = options?.onNameConflict ?? 'throw'
-  const skipped: string[] = []
+  mainName: string
+): void {
+  replacePreparedActressAliases(actressId, prepareActressAliases(aliases, mainName))
+}
+
+function replacePreparedActressAliases(actressId: number, aliases: string[]): void {
   const db = getDb()
   db.prepare("DELETE FROM actress_names WHERE actress_id = ? AND type = 'alias'").run(actressId)
-  const seen = new Set<string>()
-  const mainKey = normalizeActressNameKey(mainName)
 
   for (const alias of aliases) {
-    const trimmed = alias.trim()
-    if (!trimmed || !isValidActressAlias(trimmed)) continue
-    const key = normalizeActressNameKey(trimmed)
-    if (key === mainKey || seen.has(key)) continue
-    if (!isActressNameAvailable(trimmed, actressId)) {
-      if (onNameConflict === 'skip') {
-        skipped.push(trimmed)
-        continue
-      }
-      throw new Error(`名称「${trimmed}」已被其他演员使用`)
+    if (!isActressNameAvailable(alias, actressId)) {
+      throw new Error(`名称「${alias}」已被其他演员使用`)
     }
-    seen.add(key)
-    upsertActressName(actressId, trimmed, ACTRESS_NAME_TYPE.ALIAS, null, null, 0)
+    upsertActressName(actressId, alias, ACTRESS_NAME_TYPE.ALIAS, null, null, 0)
   }
-
-  return skipped
 }
 
 /** Manually edit actress profile fields. Aliases fully replace when supplied. */
@@ -1669,8 +1696,8 @@ export function applyActressScrapeResult(
     selected.has('aliases')
       ? resolveApplicableScrapedAliases(result.aliases, actressId, actress.main_name)
       : { applicable: [], conflicts: [] }
-  for (const name of conflictingAliases) {
-    warnings.push(`别名「${name}」已被其他演员使用，已跳过`)
+  if (conflictingAliases.length > 0) {
+    throw new Error(`名称「${conflictingAliases[0]}」已被其他演员使用`)
   }
   const shouldReplaceAliases =
     selected.has('aliases') &&
@@ -1846,12 +1873,7 @@ export function applyActressScrapeResult(
     }
 
     if (shouldReplaceAliases) {
-      const skipped = replaceActressAliases(actressId, applicableAliases, actress.main_name, {
-        onNameConflict: 'skip'
-      })
-      for (const name of skipped) {
-        warnings.push(`别名「${name}」已被其他演员使用，已跳过`)
-      }
+      replaceActressAliases(actressId, applicableAliases, actress.main_name)
     }
     if (selected.has('nameZh') || selected.has('nameEn') || shouldReplaceAliases) {
       synchronizeActressNameOwnership(actressId)

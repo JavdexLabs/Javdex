@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
 import { insertTestVideoWithFile } from './testVideoFixtures'
+import { addAlias, upsertActressFromScrape } from './actressRepo'
 import {
   addManualVideoTag,
   countVideosForBatchScrape,
@@ -416,14 +417,9 @@ describe('videoRepo.listVideos', () => {
   it('searches videos by actress alias', () => {
     setupDb()
     const db = getDb()
-    db.prepare('INSERT INTO actresses (main_name, gender) VALUES (?, ?)').run('Yui Hatano', 'female')
-    const actress = db.prepare('SELECT id FROM actresses WHERE main_name = ?').get('Yui Hatano') as {
-      id: number
-    }
-    db.prepare(
-      'INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, ?, ?)'
-    ).run(actress.id, '波多野結衣', 'alias', 0)
-    db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(1, actress.id)
+    const actressId = upsertActressFromScrape('Yui Hatano', null)
+    addAlias(actressId, '波多野結衣')
+    db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(1, actressId)
 
     const byMain = listVideos({ search: 'Hatano' })
     assert.equal(byMain.total, 1)
@@ -437,19 +433,30 @@ describe('videoRepo.listVideos', () => {
   it('preserves SQL LIKE pattern matching in the video search actress branch', () => {
     setupDb()
     const db = getDb()
-    db.prepare('INSERT INTO actresses (main_name, gender) VALUES (?, ?)').run(
-      'Pattern Actress',
-      'female'
-    )
-    const actress = db
-      .prepare('SELECT id FROM actresses WHERE main_name = ?')
-      .get('Pattern Actress') as { id: number }
-    db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(2, actress.id)
+    const actressId = upsertActressFromScrape('Pattern Actress', null)
+    db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(2, actressId)
 
     const result = listVideos({ search: 'Pattern_Actress' })
 
     assert.equal(result.total, 1)
     assert.equal(result.items[0].code, 'MUKD-501')
+  })
+
+  it('excludes migrated pending actress names from video search', () => {
+    setupDb()
+    const db = getDb()
+    const actressId = upsertActressFromScrape('Pending Holder', null)
+    db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(1, actressId)
+    db.prepare(
+      "INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, 'alias', 0)"
+    ).run(actressId, 'Ambiguous Pending')
+    db.prepare(
+      `INSERT INTO pending_actress_name_claims
+         (normalized_name, actress_id, name, type, is_primary)
+       VALUES (?, ?, ?, 'alias', 0)`
+    ).run('ambiguouspending', actressId, 'Ambiguous Pending')
+
+    assert.equal(listVideos({ search: 'Ambiguous Pending' }).total, 0)
   })
 })
 

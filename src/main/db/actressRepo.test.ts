@@ -613,6 +613,15 @@ describe('actressRepo.mergeActresses', () => {
       'INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, ?, ?)'
     ).run(2, 'Missing Alias', 'alias', 0)
     db.prepare(
+      'INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, ?, ?)'
+    ).run(2, '缺失女优', 'zh', 1)
+    db.prepare(
+      'INSERT INTO actress_name_ownership (normalized_name, actress_id) VALUES (?, ?)'
+    ).run('缺失女优', 2)
+    db.prepare('UPDATE actresses SET cup_size = ? WHERE id = ?').run('F', 2)
+    db.prepare('INSERT INTO actress_tags (name, source) VALUES (?, ?)').run('Merged Tag', 'manual')
+    db.prepare('INSERT INTO actress_tag (actress_id, tag_id) VALUES (?, ?)').run(2, 1)
+    db.prepare(
       `INSERT INTO actress_gallery_assets
         (actress_id, type, position, remote_url, local_path, created_at)
        VALUES (?, 'gallery', 0, ?, ?, ?)`
@@ -625,6 +634,19 @@ describe('actressRepo.mergeActresses', () => {
     assert.equal(detail.videos.length, 2)
     assert.ok(detail.aliases.includes('Missing Female'))
     assert.ok(detail.aliases.includes('Missing Alias'))
+    assert.equal(detail.name_zh, '缺失女优')
+    assert.equal(detail.cup_size, 'F')
+    assert.deepEqual(
+      db
+        .prepare(
+          `SELECT at.name
+           FROM actress_tags at
+           JOIN actress_tag link ON link.tag_id = at.id
+           WHERE link.actress_id = ?`
+        )
+        .all(1),
+      [{ name: 'Merged Tag' }]
+    )
     assert.equal(detail.gallery.length, 2)
     assert.equal(db.prepare('SELECT id FROM actresses WHERE id = 2').get(), undefined)
     assert.equal(findActressByNameOrAlias('Missing Female'), 1)
@@ -650,6 +672,152 @@ describe('actressRepo.mergeActresses', () => {
     assert.ok(detail)
     assert.equal(detail.main_name, 'Missing Female')
     assert.ok(detail.aliases.includes('Complete'))
+  })
+
+  it('rolls back the whole merge when final main-name reconstruction fails', () => {
+    setupDb()
+    const db = getDb()
+    db.exec(`
+      CREATE TRIGGER fail_merged_main_name
+      BEFORE INSERT ON actress_names
+      WHEN NEW.actress_id = 1
+        AND NEW.type = 'main'
+        AND NEW.name = 'Missing Female'
+      BEGIN
+        SELECT RAISE(ABORT, 'main reconstruction failed');
+      END;
+    `)
+
+    assert.throws(() => mergeActresses(1, 2, 'merge'), /main reconstruction failed/)
+
+    assert.equal(getActressDetail(1)?.main_name, 'Complete')
+    assert.equal(getActressDetail(2)?.main_name, 'Missing Female')
+    assert.equal(findActressByNameOrAlias('Complete'), 1)
+    assert.equal(findActressByNameOrAlias('Missing Female'), 2)
+  })
+
+  it('rolls back the whole merge when alias reconstruction fails', () => {
+    setupDb()
+    const db = getDb()
+    db.exec(`
+      CREATE TRIGGER fail_merged_alias
+      BEFORE INSERT ON actress_names
+      WHEN NEW.actress_id = 1
+        AND NEW.type = 'alias'
+        AND NEW.name = 'Missing Female'
+      BEGIN
+        SELECT RAISE(ABORT, 'alias reconstruction failed');
+      END;
+    `)
+
+    assert.throws(() => mergeActresses(1, 2, 'keep'), /alias reconstruction failed/)
+
+    assert.equal(getActressDetail(1)?.main_name, 'Complete')
+    assert.equal(getActressDetail(2)?.main_name, 'Missing Female')
+    assert.equal(findActressByNameOrAlias('Complete'), 1)
+    assert.equal(findActressByNameOrAlias('Missing Female'), 2)
+  })
+
+  it('rejects the whole merge when any resulting name belongs to a third actress', () => {
+    setupDb()
+    const db = getDb()
+    const thirdId = upsertActressFromScrape('Third Owner', null)
+    editActress(thirdId, { aliases: ['Contested Alias'] })
+    db.prepare(
+      "INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, 'alias', 0)"
+    ).run(2, 'Contested Alias')
+
+    assert.throws(() => mergeActresses(1, 2, 'keep'), /名称「Contested Alias」已被其他演员使用/)
+
+    assert.equal(getActressDetail(1)?.main_name, 'Complete')
+    assert.equal(getActressDetail(2)?.main_name, 'Missing Female')
+    assert.equal(findActressByNameOrAlias('Contested Alias'), thirdId)
+    assert.equal(findActressByNameOrAlias('Missing Female'), 2)
+  })
+
+  it('rejects the whole merge when the selected final main name belongs to a third actress', () => {
+    setupDb()
+    const db = getDb()
+    const thirdId = upsertActressFromScrape('Shared Name', null)
+    db.prepare('UPDATE actresses SET main_name = ? WHERE id = ?').run('Ｓｈａｒｅｄ　Ｎａｍｅ', 2)
+    db.prepare("UPDATE actress_names SET name = ? WHERE actress_id = ? AND type = 'main'").run(
+      'Ｓｈａｒｅｄ　Ｎａｍｅ',
+      2
+    )
+
+    assert.throws(() => mergeActresses(1, 2, 'merge'), /名称「Ｓｈａｒｅｄ　Ｎａｍｅ」已被其他演员使用/)
+
+    assert.equal(getActressDetail(1)?.main_name, 'Complete')
+    assert.equal(getActressDetail(2)?.main_name, 'Ｓｈａｒｅｄ　Ｎａｍｅ')
+    assert.equal(findActressByNameOrAlias('Shared Name'), thirdId)
+  })
+
+  it('resolves a migrated pending name claimed only by the two merged actresses', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare(
+      "INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, 'alias', 0)"
+    ).run(1, 'Shared Merge Name')
+    db.prepare(
+      "INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, 'alias', 0)"
+    ).run(2, 'Ｓｈａｒｅｄ　Ｍｅｒｇｅ　Ｎａｍｅ')
+    const insertPending = db.prepare(
+      `INSERT INTO pending_actress_name_claims
+         (normalized_name, actress_id, name, type, is_primary)
+       VALUES (?, ?, ?, 'alias', 0)`
+    )
+    insertPending.run('sharedmergename', 1, 'Shared Merge Name')
+    insertPending.run('sharedmergename', 2, 'Ｓｈａｒｅｄ　Ｍｅｒｇｅ　Ｎａｍｅ')
+
+    mergeActresses(1, 2, 'keep')
+
+    assert.equal(findActressByNameOrAlias('shared merge name'), 1)
+    assert.deepEqual(
+      db
+        .prepare(
+          'SELECT actress_id FROM pending_actress_name_claims WHERE normalized_name = ?'
+        )
+        .all('sharedmergename'),
+      []
+    )
+  })
+
+  it('preserves existing aliases without reapplying scraped-value heuristics', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare(
+      "INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, 'alias', 0)"
+    ).run(2, 'Watch Mori')
+    db.prepare(
+      'INSERT INTO actress_name_ownership (normalized_name, actress_id) VALUES (?, ?)'
+    ).run('watchmori', 2)
+
+    mergeActresses(1, 2, 'keep')
+
+    assert.equal(findActressByNameOrAlias('Watch Mori'), 1)
+    assert.ok(getActressDetail(1)?.aliases.includes('Watch Mori'))
+  })
+
+  it('deletes unusable keeper avatar assets after adopting the merged actress avatar', () => {
+    setupDb()
+    const db = getDb()
+    writeTestAsset('avatars/broken-keeper.jpg', 'not an image')
+    writeTestAsset('avatar_sources/broken-keeper.jpg', 'not an image')
+    writeTestAvatar('avatars/merged-valid.jpg')
+    db.prepare(
+      'UPDATE actresses SET avatar_path = ?, avatar_source_path = ? WHERE id = ?'
+    ).run('avatars/broken-keeper.jpg', 'avatar_sources/broken-keeper.jpg', 1)
+    db.prepare('UPDATE actresses SET avatar_path = ? WHERE id = ?').run(
+      'avatars/merged-valid.jpg',
+      2
+    )
+
+    mergeActresses(1, 2, 'keep')
+
+    assert.equal(getActressDetail(1)?.avatar_path, 'avatars/merged-valid.jpg')
+    assert.equal(assetExists('avatars/broken-keeper.jpg'), false)
+    assert.equal(assetExists('avatar_sources/broken-keeper.jpg'), false)
+    assert.equal(assetExists('avatars/merged-valid.jpg'), true)
   })
 
   for (const merged of MERGE_SCRAPE_STATUS_MATRIX) {
@@ -1352,7 +1520,7 @@ describe('actressRepo.applyActressScrapeResult', () => {
 
     const outcome = applyActressScrapeResult(
       2,
-      { aliases: ['Missing Female', 'Complete Alias'] },
+      { aliases: ['Missing Female', 'watch online'] },
       null,
       [],
       ['aliases'],
@@ -1670,20 +1838,23 @@ describe('actressRepo.applyActressScrapeResult', () => {
     assert.deepEqual(detail?.aliases, [])
   })
 
-  it('replaceIfPresent preserves aliases when every returned alias conflicts', () => {
+  it('replaceIfPresent rejects all fields when every returned alias conflicts', () => {
     setupDb()
 
-    const { applied, warnings } = applyActressScrapeResult(
-      1,
-      { birthDate: '1995-03-04', aliases: ['Missing Female'] },
-      null,
-      [],
-      ['birthDate', 'aliases'],
-      'replaceIfPresent'
+    assert.throws(
+      () =>
+        applyActressScrapeResult(
+          1,
+          { birthDate: '1995-03-04', aliases: ['Missing Female'] },
+          null,
+          [],
+          ['birthDate', 'aliases'],
+          'replaceIfPresent'
+        ),
+      /名称「Missing Female」已被其他演员使用/
     )
 
-    assert.equal(applied, true)
-    assert.equal(warnings.some((warning) => warning.includes('Missing Female')), true)
+    assert.equal(getActressDetail(1)?.birth_date, '1990-01-01')
     assert.deepEqual(getActressDetail(1)?.aliases, ['Complete Alias'])
   })
 
@@ -1709,54 +1880,51 @@ describe('actressRepo.applyActressScrapeResult', () => {
     assert.deepEqual(row, { bust_cm: 90, waist_cm: null, hip_cm: null })
   })
 
-  it('skips conflicting aliases and applies other scrape fields', () => {
+  it('rejects the whole scraped result when any alias has another owner', () => {
     setupDb()
-    const { applied, warnings } = applyActressScrapeResult(
-      2,
-      {
-        birthDate: '1995-03-04',
-        aliases: ['Complete Alias', 'Safe Alias']
-      },
-      null,
-      [],
-      ['birthDate', 'aliases'],
-      'replace'
+    assert.throws(
+      () =>
+        applyActressScrapeResult(
+          2,
+          {
+            birthDate: '1995-03-04',
+            aliases: ['Complete Alias', 'Safe Alias']
+          },
+          null,
+          [],
+          ['birthDate', 'aliases'],
+          'replace'
+        ),
+      /名称「Complete Alias」已被其他演员使用/
     )
-
-    assert.equal(applied, true)
-    assert.deepEqual(warnings, ['别名「Complete Alias」已被其他演员使用，已跳过'])
 
     const row = getDb().prepare('SELECT birth_date FROM actresses WHERE id = ?').get(2) as {
       birth_date: string | null
     }
-    assert.equal(row.birth_date, '1995-03-04')
-
-    const aliases = getDb()
-      .prepare("SELECT name FROM actress_names WHERE actress_id = ? AND type = 'alias' ORDER BY name")
-      .all(2) as { name: string }[]
-    assert.deepEqual(
-      aliases.map((item) => item.name),
-      ['Safe Alias']
-    )
+    assert.equal(row.birth_date, null)
+    assert.deepEqual(getActressDetail(2)?.aliases, [])
   })
 
   it('treats canonically equivalent scraped aliases as conflicts', () => {
     setupDb()
 
-    const { applied, warnings } = applyActressScrapeResult(
-      2,
-      {
-        birthDate: '1995-03-04',
-        aliases: ['Ｃｏｍｐｌｅｔｅ']
-      },
-      null,
-      [],
-      ['birthDate', 'aliases'],
-      'replaceIfPresent'
+    assert.throws(
+      () =>
+        applyActressScrapeResult(
+          2,
+          {
+            birthDate: '1995-03-04',
+            aliases: ['Ｃｏｍｐｌｅｔｅ']
+          },
+          null,
+          [],
+          ['birthDate', 'aliases'],
+          'replaceIfPresent'
+        ),
+      /名称「Ｃｏｍｐｌｅｔｅ」已被其他演员使用/
     )
 
-    assert.equal(applied, true)
-    assert.deepEqual(warnings, ['别名「Ｃｏｍｐｌｅｔｅ」已被其他演员使用，已跳过'])
+    assert.equal(getActressDetail(2)?.birth_date, null)
     assert.deepEqual(getActressDetail(2)?.aliases, [])
   })
 })

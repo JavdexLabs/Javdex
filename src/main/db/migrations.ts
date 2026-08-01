@@ -1,7 +1,8 @@
 import type Database from 'better-sqlite3'
+import { normalizeActressName } from './actressNameOwnership'
 import { SCHEMA_SQL } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 4
+export const CURRENT_SCHEMA_VERSION = 5
 
 type Migration = {
   version: number
@@ -146,6 +147,115 @@ function migrateToV4(database: Database.Database): void {
   migrateScrapeStatus()
 }
 
+type LegacyActressName = {
+  actress_id: number
+  name: string
+  type: string
+  locale: string | null
+  source: string | null
+  is_primary: number
+}
+
+function migrateToV5(database: Database.Database): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS actress_name_ownership (
+      normalized_name TEXT PRIMARY KEY CHECK(length(normalized_name) > 0),
+      actress_id INTEGER NOT NULL,
+      FOREIGN KEY (actress_id) REFERENCES actresses(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_actress_name_ownership_actress_id
+      ON actress_name_ownership(actress_id);
+
+    CREATE TABLE IF NOT EXISTS pending_actress_name_claims (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      normalized_name TEXT NOT NULL CHECK(length(normalized_name) > 0),
+      actress_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      locale TEXT,
+      source TEXT,
+      is_primary INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (actress_id) REFERENCES actresses(id) ON DELETE CASCADE,
+      UNIQUE (normalized_name, actress_id, name, type)
+    );
+    CREATE INDEX IF NOT EXISTS idx_pending_actress_name_claims_normalized
+      ON pending_actress_name_claims(normalized_name);
+    CREATE INDEX IF NOT EXISTS idx_pending_actress_name_claims_actress_id
+      ON pending_actress_name_claims(actress_id);
+  `)
+
+  if (!tableExists(database, 'actress_names')) return
+
+  database.exec(`
+    DELETE FROM actress_names
+    WHERE type = 'main'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM actresses
+        WHERE actresses.id = actress_names.actress_id
+          AND actresses.main_name = actress_names.name
+      );
+
+    INSERT OR IGNORE INTO actress_names (actress_id, name, type, is_primary)
+    SELECT id, main_name, 'main', 1
+    FROM actresses;
+
+    UPDATE actress_names
+    SET is_primary = 1
+    WHERE type = 'main';
+  `)
+
+  const groups = new Map<string, LegacyActressName[]>()
+  const names = database
+    .prepare(
+      `SELECT actress_id, name, type, locale, source, is_primary
+       FROM actress_names
+       ORDER BY id`
+    )
+    .all() as LegacyActressName[]
+
+  for (const name of names) {
+    let normalizedName: string
+    try {
+      normalizedName = normalizeActressName(name.name)
+    } catch {
+      continue
+    }
+    const existing = groups.get(normalizedName)
+    if (existing) existing.push(name)
+    else groups.set(normalizedName, [name])
+  }
+
+  const insertOwnership = database.prepare(
+    `INSERT INTO actress_name_ownership (normalized_name, actress_id)
+     VALUES (?, ?)`
+  )
+  const insertPendingClaim = database.prepare(
+    `INSERT INTO pending_actress_name_claims (
+       normalized_name, actress_id, name, type, locale, source, is_primary
+     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+  )
+
+  for (const [normalizedName, claims] of groups) {
+    const actressIds = new Set(claims.map((claim) => claim.actress_id))
+    if (actressIds.size === 1) {
+      insertOwnership.run(normalizedName, claims[0].actress_id)
+      continue
+    }
+    for (const claim of claims) {
+      insertPendingClaim.run(
+        normalizedName,
+        claim.actress_id,
+        claim.name,
+        claim.type,
+        claim.locale,
+        claim.source,
+        claim.is_primary
+      )
+    }
+  }
+}
+
 const MIGRATIONS: Migration[] = [
   {
     version: 2,
@@ -158,6 +268,10 @@ const MIGRATIONS: Migration[] = [
   {
     version: 4,
     migrate: migrateToV4
+  },
+  {
+    version: 5,
+    migrate: migrateToV5
   }
 ]
 
@@ -174,8 +288,10 @@ export function migrateDatabase(database: Database.Database): void {
     )
   }
   if (current === 0) {
-    database.exec(SCHEMA_SQL)
-    database.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
+    database.transaction(() => {
+      database.exec(SCHEMA_SQL)
+      database.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
+    })()
     return
   }
   for (let next = current + 1; next <= CURRENT_SCHEMA_VERSION; next += 1) {
@@ -183,7 +299,9 @@ export function migrateDatabase(database: Database.Database): void {
     if (!migration) {
       throw new Error(`Missing database migration for schema version ${next}.`)
     }
-    migration.migrate(database)
-    database.pragma(`user_version = ${next}`)
+    database.transaction(() => {
+      migration.migrate(database)
+      database.pragma(`user_version = ${next}`)
+    })()
   }
 }

@@ -189,6 +189,31 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_actress_names_one_main
     ON actress_names(actress_id)
     WHERE type = 'main';
 
+CREATE TABLE IF NOT EXISTS actress_name_ownership (
+    normalized_name TEXT PRIMARY KEY CHECK(length(normalized_name) > 0),
+    actress_id INTEGER NOT NULL,
+    FOREIGN KEY (actress_id) REFERENCES actresses(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_actress_name_ownership_actress_id
+    ON actress_name_ownership(actress_id);
+
+CREATE TABLE IF NOT EXISTS pending_actress_name_claims (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    normalized_name TEXT NOT NULL CHECK(length(normalized_name) > 0),
+    actress_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    locale TEXT,
+    source TEXT,
+    is_primary INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (actress_id) REFERENCES actresses(id) ON DELETE CASCADE,
+    UNIQUE (normalized_name, actress_id, name, type)
+);
+CREATE INDEX IF NOT EXISTS idx_pending_actress_name_claims_normalized
+    ON pending_actress_name_claims(normalized_name);
+CREATE INDEX IF NOT EXISTS idx_pending_actress_name_claims_actress_id
+    ON pending_actress_name_claims(actress_id);
+
 CREATE TABLE IF NOT EXISTS actress_tags (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,

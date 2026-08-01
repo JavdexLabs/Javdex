@@ -1,6 +1,11 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import Database from 'better-sqlite3'
+import { findActressIdByOwnedName, normalizeActressName } from './actressNameOwnership'
+import { closeDatabase, initDatabaseAtPath } from './database'
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
 
 function indexNames(db: Database.Database): string[] {
@@ -76,7 +81,161 @@ function createV3ActressSchema(db: Database.Database): void {
   db.pragma('user_version = 3')
 }
 
+function createV4ActressSchema(db: Database.Database): void {
+  createV3ActressSchema(db)
+  db.exec(`
+    ALTER TABLE actresses
+    ADD COLUMN scraped_status INTEGER NOT NULL DEFAULT 0
+    CHECK(scraped_status IN (0, 1, 2));
+    CREATE INDEX idx_actresses_scraped_status ON actresses(scraped_status);
+  `)
+  db.pragma('user_version = 4')
+}
+
 describe('database schema', () => {
+  it('normalizes actress ownership names without merging distinct scripts or punctuation', () => {
+    assert.equal(normalizeActressName('  Ａlice\u3000Smith\t'), 'alicesmith')
+    assert.equal(normalizeActressName('山田・太郎-Ａ'), '山田・太郎-a')
+    assert.notEqual(normalizeActressName('櫻井'), normalizeActressName('樱井'))
+    assert.notEqual(normalizeActressName('さくら'), normalizeActressName('サクラ'))
+    assert.notEqual(normalizeActressName('yu'), normalizeActressName('yuu'))
+    assert.throws(() => normalizeActressName(' \t\n\u3000'), /演员名称不能为空/)
+  })
+
+  it('migrates uncontested names to ownership and preserves cross-actress collisions for review', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-name-ownership-'))
+    const dbPath = path.join(tempDir, 'library.db')
+    const fixture = new Database(dbPath)
+    try {
+      createV4ActressSchema(fixture)
+      fixture.exec(`
+        INSERT INTO actresses (id, main_name) VALUES
+          (1, 'Ａlice Smith'),
+          (2, 'Bob'),
+          (3, 'Main Without Row');
+        INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES
+          (1, 'Ａlice Smith', 'main', 1),
+          (1, 'Alice Smith', 'alias', 0),
+          (1, 'Shared Name', 'alias', 0),
+          (1, '爱丽丝', 'zh', 1),
+          (2, 'Bob', 'main', 1),
+          (2, 'ＳＨＡＲＥＤ　ＮＡＭＥ', 'en', 1),
+          (2, '　', 'alias', 0);
+      `)
+    } finally {
+      fixture.close()
+    }
+
+    try {
+      const db = initDatabaseAtPath(dbPath)
+
+      assert.deepEqual(
+        db
+          .prepare(
+            `SELECT normalized_name, actress_id
+             FROM actress_name_ownership
+             ORDER BY normalized_name`
+          )
+          .all(),
+        [
+          { normalized_name: 'alicesmith', actress_id: 1 },
+          { normalized_name: 'bob', actress_id: 2 },
+          { normalized_name: 'mainwithoutrow', actress_id: 3 },
+          { normalized_name: '爱丽丝', actress_id: 1 }
+        ]
+      )
+      assert.deepEqual(
+        db
+          .prepare(
+            `SELECT actress_id, name, type, is_primary
+             FROM actress_names
+             WHERE actress_id = 3`
+          )
+          .get(),
+        { actress_id: 3, name: 'Main Without Row', type: 'main', is_primary: 1 }
+      )
+      assert.deepEqual(
+        db
+          .prepare(
+            `SELECT normalized_name, actress_id, name, type
+             FROM pending_actress_name_claims
+             ORDER BY actress_id, type`
+          )
+          .all(),
+        [
+          {
+            normalized_name: 'sharedname',
+            actress_id: 1,
+            name: 'Shared Name',
+            type: 'alias'
+          },
+          {
+            normalized_name: 'sharedname',
+            actress_id: 2,
+            name: 'ＳＨＡＲＥＤ　ＮＡＭＥ',
+            type: 'en'
+          }
+        ]
+      )
+      assert.equal(findActressIdByOwnedName(' alice smith '), 1)
+      assert.equal(findActressIdByOwnedName('ＳＨＡＲＥＤＮＡＭＥ'), null)
+
+      const migratedRows = {
+        ownership: db.prepare('SELECT * FROM actress_name_ownership ORDER BY normalized_name').all(),
+        pending: db
+          .prepare('SELECT * FROM pending_actress_name_claims ORDER BY id')
+          .all()
+      }
+      migrateDatabase(db)
+      assert.deepEqual(
+        {
+          ownership: db
+            .prepare('SELECT * FROM actress_name_ownership ORDER BY normalized_name')
+            .all(),
+          pending: db.prepare('SELECT * FROM pending_actress_name_claims ORDER BY id').all()
+        },
+        migratedRows
+      )
+    } finally {
+      closeDatabase()
+      fs.rmSync(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  it('rolls back name ownership data and schema version when migration fails', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-name-rollback-'))
+    const dbPath = path.join(tempDir, 'library.db')
+    const db = new Database(dbPath)
+    try {
+      createV4ActressSchema(db)
+      db.pragma('foreign_keys = ON')
+      db.exec(`
+        INSERT INTO actresses (id, main_name) VALUES (1, 'Kept Main');
+        INSERT INTO actress_names (actress_id, name, type, is_primary)
+        VALUES (999, 'Orphan Name', 'alias', 0);
+      `)
+
+      assert.throws(() => migrateDatabase(db), /FOREIGN KEY constraint failed/)
+
+      assert.equal(db.pragma('user_version', { simple: true }), 4)
+      assert.equal(
+        Boolean(
+          db
+            .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+            .get('actress_name_ownership')
+        ),
+        false
+      )
+      assert.deepEqual(
+        db.prepare('SELECT actress_id, name, type FROM actress_names').all(),
+        [{ actress_id: 999, name: 'Orphan Name', type: 'alias' }]
+      )
+    } finally {
+      db.close()
+      fs.rmSync(tempDir, { recursive: true, force: true })
+    }
+  })
+
   it('creates the current schema and records user_version', () => {
     const db = new Database(':memory:')
     try {
@@ -116,6 +275,8 @@ describe('database schema', () => {
         'playlists',
         'playlist_video',
         'actress_names',
+        'actress_name_ownership',
+        'pending_actress_name_claims',
         'actress_tags',
         'actress_tag',
         'actress_gallery_assets'
@@ -140,6 +301,22 @@ describe('database schema', () => {
       assert.equal(indexNames(db).includes('idx_videos_file_path'), false)
 
       db.prepare("INSERT INTO actresses (main_name) VALUES ('Default status')").run()
+      const defaultStatusId = Number(
+        (
+          db
+            .prepare("SELECT id FROM actresses WHERE main_name = 'Default status'")
+            .get() as { id: number }
+        ).id
+      )
+      assert.throws(
+        () =>
+          db
+            .prepare(
+              'INSERT INTO actress_name_ownership (normalized_name, actress_id) VALUES (?, ?)'
+            )
+            .run('', defaultStatusId),
+        /CHECK constraint failed/
+      )
       assert.equal(
         (
           db
@@ -411,7 +588,7 @@ describe('database schema', () => {
       assert.equal(rows.some((row) => row.scraped_status === 2), false)
       assert.equal(rowCount(db, 'actresses'), rows.length)
       assert.equal(rowCount(db, 'actress_gallery_assets'), 2)
-      assert.equal(rowCount(db, 'actress_names'), 3)
+      assert.equal(rowCount(db, 'actress_names'), rowCount(db, 'actresses') + 2)
       assert.equal(rowCount(db, 'actress_tag'), 1)
       assert.equal(rowCount(db, 'video_actress'), 1)
     } finally {

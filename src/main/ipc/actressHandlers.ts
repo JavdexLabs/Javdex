@@ -100,7 +100,7 @@ export function registerActressHandlers(): void {
   )
 
   registerHandler(IPC.ACTRESS_CONFLICT_COUNT, (): number =>
-    actressIdentityConflictWorkflow.countPendingScrapes()
+    actressIdentityConflictWorkflow.countPendingReviewItems()
   )
 
   registerHandler(

@@ -7,6 +7,7 @@ import Database from 'better-sqlite3'
 import { findActressIdByOwnedName } from './actressNameOwnership'
 import { closeDatabase, initDatabaseAtPath } from './database'
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
+import { ActressIdentityConflictWorkflow } from '../services/actressIdentityConflictWorkflow'
 
 function indexNames(db: Database.Database): string[] {
   return (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as {
@@ -186,6 +187,34 @@ describe('database schema', () => {
       assert.equal(findActressIdByOwnedName(' alice smith '), 1)
       assert.equal(findActressIdByOwnedName('ＳＨＡＲＥＤＮＡＭＥ'), null)
       assert.throws(() => findActressIdByOwnedName(' \t\n\u3000'), /演员名称不能为空/)
+
+      const pendingOwnershipWorkflow = new ActressIdentityConflictWorkflow()
+      const pendingOwnershipGroups = pendingOwnershipWorkflow.listConflictGroups()
+      assert.equal(pendingOwnershipWorkflow.countPendingScrapes(), 0)
+      assert.equal(pendingOwnershipWorkflow.countPendingReviewItems(), 1)
+      assert.deepEqual(
+        pendingOwnershipGroups.map((group) => ({
+          normalizedName: group.normalizedName,
+          candidateCount: group.candidates.length,
+          claimants: group.claimants.map((claimant) => claimant.actressId),
+          claims: group.pendingNameClaims.map((claim) => ({
+            actressId: claim.actressId,
+            name: claim.name,
+            type: claim.type
+          }))
+        })),
+        [
+          {
+            normalizedName: 'sharedname',
+            candidateCount: 0,
+            claimants: [1, 2],
+            claims: [
+              { actressId: 1, name: 'Shared Name', type: 'alias' },
+              { actressId: 2, name: 'ＳＨＡＲＥＤ　ＮＡＭＥ', type: 'en' }
+            ]
+          }
+        ]
+      )
 
       const migratedRows = {
         ownership: db.prepare('SELECT * FROM actress_name_ownership ORDER BY normalized_name').all(),

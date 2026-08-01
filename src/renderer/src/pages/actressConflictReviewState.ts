@@ -35,6 +35,12 @@ export function buildActressConflictDecisionSnapshot(
       actressId: claimant.actressId,
       revision: claimant.revision
     })),
+    pendingNameClaims: group.pendingNameClaims.map((claim) => ({
+      claimId: claim.claimId,
+      actressId: claim.actressId,
+      name: claim.name,
+      type: claim.type
+    })),
     candidates: group.candidates.map((candidate) => ({
       pendingId: candidate.pendingId,
       pendingRevision: candidate.revision,
@@ -76,7 +82,7 @@ export function buildActressConflictMergeActors(
       revision: claimant.revision,
       mainName: claimant.mainName,
       avatarPath: claimant.avatarPath,
-      hasPending: false
+      hasPending: claimant.hasPendingScrape
     })
   }
   for (const candidate of group.candidates) {
@@ -103,7 +109,8 @@ export function canConfirmMergeActresses(
   selectedActressId: number,
   partnerActressId: number | null,
   keepActressId: number | null,
-  finalMainNameActressId: number | null
+  finalMainNameActressId: number | null,
+  allowSinglePendingScrape = true
 ): boolean {
   if (
     partnerActressId == null ||
@@ -114,7 +121,8 @@ export function canConfirmMergeActresses(
   }
   const selected = actors.find((actor) => actor.actressId === selectedActressId)
   const partner = actors.find((actor) => actor.actressId === partnerActressId)
-  if (!selected || !partner || !selected.hasPending) return false
+  if (!selected || !partner) return false
+  if (!allowSinglePendingScrape && (selected.hasPending || partner.hasPending)) return false
   if (selected.hasPending && partner.hasPending) return false
   if (keepActressId !== selectedActressId && keepActressId !== partnerActressId) return false
   return (

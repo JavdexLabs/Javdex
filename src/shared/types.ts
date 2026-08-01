@@ -1024,6 +1024,17 @@ export interface ActressConflictCurrentOwner {
   mainName: string
   avatarPath: string | null
   nameTypes: ActressPendingNameType[]
+  hasPendingScrape: boolean
+}
+
+export interface PendingActressNameClaim {
+  claimId: number
+  actressId: number
+  name: string
+  type: ActressPendingNameType
+  locale: string | null
+  source: string | null
+  isPrimary: boolean
 }
 
 export interface ActressNameConflictGroup {
@@ -1033,6 +1044,8 @@ export interface ActressNameConflictGroup {
   currentOwner: ActressConflictCurrentOwner | null
   /** Every actress that currently declares this normalized name, including legacy ambiguous claims. */
   claimants: ActressConflictCurrentOwner[]
+  /** Ambiguous historical claims awaiting an explicit ownership decision. */
+  pendingNameClaims: PendingActressNameClaim[]
   candidates: PendingActressScrapeCandidate[]
 }
 
@@ -1042,6 +1055,12 @@ export interface ActressConflictDecisionSnapshot {
   currentOwnerActressId: number | null
   currentOwnerRevision: number | null
   claimants: Array<{ actressId: number; revision: number }>
+  pendingNameClaims: Array<{
+    claimId: number
+    actressId: number
+    name: string
+    type: ActressPendingNameType
+  }>
   candidates: Array<{
     pendingId: number
     pendingRevision: number
@@ -1082,6 +1101,14 @@ export type ResolveActressConflictInput = ActressConflictDecisionBase &
         nameType: ActressPendingNameType
         newName: string
       }
+    | {
+        kind: 'editPendingNameClaim'
+        claimId: number
+        actressId: number
+        name: string
+        nameType: ActressPendingNameType
+        newName: string
+      }
     | { kind: 'assignToCurrentActress'; pendingId: number }
     | {
         kind: 'assignToExistingActress'
@@ -1090,7 +1117,7 @@ export type ResolveActressConflictInput = ActressConflictDecisionBase &
       }
     | {
         kind: 'mergeActresses'
-        pendingId: number
+        pendingId?: number
         keepActressId: number
         keepActressRevision: number
         mergeActressId: number

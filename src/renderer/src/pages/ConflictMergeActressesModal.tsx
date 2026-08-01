@@ -19,6 +19,7 @@ export interface ConflictMergeActressesDecision {
 interface Props {
   actors: ActressConflictMergeActor[]
   selectedActressId: number
+  allowPendingScrape: boolean
   busy: boolean
   onConfirm: (decision: ConflictMergeActressesDecision) => void
   onCancel: () => void
@@ -50,6 +51,7 @@ function ActorChoice({
 export default function ConflictMergeActressesModal({
   actors,
   selectedActressId,
+  allowPendingScrape,
   busy,
   onConfirm,
   onCancel
@@ -70,7 +72,8 @@ export default function ConflictMergeActressesModal({
     selectedActressId,
     partnerActressId,
     keepActressId,
-    finalMainNameActressId
+    finalMainNameActressId,
+    allowPendingScrape
   )
 
   const choosePartner = (actressId: number): void => {
@@ -113,8 +116,11 @@ export default function ConflictMergeActressesModal({
       </p>
       {selectedActor ? (
         <div className="conflict-merge-selected">
-          <span>当前待确认演员</span>
-          <ActorChoice actor={selectedActor} detail="已有待确认刮削结果" />
+          <span>当前选择演员</span>
+          <ActorChoice
+            actor={selectedActor}
+            detail={selectedActor.hasPending ? '已有待确认刮削结果' : '历史名称声明演员'}
+          />
         </div>
       ) : null}
 
@@ -122,7 +128,9 @@ export default function ConflictMergeActressesModal({
         <legend>选择另一条演员档案</legend>
         <div className="conflict-merge-options">
           {partnerOptions.map((actor, index) => {
-            const blocked = actor.hasPending
+            const blocked = allowPendingScrape
+              ? Boolean(selectedActor?.hasPending && actor.hasPending)
+              : Boolean(selectedActor?.hasPending || actor.hasPending)
             const disabled = busy || blocked
             return (
               <label
@@ -141,7 +149,7 @@ export default function ConflictMergeActressesModal({
                 />
                 <ActorChoice
                   actor={actor}
-                  detail={blocked ? '也有待确认结果，请先处理其中一份' : '可与当前演员合并'}
+                  detail={blocked ? '存在待确认结果，请先处理后再合并' : '可与当前演员合并'}
                 />
               </label>
             )

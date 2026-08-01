@@ -124,14 +124,21 @@ export default function ActressConflictReviewPage(): JSX.Element {
   const location = useLocation()
   const queryClient = useQueryClient()
   const toast = useToast()
+  const backButtonRef = useRef<HTMLButtonElement>(null)
+  const groupButtonRefs = useRef(new Map<string, HTMLButtonElement>())
+  const [focusAfterRefresh, setFocusAfterRefresh] = useState<{
+    normalizedName: string | null
+  } | null>(null)
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [selectedPendingId, setSelectedPendingId] = useState<number | null>(null)
+  const [selectedClaimId, setSelectedClaimId] = useState<number | null>(null)
   const [discardCandidate, setDiscardCandidate] = useState<PendingActressScrapeCandidate | null>(
     null
   )
   const [discarding, setDiscarding] = useState(false)
   const [selectedConflictKey, setSelectedConflictKey] = useState<string | null>(null)
   const [editedName, setEditedName] = useState('')
+  const [editedClaimName, setEditedClaimName] = useState('')
   const [resolving, setResolving] = useState(false)
   const [ownershipDecision, setOwnershipDecision] =
     useState<ActressOwnershipDecision | null>(null)
@@ -146,6 +153,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
   } | null>(null)
   const [illegalNameOpen, setIllegalNameOpen] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
+  const [mergeSelectedActressId, setMergeSelectedActressId] = useState<number | null>(null)
   const [illegalValidationStatus, setIllegalValidationStatus] =
     useState<IllegalNameReplacementValidationStatus>('idle')
   const [illegalValidationErrors, setIllegalValidationErrors] = useState<Record<number, string>>({})
@@ -162,16 +170,26 @@ export default function ActressConflictReviewPage(): JSX.Element {
     queryKey: actressKeys.conflicts(),
     queryFn: () => api.actressScrape.listConflicts()
   })
+  const pendingCountQuery = useQuery({
+    queryKey: actressKeys.conflictCount(),
+    queryFn: () => api.actressScrape.conflictCount()
+  })
   const groups = groupsQuery.data ?? []
-  const pendingCount = new Set(
-    groups.flatMap((group) => group.candidates.map((candidate) => candidate.pendingId))
-  ).size
+  const pendingCount = pendingCountQuery.data ?? 0
   const selectedGroup =
     groups.find((group) => group.normalizedName === selectedName) ?? groups[0] ?? null
   const selectedCandidate =
     selectedGroup?.candidates.find((candidate) => candidate.pendingId === selectedPendingId) ??
     selectedGroup?.candidates[0] ??
     null
+  const selectedNameClaim =
+    selectedGroup?.pendingNameClaims.find((claim) => claim.claimId === selectedClaimId) ??
+    selectedGroup?.pendingNameClaims[0] ??
+    null
+  const selectedClaimant = selectedNameClaim
+    ? selectedGroup?.claimants.find((claimant) => claimant.actressId === selectedNameClaim.actressId) ??
+      null
+    : null
   const mergeActors = useMemo(
     () => (selectedGroup ? buildActressConflictMergeActors(selectedGroup) : []),
     [selectedGroup]
@@ -202,6 +220,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
     if (!selectedGroup) {
       setSelectedName(null)
       setSelectedPendingId(null)
+      setSelectedClaimId(null)
       return
     }
     if (selectedName !== selectedGroup.normalizedName) {
@@ -210,7 +229,10 @@ export default function ActressConflictReviewPage(): JSX.Element {
     if (selectedCandidate && selectedPendingId !== selectedCandidate.pendingId) {
       setSelectedPendingId(selectedCandidate.pendingId)
     }
-  }, [selectedCandidate, selectedGroup, selectedName, selectedPendingId])
+    if (selectedNameClaim && selectedClaimId !== selectedNameClaim.claimId) {
+      setSelectedClaimId(selectedNameClaim.claimId)
+    }
+  }, [selectedCandidate, selectedClaimId, selectedGroup, selectedName, selectedNameClaim, selectedPendingId])
 
   useEffect(() => {
     const key = selectedConflict ? `${selectedConflict.type}\0${selectedConflict.name}` : null
@@ -223,6 +245,18 @@ export default function ActressConflictReviewPage(): JSX.Element {
     selectedConflictKey,
     selectedGroup?.normalizedName
   ])
+
+  useEffect(() => {
+    setEditedClaimName(selectedNameClaim?.name ?? '')
+  }, [selectedGroup?.normalizedName, selectedNameClaim?.claimId, selectedNameClaim?.name])
+
+  useEffect(() => {
+    if (!focusAfterRefresh) return
+    const target = focusAfterRefresh.normalizedName
+      ? groupButtonRefs.current.get(focusAfterRefresh.normalizedName)
+      : backButtonRef.current
+    target?.focus()
+  }, [focusAfterRefresh])
 
   useEffect(() => {
     if (ownershipDecision !== 'assignToExistingActress') return
@@ -318,6 +352,20 @@ export default function ActressConflictReviewPage(): JSX.Element {
   )
   const previewResources = selectedCandidate?.resources ?? []
 
+  const selectAfterRefresh = (
+    previousGroups: ActressNameConflictGroup[],
+    refreshedGroups: ActressNameConflictGroup[],
+    previousSelectedName: string | null
+  ): void => {
+    const normalizedName = selectConflictGroupAfterRefresh(
+      previousGroups,
+      refreshedGroups,
+      previousSelectedName
+    )
+    setSelectedName(normalizedName)
+    setFocusAfterRefresh({ normalizedName })
+  }
+
   const discard = async (): Promise<void> => {
     if (!discardCandidate || discarding) return
     const previousGroups = groups
@@ -332,13 +380,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
       setSelectedPendingId(null)
       await queryClient.invalidateQueries({ queryKey: actressKeys.all })
       const refreshed = await groupsQuery.refetch()
-      setSelectedName(
-        selectConflictGroupAfterRefresh(
-          previousGroups,
-          refreshed.data ?? [],
-          previousSelectedName
-        )
-      )
+      selectAfterRefresh(previousGroups, refreshed.data ?? [], previousSelectedName)
       toast.show('已丢弃错误匹配并清理暂存资源', 'success')
     } catch (error) {
       toast.show(String((error as Error).message), 'error')
@@ -363,19 +405,14 @@ export default function ActressConflictReviewPage(): JSX.Element {
         setSelectedPendingId(null)
       }
       setMergeOpen(false)
+      setMergeSelectedActressId(null)
       setOwnershipDecision(null)
       resetIllegalNameDialog()
       setExistingOwnerSearch('')
       setSelectedExistingOwner(null)
       await queryClient.invalidateQueries({ queryKey: actressKeys.all })
       const refreshed = await groupsQuery.refetch()
-      setSelectedName(
-        selectConflictGroupAfterRefresh(
-          previousGroups,
-          refreshed.data ?? [],
-          previousSelectedName
-        )
-      )
+      selectAfterRefresh(previousGroups, refreshed.data ?? [], previousSelectedName)
     } catch (error) {
       toast.show(String((error as Error).message), 'error')
       await groupsQuery.refetch()
@@ -397,6 +434,20 @@ export default function ActressConflictReviewPage(): JSX.Element {
     })
   }
 
+  const editSelectedNameClaim = (): void => {
+    if (!selectedGroup || !selectedNameClaim) return
+    void resolveDecision({
+      kind: 'editPendingNameClaim',
+      snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
+      claimId: selectedNameClaim.claimId,
+      actressId: selectedNameClaim.actressId,
+      name: selectedNameClaim.name,
+      nameType: selectedNameClaim.type,
+      newName: editedClaimName,
+      replacementMainNames: []
+    })
+  }
+
   const applySelectedPending = (): void => {
     if (!selectedGroup || !selectedCandidate) return
     void resolveDecision({
@@ -408,7 +459,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
   }
 
   const confirmOwnershipDecision = (): void => {
-    if (!selectedGroup || !selectedCandidate || !ownershipDecision) return
+    if (!selectedGroup || !ownershipDecision) return
     const chosenOwnerActressId = selectedExistingOwner?.actressId ?? null
     const destinationOwnerActressId =
       ownershipDecision === 'assignToCurrentActress'
@@ -422,6 +473,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
       mainName: replacementMainNames[claimant.actressId] ?? ''
     }))
     if (ownershipDecision === 'assignToCurrentActress') {
+      if (!selectedCandidate) return
       void resolveDecision({
         kind: ownershipDecision,
         snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
@@ -453,14 +505,40 @@ export default function ActressConflictReviewPage(): JSX.Element {
   }
 
   const confirmMergeActresses = (decision: ConflictMergeActressesDecision): void => {
-    if (!selectedGroup || !selectedCandidate) return
+    if (!selectedGroup) return
     void resolveDecision({
       kind: 'mergeActresses',
       snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
-      pendingId: selectedCandidate.pendingId,
+      ...(selectedCandidate?.actressId === mergeSelectedActressId
+        ? { pendingId: selectedCandidate.pendingId }
+        : {}),
       ...decision,
       replacementMainNames: []
     })
+  }
+
+  const openCurrentActressOwnership = (): void => {
+    setSelectedExistingOwner(null)
+    setOwnershipDecision('assignToCurrentActress')
+  }
+
+  const openExistingActressOwnership = (
+    owner: { actressId: number; mainName: string; revision: number } | null
+  ): void => {
+    setSelectedExistingOwner(owner)
+    setOwnershipDecision('assignToExistingActress')
+  }
+
+  const openMergeDialog = (actressId: number): void => {
+    setOwnershipDecision(null)
+    setMergeSelectedActressId(actressId)
+    setMergeOpen(true)
+  }
+
+  const openIllegalNameDialog = (): void => {
+    setOwnershipDecision(null)
+    resetIllegalNameDialog()
+    setIllegalNameOpen(true)
   }
 
   const selectExistingOwner = async (item: ActressListItem): Promise<void> => {
@@ -490,6 +568,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
     <div className="detail-pane conflict-review-page">
       <header className="conflict-review-header">
         <button
+          ref={backButtonRef}
           type="button"
           className="btn btn-sm btn-ghost"
           onClick={() => navigateToActressList(navigate, location)}
@@ -500,7 +579,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
         <div>
           <span>演员维护</span>
           <h1>名称冲突待确认</h1>
-          <p>刮削结果在确认前不会写入演员资料。</p>
+          <p>待确认名称归属与刮削结果在同一工作台确认。</p>
         </div>
         <strong aria-live="polite">待确认 {pendingCount}</strong>
       </header>
@@ -511,7 +590,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
         <EmptyState
           icon={<UserRoundCheck {...UI_ICON_SM} aria-hidden />}
           title="没有待确认的名称冲突"
-          description="所有演员刮削结果都已处理。"
+          description="所有待确认名称归属和演员刮削结果都已处理。"
           variant="page"
         />
       ) : (
@@ -524,6 +603,10 @@ export default function ActressConflictReviewPage(): JSX.Element {
             <div className="conflict-review-group-list">
               {groups.map((group) => (
                 <button
+                  ref={(button) => {
+                    if (button) groupButtonRefs.current.set(group.normalizedName, button)
+                    else groupButtonRefs.current.delete(group.normalizedName)
+                  }}
                   type="button"
                   key={group.normalizedName}
                   className={
@@ -532,6 +615,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                   onClick={() => {
                     setSelectedName(group.normalizedName)
                     setSelectedPendingId(group.candidates[0]?.pendingId ?? null)
+                    setSelectedClaimId(group.pendingNameClaims[0]?.claimId ?? null)
                   }}
                 >
                   <span>
@@ -546,13 +630,15 @@ export default function ActressConflictReviewPage(): JSX.Element {
                             : '当前无归属'}
                     </small>
                   </span>
-                  <em>{group.candidates.length}</em>
+                  <em>
+                    {group.candidates.length + (group.pendingNameClaims.length > 0 ? 1 : 0)}
+                  </em>
                 </button>
               ))}
             </div>
           </aside>
 
-          {selectedGroup && selectedCandidate ? (
+          {selectedGroup ? (
             <main className="scroll-body scroll-body--scroll conflict-review-detail">
               <header className="conflict-review-detail-head">
                 <div>
@@ -573,7 +659,11 @@ export default function ActressConflictReviewPage(): JSX.Element {
               <section className="conflict-review-section">
                 <div className="conflict-review-section-title">
                   <strong>当前归属与候选结果</strong>
-                  <span>选择一份候选查看刮削详情</span>
+                  <span>
+                    {selectedGroup.candidates.length > 0
+                      ? '选择一份候选查看刮削详情'
+                      : '核对历史名称声明'}
+                  </span>
                 </div>
                 <div className="conflict-review-actors">
                   {selectedGroup.claimants.map((claimant) => {
@@ -608,13 +698,121 @@ export default function ActressConflictReviewPage(): JSX.Element {
                     <CandidateButton
                       key={candidate.pendingId}
                       candidate={candidate}
-                      selected={candidate.pendingId === selectedCandidate.pendingId}
+                      selected={candidate.pendingId === selectedCandidate?.pendingId}
                       onSelect={() => setSelectedPendingId(candidate.pendingId)}
                     />
                   ))}
                 </div>
               </section>
 
+              {selectedGroup.pendingNameClaims.length > 0 ? (
+                <section className="conflict-review-section conflict-review-candidate">
+                  <div className="conflict-review-section-title">
+                    <strong>待确认名称归属</strong>
+                    <span>这些是历史数据中的真实名称声明，不包含刮削资料</span>
+                  </div>
+                  <div className="conflict-review-actors" aria-label="待确认名称声明">
+                    {selectedGroup.pendingNameClaims.map((claim) => {
+                      const claimant = selectedGroup.claimants.find(
+                        (item) => item.actressId === claim.actressId
+                      )
+                      return (
+                        <button
+                          type="button"
+                          className={`conflict-review-actor${
+                            claim.claimId === selectedNameClaim?.claimId ? ' is-selected' : ''
+                          }`}
+                          key={claim.claimId}
+                          aria-pressed={claim.claimId === selectedNameClaim?.claimId}
+                          onClick={() => setSelectedClaimId(claim.claimId)}
+                        >
+                          <ActressAvatar
+                            src={resolveMediaSrc(claimant?.avatarPath)}
+                            name={claimant?.mainName ?? claim.name}
+                            gender={null}
+                          />
+                          <span>
+                            <strong>{claim.name}</strong>
+                            <small>
+                              {claimant?.mainName ?? `演员 #${claim.actressId}`} ·{' '}
+                              {NAME_TYPE_LABEL[claim.type]}
+                            </small>
+                            <em>历史名称声明</em>
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {selectedNameClaim ? (
+                    <div className="conflict-review-actions" aria-label="待确认名称归属处理">
+                      <div className="conflict-review-edit-name conflict-review-edit-name--single">
+                        <label>
+                          <span>修改所选{NAME_TYPE_LABEL[selectedNameClaim.type]}</span>
+                          <input
+                            className="text-input"
+                            value={editedClaimName}
+                            onChange={(event) => setEditedClaimName(event.target.value)}
+                            disabled={resolving}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost"
+                          disabled={resolving || !editedClaimName.trim()}
+                          onClick={editSelectedNameClaim}
+                        >
+                          修改名称
+                        </button>
+                      </div>
+                      <div className="conflict-review-ownership-actions">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-primary"
+                          disabled={resolving || !selectedClaimant}
+                          onClick={() => {
+                            if (!selectedClaimant) return
+                            openExistingActressOwnership({
+                              actressId: selectedClaimant.actressId,
+                              mainName: selectedClaimant.mainName,
+                              revision: selectedClaimant.revision
+                            })
+                          }}
+                        >
+                          确认归给 {selectedClaimant?.mainName ?? '所选演员'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost"
+                          disabled={resolving}
+                          onClick={() => openExistingActressOwnership(null)}
+                        >
+                          归给其他演员…
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost"
+                          disabled={resolving || mergeActors.length < 2}
+                          onClick={() => openMergeDialog(selectedNameClaim.actressId)}
+                        >
+                          <GitMerge {...UI_ICON_SM} aria-hidden />
+                          合并演员…
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost conflict-review-illegal"
+                          disabled={resolving}
+                          onClick={openIllegalNameDialog}
+                        >
+                          <Ban {...UI_ICON_SM} aria-hidden />
+                          标记为非法名称
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
+
+              {selectedCandidate ? (
               <section className="conflict-review-section conflict-review-candidate">
                 <div className="conflict-review-section-title">
                   <strong>候选资料 · {selectedCandidate.actressMainName}</strong>
@@ -691,7 +889,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                           type="button"
                           className="btn btn-sm btn-primary"
                           disabled={resolving}
-                          onClick={() => setOwnershipDecision('assignToCurrentActress')}
+                          onClick={openCurrentActressOwnership}
                         >
                           归给 {selectedCandidate.actressMainName}
                         </button>
@@ -701,15 +899,14 @@ export default function ActressConflictReviewPage(): JSX.Element {
                           disabled={resolving}
                           onClick={() => {
                             if (selectedGroup.currentOwner) {
-                              setSelectedExistingOwner({
+                              openExistingActressOwnership({
                                 actressId: selectedGroup.currentOwner.actressId,
                                 mainName: selectedGroup.currentOwner.mainName,
                                 revision: selectedGroup.currentOwner.revision
                               })
                             } else {
-                              setSelectedExistingOwner(null)
+                              openExistingActressOwnership(null)
                             }
-                            setOwnershipDecision('assignToExistingActress')
                           }}
                         >
                           归给已有演员…
@@ -723,10 +920,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                               ? '当前组没有另一条可合并演员档案'
                               : undefined
                           }
-                          onClick={() => {
-                            setOwnershipDecision(null)
-                            setMergeOpen(true)
-                          }}
+                          onClick={() => openMergeDialog(selectedCandidate.actressId)}
                         >
                           <GitMerge {...UI_ICON_SM} aria-hidden />
                           合并演员…
@@ -735,11 +929,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                           type="button"
                           className="btn btn-sm btn-ghost conflict-review-illegal"
                           disabled={resolving}
-                          onClick={() => {
-                            setOwnershipDecision(null)
-                            resetIllegalNameDialog()
-                            setIllegalNameOpen(true)
-                          }}
+                          onClick={openIllegalNameDialog}
                         >
                           <Ban {...UI_ICON_SM} aria-hidden />
                           标记为非法名称
@@ -773,6 +963,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                   </div>
                 ) : null}
               </section>
+              ) : null}
             </main>
           ) : (
             <EmptyState icon={<UsersRound {...UI_ICON_SM} />} title="请选择冲突组" variant="fill" />
@@ -780,11 +971,11 @@ export default function ActressConflictReviewPage(): JSX.Element {
         </div>
       )}
 
-      {ownershipDecision && selectedGroup && selectedCandidate ? (
+      {ownershipDecision && selectedGroup ? (
         <ConfirmModal
           title={
             ownershipDecision === 'assignToCurrentActress'
-              ? `将名称归给「${selectedCandidate.actressMainName}」`
+              ? `将名称归给「${selectedCandidate?.actressMainName ?? '待确认演员'}」`
               : `将名称归给「${selectedExistingOwner?.mainName ?? '已有演员'}」`
           }
           confirmText={resolving ? '处理中…' : '确认归属'}
@@ -808,7 +999,9 @@ export default function ActressConflictReviewPage(): JSX.Element {
           <p>
             {ownershipDecision === 'assignToCurrentActress'
               ? `「${selectedGroup.displayName}」的完整归属会转给所选待确认演员；原归属演员的同名名称行会被移除。`
-              : '整个同名组会确认给所选演员；各份非名称资料仍写回自己的原目标演员。'}
+              : selectedGroup.candidates.length > 0
+                ? '整个同名组会确认给所选演员；各份非名称资料仍写回自己的原目标演员。'
+                : '整个历史同名组会确认给所选演员，不会创建或写入任何刮削资料。'}
           </p>
           {ownershipDecision === 'assignToExistingActress' ? (
             <div className="conflict-review-existing-owner-picker">
@@ -931,14 +1124,18 @@ export default function ActressConflictReviewPage(): JSX.Element {
         </ConfirmModal>
       ) : null}
 
-      {mergeOpen && selectedGroup && selectedCandidate ? (
+      {mergeOpen && selectedGroup && mergeSelectedActressId != null ? (
         <ConflictMergeActressesModal
-          key={`${selectedGroup.normalizedName}-${selectedCandidate.pendingId}`}
+          key={`${selectedGroup.normalizedName}-${mergeSelectedActressId}`}
           actors={mergeActors}
-          selectedActressId={selectedCandidate.actressId}
+          selectedActressId={mergeSelectedActressId}
+          allowPendingScrape={selectedCandidate?.actressId === mergeSelectedActressId}
           busy={resolving}
           onConfirm={confirmMergeActresses}
-          onCancel={() => setMergeOpen(false)}
+          onCancel={() => {
+            setMergeOpen(false)
+            setMergeSelectedActressId(null)
+          }}
         />
       ) : null}
 

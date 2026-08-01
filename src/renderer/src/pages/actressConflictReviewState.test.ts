@@ -19,7 +19,8 @@ const group: ActressNameConflictGroup = {
     revision: 7,
     mainName: 'Collision',
     avatarPath: null,
-    nameTypes: ['main', 'alias']
+    nameTypes: ['main', 'alias'],
+    hasPendingScrape: false
   },
   claimants: [
     {
@@ -27,9 +28,11 @@ const group: ActressNameConflictGroup = {
       revision: 7,
       mainName: 'Collision',
       avatarPath: null,
-      nameTypes: ['main', 'alias']
+      nameTypes: ['main', 'alias'],
+      hasPendingScrape: false
     }
   ],
+  pendingNameClaims: [],
   candidates: [
     {
       pendingId: 10,
@@ -60,6 +63,7 @@ describe('actress conflict review state', () => {
       currentOwnerActressId: 1,
       currentOwnerRevision: 7,
       claimants: [{ actressId: 1, revision: 7 }],
+      pendingNameClaims: [],
       candidates: [
         {
           pendingId: 10,
@@ -127,6 +131,7 @@ describe('actress conflict review state', () => {
     assert.equal(canConfirmMergeActresses(actors, 2, 1, null, null), false)
     assert.equal(canConfirmMergeActresses(actors, 2, 1, 1, null), false)
     assert.equal(canConfirmMergeActresses(actors, 2, 1, 1, 1), true)
+    assert.equal(canConfirmMergeActresses(actors, 2, 1, 1, 1, false), false)
     assert.equal(canConfirmMergeActresses(actors, 2, 1, 1, 3), false)
     assert.equal(
       canConfirmMergeActresses(
@@ -138,6 +143,26 @@ describe('actress conflict review state', () => {
       ),
       false
     )
+  })
+
+  it('allows a pending-name-ownership pair to be merged', () => {
+    const actors = buildActressConflictMergeActors({
+      ...group,
+      currentOwner: null,
+      candidates: [],
+      claimants: [
+        group.claimants[0],
+        {
+          actressId: 2,
+          revision: 9,
+          mainName: 'Other',
+          avatarPath: null,
+          nameTypes: ['main'],
+          hasPendingScrape: false
+        }
+      ]
+    })
+    assert.equal(canConfirmMergeActresses(actors, 1, 2, 1, 1), true)
   })
 
   it('keeps the current group or selects its next neighbor after refresh', () => {

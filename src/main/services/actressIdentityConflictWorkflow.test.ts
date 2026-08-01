@@ -51,6 +51,32 @@ function createActress(mainName: string): number {
   return id
 }
 
+function createPendingNameOwnershipCollision(): { firstId: number; secondId: number } {
+  const firstId = createActress('Collision')
+  const secondId = createActress('Second Claimant')
+  const db = getDb()
+  db.prepare('DELETE FROM actress_name_ownership WHERE normalized_name IN (?, ?)').run(
+    'collision',
+    'secondclaimant'
+  )
+  db.prepare('UPDATE actresses SET main_name = ? WHERE id = ?').run(
+    'C o l l i s i o n',
+    secondId
+  )
+  db.prepare("UPDATE actress_names SET name = ? WHERE actress_id = ? AND type = 'main'").run(
+    'C o l l i s i o n',
+    secondId
+  )
+  const insertClaim = db.prepare(
+    `INSERT INTO pending_actress_name_claims
+       (normalized_name, actress_id, name, type, is_primary)
+     VALUES (?, ?, ?, 'main', 1)`
+  )
+  insertClaim.run('collision', firstId, 'Collision')
+  insertClaim.run('collision', secondId, 'C o l l i s i o n')
+  return { firstId, secondId }
+}
+
 function decisionSnapshot(group: ActressNameConflictGroup) {
   return {
     status: group.status,
@@ -60,6 +86,12 @@ function decisionSnapshot(group: ActressNameConflictGroup) {
     claimants: group.claimants.map((claimant) => ({
       actressId: claimant.actressId,
       revision: claimant.revision
+    })),
+    pendingNameClaims: group.pendingNameClaims.map((claim) => ({
+      claimId: claim.claimId,
+      actressId: claim.actressId,
+      name: claim.name,
+      type: claim.type
     })),
     candidates: group.candidates.map((item) => ({
       pendingId: item.pendingId,
@@ -71,6 +103,202 @@ function decisionSnapshot(group: ActressNameConflictGroup) {
 }
 
 describe('ActressIdentityConflictWorkflow', () => {
+  it('lists pending name ownership without inventing a pending scrape', () => {
+    const { firstId: firstClaimantId, secondId: secondClaimantId } =
+      createPendingNameOwnershipCollision()
+
+    const workflow = new ActressIdentityConflictWorkflow()
+    const groups = workflow.listConflictGroups()
+
+    assert.equal(workflow.countPendingScrapes(), 0)
+    assert.equal(workflow.countPendingReviewItems(), 1)
+    assert.equal(groups.length, 1)
+    assert.equal(groups[0].normalizedName, 'collision')
+    assert.equal(groups[0].currentOwner, null)
+    assert.deepEqual(
+      groups[0].claimants.map((claimant) => claimant.actressId),
+      [firstClaimantId, secondClaimantId]
+    )
+    assert.deepEqual(groups[0].candidates, [])
+  })
+
+  it('rejects an unsupported pending name type instead of silently reclassifying it', () => {
+    createPendingNameOwnershipCollision()
+    getDb()
+      .prepare(
+        `UPDATE pending_actress_name_claims
+         SET type = 'unsupported'
+         WHERE id = (SELECT MIN(id) FROM pending_actress_name_claims)`
+      )
+      .run()
+
+    assert.throws(
+      () => new ActressIdentityConflictWorkflow().listConflictGroups(),
+      /不支持的待确认名称类型：unsupported/
+    )
+  })
+
+  it('rejects a pending-name-ownership decision when the shown claim row changed', () => {
+    const { firstId, secondId } = createPendingNameOwnershipCollision()
+    const db = getDb()
+    const workflow = new ActressIdentityConflictWorkflow()
+    const group = workflow.listConflictGroups()[0]
+    db.prepare('UPDATE pending_actress_name_claims SET name = ? WHERE id = ?').run(
+      'Changed Behind UI',
+      group.pendingNameClaims[0].claimId
+    )
+
+    assert.deepEqual(
+      workflow.resolveConflict({
+        kind: 'markIllegalName',
+        snapshot: decisionSnapshot(group),
+        replacementMainNames: [
+          { actressId: firstId, mainName: 'First Replacement' },
+          { actressId: secondId, mainName: 'Second Replacement' }
+        ]
+      }),
+      { status: 'stale', message: '数据已变化，请刷新后重新确认' }
+    )
+    assert.equal(getActressDetail(firstId)?.main_name, 'Collision')
+    assert.equal(getActressDetail(secondId)?.main_name, 'C o l l i s i o n')
+  })
+
+  it('assigns pending name ownership without creating or applying scrape data', () => {
+    const { firstId: ownerId, secondId: otherId } = createPendingNameOwnershipCollision()
+    const workflow = new ActressIdentityConflictWorkflow()
+    const group = workflow.listConflictGroups()[0]
+
+    const outcome = workflow.resolveConflict({
+      kind: 'assignToExistingActress',
+      snapshot: decisionSnapshot(group),
+      ownerActressId: ownerId,
+      ownerActressRevision: group.claimants.find((item) => item.actressId === ownerId)!.revision,
+      replacementMainNames: [{ actressId: otherId, mainName: 'Second Replacement' }]
+    })
+
+    assert.deepEqual(outcome, { status: 'success', remainingPending: 0 })
+    assert.equal(findActressByNameOrAlias('Collision'), ownerId)
+    assert.equal(getActressDetail(otherId)?.main_name, 'Second Replacement')
+    assert.equal(workflow.countPendingScrapes(), 0)
+    assert.equal(workflow.countPendingReviewItems(), 0)
+    assert.deepEqual(workflow.listConflictGroups(), [])
+  })
+
+  it('edits one pending name claim and resolves both resulting unique owners', () => {
+    const { firstId, secondId: editedId } = createPendingNameOwnershipCollision()
+    const workflow = new ActressIdentityConflictWorkflow()
+    const group = workflow.listConflictGroups()[0]
+    const selected = group.pendingNameClaims.find((claim) => claim.actressId === editedId)!
+
+    const outcome = workflow.resolveConflict({
+      kind: 'editPendingNameClaim',
+      snapshot: decisionSnapshot(group),
+      claimId: selected.claimId,
+      actressId: editedId,
+      name: selected.name,
+      nameType: selected.type,
+      newName: 'Second Resolved',
+      replacementMainNames: []
+    })
+
+    assert.deepEqual(outcome, { status: 'success', remainingPending: 0 })
+    assert.equal(findActressByNameOrAlias('Collision'), firstId)
+    assert.equal(findActressByNameOrAlias('Second Resolved'), editedId)
+    assert.equal(getActressDetail(editedId)?.main_name, 'Second Resolved')
+    assert.equal(workflow.countPendingScrapes(), 0)
+    assert.deepEqual(workflow.listConflictGroups(), [])
+  })
+
+  it('moves an edited pending name claim into another normalized-name group', () => {
+    const { firstId, secondId } = createPendingNameOwnershipCollision()
+    const occupiedId = createActress('Occupied Name')
+    const workflow = new ActressIdentityConflictWorkflow()
+    const group = workflow.listConflictGroups()[0]
+    const selected = group.pendingNameClaims.find((claim) => claim.actressId === secondId)!
+
+    const outcome = workflow.resolveConflict({
+      kind: 'editPendingNameClaim',
+      snapshot: decisionSnapshot(group),
+      claimId: selected.claimId,
+      actressId: secondId,
+      name: selected.name,
+      nameType: selected.type,
+      newName: 'OccupiedName',
+      replacementMainNames: []
+    })
+
+    assert.deepEqual(outcome, { status: 'success', remainingPending: 1 })
+    assert.equal(findActressByNameOrAlias('Collision'), firstId)
+    assert.equal(findActressByNameOrAlias('Occupied Name'), null)
+    assert.equal(getActressDetail(secondId)?.main_name, 'OccupiedName')
+    const movedGroup = workflow.listConflictGroups()[0]
+    assert.equal(movedGroup.normalizedName, 'occupiedname')
+    assert.deepEqual(
+      movedGroup.claimants.map((claimant) => claimant.actressId),
+      [secondId, occupiedId]
+    )
+    assert.equal(movedGroup.pendingNameClaims.length, 2)
+    assert.deepEqual(movedGroup.candidates, [])
+  })
+
+  it('merges actresses directly from pending name ownership', () => {
+    const { firstId: keepId, secondId: mergeId } = createPendingNameOwnershipCollision()
+    const workflow = new ActressIdentityConflictWorkflow()
+    const group = workflow.listConflictGroups()[0]
+    const keep = group.claimants.find((item) => item.actressId === keepId)!
+    const merged = group.claimants.find((item) => item.actressId === mergeId)!
+
+    const outcome = workflow.resolveConflict({
+      kind: 'mergeActresses',
+      snapshot: decisionSnapshot(group),
+      keepActressId: keepId,
+      keepActressRevision: keep.revision,
+      mergeActressId: mergeId,
+      mergeActressRevision: merged.revision,
+      finalMainName: keep.mainName,
+      replacementMainNames: []
+    })
+
+    assert.deepEqual(outcome, { status: 'success', remainingPending: 0 })
+    assert.equal(getActressDetail(mergeId), null)
+    assert.equal(findActressByNameOrAlias('Collision'), keepId)
+    assert.equal(workflow.countPendingScrapes(), 0)
+    assert.deepEqual(workflow.listConflictGroups(), [])
+  })
+
+  it('removes an illegal pending name without persisting a blacklist', () => {
+    const firstId = createActress('First Claimant')
+    const secondId = createActress('Second Claimant')
+    const db = getDb()
+    const insertName = db.prepare(
+      `INSERT INTO actress_names (actress_id, name, type, is_primary)
+       VALUES (?, ?, 'alias', 0)`
+    )
+    insertName.run(firstId, '作品一覧')
+    insertName.run(secondId, '作 品 一 覧')
+    const insertClaim = db.prepare(
+      `INSERT INTO pending_actress_name_claims
+         (normalized_name, actress_id, name, type, is_primary)
+       VALUES (?, ?, ?, 'alias', 0)`
+    )
+    insertClaim.run('作品一覧', firstId, '作品一覧')
+    insertClaim.run('作品一覧', secondId, '作 品 一 覧')
+    const workflow = new ActressIdentityConflictWorkflow()
+    const group = workflow.listConflictGroups()[0]
+
+    const outcome = workflow.resolveConflict({
+      kind: 'markIllegalName',
+      snapshot: decisionSnapshot(group),
+      replacementMainNames: []
+    })
+
+    assert.deepEqual(outcome, { status: 'success', remainingPending: 0 })
+    assert.equal(getActressDetail(firstId)?.main_name, 'First Claimant')
+    assert.equal(getActressDetail(secondId)?.main_name, 'Second Claimant')
+    assert.equal(findActressByNameOrAlias('作品一覧'), null)
+    assert.deepEqual(workflow.listConflictGroups(), [])
+  })
+
   it('reassigns the only pending scrape to the explicit keeper after a merge', () => {
     const ownerId = createActress('Owner')
     const targetId = createActress('Target')

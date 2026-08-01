@@ -1,6 +1,7 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, type MouseEvent, type ReactNode } from 'react'
-import { resolveMediaSrc } from '../api'
+import { useQuery } from '@tanstack/react-query'
+import { api, resolveMediaSrc } from '../api'
 import { getDetailPosterScope } from '../listView/detailPosterScope'
 import { clearListScrollForPrimaryNav } from '../listView/listViewMemory'
 import {
@@ -18,6 +19,7 @@ import { useTheme } from './ThemeProvider'
 import { usePluginDevLeaveGuard } from './pluginDev/PluginDevLeaveGuard'
 import { NavIcon, type NavIconName } from './NavIcons'
 import { ROUTE_PATH } from '../listView/routePaths'
+import { actressKeys } from '../query/queryKeys'
 
 type NavItem = { to: string; label: string; icon: NavIconName; end?: boolean }
 
@@ -40,7 +42,15 @@ function isPluginDevPath(pathname: string): boolean {
   return pathname === ROUTE_PATH.settingsPluginDev
 }
 
-function NavItems({ items }: { items: NavItem[] }): JSX.Element {
+function NavItems({
+  items,
+  badges = {},
+  badgeTargets = {}
+}: {
+  items: NavItem[]
+  badges?: Partial<Record<string, number>>
+  badgeTargets?: Partial<Record<string, string>>
+}): JSX.Element {
   const location = useLocation()
   const navigate = useNavigate()
   const { requestLeave } = usePluginDevLeaveGuard()
@@ -63,23 +73,54 @@ function NavItems({ items }: { items: NavItem[] }): JSX.Element {
     go()
   }
 
+  const handleBadgeClick = (listRoot: string, target: string): void => {
+    const go = (): void => {
+      const listTarget = primaryNavLinkTo(listRoot, location.pathname, location.search)
+      navigate({ pathname: target, search: listTarget.search })
+    }
+    if (isPluginDevPath(location.pathname)) {
+      requestLeave(go)
+      return
+    }
+    go()
+  }
+
   return (
     <>
-      {items.map((n) => (
-        <NavLink
-          key={n.to}
-          to={primaryNavLinkTo(n.to, location.pathname, location.search)}
-          end={n.end}
-          draggable={false}
-          onClick={(event) => handleNavClick(event, n.to)}
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-        >
-          <span className="nav-icon">
-            <NavIcon name={n.icon} />
-          </span>
-          <span className="nav-label">{n.label}</span>
-        </NavLink>
-      ))}
+      {items.map((n) => {
+        const badgeCount = badges[n.to] ?? 0
+        const badgeTarget = badgeTargets[n.to]
+        return (
+          <div
+            className={`nav-item-row${badgeCount > 0 && badgeTarget ? ' nav-item-row--with-badge' : ''}`}
+            key={n.to}
+          >
+            <NavLink
+              to={primaryNavLinkTo(n.to, location.pathname, location.search)}
+              end={n.end}
+              draggable={false}
+              onClick={(event) => handleNavClick(event, n.to)}
+              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+            >
+              <span className="nav-icon">
+                <NavIcon name={n.icon} />
+              </span>
+              <span className="nav-label">{n.label}</span>
+            </NavLink>
+            {badgeCount > 0 && badgeTarget ? (
+              <button
+                type="button"
+                className="nav-count-badge nav-count-badge--entry"
+                aria-label={`打开 ${badgeCount} 项待确认名称冲突`}
+                title="打开名称冲突待确认"
+                onClick={() => handleBadgeClick(n.to, badgeTarget)}
+              >
+                {badgeCount > 99 ? '99+' : badgeCount}
+              </button>
+            ) : null}
+          </div>
+        )
+      })}
     </>
   )
 }
@@ -97,6 +138,14 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
   const backgroundSrc =
     imagePreviewOpen || privacyHidesBackground ? null : resolveMediaSrc(background?.path)
   const hasBackgroundLayer = Boolean(backgroundSrc)
+  const conflictCountQuery = useQuery({
+    queryKey: actressKeys.conflictCount(),
+    queryFn: () => api.actressScrape.conflictCount(),
+    refetchInterval: 3_000
+  })
+  const conflictBadges = {
+    [ROUTE_PATH.actresses]: conflictCountQuery.data ?? 0
+  }
 
   useEffect(() => {
     syncPrimaryNavigationMemory(location.pathname, location.search)
@@ -114,7 +163,11 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
       <aside className="sidebar">
         <AppBrand />
         <nav className="sidebar-nav">
-          <NavItems items={NAV_MAIN} />
+          <NavItems
+            items={NAV_MAIN}
+            badges={conflictBadges}
+            badgeTargets={{ [ROUTE_PATH.actresses]: ROUTE_PATH.actressConflicts }}
+          />
           <div className={`nav-group${facetActive ? ' nav-group--active' : ''}`}>
             <div className="nav-group-label">分类</div>
             <NavItems items={NAV_FACETS} />

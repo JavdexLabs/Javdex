@@ -403,6 +403,15 @@ textarea,
   -webkit-user-drag: none;
   transition: background var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast);
 }
+.nav-item-row {
+  position: relative;
+}
+.nav-item-row > .nav-item {
+  width: 100%;
+}
+.nav-item-row--with-badge > .nav-item {
+  padding-right: 50px;
+}
 .nav-item:hover {
   background: var(--surface-elevated);
   color: var(--text-primary);
@@ -426,6 +435,35 @@ textarea,
   line-height: 18px;
   flex: 1;
   min-width: 0;
+}
+
+.nav-count-badge {
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border-warning);
+  border-radius: var(--radius-overlay);
+  background: var(--surface-warning);
+  color: var(--text-warning);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+.nav-count-badge--entry {
+  position: absolute;
+  top: calc((var(--control-h-lg) - 24px) / 2);
+  right: 11px;
+  min-width: 24px;
+  height: 24px;
+  cursor: pointer;
+}
+
+.nav-count-badge--entry:hover,
+.nav-count-badge--entry:focus-visible {
+  border-color: var(--border-accent);
+  color: var(--text-accent);
 }
 
 .main-area {
@@ -16106,6 +16144,10 @@ button.alias-tag-chip-name:disabled {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.conflict-review-edit-name--single {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .conflict-review-ownership-actions {

@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import { normalizeActressName } from './actressNameOwnership'
+import { normalizeActressName } from './actressNameNormalization'
 import { SCHEMA_SQL } from './schema'
 
 export const CURRENT_SCHEMA_VERSION = 5

@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
-import { findActressIdByOwnedName, normalizeActressName } from './actressNameOwnership'
+import { findActressIdByOwnedName } from './actressNameOwnership'
 import { closeDatabase, initDatabaseAtPath } from './database'
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
 
@@ -93,15 +93,6 @@ function createV4ActressSchema(db: Database.Database): void {
 }
 
 describe('database schema', () => {
-  it('normalizes actress ownership names without merging distinct scripts or punctuation', () => {
-    assert.equal(normalizeActressName('  Ａlice\u3000Smith\t'), 'alicesmith')
-    assert.equal(normalizeActressName('山田・太郎-Ａ'), '山田・太郎-a')
-    assert.notEqual(normalizeActressName('櫻井'), normalizeActressName('樱井'))
-    assert.notEqual(normalizeActressName('さくら'), normalizeActressName('サクラ'))
-    assert.notEqual(normalizeActressName('yu'), normalizeActressName('yuu'))
-    assert.throws(() => normalizeActressName(' \t\n\u3000'), /演员名称不能为空/)
-  })
-
   it('migrates uncontested names to ownership and preserves cross-actress collisions for review', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-name-ownership-'))
     const dbPath = path.join(tempDir, 'library.db')
@@ -118,6 +109,13 @@ describe('database schema', () => {
           (1, 'Alice Smith', 'alias', 0),
           (1, 'Shared Name', 'alias', 0),
           (1, '爱丽丝', 'zh', 1),
+          (1, '山田・太郎-Ａ', 'alias', 0),
+          (1, '櫻井', 'alias', 0),
+          (1, '樱井', 'alias', 0),
+          (1, 'さくら', 'alias', 0),
+          (1, 'サクラ', 'alias', 0),
+          (1, 'Yu', 'alias', 0),
+          (1, 'Yuu', 'alias', 0),
           (2, 'Bob', 'main', 1),
           (2, 'ＳＨＡＲＥＤ　ＮＡＭＥ', 'en', 1),
           (2, '　', 'alias', 0);
@@ -129,21 +127,29 @@ describe('database schema', () => {
     try {
       const db = initDatabaseAtPath(dbPath)
 
-      assert.deepEqual(
-        db
-          .prepare(
-            `SELECT normalized_name, actress_id
-             FROM actress_name_ownership
-             ORDER BY normalized_name`
-          )
-          .all(),
-        [
-          { normalized_name: 'alicesmith', actress_id: 1 },
-          { normalized_name: 'bob', actress_id: 2 },
-          { normalized_name: 'mainwithoutrow', actress_id: 3 },
-          { normalized_name: '爱丽丝', actress_id: 1 }
-        ]
+      const ownership = Object.fromEntries(
+        (
+          db
+            .prepare(
+              `SELECT normalized_name, actress_id
+               FROM actress_name_ownership`
+            )
+            .all() as Array<{ normalized_name: string; actress_id: number }>
+        ).map((row) => [row.normalized_name, row.actress_id])
       )
+      assert.deepEqual(ownership, {
+        alicesmith: 1,
+        bob: 2,
+        mainwithoutrow: 3,
+        '爱丽丝': 1,
+        '山田・太郎-a': 1,
+        櫻井: 1,
+        樱井: 1,
+        さくら: 1,
+        サクラ: 1,
+        yu: 1,
+        yuu: 1
+      })
       assert.deepEqual(
         db
           .prepare(
@@ -179,6 +185,7 @@ describe('database schema', () => {
       )
       assert.equal(findActressIdByOwnedName(' alice smith '), 1)
       assert.equal(findActressIdByOwnedName('ＳＨＡＲＥＤＮＡＭＥ'), null)
+      assert.throws(() => findActressIdByOwnedName(' \t\n\u3000'), /演员名称不能为空/)
 
       const migratedRows = {
         ownership: db.prepare('SELECT * FROM actress_name_ownership ORDER BY normalized_name').all(),

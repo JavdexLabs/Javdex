@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
-import { editActress, getActressDetail } from '../db/actressRepo'
+import { addActressGalleryAsset, editActress, getActressDetail } from '../db/actressRepo'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import { scrapeActress } from './actressScraperManager'
 import { scrapeBrowser } from './scrapeBrowser'
@@ -65,6 +65,43 @@ afterEach(() => {
 })
 
 describe('actressScraperManager', () => {
+  it('clears the selected avatar in replace mode when the matched source has no avatar', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'No Avatar Profile Source',
+      version: '1.0.0',
+      description: 'Matches a profile without returning an avatar',
+      supportedFields: ['avatar'],
+      code: `
+module.exports = {
+  async parseActress(ctx) {
+    return { mainName: ctx.mainName };
+  }
+};
+`
+    })
+    assert.ok(tempRoot)
+    const avatarRelPath = 'avatars/existing.jpg'
+    const avatarAbsPath = path.join(tempRoot, 'media_assets', avatarRelPath)
+    fs.mkdirSync(path.dirname(avatarAbsPath), { recursive: true })
+    fs.writeFileSync(avatarAbsPath, MINIMAL_JPEG)
+    const inserted = getDb()
+      .prepare('INSERT INTO actresses (main_name, gender, avatar_path) VALUES (?, ?, ?)')
+      .run('Replace Empty Avatar Actress', 'female', avatarRelPath)
+    const actressId = Number(inserted.lastInsertRowid)
+
+    const outcome = await scrapeActress(actressId, 'No Avatar Profile Source', {
+      fields: ['avatar'],
+      mode: 'replace',
+      closeBrowser: false
+    })
+
+    assert.equal(outcome.ok, true)
+    assert.equal(getActressDetail(actressId)?.avatar_path, null)
+    assert.equal(fs.existsSync(avatarAbsPath), false)
+  })
+
   it('promotes an unscraped actress to scrape success when a profile field is applied', async () => {
     await installScraperPluginPackage({
       schemaVersion: 1,
@@ -164,7 +201,7 @@ module.exports = {
     assert.equal(detail?.last_scraped_at, null)
   })
 
-  it('records failure when a matched profile has no valid selected field', async () => {
+  it('records failure in replace-if-present mode when a matched profile has no selected value', async () => {
     await installScraperPluginPackage({
       schemaVersion: 1,
       kind: 'actress',
@@ -187,6 +224,7 @@ module.exports = {
 
     const outcome = await scrapeActress(actressId, 'Empty Profile Source', {
       fields: ['birthDate'],
+      mode: 'replaceIfPresent',
       closeBrowser: false
     })
 
@@ -393,6 +431,125 @@ module.exports = {
     assert.ok(detail?.last_scraped_at)
   })
 
+  it('preserves a field in replace mode when its composite source fails', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'Failed Composite Avatar Source',
+      version: '1.0.0',
+      description: 'Fails while scraping avatars',
+      supportedFields: ['avatar'],
+      code: `
+module.exports = {
+  async parseActress() {
+    throw new Error('avatar source offline');
+  }
+};
+`
+    })
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'Successful Composite Birth Source',
+      version: '1.0.0',
+      description: 'Returns a birth date',
+      supportedFields: ['birthDate'],
+      code: `
+module.exports = {
+  async parseActress() {
+    return { birthDate: '1990-01-02' };
+  }
+};
+`
+    })
+    createCompositeScraper('actress', {
+      name: 'Partial Failure Replace Composite',
+      fieldPluginMap: {
+        avatar: 'Failed Composite Avatar Source',
+        birthDate: 'Successful Composite Birth Source'
+      }
+    })
+    assert.ok(tempRoot)
+    const avatarRelPath = 'avatars/composite-failure-existing.jpg'
+    const avatarAbsPath = path.join(tempRoot, 'media_assets', avatarRelPath)
+    fs.mkdirSync(path.dirname(avatarAbsPath), { recursive: true })
+    fs.writeFileSync(avatarAbsPath, MINIMAL_JPEG)
+    const inserted = getDb()
+      .prepare('INSERT INTO actresses (main_name, gender, avatar_path) VALUES (?, ?, ?)')
+      .run('Composite Failure Actress', 'female', avatarRelPath)
+    const actressId = Number(inserted.lastInsertRowid)
+
+    const outcome = await scrapeActress(actressId, 'Partial Failure Replace Composite', {
+      fields: ['avatar', 'birthDate'],
+      mode: 'replace',
+      closeBrowser: false
+    })
+
+    assert.equal(outcome.ok, true)
+    assert.equal(outcome.warnings?.some((warning) => warning.includes('avatar source offline')), true)
+    assert.equal(getActressDetail(actressId)?.avatar_path, avatarRelPath)
+    assert.equal(fs.existsSync(avatarAbsPath), true)
+  })
+
+  it('clears a field in replace mode when its composite source matched with no value', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'Empty Composite Avatar Source',
+      version: '1.0.0',
+      description: 'Matches without returning an avatar',
+      supportedFields: ['avatar'],
+      code: `
+module.exports = {
+  async parseActress(ctx) {
+    return { mainName: ctx.mainName };
+  }
+};
+`
+    })
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'Matched Composite Birth Source',
+      version: '1.0.0',
+      description: 'Returns a birth date',
+      supportedFields: ['birthDate'],
+      code: `
+module.exports = {
+  async parseActress() {
+    return { birthDate: '1990-01-02' };
+  }
+};
+`
+    })
+    createCompositeScraper('actress', {
+      name: 'Matched Empty Replace Composite',
+      fieldPluginMap: {
+        avatar: 'Empty Composite Avatar Source',
+        birthDate: 'Matched Composite Birth Source'
+      }
+    })
+    assert.ok(tempRoot)
+    const avatarRelPath = 'avatars/composite-empty-existing.jpg'
+    const avatarAbsPath = path.join(tempRoot, 'media_assets', avatarRelPath)
+    fs.mkdirSync(path.dirname(avatarAbsPath), { recursive: true })
+    fs.writeFileSync(avatarAbsPath, MINIMAL_JPEG)
+    const inserted = getDb()
+      .prepare('INSERT INTO actresses (main_name, gender, avatar_path) VALUES (?, ?, ?)')
+      .run('Composite Empty Actress', 'female', avatarRelPath)
+    const actressId = Number(inserted.lastInsertRowid)
+
+    const outcome = await scrapeActress(actressId, 'Matched Empty Replace Composite', {
+      fields: ['avatar', 'birthDate'],
+      mode: 'replace',
+      closeBrowser: false
+    })
+
+    assert.equal(outcome.ok, true)
+    assert.equal(getActressDetail(actressId)?.avatar_path, null)
+    assert.equal(fs.existsSync(avatarAbsPath), false)
+  })
+
   it('records failure when every configured composite source fails', async () => {
     await installScraperPluginPackage({
       schemaVersion: 1,
@@ -517,7 +674,7 @@ module.exports = {
     }
   })
 
-  it('keeps a composite scrape successful when a remote gallery is stored despite download warnings', async () => {
+  it('preserves the existing gallery when every returned image fails to download', async () => {
     await installScraperPluginPackage({
       schemaVersion: 1,
       kind: 'actress',
@@ -539,10 +696,21 @@ module.exports = {
         gallery: 'Remote Gallery Source'
       }
     })
+    assert.ok(tempRoot)
+    const existingRelPath = 'actress-gallery/existing.jpg'
+    const existingAbsPath = path.join(tempRoot, 'media_assets', existingRelPath)
+    fs.mkdirSync(path.dirname(existingAbsPath), { recursive: true })
+    fs.writeFileSync(existingAbsPath, MINIMAL_JPEG)
     const inserted = getDb()
       .prepare('INSERT INTO actresses (main_name, gender) VALUES (?, ?)')
       .run('Remote Gallery Actress', 'female')
     const actressId = Number(inserted.lastInsertRowid)
+    addActressGalleryAsset(actressId, {
+      remoteUrl: 'https://example.invalid/existing.jpg',
+      localPath: existingRelPath,
+      width: 1,
+      height: 1
+    })
     const originalFetchBuffer = scrapeBrowser.fetchBuffer
     scrapeBrowser.fetchBuffer = async () => {
       throw new Error('gallery host offline')
@@ -551,21 +719,23 @@ module.exports = {
     try {
       const outcome = await scrapeActress(actressId, 'Remote Gallery Composite', {
         fields: ['gallery'],
+        mode: 'replace',
         closeBrowser: false
       })
 
       const detail = getActressDetail(actressId)
-      assert.equal(outcome.ok, true)
+      assert.equal(outcome.ok, false)
       assert.equal(outcome.warnings?.some((warning) => warning.includes('写真下载失败')), true)
-      assert.equal(detail?.scraped_status, 1)
-      assert.ok(detail?.last_scraped_at)
+      assert.equal(detail?.scraped_status, 2)
+      assert.equal(detail?.last_scraped_at, null)
       assert.deepEqual(
         detail?.gallery.map((asset) => ({
           remoteUrl: asset.remote_url,
           localPath: asset.local_path
         })),
-        [{ remoteUrl: 'https://example.invalid/gallery.jpg', localPath: null }]
+        [{ remoteUrl: 'https://example.invalid/existing.jpg', localPath: existingRelPath }]
       )
+      assert.equal(fs.existsSync(existingAbsPath), true)
     } finally {
       scrapeBrowser.fetchBuffer = originalFetchBuffer
     }

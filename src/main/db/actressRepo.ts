@@ -2,6 +2,7 @@ import type { Database as SqliteDatabase } from 'better-sqlite3'
 import fs from 'node:fs'
 import path from 'node:path'
 import { getDb } from './database'
+import { normalizeActressName } from './actressNameNormalization'
 import type {
   Actress,
   ActressDetail,
@@ -1221,8 +1222,19 @@ export function deleteUnlinkedActresses(ids: number[]): number {
 }
 
 function isActressNameAvailable(name: string, exceptId: number): boolean {
-  const existing = findActressByNameOrAlias(name)
-  return existing === null || existing === exceptId
+  const normalizedName = normalizeActressName(name)
+  const storedNames = getDb()
+    .prepare(
+      `SELECT id AS actress_id, main_name AS name FROM actresses
+       UNION ALL
+       SELECT actress_id, name FROM actress_names`
+    )
+    .all() as Array<{ actress_id: number; name: string }>
+
+  return storedNames.every(
+    (stored) =>
+      stored.actress_id === exceptId || normalizeActressName(stored.name) !== normalizedName
+  )
 }
 
 function assertActressNameAvailable(name: string, exceptId: number): void {
@@ -1520,8 +1532,9 @@ function hasValidActressScrapeValue(
   field: ActressScrapeField,
   avatarApplied: boolean,
   galleryAssets: ActressGalleryAssetWriteInput[],
-  actressId: number,
-  mainName: string
+  applicableAliases: string[],
+  mode: ActressScrapeUpdateMode,
+  actress: Pick<Actress, 'bust_cm' | 'waist_cm' | 'hip_cm'>
 ): boolean {
   switch (field) {
     case 'avatar':
@@ -1541,6 +1554,13 @@ function hasValidActressScrapeValue(
     case 'heightCm':
       return result.heightCm !== undefined && result.heightCm !== null
     case 'measurements':
+      if (mode === 'fillEmpty') {
+        return (
+          (actress.bust_cm == null && result.bustCm !== undefined && result.bustCm !== null) ||
+          (actress.waist_cm == null && result.waistCm !== undefined && result.waistCm !== null) ||
+          (actress.hip_cm == null && result.hipCm !== undefined && result.hipCm !== null)
+        )
+      }
       return [result.bustCm, result.waistCm, result.hipCm].some(
         (value) => value !== undefined && value !== null
       )
@@ -1555,18 +1575,36 @@ function hasValidActressScrapeValue(
     case 'profileSummary':
       return Boolean(result.profileSummary?.trim())
     case 'aliases':
-      return (result.aliases ?? []).some((name) => {
-        const trimmed = name.trim()
-        return (
-          Boolean(trimmed) &&
-          isValidActressAlias(trimmed) &&
-          normalizeActressNameKey(trimmed) !== normalizeActressNameKey(mainName) &&
-          isActressNameAvailable(trimmed, actressId)
-        )
-      })
+      return applicableAliases.length > 0
     default:
       return false
   }
+}
+
+function resolveApplicableScrapedAliases(
+  aliases: string[] | undefined,
+  actressId: number,
+  mainName: string
+): { applicable: string[]; conflicts: string[] } {
+  const applicable: string[] = []
+  const conflicts: string[] = []
+  const seen = new Set<string>()
+  const mainKey = normalizeActressNameKey(mainName)
+
+  for (const name of aliases ?? []) {
+    const trimmed = name.trim()
+    if (!trimmed || !isValidActressAlias(trimmed)) continue
+    const key = normalizeActressNameKey(trimmed)
+    if (key === mainKey || seen.has(key)) continue
+    seen.add(key)
+    if (!isActressNameAvailable(trimmed, actressId)) {
+      conflicts.push(trimmed)
+      continue
+    }
+    applicable.push(trimmed)
+  }
+
+  return { applicable, conflicts }
 }
 
 /** Apply actress profile scrape result (avatar, gallery, profile fields, measurements, aliases). */
@@ -1587,17 +1625,42 @@ export function applyActressScrapeResult(
   const scrapedAt = nowIso()
   const actress = db
     .prepare(
-      'SELECT main_name, avatar_path, avatar_source_path FROM actresses WHERE id = ?'
+      `SELECT main_name, avatar_path, avatar_source_path, bust_cm, waist_cm, hip_cm
+       FROM actresses WHERE id = ?`
     )
     .get(actressId) as
-    | { main_name: string; avatar_path: string | null; avatar_source_path: string | null }
+    | Pick<
+        Actress,
+        | 'main_name'
+        | 'avatar_path'
+        | 'avatar_source_path'
+        | 'bust_cm'
+        | 'waist_cm'
+        | 'hip_cm'
+      >
     | undefined
   if (!actress) throw new Error('演员不存在')
   const preserveExistingDb = mode === 'fillEmpty'
   const preserveNullScrape = mode !== 'replace'
+  const shouldClearAvatar =
+    mode === 'replace' &&
+    selected.has('avatar') &&
+    !result.avatarUrl?.trim() &&
+    !avatarRelPath
   if (preserveExistingDb && selected.has('avatar')) {
     clearBrokenActressAvatarIfNeeded(actressId)
   }
+  const aliasResultIsEmpty = !result.aliases || result.aliases.length === 0
+  const { applicable: applicableAliases, conflicts: conflictingAliases } =
+    selected.has('aliases')
+      ? resolveApplicableScrapedAliases(result.aliases, actressId, actress.main_name)
+      : { applicable: [], conflicts: [] }
+  for (const name of conflictingAliases) {
+    warnings.push(`别名「${name}」已被其他演员使用，已跳过`)
+  }
+  const shouldReplaceAliases =
+    selected.has('aliases') &&
+    (applicableAliases.length > 0 || (mode === 'replace' && aliasResultIsEmpty))
 
   let adoptedAvatar:
     | { displayPath: string; sourcePath: string; cropJson: string }
@@ -1635,16 +1698,26 @@ export function applyActressScrapeResult(
     }
   }
 
-  const hasValidValue = effective.some((field) =>
-    hasValidActressScrapeValue(
-      result,
-      field,
-      avatarApplied,
-      galleryAssets,
-      actressId,
-      actress.main_name
+  const hasReplaceOperation =
+    mode === 'replace' &&
+    effective.some((field) => {
+      if (field === 'avatar') return shouldClearAvatar
+      if (field === 'aliases') return aliasResultIsEmpty
+      return true
+    })
+  const hasValidValue =
+    hasReplaceOperation ||
+    effective.some((field) =>
+      hasValidActressScrapeValue(
+        result,
+        field,
+        avatarApplied,
+        galleryAssets,
+        applicableAliases,
+        mode,
+        actress
+      )
     )
-  )
   if (!hasValidValue) {
     return { applied: false, warnings, avatarApplied: false }
   }
@@ -1726,8 +1799,12 @@ export function applyActressScrapeResult(
       bind.avatar_path = adoptedAvatar.displayPath
       bind.avatar_source_path = adoptedAvatar.sourcePath
       bind.avatar_crop_json = adoptedAvatar.cropJson
+    } else if (shouldClearAvatar) {
+      updates.push('avatar_path = NULL')
+      updates.push('avatar_source_path = NULL')
+      updates.push('avatar_crop_json = NULL')
     }
-    if (selected.has('nameZh') && result.nameZh !== undefined) {
+    if (selected.has('nameZh') && (mode === 'replace' || result.nameZh !== undefined)) {
       const zh = result.nameZh?.trim() || null
       if (zh) assertActressNameAvailable(zh, actressId)
       if (preserveExistingDb) {
@@ -1736,7 +1813,7 @@ export function applyActressScrapeResult(
         setActressTypedName(actressId, 'zh', zh)
       }
     }
-    if (selected.has('nameEn') && result.nameEn !== undefined) {
+    if (selected.has('nameEn') && (mode === 'replace' || result.nameEn !== undefined)) {
       const en = result.nameEn?.trim() || null
       if (en) assertActressNameAvailable(en, actressId)
       if (preserveExistingDb) {
@@ -1754,15 +1831,12 @@ export function applyActressScrapeResult(
       db.prepare(`UPDATE actresses SET ${updates.join(', ')} WHERE id = @id`).run(bind)
     }
 
-    if (selected.has('aliases')) {
-      const aliases = (result.aliases ?? []).filter((a) => isValidActressAlias(a.trim()))
-      if (mode === 'replace' || aliases.length > 0) {
-        const skipped = replaceActressAliases(actressId, aliases, actress.main_name, {
-          onNameConflict: 'skip'
-        })
-        for (const name of skipped) {
-          warnings.push(`别名「${name}」已被其他演员使用，已跳过`)
-        }
+    if (shouldReplaceAliases) {
+      const skipped = replaceActressAliases(actressId, applicableAliases, actress.main_name, {
+        onNameConflict: 'skip'
+      })
+      for (const name of skipped) {
+        warnings.push(`别名「${name}」已被其他演员使用，已跳过`)
       }
     }
     if (selected.has('gallery') && (galleryAssets.length > 0 || mode === 'replace')) {
@@ -1782,6 +1856,9 @@ export function applyActressScrapeResult(
     ) {
       deleteAsset(actress.avatar_source_path)
     }
+  } else if (shouldClearAvatar) {
+    deleteAsset(actress.avatar_path)
+    deleteAsset(actress.avatar_source_path)
   }
 
   return { applied: true, warnings, avatarApplied }
@@ -1808,7 +1885,7 @@ function isValidActressAlias(name: string): boolean {
 }
 
 function normalizeActressNameKey(name: string): string {
-  return name.toLowerCase().replace(/\s+/g, '')
+  return normalizeActressName(name)
 }
 
 function removeMergedActressRecord(id: number): void {

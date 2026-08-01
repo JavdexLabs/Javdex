@@ -118,6 +118,7 @@ function mergeActressResults(
 interface CompositeActressScrapeOutcome {
   result: ActressScrapeResult | null
   warnings: string[]
+  matchedFields: ActressScrapeField[]
 }
 
 async function scrapeCompositeActress(
@@ -129,7 +130,7 @@ async function scrapeCompositeActress(
   delayController?: ScrapeActressOptions['delayController']
 ): Promise<CompositeActressScrapeOutcome> {
   const composite = findCompositeScraper('actress', compositeName)
-  if (!composite) return { result: null, warnings: [] }
+  if (!composite) return { result: null, warnings: [], matchedFields: [] }
   const grouped = new Map<string, ActressScrapeField[]>()
   for (const field of fields) {
     const pluginName = composite.fieldPluginMap[field]
@@ -139,6 +140,7 @@ async function scrapeCompositeActress(
   let merged: ActressScrapeResult | null = null
   let failedSources = 0
   const warnings: string[] = []
+  const matchedFields = new Set<ActressScrapeField>()
   for (const [pluginName, pluginFields] of grouped) {
     try {
       const scraper = getActressScraper(pluginName)
@@ -149,6 +151,7 @@ async function scrapeCompositeActress(
         : await scraper.parseTask(queryName, aliases, proxyUrl)
       const result = normalizeActressScrapeResult(rawResult)
       if (!result) continue
+      for (const field of pluginFields) matchedFields.add(field)
       merged = mergeActressResults(merged, pickActressFields(result, new Set(pluginFields)))
     } catch (error) {
       failedSources += 1
@@ -158,7 +161,7 @@ async function scrapeCompositeActress(
   if (grouped.size > 0 && failedSources === grouped.size) {
     throw new Error(warnings.join('；'))
   }
-  return { result: merged, warnings }
+  return { result: merged, warnings, matchedFields: [...matchedFields] }
 }
 
 function dedupeActressNameList(names: string[]): string[] {
@@ -236,6 +239,7 @@ export async function scrapeActress(
 
     let rawResult: ActressScrapeResult | null
     let sourceWarnings: string[] = []
+    let fieldsToApply = requested
     if (scraper) {
       rawResult = options?.delayController
         ? await options.delayController.run('actress', scraper.scraperName, () =>
@@ -253,6 +257,7 @@ export async function scrapeActress(
       )
       rawResult = compositeOutcome.result
       sourceWarnings = compositeOutcome.warnings
+      fieldsToApply = compositeOutcome.matchedFields
     }
     const result = normalizeActressScrapeResult(rawResult)
     if (!result) {
@@ -289,19 +294,27 @@ export async function scrapeActress(
           fetcher,
           actressId
         )
-        if (!downloaded) failedDownloads += 1
+        if (!downloaded) {
+          failedDownloads += 1
+          continue
+        }
         galleryAssets.push({
           remoteUrl: galleryUrls[index],
-          localPath: downloaded?.localPath ?? null,
-          width: downloaded?.width ?? null,
-          height: downloaded?.height ?? null
+          localPath: downloaded.localPath,
+          width: downloaded.width,
+          height: downloaded.height
         })
       }
       const sourceName = composite?.fieldPluginMap.gallery
-      if (failedDownloads > 0 && sourceName) {
+      if (failedDownloads > 0) {
         sourceWarnings.push(
-          `字段源「${sourceName}」失败：${failedDownloads} 张写真下载失败`
+          sourceName
+            ? `字段源「${sourceName}」失败：${failedDownloads} 张写真下载失败`
+            : `${failedDownloads} 张写真下载失败`
         )
+      }
+      if (failedDownloads === galleryUrls.length) {
+        fieldsToApply = fieldsToApply.filter((field) => field !== 'gallery')
       }
     }
 
@@ -310,7 +323,7 @@ export async function scrapeActress(
       { ...result, galleryImageUrls: galleryUrls },
       avatarRel,
       galleryAssets,
-      requested,
+      fieldsToApply,
       mode
     )
     const warnings = [...sourceWarnings, ...applyWarnings]

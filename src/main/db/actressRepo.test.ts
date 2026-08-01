@@ -1403,6 +1403,50 @@ describe('actressRepo.applyActressScrapeResult', () => {
     assert.equal(parseAvatarCrop(after.avatar_crop_json)?.zoom, 1)
   })
 
+  it('replace clears an existing avatar when the source returns no avatar', () => {
+    setupDb()
+
+    const { applied, avatarApplied } = applyActressScrapeResult(
+      1,
+      {},
+      null,
+      [],
+      ['avatar'],
+      'replace'
+    )
+
+    const row = getDb()
+      .prepare('SELECT avatar_path, avatar_source_path, avatar_crop_json FROM actresses WHERE id = ?')
+      .get(1) as {
+      avatar_path: string | null
+      avatar_source_path: string | null
+      avatar_crop_json: string | null
+    }
+    assert.equal(applied, true)
+    assert.equal(avatarApplied, false)
+    assert.equal(row.avatar_path, null)
+    assert.equal(row.avatar_source_path, null)
+    assert.equal(row.avatar_crop_json, null)
+    assert.equal(assetExists('avatars/complete.jpg'), false)
+  })
+
+  it('replace preserves an existing avatar when a returned avatar fails to download', () => {
+    setupDb()
+
+    const { applied } = applyActressScrapeResult(
+      1,
+      { avatarUrl: 'https://example.test/unavailable.jpg' },
+      null,
+      [],
+      ['avatar'],
+      'replace'
+    )
+
+    assert.equal(applied, false)
+    assert.equal(getActressDetail(1)?.avatar_path, 'avatars/complete.jpg')
+    assert.equal(assetExists('avatars/complete.jpg'), true)
+  })
+
   it('fillEmpty preserves existing measurement values while filling missing ones', () => {
     setupDb()
     const { applied } = applyActressScrapeResult(
@@ -1458,6 +1502,95 @@ describe('actressRepo.applyActressScrapeResult', () => {
     assert.equal(row.profile_summary, 'Bio')
   })
 
+  it('replace clears every selected non-avatar field when the matched source returns no values', () => {
+    setupDb()
+    editActress(1, {
+      name_zh: '测试中文名',
+      name_en: 'Test English Name',
+      cup_size: 'E'
+    })
+
+    const { applied } = applyActressScrapeResult(
+      1,
+      {},
+      null,
+      [],
+      [
+        'gallery',
+        'birthDate',
+        'nameZh',
+        'nameEn',
+        'debutDate',
+        'heightCm',
+        'measurements',
+        'cupSize',
+        'bloodType',
+        'zodiac',
+        'nationality',
+        'profileSummary',
+        'aliases'
+      ],
+      'replace'
+    )
+
+    const detail = getActressDetail(1)
+    assert.equal(applied, true)
+    assert.equal(detail?.birth_date, null)
+    assert.equal(detail?.name_zh, null)
+    assert.equal(detail?.name_en, null)
+    assert.equal(detail?.debut_date, null)
+    assert.equal(detail?.height_cm, null)
+    assert.equal(detail?.bust_cm, null)
+    assert.equal(detail?.waist_cm, null)
+    assert.equal(detail?.hip_cm, null)
+    assert.equal(detail?.cup_size, null)
+    assert.equal(detail?.blood_type, null)
+    assert.equal(detail?.zodiac, null)
+    assert.equal(detail?.nationality, null)
+    assert.equal(detail?.profile_summary, null)
+    assert.deepEqual(detail?.gallery, [])
+    assert.deepEqual(detail?.aliases, [])
+  })
+
+  it('replaceIfPresent preserves aliases when every returned alias conflicts', () => {
+    setupDb()
+
+    const { applied, warnings } = applyActressScrapeResult(
+      1,
+      { birthDate: '1995-03-04', aliases: ['Missing Female'] },
+      null,
+      [],
+      ['birthDate', 'aliases'],
+      'replaceIfPresent'
+    )
+
+    assert.equal(applied, true)
+    assert.equal(warnings.some((warning) => warning.includes('Missing Female')), true)
+    assert.deepEqual(getActressDetail(1)?.aliases, ['Complete Alias'])
+  })
+
+  it('fillEmpty does not report success when measurements only repeat a filled component', () => {
+    setupDb()
+    getDb()
+      .prepare('UPDATE actresses SET waist_cm = NULL, hip_cm = NULL WHERE id = ?')
+      .run(1)
+
+    const { applied } = applyActressScrapeResult(
+      1,
+      { bustCm: 99 },
+      null,
+      [],
+      ['measurements'],
+      'fillEmpty'
+    )
+
+    const row = getDb()
+      .prepare('SELECT bust_cm, waist_cm, hip_cm FROM actresses WHERE id = ?')
+      .get(1) as { bust_cm: number | null; waist_cm: number | null; hip_cm: number | null }
+    assert.equal(applied, false)
+    assert.deepEqual(row, { bust_cm: 90, waist_cm: null, hip_cm: null })
+  })
+
   it('skips conflicting aliases and applies other scrape fields', () => {
     setupDb()
     const { applied, warnings } = applyActressScrapeResult(
@@ -1487,5 +1620,25 @@ describe('actressRepo.applyActressScrapeResult', () => {
       aliases.map((item) => item.name),
       ['Safe Alias']
     )
+  })
+
+  it('treats canonically equivalent scraped aliases as conflicts', () => {
+    setupDb()
+
+    const { applied, warnings } = applyActressScrapeResult(
+      2,
+      {
+        birthDate: '1995-03-04',
+        aliases: ['Ｃｏｍｐｌｅｔｅ']
+      },
+      null,
+      [],
+      ['birthDate', 'aliases'],
+      'replaceIfPresent'
+    )
+
+    assert.equal(applied, true)
+    assert.deepEqual(warnings, ['别名「Ｃｏｍｐｌｅｔｅ」已被其他演员使用，已跳过'])
+    assert.deepEqual(getActressDetail(2)?.aliases, [])
   })
 })

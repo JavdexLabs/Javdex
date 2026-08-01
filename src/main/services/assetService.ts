@@ -4,7 +4,13 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { getSettings } from '../settings/settingsStore'
 import { encryptPlain, decryptBlob, isEncryptedBlob, mimeFromExt } from './assetCrypto'
-import { getCachedAsset, setCachedAsset, invalidateAssetCache } from './assetCache'
+import {
+  getCachedAsset,
+  getOrLoadImageInspection,
+  setCachedAsset,
+  invalidateAssetCache,
+  type ImageAssetInspection
+} from './assetCache'
 import {
   ensureMediaAssetDirsAt,
   resolveMediaAssetsRoot
@@ -105,6 +111,21 @@ function hasImageMagicBytes(buf: Buffer): boolean {
   return detectImageExtensionFromBuffer(buf) !== null
 }
 
+function isUsableImageBuffer(body: Buffer): boolean {
+  if (body.length === 0) return false
+  if (body[0] === 0x3c || body[0] === 0x7b) return false
+
+  if (typeof nativeImage?.createFromBuffer === 'function') {
+    const img = nativeImage.createFromBuffer(body)
+    if (!img.isEmpty()) {
+      const { width, height } = img.getSize()
+      if (width > 0 && height > 0) return true
+    }
+  }
+
+  return hasImageMagicBytes(body)
+}
+
 /** True when a stored relative asset path resolves to a readable non-empty image. */
 export function isUsableImageAsset(relPath: string | null | undefined): boolean {
   if (!relPath?.trim()) return false
@@ -112,20 +133,45 @@ export function isUsableImageAsset(relPath: string | null | undefined): boolean 
     const abs = resolveAssetPath(relPath.trim())
     if (!fs.existsSync(abs)) return false
     const { body } = readAssetForServe(relPath.trim())
-    if (body.length === 0) return false
-    if (body[0] === 0x3c || body[0] === 0x7b) return false
-
-    if (typeof nativeImage?.createFromBuffer === 'function') {
-      const img = nativeImage.createFromBuffer(body)
-      if (!img.isEmpty()) {
-        const { width, height } = img.getSize()
-        if (width > 0 && height > 0) return true
-      }
-    }
-
-    return hasImageMagicBytes(body)
+    return isUsableImageBuffer(body)
   } catch {
     return false
+  }
+}
+
+/** Cached usability + content identity for list queries that need both values. */
+export function inspectImageAsset(relPath: string | null | undefined): ImageAssetInspection {
+  const normalizedPath = relPath?.trim()
+  if (!normalizedPath) return { usable: false, fingerprint: null }
+
+  try {
+    const abs = resolveAssetPath(normalizedPath)
+    const stat = fs.statSync(abs)
+    if (!stat.isFile() || stat.size === 0) {
+      invalidateAssetCache(normalizedPath)
+      return { usable: false, fingerprint: null }
+    }
+
+    return getOrLoadImageInspection(
+      normalizedPath,
+      {
+        resolvedPath: abs,
+        mtimeMs: stat.mtimeMs,
+        ctimeMs: stat.ctimeMs,
+        size: stat.size
+      },
+      () => {
+        const { body } = readAssetForServe(normalizedPath)
+        const usable = isUsableImageBuffer(body)
+        return {
+          usable,
+          fingerprint: usable ? avatarSourceFingerprint(body) : null
+        }
+      }
+    )
+  } catch {
+    invalidateAssetCache(normalizedPath)
+    return { usable: false, fingerprint: null }
   }
 }
 
@@ -137,6 +183,7 @@ export function deleteAsset(relPath: string | null | undefined): void {
     const root = assetsRoot()
     if (abs.startsWith(root) && fs.existsSync(abs)) {
       fs.unlinkSync(abs)
+      invalidateAssetCache(relPath)
     }
   } catch (err) {
     console.error('deleteAsset failed:', relPath, (err as Error).message)

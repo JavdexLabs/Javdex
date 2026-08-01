@@ -47,6 +47,7 @@ import {
   importAvatarDisplayFromBuffer,
   importAvatarFromFile,
   importAvatarSourceFromBuffer,
+  inspectImageAsset,
   isUsableImageAsset,
   readAssetBytes,
   readAssetForServe,
@@ -641,18 +642,13 @@ function buildActressListWhere(
 }
 
 function actressHasUsableAvatar(actress: Pick<ActressListItem, 'avatar_path'>): boolean {
-  return !isBlankText(actress.avatar_path) && isUsableImageAsset(actress.avatar_path)
+  return !isBlankText(actress.avatar_path) && inspectImageAsset(actress.avatar_path).usable
 }
 
 function actressDisplayAvatarFingerprint(
   actress: Pick<ActressListItem, 'avatar_path'>
 ): string | null {
-  if (!actressHasUsableAvatar(actress) || !actress.avatar_path) return null
-  try {
-    return avatarSourceFingerprint(readAssetBytes(actress.avatar_path))
-  } catch {
-    return null
-  }
+  return inspectImageAsset(actress.avatar_path).fingerprint
 }
 
 function enrichActressListItems(actresses: ActressListItem[]): ActressListItem[] {

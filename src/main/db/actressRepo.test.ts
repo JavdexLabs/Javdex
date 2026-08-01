@@ -389,6 +389,18 @@ describe('actressRepo.listActressPage', () => {
       ['Missing Male']
     )
   })
+
+  it('refreshes the avatar fingerprint as soon as the avatar file changes', () => {
+    setupStatuses()
+
+    const first = listActressPage({ gender: 'all', avatar: 'with' }).items[0]
+    assert.equal(first?.avatar_fingerprint, avatarSourceFingerprint(MINIMAL_JPEG))
+
+    writeTestAsset('avatars/complete.jpg', WEBP_CONTAINER)
+
+    const refreshed = listActressPage({ gender: 'all', avatar: 'with' }).items[0]
+    assert.equal(refreshed?.avatar_fingerprint, avatarSourceFingerprint(WEBP_CONTAINER))
+  })
 })
 
 describe('actressRepo.clearActressMetadataRecord', () => {

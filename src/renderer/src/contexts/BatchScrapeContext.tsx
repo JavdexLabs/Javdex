@@ -8,6 +8,7 @@ import {
 } from 'react'
 import type { BatchProgress } from '@shared/types'
 import { api } from '../api'
+import { isBatchScrapeActive } from './batchScrapeActivity'
 
 export type BatchScrapeContextValue = {
   videoBatch: BatchProgress | null
@@ -20,10 +21,6 @@ export type BatchScrapeContextValue = {
 }
 
 const BatchScrapeContext = createContext<BatchScrapeContextValue | null>(null)
-
-function isActive(batch: BatchProgress | null): boolean {
-  return Boolean(batch && batch.status !== 'idle')
-}
 
 export function BatchScrapeProvider({ children }: { children: ReactNode }): JSX.Element {
   const [videoBatch, setVideoBatch] = useState<BatchProgress | null>(null)
@@ -69,9 +66,9 @@ export function BatchScrapeProvider({ children }: { children: ReactNode }): JSX.
       actressBatch,
       actressBatchRecoverable,
       actressBatchUnrecoverableReason,
-      videoBatchActive: isActive(videoBatch),
-      actressBatchActive: isActive(actressBatch),
-      anyBatchActive: isActive(videoBatch) || isActive(actressBatch)
+      videoBatchActive: isBatchScrapeActive(videoBatch),
+      actressBatchActive: isBatchScrapeActive(actressBatch),
+      anyBatchActive: isBatchScrapeActive(videoBatch) || isBatchScrapeActive(actressBatch)
     }),
     [videoBatch, actressBatch, actressBatchRecoverable, actressBatchUnrecoverableReason]
   )

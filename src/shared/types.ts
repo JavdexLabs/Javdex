@@ -1055,6 +1055,19 @@ export interface ActressConflictReplacementMainName {
   mainName: string
 }
 
+export interface ValidateIllegalNameReplacementsInput {
+  snapshot: ActressConflictDecisionSnapshot
+  replacementMainNames: ActressConflictReplacementMainName[]
+}
+
+export type ValidateIllegalNameReplacementsResult =
+  | { status: 'valid' }
+  | {
+      status: 'invalid'
+      errors: Array<{ actressId: number; message: string }>
+    }
+  | { status: 'stale'; message: string }
+
 interface ActressConflictDecisionBase {
   snapshot: ActressConflictDecisionSnapshot
   replacementMainNames: ActressConflictReplacementMainName[]
@@ -1075,6 +1088,7 @@ export type ResolveActressConflictInput = ActressConflictDecisionBase &
         ownerActressId: number
         ownerActressRevision: number
       }
+    | { kind: 'markIllegalName' }
     | { kind: 'applyPending'; pendingId: number }
   )
 

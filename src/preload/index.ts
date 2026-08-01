@@ -28,6 +28,8 @@ import type {
   DiscardPendingActressScrapeResult,
   ResolveActressConflictInput,
   ResolveActressConflictResult,
+  ValidateIllegalNameReplacementsInput,
+  ValidateIllegalNameReplacementsResult,
   ActressEditInput,
   ActressGenderFilter,
   ActressListItem,
@@ -289,6 +291,11 @@ const api = {
       invoke<DiscardPendingActressScrapeResult>(IPC.ACTRESS_CONFLICT_DISCARD, input),
     resolveConflict: (input: ResolveActressConflictInput) =>
       invoke<ResolveActressConflictResult>(IPC.ACTRESS_CONFLICT_RESOLVE, input),
+    validateIllegalNameReplacements: (input: ValidateIllegalNameReplacementsInput) =>
+      invoke<ValidateIllegalNameReplacementsResult>(
+        IPC.ACTRESS_CONFLICT_VALIDATE_ILLEGAL,
+        input
+      ),
     batchCount: (filter: ActressBatchScrapeFilter) =>
       invoke<number>(IPC.ACTRESS_SCRAPE_BATCH_COUNT, filter),
     batchStart: (request?: ActressBatchScrapeRequest | string) =>

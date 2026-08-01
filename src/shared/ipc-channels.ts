@@ -73,6 +73,7 @@ export const IPC = {
   ACTRESS_CONFLICT_LIST: 'actressConflict:list',
   ACTRESS_CONFLICT_COUNT: 'actressConflict:count',
   ACTRESS_CONFLICT_DISCARD: 'actressConflict:discard',
+  ACTRESS_CONFLICT_VALIDATE_ILLEGAL: 'actressConflict:validateIllegal',
   ACTRESS_CONFLICT_RESOLVE: 'actressConflict:resolve',
 
   // Tags

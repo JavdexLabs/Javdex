@@ -434,6 +434,508 @@ describe('ActressIdentityConflictWorkflow', () => {
     assert.equal(getActressDetail(targetId)?.birth_date, '1991-01-01')
   })
 
+  it('removes an illegal normalized name from the whole group and applies unlocked profiles', () => {
+    const ownerId = createActress('Owner')
+    const firstTargetId = createActress('First Target')
+    const secondTargetId = createActress('Second Target')
+    editActress(ownerId, { aliases: ['作品一覧'] })
+    const workflow = new ActressIdentityConflictWorkflow()
+    for (const [actressId, birthDate] of [
+      [firstTargetId, '1991-01-01'],
+      [secondTargetId, '1992-02-02']
+    ] as const) {
+      workflow.processPreparedScrape({
+        actressId,
+        plugin: { name: 'Fixture Source', source: 'builtin' },
+        queryName: getActressDetail(actressId)?.main_name ?? '',
+        selectedFields: ['birthDate', 'aliases'],
+        applicableFields: ['birthDate', 'aliases'],
+        mode: 'replace',
+        result: { birthDate, aliases: ['作品一覧'] },
+        warnings: [],
+        resources: []
+      })
+    }
+    const group = workflow.listConflictGroups()[0]
+
+    const outcome = workflow.resolveConflict({
+      kind: 'markIllegalName',
+      snapshot: decisionSnapshot(group),
+      replacementMainNames: []
+    })
+
+    assert.deepEqual(outcome, { status: 'success', remainingPending: 0 })
+    assert.deepEqual(getActressDetail(ownerId)?.aliases, [])
+    assert.equal(findActressByNameOrAlias('作品一覧'), null)
+    assert.equal(getActressDetail(firstTargetId)?.birth_date, '1991-01-01')
+    assert.equal(getActressDetail(secondTargetId)?.birth_date, '1992-02-02')
+    assert.deepEqual(getActressDetail(firstTargetId)?.aliases, [])
+    assert.deepEqual(getActressDetail(secondTargetId)?.aliases, [])
+    assert.deepEqual(workflow.listConflictGroups(), [])
+  })
+
+  it('requires a valid replacement for every main-name claimant before illegal-name removal', () => {
+    const firstClaimantId = createActress('作品一覧')
+    const secondClaimantId = createActress('Second Claimant')
+    const occupiedId = createActress('Occupied Name')
+    const targetId = createActress('Target')
+    const db = getDb()
+    db.prepare('DELETE FROM actress_name_ownership WHERE normalized_name IN (?, ?)').run(
+      '作品一覧',
+      'secondclaimant'
+    )
+    db.prepare('UPDATE actresses SET main_name = ? WHERE id = ?').run(
+      '作 品 一 覧',
+      secondClaimantId
+    )
+    db.prepare("UPDATE actress_names SET name = ? WHERE actress_id = ? AND type = 'main'").run(
+      '作 品 一 覧',
+      secondClaimantId
+    )
+    const insertClaim = db.prepare(
+      `INSERT INTO pending_actress_name_claims
+         (normalized_name, actress_id, name, type, is_primary)
+       VALUES (?, ?, ?, 'main', 1)`
+    )
+    insertClaim.run('作品一覧', firstClaimantId, '作品一覧')
+    insertClaim.run('作品一覧', secondClaimantId, '作 品 一 覧')
+
+    const workflow = new ActressIdentityConflictWorkflow()
+    workflow.processPreparedScrape({
+      actressId: targetId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Target',
+      selectedFields: ['birthDate', 'aliases'],
+      applicableFields: ['birthDate', 'aliases'],
+      mode: 'replace',
+      result: { birthDate: '1993-03-03', aliases: ['作品一覧'] },
+      warnings: [],
+      resources: []
+    })
+    const group = workflow.listConflictGroups()[0]
+
+    assert.throws(
+      () =>
+        workflow.resolveConflict({
+          kind: 'markIllegalName',
+          snapshot: decisionSnapshot(group),
+          replacementMainNames: [
+            { actressId: firstClaimantId, mainName: 'First Replacement' }
+          ]
+        }),
+      /必须提供替代主名/
+    )
+    assert.throws(
+      () =>
+        workflow.resolveConflict({
+          kind: 'markIllegalName',
+          snapshot: decisionSnapshot(group),
+          replacementMainNames: [
+            { actressId: firstClaimantId, mainName: 'First Replacement' },
+            { actressId: secondClaimantId, mainName: 'Occupied Name' }
+          ]
+        }),
+      /已被其他演员使用/
+    )
+    assert.equal(getActressDetail(firstClaimantId)?.main_name, '作品一覧')
+    assert.equal(getActressDetail(secondClaimantId)?.main_name, '作 品 一 覧')
+    assert.equal(getActressDetail(targetId)?.birth_date, null)
+    assert.equal(findActressByNameOrAlias('作品一覧'), null)
+
+    assert.deepEqual(
+      workflow.resolveConflict({
+        kind: 'markIllegalName',
+        snapshot: decisionSnapshot(group),
+        replacementMainNames: [
+          { actressId: firstClaimantId, mainName: 'First Replacement' },
+          { actressId: secondClaimantId, mainName: 'Second Replacement' }
+        ]
+      }),
+      { status: 'success', remainingPending: 0 }
+    )
+    assert.equal(getActressDetail(firstClaimantId)?.main_name, 'First Replacement')
+    assert.equal(getActressDetail(secondClaimantId)?.main_name, 'Second Replacement')
+    assert.equal(getActressDetail(occupiedId)?.main_name, 'Occupied Name')
+    assert.equal(getActressDetail(targetId)?.birth_date, '1993-03-03')
+  })
+
+  it('validates illegal-name replacement main names against the live conflict snapshot', () => {
+    const ownerId = createActress('作品一覧')
+    createActress('Occupied Name')
+    const targetId = createActress('Target')
+    const workflow = new ActressIdentityConflictWorkflow()
+    workflow.processPreparedScrape({
+      actressId: targetId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Target',
+      selectedFields: ['aliases'],
+      applicableFields: ['aliases'],
+      mode: 'replace',
+      result: { aliases: ['作品一覧'] },
+      warnings: [],
+      resources: []
+    })
+    const group = workflow.listConflictGroups()[0]
+    const validate = workflow.validateIllegalNameReplacements.bind(workflow)
+
+    assert.deepEqual(
+      validate({ snapshot: decisionSnapshot(group), replacementMainNames: [] }),
+      {
+        status: 'invalid',
+        errors: [{ actressId: ownerId, message: '请填写替代主名' }]
+      }
+    )
+    assert.deepEqual(
+      validate({
+        snapshot: decisionSnapshot(group),
+        replacementMainNames: [{ actressId: ownerId, mainName: 'Occupied Name' }]
+      }),
+      {
+        status: 'invalid',
+        errors: [{ actressId: ownerId, message: '名称「Occupied Name」已被其他演员使用' }]
+      }
+    )
+    assert.deepEqual(
+      validate({
+        snapshot: decisionSnapshot(group),
+        replacementMainNames: [{ actressId: ownerId, mainName: 'Owner Replacement' }]
+      }),
+      { status: 'valid' }
+    )
+
+    editActress(targetId, { birth_date: '2000-01-01' })
+    assert.deepEqual(
+      validate({
+        snapshot: decisionSnapshot(group),
+        replacementMainNames: [{ actressId: ownerId, mainName: 'Owner Replacement' }]
+      }),
+      { status: 'stale', message: '数据已变化，请刷新后重新确认' }
+    )
+  })
+
+  it('does not reconcile newly active conflicts while rejecting a stale illegal-name decision', () => {
+    const ownerId = createActress('Owner')
+    const targetId = createActress('Target')
+    editActress(ownerId, { aliases: ['Collision'] })
+    const workflow = new ActressIdentityConflictWorkflow()
+    workflow.processPreparedScrape({
+      actressId: targetId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Target',
+      selectedFields: ['aliases'],
+      applicableFields: ['aliases'],
+      mode: 'replace',
+      result: { aliases: ['Collision', 'Later Collision'] },
+      warnings: [],
+      resources: []
+    })
+    const group = workflow
+      .listConflictGroups()
+      .find((item) => item.normalizedName === 'collision')!
+    const snapshot = decisionSnapshot(group)
+    const pendingId = group.candidates[0].pendingId
+    createActress('Later Collision')
+    const db = getDb()
+    const readPendingState = (): { revision: number; conflictCount: number } => ({
+      revision: (
+        db.prepare('SELECT revision FROM pending_actress_scrapes WHERE id = ?').get(pendingId) as {
+          revision: number
+        }
+      ).revision,
+      conflictCount: (
+        db
+          .prepare(
+            'SELECT COUNT(*) AS total FROM pending_actress_scrape_conflicts WHERE pending_scrape_id = ?'
+          )
+          .get(pendingId) as { total: number }
+      ).total
+    })
+    const before = readPendingState()
+
+    assert.deepEqual(
+      workflow.validateIllegalNameReplacements({ snapshot, replacementMainNames: [] }),
+      { status: 'stale', message: '数据已变化，请刷新后重新确认' }
+    )
+    assert.deepEqual(readPendingState(), before)
+    assert.deepEqual(
+      workflow.resolveConflict({
+        kind: 'markIllegalName',
+        snapshot,
+        replacementMainNames: []
+      }),
+      { status: 'stale', message: '数据已变化，请刷新后重新确认' }
+    )
+    assert.deepEqual(readPendingState(), before)
+  })
+
+  it('removes only the current illegal group and does not remember a blacklist rule', () => {
+    const illegalOwnerId = createActress('Illegal Owner')
+    const otherOwnerId = createActress('Other Owner')
+    const blockedTargetId = createActress('Blocked Target')
+    editActress(illegalOwnerId, { aliases: ['作品一覧'] })
+    editActress(otherOwnerId, { aliases: ['Other Collision'] })
+    const workflow = new ActressIdentityConflictWorkflow()
+    workflow.processPreparedScrape({
+      actressId: blockedTargetId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Blocked Target',
+      selectedFields: ['birthDate', 'aliases'],
+      applicableFields: ['birthDate', 'aliases'],
+      mode: 'replace',
+      result: { birthDate: '1993-03-03', aliases: ['作品一覧', 'Other Collision'] },
+      warnings: [],
+      resources: []
+    })
+    const illegalGroup = workflow
+      .listConflictGroups()
+      .find((group) => group.normalizedName === '作品一覧')!
+
+    assert.deepEqual(
+      workflow.resolveConflict({
+        kind: 'markIllegalName',
+        snapshot: decisionSnapshot(illegalGroup),
+        replacementMainNames: []
+      }),
+      { status: 'success', remainingPending: 1 }
+    )
+    const remainingGroup = workflow.listConflictGroups()[0]
+    assert.equal(remainingGroup.normalizedName, 'othercollision')
+    assert.deepEqual(remainingGroup.candidates[0].result.aliases, ['Other Collision'])
+    assert.equal(getActressDetail(blockedTargetId)?.birth_date, null)
+    assert.deepEqual(getActressDetail(illegalOwnerId)?.aliases, [])
+
+    const firstFutureTargetId = createActress('First Future Target')
+    assert.equal(
+      workflow.processPreparedScrape({
+        actressId: firstFutureTargetId,
+        plugin: { name: 'Fixture Source', source: 'builtin' },
+        queryName: 'First Future Target',
+        selectedFields: ['aliases'],
+        applicableFields: ['aliases'],
+        mode: 'replace',
+        result: { aliases: ['作品一覧'] },
+        warnings: [],
+        resources: []
+      }).status,
+      'success'
+    )
+    const secondFutureTargetId = createActress('Second Future Target')
+    assert.equal(
+      workflow.processPreparedScrape({
+        actressId: secondFutureTargetId,
+        plugin: { name: 'Fixture Source', source: 'builtin' },
+        queryName: 'Second Future Target',
+        selectedFields: ['aliases'],
+        applicableFields: ['aliases'],
+        mode: 'replace',
+        result: { aliases: ['作品一覧'] },
+        warnings: [],
+        resources: []
+      }).status,
+      'pending'
+    )
+    const recreatedGroup = workflow
+      .listConflictGroups()
+      .find((group) => group.normalizedName === '作品一覧')!
+    assert.equal(recreatedGroup.currentOwner?.actressId, firstFutureTargetId)
+    assert.deepEqual(
+      recreatedGroup.candidates.map((candidate) => candidate.actressId),
+      [secondFutureTargetId]
+    )
+  })
+
+  it('applies a result when its other recorded conflict has already become inactive', () => {
+    const illegalOwnerId = createActress('Illegal Owner')
+    const resolvedOwnerId = createActress('Resolved Owner')
+    const targetId = createActress('Target')
+    editActress(illegalOwnerId, { aliases: ['作品一覧'] })
+    editActress(resolvedOwnerId, { aliases: ['Resolved Elsewhere'] })
+    const workflow = new ActressIdentityConflictWorkflow()
+    workflow.processPreparedScrape({
+      actressId: targetId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Target',
+      selectedFields: ['birthDate', 'aliases'],
+      applicableFields: ['birthDate', 'aliases'],
+      mode: 'replace',
+      result: {
+        birthDate: '1994-04-04',
+        aliases: ['作品一覧', 'Resolved Elsewhere']
+      },
+      warnings: [],
+      resources: []
+    })
+    const illegalGroup = workflow
+      .listConflictGroups()
+      .find((group) => group.normalizedName === '作品一覧')!
+    editActress(resolvedOwnerId, { aliases: [] })
+
+    assert.deepEqual(
+      workflow.resolveConflict({
+        kind: 'markIllegalName',
+        snapshot: decisionSnapshot(illegalGroup),
+        replacementMainNames: []
+      }),
+      { status: 'success', remainingPending: 0 }
+    )
+    assert.equal(getActressDetail(targetId)?.birth_date, '1994-04-04')
+    assert.deepEqual(getActressDetail(targetId)?.aliases, ['Resolved Elsewhere'])
+    assert.deepEqual(workflow.listConflictGroups(), [])
+  })
+
+  for (const failurePoint of [
+    'name deletion',
+    'main replacement',
+    'profile application',
+    'pending cleanup'
+  ] as const) {
+    it(`rolls back illegal-name handling when ${failurePoint} fails`, () => {
+      const ownerId = createActress(failurePoint === 'main replacement' ? '作品一覧' : 'Owner')
+      const targetId = createActress('Target')
+      if (failurePoint !== 'main replacement') {
+        editActress(ownerId, { aliases: ['作品一覧'] })
+      }
+      const workflow = new ActressIdentityConflictWorkflow()
+      workflow.processPreparedScrape({
+        actressId: targetId,
+        plugin: { name: 'Fixture Source', source: 'builtin' },
+        queryName: 'Target',
+        selectedFields: ['birthDate', 'aliases'],
+        applicableFields: ['birthDate', 'aliases'],
+        mode: 'replace',
+        result: { birthDate: '1993-03-03', aliases: ['作品一覧'] },
+        warnings: [],
+        resources: []
+      })
+      const group = workflow.listConflictGroups()[0]
+      const pendingId = group.candidates[0].pendingId
+      const db = getDb()
+      if (failurePoint === 'name deletion') {
+        db.exec(`
+          CREATE TRIGGER fail_illegal_name_delete
+          BEFORE DELETE ON actress_names
+          WHEN normalize_actress_name(OLD.name) = '作品一覧'
+          BEGIN
+            SELECT RAISE(ABORT, 'forced name deletion failure');
+          END;
+        `)
+      } else if (failurePoint === 'main replacement') {
+        db.exec(`
+          CREATE TRIGGER fail_illegal_main_replacement
+          BEFORE UPDATE OF main_name ON actresses
+          WHEN OLD.id = ${ownerId}
+          BEGIN
+            SELECT RAISE(ABORT, 'forced main replacement failure');
+          END;
+        `)
+      } else if (failurePoint === 'profile application') {
+        db.exec(`
+          CREATE TRIGGER fail_illegal_profile_apply
+          BEFORE UPDATE OF birth_date ON actresses
+          WHEN OLD.id = ${targetId}
+          BEGIN
+            SELECT RAISE(ABORT, 'forced profile application failure');
+          END;
+        `)
+      } else {
+        db.exec(`
+          CREATE TRIGGER fail_illegal_pending_cleanup
+          BEFORE DELETE ON pending_actress_scrapes
+          WHEN OLD.id = ${pendingId}
+          BEGIN
+            SELECT RAISE(ABORT, 'forced pending cleanup failure');
+          END;
+        `)
+      }
+
+      assert.throws(
+        () =>
+          workflow.resolveConflict({
+            kind: 'markIllegalName',
+            snapshot: decisionSnapshot(group),
+            replacementMainNames:
+              failurePoint === 'main replacement'
+                ? [{ actressId: ownerId, mainName: 'Owner Replacement' }]
+                : []
+          }),
+        /forced/
+      )
+      assert.equal(
+        getActressDetail(ownerId)?.main_name,
+        failurePoint === 'main replacement' ? '作品一覧' : 'Owner'
+      )
+      if (failurePoint !== 'main replacement') {
+        assert.deepEqual(getActressDetail(ownerId)?.aliases, ['作品一覧'])
+      }
+      assert.equal(findActressByNameOrAlias('作品一覧'), ownerId)
+      assert.equal(getActressDetail(targetId)?.birth_date, null)
+      assert.equal(getActressDetail(targetId)?.scraped_status, 0)
+      assert.equal(workflow.countPendingScrapes(), 1)
+      assert.equal(workflow.listConflictGroups()[0].normalizedName, '作品一覧')
+    })
+  }
+
+  it('keeps the whole illegal-name group pending when any resource preparation fails', () => {
+    const ownerId = createActress('Owner')
+    const firstTargetId = createActress('First Target')
+    const secondTargetId = createActress('Second Target')
+    editActress(ownerId, { aliases: ['作品一覧'] })
+    const workflow = new ActressIdentityConflictWorkflow()
+    for (const actressId of [firstTargetId, secondTargetId]) {
+      workflow.processPreparedScrape({
+        actressId,
+        plugin: { name: 'Fixture Source', source: 'builtin' },
+        queryName: getActressDetail(actressId)?.main_name ?? '',
+        selectedFields: ['avatar', 'birthDate', 'aliases'],
+        applicableFields: ['avatar', 'birthDate', 'aliases'],
+        mode: 'replace',
+        result: {
+          avatarUrl: `https://example.test/${actressId}.jpg`,
+          birthDate: '1993-03-03',
+          aliases: ['作品一覧']
+        },
+        warnings: [],
+        resources: [
+          {
+            field: 'avatar',
+            position: 0,
+            remoteUrl: `https://example.test/${actressId}.jpg`,
+            data: MINIMAL_JPEG
+          }
+        ]
+      })
+    }
+    const group = workflow.listConflictGroups()[0]
+    const stagedPaths = group.candidates.map((candidate) =>
+      path.join(tempRoot, 'media_assets', candidate.resources[0].stagedPath)
+    )
+    fs.writeFileSync(stagedPaths[1], Buffer.from('broken image'))
+
+    assert.throws(
+      () =>
+        workflow.resolveConflict({
+          kind: 'markIllegalName',
+          snapshot: decisionSnapshot(group),
+          replacementMainNames: []
+        }),
+      /暂存资源不可用/
+    )
+    assert.deepEqual(getActressDetail(ownerId)?.aliases, ['作品一覧'])
+    assert.equal(findActressByNameOrAlias('作品一覧'), ownerId)
+    assert.equal(getActressDetail(firstTargetId)?.birth_date, null)
+    assert.equal(getActressDetail(firstTargetId)?.avatar_path, null)
+    assert.equal(getActressDetail(secondTargetId)?.birth_date, null)
+    assert.equal(getActressDetail(secondTargetId)?.avatar_path, null)
+    assert.equal(workflow.countPendingScrapes(), 2)
+    assert.equal(fs.existsSync(stagedPaths[0]), true)
+    assert.equal(fs.existsSync(stagedPaths[1]), true)
+    const avatarDirectory = path.join(tempRoot, 'media_assets', 'avatars')
+    assert.deepEqual(
+      fs.existsSync(avatarDirectory) ? fs.readdirSync(avatarDirectory) : [],
+      []
+    )
+  })
+
   it('requires a replacement when assigning a current main name to a third existing actress', () => {
     const currentOwnerId = createActress('Collision')
     const chosenOwnerId = createActress('Chosen Owner')

@@ -8,6 +8,13 @@ export type ActressOwnershipDecision =
   | 'assignToCurrentActress'
   | 'assignToExistingActress'
 
+export type IllegalNameReplacementValidationStatus =
+  | 'idle'
+  | 'checking'
+  | 'valid'
+  | 'invalid'
+  | 'stale'
+
 export function buildActressConflictDecisionSnapshot(
   group: ActressNameConflictGroup
 ): ActressConflictDecisionSnapshot {
@@ -36,5 +43,17 @@ export function conflictClaimantsNeedingReplacement(
   return group.claimants.filter(
     (claimant) =>
       claimant.nameTypes.includes('main') && claimant.actressId !== destinationOwnerActressId
+  )
+}
+
+export function canConfirmIllegalName(
+  requiredClaimants: ActressConflictCurrentOwner[],
+  replacementMainNames: Record<number, string>,
+  validationStatus: IllegalNameReplacementValidationStatus
+): boolean {
+  if (requiredClaimants.length === 0) return true
+  return (
+    validationStatus === 'valid' &&
+    requiredClaimants.every((claimant) => replacementMainNames[claimant.actressId]?.trim())
   )
 }

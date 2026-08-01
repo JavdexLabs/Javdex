@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, CircleAlert, Trash2, UserRoundCheck, UsersRound } from 'lucide-react'
+import { ArrowLeft, Ban, CircleAlert, Trash2, UserRoundCheck, UsersRound } from 'lucide-react'
 import type {
   ActressNameConflictGroup,
   ActressPendingNameType,
@@ -23,8 +23,10 @@ import { actressKeys } from '../query/queryKeys'
 import { useDebounce } from '../hooks/useDebounce'
 import {
   buildActressConflictDecisionSnapshot,
+  canConfirmIllegalName,
   conflictClaimantsNeedingReplacement,
-  type ActressOwnershipDecision
+  type ActressOwnershipDecision,
+  type IllegalNameReplacementValidationStatus
 } from './actressConflictReviewState'
 
 const FIELD_LABEL = new Map(ACTRESS_SCRAPE_FIELD_OPTIONS.map((option) => [option.id, option.label]))
@@ -129,6 +131,17 @@ export default function ActressConflictReviewPage(): JSX.Element {
     mainName: string
     revision: number
   } | null>(null)
+  const [illegalNameOpen, setIllegalNameOpen] = useState(false)
+  const [illegalValidationStatus, setIllegalValidationStatus] =
+    useState<IllegalNameReplacementValidationStatus>('idle')
+  const [illegalValidationErrors, setIllegalValidationErrors] = useState<Record<number, string>>({})
+  const illegalValidationSeqRef = useRef(0)
+  const resetIllegalNameDialog = useCallback((): void => {
+    setIllegalNameOpen(false)
+    setReplacementMainNames({})
+    setIllegalValidationStatus('idle')
+    setIllegalValidationErrors({})
+  }, [])
   const debouncedExistingOwnerSearch = useDebounce(existingOwnerSearch, 250)
 
   const groupsQuery = useQuery({
@@ -153,6 +166,19 @@ export default function ActressConflictReviewPage(): JSX.Element {
     selectedConflicts.find(
       (conflict) => `${conflict.type}\0${conflict.name}` === selectedConflictKey
     ) ?? selectedConflicts[0] ?? null
+  const illegalReplacementClaimants = useMemo(
+    () => (selectedGroup ? conflictClaimantsNeedingReplacement(selectedGroup, null) : []),
+    [selectedGroup]
+  )
+  const illegalReplacements = useMemo(
+    () =>
+      illegalReplacementClaimants.map((claimant) => ({
+        actressId: claimant.actressId,
+        mainName: replacementMainNames[claimant.actressId] ?? ''
+      })),
+    [illegalReplacementClaimants, replacementMainNames]
+  )
+  const debouncedIllegalReplacements = useDebounce(illegalReplacements, 250)
 
   useEffect(() => {
     if (!selectedGroup) {
@@ -200,6 +226,68 @@ export default function ActressConflictReviewPage(): JSX.Element {
     }
   }, [debouncedExistingOwnerSearch, ownershipDecision, toast])
 
+  useEffect(() => {
+    illegalValidationSeqRef.current += 1
+    setIllegalValidationErrors({})
+    if (!illegalNameOpen) {
+      setIllegalValidationStatus('idle')
+    } else if (illegalReplacementClaimants.length === 0) {
+      setIllegalValidationStatus('valid')
+    } else if (
+      illegalReplacementClaimants.some(
+        (claimant) => !replacementMainNames[claimant.actressId]?.trim()
+      )
+    ) {
+      setIllegalValidationStatus('idle')
+    } else {
+      setIllegalValidationStatus('checking')
+    }
+  }, [illegalNameOpen, illegalReplacements, selectedGroup])
+
+  useEffect(() => {
+    if (!illegalNameOpen || !selectedGroup || illegalReplacementClaimants.length === 0) return
+    if (debouncedIllegalReplacements.some((replacement) => !replacement.mainName.trim())) return
+    const seq = illegalValidationSeqRef.current
+    const snapshot = buildActressConflictDecisionSnapshot(selectedGroup)
+    void api.actressScrape
+      .validateIllegalNameReplacements({
+        snapshot,
+        replacementMainNames: debouncedIllegalReplacements
+      })
+      .then((result) => {
+        if (seq !== illegalValidationSeqRef.current) return
+        if (result.status === 'valid') {
+          setIllegalValidationStatus('valid')
+          setIllegalValidationErrors({})
+          return
+        }
+        if (result.status === 'invalid') {
+          setIllegalValidationStatus('invalid')
+          setIllegalValidationErrors(
+            Object.fromEntries(result.errors.map((error) => [error.actressId, error.message]))
+          )
+          return
+        }
+        setIllegalValidationStatus('stale')
+        resetIllegalNameDialog()
+        toast.show(result.message, 'info')
+        void queryClient.invalidateQueries({ queryKey: actressKeys.conflicts() })
+      })
+      .catch((error) => {
+        if (seq !== illegalValidationSeqRef.current) return
+        setIllegalValidationStatus('invalid')
+        toast.show(String((error as Error).message), 'error')
+      })
+  }, [
+    debouncedIllegalReplacements,
+    illegalNameOpen,
+    illegalReplacementClaimants.length,
+    queryClient,
+    resetIllegalNameDialog,
+    selectedGroup,
+    toast
+  ])
+
   const resultFields = useMemo(
     () =>
       selectedCandidate
@@ -246,7 +334,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
         setSelectedPendingId(null)
       }
       setOwnershipDecision(null)
-      setReplacementMainNames({})
+      resetIllegalNameDialog()
       setExistingOwnerSearch('')
       setSelectedExistingOwner(null)
       await queryClient.invalidateQueries({ queryKey: actressKeys.all })
@@ -312,6 +400,18 @@ export default function ActressConflictReviewPage(): JSX.Element {
       ownerActressId: selectedExistingOwner.actressId,
       ownerActressRevision: selectedExistingOwner.revision,
       replacementMainNames: replacements
+    })
+  }
+
+  const confirmIllegalName = (): void => {
+    if (!selectedGroup) return
+    void resolveDecision({
+      kind: 'markIllegalName',
+      snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
+      replacementMainNames: illegalReplacementClaimants.map((claimant) => ({
+        actressId: claimant.actressId,
+        mainName: replacementMainNames[claimant.actressId] ?? ''
+      }))
     })
   }
 
@@ -566,6 +666,19 @@ export default function ActressConflictReviewPage(): JSX.Element {
                         >
                           归给已有演员…
                         </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost conflict-review-illegal"
+                          disabled={resolving}
+                          onClick={() => {
+                            setOwnershipDecision(null)
+                            resetIllegalNameDialog()
+                            setIllegalNameOpen(true)
+                          }}
+                        >
+                          <Ban {...UI_ICON_SM} aria-hidden />
+                          标记为非法名称
+                        </button>
                       </div>
                     </>
                   ) : null}
@@ -685,6 +798,71 @@ export default function ActressConflictReviewPage(): JSX.Element {
               />
             </label>
           ))}
+        </ConfirmModal>
+      ) : null}
+
+      {illegalNameOpen && selectedGroup ? (
+        <ConfirmModal
+          title={`删除非法名称「${selectedGroup.displayName}」`}
+          size="sm"
+          danger
+          confirmText={resolving ? '处理中…' : '确认删除名称'}
+          confirmDisabled={
+            resolving ||
+            !canConfirmIllegalName(
+              illegalReplacementClaimants,
+              replacementMainNames,
+              illegalValidationStatus
+            )
+          }
+          busy={resolving}
+          closeDisabled={resolving}
+          onConfirm={confirmIllegalName}
+          onCancel={resetIllegalNameDialog}
+        >
+          <div>
+            <p>
+              这会删除该名称的当前归属、所有相关名称声明，以及整个聚合组中的冲突项。被解除的待确认资料会继续应用到各自演员。
+            </p>
+            <p>
+              此操作不会保存黑名单或长期规则；未来插件再次返回相同文本时，仍会按普通名称冲突处理。
+            </p>
+          </div>
+          {illegalReplacementClaimants.map((claimant, index) => {
+            const error = illegalValidationErrors[claimant.actressId]
+            return (
+              <label className="conflict-review-replacement-main" key={claimant.actressId}>
+                <span>为「{claimant.mainName}」填写替代主名</span>
+                <input
+                  autoFocus={index === 0}
+                  className="text-input form-control-full"
+                  value={replacementMainNames[claimant.actressId] ?? ''}
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={error ? `illegal-name-error-${claimant.actressId}` : undefined}
+                  onChange={(event) =>
+                    setReplacementMainNames((current) => ({
+                      ...current,
+                      [claimant.actressId]: event.target.value
+                    }))
+                  }
+                  disabled={resolving}
+                />
+                {error ? (
+                  <small
+                    id={`illegal-name-error-${claimant.actressId}`}
+                    className="text-danger"
+                  >
+                    {error}
+                  </small>
+                ) : null}
+              </label>
+            )
+          })}
+          {illegalReplacementClaimants.length > 0 && illegalValidationStatus === 'checking' ? (
+            <p className="modal-lead" role="status">
+              正在检查替代主名…
+            </p>
+          ) : null}
         </ConfirmModal>
       ) : null}
 

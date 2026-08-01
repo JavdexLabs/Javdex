@@ -1,5 +1,6 @@
 import type {
   ActressConflictCurrentOwner,
+  ActressConflictDecisionSnapshot,
   ActressNameConflictGroup,
   ActressPendingNameType,
   ActressScrapeDisposition,
@@ -12,7 +13,9 @@ import type {
   PendingActressScrapeCandidate,
   PendingActressScrapeResource,
   ResolveActressConflictInput,
-  ResolveActressConflictResult
+  ResolveActressConflictResult,
+  ValidateIllegalNameReplacementsInput,
+  ValidateIllegalNameReplacementsResult
 } from '@shared/types'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -287,6 +290,110 @@ function readNameClaimants(normalizedName: string): ActressConflictCurrentOwner[
   return [...claimants.values()]
 }
 
+function conflictSnapshotMatches(snapshot: ActressConflictDecisionSnapshot): boolean {
+  const db = getDb()
+  const owner = db
+    .prepare(
+      `SELECT o.actress_id, a.revision
+       FROM actress_name_ownership o
+       JOIN actresses a ON a.id = o.actress_id
+       WHERE o.normalized_name = ?`
+    )
+    .get(snapshot.normalizedName) as
+    | { actress_id: number; revision: number }
+    | undefined
+  if ((owner?.actress_id ?? null) !== snapshot.currentOwnerActressId) return false
+  if ((owner?.revision ?? null) !== snapshot.currentOwnerRevision) return false
+
+  const expectedClaimants = [...snapshot.claimants].sort((a, b) => a.actressId - b.actressId)
+  const currentClaimants = readNameClaimants(snapshot.normalizedName)
+    .map((claimant) => ({ actressId: claimant.actressId, revision: claimant.revision }))
+    .sort((a, b) => a.actressId - b.actressId)
+  if (
+    expectedClaimants.length !== currentClaimants.length ||
+    expectedClaimants.some(
+      (claimant, index) =>
+        claimant.actressId !== currentClaimants[index]?.actressId ||
+        claimant.revision !== currentClaimants[index]?.revision
+    )
+  ) {
+    return false
+  }
+
+  const expectedIds = snapshot.candidates
+    .map((candidate) => candidate.pendingId)
+    .sort((a, b) => a - b)
+  const actualIds = (
+    db
+      .prepare(
+        `SELECT DISTINCT pending_scrape_id
+         FROM pending_actress_scrape_conflicts
+         WHERE normalized_name = ?
+         ORDER BY pending_scrape_id`
+      )
+      .all(snapshot.normalizedName) as Array<{ pending_scrape_id: number }>
+  ).map((row) => row.pending_scrape_id)
+  if (
+    expectedIds.length !== actualIds.length ||
+    expectedIds.some((pendingId, index) => pendingId !== actualIds[index])
+  ) {
+    return false
+  }
+
+  const readCandidate = db.prepare(
+    `SELECT p.revision AS pending_revision,
+            p.actress_id,
+            p.applicable_fields_json,
+            p.result_json,
+            a.revision AS actress_revision
+     FROM pending_actress_scrapes p
+     JOIN actresses a ON a.id = p.actress_id
+     WHERE p.id = ?`
+  )
+  const readRecordedConflicts = db.prepare(
+    `SELECT normalized_name, name, name_type
+     FROM pending_actress_scrape_conflicts
+     WHERE pending_scrape_id = ?`
+  )
+  return snapshot.candidates.every((candidate) => {
+    const current = readCandidate.get(candidate.pendingId) as
+      | {
+          pending_revision: number
+          actress_id: number
+          applicable_fields_json: string
+          result_json: string
+          actress_revision: number
+        }
+      | undefined
+    if (
+      current?.pending_revision !== candidate.pendingRevision ||
+      current.actress_id !== candidate.actressId ||
+      current.actress_revision !== candidate.actressRevision
+    ) {
+      return false
+    }
+    const recorded = new Set(
+      (
+        readRecordedConflicts.all(candidate.pendingId) as Array<{
+          normalized_name: string
+          name: string
+          name_type: ActressPendingNameType
+        }>
+      ).map((conflict) => `${conflict.normalized_name}\0${conflict.name}\0${conflict.name_type}`)
+    )
+    return conflictingNames(
+      current.actress_id,
+      namesFromResult(
+        parseJson<ActressScrapeField[]>(current.applicable_fields_json),
+        parseJson<ActressScrapeResult>(current.result_json)
+      ),
+      candidate.pendingId
+    ).every((conflict) =>
+      recorded.has(`${conflict.normalizedName}\0${conflict.name}\0${conflict.type}`)
+    )
+  })
+}
+
 function isPendingConflictActive(
   pendingId: number,
   actressId: number,
@@ -419,6 +526,40 @@ function replacementMainNameFor(
   return replacement
 }
 
+function replacementMainNameConflict(
+  actressId: number,
+  replacement: string,
+  removedNormalizedName: string
+): string | null {
+  const db = getDb()
+  const replacementNormalized = normalizeActressName(replacement)
+  if (replacementNormalized === removedNormalizedName) {
+    return '替代主名不能与被移除的名称相同'
+  }
+  const owner = db
+    .prepare('SELECT actress_id FROM actress_name_ownership WHERE normalized_name = ?')
+    .get(replacementNormalized) as { actress_id: number } | undefined
+  const foreignClaim = db
+    .prepare(
+      `SELECT 1 FROM pending_actress_name_claims
+       WHERE normalized_name = ? AND actress_id != ? LIMIT 1`
+    )
+    .get(replacementNormalized, actressId)
+  const foreignPending = db
+    .prepare(
+      `SELECT 1
+       FROM pending_actress_scrape_conflicts c
+       JOIN pending_actress_scrapes p ON p.id = c.pending_scrape_id
+       WHERE c.normalized_name = ? AND p.actress_id != ?
+       LIMIT 1`
+    )
+    .get(replacementNormalized, actressId)
+  if ((owner && owner.actress_id !== actressId) || foreignClaim || foreignPending) {
+    return `名称「${replacement}」已被其他演员使用`
+  }
+  return null
+}
+
 function replaceMainNameBeforeRemovingNormalized(
   input: ResolveActressConflictInput,
   actressId: number,
@@ -440,31 +581,8 @@ function replaceMainNameBeforeRemovingNormalized(
   }
 
   const replacement = replacementMainNameFor(input, actressId)
-  const replacementNormalized = normalizeActressName(replacement)
-  if (replacementNormalized === normalizedName) {
-    throw new Error('替代主名不能与被移除的名称相同')
-  }
-  const owner = db
-    .prepare('SELECT actress_id FROM actress_name_ownership WHERE normalized_name = ?')
-    .get(replacementNormalized) as { actress_id: number } | undefined
-  const foreignClaim = db
-    .prepare(
-      `SELECT 1 FROM pending_actress_name_claims
-       WHERE normalized_name = ? AND actress_id != ? LIMIT 1`
-    )
-    .get(replacementNormalized, actressId)
-  const foreignPending = db
-    .prepare(
-      `SELECT 1
-       FROM pending_actress_scrape_conflicts c
-       JOIN pending_actress_scrapes p ON p.id = c.pending_scrape_id
-       WHERE c.normalized_name = ? AND p.actress_id != ?
-       LIMIT 1`
-    )
-    .get(replacementNormalized, actressId)
-  if ((owner && owner.actress_id !== actressId) || foreignClaim || foreignPending) {
-    throw new Error(`替代主名「${replacement}」已被其他演员使用`)
-  }
+  const conflict = replacementMainNameConflict(actressId, replacement, normalizedName)
+  if (conflict) throw new Error(conflict)
 
   db.prepare(
     `DELETE FROM actress_names
@@ -976,145 +1094,186 @@ export class ActressIdentityConflictWorkflow {
     ).total
   }
 
+  validateIllegalNameReplacements(
+    input: ValidateIllegalNameReplacementsInput
+  ): ValidateIllegalNameReplacementsResult {
+    if (!conflictSnapshotMatches(input.snapshot)) {
+      return { status: 'stale', message: '数据已变化，请刷新后重新确认' }
+    }
+    const replacements = new Map(
+      input.replacementMainNames.map((replacement) => [
+        replacement.actressId,
+        replacement.mainName.trim()
+      ])
+    )
+    const errors: Array<{ actressId: number; message: string }> = []
+    const normalizedByActress = new Map<number, string>()
+    const requiredClaimants = readNameClaimants(input.snapshot.normalizedName).filter(
+      (claimant) => claimant.nameTypes.includes('main')
+    )
+    for (const claimant of requiredClaimants) {
+      const replacement = replacements.get(claimant.actressId) ?? ''
+      if (!replacement) {
+        errors.push({ actressId: claimant.actressId, message: '请填写替代主名' })
+        continue
+      }
+      const conflict = replacementMainNameConflict(
+        claimant.actressId,
+        replacement,
+        input.snapshot.normalizedName
+      )
+      if (conflict) {
+        errors.push({ actressId: claimant.actressId, message: conflict })
+        continue
+      }
+      normalizedByActress.set(claimant.actressId, normalizeActressName(replacement))
+    }
+    const duplicateActors = new Set<number>()
+    const firstActorByName = new Map<string, number>()
+    for (const [actressId, normalizedName] of normalizedByActress) {
+      const firstActorId = firstActorByName.get(normalizedName)
+      if (firstActorId === undefined) {
+        firstActorByName.set(normalizedName, actressId)
+      } else if (firstActorId !== actressId) {
+        duplicateActors.add(firstActorId)
+        duplicateActors.add(actressId)
+      }
+    }
+    for (const actressId of duplicateActors) {
+      errors.push({ actressId, message: '替代主名不能同时归属多个演员' })
+    }
+    return errors.length > 0 ? { status: 'invalid', errors } : { status: 'valid' }
+  }
+
   resolveConflict(input: ResolveActressConflictInput): ResolveActressConflictResult {
     const db = getDb()
-    ensureCurrentPendingConflicts()
     const stale = (): ResolveActressConflictResult => ({
       status: 'stale',
       message: '数据已变化，请刷新后重新确认'
     })
     const snapshotMatches = (): boolean => {
-      const owner = db
-        .prepare(
-          `SELECT o.actress_id, a.revision
-           FROM actress_name_ownership o
-           JOIN actresses a ON a.id = o.actress_id
-           WHERE o.normalized_name = ?`
-        )
-        .get(input.snapshot.normalizedName) as
-        | { actress_id: number; revision: number }
-        | undefined
-      if ((owner?.actress_id ?? null) !== input.snapshot.currentOwnerActressId) return false
-      if ((owner?.revision ?? null) !== input.snapshot.currentOwnerRevision) return false
-      const expectedClaimants = [...input.snapshot.claimants].sort(
-        (a, b) => a.actressId - b.actressId
-      )
-      const currentClaimants = readNameClaimants(input.snapshot.normalizedName)
-        .map((claimant) => ({ actressId: claimant.actressId, revision: claimant.revision }))
-        .sort((a, b) => a.actressId - b.actressId)
-      if (
-        expectedClaimants.length !== currentClaimants.length ||
-        expectedClaimants.some(
-          (claimant, index) =>
-            claimant.actressId !== currentClaimants[index]?.actressId ||
-            claimant.revision !== currentClaimants[index]?.revision
-        )
-      ) {
-        return false
-      }
+      if (!conflictSnapshotMatches(input.snapshot)) return false
       if (input.kind === 'assignToExistingActress') {
         const chosen = db
           .prepare('SELECT revision FROM actresses WHERE id = ?')
           .get(input.ownerActressId) as { revision: number } | undefined
         if (chosen?.revision !== input.ownerActressRevision) return false
       }
-
-      const expectedIds = input.snapshot.candidates
-        .map((candidate) => candidate.pendingId)
-        .sort((a, b) => a - b)
-      const actualIds = (
-        db
-          .prepare(
-            `SELECT DISTINCT pending_scrape_id
-             FROM pending_actress_scrape_conflicts
-             WHERE normalized_name = ?
-             ORDER BY pending_scrape_id`
-          )
-          .all(input.snapshot.normalizedName) as Array<{ pending_scrape_id: number }>
-      ).map((row) => row.pending_scrape_id)
-      if (
-        expectedIds.length !== actualIds.length ||
-        expectedIds.some((pendingId, index) => pendingId !== actualIds[index])
-      ) {
-        return false
-      }
-      const readCandidate = db.prepare(
-        `SELECT p.revision AS pending_revision, p.actress_id, a.revision AS actress_revision
-         FROM pending_actress_scrapes p
-         JOIN actresses a ON a.id = p.actress_id
-         WHERE p.id = ?`
-      )
-      return input.snapshot.candidates.every((candidate) => {
-        const current = readCandidate.get(candidate.pendingId) as
-          | {
-              pending_revision: number
-              actress_id: number
-              actress_revision: number
-            }
-          | undefined
-        return (
-          current?.pending_revision === candidate.pendingRevision &&
-          current.actress_id === candidate.actressId &&
-          current.actress_revision === candidate.actressRevision
-        )
-      })
+      return true
     }
 
     if (!snapshotMatches()) return stale()
+    const activePendingConflicts = (
+      pendingId: number
+    ): Array<{
+      normalizedName: string
+      name: string
+      nameType: ActressPendingNameType
+    }> => {
+      const pending = db
+        .prepare('SELECT actress_id FROM pending_actress_scrapes WHERE id = ?')
+        .get(pendingId) as { actress_id: number } | undefined
+      if (!pending) throw new Error('STALE_CONFLICT_SNAPSHOT')
+      const conflicts = db
+        .prepare(
+          `SELECT normalized_name, name, name_type
+           FROM pending_actress_scrape_conflicts
+           WHERE pending_scrape_id = ?`
+        )
+        .all(pendingId) as Array<{
+        normalized_name: string
+        name: string
+        name_type: ActressPendingNameType
+      }>
+      return conflicts
+        .filter((conflict) =>
+          isPendingConflictActive(pendingId, pending.actress_id, conflict.normalized_name)
+        )
+        .map((conflict) => ({
+          normalizedName: conflict.normalized_name,
+          name: conflict.name,
+          nameType: conflict.name_type
+        }))
+    }
     const remainingConflictCount = (pendingId: number, excludingNormalizedName: string): number =>
-      (
-        db
-          .prepare(
-            `SELECT COUNT(*) AS total
-             FROM pending_actress_scrape_conflicts
-             WHERE pending_scrape_id = ? AND normalized_name != ?`
-          )
-          .get(pendingId, excludingNormalizedName) as { total: number }
-      ).total
+      activePendingConflicts(pendingId).filter(
+        (conflict) => conflict.normalizedName !== excludingNormalizedName
+      ).length
     const remainingConflictCountAfterItem = (
       pendingId: number,
       normalizedName: string,
       name: string,
       nameType: ActressPendingNameType
     ): number =>
-      (
-        db
-          .prepare(
-            `SELECT COUNT(*) AS total
-             FROM pending_actress_scrape_conflicts
-             WHERE pending_scrape_id = ? AND NOT (
-               normalized_name = ? AND name = ? AND name_type = ?
-             )`
+      activePendingConflicts(pendingId).filter(
+        (conflict) =>
+          !(
+            conflict.normalizedName === normalizedName &&
+            conflict.name === name &&
+            conflict.nameType === nameType
           )
-          .get(pendingId, normalizedName, name, nameType) as { total: number }
-      ).total
+      ).length
     const preparedByPending = new Map<number, PreparedPendingFormalResources>()
     const preparePending = (pendingId: number): void => {
       if (!preparedByPending.has(pendingId)) {
         preparedByPending.set(pendingId, promotePendingResources(pendingId))
       }
     }
+    const pendingIdsUnlockedByDecision = (): number[] => {
+      if (input.kind === 'applyPending') return [input.pendingId]
+      const affectedCandidates =
+        'pendingId' in input
+          ? input.snapshot.candidates.filter(
+              (candidate) => candidate.pendingId === input.pendingId
+            )
+          : input.snapshot.candidates
+      if (input.kind === 'editName') {
+        const newName = input.newName.trim()
+        if (!newName) throw new Error('名称不能为空')
+        const pending = db
+          .prepare('SELECT actress_id FROM pending_actress_scrapes WHERE id = ?')
+          .get(input.pendingId) as { actress_id: number } | undefined
+        if (!pending) return []
+        const normalizedName = normalizeActressName(newName)
+        const stillConflicts =
+          conflictingNames(
+            pending.actress_id,
+            [{ name: newName, normalizedName, type: input.nameType }],
+            input.pendingId
+          ).length > 0
+        return !stillConflicts &&
+          affectedCandidates.length > 0 &&
+          remainingConflictCountAfterItem(
+            input.pendingId,
+            input.snapshot.normalizedName,
+            input.name,
+            input.nameType
+          ) === 0
+          ? [input.pendingId]
+          : []
+      }
+      return affectedCandidates
+        .filter(
+          (candidate) =>
+            remainingConflictCount(candidate.pendingId, input.snapshot.normalizedName) === 0
+        )
+        .map((candidate) => candidate.pendingId)
+    }
     const createdDuringApply: string[] = []
     const obsoleteAfterCommit: string[] = []
     try {
+      for (const pendingId of pendingIdsUnlockedByDecision()) preparePending(pendingId)
       const remainingPending = db.transaction(() => {
         if (!snapshotMatches()) throw new Error('STALE_CONFLICT_SNAPSHOT')
         const applyIfUnlocked = (
           pendingId: number,
           resultOverride?: ActressScrapeResult
         ): void => {
-          const unresolved = (
-            db
-              .prepare(
-                'SELECT COUNT(*) AS total FROM pending_actress_scrape_conflicts WHERE pending_scrape_id = ?'
-              )
-              .get(pendingId) as { total: number }
-          ).total
-          if (unresolved > 0) return
           const pending = db
             .prepare('SELECT * FROM pending_actress_scrapes WHERE id = ?')
             .get(pendingId) as PendingRow | undefined
           if (!pending) throw new Error('STALE_CONFLICT_SNAPSHOT')
+          if (activePendingConflicts(pendingId).length > 0) return
           const prepared = preparedByPending.get(pendingId)
           const resourceCount = (
             db
@@ -1150,6 +1309,35 @@ export class ActressIdentityConflictWorkflow {
           createdDuringApply.push(...(applied.fileChanges?.createdPaths ?? []))
           obsoleteAfterCommit.push(...(applied.fileChanges?.obsoletePaths ?? []))
         }
+        const removeCurrentGroupFromCandidates = (): void => {
+          for (const candidate of input.snapshot.candidates) {
+            const pending = db
+              .prepare('SELECT * FROM pending_actress_scrapes WHERE id = ?')
+              .get(candidate.pendingId) as PendingRow | undefined
+            if (!pending) throw new Error('STALE_CONFLICT_SNAPSHOT')
+            const excluded = excludeNormalizedNameFromPendingResult(
+              parseJson<ActressScrapeResult>(pending.result_json),
+              parseJson<ActressScrapeField[]>(pending.applicable_fields_json),
+              input.snapshot.normalizedName
+            )
+            db.prepare(
+              `UPDATE pending_actress_scrapes
+               SET result_json = ?, applicable_fields_json = ?, revision = revision + 1
+               WHERE id = ?`
+            ).run(
+              JSON.stringify(excluded.result),
+              JSON.stringify(excluded.fields),
+              candidate.pendingId
+            )
+            db.prepare(
+              `DELETE FROM pending_actress_scrape_conflicts
+               WHERE pending_scrape_id = ? AND normalized_name = ?`
+            ).run(candidate.pendingId, input.snapshot.normalizedName)
+          }
+          for (const candidate of input.snapshot.candidates) {
+            applyIfUnlocked(candidate.pendingId)
+          }
+        }
 
         if (input.kind === 'editName') {
           const newName = input.newName.trim()
@@ -1182,17 +1370,6 @@ export class ActressIdentityConflictWorkflow {
             [{ name: newName, normalizedName, type: input.nameType }],
             input.pendingId
           ).length > 0
-          if (
-            !stillConflicts &&
-            remainingConflictCountAfterItem(
-              input.pendingId,
-              input.snapshot.normalizedName,
-              input.name,
-              input.nameType
-            ) === 0
-          ) {
-            preparePending(input.pendingId)
-          }
           db.prepare(
             `UPDATE pending_actress_scrapes
              SET result_json = ?, revision = revision + 1
@@ -1225,10 +1402,6 @@ export class ActressIdentityConflictWorkflow {
             name_type: ActressPendingNameType
           }>
           if (conflictRows.length === 0) throw new Error('STALE_CONFLICT_SNAPSHOT')
-          if (remainingConflictCount(input.pendingId, input.snapshot.normalizedName) === 0) {
-            preparePending(input.pendingId)
-          }
-
           const previousClaimantIds = readNameClaimants(input.snapshot.normalizedName)
             .map((claimant) => claimant.actressId)
             .filter((actressId) => actressId !== pending.actress_id)
@@ -1279,14 +1452,6 @@ export class ActressIdentityConflictWorkflow {
             name_type: ActressPendingNameType
           }>
           if (groupConflicts.length === 0) throw new Error('STALE_CONFLICT_SNAPSHOT')
-          for (const candidate of input.snapshot.candidates) {
-            if (
-              remainingConflictCount(candidate.pendingId, input.snapshot.normalizedName) === 0
-            ) {
-              preparePending(candidate.pendingId)
-            }
-          }
-
           const declaredBy = db
             .prepare(
               `SELECT DISTINCT actress_id
@@ -1311,33 +1476,7 @@ export class ActressIdentityConflictWorkflow {
           for (const { actress_id: actressId } of declaredBy) {
             if (actressId !== input.ownerActressId) synchronizeActressNameOwnership(actressId)
           }
-          for (const candidate of input.snapshot.candidates) {
-            const pending = db
-              .prepare('SELECT * FROM pending_actress_scrapes WHERE id = ?')
-              .get(candidate.pendingId) as PendingRow | undefined
-            if (!pending) throw new Error('STALE_CONFLICT_SNAPSHOT')
-            const excluded = excludeNormalizedNameFromPendingResult(
-              parseJson<ActressScrapeResult>(pending.result_json),
-              parseJson<ActressScrapeField[]>(pending.applicable_fields_json),
-              input.snapshot.normalizedName
-            )
-            db.prepare(
-              `UPDATE pending_actress_scrapes
-               SET result_json = ?, applicable_fields_json = ?, revision = revision + 1
-               WHERE id = ?`
-            ).run(
-              JSON.stringify(excluded.result),
-              JSON.stringify(excluded.fields),
-              candidate.pendingId
-            )
-            db.prepare(
-              `DELETE FROM pending_actress_scrape_conflicts
-               WHERE pending_scrape_id = ? AND normalized_name = ?`
-            ).run(candidate.pendingId, input.snapshot.normalizedName)
-          }
-          for (const candidate of input.snapshot.candidates) {
-            applyIfUnlocked(candidate.pendingId)
-          }
+          removeCurrentGroupFromCandidates()
           const chosenHasName = db
             .prepare(
               `SELECT 1 FROM actress_names
@@ -1355,6 +1494,27 @@ export class ActressIdentityConflictWorkflow {
             )
           }
           synchronizeActressNameOwnership(input.ownerActressId)
+        } else if (input.kind === 'markIllegalName') {
+          const claimantIds = readNameClaimants(input.snapshot.normalizedName).map(
+            (claimant) => claimant.actressId
+          )
+          for (const claimantId of claimantIds) {
+            replaceMainNameBeforeRemovingNormalized(
+              input,
+              claimantId,
+              input.snapshot.normalizedName
+            )
+          }
+          db.prepare(
+            'DELETE FROM actress_name_ownership WHERE normalized_name = ?'
+          ).run(input.snapshot.normalizedName)
+          db.prepare(
+            'DELETE FROM pending_actress_name_claims WHERE normalized_name = ?'
+          ).run(input.snapshot.normalizedName)
+          for (const claimantId of claimantIds) {
+            synchronizeActressNameOwnership(claimantId)
+          }
+          removeCurrentGroupFromCandidates()
         } else if (input.kind === 'applyPending') {
           if (input.snapshot.status !== 'applicable') {
             throw new Error('STALE_CONFLICT_SNAPSHOT')
@@ -1381,7 +1541,6 @@ export class ActressIdentityConflictWorkflow {
           ) {
             throw new Error('STALE_CONFLICT_SNAPSHOT')
           }
-          preparePending(input.pendingId)
           db.prepare(
             'DELETE FROM pending_actress_scrape_conflicts WHERE pending_scrape_id = ?'
           ).run(input.pendingId)

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import type { ActressNameConflictGroup } from '@shared/types'
 import {
   buildActressConflictDecisionSnapshot,
+  canConfirmIllegalName,
   conflictClaimantsNeedingReplacement
 } from './actressConflictReviewState'
 
@@ -77,6 +78,27 @@ describe('actress conflict review state', () => {
         2
       ),
       []
+    )
+  })
+
+  it('enables illegal-name confirmation only after every required replacement is valid', () => {
+    assert.equal(canConfirmIllegalName([], {}, 'idle'), true)
+    assert.equal(canConfirmIllegalName(group.claimants, {}, 'idle'), false)
+    assert.equal(
+      canConfirmIllegalName(group.claimants, { 1: 'Owner Replacement' }, 'checking'),
+      false
+    )
+    assert.equal(
+      canConfirmIllegalName(group.claimants, { 1: 'Owner Replacement' }, 'invalid'),
+      false
+    )
+    assert.equal(
+      canConfirmIllegalName(group.claimants, { 1: 'Owner Replacement' }, 'stale'),
+      false
+    )
+    assert.equal(
+      canConfirmIllegalName(group.claimants, { 1: 'Owner Replacement' }, 'valid'),
+      true
     )
   })
 })

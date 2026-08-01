@@ -16085,6 +16085,18 @@ button.alias-tag-chip-name:disabled {
   gap: 8px;
 }
 
+.conflict-review-ownership-actions {
+  flex-wrap: wrap;
+}
+
+.conflict-review-illegal {
+  color: var(--text-danger);
+}
+
+.conflict-review-replacement-main .text-input[aria-invalid='true'] {
+  border-color: var(--border-danger);
+}
+
 .conflict-review-apply-ready {
   justify-content: space-between;
 }

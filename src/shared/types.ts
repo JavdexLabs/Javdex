@@ -86,6 +86,7 @@ export interface Actress {
   last_scraped_at: string | null
   updated_at: string | null
   gender: ActressGender | null
+  revision?: number
 }
 
 export interface Tag {
@@ -970,6 +971,98 @@ export const ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS: {
 ]
 
 export type ActressScrapeUpdateMode = 'replace' | 'fillEmpty' | 'replaceIfPresent'
+
+export interface ActressScrapePluginRef {
+  name: string
+  source: ScraperPluginSource
+  version?: string
+}
+
+export type ActressPendingNameType = 'main' | 'zh' | 'en' | 'alias'
+
+export interface PendingActressScrapeCandidate {
+  pendingId: number
+  revision: number
+  actressId: number
+  actressRevision: number
+  actressMainName: string
+  actressAvatarPath: string | null
+  plugin: ActressScrapePluginRef
+  queryName: string
+  selectedFields: ActressScrapeField[]
+  applicableFields: ActressScrapeField[]
+  mode: ActressScrapeUpdateMode
+  result: ActressScrapeResult
+  warnings: string[]
+  createdAt: string
+  batchJobId?: string
+  resources: PendingActressScrapeResource[]
+  conflicts: Array<{ name: string; normalizedName: string; type: ActressPendingNameType }>
+}
+
+export interface PendingActressScrapeResource {
+  field: 'avatar' | 'gallery'
+  position: number
+  remoteUrl?: string
+  stagedPath: string
+  width: number | null
+  height: number | null
+}
+
+export interface DiscardPendingActressScrapeInput {
+  pendingId: number
+  expectedRevision: number
+}
+
+export interface DiscardPendingActressScrapeResult {
+  remainingPending: number
+}
+
+export interface ActressConflictCurrentOwner {
+  actressId: number
+  mainName: string
+  avatarPath: string | null
+  nameTypes: ActressPendingNameType[]
+}
+
+export interface ActressNameConflictGroup {
+  normalizedName: string
+  displayName: string
+  currentOwner: ActressConflictCurrentOwner | null
+  candidates: PendingActressScrapeCandidate[]
+}
+
+export type ActressScrapeDisposition =
+  | {
+      status: 'success'
+      ok: true
+      result: ActressScrapeResult
+      warnings?: string[]
+      skipped?: boolean
+      avatarUpdated?: boolean
+      pendingId?: never
+      error?: never
+    }
+  | {
+      status: 'pending'
+      ok: true
+      pendingId: number
+      result: ActressScrapeResult
+      warnings?: string[]
+      skipped?: false
+      avatarUpdated?: false
+      error?: never
+    }
+  | {
+      status: 'failure'
+      ok: false
+      error: string
+      warnings?: string[]
+      result?: never
+      skipped?: false
+      avatarUpdated?: false
+      pendingId?: never
+    }
 
 export const ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS: ScrapeUpdateModeOption<ActressScrapeUpdateMode>[] = [
   {

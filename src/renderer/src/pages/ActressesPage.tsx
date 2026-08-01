@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMatch, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, SearchCheck, SearchX, Trash2, Users } from 'lucide-react'
+import { ChevronDown, CircleAlert, SearchCheck, SearchX, Trash2, Users } from 'lucide-react'
 import {
   ACTRESS_LIST_DEFAULTS,
   ACTRESS_SCRAPE_FIELD_OPTIONS,
@@ -43,7 +43,7 @@ import {
   parseGender,
   patchSearchParams
 } from '../listView/listQueryParams'
-import { navigateToActressDetail } from '../listView/listNavigation'
+import { navigateToActressConflicts, navigateToActressDetail } from '../listView/listNavigation'
 import { forgetPrimaryListLocation } from '../listView/primaryNavigationMemory'
 import { ROUTE_MATCH, ROUTE_PATH } from '../listView/routePaths'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -98,7 +98,9 @@ export default function ActressesPage(): JSX.Element {
   const location = useLocation()
   const toast = useToast()
   const [searchParams, setSearchParams] = useSearchParams()
-  const detailOpen = Boolean(useMatch({ path: ROUTE_MATCH.actressDetailOpen, end: false }))
+  const actressDetailOpen = useMatch({ path: ROUTE_MATCH.actressDetailOpen, end: false })
+  const conflictReviewOpen = useMatch({ path: ROUTE_MATCH.actressConflicts, end: false })
+  const detailOpen = Boolean(actressDetailOpen || conflictReviewOpen)
 
   const urlQ = searchParams.get(LIST_PARAM.q) ?? ''
   const [searchInput, setSearchInput] = useState(urlQ)
@@ -165,6 +167,12 @@ export default function ActressesPage(): JSX.Element {
       }),
     placeholderData: (prev) => prev
   })
+  const conflictCountQuery = useQuery({
+    queryKey: actressKeys.conflictCount(),
+    queryFn: () => api.actressScrape.conflictCount(),
+    refetchInterval: detailOpen ? false : 3_000
+  })
+  const pendingConflictCount = conflictCountQuery.data ?? 0
 
   useEffect(() => {
     if (listQuery.isError && listQuery.error) {
@@ -493,6 +501,16 @@ export default function ActressesPage(): JSX.Element {
             }}
             controls={
               <>
+                {pendingConflictCount > 0 ? (
+                  <button
+                    type="button"
+                    className="btn btn-sm actress-conflict-entry"
+                    onClick={() => navigateToActressConflicts(navigate, location)}
+                  >
+                    <CircleAlert {...UI_ICON_SM} aria-hidden />
+                    待确认 {pendingConflictCount}
+                  </button>
+                ) : null}
                 <div className="library-filter-anchor">
                   <button
                     ref={filterBtnRef}

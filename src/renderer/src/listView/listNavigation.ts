@@ -1,6 +1,7 @@
 import type { NavigateFunction, Location } from 'react-router-dom'
 import { matchPath } from 'react-router-dom'
 import {
+  actressConflictReviewPath,
   actressDetailPath,
   actressVideoActressPath,
   actressVideoDetailPath,
@@ -187,6 +188,16 @@ export function navigateToActressDetail(
 ): void {
   navigate({
     pathname: actressDetailPath(actressId),
+    search: location.search
+  })
+}
+
+export function navigateToActressConflicts(
+  navigate: NavigateFunction,
+  location: Location
+): void {
+  navigate({
+    pathname: actressConflictReviewPath(),
     search: location.search
   })
 }

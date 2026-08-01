@@ -8,7 +8,7 @@ import type {
   ActressBatchScrapeFilter,
   ActressBatchScrapeRequest,
   ActressScrapeField,
-  ActressScrapeResult,
+  ActressScrapeDisposition,
   ActressScrapeUpdateMode,
   BatchProgress,
   BatchScrapeState,
@@ -309,7 +309,7 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
       queryName?: string,
       useAliases?: boolean,
       autoCropAvatar?: boolean
-    ): Promise<ActressScrapeResult> => {
+    ): Promise<ActressScrapeDisposition> => {
       assertBatchScrapeAvailable()
       const outcome = await scrapeRunCoordinator.runExclusive('演员刮削', async () => {
         const result = await scrapeActress(actressId, scraperName, {
@@ -319,6 +319,7 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
           useAliases
         })
         if (
+          result.status === 'success' &&
           autoCropAvatar &&
           fields?.includes('avatar') &&
           result.avatarUpdated &&
@@ -334,8 +335,7 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
         }
         return result
       })
-      if (!outcome.ok || !outcome.result) throw new Error(outcome.error)
-      return outcome.result
+      return outcome
     }
   )
 

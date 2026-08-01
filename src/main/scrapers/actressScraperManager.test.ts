@@ -65,6 +65,54 @@ afterEach(() => {
 })
 
 describe('actressScraperManager', () => {
+  it('returns a pending outcome without partially applying a conflicting profile', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'Conflicting Profile Source',
+      version: '1.0.0',
+      description: 'Returns a profile name already owned by another actress',
+      supportedFields: ['birthDate', 'aliases'],
+      code: `
+module.exports = {
+  async parseActress() {
+    return { birthDate: '1993-04-05', aliases: ['Shared Collision'] };
+  }
+};
+`
+    })
+    const ownerId = Number(
+      getDb()
+        .prepare('INSERT INTO actresses (main_name, gender) VALUES (?, ?)')
+        .run('Conflict Owner', 'female').lastInsertRowid
+    )
+    editActress(ownerId, { aliases: ['Shared Collision'] })
+    const targetId = Number(
+      getDb()
+        .prepare('INSERT INTO actresses (main_name, gender) VALUES (?, ?)')
+        .run('Conflict Target', 'female').lastInsertRowid
+    )
+
+    const outcome = await scrapeActress(targetId, 'Conflicting Profile Source', {
+      fields: ['birthDate', 'aliases'],
+      mode: 'replace',
+      closeBrowser: false
+    })
+
+    assert.equal(outcome.status, 'pending')
+    assert.equal(outcome.ok, true)
+    assert.equal(getActressDetail(targetId)?.birth_date, null)
+    assert.equal(getActressDetail(targetId)?.scraped_status, 0)
+    assert.equal(
+      (
+        getDb().prepare('SELECT COUNT(*) AS total FROM pending_actress_scrapes').get() as {
+          total: number
+        }
+      ).total,
+      1
+    )
+  })
+
   it('clears the selected avatar in replace mode when the matched source has no avatar', async () => {
     await installScraperPluginPackage({
       schemaVersion: 1,

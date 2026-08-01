@@ -12,7 +12,9 @@ export const videoKeys = {
 export const actressKeys = {
   all: ['actresses'] as const,
   list: (queryHash: string, search: string, gender: string, sortBy: string, sortDir: string) =>
-    ['actresses', 'list', queryHash, search, gender, sortBy, sortDir] as const
+    ['actresses', 'list', queryHash, search, gender, sortBy, sortDir] as const,
+  conflicts: () => ['actresses', 'conflicts'] as const,
+  conflictCount: () => ['actresses', 'conflicts', 'count'] as const
 }
 
 export const facetKeys = {

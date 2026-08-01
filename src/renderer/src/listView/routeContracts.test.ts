@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Location, NavigateFunction } from 'react-router-dom'
 import {
+  actressConflictReviewPath,
   actressDetailPath,
   actressVideoActressPath,
   actressVideoDetailPath,
@@ -14,7 +15,12 @@ import {
   parseFacetVideoPath
 } from './facetRoutes'
 import { libraryVideoActressPath, libraryVideoDetailPath, parseLibraryVideoPath } from './libraryRoutes'
-import { navigateToActressDetail, navigateToActressList, navigateToFacetDetail } from './listNavigation'
+import {
+  navigateToActressConflicts,
+  navigateToActressDetail,
+  navigateToActressList,
+  navigateToFacetDetail
+} from './listNavigation'
 import {
   actressQueryHash,
   actressAvatarParam,
@@ -52,6 +58,7 @@ describe('route builders and parsers', () => {
   })
 
   it('round-trips actress detail stacks', () => {
+    assert.equal(actressConflictReviewPath(), '/actresses/conflicts')
     assert.equal(actressDetailPath(3), '/actresses/3')
     assert.equal(actressVideoDetailPath(3, 9), '/actresses/3/9')
     assert.equal(actressVideoActressPath(3, 9, 11), '/actresses/3/9/actress/11')
@@ -100,6 +107,26 @@ describe('actress avatar filter query contract', () => {
     assert.equal(actressAvatarParam('without'), 'without')
     assert.equal(actressAvatarParam('without-face'), 'without-face')
     assert.equal(actressAvatarParam('all'), null)
+  })
+
+  it('opens and closes conflict review without losing actress list query state', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const location = {
+      pathname: '/actresses',
+      search: '?q=sara&status=failed',
+      hash: '',
+      state: null,
+      key: 'test'
+    } as Location
+
+    navigateToActressConflicts(navigate, location)
+    navigateToActressList(navigate, { ...location, pathname: '/actresses/conflicts' } as Location)
+
+    assert.deepEqual(destinations, [
+      { pathname: '/actresses/conflicts', search: '?q=sara&status=failed' },
+      { pathname: '/actresses', search: 'q=sara&status=failed' }
+    ])
   })
 
   it('keeps avatar filters distinct in the actress query hash', () => {

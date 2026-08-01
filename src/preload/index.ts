@@ -22,6 +22,10 @@ import type {
   PlayResult,
   ScrapeResult,
   ActressScrapeResult,
+  ActressScrapeDisposition,
+  ActressNameConflictGroup,
+  DiscardPendingActressScrapeInput,
+  DiscardPendingActressScrapeResult,
   ActressEditInput,
   ActressGenderFilter,
   ActressListItem,
@@ -267,7 +271,7 @@ const api = {
       useAliases?: boolean,
       autoCropAvatar?: boolean
     ) =>
-      invoke<ActressScrapeResult>(
+      invoke<ActressScrapeDisposition>(
         IPC.ACTRESS_SCRAPE_ONE,
         actressId,
         scraperName,
@@ -277,6 +281,10 @@ const api = {
         useAliases,
         autoCropAvatar
       ),
+    listConflicts: () => invoke<ActressNameConflictGroup[]>(IPC.ACTRESS_CONFLICT_LIST),
+    conflictCount: () => invoke<number>(IPC.ACTRESS_CONFLICT_COUNT),
+    discardConflict: (input: DiscardPendingActressScrapeInput) =>
+      invoke<DiscardPendingActressScrapeResult>(IPC.ACTRESS_CONFLICT_DISCARD, input),
     batchCount: (filter: ActressBatchScrapeFilter) =>
       invoke<number>(IPC.ACTRESS_SCRAPE_BATCH_COUNT, filter),
     batchStart: (request?: ActressBatchScrapeRequest | string) =>

@@ -1,17 +1,24 @@
 import type { BaseActressScraper } from './BaseActressScraper'
 import type {
+  ActressScrapeDisposition,
   ActressScrapeResult,
   ActressScrapeField,
   ActressScrapeUpdateMode
 } from '@shared/types'
 import { ALL_ACTRESS_SCRAPE_FIELDS, resolveScrapeProxyUrl } from '@shared/types'
 import {
-  applyActressScrapeResult,
   getActressDetail,
   recordActressScrapeFailure,
   resolveEffectiveActressScrapeFields,
 } from '../db/actressRepo'
-import { downloadActressGalleryImage, downloadAvatar } from '../services/assetService'
+import {
+  isUsableImageBuffer,
+  readImageDimensionsFromBuffer
+} from '../services/assetService'
+import {
+  ActressIdentityConflictWorkflow,
+  type PreparedActressScrapeResource
+} from '../services/actressIdentityConflictWorkflow'
 import { getSettings } from '../settings/settingsStore'
 import { scrapeBrowser } from './scrapeBrowser'
 import {
@@ -54,15 +61,9 @@ export function getActressScraper(name?: string): BaseActressScraper {
   return scraper
 }
 
-export interface ActressScrapeOutcome {
-  ok: boolean
-  result?: ActressScrapeResult
-  error?: string
-  skipped?: boolean
-  warnings?: string[]
-  /** The requested avatar was downloaded, validated, and is ready for smart crop. */
-  avatarUpdated?: boolean
-}
+export type ActressScrapeOutcome = ActressScrapeDisposition
+
+export const actressIdentityConflictWorkflow = new ActressIdentityConflictWorkflow()
 
 export interface ScrapeActressOptions {
   closeBrowser?: boolean
@@ -72,6 +73,8 @@ export interface ScrapeActressOptions {
   queryName?: string
   /** When true, scrapers also try stored aliases / zh / en names. Default false. */
   useAliases?: boolean
+  /** Stable persisted batch identifier, retained on pending snapshots. */
+  batchJobId?: string
   delayController?: {
     run<T>(kind: 'actress', pluginName: string, task: () => Promise<T>): Promise<T>
   }
@@ -206,14 +209,14 @@ export async function scrapeActress(
   options?: ScrapeActressOptions
 ): Promise<ActressScrapeOutcome> {
   const detail = getActressDetail(actressId)
-  if (!detail) return { ok: false, error: '演员不存在' }
+  if (!detail) return { status: 'failure', ok: false, error: '演员不存在' }
 
   const fields = options?.fields
   const requested = fields ?? ALL_ACTRESS_SCRAPE_FIELDS
   const mode = options?.mode ?? 'replace'
   const effective = resolveEffectiveActressScrapeFields(actressId, requested, mode)
   if (effective.length === 0) {
-    return { ok: true, result: {}, skipped: true }
+    return { status: 'success', ok: true, result: {}, skipped: true }
   }
   const selected = new Set(effective)
 
@@ -263,47 +266,53 @@ export async function scrapeActress(
     if (!result) {
       recordActressScrapeFailure(actressId)
       return {
+        status: 'failure',
         ok: false,
         error: '未找到匹配的演员资料',
         warnings: sourceWarnings.length > 0 ? sourceWarnings : undefined
       }
     }
-    const fetcher = (url: string): Promise<Buffer> => scrapeBrowser.fetchBuffer(url)
-    let avatarRel: string | null = null
+    const preparedResources: PreparedActressScrapeResource[] = []
     if (selected.has('avatar') && result.avatarUrl) {
-      avatarRel = await downloadAvatar(detail.main_name, result.avatarUrl, fetcher)
-      const sourceName = composite?.fieldPluginMap.avatar
-      if (!avatarRel && sourceName) {
-        sourceWarnings.push(`字段源「${sourceName}」失败：头像下载失败`)
+      try {
+        const data = await scrapeBrowser.fetchBuffer(result.avatarUrl)
+        if (!isUsableImageBuffer(data)) throw new Error('响应不是可用图片')
+        const dimensions = readImageDimensionsFromBuffer(data)
+        preparedResources.push({
+          field: 'avatar',
+          position: 0,
+          remoteUrl: result.avatarUrl,
+          data,
+          width: dimensions?.width ?? null,
+          height: dimensions?.height ?? null
+        })
+      } catch {
+        const sourceName = composite?.fieldPluginMap.avatar
+        sourceWarnings.push(
+          sourceName ? `字段源「${sourceName}」失败：头像下载失败` : '头像下载失败'
+        )
       }
     }
 
     const galleryUrls = dedupeUrls(result.galleryImageUrls ?? [])
-    const galleryAssets: Array<{
-      remoteUrl: string
-      localPath: string | null
-      width: number | null
-      height: number | null
-    }> = []
     if (selected.has('gallery') && galleryUrls.length) {
       let failedDownloads = 0
       for (let index = 0; index < galleryUrls.length; index++) {
-        const downloaded = await downloadActressGalleryImage(
-          detail.main_name,
-          galleryUrls[index],
-          fetcher,
-          actressId
-        )
-        if (!downloaded) {
+        try {
+          const data = await scrapeBrowser.fetchBuffer(galleryUrls[index])
+          if (!isUsableImageBuffer(data)) throw new Error('响应不是可用图片')
+          const dimensions = readImageDimensionsFromBuffer(data)
+          preparedResources.push({
+            field: 'gallery',
+            position: index,
+            remoteUrl: galleryUrls[index],
+            data,
+            width: dimensions?.width ?? null,
+            height: dimensions?.height ?? null
+          })
+        } catch {
           failedDownloads += 1
-          continue
         }
-        galleryAssets.push({
-          remoteUrl: galleryUrls[index],
-          localPath: downloaded.localPath,
-          width: downloaded.width,
-          height: downloaded.height
-        })
       }
       const sourceName = composite?.fieldPluginMap.gallery
       if (failedDownloads > 0) {
@@ -318,33 +327,28 @@ export async function scrapeActress(
       }
     }
 
-    const { applied, warnings: applyWarnings, avatarApplied } = applyActressScrapeResult(
-      actressId,
-      { ...result, galleryImageUrls: galleryUrls },
-      avatarRel,
-      galleryAssets,
-      fieldsToApply,
-      mode
+    const descriptor = listActressScraperPlugins().find(
+      (plugin) => plugin.name === selectedScraperName
     )
-    const warnings = [...sourceWarnings, ...applyWarnings]
-    if (!applied) {
-      recordActressScrapeFailure(actressId)
-      return {
-        ok: false,
-        error: '未找到有效的演员资料',
-        warnings: warnings.length > 0 ? warnings : undefined
-      }
-    }
-    return {
-      ok: true,
-      result,
-      skipped: !applied,
-      warnings: warnings.length > 0 ? warnings : undefined,
-      avatarUpdated: avatarApplied
-    }
+    return actressIdentityConflictWorkflow.processPreparedScrape({
+      actressId,
+      plugin: {
+        name: selectedScraperName,
+        source: descriptor?.source ?? (composite ? 'composite' : 'builtin'),
+        ...(descriptor?.version ? { version: descriptor.version } : {})
+      },
+      queryName,
+      selectedFields: requested,
+      applicableFields: fieldsToApply.filter((field) => effective.includes(field)),
+      mode,
+      result: { ...result, galleryImageUrls: galleryUrls },
+      warnings: sourceWarnings,
+      resources: preparedResources,
+      ...(options?.batchJobId ? { batchJobId: options.batchJobId } : {})
+    })
   } catch (err) {
     recordActressScrapeFailure(actressId)
-    return { ok: false, error: (err as Error).message }
+    return { status: 'failure', ok: false, error: (err as Error).message }
   } finally {
     if (options?.closeBrowser !== false) {
       scrapeBrowser.close()

@@ -8,7 +8,7 @@ export default function ActressShell(): JSX.Element {
   return (
     <ListDetailShell
       list={ACTRESS_LIST}
-      detailMatchPath={ROUTE_MATCH.actressDetailOpen}
+      detailMatchPath={[ROUTE_MATCH.actressConflicts, ROUTE_MATCH.actressDetailOpen]}
       detailMatchEnd={false}
     />
   )

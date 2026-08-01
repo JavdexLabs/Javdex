@@ -257,6 +257,7 @@ describe('database schema', () => {
       }>
       assert.equal(actressCols.some((column) => column.name === 'avatar_source_path'), true)
       assert.equal(actressCols.some((column) => column.name === 'avatar_crop_json'), true)
+      assert.equal(actressCols.some((column) => column.name === 'revision'), true)
       const scrapedStatusColumn = actressCols.find((column) => column.name === 'scraped_status')
       assert.deepEqual(
         scrapedStatusColumn
@@ -284,6 +285,9 @@ describe('database schema', () => {
         'actress_names',
         'actress_name_ownership',
         'pending_actress_name_claims',
+        'pending_actress_scrapes',
+        'pending_actress_scrape_conflicts',
+        'pending_actress_scrape_resources',
         'actress_tags',
         'actress_tag',
         'actress_gallery_assets'

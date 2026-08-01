@@ -1235,6 +1235,12 @@ export function deleteUnlinkedActresses(ids: number[]): number {
     const listGallery = db.prepare(
       'SELECT local_path FROM actress_gallery_assets WHERE actress_id = ?'
     )
+    const listPendingResources = db.prepare(
+      `SELECT r.staged_path
+       FROM pending_actress_scrape_resources r
+       JOIN pending_actress_scrapes p ON p.id = r.pending_scrape_id
+       WHERE p.actress_id = ?`
+    )
     const removeActress = db.prepare('DELETE FROM actresses WHERE id = ?')
     const paths: Array<string | null> = []
     let linkedCount = 0
@@ -1249,6 +1255,8 @@ export function deleteUnlinkedActresses(ids: number[]): number {
       paths.push(actress.avatar_path, actress.avatar_source_path)
       const gallery = listGallery.all(id) as { local_path: string | null }[]
       paths.push(...gallery.map((item) => item.local_path))
+      const pendingResources = listPendingResources.all(id) as Array<{ staged_path: string }>
+      paths.push(...pendingResources.map((item) => item.staged_path))
     }
 
     if (linkedCount > 0) {
@@ -1655,7 +1663,8 @@ export function applyActressScrapeResult(
   avatarRelPath: string | null,
   galleryAssets: ActressGalleryAssetWriteInput[],
   fields?: ActressScrapeField[],
-  mode: ActressScrapeUpdateMode = 'replace'
+  mode: ActressScrapeUpdateMode = 'replace',
+  beforeCommit?: () => void
 ): { applied: boolean; warnings: string[]; avatarApplied: boolean } {
   const db = getDb()
   const requested = fields ?? ALL_ACTRESS_SCRAPE_FIELDS
@@ -1881,8 +1890,19 @@ export function applyActressScrapeResult(
     if (selected.has('gallery') && (galleryAssets.length > 0 || mode === 'replace')) {
       obsoleteGalleryLocalPaths = replaceActressGalleryAssetRows(actressId, galleryAssets)
     }
+    beforeCommit?.()
   })
-  txn()
+  try {
+    txn()
+  } catch (error) {
+    if (adoptedAvatar) {
+      deleteAsset(adoptedAvatar.displayPath)
+      if (adoptedAvatar.sourcePath !== adoptedAvatar.displayPath) {
+        deleteAsset(adoptedAvatar.sourcePath)
+      }
+    }
+    throw error
+  }
   deleteObsoleteActressGalleryAssets(obsoleteGalleryLocalPaths)
 
   if (selected.has('avatar') && adoptedAvatar) {

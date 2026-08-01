@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3'
 import { normalizeActressName } from './actressNameNormalization'
 import { SCHEMA_SQL } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 5
+export const CURRENT_SCHEMA_VERSION = 6
 
 type Migration = {
   version: number
@@ -256,6 +256,69 @@ function migrateToV5(database: Database.Database): void {
   }
 }
 
+function migrateToV6(database: Database.Database): void {
+  const actressColumns = columnNames(database, 'actresses')
+  if (!actressColumns.has('revision')) {
+    database.exec('ALTER TABLE actresses ADD COLUMN revision INTEGER NOT NULL DEFAULT 0')
+  }
+  database.exec(`
+    CREATE TRIGGER IF NOT EXISTS trg_actresses_revision_after_update
+    AFTER UPDATE ON actresses
+    WHEN NEW.revision = OLD.revision
+    BEGIN
+      UPDATE actresses SET revision = OLD.revision + 1 WHERE id = NEW.id;
+    END;
+
+    CREATE TABLE IF NOT EXISTS pending_actress_scrapes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      actress_id INTEGER NOT NULL UNIQUE,
+      revision INTEGER NOT NULL DEFAULT 1,
+      target_actress_revision INTEGER NOT NULL,
+      plugin_name TEXT NOT NULL,
+      plugin_source TEXT NOT NULL CHECK(plugin_source IN ('builtin', 'user', 'composite')),
+      plugin_version TEXT,
+      query_name TEXT NOT NULL,
+      selected_fields_json TEXT NOT NULL,
+      applicable_fields_json TEXT NOT NULL,
+      update_mode TEXT NOT NULL CHECK(update_mode IN ('replace', 'fillEmpty', 'replaceIfPresent')),
+      result_json TEXT NOT NULL,
+      warnings_json TEXT NOT NULL,
+      batch_job_id TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (actress_id) REFERENCES actresses(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_pending_actress_scrapes_created_at
+      ON pending_actress_scrapes(created_at);
+
+    CREATE TABLE IF NOT EXISTS pending_actress_scrape_conflicts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pending_scrape_id INTEGER NOT NULL,
+      normalized_name TEXT NOT NULL CHECK(length(normalized_name) > 0),
+      name TEXT NOT NULL,
+      name_type TEXT NOT NULL CHECK(name_type IN ('main', 'zh', 'en', 'alias')),
+      FOREIGN KEY (pending_scrape_id) REFERENCES pending_actress_scrapes(id) ON DELETE CASCADE,
+      UNIQUE (pending_scrape_id, normalized_name, name, name_type)
+    );
+    CREATE INDEX IF NOT EXISTS idx_pending_actress_scrape_conflicts_name
+      ON pending_actress_scrape_conflicts(normalized_name);
+
+    CREATE TABLE IF NOT EXISTS pending_actress_scrape_resources (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pending_scrape_id INTEGER NOT NULL,
+      field TEXT NOT NULL CHECK(field IN ('avatar', 'gallery')),
+      position INTEGER NOT NULL DEFAULT 0,
+      remote_url TEXT,
+      staged_path TEXT NOT NULL,
+      width INTEGER,
+      height INTEGER,
+      FOREIGN KEY (pending_scrape_id) REFERENCES pending_actress_scrapes(id) ON DELETE CASCADE,
+      UNIQUE (pending_scrape_id, field, position)
+    );
+    CREATE INDEX IF NOT EXISTS idx_pending_actress_scrape_resources_pending
+      ON pending_actress_scrape_resources(pending_scrape_id);
+  `)
+}
+
 const MIGRATIONS: Migration[] = [
   {
     version: 2,
@@ -272,6 +335,10 @@ const MIGRATIONS: Migration[] = [
   {
     version: 5,
     migrate: migrateToV5
+  },
+  {
+    version: 6,
+    migrate: migrateToV6
   }
 ]
 

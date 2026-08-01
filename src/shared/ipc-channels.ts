@@ -70,6 +70,9 @@ export const IPC = {
   ACTRESS_POSTER_SET: 'actress:posterSet',
   ACTRESS_MERGE: 'actress:merge',
   ACTRESS_MARK_SCRAPE_SUCCESS: 'actress:markScrapeSuccess',
+  ACTRESS_CONFLICT_LIST: 'actressConflict:list',
+  ACTRESS_CONFLICT_COUNT: 'actressConflict:count',
+  ACTRESS_CONFLICT_DISCARD: 'actressConflict:discard',
 
   // Tags
   TAG_LIST: 'tag:list',

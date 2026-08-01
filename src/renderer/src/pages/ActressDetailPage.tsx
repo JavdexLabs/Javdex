@@ -185,7 +185,7 @@ export default function ActressDetailPage(): JSX.Element {
     setScraperName(site)
     setScraping(true)
     try {
-      await api.actressScrape.one(
+      const outcome = await api.actressScrape.one(
         actressId,
         site || undefined,
         fields,
@@ -194,7 +194,13 @@ export default function ActressDetailPage(): JSX.Element {
         useAliases,
         autoCropAvatar
       )
-      toast.show('匹配完成', 'success')
+      if (outcome.status === 'pending') {
+        toast.show('发现名称冲突，结果已保存到待确认', 'info')
+      } else if (outcome.status === 'failure') {
+        toast.show(`匹配失败：${outcome.error}`, 'error')
+      } else {
+        toast.show('匹配完成', 'success')
+      }
     } catch (e) {
       toast.show(`匹配失败：${(e as Error).message}`, 'error')
     } finally {

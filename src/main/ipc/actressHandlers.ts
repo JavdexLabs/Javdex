@@ -11,6 +11,9 @@ import type {
   ActressListQuery,
   ActressListSortBy,
   ActressMergeInput,
+  ActressNameConflictGroup,
+  DiscardPendingActressScrapeInput,
+  DiscardPendingActressScrapeResult,
   ListSortDir
 } from '@shared/types'
 import {
@@ -31,6 +34,7 @@ import {
   importActressGalleryImage
 } from '../services/actressGalleryService'
 import { registerHandler } from './shared'
+import { actressIdentityConflictWorkflow } from '../scrapers/actressScraperManager'
 
 export function registerActressHandlers(): void {
   registerHandler(
@@ -86,6 +90,20 @@ export function registerActressHandlers(): void {
     markActressScrapeSucceeded(id)
     return true
   })
+
+  registerHandler(IPC.ACTRESS_CONFLICT_LIST, (): ActressNameConflictGroup[] =>
+    actressIdentityConflictWorkflow.listConflictGroups()
+  )
+
+  registerHandler(IPC.ACTRESS_CONFLICT_COUNT, (): number =>
+    actressIdentityConflictWorkflow.countPendingScrapes()
+  )
+
+  registerHandler(
+    IPC.ACTRESS_CONFLICT_DISCARD,
+    (_e, input: DiscardPendingActressScrapeInput): DiscardPendingActressScrapeResult =>
+      actressIdentityConflictWorkflow.discardPendingScrape(input)
+  )
 
   registerHandler(
     IPC.ACTRESS_GALLERY_IMPORT,

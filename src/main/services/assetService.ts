@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { app, nativeImage } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -111,7 +111,7 @@ function hasImageMagicBytes(buf: Buffer): boolean {
   return detectImageExtensionFromBuffer(buf) !== null
 }
 
-function isUsableImageBuffer(body: Buffer): boolean {
+export function isUsableImageBuffer(body: Buffer): boolean {
   if (body.length === 0) return false
   if (body[0] === 0x3c || body[0] === 0x7b) return false
 
@@ -548,6 +548,47 @@ export async function downloadAvatar(
   } catch (err) {
     console.error('downloadAvatar failed:', name, url, (err as Error).message)
     return null
+  }
+}
+
+/** Store a validated scrape avatar buffer using the same temporary naming as downloads. */
+export function storeScrapedActressAvatar(
+  name: string,
+  url: string,
+  data: Buffer
+): string {
+  if (!isUsableImageBuffer(data)) throw new Error('头像不是可用图片')
+  const ext = detectImageExtensionFromBuffer(data) ?? extFromUrl(url)
+  return writeImageAsset(
+    'avatars',
+    buildActressAssetSeed(name),
+    `${url}\0${randomUUID()}`,
+    ext,
+    data
+  )
+}
+
+/** Store a validated scrape gallery buffer in the actress-scoped formal gallery. */
+export function storeScrapedActressGalleryImage(
+  name: string,
+  actressId: number,
+  url: string,
+  data: Buffer
+): DownloadedImageAsset {
+  if (!isUsableImageBuffer(data)) throw new Error('写真不是可用图片')
+  const ext = detectImageExtensionFromBuffer(data) ?? extFromUrl(url)
+  const localPath = writeImageAsset(
+    'actress_gallery',
+    buildActressAssetSeed(name, actressId),
+    `${url}\0${randomUUID()}`,
+    ext,
+    data
+  )
+  const dimensions = readImageDimensionsFromBuffer(data)
+  return {
+    localPath,
+    width: dimensions?.width ?? null,
+    height: dimensions?.height ?? null
   }
 }
 

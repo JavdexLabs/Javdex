@@ -3,17 +3,14 @@ import assert from 'node:assert/strict'
 import { buildActressScrapeMetaItems, canMarkActressScrapeSuccess } from './ActressProfileMeta'
 
 describe('ActressProfileMeta scrape record', () => {
-  it('shows all cumulative states and only includes a non-blank success time', () => {
+  it('hides scrape record for successful actresses and keeps attention states', () => {
     assert.deepEqual(
       buildActressScrapeMetaItems({ scraped_status: 0, last_scraped_at: null }),
       [{ key: 'scraped_status', label: '刮削状态', value: '未刮削', status: 0 }]
     )
     assert.deepEqual(
       buildActressScrapeMetaItems({ scraped_status: 1, last_scraped_at: 'stored timestamp' }),
-      [
-        { key: 'scraped_status', label: '刮削状态', value: '刮削成功', status: 1 },
-        { key: 'last_scraped_at', label: '最近成功', value: 'stored timestamp' }
-      ]
+      []
     )
     assert.deepEqual(
       buildActressScrapeMetaItems({ scraped_status: 2, last_scraped_at: '   ' }),

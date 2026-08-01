@@ -71,6 +71,9 @@ export function canMarkActressScrapeSuccess(status: ScrapedStatus): boolean {
 export function buildActressScrapeMetaItems(
   actress: Pick<ActressDetail, 'scraped_status' | 'last_scraped_at'>
 ): MetaItem[] {
+  // Successful records are the common case; keep the detail page quiet unless attention is needed.
+  if (actress.scraped_status === 1) return []
+
   const items: MetaItem[] = [
     {
       key: 'scraped_status',

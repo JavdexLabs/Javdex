@@ -1,4 +1,5 @@
 import type { BatchProgress, BatchScrapeState } from '@shared/types'
+import { randomUUID } from 'node:crypto'
 import { reconcilePersistedActressBatchJob } from './actressBatchScrapeTargets'
 import {
   clearBatchScrapeJob,
@@ -82,11 +83,13 @@ export function createBatchScrapeJob<TTarget extends { id: number }>(
   getLabel: (target: TTarget) => string
 ): PersistedBatchScrapeJob {
   return {
+    jobId: randomUUID(),
     kind,
     request,
     targets: targets.map((target) => ({ id: target.id, label: getLabel(target) })),
     nextIndex: 0,
     success: 0,
+    pending: 0,
     failed: 0,
     logs: [],
     total: targets.length,
@@ -105,6 +108,7 @@ export function persistBatchScrapeCheckpoint(
     ...job,
     nextIndex,
     success: progress.success,
+    pending: progress.pending,
     failed: progress.failed,
     logs: progress.logs,
     total: progress.total,

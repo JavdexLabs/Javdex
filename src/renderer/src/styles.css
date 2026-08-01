@@ -7140,6 +7140,13 @@ button.actress-mini:focus-visible .actress-avatar {
   white-space: nowrap;
 }
 
+.settings-overview-batch-meta-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .settings-overview-panel--status {
   margin-top: 0;
 }
@@ -7505,6 +7512,14 @@ button.actress-mini:focus-visible .actress-avatar {
   background: var(--surface-panel);
 }
 
+.batch-log-toolbar-actions {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .batch-log-stats {
   flex: 0 0 auto;
   min-width: 0;
@@ -7521,6 +7536,10 @@ button.actress-mini:focus-visible .actress-avatar {
   grid-template-columns: repeat(4, max-content) minmax(0, 1fr);
   align-items: center;
   gap: 8px;
+}
+
+.batch-log-stats-row--with-pending {
+  grid-template-columns: repeat(5, max-content) minmax(0, 1fr);
 }
 
 .batch-log-stat {
@@ -7555,6 +7574,10 @@ button.actress-mini:focus-visible .actress-avatar {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   line-height: 1;
+}
+
+.batch-log-stat--pending strong {
+  color: var(--text-warning);
 }
 
 .batch-log-stats-current {

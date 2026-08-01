@@ -60,6 +60,7 @@ import { useTheme } from '../components/ThemeProvider'
 import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
 import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
 import { useAvatarAutoCropBatch } from '../contexts/AvatarAutoCropBatchContext'
+import { actressConflictReviewPath } from '../listView/actressRoutes'
 import useNetworkSettingsController from '../hooks/useNetworkSettingsController'
 import {
   invalidateAllLibraryQueries
@@ -837,6 +838,11 @@ export default function SettingsPage(): JSX.Element {
     navigate(settingsPath(group, tab))
   }
 
+  const openActressConflicts = (): void => {
+    setBatchDetailScope(null)
+    navigate(actressConflictReviewPath())
+  }
+
   const videoUserPlugins = videoPluginDetails.filter((plugin) => plugin.source !== 'composite')
   const actressUserPlugins = actressPluginDetails.filter((plugin) => plugin.source !== 'composite')
   const videoCompositePlugins = videoPluginDetails.filter((plugin) => plugin.source === 'composite')
@@ -868,6 +874,7 @@ export default function SettingsPage(): JSX.Element {
           total: avatarAutoCropBatch.state.total,
           current: avatarAutoCropBatch.state.current,
           success: avatarAutoCropBatch.state.success,
+          pending: 0,
           failed: avatarAutoCropBatch.state.failed,
           currentCode:
             avatarAutoCropBatch.state.status === 'cancelling'
@@ -1009,6 +1016,7 @@ export default function SettingsPage(): JSX.Element {
                   onOpenActressBatchAdvanced={() => setShowActressBatchModal(true)}
                   onOpenVideoBatchDetails={() => setBatchDetailScope('video')}
                   onOpenActressBatchDetails={() => setBatchDetailScope('actress')}
+                  onOpenActressConflicts={openActressConflicts}
                   onPauseVideoBatch={cancelVideoBatch}
                   onPauseActressBatch={cancelActressBatch}
                   onResumeBatch={resumeBatch}
@@ -1200,6 +1208,9 @@ export default function SettingsPage(): JSX.Element {
                   </button>
                 ) : null
               ) : undefined
+            }
+            onOpenPending={
+              batchDetailScope === 'actress' ? openActressConflicts : undefined
             }
             onPause={() => {
               if (batchDetailScope === 'avatar') {

@@ -1533,6 +1533,7 @@ export interface BatchProgress {
   total: number
   current: number
   success: number
+  pending: number
   failed: number
   /** Code currently being processed. */
   currentCode: string | null

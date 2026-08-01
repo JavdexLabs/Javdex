@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
@@ -18,11 +19,13 @@ export interface BatchScrapeJobTarget {
 }
 
 export interface PersistedBatchScrapeJob {
+  jobId: string
   kind: BatchScrapeJobKind
   request: VideoBatchScrapeRequest | ActressBatchScrapeRequest
   targets: BatchScrapeJobTarget[]
   nextIndex: number
   success: number
+  pending: number
   failed: number
   logs: BatchLogEntry[]
   total: number
@@ -56,17 +59,29 @@ function readJobFile(): PersistedBatchScrapeJob | null {
     ) {
       return null
     }
+    const updatedAt =
+      typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString()
+    const legacyJobId = `legacy-${parsed.kind}-${createHash('sha256')
+      .update(raw)
+      .digest('hex')
+      .slice(0, 16)}`
     return {
+      jobId:
+        typeof parsed.jobId === 'string' && parsed.jobId.trim()
+          ? parsed.jobId.trim()
+          : legacyJobId,
       kind: parsed.kind,
       request: parsed.request as VideoBatchScrapeRequest | ActressBatchScrapeRequest,
       targets: parsed.targets as BatchScrapeJobTarget[],
       nextIndex: Math.max(0, Math.floor(parsed.nextIndex)),
       success: Math.max(0, Math.floor(parsed.success)),
+      pending:
+        typeof parsed.pending === 'number' ? Math.max(0, Math.floor(parsed.pending)) : 0,
       failed: Math.max(0, Math.floor(parsed.failed)),
       logs: parsed.logs as BatchLogEntry[],
       total: Math.max(0, Math.floor(parsed.total)),
       status: parsed.status === 'running' ? 'running' : 'paused',
-      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString()
+      updatedAt
     }
   } catch {
     return null
@@ -117,6 +132,7 @@ export function jobToBatchProgress(job: PersistedBatchScrapeJob): BatchProgress 
     total: job.total,
     current: job.nextIndex,
     success: job.success,
+    pending: job.pending,
     failed: job.failed,
     currentCode: nextTarget?.label ?? null,
     status: 'paused',

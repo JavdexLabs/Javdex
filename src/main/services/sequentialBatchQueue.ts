@@ -6,7 +6,7 @@ type ProgressListener = (progress: BatchProgress) => void
 const MAX_LOGS = 200
 
 export interface QueueItemOutcome {
-  success: boolean
+  status: 'success' | 'pending' | 'failure'
   level: BatchLogEntry['level']
   message: string
 }
@@ -14,7 +14,7 @@ export interface QueueItemOutcome {
 export interface SequentialBatchRun<TTarget> {
   targets: TTarget[]
   startIndex?: number
-  initialProgress?: Pick<BatchProgress, 'success' | 'failed' | 'logs'>
+  initialProgress?: Pick<BatchProgress, 'success' | 'pending' | 'failed' | 'logs'>
   resumeMessage?: string
   startMessage: (total: number) => string
   pausedMessage: string
@@ -83,6 +83,7 @@ export class SequentialBatchQueue<TTarget> {
       total: run.targets.length,
       current: startIndex,
       success: initial?.success ?? 0,
+      pending: initial?.pending ?? 0,
       failed: initial?.failed ?? 0,
       logs: initial?.logs ? [...initial.logs] : [],
       status: 'running'
@@ -127,7 +128,8 @@ export class SequentialBatchQueue<TTarget> {
 
         try {
           const itemOutcome = await run.runTarget(target)
-          if (itemOutcome.success) this.progress.success += 1
+          if (itemOutcome.status === 'success') this.progress.success += 1
+          else if (itemOutcome.status === 'pending') this.progress.pending += 1
           else this.progress.failed += 1
           this.log(code, itemOutcome.level, itemOutcome.message)
         } catch (err) {
@@ -169,6 +171,7 @@ export class SequentialBatchQueue<TTarget> {
       total: 0,
       current: 0,
       success: 0,
+      pending: 0,
       failed: 0,
       currentCode: null,
       status: 'idle',

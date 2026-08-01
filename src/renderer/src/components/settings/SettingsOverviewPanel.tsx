@@ -102,6 +102,7 @@ interface SettingsOverviewPanelProps {
   onOpenActressBatchAdvanced: () => void
   onOpenVideoBatchDetails: () => void
   onOpenActressBatchDetails: () => void
+  onOpenActressConflicts: () => void
   onPauseVideoBatch: BatchControlHandler
   onPauseActressBatch: BatchControlHandler
   onResumeBatch: BatchControlHandler
@@ -246,6 +247,8 @@ function BatchOverviewStatus({
   scopeLabel,
   canResume = true,
   resumeDisabledReason = null,
+  showPending = false,
+  onOpenPending,
   onOpen,
   onPause,
   onResume,
@@ -256,6 +259,8 @@ function BatchOverviewStatus({
   scopeLabel: string
   canResume?: boolean
   resumeDisabledReason?: string | null
+  showPending?: boolean
+  onOpenPending?: () => void
   onOpen: () => void
   onPause: BatchControlHandler
   onResume: BatchControlHandler
@@ -277,7 +282,9 @@ function BatchOverviewStatus({
       ? resumeDisabledReason || '状态范围无法识别，请终止后重新启动'
       : batch?.currentCode
         ? `当前：${batch.currentCode}`
-        : `成功 ${batch?.success ?? 0} · 失败 ${batch?.failed ?? 0}`
+        : `成功 ${batch?.success ?? 0}${
+            showPending ? ` · 待确认 ${batch?.pending ?? 0}` : ''
+          } · 失败 ${batch?.failed ?? 0}`
     : '上方可启动未刮削项或高级刮削'
   const openLabel = `查看${scopeLabel}批量任务详情`
 
@@ -323,8 +330,17 @@ function BatchOverviewStatus({
       </div>
       <div className="settings-overview-batch-meta">
         <small>{batchDetail}</small>
-        {activeBatch ? (
-          <span className="settings-overview-batch-inline-count">{batchCount}</span>
+        {activeBatch || (showPending && (batch?.pending ?? 0) > 0 && onOpenPending) ? (
+          <span className="settings-overview-batch-meta-actions">
+            {showPending && (batch?.pending ?? 0) > 0 && onOpenPending ? (
+              <button type="button" className="btn btn-sm btn-ghost" onClick={onOpenPending}>
+                查看待确认
+              </button>
+            ) : null}
+            {activeBatch ? (
+              <span className="settings-overview-batch-inline-count">{batchCount}</span>
+            ) : null}
+          </span>
         ) : null}
       </div>
     </div>
@@ -354,6 +370,7 @@ export default function SettingsOverviewPanel({
   onOpenActressBatchAdvanced,
   onOpenVideoBatchDetails,
   onOpenActressBatchDetails,
+  onOpenActressConflicts,
   onPauseVideoBatch,
   onPauseActressBatch,
   onResumeBatch,
@@ -681,6 +698,8 @@ export default function SettingsOverviewPanel({
             scopeLabel="演员"
             canResume={actressBatchRecoverable}
             resumeDisabledReason={actressBatchUnrecoverableReason}
+            showPending
+            onOpenPending={onOpenActressConflicts}
             onOpen={onOpenActressBatchDetails}
             onPause={onPauseActressBatch}
             onResume={onResumeBatch}

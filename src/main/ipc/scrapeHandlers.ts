@@ -416,6 +416,7 @@ function idleBatchProgress(): BatchProgress {
     total: 0,
     current: 0,
     success: 0,
+    pending: 0,
     failed: 0,
     currentCode: null,
     status: 'idle',

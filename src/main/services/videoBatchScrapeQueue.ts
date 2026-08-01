@@ -153,6 +153,7 @@ class VideoBatchScrapeQueue {
         startIndex: job.nextIndex,
         initialProgress: {
           success: job.success,
+          pending: job.pending,
           failed: job.failed,
           logs: job.logs
         },
@@ -178,19 +179,19 @@ class VideoBatchScrapeQueue {
           if (itemOutcome.ok) {
             if (itemOutcome.skipped) {
               return {
-                success: true,
+                status: 'success',
                 level: 'info',
                 message: '跳过：所选更新字段无需写入'
               }
             }
             return {
-              success: true,
+              status: 'success',
               level: 'success',
               message: `更新成功：${itemOutcome.result?.title ?? code}`
             }
           }
           return {
-            success: false,
+            status: 'failure',
             level: 'error',
             message: `更新失败：${itemOutcome.error ?? '未知错误'}`
           }

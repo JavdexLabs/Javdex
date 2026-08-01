@@ -8,6 +8,7 @@ function batch(status: BatchProgress['status']): BatchProgress {
     total: 7,
     current: 7,
     success: 4,
+    pending: 0,
     failed: 3,
     currentCode: null,
     status,

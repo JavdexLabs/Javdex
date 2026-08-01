@@ -183,6 +183,7 @@ class ActressScrapeQueue {
         startIndex: job.nextIndex,
         initialProgress: {
           success: job.success,
+          pending: job.pending,
           failed: job.failed,
           logs: job.logs
         },
@@ -192,7 +193,7 @@ class ActressScrapeQueue {
         pausedMessage: '用户暂停了演员批量刮削',
         cancelledMessage: '用户终止了演员批量刮削',
         doneMessage: (progress) =>
-          `演员批量刮削完成：成功 ${progress.success}，失败 ${progress.failed}`,
+          `演员批量刮削完成：成功 ${progress.success}，待确认 ${progress.pending}，失败 ${progress.failed}`,
         getCode: (target) => target.main_name,
         onCheckpoint: (progress, nextIndex) => {
           if (!this.activeJob) return
@@ -204,12 +205,20 @@ class ActressScrapeQueue {
             fields,
             mode,
             useAliases: request.useAliases ?? false,
+            batchJobId: job.jobId,
             delayController
           })
+          if (itemOutcome.status === 'pending') {
+            return {
+              status: 'pending',
+              level: 'info',
+              message: `待确认：名称归属冲突（结果 ${itemOutcome.pendingId}）`
+            }
+          }
           if (itemOutcome.ok) {
             if (itemOutcome.skipped) {
               return {
-                success: true,
+                status: 'success',
                 level: 'info',
                 message: '跳过：所选更新字段无需写入'
               }
@@ -236,19 +245,19 @@ class ActressScrapeQueue {
 
             if (details.length > 0) {
               return {
-                success: true,
+                status: 'success',
                 level: 'info',
                 message: `刮削成功；${details.join('；')}`
               }
             }
             return {
-              success: true,
+              status: 'success',
               level: 'success',
               message: '刮削成功'
             }
           }
           return {
-            success: false,
+            status: 'failure',
             level: 'error',
             message: `刮削失败：${itemOutcome.error ?? '未知错误'}`
           }

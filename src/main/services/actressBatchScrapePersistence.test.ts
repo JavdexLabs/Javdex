@@ -4,7 +4,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
-import { getActressDetail } from '../db/actressRepo'
+import { editActress, getActressDetail } from '../db/actressRepo'
+import { actressIdentityConflictWorkflow } from '../scrapers/actressScraperManager'
 import { installScraperPluginPackage } from '../scrapers/scraperPluginService'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import { actressScrapeQueue } from './actressScrapeQueue'
@@ -17,6 +18,7 @@ import {
 } from './batchScrapeJobStore'
 
 const PLUGIN_NAME = 'Persistence Profile Source'
+const PENDING_PLUGIN_NAME = 'Persistence Conflict Source'
 const SCRAPED_BIRTH_DATE = '1991-05-06'
 
 let tempRoot: string | null = null
@@ -49,6 +51,7 @@ function writePausedActressJob(
   overrides: Partial<PersistedBatchScrapeJob> = {}
 ): PersistedBatchScrapeJob {
   const job: PersistedBatchScrapeJob = {
+    jobId: '00000000-0000-4000-8000-000000000001',
     kind: 'actress',
     request: {
       scope: 'female',
@@ -63,6 +66,7 @@ function writePausedActressJob(
     ],
     nextIndex: 1,
     success: 1,
+    pending: 0,
     failed: 0,
     logs: [
       {
@@ -100,6 +104,11 @@ beforeEach(async () => {
   seedActress('Persist B', 'female', 0)
   seedActress('Persist Success', 'female', 1)
   seedActress('Persist Outside', 'male', 0)
+  seedActress('Conflict Owner', 'female', 1)
+  editActress(id('Conflict Owner'), {
+    main_name: 'Conflict Owner',
+    aliases: ['Collision']
+  })
   await installScraperPluginPackage({
     schemaVersion: 1,
     kind: 'actress',
@@ -111,6 +120,21 @@ beforeEach(async () => {
 module.exports = {
   async parseActress() {
     return { birthDate: '${SCRAPED_BIRTH_DATE}' };
+  }
+};
+`
+  })
+  await installScraperPluginPackage({
+    schemaVersion: 1,
+    kind: 'actress',
+    name: PENDING_PLUGIN_NAME,
+    version: '1.0.0',
+    description: 'Returns a conflicting alias',
+    supportedFields: ['aliases'],
+    code: `
+module.exports = {
+  async parseActress() {
+    return { aliases: ['Collision'] };
   }
 };
 `
@@ -131,6 +155,139 @@ afterEach(() => {
 })
 
 describe('actress batch scrape persistence lifecycle', () => {
+  it('persists one stable job id and advances pending targets across restart', async () => {
+    let pauseRequested = false
+    actressScrapeQueue.setListener((progress) => {
+      if (pauseRequested) return
+      if (progress.current >= 1 && progress.status === 'running') {
+        pauseRequested = true
+        actressScrapeQueue.pause()
+      }
+    })
+
+    await actressScrapeQueue.start({
+      actressIds: [id('Persist A'), id('Persist B')],
+      scope: 'all',
+      scrapeStatus: 'all',
+      fields: ['aliases'],
+      scraperName: PENDING_PLUGIN_NAME,
+      mode: 'replace'
+    })
+
+    const pausedJob = readJobFile()
+    assert.match(pausedJob.jobId, /^[0-9a-f-]{36}$/i)
+    assert.equal(pausedJob.nextIndex, 1)
+    assert.deepEqual(
+      {
+        success: pausedJob.success,
+        pending: pausedJob.pending,
+        failed: pausedJob.failed
+      },
+      { success: 0, pending: 1, failed: 0 }
+    )
+    const firstCandidate = actressIdentityConflictWorkflow
+      .listConflictGroups()[0]
+      .candidates.find((candidate) => candidate.actressId === id('Persist A'))!
+    assert.equal(firstCandidate.batchJobId, pausedJob.jobId)
+
+    actressScrapeQueue.setListener(null)
+    resetBatchScrapeJobCache()
+    await actressScrapeQueue.resume()
+
+    assert.equal(loadBatchScrapeJob(), null)
+    assert.equal(fs.existsSync(jobFilePath()), false)
+    assert.deepEqual(
+      {
+        current: actressScrapeQueue.getProgress().current,
+        success: actressScrapeQueue.getProgress().success,
+        pending: actressScrapeQueue.getProgress().pending,
+        failed: actressScrapeQueue.getProgress().failed
+      },
+      { current: 2, success: 0, pending: 2, failed: 0 }
+    )
+    assert.ok(
+      actressScrapeQueue
+        .getProgress()
+        .logs.some((entry) =>
+          entry.message.includes('批量刮削完成：成功 0，待确认 2，失败 0')
+        )
+    )
+    const candidates = actressIdentityConflictWorkflow
+      .listConflictGroups()[0]
+      .candidates.sort((a, b) => a.actressId - b.actressId)
+    assert.deepEqual(
+      candidates.map((candidate) => ({
+        actressId: candidate.actressId,
+        batchJobId: candidate.batchJobId
+      })),
+      [
+        { actressId: id('Persist A'), batchJobId: pausedJob.jobId },
+        { actressId: id('Persist B'), batchJobId: pausedJob.jobId }
+      ]
+    )
+    assert.equal(
+      candidates.find((candidate) => candidate.actressId === id('Persist A'))?.pendingId,
+      firstCandidate.pendingId
+    )
+
+    actressIdentityConflictWorkflow.discardPendingScrape({
+      pendingId: firstCandidate.pendingId,
+      expectedRevision: firstCandidate.revision
+    })
+    assert.equal(actressIdentityConflictWorkflow.countPendingScrapes(), 1)
+    assert.equal(actressScrapeQueue.getProgress().pending, 2)
+  })
+
+  it('loads a legacy task without tri-state fields using a stable fallback job id', async () => {
+    const saved = writePausedActressJob()
+    const {
+      jobId: _jobId,
+      pending: _pending,
+      updatedAt: _updatedAt,
+      ...legacyJob
+    } = saved
+    fs.writeFileSync(jobFilePath(), JSON.stringify(legacyJob), 'utf-8')
+
+    resetBatchScrapeJobCache()
+    const first = loadBatchScrapeJob()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    resetBatchScrapeJobCache()
+    const second = loadBatchScrapeJob()
+
+    assert.equal(first?.pending, 0)
+    assert.equal(second?.pending, 0)
+    assert.equal(second?.jobId, first?.jobId)
+  })
+
+  it('clears a cancelled task file without deleting its completed pending result', async () => {
+    let cancelRequested = false
+    actressScrapeQueue.setListener((progress) => {
+      if (cancelRequested) return
+      if (progress.current >= 1 && progress.status === 'running') {
+        cancelRequested = true
+        actressScrapeQueue.discard()
+      }
+    })
+
+    await actressScrapeQueue.start({
+      actressIds: [id('Persist A'), id('Persist B')],
+      scope: 'all',
+      scrapeStatus: 'all',
+      fields: ['aliases'],
+      scraperName: PENDING_PLUGIN_NAME,
+      mode: 'replace'
+    })
+
+    assert.equal(fs.existsSync(jobFilePath()), false)
+    assert.equal(loadBatchScrapeJob(), null)
+    assert.equal(actressScrapeQueue.getProgress().status, 'idle')
+    assert.equal(actressIdentityConflictWorkflow.countPendingScrapes(), 1)
+    assert.match(
+      actressIdentityConflictWorkflow.listConflictGroups()[0].candidates[0].batchJobId ?? '',
+      /^[0-9a-f-]{36}$/i
+    )
+  })
+
   it('persists only a canonical status and the start-time target snapshot', async () => {
     // Pause after the first target finishes so a checkpoint lands on disk.
     let pauseRequested = false
@@ -159,7 +316,7 @@ describe('actress batch scrape persistence lifecycle', () => {
     )
     assert.equal(job.total, 2)
     assert.equal(job.nextIndex, 1)
-    assert.equal(job.success + job.failed, 1)
+    assert.equal(job.success + job.pending + job.failed, 1)
     assert.equal(job.status, 'paused')
     actressScrapeQueue.setListener(null)
   })

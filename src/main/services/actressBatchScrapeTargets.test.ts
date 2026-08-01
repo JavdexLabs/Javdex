@@ -96,6 +96,7 @@ describe('actressBatchScrapeTargets status normalization', () => {
 describe('reconcilePersistedActressBatchJob', () => {
   function pausedActressJob(scrapeStatus?: string): PersistedBatchScrapeJob {
     return {
+      jobId: '00000000-0000-4000-8000-000000000001',
       kind: 'actress',
       request: {
         scope: 'female',
@@ -109,6 +110,7 @@ describe('reconcilePersistedActressBatchJob', () => {
       ],
       nextIndex: 1,
       success: 1,
+      pending: 0,
       failed: 0,
       logs: [
         {

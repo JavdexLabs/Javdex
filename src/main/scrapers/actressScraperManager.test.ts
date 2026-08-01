@@ -674,7 +674,7 @@ module.exports = {
     }
   })
 
-  it('preserves the existing gallery when every returned image fails to download', async () => {
+  it('preserves the existing gallery when every returned image is unusable', async () => {
     await installScraperPluginPackage({
       schemaVersion: 1,
       kind: 'actress',
@@ -713,7 +713,7 @@ module.exports = {
     })
     const originalFetchBuffer = scrapeBrowser.fetchBuffer
     scrapeBrowser.fetchBuffer = async () => {
-      throw new Error('gallery host offline')
+      return Buffer.from('<html>not an image</html>')
     }
 
     try {

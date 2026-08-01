@@ -561,6 +561,7 @@ export async function downloadActressGalleryImage(
   try {
     const ext = extFromUrl(url)
     const buf = await fetcher(url)
+    if (!isUsableImageBuffer(buf)) throw new Error('response is not a usable image')
     const localPath = writeImageAsset(
       'actress_gallery',
       buildActressAssetSeed(name, actressId),

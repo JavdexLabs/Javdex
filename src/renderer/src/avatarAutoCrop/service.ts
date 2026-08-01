@@ -1,4 +1,5 @@
 import type {
+  AvatarAnalysisPurpose,
   AvatarAutoCropResult,
   AvatarAutoCropWorkerConfig,
   AvatarAutoCropWorkerResponse
@@ -90,7 +91,8 @@ function ensureWorker(): Worker {
 export function analyzeAvatarBitmap(
   bitmap: ImageBitmap,
   centeringMode: AvatarCenteringMode,
-  preserveFullHead: boolean
+  preserveFullHead: boolean,
+  purpose: AvatarAnalysisPurpose = 'smart-crop'
 ): Promise<AvatarAutoCropResult> {
   const requestId = ++requestSequence
   const activeWorker = ensureWorker()
@@ -111,7 +113,8 @@ export function analyzeAvatarBitmap(
           bitmap,
           config: workerConfig(),
           centeringMode,
-          preserveFullHead
+          preserveFullHead,
+          purpose
         },
         [bitmap]
       )

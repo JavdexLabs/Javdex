@@ -37,6 +37,8 @@ export interface AvatarAutoCropResult {
   modelVersion: string
 }
 
+export type AvatarAnalysisPurpose = 'smart-crop' | 'face-presence'
+
 export interface AvatarAutoCropWorkerConfig {
   runtimeBaseUrl: string
   detectorModelUrl: string
@@ -51,6 +53,8 @@ export interface AvatarAutoCropAnalyzeRequest {
   config: AvatarAutoCropWorkerConfig
   centeringMode: AvatarCenteringMode
   preserveFullHead: boolean
+  /** Selects the candidate acceptance policy; defaults to smart crop. */
+  purpose?: AvatarAnalysisPurpose
 }
 
 export interface AvatarAutoCropDisposeRequest {

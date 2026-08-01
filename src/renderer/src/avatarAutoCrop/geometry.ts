@@ -1,6 +1,14 @@
 import type { AvatarFaceCandidate, NormalizedPoint, NormalizedRect } from './types'
 
-const MIN_DETECTION_CONFIDENCE = 0.65
+/** Confidence floor for smart-crop composition candidates. */
+export const DEFAULT_FACE_DETECTION_CONFIDENCE = 0.65
+/**
+ * Lower floor used only for “is there a face?” presence checks.
+ * The MediaPipe detector is initialized at this value so mid-confidence faces
+ * can still surface; crop ranking continues to require
+ * {@link DEFAULT_FACE_DETECTION_CONFIDENCE}.
+ */
+export const FACE_PRESENCE_DETECTION_CONFIDENCE = 0.4
 const MAX_CANDIDATES = 5
 
 export interface RawFaceCandidate {
@@ -80,11 +88,14 @@ export function mergeDuplicateCandidates(candidates: RawFaceCandidate[]): RawFac
   return merged
 }
 
-export function rankFaceCandidates(candidates: RawFaceCandidate[]): AvatarFaceCandidate[] {
+export function rankFaceCandidates(
+  candidates: RawFaceCandidate[],
+  minDetectionConfidence: number = DEFAULT_FACE_DETECTION_CONFIDENCE
+): AvatarFaceCandidate[] {
   const valid = candidates.filter(
     (candidate) =>
       Number.isFinite(candidate.confidence) &&
-      candidate.confidence >= MIN_DETECTION_CONFIDENCE &&
+      candidate.confidence >= minDetectionConfidence &&
       boxArea(candidate.box) >= 0.00004
   )
   const largestArea = Math.max(1e-8, ...valid.map((candidate) => boxArea(candidate.box)))

@@ -222,7 +222,7 @@ export default function ActressesPage(): JSX.Element {
   const avatarBatchActive =
     avatarAutoCropBatch.state.status === 'running' ||
     avatarAutoCropBatch.state.status === 'cancelling'
-  const faceScanAutoStartKey = `${urlQ.trim()}\u0000${genderFilter}\u0000${statusFilter}`
+  const faceScanAutoStartKey = faceScanMissingIdentity
   const faceScanAutoStartedKeyRef = useRef<string | null>(null)
 
   const startFaceScan = useCallback(
@@ -242,6 +242,14 @@ export default function ActressesPage(): JSX.Element {
       faceScanAutoStartedKeyRef.current = faceScanAutoStartKey
       const summary = await faceScan.start()
       if (!summary) return
+
+      // Record only the identities that remain unresolved after this attempt.
+      // Search/sort changes keep the same key and therefore only recombine the
+      // cache; a changed or newly added avatar produces a new key and rescans.
+      faceScanAutoStartedKeyRef.current = uncachedActressFaceScanIdentity(
+        fetchedItems,
+        faceScan.cache
+      )
 
       if (summary.cancelled) {
         patchParams({
@@ -265,7 +273,15 @@ export default function ActressesPage(): JSX.Element {
         summary.failed > 0 ? 'info' : 'success'
       )
     },
-    [actressBatchActive, avatarBatchActive, faceScan, faceScanAutoStartKey, patchParams, toast]
+    [
+      actressBatchActive,
+      avatarBatchActive,
+      faceScan,
+      faceScanAutoStartKey,
+      fetchedItems,
+      patchParams,
+      toast
+    ]
   )
 
   useEffect(() => {
@@ -274,6 +290,7 @@ export default function ActressesPage(): JSX.Element {
       return
     }
     if (!faceScan.needsScan && !faceScanMissingIdentity) return
+    if (faceScan.running) return
     if (faceScanAutoStartedKeyRef.current === faceScanAutoStartKey) return
     if (actressBatchActive || avatarBatchActive) return
     faceScanAutoStartedKeyRef.current = faceScanAutoStartKey
@@ -285,6 +302,7 @@ export default function ActressesPage(): JSX.Element {
     faceScanAutoStartKey,
     faceScanMissingIdentity,
     faceScan.needsScan,
+    faceScan.running,
     startFaceScan
   ])
 

@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ActressAvatarFilter, ActressListPage } from '@shared/types'
 import { api, assetUrl } from '../api'
 import { cancelPendingAvatarAutoCrop } from '../avatarAutoCrop/service'
 import { detectActressAvatarFace } from './detect'
+import { type ActressFaceScanCache, type ActressFaceScanStatus } from './cache'
 import {
-  type ActressFaceScanCache,
-  type ActressFaceScanStatus
-} from './cache'
+  getActressFaceScanSession,
+  getActressFaceScanSessionRevision,
+  subscribeActressFaceScanSession,
+  updateActressFaceScanSession
+} from './session'
 import {
   scanActressFaceTargets,
   type ActressFaceScanProgress,
@@ -22,6 +25,7 @@ export interface ActressFaceScanState {
 export interface UseActressFaceScanResult {
   cache: ActressFaceScanCache
   needsScan: boolean
+  running: boolean
   state: ActressFaceScanState | null
   start: () => Promise<ActressFaceScanSummary | null>
   cancel: () => void
@@ -38,28 +42,41 @@ function targetsFromPage(page: ActressListPage): ActressFaceScanTarget[] {
 }
 
 export function useActressFaceScan(): UseActressFaceScanResult {
-  const cacheRef = useRef<ActressFaceScanCache>(new Map())
+  useSyncExternalStore(
+    subscribeActressFaceScanSession,
+    getActressFaceScanSessionRevision,
+    getActressFaceScanSessionRevision
+  )
+  const session = getActressFaceScanSession()
+  const cache = session.cache
   const mountedRef = useRef(true)
-  const runningRef = useRef(false)
-  const cancelRequestedRef = useRef(false)
-  const runSequenceRef = useRef(0)
-  const [needsScan, setNeedsScan] = useState(true)
   const [state, setState] = useState<ActressFaceScanState | null>(null)
 
-  useEffect(
-    () => () => {
+  const setNeedsScan = useCallback((value: boolean): void => {
+    updateActressFaceScanSession({ needsScan: value })
+  }, [])
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
       mountedRef.current = false
-      cancelRequestedRef.current = true
-      if (runningRef.current) cancelPendingAvatarAutoCrop()
-    },
-    []
-  )
+      // Cancel an in-flight scan when leaving the page; completed cache entries remain.
+      if (getActressFaceScanSession().running) {
+        updateActressFaceScanSession({ cancelRequested: true })
+        cancelPendingAvatarAutoCrop()
+      }
+    }
+  }, [])
 
   const start = useCallback(async (): Promise<ActressFaceScanSummary | null> => {
-    if (runningRef.current) return null
-    runningRef.current = true
-    cancelRequestedRef.current = false
-    const runId = ++runSequenceRef.current
+    const currentSession = getActressFaceScanSession()
+    if (currentSession.running) return null
+    const runId = currentSession.runSequence + 1
+    updateActressFaceScanSession({
+      running: true,
+      cancelRequested: false,
+      runSequence: runId
+    })
     setState({
       progress: {
         total: 0,
@@ -82,29 +99,31 @@ export function useActressFaceScan(): UseActressFaceScanResult {
         sortBy: 'video_count',
         sortDir: 'desc'
       })
-      if (!mountedRef.current || runId !== runSequenceRef.current) return null
+      if (runId !== getActressFaceScanSession().runSequence) return null
 
       const targets = targetsFromPage(page)
       const summary = await scanActressFaceTargets(
         targets,
-        cacheRef.current,
+        cache,
         async (target): Promise<ActressFaceScanStatus> => {
           if (!target.avatarUrl) throw new Error('头像图片地址不可用')
           if (!target.fingerprint) throw new Error('头像指纹不可用')
           return detectActressAvatarFace(target)
         },
-        () => cancelRequestedRef.current,
+        () => getActressFaceScanSession().cancelRequested,
         (progress) => {
-          if (!mountedRef.current || runId !== runSequenceRef.current) return
+          if (!mountedRef.current || runId !== getActressFaceScanSession().runSequence) return
           setState((current) => (current ? { ...current, progress } : current))
         }
       )
-      if (!mountedRef.current || runId !== runSequenceRef.current) return null
-      setState({ progress: { ...lastProgress(summary), status: 'done' }, summary })
+      if (runId !== getActressFaceScanSession().runSequence) return null
+      // Persist completeness even if the actresses page unmounted during the run.
       setNeedsScan(summary.cancelled || summary.failed > 0)
+      if (!mountedRef.current) return summary
+      setState({ progress: { ...lastProgress(summary), status: 'done' }, summary })
       return summary
     } catch (error) {
-      if (!mountedRef.current || runId !== runSequenceRef.current) return null
+      if (runId !== getActressFaceScanSession().runSequence) return null
       const message = error instanceof Error ? error.message : String(error)
       const summary: ActressFaceScanSummary = {
         cancelled: false,
@@ -117,6 +136,8 @@ export function useActressFaceScan(): UseActressFaceScanResult {
         withoutFaceIds: [],
         failures: [{ actressId: 0, mainName: '-', message }]
       }
+      setNeedsScan(true)
+      if (!mountedRef.current) return summary
       setState({
         progress: {
           total: 0,
@@ -130,19 +151,17 @@ export function useActressFaceScan(): UseActressFaceScanResult {
         },
         summary
       })
-      setNeedsScan(true)
       return summary
     } finally {
-      if (runId === runSequenceRef.current) {
-        runningRef.current = false
-        cancelRequestedRef.current = false
+      if (runId === getActressFaceScanSession().runSequence) {
+        updateActressFaceScanSession({ running: false, cancelRequested: false })
       }
     }
-  }, [])
+  }, [cache, setNeedsScan])
 
   const cancel = useCallback((): void => {
-    if (!runningRef.current) return
-    cancelRequestedRef.current = true
+    if (!getActressFaceScanSession().running) return
+    updateActressFaceScanSession({ cancelRequested: true })
     setState((current) =>
       current
         ? {
@@ -154,11 +173,19 @@ export function useActressFaceScan(): UseActressFaceScanResult {
   }, [])
 
   const close = useCallback((): void => {
-    if (runningRef.current) return
+    if (getActressFaceScanSession().running) return
     setState(null)
   }, [])
 
-  return { cache: cacheRef.current, needsScan, state, start, cancel, close }
+  return {
+    cache,
+    needsScan: session.needsScan,
+    running: session.running,
+    state,
+    start,
+    cancel,
+    close
+  }
 }
 
 function lastProgress(summary: ActressFaceScanSummary): ActressFaceScanProgress {

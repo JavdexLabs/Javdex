@@ -30,7 +30,7 @@ export async function detectActressAvatarFace(
   const image = await loadImage(target.avatarUrl)
   const bitmap = await createAvatarAnalysisBitmap(image)
   try {
-    const result = await analyzeAvatarBitmap(bitmap, 'face', false)
+    const result = await analyzeAvatarBitmap(bitmap, 'face', false, 'face-presence')
     return result.candidates.length > 0 ? 'has-face' : 'without-face'
   } catch (error) {
     // The existing crop service reports a successful zero-face inference as an

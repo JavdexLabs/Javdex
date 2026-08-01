@@ -58,6 +58,11 @@ import {
 } from '../services/assetService'
 import { mimeFromExt } from '../services/assetCrypto'
 import { actressSearchLikeParams, actressTextSearchSql } from './actressSearchSql'
+import {
+  findActressIdByOwnedName,
+  isActressNameOwnershipAvailable as isActressNameAvailable,
+  synchronizeActressNameOwnership
+} from './actressNameOwnership'
 
 interface ActressGalleryAssetWriteInput {
   remoteUrl?: string | null
@@ -67,7 +72,6 @@ interface ActressGalleryAssetWriteInput {
 }
 import {
   ACTRESS_NAME_TYPE,
-  findActressIdByStoredName,
   getActressTypedName,
   listActressAliasNames,
   listActressNameRows,
@@ -82,7 +86,7 @@ import {
  * so renamed/alias performers are merged under one identity.
  */
 export function findActressByNameOrAlias(name: string): number | null {
-  return findActressIdByStoredName(name)
+  return findActressIdByOwnedName(name)
 }
 
 /** Return a usable avatar source and its exact plaintext-byte fingerprint. */
@@ -130,11 +134,16 @@ export function upsertActressFromScrape(
     return existingId
   }
 
-  const info = db
-    .prepare('INSERT INTO actresses (main_name, avatar_path, gender) VALUES (?, ?, ?)')
-    .run(trimmed, null, gender ?? 'female')
-  const id = Number(info.lastInsertRowid)
-  upsertActressName(id, trimmed, 'main', null, null, 1)
+  assertActressNameAvailable(trimmed, 0)
+  const id = db.transaction(() => {
+    const info = db
+      .prepare('INSERT INTO actresses (main_name, avatar_path, gender) VALUES (?, ?, ?)')
+      .run(trimmed, null, gender ?? 'female')
+    const createdId = Number(info.lastInsertRowid)
+    upsertActressName(createdId, trimmed, 'main', null, null, 1)
+    synchronizeActressNameOwnership(createdId)
+    return createdId
+  })()
   if (avatarRelPath) {
     adoptDownloadedAvatarIfMissing(id, avatarRelPath)
   }
@@ -175,7 +184,13 @@ function adoptDownloadedAvatarIfMissing(id: number, downloadedRelPath: string): 
 }
 
 export function addAlias(actressId: number, aliasName: string): void {
-  upsertActressName(actressId, aliasName.trim(), ACTRESS_NAME_TYPE.ALIAS, null, null, 0)
+  const db = getDb()
+  db.transaction(() => {
+    const trimmed = aliasName.trim()
+    assertActressNameAvailable(trimmed, actressId)
+    upsertActressName(actressId, trimmed, ACTRESS_NAME_TYPE.ALIAS, null, null, 0)
+    synchronizeActressNameOwnership(actressId)
+  })()
 }
 
 export type ActressBatchTarget = { id: number; main_name: string }
@@ -1089,6 +1104,10 @@ export function mergeActresses(
        SELECT ?, tag_id FROM actress_tag WHERE actress_id = ?`
     ).run(keepId, mergeId)
 
+    db.prepare('UPDATE actress_name_ownership SET actress_id = ? WHERE actress_id = ?').run(
+      keepId,
+      mergeId
+    )
     removeMergedActressRecord(mergeId)
   })
   txn()
@@ -1151,11 +1170,9 @@ export function clearActressMetadataRecord(id: number): void {
     .get(id) as { avatar_path: string | null; avatar_source_path: string | null } | undefined
   if (!actress) throw new Error('演员不存在')
 
-  deleteActressGalleryAssets(id)
-  deleteAsset(actress.avatar_path)
-  deleteAsset(actress.avatar_source_path)
-
+  let galleryPaths: Array<string | null> = []
   const txn = db.transaction(() => {
+    galleryPaths = deleteActressGalleryAssetRows(id)
     db.prepare(
       `UPDATE actresses SET
          birth_date = NULL, debut_date = NULL, height_cm = NULL,
@@ -1167,8 +1184,12 @@ export function clearActressMetadataRecord(id: number): void {
        WHERE id = ?`
     ).run(nowIso(), id)
     db.prepare("DELETE FROM actress_names WHERE actress_id = ? AND type != 'main'").run(id)
+    synchronizeActressNameOwnership(id)
   })
   txn()
+  for (const galleryPath of galleryPaths) deleteAsset(galleryPath)
+  deleteAsset(actress.avatar_path)
+  deleteAsset(actress.avatar_source_path)
 }
 
 /** Delete an actress that has no linked videos. Removes aliases and avatar. */
@@ -1219,22 +1240,6 @@ export function deleteUnlinkedActresses(ids: number[]): number {
 
   for (const assetPath of assets) deleteAsset(assetPath)
   return uniqueIds.length
-}
-
-function isActressNameAvailable(name: string, exceptId: number): boolean {
-  const normalizedName = normalizeActressName(name)
-  const storedNames = getDb()
-    .prepare(
-      `SELECT id AS actress_id, main_name AS name FROM actresses
-       UNION ALL
-       SELECT actress_id, name FROM actress_names`
-    )
-    .all() as Array<{ actress_id: number; name: string }>
-
-  return storedNames.every(
-    (stored) =>
-      stored.actress_id === exceptId || normalizeActressName(stored.name) !== normalizedName
-  )
 }
 
 function assertActressNameAvailable(name: string, exceptId: number): void {
@@ -1346,6 +1351,15 @@ export function editActress(id: number, input: ActressEditInput): void {
       setActressTypedName(id, 'en', en)
     }
     if (input.aliases) replaceActressAliases(id, input.aliases, mainName)
+
+    if (
+      'main_name' in input ||
+      'name_zh' in input ||
+      'name_en' in input ||
+      'aliases' in input
+    ) {
+      synchronizeActressNameOwnership(id)
+    }
 
     if (input.clearAvatar) {
       clearActressAvatarBundle(id)
@@ -1839,6 +1853,9 @@ export function applyActressScrapeResult(
         warnings.push(`别名「${name}」已被其他演员使用，已跳过`)
       }
     }
+    if (selected.has('nameZh') || selected.has('nameEn') || shouldReplaceAliases) {
+      synchronizeActressNameOwnership(actressId)
+    }
     if (selected.has('gallery') && (galleryAssets.length > 0 || mode === 'replace')) {
       obsoleteGalleryLocalPaths = replaceActressGalleryAssetRows(actressId, galleryAssets)
     }
@@ -1899,14 +1916,14 @@ function removeMergedActressRecord(id: number): void {
   void actress
 }
 
-function deleteActressGalleryAssets(actressId: number): void {
+function deleteActressGalleryAssetRows(actressId: number): Array<string | null> {
   const db = getDb()
   const rows = db
     .prepare('SELECT local_path FROM actress_gallery_assets WHERE actress_id = ?')
     .all(actressId) as { local_path: string | null }[]
   db.prepare('UPDATE actresses SET poster_path = NULL WHERE id = ?').run(actressId)
-  for (const row of rows) deleteAsset(row.local_path)
   db.prepare('DELETE FROM actress_gallery_assets WHERE actress_id = ?').run(actressId)
+  return rows.map((row) => row.local_path)
 }
 
 function clearActressPosterForPaths(actressId: number, paths: Array<string | null>): void {

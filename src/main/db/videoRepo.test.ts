@@ -122,6 +122,90 @@ describe('videoRepo.resolveEffectiveScrapeFields', () => {
 })
 
 describe('videoRepo.applyScrapeResult', () => {
+  it('reuses the unique name owner for canonically equivalent scraped cast names', () => {
+    setupDb()
+
+    applyScrapeResult(
+      1,
+      { code: 'IPX-535', actresses: [{ name: 'Alice Example', gender: 'female' }] },
+      null,
+      new Map(),
+      [],
+      ['actressesFemale']
+    )
+    applyScrapeResult(
+      2,
+      { code: 'MUKD-501', actresses: [{ name: 'Ａｌｉｃｅ　Ｅｘａｍｐｌｅ', gender: 'female' }] },
+      null,
+      new Map(),
+      [],
+      ['actressesFemale']
+    )
+
+    const db = getDb()
+    assert.equal(
+      (db.prepare('SELECT COUNT(*) AS n FROM actresses').get() as { n: number }).n,
+      1
+    )
+    const links = db
+      .prepare('SELECT video_id, actress_id FROM video_actress ORDER BY video_id')
+      .all() as Array<{ video_id: number; actress_id: number }>
+    assert.deepEqual(links, [
+      { video_id: 1, actress_id: 1 },
+      { video_id: 2, actress_id: 1 }
+    ])
+  })
+
+  it('does not create or link an actress for a migrated pending cast name', () => {
+    setupDb()
+    const db = getDb()
+    const insertActress = db.prepare('INSERT INTO actresses (main_name, gender) VALUES (?, ?)')
+    const firstId = Number(insertActress.run('Ambiguous Cast Name', 'female').lastInsertRowid)
+    const secondId = Number(insertActress.run('Ａｍｂｉｇｕｏｕｓ　Ｃａｓｔ　Ｎａｍｅ', 'female').lastInsertRowid)
+    const insertName = db.prepare(
+      "INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, 'main', 1)"
+    )
+    insertName.run(firstId, 'Ambiguous Cast Name')
+    insertName.run(secondId, 'Ａｍｂｉｇｕｏｕｓ　Ｃａｓｔ　Ｎａｍｅ')
+    const insertClaim = db.prepare(
+      `INSERT INTO pending_actress_name_claims
+        (normalized_name, actress_id, name, type, is_primary)
+       VALUES ('ambiguouscastname', ?, ?, 'main', 1)`
+    )
+    insertClaim.run(firstId, 'Ambiguous Cast Name')
+    insertClaim.run(secondId, 'Ａｍｂｉｇｕｏｕｓ　Ｃａｓｔ　Ｎａｍｅ')
+
+    assert.throws(
+      () =>
+        applyScrapeResult(
+          1,
+          {
+            code: 'IPX-535',
+            title: 'Must Roll Back',
+            actresses: [{ name: 'Ambiguous　Cast Name', gender: 'female' }]
+          },
+          null,
+          new Map(),
+          [],
+          ['title', 'actressesFemale']
+        ),
+      /已被其他演员使用/
+    )
+
+    assert.equal(
+      (db.prepare('SELECT COUNT(*) AS n FROM actresses').get() as { n: number }).n,
+      2
+    )
+    assert.equal(
+      (db.prepare('SELECT title FROM videos WHERE id = 1').get() as { title: string }).title,
+      'First'
+    )
+    assert.equal(
+      (db.prepare('SELECT COUNT(*) AS n FROM video_actress').get() as { n: number }).n,
+      0
+    )
+  })
+
   it('replaceIfPresent updates existing scalars when scrape has values and keeps null scrape values', () => {
     setupDb()
     const db = getDb()

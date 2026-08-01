@@ -3,6 +3,7 @@ import { app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { migrateDatabase } from './migrations'
+import { normalizeActressName } from './actressNameNormalization'
 
 let db: Database.Database | null = null
 
@@ -29,6 +30,14 @@ function openDatabase(dbPath: string): Database.Database {
   // Performance + integrity pragmas.
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
+  db.function('normalize_actress_name', { deterministic: true }, (value: unknown) => {
+    if (typeof value !== 'string') return null
+    try {
+      return normalizeActressName(value)
+    } catch {
+      return null
+    }
+  })
 
   migrateDatabase(db)
 

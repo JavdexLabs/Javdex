@@ -17,6 +17,7 @@ import {
   deleteUnlinkedActresses,
   backfillActressGalleryAssetDimensions,
   editActress,
+  findActressByNameOrAlias,
   listActresses,
   listActressesForBatchScrape,
   listActressPage,
@@ -32,6 +33,7 @@ import {
   upsertActressFromScrape
 } from './actressRepo'
 import { avatarSourceFingerprint } from '../services/assetService'
+import { findActressIdByOwnedName } from './actressNameOwnership'
 
 let tempRoot: string | null = null
 
@@ -107,6 +109,22 @@ function setupDb(): void {
   db.prepare(
     'INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, ?, ?)'
   ).run(1, 'Complete Alias', 'alias', 0)
+  const insertName = db.prepare(
+    "INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, 'main', 1)"
+  )
+  const insertOwnership = db.prepare(
+    'INSERT INTO actress_name_ownership (normalized_name, actress_id) VALUES (?, ?)'
+  )
+  for (const [id, name, normalizedName] of [
+    [1, 'Complete', 'complete'],
+    [2, 'Missing Female', 'missingfemale'],
+    [3, 'Missing Male', 'missingmale'],
+    [4, 'Unknown Gender', 'unknowngender']
+  ] as const) {
+    insertName.run(id, name)
+    insertOwnership.run(normalizedName, id)
+  }
+  insertOwnership.run('completealias', 1)
   db.prepare(
     `INSERT INTO actress_gallery_assets
       (actress_id, type, position, remote_url, local_path, created_at)
@@ -160,7 +178,81 @@ afterEach(() => {
   }
 })
 
+describe('actressRepo actress name ownership', () => {
+  it('changes the main-name row and ownership together when an actress is renamed', () => {
+    setupDb()
+    const db = getDb()
+    editActress(1, { main_name: 'Renamed Complete' })
+
+    assert.equal(findActressIdByOwnedName('Renamed Complete'), 1)
+    assert.equal(findActressIdByOwnedName('Complete'), null)
+    assert.deepEqual(
+      db
+        .prepare("SELECT name, is_primary FROM actress_names WHERE actress_id = 1 AND type = 'main'")
+        .all(),
+      [{ name: 'Renamed Complete', is_primary: 1 }]
+    )
+  })
+
+  it('keeps ownership while another name type still declares the same normalized name', () => {
+    setupDb()
+
+    editActress(1, {
+      name_zh: 'Shared Name',
+      aliases: ['Ｓｈａｒｅｄ　Ｎａｍｅ']
+    })
+    editActress(1, { name_zh: null })
+
+    assert.equal(findActressIdByOwnedName('shared name'), 1)
+
+    editActress(1, { aliases: [] })
+
+    assert.equal(findActressIdByOwnedName('shared name'), null)
+  })
+
+  it('rolls back the complete manual edit when any declared name has another owner', () => {
+    setupDb()
+
+    assert.throws(
+      () =>
+        editActress(1, {
+          main_name: 'Changed Before Conflict',
+          birth_date: '2001-02-03',
+          name_en: 'Ｍｉｓｓｉｎｇ　Ｆｅｍａｌｅ'
+        }),
+      /已被其他演员使用/
+    )
+
+    const actress = getDb()
+      .prepare('SELECT main_name, birth_date FROM actresses WHERE id = 1')
+      .get() as { main_name: string; birth_date: string | null }
+    assert.deepEqual(actress, { main_name: 'Complete', birth_date: '1990-01-01' })
+    assert.equal(findActressIdByOwnedName('Complete'), 1)
+    assert.equal(findActressIdByOwnedName('Changed Before Conflict'), null)
+  })
+})
+
 describe('actressRepo.listActresses', () => {
+  it('excludes migrated pending names from search and exact identity lookup', () => {
+    setupDb()
+    const db = getDb()
+    const insertName = db.prepare(
+      "INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, 'alias', 0)"
+    )
+    insertName.run(2, 'Ambiguous Migrated Name')
+    insertName.run(3, 'Ａｍｂｉｇｕｏｕｓ　Ｍｉｇｒａｔｅｄ　Ｎａｍｅ')
+    const insertClaim = db.prepare(
+      `INSERT INTO pending_actress_name_claims
+        (normalized_name, actress_id, name, type, is_primary)
+       VALUES (?, ?, ?, 'alias', 0)`
+    )
+    insertClaim.run('ambiguousmigratedname', 2, 'Ambiguous Migrated Name')
+    insertClaim.run('ambiguousmigratedname', 3, 'Ａｍｂｉｇｕｏｕｓ　Ｍｉｇｒａｔｅｄ　Ｎａｍｅ')
+
+    assert.deepEqual(listActresses('Ambiguous Migrated', 'all'), [])
+    assert.equal(findActressByNameOrAlias('ambiguous migrated name'), null)
+  })
+
   it('does not match a replaced main name that is not kept as an explicit alias', () => {
     setupDb()
     const actressId = upsertActressFromScrape('Former (Name)', null)
@@ -180,19 +272,11 @@ describe('actressRepo.listActresses', () => {
 
   it('matches main name, alias, and typed names', () => {
     setupDb()
-    const db = getDb()
-    db.prepare(
-      'INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, ?, ?)'
-    ).run(1, '完整中文', 'zh', 1)
-    db.prepare(
-      'INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, ?, ?)'
-    ).run(1, 'Complete EN', 'en', 1)
-    db.prepare('INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, ?, ?)').run(
-      1,
-      'Complete Romaji',
-      'alias',
-      0
-    )
+    editActress(1, {
+      name_zh: '完整中文',
+      name_en: 'Complete EN',
+      aliases: ['Complete Alias', 'Complete Romaji']
+    })
 
     assert.deepEqual(
       listActresses('Complete', 'all').map((a) => a.main_name),
@@ -432,6 +516,35 @@ describe('actressRepo.clearActressMetadataRecord', () => {
     assert.equal(links.c, 1)
   })
 
+  it('clears non-name metadata without claiming a migrated pending main name', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare(
+      "DELETE FROM actress_name_ownership WHERE normalized_name IN ('complete', 'missingfemale')"
+    ).run()
+    db.prepare('UPDATE actresses SET main_name = ? WHERE id = 2').run('Ｃｏｍｐｌｅｔｅ')
+    db.prepare("UPDATE actress_names SET name = ? WHERE actress_id = 2 AND type = 'main'").run(
+      'Ｃｏｍｐｌｅｔｅ'
+    )
+    const insertClaim = db.prepare(
+      `INSERT INTO pending_actress_name_claims
+        (normalized_name, actress_id, name, type, is_primary)
+       VALUES ('complete', ?, ?, 'main', 1)`
+    )
+    insertClaim.run(1, 'Complete')
+    insertClaim.run(2, 'Ｃｏｍｐｌｅｔｅ')
+
+    clearActressMetadataRecord(1)
+
+    assert.equal(findActressIdByOwnedName('Complete'), null)
+    assert.equal(findActressIdByOwnedName('Complete Alias'), null)
+    assert.equal(
+      (db.prepare('SELECT COUNT(*) AS n FROM pending_actress_name_claims').get() as { n: number }).n,
+      2
+    )
+    assert.equal(getActressDetail(1)?.avatar_path, null)
+  })
+
   it('resets every cumulative state to unscraped and drops the success time', () => {
     setupDb()
     markActressScrapeSucceeded(1)
@@ -514,6 +627,11 @@ describe('actressRepo.mergeActresses', () => {
     assert.ok(detail.aliases.includes('Missing Alias'))
     assert.equal(detail.gallery.length, 2)
     assert.equal(db.prepare('SELECT id FROM actresses WHERE id = 2').get(), undefined)
+    assert.equal(findActressByNameOrAlias('Missing Female'), 1)
+    assert.deepEqual(
+      listActresses('Missing Female', 'all').map((actress) => actress.id),
+      [1]
+    )
   })
 
   it('rejects merging actresses with different genders', () => {

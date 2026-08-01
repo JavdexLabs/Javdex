@@ -26,6 +26,8 @@ import type {
   ActressNameConflictGroup,
   DiscardPendingActressScrapeInput,
   DiscardPendingActressScrapeResult,
+  ResolveActressConflictInput,
+  ResolveActressConflictResult,
   ActressEditInput,
   ActressGenderFilter,
   ActressListItem,
@@ -285,6 +287,8 @@ const api = {
     conflictCount: () => invoke<number>(IPC.ACTRESS_CONFLICT_COUNT),
     discardConflict: (input: DiscardPendingActressScrapeInput) =>
       invoke<DiscardPendingActressScrapeResult>(IPC.ACTRESS_CONFLICT_DISCARD, input),
+    resolveConflict: (input: ResolveActressConflictInput) =>
+      invoke<ResolveActressConflictResult>(IPC.ACTRESS_CONFLICT_RESOLVE, input),
     batchCount: (filter: ActressBatchScrapeFilter) =>
       invoke<number>(IPC.ACTRESS_SCRAPE_BATCH_COUNT, filter),
     batchStart: (request?: ActressBatchScrapeRequest | string) =>

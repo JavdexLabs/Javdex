@@ -15923,13 +15923,22 @@ button.alias-tag-chip-name:disabled {
   transition: background var(--motion-fast), border-color var(--motion-fast), transform var(--motion-fast);
 }
 
-.conflict-review-owner {
+.conflict-review-owner.is-current {
   border-color: var(--border-accent);
 }
 
-.conflict-review-owner > svg {
+.conflict-review-owner.is-current > svg {
   margin-left: auto;
   color: var(--text-accent);
+}
+
+.conflict-review-owner.is-legacy {
+  border-color: var(--border-warning);
+}
+
+.conflict-review-owner.is-legacy > svg {
+  margin-left: auto;
+  color: var(--text-warning);
 }
 
 .conflict-review-actor:hover {
@@ -16037,6 +16046,132 @@ button.alias-tag-chip-name:disabled {
   margin-top: 10px;
 }
 
+.conflict-review-actions {
+  margin-top: 10px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+}
+
+.conflict-review-edit-name {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.conflict-review-edit-name > label,
+.conflict-review-replacement-main {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.conflict-review-edit-name .text-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.conflict-review-ownership-actions,
+.conflict-review-apply-ready {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.conflict-review-apply-ready {
+  justify-content: space-between;
+}
+
+.conflict-review-apply-ready > span {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.conflict-review-replacement-main {
+  margin-top: 14px;
+}
+
+.conflict-review-existing-owner-picker {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.conflict-review-existing-owner-picker > .search-input {
+  width: 100%;
+}
+
+.conflict-review-existing-owner-list {
+  max-height: 220px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  display: grid;
+  gap: 4px;
+}
+
+.conflict-review-existing-owner-list > button {
+  min-width: 0;
+  min-height: var(--control-h-md);
+  padding: 6px 8px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.conflict-review-existing-owner-list > button:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-control-hover);
+}
+
+.conflict-review-existing-owner-list > button:active {
+  transform: translateY(1px);
+}
+
+.conflict-review-existing-owner-list > button.is-selected {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+}
+
+.conflict-review-existing-owner-list > button:focus-visible {
+  outline: var(--focus-outline);
+  box-shadow: var(--focus-ring);
+}
+
+.conflict-review-existing-owner-list .actress-avatar {
+  width: 32px;
+  height: 32px;
+}
+
+.conflict-review-existing-owner-list button > span,
+.conflict-review-existing-owner-list strong,
+.conflict-review-existing-owner-list small {
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conflict-review-existing-owner-list small {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .conflict-review-previews {
   margin-top: 10px;
   display: grid;
@@ -16084,5 +16219,9 @@ button.alias-tag-chip-name:disabled {
   .conflict-review-meta > div:nth-child(odd),
   .conflict-review-values > div:nth-child(odd) {
     border-right: 0;
+  }
+
+  .conflict-review-edit-name {
+    grid-template-columns: 1fr;
   }
 }

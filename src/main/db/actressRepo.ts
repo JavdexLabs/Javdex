@@ -1664,8 +1664,14 @@ export function applyActressScrapeResult(
   galleryAssets: ActressGalleryAssetWriteInput[],
   fields?: ActressScrapeField[],
   mode: ActressScrapeUpdateMode = 'replace',
-  beforeCommit?: () => void
-): { applied: boolean; warnings: string[]; avatarApplied: boolean } {
+  beforeCommit?: () => void,
+  options?: { deferFileCleanup?: boolean }
+): {
+  applied: boolean
+  warnings: string[]
+  avatarApplied: boolean
+  fileChanges?: { createdPaths: string[]; obsoletePaths: string[] }
+} {
   const db = getDb()
   const requested = fields ?? ALL_ACTRESS_SCRAPE_FIELDS
   const effective = resolveEffectiveActressScrapeFields(actressId, requested, mode)
@@ -1903,24 +1909,46 @@ export function applyActressScrapeResult(
     }
     throw error
   }
-  deleteObsoleteActressGalleryAssets(obsoleteGalleryLocalPaths)
+  const createdPaths = adoptedAvatar
+    ? Array.from(new Set([adoptedAvatar.displayPath, adoptedAvatar.sourcePath]))
+    : []
+  const obsoletePaths = [...obsoleteGalleryLocalPaths]
 
   if (selected.has('avatar') && adoptedAvatar) {
     if (actress.avatar_path && actress.avatar_path !== adoptedAvatar.displayPath) {
-      deleteAsset(actress.avatar_path)
+      obsoletePaths.push(actress.avatar_path)
     }
     if (
       actress.avatar_source_path &&
       actress.avatar_source_path !== adoptedAvatar.sourcePath
     ) {
-      deleteAsset(actress.avatar_source_path)
+      obsoletePaths.push(actress.avatar_source_path)
     }
   } else if (shouldClearAvatar) {
-    deleteAsset(actress.avatar_path)
-    deleteAsset(actress.avatar_source_path)
+    if (actress.avatar_path) obsoletePaths.push(actress.avatar_path)
+    if (actress.avatar_source_path) obsoletePaths.push(actress.avatar_source_path)
   }
 
-  return { applied: true, warnings, avatarApplied }
+  if (!options?.deferFileCleanup) {
+    deleteObsoleteActressGalleryAssets(obsoleteGalleryLocalPaths)
+    for (const obsoletePath of obsoletePaths) {
+      if (!obsoleteGalleryLocalPaths.includes(obsoletePath)) deleteAsset(obsoletePath)
+    }
+  }
+
+  return {
+    applied: true,
+    warnings,
+    avatarApplied,
+    ...(options?.deferFileCleanup
+      ? {
+          fileChanges: {
+            createdPaths,
+            obsoletePaths: Array.from(new Set(obsoletePaths))
+          }
+        }
+      : {})
+  }
 }
 
 function dedupeUrls(urls: string[]): string[] {

@@ -14,6 +14,8 @@ import type {
   ActressNameConflictGroup,
   DiscardPendingActressScrapeInput,
   DiscardPendingActressScrapeResult,
+  ResolveActressConflictInput,
+  ResolveActressConflictResult,
   ListSortDir
 } from '@shared/types'
 import {
@@ -103,6 +105,12 @@ export function registerActressHandlers(): void {
     IPC.ACTRESS_CONFLICT_DISCARD,
     (_e, input: DiscardPendingActressScrapeInput): DiscardPendingActressScrapeResult =>
       actressIdentityConflictWorkflow.discardPendingScrape(input)
+  )
+
+  registerHandler(
+    IPC.ACTRESS_CONFLICT_RESOLVE,
+    (_e, input: ResolveActressConflictInput): ResolveActressConflictResult =>
+      actressIdentityConflictWorkflow.resolveConflict(input)
   )
 
   registerHandler(

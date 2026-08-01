@@ -1020,17 +1020,67 @@ export interface DiscardPendingActressScrapeResult {
 
 export interface ActressConflictCurrentOwner {
   actressId: number
+  revision: number
   mainName: string
   avatarPath: string | null
   nameTypes: ActressPendingNameType[]
 }
 
 export interface ActressNameConflictGroup {
+  status: 'conflict' | 'applicable'
   normalizedName: string
   displayName: string
   currentOwner: ActressConflictCurrentOwner | null
+  /** Every actress that currently declares this normalized name, including legacy ambiguous claims. */
+  claimants: ActressConflictCurrentOwner[]
   candidates: PendingActressScrapeCandidate[]
 }
+
+export interface ActressConflictDecisionSnapshot {
+  status: 'conflict' | 'applicable'
+  normalizedName: string
+  currentOwnerActressId: number | null
+  currentOwnerRevision: number | null
+  claimants: Array<{ actressId: number; revision: number }>
+  candidates: Array<{
+    pendingId: number
+    pendingRevision: number
+    actressId: number
+    actressRevision: number
+  }>
+}
+
+export interface ActressConflictReplacementMainName {
+  actressId: number
+  mainName: string
+}
+
+interface ActressConflictDecisionBase {
+  snapshot: ActressConflictDecisionSnapshot
+  replacementMainNames: ActressConflictReplacementMainName[]
+}
+
+export type ResolveActressConflictInput = ActressConflictDecisionBase &
+  (
+    | {
+        kind: 'editName'
+        pendingId: number
+        name: string
+        nameType: ActressPendingNameType
+        newName: string
+      }
+    | { kind: 'assignToCurrentActress'; pendingId: number }
+    | {
+        kind: 'assignToExistingActress'
+        ownerActressId: number
+        ownerActressRevision: number
+      }
+    | { kind: 'applyPending'; pendingId: number }
+  )
+
+export type ResolveActressConflictResult =
+  | { status: 'success'; remainingPending: number }
+  | { status: 'stale'; message: string }
 
 export type ActressScrapeDisposition =
   | {

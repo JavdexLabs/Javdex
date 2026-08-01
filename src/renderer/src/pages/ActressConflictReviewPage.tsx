@@ -4,9 +4,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, CircleAlert, Trash2, UserRoundCheck, UsersRound } from 'lucide-react'
 import type {
   ActressNameConflictGroup,
+  ActressPendingNameType,
+  ActressListItem,
   ActressScrapeField,
   ActressScrapeUpdateMode,
-  PendingActressScrapeCandidate
+  PendingActressScrapeCandidate,
+  ResolveActressConflictInput
 } from '@shared/types'
 import { ACTRESS_SCRAPE_FIELD_OPTIONS } from '@shared/types'
 import { api, resolveMediaSrc } from '../api'
@@ -17,6 +20,12 @@ import { UI_ICON_SM } from '../components/iconDefaults'
 import { useToast } from '../components/Toast'
 import { navigateToActressList } from '../listView/listNavigation'
 import { actressKeys } from '../query/queryKeys'
+import { useDebounce } from '../hooks/useDebounce'
+import {
+  buildActressConflictDecisionSnapshot,
+  conflictClaimantsNeedingReplacement,
+  type ActressOwnershipDecision
+} from './actressConflictReviewState'
 
 const FIELD_LABEL = new Map(ACTRESS_SCRAPE_FIELD_OPTIONS.map((option) => [option.id, option.label]))
 
@@ -24,6 +33,13 @@ const MODE_LABEL: Record<ActressScrapeUpdateMode, string> = {
   replace: '覆盖更新',
   fillEmpty: '空字段补齐',
   replaceIfPresent: '有值覆盖'
+}
+
+const NAME_TYPE_LABEL: Record<ActressPendingNameType, string> = {
+  main: '主名',
+  zh: '中文名',
+  en: '英文名',
+  alias: '别名'
 }
 
 const RESULT_LABELS: Array<{
@@ -99,6 +115,21 @@ export default function ActressConflictReviewPage(): JSX.Element {
     null
   )
   const [discarding, setDiscarding] = useState(false)
+  const [selectedConflictKey, setSelectedConflictKey] = useState<string | null>(null)
+  const [editedName, setEditedName] = useState('')
+  const [resolving, setResolving] = useState(false)
+  const [ownershipDecision, setOwnershipDecision] =
+    useState<ActressOwnershipDecision | null>(null)
+  const [replacementMainNames, setReplacementMainNames] = useState<Record<number, string>>({})
+  const [existingOwnerSearch, setExistingOwnerSearch] = useState('')
+  const [existingOwnerOptions, setExistingOwnerOptions] = useState<ActressListItem[]>([])
+  const [existingOwnersLoading, setExistingOwnersLoading] = useState(false)
+  const [selectedExistingOwner, setSelectedExistingOwner] = useState<{
+    actressId: number
+    mainName: string
+    revision: number
+  } | null>(null)
+  const debouncedExistingOwnerSearch = useDebounce(existingOwnerSearch, 250)
 
   const groupsQuery = useQuery({
     queryKey: actressKeys.conflicts(),
@@ -114,6 +145,14 @@ export default function ActressConflictReviewPage(): JSX.Element {
     selectedGroup?.candidates.find((candidate) => candidate.pendingId === selectedPendingId) ??
     selectedGroup?.candidates[0] ??
     null
+  const selectedConflicts =
+    selectedCandidate?.conflicts.filter(
+      (conflict) => conflict.normalizedName === selectedGroup?.normalizedName
+    ) ?? []
+  const selectedConflict =
+    selectedConflicts.find(
+      (conflict) => `${conflict.type}\0${conflict.name}` === selectedConflictKey
+    ) ?? selectedConflicts[0] ?? null
 
   useEffect(() => {
     if (!selectedGroup) {
@@ -128,6 +167,38 @@ export default function ActressConflictReviewPage(): JSX.Element {
       setSelectedPendingId(selectedCandidate.pendingId)
     }
   }, [selectedCandidate, selectedGroup, selectedName, selectedPendingId])
+
+  useEffect(() => {
+    const key = selectedConflict ? `${selectedConflict.type}\0${selectedConflict.name}` : null
+    if (selectedConflictKey !== key) setSelectedConflictKey(key)
+    setEditedName(selectedConflict?.name ?? '')
+  }, [
+    selectedCandidate?.pendingId,
+    selectedConflict?.name,
+    selectedConflict?.type,
+    selectedConflictKey,
+    selectedGroup?.normalizedName
+  ])
+
+  useEffect(() => {
+    if (ownershipDecision !== 'assignToExistingActress') return
+    let cancelled = false
+    setExistingOwnersLoading(true)
+    api.actresses
+      .list(debouncedExistingOwnerSearch.trim(), 'all')
+      .then((items) => {
+        if (!cancelled) setExistingOwnerOptions(items.slice(0, 40))
+      })
+      .catch((error) => {
+        if (!cancelled) toast.show(String((error as Error).message), 'error')
+      })
+      .finally(() => {
+        if (!cancelled) setExistingOwnersLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [debouncedExistingOwnerSearch, ownershipDecision, toast])
 
   const resultFields = useMemo(
     () =>
@@ -161,6 +232,111 @@ export default function ActressConflictReviewPage(): JSX.Element {
       setDiscarding(false)
     }
   }
+
+
+  const resolveDecision = async (input: ResolveActressConflictInput): Promise<void> => {
+    if (resolving) return
+    setResolving(true)
+    try {
+      const outcome = await api.actressScrape.resolveConflict(input)
+      if (outcome.status === 'stale') {
+        toast.show(outcome.message, 'info')
+      } else {
+        toast.show('名称冲突已处理', 'success')
+        setSelectedPendingId(null)
+      }
+      setOwnershipDecision(null)
+      setReplacementMainNames({})
+      setExistingOwnerSearch('')
+      setSelectedExistingOwner(null)
+      await queryClient.invalidateQueries({ queryKey: actressKeys.all })
+      await groupsQuery.refetch()
+    } catch (error) {
+      toast.show(String((error as Error).message), 'error')
+      await groupsQuery.refetch()
+    } finally {
+      setResolving(false)
+    }
+  }
+
+  const editSelectedName = (): void => {
+    if (!selectedGroup || !selectedCandidate || !selectedConflict) return
+    void resolveDecision({
+      kind: 'editName',
+      snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
+      pendingId: selectedCandidate.pendingId,
+      name: selectedConflict.name,
+      nameType: selectedConflict.type,
+      newName: editedName,
+      replacementMainNames: []
+    })
+  }
+
+  const applySelectedPending = (): void => {
+    if (!selectedGroup || !selectedCandidate) return
+    void resolveDecision({
+      kind: 'applyPending',
+      snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
+      pendingId: selectedCandidate.pendingId,
+      replacementMainNames: []
+    })
+  }
+
+  const confirmOwnershipDecision = (): void => {
+    if (!selectedGroup || !selectedCandidate || !ownershipDecision) return
+    const chosenOwnerActressId = selectedExistingOwner?.actressId ?? null
+    const destinationOwnerActressId =
+      ownershipDecision === 'assignToCurrentActress'
+        ? selectedCandidate.actressId
+        : chosenOwnerActressId
+    const replacements = conflictClaimantsNeedingReplacement(
+      selectedGroup,
+      destinationOwnerActressId
+    ).map((claimant) => ({
+      actressId: claimant.actressId,
+      mainName: replacementMainNames[claimant.actressId] ?? ''
+    }))
+    if (ownershipDecision === 'assignToCurrentActress') {
+      void resolveDecision({
+        kind: ownershipDecision,
+        snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
+        pendingId: selectedCandidate.pendingId,
+        replacementMainNames: replacements
+      })
+      return
+    }
+    if (!selectedExistingOwner) return
+    void resolveDecision({
+      kind: ownershipDecision,
+      snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
+      ownerActressId: selectedExistingOwner.actressId,
+      ownerActressRevision: selectedExistingOwner.revision,
+      replacementMainNames: replacements
+    })
+  }
+
+  const selectExistingOwner = async (item: ActressListItem): Promise<void> => {
+    try {
+      const detail = item.revision == null ? await api.actresses.get(item.id) : null
+      const revision = item.revision ?? detail?.revision
+      if (revision == null) throw new Error('无法读取演员当前版本，请刷新后重试')
+      setSelectedExistingOwner({
+        actressId: item.id,
+        mainName: item.main_name,
+        revision
+      })
+    } catch (error) {
+      toast.show(String((error as Error).message), 'error')
+    }
+  }
+
+  const decisionDestinationActressId =
+    ownershipDecision === 'assignToCurrentActress'
+      ? selectedCandidate?.actressId
+      : selectedExistingOwner?.actressId
+  const replacementClaimants = selectedGroup
+    ? conflictClaimantsNeedingReplacement(selectedGroup, decisionDestinationActressId)
+    : []
 
   return (
     <div className="detail-pane conflict-review-page">
@@ -213,7 +389,13 @@ export default function ActressConflictReviewPage(): JSX.Element {
                   <span>
                     <strong>{group.displayName}</strong>
                     <small>
-                      {group.currentOwner ? `当前归属 · ${group.currentOwner.mainName}` : '当前无归属'}
+                      {group.status === 'applicable'
+                        ? '冲突已消失 · 等待应用'
+                        : group.currentOwner
+                          ? `当前归属 · ${group.currentOwner.mainName}`
+                          : group.claimants.length > 0
+                            ? `历史归属待确认 · ${group.claimants.length} 位`
+                            : '当前无归属'}
                     </small>
                   </span>
                   <em>{group.candidates.length}</em>
@@ -230,8 +412,13 @@ export default function ActressConflictReviewPage(): JSX.Element {
                   <h2>{selectedGroup.displayName}</h2>
                   <p>标准化键：{selectedGroup.normalizedName}</p>
                 </div>
-                <span className="conflict-review-state">
-                  <CircleAlert {...UI_ICON_SM} aria-hidden />待确认
+                  <span className="conflict-review-state">
+                  {selectedGroup.status === 'applicable' ? (
+                    <UserRoundCheck {...UI_ICON_SM} aria-hidden />
+                  ) : (
+                    <CircleAlert {...UI_ICON_SM} aria-hidden />
+                  )}
+                  {selectedGroup.status === 'applicable' ? '可应用' : '待确认'}
                 </span>
               </header>
 
@@ -241,20 +428,34 @@ export default function ActressConflictReviewPage(): JSX.Element {
                   <span>选择一份候选查看刮削详情</span>
                 </div>
                 <div className="conflict-review-actors">
-                  {selectedGroup.currentOwner ? (
-                    <div className="conflict-review-owner">
+                  {selectedGroup.claimants.map((claimant) => {
+                    const isCurrentOwner =
+                      claimant.actressId === selectedGroup.currentOwner?.actressId
+                    return (
+                    <div
+                      className={`conflict-review-owner ${isCurrentOwner ? 'is-current' : 'is-legacy'}`}
+                      key={claimant.actressId}
+                    >
                       <ActressAvatar
-                        src={resolveMediaSrc(selectedGroup.currentOwner.avatarPath)}
-                        name={selectedGroup.currentOwner.mainName}
+                        src={resolveMediaSrc(claimant.avatarPath)}
+                        name={claimant.mainName}
                         gender={null}
                       />
                       <span>
-                        <strong>{selectedGroup.currentOwner.mainName}</strong>
-                        <small>当前归属 · {selectedGroup.currentOwner.nameTypes.join(' / ')}</small>
+                        <strong>{claimant.mainName}</strong>
+                        <small>
+                          {isCurrentOwner ? '当前归属' : '历史归属待确认'} ·{' '}
+                          {claimant.nameTypes.map((type) => NAME_TYPE_LABEL[type]).join(' / ')}
+                        </small>
                       </span>
-                      <UserRoundCheck {...UI_ICON_SM} aria-hidden />
+                      {isCurrentOwner ? (
+                        <UserRoundCheck {...UI_ICON_SM} aria-hidden />
+                      ) : (
+                        <CircleAlert {...UI_ICON_SM} aria-hidden />
+                      )}
                     </div>
-                  ) : null}
+                    )
+                  })}
                   {selectedGroup.candidates.map((candidate) => (
                     <CandidateButton
                       key={candidate.pendingId}
@@ -283,6 +484,92 @@ export default function ActressConflictReviewPage(): JSX.Element {
                   <div><dt>更新方式</dt><dd>{MODE_LABEL[selectedCandidate.mode]}</dd></div>
                   <div><dt>选择字段</dt><dd>{candidateFieldLabel(selectedCandidate.selectedFields)}</dd></div>
                 </dl>
+                <div className="conflict-review-actions" aria-label="名称冲突处理">
+                  {selectedGroup.status === 'applicable' ? (
+                    <div className="conflict-review-apply-ready">
+                      <span>名称冲突已在其他操作中消失，资料仍未写入。</span>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-primary"
+                        disabled={resolving}
+                        onClick={applySelectedPending}
+                      >
+                        应用待确认资料
+                      </button>
+                    </div>
+                  ) : selectedConflict ? (
+                    <>
+                      <div className="conflict-review-edit-name">
+                        {selectedConflicts.length > 1 ? (
+                          <label>
+                            <span>名称项</span>
+                            <select
+                              className="text-input"
+                              value={`${selectedConflict.type}\0${selectedConflict.name}`}
+                              onChange={(event) => setSelectedConflictKey(event.target.value)}
+                              disabled={resolving}
+                            >
+                              {selectedConflicts.map((conflict) => (
+                                <option
+                                  key={`${conflict.type}\0${conflict.name}`}
+                                  value={`${conflict.type}\0${conflict.name}`}
+                                >
+                                  {NAME_TYPE_LABEL[conflict.type]} · {conflict.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ) : null}
+                        <label>
+                          <span>修改所选{NAME_TYPE_LABEL[selectedConflict.type]}</span>
+                          <input
+                            className="text-input"
+                            value={editedName}
+                            onChange={(event) => setEditedName(event.target.value)}
+                            disabled={resolving}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost"
+                          disabled={resolving || !editedName.trim()}
+                          onClick={editSelectedName}
+                        >
+                          修改名称
+                        </button>
+                      </div>
+                      <div className="conflict-review-ownership-actions">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-primary"
+                          disabled={resolving}
+                          onClick={() => setOwnershipDecision('assignToCurrentActress')}
+                        >
+                          归给 {selectedCandidate.actressMainName}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost"
+                          disabled={resolving}
+                          onClick={() => {
+                            if (selectedGroup.currentOwner) {
+                              setSelectedExistingOwner({
+                                actressId: selectedGroup.currentOwner.actressId,
+                                mainName: selectedGroup.currentOwner.mainName,
+                                revision: selectedGroup.currentOwner.revision
+                              })
+                            } else {
+                              setSelectedExistingOwner(null)
+                            }
+                            setOwnershipDecision('assignToExistingActress')
+                          }}
+                        >
+                          归给已有演员…
+                        </button>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
                 {resultFields.length > 0 ? (
                   <dl className="conflict-review-values">
                     {resultFields.map((field) => (
@@ -314,6 +601,92 @@ export default function ActressConflictReviewPage(): JSX.Element {
           )}
         </div>
       )}
+
+      {ownershipDecision && selectedGroup && selectedCandidate ? (
+        <ConfirmModal
+          title={
+            ownershipDecision === 'assignToCurrentActress'
+              ? `将名称归给「${selectedCandidate.actressMainName}」`
+              : `将名称归给「${selectedExistingOwner?.mainName ?? '已有演员'}」`
+          }
+          confirmText={resolving ? '处理中…' : '确认归属'}
+          confirmDisabled={
+            resolving ||
+            (ownershipDecision === 'assignToExistingActress' && !selectedExistingOwner) ||
+            replacementClaimants.some(
+              (claimant) => !replacementMainNames[claimant.actressId]?.trim()
+            )
+          }
+          busy={resolving}
+          closeDisabled={resolving}
+          onConfirm={confirmOwnershipDecision}
+          onCancel={() => {
+            setOwnershipDecision(null)
+            setReplacementMainNames({})
+            setExistingOwnerSearch('')
+            setSelectedExistingOwner(null)
+          }}
+        >
+          <p>
+            {ownershipDecision === 'assignToCurrentActress'
+              ? `「${selectedGroup.displayName}」的完整归属会转给所选待确认演员；原归属演员的同名名称行会被移除。`
+              : '整个同名组会确认给所选演员；各份非名称资料仍写回自己的原目标演员。'}
+          </p>
+          {ownershipDecision === 'assignToExistingActress' ? (
+            <div className="conflict-review-existing-owner-picker">
+              <input
+                type="search"
+                className="search-input"
+                placeholder="搜索主名或别名…"
+                value={existingOwnerSearch}
+                onChange={(event) => setExistingOwnerSearch(event.target.value)}
+                disabled={resolving}
+              />
+              <div className="conflict-review-existing-owner-list" role="listbox" aria-label="已有演员">
+                {existingOwnersLoading ? (
+                  <EmptyState loading variant="modal" />
+                ) : existingOwnerOptions.length === 0 ? (
+                  <EmptyState title="没有匹配的演员" variant="modal" />
+                ) : existingOwnerOptions.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="option"
+                    aria-selected={selectedExistingOwner?.actressId === item.id}
+                    className={selectedExistingOwner?.actressId === item.id ? 'is-selected' : ''}
+                    onClick={() => void selectExistingOwner(item)}
+                  >
+                    <ActressAvatar
+                      src={resolveMediaSrc(item.avatar_path)}
+                      name={item.main_name}
+                      gender={item.gender}
+                      decorative
+                    />
+                    <span><strong>{item.main_name}</strong><small>{item.video_count} 部影片</small></span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {replacementClaimants.map((claimant, index) => (
+            <label className="conflict-review-replacement-main" key={claimant.actressId}>
+              <span>为「{claimant.mainName}」填写替代主名</span>
+              <input
+                autoFocus={index === 0}
+                className="text-input form-control-full"
+                value={replacementMainNames[claimant.actressId] ?? ''}
+                onChange={(event) =>
+                  setReplacementMainNames((current) => ({
+                    ...current,
+                    [claimant.actressId]: event.target.value
+                  }))
+                }
+                disabled={resolving}
+              />
+            </label>
+          ))}
+        </ConfirmModal>
+      ) : null}
 
       {discardCandidate ? (
         <ConfirmModal

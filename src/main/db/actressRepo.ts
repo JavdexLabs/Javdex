@@ -2,25 +2,39 @@ import type { Database as SqliteDatabase } from 'better-sqlite3'
 import fs from 'node:fs'
 import path from 'node:path'
 import { getDb } from './database'
+import { normalizeActressName } from './actressNameNormalization'
 import type {
   Actress,
   ActressDetail,
   ActressGalleryAsset,
   Video,
   ActressScrapeResult,
+  ActressScrapeFieldImpact,
   ActressEditInput,
   ActressScrapeField,
   ActressScrapeUpdateMode,
   ActressBatchScrapeFilter,
+  ActressBatchScrapeStatus,
   ActressGender,
   ActressGenderFilter,
   ActressListItem,
+  ActressListPage,
+  ActressListQuery,
   ActressListSortBy,
+  ActressListStatusCounts,
+  ActressListStatusFilter,
   ActressAvatarSourceInfo,
+  ActressAvatarFilter,
   ActressMergeMainNameFrom,
-  ListSortDir
+  ListSortDir,
+  ScrapedStatus
 } from '@shared/types'
-import { ALL_ACTRESS_SCRAPE_FIELDS, ACTRESS_BATCH_DEFAULT_MISSING_FIELDS } from '@shared/types'
+import {
+  ALL_ACTRESS_SCRAPE_FIELDS,
+  ACTRESS_BATCH_DEFAULT_MISSING_FIELDS,
+  ACTRESS_LIST_STATUS_SCRAPED_STATUS,
+  actressStatusFilterOf
+} from '@shared/types'
 import {
   createAvatarCropV1,
   parseAvatarCrop,
@@ -35,6 +49,7 @@ import {
   importAvatarDisplayFromBuffer,
   importAvatarFromFile,
   importAvatarSourceFromBuffer,
+  inspectImageAsset,
   isUsableImageAsset,
   readAssetBytes,
   readAssetForServe,
@@ -45,12 +60,23 @@ import {
 import { mimeFromExt } from '../services/assetCrypto'
 import { actressSearchLikeParams, actressTextSearchSql } from './actressSearchSql'
 import {
+  findActressIdByOwnedName,
+  isActressNameOwnershipAvailable as isActressNameAvailable,
+  validateAndReleaseActressNameOwnershipForMerge,
+  synchronizeActressNameOwnership
+} from './actressNameOwnership'
+
+interface ActressGalleryAssetWriteInput {
+  remoteUrl?: string | null
+  localPath?: string | null
+  width?: number | null
+  height?: number | null
+}
+import {
   ACTRESS_NAME_TYPE,
-  findActressIdByStoredName,
   getActressTypedName,
   listActressAliasNames,
   listActressNameRows,
-  mergeActressNameRows,
   setActressTypedName,
   setActressTypedNameIfEmpty,
   upsertActressName
@@ -61,7 +87,7 @@ import {
  * so renamed/alias performers are merged under one identity.
  */
 export function findActressByNameOrAlias(name: string): number | null {
-  return findActressIdByStoredName(name)
+  return findActressIdByOwnedName(name)
 }
 
 /** Return a usable avatar source and its exact plaintext-byte fingerprint. */
@@ -109,11 +135,16 @@ export function upsertActressFromScrape(
     return existingId
   }
 
-  const info = db
-    .prepare('INSERT INTO actresses (main_name, avatar_path, gender) VALUES (?, ?, ?)')
-    .run(trimmed, null, gender ?? 'female')
-  const id = Number(info.lastInsertRowid)
-  upsertActressName(id, trimmed, 'main', null, null, 1)
+  assertActressNameAvailable(trimmed, 0)
+  const id = db.transaction(() => {
+    const info = db
+      .prepare('INSERT INTO actresses (main_name, avatar_path, gender) VALUES (?, ?, ?)')
+      .run(trimmed, null, gender ?? 'female')
+    const createdId = Number(info.lastInsertRowid)
+    upsertActressName(createdId, trimmed, 'main', null, null, 1)
+    synchronizeActressNameOwnership(createdId)
+    return createdId
+  })()
   if (avatarRelPath) {
     adoptDownloadedAvatarIfMissing(id, avatarRelPath)
   }
@@ -154,10 +185,16 @@ function adoptDownloadedAvatarIfMissing(id: number, downloadedRelPath: string): 
 }
 
 export function addAlias(actressId: number, aliasName: string): void {
-  upsertActressName(actressId, aliasName.trim(), ACTRESS_NAME_TYPE.ALIAS, null, null, 0)
+  const db = getDb()
+  db.transaction(() => {
+    const trimmed = aliasName.trim()
+    assertActressNameAvailable(trimmed, actressId)
+    upsertActressName(actressId, trimmed, ACTRESS_NAME_TYPE.ALIAS, null, null, 0)
+    synchronizeActressNameOwnership(actressId)
+  })()
 }
 
-type ActressBatchTarget = { id: number; main_name: string }
+export type ActressBatchTarget = { id: number; main_name: string }
 
 function actressMissingFieldCondition(field: ActressScrapeField): string {
   switch (field) {
@@ -205,19 +242,37 @@ function actressMissingFieldCondition(field: ActressScrapeField): string {
   }
 }
 
-function actressNeverScrapedCondition(): string {
-  return "(a.last_scraped_at IS NULL OR trim(a.last_scraped_at) = '')"
-}
-
-function actressScrapedCondition(): string {
-  return "(a.last_scraped_at IS NOT NULL AND trim(a.last_scraped_at) != '')"
+/**
+ * Append a cumulative scrape-status condition. The list filter and the batch scope share the
+ * same status vocabulary and column mapping, so both go through one place.
+ */
+function pushScrapeStatusCondition(
+  conditions: string[],
+  params: unknown[],
+  status: ActressListStatusFilter | ActressBatchScrapeStatus
+): void {
+  if (status === 'all') return
+  conditions.push('a.scraped_status = ?')
+  params.push(ACTRESS_LIST_STATUS_SCRAPED_STATUS[status])
 }
 
 function buildActressBatchConditions(
-  filter: Pick<ActressBatchScrapeFilter, 'scope' | 'scrapeStatus'>
+  filter: Pick<ActressBatchScrapeFilter, 'actressIds' | 'scope' | 'scrapeStatus'>
 ): { conditions: string[]; params: unknown[] } {
   const conditions: string[] = []
   const params: unknown[] = []
+
+  if (filter.actressIds) {
+    const actressIds = Array.from(
+      new Set(filter.actressIds.map((id) => Number(id)).filter((id) => Number.isFinite(id)))
+    )
+    if (actressIds.length === 0) {
+      conditions.push('0')
+    } else {
+      conditions.push(`a.id IN (${actressIds.map(() => '?').join(', ')})`)
+      params.push(...actressIds)
+    }
+  }
 
   if (filter.scope === 'female') {
     conditions.push("(a.gender IS NULL OR a.gender = 'female')")
@@ -225,12 +280,7 @@ function buildActressBatchConditions(
     conditions.push("a.gender = 'male'")
   }
 
-  const scrapeStatus = filter.scrapeStatus ?? 'all'
-  if (scrapeStatus === 'unscraped') {
-    conditions.push(actressNeverScrapedCondition())
-  } else if (scrapeStatus === 'scraped') {
-    conditions.push(actressScrapedCondition())
-  }
+  pushScrapeStatusCondition(conditions, params, filter.scrapeStatus ?? 'all')
 
   return { conditions, params }
 }
@@ -253,7 +303,7 @@ function buildBatchActressWhere(filter: ActressBatchScrapeFilter): {
 }
 
 function actressBatchScopeSql(
-  filter: Pick<ActressBatchScrapeFilter, 'scope' | 'scrapeStatus'>
+  filter: Pick<ActressBatchScrapeFilter, 'actressIds' | 'scope' | 'scrapeStatus'>
 ): {
   sql: string
   params: unknown[]
@@ -266,7 +316,7 @@ function actressBatchScopeSql(
 }
 
 function listActressesWithBrokenAvatars(
-  filter: Pick<ActressBatchScrapeFilter, 'scope' | 'scrapeStatus'>
+  filter: Pick<ActressBatchScrapeFilter, 'actressIds' | 'scope' | 'scrapeStatus'>
 ): ActressBatchTarget[] {
   const db = getDb()
   const { sql: scopeSql, params } = actressBatchScopeSql(filter)
@@ -587,13 +637,11 @@ export function listIncompleteProfileActresses(
   })
 }
 
-export function listActresses(
-  search?: string,
-  gender: ActressGenderFilter = 'female',
-  sortBy: ActressListSortBy = 'video_count',
-  sortDir: ListSortDir = 'desc'
-): ActressListItem[] {
-  const db = getDb()
+function buildActressListWhere(
+  search: string | undefined,
+  gender: ActressGenderFilter,
+  status: ActressListStatusFilter
+): { sql: string; params: unknown[] } {
   const conditions: string[] = []
   const params: unknown[] = []
 
@@ -605,10 +653,52 @@ export function listActresses(
     conditions.push('a.gender = ?')
     params.push(gender)
   }
+  pushScrapeStatusCondition(conditions, params, status)
 
-  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+  return { sql: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', params }
+}
+
+function actressHasUsableAvatar(actress: Pick<ActressListItem, 'avatar_path'>): boolean {
+  return !isBlankText(actress.avatar_path) && inspectImageAsset(actress.avatar_path).usable
+}
+
+function actressDisplayAvatarFingerprint(
+  actress: Pick<ActressListItem, 'avatar_path'>
+): string | null {
+  return inspectImageAsset(actress.avatar_path).fingerprint
+}
+
+function enrichActressListItems(actresses: ActressListItem[]): ActressListItem[] {
+  return actresses.map((actress) => ({
+    ...actress,
+    avatar_fingerprint: actressDisplayAvatarFingerprint(actress)
+  }))
+}
+
+function filterActressAvatars(
+  actresses: ActressListItem[],
+  avatar: ActressAvatarFilter
+): ActressListItem[] {
+  if (avatar === 'all') return actresses
+  // "without-face" is resolved by the renderer's local model. The main process
+  // still returns the usable-avatar candidate set so the renderer can scan it.
+  if (avatar === 'without-face') return actresses.filter((actress) => actressHasUsableAvatar(actress))
+  const wantsAvatar = avatar === 'with'
+  return actresses.filter((actress) => actressHasUsableAvatar(actress) === wantsAvatar)
+}
+
+export function listActresses(
+  search?: string,
+  gender: ActressGenderFilter = 'female',
+  sortBy: ActressListSortBy = 'video_count',
+  sortDir: ListSortDir = 'desc',
+  status: ActressListStatusFilter = 'all',
+  avatar: ActressAvatarFilter = 'all'
+): ActressListItem[] {
+  const db = getDb()
+  const { sql: where, params } = buildActressListWhere(search, gender, status)
   const orderBy = buildActressListOrderBy(sortBy, sortDir)
-  return db
+  const actresses = db
     .prepare(
       `SELECT a.*,
               COUNT(va.video_id) AS video_count,
@@ -620,6 +710,7 @@ export function listActresses(
        ORDER BY ${orderBy}`
     )
     .all(...params) as ActressListItem[]
+  return filterActressAvatars(actresses, avatar)
 }
 
 function buildActressListOrderBy(sortBy: ActressListSortBy, sortDir: ListSortDir): string {
@@ -640,6 +731,52 @@ function buildActressListOrderBy(sortBy: ActressListSortBy, sortDir: ListSortDir
     case 'video_count':
     default:
       return `video_count ${dir}, ${tie}`
+  }
+}
+
+/** Actresses per cumulative status, scoped by search and gender but not by the status filter. */
+function countActressListStatuses(
+  search: string | undefined,
+  gender: ActressGenderFilter
+): ActressListStatusCounts {
+  const db = getDb()
+  const { sql: where, params } = buildActressListWhere(search, gender, 'all')
+  const rows = db
+    .prepare(
+      `SELECT a.scraped_status AS status, COUNT(*) AS n
+       FROM actresses a
+       ${where}
+       GROUP BY a.scraped_status`
+    )
+    .all(...params) as Array<{ status: ScrapedStatus; n: number }>
+
+  const counts: ActressListStatusCounts = { all: 0, success: 0, unscraped: 0, failed: 0 }
+  for (const row of rows) {
+    counts[actressStatusFilterOf(row.status)] += row.n
+    counts.all += row.n
+  }
+  return counts
+}
+
+/** Actress list read contract: filtered rows plus the status counts the toolbar shows. */
+export function listActressPage(query: ActressListQuery = {}): ActressListPage {
+  const gender = query.gender ?? 'female'
+  const avatar = query.avatar === 'without-face' ? 'with' : query.avatar ?? 'all'
+  const actresses = listActresses(
+    query.search,
+    gender,
+    query.sortBy,
+    query.sortDir,
+    query.status ?? 'all',
+    avatar
+  )
+  return {
+    // Fingerprints are only needed when the renderer may run or apply the
+    // local face filter. Avoid probing every avatar for ordinary list views.
+    items: query.avatar === 'with' || query.avatar === 'without-face'
+      ? enrichActressListItems(actresses)
+      : actresses,
+    statusCounts: countActressListStatuses(query.search, gender)
   }
 }
 
@@ -720,12 +857,7 @@ export function getActressDetail(id: number): ActressDetail | null {
 
 export function addActressGalleryAsset(
   actressId: number,
-  input: {
-    remoteUrl?: string | null
-    localPath?: string | null
-    width?: number | null
-    height?: number | null
-  }
+  input: ActressGalleryAssetWriteInput
 ): ActressGalleryAsset {
   if (!input.remoteUrl && !input.localPath) throw new Error('写真来源不能为空')
   const db = getDb()
@@ -759,52 +891,61 @@ export function addActressGalleryAsset(
 
 export function replaceActressGalleryAssets(
   actressId: number,
-  assets: Array<{
-    remoteUrl?: string | null
-    localPath?: string | null
-    width?: number | null
-    height?: number | null
-  }>
+  assets: ActressGalleryAssetWriteInput[]
 ): void {
+  const db = getDb()
+  const obsoleteLocalPaths = db.transaction(() =>
+    replaceActressGalleryAssetRows(actressId, assets)
+  )()
+  deleteObsoleteActressGalleryAssets(obsoleteLocalPaths)
+}
+
+function replaceActressGalleryAssetRows(
+  actressId: number,
+  assets: ActressGalleryAssetWriteInput[]
+): string[] {
   const db = getDb()
   const existing = db
     .prepare('SELECT local_path FROM actress_gallery_assets WHERE actress_id = ?')
     .all(actressId) as { local_path: string | null }[]
   const createdAt = nowIso()
 
-  const txn = db.transaction(() => {
-    clearActressPosterForPaths(
+  clearActressPosterForPaths(
+    actressId,
+    existing.map((row) => row.local_path)
+  )
+  db.prepare('DELETE FROM actress_gallery_assets WHERE actress_id = ?').run(actressId)
+  const insert = db.prepare(
+    `INSERT INTO actress_gallery_assets
+       (actress_id, type, position, remote_url, local_path, width, height, created_at)
+     VALUES (@actressId, 'gallery', @position, @remoteUrl, @localPath, @width, @height, @createdAt)`
+  )
+  assets.forEach((asset, position) => {
+    if (!asset.remoteUrl && !asset.localPath) return
+    insert.run({
       actressId,
-      existing.map((row) => row.local_path)
-    )
-    db.prepare('DELETE FROM actress_gallery_assets WHERE actress_id = ?').run(actressId)
-    const insert = db.prepare(
-      `INSERT INTO actress_gallery_assets
-         (actress_id, type, position, remote_url, local_path, width, height, created_at)
-       VALUES (@actressId, 'gallery', @position, @remoteUrl, @localPath, @width, @height, @createdAt)`
-    )
-    assets.forEach((asset, position) => {
-      if (!asset.remoteUrl && !asset.localPath) return
-      insert.run({
-        actressId,
-        position,
-        remoteUrl: asset.remoteUrl ?? null,
-        localPath: asset.localPath ?? null,
-        width: asset.width ?? null,
-        height: asset.height ?? null,
-        createdAt
-      })
+      position,
+      remoteUrl: asset.remoteUrl ?? null,
+      localPath: asset.localPath ?? null,
+      width: asset.width ?? null,
+      height: asset.height ?? null,
+      createdAt
     })
   })
-  txn()
 
   const retainedLocalPaths = new Set(
     assets.map((asset) => asset.localPath).filter((localPath): localPath is string => !!localPath)
   )
-  for (const row of existing) {
-    if (!row.local_path || retainedLocalPaths.has(row.local_path)) continue
-    deleteAsset(row.local_path)
-  }
+  return existing
+    .map((row) => row.local_path)
+    .filter(
+      (localPath): localPath is string =>
+        Boolean(localPath) && !retainedLocalPaths.has(localPath as string)
+    )
+}
+
+function deleteObsoleteActressGalleryAssets(localPaths: string[]): void {
+  for (const localPath of localPaths) deleteAsset(localPath)
 }
 
 export function deleteActressGalleryAsset(actressId: number, assetId: number): string | null {
@@ -839,37 +980,70 @@ export function setActressPosterPath(id: number, posterPath: string | null): voi
   )
 }
 
-/** Merge mergeId into keepId. The merged record is removed; videos, gallery, and aliases combine. */
+/** Merge mergeId into keepId as one database transaction. */
 export function mergeActresses(
   keepId: number,
   mergeId: number,
-  mainNameFrom: ActressMergeMainNameFrom = 'keep'
-): void {
+  mainNameFrom: ActressMergeMainNameFrom = 'keep',
+  options?: { deferFileCleanup?: boolean }
+): { fileChanges?: { obsoletePaths: string[] } } {
   if (keepId === mergeId) throw new Error('不能合并同一演员')
 
   const db = getDb()
-  const keep = db.prepare('SELECT * FROM actresses WHERE id = ?').get(keepId) as Actress | undefined
-  const merge = db.prepare('SELECT * FROM actresses WHERE id = ?').get(mergeId) as Actress | undefined
-  if (!keep || !merge) throw new Error('演员不存在')
-  if (!canMergeActressGenders(keep.gender, merge.gender)) {
-    throw new Error('不能合并不同性别的演员')
-  }
+  const cleanup = db.transaction(() => {
+    const keep = db.prepare('SELECT * FROM actresses WHERE id = ?').get(keepId) as
+      | Actress
+      | undefined
+    const merge = db.prepare('SELECT * FROM actresses WHERE id = ?').get(mergeId) as
+      | Actress
+      | undefined
+    if (!keep || !merge) throw new Error('演员不存在')
+    if (!canMergeActressGenders(keep.gender, merge.gender)) {
+      throw new Error('不能合并不同性别的演员')
+    }
 
-  const finalMain = mainNameFrom === 'keep' ? keep.main_name : merge.main_name
-  const aliasCandidates = new Set<string>()
-  for (const alias of [...listActressAliasNames(keepId), ...listActressAliasNames(mergeId)]) {
-    aliasCandidates.add(alias)
-  }
-  if (merge.main_name.trim() !== finalMain) aliasCandidates.add(merge.main_name.trim())
-  if (mainNameFrom === 'merge' && keep.main_name.trim() !== finalMain) {
-    aliasCandidates.add(keep.main_name.trim())
-  }
+    const finalMain = mainNameFrom === 'keep' ? keep.main_name : merge.main_name
+    const keepNameRows = listActressNameRows(keepId)
+    const mergeNameRows = listActressNameRows(mergeId)
+    const allNameRows = [...keepNameRows, ...mergeNameRows]
+    const aliases = dedupeActressAliases(
+      [
+        ...listActressAliasNames(keepId, keepNameRows),
+        ...listActressAliasNames(mergeId, mergeNameRows),
+        ...(keep.main_name === finalMain ? [] : [keep.main_name]),
+        ...(merge.main_name === finalMain ? [] : [merge.main_name])
+      ],
+      finalMain
+    )
+    const typedNameRows = allNameRows.filter(
+      (row) => row.type !== ACTRESS_NAME_TYPE.MAIN && row.type !== ACTRESS_NAME_TYPE.ALIAS
+    )
+    validateAndReleaseActressNameOwnershipForMerge(
+      [finalMain, ...aliases, ...typedNameRows.map((row) => row.name)],
+      [keepId, mergeId]
+    )
 
-  const mergeAvatarPath = merge.avatar_path
-  const mergeAvatarSourcePath = merge.avatar_source_path
-  const keepHadAvatar = !isBlankText(keep.avatar_path)
+    const avatarOwner = isUsableImageAsset(keep.avatar_path)
+      ? keep
+      : isUsableImageAsset(merge.avatar_path)
+        ? merge
+        : null
+    const avatarPath = avatarOwner?.avatar_path ?? null
+    const avatarSourcePath =
+      avatarOwner && isUsableImageAsset(avatarOwner.avatar_source_path)
+        ? avatarOwner.avatar_source_path
+        : null
+    const avatarCropJson =
+      avatarOwner?.avatar_crop_json &&
+      avatarSourcePath &&
+      parseAvatarCrop(
+        avatarOwner.avatar_crop_json,
+        avatarSourceFingerprint(readAssetBytes(avatarSourcePath))
+      )
+        ? avatarOwner.avatar_crop_json
+        : null
+    const mergedScrapeRecord = mergeActressScrapeRecords(keep, merge)
 
-  const txn = db.transaction(() => {
     db.prepare(
       `INSERT OR IGNORE INTO video_actress (video_id, actress_id)
        SELECT video_id, ? FROM video_actress WHERE actress_id = ?`
@@ -903,10 +1077,17 @@ export function mergeActresses(
       }
     }
 
-    mergeActressNameRows(keepId, mergeId)
+    db.prepare(
+      `INSERT OR IGNORE INTO actress_tag (actress_id, tag_id)
+       SELECT ?, tag_id FROM actress_tag WHERE actress_id = ?`
+    ).run(keepId, mergeId)
+
+    db.prepare('DELETE FROM actress_names WHERE actress_id = ?').run(keepId)
+    removeMergedActressRecord(mergeId)
 
     db.prepare(
       `UPDATE actresses SET
+         main_name = @main_name,
          birth_date = COALESCE(NULLIF(trim(birth_date), ''), NULLIF(trim(@birth_date), '')),
          debut_date = COALESCE(NULLIF(trim(debut_date), ''), NULLIF(trim(@debut_date), '')),
          height_cm = COALESCE(height_cm, @height_cm),
@@ -918,29 +1099,17 @@ export function mergeActresses(
          zodiac = COALESCE(NULLIF(trim(zodiac), ''), NULLIF(trim(@zodiac), '')),
          nationality = COALESCE(NULLIF(trim(nationality), ''), NULLIF(trim(@nationality), '')),
          profile_summary = COALESCE(NULLIF(trim(profile_summary), ''), NULLIF(trim(@profile_summary), '')),
-         avatar_path = CASE
-           WHEN avatar_path IS NULL OR trim(avatar_path) = '' THEN @avatar_path
-           ELSE avatar_path
-         END,
-         avatar_source_path = CASE
-           WHEN @keep_had_avatar = 0 THEN @avatar_source_path
-           ELSE avatar_source_path
-         END,
-         avatar_crop_json = CASE
-           WHEN @keep_had_avatar = 0 THEN @avatar_crop_json
-           ELSE avatar_crop_json
-         END,
+         avatar_path = @avatar_path,
+         avatar_source_path = @avatar_source_path,
+         avatar_crop_json = @avatar_crop_json,
          gender = COALESCE(gender, @gender),
-         last_scraped_at = CASE
-           WHEN last_scraped_at IS NULL THEN @last_scraped_at
-           WHEN @last_scraped_at IS NULL THEN last_scraped_at
-           WHEN last_scraped_at > @last_scraped_at THEN last_scraped_at
-           ELSE @last_scraped_at
-         END,
+         scraped_status = @scraped_status,
+         last_scraped_at = @last_scraped_at,
          updated_at = @updated_at
        WHERE id = @keepId`
     ).run({
       keepId,
+      main_name: finalMain,
       birth_date: merge.birth_date,
       debut_date: merge.debut_date,
       height_cm: merge.height_cm,
@@ -952,46 +1121,80 @@ export function mergeActresses(
       zodiac: merge.zodiac,
       nationality: merge.nationality,
       profile_summary: merge.profile_summary,
-      avatar_path: merge.avatar_path,
-      avatar_source_path: merge.avatar_source_path,
-      avatar_crop_json: merge.avatar_crop_json,
-      keep_had_avatar: keepHadAvatar ? 1 : 0,
+      avatar_path: avatarPath,
+      avatar_source_path: avatarSourcePath,
+      avatar_crop_json: avatarCropJson,
       gender: merge.gender,
-      last_scraped_at: merge.last_scraped_at,
+      scraped_status: mergedScrapeRecord.scrapedStatus,
+      last_scraped_at: mergedScrapeRecord.lastScrapedAt,
       updated_at: nowIso()
     })
 
-    db.prepare(
-      `INSERT OR IGNORE INTO actress_tag (actress_id, tag_id)
-       SELECT ?, tag_id FROM actress_tag WHERE actress_id = ?`
-    ).run(keepId, mergeId)
-
-    removeMergedActressRecord(mergeId)
-  })
-  txn()
-
-  const keptAvatar = (
-    db.prepare('SELECT avatar_path FROM actresses WHERE id = ?').get(keepId) as {
-      avatar_path: string | null
-    }
-  ).avatar_path
-
-  if (finalMain !== keep.main_name) {
-    assertActressNameAvailable(finalMain, keepId)
-    db.prepare('UPDATE actresses SET main_name = ?, updated_at = ? WHERE id = ?').run(
-      finalMain,
-      nowIso(),
-      keepId
+    upsertActressName(keepId, finalMain, ACTRESS_NAME_TYPE.MAIN, null, null, 1)
+    const insertTypedName = db.prepare(
+      `INSERT OR IGNORE INTO actress_names
+         (actress_id, name, type, locale, source, is_primary)
+       VALUES (?, ?, ?, ?, ?, ?)`
     )
-    upsertActressName(keepId, finalMain, 'main', null, null, 1)
-  }
+    for (const row of typedNameRows) {
+      insertTypedName.run(keepId, row.name, row.type, row.locale, row.source, row.is_primary)
+    }
+    replacePreparedActressAliases(keepId, aliases)
+    synchronizeActressNameOwnership(keepId)
 
-  replaceActressAliases(keepId, Array.from(aliasCandidates), finalMain)
+    const keptAvatar = db
+      .prepare('SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?')
+      .get(keepId) as { avatar_path: string | null; avatar_source_path: string | null }
+    const retainedAvatarPaths = new Set(
+      [keptAvatar.avatar_path, keptAvatar.avatar_source_path].filter(
+        (assetPath): assetPath is string => Boolean(assetPath)
+      )
+    )
+    const obsoleteAvatarPaths = Array.from(
+      new Set([
+        keep.avatar_path,
+        keep.avatar_source_path,
+        merge.avatar_path,
+        merge.avatar_source_path
+      ])
+    ).filter(
+      (assetPath): assetPath is string =>
+        Boolean(assetPath) && !retainedAvatarPaths.has(assetPath as string)
+    )
+    return {
+      obsoleteAvatarPaths
+    }
+  })()
 
-  if (keepHadAvatar) {
-    if (mergeAvatarPath && mergeAvatarPath !== keptAvatar) deleteAsset(mergeAvatarPath)
-    if (mergeAvatarSourcePath) deleteAsset(mergeAvatarSourcePath)
+  if (!options?.deferFileCleanup) {
+    for (const assetPath of cleanup.obsoleteAvatarPaths) deleteAsset(assetPath)
   }
+  return options?.deferFileCleanup
+    ? { fileChanges: { obsoletePaths: cleanup.obsoleteAvatarPaths } }
+    : {}
+}
+
+/** Cumulative history is strongest for a success, then a failure, and weakest when never scraped. */
+const ACTRESS_SCRAPE_STATUS_STRENGTH: Record<ScrapedStatus, number> = { 0: 0, 2: 1, 1: 2 }
+
+type ActressScrapeRecord = Pick<Actress, 'scraped_status' | 'last_scraped_at'>
+
+/** Combine two cumulative histories: the strongest state wins, and only successes contribute a time. */
+function mergeActressScrapeRecords(
+  keep: ActressScrapeRecord,
+  merge: ActressScrapeRecord
+): { scrapedStatus: ScrapedStatus; lastScrapedAt: string | null } {
+  const scrapedStatus =
+    ACTRESS_SCRAPE_STATUS_STRENGTH[merge.scraped_status] >
+    ACTRESS_SCRAPE_STATUS_STRENGTH[keep.scraped_status]
+      ? merge.scraped_status
+      : keep.scraped_status
+  const [newestSuccessTime] = [keep, merge]
+    .filter((record) => record.scraped_status === 1)
+    .map((record) => record.last_scraped_at)
+    .filter((time): time is string => !isBlankText(time))
+    .sort((a, b) => (a > b ? -1 : 1))
+  return { scrapedStatus, lastScrapedAt: newestSuccessTime ?? null }
 }
 
 /**
@@ -1005,11 +1208,9 @@ export function clearActressMetadataRecord(id: number): void {
     .get(id) as { avatar_path: string | null; avatar_source_path: string | null } | undefined
   if (!actress) throw new Error('演员不存在')
 
-  deleteActressGalleryAssets(id)
-  deleteAsset(actress.avatar_path)
-  deleteAsset(actress.avatar_source_path)
-
+  let galleryPaths: Array<string | null> = []
   const txn = db.transaction(() => {
+    galleryPaths = deleteActressGalleryAssetRows(id)
     db.prepare(
       `UPDATE actresses SET
          birth_date = NULL, debut_date = NULL, height_cm = NULL,
@@ -1017,36 +1218,74 @@ export function clearActressMetadataRecord(id: number): void {
          blood_type = NULL, zodiac = NULL, nationality = NULL,
          profile_summary = NULL, avatar_path = NULL, avatar_source_path = NULL,
          avatar_crop_json = NULL, poster_path = NULL,
-         last_scraped_at = NULL, updated_at = ?
+         scraped_status = 0, last_scraped_at = NULL, updated_at = ?
        WHERE id = ?`
     ).run(nowIso(), id)
     db.prepare("DELETE FROM actress_names WHERE actress_id = ? AND type != 'main'").run(id)
+    synchronizeActressNameOwnership(id)
   })
   txn()
-}
-
-/** Delete an actress that has no linked videos. Removes aliases and avatar. */
-export function deleteActress(id: number): void {
-  const db = getDb()
-  const count = db
-    .prepare('SELECT COUNT(*) AS c FROM video_actress WHERE actress_id = ?')
-    .get(id) as { c: number }
-  if (count.c > 0) throw new Error('仍有影片关联，无法删除')
-
-  const actress = db
-    .prepare('SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?')
-    .get(id) as { avatar_path: string | null; avatar_source_path: string | null } | undefined
-  if (!actress) throw new Error('演员不存在')
-
-  deleteActressGalleryAssets(id)
-  db.prepare('DELETE FROM actresses WHERE id = ?').run(id)
+  for (const galleryPath of galleryPaths) deleteAsset(galleryPath)
   deleteAsset(actress.avatar_path)
   deleteAsset(actress.avatar_source_path)
 }
 
-function isActressNameAvailable(name: string, exceptId: number): boolean {
-  const existing = findActressByNameOrAlias(name)
-  return existing === null || existing === exceptId
+/** Delete an actress that has no linked videos. Removes aliases and avatar. */
+export function deleteActress(id: number): void {
+  deleteUnlinkedActresses([id])
+}
+
+/** Atomically delete actress records only when every selected actress has no linked videos. */
+export function deleteUnlinkedActresses(ids: number[]): number {
+  const db = getDb()
+  const uniqueIds = Array.from(
+    new Set(ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))
+  )
+  if (uniqueIds.length === 0) return 0
+
+  const assets = db.transaction(() => {
+    const findActress = db.prepare(
+      'SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?'
+    )
+    const countLinks = db.prepare(
+      'SELECT COUNT(*) AS c FROM video_actress WHERE actress_id = ?'
+    )
+    const listGallery = db.prepare(
+      'SELECT local_path FROM actress_gallery_assets WHERE actress_id = ?'
+    )
+    const listPendingResources = db.prepare(
+      `SELECT r.staged_path
+       FROM pending_actress_scrape_resources r
+       JOIN pending_actress_scrapes p ON p.id = r.pending_scrape_id
+       WHERE p.actress_id = ?`
+    )
+    const removeActress = db.prepare('DELETE FROM actresses WHERE id = ?')
+    const paths: Array<string | null> = []
+    let linkedCount = 0
+
+    for (const id of uniqueIds) {
+      const actress = findActress.get(id) as
+        | { avatar_path: string | null; avatar_source_path: string | null }
+        | undefined
+      if (!actress) throw new Error('选中的演员不存在，请刷新列表后重试')
+      const links = countLinks.get(id) as { c: number }
+      if (links.c > 0) linkedCount += 1
+      paths.push(actress.avatar_path, actress.avatar_source_path)
+      const gallery = listGallery.all(id) as { local_path: string | null }[]
+      paths.push(...gallery.map((item) => item.local_path))
+      const pendingResources = listPendingResources.all(id) as Array<{ staged_path: string }>
+      paths.push(...pendingResources.map((item) => item.staged_path))
+    }
+
+    if (linkedCount > 0) {
+      throw new Error(`${linkedCount} 位演员仍有关联影片，整批未删除`)
+    }
+    for (const id of uniqueIds) removeActress.run(id)
+    return paths
+  })()
+
+  for (const assetPath of assets) deleteAsset(assetPath)
+  return uniqueIds.length
 }
 
 function assertActressNameAvailable(name: string, exceptId: number): void {
@@ -1055,36 +1294,43 @@ function assertActressNameAvailable(name: string, exceptId: number): void {
   }
 }
 
+function dedupeActressAliases(aliases: string[], mainName: string): string[] {
+  const prepared: string[] = []
+  const seen = new Set<string>()
+  const mainKey = normalizeActressNameKey(mainName)
+  for (const alias of aliases) {
+    const trimmed = alias.trim()
+    if (!trimmed) continue
+    const key = normalizeActressNameKey(trimmed)
+    if (key === mainKey || seen.has(key)) continue
+    seen.add(key)
+    prepared.push(trimmed)
+  }
+  return prepared
+}
+
+function prepareActressAliases(aliases: string[], mainName: string): string[] {
+  return dedupeActressAliases(aliases, mainName).filter(isValidActressAlias)
+}
+
 function replaceActressAliases(
   actressId: number,
   aliases: string[],
-  mainName: string,
-  options?: { onNameConflict?: 'throw' | 'skip' }
-): string[] {
-  const onNameConflict = options?.onNameConflict ?? 'throw'
-  const skipped: string[] = []
+  mainName: string
+): void {
+  replacePreparedActressAliases(actressId, prepareActressAliases(aliases, mainName))
+}
+
+function replacePreparedActressAliases(actressId: number, aliases: string[]): void {
   const db = getDb()
   db.prepare("DELETE FROM actress_names WHERE actress_id = ? AND type = 'alias'").run(actressId)
-  const seen = new Set<string>()
-  const mainKey = normalizeActressNameKey(mainName)
 
   for (const alias of aliases) {
-    const trimmed = alias.trim()
-    if (!trimmed || !isValidActressAlias(trimmed)) continue
-    const key = normalizeActressNameKey(trimmed)
-    if (key === mainKey || seen.has(key)) continue
-    if (!isActressNameAvailable(trimmed, actressId)) {
-      if (onNameConflict === 'skip') {
-        skipped.push(trimmed)
-        continue
-      }
-      throw new Error(`名称「${trimmed}」已被其他演员使用`)
+    if (!isActressNameAvailable(alias, actressId)) {
+      throw new Error(`名称「${alias}」已被其他演员使用`)
     }
-    seen.add(key)
-    upsertActressName(actressId, trimmed, ACTRESS_NAME_TYPE.ALIAS, null, null, 0)
+    upsertActressName(actressId, alias, ACTRESS_NAME_TYPE.ALIAS, null, null, 0)
   }
-
-  return skipped
 }
 
 /** Manually edit actress profile fields. Aliases fully replace when supplied. */
@@ -1158,6 +1404,15 @@ export function editActress(id: number, input: ActressEditInput): void {
       setActressTypedName(id, 'en', en)
     }
     if (input.aliases) replaceActressAliases(id, input.aliases, mainName)
+
+    if (
+      'main_name' in input ||
+      'name_zh' in input ||
+      'name_en' in input ||
+      'aliases' in input
+    ) {
+      synchronizeActressNameOwnership(id)
+    }
 
     if (input.clearAvatar) {
       clearActressAvatarBundle(id)
@@ -1296,9 +1551,6 @@ export function resolveEffectiveActressScrapeFields(
   mode: ActressScrapeUpdateMode = 'replace'
 ): ActressScrapeField[] {
   if (mode !== 'fillEmpty') return fields
-  if (fields.includes('avatar')) {
-    clearBrokenActressAvatarIfNeeded(actressId)
-  }
   const db = getDb()
   const actress = db.prepare('SELECT * FROM actresses WHERE id = ?').get(actressId) as
     | Actress
@@ -1312,15 +1564,395 @@ export function resolveEffectiveActressScrapeFields(
   )
 }
 
-/** Record that a scrape attempt finished, even when no profile data was applied. */
-export function touchActressLastScrapedAt(actressId: number): void {
+/** Record a failed scrape without degrading actresses that have succeeded before. */
+export function recordActressScrapeFailure(actressId: number): void {
+  const db = getDb()
+  db.prepare(
+    `UPDATE actresses
+     SET scraped_status = CASE WHEN scraped_status = 1 THEN 1 ELSE 2 END,
+         updated_at = ?
+     WHERE id = ?`
+  ).run(nowIso(), actressId)
+}
+
+/** Manually confirm a scrape succeeded. An earlier success time is kept, a missing one is stamped. */
+export function markActressScrapeSucceeded(actressId: number): void {
   const db = getDb()
   const scrapedAt = nowIso()
-  db.prepare('UPDATE actresses SET last_scraped_at = ?, updated_at = ? WHERE id = ?').run(
-    scrapedAt,
-    scrapedAt,
-    actressId
+  const result = db
+    .prepare(
+      `UPDATE actresses
+       SET scraped_status = 1,
+           last_scraped_at = COALESCE(NULLIF(trim(last_scraped_at), ''), @scrapedAt),
+           updated_at = @scrapedAt
+       WHERE id = @actressId`
+    )
+    .run({ actressId, scrapedAt })
+  if (result.changes === 0) throw new Error('演员不存在')
+}
+
+function hasValidActressScrapeValue(
+  result: ActressScrapeResult,
+  field: ActressScrapeField,
+  avatarApplied: boolean,
+  galleryAssets: ActressGalleryAssetWriteInput[],
+  applicableAliases: string[],
+  mode: ActressScrapeUpdateMode,
+  actress: Pick<Actress, 'bust_cm' | 'waist_cm' | 'hip_cm'>
+): boolean {
+  switch (field) {
+    case 'avatar':
+      return avatarApplied
+    case 'gallery':
+      return galleryAssets.some(
+        (asset) => Boolean(asset.remoteUrl?.trim()) || Boolean(asset.localPath?.trim())
+      )
+    case 'birthDate':
+      return Boolean(result.birthDate?.trim())
+    case 'nameZh':
+      return Boolean(result.nameZh?.trim())
+    case 'nameEn':
+      return Boolean(result.nameEn?.trim())
+    case 'debutDate':
+      return Boolean(result.debutDate?.trim())
+    case 'heightCm':
+      return result.heightCm !== undefined && result.heightCm !== null
+    case 'measurements':
+      if (mode === 'fillEmpty') {
+        return (
+          (actress.bust_cm == null && result.bustCm !== undefined && result.bustCm !== null) ||
+          (actress.waist_cm == null && result.waistCm !== undefined && result.waistCm !== null) ||
+          (actress.hip_cm == null && result.hipCm !== undefined && result.hipCm !== null)
+        )
+      }
+      return [result.bustCm, result.waistCm, result.hipCm].some(
+        (value) => value !== undefined && value !== null
+      )
+    case 'cupSize':
+      return Boolean(normalizeCupSize(result.cupSize))
+    case 'bloodType':
+      return Boolean(result.bloodType?.trim())
+    case 'zodiac':
+      return Boolean(result.zodiac?.trim())
+    case 'nationality':
+      return Boolean(result.nationality?.trim())
+    case 'profileSummary':
+      return Boolean(result.profileSummary?.trim())
+    case 'aliases':
+      return applicableAliases.length > 0
+    default:
+      return false
+  }
+}
+
+function resolveApplicableScrapedAliases(
+  aliases: string[] | undefined,
+  actressId: number,
+  mainName: string,
+  releasedNameKeys: ReadonlySet<string> = new Set()
+): { applicable: string[]; conflicts: string[] } {
+  const applicable: string[] = []
+  const conflicts: string[] = []
+  const seen = new Set<string>()
+  const mainKey = normalizeActressNameKey(mainName)
+
+  for (const name of aliases ?? []) {
+    const trimmed = name.trim()
+    if (!trimmed || !isValidActressAlias(trimmed)) continue
+    const key = normalizeActressNameKey(trimmed)
+    if (key === mainKey || seen.has(key)) continue
+    seen.add(key)
+    if (!releasedNameKeys.has(key) && !isActressNameAvailable(trimmed, actressId)) {
+      conflicts.push(trimmed)
+      continue
+    }
+    applicable.push(trimmed)
+  }
+
+  return { applicable, conflicts }
+}
+
+interface ActressScrapeApplicationPlan {
+  effectiveFields: ActressScrapeField[]
+  impacts: ActressScrapeFieldImpact[]
+  applicableAliases: string[]
+  shouldReplaceAliases: boolean
+  shouldClearAvatar: boolean
+}
+
+interface ActressScrapePlanSnapshot extends Actress {
+  name_zh: string | null
+  name_en: string | null
+  aliases: string[]
+  gallery: Array<Pick<ActressGalleryAsset, 'remote_url' | 'local_path'>>
+}
+
+/** Read only the rows needed to plan a scrape. Unlike getActressDetail, this never backfills assets. */
+function readActressScrapePlanSnapshot(actressId: number): ActressScrapePlanSnapshot | null {
+  const db = getDb()
+  const actress = db.prepare('SELECT * FROM actresses WHERE id = ?').get(actressId) as
+    | Actress
+    | undefined
+  if (!actress) return null
+  const names = listActressNameRows(actressId)
+  const gallery = db
+    .prepare(
+      `SELECT remote_url, local_path
+       FROM actress_gallery_assets
+       WHERE actress_id = ?
+       ORDER BY position, id`
+    )
+    .all(actressId) as ActressScrapePlanSnapshot['gallery']
+  return {
+    ...actress,
+    name_zh: getActressTypedName(actressId, 'zh', names),
+    name_en: getActressTypedName(actressId, 'en', names),
+    aliases: listActressAliasNames(actressId, names),
+    gallery
+  }
+}
+
+function samePlannedValue(
+  left: ActressScrapeFieldImpact['currentValue'],
+  right: ActressScrapeFieldImpact['nextValue']
+): boolean {
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((value, index) => value === right[index])
+  }
+  return left === right
+}
+
+function plannedImpact(
+  field: ActressScrapeField,
+  currentValue: ActressScrapeFieldImpact['currentValue'],
+  incomingValue: ActressScrapeFieldImpact['nextValue'],
+  mode: ActressScrapeUpdateMode,
+  selected: boolean,
+  options?: {
+    part?: ActressScrapeFieldImpact['part']
+    collection?: boolean
+    resourceUnavailable?: boolean
+  }
+): ActressScrapeFieldImpact {
+  let nextValue = currentValue
+  let reason: ActressScrapeFieldImpact['reason'] =
+    mode === 'replace' ? 'replace' : mode
+
+  if (!selected) {
+    reason = mode === 'fillEmpty' ? 'existingValue' : 'noValue'
+  } else if (options?.resourceUnavailable) {
+    reason = 'resourceUnavailable'
+  } else if (mode === 'replace') {
+    nextValue = incomingValue
+  } else if (mode === 'fillEmpty') {
+    if (currentValue === null || (Array.isArray(currentValue) && currentValue.length === 0)) {
+      if (incomingValue !== null && (!Array.isArray(incomingValue) || incomingValue.length > 0)) {
+        nextValue = incomingValue
+      } else {
+        reason = 'noValue'
+      }
+    } else {
+      reason = 'existingValue'
+    }
+  } else if (
+    incomingValue !== null &&
+    (!Array.isArray(incomingValue) || incomingValue.length > 0)
+  ) {
+    nextValue = incomingValue
+  } else {
+    reason = 'noValue'
+  }
+
+  const action: ActressScrapeFieldImpact['action'] = samePlannedValue(currentValue, nextValue)
+    ? 'preserve'
+    : nextValue === null || (Array.isArray(nextValue) && nextValue.length === 0)
+      ? 'clear'
+      : options?.collection
+        ? 'replace'
+        : 'set'
+  return {
+    field,
+    ...(options?.part ? { part: options.part } : {}),
+    action,
+    currentValue,
+    nextValue,
+    reason
+  }
+}
+
+/**
+ * Build the read-only field plan used by both conflict preview and formal application.
+ * Files are inspected for availability, but neither database rows nor assets are changed.
+ */
+export function planActressScrapeResult(
+  actressId: number,
+  result: ActressScrapeResult,
+  avatarRelPath: string | null,
+  galleryAssets: ActressGalleryAssetWriteInput[],
+  fields?: ActressScrapeField[],
+  mode: ActressScrapeUpdateMode = 'replace',
+  options?: { releasedNameKeys?: readonly string[] }
+): ActressScrapeApplicationPlan {
+  const storedDetail = readActressScrapePlanSnapshot(actressId)
+  if (!storedDetail) throw new Error('演员不存在')
+  const releasedNameKeys = new Set(options?.releasedNameKeys ?? [])
+  const detail: ActressScrapePlanSnapshot = releasedNameKeys.size
+    ? {
+        ...storedDetail,
+        name_zh:
+          storedDetail.name_zh &&
+          releasedNameKeys.has(normalizeActressNameKey(storedDetail.name_zh))
+            ? null
+            : storedDetail.name_zh,
+        name_en:
+          storedDetail.name_en &&
+          releasedNameKeys.has(normalizeActressNameKey(storedDetail.name_en))
+            ? null
+            : storedDetail.name_en,
+        aliases: storedDetail.aliases.filter(
+          (alias) => !releasedNameKeys.has(normalizeActressNameKey(alias))
+        )
+      }
+    : storedDetail
+  const requested = fields ?? ALL_ACTRESS_SCRAPE_FIELDS
+  const storedEffectiveFields = resolveEffectiveActressScrapeFields(actressId, requested, mode)
+  const effectiveFields =
+    mode === 'fillEmpty' && releasedNameKeys.size
+      ? requested.filter((field) => {
+          if (field === 'nameZh') return isBlankText(detail.name_zh)
+          if (field === 'nameEn') return isBlankText(detail.name_en)
+          if (field === 'aliases') return detail.aliases.length === 0
+          return storedEffectiveFields.includes(field)
+        })
+      : storedEffectiveFields
+  const selected = new Set(effectiveFields)
+  const avatarResourceAvailable = Boolean(avatarRelPath && isUsableImageAsset(avatarRelPath))
+  const avatarResourceUnavailable = Boolean(
+    selected.has('avatar') &&
+      ((avatarRelPath && !avatarResourceAvailable) || (!avatarRelPath && result.avatarUrl?.trim()))
   )
+  const aliasResultIsEmpty = !result.aliases || result.aliases.length === 0
+  const { applicable: applicableAliases, conflicts: conflictingAliases } = selected.has('aliases')
+    ? resolveApplicableScrapedAliases(
+        result.aliases,
+        actressId,
+        detail.main_name,
+        releasedNameKeys
+      )
+    : { applicable: [], conflicts: [] }
+  if (conflictingAliases.length > 0) {
+    throw new Error(`名称「${conflictingAliases[0]}」已被其他演员使用`)
+  }
+  const shouldReplaceAliases =
+    selected.has('aliases') &&
+    (applicableAliases.length > 0 || (mode === 'replace' && aliasResultIsEmpty))
+  const shouldClearAvatar =
+    mode === 'replace' &&
+    selected.has('avatar') &&
+    !result.avatarUrl?.trim() &&
+    !avatarRelPath
+
+  const galleryValues = galleryAssets
+    .map((asset) => asset.localPath?.trim() || asset.remoteUrl?.trim() || '')
+    .filter(Boolean)
+  const currentGallery = detail.gallery
+    .map((asset) => asset.local_path?.trim() || asset.remote_url?.trim() || '')
+    .filter(Boolean)
+  const currentAvatar =
+    detail.avatar_path?.trim() && isUsableImageAsset(detail.avatar_path)
+      ? detail.avatar_path.trim()
+      : null
+  const avatarMatchesExisting = Boolean(
+    avatarResourceAvailable &&
+      avatarRelPath &&
+      downloadedAvatarMatchesExistingSource(detail, avatarRelPath)
+  )
+  const nextAvatar = avatarMatchesExisting
+    ? currentAvatar
+    : avatarResourceAvailable
+      ? avatarRelPath
+    : shouldClearAvatar
+      ? null
+      : currentAvatar
+  const textInputs: Array<{
+    field: Exclude<ActressScrapeField, 'avatar' | 'gallery' | 'measurements' | 'aliases'>
+    current: string | number | null
+    incoming: string | number | null
+  }> = [
+    { field: 'birthDate', current: detail.birth_date, incoming: result.birthDate?.trim() || null },
+    { field: 'nameZh', current: detail.name_zh, incoming: result.nameZh?.trim() || null },
+    { field: 'nameEn', current: detail.name_en, incoming: result.nameEn?.trim() || null },
+    { field: 'debutDate', current: detail.debut_date, incoming: result.debutDate?.trim() || null },
+    { field: 'heightCm', current: detail.height_cm, incoming: result.heightCm ?? null },
+    { field: 'cupSize', current: detail.cup_size, incoming: normalizeCupSize(result.cupSize) },
+    { field: 'bloodType', current: detail.blood_type, incoming: result.bloodType?.trim() || null },
+    { field: 'zodiac', current: detail.zodiac, incoming: result.zodiac?.trim() || null },
+    { field: 'nationality', current: detail.nationality, incoming: result.nationality?.trim() || null },
+    {
+      field: 'profileSummary',
+      current: detail.profile_summary,
+      incoming: result.profileSummary?.trim() || null
+    }
+  ]
+  const impacts: ActressScrapeFieldImpact[] = []
+  for (const field of requested) {
+    if (field === 'avatar') {
+      impacts.push(
+        plannedImpact('avatar', currentAvatar, nextAvatar, mode, selected.has('avatar'), {
+          resourceUnavailable: avatarResourceUnavailable
+        })
+      )
+    } else if (field === 'gallery') {
+      impacts.push(
+        plannedImpact(
+          'gallery',
+          currentGallery,
+          galleryValues,
+          mode,
+          selected.has('gallery'),
+          { collection: true }
+        )
+      )
+    } else if (field === 'measurements') {
+      for (const [part, current, incoming] of [
+        ['bustCm', detail.bust_cm, result.bustCm ?? null],
+        ['waistCm', detail.waist_cm, result.waistCm ?? null],
+        ['hipCm', detail.hip_cm, result.hipCm ?? null]
+      ] as const) {
+        impacts.push(
+          plannedImpact('measurements', current, incoming, mode, selected.has('measurements'), {
+            part
+          })
+        )
+      }
+    } else if (field === 'aliases') {
+      impacts.push(
+        plannedImpact(
+          'aliases',
+          detail.aliases,
+          applicableAliases,
+          mode,
+          selected.has('aliases'),
+          { collection: true }
+        )
+      )
+    } else {
+      const input = textInputs.find((item) => item.field === field)
+      if (input) {
+        impacts.push(
+          plannedImpact(field, input.current, input.incoming, mode, selected.has(field))
+        )
+      }
+    }
+  }
+
+  return {
+    effectiveFields,
+    impacts,
+    applicableAliases,
+    shouldReplaceAliases,
+    shouldClearAvatar
+  }
 }
 
 /** Apply actress profile scrape result (avatar, gallery, profile fields, measurements, aliases). */
@@ -1328,35 +1960,56 @@ export function applyActressScrapeResult(
   actressId: number,
   result: ActressScrapeResult,
   avatarRelPath: string | null,
-  galleryAssets: Array<{
-    remoteUrl?: string | null
-    localPath?: string | null
-    width?: number | null
-    height?: number | null
-  }>,
+  galleryAssets: ActressGalleryAssetWriteInput[],
   fields?: ActressScrapeField[],
-  mode: ActressScrapeUpdateMode = 'replace'
-): { applied: boolean; warnings: string[]; avatarApplied: boolean } {
+  mode: ActressScrapeUpdateMode = 'replace',
+  beforeCommit?: () => void,
+  options?: { deferFileCleanup?: boolean }
+): {
+  applied: boolean
+  warnings: string[]
+  avatarApplied: boolean
+  fileChanges?: { createdPaths: string[]; obsoletePaths: string[] }
+} {
   const db = getDb()
-  const requested = fields ?? ALL_ACTRESS_SCRAPE_FIELDS
-  const effective = resolveEffectiveActressScrapeFields(actressId, requested, mode)
+  const plan = planActressScrapeResult(
+    actressId,
+    result,
+    avatarRelPath,
+    galleryAssets,
+    fields,
+    mode
+  )
+  const effective = plan.effectiveFields
   if (effective.length === 0) return { applied: false, warnings: [], avatarApplied: false }
   const selected = new Set(effective)
   const warnings: string[] = []
   const scrapedAt = nowIso()
-  const actress = db
-    .prepare(
-      'SELECT main_name, avatar_path, avatar_source_path FROM actresses WHERE id = ?'
-    )
-    .get(actressId) as
-    | { main_name: string; avatar_path: string | null; avatar_source_path: string | null }
-    | undefined
-  if (!actress) throw new Error('演员不存在')
   const preserveExistingDb = mode === 'fillEmpty'
-  const preserveNullScrape = mode !== 'replace'
   if (preserveExistingDb && selected.has('avatar')) {
     clearBrokenActressAvatarIfNeeded(actressId)
   }
+  const actress = db
+    .prepare(
+      `SELECT main_name, avatar_path, avatar_source_path, bust_cm, waist_cm, hip_cm
+       FROM actresses WHERE id = ?`
+    )
+    .get(actressId) as
+    | Pick<
+        Actress,
+        | 'main_name'
+        | 'avatar_path'
+        | 'avatar_source_path'
+        | 'bust_cm'
+        | 'waist_cm'
+        | 'hip_cm'
+      >
+    | undefined
+  if (!actress) throw new Error('演员不存在')
+  const shouldClearAvatar = plan.shouldClearAvatar
+  const aliasResultIsEmpty = !result.aliases || result.aliases.length === 0
+  const applicableAliases = plan.applicableAliases
+  const shouldReplaceAliases = plan.shouldReplaceAliases
 
   let adoptedAvatar:
     | { displayPath: string; sourcePath: string; cropJson: string }
@@ -1394,62 +2047,78 @@ export function applyActressScrapeResult(
     }
   }
 
+  const hasReplaceOperation =
+    mode === 'replace' &&
+    effective.some((field) => {
+      if (field === 'avatar') return shouldClearAvatar
+      if (field === 'aliases') return aliasResultIsEmpty
+      return true
+    })
+  const hasValidValue =
+    hasReplaceOperation ||
+    effective.some((field) =>
+      hasValidActressScrapeValue(
+        result,
+        field,
+        avatarApplied,
+        galleryAssets,
+        applicableAliases,
+        mode,
+        actress
+      )
+    )
+  if (!hasValidValue) {
+    return { applied: false, warnings, avatarApplied: false }
+  }
+
+  let obsoleteGalleryLocalPaths: string[] = []
   const txn = db.transaction(() => {
     const updates: string[] = []
     const bind: Record<string, unknown> = { id: actressId }
-    const setText = (column: string, bindKey: string, value: string | null): void => {
-      if (preserveExistingDb) {
-        updates.push(
-          `${column} = CASE WHEN ${column} IS NULL OR trim(${column}) = '' THEN @${bindKey} ELSE ${column} END`
-        )
-      } else if (preserveNullScrape) {
-        updates.push(
-          `${column} = CASE WHEN @${bindKey} IS NULL OR trim(@${bindKey}) = '' THEN ${column} ELSE @${bindKey} END`
-        )
-      } else {
-        updates.push(`${column} = @${bindKey}`)
-      }
-      bind[bindKey] = value
-    }
-    const setNumber = (column: string, bindKey: string, value: number | null): void => {
-      if (preserveExistingDb) {
-        updates.push(`${column} = COALESCE(${column}, @${bindKey})`)
-      } else if (preserveNullScrape) {
-        updates.push(`${column} = COALESCE(@${bindKey}, ${column})`)
-      } else {
-        updates.push(`${column} = @${bindKey}`)
-      }
-      bind[bindKey] = value
+    const impactValue = (
+      field: ActressScrapeField,
+      part?: ActressScrapeFieldImpact['part']
+    ): ActressScrapeFieldImpact['nextValue'] =>
+      plan.impacts.find((impact) => impact.field === field && impact.part === part)?.nextValue ??
+      null
+    const setPlanned = (
+      column: string,
+      bindKey: string,
+      field: ActressScrapeField,
+      part?: ActressScrapeFieldImpact['part']
+    ): void => {
+      updates.push(`${column} = @${bindKey}`)
+      bind[bindKey] = impactValue(field, part)
     }
 
     if (selected.has('birthDate')) {
-      setText('birth_date', 'birth_date', result.birthDate?.trim() || null)
+      setPlanned('birth_date', 'birth_date', 'birthDate')
     }
     if (selected.has('debutDate')) {
-      setText('debut_date', 'debut_date', result.debutDate?.trim() || null)
+      setPlanned('debut_date', 'debut_date', 'debutDate')
     }
     if (selected.has('heightCm')) {
-      setNumber('height_cm', 'height_cm', result.heightCm ?? null)
+      setPlanned('height_cm', 'height_cm', 'heightCm')
     }
     if (selected.has('measurements')) {
-      setNumber('bust_cm', 'bust_cm', result.bustCm ?? null)
-      setNumber('waist_cm', 'waist_cm', result.waistCm ?? null)
-      setNumber('hip_cm', 'hip_cm', result.hipCm ?? null)
+      setPlanned('bust_cm', 'bust_cm', 'measurements', 'bustCm')
+      setPlanned('waist_cm', 'waist_cm', 'measurements', 'waistCm')
+      setPlanned('hip_cm', 'hip_cm', 'measurements', 'hipCm')
     }
     if (selected.has('cupSize')) {
-      setText('cup_size', 'cup_size', normalizeCupSize(result.cupSize))
+      setPlanned('cup_size', 'cup_size', 'cupSize')
     }
     if (selected.has('bloodType')) {
-      setText('blood_type', 'blood_type', result.bloodType?.trim() || null)
+      setPlanned('blood_type', 'blood_type', 'bloodType')
     }
     if (selected.has('zodiac')) {
-      setText('zodiac', 'zodiac', result.zodiac?.trim() || null)
+      setPlanned('zodiac', 'zodiac', 'zodiac')
     }
     if (selected.has('nationality')) {
-      setText('nationality', 'nationality', result.nationality?.trim() || null)
+      setPlanned('nationality', 'nationality', 'nationality')
     }
     if (selected.has('profileSummary')) {
-      setText('profile_summary', 'profile_summary', result.profileSummary?.trim() || null)
+      setPlanned('profile_summary', 'profile_summary', 'profileSummary')
     }
     if (selected.has('avatar') && adoptedAvatar) {
       updates.push(
@@ -1470,9 +2139,13 @@ export function applyActressScrapeResult(
       bind.avatar_path = adoptedAvatar.displayPath
       bind.avatar_source_path = adoptedAvatar.sourcePath
       bind.avatar_crop_json = adoptedAvatar.cropJson
+    } else if (shouldClearAvatar) {
+      updates.push('avatar_path = NULL')
+      updates.push('avatar_source_path = NULL')
+      updates.push('avatar_crop_json = NULL')
     }
-    if (selected.has('nameZh') && result.nameZh !== undefined) {
-      const zh = result.nameZh?.trim() || null
+    if (selected.has('nameZh') && (mode === 'replace' || result.nameZh !== undefined)) {
+      const zh = impactValue('nameZh') as string | null
       if (zh) assertActressNameAvailable(zh, actressId)
       if (preserveExistingDb) {
         setActressTypedNameIfEmpty(actressId, 'zh', zh)
@@ -1480,8 +2153,8 @@ export function applyActressScrapeResult(
         setActressTypedName(actressId, 'zh', zh)
       }
     }
-    if (selected.has('nameEn') && result.nameEn !== undefined) {
-      const en = result.nameEn?.trim() || null
+    if (selected.has('nameEn') && (mode === 'replace' || result.nameEn !== undefined)) {
+      const en = impactValue('nameEn') as string | null
       if (en) assertActressNameAvailable(en, actressId)
       if (preserveExistingDb) {
         setActressTypedNameIfEmpty(actressId, 'en', en)
@@ -1489,6 +2162,7 @@ export function applyActressScrapeResult(
         setActressTypedName(actressId, 'en', en)
       }
     }
+    updates.push('scraped_status = 1')
     updates.push('last_scraped_at = @last_scraped_at')
     updates.push('updated_at = @updated_at')
     bind.last_scraped_at = scrapedAt
@@ -1497,41 +2171,68 @@ export function applyActressScrapeResult(
       db.prepare(`UPDATE actresses SET ${updates.join(', ')} WHERE id = @id`).run(bind)
     }
 
-    if (selected.has('aliases')) {
-      const aliases = (result.aliases ?? []).filter((a) => isValidActressAlias(a.trim()))
-      if (mode === 'replace' || aliases.length > 0) {
-        const skipped = replaceActressAliases(actressId, aliases, actress.main_name, {
-          onNameConflict: 'skip'
-        })
-        for (const name of skipped) {
-          warnings.push(`别名「${name}」已被其他演员使用，已跳过`)
-        }
+    if (shouldReplaceAliases) {
+      replaceActressAliases(actressId, applicableAliases, actress.main_name)
+    }
+    if (selected.has('nameZh') || selected.has('nameEn') || shouldReplaceAliases) {
+      synchronizeActressNameOwnership(actressId)
+    }
+    if (selected.has('gallery') && (galleryAssets.length > 0 || mode === 'replace')) {
+      obsoleteGalleryLocalPaths = replaceActressGalleryAssetRows(actressId, galleryAssets)
+    }
+    beforeCommit?.()
+  })
+  try {
+    txn()
+  } catch (error) {
+    if (adoptedAvatar) {
+      deleteAsset(adoptedAvatar.displayPath)
+      if (adoptedAvatar.sourcePath !== adoptedAvatar.displayPath) {
+        deleteAsset(adoptedAvatar.sourcePath)
       }
     }
-  })
-  txn()
-
-  if (selected.has('gallery')) {
-    if (galleryAssets.length) {
-      replaceActressGalleryAssets(actressId, galleryAssets)
-    } else if (mode === 'replace') {
-      replaceActressGalleryAssets(actressId, [])
-    }
+    throw error
   }
+  const createdPaths = adoptedAvatar
+    ? Array.from(new Set([adoptedAvatar.displayPath, adoptedAvatar.sourcePath]))
+    : []
+  const obsoletePaths = [...obsoleteGalleryLocalPaths]
 
   if (selected.has('avatar') && adoptedAvatar) {
     if (actress.avatar_path && actress.avatar_path !== adoptedAvatar.displayPath) {
-      deleteAsset(actress.avatar_path)
+      obsoletePaths.push(actress.avatar_path)
     }
     if (
       actress.avatar_source_path &&
       actress.avatar_source_path !== adoptedAvatar.sourcePath
     ) {
-      deleteAsset(actress.avatar_source_path)
+      obsoletePaths.push(actress.avatar_source_path)
+    }
+  } else if (shouldClearAvatar) {
+    if (actress.avatar_path) obsoletePaths.push(actress.avatar_path)
+    if (actress.avatar_source_path) obsoletePaths.push(actress.avatar_source_path)
+  }
+
+  if (!options?.deferFileCleanup) {
+    deleteObsoleteActressGalleryAssets(obsoleteGalleryLocalPaths)
+    for (const obsoletePath of obsoletePaths) {
+      if (!obsoleteGalleryLocalPaths.includes(obsoletePath)) deleteAsset(obsoletePath)
     }
   }
 
-  return { applied: true, warnings, avatarApplied }
+  return {
+    applied: true,
+    warnings,
+    avatarApplied,
+    ...(options?.deferFileCleanup
+      ? {
+          fileChanges: {
+            createdPaths,
+            obsoletePaths: Array.from(new Set(obsoletePaths))
+          }
+        }
+      : {})
+  }
 }
 
 function dedupeUrls(urls: string[]): string[] {
@@ -1555,7 +2256,7 @@ function isValidActressAlias(name: string): boolean {
 }
 
 function normalizeActressNameKey(name: string): string {
-  return name.toLowerCase().replace(/\s+/g, '')
+  return normalizeActressName(name)
 }
 
 function removeMergedActressRecord(id: number): void {
@@ -1569,14 +2270,14 @@ function removeMergedActressRecord(id: number): void {
   void actress
 }
 
-function deleteActressGalleryAssets(actressId: number): void {
+function deleteActressGalleryAssetRows(actressId: number): Array<string | null> {
   const db = getDb()
   const rows = db
     .prepare('SELECT local_path FROM actress_gallery_assets WHERE actress_id = ?')
     .all(actressId) as { local_path: string | null }[]
   db.prepare('UPDATE actresses SET poster_path = NULL WHERE id = ?').run(actressId)
-  for (const row of rows) deleteAsset(row.local_path)
   db.prepare('DELETE FROM actress_gallery_assets WHERE actress_id = ?').run(actressId)
+  return rows.map((row) => row.local_path)
 }
 
 function clearActressPosterForPaths(actressId: number, paths: Array<string | null>): void {

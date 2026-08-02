@@ -22,9 +22,22 @@ import type {
   PlayResult,
   ScrapeResult,
   ActressScrapeResult,
+  ActressScrapeDisposition,
+  ActressNameConflictGroup,
+  ActressConflictReviewSummary,
+  InspectActressConflictNameInput,
+  InspectActressConflictNameResult,
+  DiscardPendingActressScrapeInput,
+  DiscardPendingActressScrapeResult,
+  ResolveActressConflictInput,
+  ResolveActressConflictResult,
+  ValidateIllegalNameReplacementsInput,
+  ValidateIllegalNameReplacementsResult,
   ActressEditInput,
   ActressGenderFilter,
   ActressListItem,
+  ActressListPage,
+  ActressListQuery,
   ActressListSortBy,
   ActressMergeInput,
   ListSortDir,
@@ -175,11 +188,13 @@ const api = {
       sortBy?: ActressListSortBy,
       sortDir?: ListSortDir
     ) => invoke<ActressListItem[]>(IPC.ACTRESS_LIST, search, gender, sortBy, sortDir),
+    listPage: (query: ActressListQuery) => invoke<ActressListPage>(IPC.ACTRESS_LIST_PAGE, query),
     get: (id: number) => invoke<ActressDetail | null>(IPC.ACTRESS_GET, id),
     getAvatarSourceInfo: (id: number) =>
       invoke<ActressAvatarSourceInfo | null>(IPC.ACTRESS_AVATAR_SOURCE_INFO, id),
     edit: (id: number, input: ActressEditInput) => invoke<boolean>(IPC.ACTRESS_EDIT, id, input),
     remove: (id: number) => invoke<boolean>(IPC.ACTRESS_DELETE, id),
+    removeBatch: (ids: number[]) => invoke<number>(IPC.ACTRESS_DELETE_BATCH, ids),
     clearMeta: (id: number) => invoke<boolean>(IPC.ACTRESS_CLEAR_META, id),
     importGalleryImage: (id: number, input: ActressGalleryImportInput) =>
       invoke<ActressGalleryAsset>(IPC.ACTRESS_GALLERY_IMPORT, id, input),
@@ -187,7 +202,8 @@ const api = {
       invoke<boolean>(IPC.ACTRESS_GALLERY_DELETE, id, assetId),
     setPoster: (id: number, posterPath: string | null) =>
       invoke<boolean>(IPC.ACTRESS_POSTER_SET, id, posterPath),
-    merge: (input: ActressMergeInput) => invoke<boolean>(IPC.ACTRESS_MERGE, input)
+    merge: (input: ActressMergeInput) => invoke<boolean>(IPC.ACTRESS_MERGE, input),
+    markScrapeSuccess: (id: number) => invoke<boolean>(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id)
   },
   tags: {
     list: () =>
@@ -262,7 +278,7 @@ const api = {
       useAliases?: boolean,
       autoCropAvatar?: boolean
     ) =>
-      invoke<ActressScrapeResult>(
+      invoke<ActressScrapeDisposition>(
         IPC.ACTRESS_SCRAPE_ONE,
         actressId,
         scraperName,
@@ -271,6 +287,21 @@ const api = {
         queryName,
         useAliases,
         autoCropAvatar
+      ),
+    listConflicts: () => invoke<ActressNameConflictGroup[]>(IPC.ACTRESS_CONFLICT_LIST),
+    conflictCount: () => invoke<number>(IPC.ACTRESS_CONFLICT_COUNT),
+    conflictSummary: () =>
+      invoke<ActressConflictReviewSummary>(IPC.ACTRESS_CONFLICT_SUMMARY),
+    inspectConflictName: (input: InspectActressConflictNameInput) =>
+      invoke<InspectActressConflictNameResult>(IPC.ACTRESS_CONFLICT_INSPECT_NAME, input),
+    discardConflict: (input: DiscardPendingActressScrapeInput) =>
+      invoke<DiscardPendingActressScrapeResult>(IPC.ACTRESS_CONFLICT_DISCARD, input),
+    resolveConflict: (input: ResolveActressConflictInput) =>
+      invoke<ResolveActressConflictResult>(IPC.ACTRESS_CONFLICT_RESOLVE, input),
+    validateIllegalNameReplacements: (input: ValidateIllegalNameReplacementsInput) =>
+      invoke<ValidateIllegalNameReplacementsResult>(
+        IPC.ACTRESS_CONFLICT_VALIDATE_ILLEGAL,
+        input
       ),
     batchCount: (filter: ActressBatchScrapeFilter) =>
       invoke<number>(IPC.ACTRESS_SCRAPE_BATCH_COUNT, filter),

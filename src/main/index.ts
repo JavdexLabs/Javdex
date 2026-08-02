@@ -10,6 +10,7 @@ import { scrapeBrowser } from './scrapers/scrapeBrowser'
 import { migrateUserPluginsAwayFromBuiltInNames } from './scrapers/scraperPluginService'
 import { resolveMediaAssetPath, toStoredAssetPath } from './services/mediaProtocol'
 import { checkForLatestRelease, shouldRunAutomaticCheck } from './services/appReleaseService'
+import { cleanupOrphanedActressScrapeStaging } from './services/actressIdentityConflictWorkflow'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -118,6 +119,7 @@ if (gotSingleInstanceLock) {
     applyAppIcons()
     initDatabase()
     ensureAssetDirs()
+    cleanupOrphanedActressScrapeStaging()
     migrateUserPluginsAwayFromBuiltInNames()
     registerAssetProtocol()
     registerIpcHandlers(() => mainWindow)

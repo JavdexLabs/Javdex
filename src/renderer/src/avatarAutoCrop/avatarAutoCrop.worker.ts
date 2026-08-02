@@ -8,6 +8,8 @@ import {
   type NormalizedLandmark
 } from '@mediapipe/tasks-vision'
 import {
+  DEFAULT_FACE_DETECTION_CONFIDENCE,
+  FACE_PRESENCE_DETECTION_CONFIDENCE,
   clampNormalizedPoint,
   hasUsableMeshGeometry,
   headBoundsFromHairMask,
@@ -71,7 +73,9 @@ async function ensureTasks(
     detector = await FaceDetector.createFromOptions(detectorFileset, {
       baseOptions: { modelAssetPath: config.detectorModelUrl, delegate: 'CPU' },
       runningMode: 'IMAGE',
-      minDetectionConfidence: 0.65,
+      // Keep the detector at the presence floor so filter scans can accept
+      // mid-confidence faces; crop ranking still applies the higher default.
+      minDetectionConfidence: FACE_PRESENCE_DETECTION_CONFIDENCE,
       minSuppressionThreshold: 0.3
     })
     const landmarkerFileset = await FilesetResolver.forVisionTasks(config.runtimeBaseUrl, true)
@@ -359,13 +363,21 @@ async function analyze(request: AvatarAutoCropAnalyzeRequest): Promise<AvatarAut
   await ensureTasks(request.config, needsHeadBounds)
   if (!detector || !landmarker) throw new Error('本地人脸检测组件初始化失败')
 
+  const minDetectionConfidence =
+    request.purpose === 'face-presence'
+      ? FACE_PRESENCE_DETECTION_CONFIDENCE
+      : DEFAULT_FACE_DETECTION_CONFIDENCE
   let raw = resultToRaw(detector.detect(request.bitmap), request.bitmap.width, request.bitmap.height)
+  let ranked = rankFaceCandidates(mergeDuplicateCandidates(raw), minDetectionConfidence)
   let usedTiledFallback = false
-  if (raw.length === 0) {
+  // The detector runs at the lower presence threshold for every request. A
+  // smart-crop request can therefore receive only sub-threshold full-image
+  // candidates; preserve the previous tiled fallback in that case.
+  if (ranked.length === 0) {
     raw = detectTiledFaces(request.bitmap)
+    ranked = rankFaceCandidates(mergeDuplicateCandidates(raw), minDetectionConfidence)
     usedTiledFallback = true
   }
-  const ranked = rankFaceCandidates(mergeDuplicateCandidates(raw))
   if (ranked.length === 0) {
     throw new Error('未检测到清晰人脸，请选择更清晰的原图或手动裁剪')
   }

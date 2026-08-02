@@ -1,4 +1,12 @@
-import type { ActressGenderFilter, ScrapedStatus, VideoQuery, ActressListSortBy, ListSortDir } from '@shared/types'
+import type {
+  ActressAvatarFilter,
+  ActressGenderFilter,
+  ActressListStatusFilter,
+  ScrapedStatus,
+  VideoQuery,
+  ActressListSortBy,
+  ListSortDir
+} from '@shared/types'
 import { ACTRESS_LIST_DEFAULTS } from '@shared/types'
 
 /** Shared list URL keys (library, actresses, facet list). */
@@ -9,6 +17,7 @@ export const LIST_PARAM = {
   tags: 'tags',
   prefix: 'prefix',
   status: 'status',
+  avatar: 'avatar',
   year: 'year',
   gender: 'gender'
 } as const
@@ -21,6 +30,32 @@ export const LIBRARY_DEFAULTS = {
 }
 
 export const ACTRESS_DEFAULT_GENDER: ActressGenderFilter = ACTRESS_LIST_DEFAULTS.gender
+
+/** All statuses is the default and is never written to the URL. */
+export const ACTRESS_DEFAULT_STATUS: ActressListStatusFilter = 'all'
+
+/** All avatar states are the default and are never written to the URL. */
+export const ACTRESS_DEFAULT_AVATAR: ActressAvatarFilter = 'all'
+
+export function parseActressStatus(raw: string | null): ActressListStatusFilter {
+  if (raw === 'success' || raw === 'unscraped' || raw === 'failed') return raw
+  return ACTRESS_DEFAULT_STATUS
+}
+
+/** URL value for a status filter; `null` drops the param so all statuses stay implicit. */
+export function actressStatusParam(status: ActressListStatusFilter): string | null {
+  return status === ACTRESS_DEFAULT_STATUS ? null : status
+}
+
+export function parseActressAvatar(raw: string | null): ActressAvatarFilter {
+  if (raw === 'with' || raw === 'without' || raw === 'without-face') return raw
+  return ACTRESS_DEFAULT_AVATAR
+}
+
+/** URL value for an avatar filter; all avatars stays implicit. */
+export function actressAvatarParam(avatar: ActressAvatarFilter): string | null {
+  return avatar === ACTRESS_DEFAULT_AVATAR ? null : avatar
+}
 
 export function parseActressSort(
   rawSort: string | null,
@@ -120,6 +155,8 @@ export function actressQueryHash(params: URLSearchParams): string {
   return hashListQuery({
     q: (params.get(LIST_PARAM.q) ?? '').trim(),
     gender: parseGender(params.get(LIST_PARAM.gender)),
+    status: parseActressStatus(params.get(LIST_PARAM.status)),
+    avatar: parseActressAvatar(params.get(LIST_PARAM.avatar)),
     sort: sortBy,
     dir: sortDir
   })

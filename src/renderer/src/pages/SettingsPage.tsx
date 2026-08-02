@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import type {
@@ -30,7 +30,7 @@ import {
 } from '@shared/types'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { api } from '../api'
-import { overviewStatsKeys } from '../query/queryKeys'
+import { actressKeys, overviewStatsKeys } from '../query/queryKeys'
 import ConfirmModal from '../components/ConfirmModal'
 import EmptyState from '../components/EmptyState'
 import Modal from '../components/Modal'
@@ -60,6 +60,7 @@ import { useTheme } from '../components/ThemeProvider'
 import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
 import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
 import { useAvatarAutoCropBatch } from '../contexts/AvatarAutoCropBatchContext'
+import { actressConflictReviewPath } from '../listView/actressRoutes'
 import useNetworkSettingsController from '../hooks/useNetworkSettingsController'
 import {
   invalidateAllLibraryQueries
@@ -141,7 +142,12 @@ export default function SettingsPage(): JSX.Element {
   const [scanStatus, setScanStatus] = useState('')
   const [scanResult, setScanResult] = useState<ScanResult | null>(null)
   const [unrecognized, setUnrecognized] = useState<string[]>([])
-  const { videoBatch, actressBatch } = useBatchScrapeActivity()
+  const {
+    videoBatch,
+    actressBatch,
+    actressBatchRecoverable,
+    actressBatchUnrecoverableReason
+  } = useBatchScrapeActivity()
   const avatarAutoCropBatch = useAvatarAutoCropBatch()
   const [showVideoBatchModal, setShowVideoBatchModal] = useState(false)
   const [showActressBatchModal, setShowActressBatchModal] = useState(false)
@@ -160,6 +166,12 @@ export default function SettingsPage(): JSX.Element {
     overviewStatsRefreshKey,
     activeGroup.id === 'overview' && location.pathname !== settingsPluginDevPath()
   )
+  const actressConflictSummaryQuery = useQuery({
+    queryKey: actressKeys.conflictSummary(),
+    queryFn: () => api.actressScrape.conflictSummary(),
+    refetchInterval: 3000
+  })
+  const actressConflictGroupCount = actressConflictSummaryQuery.data?.groupCount ?? 0
   const videoBatchLogRef = useRef<HTMLDivElement>(null)
   const actressLogRef = useRef<HTMLDivElement>(null)
   const avatarBatchLogRef = useRef<HTMLDivElement>(null)
@@ -260,10 +272,11 @@ export default function SettingsPage(): JSX.Element {
 
   const refreshVideoBatchScopeHint = async (
     status: VideoBatchScrapeStatus,
-    missingFields: VideoScrapeField[] = []
+    missingFields: VideoScrapeField[] = [],
+    scraperName?: string
   ): Promise<void> => {
     try {
-      const n = await api.scrape.videoBatchCount({ status, missingFields })
+      const n = await api.scrape.videoBatchCount({ status, missingFields, scraperName })
       setVideoBatchScopeCountLabel(`${n} 部影片`)
     } catch {
       setVideoBatchScopeCountLabel('- 部影片')
@@ -832,6 +845,11 @@ export default function SettingsPage(): JSX.Element {
     navigate(settingsPath(group, tab))
   }
 
+  const openActressConflicts = (): void => {
+    setBatchDetailScope(null)
+    navigate(actressConflictReviewPath())
+  }
+
   const videoUserPlugins = videoPluginDetails.filter((plugin) => plugin.source !== 'composite')
   const actressUserPlugins = actressPluginDetails.filter((plugin) => plugin.source !== 'composite')
   const videoCompositePlugins = videoPluginDetails.filter((plugin) => plugin.source === 'composite')
@@ -863,6 +881,7 @@ export default function SettingsPage(): JSX.Element {
           total: avatarAutoCropBatch.state.total,
           current: avatarAutoCropBatch.state.current,
           success: avatarAutoCropBatch.state.success,
+          pending: 0,
           failed: avatarAutoCropBatch.state.failed,
           currentCode:
             avatarAutoCropBatch.state.status === 'cancelling'
@@ -989,6 +1008,7 @@ export default function SettingsPage(): JSX.Element {
                   anyBatchActive={anyBatchActive}
                   videoBatchPct={videoBatchPct}
                   actressPct={actressPct}
+                  actressConflictGroupCount={actressConflictGroupCount}
                   unrecognizedCount={unrecognizedCount}
                   statsRefreshKey={overviewStatsRefreshKey}
                   onNavigate={navigateSettings}
@@ -1004,11 +1024,14 @@ export default function SettingsPage(): JSX.Element {
                   onOpenActressBatchAdvanced={() => setShowActressBatchModal(true)}
                   onOpenVideoBatchDetails={() => setBatchDetailScope('video')}
                   onOpenActressBatchDetails={() => setBatchDetailScope('actress')}
+                  onOpenActressConflicts={openActressConflicts}
                   onPauseVideoBatch={cancelVideoBatch}
                   onPauseActressBatch={cancelActressBatch}
                   onResumeBatch={resumeBatch}
                   onDiscardVideoBatch={() => discardBatch('video')}
                   onDiscardActressBatch={() => discardBatch('actress')}
+                  actressBatchRecoverable={actressBatchRecoverable}
+                  actressBatchUnrecoverableReason={actressBatchUnrecoverableReason}
                 />
               )}
 
@@ -1157,6 +1180,10 @@ export default function SettingsPage(): JSX.Element {
                   ? false
                   : videoBatchPaused
             }
+            canResume={batchDetailScope !== 'actress' || actressBatchRecoverable}
+            resumeDisabledReason={
+              batchDetailScope === 'actress' ? actressBatchUnrecoverableReason : null
+            }
             logRef={
               batchDetailScope === 'actress'
                 ? actressLogRef
@@ -1190,6 +1217,12 @@ export default function SettingsPage(): JSX.Element {
                 ) : null
               ) : undefined
             }
+            pendingGroupCount={
+              batchDetailScope === 'actress' ? actressConflictGroupCount : 0
+            }
+            onOpenPending={
+              batchDetailScope === 'actress' ? openActressConflicts : undefined
+            }
             onPause={() => {
               if (batchDetailScope === 'avatar') {
                 avatarAutoCropBatch.cancel()
@@ -1220,13 +1253,15 @@ export default function SettingsPage(): JSX.Element {
           scopeOptions={VIDEO_BATCH_SCRAPE_STATUS_OPTIONS}
           initialScope={0}
           scopeCountLabel={videoBatchScopeCountLabel}
-          onScopeChange={(status, missingFields) =>
-            void refreshVideoBatchScopeHint(status, missingFields)
+          onScopeChange={(status, missingFields, _auxScope, scraperName) =>
+            void refreshVideoBatchScopeHint(status, missingFields, scraperName)
           }
           missingFieldOptions={VIDEO_SCRAPE_FIELD_OPTIONS}
           missingFieldHint="选择后包含缺少任一所选字段的影片。"
-          onMissingFieldsChange={(missingFields, status) => {
-            if (status !== undefined) void refreshVideoBatchScopeHint(status, missingFields)
+          onMissingFieldsChange={(missingFields, status, _auxScope, scraperName) => {
+            if (status !== undefined) {
+              void refreshVideoBatchScopeHint(status, missingFields, scraperName)
+            }
           }}
           onCancel={() => setShowVideoBatchModal(false)}
           onConfirm={(fields, site, status, mode, missingFields) => {

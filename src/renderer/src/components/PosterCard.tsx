@@ -8,6 +8,7 @@ import { useEscapeKey } from '../hooks/useEscapeKey'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { Ellipsis, ListMinus, Pencil } from 'lucide-react'
 import IconButton from './IconButton'
+import MediaTileActionButton from './MediaTileActionButton'
 import { UI_ICON, UI_ICON_SM } from './iconDefaults'
 
 const STATUS_BADGE: Record<number, { text: string; cls: string } | null> = {
@@ -149,13 +150,17 @@ export default function PosterCard({
           />
         )}
         {!selectionMode && onRemove && (
-          <IconButton
-            className="media-tile-delete icon-btn--danger poster-hover-control"
+          <MediaTileActionButton
+            action="remove"
+            className="poster-hover-control"
             icon={<ListMinus {...UI_ICON_SM} />}
             label={`从清单移出 ${video.code}`}
             title="移出清单"
             disabled={removeDisabled}
-            onClick={(e) => stopAndRun(e, onRemove)}
+            onClick={() => {
+              setMenuOpen(false)
+              onRemove(video)
+            }}
           />
         )}
         {!selectionMode && onEdit && (

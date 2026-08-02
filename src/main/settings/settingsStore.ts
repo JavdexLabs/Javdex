@@ -79,6 +79,52 @@ export function updateSettings(patch: Partial<AppSettings>): AppSettings {
   return next
 }
 
+/**
+ * Replace settings that still point at the retired bundled JAV8 scraper.
+ * Run this after legacy same-name user plugins have been renamed so their
+ * references can follow the user plugin instead of being mistaken for the
+ * retired bundled scraper.
+ */
+export function migrateRetiredVideoScraperSettings(): void {
+  const retiredName = 'JAV8'
+  const settings = getSettings()
+  const defaultScraper =
+    settings.defaultScraper === retiredName
+      ? DEFAULT_SETTINGS.defaultScraper
+      : settings.defaultScraper
+  const videoDelays = Object.fromEntries(
+    Object.entries(settings.scraperPluginDelays.video).filter(([name]) => name !== retiredName)
+  )
+  const videoComposites = settings.compositeScrapers.video.map((item) => ({
+    ...item,
+    fieldPluginMap: Object.fromEntries(
+      Object.entries(item.fieldPluginMap).map(([field, pluginName]) => [
+        field,
+        pluginName === retiredName ? DEFAULT_SETTINGS.defaultScraper : pluginName
+      ])
+    ) as typeof item.fieldPluginMap
+  }))
+  const hasRetiredReference =
+    settings.defaultScraper === retiredName ||
+    Object.prototype.hasOwnProperty.call(settings.scraperPluginDelays.video, retiredName) ||
+    settings.compositeScrapers.video.some((item) =>
+      Object.values(item.fieldPluginMap).includes(retiredName)
+    )
+  if (!hasRetiredReference) return
+
+  updateSettings({
+    defaultScraper,
+    scraperPluginDelays: {
+      ...settings.scraperPluginDelays,
+      video: videoDelays
+    },
+    compositeScrapers: {
+      ...settings.compositeScrapers,
+      video: videoComposites
+    }
+  })
+}
+
 type ParsedSettings = Partial<AppSettings>
 
 function normalizeSettings(parsed: ParsedSettings): AppSettings {
@@ -322,10 +368,11 @@ function normalizeCompositeScrapers(
     const fieldPluginMap: CompositeScraperDefinition['fieldPluginMap'] = {}
     for (const [field, pluginName] of Object.entries(rawMap)) {
       if (typeof pluginName !== 'string' || !pluginName.trim()) continue
+      const trimmedPluginName = pluginName.trim()
       const resolvedPluginName =
-        kind === 'actress' && pluginName.trim() === '偶像档案库'
+        kind === 'actress' && trimmedPluginName === '偶像档案库'
           ? DEFAULT_SETTINGS.defaultActressScraper
-          : pluginName.trim()
+          : trimmedPluginName
       const mappedFields =
         kind === 'actress' ? expandActressScrapeFields([field]) : [field]
       for (const mappedField of mappedFields) {

@@ -11,6 +11,9 @@ interface BatchTaskControlsProps {
   running: boolean
   paused: boolean
   status: string
+  /** When false, the resume control stays disabled even while paused. */
+  canResume?: boolean
+  resumeDisabledReason?: string | null
   variant?: 'icon' | 'button'
   showDisabled?: boolean
   onPause: BatchControlHandler
@@ -23,6 +26,8 @@ export default function BatchTaskControls({
   running,
   paused,
   status,
+  canResume = true,
+  resumeDisabledReason = null,
   variant = 'button',
   showDisabled = true,
   onPause,
@@ -71,6 +76,10 @@ export default function BatchTaskControls({
 
   if (!showDisabled && !controllable) return null
 
+  const resumeAllowed = paused && canResume
+  const resumeTitle = !canResume
+    ? (resumeDisabledReason ?? `该${scopeLabel}${batchTaskText}不可恢复`)
+    : undefined
   const pauseIcon =
     pendingAction === 'pause' ? <LoaderCircle {...UI_ICON_SM} /> : <Pause {...UI_ICON_SM} />
   const resumeIcon =
@@ -98,9 +107,13 @@ export default function BatchTaskControls({
           <IconButton
             className="settings-overview-batch-icon-btn"
             icon={resumeIcon}
-            label={`${resumeText}${scopeLabel}${batchTaskText}`}
+            label={
+              resumeAllowed
+                ? `${resumeText}${scopeLabel}${batchTaskText}`
+                : (resumeTitle ?? `${resumeText}${scopeLabel}${batchTaskText}`)
+            }
             aria-busy={pendingAction === 'resume' || undefined}
-            disabled={!paused || controlsBusy}
+            disabled={!resumeAllowed || controlsBusy}
             onClick={() => void runControl('resume', onResume)}
           />
         )}
@@ -136,7 +149,8 @@ export default function BatchTaskControls({
         type="button"
         className="btn btn-sm"
         aria-busy={pendingAction === 'resume' || undefined}
-        disabled={!paused || controlsBusy}
+        disabled={!resumeAllowed || controlsBusy}
+        title={resumeTitle}
         onClick={() => void runControl('resume', onResume)}
       >
         {resumeIcon}

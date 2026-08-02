@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { ImagePlus, Link, UploadCloud } from 'lucide-react'
 import { api } from '../api'
-import MediaTileDeleteButton from './MediaTileDeleteButton'
+import MediaTileActionButton from './MediaTileActionButton'
 import Modal from './Modal'
 import { useToast } from './Toast'
 import { UI_ICON } from './iconDefaults'
@@ -328,7 +328,8 @@ export default function ImageImportModal({
                   <div className="image-import-thumb" aria-hidden="true">
                     <img src={item.previewUrl} alt="" loading="lazy" draggable={false} />
                   </div>
-                  <MediaTileDeleteButton
+                  <MediaTileActionButton
+                    action="remove"
                     label={`移除待导入图片 ${index + 1}`}
                     title="移除图片"
                     onClick={() => removeQueued(item.key)}

@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
-import { listVideos } from '../db/videoRepo'
+import { listVideoFiles, listVideos } from '../db/videoRepo'
 import { scanFolders } from './scanner'
 
 let tempRoot: string | null = null
@@ -27,6 +27,129 @@ afterEach(() => {
 })
 
 describe('scanFolders', () => {
+  it('imports a symbolic-link video by its link path and file name', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    const targetDir = path.join(root, 'targets')
+    fs.mkdirSync(library, { recursive: true })
+    fs.mkdirSync(targetDir, { recursive: true })
+    const targetPath = path.join(targetDir, 'source.mp4')
+    const linkPath = path.join(library, 'IPX-777.mp4')
+    fs.writeFileSync(targetPath, 'video')
+    fs.symlinkSync(targetPath, linkPath, 'file')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+
+    const result = await scanFolders([library], undefined, {
+      readDurationSeconds: async () => 3661,
+      minImportDurationSeconds: null
+    })
+
+    assert.equal(result.scannedFiles, 1)
+    assert.equal(result.imported, 1)
+    assert.deepEqual(result.newCodes, ['IPX-777'])
+    const videos = listVideos({ limit: 10, offset: 0 })
+    assert.equal(videos.total, 1)
+    assert.equal(videos.items[0].primary_file_path, linkPath)
+  })
+
+  it('does not follow symbolic-link directories', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    const targetDir = path.join(root, 'targets')
+    fs.mkdirSync(library, { recursive: true })
+    fs.mkdirSync(targetDir, { recursive: true })
+    fs.writeFileSync(path.join(targetDir, 'IPX-778.mp4'), 'video')
+    fs.symlinkSync(targetDir, path.join(library, 'linked-directory'), 'junction')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+
+    const result = await scanFolders([library], undefined, {
+      readDurationSeconds: async () => 3661,
+      minImportDurationSeconds: null
+    })
+
+    assert.equal(result.scannedFiles, 0)
+    assert.equal(result.imported, 0)
+    assert.equal(listVideos({ limit: 10, offset: 0 }).total, 0)
+  })
+
+  it('silently skips a broken symbolic-link video', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    fs.symlinkSync(
+      path.join(root, 'missing.mp4'),
+      path.join(library, 'IPX-779.mp4'),
+      'file'
+    )
+    initDatabaseAtPath(path.join(root, 'library.db'))
+
+    const result = await scanFolders([library], undefined, {
+      readDurationSeconds: async () => 3661,
+      minImportDurationSeconds: null
+    })
+
+    assert.equal(result.scannedFiles, 0)
+    assert.equal(result.imported, 0)
+    assert.equal(result.failed, 0)
+    assert.equal(result.unrecognizedFiles.length, 0)
+  })
+
+  it('removes an imported symbolic-link video after its target disappears', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    const targetPath = path.join(root, 'target.mp4')
+    const linkPath = path.join(library, 'IPX-780.mp4')
+    fs.mkdirSync(library, { recursive: true })
+    fs.writeFileSync(targetPath, 'video')
+    fs.symlinkSync(targetPath, linkPath, 'file')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const options = {
+      readDurationSeconds: async (): Promise<number> => 3661,
+      minImportDurationSeconds: null
+    }
+
+    const first = await scanFolders([library], undefined, options)
+    fs.unlinkSync(targetPath)
+    const second = await scanFolders([library], undefined, options)
+
+    assert.equal(first.imported, 1)
+    assert.equal(second.scannedFiles, 0)
+    assert.equal(second.removed, 1)
+    assert.equal(listVideos({ limit: 10, offset: 0 }).total, 0)
+  })
+
+  it('keeps distinct symbolic-link paths that point to the same target', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    const firstDir = path.join(library, 'first')
+    const secondDir = path.join(library, 'second')
+    const targetPath = path.join(root, 'target.mp4')
+    fs.mkdirSync(firstDir, { recursive: true })
+    fs.mkdirSync(secondDir, { recursive: true })
+    fs.writeFileSync(targetPath, 'video')
+    fs.symlinkSync(targetPath, path.join(firstDir, 'IPX-781.mp4'), 'file')
+    fs.symlinkSync(targetPath, path.join(secondDir, 'IPX-781.mp4'), 'file')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+
+    const result = await scanFolders([library], undefined, {
+      readDurationSeconds: async () => 3661,
+      minImportDurationSeconds: null
+    })
+
+    assert.equal(result.scannedFiles, 2)
+    assert.equal(result.imported, 2)
+    const videos = listVideos({ limit: 10, offset: 0 })
+    assert.equal(videos.total, 1)
+    const files = listVideoFiles(videos.items[0].id)
+    assert.deepEqual(
+      files.map((file) => file.file_path),
+      [
+        path.join(firstDir, 'IPX-781.mp4'),
+        path.join(secondDir, 'IPX-781.mp4')
+      ].sort()
+    )
+  })
+
   it('imports recognized videos and reports unrecognized files', async () => {
     const root = makeTempRoot()
     const library = path.join(root, 'library')

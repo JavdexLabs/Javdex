@@ -82,9 +82,11 @@ export interface Actress {
   zodiac: string | null
   nationality: string | null
   profile_summary: string | null
+  scraped_status: ScrapedStatus
   last_scraped_at: string | null
   updated_at: string | null
   gender: ActressGender | null
+  revision?: number
 }
 
 export interface Tag {
@@ -216,6 +218,75 @@ export interface ActressDetail extends Actress {
 
 export interface ActressListItem extends Actress {
   video_count: number
+  /** SHA-256 fingerprint of the current readable display avatar, when available. */
+  avatar_fingerprint?: string | null
+}
+
+/** Canonical actress library status filter vocabulary (also the URL values). */
+export type ActressListStatusFilter = 'all' | 'success' | 'unscraped' | 'failed'
+
+/** Actress avatar filter, including the renderer-only local face-detection state. */
+export type ActressAvatarFilter = 'all' | 'with' | 'without' | 'without-face'
+
+export const ACTRESS_LIST_STATUS_SCRAPED_STATUS: Record<
+  Exclude<ActressListStatusFilter, 'all'>,
+  ScrapedStatus
+> = {
+  unscraped: 0,
+  success: 1,
+  failed: 2
+}
+
+const ACTRESS_LIST_STATUS_BY_SCRAPED_STATUS = new Map<
+  ScrapedStatus,
+  Exclude<ActressListStatusFilter, 'all'>
+>(
+  (
+    Object.entries(ACTRESS_LIST_STATUS_SCRAPED_STATUS) as [
+      Exclude<ActressListStatusFilter, 'all'>,
+      ScrapedStatus
+    ][]
+  ).map(([filter, status]) => [status, filter])
+)
+
+/** Filter vocabulary for a stored cumulative status value. */
+export function actressStatusFilterOf(
+  status: ScrapedStatus
+): Exclude<ActressListStatusFilter, 'all'> {
+  return ACTRESS_LIST_STATUS_BY_SCRAPED_STATUS.get(status) ?? 'unscraped'
+}
+
+/**
+ * Single label source for the three concrete cumulative scrape states, shared by the
+ * library filter, avatar badge, detail page, and batch scope so the strings never drift.
+ */
+export const ACTRESS_SCRAPE_STATUS_LABELS: Record<Exclude<ActressListStatusFilter, 'all'>, string> = {
+  unscraped: '未刮削',
+  success: '刮削成功',
+  failed: '刮削失败'
+}
+
+/** Actress library status-filter labels; the "all" option is filter-specific ("全部状态"). */
+export const ACTRESS_STATUS_FILTER_LABELS: Record<ActressListStatusFilter, string> = {
+  all: '全部状态',
+  ...ACTRESS_SCRAPE_STATUS_LABELS
+}
+
+export interface ActressListQuery {
+  search?: string
+  gender?: ActressGenderFilter
+  status?: ActressListStatusFilter
+  avatar?: ActressAvatarFilter
+  sortBy?: ActressListSortBy
+  sortDir?: ListSortDir
+}
+
+/** Actresses per cumulative status within the current search and gender scope. */
+export type ActressListStatusCounts = Record<ActressListStatusFilter, number>
+
+export interface ActressListPage {
+  items: ActressListItem[]
+  statusCounts: ActressListStatusCounts
 }
 
 /** Read-only source metadata used by renderer-side smart avatar composition. */
@@ -781,10 +852,14 @@ export interface VideoBatchScrapeFilter {
   videoIds?: number[]
   /** Optional range filter: include videos missing any selected metadata field. */
   missingFields?: VideoScrapeField[]
+  /** Actual plugins supplying site-scoped source and rating fields. */
+  sourceName?: string
+  ratingSourceName?: string
+  /** Scraper selected by the user; main process resolves its actual field sources. */
+  scraperName?: string
 }
 
 export interface VideoBatchScrapeRequest extends VideoBatchScrapeFilter {
-  scraperName?: string
   fields: VideoScrapeField[]
   /** Default: replace — only write into empty fields when fillEmpty. */
   mode?: VideoScrapeUpdateMode
@@ -809,8 +884,9 @@ export interface VideoRematchBatchRequest {
 
 export interface VideoScrapeOneResult {
   result: ScrapeResult
-  /** False when fillEmpty mode had nothing empty to update. */
+  /** True only when at least one selected field was written or explicitly cleared. */
   applied: boolean
+  warnings: string[]
 }
 
 /** Selectable fields when manually re-scraping an actress profile. */
@@ -874,7 +950,11 @@ export const ACTRESS_BATCH_DEFAULT_MISSING_FIELDS: ActressScrapeField[] = [
 
 export type ActressBatchScrapeScope = ActressGenderFilter
 
-export type ActressBatchScrapeStatus = 'unscraped' | 'scraped' | 'all'
+/** Cumulative profile-scrape scopes for advanced actress batch scrape. */
+export type ActressBatchScrapeStatus = 'unscraped' | 'success' | 'failed' | 'all'
+
+/** Pre-cumulative two-state scope, accepted only as compatibility input. */
+export type LegacyActressBatchScrapeStatus = 'scraped'
 
 export const ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS: {
   id: ActressBatchScrapeScope
@@ -889,12 +969,262 @@ export const ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS: {
   id: ActressBatchScrapeStatus
   label: string
 }[] = [
-  { id: 'unscraped', label: '从未刮削' },
-  { id: 'scraped', label: '已刮削' },
+  { id: 'unscraped', label: ACTRESS_SCRAPE_STATUS_LABELS.unscraped },
+  { id: 'success', label: ACTRESS_SCRAPE_STATUS_LABELS.success },
+  { id: 'failed', label: ACTRESS_SCRAPE_STATUS_LABELS.failed },
   { id: 'all', label: '全部' }
 ]
 
 export type ActressScrapeUpdateMode = 'replace' | 'fillEmpty' | 'replaceIfPresent'
+
+export type ActressScrapeFieldImpactAction =
+  | 'set'
+  | 'clear'
+  | 'append'
+  | 'replace'
+  | 'preserve'
+
+export type ActressScrapeFieldImpactReason =
+  | 'replace'
+  | 'fillEmpty'
+  | 'replaceIfPresent'
+  | 'noValue'
+  | 'existingValue'
+  | 'resourceUnavailable'
+
+export interface ActressScrapeFieldImpact {
+  field: ActressScrapeField
+  /** Measurements are planned independently even though they share one selectable field. */
+  part?: 'bustCm' | 'waistCm' | 'hipCm'
+  action: ActressScrapeFieldImpactAction
+  currentValue: string | number | string[] | null
+  nextValue: string | number | string[] | null
+  reason: ActressScrapeFieldImpactReason
+}
+
+export interface ActressScrapePluginRef {
+  name: string
+  source: ScraperPluginSource
+  version?: string
+}
+
+export type ActressPendingNameType = 'main' | 'zh' | 'en' | 'alias'
+
+export interface PendingActressScrapeCandidate {
+  pendingId: number
+  revision: number
+  actressId: number
+  actressRevision: number
+  actressMainName: string
+  actressAvatarPath: string | null
+  plugin: ActressScrapePluginRef
+  queryName: string
+  selectedFields: ActressScrapeField[]
+  applicableFields: ActressScrapeField[]
+  mode: ActressScrapeUpdateMode
+  result: ActressScrapeResult
+  warnings: string[]
+  createdAt: string
+  batchJobId?: string
+  resources: PendingActressScrapeResource[]
+  conflicts: Array<{ name: string; normalizedName: string; type: ActressPendingNameType }>
+  /** Exact field result when this candidate actress receives the current conflict name. */
+  fieldImpactsWhenAssignedToCandidate: ActressScrapeFieldImpact[]
+  /** Exact field result when the current conflict name is kept away from this candidate. */
+  fieldImpacts: ActressScrapeFieldImpact[]
+  willApplyAfterDecision: boolean
+  remainingConflictCountAfterDecision: number
+}
+
+export interface PendingActressScrapeResource {
+  field: 'avatar' | 'gallery'
+  position: number
+  remoteUrl?: string
+  stagedPath: string
+  width: number | null
+  height: number | null
+}
+
+export interface DiscardPendingActressScrapeInput {
+  pendingId: number
+  expectedRevision: number
+}
+
+export interface DiscardPendingActressScrapeResult {
+  remainingPending: number
+}
+
+export interface ActressConflictCurrentOwner {
+  actressId: number
+  revision: number
+  mainName: string
+  avatarPath: string | null
+  nameTypes: ActressPendingNameType[]
+  hasPendingScrape: boolean
+}
+
+export interface PendingActressNameClaim {
+  claimId: number
+  actressId: number
+  name: string
+  type: ActressPendingNameType
+  locale: string | null
+  source: string | null
+  isPrimary: boolean
+}
+
+export interface ActressNameConflictGroup {
+  status: 'conflict' | 'applicable'
+  normalizedName: string
+  displayName: string
+  currentOwner: ActressConflictCurrentOwner | null
+  /** Every actress that currently declares this normalized name, including legacy ambiguous claims. */
+  claimants: ActressConflictCurrentOwner[]
+  /** Ambiguous historical claims awaiting an explicit ownership decision. */
+  pendingNameClaims: PendingActressNameClaim[]
+  candidates: PendingActressScrapeCandidate[]
+  /** Exact main-process merge preflight for every pair shown in this group. */
+  mergePairs?: Array<{
+    actressIds: [number, number]
+    blockedReason: string | null
+  }>
+}
+
+export interface ActressConflictReviewSummary {
+  groupCount: number
+  conflictGroupCount: number
+  applicableGroupCount: number
+  pendingScrapeCount: number
+  pendingNameClaimGroupCount: number
+}
+
+export interface InspectActressConflictNameInput {
+  actressId: number
+  name: string
+  pendingId?: number
+}
+
+export interface InspectActressConflictNameResult {
+  normalizedName: string
+  status: 'available' | 'conflict'
+}
+
+export interface ActressConflictDecisionSnapshot {
+  status: 'conflict' | 'applicable'
+  normalizedName: string
+  currentOwnerActressId: number | null
+  currentOwnerRevision: number | null
+  claimants: Array<{ actressId: number; revision: number }>
+  pendingNameClaims: Array<{
+    claimId: number
+    actressId: number
+    name: string
+    type: ActressPendingNameType
+  }>
+  candidates: Array<{
+    pendingId: number
+    pendingRevision: number
+    actressId: number
+    actressRevision: number
+  }>
+}
+
+export interface ActressConflictReplacementMainName {
+  actressId: number
+  mainName: string
+}
+
+export interface ValidateIllegalNameReplacementsInput {
+  snapshot: ActressConflictDecisionSnapshot
+  replacementMainNames: ActressConflictReplacementMainName[]
+  /** Ownership decisions keep this claimant's main name; illegal-name decisions omit it. */
+  destinationOwnerActressId?: number
+}
+
+export type ValidateIllegalNameReplacementsResult =
+  | { status: 'valid' }
+  | {
+      status: 'invalid'
+      errors: Array<{ actressId: number; message: string }>
+    }
+  | { status: 'stale'; message: string }
+
+interface ActressConflictDecisionBase {
+  snapshot: ActressConflictDecisionSnapshot
+  replacementMainNames: ActressConflictReplacementMainName[]
+}
+
+export type ResolveActressConflictInput = ActressConflictDecisionBase &
+  (
+    | {
+        kind: 'editName'
+        pendingId: number
+        name: string
+        nameType: ActressPendingNameType
+        newName: string
+      }
+    | {
+        kind: 'editPendingNameClaim'
+        claimId: number
+        actressId: number
+        name: string
+        nameType: ActressPendingNameType
+        newName: string
+      }
+    | { kind: 'assignToCurrentActress'; pendingId: number }
+    | {
+        kind: 'assignToExistingActress'
+        ownerActressId: number
+        ownerActressRevision: number
+      }
+    | {
+        kind: 'mergeActresses'
+        pendingId?: number
+        keepActressId: number
+        keepActressRevision: number
+        mergeActressId: number
+        mergeActressRevision: number
+        finalMainName: string
+      }
+    | { kind: 'markIllegalName' }
+    | { kind: 'applyPending'; pendingId: number }
+  )
+
+export type ResolveActressConflictResult =
+  | { status: 'success'; remainingPending: number }
+  | { status: 'stale'; message: string }
+
+export type ActressScrapeDisposition =
+  | {
+      status: 'success'
+      ok: true
+      result: ActressScrapeResult
+      warnings?: string[]
+      skipped?: boolean
+      avatarUpdated?: boolean
+      pendingId?: never
+      error?: never
+    }
+  | {
+      status: 'pending'
+      ok: true
+      pendingId: number
+      result: ActressScrapeResult
+      warnings?: string[]
+      skipped?: false
+      avatarUpdated?: false
+      error?: never
+    }
+  | {
+      status: 'failure'
+      ok: false
+      error: string
+      warnings?: string[]
+      result?: never
+      skipped?: false
+      avatarUpdated?: false
+      pendingId?: never
+    }
 
 export const ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS: ScrapeUpdateModeOption<ActressScrapeUpdateMode>[] = [
   {
@@ -915,9 +1245,14 @@ export const ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS: ScrapeUpdateModeOption<ActressS
 ]
 
 export interface ActressBatchScrapeFilter {
+  /**
+   * Optional explicit target ids. When present they are the authoritative target set;
+   * an empty array matches no actresses.
+   */
+  actressIds?: number[]
   /** Filter by actor gender. Unknown gender is treated as female for compatibility. */
   scope: ActressBatchScrapeScope
-  /** Filter by profile scrape history. Default: all. */
+  /** Filter by cumulative profile-scrape status. Default: all. */
   scrapeStatus?: ActressBatchScrapeStatus
   /** Optional range filter: include actresses missing any selected profile field. */
   missingFields?: ActressScrapeField[]
@@ -1208,9 +1543,11 @@ export interface LibraryOverviewStats {
     total: number
     female: number
     male: number
-    /** Female performers with a scrape timestamp. */
+    /** Female performers with cumulative 刮削成功. */
     scraped: number
-    /** Female performers without a scrape timestamp. */
+    /** Female performers with cumulative 刮削失败. */
+    failed: number
+    /** Female performers with cumulative 未刮削. */
     unscraped: number
   }
   playlists: number
@@ -1285,6 +1622,7 @@ export interface BatchProgress {
   total: number
   current: number
   success: number
+  pending: number
   failed: number
   /** Code currently being processed. */
   currentCode: string | null
@@ -1295,6 +1633,13 @@ export interface BatchProgress {
 export interface BatchScrapeState {
   kind: 'video' | 'actress' | null
   progress: BatchProgress | null
+  /**
+   * False when a persisted actress batch carries an unrecognized scrape-status
+   * scope. The task remains viewable and discardable, but resume is blocked.
+   */
+  recoverable: boolean
+  /** Present when recoverable is false. */
+  unrecoverableReason?: string
 }
 
 export interface BatchLogEntry {

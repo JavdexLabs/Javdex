@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  FACE_PRESENCE_DETECTION_CONFIDENCE,
   headBoundsFromHairMask,
   isAmbiguousFaceSelection,
   mapRoiPointToImage,
@@ -52,6 +53,12 @@ describe('avatar auto-crop geometry', () => {
     ])
     assert.equal(ranked.length, 2)
     assert.equal(isAmbiguousFaceSelection(ranked), true)
+  })
+
+  it('accepts mid-confidence faces only when the presence floor is used', () => {
+    const mid = [raw(0.3, 0.25, 0.28, 0.32, 0.45)]
+    assert.equal(rankFaceCandidates(mid).length, 0)
+    assert.equal(rankFaceCandidates(mid, FACE_PRESENCE_DETECTION_CONFIDENCE).length, 1)
   })
 
   it('maps ROI landmarks back to full-image normalized coordinates', () => {

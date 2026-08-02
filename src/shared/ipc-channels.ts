@@ -58,15 +58,25 @@ export const IPC = {
 
   // Actresses
   ACTRESS_LIST: 'actress:list',
+  ACTRESS_LIST_PAGE: 'actress:listPage',
   ACTRESS_GET: 'actress:get',
   ACTRESS_AVATAR_SOURCE_INFO: 'actress:avatarSourceInfo',
   ACTRESS_EDIT: 'actress:edit',
   ACTRESS_DELETE: 'actress:delete',
+  ACTRESS_DELETE_BATCH: 'actress:deleteBatch',
   ACTRESS_CLEAR_META: 'actress:clearMeta',
   ACTRESS_GALLERY_IMPORT: 'actress:galleryImport',
   ACTRESS_GALLERY_DELETE: 'actress:galleryDelete',
   ACTRESS_POSTER_SET: 'actress:posterSet',
   ACTRESS_MERGE: 'actress:merge',
+  ACTRESS_MARK_SCRAPE_SUCCESS: 'actress:markScrapeSuccess',
+  ACTRESS_CONFLICT_LIST: 'actressConflict:list',
+  ACTRESS_CONFLICT_COUNT: 'actressConflict:count',
+  ACTRESS_CONFLICT_SUMMARY: 'actressConflict:summary',
+  ACTRESS_CONFLICT_INSPECT_NAME: 'actressConflict:inspectName',
+  ACTRESS_CONFLICT_DISCARD: 'actressConflict:discard',
+  ACTRESS_CONFLICT_VALIDATE_ILLEGAL: 'actressConflict:validateIllegal',
+  ACTRESS_CONFLICT_RESOLVE: 'actressConflict:resolve',
 
   // Tags
   TAG_LIST: 'tag:list',

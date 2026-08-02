@@ -27,6 +27,7 @@ import {
 import { api } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
+import { useRangeSelection } from '../hooks/useRangeSelection'
 import { useToast } from '../components/Toast'
 import VirtualPosterGrid from '../components/VirtualPosterGrid'
 import { useDisplayMode } from '../components/DisplayModeContext'
@@ -100,7 +101,6 @@ export default function LibraryPage(): JSX.Element {
   const filterBtnRef = useRef<HTMLButtonElement>(null)
   const [filterOpen, setFilterOpen] = useState(false)
   const detailOpen = Boolean(useMatch({ path: ROUTE_MATCH.libraryDetailOpen, end: false }))
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   const [playlistTarget, setPlaylistTarget] = useState<Video | null>(null)
   const [showBulkPlaylist, setShowBulkPlaylist] = useState(false)
   const [editingVideo, setEditingVideo] = useState<VideoDetail | null>(null)
@@ -282,19 +282,18 @@ export default function LibraryPage(): JSX.Element {
 
   useListSurfaceRefetch(detailOpen, refetchLibrarySurface)
 
-  const selectionAnchorIndexRef = useRef<number | null>(null)
-
-  useEffect(() => {
-    setSelectedIds(new Set())
-    selectionAnchorIndexRef.current = null
-  }, [queryHash])
+  const {
+    selectedIds,
+    selectedCount,
+    selectionMode,
+    toggleSelection: toggleVideoSelection,
+    clearSelection
+  } = useRangeSelection(videos, queryHash)
 
   const selectedVideos = useMemo(
     () => videos.filter((video) => selectedIds.has(video.id)),
     [videos, selectedIds]
   )
-  const selectedCount = selectedIds.size
-  const selectionMode = selectedCount > 0
 
   const [unscrapedBannerHidden, setUnscrapedBannerHidden] = useState(() =>
     isMaintenanceHintDismissed(MAINTENANCE_HINT_KEYS.videoBanner)
@@ -320,47 +319,6 @@ export default function LibraryPage(): JSX.Element {
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     }
-  }
-
-  const toggleVideoSelection = useCallback(
-    (video: Video, index: number, event?: React.MouseEvent): void => {
-      const anchor = selectionAnchorIndexRef.current
-      if (
-        event?.shiftKey &&
-        anchor != null &&
-        anchor >= 0 &&
-        anchor < videos.length &&
-        index >= 0 &&
-        index < videos.length
-      ) {
-        event.preventDefault()
-        const start = Math.min(anchor, index)
-        const end = Math.max(anchor, index)
-        setSelectedIds((prev) => {
-          const next = new Set(prev)
-          for (let i = start; i <= end; i += 1) {
-            const id = videos[i]?.id
-            if (id != null) next.add(id)
-          }
-          return next
-        })
-        return
-      }
-
-      setSelectedIds((prev) => {
-        const next = new Set(prev)
-        if (next.has(video.id)) next.delete(video.id)
-        else next.add(video.id)
-        return next
-      })
-      selectionAnchorIndexRef.current = index
-    },
-    [videos]
-  )
-
-  const clearSelection = (): void => {
-    setSelectedIds(new Set())
-    selectionAnchorIndexRef.current = null
   }
 
   const openEdit = async (video: Video): Promise<void> => {
@@ -404,9 +362,16 @@ export default function LibraryPage(): JSX.Element {
     setScraperName(site)
     try {
       const res = await api.scrape.one(target.id, site || undefined, fields, mode)
+      const hasWarnings = res.warnings.length > 0
       toast.show(
-        res.applied ? `已更新 ${target.code}` : '所选字段无需写入',
-        res.applied ? 'success' : 'info'
+        res.applied
+          ? hasWarnings
+            ? `已更新 ${target.code}，部分图片未应用：${res.warnings.join('；')}`
+            : `已更新 ${target.code}`
+          : hasWarnings
+            ? `资源不可用，已保留原数据：${res.warnings.join('；')}`
+            : '所选字段无可写入内容',
+        res.applied && !hasWarnings ? 'success' : 'info'
       )
       if (res.applied) {
         invalidateVideoLibraryQueries(queryClient)

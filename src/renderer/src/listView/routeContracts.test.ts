@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Location, NavigateFunction } from 'react-router-dom'
 import {
+  actressConflictReviewPath,
   actressDetailPath,
   actressVideoActressPath,
   actressVideoDetailPath,
@@ -14,7 +15,21 @@ import {
   parseFacetVideoPath
 } from './facetRoutes'
 import { libraryVideoActressPath, libraryVideoDetailPath, parseLibraryVideoPath } from './libraryRoutes'
-import { navigateToFacetDetail } from './listNavigation'
+import {
+  navigateToActressConflicts,
+  navigateToActressDetail,
+  navigateToActressList,
+  navigateToFacetDetail
+} from './listNavigation'
+import {
+  actressQueryHash,
+  actressAvatarParam,
+  actressStatusParam,
+  LIST_PARAM,
+  parseActressAvatar,
+  parseActressStatus,
+  patchSearchParams
+} from './listQueryParams'
 import {
   clearPrimaryNavigationMemory,
   forgetPrimaryListLocation,
@@ -43,6 +58,7 @@ describe('route builders and parsers', () => {
   })
 
   it('round-trips actress detail stacks', () => {
+    assert.equal(actressConflictReviewPath(), '/actresses/conflicts')
     assert.equal(actressDetailPath(3), '/actresses/3')
     assert.equal(actressVideoDetailPath(3, 9), '/actresses/3/9')
     assert.equal(actressVideoActressPath(3, 9, 11), '/actresses/3/9/actress/11')
@@ -77,6 +93,135 @@ describe('route builders and parsers', () => {
     assert.equal(parseLibraryVideoPath('/detail/not-a-number'), null)
     assert.equal(parseActressVideoPath('/actresses/x'), null)
     assert.equal(parsePlaylistVideoPath('/playlists/x'), null)
+  })
+})
+
+describe('actress avatar filter query contract', () => {
+  it('normalizes avatar filter values and omits the all default', () => {
+    assert.equal(parseActressAvatar('with'), 'with')
+    assert.equal(parseActressAvatar('without'), 'without')
+    assert.equal(parseActressAvatar('without-face'), 'without-face')
+    assert.equal(parseActressAvatar('invalid'), 'all')
+    assert.equal(parseActressAvatar(null), 'all')
+    assert.equal(actressAvatarParam('with'), 'with')
+    assert.equal(actressAvatarParam('without'), 'without')
+    assert.equal(actressAvatarParam('without-face'), 'without-face')
+    assert.equal(actressAvatarParam('all'), null)
+  })
+
+  it('opens and closes conflict review without losing actress list query state', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const location = {
+      pathname: '/actresses',
+      search: '?q=sara&status=failed',
+      hash: '',
+      state: null,
+      key: 'test'
+    } as Location
+
+    navigateToActressConflicts(navigate, location)
+    navigateToActressList(navigate, { ...location, pathname: '/actresses/conflicts' } as Location)
+
+    assert.deepEqual(destinations, [
+      { pathname: '/actresses/conflicts', search: '?q=sara&status=failed' },
+      { pathname: '/actresses', search: 'q=sara&status=failed' }
+    ])
+  })
+
+  it('keeps avatar filters distinct in the actress query hash', () => {
+    const withAvatar = new URLSearchParams(`${LIST_PARAM.avatar}=with`)
+    const withoutAvatar = new URLSearchParams(`${LIST_PARAM.avatar}=without`)
+    const withoutFaceAvatar = new URLSearchParams(`${LIST_PARAM.avatar}=without-face`)
+
+    assert.notEqual(actressQueryHash(withAvatar), actressQueryHash(withoutAvatar))
+    assert.notEqual(actressQueryHash(withoutAvatar), actressQueryHash(withoutFaceAvatar))
+    assert.equal(actressQueryHash(new URLSearchParams()), actressQueryHash(new URLSearchParams()))
+  })
+})
+
+describe('actress status filter query contract', () => {
+  it('parses the canonical status values and treats anything else as all', () => {
+    assert.equal(parseActressStatus('success'), 'success')
+    assert.equal(parseActressStatus('unscraped'), 'unscraped')
+    assert.equal(parseActressStatus('failed'), 'failed')
+    assert.equal(parseActressStatus(null), 'all')
+    assert.equal(parseActressStatus('all'), 'all')
+    assert.equal(parseActressStatus('1'), 'all')
+    assert.equal(parseActressStatus('scraped'), 'all')
+  })
+
+  it('omits the param for all and writes the canonical value otherwise', () => {
+    assert.equal(actressStatusParam('all'), null)
+    assert.equal(actressStatusParam('unscraped'), 'unscraped')
+
+    const applied = patchSearchParams(new URLSearchParams('q=sara&gender=all'), {
+      [LIST_PARAM.status]: actressStatusParam('failed')
+    })
+    assert.equal(applied.toString(), 'q=sara&gender=all&status=failed')
+
+    const removed = patchSearchParams(applied, {
+      [LIST_PARAM.status]: actressStatusParam('all')
+    })
+    assert.equal(removed.toString(), 'q=sara&gender=all')
+  })
+
+  it('includes status in the list query identity and ignores invalid values', () => {
+    const unscraped = actressQueryHash(new URLSearchParams('status=unscraped'))
+    const failed = actressQueryHash(new URLSearchParams('status=failed'))
+    const invalid = actressQueryHash(new URLSearchParams('status=bogus'))
+    const all = actressQueryHash(new URLSearchParams(''))
+
+    assert.notEqual(unscraped, failed)
+    assert.notEqual(unscraped, all)
+    assert.equal(invalid, all)
+  })
+
+  it('keeps search, gender and sort identity while only the status changes', () => {
+    const base = new URLSearchParams('q=sara&gender=all&sort=age&dir=asc')
+    const withStatus = patchSearchParams(base, { [LIST_PARAM.status]: 'unscraped' })
+
+    assert.equal(withStatus.get(LIST_PARAM.q), 'sara')
+    assert.equal(withStatus.get(LIST_PARAM.gender), 'all')
+    assert.equal(withStatus.get(LIST_PARAM.sort), 'age')
+    assert.equal(withStatus.get(LIST_PARAM.dir), 'asc')
+    assert.notEqual(actressQueryHash(withStatus), actressQueryHash(base))
+  })
+
+  it('round-trips the status query through actress detail and back', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
+    const listLocation = {
+      pathname: '/actresses',
+      search: '?q=sara&gender=all&status=failed',
+      hash: '',
+      state: null,
+      key: 'test'
+    } as Location
+
+    navigateToActressDetail(navigate, listLocation, 8)
+    assert.deepEqual(destinations[0], {
+      pathname: '/actresses/8',
+      search: '?q=sara&gender=all&status=failed'
+    })
+
+    navigateToActressList(navigate, { ...listLocation, pathname: '/actresses/8' } as Location)
+    assert.deepEqual(destinations[1], {
+      pathname: '/actresses',
+      search: 'q=sara&gender=all&status=failed'
+    })
+  })
+
+  it('remembers the actress status filter across primary navigation', () => {
+    clearPrimaryNavigationMemory()
+    rememberPrimaryListLocation('/actresses/8', '?q=sara&status=unscraped&avatar=without')
+
+    assert.deepEqual(primaryNavigationTarget('/actresses'), {
+      pathname: '/actresses',
+      search: '?q=sara&status=unscraped&avatar=without'
+    })
   })
 })
 

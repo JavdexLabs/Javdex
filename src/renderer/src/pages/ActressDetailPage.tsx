@@ -28,7 +28,8 @@ import ActressAvatar from '../components/ActressAvatar'
 import ActressGalleryPanel from '../components/ActressGalleryPanel'
 import ActressProfileMeta, {
   buildActressProfileStats,
-  buildActressProfileSubtitle
+  buildActressProfileSubtitle,
+  canMarkActressScrapeSuccess
 } from '../components/ActressProfileMeta'
 import DetailScrollBody from '../components/DetailScrollBody'
 import ImagePreviewLightbox from '../components/ImagePreviewLightbox'
@@ -184,7 +185,7 @@ export default function ActressDetailPage(): JSX.Element {
     setScraperName(site)
     setScraping(true)
     try {
-      await api.actressScrape.one(
+      const outcome = await api.actressScrape.one(
         actressId,
         site || undefined,
         fields,
@@ -193,12 +194,18 @@ export default function ActressDetailPage(): JSX.Element {
         useAliases,
         autoCropAvatar
       )
-      toast.show('匹配完成', 'success')
-      invalidateActressLibraryQueries(queryClient)
-      void load({ silent: true })
+      if (outcome.status === 'pending') {
+        toast.show('发现名称冲突，结果已保存到待确认', 'info')
+      } else if (outcome.status === 'failure') {
+        toast.show(`匹配失败：${outcome.error}`, 'error')
+      } else {
+        toast.show('匹配完成', 'success')
+      }
     } catch (e) {
       toast.show(`匹配失败：${(e as Error).message}`, 'error')
     } finally {
+      invalidateActressLibraryQueries(queryClient)
+      await load({ silent: true })
       setScraping(false)
     }
   }
@@ -243,11 +250,23 @@ export default function ActressDetailPage(): JSX.Element {
     }
   }
 
+  const handleMarkScrapeSuccess = async (): Promise<void> => {
+    try {
+      await api.actresses.markScrapeSuccess(actressId)
+      toast.show('已标记为刮削成功', 'success')
+      invalidateActressLibraryQueries(queryClient)
+      await load({ silent: true })
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+    }
+  }
+
   const doClearMeta = async (): Promise<void> => {
     try {
       await api.actresses.clearMeta(actressId)
       setConfirmClear(false)
       toast.show('已清除元数据', 'success')
+      invalidateActressLibraryQueries(queryClient)
       void load({ silent: true })
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
@@ -314,12 +333,13 @@ export default function ActressDetailPage(): JSX.Element {
   }
 
   const avatar = assetUrl(actress.avatar_path)
+  const avatarPreview = assetUrl(actress.avatar_source_path) ?? avatar
   const canDelete = actress.videos.length === 0
   const profileSubtitle = buildActressProfileSubtitle(actress)
   const profileStats = buildActressProfileStats(actress)
 
   const onAvatarKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (!avatar || !avatarPreviewEnabled || e.defaultPrevented) return
+    if (!avatarPreview || !avatarPreviewEnabled || e.defaultPrevented) return
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
       openAvatarPreview()
@@ -353,6 +373,14 @@ export default function ActressDetailPage(): JSX.Element {
           label: '合并演员',
           onClick: () => setShowMerge(true)
         },
+        {
+          key: 'mark-success',
+          label: '标记为刮削成功',
+          hidden: !canMarkActressScrapeSuccess(actress.scraped_status),
+          onClick: () => {
+            void handleMarkScrapeSuccess()
+          }
+        },
         { key: 'danger-separator', type: 'separator' },
         {
           key: 'clear-meta',
@@ -378,18 +406,18 @@ export default function ActressDetailPage(): JSX.Element {
         <div className="actress-profile-header">
           <div
             className={`detail-avatar-frame${
-              avatar && avatarPreviewEnabled ? ' detail-avatar-frame--preview' : ''
+              avatarPreview && avatarPreviewEnabled ? ' detail-avatar-frame--preview' : ''
             }`}
-            role={avatar && avatarPreviewEnabled ? 'button' : undefined}
+            role={avatarPreview && avatarPreviewEnabled ? 'button' : undefined}
             aria-label={
-              avatar && avatarPreviewEnabled
-                ? `查看头像：${actress.main_name}`
+              avatarPreview && avatarPreviewEnabled
+                ? `查看原图：${actress.main_name}`
                 : undefined
             }
-            tabIndex={avatar && avatarPreviewEnabled ? 0 : undefined}
-            title={avatar && avatarPreviewEnabled ? '查看头像' : undefined}
+            tabIndex={avatarPreview && avatarPreviewEnabled ? 0 : undefined}
+            title={avatarPreview && avatarPreviewEnabled ? '查看原图' : undefined}
             onClick={() => {
-              if (avatar && avatarPreviewEnabled) openAvatarPreview()
+              if (avatarPreview && avatarPreviewEnabled) openAvatarPreview()
             }}
             onKeyDown={onAvatarKeyDown}
           >
@@ -469,16 +497,16 @@ export default function ActressDetailPage(): JSX.Element {
       )}
       </DetailScrollBody>
 
-      {avatarPreviewOpen && avatar && (
+      {avatarPreviewOpen && avatarPreview && (
         <ImagePreviewLightbox
-          items={[{ id: actress.id, src: avatar }]}
+          items={[{ id: actress.id, src: avatarPreview }]}
           index={0}
           onClose={closeAvatarPreview}
           onIndexChange={() => {}}
           labels={{
-            dialog: '查看演员头像',
-            filmstrip: '演员头像',
-            thumb: () => `头像：${actress.main_name}`
+            dialog: '查看演员原图',
+            filmstrip: '演员原图',
+            thumb: () => `原图：${actress.main_name}`
           }}
         />
       )}
@@ -546,6 +574,7 @@ export default function ActressDetailPage(): JSX.Element {
           onMerged={() => {
             setShowMerge(false)
             toast.show('演员已合并', 'success')
+            invalidateActressLibraryQueries(queryClient)
             void load({ silent: true })
           }}
         />

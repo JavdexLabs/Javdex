@@ -1,9 +1,9 @@
-import { Outlet, useMatch } from 'react-router-dom'
+import { matchPath, Outlet, useLocation } from 'react-router-dom'
 import { type ReactNode } from 'react'
 
 interface ListDetailShellProps {
   list: ReactNode
-  detailMatchPath: string
+  detailMatchPath: string | readonly string[]
   /** When false, matches nested paths (e.g. facet detail + video id). Default true. */
   detailMatchEnd?: boolean
 }
@@ -14,8 +14,12 @@ export default function ListDetailShell({
   detailMatchPath,
   detailMatchEnd = true
 }: ListDetailShellProps): JSX.Element {
-  const detailMatch = useMatch({ path: detailMatchPath, end: detailMatchEnd })
-  const detailOpen = Boolean(detailMatch)
+  const location = useLocation()
+  const detailMatchPaths =
+    typeof detailMatchPath === 'string' ? [detailMatchPath] : detailMatchPath
+  const detailOpen = detailMatchPaths.some((path) =>
+    Boolean(matchPath({ path, end: detailMatchEnd }, location.pathname))
+  )
 
   return (
     <div className={`list-detail-shell${detailOpen ? ' list-detail-shell--detail' : ''}`}>

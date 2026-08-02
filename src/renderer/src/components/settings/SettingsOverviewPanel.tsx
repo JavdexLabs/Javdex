@@ -91,6 +91,7 @@ interface SettingsOverviewPanelProps {
   anyBatchActive: boolean
   videoBatchPct: number
   actressPct: number
+  actressConflictGroupCount: number
   unrecognizedCount: number
   statsRefreshKey?: number
   onNavigate: (group: SettingsGroup, tab?: SettingsTab) => void
@@ -102,11 +103,14 @@ interface SettingsOverviewPanelProps {
   onOpenActressBatchAdvanced: () => void
   onOpenVideoBatchDetails: () => void
   onOpenActressBatchDetails: () => void
+  onOpenActressConflicts: () => void
   onPauseVideoBatch: BatchControlHandler
   onPauseActressBatch: BatchControlHandler
   onResumeBatch: BatchControlHandler
   onDiscardVideoBatch: BatchControlHandler
   onDiscardActressBatch: BatchControlHandler
+  actressBatchRecoverable?: boolean
+  actressBatchUnrecoverableReason?: string | null
 }
 
 function formatCount(value: number): string {
@@ -242,6 +246,11 @@ function BatchOverviewStatus({
   batch,
   percent,
   scopeLabel,
+  canResume = true,
+  resumeDisabledReason = null,
+  showPending = false,
+  pendingGroupCount = 0,
+  onOpenPending,
   onOpen,
   onPause,
   onResume,
@@ -250,6 +259,11 @@ function BatchOverviewStatus({
   batch: BatchProgress | null
   percent: number
   scopeLabel: string
+  canResume?: boolean
+  resumeDisabledReason?: string | null
+  showPending?: boolean
+  pendingGroupCount?: number
+  onOpenPending?: () => void
   onOpen: () => void
   onPause: BatchControlHandler
   onResume: BatchControlHandler
@@ -259,13 +273,21 @@ function BatchOverviewStatus({
   const batchRunning = batch?.status === 'running'
   const batchPaused = batch?.status === 'paused'
   const batchControllable = batchRunning || batchPaused
-  const status = activeBatch ? batchStatusLabel(batch?.status) : '空闲'
+  const status = activeBatch
+    ? !canResume && batchPaused
+      ? '不可恢复'
+      : batchStatusLabel(batch?.status)
+    : '空闲'
   const safePercent = activeBatch ? Math.max(0, Math.min(percent, 100)) : 0
   const batchCount = activeBatch ? `${batch?.current ?? 0}/${batch?.total ?? 0}` : ''
   const batchDetail = activeBatch
-    ? batch?.currentCode
-      ? `当前：${batch.currentCode}`
-      : `成功 ${batch?.success ?? 0} · 失败 ${batch?.failed ?? 0}`
+    ? !canResume && batchPaused
+      ? resumeDisabledReason || '状态范围无法识别，请终止后重新启动'
+      : batch?.currentCode
+        ? `当前：${batch.currentCode}`
+        : `成功 ${batch?.success ?? 0}${
+            showPending ? ` · 待确认 ${pendingGroupCount}` : ''
+          } · 失败 ${batch?.failed ?? 0}`
     : '上方可启动未刮削项或高级刮削'
   const openLabel = `查看${scopeLabel}批量任务详情`
 
@@ -284,6 +306,8 @@ function BatchOverviewStatus({
             running={batchRunning}
             paused={batchPaused}
             status={batch?.status ?? 'idle'}
+            canResume={canResume}
+            resumeDisabledReason={resumeDisabledReason}
             variant="icon"
             showDisabled={false}
             onPause={onPause}
@@ -309,8 +333,17 @@ function BatchOverviewStatus({
       </div>
       <div className="settings-overview-batch-meta">
         <small>{batchDetail}</small>
-        {activeBatch ? (
-          <span className="settings-overview-batch-inline-count">{batchCount}</span>
+        {activeBatch || (showPending && pendingGroupCount > 0 && onOpenPending) ? (
+          <span className="settings-overview-batch-meta-actions">
+            {showPending && pendingGroupCount > 0 && onOpenPending ? (
+              <button type="button" className="btn btn-sm btn-ghost" onClick={onOpenPending}>
+                查看待确认
+              </button>
+            ) : null}
+            {activeBatch ? (
+              <span className="settings-overview-batch-inline-count">{batchCount}</span>
+            ) : null}
+          </span>
         ) : null}
       </div>
     </div>
@@ -329,6 +362,7 @@ export default function SettingsOverviewPanel({
   anyBatchActive,
   videoBatchPct,
   actressPct,
+  actressConflictGroupCount,
   unrecognizedCount,
   statsRefreshKey = 0,
   onNavigate,
@@ -340,11 +374,14 @@ export default function SettingsOverviewPanel({
   onOpenActressBatchAdvanced,
   onOpenVideoBatchDetails,
   onOpenActressBatchDetails,
+  onOpenActressConflicts,
   onPauseVideoBatch,
   onPauseActressBatch,
   onResumeBatch,
   onDiscardVideoBatch,
-  onDiscardActressBatch
+  onDiscardActressBatch,
+  actressBatchRecoverable = true,
+  actressBatchUnrecoverableReason = null
 }: SettingsOverviewPanelProps): JSX.Element {
   const toast = useToast()
   const { stats, isLoading: statsLoading } = useLibraryOverviewStats(statsRefreshKey)
@@ -622,6 +659,7 @@ export default function SettingsOverviewPanel({
           <ScrapeCoverageBlock
             scraped={actressScraped}
             unscraped={stats?.actresses.unscraped ?? 0}
+            failed={stats?.actresses.failed ?? 0}
             total={actressFemaleTotal}
             title="刮削覆盖 · 女优"
           />
@@ -662,6 +700,11 @@ export default function SettingsOverviewPanel({
             batch={actressBatch}
             percent={actressPct}
             scopeLabel="演员"
+            canResume={actressBatchRecoverable}
+            resumeDisabledReason={actressBatchUnrecoverableReason}
+            showPending
+            pendingGroupCount={actressConflictGroupCount}
+            onOpenPending={onOpenActressConflicts}
             onOpen={onOpenActressBatchDetails}
             onPause={onPauseActressBatch}
             onResume={onResumeBatch}

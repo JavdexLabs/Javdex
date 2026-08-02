@@ -67,10 +67,19 @@ CREATE TABLE IF NOT EXISTS actresses (
     zodiac TEXT,
     nationality TEXT,
     profile_summary TEXT,
+    scraped_status INTEGER NOT NULL DEFAULT 0 CHECK(scraped_status IN (0, 1, 2)),
     last_scraped_at TEXT,
     updated_at TEXT,
-    gender TEXT CHECK(gender IN ('female', 'male'))
+    gender TEXT CHECK(gender IN ('female', 'male')),
+    revision INTEGER NOT NULL DEFAULT 0
 );
+CREATE INDEX IF NOT EXISTS idx_actresses_scraped_status ON actresses(scraped_status);
+CREATE TRIGGER IF NOT EXISTS trg_actresses_revision_after_update
+AFTER UPDATE ON actresses
+WHEN NEW.revision = OLD.revision
+BEGIN
+    UPDATE actresses SET revision = OLD.revision + 1 WHERE id = NEW.id;
+END;
 
 CREATE TABLE IF NOT EXISTS video_actress (
     video_id INTEGER NOT NULL,
@@ -183,6 +192,82 @@ CREATE TABLE IF NOT EXISTS actress_names (
     UNIQUE (actress_id, name, type)
 );
 CREATE INDEX IF NOT EXISTS idx_actress_names_name ON actress_names(name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_actress_names_one_main
+    ON actress_names(actress_id)
+    WHERE type = 'main';
+
+CREATE TABLE IF NOT EXISTS actress_name_ownership (
+    normalized_name TEXT PRIMARY KEY CHECK(length(normalized_name) > 0),
+    actress_id INTEGER NOT NULL,
+    FOREIGN KEY (actress_id) REFERENCES actresses(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_actress_name_ownership_actress_id
+    ON actress_name_ownership(actress_id);
+
+CREATE TABLE IF NOT EXISTS pending_actress_name_claims (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    normalized_name TEXT NOT NULL CHECK(length(normalized_name) > 0),
+    actress_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    locale TEXT,
+    source TEXT,
+    is_primary INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (actress_id) REFERENCES actresses(id) ON DELETE CASCADE,
+    UNIQUE (normalized_name, actress_id, name, type)
+);
+CREATE INDEX IF NOT EXISTS idx_pending_actress_name_claims_normalized
+    ON pending_actress_name_claims(normalized_name);
+CREATE INDEX IF NOT EXISTS idx_pending_actress_name_claims_actress_id
+    ON pending_actress_name_claims(actress_id);
+
+CREATE TABLE IF NOT EXISTS pending_actress_scrapes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actress_id INTEGER NOT NULL UNIQUE,
+    revision INTEGER NOT NULL DEFAULT 1,
+    target_actress_revision INTEGER NOT NULL,
+    plugin_name TEXT NOT NULL,
+    plugin_source TEXT NOT NULL CHECK(plugin_source IN ('builtin', 'user', 'composite')),
+    plugin_version TEXT,
+    query_name TEXT NOT NULL,
+    selected_fields_json TEXT NOT NULL,
+    applicable_fields_json TEXT NOT NULL,
+    update_mode TEXT NOT NULL CHECK(update_mode IN ('replace', 'fillEmpty', 'replaceIfPresent')),
+    result_json TEXT NOT NULL,
+    warnings_json TEXT NOT NULL,
+    batch_job_id TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (actress_id) REFERENCES actresses(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_pending_actress_scrapes_created_at
+    ON pending_actress_scrapes(created_at);
+
+CREATE TABLE IF NOT EXISTS pending_actress_scrape_conflicts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pending_scrape_id INTEGER NOT NULL,
+    normalized_name TEXT NOT NULL CHECK(length(normalized_name) > 0),
+    name TEXT NOT NULL,
+    name_type TEXT NOT NULL CHECK(name_type IN ('main', 'zh', 'en', 'alias')),
+    FOREIGN KEY (pending_scrape_id) REFERENCES pending_actress_scrapes(id) ON DELETE CASCADE,
+    UNIQUE (pending_scrape_id, normalized_name, name, name_type)
+);
+CREATE INDEX IF NOT EXISTS idx_pending_actress_scrape_conflicts_name
+    ON pending_actress_scrape_conflicts(normalized_name);
+
+CREATE TABLE IF NOT EXISTS pending_actress_scrape_resources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pending_scrape_id INTEGER NOT NULL,
+    field TEXT NOT NULL CHECK(field IN ('avatar', 'gallery')),
+    position INTEGER NOT NULL DEFAULT 0,
+    remote_url TEXT,
+    staged_path TEXT NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    FOREIGN KEY (pending_scrape_id) REFERENCES pending_actress_scrapes(id) ON DELETE CASCADE,
+    UNIQUE (pending_scrape_id, field, position)
+);
+CREATE INDEX IF NOT EXISTS idx_pending_actress_scrape_resources_pending
+    ON pending_actress_scrape_resources(pending_scrape_id);
 
 CREATE TABLE IF NOT EXISTS actress_tags (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

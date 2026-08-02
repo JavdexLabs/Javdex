@@ -6,7 +6,11 @@ import type {
 } from '@shared/types'
 import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS } from '@shared/types'
 import { listVideosForBatchScrape } from '../db/videoRepo'
-import { scrapeVideo } from '../scrapers/scraperManager'
+import {
+  resolveVideoScrapeFieldSources,
+  scrapeVideo,
+  type ScrapeOutcome
+} from '../scrapers/scraperManager'
 import { scrapeBrowser } from '../scrapers/scrapeBrowser'
 import {
   createBatchScrapeJob,
@@ -49,10 +53,12 @@ function resolveVideoTargets(request: VideoBatchScrapeRequest): Array<{ id: numb
   const explicitIds = request.videoIds
     ? Array.from(new Set(request.videoIds.filter((id) => Number.isFinite(id))))
     : []
+  const fieldSources = resolveVideoScrapeFieldSources(request.scraperName)
   return listVideosForBatchScrape({
     status: request.status,
     videoIds: explicitIds.length > 0 ? explicitIds : request.videoIds,
-    missingFields: request.missingFields
+    missingFields: request.missingFields,
+    ...fieldSources
   })
 }
 
@@ -63,6 +69,36 @@ function buildStatusLabel(request: VideoBatchScrapeRequest): string {
   return explicitIds.length > 0
     ? `已选 ${explicitIds.length} 部影片`
     : (STATUS_LABEL.get(request.status) ?? String(request.status))
+}
+
+export function formatVideoBatchScrapeOutcome(
+  outcome: ScrapeOutcome,
+  fallbackCode: string
+): { status: 'success' | 'failure'; level: 'success' | 'info' | 'error'; message: string } {
+  if (!outcome.ok) {
+    return {
+      status: 'failure',
+      level: 'error',
+      message: `更新失败：${outcome.error ?? '未知错误'}`
+    }
+  }
+  const warningText = outcome.warnings?.join('；')
+  if (outcome.skipped) {
+    return {
+      status: 'success',
+      level: 'info',
+      message: warningText
+        ? `跳过：资源不可用，已保留原数据（${warningText}）`
+        : '跳过：所选字段无可写入内容'
+    }
+  }
+  return {
+    status: 'success',
+    level: warningText ? 'info' : 'success',
+    message: warningText
+      ? `更新成功，部分图片未应用：${outcome.result?.title ?? fallbackCode}（${warningText}）`
+      : `更新成功：${outcome.result?.title ?? fallbackCode}`
+  }
 }
 
 /** Sequential batch queue for video metadata scraping/updating. */
@@ -153,6 +189,7 @@ class VideoBatchScrapeQueue {
         startIndex: job.nextIndex,
         initialProgress: {
           success: job.success,
+          pending: job.pending,
           failed: job.failed,
           logs: job.logs
         },
@@ -175,25 +212,7 @@ class VideoBatchScrapeQueue {
             mode,
             delayController
           })
-          if (itemOutcome.ok) {
-            if (itemOutcome.skipped) {
-              return {
-                success: true,
-                level: 'info',
-                message: '跳过：所选更新字段无需写入'
-              }
-            }
-            return {
-              success: true,
-              level: 'success',
-              message: `更新成功：${itemOutcome.result?.title ?? code}`
-            }
-          }
-          return {
-            success: false,
-            level: 'error',
-            message: `更新失败：${itemOutcome.error ?? '未知错误'}`
-          }
+          return formatVideoBatchScrapeOutcome(itemOutcome, code)
         },
         exceptionMessage: (_target, err) => `更新异常：${err.message}`,
         delayAfterTarget: false

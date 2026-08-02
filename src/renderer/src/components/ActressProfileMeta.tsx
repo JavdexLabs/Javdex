@@ -5,9 +5,10 @@ import {
   ZODIAC_OPTIONS
 } from '@shared/actressProfileOptions'
 import { formatCupSizeDisplay, normalizeCupSize } from '@shared/cupSizeUtils'
-import type { ActressDetail } from '@shared/types'
+import type { ActressDetail, ScrapedStatus } from '@shared/types'
+import { ACTRESS_SCRAPE_STATUS_LABELS, actressStatusFilterOf } from '@shared/types'
 
-type MetaItem = { key: string; label: string; value: string }
+type MetaItem = { key: string; label: string; value: string; status?: ScrapedStatus }
 
 function isBlank(value: string | null | undefined): boolean {
   return !value?.trim()
@@ -54,6 +55,38 @@ function formatTimestamp(value: string | null | undefined): string | null {
   const date = new Date(trimmed)
   if (Number.isNaN(date.getTime())) return trimmed
   return date.toLocaleString('zh-CN', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+const ACTRESS_SCRAPE_STATUS_PRESENTATION: Record<ScrapedStatus, { className: string }> = {
+  0: { className: 'detail-meta-status--unscraped' },
+  1: { className: 'detail-meta-status--success' },
+  2: { className: 'detail-meta-status--failed' }
+}
+
+/** Cumulative success is sticky, so only unscraped and failed records can be marked manually. */
+export function canMarkActressScrapeSuccess(status: ScrapedStatus): boolean {
+  return status !== 1
+}
+
+export function buildActressScrapeMetaItems(
+  actress: Pick<ActressDetail, 'scraped_status' | 'last_scraped_at'>
+): MetaItem[] {
+  // Successful records are the common case; keep the detail page quiet unless attention is needed.
+  if (actress.scraped_status === 1) return []
+
+  const items: MetaItem[] = [
+    {
+      key: 'scraped_status',
+      label: '刮削状态',
+      value: ACTRESS_SCRAPE_STATUS_LABELS[actressStatusFilterOf(actress.scraped_status)],
+      status: actress.scraped_status
+    }
+  ]
+  const scrapedAt = formatTimestamp(actress.last_scraped_at)
+  if (scrapedAt) {
+    items.push({ key: 'last_scraped_at', label: '最近成功', value: scrapedAt })
+  }
+  return items
 }
 
 function findTypedName(actress: ActressDetail, type: string): string | null {
@@ -134,7 +167,7 @@ function buildActressMetaSections(actress: ActressDetail): Array<{
     }
   }
 
-  const profile: MetaItem[] = []
+  const profile: MetaItem[] = buildActressScrapeMetaItems(actress)
   if (!isBlank(actress.blood_type)) {
     profile.push({
       key: 'blood_type',
@@ -149,11 +182,6 @@ function buildActressMetaSections(actress: ActressDetail): Array<{
       value: labelForStoredOption(ZODIAC_OPTIONS, actress.zodiac!.trim())
     })
   }
-  const scrapedAt = formatTimestamp(actress.last_scraped_at)
-  if (scrapedAt) {
-    profile.push({ key: 'last_scraped_at', label: '最近刮削', value: scrapedAt })
-  }
-
   const sections: Array<{ id: string; title: string; items: MetaItem[] }> = []
   if (identity.length > 0) sections.push({ id: 'identity', title: '基本资料', items: identity })
   if (physique.length > 0) sections.push({ id: 'physique', title: '身体数据', items: physique })
@@ -205,7 +233,17 @@ export default function ActressProfileMeta({
                 {section.items.map((item) => (
                   <div key={item.key} className="actress-profile-meta-item">
                     <dt>{item.label}</dt>
-                    <dd>{item.value}</dd>
+                    <dd
+                      className={
+                        item.status == null
+                          ? undefined
+                          : `detail-meta-status ${
+                              ACTRESS_SCRAPE_STATUS_PRESENTATION[item.status].className
+                            }`
+                      }
+                    >
+                      {item.value}
+                    </dd>
                   </div>
                 ))}
               </dl>

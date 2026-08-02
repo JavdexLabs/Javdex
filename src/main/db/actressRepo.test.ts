@@ -4,28 +4,37 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createAvatarCropV1, parseAvatarCrop } from '@shared/avatarCrop'
+import type { ScrapedStatus } from '@shared/types'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
 import { insertTestVideoWithFile } from './testVideoFixtures'
 import {
+  addActressGalleryAsset,
   applyActressScrapeResult,
   clearActressMetadataRecord,
   clearBrokenActressAvatarIfNeeded,
   countActressesForBatchScrape,
   deleteActressGalleryAsset,
+  deleteUnlinkedActresses,
   backfillActressGalleryAssetDimensions,
+  editActress,
+  findActressByNameOrAlias,
   listActresses,
   listActressesForBatchScrape,
+  listActressPage,
+  markActressScrapeSucceeded,
   mergeActresses,
   getActressAvatarSourceInfo,
   getActressDetail,
+  planActressScrapeResult,
   replaceActressGalleryAssets,
+  recordActressScrapeFailure,
   resolveEffectiveActressScrapeFields,
   setActressAvatarBundle,
   setActressPosterPath,
-  touchActressLastScrapedAt,
   upsertActressFromScrape
 } from './actressRepo'
 import { avatarSourceFingerprint } from '../services/assetService'
+import { findActressIdByOwnedName } from './actressNameOwnership'
 
 let tempRoot: string | null = null
 
@@ -101,12 +110,65 @@ function setupDb(): void {
   db.prepare(
     'INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, ?, ?)'
   ).run(1, 'Complete Alias', 'alias', 0)
+  const insertName = db.prepare(
+    "INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, 'main', 1)"
+  )
+  const insertOwnership = db.prepare(
+    'INSERT INTO actress_name_ownership (normalized_name, actress_id) VALUES (?, ?)'
+  )
+  for (const [id, name, normalizedName] of [
+    [1, 'Complete', 'complete'],
+    [2, 'Missing Female', 'missingfemale'],
+    [3, 'Missing Male', 'missingmale'],
+    [4, 'Unknown Gender', 'unknowngender']
+  ] as const) {
+    insertName.run(id, name)
+    insertOwnership.run(normalizedName, id)
+  }
+  insertOwnership.run('completealias', 1)
   db.prepare(
     `INSERT INTO actress_gallery_assets
       (actress_id, type, position, remote_url, local_path, created_at)
      VALUES (?, 'gallery', 0, ?, ?, ?)`
   ).run(1, 'https://example.test/complete.jpg', 'actress_gallery/complete.jpg', 'now')
 }
+
+function setActressScrapeRecord(
+  id: number,
+  status: ScrapedStatus,
+  lastScrapedAt: string | null
+): void {
+  getDb()
+    .prepare('UPDATE actresses SET scraped_status = ?, last_scraped_at = ? WHERE id = ?')
+    .run(status, lastScrapedAt, id)
+}
+
+const ACTRESS_SCRAPE_STATUS_LABEL: Record<ScrapedStatus, string> = {
+  0: '未刮削',
+  1: '刮削成功',
+  2: '刮削失败'
+}
+
+const KEEPER_SUCCESS_TIME = '2023-03-03T00:00:00.000Z'
+const MERGED_SUCCESS_TIME = '2024-04-04T00:00:00.000Z'
+
+/** Every pairing of cumulative states, with the history the keeper must end up with. */
+const MERGE_SCRAPE_STATUS_MATRIX: Array<{
+  keep: ScrapedStatus
+  merge: ScrapedStatus
+  status: ScrapedStatus
+  lastScrapedAt: string | null
+}> = [
+  { keep: 0, merge: 0, status: 0, lastScrapedAt: null },
+  { keep: 0, merge: 2, status: 2, lastScrapedAt: null },
+  { keep: 0, merge: 1, status: 1, lastScrapedAt: MERGED_SUCCESS_TIME },
+  { keep: 2, merge: 0, status: 2, lastScrapedAt: null },
+  { keep: 2, merge: 2, status: 2, lastScrapedAt: null },
+  { keep: 2, merge: 1, status: 1, lastScrapedAt: MERGED_SUCCESS_TIME },
+  { keep: 1, merge: 0, status: 1, lastScrapedAt: KEEPER_SUCCESS_TIME },
+  { keep: 1, merge: 2, status: 1, lastScrapedAt: KEEPER_SUCCESS_TIME },
+  { keep: 1, merge: 1, status: 1, lastScrapedAt: MERGED_SUCCESS_TIME }
+]
 
 afterEach(() => {
   closeDatabase()
@@ -117,22 +179,105 @@ afterEach(() => {
   }
 })
 
-describe('actressRepo.listActresses', () => {
-  it('matches main name, alias, and typed names', () => {
+describe('actressRepo actress name ownership', () => {
+  it('changes the main-name row and ownership together when an actress is renamed', () => {
     setupDb()
     const db = getDb()
-    db.prepare(
-      'INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, ?, ?)'
-    ).run(1, '完整中文', 'zh', 1)
-    db.prepare(
-      'INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, ?, ?)'
-    ).run(1, 'Complete EN', 'en', 1)
-    db.prepare('INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, ?, ?)').run(
-      1,
-      'Complete Romaji',
-      'alias',
-      0
+    editActress(1, { main_name: 'Renamed Complete' })
+
+    assert.equal(findActressIdByOwnedName('Renamed Complete'), 1)
+    assert.equal(findActressIdByOwnedName('Complete'), null)
+    assert.deepEqual(
+      db
+        .prepare("SELECT name, is_primary FROM actress_names WHERE actress_id = 1 AND type = 'main'")
+        .all(),
+      [{ name: 'Renamed Complete', is_primary: 1 }]
     )
+  })
+
+  it('keeps ownership while another name type still declares the same normalized name', () => {
+    setupDb()
+
+    editActress(1, {
+      name_zh: 'Shared Name',
+      aliases: ['Ｓｈａｒｅｄ　Ｎａｍｅ']
+    })
+    editActress(1, { name_zh: null })
+
+    assert.equal(findActressIdByOwnedName('shared name'), 1)
+
+    editActress(1, { aliases: [] })
+
+    assert.equal(findActressIdByOwnedName('shared name'), null)
+  })
+
+  it('rolls back the complete manual edit when any declared name has another owner', () => {
+    setupDb()
+
+    assert.throws(
+      () =>
+        editActress(1, {
+          main_name: 'Changed Before Conflict',
+          birth_date: '2001-02-03',
+          name_en: 'Ｍｉｓｓｉｎｇ　Ｆｅｍａｌｅ'
+        }),
+      /已被其他演员使用/
+    )
+
+    const actress = getDb()
+      .prepare('SELECT main_name, birth_date FROM actresses WHERE id = 1')
+      .get() as { main_name: string; birth_date: string | null }
+    assert.deepEqual(actress, { main_name: 'Complete', birth_date: '1990-01-01' })
+    assert.equal(findActressIdByOwnedName('Complete'), 1)
+    assert.equal(findActressIdByOwnedName('Changed Before Conflict'), null)
+  })
+})
+
+describe('actressRepo.listActresses', () => {
+  it('excludes migrated pending names from search and exact identity lookup', () => {
+    setupDb()
+    const db = getDb()
+    const insertName = db.prepare(
+      "INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, 'alias', 0)"
+    )
+    insertName.run(2, 'Ambiguous Migrated Name')
+    insertName.run(3, 'Ａｍｂｉｇｕｏｕｓ　Ｍｉｇｒａｔｅｄ　Ｎａｍｅ')
+    const insertClaim = db.prepare(
+      `INSERT INTO pending_actress_name_claims
+        (normalized_name, actress_id, name, type, is_primary)
+       VALUES (?, ?, ?, 'alias', 0)`
+    )
+    insertClaim.run('ambiguousmigratedname', 2, 'Ambiguous Migrated Name')
+    insertClaim.run('ambiguousmigratedname', 3, 'Ａｍｂｉｇｕｏｕｓ　Ｍｉｇｒａｔｅｄ　Ｎａｍｅ')
+
+    assert.deepEqual(listActresses('Ambiguous Migrated', 'all'), [])
+    assert.equal(findActressByNameOrAlias('ambiguous migrated name'), null)
+  })
+
+  it('does not match a replaced main name that is not kept as an explicit alias', () => {
+    setupDb()
+    const actressId = upsertActressFromScrape('Former (Name)', null)
+    editActress(actressId, { main_name: 'Current Name' })
+
+    assert.deepEqual(
+      listActresses('(', 'all').map((actress) => actress.main_name),
+      []
+    )
+
+    const db = getDb()
+    const mainNames = db
+      .prepare("SELECT name, is_primary FROM actress_names WHERE actress_id = ? AND type = 'main'")
+      .all(actressId)
+    assert.deepEqual(mainNames, [{ name: 'Current Name', is_primary: 1 }])
+  })
+
+  it('matches main name, alias, and typed names', () => {
+    setupDb()
+    editActress(1, {
+      name_zh: '完整中文',
+      name_en: 'Complete EN',
+      aliases: ['Complete Alias', 'Complete Romaji']
+    })
 
     assert.deepEqual(
       listActresses('Complete', 'all').map((a) => a.main_name),
@@ -159,6 +304,38 @@ describe('actressRepo.listActresses', () => {
     ])
   })
 
+  it('treats SQL LIKE metacharacters as literal search text', () => {
+    setupDb()
+    upsertActressFromScrape('Percent % Name', null)
+    const aliasActressId = upsertActressFromScrape('Alias Holder', null)
+    const englishNameActressId = upsertActressFromScrape('English Name Holder', null)
+    editActress(aliasActressId, { aliases: ['Under_score'] })
+    editActress(englishNameActressId, { name_en: String.raw`Back\slash` })
+
+    assert.deepEqual(
+      listActresses('%', 'all').map((actress) => actress.main_name),
+      ['Percent % Name']
+    )
+    assert.deepEqual(
+      listActresses('_', 'all').map((actress) => actress.main_name),
+      ['Alias Holder']
+    )
+    assert.deepEqual(
+      listActresses('\\', 'all').map((actress) => actress.main_name),
+      ['English Name Holder']
+    )
+  })
+
+  it('ignores stored names that are not visible name types', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare(
+      'INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, ?, ?)'
+    ).run(1, 'Invisible Historical Name', 'historical', 0)
+
+    assert.deepEqual(listActresses('Invisible', 'all'), [])
+  })
+
   it('sorts by video count descending by default', () => {
     setupDb()
     const db = getDb()
@@ -172,6 +349,142 @@ describe('actressRepo.listActresses', () => {
     assert.equal(sorted[0]?.main_name, 'Complete')
     assert.equal(sorted[0]?.video_count, 2)
     assert.equal(sorted.find((a) => a.main_name === 'Missing Female')?.video_count, 1)
+  })
+})
+
+describe('actressRepo.listActressPage', () => {
+  /** Complete: success, Missing Female: failed, Missing Male: success, Unknown Gender: unscraped. */
+  function setupStatuses(): void {
+    setupDb()
+    const update = getDb().prepare('UPDATE actresses SET scraped_status = ? WHERE id = ?')
+    update.run(1, 1)
+    update.run(2, 2)
+    update.run(1, 3)
+  }
+
+  it('returns the cumulative status of every actress with per-status counts', () => {
+    setupStatuses()
+
+    const page = listActressPage({ gender: 'all' })
+
+    assert.deepEqual(
+      page.items.map((item) => [item.main_name, item.scraped_status]),
+      [
+        ['Complete', 1],
+        ['Missing Female', 2],
+        ['Missing Male', 1],
+        ['Unknown Gender', 0]
+      ]
+    )
+    assert.deepEqual(page.statusCounts, { all: 4, success: 2, unscraped: 1, failed: 1 })
+  })
+
+  it('filters by each status while keeping the counts of the unfiltered scope', () => {
+    setupStatuses()
+
+    const success = listActressPage({ gender: 'all', status: 'success' })
+    const unscraped = listActressPage({ gender: 'all', status: 'unscraped' })
+    const failed = listActressPage({ gender: 'all', status: 'failed' })
+
+    assert.deepEqual(success.items.map((item) => item.main_name), ['Complete', 'Missing Male'])
+    assert.deepEqual(unscraped.items.map((item) => item.main_name), ['Unknown Gender'])
+    assert.deepEqual(failed.items.map((item) => item.main_name), ['Missing Female'])
+    assert.deepEqual(failed.statusCounts, success.statusCounts)
+  })
+
+  it('combines the status filter with search, gender and sort', () => {
+    setupStatuses()
+    const db = getDb()
+    insertTestVideoWithFile(db, { code: 'A-001', filePath: 'a.mp4', title: 'A', addTime: '2024-01-01' })
+    db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(1, 2)
+    db.prepare('UPDATE actresses SET scraped_status = 1 WHERE id = 4').run()
+
+    assert.deepEqual(
+      listActressPage({ search: 'Missing', gender: 'all', status: 'success' }).items.map(
+        (item) => item.main_name
+      ),
+      ['Missing Male']
+    )
+    assert.deepEqual(
+      listActressPage({ gender: 'female', status: 'failed' }).items.map((item) => [
+        item.main_name,
+        item.video_count
+      ]),
+      [['Missing Female', 1]]
+    )
+    assert.deepEqual(
+      listActressPage({ gender: 'all', status: 'success', sortBy: 'video_count', sortDir: 'asc' })
+        .items.map((item) => item.main_name),
+      ['Complete', 'Missing Male', 'Unknown Gender']
+    )
+  })
+
+  it('counts statuses within the current search and gender scope', () => {
+    setupStatuses()
+
+    assert.deepEqual(listActressPage({ gender: 'female' }).statusCounts, {
+      all: 2,
+      success: 1,
+      unscraped: 0,
+      failed: 1
+    })
+    assert.deepEqual(listActressPage({ search: 'Missing', gender: 'all' }).statusCounts, {
+      all: 2,
+      success: 1,
+      unscraped: 0,
+      failed: 1
+    })
+  })
+
+  it('treats a missing status as all statuses', () => {
+    setupStatuses()
+
+    assert.deepEqual(
+      listActressPage({ gender: 'all', status: 'all' }).items.map((item) => item.main_name),
+      listActressPage({ gender: 'all' }).items.map((item) => item.main_name)
+    )
+  })
+
+  it('filters by actual readable avatar files and treats broken paths as no avatar', () => {
+    setupStatuses()
+    const db = getDb()
+    db.prepare('UPDATE actresses SET avatar_path = ? WHERE id = ?').run(
+      'avatars/missing.jpg',
+      2
+    )
+
+    assert.deepEqual(
+      listActressPage({ gender: 'all', avatar: 'with' }).items.map((item) => item.main_name),
+      ['Complete']
+    )
+    assert.deepEqual(
+      listActressPage({ gender: 'all', avatar: 'without' }).items.map((item) => item.main_name),
+      ['Missing Female', 'Missing Male', 'Unknown Gender']
+    )
+    assert.deepEqual(
+      listActressPage({ gender: 'all', avatar: 'without-face' }).items.map(
+        (item) => item.main_name
+      ),
+      ['Complete']
+    )
+    assert.deepEqual(
+      listActressPage({ gender: 'all', status: 'success', avatar: 'without' }).items.map(
+        (item) => item.main_name
+      ),
+      ['Missing Male']
+    )
+  })
+
+  it('refreshes the avatar fingerprint as soon as the avatar file changes', () => {
+    setupStatuses()
+
+    const first = listActressPage({ gender: 'all', avatar: 'with' }).items[0]
+    assert.equal(first?.avatar_fingerprint, avatarSourceFingerprint(MINIMAL_JPEG))
+
+    writeTestAsset('avatars/complete.jpg', WEBP_CONTAINER)
+
+    const refreshed = listActressPage({ gender: 'all', avatar: 'with' }).items[0]
+    assert.equal(refreshed?.avatar_fingerprint, avatarSourceFingerprint(WEBP_CONTAINER))
   })
 })
 
@@ -203,6 +516,80 @@ describe('actressRepo.clearActressMetadataRecord', () => {
       .get() as { c: number }
     assert.equal(links.c, 1)
   })
+
+  it('clears non-name metadata without claiming a migrated pending main name', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare(
+      "DELETE FROM actress_name_ownership WHERE normalized_name IN ('complete', 'missingfemale')"
+    ).run()
+    db.prepare('UPDATE actresses SET main_name = ? WHERE id = 2').run('Ｃｏｍｐｌｅｔｅ')
+    db.prepare("UPDATE actress_names SET name = ? WHERE actress_id = 2 AND type = 'main'").run(
+      'Ｃｏｍｐｌｅｔｅ'
+    )
+    const insertClaim = db.prepare(
+      `INSERT INTO pending_actress_name_claims
+        (normalized_name, actress_id, name, type, is_primary)
+       VALUES ('complete', ?, ?, 'main', 1)`
+    )
+    insertClaim.run(1, 'Complete')
+    insertClaim.run(2, 'Ｃｏｍｐｌｅｔｅ')
+
+    clearActressMetadataRecord(1)
+
+    assert.equal(findActressIdByOwnedName('Complete'), null)
+    assert.equal(findActressIdByOwnedName('Complete Alias'), null)
+    assert.equal(
+      (db.prepare('SELECT COUNT(*) AS n FROM pending_actress_name_claims').get() as { n: number }).n,
+      2
+    )
+    assert.equal(getActressDetail(1)?.avatar_path, null)
+  })
+
+  it('resets every cumulative state to unscraped and drops the success time', () => {
+    setupDb()
+    markActressScrapeSucceeded(1)
+    recordActressScrapeFailure(2)
+
+    clearActressMetadataRecord(1)
+    clearActressMetadataRecord(2)
+    clearActressMetadataRecord(3)
+
+    for (const id of [1, 2, 3]) {
+      const detail = getActressDetail(id)
+      assert.equal(detail?.scraped_status, 0)
+      assert.equal(detail?.last_scraped_at, null)
+    }
+  })
+})
+
+describe('actressRepo.deleteUnlinkedActresses', () => {
+  it('deletes every selected unlinked actress and cleans their stored assets', () => {
+    setupDb()
+    writeTestAsset('actress_gallery/complete.jpg', MINIMAL_JPEG)
+
+    assert.equal(deleteUnlinkedActresses([1, 2, 2]), 2)
+    assert.equal(getActressDetail(1), null)
+    assert.equal(getActressDetail(2), null)
+    assert.equal(assetExists('avatars/complete.jpg'), false)
+    assert.equal(assetExists('actress_gallery/complete.jpg'), false)
+  })
+
+  it('rejects the whole batch when any selected actress still has a linked video', () => {
+    setupDb()
+    const db = getDb()
+    insertTestVideoWithFile(db, {
+      code: 'DELETE-001',
+      filePath: 'delete.mp4',
+      title: 'Linked',
+      addTime: '2024-01-01'
+    })
+    db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(1, 1)
+
+    assert.throws(() => deleteUnlinkedActresses([1, 2]), /1 位演员仍有关联影片/)
+    assert.ok(getActressDetail(1))
+    assert.ok(getActressDetail(2))
+  })
 })
 
 describe('actressRepo.mergeActresses', () => {
@@ -227,6 +614,15 @@ describe('actressRepo.mergeActresses', () => {
       'INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, ?, ?)'
     ).run(2, 'Missing Alias', 'alias', 0)
     db.prepare(
+      'INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, ?, ?)'
+    ).run(2, '缺失女优', 'zh', 1)
+    db.prepare(
+      'INSERT INTO actress_name_ownership (normalized_name, actress_id) VALUES (?, ?)'
+    ).run('缺失女优', 2)
+    db.prepare('UPDATE actresses SET cup_size = ? WHERE id = ?').run('F', 2)
+    db.prepare('INSERT INTO actress_tags (name, source) VALUES (?, ?)').run('Merged Tag', 'manual')
+    db.prepare('INSERT INTO actress_tag (actress_id, tag_id) VALUES (?, ?)').run(2, 1)
+    db.prepare(
       `INSERT INTO actress_gallery_assets
         (actress_id, type, position, remote_url, local_path, created_at)
        VALUES (?, 'gallery', 0, ?, ?, ?)`
@@ -239,8 +635,26 @@ describe('actressRepo.mergeActresses', () => {
     assert.equal(detail.videos.length, 2)
     assert.ok(detail.aliases.includes('Missing Female'))
     assert.ok(detail.aliases.includes('Missing Alias'))
+    assert.equal(detail.name_zh, '缺失女优')
+    assert.equal(detail.cup_size, 'F')
+    assert.deepEqual(
+      db
+        .prepare(
+          `SELECT at.name
+           FROM actress_tags at
+           JOIN actress_tag link ON link.tag_id = at.id
+           WHERE link.actress_id = ?`
+        )
+        .all(1),
+      [{ name: 'Merged Tag' }]
+    )
     assert.equal(detail.gallery.length, 2)
     assert.equal(db.prepare('SELECT id FROM actresses WHERE id = 2').get(), undefined)
+    assert.equal(findActressByNameOrAlias('Missing Female'), 1)
+    assert.deepEqual(
+      listActresses('Missing Female', 'all').map((actress) => actress.id),
+      [1]
+    )
   })
 
   it('rejects merging actresses with different genders', () => {
@@ -260,6 +674,190 @@ describe('actressRepo.mergeActresses', () => {
     assert.equal(detail.main_name, 'Missing Female')
     assert.ok(detail.aliases.includes('Complete'))
   })
+
+  it('rolls back the whole merge when final main-name reconstruction fails', () => {
+    setupDb()
+    const db = getDb()
+    db.exec(`
+      CREATE TRIGGER fail_merged_main_name
+      BEFORE INSERT ON actress_names
+      WHEN NEW.actress_id = 1
+        AND NEW.type = 'main'
+        AND NEW.name = 'Missing Female'
+      BEGIN
+        SELECT RAISE(ABORT, 'main reconstruction failed');
+      END;
+    `)
+
+    assert.throws(() => mergeActresses(1, 2, 'merge'), /main reconstruction failed/)
+
+    assert.equal(getActressDetail(1)?.main_name, 'Complete')
+    assert.equal(getActressDetail(2)?.main_name, 'Missing Female')
+    assert.equal(findActressByNameOrAlias('Complete'), 1)
+    assert.equal(findActressByNameOrAlias('Missing Female'), 2)
+  })
+
+  it('rolls back the whole merge when alias reconstruction fails', () => {
+    setupDb()
+    const db = getDb()
+    db.exec(`
+      CREATE TRIGGER fail_merged_alias
+      BEFORE INSERT ON actress_names
+      WHEN NEW.actress_id = 1
+        AND NEW.type = 'alias'
+        AND NEW.name = 'Missing Female'
+      BEGIN
+        SELECT RAISE(ABORT, 'alias reconstruction failed');
+      END;
+    `)
+
+    assert.throws(() => mergeActresses(1, 2, 'keep'), /alias reconstruction failed/)
+
+    assert.equal(getActressDetail(1)?.main_name, 'Complete')
+    assert.equal(getActressDetail(2)?.main_name, 'Missing Female')
+    assert.equal(findActressByNameOrAlias('Complete'), 1)
+    assert.equal(findActressByNameOrAlias('Missing Female'), 2)
+  })
+
+  it('rejects the whole merge when any resulting name belongs to a third actress', () => {
+    setupDb()
+    const db = getDb()
+    const thirdId = upsertActressFromScrape('Third Owner', null)
+    editActress(thirdId, { aliases: ['Contested Alias'] })
+    db.prepare(
+      "INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, 'alias', 0)"
+    ).run(2, 'Contested Alias')
+
+    assert.throws(() => mergeActresses(1, 2, 'keep'), /名称「Contested Alias」已被其他演员使用/)
+
+    assert.equal(getActressDetail(1)?.main_name, 'Complete')
+    assert.equal(getActressDetail(2)?.main_name, 'Missing Female')
+    assert.equal(findActressByNameOrAlias('Contested Alias'), thirdId)
+    assert.equal(findActressByNameOrAlias('Missing Female'), 2)
+  })
+
+  it('rejects the whole merge when the selected final main name belongs to a third actress', () => {
+    setupDb()
+    const db = getDb()
+    const thirdId = upsertActressFromScrape('Shared Name', null)
+    db.prepare('UPDATE actresses SET main_name = ? WHERE id = ?').run('Ｓｈａｒｅｄ　Ｎａｍｅ', 2)
+    db.prepare("UPDATE actress_names SET name = ? WHERE actress_id = ? AND type = 'main'").run(
+      'Ｓｈａｒｅｄ　Ｎａｍｅ',
+      2
+    )
+
+    assert.throws(() => mergeActresses(1, 2, 'merge'), /名称「Ｓｈａｒｅｄ　Ｎａｍｅ」已被其他演员使用/)
+
+    assert.equal(getActressDetail(1)?.main_name, 'Complete')
+    assert.equal(getActressDetail(2)?.main_name, 'Ｓｈａｒｅｄ　Ｎａｍｅ')
+    assert.equal(findActressByNameOrAlias('Shared Name'), thirdId)
+  })
+
+  it('resolves a migrated pending name claimed only by the two merged actresses', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare(
+      "INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, 'alias', 0)"
+    ).run(1, 'Shared Merge Name')
+    db.prepare(
+      "INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, 'alias', 0)"
+    ).run(2, 'Ｓｈａｒｅｄ　Ｍｅｒｇｅ　Ｎａｍｅ')
+    const insertPending = db.prepare(
+      `INSERT INTO pending_actress_name_claims
+         (normalized_name, actress_id, name, type, is_primary)
+       VALUES (?, ?, ?, 'alias', 0)`
+    )
+    insertPending.run('sharedmergename', 1, 'Shared Merge Name')
+    insertPending.run('sharedmergename', 2, 'Ｓｈａｒｅｄ　Ｍｅｒｇｅ　Ｎａｍｅ')
+
+    mergeActresses(1, 2, 'keep')
+
+    assert.equal(findActressByNameOrAlias('shared merge name'), 1)
+    assert.deepEqual(
+      db
+        .prepare(
+          'SELECT actress_id FROM pending_actress_name_claims WHERE normalized_name = ?'
+        )
+        .all('sharedmergename'),
+      []
+    )
+  })
+
+  it('preserves existing aliases without reapplying scraped-value heuristics', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare(
+      "INSERT INTO actress_names (actress_id, name, type, is_primary) VALUES (?, ?, 'alias', 0)"
+    ).run(2, 'Watch Mori')
+    db.prepare(
+      'INSERT INTO actress_name_ownership (normalized_name, actress_id) VALUES (?, ?)'
+    ).run('watchmori', 2)
+
+    mergeActresses(1, 2, 'keep')
+
+    assert.equal(findActressByNameOrAlias('Watch Mori'), 1)
+    assert.ok(getActressDetail(1)?.aliases.includes('Watch Mori'))
+  })
+
+  it('deletes unusable keeper avatar assets after adopting the merged actress avatar', () => {
+    setupDb()
+    const db = getDb()
+    writeTestAsset('avatars/broken-keeper.jpg', 'not an image')
+    writeTestAsset('avatar_sources/broken-keeper.jpg', 'not an image')
+    writeTestAvatar('avatars/merged-valid.jpg')
+    db.prepare(
+      'UPDATE actresses SET avatar_path = ?, avatar_source_path = ? WHERE id = ?'
+    ).run('avatars/broken-keeper.jpg', 'avatar_sources/broken-keeper.jpg', 1)
+    db.prepare('UPDATE actresses SET avatar_path = ? WHERE id = ?').run(
+      'avatars/merged-valid.jpg',
+      2
+    )
+
+    mergeActresses(1, 2, 'keep')
+
+    assert.equal(getActressDetail(1)?.avatar_path, 'avatars/merged-valid.jpg')
+    assert.equal(assetExists('avatars/broken-keeper.jpg'), false)
+    assert.equal(assetExists('avatar_sources/broken-keeper.jpg'), false)
+    assert.equal(assetExists('avatars/merged-valid.jpg'), true)
+  })
+
+  for (const merged of MERGE_SCRAPE_STATUS_MATRIX) {
+    const keeperLabel = ACTRESS_SCRAPE_STATUS_LABEL[merged.keep]
+    const mergedLabel = ACTRESS_SCRAPE_STATUS_LABEL[merged.merge]
+    it(`keeps ${ACTRESS_SCRAPE_STATUS_LABEL[merged.status]} when merging ${mergedLabel} into ${keeperLabel}`, () => {
+      setupDb()
+      setActressScrapeRecord(1, merged.keep, merged.keep === 1 ? KEEPER_SUCCESS_TIME : null)
+      setActressScrapeRecord(2, merged.merge, merged.merge === 1 ? MERGED_SUCCESS_TIME : null)
+
+      mergeActresses(1, 2, 'keep')
+
+      const detail = getActressDetail(1)
+      assert.equal(detail?.scraped_status, merged.status)
+      assert.equal(detail?.last_scraped_at, merged.lastScrapedAt)
+    })
+  }
+
+  it('keeps the newer success time when the keeper succeeded more recently', () => {
+    setupDb()
+    setActressScrapeRecord(1, 1, '2025-05-05T00:00:00.000Z')
+    setActressScrapeRecord(2, 1, '2024-04-04T00:00:00.000Z')
+
+    mergeActresses(1, 2, 'keep')
+
+    assert.equal(getActressDetail(1)?.last_scraped_at, '2025-05-05T00:00:00.000Z')
+  })
+
+  it('ignores a success time left on a record that is not scraped successfully', () => {
+    setupDb()
+    setActressScrapeRecord(1, 2, '2019-09-09T00:00:00.000Z')
+    setActressScrapeRecord(2, 1, '2018-08-08T00:00:00.000Z')
+
+    mergeActresses(1, 2, 'keep')
+
+    const detail = getActressDetail(1)
+    assert.equal(detail?.scraped_status, 1)
+    assert.equal(detail?.last_scraped_at, '2018-08-08T00:00:00.000Z')
+  })
 })
 
 describe('actressRepo.listActressesForBatchScrape', () => {
@@ -278,17 +876,11 @@ describe('actressRepo.listActressesForBatchScrape', () => {
     assert.equal(countActressesForBatchScrape({ scope: 'male', missingFields: [] }), 1)
   })
 
-  it('filters never-scraped actresses by scrape status', () => {
+  it('filters actresses by cumulative scrape status', () => {
     setupDb()
     const db = getDb()
-    db.prepare('UPDATE actresses SET last_scraped_at = ? WHERE main_name = ?').run(
-      '2024-01-01T00:00:00.000Z',
-      'Complete'
-    )
-    db.prepare('UPDATE actresses SET last_scraped_at = ? WHERE main_name = ?').run(
-      '2024-01-01T00:00:00.000Z',
-      'Missing Male'
-    )
+    db.prepare('UPDATE actresses SET scraped_status = 1 WHERE main_name = ?').run('Complete')
+    db.prepare('UPDATE actresses SET scraped_status = 2 WHERE main_name = ?').run('Missing Male')
 
     const targets = listActressesForBatchScrape({ scope: 'all', scrapeStatus: 'unscraped' })
 
@@ -297,15 +889,14 @@ describe('actressRepo.listActressesForBatchScrape', () => {
       ['Missing Female', 'Unknown Gender']
     )
     assert.equal(countActressesForBatchScrape({ scope: 'all', scrapeStatus: 'unscraped' }), 2)
+    assert.equal(countActressesForBatchScrape({ scope: 'all', scrapeStatus: 'success' }), 1)
+    assert.equal(countActressesForBatchScrape({ scope: 'all', scrapeStatus: 'failed' }), 1)
   })
 
   it('combines gender and scrape status filters', () => {
     setupDb()
     const db = getDb()
-    db.prepare('UPDATE actresses SET last_scraped_at = ? WHERE main_name = ?').run(
-      '2024-01-01T00:00:00.000Z',
-      'Complete'
-    )
+    db.prepare('UPDATE actresses SET scraped_status = 1 WHERE main_name = ?').run('Complete')
 
     const targets = listActressesForBatchScrape({ scope: 'female', scrapeStatus: 'unscraped' })
 
@@ -314,7 +905,7 @@ describe('actressRepo.listActressesForBatchScrape', () => {
       ['Missing Female', 'Unknown Gender']
     )
     assert.equal(
-      countActressesForBatchScrape({ scope: 'female', scrapeStatus: 'scraped' }),
+      countActressesForBatchScrape({ scope: 'female', scrapeStatus: 'success' }),
       1
     )
   })
@@ -330,6 +921,24 @@ describe('actressRepo.listActressesForBatchScrape', () => {
     assert.deepEqual(
       targets.map((target) => target.main_name),
       ['Missing Female', 'Missing Male', 'Unknown Gender']
+    )
+  })
+
+  it('limits batch targets to the explicitly selected actress ids', () => {
+    setupDb()
+
+    const targets = listActressesForBatchScrape({
+      scope: 'all',
+      actressIds: [4, 2, 2]
+    })
+
+    assert.deepEqual(
+      targets.map((target) => target.main_name),
+      ['Missing Female', 'Unknown Gender']
+    )
+    assert.equal(
+      countActressesForBatchScrape({ scope: 'all', actressIds: [] }),
+      0
     )
   })
 })
@@ -375,7 +984,7 @@ describe('actressRepo.resolveEffectiveActressScrapeFields', () => {
     )
   })
 
-  it('fillEmpty treats broken avatar files as missing and clears the stored path', () => {
+  it('fillEmpty treats broken avatar files as missing without mutating during planning', () => {
     setupDb()
     const db = getDb()
     db.prepare('UPDATE actresses SET avatar_path = ? WHERE id = ?').run('avatars/missing.jpg', 1)
@@ -385,7 +994,7 @@ describe('actressRepo.resolveEffectiveActressScrapeFields', () => {
       ['avatar']
     )
     assert.deepEqual(db.prepare('SELECT avatar_path FROM actresses WHERE id = ?').get(1), {
-      avatar_path: null
+      avatar_path: 'avatars/missing.jpg'
     })
   })
 })
@@ -661,6 +1270,73 @@ describe('actressRepo.setActressAvatarBundle', () => {
   })
 })
 
+describe('actressRepo cumulative scrape status', () => {
+  it('keeps an actress created by video scraping unscraped and exposes the status in detail', () => {
+    setupDb()
+    writeTestAvatar('avatars/video-scrape-download.jpg')
+
+    const actressId = upsertActressFromScrape(
+      'Created From Video Scrape',
+      'avatars/video-scrape-download.jpg',
+      'female'
+    )
+
+    const detail = getActressDetail(actressId)
+    assert.ok(detail)
+    assert.equal(detail.scraped_status, 0)
+    assert.equal(detail.last_scraped_at, null)
+    assert.ok(detail.avatar_path)
+  })
+})
+
+describe('actressRepo cumulative scrape status maintenance invariants', () => {
+  for (const status of [0, 1, 2] as ScrapedStatus[]) {
+    const successTime = status === 1 ? '2022-02-02T00:00:00.000Z' : null
+    it(`keeps ${ACTRESS_SCRAPE_STATUS_LABEL[status]} and its success time through manual maintenance`, () => {
+      setupDb()
+      const db = getDb()
+      setActressScrapeRecord(1, status, successTime)
+      writeTestAsset('actress_gallery/maintenance.jpg', MINIMAL_JPEG)
+
+      editActress(1, {
+        main_name: 'Maintained',
+        birth_date: '1991-02-03',
+        profile_summary: 'Manually maintained',
+        aliases: ['Maintained Alias']
+      })
+      setActressAvatarBundle(1, 'Maintained', {
+        displayImageBase64: MINIMAL_JPEG.toString('base64'),
+        sourceImageBase64: MINIMAL_JPEG.toString('base64'),
+        crop: createAvatarCropV1({
+          sourceFingerprint: avatarSourceFingerprint(MINIMAL_JPEG),
+          zoom: 1.4,
+          offsetX: 2,
+          offsetY: -2
+        })
+      })
+      const added = addActressGalleryAsset(1, {
+        remoteUrl: 'https://example.test/maintenance.jpg',
+        localPath: 'actress_gallery/maintenance.jpg'
+      })
+      setActressPosterPath(1, 'actress_gallery/maintenance.jpg')
+      setActressPosterPath(1, null)
+      deleteActressGalleryAsset(1, added.id)
+      insertTestVideoWithFile(db, {
+        code: 'MAINT-001',
+        filePath: 'maint.mp4',
+        title: 'Maintenance',
+        addTime: '2024-01-01'
+      })
+      db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(1, 1)
+      upsertActressFromScrape('Maintained', null, 'female')
+
+      const detail = getActressDetail(1)
+      assert.equal(detail?.scraped_status, status)
+      assert.equal(detail?.last_scraped_at, successTime)
+    })
+  }
+})
+
 describe('actressRepo.upsertActressFromScrape avatar adopt', () => {
   it('adopts a downloaded avatar into source+display+crop and drops the temp path', () => {
     setupDb()
@@ -775,20 +1451,366 @@ describe('actressRepo.replaceActressGalleryAssets', () => {
   })
 })
 
-describe('actressRepo.touchActressLastScrapedAt', () => {
-  it('updates last_scraped_at without changing profile fields', () => {
+describe('actressRepo.recordActressScrapeFailure', () => {
+  it('records failure without writing a success time or changing profile fields', () => {
     setupDb()
-    touchActressLastScrapedAt(2)
-    const row = getDb().prepare('SELECT last_scraped_at, birth_date FROM actresses WHERE id = ?').get(2) as {
-      last_scraped_at: string | null
-      birth_date: string | null
-    }
-    assert.ok(row.last_scraped_at)
-    assert.equal(row.birth_date, null)
+    recordActressScrapeFailure(2)
+    const detail = getActressDetail(2)
+    assert.equal(detail?.scraped_status, 2)
+    assert.equal(detail?.last_scraped_at, null)
+    assert.equal(detail?.birth_date, null)
+  })
+})
+
+describe('actressRepo.markActressScrapeSucceeded', () => {
+  it('promotes an unscraped actress and stamps the missing success time', () => {
+    setupDb()
+
+    markActressScrapeSucceeded(2)
+
+    const detail = getActressDetail(2)
+    assert.equal(detail?.scraped_status, 1)
+    assert.ok(detail?.last_scraped_at)
+  })
+
+  it('promotes a failed actress and stamps the missing success time', () => {
+    setupDb()
+    recordActressScrapeFailure(2)
+
+    markActressScrapeSucceeded(2)
+
+    const detail = getActressDetail(2)
+    assert.equal(detail?.scraped_status, 1)
+    assert.ok(detail?.last_scraped_at)
+  })
+
+  it('keeps an existing success time instead of restamping it', () => {
+    setupDb()
+    getDb()
+      .prepare('UPDATE actresses SET scraped_status = 1, last_scraped_at = ? WHERE id = ?')
+      .run('2020-01-02T03:04:05.000Z', 2)
+
+    markActressScrapeSucceeded(2)
+
+    const detail = getActressDetail(2)
+    assert.equal(detail?.scraped_status, 1)
+    assert.equal(detail?.last_scraped_at, '2020-01-02T03:04:05.000Z')
+  })
+
+  it('stamps a success time over a blank stored time', () => {
+    setupDb()
+    getDb().prepare('UPDATE actresses SET last_scraped_at = ? WHERE id = ?').run('   ', 2)
+
+    markActressScrapeSucceeded(2)
+
+    const detail = getActressDetail(2)
+    assert.equal(detail?.scraped_status, 1)
+    assert.ok(detail?.last_scraped_at?.trim())
+  })
+
+  it('rejects marking an actress that does not exist', () => {
+    setupDb()
+
+    assert.throws(() => markActressScrapeSucceeded(9999), /演员不存在/)
   })
 })
 
 describe('actressRepo.applyActressScrapeResult', () => {
+  for (const mode of ['replace', 'fillEmpty', 'replaceIfPresent'] as const) {
+    it(`keeps every selected field plan aligned with the ${mode} database result`, () => {
+      setupDb()
+      const actressId = mode === 'fillEmpty' ? 2 : 1
+      const avatarPath = `avatars/plan-matrix-${mode}.png`
+      const galleryPath = `actress_gallery/plan-matrix-${mode}.jpg`
+      writeTestAsset(
+        avatarPath,
+        Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+          'base64'
+        )
+      )
+      writeTestAvatar(galleryPath)
+      const result = {
+        avatarUrl: `https://example.test/${mode}.png`,
+        birthDate: '2001-02-03',
+        nameZh: `中文名${mode}`,
+        nameEn: `English ${mode}`,
+        debutDate: '2020-04-05',
+        heightCm: 167,
+        bustCm: 91,
+        waistCm: 61,
+        hipCm: 89,
+        cupSize: 'F',
+        bloodType: 'B',
+        zodiac: 'Taurus',
+        nationality: 'Japan',
+        profileSummary: `Profile ${mode}`,
+        aliases: [`Alias ${mode}`]
+      }
+      const gallery = [{ remoteUrl: `https://example.test/${mode}.jpg`, localPath: galleryPath }]
+      const fields = [
+        'avatar',
+        'gallery',
+        'birthDate',
+        'nameZh',
+        'nameEn',
+        'debutDate',
+        'heightCm',
+        'measurements',
+        'cupSize',
+        'bloodType',
+        'zodiac',
+        'nationality',
+        'profileSummary',
+        'aliases'
+      ] as const
+      const plan = planActressScrapeResult(
+        actressId,
+        result,
+        avatarPath,
+        gallery,
+        [...fields],
+        mode
+      )
+
+      const outcome = applyActressScrapeResult(
+        actressId,
+        result,
+        avatarPath,
+        gallery,
+        [...fields],
+        mode
+      )
+      const detail = getActressDetail(actressId)!
+
+      assert.equal(outcome.applied, true)
+      for (const impact of plan.impacts) {
+        let actual: string | number | string[] | null
+        switch (impact.field) {
+          case 'avatar':
+            assert.equal(impact.action === 'clear', detail.avatar_path == null)
+            if (impact.action === 'set') assert.equal(assetExists(detail.avatar_path), true)
+            continue
+          case 'gallery':
+            actual = detail.gallery.map(
+              (asset) => asset.local_path?.trim() || asset.remote_url?.trim() || ''
+            ).filter(Boolean)
+            break
+          case 'birthDate': actual = detail.birth_date; break
+          case 'nameZh': actual = detail.name_zh; break
+          case 'nameEn': actual = detail.name_en; break
+          case 'debutDate': actual = detail.debut_date; break
+          case 'heightCm': actual = detail.height_cm; break
+          case 'cupSize': actual = detail.cup_size; break
+          case 'bloodType': actual = detail.blood_type; break
+          case 'zodiac': actual = detail.zodiac; break
+          case 'nationality': actual = detail.nationality; break
+          case 'profileSummary': actual = detail.profile_summary; break
+          case 'aliases': actual = detail.aliases; break
+          case 'measurements':
+            actual =
+              impact.part === 'bustCm'
+                ? detail.bust_cm
+                : impact.part === 'waistCm'
+                  ? detail.waist_cm
+                  : detail.hip_cm
+            break
+          default:
+            continue
+        }
+        assert.deepEqual(actual, impact.nextValue, `${impact.field}/${impact.part ?? 'field'}`)
+      }
+    })
+  }
+
+  it('does not backfill gallery metadata while building a read-only plan', () => {
+    setupDb()
+    const db = getDb()
+    writeTestAvatar('actress_gallery/complete.jpg')
+
+    planActressScrapeResult(1, {}, null, [], ['gallery'], 'replaceIfPresent')
+
+    assert.deepEqual(
+      db
+        .prepare(
+          'SELECT width, height FROM actress_gallery_assets WHERE actress_id = ?'
+        )
+        .get(1),
+      { width: null, height: null }
+    )
+  })
+
+  it('plans and applies a fillEmpty avatar over a broken stored path consistently', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare('UPDATE actresses SET avatar_path = ? WHERE id = ?').run('avatars/missing.jpg', 1)
+    writeTestAvatar('avatars/fill-broken.jpg')
+
+    const plan = planActressScrapeResult(
+      1,
+      { avatarUrl: 'https://example.test/fill-broken.jpg' },
+      'avatars/fill-broken.jpg',
+      [],
+      ['avatar'],
+      'fillEmpty'
+    )
+
+    assert.deepEqual(plan.impacts, [
+      {
+        field: 'avatar',
+        action: 'set',
+        currentValue: null,
+        nextValue: 'avatars/fill-broken.jpg',
+        reason: 'fillEmpty'
+      }
+    ])
+    assert.equal(
+      (db.prepare('SELECT avatar_path FROM actresses WHERE id = ?').get(1) as { avatar_path: string })
+        .avatar_path,
+      'avatars/missing.jpg'
+    )
+
+    const outcome = applyActressScrapeResult(
+      1,
+      { avatarUrl: 'https://example.test/fill-broken.jpg' },
+      'avatars/fill-broken.jpg',
+      [],
+      ['avatar'],
+      'fillEmpty'
+    )
+
+    assert.equal(outcome.avatarApplied, true)
+    const avatarPath = (
+      db.prepare('SELECT avatar_path FROM actresses WHERE id = ?').get(1) as {
+        avatar_path: string | null
+      }
+    ).avatar_path
+    assert.ok(avatarPath)
+    assert.notEqual(avatarPath, 'avatars/missing.jpg')
+    assert.equal(assetExists(avatarPath), true)
+  })
+
+  it('previews replace clears without changing the actress or deleting assets', () => {
+    setupDb()
+    const before = getActressDetail(1)
+
+    const plan = planActressScrapeResult(
+      1,
+      {},
+      null,
+      [],
+      ['avatar', 'birthDate', 'measurements'],
+      'replace'
+    )
+
+    assert.deepEqual(
+      plan.impacts.map(({ field, part, action, currentValue, nextValue, reason }) => ({
+        field,
+        part,
+        action,
+        currentValue,
+        nextValue,
+        reason
+      })),
+      [
+        {
+          field: 'avatar',
+          part: undefined,
+          action: 'clear',
+          currentValue: 'avatars/complete.jpg',
+          nextValue: null,
+          reason: 'replace'
+        },
+        {
+          field: 'birthDate',
+          part: undefined,
+          action: 'clear',
+          currentValue: '1990-01-01',
+          nextValue: null,
+          reason: 'replace'
+        },
+        {
+          field: 'measurements',
+          part: 'bustCm',
+          action: 'clear',
+          currentValue: 90,
+          nextValue: null,
+          reason: 'replace'
+        },
+        {
+          field: 'measurements',
+          part: 'waistCm',
+          action: 'clear',
+          currentValue: 60,
+          nextValue: null,
+          reason: 'replace'
+        },
+        {
+          field: 'measurements',
+          part: 'hipCm',
+          action: 'clear',
+          currentValue: 88,
+          nextValue: null,
+          reason: 'replace'
+        }
+      ]
+    )
+    assert.deepEqual(getActressDetail(1), before)
+    assert.equal(assetExists('avatars/complete.jpg'), true)
+  })
+
+  it('does not claim a scrape was applied when every returned alias is unusable', () => {
+    setupDb()
+
+    const outcome = applyActressScrapeResult(
+      2,
+      { aliases: ['Missing Female', 'watch online'] },
+      null,
+      [],
+      ['aliases'],
+      'replace'
+    )
+
+    const detail = getActressDetail(2)
+    assert.equal(outcome.applied, false)
+    assert.deepEqual(detail?.aliases, [])
+    assert.equal(detail?.scraped_status, 0)
+    assert.equal(detail?.last_scraped_at, null)
+  })
+
+  it('rolls back profile data and cumulative success when gallery persistence fails', () => {
+    setupDb()
+    getDb().exec(`
+      CREATE TRIGGER fail_scraped_gallery_insert
+      BEFORE INSERT ON actress_gallery_assets
+      BEGIN
+        SELECT RAISE(ABORT, 'gallery persistence failed');
+      END;
+    `)
+
+    assert.throws(
+      () =>
+        applyActressScrapeResult(
+          2,
+          {
+            birthDate: '2001-02-03',
+            galleryImageUrls: ['https://example.test/new-gallery.jpg']
+          },
+          null,
+          [{ remoteUrl: 'https://example.test/new-gallery.jpg' }],
+          ['birthDate', 'gallery'],
+          'replace'
+        ),
+      /gallery persistence failed/
+    )
+
+    const detail = getActressDetail(2)
+    assert.equal(detail?.birth_date, null)
+    assert.equal(detail?.scraped_status, 0)
+    assert.equal(detail?.last_scraped_at, null)
+    assert.deepEqual(detail?.gallery, [])
+  })
+
   it('skips invalid downloaded avatars while applying other profile fields', () => {
     setupDb()
     const db = getDb()
@@ -839,6 +1861,24 @@ describe('actressRepo.applyActressScrapeResult', () => {
     }
 
     writeTestAvatar('avatars/same-source-again.jpg')
+    const plan = planActressScrapeResult(
+      1,
+      { birthDate: '1991-02-03' },
+      'avatars/same-source-again.jpg',
+      [],
+      ['avatar', 'birthDate'],
+      'replace'
+    )
+    assert.deepEqual(
+      plan.impacts.find((impact) => impact.field === 'avatar'),
+      {
+        field: 'avatar',
+        action: 'preserve',
+        currentValue: before.avatar_path,
+        nextValue: before.avatar_path,
+        reason: 'replace'
+      }
+    )
     const { applied, avatarApplied } = applyActressScrapeResult(
       1,
       { birthDate: '1991-02-03' },
@@ -911,6 +1951,50 @@ describe('actressRepo.applyActressScrapeResult', () => {
     assert.equal(parseAvatarCrop(after.avatar_crop_json)?.zoom, 1)
   })
 
+  it('replace clears an existing avatar when the source returns no avatar', () => {
+    setupDb()
+
+    const { applied, avatarApplied } = applyActressScrapeResult(
+      1,
+      {},
+      null,
+      [],
+      ['avatar'],
+      'replace'
+    )
+
+    const row = getDb()
+      .prepare('SELECT avatar_path, avatar_source_path, avatar_crop_json FROM actresses WHERE id = ?')
+      .get(1) as {
+      avatar_path: string | null
+      avatar_source_path: string | null
+      avatar_crop_json: string | null
+    }
+    assert.equal(applied, true)
+    assert.equal(avatarApplied, false)
+    assert.equal(row.avatar_path, null)
+    assert.equal(row.avatar_source_path, null)
+    assert.equal(row.avatar_crop_json, null)
+    assert.equal(assetExists('avatars/complete.jpg'), false)
+  })
+
+  it('replace preserves an existing avatar when a returned avatar fails to download', () => {
+    setupDb()
+
+    const { applied } = applyActressScrapeResult(
+      1,
+      { avatarUrl: 'https://example.test/unavailable.jpg' },
+      null,
+      [],
+      ['avatar'],
+      'replace'
+    )
+
+    assert.equal(applied, false)
+    assert.equal(getActressDetail(1)?.avatar_path, 'avatars/complete.jpg')
+    assert.equal(assetExists('avatars/complete.jpg'), true)
+  })
+
   it('fillEmpty preserves existing measurement values while filling missing ones', () => {
     setupDb()
     const { applied } = applyActressScrapeResult(
@@ -966,34 +2050,143 @@ describe('actressRepo.applyActressScrapeResult', () => {
     assert.equal(row.profile_summary, 'Bio')
   })
 
-  it('skips conflicting aliases and applies other scrape fields', () => {
+  it('replace clears every selected non-avatar field when the matched source returns no values', () => {
     setupDb()
-    const { applied, warnings } = applyActressScrapeResult(
-      2,
-      {
-        birthDate: '1995-03-04',
-        aliases: ['Complete Alias', 'Safe Alias']
-      },
+    editActress(1, {
+      name_zh: '测试中文名',
+      name_en: 'Test English Name',
+      cup_size: 'E'
+    })
+
+    const { applied } = applyActressScrapeResult(
+      1,
+      {},
       null,
       [],
-      ['birthDate', 'aliases'],
+      [
+        'gallery',
+        'birthDate',
+        'nameZh',
+        'nameEn',
+        'debutDate',
+        'heightCm',
+        'measurements',
+        'cupSize',
+        'bloodType',
+        'zodiac',
+        'nationality',
+        'profileSummary',
+        'aliases'
+      ],
       'replace'
     )
 
+    const detail = getActressDetail(1)
     assert.equal(applied, true)
-    assert.deepEqual(warnings, ['别名「Complete Alias」已被其他演员使用，已跳过'])
+    assert.equal(detail?.birth_date, null)
+    assert.equal(detail?.name_zh, null)
+    assert.equal(detail?.name_en, null)
+    assert.equal(detail?.debut_date, null)
+    assert.equal(detail?.height_cm, null)
+    assert.equal(detail?.bust_cm, null)
+    assert.equal(detail?.waist_cm, null)
+    assert.equal(detail?.hip_cm, null)
+    assert.equal(detail?.cup_size, null)
+    assert.equal(detail?.blood_type, null)
+    assert.equal(detail?.zodiac, null)
+    assert.equal(detail?.nationality, null)
+    assert.equal(detail?.profile_summary, null)
+    assert.deepEqual(detail?.gallery, [])
+    assert.deepEqual(detail?.aliases, [])
+  })
+
+  it('replaceIfPresent rejects all fields when every returned alias conflicts', () => {
+    setupDb()
+
+    assert.throws(
+      () =>
+        applyActressScrapeResult(
+          1,
+          { birthDate: '1995-03-04', aliases: ['Missing Female'] },
+          null,
+          [],
+          ['birthDate', 'aliases'],
+          'replaceIfPresent'
+        ),
+      /名称「Missing Female」已被其他演员使用/
+    )
+
+    assert.equal(getActressDetail(1)?.birth_date, '1990-01-01')
+    assert.deepEqual(getActressDetail(1)?.aliases, ['Complete Alias'])
+  })
+
+  it('fillEmpty does not report success when measurements only repeat a filled component', () => {
+    setupDb()
+    getDb()
+      .prepare('UPDATE actresses SET waist_cm = NULL, hip_cm = NULL WHERE id = ?')
+      .run(1)
+
+    const { applied } = applyActressScrapeResult(
+      1,
+      { bustCm: 99 },
+      null,
+      [],
+      ['measurements'],
+      'fillEmpty'
+    )
+
+    const row = getDb()
+      .prepare('SELECT bust_cm, waist_cm, hip_cm FROM actresses WHERE id = ?')
+      .get(1) as { bust_cm: number | null; waist_cm: number | null; hip_cm: number | null }
+    assert.equal(applied, false)
+    assert.deepEqual(row, { bust_cm: 90, waist_cm: null, hip_cm: null })
+  })
+
+  it('rejects the whole scraped result when any alias has another owner', () => {
+    setupDb()
+    assert.throws(
+      () =>
+        applyActressScrapeResult(
+          2,
+          {
+            birthDate: '1995-03-04',
+            aliases: ['Complete Alias', 'Safe Alias']
+          },
+          null,
+          [],
+          ['birthDate', 'aliases'],
+          'replace'
+        ),
+      /名称「Complete Alias」已被其他演员使用/
+    )
 
     const row = getDb().prepare('SELECT birth_date FROM actresses WHERE id = ?').get(2) as {
       birth_date: string | null
     }
-    assert.equal(row.birth_date, '1995-03-04')
+    assert.equal(row.birth_date, null)
+    assert.deepEqual(getActressDetail(2)?.aliases, [])
+  })
 
-    const aliases = getDb()
-      .prepare("SELECT name FROM actress_names WHERE actress_id = ? AND type = 'alias' ORDER BY name")
-      .all(2) as { name: string }[]
-    assert.deepEqual(
-      aliases.map((item) => item.name),
-      ['Safe Alias']
+  it('treats canonically equivalent scraped aliases as conflicts', () => {
+    setupDb()
+
+    assert.throws(
+      () =>
+        applyActressScrapeResult(
+          2,
+          {
+            birthDate: '1995-03-04',
+            aliases: ['Ｃｏｍｐｌｅｔｅ']
+          },
+          null,
+          [],
+          ['birthDate', 'aliases'],
+          'replaceIfPresent'
+        ),
+      /名称「Ｃｏｍｐｌｅｔｅ」已被其他演员使用/
     )
+
+    assert.equal(getActressDetail(2)?.birth_date, null)
+    assert.deepEqual(getActressDetail(2)?.aliases, [])
   })
 })

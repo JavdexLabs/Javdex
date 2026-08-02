@@ -4,6 +4,42 @@ import { SequentialBatchQueue } from './sequentialBatchQueue'
 import type { BatchProgress } from '@shared/types'
 
 describe('SequentialBatchQueue', () => {
+  it('counts success, pending, and failure as disjoint processed outcomes', async () => {
+    const queue = new SequentialBatchQueue<{ code: string }>()
+    const outcomes = new Map<string, 'success' | 'pending' | 'failure'>([
+      ['A', 'success'],
+      ['B', 'pending'],
+      ['C', 'failure']
+    ])
+
+    const result = await queue.start({
+      targets: [{ code: 'A' }, { code: 'B' }, { code: 'C' }],
+      startMessage: () => 'start',
+      pausedMessage: 'paused',
+      cancelledMessage: 'cancelled',
+      doneMessage: () => 'done',
+      getCode: (target) => target.code,
+      runTarget: async (target) => ({
+        status: outcomes.get(target.code)!,
+        level: 'info',
+        message: target.code
+      }),
+      exceptionMessage: () => 'error',
+      delayAfterTarget: false
+    })
+
+    assert.equal(result, 'done')
+    assert.deepEqual(
+      {
+        current: queue.getProgress().current,
+        success: queue.getProgress().success,
+        pending: queue.getProgress().pending,
+        failed: queue.getProgress().failed
+      },
+      { current: 3, success: 1, pending: 1, failed: 1 }
+    )
+  })
+
   it('pauses after the current target and resumes from checkpoint', async () => {
     const queue = new SequentialBatchQueue<{ id: number; code: string }>()
     const processed: string[] = []
@@ -23,7 +59,7 @@ describe('SequentialBatchQueue', () => {
       runTarget: async (target: { code: string }) => {
         processed.push(target.code)
         if (target.code === 'A') queue.pause()
-        return { success: true, level: 'success' as const, message: 'ok' }
+        return { status: 'success' as const, level: 'success' as const, message: 'ok' }
       },
       exceptionMessage: () => 'error',
       delayAfterTarget: false,
@@ -43,12 +79,13 @@ describe('SequentialBatchQueue', () => {
       startIndex: 1,
       initialProgress: {
         success: queue.getProgress().success,
+        pending: queue.getProgress().pending,
         failed: queue.getProgress().failed,
         logs: queue.getProgress().logs
       },
       runTarget: async (target: { code: string }) => {
         processed.push(target.code)
-        return { success: true, level: 'success' as const, message: 'ok' }
+        return { status: 'success' as const, level: 'success' as const, message: 'ok' }
       }
     })
 

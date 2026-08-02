@@ -10,7 +10,7 @@ import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavig
 import { useElementSize } from '../hooks/useElementSize'
 import ImagePreviewLightbox, { type ImagePreviewItem } from './ImagePreviewLightbox'
 import ImageImportModal from './ImageImportModal'
-import MediaTileDeleteButton from './MediaTileDeleteButton'
+import MediaTileActionButton from './MediaTileActionButton'
 import Modal from './Modal'
 import IconButton from './IconButton'
 import EmptyState from './EmptyState'
@@ -246,7 +246,7 @@ export default function ActressGalleryPanel({
                     draggable={false}
                   />
                 </button>
-                <MediaTileDeleteButton
+                <MediaTileActionButton
                   label={`删除写真 ${index + 1}`}
                   title="删除写真"
                   onClick={() => setDeleteTarget(asset)}

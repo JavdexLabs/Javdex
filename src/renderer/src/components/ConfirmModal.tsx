@@ -7,6 +7,8 @@ interface ConfirmModalProps {
   confirmText?: string
   cancelText?: string
   size?: ModalSize
+  className?: string
+  bodyClassName?: string
   danger?: boolean
   confirmDisabled?: boolean
   busy?: boolean
@@ -22,6 +24,8 @@ export default function ConfirmModal({
   confirmText = '确认',
   cancelText = '取消',
   size,
+  className,
+  bodyClassName,
   danger = false,
   confirmDisabled,
   busy,
@@ -34,6 +38,8 @@ export default function ConfirmModal({
     <Modal
       title={title}
       size={size}
+      className={className}
+      bodyClassName={bodyClassName}
       danger={danger}
       confirmText={confirmText}
       cancelText={cancelText}

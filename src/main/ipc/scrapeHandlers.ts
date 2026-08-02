@@ -8,7 +8,7 @@ import type {
   ActressBatchScrapeFilter,
   ActressBatchScrapeRequest,
   ActressScrapeField,
-  ActressScrapeResult,
+  ActressScrapeDisposition,
   ActressScrapeUpdateMode,
   BatchProgress,
   BatchScrapeState,
@@ -31,7 +31,12 @@ import {
   listActressScraperPlugins,
   scrapeActress
 } from '../scrapers/actressScraperManager'
-import { listScraperNames, listScraperPlugins, scrapeVideo } from '../scrapers/scraperManager'
+import {
+  listScraperNames,
+  listScraperPlugins,
+  resolveVideoScrapeFieldSources,
+  scrapeVideo
+} from '../scrapers/scraperManager'
 import {
   deleteScraperPlugin,
   createCompositeScraper,
@@ -43,15 +48,17 @@ import {
   updateCompositeScraper,
   updateScraperPluginConfig
 } from '../scrapers/scraperPluginService'
+import { estimateActressBatchScrapeTargetCount } from '../services/actressBatchScrapeTargets'
 import { actressScrapeQueue } from '../services/actressScrapeQueue'
 import {
+  assertActressBatchJobRecoverable,
   assertBatchScrapeAvailable,
   getBatchScrapeState
 } from '../services/batchScrapeControl'
 import { loadBatchScrapeJob, saveBatchScrapeJob } from '../services/batchScrapeJobStore'
 import { scrapeRunCoordinator } from '../services/scrapeRunCoordinator'
 import { videoBatchScrapeQueue } from '../services/videoBatchScrapeQueue'
-import { countActressesForBatchScrape, getActressDetail } from '../db/actressRepo'
+import { getActressDetail } from '../db/actressRepo'
 import { countVideosForBatchScrape, countVideosForRematch } from '../db/videoRepo'
 import { getSettings, updateSettings } from '../settings/settingsStore'
 import { registerHandler, type IpcContext } from './shared'
@@ -182,7 +189,11 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
         scrapeVideo(videoId, scraperName, { fields, mode })
       )
       if (!outcome.ok || !outcome.result) throw new Error(outcome.error)
-      return { result: outcome.result, applied: !outcome.skipped }
+      return {
+        result: outcome.result,
+        applied: !outcome.skipped,
+        warnings: outcome.warnings ?? []
+      }
     }
   )
 
@@ -220,7 +231,11 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
 
   registerHandler(
     IPC.SCRAPE_VIDEO_BATCH_COUNT,
-    (_e, filter: VideoBatchScrapeFilter): number => countVideosForBatchScrape(filter)
+    (_e, filter: VideoBatchScrapeFilter): number =>
+      countVideosForBatchScrape({
+        ...filter,
+        ...resolveVideoScrapeFieldSources(filter.scraperName)
+      })
   )
 
   registerHandler(
@@ -307,7 +322,7 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
       queryName?: string,
       useAliases?: boolean,
       autoCropAvatar?: boolean
-    ): Promise<ActressScrapeResult> => {
+    ): Promise<ActressScrapeDisposition> => {
       assertBatchScrapeAvailable()
       const outcome = await scrapeRunCoordinator.runExclusive('演员刮削', async () => {
         const result = await scrapeActress(actressId, scraperName, {
@@ -317,6 +332,7 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
           useAliases
         })
         if (
+          result.status === 'success' &&
           autoCropAvatar &&
           fields?.includes('avatar') &&
           result.avatarUpdated &&
@@ -332,14 +348,14 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
         }
         return result
       })
-      if (!outcome.ok || !outcome.result) throw new Error(outcome.error)
-      return outcome.result
+      return outcome
     }
   )
 
   registerHandler(
     IPC.ACTRESS_SCRAPE_BATCH_COUNT,
-    (_e, filter: ActressBatchScrapeFilter): number => countActressesForBatchScrape(filter)
+    (_e, filter: ActressBatchScrapeFilter): number =>
+      estimateActressBatchScrapeTargetCount(filter)
   )
 
   registerHandler(
@@ -413,6 +429,7 @@ function idleBatchProgress(): BatchProgress {
     total: 0,
     current: 0,
     success: 0,
+    pending: 0,
     failed: 0,
     currentCode: null,
     status: 'idle',
@@ -509,7 +526,11 @@ function assertCanResumeBatch(): void {
   if (videoBatchScrapeQueue.isRunning() || actressScrapeQueue.isRunning()) {
     throw new Error('批量刮削已在进行中')
   }
-  if (!loadBatchScrapeJob()) {
+  const job = loadBatchScrapeJob()
+  if (!job) {
     throw new Error('没有可继续的批量刮削任务')
+  }
+  if (job.kind === 'actress') {
+    assertActressBatchJobRecoverable(job)
   }
 }

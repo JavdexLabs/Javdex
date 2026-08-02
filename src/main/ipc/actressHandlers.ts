@@ -7,17 +7,32 @@ import type {
   ActressGenderFilter,
   ActressAvatarSourceInfo,
   ActressListItem,
+  ActressListPage,
+  ActressListQuery,
   ActressListSortBy,
   ActressMergeInput,
+  ActressNameConflictGroup,
+  ActressConflictReviewSummary,
+  InspectActressConflictNameInput,
+  InspectActressConflictNameResult,
+  DiscardPendingActressScrapeInput,
+  DiscardPendingActressScrapeResult,
+  ResolveActressConflictInput,
+  ResolveActressConflictResult,
+  ValidateIllegalNameReplacementsInput,
+  ValidateIllegalNameReplacementsResult,
   ListSortDir
 } from '@shared/types'
 import {
   deleteActress,
+  deleteUnlinkedActresses,
   clearActressMetadataRecord,
   editActress,
   getActressDetail,
   getActressAvatarSourceInfo,
   listActresses,
+  listActressPage,
+  markActressScrapeSucceeded,
   mergeActresses,
   setActressPosterPath
 } from '../db/actressRepo'
@@ -26,6 +41,7 @@ import {
   importActressGalleryImage
 } from '../services/actressGalleryService'
 import { registerHandler } from './shared'
+import { actressIdentityConflictWorkflow } from '../scrapers/actressScraperManager'
 
 export function registerActressHandlers(): void {
   registerHandler(
@@ -37,6 +53,11 @@ export function registerActressHandlers(): void {
       sortBy?: ActressListSortBy,
       sortDir?: ListSortDir
     ): ActressListItem[] => listActresses(search, gender, sortBy, sortDir)
+  )
+
+  registerHandler(
+    IPC.ACTRESS_LIST_PAGE,
+    (_e, query?: ActressListQuery): ActressListPage => listActressPage(query)
   )
 
   registerHandler(IPC.ACTRESS_GET, (_e, id: number): ActressDetail | null =>
@@ -58,6 +79,10 @@ export function registerActressHandlers(): void {
     return true
   })
 
+  registerHandler(IPC.ACTRESS_DELETE_BATCH, (_e, ids: number[]): number =>
+    deleteUnlinkedActresses(ids)
+  )
+
   registerHandler(IPC.ACTRESS_CLEAR_META, (_e, id: number): boolean => {
     clearActressMetadataRecord(id)
     return true
@@ -67,6 +92,50 @@ export function registerActressHandlers(): void {
     mergeActresses(input.keepId, input.mergeId, input.mainNameFrom)
     return true
   })
+
+  registerHandler(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, (_e, id: number): boolean => {
+    markActressScrapeSucceeded(id)
+    return true
+  })
+
+  registerHandler(IPC.ACTRESS_CONFLICT_LIST, (): ActressNameConflictGroup[] =>
+    actressIdentityConflictWorkflow.listConflictGroups()
+  )
+
+  registerHandler(IPC.ACTRESS_CONFLICT_COUNT, (): number =>
+    actressIdentityConflictWorkflow.countPendingReviewItems()
+  )
+
+  registerHandler(IPC.ACTRESS_CONFLICT_SUMMARY, (): ActressConflictReviewSummary =>
+    actressIdentityConflictWorkflow.getConflictReviewSummary()
+  )
+
+  registerHandler(
+    IPC.ACTRESS_CONFLICT_INSPECT_NAME,
+    (_e, input: InspectActressConflictNameInput): InspectActressConflictNameResult =>
+      actressIdentityConflictWorkflow.inspectConflictName(input)
+  )
+
+  registerHandler(
+    IPC.ACTRESS_CONFLICT_DISCARD,
+    (_e, input: DiscardPendingActressScrapeInput): DiscardPendingActressScrapeResult =>
+      actressIdentityConflictWorkflow.discardPendingScrape(input)
+  )
+
+  registerHandler(
+    IPC.ACTRESS_CONFLICT_VALIDATE_ILLEGAL,
+    (
+      _e,
+      input: ValidateIllegalNameReplacementsInput
+    ): ValidateIllegalNameReplacementsResult =>
+      actressIdentityConflictWorkflow.validateIllegalNameReplacements(input)
+  )
+
+  registerHandler(
+    IPC.ACTRESS_CONFLICT_RESOLVE,
+    (_e, input: ResolveActressConflictInput): ResolveActressConflictResult =>
+      actressIdentityConflictWorkflow.resolveConflict(input)
+  )
 
   registerHandler(
     IPC.ACTRESS_GALLERY_IMPORT,

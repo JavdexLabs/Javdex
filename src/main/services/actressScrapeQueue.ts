@@ -15,7 +15,11 @@ import {
   ACTRESS_SCRAPE_FIELD_OPTIONS,
   ALL_ACTRESS_SCRAPE_FIELDS
 } from '@shared/types'
-import { listActressesForBatchScrape } from '../db/actressRepo'
+import {
+  normalizeActressBatchScrapeRequest,
+  parseActressBatchScrapeStatus,
+  resolveActressBatchScrapeTargets
+} from './actressBatchScrapeTargets'
 import { scrapeActress } from '../scrapers/actressScraperManager'
 import { scrapeBrowser } from '../scrapers/scrapeBrowser'
 import {
@@ -24,6 +28,7 @@ import {
   finishBatchScrapeJob,
   markBatchScrapePaused,
   persistBatchScrapeCheckpoint,
+  assertActressBatchJobRecoverable,
   restoreTargetsFromJob
 } from './batchScrapeControl'
 import {
@@ -124,19 +129,16 @@ class ActressScrapeQueue {
     if (!job || job.kind !== 'actress') {
       throw new Error('没有可继续的演员批量任务')
     }
-    await this.runJob(job)
+    await this.runJob(assertActressBatchJobRecoverable(job))
   }
 
   async start(requestOrScraperName?: ActressBatchScrapeRequest | string): Promise<void> {
-    const request =
+    const request = normalizeActressBatchScrapeRequest(
       typeof requestOrScraperName === 'string'
         ? defaultRequest(requestOrScraperName)
         : (requestOrScraperName ?? defaultRequest())
-    const targets = listActressesForBatchScrape({
-      scope: request.scope,
-      scrapeStatus: request.scrapeStatus,
-      missingFields: request.missingFields
-    })
+    )
+    const targets = resolveActressBatchScrapeTargets(request)
     const job = createBatchScrapeJob('actress', request, targets, (target) => target.main_name)
     this.activeJob = job
     persistBatchScrapeCheckpoint(job, jobToBatchProgress(job), 0, 'running')
@@ -163,9 +165,13 @@ class ActressScrapeQueue {
         )
       }
     })
-    const scopeLabel = SCOPE_LABEL.get(request.scope) ?? request.scope
-    const statusLabel =
-      STATUS_LABEL.get(request.scrapeStatus ?? 'all') ?? request.scrapeStatus ?? '全部'
+    const scopeLabel = request.actressIds
+      ? `已选 ${targets.length} 位演员`
+      : (SCOPE_LABEL.get(request.scope) ?? request.scope)
+    const parsedStatus = parseActressBatchScrapeStatus(request.scrapeStatus)
+    const statusLabel = parsedStatus.ok
+      ? (STATUS_LABEL.get(parsedStatus.status) ?? parsedStatus.status)
+      : parsedStatus.value
     const missingLabel =
       missingFields.length > 0 ? `缺少任一：${fieldListLabel(missingFields)}` : '不按缺失字段筛选'
 
@@ -177,6 +183,7 @@ class ActressScrapeQueue {
         startIndex: job.nextIndex,
         initialProgress: {
           success: job.success,
+          pending: job.pending,
           failed: job.failed,
           logs: job.logs
         },
@@ -186,7 +193,7 @@ class ActressScrapeQueue {
         pausedMessage: '用户暂停了演员批量刮削',
         cancelledMessage: '用户终止了演员批量刮削',
         doneMessage: (progress) =>
-          `演员批量刮削完成：成功 ${progress.success}，失败 ${progress.failed}`,
+          `演员批量刮削完成：成功 ${progress.success}，待确认 ${progress.pending}，失败 ${progress.failed}`,
         getCode: (target) => target.main_name,
         onCheckpoint: (progress, nextIndex) => {
           if (!this.activeJob) return
@@ -198,12 +205,20 @@ class ActressScrapeQueue {
             fields,
             mode,
             useAliases: request.useAliases ?? false,
+            batchJobId: job.jobId,
             delayController
           })
+          if (itemOutcome.status === 'pending') {
+            return {
+              status: 'pending',
+              level: 'info',
+              message: `待确认：名称归属冲突（结果 ${itemOutcome.pendingId}）`
+            }
+          }
           if (itemOutcome.ok) {
             if (itemOutcome.skipped) {
               return {
-                success: true,
+                status: 'success',
                 level: 'info',
                 message: '跳过：所选更新字段无需写入'
               }
@@ -230,19 +245,19 @@ class ActressScrapeQueue {
 
             if (details.length > 0) {
               return {
-                success: true,
+                status: 'success',
                 level: 'info',
                 message: `刮削成功；${details.join('；')}`
               }
             }
             return {
-              success: true,
+              status: 'success',
               level: 'success',
               message: '刮削成功'
             }
           }
           return {
-            success: false,
+            status: 'failure',
             level: 'error',
             message: `刮削失败：${itemOutcome.error ?? '未知错误'}`
           }

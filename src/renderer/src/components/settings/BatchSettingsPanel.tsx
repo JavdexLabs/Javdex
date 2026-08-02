@@ -11,10 +11,14 @@ export default function BatchSettingsPanel({
   batch,
   running,
   paused,
+  canResume = true,
+  resumeDisabledReason = null,
   logRef,
   emptyLog,
   skipped,
   customControls,
+  pendingGroupCount = 0,
+  onOpenPending,
   onPause,
   onResume,
   onDiscard
@@ -23,10 +27,14 @@ export default function BatchSettingsPanel({
   batch: BatchProgress | null
   running: boolean
   paused: boolean
+  canResume?: boolean
+  resumeDisabledReason?: string | null
   logRef: RefObject<HTMLDivElement>
   emptyLog: string
   skipped?: number
   customControls?: ReactNode
+  pendingGroupCount?: number
+  onOpenPending?: () => void
   onPause: BatchControlHandler
   onResume: BatchControlHandler
   onDiscard: BatchControlHandler
@@ -64,26 +72,45 @@ export default function BatchSettingsPanel({
       }`}
     >
       <div className="batch-log-toolbar">
-        <SettingsStatusPill status={status}>
-          {batch ? batchStatusLabel(status) : '空闲'}
+        <SettingsStatusPill status={!canResume && paused ? 'paused' : status}>
+          {batch ? (!canResume && paused ? '不可恢复' : batchStatusLabel(status)) : '空闲'}
         </SettingsStatusPill>
-        {customControls !== undefined ? (
-          customControls
-        ) : (
-          <BatchTaskControls
-            scopeLabel={taskNoun}
-            running={running}
-            paused={paused}
-            status={status}
-            onPause={onPause}
-            onResume={onResume}
-            onDiscard={onDiscard}
-          />
-        )}
+        <div className="batch-log-toolbar-actions">
+          {scope === 'actress' && pendingGroupCount > 0 && onOpenPending ? (
+            <button type="button" className="btn btn-sm btn-ghost" onClick={onOpenPending}>
+              查看待确认
+            </button>
+          ) : null}
+          {customControls !== undefined ? (
+            customControls
+          ) : (
+            <BatchTaskControls
+              scopeLabel={taskNoun}
+              running={running}
+              paused={paused}
+              status={status}
+              canResume={canResume}
+              resumeDisabledReason={resumeDisabledReason}
+              onPause={onPause}
+              onResume={onResume}
+              onDiscard={onDiscard}
+            />
+          )}
+        </div>
       </div>
 
+      {!canResume && paused ? (
+        <p className="batch-task-unrecoverable" role="status">
+          {resumeDisabledReason ?? '状态范围无法识别，请终止后重新启动任务'}
+        </p>
+      ) : null}
+
       <div className="batch-log-stats" aria-label="运行统计">
-        <div className="batch-log-stats-row">
+        <div
+          className={`batch-log-stats-row${
+            scope === 'actress' ? ' batch-log-stats-row--with-pending' : ''
+          }`}
+        >
           <span className="batch-log-stat">
             <span className="batch-log-stat-label">进度</span>
             <strong>{progressCount}</strong>
@@ -92,6 +119,12 @@ export default function BatchSettingsPanel({
             <span className="batch-log-stat-label">成功</span>
             <strong className="text-success">{batch?.success ?? 0}</strong>
           </span>
+          {scope === 'actress' ? (
+            <span className="batch-log-stat batch-log-stat--pending">
+              <span className="batch-log-stat-label">待确认</span>
+              <strong>{pendingGroupCount}</strong>
+            </span>
+          ) : null}
           <span className="batch-log-stat">
             <span className="batch-log-stat-label">失败</span>
             <strong className="text-danger">{batch?.failed ?? 0}</strong>

@@ -4,6 +4,7 @@ import type { PluginKind } from './types'
 import SelectControl from '../SelectControl'
 import PluginDevFieldTags from './PluginDevFieldTags'
 import PluginDevMediaTargetPicker from './PluginDevMediaTargetPicker'
+import { WorkbenchRail, WorkbenchRailHeader } from '../workbench'
 
 function PluginDevFieldLabel({
   children,
@@ -137,11 +138,11 @@ export default function PluginDevConfigRail({
   }
 
   return (
-    <aside className="plugin-dev-rail plugin-dev-rail--config">
-      <div className="plugin-dev-rail-head">
+    <WorkbenchRail className="plugin-dev-rail plugin-dev-rail--config">
+      <WorkbenchRailHeader className="plugin-dev-rail-head">
         <span>任务配置</span>
         {isDebugMode ? <span className="plugin-dev-mode-badge">调试模式</span> : null}
-      </div>
+      </WorkbenchRailHeader>
 
       <div className="plugin-dev-config-scroll">
         {agentDisabledReason ? (
@@ -310,6 +311,6 @@ export default function PluginDevConfigRail({
           onClose={() => setShowTargetPicker(false)}
         />
       ) : null}
-    </aside>
+    </WorkbenchRail>
   )
 }

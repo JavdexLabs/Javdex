@@ -7,6 +7,7 @@ import ActressShell from './components/ActressShell'
 import FacetShell from './components/FacetShell'
 import DetailPage from './pages/DetailPage'
 import ActressDetailPage from './pages/ActressDetailPage'
+import ActressConflictReviewPage from './pages/ActressConflictReviewPage'
 import FacetDetailPage from './pages/FacetDetailPage'
 import PlaylistShell from './components/PlaylistShell'
 import PlaylistDetailPage from './pages/PlaylistDetailPage'
@@ -50,6 +51,7 @@ function AppContent(): JSX.Element {
                     </Route>
                     <Route path={ROUTE_PATH.actresses} element={<ActressShell />}>
                       <Route index element={null} />
+                      <Route path={ROUTE_SEGMENT.actressConflicts} element={<ActressConflictReviewPage />} />
                       <Route path={ROUTE_SEGMENT.actressDetail} element={<ActressDetailPage />}>
                         <Route path={ROUTE_SEGMENT.actressVideo} element={<DetailPage />}>
                           <Route

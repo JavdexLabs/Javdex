@@ -9,6 +9,11 @@ import {
   normalizeNetworkUrl
 } from './scrapeBrowserImageCache'
 import { cleanUserAgent, getScrapeUaProfile } from './scrapeUaProfile'
+import {
+  canResolveScrapePage,
+  canResolveScrapeSelector,
+  ScrapeBrowserWaitBudget
+} from './scrapeBrowserWaitBudget'
 
 const PARTITION = 'persist:scraper'
 
@@ -16,6 +21,7 @@ const PARTITION = 'persist:scraper'
 const DEFAULT_CONTENT_SELECTOR = 'main, article, .movie-list .item, .movie-panel-info, h1'
 const DOM_SETTLE_MIN_ELAPSED_MS = 1500
 const DOM_SETTLE_STABLE_MS = 1000
+const VERIFICATION_TIMEOUT_MS = 180_000
 
 /** Toolbar injected into challenge pages so the user can drive verification. */
 const TOOLBAR_JS = `
@@ -615,6 +621,7 @@ class ScrapeBrowser {
     url: string,
     options: {
       readySelector?: string
+      /** Normal page loading budget; time spent on Cloudflare verification is excluded. */
       timeoutMs?: number
       /** Body/title matches this → page is treated as loaded (e.g. xslist "No results found"). */
       settleWhenText?: RegExp
@@ -647,17 +654,22 @@ class ScrapeBrowser {
     })
 
     const start = Date.now()
+    const waitBudget = new ScrapeBrowserWaitBudget(start, timeoutMs, VERIFICATION_TIMEOUT_MS)
     let stableContentSince = 0
     let lastStableSignature = ''
     let focusedForChallenge = false
 
-    while (Date.now() - start < timeoutMs) {
+    while (true) {
       if (!this.win || this.win.isDestroyed()) {
         throw new Error('验证窗口已被关闭')
       }
 
       if (this.manualPass) {
-        return this.readHtml(win)
+        // “验证通过” only requests an immediate re-check. Cloudflare may still
+        // be redirecting, so the destination must pass the normal readiness loop.
+        this.manualPass = false
+        stableContentSince = 0
+        lastStableSignature = ''
       }
 
       const info = await win.webContents
@@ -700,6 +712,13 @@ class ScrapeBrowser {
         }))
 
       const isChallenge = await this.isPageChallenge(win)
+      const waitStatus = waitBudget.update(Date.now(), isChallenge)
+      if (waitStatus === 'verification-timeout') {
+        win.show()
+        win.focus()
+        throw new Error('验证超时：请在弹出的窗口中完成 Cloudflare 验证后点击「验证通过」')
+      }
+      if (waitStatus === 'page-timeout') break
       if (isChallenge && !focusedForChallenge) {
         await this.syncChallengeToolbar(win)
         focusedForChallenge = true
@@ -712,7 +731,10 @@ class ScrapeBrowser {
         frameIdle &&
         hasAnyDom &&
         Date.now() - start > DOM_SETTLE_MIN_ELAPSED_MS
-      const mayResolve = !isChallenge && (info.hasContent || info.settled || hasTerminalDomState)
+      const mayResolve = canResolveScrapePage(
+        isChallenge,
+        info.hasContent || info.settled || hasTerminalDomState
+      )
       if (mayResolve) {
         if (stableContentSince === 0 || lastStableSignature !== info.signature) {
           stableContentSince = Date.now()
@@ -730,12 +752,8 @@ class ScrapeBrowser {
     }
 
     if (!win.isDestroyed()) {
-      const isChallenge = await this.isPageChallenge(win).catch(() => false)
       win.show()
       win.focus()
-      if (isChallenge) {
-        throw new Error('验证超时：请在弹出的窗口中完成 Cloudflare 验证后点击「验证通过」')
-      }
     }
     throw new Error('页面加载超时：请检查 URL 或网络连接后重试')
   }
@@ -1039,11 +1057,30 @@ class ScrapeBrowser {
     timeoutMs: number
   ): Promise<boolean> {
     const started = Date.now()
-    while (Date.now() - started < timeoutMs) {
-      const found = await win.webContents
-        .executeJavaScript(`!!document.querySelector(${JSON.stringify(selector)})`)
-        .catch(() => false)
-      if (found) return true
+    const waitBudget = new ScrapeBrowserWaitBudget(started, timeoutMs, VERIFICATION_TIMEOUT_MS)
+    let focusedForChallenge = false
+    while (true) {
+      const isChallenge = await this.isPageChallenge(win)
+      const found = isChallenge
+        ? false
+        : await win.webContents
+            .executeJavaScript(`!!document.querySelector(${JSON.stringify(selector)})`)
+            .catch(() => false)
+      if (canResolveScrapeSelector(isChallenge, found)) return true
+
+      const waitStatus = waitBudget.update(Date.now(), isChallenge)
+      if (waitStatus === 'verification-timeout') {
+        await this.syncChallengeToolbar(win)
+        throw new Error('验证超时：请在弹出的窗口中完成 Cloudflare 验证后点击「验证通过」')
+      }
+      if (waitStatus === 'page-timeout') break
+      if (isChallenge && !focusedForChallenge) {
+        await this.syncChallengeToolbar(win)
+        focusedForChallenge = true
+      } else if (!isChallenge) {
+        focusedForChallenge = false
+      }
+
       await this.sleep(250)
     }
     throw new Error(`Timed out waiting for selector: ${selector}`)

@@ -63,7 +63,7 @@ app.getPath('userData')/scraper_plugins/{video|actress}/{plugin-name}/
 |------|------|
 | `ctx.code` | 待刮削番号 |
 | `ctx.proxyUrl` | 当前刮削代理（可能为空） |
-| `ctx.fetchPage(url, options?)` | 拉取页面 HTML；`options`: `readySelector`、`timeoutMs`、`settleWhenText`（`RegExp`） |
+| `ctx.fetchPage(url, options?)` | 拉取页面 HTML；`options`: `readySelector`、`timeoutMs`、`settleWhenText`（`RegExp`）。`timeoutMs` 只计算正常页面加载时间；Cloudflare 人工验证暂停该计时，并使用独立的 3 分钟验证上限。 |
 | `ctx.fetchBuffer(url, options?)` | 拉取二进制（如图片）；持久缓存选项见下文 |
 | `ctx.cheerio` | Cheerio 模块；**每个 HTML 须先 `const $ = ctx.cheerio.load(html)`**，沙箱内无全局 `$` |
 | `ctx.browser` | 见下方浏览器辅助 |
@@ -106,7 +106,7 @@ const body = await ctx.fetchBuffer(url, {
 | `url()` | 当前 URL |
 | `inspect(options?)` | 结构探查 |
 | `click(selector)` / `type(selector, text, options?)` / `press(key)` | 交互 |
-| `waitForSelector(selector, options?)` / `wait(timeoutMs)` | 等待 |
+| `waitForSelector(selector, options?)` / `wait(timeoutMs)` | 等待；`waitForSelector` 与 `fetchPage` 一样会暂停 Cloudflare 验证期间的页面计时 |
 
 ### `supportedFields`（video）
 

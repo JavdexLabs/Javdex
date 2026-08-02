@@ -91,6 +91,7 @@ interface SettingsOverviewPanelProps {
   anyBatchActive: boolean
   videoBatchPct: number
   actressPct: number
+  actressConflictGroupCount: number
   unrecognizedCount: number
   statsRefreshKey?: number
   onNavigate: (group: SettingsGroup, tab?: SettingsTab) => void
@@ -248,6 +249,7 @@ function BatchOverviewStatus({
   canResume = true,
   resumeDisabledReason = null,
   showPending = false,
+  pendingGroupCount = 0,
   onOpenPending,
   onOpen,
   onPause,
@@ -260,6 +262,7 @@ function BatchOverviewStatus({
   canResume?: boolean
   resumeDisabledReason?: string | null
   showPending?: boolean
+  pendingGroupCount?: number
   onOpenPending?: () => void
   onOpen: () => void
   onPause: BatchControlHandler
@@ -283,7 +286,7 @@ function BatchOverviewStatus({
       : batch?.currentCode
         ? `当前：${batch.currentCode}`
         : `成功 ${batch?.success ?? 0}${
-            showPending ? ` · 待确认 ${batch?.pending ?? 0}` : ''
+            showPending ? ` · 待确认 ${pendingGroupCount}` : ''
           } · 失败 ${batch?.failed ?? 0}`
     : '上方可启动未刮削项或高级刮削'
   const openLabel = `查看${scopeLabel}批量任务详情`
@@ -330,9 +333,9 @@ function BatchOverviewStatus({
       </div>
       <div className="settings-overview-batch-meta">
         <small>{batchDetail}</small>
-        {activeBatch || (showPending && (batch?.pending ?? 0) > 0 && onOpenPending) ? (
+        {activeBatch || (showPending && pendingGroupCount > 0 && onOpenPending) ? (
           <span className="settings-overview-batch-meta-actions">
-            {showPending && (batch?.pending ?? 0) > 0 && onOpenPending ? (
+            {showPending && pendingGroupCount > 0 && onOpenPending ? (
               <button type="button" className="btn btn-sm btn-ghost" onClick={onOpenPending}>
                 查看待确认
               </button>
@@ -359,6 +362,7 @@ export default function SettingsOverviewPanel({
   anyBatchActive,
   videoBatchPct,
   actressPct,
+  actressConflictGroupCount,
   unrecognizedCount,
   statsRefreshKey = 0,
   onNavigate,
@@ -699,6 +703,7 @@ export default function SettingsOverviewPanel({
             canResume={actressBatchRecoverable}
             resumeDisabledReason={actressBatchUnrecoverableReason}
             showPending
+            pendingGroupCount={actressConflictGroupCount}
             onOpenPending={onOpenActressConflicts}
             onOpen={onOpenActressBatchDetails}
             onPause={onPauseActressBatch}

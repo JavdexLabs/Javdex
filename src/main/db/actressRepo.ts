@@ -9,6 +9,7 @@ import type {
   ActressGalleryAsset,
   Video,
   ActressScrapeResult,
+  ActressScrapeFieldImpact,
   ActressEditInput,
   ActressScrapeField,
   ActressScrapeUpdateMode,
@@ -1550,9 +1551,6 @@ export function resolveEffectiveActressScrapeFields(
   mode: ActressScrapeUpdateMode = 'replace'
 ): ActressScrapeField[] {
   if (mode !== 'fillEmpty') return fields
-  if (fields.includes('avatar')) {
-    clearBrokenActressAvatarIfNeeded(actressId)
-  }
   const db = getDb()
   const actress = db.prepare('SELECT * FROM actresses WHERE id = ?').get(actressId) as
     | Actress
@@ -1673,6 +1671,255 @@ function resolveApplicableScrapedAliases(
   return { applicable, conflicts }
 }
 
+interface ActressScrapeApplicationPlan {
+  effectiveFields: ActressScrapeField[]
+  impacts: ActressScrapeFieldImpact[]
+  applicableAliases: string[]
+  shouldReplaceAliases: boolean
+  shouldClearAvatar: boolean
+}
+
+interface ActressScrapePlanSnapshot extends Actress {
+  name_zh: string | null
+  name_en: string | null
+  aliases: string[]
+  gallery: Array<Pick<ActressGalleryAsset, 'remote_url' | 'local_path'>>
+}
+
+/** Read only the rows needed to plan a scrape. Unlike getActressDetail, this never backfills assets. */
+function readActressScrapePlanSnapshot(actressId: number): ActressScrapePlanSnapshot | null {
+  const db = getDb()
+  const actress = db.prepare('SELECT * FROM actresses WHERE id = ?').get(actressId) as
+    | Actress
+    | undefined
+  if (!actress) return null
+  const names = listActressNameRows(actressId)
+  const gallery = db
+    .prepare(
+      `SELECT remote_url, local_path
+       FROM actress_gallery_assets
+       WHERE actress_id = ?
+       ORDER BY position, id`
+    )
+    .all(actressId) as ActressScrapePlanSnapshot['gallery']
+  return {
+    ...actress,
+    name_zh: getActressTypedName(actressId, 'zh', names),
+    name_en: getActressTypedName(actressId, 'en', names),
+    aliases: listActressAliasNames(actressId, names),
+    gallery
+  }
+}
+
+function samePlannedValue(
+  left: ActressScrapeFieldImpact['currentValue'],
+  right: ActressScrapeFieldImpact['nextValue']
+): boolean {
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((value, index) => value === right[index])
+  }
+  return left === right
+}
+
+function plannedImpact(
+  field: ActressScrapeField,
+  currentValue: ActressScrapeFieldImpact['currentValue'],
+  incomingValue: ActressScrapeFieldImpact['nextValue'],
+  mode: ActressScrapeUpdateMode,
+  selected: boolean,
+  options?: {
+    part?: ActressScrapeFieldImpact['part']
+    collection?: boolean
+    resourceUnavailable?: boolean
+  }
+): ActressScrapeFieldImpact {
+  let nextValue = currentValue
+  let reason: ActressScrapeFieldImpact['reason'] =
+    mode === 'replace' ? 'replace' : mode
+
+  if (!selected) {
+    reason = mode === 'fillEmpty' ? 'existingValue' : 'noValue'
+  } else if (options?.resourceUnavailable) {
+    reason = 'resourceUnavailable'
+  } else if (mode === 'replace') {
+    nextValue = incomingValue
+  } else if (mode === 'fillEmpty') {
+    if (currentValue === null || (Array.isArray(currentValue) && currentValue.length === 0)) {
+      if (incomingValue !== null && (!Array.isArray(incomingValue) || incomingValue.length > 0)) {
+        nextValue = incomingValue
+      } else {
+        reason = 'noValue'
+      }
+    } else {
+      reason = 'existingValue'
+    }
+  } else if (
+    incomingValue !== null &&
+    (!Array.isArray(incomingValue) || incomingValue.length > 0)
+  ) {
+    nextValue = incomingValue
+  } else {
+    reason = 'noValue'
+  }
+
+  const action: ActressScrapeFieldImpact['action'] = samePlannedValue(currentValue, nextValue)
+    ? 'preserve'
+    : nextValue === null || (Array.isArray(nextValue) && nextValue.length === 0)
+      ? 'clear'
+      : options?.collection
+        ? 'replace'
+        : 'set'
+  return {
+    field,
+    ...(options?.part ? { part: options.part } : {}),
+    action,
+    currentValue,
+    nextValue,
+    reason
+  }
+}
+
+/**
+ * Build the read-only field plan used by both conflict preview and formal application.
+ * Files are inspected for availability, but neither database rows nor assets are changed.
+ */
+export function planActressScrapeResult(
+  actressId: number,
+  result: ActressScrapeResult,
+  avatarRelPath: string | null,
+  galleryAssets: ActressGalleryAssetWriteInput[],
+  fields?: ActressScrapeField[],
+  mode: ActressScrapeUpdateMode = 'replace'
+): ActressScrapeApplicationPlan {
+  const detail = readActressScrapePlanSnapshot(actressId)
+  if (!detail) throw new Error('演员不存在')
+  const requested = fields ?? ALL_ACTRESS_SCRAPE_FIELDS
+  const effectiveFields = resolveEffectiveActressScrapeFields(actressId, requested, mode)
+  const selected = new Set(effectiveFields)
+  const avatarResourceAvailable = Boolean(avatarRelPath && isUsableImageAsset(avatarRelPath))
+  const avatarResourceUnavailable = Boolean(
+    selected.has('avatar') &&
+      ((avatarRelPath && !avatarResourceAvailable) || (!avatarRelPath && result.avatarUrl?.trim()))
+  )
+  const aliasResultIsEmpty = !result.aliases || result.aliases.length === 0
+  const { applicable: applicableAliases, conflicts: conflictingAliases } = selected.has('aliases')
+    ? resolveApplicableScrapedAliases(result.aliases, actressId, detail.main_name)
+    : { applicable: [], conflicts: [] }
+  if (conflictingAliases.length > 0) {
+    throw new Error(`名称「${conflictingAliases[0]}」已被其他演员使用`)
+  }
+  const shouldReplaceAliases =
+    selected.has('aliases') &&
+    (applicableAliases.length > 0 || (mode === 'replace' && aliasResultIsEmpty))
+  const shouldClearAvatar =
+    mode === 'replace' &&
+    selected.has('avatar') &&
+    !result.avatarUrl?.trim() &&
+    !avatarRelPath
+
+  const galleryValues = galleryAssets
+    .map((asset) => asset.localPath?.trim() || asset.remoteUrl?.trim() || '')
+    .filter(Boolean)
+  const currentGallery = detail.gallery
+    .map((asset) => asset.local_path?.trim() || asset.remote_url?.trim() || '')
+    .filter(Boolean)
+  const currentAvatar =
+    detail.avatar_path?.trim() && isUsableImageAsset(detail.avatar_path)
+      ? detail.avatar_path.trim()
+      : null
+  const avatarMatchesExisting = Boolean(
+    avatarResourceAvailable &&
+      avatarRelPath &&
+      downloadedAvatarMatchesExistingSource(detail, avatarRelPath)
+  )
+  const nextAvatar = avatarMatchesExisting
+    ? currentAvatar
+    : avatarResourceAvailable
+      ? avatarRelPath
+    : shouldClearAvatar
+      ? null
+      : currentAvatar
+  const textInputs: Array<{
+    field: Exclude<ActressScrapeField, 'avatar' | 'gallery' | 'measurements' | 'aliases'>
+    current: string | number | null
+    incoming: string | number | null
+  }> = [
+    { field: 'birthDate', current: detail.birth_date, incoming: result.birthDate?.trim() || null },
+    { field: 'nameZh', current: detail.name_zh, incoming: result.nameZh?.trim() || null },
+    { field: 'nameEn', current: detail.name_en, incoming: result.nameEn?.trim() || null },
+    { field: 'debutDate', current: detail.debut_date, incoming: result.debutDate?.trim() || null },
+    { field: 'heightCm', current: detail.height_cm, incoming: result.heightCm ?? null },
+    { field: 'cupSize', current: detail.cup_size, incoming: normalizeCupSize(result.cupSize) },
+    { field: 'bloodType', current: detail.blood_type, incoming: result.bloodType?.trim() || null },
+    { field: 'zodiac', current: detail.zodiac, incoming: result.zodiac?.trim() || null },
+    { field: 'nationality', current: detail.nationality, incoming: result.nationality?.trim() || null },
+    {
+      field: 'profileSummary',
+      current: detail.profile_summary,
+      incoming: result.profileSummary?.trim() || null
+    }
+  ]
+  const impacts: ActressScrapeFieldImpact[] = []
+  for (const field of requested) {
+    if (field === 'avatar') {
+      impacts.push(
+        plannedImpact('avatar', currentAvatar, nextAvatar, mode, selected.has('avatar'), {
+          resourceUnavailable: avatarResourceUnavailable
+        })
+      )
+    } else if (field === 'gallery') {
+      impacts.push(
+        plannedImpact(
+          'gallery',
+          currentGallery,
+          galleryValues,
+          mode,
+          selected.has('gallery'),
+          { collection: true }
+        )
+      )
+    } else if (field === 'measurements') {
+      for (const [part, current, incoming] of [
+        ['bustCm', detail.bust_cm, result.bustCm ?? null],
+        ['waistCm', detail.waist_cm, result.waistCm ?? null],
+        ['hipCm', detail.hip_cm, result.hipCm ?? null]
+      ] as const) {
+        impacts.push(
+          plannedImpact('measurements', current, incoming, mode, selected.has('measurements'), {
+            part
+          })
+        )
+      }
+    } else if (field === 'aliases') {
+      impacts.push(
+        plannedImpact(
+          'aliases',
+          detail.aliases,
+          applicableAliases,
+          mode,
+          selected.has('aliases'),
+          { collection: true }
+        )
+      )
+    } else {
+      const input = textInputs.find((item) => item.field === field)
+      if (input) {
+        impacts.push(
+          plannedImpact(field, input.current, input.incoming, mode, selected.has(field))
+        )
+      }
+    }
+  }
+
+  return {
+    effectiveFields,
+    impacts,
+    applicableAliases,
+    shouldReplaceAliases,
+    shouldClearAvatar
+  }
+}
+
 /** Apply actress profile scrape result (avatar, gallery, profile fields, measurements, aliases). */
 export function applyActressScrapeResult(
   actressId: number,
@@ -1690,12 +1937,23 @@ export function applyActressScrapeResult(
   fileChanges?: { createdPaths: string[]; obsoletePaths: string[] }
 } {
   const db = getDb()
-  const requested = fields ?? ALL_ACTRESS_SCRAPE_FIELDS
-  const effective = resolveEffectiveActressScrapeFields(actressId, requested, mode)
+  const plan = planActressScrapeResult(
+    actressId,
+    result,
+    avatarRelPath,
+    galleryAssets,
+    fields,
+    mode
+  )
+  const effective = plan.effectiveFields
   if (effective.length === 0) return { applied: false, warnings: [], avatarApplied: false }
   const selected = new Set(effective)
   const warnings: string[] = []
   const scrapedAt = nowIso()
+  const preserveExistingDb = mode === 'fillEmpty'
+  if (preserveExistingDb && selected.has('avatar')) {
+    clearBrokenActressAvatarIfNeeded(actressId)
+  }
   const actress = db
     .prepare(
       `SELECT main_name, avatar_path, avatar_source_path, bust_cm, waist_cm, hip_cm
@@ -1713,27 +1971,10 @@ export function applyActressScrapeResult(
       >
     | undefined
   if (!actress) throw new Error('演员不存在')
-  const preserveExistingDb = mode === 'fillEmpty'
-  const preserveNullScrape = mode !== 'replace'
-  const shouldClearAvatar =
-    mode === 'replace' &&
-    selected.has('avatar') &&
-    !result.avatarUrl?.trim() &&
-    !avatarRelPath
-  if (preserveExistingDb && selected.has('avatar')) {
-    clearBrokenActressAvatarIfNeeded(actressId)
-  }
+  const shouldClearAvatar = plan.shouldClearAvatar
   const aliasResultIsEmpty = !result.aliases || result.aliases.length === 0
-  const { applicable: applicableAliases, conflicts: conflictingAliases } =
-    selected.has('aliases')
-      ? resolveApplicableScrapedAliases(result.aliases, actressId, actress.main_name)
-      : { applicable: [], conflicts: [] }
-  if (conflictingAliases.length > 0) {
-    throw new Error(`名称「${conflictingAliases[0]}」已被其他演员使用`)
-  }
-  const shouldReplaceAliases =
-    selected.has('aliases') &&
-    (applicableAliases.length > 0 || (mode === 'replace' && aliasResultIsEmpty))
+  const applicableAliases = plan.applicableAliases
+  const shouldReplaceAliases = plan.shouldReplaceAliases
 
   let adoptedAvatar:
     | { displayPath: string; sourcePath: string; cropJson: string }
@@ -1799,59 +2040,50 @@ export function applyActressScrapeResult(
   const txn = db.transaction(() => {
     const updates: string[] = []
     const bind: Record<string, unknown> = { id: actressId }
-    const setText = (column: string, bindKey: string, value: string | null): void => {
-      if (preserveExistingDb) {
-        updates.push(
-          `${column} = CASE WHEN ${column} IS NULL OR trim(${column}) = '' THEN @${bindKey} ELSE ${column} END`
-        )
-      } else if (preserveNullScrape) {
-        updates.push(
-          `${column} = CASE WHEN @${bindKey} IS NULL OR trim(@${bindKey}) = '' THEN ${column} ELSE @${bindKey} END`
-        )
-      } else {
-        updates.push(`${column} = @${bindKey}`)
-      }
-      bind[bindKey] = value
-    }
-    const setNumber = (column: string, bindKey: string, value: number | null): void => {
-      if (preserveExistingDb) {
-        updates.push(`${column} = COALESCE(${column}, @${bindKey})`)
-      } else if (preserveNullScrape) {
-        updates.push(`${column} = COALESCE(@${bindKey}, ${column})`)
-      } else {
-        updates.push(`${column} = @${bindKey}`)
-      }
-      bind[bindKey] = value
+    const impactValue = (
+      field: ActressScrapeField,
+      part?: ActressScrapeFieldImpact['part']
+    ): ActressScrapeFieldImpact['nextValue'] =>
+      plan.impacts.find((impact) => impact.field === field && impact.part === part)?.nextValue ??
+      null
+    const setPlanned = (
+      column: string,
+      bindKey: string,
+      field: ActressScrapeField,
+      part?: ActressScrapeFieldImpact['part']
+    ): void => {
+      updates.push(`${column} = @${bindKey}`)
+      bind[bindKey] = impactValue(field, part)
     }
 
     if (selected.has('birthDate')) {
-      setText('birth_date', 'birth_date', result.birthDate?.trim() || null)
+      setPlanned('birth_date', 'birth_date', 'birthDate')
     }
     if (selected.has('debutDate')) {
-      setText('debut_date', 'debut_date', result.debutDate?.trim() || null)
+      setPlanned('debut_date', 'debut_date', 'debutDate')
     }
     if (selected.has('heightCm')) {
-      setNumber('height_cm', 'height_cm', result.heightCm ?? null)
+      setPlanned('height_cm', 'height_cm', 'heightCm')
     }
     if (selected.has('measurements')) {
-      setNumber('bust_cm', 'bust_cm', result.bustCm ?? null)
-      setNumber('waist_cm', 'waist_cm', result.waistCm ?? null)
-      setNumber('hip_cm', 'hip_cm', result.hipCm ?? null)
+      setPlanned('bust_cm', 'bust_cm', 'measurements', 'bustCm')
+      setPlanned('waist_cm', 'waist_cm', 'measurements', 'waistCm')
+      setPlanned('hip_cm', 'hip_cm', 'measurements', 'hipCm')
     }
     if (selected.has('cupSize')) {
-      setText('cup_size', 'cup_size', normalizeCupSize(result.cupSize))
+      setPlanned('cup_size', 'cup_size', 'cupSize')
     }
     if (selected.has('bloodType')) {
-      setText('blood_type', 'blood_type', result.bloodType?.trim() || null)
+      setPlanned('blood_type', 'blood_type', 'bloodType')
     }
     if (selected.has('zodiac')) {
-      setText('zodiac', 'zodiac', result.zodiac?.trim() || null)
+      setPlanned('zodiac', 'zodiac', 'zodiac')
     }
     if (selected.has('nationality')) {
-      setText('nationality', 'nationality', result.nationality?.trim() || null)
+      setPlanned('nationality', 'nationality', 'nationality')
     }
     if (selected.has('profileSummary')) {
-      setText('profile_summary', 'profile_summary', result.profileSummary?.trim() || null)
+      setPlanned('profile_summary', 'profile_summary', 'profileSummary')
     }
     if (selected.has('avatar') && adoptedAvatar) {
       updates.push(
@@ -1878,7 +2110,7 @@ export function applyActressScrapeResult(
       updates.push('avatar_crop_json = NULL')
     }
     if (selected.has('nameZh') && (mode === 'replace' || result.nameZh !== undefined)) {
-      const zh = result.nameZh?.trim() || null
+      const zh = impactValue('nameZh') as string | null
       if (zh) assertActressNameAvailable(zh, actressId)
       if (preserveExistingDb) {
         setActressTypedNameIfEmpty(actressId, 'zh', zh)
@@ -1887,7 +2119,7 @@ export function applyActressScrapeResult(
       }
     }
     if (selected.has('nameEn') && (mode === 'replace' || result.nameEn !== undefined)) {
-      const en = result.nameEn?.trim() || null
+      const en = impactValue('nameEn') as string | null
       if (en) assertActressNameAvailable(en, actressId)
       if (preserveExistingDb) {
         setActressTypedNameIfEmpty(actressId, 'en', en)

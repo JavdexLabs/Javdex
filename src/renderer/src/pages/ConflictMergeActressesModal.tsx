@@ -18,8 +18,6 @@ export interface ConflictMergeActressesDecision {
 
 interface Props {
   actors: ActressConflictMergeActor[]
-  selectedActressId: number
-  allowPendingScrape: boolean
   busy: boolean
   onConfirm: (decision: ConflictMergeActressesDecision) => void
   onCancel: () => void
@@ -50,52 +48,58 @@ function ActorChoice({
 
 export default function ConflictMergeActressesModal({
   actors,
-  selectedActressId,
-  allowPendingScrape,
   busy,
   onConfirm,
   onCancel
 }: Props): JSX.Element {
-  const selectedActor = actors.find((actor) => actor.actressId === selectedActressId) ?? null
-  const partnerOptions = actors.filter((actor) => actor.actressId !== selectedActressId)
-  const [partnerActressId, setPartnerActressId] = useState<number | null>(null)
+  const [selectedIds, setSelectedIds] = useState<number[]>(
+    actors.length === 2 ? actors.map((actor) => actor.actressId) : []
+  )
   const [keepActressId, setKeepActressId] = useState<number | null>(null)
   const [finalMainNameActressId, setFinalMainNameActressId] = useState<number | null>(null)
-  const partnerActor =
-    actors.find((actor) => actor.actressId === partnerActressId) ?? null
   const pair = useMemo(
-    () => (selectedActor && partnerActor ? [selectedActor, partnerActor] : []),
-    [partnerActor, selectedActor]
+    () => selectedIds.flatMap((id) => actors.find((actor) => actor.actressId === id) ?? []),
+    [actors, selectedIds]
   )
+  const bothHavePending = pair.length === 2 && pair.every((actor) => actor.hasPending)
+  const pairBlockedReason =
+    pair.length === 2
+      ? pair[0].blockedPartnerReasons[pair[1].actressId] ?? null
+      : null
+  const hasThirdPartyConflict = actors.length > 2 || Boolean(pairBlockedReason)
   const confirmEnabled = canConfirmMergeActresses(
     actors,
-    selectedActressId,
-    partnerActressId,
+    pair[0]?.actressId ?? -1,
+    pair[1]?.actressId ?? null,
     keepActressId,
-    finalMainNameActressId,
-    allowPendingScrape
+    finalMainNameActressId
   )
 
-  const choosePartner = (actressId: number): void => {
-    setPartnerActressId(actressId)
+  const toggleActor = (actressId: number): void => {
+    setSelectedIds((current) => {
+      const next = current.includes(actressId)
+        ? current.filter((id) => id !== actressId)
+        : current.length < 2
+          ? [...current, actressId]
+          : [current[1], actressId]
+      return next
+    })
     setKeepActressId(null)
     setFinalMainNameActressId(null)
   }
 
   const confirm = (): void => {
-    if (!confirmEnabled || !selectedActor || !partnerActor || keepActressId == null) return
-    const keeper = keepActressId === selectedActor.actressId ? selectedActor : partnerActor
-    const merged = keepActressId === selectedActor.actressId ? partnerActor : selectedActor
-    const finalMainName = pair.find(
-      (actor) => actor.actressId === finalMainNameActressId
-    )?.mainName
-    if (!finalMainName) return
+    if (!confirmEnabled) return
+    const keeper = pair.find((actor) => actor.actressId === keepActressId)
+    const merged = pair.find((actor) => actor.actressId !== keepActressId)
+    const finalNameActor = pair.find((actor) => actor.actressId === finalMainNameActressId)
+    if (!keeper || !merged || !finalNameActor) return
     onConfirm({
       keepActressId: keeper.actressId,
       keepActressRevision: keeper.revision,
       mergeActressId: merged.actressId,
       mergeActressRevision: merged.revision,
-      finalMainName
+      finalMainName: finalNameActor.mainName
     })
   }
 
@@ -111,75 +115,64 @@ export default function ConflictMergeActressesModal({
       onConfirm={confirm}
       onCancel={onCancel}
     >
-      <p>
-        合并会删除其中一条档案，并把影片、写真、标签、名称和缺失资料收敛到保留档案。请逐项明确选择，系统不会自动决定。
-      </p>
-      {selectedActor ? (
-        <div className="conflict-merge-selected">
-          <span>当前选择演员</span>
-          <ActorChoice
-            actor={selectedActor}
-            detail={selectedActor.hasPending ? '已有待确认刮削结果' : '历史名称声明演员'}
-          />
-        </div>
-      ) : null}
+      <p>合并会删除其中一条档案。请依次选择两位演员、保留档案和最终主名。</p>
 
       <fieldset className="conflict-merge-fieldset">
-        <legend>选择另一条演员档案</legend>
+        <legend>1. 选择两位演员</legend>
         <div className="conflict-merge-options">
-          {partnerOptions.map((actor, index) => {
-            const blocked = allowPendingScrape
-              ? Boolean(selectedActor?.hasPending && actor.hasPending)
-              : Boolean(selectedActor?.hasPending || actor.hasPending)
-            const disabled = busy || blocked
+          {actors.map((actor) => {
+            const selected = selectedIds.includes(actor.actressId)
             return (
               <label
                 key={actor.actressId}
-                className={`conflict-merge-option${
-                  partnerActressId === actor.actressId ? ' is-selected' : ''
-                }${disabled ? ' is-disabled' : ''}`}
+                className={`conflict-merge-option${selected ? ' is-selected' : ''}`}
               >
                 <input
-                  type="radio"
-                  name="conflict-merge-partner"
-                  checked={partnerActressId === actor.actressId}
-                  disabled={disabled}
-                  autoFocus={index === 0 && !disabled}
-                  onChange={() => choosePartner(actor.actressId)}
+                  type="checkbox"
+                  checked={selected}
+                  disabled={busy}
+                  onChange={() => toggleActor(actor.actressId)}
                 />
                 <ActorChoice
                   actor={actor}
-                  detail={blocked ? '存在待确认结果，请先处理后再合并' : '可与当前演员合并'}
+                  detail={actor.hasPending ? '有关联待确认刮削结果' : '仅演员档案与名称'}
                 />
               </label>
             )
           })}
-          {partnerOptions.length === 0 ? (
-            <EmptyState
-              variant="modal"
-              title="当前组没有另一条可合并档案"
-            />
+          {actors.length < 2 ? (
+            <EmptyState variant="modal" title="当前组没有两条可合并档案" />
           ) : null}
         </div>
+        {bothHavePending ? (
+          <p className="text-danger">两位演员都有待确认刮削结果，请先处理其中一份。</p>
+        ) : null}
+        {hasThirdPartyConflict ? (
+          <p className="text-danger">
+            {actors.length > 2
+              ? '本组还涉及第三位演员，请先确认名称归属后再合并。'
+              : pairBlockedReason}
+          </p>
+        ) : null}
       </fieldset>
 
       {pair.length === 2 ? (
         <>
           <fieldset className="conflict-merge-fieldset">
-            <legend>选择保留演员</legend>
+            <legend>2. 选择保留档案</legend>
             <div className="conflict-merge-options conflict-merge-options--two">
               {pair.map((actor) => (
                 <label
                   key={actor.actressId}
                   className={`conflict-merge-option${
                     keepActressId === actor.actressId ? ' is-selected' : ''
-                  }${busy ? ' is-disabled' : ''}`}
+                  }`}
                 >
                   <input
                     type="radio"
                     name="conflict-merge-keeper"
                     checked={keepActressId === actor.actressId}
-                    disabled={busy}
+                    disabled={busy || bothHavePending || hasThirdPartyConflict}
                     onChange={() => setKeepActressId(actor.actressId)}
                   />
                   <ActorChoice actor={actor} detail="保留这条档案及已有资料" />
@@ -189,22 +182,18 @@ export default function ConflictMergeActressesModal({
           </fieldset>
 
           <fieldset className="conflict-merge-fieldset">
-            <legend>选择最终主名</legend>
+            <legend>3. 选择最终主名</legend>
             <div className="conflict-merge-name-options">
               {pair.map((actor) => (
                 <label
                   key={`${actor.actressId}-${actor.mainName}`}
-                  className={
-                    `${finalMainNameActressId === actor.actressId ? 'is-selected' : ''}${
-                      busy ? ' is-disabled' : ''
-                    }`.trim()
-                  }
+                  className={finalMainNameActressId === actor.actressId ? 'is-selected' : ''}
                 >
                   <input
                     type="radio"
                     name="conflict-merge-main-name"
                     checked={finalMainNameActressId === actor.actressId}
-                    disabled={busy}
+                    disabled={busy || bothHavePending || hasThirdPartyConflict}
                     onChange={() => setFinalMainNameActressId(actor.actressId)}
                   />
                   <span>{actor.mainName}</span>

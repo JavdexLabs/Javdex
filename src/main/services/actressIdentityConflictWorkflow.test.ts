@@ -103,6 +103,108 @@ function decisionSnapshot(group: ActressNameConflictGroup) {
 }
 
 describe('ActressIdentityConflictWorkflow', () => {
+  it('inspects live ownership even when the name is not yet in a review group', () => {
+    const ownerId = createActress('Already Owned')
+    const targetId = createActress('Target')
+    const workflow = new ActressIdentityConflictWorkflow()
+
+    assert.deepEqual(
+      workflow.inspectConflictName({ actressId: targetId, name: 'AlreadyOwned' }),
+      { normalizedName: 'alreadyowned', status: 'conflict' }
+    )
+    assert.deepEqual(
+      workflow.inspectConflictName({ actressId: ownerId, name: 'Already Owned' }),
+      { normalizedName: 'alreadyowned', status: 'available' }
+    )
+    assert.deepEqual(workflow.listConflictGroups(), [])
+  })
+
+  it('summarizes the same aggregated name groups returned by the review list', () => {
+    createPendingNameOwnershipCollision()
+    const workflow = new ActressIdentityConflictWorkflow()
+
+    assert.equal(workflow.listConflictGroups().length, 1)
+    assert.deepEqual(workflow.getConflictReviewSummary(), {
+      groupCount: 1,
+      conflictGroupCount: 1,
+      applicableGroupCount: 0,
+      pendingScrapeCount: 0,
+      pendingNameClaimGroupCount: 1
+    })
+  })
+
+  it('keeps summary counts exact for mixed, multi-result, and multi-conflict groups', () => {
+    createPendingNameOwnershipCollision()
+    const sharedOwnerId = createActress('Shared Owner')
+    const otherOwnerId = createActress('Other Owner')
+    const naturalOwnerId = createActress('Natural Owner')
+    editActress(sharedOwnerId, { aliases: ['Shared Collision'] })
+    editActress(otherOwnerId, { aliases: ['Other Collision'] })
+    editActress(naturalOwnerId, { aliases: ['Natural Collision'] })
+    const workflow = new ActressIdentityConflictWorkflow()
+    const targets = [createActress('First Target'), createActress('Second Target')]
+    for (const targetId of targets) {
+      workflow.processPreparedScrape({
+        actressId: targetId,
+        plugin: { name: 'Fixture Source', source: 'builtin' },
+        queryName: getActressDetail(targetId)!.main_name,
+        selectedFields: ['aliases'],
+        applicableFields: ['aliases'],
+        mode: 'replace',
+        result: { aliases: ['Shared Collision'] },
+        warnings: [],
+        resources: []
+      })
+    }
+    const multiTargetId = createActress('Multi Target')
+    workflow.processPreparedScrape({
+      actressId: multiTargetId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Multi Target',
+      selectedFields: ['aliases'],
+      applicableFields: ['aliases'],
+      mode: 'replace',
+      result: { aliases: ['Shared Collision', 'Other Collision'] },
+      warnings: [],
+      resources: []
+    })
+    const naturalTargetId = createActress('Natural Target')
+    workflow.processPreparedScrape({
+      actressId: naturalTargetId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Natural Target',
+      selectedFields: ['aliases'],
+      applicableFields: ['aliases'],
+      mode: 'replace',
+      result: { aliases: ['Natural Collision'] },
+      warnings: [],
+      resources: []
+    })
+    editActress(naturalOwnerId, { aliases: [] })
+
+    const groups = workflow.listConflictGroups()
+    assert.equal(
+      groups.find((group) => group.normalizedName === 'sharedcollision')?.candidates.length,
+      3
+    )
+    assert.equal(
+      groups.find((group) => group.normalizedName === 'othercollision')?.candidates[0]
+        .actressId,
+      multiTargetId
+    )
+    assert.equal(
+      groups.find((group) => group.normalizedName === 'naturalcollision')?.status,
+      'applicable'
+    )
+    assert.deepEqual(workflow.getConflictReviewSummary(), {
+      groupCount: groups.length,
+      conflictGroupCount: groups.filter((group) => group.status === 'conflict').length,
+      applicableGroupCount: groups.filter((group) => group.status === 'applicable').length,
+      pendingScrapeCount: 4,
+      pendingNameClaimGroupCount: 1
+    })
+  })
+
   it('lists pending name ownership without inventing a pending scrape', () => {
     const { firstId: firstClaimantId, secondId: secondClaimantId } =
       createPendingNameOwnershipCollision()
@@ -324,7 +426,6 @@ describe('ActressIdentityConflictWorkflow', () => {
     const outcome = workflow.resolveConflict({
       kind: 'mergeActresses',
       snapshot: decisionSnapshot(group),
-      pendingId: candidate.pendingId,
       keepActressId: ownerId,
       keepActressRevision: group.currentOwner!.revision,
       mergeActressId: targetId,
@@ -494,6 +595,33 @@ describe('ActressIdentityConflictWorkflow', () => {
     assert.equal(workflow.countPendingScrapes(), 2)
   })
 
+  it('does not treat another conflict between the same actress pair as a merge blocker', () => {
+    const ownerId = createActress('Owner')
+    const targetId = createActress('Target')
+    editActress(ownerId, { aliases: ['Pair Collision', 'Second Pair Collision'] })
+    const workflow = new ActressIdentityConflictWorkflow()
+    workflow.processPreparedScrape({
+      actressId: targetId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Target',
+      selectedFields: ['aliases'],
+      applicableFields: ['aliases'],
+      mode: 'replace',
+      result: { aliases: ['Pair Collision', 'Second Pair Collision'] },
+      warnings: [],
+      resources: []
+    })
+
+    const group = workflow
+      .listConflictGroups()
+      .find((item) => item.normalizedName === 'paircollision')!
+
+    assert.equal(group.candidates[0].remainingConflictCountAfterDecision, 1)
+    assert.deepEqual(group.mergePairs, [
+      { actressIds: [ownerId, targetId], blockedReason: null }
+    ])
+  })
+
   it('rejects the whole workbench merge when a resulting name belongs to a third actress', () => {
     const ownerId = createActress('Owner')
     const targetId = createActress('Target')
@@ -562,6 +690,8 @@ describe('ActressIdentityConflictWorkflow', () => {
       .listConflictGroups()
       .find((item) => item.normalizedName === 'paircollision')!
     const candidate = group.candidates[0]
+
+    assert.match(group.mergePairs?.[0].blockedReason ?? '', /Third Collision/)
 
     assert.throws(
       () =>
@@ -1243,6 +1373,14 @@ describe('ActressIdentityConflictWorkflow', () => {
     assert.deepEqual(
       validate({
         snapshot: decisionSnapshot(group),
+        replacementMainNames: [],
+        destinationOwnerActressId: ownerId
+      }),
+      { status: 'valid' }
+    )
+    assert.deepEqual(
+      validate({
+        snapshot: decisionSnapshot(group),
         replacementMainNames: [{ actressId: ownerId, mainName: 'Occupied Name' }]
       }),
       {
@@ -1762,6 +1900,13 @@ describe('ActressIdentityConflictWorkflow', () => {
     editActress(ownerId, { aliases: [] })
     const group = workflow.listConflictGroups()[0]
     assert.equal(group.status, 'applicable')
+    assert.deepEqual(workflow.getConflictReviewSummary(), {
+      groupCount: 1,
+      conflictGroupCount: 0,
+      applicableGroupCount: 1,
+      pendingScrapeCount: 1,
+      pendingNameClaimGroupCount: 0
+    })
     assert.equal(getActressDetail(targetId)?.birth_date, null)
     assert.equal(getActressDetail(targetId)?.scraped_status, 0)
     const candidate = group.candidates[0]

@@ -72,6 +72,8 @@ export const IPC = {
   ACTRESS_MARK_SCRAPE_SUCCESS: 'actress:markScrapeSuccess',
   ACTRESS_CONFLICT_LIST: 'actressConflict:list',
   ACTRESS_CONFLICT_COUNT: 'actressConflict:count',
+  ACTRESS_CONFLICT_SUMMARY: 'actressConflict:summary',
+  ACTRESS_CONFLICT_INSPECT_NAME: 'actressConflict:inspectName',
   ACTRESS_CONFLICT_DISCARD: 'actressConflict:discard',
   ACTRESS_CONFLICT_VALIDATE_ILLEGAL: 'actressConflict:validateIllegal',
   ACTRESS_CONFLICT_RESOLVE: 'actressConflict:resolve',

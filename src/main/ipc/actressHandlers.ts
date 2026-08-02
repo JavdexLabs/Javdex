@@ -12,6 +12,9 @@ import type {
   ActressListSortBy,
   ActressMergeInput,
   ActressNameConflictGroup,
+  ActressConflictReviewSummary,
+  InspectActressConflictNameInput,
+  InspectActressConflictNameResult,
   DiscardPendingActressScrapeInput,
   DiscardPendingActressScrapeResult,
   ResolveActressConflictInput,
@@ -101,6 +104,16 @@ export function registerActressHandlers(): void {
 
   registerHandler(IPC.ACTRESS_CONFLICT_COUNT, (): number =>
     actressIdentityConflictWorkflow.countPendingReviewItems()
+  )
+
+  registerHandler(IPC.ACTRESS_CONFLICT_SUMMARY, (): ActressConflictReviewSummary =>
+    actressIdentityConflictWorkflow.getConflictReviewSummary()
+  )
+
+  registerHandler(
+    IPC.ACTRESS_CONFLICT_INSPECT_NAME,
+    (_e, input: InspectActressConflictNameInput): InspectActressConflictNameResult =>
+      actressIdentityConflictWorkflow.inspectConflictName(input)
   )
 
   registerHandler(

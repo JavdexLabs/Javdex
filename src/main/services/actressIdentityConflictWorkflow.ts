@@ -1,6 +1,7 @@
 import type {
   ActressConflictCurrentOwner,
   ActressConflictDecisionSnapshot,
+  ActressConflictReviewSummary,
   ActressNameConflictGroup,
   ActressPendingNameType,
   ActressScrapeDisposition,
@@ -10,6 +11,8 @@ import type {
   ActressScrapeUpdateMode,
   DiscardPendingActressScrapeInput,
   DiscardPendingActressScrapeResult,
+  InspectActressConflictNameInput,
+  InspectActressConflictNameResult,
   PendingActressNameClaim,
   PendingActressScrapeCandidate,
   PendingActressScrapeResource,
@@ -27,6 +30,7 @@ import {
   applyActressScrapeResult,
   markActressScrapeSucceeded,
   mergeActresses,
+  planActressScrapeResult,
   recordActressScrapeFailure
 } from '../db/actressRepo'
 import { synchronizeActressNameOwnership } from '../db/actressNameOwnership'
@@ -607,6 +611,138 @@ function ensureCurrentPendingConflicts(): void {
   })()
 }
 
+function readActivePendingConflictsForMerge(
+  pendingId: number
+): Array<{ normalizedName: string; name: string }> {
+  const db = getDb()
+  const pending = db
+    .prepare('SELECT actress_id FROM pending_actress_scrapes WHERE id = ?')
+    .get(pendingId) as { actress_id: number } | undefined
+  if (!pending) return []
+  const rows = db
+    .prepare(
+      `SELECT normalized_name, name
+       FROM pending_actress_scrape_conflicts
+       WHERE pending_scrape_id = ?`
+    )
+    .all(pendingId) as Array<{ normalized_name: string; name: string }>
+  return rows
+    .filter((row) =>
+      isPendingConflictActive(pendingId, pending.actress_id, row.normalized_name)
+    )
+    .map((row) => ({ normalizedName: row.normalized_name, name: row.name }))
+}
+
+function pendingConflictWithThirdActress(
+  pendingId: number,
+  mergedActressIds: readonly number[]
+): { name: string } | null {
+  const db = getDb()
+  const allowedIds = new Set(mergedActressIds)
+  const findOwner = db.prepare(
+    'SELECT actress_id FROM actress_name_ownership WHERE normalized_name = ?'
+  )
+  const listClaimants = db.prepare(
+    'SELECT DISTINCT actress_id FROM pending_actress_name_claims WHERE normalized_name = ?'
+  )
+  const listOtherPendingTargets = db.prepare(
+    `SELECT DISTINCT p.actress_id
+     FROM pending_actress_scrape_conflicts c
+     JOIN pending_actress_scrapes p ON p.id = c.pending_scrape_id
+     WHERE c.normalized_name = ? AND c.pending_scrape_id != ?`
+  )
+  for (const conflict of readActivePendingConflictsForMerge(pendingId)) {
+    const owner = findOwner.get(conflict.normalizedName) as
+      | { actress_id: number }
+      | undefined
+    const claimants = listClaimants.all(conflict.normalizedName) as Array<{
+      actress_id: number
+    }>
+    const otherPendingTargets = listOtherPendingTargets.all(
+      conflict.normalizedName,
+      pendingId
+    ) as Array<{ actress_id: number }>
+    if (
+      (owner && !allowedIds.has(owner.actress_id)) ||
+      claimants.some((claimant) => !allowedIds.has(claimant.actress_id)) ||
+      otherPendingTargets.some((target) => !allowedIds.has(target.actress_id))
+    ) {
+      return conflict
+    }
+  }
+  return null
+}
+
+function mergedNameConflictWithThirdPending(
+  pendingId: number,
+  mergedActressIds: readonly number[]
+): { name: string } | null {
+  const db = getDb()
+  const placeholders = mergedActressIds.map(() => '?').join(', ')
+  const conflicts = db
+    .prepare(
+      `SELECT DISTINCT
+         c.pending_scrape_id,
+         c.normalized_name,
+         c.name,
+         p.actress_id
+       FROM pending_actress_scrape_conflicts c
+       JOIN pending_actress_scrapes p ON p.id = c.pending_scrape_id
+       WHERE c.pending_scrape_id != ?
+         AND p.actress_id NOT IN (${placeholders})
+         AND EXISTS (
+           SELECT 1
+           FROM actress_names an
+           WHERE an.actress_id IN (${placeholders})
+             AND normalize_actress_name(an.name) = c.normalized_name
+         )
+       ORDER BY c.normalized_name, c.pending_scrape_id`
+    )
+    .all(pendingId, ...mergedActressIds, ...mergedActressIds) as Array<{
+    pending_scrape_id: number
+    normalized_name: string
+    name: string
+    actress_id: number
+  }>
+  return (
+    conflicts.find((conflict) =>
+      isPendingConflictActive(
+        conflict.pending_scrape_id,
+        conflict.actress_id,
+        conflict.normalized_name
+      )
+    ) ?? null
+  )
+}
+
+function mergePairBlockedReason(actressIds: readonly [number, number]): string | null {
+  const pendingRows = getDb()
+    .prepare(
+      `SELECT id
+       FROM pending_actress_scrapes
+       WHERE actress_id IN (?, ?)
+       ORDER BY id`
+    )
+    .all(...actressIds) as Array<{ id: number }>
+  if (pendingRows.length > 1) {
+    return '两位演员都有待确认刮削结果，请先处理其中一份'
+  }
+  const pendingId = pendingRows[0]?.id
+  const thirdActressConflict =
+    pendingId == null ? null : pendingConflictWithThirdActress(pendingId, actressIds)
+  if (thirdActressConflict) {
+    return `名称「${thirdActressConflict.name}」还与第三位演员冲突，请先处理该冲突`
+  }
+  const thirdPendingConflict = mergedNameConflictWithThirdPending(
+    pendingId ?? -1,
+    actressIds
+  )
+  if (thirdPendingConflict) {
+    return `名称「${thirdPendingConflict.name}」还与第三位演员的待确认结果冲突，请先处理该冲突`
+  }
+  return null
+}
+
 function parseJson<T>(value: string): T {
   return JSON.parse(value) as T
 }
@@ -1060,7 +1196,7 @@ export class ActressIdentityConflictWorkflow {
     }
   }
 
-  listConflictGroups(): ActressNameConflictGroup[] {
+  listConflictGroups(includeFieldImpacts = true): ActressNameConflictGroup[] {
     const db = getDb()
     ensureCurrentPendingConflicts()
     const pendingRows = db
@@ -1136,7 +1272,10 @@ export class ActressIdentityConflictWorkflow {
       resources: resourcesByPending.get(row.id) ?? [],
       conflicts: (conflictsByPending.get(row.id) ?? []).filter((conflict) =>
         isPendingConflictActive(row.id, row.actress_id, conflict.normalizedName)
-      )
+      ),
+      fieldImpacts: [],
+      willApplyAfterDecision: false,
+      remainingConflictCountAfterDecision: 0
     }))
 
     const grouped = new Map<string, ActressNameConflictGroup>()
@@ -1201,9 +1340,74 @@ export class ActressIdentityConflictWorkflow {
         })
       }
     }
-    return [...grouped.values()].sort((a, b) =>
-      a.normalizedName.localeCompare(b.normalizedName)
-    )
+    return [...grouped.values()]
+      .map((group): ActressNameConflictGroup => {
+        const plannedCandidates = group.candidates.map((candidate) => {
+          const remainingConflictCountAfterDecision =
+            group.status === 'applicable'
+              ? candidate.conflicts.length
+              : candidate.conflicts.filter(
+                  (conflict) => conflict.normalizedName !== group.normalizedName
+                ).length
+          const willApplyAfterDecision = remainingConflictCountAfterDecision === 0
+          if (!willApplyAfterDecision || !includeFieldImpacts) {
+            return {
+              ...candidate,
+              fieldImpacts: [],
+              willApplyAfterDecision,
+              remainingConflictCountAfterDecision
+            }
+          }
+          const preview =
+            group.status === 'conflict'
+              ? excludeNormalizedNameFromPendingResult(
+                  candidate.result,
+                  candidate.applicableFields,
+                  group.normalizedName
+                )
+              : { result: candidate.result, fields: candidate.applicableFields }
+          const avatarResource = candidate.resources.find(
+            (resource) => resource.field === 'avatar'
+          )
+          const galleryResources = candidate.resources
+            .filter((resource) => resource.field === 'gallery')
+            .map((resource) => ({
+              remoteUrl: resource.remoteUrl ?? null,
+              localPath: resource.stagedPath,
+              width: resource.width,
+              height: resource.height
+            }))
+          const plan = planActressScrapeResult(
+            candidate.actressId,
+            preview.result,
+            avatarResource?.stagedPath ?? null,
+            galleryResources,
+            preview.fields,
+            candidate.mode
+          )
+          return {
+            ...candidate,
+            fieldImpacts: plan.impacts,
+            willApplyAfterDecision,
+            remainingConflictCountAfterDecision
+          }
+        })
+        const actressIds = Array.from(
+          new Set([
+            ...group.claimants.map((claimant) => claimant.actressId),
+            ...plannedCandidates.map((candidate) => candidate.actressId)
+          ])
+        ).sort((left, right) => left - right)
+        const mergePairs: NonNullable<ActressNameConflictGroup['mergePairs']> = []
+        for (let left = 0; left < actressIds.length; left += 1) {
+          for (let right = left + 1; right < actressIds.length; right += 1) {
+            const pair: [number, number] = [actressIds[left], actressIds[right]]
+            mergePairs.push({ actressIds: pair, blockedReason: mergePairBlockedReason(pair) })
+          }
+        }
+        return { ...group, candidates: plannedCandidates, mergePairs }
+      })
+      .sort((a, b) => a.displayName.localeCompare(b.displayName, 'zh-Hans-CN'))
   }
 
   countPendingScrapes(): number {
@@ -1215,7 +1419,68 @@ export class ActressIdentityConflictWorkflow {
   }
 
   countPendingReviewItems(): number {
-    const counts = getDb()
+    return this.getConflictReviewSummary().groupCount
+  }
+
+  getConflictReviewSummary(): ActressConflictReviewSummary {
+    // The global badge polls frequently: aggregate only group keys/statuses here. The full
+    // workbench query still owns candidate JSON, resources, claimants and field planning.
+    ensureCurrentPendingConflicts()
+    const db = getDb()
+    const pendingNameGroups = db
+      .prepare('SELECT DISTINCT normalized_name FROM pending_actress_name_claims')
+      .all() as Array<{ normalized_name: string }>
+    const recordedConflicts = db
+      .prepare(
+        `SELECT c.id, c.pending_scrape_id, c.normalized_name,
+                CASE WHEN
+                  EXISTS (
+                    SELECT 1 FROM actress_name_ownership o
+                    WHERE o.normalized_name = c.normalized_name
+                      AND o.actress_id != p.actress_id
+                  )
+                  OR EXISTS (
+                    SELECT 1 FROM pending_actress_name_claims n
+                    WHERE n.normalized_name = c.normalized_name
+                      AND n.actress_id != p.actress_id
+                  )
+                  OR EXISTS (
+                    SELECT 1
+                    FROM pending_actress_scrape_conflicts other_c
+                    JOIN pending_actress_scrapes other_p
+                      ON other_p.id = other_c.pending_scrape_id
+                    WHERE other_c.normalized_name = c.normalized_name
+                      AND other_c.pending_scrape_id != c.pending_scrape_id
+                      AND other_p.actress_id != p.actress_id
+                  )
+                THEN 1 ELSE 0 END AS is_active
+         FROM pending_actress_scrape_conflicts c
+         JOIN pending_actress_scrapes p ON p.id = c.pending_scrape_id
+         ORDER BY c.id`
+      )
+      .all() as Array<{
+      id: number
+      pending_scrape_id: number
+      normalized_name: string
+      is_active: number
+    }>
+    const conflictGroups = new Set(pendingNameGroups.map((row) => row.normalized_name))
+    const rowsByPending = new Map<number, typeof recordedConflicts>()
+    for (const row of recordedConflicts) {
+      const rows = rowsByPending.get(row.pending_scrape_id) ?? []
+      rows.push(row)
+      rowsByPending.set(row.pending_scrape_id, rows)
+      if (row.is_active) conflictGroups.add(row.normalized_name)
+    }
+    const applicableGroups = new Set<string>()
+    for (const rows of rowsByPending.values()) {
+      if (rows.some((row) => Boolean(row.is_active))) continue
+      const normalizedName = rows[0]?.normalized_name
+      if (normalizedName && !conflictGroups.has(normalizedName)) {
+        applicableGroups.add(normalizedName)
+      }
+    }
+    const counts = db
       .prepare(
         `SELECT
            (SELECT COUNT(*) FROM pending_actress_scrapes) AS pending_scrapes,
@@ -1223,7 +1488,26 @@ export class ActressIdentityConflictWorkflow {
              AS pending_name_groups`
       )
       .get() as { pending_scrapes: number; pending_name_groups: number }
-    return counts.pending_scrapes + counts.pending_name_groups
+    return {
+      groupCount: conflictGroups.size + applicableGroups.size,
+      conflictGroupCount: conflictGroups.size,
+      applicableGroupCount: applicableGroups.size,
+      pendingScrapeCount: counts.pending_scrapes,
+      pendingNameClaimGroupCount: counts.pending_name_groups
+    }
+  }
+
+  inspectConflictName(
+    input: InspectActressConflictNameInput
+  ): InspectActressConflictNameResult {
+    const name = input.name.trim()
+    const normalizedName = normalizeActressName(name)
+    const conflict = conflictingNames(
+      input.actressId,
+      [{ name, normalizedName, type: 'alias' }],
+      input.pendingId
+    ).length > 0
+    return { normalizedName, status: conflict ? 'conflict' : 'available' }
   }
 
   validateIllegalNameReplacements(
@@ -1241,7 +1525,9 @@ export class ActressIdentityConflictWorkflow {
     const errors: Array<{ actressId: number; message: string }> = []
     const normalizedByActress = new Map<number, string>()
     const requiredClaimants = readNameClaimants(input.snapshot.normalizedName).filter(
-      (claimant) => claimant.nameTypes.includes('main')
+      (claimant) =>
+        claimant.nameTypes.includes('main') &&
+        claimant.actressId !== input.destinationOwnerActressId
     )
     for (const claimant of requiredClaimants) {
       const replacement = replacements.get(claimant.actressId) ?? ''
@@ -1363,84 +1649,6 @@ export class ActressIdentityConflictWorkflow {
           name: conflict.name,
           nameType: conflict.name_type
         }))
-    }
-    const pendingConflictWithThirdActress = (
-      pendingId: number,
-      mergedActressIds: readonly number[]
-    ): { name: string } | null => {
-      const allowedIds = new Set(mergedActressIds)
-      const findOwner = db.prepare(
-        'SELECT actress_id FROM actress_name_ownership WHERE normalized_name = ?'
-      )
-      const listClaimants = db.prepare(
-        'SELECT DISTINCT actress_id FROM pending_actress_name_claims WHERE normalized_name = ?'
-      )
-      const listOtherPendingTargets = db.prepare(
-        `SELECT DISTINCT p.actress_id
-         FROM pending_actress_scrape_conflicts c
-         JOIN pending_actress_scrapes p ON p.id = c.pending_scrape_id
-         WHERE c.normalized_name = ? AND c.pending_scrape_id != ?`
-      )
-      for (const conflict of activePendingConflicts(pendingId)) {
-        const owner = findOwner.get(conflict.normalizedName) as
-          | { actress_id: number }
-          | undefined
-        const claimants = listClaimants.all(conflict.normalizedName) as Array<{
-          actress_id: number
-        }>
-        const otherPendingTargets = listOtherPendingTargets.all(
-          conflict.normalizedName,
-          pendingId
-        ) as Array<{ actress_id: number }>
-        if (
-          (owner && !allowedIds.has(owner.actress_id)) ||
-          claimants.some((claimant) => !allowedIds.has(claimant.actress_id)) ||
-          otherPendingTargets.some((target) => !allowedIds.has(target.actress_id))
-        ) {
-          return conflict
-        }
-      }
-      return null
-    }
-    const mergedNameConflictWithThirdPending = (
-      pendingId: number,
-      mergedActressIds: readonly number[]
-    ): { name: string } | null => {
-      const placeholders = mergedActressIds.map(() => '?').join(', ')
-      const conflicts = db
-        .prepare(
-          `SELECT DISTINCT
-             c.pending_scrape_id,
-             c.normalized_name,
-             c.name,
-             p.actress_id
-           FROM pending_actress_scrape_conflicts c
-           JOIN pending_actress_scrapes p ON p.id = c.pending_scrape_id
-           WHERE c.pending_scrape_id != ?
-             AND p.actress_id NOT IN (${placeholders})
-             AND EXISTS (
-               SELECT 1
-               FROM actress_names an
-               WHERE an.actress_id IN (${placeholders})
-                 AND normalize_actress_name(an.name) = c.normalized_name
-             )
-           ORDER BY c.normalized_name, c.pending_scrape_id`
-        )
-        .all(pendingId, ...mergedActressIds, ...mergedActressIds) as Array<{
-        pending_scrape_id: number
-        normalized_name: string
-        name: string
-        actress_id: number
-      }>
-      return (
-        conflicts.find((conflict) =>
-          isPendingConflictActive(
-            conflict.pending_scrape_id,
-            conflict.actress_id,
-            conflict.normalized_name
-          )
-        ) ?? null
-      )
     }
     const remainingConflictCount = (pendingId: number, excludingNormalizedName: string): number =>
       activePendingConflicts(pendingId).filter(
@@ -1842,9 +2050,6 @@ export class ActressIdentityConflictWorkflow {
           }>
           if (pendingRows.length > 1) {
             throw new Error('两位演员都有待确认刮削结果，请先处理其中一份')
-          }
-          if (input.pendingId === undefined && pendingRows.length > 0) {
-            throw new Error('演员还有待确认刮削结果，请先处理后再从历史名称组执行合并')
           }
           const pending =
             input.pendingId === undefined

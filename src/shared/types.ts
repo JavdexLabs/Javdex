@@ -972,6 +972,31 @@ export const ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS: {
 
 export type ActressScrapeUpdateMode = 'replace' | 'fillEmpty' | 'replaceIfPresent'
 
+export type ActressScrapeFieldImpactAction =
+  | 'set'
+  | 'clear'
+  | 'append'
+  | 'replace'
+  | 'preserve'
+
+export type ActressScrapeFieldImpactReason =
+  | 'replace'
+  | 'fillEmpty'
+  | 'replaceIfPresent'
+  | 'noValue'
+  | 'existingValue'
+  | 'resourceUnavailable'
+
+export interface ActressScrapeFieldImpact {
+  field: ActressScrapeField
+  /** Measurements are planned independently even though they share one selectable field. */
+  part?: 'bustCm' | 'waistCm' | 'hipCm'
+  action: ActressScrapeFieldImpactAction
+  currentValue: string | number | string[] | null
+  nextValue: string | number | string[] | null
+  reason: ActressScrapeFieldImpactReason
+}
+
 export interface ActressScrapePluginRef {
   name: string
   source: ScraperPluginSource
@@ -998,6 +1023,9 @@ export interface PendingActressScrapeCandidate {
   batchJobId?: string
   resources: PendingActressScrapeResource[]
   conflicts: Array<{ name: string; normalizedName: string; type: ActressPendingNameType }>
+  fieldImpacts: ActressScrapeFieldImpact[]
+  willApplyAfterDecision: boolean
+  remainingConflictCountAfterDecision: number
 }
 
 export interface PendingActressScrapeResource {
@@ -1047,6 +1075,30 @@ export interface ActressNameConflictGroup {
   /** Ambiguous historical claims awaiting an explicit ownership decision. */
   pendingNameClaims: PendingActressNameClaim[]
   candidates: PendingActressScrapeCandidate[]
+  /** Exact main-process merge preflight for every pair shown in this group. */
+  mergePairs?: Array<{
+    actressIds: [number, number]
+    blockedReason: string | null
+  }>
+}
+
+export interface ActressConflictReviewSummary {
+  groupCount: number
+  conflictGroupCount: number
+  applicableGroupCount: number
+  pendingScrapeCount: number
+  pendingNameClaimGroupCount: number
+}
+
+export interface InspectActressConflictNameInput {
+  actressId: number
+  name: string
+  pendingId?: number
+}
+
+export interface InspectActressConflictNameResult {
+  normalizedName: string
+  status: 'available' | 'conflict'
 }
 
 export interface ActressConflictDecisionSnapshot {
@@ -1077,6 +1129,8 @@ export interface ActressConflictReplacementMainName {
 export interface ValidateIllegalNameReplacementsInput {
   snapshot: ActressConflictDecisionSnapshot
   replacementMainNames: ActressConflictReplacementMainName[]
+  /** Ownership decisions keep this claimant's main name; illegal-name decisions omit it. */
+  destinationOwnerActressId?: number
 }
 
 export type ValidateIllegalNameReplacementsResult =

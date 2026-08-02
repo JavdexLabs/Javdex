@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import type {
@@ -30,7 +30,7 @@ import {
 } from '@shared/types'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { api } from '../api'
-import { overviewStatsKeys } from '../query/queryKeys'
+import { actressKeys, overviewStatsKeys } from '../query/queryKeys'
 import ConfirmModal from '../components/ConfirmModal'
 import EmptyState from '../components/EmptyState'
 import Modal from '../components/Modal'
@@ -166,6 +166,12 @@ export default function SettingsPage(): JSX.Element {
     overviewStatsRefreshKey,
     activeGroup.id === 'overview' && location.pathname !== settingsPluginDevPath()
   )
+  const actressConflictSummaryQuery = useQuery({
+    queryKey: actressKeys.conflictSummary(),
+    queryFn: () => api.actressScrape.conflictSummary(),
+    refetchInterval: 3000
+  })
+  const actressConflictGroupCount = actressConflictSummaryQuery.data?.groupCount ?? 0
   const videoBatchLogRef = useRef<HTMLDivElement>(null)
   const actressLogRef = useRef<HTMLDivElement>(null)
   const avatarBatchLogRef = useRef<HTMLDivElement>(null)
@@ -1001,6 +1007,7 @@ export default function SettingsPage(): JSX.Element {
                   anyBatchActive={anyBatchActive}
                   videoBatchPct={videoBatchPct}
                   actressPct={actressPct}
+                  actressConflictGroupCount={actressConflictGroupCount}
                   unrecognizedCount={unrecognizedCount}
                   statsRefreshKey={overviewStatsRefreshKey}
                   onNavigate={navigateSettings}
@@ -1208,6 +1215,9 @@ export default function SettingsPage(): JSX.Element {
                   </button>
                 ) : null
               ) : undefined
+            }
+            pendingGroupCount={
+              batchDetailScope === 'actress' ? actressConflictGroupCount : 0
             }
             onOpenPending={
               batchDetailScope === 'actress' ? openActressConflicts : undefined

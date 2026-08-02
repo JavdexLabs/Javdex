@@ -19,6 +19,12 @@ import { settingsPath } from '../../settings/settingsRoutes'
 import IconButton from '../IconButton'
 import { useToast } from '../Toast'
 import { UI_ICON_MD } from '../iconDefaults'
+import {
+  WorkbenchMain,
+  WorkbenchShell,
+  WorkbenchStatusPill,
+  WorkbenchToolbar
+} from '../workbench'
 import PluginDevAgentRail from './PluginDevAgentRail'
 import PluginDevCodeModal from './PluginDevCodeModal'
 import PluginDevConnectionModal from './PluginDevConnectionModal'
@@ -772,7 +778,7 @@ export default function PluginDevPanel({
             : ''
 
   return (
-    <div className="plugin-dev-shell">
+    <WorkbenchShell className="plugin-dev-shell">
       <nav className="plugin-dev-breadcrumb" aria-label="当前位置">
         <button
           type="button"
@@ -797,7 +803,7 @@ export default function PluginDevPanel({
         <strong>开发助手</strong>
       </nav>
 
-      <header className="plugin-dev-toolbar">
+      <WorkbenchToolbar className="plugin-dev-toolbar">
         <div className="plugin-dev-toolbar-start">
           <div
             className="settings-tab-bar settings-tab-bar--compact plugin-dev-kind-toggle plugin-dev-toolbar-kind-toggle"
@@ -821,9 +827,9 @@ export default function PluginDevPanel({
               演员
             </button>
           </div>
-          <span className={`plugin-dev-status-pill ${statusClass}`}>
+          <WorkbenchStatusPill className={`plugin-dev-status-pill ${statusClass}`}>
             {agentStatusLabel(agentStatus, agentStep)}
-          </span>
+          </WorkbenchStatusPill>
         </div>
         <div className="plugin-dev-toolbar-actions">
           <span className="plugin-source-badge plugin-source-badge--user plugin-dev-source-badge">
@@ -850,9 +856,9 @@ export default function PluginDevPanel({
             onClick={openConnectionModal}
           />
         </div>
-      </header>
+      </WorkbenchToolbar>
 
-      <div className="plugin-dev-main plugin-dev-main--agent-focus">
+      <WorkbenchMain className="plugin-dev-main plugin-dev-main--agent-focus">
         <PluginDevConfigRail
           kind={kind}
           siteName={siteName}
@@ -921,7 +927,7 @@ export default function PluginDevPanel({
           onContinueChallenge={() => void continueAfterChallenge()}
           onExportWorkLog={() => void exportAgentWorkLog()}
         />
-      </div>
+      </WorkbenchMain>
 
       {showConnectionModal && (
         <PluginDevConnectionModal
@@ -949,6 +955,6 @@ export default function PluginDevPanel({
           onClose={() => setShowCodeModal(false)}
         />
       )}
-    </div>
+    </WorkbenchShell>
   )
 }

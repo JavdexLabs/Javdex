@@ -25,6 +25,7 @@ import {
   mergeActresses,
   getActressAvatarSourceInfo,
   getActressDetail,
+  planActressScrapeResult,
   replaceActressGalleryAssets,
   recordActressScrapeFailure,
   resolveEffectiveActressScrapeFields,
@@ -983,7 +984,7 @@ describe('actressRepo.resolveEffectiveActressScrapeFields', () => {
     )
   })
 
-  it('fillEmpty treats broken avatar files as missing and clears the stored path', () => {
+  it('fillEmpty treats broken avatar files as missing without mutating during planning', () => {
     setupDb()
     const db = getDb()
     db.prepare('UPDATE actresses SET avatar_path = ? WHERE id = ?').run('avatars/missing.jpg', 1)
@@ -993,7 +994,7 @@ describe('actressRepo.resolveEffectiveActressScrapeFields', () => {
       ['avatar']
     )
     assert.deepEqual(db.prepare('SELECT avatar_path FROM actresses WHERE id = ?').get(1), {
-      avatar_path: null
+      avatar_path: 'avatars/missing.jpg'
     })
   })
 })
@@ -1515,6 +1516,249 @@ describe('actressRepo.markActressScrapeSucceeded', () => {
 })
 
 describe('actressRepo.applyActressScrapeResult', () => {
+  for (const mode of ['replace', 'fillEmpty', 'replaceIfPresent'] as const) {
+    it(`keeps every selected field plan aligned with the ${mode} database result`, () => {
+      setupDb()
+      const actressId = mode === 'fillEmpty' ? 2 : 1
+      const avatarPath = `avatars/plan-matrix-${mode}.png`
+      const galleryPath = `actress_gallery/plan-matrix-${mode}.jpg`
+      writeTestAsset(
+        avatarPath,
+        Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+          'base64'
+        )
+      )
+      writeTestAvatar(galleryPath)
+      const result = {
+        avatarUrl: `https://example.test/${mode}.png`,
+        birthDate: '2001-02-03',
+        nameZh: `中文名${mode}`,
+        nameEn: `English ${mode}`,
+        debutDate: '2020-04-05',
+        heightCm: 167,
+        bustCm: 91,
+        waistCm: 61,
+        hipCm: 89,
+        cupSize: 'F',
+        bloodType: 'B',
+        zodiac: 'Taurus',
+        nationality: 'Japan',
+        profileSummary: `Profile ${mode}`,
+        aliases: [`Alias ${mode}`]
+      }
+      const gallery = [{ remoteUrl: `https://example.test/${mode}.jpg`, localPath: galleryPath }]
+      const fields = [
+        'avatar',
+        'gallery',
+        'birthDate',
+        'nameZh',
+        'nameEn',
+        'debutDate',
+        'heightCm',
+        'measurements',
+        'cupSize',
+        'bloodType',
+        'zodiac',
+        'nationality',
+        'profileSummary',
+        'aliases'
+      ] as const
+      const plan = planActressScrapeResult(
+        actressId,
+        result,
+        avatarPath,
+        gallery,
+        [...fields],
+        mode
+      )
+
+      const outcome = applyActressScrapeResult(
+        actressId,
+        result,
+        avatarPath,
+        gallery,
+        [...fields],
+        mode
+      )
+      const detail = getActressDetail(actressId)!
+
+      assert.equal(outcome.applied, true)
+      for (const impact of plan.impacts) {
+        let actual: string | number | string[] | null
+        switch (impact.field) {
+          case 'avatar':
+            assert.equal(impact.action === 'clear', detail.avatar_path == null)
+            if (impact.action === 'set') assert.equal(assetExists(detail.avatar_path), true)
+            continue
+          case 'gallery':
+            actual = detail.gallery.map(
+              (asset) => asset.local_path?.trim() || asset.remote_url?.trim() || ''
+            ).filter(Boolean)
+            break
+          case 'birthDate': actual = detail.birth_date; break
+          case 'nameZh': actual = detail.name_zh; break
+          case 'nameEn': actual = detail.name_en; break
+          case 'debutDate': actual = detail.debut_date; break
+          case 'heightCm': actual = detail.height_cm; break
+          case 'cupSize': actual = detail.cup_size; break
+          case 'bloodType': actual = detail.blood_type; break
+          case 'zodiac': actual = detail.zodiac; break
+          case 'nationality': actual = detail.nationality; break
+          case 'profileSummary': actual = detail.profile_summary; break
+          case 'aliases': actual = detail.aliases; break
+          case 'measurements':
+            actual =
+              impact.part === 'bustCm'
+                ? detail.bust_cm
+                : impact.part === 'waistCm'
+                  ? detail.waist_cm
+                  : detail.hip_cm
+            break
+          default:
+            continue
+        }
+        assert.deepEqual(actual, impact.nextValue, `${impact.field}/${impact.part ?? 'field'}`)
+      }
+    })
+  }
+
+  it('does not backfill gallery metadata while building a read-only plan', () => {
+    setupDb()
+    const db = getDb()
+    writeTestAvatar('actress_gallery/complete.jpg')
+
+    planActressScrapeResult(1, {}, null, [], ['gallery'], 'replaceIfPresent')
+
+    assert.deepEqual(
+      db
+        .prepare(
+          'SELECT width, height FROM actress_gallery_assets WHERE actress_id = ?'
+        )
+        .get(1),
+      { width: null, height: null }
+    )
+  })
+
+  it('plans and applies a fillEmpty avatar over a broken stored path consistently', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare('UPDATE actresses SET avatar_path = ? WHERE id = ?').run('avatars/missing.jpg', 1)
+    writeTestAvatar('avatars/fill-broken.jpg')
+
+    const plan = planActressScrapeResult(
+      1,
+      { avatarUrl: 'https://example.test/fill-broken.jpg' },
+      'avatars/fill-broken.jpg',
+      [],
+      ['avatar'],
+      'fillEmpty'
+    )
+
+    assert.deepEqual(plan.impacts, [
+      {
+        field: 'avatar',
+        action: 'set',
+        currentValue: null,
+        nextValue: 'avatars/fill-broken.jpg',
+        reason: 'fillEmpty'
+      }
+    ])
+    assert.equal(
+      (db.prepare('SELECT avatar_path FROM actresses WHERE id = ?').get(1) as { avatar_path: string })
+        .avatar_path,
+      'avatars/missing.jpg'
+    )
+
+    const outcome = applyActressScrapeResult(
+      1,
+      { avatarUrl: 'https://example.test/fill-broken.jpg' },
+      'avatars/fill-broken.jpg',
+      [],
+      ['avatar'],
+      'fillEmpty'
+    )
+
+    assert.equal(outcome.avatarApplied, true)
+    const avatarPath = (
+      db.prepare('SELECT avatar_path FROM actresses WHERE id = ?').get(1) as {
+        avatar_path: string | null
+      }
+    ).avatar_path
+    assert.ok(avatarPath)
+    assert.notEqual(avatarPath, 'avatars/missing.jpg')
+    assert.equal(assetExists(avatarPath), true)
+  })
+
+  it('previews replace clears without changing the actress or deleting assets', () => {
+    setupDb()
+    const before = getActressDetail(1)
+
+    const plan = planActressScrapeResult(
+      1,
+      {},
+      null,
+      [],
+      ['avatar', 'birthDate', 'measurements'],
+      'replace'
+    )
+
+    assert.deepEqual(
+      plan.impacts.map(({ field, part, action, currentValue, nextValue, reason }) => ({
+        field,
+        part,
+        action,
+        currentValue,
+        nextValue,
+        reason
+      })),
+      [
+        {
+          field: 'avatar',
+          part: undefined,
+          action: 'clear',
+          currentValue: 'avatars/complete.jpg',
+          nextValue: null,
+          reason: 'replace'
+        },
+        {
+          field: 'birthDate',
+          part: undefined,
+          action: 'clear',
+          currentValue: '1990-01-01',
+          nextValue: null,
+          reason: 'replace'
+        },
+        {
+          field: 'measurements',
+          part: 'bustCm',
+          action: 'clear',
+          currentValue: 90,
+          nextValue: null,
+          reason: 'replace'
+        },
+        {
+          field: 'measurements',
+          part: 'waistCm',
+          action: 'clear',
+          currentValue: 60,
+          nextValue: null,
+          reason: 'replace'
+        },
+        {
+          field: 'measurements',
+          part: 'hipCm',
+          action: 'clear',
+          currentValue: 88,
+          nextValue: null,
+          reason: 'replace'
+        }
+      ]
+    )
+    assert.deepEqual(getActressDetail(1), before)
+    assert.equal(assetExists('avatars/complete.jpg'), true)
+  })
+
   it('does not claim a scrape was applied when every returned alias is unusable', () => {
     setupDb()
 
@@ -1617,6 +1861,24 @@ describe('actressRepo.applyActressScrapeResult', () => {
     }
 
     writeTestAvatar('avatars/same-source-again.jpg')
+    const plan = planActressScrapeResult(
+      1,
+      { birthDate: '1991-02-03' },
+      'avatars/same-source-again.jpg',
+      [],
+      ['avatar', 'birthDate'],
+      'replace'
+    )
+    assert.deepEqual(
+      plan.impacts.find((impact) => impact.field === 'avatar'),
+      {
+        field: 'avatar',
+        action: 'preserve',
+        currentValue: before.avatar_path,
+        nextValue: before.avatar_path,
+        reason: 'replace'
+      }
+    )
     const { applied, avatarApplied } = applyActressScrapeResult(
       1,
       { birthDate: '1991-02-03' },

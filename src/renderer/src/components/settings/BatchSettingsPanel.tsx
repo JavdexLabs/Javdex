@@ -17,6 +17,7 @@ export default function BatchSettingsPanel({
   emptyLog,
   skipped,
   customControls,
+  pendingGroupCount = 0,
   onOpenPending,
   onPause,
   onResume,
@@ -32,6 +33,7 @@ export default function BatchSettingsPanel({
   emptyLog: string
   skipped?: number
   customControls?: ReactNode
+  pendingGroupCount?: number
   onOpenPending?: () => void
   onPause: BatchControlHandler
   onResume: BatchControlHandler
@@ -74,7 +76,7 @@ export default function BatchSettingsPanel({
           {batch ? (!canResume && paused ? '不可恢复' : batchStatusLabel(status)) : '空闲'}
         </SettingsStatusPill>
         <div className="batch-log-toolbar-actions">
-          {scope === 'actress' && (batch?.pending ?? 0) > 0 && onOpenPending ? (
+          {scope === 'actress' && pendingGroupCount > 0 && onOpenPending ? (
             <button type="button" className="btn btn-sm btn-ghost" onClick={onOpenPending}>
               查看待确认
             </button>
@@ -120,7 +122,7 @@ export default function BatchSettingsPanel({
           {scope === 'actress' ? (
             <span className="batch-log-stat batch-log-stat--pending">
               <span className="batch-log-stat-label">待确认</span>
-              <strong>{batch?.pending ?? 0}</strong>
+              <strong>{pendingGroupCount}</strong>
             </span>
           ) : null}
           <span className="batch-log-stat">

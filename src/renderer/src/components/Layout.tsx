@@ -138,13 +138,13 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
   const backgroundSrc =
     imagePreviewOpen || privacyHidesBackground ? null : resolveMediaSrc(background?.path)
   const hasBackgroundLayer = Boolean(backgroundSrc)
-  const conflictCountQuery = useQuery({
-    queryKey: actressKeys.conflictCount(),
-    queryFn: () => api.actressScrape.conflictCount(),
+  const conflictSummaryQuery = useQuery({
+    queryKey: actressKeys.conflictSummary(),
+    queryFn: () => api.actressScrape.conflictSummary(),
     refetchInterval: 3_000
   })
   const conflictBadges = {
-    [ROUTE_PATH.actresses]: conflictCountQuery.data ?? 0
+    [ROUTE_PATH.actresses]: conflictSummaryQuery.data?.groupCount ?? 0
   }
 
   useEffect(() => {

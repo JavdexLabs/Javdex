@@ -24,6 +24,9 @@ import type {
   ActressScrapeResult,
   ActressScrapeDisposition,
   ActressNameConflictGroup,
+  ActressConflictReviewSummary,
+  InspectActressConflictNameInput,
+  InspectActressConflictNameResult,
   DiscardPendingActressScrapeInput,
   DiscardPendingActressScrapeResult,
   ResolveActressConflictInput,
@@ -287,6 +290,10 @@ const api = {
       ),
     listConflicts: () => invoke<ActressNameConflictGroup[]>(IPC.ACTRESS_CONFLICT_LIST),
     conflictCount: () => invoke<number>(IPC.ACTRESS_CONFLICT_COUNT),
+    conflictSummary: () =>
+      invoke<ActressConflictReviewSummary>(IPC.ACTRESS_CONFLICT_SUMMARY),
+    inspectConflictName: (input: InspectActressConflictNameInput) =>
+      invoke<InspectActressConflictNameResult>(IPC.ACTRESS_CONFLICT_INSPECT_NAME, input),
     discardConflict: (input: DiscardPendingActressScrapeInput) =>
       invoke<DiscardPendingActressScrapeResult>(IPC.ACTRESS_CONFLICT_DISCARD, input),
     resolveConflict: (input: ResolveActressConflictInput) =>

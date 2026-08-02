@@ -8,6 +8,7 @@ import type {
 import PluginDevConversation from './PluginDevConversation'
 import PluginDevResultPanel from './PluginDevResultPanel'
 import { agentPhaseLabel, type PluginDevAgentTab, type PluginDevConversationItem, type PluginKind } from './types'
+import { WorkbenchRail, WorkbenchTabs } from '../workbench'
 
 export default function PluginDevAgentRail({
   kind,
@@ -76,35 +77,26 @@ export default function PluginDevAgentRail({
   ]
 
   return (
-    <aside className="plugin-dev-rail plugin-dev-rail--agent">
-      <div
-        className="settings-tab-bar settings-tab-bar--compact plugin-dev-agent-tabs"
-        role="tablist"
-        aria-label="Agent 面板"
-      >
-        <button
-          id="plugin-dev-tab-conversation"
-          type="button"
-          role="tab"
-          aria-selected={tab === 'conversation'}
-          className={`settings-tab-button${tab === 'conversation' ? ' is-active' : ''}`}
-          onClick={() => onTabChange('conversation')}
-        >
-          对话
-          {conversationCount > 0 && <span>{conversationCount}</span>}
-        </button>
-        <button
-          id="plugin-dev-tab-result"
-          type="button"
-          role="tab"
-          aria-selected={tab === 'result'}
-          className={`settings-tab-button${tab === 'result' ? ' is-active' : ''}`}
-          onClick={() => onTabChange('result')}
-        >
-          结果
-          {resultCount > 0 && <span>{resultCount}</span>}
-        </button>
-      </div>
+    <WorkbenchRail className="plugin-dev-rail plugin-dev-rail--agent">
+      <WorkbenchTabs
+        id="plugin-dev-tab"
+        label="Agent 面板"
+        value={tab}
+        className="plugin-dev-agent-tabs"
+        items={[
+          {
+            id: 'conversation',
+            label: <>对话{conversationCount > 0 && <span>{conversationCount}</span>}</>,
+            panelId: 'plugin-dev-panel-conversation'
+          },
+          {
+            id: 'result',
+            label: <>结果{resultCount > 0 && <span>{resultCount}</span>}</>,
+            panelId: 'plugin-dev-panel-result'
+          }
+        ]}
+        onChange={onTabChange}
+      />
 
       <div className="plugin-dev-agent-flow" aria-label="Agent 流程">
         <div className="plugin-dev-phase-track">
@@ -121,6 +113,7 @@ export default function PluginDevAgentRail({
 
       <div className="plugin-dev-agent-body">
         <div
+          id="plugin-dev-panel-conversation"
           className="plugin-dev-agent-pane"
           role="tabpanel"
           aria-labelledby="plugin-dev-tab-conversation"
@@ -150,6 +143,7 @@ export default function PluginDevAgentRail({
           />
         </div>
         <div
+          id="plugin-dev-panel-result"
           className="plugin-dev-agent-pane"
           role="tabpanel"
           aria-labelledby="plugin-dev-tab-result"
@@ -164,6 +158,6 @@ export default function PluginDevAgentRail({
           />
         </div>
       </div>
-    </aside>
+    </WorkbenchRail>
   )
 }

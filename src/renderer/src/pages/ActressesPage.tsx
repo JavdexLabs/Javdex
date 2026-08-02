@@ -167,12 +167,12 @@ export default function ActressesPage(): JSX.Element {
       }),
     placeholderData: (prev) => prev
   })
-  const conflictCountQuery = useQuery({
-    queryKey: actressKeys.conflictCount(),
-    queryFn: () => api.actressScrape.conflictCount(),
+  const conflictSummaryQuery = useQuery({
+    queryKey: actressKeys.conflictSummary(),
+    queryFn: () => api.actressScrape.conflictSummary(),
     refetchInterval: detailOpen ? false : 3_000
   })
-  const pendingConflictCount = conflictCountQuery.data ?? 0
+  const pendingConflictCount = conflictSummaryQuery.data?.groupCount ?? 0
 
   useEffect(() => {
     if (listQuery.isError && listQuery.error) {

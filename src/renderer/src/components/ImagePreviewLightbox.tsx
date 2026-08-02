@@ -5,6 +5,11 @@ import { Minus, Plus, RotateCcw, X } from 'lucide-react'
 import IconButton from './IconButton'
 import { useImagePreviewOverlay } from './ImagePreviewOverlayContext'
 import { UI_ICON } from './iconDefaults'
+import {
+  getImagePreviewSwipeDirection,
+  isImagePreviewDrag,
+  type ImagePreviewSwipeDirection
+} from './imagePreviewGesture'
 
 const ZOOM_MIN = 0.5
 const ZOOM_MAX = 5
@@ -13,6 +18,8 @@ const CHROME_IDLE_MS = 1000
 /** Ignore passive pointer/focus events right after open so chrome stays hidden until interaction. */
 const CHROME_OPEN_GRACE_MS = 200
 const FILMSTRIP_DRAG_THRESHOLD = 5
+const SWIPE_AXIS_LOCK_THRESHOLD = 6
+const SWIPE_SETTLE_MS = 180
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
@@ -61,11 +68,21 @@ export default function ImagePreviewLightbox({
   const [chromeHover, setChromeHover] = useState(false)
   const [imageReady, setImageReady] = useState(true)
   const [filmstripDragging, setFilmstripDragging] = useState(false)
+  const [swipeOffsetX, setSwipeOffsetX] = useState(0)
+  const [swipeViewportWidth, setSwipeViewportWidth] = useState(0)
+  const [swipeDirection, setSwipeDirection] = useState<ImagePreviewSwipeDirection | null>(null)
+  const [swipeDragging, setSwipeDragging] = useState(false)
+  const [swipeSettling, setSwipeSettling] = useState(false)
   const chromeHoverRef = useRef(false)
   const chromeGateRef = useRef<'arming' | 'open'>('arming')
   const chromeTimerRef = useRef<number | null>(null)
   const chromeReleaseTimerRef = useRef<number | null>(null)
   const chromeGateTimerRef = useRef<number | null>(null)
+  const swipeAnimationTimerRef = useRef<number | null>(null)
+  const swipeAnimatingRef = useRef(false)
+  const swipeCommitRef = useRef(false)
+  const swipeClickSuppressedRef = useRef(false)
+  const swipeClickReleaseTimerRef = useRef<number | null>(null)
   const activeThumbRef = useRef<HTMLButtonElement>(null)
   const filmstripRef = useRef<HTMLDivElement>(null)
   const thumbSelectRef = useRef(false)
@@ -74,6 +91,12 @@ export default function ImagePreviewLightbox({
     pointerId: number
     startX: number
     originScrollLeft: number
+  } | null>(null)
+  const swipeRef = useRef<{
+    pointerId: number
+    startX: number
+    startY: number
+    axis: 'pending' | 'horizontal' | 'vertical'
   } | null>(null)
   const dragRef = useRef<{
     pointerId: number
@@ -86,6 +109,13 @@ export default function ImagePreviewLightbox({
   const resetView = useCallback(() => {
     setScale(1)
     setPan({ x: 0, y: 0 })
+  }, [])
+
+  const clearSwipeAnimation = useCallback(() => {
+    if (swipeAnimationTimerRef.current != null) {
+      window.clearTimeout(swipeAnimationTimerRef.current)
+      swipeAnimationTimerRef.current = null
+    }
   }, [])
 
   const clearChromeTimer = useCallback(() => {
@@ -168,6 +198,15 @@ export default function ImagePreviewLightbox({
   }, [resetChromeOnOpen])
 
   useEffect(() => {
+    const preserveReadyImage = swipeCommitRef.current
+    swipeCommitRef.current = false
+    swipeAnimatingRef.current = false
+    swipeRef.current = null
+    clearSwipeAnimation()
+    setSwipeOffsetX(0)
+    setSwipeDirection(null)
+    setSwipeDragging(false)
+    setSwipeSettling(false)
     resetView()
     if (thumbSelectRef.current) {
       thumbSelectRef.current = false
@@ -176,22 +215,30 @@ export default function ImagePreviewLightbox({
     } else {
       resetChromeOnOpen()
     }
+    if (preserveReadyImage) {
+      setImageReady(true)
+      return
+    }
     setImageReady(false)
     const frame = window.requestAnimationFrame(() => setImageReady(true))
     return () => window.cancelAnimationFrame(frame)
-  }, [clearChromeTimer, index, resetChromeOnOpen, resetView])
+  }, [clearChromeTimer, clearSwipeAnimation, index, resetChromeOnOpen, resetView])
 
   useEffect(() => {
     return () => {
       clearChromeTimer()
+      clearSwipeAnimation()
       if (chromeReleaseTimerRef.current != null) {
         window.clearTimeout(chromeReleaseTimerRef.current)
       }
       if (chromeGateTimerRef.current != null) {
         window.clearTimeout(chromeGateTimerRef.current)
       }
+      if (swipeClickReleaseTimerRef.current != null) {
+        window.clearTimeout(swipeClickReleaseTimerRef.current)
+      }
     }
-  }, [clearChromeTimer])
+  }, [clearChromeTimer, clearSwipeAnimation])
 
   useEffect(() => {
     document.body.style.overflow = 'hidden'
@@ -213,16 +260,18 @@ export default function ImagePreviewLightbox({
   }, [])
 
   const goPrev = useCallback(() => {
+    if (swipeAnimatingRef.current || swipeClickSuppressedRef.current) return
     if (index > 0) onIndexChange(index - 1)
   }, [index, onIndexChange])
 
   const goNext = useCallback(() => {
+    if (swipeAnimatingRef.current || swipeClickSuppressedRef.current) return
     if (index < items.length - 1) onIndexChange(index + 1)
   }, [index, items.length, onIndexChange])
 
   const selectThumb = useCallback(
     (thumbIndex: number) => {
-      if (thumbIndex === index) return
+      if (thumbIndex === index || swipeAnimatingRef.current) return
       thumbSelectRef.current = true
       holdChrome()
       onIndexChange(thumbIndex)
@@ -268,13 +317,32 @@ export default function ImagePreviewLightbox({
 
   const onWheel = (e: React.WheelEvent<HTMLDivElement>): void => {
     e.preventDefault()
+    if (swipeRef.current || swipeAnimatingRef.current) return
     bumpChrome()
     zoomBy(e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP)
   }
 
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
+  const swipeAreaWidth = (target: HTMLElement): number =>
+    target.closest<HTMLElement>('.image-preview-stage')?.clientWidth ?? target.clientWidth
+
+  const onPointerDown = (e: React.PointerEvent<HTMLElement>): void => {
     bumpChrome()
-    if (scale <= 1 || e.button !== 0) return
+    if (e.button !== 0 || swipeAnimatingRef.current) return
+    if (Math.round(scale * 100) === 100) {
+      e.currentTarget.setPointerCapture(e.pointerId)
+      swipeRef.current = {
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        axis: 'pending'
+      }
+      setSwipeViewportWidth(swipeAreaWidth(e.currentTarget))
+      setSwipeOffsetX(0)
+      setSwipeDirection(null)
+      setSwipeDragging(true)
+      return
+    }
+    if (scale <= 1) return
     e.currentTarget.setPointerCapture(e.pointerId)
     dragRef.current = {
       pointerId: e.pointerId,
@@ -285,7 +353,23 @@ export default function ImagePreviewLightbox({
     }
   }
 
-  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>): void => {
+  const onPointerMove = (e: React.PointerEvent<HTMLElement>): void => {
+    const swipe = swipeRef.current
+    if (swipe?.pointerId === e.pointerId) {
+      const deltaX = e.clientX - swipe.startX
+      const deltaY = e.clientY - swipe.startY
+      if (
+        swipe.axis === 'pending' &&
+        Math.max(Math.abs(deltaX), Math.abs(deltaY)) > SWIPE_AXIS_LOCK_THRESHOLD
+      ) {
+        swipe.axis = Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical'
+      }
+      if (swipe.axis === 'horizontal') {
+        setSwipeOffsetX(deltaX)
+        setSwipeDirection(deltaX >= 0 ? 'prev' : 'next')
+      }
+      return
+    }
     const drag = dragRef.current
     if (!drag || drag.pointerId !== e.pointerId) return
     setPan({
@@ -294,7 +378,65 @@ export default function ImagePreviewLightbox({
     })
   }
 
-  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>): void => {
+  const onPointerUp = (
+    e: React.PointerEvent<HTMLElement>,
+    commitSwipe = true
+  ): void => {
+    const swipe = swipeRef.current
+    if (swipe?.pointerId === e.pointerId) {
+      swipeRef.current = null
+      setSwipeDragging(false)
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId)
+      }
+      const deltaX = e.clientX - swipe.startX
+      const deltaY = e.clientY - swipe.startY
+      if (isImagePreviewDrag(deltaX, deltaY, SWIPE_AXIS_LOCK_THRESHOLD)) {
+        swipeClickSuppressedRef.current = true
+        if (swipeClickReleaseTimerRef.current != null) {
+          window.clearTimeout(swipeClickReleaseTimerRef.current)
+        }
+        swipeClickReleaseTimerRef.current = window.setTimeout(() => {
+          swipeClickSuppressedRef.current = false
+          swipeClickReleaseTimerRef.current = null
+        }, 0)
+      }
+      const direction =
+        commitSwipe && swipe.axis === 'horizontal'
+          ? getImagePreviewSwipeDirection(deltaX, deltaY)
+          : null
+      const targetIndex =
+        direction === 'prev' ? index - 1 : direction === 'next' ? index + 1 : null
+      const canCommit = targetIndex != null && targetIndex >= 0 && targetIndex < items.length
+
+      if (!canCommit && (swipe.axis !== 'horizontal' || Math.abs(deltaX) < 1)) {
+        setSwipeOffsetX(0)
+        setSwipeDirection(null)
+        return
+      }
+
+      clearSwipeAnimation()
+      swipeAnimatingRef.current = true
+      setSwipeSettling(true)
+      if (canCommit && direction) {
+        const viewportWidth = swipeAreaWidth(e.currentTarget) || swipeViewportWidth
+        setSwipeDirection(direction)
+        setSwipeOffsetX(direction === 'prev' ? viewportWidth : -viewportWidth)
+      } else {
+        setSwipeOffsetX(0)
+      }
+      swipeAnimationTimerRef.current = window.setTimeout(() => {
+        swipeAnimationTimerRef.current = null
+        if (canCommit && targetIndex != null) {
+          swipeCommitRef.current = true
+          onIndexChange(targetIndex)
+        }
+        swipeAnimatingRef.current = false
+        setSwipeOffsetX(0)
+        setSwipeDirection(null)
+        setSwipeSettling(false)
+      }, SWIPE_SETTLE_MS)
+    }
     if (dragRef.current?.pointerId === e.pointerId) dragRef.current = null
   }
 
@@ -365,6 +507,19 @@ export default function ImagePreviewLightbox({
   if (!src) return null
 
   const canPan = scale > 1
+  const canSwipe = Math.round(scale * 100) === 100
+  const adjacentIndex =
+    swipeDirection === 'prev' ? index - 1 : swipeDirection === 'next' ? index + 1 : -1
+  const adjacentItem = adjacentIndex >= 0 && adjacentIndex < items.length ? items[adjacentIndex] : null
+  const adjacentOffsetX =
+    swipeDirection === 'prev'
+      ? swipeOffsetX - swipeViewportWidth
+      : swipeDirection === 'next'
+        ? swipeOffsetX + swipeViewportWidth
+        : 0
+  const swipeSlideClass = `${swipeDragging ? ' is-dragging' : ''}${
+    swipeSettling ? ' is-settling' : ''
+  }`
   const posterCandidate = items[index]?.localPath ?? null
   const isPoster = Boolean(posterCandidate && posterPath === posterCandidate)
   const showPosterAction = Boolean(onPosterChange)
@@ -395,7 +550,7 @@ export default function ImagePreviewLightbox({
     >
       <div className="image-preview-backdrop" aria-hidden />
       <p id="image-preview-hint" className="sr-only">
-        使用左右方向键切换图片，加号与减号缩放，0 还原视图，Esc 关闭。
+        未缩放时可用鼠标左右拖动切换图片；也可使用左右方向键切换图片，加号与减号缩放，0 还原视图，Esc 关闭。
       </p>
 
       <header
@@ -460,33 +615,63 @@ export default function ImagePreviewLightbox({
           className="image-preview-hit image-preview-hit--prev"
           onClick={goPrev}
           onMouseEnter={() => noteChromeActivity(true)}
+          onPointerDown={canSwipe ? onPointerDown : undefined}
+          onPointerMove={canSwipe ? onPointerMove : undefined}
+          onPointerUp={canSwipe ? onPointerUp : undefined}
+          onPointerCancel={canSwipe ? (event) => onPointerUp(event, false) : undefined}
           disabled={index === 0}
           aria-label="上一张"
         />
         <div
-          className={`image-preview-viewport${canPan ? ' image-preview-viewport--pan' : ''}`}
+          className={`image-preview-viewport${canPan ? ' image-preview-viewport--pan' : ''}${
+            canSwipe ? ' image-preview-viewport--swipe' : ''
+          }`}
           onPointerEnter={() => noteChromeActivity(true)}
           onWheel={onWheel}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
+          onPointerCancel={(event) => onPointerUp(event, false)}
           onDoubleClick={onDoubleClick}
         >
-          <img
-            key={items[index]?.id ?? index}
-            src={src}
-            alt=""
-            className={`image-preview-img${imageReady ? ' is-visible' : ''}`}
-            style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${scale})` }}
-            draggable={false}
-          />
+          <div
+            className={`image-preview-slide${swipeSlideClass}`}
+            style={{ transform: `translate3d(${swipeOffsetX}px, 0, 0)` }}
+          >
+            <img
+              key={items[index]?.id ?? index}
+              src={src}
+              alt=""
+              className={`image-preview-img${imageReady ? ' is-visible' : ''}`}
+              style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${scale})` }}
+              draggable={false}
+            />
+          </div>
+          {adjacentItem && (
+            <div
+              className={`image-preview-slide image-preview-slide--adjacent${swipeSlideClass}`}
+              style={{ transform: `translate3d(${adjacentOffsetX}px, 0, 0)` }}
+              aria-hidden
+            >
+              <img
+                key={adjacentItem.id}
+                src={adjacentItem.src}
+                alt=""
+                className="image-preview-img is-visible"
+                draggable={false}
+              />
+            </div>
+          )}
         </div>
         <button
           type="button"
           className="image-preview-hit image-preview-hit--next"
           onClick={goNext}
           onMouseEnter={() => noteChromeActivity(true)}
+          onPointerDown={canSwipe ? onPointerDown : undefined}
+          onPointerMove={canSwipe ? onPointerMove : undefined}
+          onPointerUp={canSwipe ? onPointerUp : undefined}
+          onPointerCancel={canSwipe ? (event) => onPointerUp(event, false) : undefined}
           disabled={index === items.length - 1}
           aria-label="下一张"
         />

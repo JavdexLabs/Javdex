@@ -135,6 +135,8 @@
   --control-h-md: 36px;
   --control-h-lg: 40px;
   --control-pad-x: 14px;
+  --modal-picker-h-md: 580px;
+  --modal-viewport-inset: 48px;
   --target-min: 28px;
   --radius-sm: 6px;
   --radius-md: 8px;
@@ -12656,7 +12658,7 @@ button.actress-mini:focus-visible .actress-avatar {
   background: var(--surface-panel);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-overlay);
-  max-height: calc(100vh - 48px);
+  max-height: calc(100vh - var(--modal-viewport-inset));
   overflow: hidden;
   box-shadow: var(--shadow-elevated);
 }
@@ -16322,6 +16324,10 @@ button.alias-tag-chip-name:disabled {
   border-style: dashed;
 }
 
+.conflict-workbench-owner--other.is-selected {
+  border-style: solid;
+}
+
 .conflict-workbench-owner .actress-avatar,
 .conflict-workbench-source-list .actress-avatar,
 .conflict-workbench-source-heading .actress-avatar,
@@ -16386,7 +16392,8 @@ button.alias-tag-chip-name:disabled {
   background: var(--surface-control-hover);
 }
 
-.conflict-workbench-source-list > button.is-selected {
+.conflict-workbench-source-list > button.is-selected,
+.conflict-workbench-owner-search > button.is-selected {
   border-color: var(--border-accent);
   background: var(--surface-selected);
 }
@@ -16712,6 +16719,37 @@ button.alias-tag-chip-name:disabled {
   gap: 6px;
   overflow: auto;
   scrollbar-gutter: stable;
+}
+
+.modal--conflict-owner-picker {
+  height: min(
+    var(--modal-picker-h-md),
+    calc(100vh - var(--modal-viewport-inset))
+  );
+}
+
+.modal--form .modal-body.conflict-workbench-owner-modal-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-inline-end: 0;
+  scrollbar-gutter: auto;
+}
+
+.conflict-workbench-owner-modal-body .conflict-workbench-owner-picker,
+.conflict-workbench-owner-modal-body .conflict-workbench-owner-search {
+  flex: 1;
+  min-height: 0;
+}
+
+.conflict-workbench-owner-modal-body .conflict-workbench-owner-picker > .search-input {
+  flex: 0 0 var(--control-h-md);
+  height: var(--control-h-md);
+  min-height: var(--control-h-md);
+}
+
+.conflict-workbench-owner-modal-body .conflict-workbench-owner-search {
+  max-height: none;
 }
 
 .conflict-workbench-owner-picker {

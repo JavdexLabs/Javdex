@@ -342,6 +342,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
   const [otherOwnerSearch, setOtherOwnerSearch] = useState('')
   const [otherOwnerOptions, setOtherOwnerOptions] = useState<ActressListItem[]>([])
   const [otherOwnerLoading, setOtherOwnerLoading] = useState(false)
+  const [selectedOtherOwner, setSelectedOtherOwner] = useState<ActressListItem | null>(null)
   const [editNameOpen, setEditNameOpen] = useState(false)
   const [editedName, setEditedName] = useState('')
   const [liveEditInspection, setLiveEditInspection] = useState<{
@@ -443,6 +444,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
   const resetTransientState = useCallback((): void => {
     setOtherOwnerOpen(false)
     setOtherOwnerSearch('')
+    setSelectedOtherOwner(null)
     setEditNameOpen(false)
     setMergeOpen(false)
     setReplacementDialog(null)
@@ -484,7 +486,19 @@ export default function ActressConflictReviewPage(): JSX.Element {
     void api.actresses
       .list(debouncedOwnerSearch.trim(), 'all')
       .then((items) => {
-        if (!cancelled) setOtherOwnerOptions(items.slice(0, 40))
+        if (cancelled) return
+        const visibleItems = items
+          .filter((item) => ownerOptions.every((owner) => owner.actressId !== item.id))
+          .slice(0, 40)
+        const shouldKeepSelectedVisible =
+          debouncedOwnerSearch.trim() === '' &&
+          selectedOtherOwner != null &&
+          !visibleItems.some((item) => item.id === selectedOtherOwner.id)
+        setOtherOwnerOptions(
+          shouldKeepSelectedVisible
+            ? [selectedOtherOwner, ...visibleItems].slice(0, 40)
+            : visibleItems
+        )
       })
       .catch((error) => {
         if (!cancelled) toast.show(String((error as Error).message), 'error')
@@ -495,7 +509,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [debouncedOwnerSearch, otherOwnerOpen, toast])
+  }, [debouncedOwnerSearch, otherOwnerOpen, ownerOptions, selectedOtherOwner, toast])
 
   useEffect(() => {
     setLiveEditInspection(null)
@@ -594,6 +608,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
         setSelection((current) =>
           current ? selectConflictProposedOwner(current, null) : current
         )
+        setSelectedOtherOwner(null)
         void queryClient.invalidateQueries({ queryKey: actressKeys.all })
       })
       .catch((error) => {
@@ -806,6 +821,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
             })
           : current
       )
+      setSelectedOtherOwner(item)
       setOtherOwnerOpen(false)
       setOtherOwnerSearch('')
     } catch (error) {
@@ -994,7 +1010,8 @@ export default function ActressConflictReviewPage(): JSX.Element {
                               className={`conflict-workbench-owner${
                                 proposedOwner?.actressId === owner.actressId ? ' is-selected' : ''
                               }`}
-                              onClick={() =>
+                              onClick={() => {
+                                setSelectedOtherOwner(null)
                                 setSelection((current) =>
                                   current
                                     ? selectConflictProposedOwner(current, {
@@ -1004,7 +1021,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                                       })
                                     : current
                                 )
-                              }
+                              }}
                             >
                               <ActressAvatar
                                 src={resolveMediaSrc(owner.avatarPath)}
@@ -1017,11 +1034,34 @@ export default function ActressConflictReviewPage(): JSX.Element {
                           ))}
                           <button
                             type="button"
-                            className="conflict-workbench-owner conflict-workbench-owner--other"
-                            onClick={() => setOtherOwnerOpen(true)}
+                            aria-pressed={selectedOtherOwner != null}
+                            className={`conflict-workbench-owner conflict-workbench-owner--other${
+                              selectedOtherOwner ? ' is-selected' : ''
+                            }`}
+                            onClick={() => {
+                              setOtherOwnerSearch('')
+                              setOtherOwnerOpen(true)
+                            }}
                           >
-                            <UserRoundSearch {...UI_ICON_SM} aria-hidden />
-                            <span><strong>选择其他演员…</strong><small>从演员库搜索组外演员</small></span>
+                            {selectedOtherOwner ? (
+                              <>
+                                <ActressAvatar
+                                  src={resolveMediaSrc(selectedOtherOwner.avatar_path)}
+                                  name={selectedOtherOwner.main_name}
+                                  gender={selectedOtherOwner.gender}
+                                  decorative
+                                />
+                                <span>
+                                  <strong>{selectedOtherOwner.main_name}</strong>
+                                  <small>已从演员库选择 · 点击重新选择</small>
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <UserRoundSearch {...UI_ICON_SM} aria-hidden />
+                                <span><strong>选择其他演员…</strong><small>从演员库搜索组外演员</small></span>
+                              </>
+                            )}
                           </button>
                         </div>
                       </section>
@@ -1161,7 +1201,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                     {selectedCandidate ? (
                       <button type="button" className="btn btn-sm btn-ghost" disabled={resolving} onClick={() => setDiscardCandidate(selectedCandidate)}>
                         <Trash2 {...UI_ICON_SM} aria-hidden />
-                        {selectedGroup.status === 'applicable' ? '丢弃这份结果…' : '丢弃这份错误匹配…'}
+                        {selectedGroup.status === 'applicable' ? '丢弃这份结果' : '丢弃这份错误匹配'}
                       </button>
                     ) : null}
                     {selectedGroup.status === 'applicable' ? (
@@ -1202,6 +1242,8 @@ export default function ActressConflictReviewPage(): JSX.Element {
         <ConfirmModal
           title="选择其他演员"
           size="md"
+          className="modal--conflict-owner-picker"
+          bodyClassName="conflict-workbench-owner-modal-body"
           confirmText="选好后返回处理页确认"
           confirmDisabled
           onConfirm={() => undefined}
@@ -1222,7 +1264,13 @@ export default function ActressConflictReviewPage(): JSX.Element {
               ) : otherOwnerOptions.length === 0 ? (
                 <EmptyState title="没有匹配的演员" variant="modal" />
               ) : otherOwnerOptions.map((item) => (
-                <button key={item.id} type="button" onClick={() => void chooseOtherOwner(item)}>
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-pressed={selectedOtherOwner?.id === item.id}
+                  className={selectedOtherOwner?.id === item.id ? 'is-selected' : ''}
+                  onClick={() => void chooseOtherOwner(item)}
+                >
                   <ActressAvatar src={resolveMediaSrc(item.avatar_path)} name={item.main_name} gender={item.gender} decorative />
                   <span><strong>{item.main_name}</strong><small>{item.video_count} 部影片</small></span>
                 </button>

@@ -1057,6 +1057,110 @@ describe('ActressIdentityConflictWorkflow', () => {
     assert.equal(findActressByNameOrAlias(' Collision '), targetId)
   })
 
+  it('previews and applies an assigned conflicting alias in a fill-empty alias collection', () => {
+    const ownerId = createActress('Owner')
+    const targetId = createActress('Target')
+    editActress(ownerId, { aliases: ['Collision'] })
+    const workflow = new ActressIdentityConflictWorkflow()
+    assert.equal(
+      workflow.processPreparedScrape({
+        actressId: targetId,
+        plugin: { name: 'Fixture Source', source: 'builtin' },
+        queryName: 'Target',
+        selectedFields: ['aliases'],
+        applicableFields: ['aliases'],
+        mode: 'fillEmpty',
+        result: { aliases: ['Collision', 'Other Alias'] },
+        warnings: [],
+        resources: []
+      }).status,
+      'pending'
+    )
+    const group = workflow.listConflictGroups()[0]
+    const candidate = group.candidates[0]
+
+    assert.deepEqual(
+      candidate.fieldImpacts.find((impact) => impact.field === 'aliases')?.nextValue,
+      ['Other Alias']
+    )
+    assert.deepEqual(
+      candidate.fieldImpactsWhenAssignedToCandidate.find(
+        (impact) => impact.field === 'aliases'
+      )?.nextValue,
+      ['Collision', 'Other Alias']
+    )
+
+    assert.deepEqual(
+      workflow.resolveConflict({
+        kind: 'assignToCurrentActress',
+        snapshot: decisionSnapshot(group),
+        pendingId: candidate.pendingId,
+        replacementMainNames: []
+      }),
+      { status: 'success', remainingPending: 0 }
+    )
+    assert.deepEqual(getActressDetail(targetId)?.aliases, ['Collision', 'Other Alias'])
+  })
+
+  it('keeps earlier ownership decisions in the final fill-empty alias preview and apply', () => {
+    const firstOwnerId = createActress('First Owner')
+    const secondOwnerId = createActress('Second Owner')
+    const targetId = createActress('Target')
+    editActress(firstOwnerId, { aliases: ['First Collision'] })
+    editActress(secondOwnerId, { aliases: ['Second Collision'] })
+    const workflow = new ActressIdentityConflictWorkflow()
+    workflow.processPreparedScrape({
+      actressId: targetId,
+      plugin: { name: 'Fixture Source', source: 'builtin' },
+      queryName: 'Target',
+      selectedFields: ['aliases'],
+      applicableFields: ['aliases'],
+      mode: 'fillEmpty',
+      result: { aliases: ['First Collision', 'Second Collision', 'Other Alias'] },
+      warnings: [],
+      resources: []
+    })
+
+    const firstGroup = workflow
+      .listConflictGroups()
+      .find((item) => item.normalizedName === 'firstcollision')!
+    assert.deepEqual(
+      workflow.resolveConflict({
+        kind: 'assignToCurrentActress',
+        snapshot: decisionSnapshot(firstGroup),
+        pendingId: firstGroup.candidates[0].pendingId,
+        replacementMainNames: []
+      }),
+      { status: 'success', remainingPending: 1 }
+    )
+    assert.deepEqual(getActressDetail(targetId)?.aliases, ['First Collision'])
+
+    const secondGroup = workflow
+      .listConflictGroups()
+      .find((item) => item.normalizedName === 'secondcollision')!
+    const candidate = secondGroup.candidates[0]
+    assert.deepEqual(
+      candidate.fieldImpactsWhenAssignedToCandidate.find(
+        (impact) => impact.field === 'aliases'
+      )?.nextValue,
+      ['First Collision', 'Second Collision', 'Other Alias']
+    )
+    assert.deepEqual(
+      workflow.resolveConflict({
+        kind: 'assignToCurrentActress',
+        snapshot: decisionSnapshot(secondGroup),
+        pendingId: candidate.pendingId,
+        replacementMainNames: []
+      }),
+      { status: 'success', remainingPending: 0 }
+    )
+    assert.deepEqual(getActressDetail(targetId)?.aliases.sort(), [
+      'First Collision',
+      'Other Alias',
+      'Second Collision'
+    ])
+  })
+
   it('validates and removes every legacy claimant when assigning to the pending actress', () => {
     const firstClaimantId = createActress('Collision')
     const secondClaimantId = createActress('Second Claimant')

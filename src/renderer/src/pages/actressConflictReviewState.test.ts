@@ -10,6 +10,7 @@ import {
   canConfirmMergeActresses,
   CONFLICT_ACTION_SCOPE_LABEL,
   conflictClaimantsNeedingReplacement,
+  conflictFieldImpactsForProposedOwner,
   createConflictReviewSelection,
   inspectConflictNameEdit,
   normalizeConflictNameForPreview,
@@ -60,7 +61,24 @@ const group: ActressNameConflictGroup = {
       createdAt: '2026-08-01T00:00:00.000Z',
       resources: [],
       conflicts: [{ name: 'Collision', normalizedName: 'collision', type: 'alias' }],
-      fieldImpacts: [],
+      fieldImpactsWhenAssignedToCandidate: [
+        {
+          field: 'aliases',
+          action: 'replace',
+          currentValue: [],
+          nextValue: ['Collision', 'Other Alias'],
+          reason: 'replace'
+        }
+      ],
+      fieldImpacts: [
+        {
+          field: 'aliases',
+          action: 'replace',
+          currentValue: [],
+          nextValue: ['Other Alias'],
+          reason: 'replace'
+        }
+      ],
       willApplyAfterDecision: true,
       remainingConflictCountAfterDecision: 0
     }
@@ -100,6 +118,23 @@ describe('actress conflict review state', () => {
       unchanged: [unchanged],
       unchangedInitiallyOpen: false
     })
+  })
+
+  it('uses the candidate-owned impact plan only when that candidate is the proposed owner', () => {
+    const candidate = group.candidates[0]
+    assert.equal(
+      conflictFieldImpactsForProposedOwner(candidate, {
+        actressId: candidate.actressId,
+        revision: candidate.actressRevision,
+        mainName: candidate.actressMainName
+      }),
+      candidate.fieldImpactsWhenAssignedToCandidate
+    )
+    assert.equal(
+      conflictFieldImpactsForProposedOwner(candidate, group.currentOwner),
+      candidate.fieldImpacts
+    )
+    assert.equal(conflictFieldImpactsForProposedOwner(candidate, null), candidate.fieldImpacts)
   })
 
   it('sections groups by task state and sorts each section by display name', () => {

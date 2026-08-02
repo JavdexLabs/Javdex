@@ -15906,13 +15906,18 @@ button.alias-tag-chip-name:disabled {
   opacity: 0.58;
 }
 
-.conflict-merge-option:focus-within {
+.conflict-merge-option:has(> input:focus-visible) {
   outline: var(--focus-outline);
+  outline-offset: 2px;
   box-shadow: var(--focus-ring);
 }
 
 .conflict-merge-option > input {
   flex: 0 0 auto;
+}
+
+.conflict-merge-option > input:focus-visible {
+  outline: none;
 }
 
 .conflict-merge-actor-copy {
@@ -15980,9 +15985,14 @@ button.alias-tag-chip-name:disabled {
   opacity: 0.58;
 }
 
-.conflict-merge-name-options > label:focus-within {
+.conflict-merge-name-options > label:has(> input:focus-visible) {
   outline: var(--focus-outline);
+  outline-offset: 2px;
   box-shadow: var(--focus-ring);
+}
+
+.conflict-merge-name-options > label > input:focus-visible {
+  outline: none;
 }
 
 .conflict-merge-name-options span {
@@ -16411,7 +16421,6 @@ button.alias-tag-chip-name:disabled {
 }
 
 .conflict-workbench-candidate-impacts > details,
-.conflict-workbench-technical,
 .conflict-workbench-unchanged {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -16420,7 +16429,6 @@ button.alias-tag-chip-name:disabled {
 }
 
 .conflict-workbench-candidate-impacts summary,
-.conflict-workbench-technical > summary,
 .conflict-workbench-unchanged > summary {
   min-height: 34px;
   padding: 7px 10px;
@@ -16497,17 +16505,10 @@ button.alias-tag-chip-name:disabled {
   font-style: normal;
 }
 
-.conflict-workbench-technical {
-  margin-top: 16px;
-  background: var(--surface-control);
-}
-
-.conflict-workbench-technical dl,
 .conflict-workbench-edit-context {
   margin: 0;
 }
 
-.conflict-workbench-technical dl > div,
 .conflict-workbench-edit-context > div {
   min-height: 30px;
   padding: 6px 10px;
@@ -16518,14 +16519,12 @@ button.alias-tag-chip-name:disabled {
   font-size: 11px;
 }
 
-.conflict-workbench-technical dt,
 .conflict-workbench-edit-context dt,
 .conflict-workbench-meta-grid dt,
 .conflict-workbench-result-values dt {
   color: var(--text-muted);
 }
 
-.conflict-workbench-technical dd,
 .conflict-workbench-edit-context dd,
 .conflict-workbench-meta-grid dd,
 .conflict-workbench-result-values dd {
@@ -16591,12 +16590,6 @@ button.alias-tag-chip-name:disabled {
 
 .conflict-workbench-secondary-actions .btn {
   gap: 5px;
-}
-
-.conflict-workbench-secondary-actions .btn em {
-  color: var(--text-muted);
-  font-size: 9px;
-  font-style: normal;
 }
 
 .conflict-workbench-secondary-actions .conflict-workbench-illegal {
@@ -16695,6 +16688,12 @@ button.alias-tag-chip-name:disabled {
   gap: 6px;
   overflow: auto;
   scrollbar-gutter: stable;
+}
+
+.conflict-workbench-owner-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .conflict-workbench-edit-field {

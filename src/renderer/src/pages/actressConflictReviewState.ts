@@ -2,7 +2,8 @@ import type {
   ActressConflictCurrentOwner,
   ActressConflictDecisionSnapshot,
   ActressNameConflictGroup,
-  ActressScrapeFieldImpact
+  ActressScrapeFieldImpact,
+  PendingActressScrapeCandidate
 } from '@shared/types'
 import { normalizeActressName } from '@shared/actressNameNormalization'
 
@@ -99,6 +100,15 @@ export function partitionConflictFieldImpacts(impacts: ActressScrapeFieldImpact[
     unchanged: impacts.filter((impact) => impact.action === 'preserve'),
     unchangedInitiallyOpen: false
   }
+}
+
+export function conflictFieldImpactsForProposedOwner(
+  candidate: PendingActressScrapeCandidate,
+  proposedOwner: ConflictReviewProposedOwner | null
+): ActressScrapeFieldImpact[] {
+  return proposedOwner?.actressId === candidate.actressId
+    ? candidate.fieldImpactsWhenAssignedToCandidate
+    : candidate.fieldImpacts
 }
 
 export interface ConflictNameEditInspection {

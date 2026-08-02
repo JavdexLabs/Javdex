@@ -1023,6 +1023,9 @@ export interface PendingActressScrapeCandidate {
   batchJobId?: string
   resources: PendingActressScrapeResource[]
   conflicts: Array<{ name: string; normalizedName: string; type: ActressPendingNameType }>
+  /** Exact field result when this candidate actress receives the current conflict name. */
+  fieldImpactsWhenAssignedToCandidate: ActressScrapeFieldImpact[]
+  /** Exact field result when the current conflict name is kept away from this candidate. */
   fieldImpacts: ActressScrapeFieldImpact[]
   willApplyAfterDecision: boolean
   remainingConflictCountAfterDecision: number

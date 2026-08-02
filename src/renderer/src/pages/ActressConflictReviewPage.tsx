@@ -53,6 +53,7 @@ import {
   canConfirmIllegalName,
   CONFLICT_ACTION_SCOPE_LABEL,
   conflictClaimantsNeedingReplacement,
+  conflictFieldImpactsForProposedOwner,
   createConflictReviewSelection,
   inspectConflictNameEdit,
   partitionConflictFieldImpacts,
@@ -186,7 +187,13 @@ function buildOwnerOptions(group: ActressNameConflictGroup): ConflictOwnerOption
   )
 }
 
-function ImpactRows({ candidate }: { candidate: PendingActressScrapeCandidate }): JSX.Element {
+function ImpactRows({
+  candidate,
+  impacts
+}: {
+  candidate: PendingActressScrapeCandidate
+  impacts: ActressScrapeFieldImpact[]
+}): JSX.Element {
   if (!candidate.willApplyAfterDecision) {
     return (
       <p className="conflict-workbench-impact-note">
@@ -194,9 +201,7 @@ function ImpactRows({ candidate }: { candidate: PendingActressScrapeCandidate })
       </p>
     )
   }
-  const { changed, unchanged, unchangedInitiallyOpen } = partitionConflictFieldImpacts(
-    candidate.fieldImpacts
-  )
+  const { changed, unchanged, unchangedInitiallyOpen } = partitionConflictFieldImpacts(impacts)
   return (
     <div className="conflict-workbench-impact-list">
       {changed.length === 0 ? (
@@ -937,10 +942,10 @@ export default function ActressConflictReviewPage(): JSX.Element {
                     </h2>
                     <p>
                       {selectedGroup.status === 'applicable'
-                        ? '名称冲突已消失，资料仍未写入。请选择来源查看影响后明确应用或丢弃。'
-                        : selectedCandidate
-                          ? `${selectedCandidate.plugin.name} 给「${selectedCandidate.actressMainName}」返回了这个名称；请结合当前归属和来源资料确认。`
-                          : '多位演员保存了同一个名称，请确认最终归属，或选择其他处理方式。'}
+                          ? '名称冲突已消失，资料仍未写入。请选择来源查看影响后明确应用或丢弃。'
+                          : selectedCandidate
+                            ? `${selectedCandidate.plugin.name} 为「${selectedCandidate.actressMainName}」返回了名称「${selectedGroup.displayName}」；当前该名称归属于「${selectedGroup.currentOwner?.mainName ?? '暂无演员'}」，请结合来源资料确认。`
+                            : '多位演员保存了同一个名称，请确认最终归属，或选择其他处理方式。'}
                     </p>
                   </div>
                   <WorkbenchStatusPill className={selectedGroup.status === 'conflict' ? 'is-waiting' : 'is-ok'}>
@@ -1074,9 +1079,9 @@ export default function ActressConflictReviewPage(): JSX.Element {
                               .filter((claimant) => claimant.actressId !== proposedOwner.actressId)
                               .map((claimant) => (
                                 <li key={`claimant-${claimant.actressId}`}>
-                                  从「{claimant.mainName}」移除本名称
+                                  「{claimant.mainName}」将不再使用名称「{selectedGroup.displayName}」
                                   {claimant.nameTypes.includes('main')
-                                    ? `；主名需改为「${replacementMainNames[claimant.actressId]?.trim() || '尚未设置'}」`
+                                    ? `；需将主名改为「${replacementMainNames[claimant.actressId]?.trim() || '尚未设置'}」`
                                     : ''}
                                 </li>
                               ))}
@@ -1085,7 +1090,9 @@ export default function ActressConflictReviewPage(): JSX.Element {
                                 .filter((conflict) => conflict.normalizedName === selectedGroup.normalizedName)
                                 .map((conflict) => (
                                   <li key={`candidate-${candidate.pendingId}-${conflict.type}-${conflict.name}`}>
-                                    从「{candidate.actressMainName}」的待确认结果移除「{conflict.name}」
+                                    {candidate.actressId === proposedOwner.actressId
+                                      ? `「${candidate.actressMainName}」的待确认资料将保留名称「${conflict.name}」，该名称冲突会被解除`
+                                      : `「${candidate.actressMainName}」的待确认资料将不再写入名称「${conflict.name}」`}
                                   </li>
                                 ))
                             )}
@@ -1103,7 +1110,13 @@ export default function ActressConflictReviewPage(): JSX.Element {
                               <span>资料写回「{candidate.actressMainName}」</span>
                               <em>{candidate.willApplyAfterDecision ? '精确字段影响' : '继续等待'}</em>
                             </summary>
-                            <ImpactRows candidate={candidate} />
+                            <ImpactRows
+                              candidate={candidate}
+                              impacts={conflictFieldImpactsForProposedOwner(
+                                candidate,
+                                proposedOwner
+                              )}
+                            />
                           </details>
                         ))}
                         {selectedGroup.candidates.length === 0 ? (
@@ -1112,23 +1125,6 @@ export default function ActressConflictReviewPage(): JSX.Element {
                       </div>
                     </section>
 
-                    <details className="conflict-workbench-technical">
-                      <summary>技术详情</summary>
-                      <dl>
-                        <div><dt>标准化名称键</dt><dd className="copyable-text">{selectedGroup.normalizedName}</dd></div>
-                        {selectedCandidate ? (
-                          <>
-                            <div><dt>待确认结果 ID</dt><dd className="copyable-text">{selectedCandidate.pendingId}</dd></div>
-                            <div><dt>结果版本</dt><dd className="copyable-text">{selectedCandidate.revision}</dd></div>
-                            <div><dt>目标演员版本</dt><dd className="copyable-text">{selectedCandidate.actressRevision}</dd></div>
-                            <div><dt>创建时间</dt><dd className="copyable-text">{selectedCandidate.createdAt}</dd></div>
-                            <div><dt>插件版本</dt><dd className="copyable-text">{selectedCandidate.plugin.version || '未声明'}</dd></div>
-                            {selectedCandidate.batchJobId ? <div><dt>批次 ID</dt><dd className="copyable-text">{selectedCandidate.batchJobId}</dd></div> : null}
-                          </>
-                        ) : null}
-                        {selectedClaim ? <div><dt>历史声明 ID</dt><dd className="copyable-text">{selectedClaim.claimId}</dd></div> : null}
-                      </dl>
-                    </details>
                   </div>
 
                   <div
@@ -1184,13 +1180,13 @@ export default function ActressConflictReviewPage(): JSX.Element {
                   <div className="conflict-workbench-secondary-actions" aria-label="其他处理方式">
                     <span>其他处理</span>
                     <button type="button" className="btn btn-sm btn-ghost" disabled={!editSourceName || resolving} onClick={openEditName}>
-                      <Pencil {...UI_ICON_SM} aria-hidden />修改本条返回名称… <em>{CONFLICT_ACTION_SCOPE_LABEL.editName}</em>
+                      <Pencil {...UI_ICON_SM} aria-hidden />修改本条返回名称
                     </button>
                     <button type="button" className="btn btn-sm btn-ghost" disabled={mergeActors.length < 2 || resolving} onClick={() => setMergeOpen(true)}>
-                      <GitMerge {...UI_ICON_SM} aria-hidden />合并演员档案… <em>{CONFLICT_ACTION_SCOPE_LABEL.mergeActresses}</em>
+                      <GitMerge {...UI_ICON_SM} aria-hidden />合并演员档案
                     </button>
                     <button type="button" className="btn btn-sm btn-ghost conflict-workbench-illegal" disabled={resolving} onClick={openIllegalName}>
-                      <Ban {...UI_ICON_SM} aria-hidden />这不是演员名称… <em>{CONFLICT_ACTION_SCOPE_LABEL.markIllegalName}</em>
+                      <Ban {...UI_ICON_SM} aria-hidden />这不是演员名称
                     </button>
                   </div>
                 ) : null}
@@ -1212,24 +1208,26 @@ export default function ActressConflictReviewPage(): JSX.Element {
           onCancel={() => { setOtherOwnerOpen(false); setOtherOwnerSearch('') }}
         >
           <p>这里只选择拟定归属；不会在弹窗内提交名称变更。</p>
-          <input
-            type="search"
-            className="search-input form-control-full"
-            placeholder="搜索演员主名或别名…"
-            value={otherOwnerSearch}
-            onChange={(event) => setOtherOwnerSearch(event.target.value)}
-          />
-          <div className="conflict-workbench-owner-search" role="group" aria-label="其他演员">
-            {otherOwnerLoading ? (
-              <EmptyState loading variant="modal" />
-            ) : otherOwnerOptions.length === 0 ? (
-              <EmptyState title="没有匹配的演员" variant="modal" />
-            ) : otherOwnerOptions.map((item) => (
-              <button key={item.id} type="button" onClick={() => void chooseOtherOwner(item)}>
-                <ActressAvatar src={resolveMediaSrc(item.avatar_path)} name={item.main_name} gender={item.gender} decorative />
-                <span><strong>{item.main_name}</strong><small>{item.video_count} 部影片</small></span>
-              </button>
-            ))}
+          <div className="conflict-workbench-owner-picker">
+            <input
+              type="search"
+              className="search-input form-control-full"
+              placeholder="搜索演员主名或别名…"
+              value={otherOwnerSearch}
+              onChange={(event) => setOtherOwnerSearch(event.target.value)}
+            />
+            <div className="conflict-workbench-owner-search" role="group" aria-label="其他演员">
+              {otherOwnerLoading ? (
+                <EmptyState loading variant="modal" />
+              ) : otherOwnerOptions.length === 0 ? (
+                <EmptyState title="没有匹配的演员" variant="modal" />
+              ) : otherOwnerOptions.map((item) => (
+                <button key={item.id} type="button" onClick={() => void chooseOtherOwner(item)}>
+                  <ActressAvatar src={resolveMediaSrc(item.avatar_path)} name={item.main_name} gender={item.gender} decorative />
+                  <span><strong>{item.main_name}</strong><small>{item.video_count} 部影片</small></span>
+                </button>
+              ))}
+            </div>
           </div>
         </ConfirmModal>
       ) : null}

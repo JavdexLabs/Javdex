@@ -875,6 +875,21 @@ function declarePendingNamesForActress(
   }
 }
 
+function releasePendingResultNamesBeforeApply(
+  actressId: number,
+  fields: ActressScrapeField[],
+  result: ActressScrapeResult
+): void {
+  const remove = getDb().prepare(
+    `DELETE FROM actress_names
+     WHERE actress_id = ? AND type = ? AND normalize_actress_name(name) = ?`
+  )
+  for (const item of namesFromResult(fields, result)) {
+    remove.run(actressId, item.type, item.normalizedName)
+  }
+  synchronizeActressNameOwnership(actressId)
+}
+
 function reconcilePendingNameClaimGroup(normalizedName: string): void {
   const db = getDb()
   const declarations = db
@@ -948,6 +963,26 @@ function excludeNormalizedNameFromPendingResult(
     result: updated,
     fields: fields.filter((field) => !excludedFields.has(field))
   }
+}
+
+function pendingResultNameKeysOwnedByActress(
+  actressId: number,
+  fields: ActressScrapeField[],
+  result: ActressScrapeResult
+): string[] {
+  const readOwner = getDb().prepare(
+    'SELECT actress_id FROM actress_name_ownership WHERE normalized_name = ?'
+  )
+  return Array.from(
+    new Set(
+      namesFromResult(fields, result)
+        .filter((name) => {
+          const owner = readOwner.get(name.normalizedName) as { actress_id: number } | undefined
+          return owner?.actress_id === actressId
+        })
+        .map((name) => name.normalizedName)
+    )
+  )
 }
 
 function promotePendingResources(pendingId: number): PreparedPendingFormalResources {
@@ -1273,6 +1308,7 @@ export class ActressIdentityConflictWorkflow {
       conflicts: (conflictsByPending.get(row.id) ?? []).filter((conflict) =>
         isPendingConflictActive(row.id, row.actress_id, conflict.normalizedName)
       ),
+      fieldImpactsWhenAssignedToCandidate: [],
       fieldImpacts: [],
       willApplyAfterDecision: false,
       remainingConflictCountAfterDecision: 0
@@ -1353,6 +1389,7 @@ export class ActressIdentityConflictWorkflow {
           if (!willApplyAfterDecision || !includeFieldImpacts) {
             return {
               ...candidate,
+              fieldImpactsWhenAssignedToCandidate: [],
               fieldImpacts: [],
               willApplyAfterDecision,
               remainingConflictCountAfterDecision
@@ -1385,8 +1422,32 @@ export class ActressIdentityConflictWorkflow {
             preview.fields,
             candidate.mode
           )
+          const assignedPlan =
+            group.status === 'conflict'
+              ? planActressScrapeResult(
+                  candidate.actressId,
+                  candidate.result,
+                  avatarResource?.stagedPath ?? null,
+                  galleryResources,
+                  candidate.applicableFields,
+                  candidate.mode,
+                  {
+                    releasedNameKeys: Array.from(
+                      new Set([
+                        group.normalizedName,
+                        ...pendingResultNameKeysOwnedByActress(
+                          candidate.actressId,
+                          candidate.applicableFields,
+                          candidate.result
+                        )
+                      ])
+                    )
+                  }
+                )
+              : plan
           return {
             ...candidate,
+            fieldImpactsWhenAssignedToCandidate: assignedPlan.impacts,
             fieldImpacts: plan.impacts,
             willApplyAfterDecision,
             remainingConflictCountAfterDecision
@@ -1938,15 +1999,6 @@ export class ActressIdentityConflictWorkflow {
           for (const previousClaimantId of previousClaimantIds) {
             synchronizeActressNameOwnership(previousClaimantId)
           }
-          declarePendingNamesForActress(
-            pending.actress_id,
-            conflictRows.map((row) => ({
-              name: row.name,
-              normalizedName: row.normalized_name,
-              type: row.name_type
-            }))
-          )
-          synchronizeActressNameOwnership(pending.actress_id)
           db.prepare(
             `DELETE FROM pending_actress_scrape_conflicts
              WHERE pending_scrape_id = ? AND normalized_name = ?`
@@ -1954,7 +2006,24 @@ export class ActressIdentityConflictWorkflow {
           db.prepare(
             'UPDATE pending_actress_scrapes SET revision = revision + 1 WHERE id = ?'
           ).run(input.pendingId)
-          applyIfUnlocked(input.pendingId)
+          if (activePendingConflicts(input.pendingId).length === 0) {
+            const applicableFields = parseJson<ActressScrapeField[]>(
+              pending.applicable_fields_json
+            )
+            const result = parseJson<ActressScrapeResult>(pending.result_json)
+            releasePendingResultNamesBeforeApply(pending.actress_id, applicableFields, result)
+            applyIfUnlocked(input.pendingId)
+          } else {
+            declarePendingNamesForActress(
+              pending.actress_id,
+              conflictRows.map((row) => ({
+                name: row.name,
+                normalizedName: row.normalized_name,
+                type: row.name_type
+              }))
+            )
+            synchronizeActressNameOwnership(pending.actress_id)
+          }
         } else if (input.kind === 'assignToExistingActress') {
           const groupConflicts = db
             .prepare(

@@ -1648,7 +1648,8 @@ function hasValidActressScrapeValue(
 function resolveApplicableScrapedAliases(
   aliases: string[] | undefined,
   actressId: number,
-  mainName: string
+  mainName: string,
+  releasedNameKeys: ReadonlySet<string> = new Set()
 ): { applicable: string[]; conflicts: string[] } {
   const applicable: string[] = []
   const conflicts: string[] = []
@@ -1661,7 +1662,7 @@ function resolveApplicableScrapedAliases(
     const key = normalizeActressNameKey(trimmed)
     if (key === mainKey || seen.has(key)) continue
     seen.add(key)
-    if (!isActressNameAvailable(trimmed, actressId)) {
+    if (!releasedNameKeys.has(key) && !isActressNameAvailable(trimmed, actressId)) {
       conflicts.push(trimmed)
       continue
     }
@@ -1789,12 +1790,41 @@ export function planActressScrapeResult(
   avatarRelPath: string | null,
   galleryAssets: ActressGalleryAssetWriteInput[],
   fields?: ActressScrapeField[],
-  mode: ActressScrapeUpdateMode = 'replace'
+  mode: ActressScrapeUpdateMode = 'replace',
+  options?: { releasedNameKeys?: readonly string[] }
 ): ActressScrapeApplicationPlan {
-  const detail = readActressScrapePlanSnapshot(actressId)
-  if (!detail) throw new Error('演员不存在')
+  const storedDetail = readActressScrapePlanSnapshot(actressId)
+  if (!storedDetail) throw new Error('演员不存在')
+  const releasedNameKeys = new Set(options?.releasedNameKeys ?? [])
+  const detail: ActressScrapePlanSnapshot = releasedNameKeys.size
+    ? {
+        ...storedDetail,
+        name_zh:
+          storedDetail.name_zh &&
+          releasedNameKeys.has(normalizeActressNameKey(storedDetail.name_zh))
+            ? null
+            : storedDetail.name_zh,
+        name_en:
+          storedDetail.name_en &&
+          releasedNameKeys.has(normalizeActressNameKey(storedDetail.name_en))
+            ? null
+            : storedDetail.name_en,
+        aliases: storedDetail.aliases.filter(
+          (alias) => !releasedNameKeys.has(normalizeActressNameKey(alias))
+        )
+      }
+    : storedDetail
   const requested = fields ?? ALL_ACTRESS_SCRAPE_FIELDS
-  const effectiveFields = resolveEffectiveActressScrapeFields(actressId, requested, mode)
+  const storedEffectiveFields = resolveEffectiveActressScrapeFields(actressId, requested, mode)
+  const effectiveFields =
+    mode === 'fillEmpty' && releasedNameKeys.size
+      ? requested.filter((field) => {
+          if (field === 'nameZh') return isBlankText(detail.name_zh)
+          if (field === 'nameEn') return isBlankText(detail.name_en)
+          if (field === 'aliases') return detail.aliases.length === 0
+          return storedEffectiveFields.includes(field)
+        })
+      : storedEffectiveFields
   const selected = new Set(effectiveFields)
   const avatarResourceAvailable = Boolean(avatarRelPath && isUsableImageAsset(avatarRelPath))
   const avatarResourceUnavailable = Boolean(
@@ -1803,7 +1833,12 @@ export function planActressScrapeResult(
   )
   const aliasResultIsEmpty = !result.aliases || result.aliases.length === 0
   const { applicable: applicableAliases, conflicts: conflictingAliases } = selected.has('aliases')
-    ? resolveApplicableScrapedAliases(result.aliases, actressId, detail.main_name)
+    ? resolveApplicableScrapedAliases(
+        result.aliases,
+        actressId,
+        detail.main_name,
+        releasedNameKeys
+      )
     : { applicable: [], conflicts: [] }
   if (conflictingAliases.length > 0) {
     throw new Error(`名称「${conflictingAliases[0]}」已被其他演员使用`)

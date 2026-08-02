@@ -852,10 +852,14 @@ export interface VideoBatchScrapeFilter {
   videoIds?: number[]
   /** Optional range filter: include videos missing any selected metadata field. */
   missingFields?: VideoScrapeField[]
+  /** Actual plugins supplying site-scoped source and rating fields. */
+  sourceName?: string
+  ratingSourceName?: string
+  /** Scraper selected by the user; main process resolves its actual field sources. */
+  scraperName?: string
 }
 
 export interface VideoBatchScrapeRequest extends VideoBatchScrapeFilter {
-  scraperName?: string
   fields: VideoScrapeField[]
   /** Default: replace — only write into empty fields when fillEmpty. */
   mode?: VideoScrapeUpdateMode
@@ -880,8 +884,9 @@ export interface VideoRematchBatchRequest {
 
 export interface VideoScrapeOneResult {
   result: ScrapeResult
-  /** False when fillEmpty mode had nothing empty to update. */
+  /** True only when at least one selected field was written or explicitly cleared. */
   applied: boolean
+  warnings: string[]
 }
 
 /** Selectable fields when manually re-scraping an actress profile. */

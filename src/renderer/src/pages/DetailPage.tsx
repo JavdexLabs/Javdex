@@ -274,9 +274,16 @@ export default function DetailPage(): JSX.Element {
     setScraping(true)
     try {
       const res = await api.scrape.one(videoId, site || undefined, fields, mode)
+      const hasWarnings = res.warnings.length > 0
       toast.show(
-        res.applied ? '匹配完成' : '无可补齐的空字段，未写入变更',
-        res.applied ? 'success' : 'info'
+        res.applied
+          ? hasWarnings
+            ? `已更新，部分图片未应用：${res.warnings.join('；')}`
+            : '匹配完成'
+          : hasWarnings
+            ? `资源不可用，已保留原数据：${res.warnings.join('；')}`
+            : '所选字段无可写入内容',
+        res.applied && !hasWarnings ? 'success' : 'info'
       )
       if (res.applied) {
         invalidateVideos()

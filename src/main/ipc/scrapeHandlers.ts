@@ -31,7 +31,12 @@ import {
   listActressScraperPlugins,
   scrapeActress
 } from '../scrapers/actressScraperManager'
-import { listScraperNames, listScraperPlugins, scrapeVideo } from '../scrapers/scraperManager'
+import {
+  listScraperNames,
+  listScraperPlugins,
+  resolveVideoScrapeFieldSources,
+  scrapeVideo
+} from '../scrapers/scraperManager'
 import {
   deleteScraperPlugin,
   createCompositeScraper,
@@ -184,7 +189,11 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
         scrapeVideo(videoId, scraperName, { fields, mode })
       )
       if (!outcome.ok || !outcome.result) throw new Error(outcome.error)
-      return { result: outcome.result, applied: !outcome.skipped }
+      return {
+        result: outcome.result,
+        applied: !outcome.skipped,
+        warnings: outcome.warnings ?? []
+      }
     }
   )
 
@@ -222,7 +231,11 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
 
   registerHandler(
     IPC.SCRAPE_VIDEO_BATCH_COUNT,
-    (_e, filter: VideoBatchScrapeFilter): number => countVideosForBatchScrape(filter)
+    (_e, filter: VideoBatchScrapeFilter): number =>
+      countVideosForBatchScrape({
+        ...filter,
+        ...resolveVideoScrapeFieldSources(filter.scraperName)
+      })
   )
 
   registerHandler(

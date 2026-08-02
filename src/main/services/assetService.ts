@@ -527,6 +527,7 @@ export async function downloadCover(
   try {
     const ext = extFromUrl(url)
     const buf = await fetcher(url)
+    if (!isUsableImageBuffer(buf)) throw new Error('response is not a usable image')
     return writeImageAsset('covers', code, url, ext, buf)
   } catch (err) {
     console.error('downloadCover failed:', code, url, (err as Error).message)
@@ -638,6 +639,7 @@ export async function downloadSamples(
     try {
       const ext = extFromUrl(url)
       const buf = await fetcher(url)
+      if (!isUsableImageBuffer(buf)) throw new Error('response is not a usable image')
       out.push(writeImageAsset('samples', `${code}_${index}`, url, ext, buf))
     } catch (err) {
       console.error('downloadSamples failed:', code, index, url, (err as Error).message)

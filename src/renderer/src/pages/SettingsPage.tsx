@@ -272,10 +272,11 @@ export default function SettingsPage(): JSX.Element {
 
   const refreshVideoBatchScopeHint = async (
     status: VideoBatchScrapeStatus,
-    missingFields: VideoScrapeField[] = []
+    missingFields: VideoScrapeField[] = [],
+    scraperName?: string
   ): Promise<void> => {
     try {
-      const n = await api.scrape.videoBatchCount({ status, missingFields })
+      const n = await api.scrape.videoBatchCount({ status, missingFields, scraperName })
       setVideoBatchScopeCountLabel(`${n} 部影片`)
     } catch {
       setVideoBatchScopeCountLabel('- 部影片')
@@ -1252,13 +1253,15 @@ export default function SettingsPage(): JSX.Element {
           scopeOptions={VIDEO_BATCH_SCRAPE_STATUS_OPTIONS}
           initialScope={0}
           scopeCountLabel={videoBatchScopeCountLabel}
-          onScopeChange={(status, missingFields) =>
-            void refreshVideoBatchScopeHint(status, missingFields)
+          onScopeChange={(status, missingFields, _auxScope, scraperName) =>
+            void refreshVideoBatchScopeHint(status, missingFields, scraperName)
           }
           missingFieldOptions={VIDEO_SCRAPE_FIELD_OPTIONS}
           missingFieldHint="选择后包含缺少任一所选字段的影片。"
-          onMissingFieldsChange={(missingFields, status) => {
-            if (status !== undefined) void refreshVideoBatchScopeHint(status, missingFields)
+          onMissingFieldsChange={(missingFields, status, _auxScope, scraperName) => {
+            if (status !== undefined) {
+              void refreshVideoBatchScopeHint(status, missingFields, scraperName)
+            }
           }}
           onCancel={() => setShowVideoBatchModal(false)}
           onConfirm={(fields, site, status, mode, missingFields) => {

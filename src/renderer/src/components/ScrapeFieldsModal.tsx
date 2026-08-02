@@ -108,14 +108,19 @@ interface Props<T extends string, S extends string | number = never, A extends s
   initialScope?: S
   scopeTitle?: string
   scopeCountLabel?: string
-  onScopeChange?: (scope: S, missingFields: T[], auxScope?: A) => void
+  onScopeChange?: (scope: S, missingFields: T[], auxScope?: A, scraperName?: string) => void
   auxScopeOptions?: ScrapeScopeOption<A>[]
   initialAuxScope?: A
   auxScopeTitle?: string
   missingFieldOptions?: ScrapeFieldOption<T>[]
   initialMissingFields?: T[]
   missingFieldHint?: string
-  onMissingFieldsChange?: (missingFields: T[], scope?: S, auxScope?: A) => void
+  onMissingFieldsChange?: (
+    missingFields: T[],
+    scope?: S,
+    auxScope?: A,
+    scraperName?: string
+  ) => void
   updateModeOptions?: ScrapeScopeOption<string>[]
   initialUpdateMode?: string
   updateModeHint?: string
@@ -244,15 +249,21 @@ export default function ScrapeFieldsModal<
     nextMissingFields: T[] = effectiveMissingFields
   ): void => {
     if (nextScope !== undefined) {
-      onScopeChange?.(nextScope, nextMissingFields, nextAuxScope)
+      onScopeChange?.(nextScope, nextMissingFields, nextAuxScope, scraperName)
     }
   }
   const notifyMissingFieldsChange = (nextMissingFields: T[]): void => {
     if (onMissingFieldsChange) {
-      onMissingFieldsChange(nextMissingFields, scope, auxScope)
+      onMissingFieldsChange(nextMissingFields, scope, auxScope, scraperName)
       return
     }
     notifyScopeChange(scope, auxScope, nextMissingFields)
+  }
+  const changeScraperName = (nextScraperName: string): void => {
+    setScraperName(nextScraperName)
+    if (scope !== undefined) {
+      onScopeChange?.(scope, effectiveMissingFields, auxScope, nextScraperName)
+    }
   }
 
   useEffect(() => {
@@ -501,7 +512,7 @@ export default function ScrapeFieldsModal<
               <ScraperSiteSelect
                 scrapers={scrapers}
                 value={scraperName}
-                onChange={setScraperName}
+                onChange={changeScraperName}
                 title={scraperTitle}
               />
               {unsupportedCount > 0 && (

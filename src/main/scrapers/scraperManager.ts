@@ -6,7 +6,7 @@ import {
   markScrapeFailed,
   resolveEffectiveScrapeFields
 } from '../db/videoRepo'
-import { downloadCover, downloadAvatar, downloadSamples } from '../services/assetService'
+import { deleteAsset, downloadCover, downloadAvatar, downloadSamples } from '../services/assetService'
 import { getSettings } from '../settings/settingsStore'
 import { scrapeBrowser } from './scrapeBrowser'
 import type { VideoScrapeField, VideoScrapeUpdateMode } from '@shared/types'
@@ -57,8 +57,9 @@ export interface ScrapeOutcome {
   ok: boolean
   result?: ScrapeResult
   error?: string
-  /** True when scrape succeeded but fillEmpty had no empty fields to write. */
+  /** True when the plugin matched but no selected field could be applied. */
   skipped?: boolean
+  warnings?: string[]
 }
 
 export interface ScrapeVideoOptions {
@@ -124,7 +125,7 @@ async function scrapeCompositeVideo(
   effectiveFields: VideoScrapeField[],
   proxy: string,
   delayController?: ScrapeVideoOptions['delayController']
-): Promise<ScrapeResult | null> {
+): Promise<{ result: ScrapeResult; matchedFields: VideoScrapeField[] } | null> {
   const composite = findCompositeScraper('video', compositeName)
   if (!composite) return null
   const grouped = new Map<string, VideoScrapeField[]>()
@@ -134,6 +135,7 @@ async function scrapeCompositeVideo(
     grouped.set(pluginName, [...(grouped.get(pluginName) ?? []), field])
   }
   let merged: ScrapeResult | null = null
+  const matchedFields: VideoScrapeField[] = []
   for (const [pluginName, fields] of grouped) {
     const scraper = getScraper(pluginName)
     const rawResult = delayController
@@ -142,19 +144,35 @@ async function scrapeCompositeVideo(
     const result = normalizeVideoScrapeResult(rawResult, videoCode)
     if (!result) continue
     merged = mergeVideoResults(merged, pickVideoFields(result, fieldSet(fields), videoCode))
+    matchedFields.push(...fields)
   }
-  return merged
+  return merged ? { result: merged, matchedFields } : null
 }
 
-function resolveRatingSourceName(
+function resolveVideoFieldSourceNames(
   scraper: { scraperName: string } | null | undefined,
   scraperName: string | undefined,
   defaultScraper: string
-): string {
-  if (scraper) return scraper.scraperName
+): { sourceName: string; ratingSourceName: string } {
+  if (scraper) {
+    return { sourceName: scraper.scraperName, ratingSourceName: scraper.scraperName }
+  }
   const resolvedName = scraperName || defaultScraper
   const composite = findCompositeScraper('video', resolvedName)
-  return composite?.fieldPluginMap.rating ?? resolvedName
+  return {
+    sourceName: composite?.fieldPluginMap.source ?? resolvedName,
+    ratingSourceName: composite?.fieldPluginMap.rating ?? resolvedName
+  }
+}
+
+export function resolveVideoScrapeFieldSources(scraperName?: string): {
+  sourceName: string
+  ratingSourceName: string
+} {
+  const settings = getSettings()
+  const composite = findCompositeScraper('video', scraperName || settings.defaultScraper)
+  const scraper = composite ? null : getScraper(scraperName)
+  return resolveVideoFieldSourceNames(scraper, scraperName, settings.defaultScraper)
 }
 
 /**
@@ -170,16 +188,49 @@ export async function scrapeVideo(
   if (!video) return { ok: false, error: '视频不存在' }
 
   const mode = options?.mode ?? 'replace'
-  const requested = options?.fields ?? ALL_VIDEO_SCRAPE_FIELDS
-  const effective = resolveEffectiveScrapeFields(videoId, requested, mode)
-  const selected = new Set(effective)
   const settings = getSettings()
+  const resolvedScraperName = scraperName || settings.defaultScraper
+  const descriptor = listMergedPluginDescriptors('video').find(
+    (plugin) => plugin.name === resolvedScraperName
+  )
+  const supportedFields = new Set(descriptor?.supportedFields ?? ALL_VIDEO_SCRAPE_FIELDS)
+  const requested = (options?.fields ?? ALL_VIDEO_SCRAPE_FIELDS).filter((field) =>
+    supportedFields.has(field)
+  )
   const proxy = resolveScrapeProxyUrl(settings)
   const scraper = findCompositeScraper('video', scraperName || settings.defaultScraper)
     ? null
     : getScraper(scraperName)
+  const { sourceName, ratingSourceName } = resolveVideoFieldSourceNames(
+    scraper,
+    scraperName,
+    settings.defaultScraper
+  )
+  const effective = resolveEffectiveScrapeFields(
+    videoId,
+    requested,
+    mode,
+    sourceName,
+    ratingSourceName
+  )
+  const selected = new Set(effective)
+  let coverRel: string | null = null
+  let sampleRels: Array<string | null> = []
+
+  if (effective.length === 0) {
+    return { ok: true, result: { code: video.code }, skipped: true, warnings: [] }
+  }
 
   try {
+    const compositeOutcome = scraper
+      ? null
+      : await scrapeCompositeVideo(
+          video.code,
+          scraperName || settings.defaultScraper,
+          effective,
+          proxy,
+          options?.delayController
+        )
     const result = scraper
       ? normalizeVideoScrapeResult(
           options?.delayController
@@ -189,25 +240,14 @@ export async function scrapeVideo(
             : await scraper.parseTask(video.code, proxy),
           video.code
         )
-      : await scrapeCompositeVideo(
-          video.code,
-          scraperName || settings.defaultScraper,
-          effective,
-          proxy,
-          options?.delayController
-        )
+      : compositeOutcome?.result ?? null
     if (!result) {
       markScrapeFailed(videoId)
       return { ok: false, error: '未找到匹配的元数据' }
     }
 
-    if (effective.length === 0) {
-      return { ok: true, result, skipped: true }
-    }
-
     const fetcher = (url: string): Promise<Buffer> => scrapeBrowser.fetchBuffer(url)
 
-    let coverRel: string | null = null
     if (selected.has('cover') && result.coverUrl) {
       coverRel = await downloadCover(result.code || video.code, result.coverUrl, fetcher)
     }
@@ -227,31 +267,35 @@ export async function scrapeVideo(
       }
     }
 
-    let sampleRels: Array<string | null> = []
     if (selected.has('samples') && result.sampleImageUrls?.length) {
       sampleRels = await downloadSamples(result.code || video.code, result.sampleImageUrls, fetcher)
+      if (sampleRels.some((assetPath) => !assetPath)) {
+        for (const assetPath of sampleRels) deleteAsset(assetPath)
+        sampleRels = result.sampleImageUrls.map(() => null)
+      }
     }
 
-    const sourceName = scraper?.scraperName ?? scraperName ?? settings.defaultScraper
-    const ratingSourceName = resolveRatingSourceName(
-      scraper,
-      scraperName,
-      settings.defaultScraper
-    )
-
-    const applied = applyScrapeResult(
+    const fieldsToApply = compositeOutcome?.matchedFields ?? requested
+    const application = applyScrapeResult(
       videoId,
       result,
       coverRel,
       avatarMap,
       sampleRels,
-      requested,
+      fieldsToApply,
       sourceName,
       mode,
       ratingSourceName
     )
-    return { ok: true, result, skipped: !applied }
+    return {
+      ok: true,
+      result,
+      skipped: !application.applied,
+      warnings: application.warnings
+    }
   } catch (err) {
+    deleteAsset(coverRel)
+    for (const assetPath of sampleRels) deleteAsset(assetPath)
     markScrapeFailed(videoId)
     return { ok: false, error: (err as Error).message }
   } finally {

@@ -362,9 +362,16 @@ export default function LibraryPage(): JSX.Element {
     setScraperName(site)
     try {
       const res = await api.scrape.one(target.id, site || undefined, fields, mode)
+      const hasWarnings = res.warnings.length > 0
       toast.show(
-        res.applied ? `已更新 ${target.code}` : '所选字段无需写入',
-        res.applied ? 'success' : 'info'
+        res.applied
+          ? hasWarnings
+            ? `已更新 ${target.code}，部分图片未应用：${res.warnings.join('；')}`
+            : `已更新 ${target.code}`
+          : hasWarnings
+            ? `资源不可用，已保留原数据：${res.warnings.join('；')}`
+            : '所选字段无可写入内容',
+        res.applied && !hasWarnings ? 'success' : 'info'
       )
       if (res.applied) {
         invalidateVideoLibraryQueries(queryClient)

@@ -11,7 +11,7 @@
 | `video` | `parseVideo(ctx)` | 影片元数据刮削 |
 | `actress` | `parseActress(ctx)` | 演员资料刮削 |
 
-内置插件位于 `src/main/bundled-plugins/`（如 JavDB、JavLibrary、JAV8、Xslist、Gfriends 等），以 `plugin.json` + 入口脚本形式随应用分发。
+内置插件位于 `src/main/bundled-plugins/`（如 JavDB、JavLibrary、Xslist、Gfriends 等），以 `plugin.json` + 入口脚本形式随应用分发。
 
 ## 包与安装形态
 

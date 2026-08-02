@@ -4,7 +4,11 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
-import { getSettings, resetSettingsCacheForTests } from './settingsStore'
+import {
+  getSettings,
+  migrateRetiredVideoScraperSettings,
+  resetSettingsCacheForTests
+} from './settingsStore'
 
 let tempRoot: string | null = null
 let previousUserData: string | undefined
@@ -79,6 +83,41 @@ describe('settingsStore retired actress scrapers', () => {
     const [composite] = getSettings().compositeScrapers.actress
     assert.equal(composite?.fieldPluginMap.avatar, 'Xslist')
     assert.equal(composite?.fieldPluginMap.measurements, 'Xslist')
+  })
+})
+
+describe('settingsStore retired video scrapers', () => {
+  it('rewrites the retired JAV8 default to JavDB', () => {
+    writeSettings({ defaultScraper: 'JAV8' })
+    migrateRetiredVideoScraperSettings()
+    assert.equal(getSettings().defaultScraper, 'JavDB')
+  })
+
+  it('rewrites JAV8 composite mappings and removes its delay', () => {
+    writeSettings({
+      scraperPluginDelays: {
+        video: { JAV8: { minMs: 1000, maxMs: 2000 } },
+        actress: {}
+      },
+      compositeScrapers: {
+        video: [
+          {
+            kind: 'video',
+            name: 'Legacy JAV8 Fields',
+            fieldPluginMap: { title: 'JavLibrary', cover: 'JAV8' }
+          }
+        ],
+        actress: []
+      }
+    })
+
+    migrateRetiredVideoScraperSettings()
+    const settings = getSettings()
+    assert.equal(settings.scraperPluginDelays.video.JAV8, undefined)
+    assert.deepEqual(settings.compositeScrapers.video[0]?.fieldPluginMap, {
+      title: 'JavLibrary',
+      cover: 'JavDB'
+    })
   })
 })
 

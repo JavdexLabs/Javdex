@@ -148,7 +148,7 @@ describe('scraperPluginService', () => {
   it('lists bundled plugins shipped with the app', () => {
     assert.deepEqual(
       listBundledPluginDescriptors('video').map((item) => item.name).sort(),
-      ['JAV8', 'JavDB', 'JavLibrary']
+      ['JavDB', 'JavLibrary']
     )
     assert.deepEqual(
       listBundledPluginDescriptors('actress').map((item) => item.name).sort(),
@@ -224,6 +224,10 @@ describe('scraperPluginService', () => {
       loadUserVideoScrapers().some((item) => item.scraperName === 'JavDB'),
       false
     )
+    await assert.rejects(
+      importScraperPluginPackage(writePackage(pluginPackage('video', 'JAV8'))),
+      /不能与内置插件同名/
+    )
   })
 
   it('renames legacy user plugins that override built-in names to -custom', () => {
@@ -277,12 +281,46 @@ describe('scraperPluginService', () => {
     })
     assert.equal(settings.scraperPluginDelays.video.JavDB, undefined)
     assert.equal(settings.compositeScrapers.video[0]?.fieldPluginMap.title, 'JavDB-custom')
-    assert.equal(settings.compositeScrapers.video[0]?.fieldPluginMap.cover, 'JAV8')
+    assert.equal(settings.compositeScrapers.video[0]?.fieldPluginMap.cover, 'JavDB')
     assert.equal(settings.compositeScrapers.actress[0]?.fieldPluginMap.avatar, 'Xslist-custom')
 
     const merged = listMergedPluginDescriptors('video').filter((item) => item.name === 'JavDB')
     assert.equal(merged.length, 1)
     assert.equal(merged[0]?.source, 'builtin')
+  })
+
+  it('preserves settings for a legacy user plugin named after retired JAV8', () => {
+    writeLegacyBuiltInOverride('video', 'JAV8')
+    updateSettings({
+      defaultScraper: 'JAV8',
+      scraperPluginDelays: {
+        video: { JAV8: { minMs: 1200, maxMs: 2400 } },
+        actress: {}
+      },
+      compositeScrapers: {
+        video: [
+          {
+            kind: 'video',
+            name: 'Legacy JAV8 Combo',
+            fieldPluginMap: { title: 'JAV8' }
+          }
+        ],
+        actress: []
+      }
+    })
+
+    migrateUserPluginsAwayFromBuiltInNames()
+
+    const settings = getSettings()
+    assert.equal(settings.defaultScraper, 'JAV8-custom')
+    assert.deepEqual(settings.scraperPluginDelays.video['JAV8-custom'], {
+      minMs: 1200,
+      maxMs: 2400
+    })
+    assert.equal(
+      settings.compositeScrapers.video[0]?.fieldPluginMap.title,
+      'JAV8-custom'
+    )
   })
 
   it('uses -custom-2 when -custom is already taken', () => {

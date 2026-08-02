@@ -28,10 +28,17 @@ import {
 } from './scraperPluginSandbox'
 import { isBuiltInScraperName } from './builtInScraperNames'
 import { findBundledPluginRecord, readBundledPluginRecords } from './bundledPlugins'
-import { getSettings, updateSettings } from '../settings/settingsStore'
+import {
+  getSettings,
+  migrateRetiredVideoScraperSettings,
+  updateSettings
+} from '../settings/settingsStore'
 import { readTestUserDataPath } from '@shared/appIdentity'
 
 const PLUGIN_SCHEMA_VERSION = 1
+const RETIRED_PLUGIN_NAMES: Partial<Record<ScraperPluginKind, readonly string[]>> = {
+  video: ['JAV8']
+}
 const PLUGIN_DEFAULT_DELAYS: Partial<
   Record<ScraperPluginKind, Record<string, ScraperPluginDelay>>
 > = {
@@ -154,6 +161,7 @@ export function migrateUserPluginsAwayFromBuiltInNames(): void {
   if (renames.length > 0) {
     remapSettingsPluginNames(renames)
   }
+  migrateRetiredVideoScraperSettings()
 }
 
 export async function importScraperPluginPackage(
@@ -611,7 +619,11 @@ function normalizePackage(pkg: ScraperPluginPackageImport): ScraperPluginPackage
 }
 
 function isReservedBuiltInPluginName(kind: ScraperPluginKind, name: string): boolean {
-  return isBuiltInScraperName(kind, name) || Boolean(findBundledPluginRecord(kind, name))
+  return (
+    isBuiltInScraperName(kind, name) ||
+    RETIRED_PLUGIN_NAMES[kind]?.includes(name) === true ||
+    Boolean(findBundledPluginRecord(kind, name))
+  )
 }
 
 function validatePluginNameAvailable(

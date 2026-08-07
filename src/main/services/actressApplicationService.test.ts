@@ -134,6 +134,23 @@ describe('actressApplicationService.listFaceScanManifest', () => {
   })
 })
 
+describe('actressApplicationService.importGalleryImage', () => {
+  it('runs legacy dimension repair as part of the explicit gallery write flow', async () => {
+    const calls: Array<number | undefined> = []
+    const asset = { id: 9, actress_id: 7 } as never
+    const service = createActressApplicationService({
+      importGalleryImage: async () => asset,
+      repairGalleryDimensions: (_database, actressId) => {
+        calls.push(actressId)
+        return 1
+      }
+    })
+
+    assert.equal(await service.importGalleryImage(7, { source: 'file', sourcePath: 'x.jpg' }), asset)
+    assert.deepEqual(calls, [7])
+  })
+})
+
 describe('actressApplicationService.deleteActresses', () => {
   it('deletes the complete batch and cleans stored resources', () => {
     setupDb()

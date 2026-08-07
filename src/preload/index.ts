@@ -6,6 +6,8 @@ import type {
   ActressDeleteMode,
   ActressIpcArgs,
   ActressIpcChannel,
+  ActressIpcEvent,
+  ActressIpcEventChannel,
   ActressIpcResult
 } from '../shared/actressIpcContract'
 import type {
@@ -106,6 +108,15 @@ function invokeActress<Channel extends ActressIpcChannel>(
   return invoke<ActressIpcResult<Channel>>(channel, ...args)
 }
 
+function onActressEvent<Channel extends ActressIpcEventChannel>(
+  channel: Channel,
+  callback: (payload: ActressIpcEvent<Channel>) => void
+): () => void {
+  const listener = (_event: unknown, payload: ActressIpcEvent<Channel>): void => callback(payload)
+  ipcRenderer.on(channel, listener)
+  return () => ipcRenderer.removeListener(channel, listener)
+}
+
 const api = {
   appUpdate: {
     getState: () => invoke<UpdateCheckState>(IPC.APP_UPDATE_GET_STATE),
@@ -200,27 +211,27 @@ const api = {
       gender?: ActressGenderFilter,
       sortBy?: ActressListSortBy,
       sortDir?: ListSortDir
-    ) => invoke<ActressListItem[]>(IPC.ACTRESS_LIST, search, gender, sortBy, sortDir),
+    ) => invokeActress(IPC.ACTRESS_LIST, search, gender, sortBy, sortDir),
     listPage: (query: ActressListQuery) => invokeActress(IPC.ACTRESS_LIST_PAGE, query),
     faceScanManifest: () => invokeActress(IPC.ACTRESS_FACE_SCAN_MANIFEST),
-    get: (id: number) => invoke<ActressDetail | null>(IPC.ACTRESS_GET, id),
+    get: (id: number) => invokeActress(IPC.ACTRESS_GET, id),
     getAvatarSourceInfo: (id: number) =>
-      invoke<ActressAvatarSourceInfo | null>(IPC.ACTRESS_AVATAR_SOURCE_INFO, id),
-    edit: (id: number, input: ActressEditInput) => invoke<boolean>(IPC.ACTRESS_EDIT, id, input),
+      invokeActress(IPC.ACTRESS_AVATAR_SOURCE_INFO, id),
+    edit: (id: number, input: ActressEditInput) => invokeActress(IPC.ACTRESS_EDIT, id, input),
     deletePreview: (ids: number[]) => invokeActress(IPC.ACTRESS_DELETE_PREVIEW, ids),
     remove: (id: number, mode: ActressDeleteMode = 'only-unlinked') =>
       invokeActress(IPC.ACTRESS_DELETE, { ids: [id], mode }),
     removeBatch: (ids: number[], mode: ActressDeleteMode = 'only-unlinked') =>
       invokeActress(IPC.ACTRESS_DELETE_BATCH, { ids, mode }),
-    clearMeta: (id: number) => invoke<boolean>(IPC.ACTRESS_CLEAR_META, id),
+    clearMeta: (id: number) => invokeActress(IPC.ACTRESS_CLEAR_META, id),
     importGalleryImage: (id: number, input: ActressGalleryImportInput) =>
-      invoke<ActressGalleryAsset>(IPC.ACTRESS_GALLERY_IMPORT, id, input),
+      invokeActress(IPC.ACTRESS_GALLERY_IMPORT, id, input),
     deleteGalleryImage: (id: number, assetId: number) =>
-      invoke<boolean>(IPC.ACTRESS_GALLERY_DELETE, id, assetId),
+      invokeActress(IPC.ACTRESS_GALLERY_DELETE, id, assetId),
     setPoster: (id: number, posterPath: string | null) =>
-      invoke<boolean>(IPC.ACTRESS_POSTER_SET, id, posterPath),
-    merge: (input: ActressMergeInput) => invoke<boolean>(IPC.ACTRESS_MERGE, input),
-    markScrapeSuccess: (id: number) => invoke<boolean>(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id)
+      invokeActress(IPC.ACTRESS_POSTER_SET, id, posterPath),
+    merge: (input: ActressMergeInput) => invokeActress(IPC.ACTRESS_MERGE, input),
+    markScrapeSuccess: (id: number) => invokeActress(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id)
   },
   tags: {
     list: () =>
@@ -295,7 +306,7 @@ const api = {
       useAliases?: boolean,
       autoCropAvatar?: boolean
     ) =>
-      invoke<ActressScrapeDisposition>(
+      invokeActress(
         IPC.ACTRESS_SCRAPE_ONE,
         actressId,
         scraperName,
@@ -305,53 +316,49 @@ const api = {
         useAliases,
         autoCropAvatar
       ),
-    listConflicts: () => invoke<ActressNameConflictGroup[]>(IPC.ACTRESS_CONFLICT_LIST),
-    conflictCount: () => invoke<number>(IPC.ACTRESS_CONFLICT_COUNT),
+    listConflicts: () => invokeActress(IPC.ACTRESS_CONFLICT_LIST),
+    conflictCount: () => invokeActress(IPC.ACTRESS_CONFLICT_COUNT),
     conflictSummary: () =>
-      invoke<ActressConflictReviewSummary>(IPC.ACTRESS_CONFLICT_SUMMARY),
+      invokeActress(IPC.ACTRESS_CONFLICT_SUMMARY),
     inspectConflictName: (input: InspectActressConflictNameInput) =>
-      invoke<InspectActressConflictNameResult>(IPC.ACTRESS_CONFLICT_INSPECT_NAME, input),
+      invokeActress(IPC.ACTRESS_CONFLICT_INSPECT_NAME, input),
     discardConflict: (input: DiscardPendingActressScrapeInput) =>
-      invoke<DiscardPendingActressScrapeResult>(IPC.ACTRESS_CONFLICT_DISCARD, input),
+      invokeActress(IPC.ACTRESS_CONFLICT_DISCARD, input),
     resolveConflict: (input: ResolveActressConflictInput) =>
-      invoke<ResolveActressConflictResult>(IPC.ACTRESS_CONFLICT_RESOLVE, input),
+      invokeActress(IPC.ACTRESS_CONFLICT_RESOLVE, input),
     validateIllegalNameReplacements: (input: ValidateIllegalNameReplacementsInput) =>
-      invoke<ValidateIllegalNameReplacementsResult>(
+      invokeActress(
         IPC.ACTRESS_CONFLICT_VALIDATE_ILLEGAL,
         input
       ),
     batchCount: (filter: ActressBatchScrapeFilter) =>
-      invoke<number>(IPC.ACTRESS_SCRAPE_BATCH_COUNT, filter),
+      invokeActress(IPC.ACTRESS_SCRAPE_BATCH_COUNT, filter),
     batchStart: (request?: ActressBatchScrapeRequest | string) =>
-      invoke<boolean>(IPC.ACTRESS_SCRAPE_BATCH_START, request),
-    batchCancel: () => invoke<boolean>(IPC.ACTRESS_SCRAPE_BATCH_CANCEL),
-    listPlugins: () => invoke<string[]>(IPC.ACTRESS_SCRAPER_LIST),
+      invokeActress(IPC.ACTRESS_SCRAPE_BATCH_START, request),
+    batchCancel: () => invokeActress(IPC.ACTRESS_SCRAPE_BATCH_CANCEL),
+    listPlugins: () => invokeActress(IPC.ACTRESS_SCRAPER_LIST),
     listPluginDetails: () =>
-      invoke<ScraperPluginDescriptor[]>(IPC.ACTRESS_SCRAPER_PLUGIN_DETAILS),
+      invokeActress(IPC.ACTRESS_SCRAPER_PLUGIN_DETAILS),
     exportPlugin: (name: string) =>
-      invoke<string | null>(IPC.ACTRESS_SCRAPER_PLUGIN_EXPORT, name),
+      invokeActress(IPC.ACTRESS_SCRAPER_PLUGIN_EXPORT, name),
     getPluginPackage: (name: string) =>
-      invoke<ScraperPluginPackage>(IPC.ACTRESS_SCRAPER_PLUGIN_PACKAGE, name),
+      invokeActress(IPC.ACTRESS_SCRAPER_PLUGIN_PACKAGE, name),
     updatePlugin: (name: string, input: ScraperPluginUpdateInput) =>
-      invoke<ScraperPluginDescriptor>(IPC.ACTRESS_SCRAPER_PLUGIN_UPDATE, name, input),
-    deletePlugin: (name: string) => invoke<boolean>(IPC.ACTRESS_SCRAPER_PLUGIN_DELETE, name),
+      invokeActress(IPC.ACTRESS_SCRAPER_PLUGIN_UPDATE, name, input),
+    deletePlugin: (name: string) => invokeActress(IPC.ACTRESS_SCRAPER_PLUGIN_DELETE, name),
     createComposite: (input: CompositeScraperInput) =>
-      invoke<ScraperPluginDescriptor>(IPC.ACTRESS_SCRAPER_COMPOSITE_CREATE, input),
+      invokeActress(IPC.ACTRESS_SCRAPER_COMPOSITE_CREATE, input),
     updateComposite: (name: string, input: CompositeScraperInput) =>
-      invoke<ScraperPluginDescriptor>(IPC.ACTRESS_SCRAPER_COMPOSITE_UPDATE, name, input),
+      invokeActress(IPC.ACTRESS_SCRAPER_COMPOSITE_UPDATE, name, input),
     deleteComposite: (name: string) =>
-      invoke<boolean>(IPC.ACTRESS_SCRAPER_COMPOSITE_DELETE, name),
+      invokeActress(IPC.ACTRESS_SCRAPER_COMPOSITE_DELETE, name),
     onBatchProgress: (cb: (p: BatchProgress) => void) => {
-      const listener = (_e: unknown, p: BatchProgress): void => cb(p)
-      ipcRenderer.on(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, listener)
-      return (): void => {
-        ipcRenderer.removeListener(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, listener)
-      }
+      return onActressEvent(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, cb)
     },
     onAvatarAutoCropRequest: (
       cb: (request: ActressAvatarAutoCropRequest) => Promise<ActressAvatarAutoCropOutcome>
     ) => {
-      const listener = (_e: unknown, request: ActressAvatarAutoCropRequest): void => {
+      return onActressEvent(IPC.ACTRESS_AVATAR_AUTO_CROP_REQUEST, (request) => {
         void Promise.resolve(cb(request))
           .catch(
             (error): ActressAvatarAutoCropOutcome => ({
@@ -360,17 +367,13 @@ const api = {
             })
           )
           .then((outcome) =>
-            invoke<boolean>(IPC.ACTRESS_AVATAR_AUTO_CROP_RESULT, {
+            invokeActress(IPC.ACTRESS_AVATAR_AUTO_CROP_RESULT, {
               requestId: request.requestId,
               ...outcome
             } satisfies ActressAvatarAutoCropResponse)
           )
           .catch(() => undefined)
-      }
-      ipcRenderer.on(IPC.ACTRESS_AVATAR_AUTO_CROP_REQUEST, listener)
-      return (): void => {
-        ipcRenderer.removeListener(IPC.ACTRESS_AVATAR_AUTO_CROP_REQUEST, listener)
-      }
+      })
     }
   },
   plugins: {

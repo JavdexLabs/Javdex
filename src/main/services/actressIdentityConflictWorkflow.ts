@@ -2281,3 +2281,5 @@ export class ActressIdentityConflictWorkflow {
     return { remainingPending }
   }
 }
+
+export const actressIdentityConflictWorkflow = new ActressIdentityConflictWorkflow()

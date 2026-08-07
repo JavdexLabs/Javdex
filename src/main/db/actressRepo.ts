@@ -666,23 +666,6 @@ function buildActressListWhere(
   return { sql: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', params }
 }
 
-function actressHasUsableAvatar(actress: Pick<ActressListItem, 'avatar_path'>): boolean {
-  return !isBlankText(actress.avatar_path) && inspectImageAsset(actress.avatar_path).usable
-}
-
-function actressDisplayAvatarFingerprint(
-  actress: Pick<ActressListItem, 'avatar_path'>
-): string | null {
-  return inspectImageAsset(actress.avatar_path).fingerprint
-}
-
-function enrichActressListItems(actresses: ActressListItem[]): ActressListItem[] {
-  return actresses.map((actress) => ({
-    ...actress,
-    avatar_fingerprint: actressDisplayAvatarFingerprint(actress)
-  }))
-}
-
 function filterActressAvatars(
   actresses: ActressListItem[],
   avatar: ActressAvatarFilter
@@ -690,7 +673,20 @@ function filterActressAvatars(
   if (avatar === 'all') return actresses
   if (avatar === 'without-face') return []
   const wantsAvatar = avatar === 'with'
-  return actresses.filter((actress) => actressHasUsableAvatar(actress) === wantsAvatar)
+  const filtered: ActressListItem[] = []
+  for (const actress of actresses) {
+    const inspection = isBlankText(actress.avatar_path)
+      ? null
+      : inspectImageAsset(actress.avatar_path)
+    const usable = inspection?.usable === true
+    if (usable !== wantsAvatar) continue
+    filtered.push(
+      wantsAvatar
+        ? { ...actress, avatar_fingerprint: inspection?.fingerprint ?? null }
+        : actress
+    )
+  }
+  return filtered
 }
 
 function queryActressListRows(
@@ -872,11 +868,9 @@ export function listActressPage(query: ActressListQuery = {}): ActressListPage {
       : filtered.slice(offset, offset + limit)
   }
   return {
-    // Fingerprints are only needed when the renderer may run or apply the
-    // local face filter. Avoid probing every avatar for ordinary list views.
-    items: requestedAvatar === 'with'
-      ? enrichActressListItems(actresses)
-      : actresses,
+    // The ordinary `all` path never probes avatar files. Exact with/without
+    // filtering is a dedicated snapshot and inspects each candidate once.
+    items: actresses,
     total,
     statusCounts: countActressListStatuses(query.search, gender, actressIds)
   }
@@ -920,7 +914,6 @@ export function backfillActressGalleryAssetDimensions(
 }
 
 export function getActressDetail(id: number): ActressDetail | null {
-  backfillActressGalleryAssetDimensions(undefined, id)
   const db = getDb()
   const actress = db.prepare('SELECT * FROM actresses WHERE id = ?').get(id) as
     | Actress
@@ -1854,7 +1847,7 @@ interface ActressScrapePlanSnapshot extends Actress {
   gallery: Array<Pick<ActressGalleryAsset, 'remote_url' | 'local_path'>>
 }
 
-/** Read only the rows needed to plan a scrape. Unlike getActressDetail, this never backfills assets. */
+/** Read only the rows needed to plan a scrape without loading related videos or gallery assets. */
 function readActressScrapePlanSnapshot(actressId: number): ActressScrapePlanSnapshot | null {
   const db = getDb()
   const actress = db.prepare('SELECT * FROM actresses WHERE id = ?').get(actressId) as

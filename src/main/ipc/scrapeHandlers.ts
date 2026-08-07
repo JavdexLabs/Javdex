@@ -62,6 +62,7 @@ import { getActressDetail } from '../db/actressRepo'
 import { countVideosForBatchScrape, countVideosForRematch } from '../db/videoRepo'
 import { getSettings, updateSettings } from '../settings/settingsStore'
 import { registerHandler, type IpcContext } from './shared'
+import { registerActressHandler, sendActressEvent } from './actressContractAdapter'
 
 const AVATAR_AUTO_CROP_TIMEOUT_MS = 5_000
 let avatarAutoCropBatchToken: string | null = null
@@ -89,9 +90,9 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
     }
   >()
 
-  registerHandler(
+  registerActressHandler(
     IPC.ACTRESS_AVATAR_AUTO_CROP_RESULT,
-    (_event, response: ActressAvatarAutoCropResponse): boolean => {
+    (response): boolean => {
       const pending = pendingAvatarAutoCrops.get(response.requestId)
       if (!pending) return false
       clearTimeout(pending.timeout)
@@ -116,7 +117,10 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
         resolve({ status: 'failed', message: '智能构图等待超时' })
       }, AVATAR_AUTO_CROP_TIMEOUT_MS)
       pendingAvatarAutoCrops.set(requestId, { resolve, timeout })
-      window.webContents.send(IPC.ACTRESS_AVATAR_AUTO_CROP_REQUEST, { ...target, requestId })
+      sendActressEvent(window.webContents, IPC.ACTRESS_AVATAR_AUTO_CROP_REQUEST, {
+        ...target,
+        requestId
+      })
     })
   }
 
@@ -261,29 +265,29 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
 
   registerHandler(IPC.SCRAPE_REMATCH_BATCH_CANCEL, (): boolean => pauseVideoBatch())
 
-  registerHandler(IPC.ACTRESS_SCRAPER_LIST, (): string[] => listActressScraperNames())
+  registerActressHandler(IPC.ACTRESS_SCRAPER_LIST, () => listActressScraperNames())
 
-  registerHandler(IPC.ACTRESS_SCRAPER_PLUGIN_DETAILS, (): ScraperPluginDescriptor[] =>
+  registerActressHandler(IPC.ACTRESS_SCRAPER_PLUGIN_DETAILS, () =>
     listActressScraperPlugins()
   )
 
-  registerHandler(
+  registerActressHandler(
     IPC.ACTRESS_SCRAPER_PLUGIN_EXPORT,
-    async (_e, name: string): Promise<string | null> => exportPluginWithDialog(ctx, 'actress', name)
+    async (name) => exportPluginWithDialog(ctx, 'actress', name)
   )
 
-  registerHandler(
+  registerActressHandler(
     IPC.ACTRESS_SCRAPER_PLUGIN_PACKAGE,
-    (_e, name: string) => readScraperPluginPackage('actress', name)
+    (name) => readScraperPluginPackage('actress', name)
   )
 
-  registerHandler(
+  registerActressHandler(
     IPC.ACTRESS_SCRAPER_PLUGIN_UPDATE,
-    (_e, name: string, input: ScraperPluginUpdateInput): ScraperPluginDescriptor =>
+    (name, input) =>
       updateScraperPluginConfig('actress', name, input)
   )
 
-  registerHandler(IPC.ACTRESS_SCRAPER_PLUGIN_DELETE, (_e, name: string): boolean => {
+  registerActressHandler(IPC.ACTRESS_SCRAPER_PLUGIN_DELETE, (name) => {
     const ok = deleteScraperPlugin('actress', name)
     if (getSettings().defaultActressScraper === name) {
       updateSettings({ defaultActressScraper: 'Xslist' })
@@ -291,19 +295,19 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
     return ok
   })
 
-  registerHandler(
+  registerActressHandler(
     IPC.ACTRESS_SCRAPER_COMPOSITE_CREATE,
-    (_e, input: CompositeScraperInput): ScraperPluginDescriptor =>
+    (input) =>
       createCompositeScraper('actress', input)
   )
 
-  registerHandler(
+  registerActressHandler(
     IPC.ACTRESS_SCRAPER_COMPOSITE_UPDATE,
-    (_e, name: string, input: CompositeScraperInput): ScraperPluginDescriptor =>
+    (name, input) =>
       updateCompositeScraper('actress', name, input)
   )
 
-  registerHandler(IPC.ACTRESS_SCRAPER_COMPOSITE_DELETE, (_e, name: string): boolean => {
+  registerActressHandler(IPC.ACTRESS_SCRAPER_COMPOSITE_DELETE, (name) => {
     const ok = deleteCompositeScraper('actress', name)
     if (getSettings().defaultActressScraper === name) {
       updateSettings({ defaultActressScraper: 'Xslist' })
@@ -311,18 +315,17 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
     return ok
   })
 
-  registerHandler(
+  registerActressHandler(
     IPC.ACTRESS_SCRAPE_ONE,
     async (
-      _e,
-      actressId: number,
-      scraperName?: string,
-      fields?: ActressScrapeField[],
-      mode?: ActressScrapeUpdateMode,
-      queryName?: string,
-      useAliases?: boolean,
-      autoCropAvatar?: boolean
-    ): Promise<ActressScrapeDisposition> => {
+      actressId,
+      scraperName,
+      fields,
+      mode,
+      queryName,
+      useAliases,
+      autoCropAvatar
+    ) => {
       assertBatchScrapeAvailable()
       const outcome = await scrapeRunCoordinator.runExclusive('演员刮削', async () => {
         const result = await scrapeActress(actressId, scraperName, {
@@ -352,18 +355,18 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
     }
   )
 
-  registerHandler(
+  registerActressHandler(
     IPC.ACTRESS_SCRAPE_BATCH_COUNT,
-    (_e, filter: ActressBatchScrapeFilter): number =>
+    (filter) =>
       estimateActressBatchScrapeTargetCount(filter)
   )
 
-  registerHandler(
+  registerActressHandler(
     IPC.ACTRESS_SCRAPE_BATCH_START,
-    (_e, request?: ActressBatchScrapeRequest | string): boolean => startActressBatch(ctx, request)
+    (request) => startActressBatch(ctx, request)
   )
 
-  registerHandler(IPC.ACTRESS_SCRAPE_BATCH_CANCEL, (): boolean => pauseActressBatch())
+  registerActressHandler(IPC.ACTRESS_SCRAPE_BATCH_CANCEL, () => pauseActressBatch())
 }
 
 function pauseVideoBatch(): boolean {
@@ -399,7 +402,7 @@ function resumeActiveBatch(ctx: IpcContext): boolean {
     return true
   }
   actressScrapeQueue.setListener((progress: BatchProgress) => {
-    win?.webContents.send(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, progress)
+    sendActressEvent(win?.webContents, IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, progress)
   })
   void scrapeRunCoordinator
     .runExclusive('演员批量刮削', () => actressScrapeQueue.resume())
@@ -419,7 +422,11 @@ function discardActiveBatch(ctx: IpcContext): boolean {
   }
   actressScrapeQueue.discard()
   if (!actressScrapeQueue.isRunning()) {
-    ctx.getWindow()?.webContents.send(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, idleBatchProgress())
+    sendActressEvent(
+      ctx.getWindow()?.webContents,
+      IPC.ACTRESS_SCRAPE_BATCH_PROGRESS,
+      idleBatchProgress()
+    )
   }
   return true
 }
@@ -447,7 +454,7 @@ function startActressBatch(
   }
   const win = ctx.getWindow()
   actressScrapeQueue.setListener((progress: BatchProgress) => {
-    win?.webContents.send(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, progress)
+    sendActressEvent(win?.webContents, IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, progress)
   })
   void scrapeRunCoordinator
     .runExclusive('演员批量刮削', () => actressScrapeQueue.start(request))

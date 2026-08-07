@@ -16,7 +16,7 @@ import {
   readImageDimensionsFromBuffer
 } from '../services/assetService'
 import {
-  ActressIdentityConflictWorkflow,
+  actressIdentityConflictWorkflow,
   type PreparedActressScrapeResource
 } from '../services/actressIdentityConflictWorkflow'
 import { getSettings } from '../settings/settingsStore'
@@ -63,7 +63,7 @@ export function getActressScraper(name?: string): BaseActressScraper {
 
 export type ActressScrapeOutcome = ActressScrapeDisposition
 
-export const actressIdentityConflictWorkflow = new ActressIdentityConflictWorkflow()
+export { actressIdentityConflictWorkflow }
 
 export interface ScrapeActressOptions {
   closeBrowser?: boolean

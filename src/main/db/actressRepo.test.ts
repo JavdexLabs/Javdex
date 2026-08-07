@@ -1464,6 +1464,46 @@ describe('actressRepo.backfillActressGalleryAssetDimensions', () => {
   })
 })
 
+describe('actressRepo query purity', () => {
+  it('does not change database rows or stored resources when listing and reading details', () => {
+    setupDb()
+    const db = getDb()
+    const relPath = 'actress_gallery/complete.jpg'
+    writeTestAsset(relPath, MINIMAL_JPEG)
+    const absolutePath = path.join(tempRoot!, 'media_assets', relPath)
+    const rowsBefore = db
+      .prepare('SELECT * FROM actress_gallery_assets ORDER BY id')
+      .all()
+    const actressesBefore = db.prepare('SELECT * FROM actresses ORDER BY id').all()
+    const namesBefore = db.prepare('SELECT * FROM actress_names ORDER BY id').all()
+    const changesBefore = (db.prepare('SELECT total_changes() AS n').get() as { n: number }).n
+    const bytesBefore = fs.readFileSync(absolutePath)
+    const modifiedBefore = fs.statSync(absolutePath).mtimeMs
+
+    const page = listActressPage({ gender: 'all', avatar: 'all', limit: 2, offset: 0 })
+    const detail = getActressDetail(1)
+
+    assert.equal(page.items.length, 2)
+    assert.equal(detail?.gallery.length, 1)
+    assert.deepEqual(
+      db.prepare('SELECT * FROM actress_gallery_assets ORDER BY id').all(),
+      rowsBefore
+    )
+    assert.deepEqual(db.prepare('SELECT * FROM actresses ORDER BY id').all(), actressesBefore)
+    assert.deepEqual(db.prepare('SELECT * FROM actress_names ORDER BY id').all(), namesBefore)
+    assert.equal(
+      (db.prepare('SELECT total_changes() AS n').get() as { n: number }).n,
+      changesBefore
+    )
+    assert.deepEqual(fs.readFileSync(absolutePath), bytesBefore)
+    assert.equal(fs.statSync(absolutePath).mtimeMs, modifiedBefore)
+    assert.deepEqual(
+      db.prepare('SELECT width, height FROM actress_gallery_assets WHERE actress_id = 1').get(),
+      { width: null, height: null }
+    )
+  })
+})
+
 describe('actressRepo.posterPath', () => {
   it('clears the poster when the referenced gallery image is deleted', () => {
     setupDb()

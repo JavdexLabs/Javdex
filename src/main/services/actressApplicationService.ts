@@ -1,19 +1,29 @@
-import { deleteUnlinkedActressRecords, listActressPage } from '../db/actressRepo'
+import {
+  deleteUnlinkedActressRecords,
+  listActressFaceScanManifest,
+  listActressPage
+} from '../db/actressRepo'
 import { deleteAssetOrThrow } from './assetService'
 import type {
   ActressDeleteCleanupFailure,
   ActressDeleteResult
 } from '@shared/actressIpcContract'
-import type { ActressListPage, ActressListQuery } from '@shared/types'
+import type {
+  ActressFaceScanManifestItem,
+  ActressListPage,
+  ActressListQuery
+} from '@shared/types'
 
 export interface ActressApplicationService {
   listActresses(query?: ActressListQuery): ActressListPage
+  listFaceScanManifest(): ActressFaceScanManifestItem[]
   deleteUnlinkedActresses(input: { ids: number[] }): ActressDeleteResult
 }
 
 interface ActressApplicationServiceDependencies {
   deleteStoredAsset: (path: string) => void
   listPage: (query?: ActressListQuery) => ActressListPage
+  listFaceScanManifest: () => ActressFaceScanManifestItem[]
 }
 
 const MAX_AVATAR_PAGE_SNAPSHOTS = 8
@@ -25,7 +35,8 @@ function avatarPageSnapshotKey(query: ActressListQuery): string {
     status: query.status ?? 'all',
     avatar: query.avatar ?? 'all',
     sortBy: query.sortBy ?? 'video_count',
-    sortDir: query.sortDir ?? 'desc'
+    sortDir: query.sortDir ?? 'desc',
+    actressIds: query.actressIds ?? null
   })
 }
 
@@ -34,9 +45,13 @@ export function createActressApplicationService(
 ): ActressApplicationService {
   const deleteStoredAsset = dependencies.deleteStoredAsset ?? deleteAssetOrThrow
   const readListPage = dependencies.listPage ?? listActressPage
+  const readFaceScanManifest = dependencies.listFaceScanManifest ?? listActressFaceScanManifest
   const avatarPageSnapshots = new Map<string, ActressListPage>()
 
   return {
+    listFaceScanManifest(): ActressFaceScanManifestItem[] {
+      return readFaceScanManifest()
+    },
     listActresses(query): ActressListPage {
       const requested = query ?? {}
       const limit = requested.limit

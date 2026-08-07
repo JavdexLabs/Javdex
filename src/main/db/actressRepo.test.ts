@@ -20,6 +20,7 @@ import {
   findActressByNameOrAlias,
   listActresses,
   listActressesForBatchScrape,
+  listActressFaceScanManifest,
   listActressPage,
   markActressScrapeSucceeded,
   mergeActresses,
@@ -376,6 +377,22 @@ describe('actressRepo.listActressPage', () => {
     )
   })
 
+  it('pages an explicit renderer-session actress subset with complete totals', () => {
+    setupStatuses()
+
+    const page = listActressPage({
+      gender: 'all',
+      actressIds: [4, 2],
+      limit: 1,
+      offset: 0
+    })
+
+    assert.equal(page.total, 2)
+    assert.deepEqual(page.items.map((item) => item.main_name), ['Missing Female'])
+    assert.deepEqual(page.statusCounts, { all: 2, success: 0, unscraped: 1, failed: 1 })
+    assert.equal(listActressPage({ gender: 'all', actressIds: [] }).total, 0)
+  })
+
   it('returns the cumulative status of every actress with per-status counts', () => {
     setupStatuses()
 
@@ -476,11 +493,12 @@ describe('actressRepo.listActressPage', () => {
       ['Missing Female', 'Missing Male', 'Unknown Gender']
     )
     assert.deepEqual(
-      listActressPage({ gender: 'all', avatar: 'without-face' }).items.map(
+      listActressPage({ gender: 'all', avatar: 'without-face', actressIds: [1] }).items.map(
         (item) => item.main_name
       ),
       ['Complete']
     )
+    assert.equal(listActressPage({ gender: 'all', avatar: 'without-face' }).total, 0)
     assert.deepEqual(
       listActressPage({ gender: 'all', status: 'success', avatar: 'without' }).items.map(
         (item) => item.main_name
@@ -499,6 +517,31 @@ describe('actressRepo.listActressPage', () => {
 
     const refreshed = listActressPage({ gender: 'all', avatar: 'with' }).items[0]
     assert.equal(refreshed?.avatar_fingerprint, avatarSourceFingerprint(WEBP_CONTAINER))
+  })
+
+  it('returns only the minimal readable-avatar face scan manifest', () => {
+    setupStatuses()
+    getDb().prepare('UPDATE actresses SET avatar_path = ? WHERE id = ?').run(
+      'avatars/missing.jpg',
+      2
+    )
+
+    const manifest = listActressFaceScanManifest()
+
+    assert.deepEqual(manifest, [
+      {
+        id: 1,
+        main_name: 'Complete',
+        avatar_path: 'avatars/complete.jpg',
+        avatar_fingerprint: avatarSourceFingerprint(MINIMAL_JPEG)
+      }
+    ])
+    assert.deepEqual(Object.keys(manifest[0] ?? {}).sort(), [
+      'avatar_fingerprint',
+      'avatar_path',
+      'id',
+      'main_name'
+    ])
   })
 })
 

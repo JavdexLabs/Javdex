@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import type { ActressListItem } from '@shared/types'
 import {
   actressesWithoutFace,
+  actressIdsWithoutFace,
   cacheActressFaceStatus,
   getCachedActressFaceStatus,
   type ActressFaceScanCache
@@ -55,6 +56,26 @@ describe('actress face scan cache', () => {
         [item(1, 'avatars/a.jpg'), item(2, 'avatars/b.jpg'), item(3, 'avatars/c.jpg')],
         cache
       ).map((entry) => entry.id),
+      [1]
+    )
+  })
+
+  it('combines a minimal full-library manifest with current session results', () => {
+    const cache: ActressFaceScanCache = new Map()
+    cacheActressFaceStatus(cache, 1, 'fp-a', 'without-face')
+    cacheActressFaceStatus(cache, 2, 'fp-b', 'has-face')
+    cacheActressFaceStatus(cache, 3, 'stale-fingerprint', 'without-face')
+
+    assert.deepEqual(
+      actressIdsWithoutFace(
+        [
+          { id: 1, avatar_fingerprint: 'fp-a' },
+          { id: 2, avatar_fingerprint: 'fp-b' },
+          { id: 3, avatar_fingerprint: 'changed-fingerprint' },
+          { id: 4, avatar_fingerprint: 'fp-d' }
+        ],
+        cache
+      ),
       [1]
     )
   })

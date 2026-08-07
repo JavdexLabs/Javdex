@@ -201,6 +201,7 @@ const api = {
       sortDir?: ListSortDir
     ) => invoke<ActressListItem[]>(IPC.ACTRESS_LIST, search, gender, sortBy, sortDir),
     listPage: (query: ActressListQuery) => invokeActress(IPC.ACTRESS_LIST_PAGE, query),
+    faceScanManifest: () => invokeActress(IPC.ACTRESS_FACE_SCAN_MANIFEST),
     get: (id: number) => invoke<ActressDetail | null>(IPC.ACTRESS_GET, id),
     getAvatarSourceInfo: (id: number) =>
       invoke<ActressAvatarSourceInfo | null>(IPC.ACTRESS_AVATAR_SOURCE_INFO, id),

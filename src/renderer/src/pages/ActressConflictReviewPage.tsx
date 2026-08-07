@@ -42,6 +42,7 @@ import {
 import { useDebounce } from '../hooks/useDebounce'
 import { navigateToActressList } from '../listView/listNavigation'
 import { actressKeys } from '../query/queryKeys'
+import { invalidateActressLibraryQueries } from '../query/invalidateLibraryQueries'
 import ConflictMergeActressesModal, {
   type ConflictMergeActressesDecision
 } from './ConflictMergeActressesModal'
@@ -609,7 +610,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
           current ? selectConflictProposedOwner(current, null) : current
         )
         setSelectedOtherOwner(null)
-        void queryClient.invalidateQueries({ queryKey: actressKeys.all })
+        void invalidateActressLibraryQueries(queryClient)
       })
       .catch((error) => {
         if (seq !== replacementValidationSeq.current) return
@@ -662,7 +663,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
     setResolving(true)
     try {
       const outcome = await api.actressScrape.resolveConflict(input)
-      await queryClient.invalidateQueries({ queryKey: actressKeys.all })
+      await invalidateActressLibraryQueries(queryClient)
       const refreshed = await groupsQuery.refetch()
       if (outcome.status === 'stale') {
         setReplacementDialog(null)
@@ -791,13 +792,13 @@ export default function ActressConflictReviewPage(): JSX.Element {
         expectedRevision: discardCandidate.revision
       })
       setDiscardCandidate(null)
-      await queryClient.invalidateQueries({ queryKey: actressKeys.all })
+      await invalidateActressLibraryQueries(queryClient)
       const refreshed = await groupsQuery.refetch()
       selectAfterRefresh(previousGroups, refreshed.data ?? [], previousSelectedName)
       toast.show('已丢弃错误匹配并清理暂存资源', 'success')
     } catch (error) {
       const message = String((error as Error).message)
-      await queryClient.invalidateQueries({ queryKey: actressKeys.all })
+      await invalidateActressLibraryQueries(queryClient)
       const refreshed = await groupsQuery.refetch()
       setDiscardCandidate(null)
       selectAfterRefresh(previousGroups, refreshed.data ?? [], previousSelectedName, true)

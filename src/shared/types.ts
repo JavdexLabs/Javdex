@@ -222,6 +222,14 @@ export interface ActressListItem extends Actress {
   avatar_fingerprint?: string | null
 }
 
+/** Minimal renderer-session input for local avatar face detection. */
+export interface ActressFaceScanManifestItem {
+  id: number
+  main_name: string
+  avatar_path: string
+  avatar_fingerprint: string
+}
+
 /** Canonical actress library status filter vocabulary (also the URL values). */
 export type ActressListStatusFilter = 'all' | 'success' | 'unscraped' | 'failed'
 
@@ -281,6 +289,8 @@ export interface ActressListQuery {
   sortDir?: ListSortDir
   limit?: number
   offset?: number
+  /** Renderer-session subset used to page already classified local face results. */
+  actressIds?: number[]
 }
 
 /** Actresses per cumulative status within the current search and gender scope. */

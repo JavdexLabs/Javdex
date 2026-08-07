@@ -1,5 +1,5 @@
 import { IPC } from './ipc-channels'
-import type { ActressListPage, ActressListQuery } from './types'
+import type { ActressFaceScanManifestItem, ActressListPage, ActressListQuery } from './types'
 
 export interface ActressDeleteCleanupFailure {
   path: string
@@ -15,6 +15,10 @@ export interface ActressIpcContract {
   [IPC.ACTRESS_LIST_PAGE]: {
     args: [query?: ActressListQuery]
     result: ActressListPage
+  }
+  [IPC.ACTRESS_FACE_SCAN_MANIFEST]: {
+    args: []
+    result: ActressFaceScanManifestItem[]
   }
   [IPC.ACTRESS_DELETE]: {
     args: [id: number]

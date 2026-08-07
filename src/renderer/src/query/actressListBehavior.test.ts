@@ -8,12 +8,40 @@ import {
 } from '../listView/listViewMemory'
 import { actressKeys } from './queryKeys'
 import type { ActressListPage } from '@shared/types'
-import { InfiniteQueryObserver, QueryClient } from '@tanstack/react-query'
+import { InfiniteQueryObserver, QueryClient, QueryObserver } from '@tanstack/react-query'
 import { actressInfiniteQueryOptions } from './actressInfiniteQueryOptions'
+import { actressFaceScanManifestQueryOptions } from '../actressFaceFilter/manifestQueryOptions'
+import { invalidateActressLibraryQueries } from './invalidateLibraryQueries'
 
 afterEach(clearAllListViewMemory)
 
 describe('actress list renderer behavior', () => {
+  it('does not load the full face-scan manifest for an ordinary actress page', async () => {
+    let fetches = 0
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const observer = new QueryObserver(
+      client,
+      actressFaceScanManifestQueryOptions(async () => {
+        fetches += 1
+        return []
+      })
+    )
+    const unsubscribe = observer.subscribe(() => undefined)
+
+    await Promise.resolve()
+    assert.equal(fetches, 0)
+    await observer.refetch()
+    assert.equal(fetches, 1)
+    assert.equal(observer.getCurrentResult().isStale, false)
+
+    await invalidateActressLibraryQueries(client)
+    assert.equal(fetches, 1)
+    assert.equal(observer.getCurrentResult().data, undefined)
+
+    unsubscribe()
+    client.clear()
+  })
+
   it('isolates cached pages when any query condition changes', () => {
     const base = actressKeys.list({ gender: 'female', status: 'all' }, 'gender=female')
     const filtered = actressKeys.list(
@@ -22,6 +50,33 @@ describe('actress list renderer behavior', () => {
     )
 
     assert.notDeepEqual(base, filtered)
+  })
+
+  it('recombines the same session face-result subset for list filter changes', () => {
+    const actressIds = [2, 7, 11]
+    const baseQuery = {
+      gender: 'all' as const,
+      status: 'all' as const,
+      avatar: 'all' as const,
+      sortBy: 'gallery' as const,
+      sortDir: 'asc' as const,
+      actressIds
+    }
+    const filteredQuery = {
+      ...baseQuery,
+      search: 'A',
+      gender: 'female' as const,
+      status: 'success' as const,
+      sortBy: 'video_count' as const,
+      sortDir: 'desc' as const
+    }
+
+    assert.deepEqual(filteredQuery.actressIds, baseQuery.actressIds)
+    assert.notDeepEqual(
+      actressKeys.list(baseQuery, 'face-results:base'),
+      actressKeys.list(filteredQuery, 'face-results:filtered')
+    )
+    assert.deepEqual(actressKeys.faceScanManifest(), ['actresses', 'face-scan-manifest'])
   })
 
   it('keeps loaded pages after a failure and retries the same next-page offset', async () => {

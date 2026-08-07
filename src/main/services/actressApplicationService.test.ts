@@ -6,7 +6,7 @@ import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { findActressByNameOrAlias, getActressDetail } from '../db/actressRepo'
 import { createActressApplicationService } from './actressApplicationService'
-import type { ActressListItem } from '@shared/types'
+import type { ActressFaceScanManifestItem, ActressListItem } from '@shared/types'
 
 let tempRoot: string | null = null
 
@@ -116,6 +116,20 @@ describe('actressApplicationService.listActresses', () => {
     assert.equal(reads, 2)
     assert.equal(first.items[0]?.id, 1)
     assert.equal(refreshed.items[0]?.id, 2)
+  })
+})
+
+describe('actressApplicationService.listFaceScanManifest', () => {
+  it('exposes the dedicated minimal manifest through the application boundary', () => {
+    const manifest: ActressFaceScanManifestItem[] = [{
+      id: 7,
+      main_name: 'Face Candidate',
+      avatar_path: 'avatars/7.jpg',
+      avatar_fingerprint: 'fingerprint-7'
+    }]
+    const service = createActressApplicationService({ listFaceScanManifest: () => manifest })
+
+    assert.deepEqual(service.listFaceScanManifest(), manifest)
   })
 })
 

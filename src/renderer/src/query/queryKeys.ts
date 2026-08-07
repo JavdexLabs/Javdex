@@ -13,6 +13,7 @@ export const actressKeys = {
   all: ['actresses'] as const,
   list: (query: ActressListQuery, queryHash: string) =>
     ['actresses', 'list', queryHash, query] as const,
+  faceScanManifest: () => ['actresses', 'face-scan-manifest'] as const,
   conflicts: () => ['actresses', 'conflicts'] as const,
   conflictCount: () => ['actresses', 'conflicts', 'count'] as const,
   conflictSummary: () => ['actresses', 'conflicts', 'summary'] as const

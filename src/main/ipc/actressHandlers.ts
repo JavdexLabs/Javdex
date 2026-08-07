@@ -66,6 +66,9 @@ export function registerActressHandlers(): void {
   registerActressHandler(IPC.ACTRESS_LIST_PAGE, (query) =>
     actressApplicationService.listActresses(query)
   )
+  registerActressHandler(IPC.ACTRESS_FACE_SCAN_MANIFEST, () =>
+    actressApplicationService.listFaceScanManifest()
+  )
 
   registerHandler(IPC.ACTRESS_GET, (_e, id: number): ActressDetail | null =>
     getActressDetail(id)

@@ -61,7 +61,7 @@ import {
   MAINTENANCE_HINT_KEYS
 } from '../utils/maintenanceHints'
 import {
-  actressesWithoutFace,
+  actressIdsWithoutFace,
   uncachedActressFaceScanIdentity
 } from '../actressFaceFilter/cache'
 import { useActressFaceScan, previousAvatarAfterFaceScan } from '../actressFaceFilter/useActressFaceScan'
@@ -151,15 +151,31 @@ export default function ActressesPage(): JSX.Element {
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
 
   const actressListQuery = useMemo(
-    () => ({
-      search: debouncedQ.trim(),
-      gender: genderFilter,
-      status: statusFilter,
-      avatar: avatarFilter,
+    () => {
+      const faceResultIds = avatarFilter === 'without-face'
+        ? actressIdsWithoutFace(faceScan.manifest, faceScan.cache)
+        : undefined
+      return {
+        search: debouncedQ.trim(),
+        gender: genderFilter,
+        status: statusFilter,
+        avatar: avatarFilter === 'without-face' ? 'all' as const : avatarFilter,
+        sortBy,
+        sortDir,
+        actressIds: faceResultIds
+      }
+    },
+    [
+      avatarFilter,
+      debouncedQ,
+      faceScan.cache,
+      faceScan.manifest,
+      faceScan.running,
+      genderFilter,
       sortBy,
-      sortDir
-    }),
-    [avatarFilter, debouncedQ, genderFilter, sortBy, sortDir, statusFilter]
+      sortDir,
+      statusFilter
+    ]
   )
   const handleListError = useCallback(
     (error: unknown) => toast.show(String((error as Error).message ?? error), 'error'),
@@ -181,12 +197,11 @@ export default function ActressesPage(): JSX.Element {
 
   useListSurfaceRefetch(detailOpen, refetchActressSurface)
 
-  const fetchedItems = listQuery.items
-  const items =
-    avatarFilter === 'without-face'
-      ? actressesWithoutFace(fetchedItems, faceScan.cache)
-      : fetchedItems
-  const faceScanMissingIdentity = uncachedActressFaceScanIdentity(fetchedItems, faceScan.cache)
+  const items = listQuery.items
+  const faceScanMissingIdentity = uncachedActressFaceScanIdentity(
+    faceScan.manifest,
+    faceScan.cache
+  )
   const loading = listQuery.loading
   const isFetching = listQuery.isFetching
 
@@ -247,10 +262,7 @@ export default function ActressesPage(): JSX.Element {
       // Record only the identities that remain unresolved after this attempt.
       // Search/sort changes keep the same key and therefore only recombine the
       // cache; a changed or newly added avatar produces a new key and rescans.
-      faceScanAutoStartedKeyRef.current = uncachedActressFaceScanIdentity(
-        fetchedItems,
-        faceScan.cache
-      )
+      faceScanAutoStartedKeyRef.current = faceScan.uncachedIdentity()
 
       if (summary.cancelled) {
         patchParams({
@@ -279,7 +291,7 @@ export default function ActressesPage(): JSX.Element {
       avatarBatchActive,
       faceScan,
       faceScanAutoStartKey,
-      fetchedItems,
+      faceScan.manifest,
       patchParams,
       toast
     ]
@@ -290,7 +302,7 @@ export default function ActressesPage(): JSX.Element {
       faceScanAutoStartedKeyRef.current = null
       return
     }
-    if (!faceScan.needsScan && !faceScanMissingIdentity) return
+    if (faceScan.manifestReady && !faceScan.needsScan && !faceScanMissingIdentity) return
     if (faceScan.running) return
     if (faceScanAutoStartedKeyRef.current === faceScanAutoStartKey) return
     if (actressBatchActive || avatarBatchActive) return
@@ -303,6 +315,7 @@ export default function ActressesPage(): JSX.Element {
     faceScanAutoStartKey,
     faceScanMissingIdentity,
     faceScan.needsScan,
+    faceScan.manifestReady,
     faceScan.running,
     startFaceScan
   ])
@@ -585,7 +598,7 @@ export default function ActressesPage(): JSX.Element {
                 className="count-badge count-badge--stable count-badge--people"
                 aria-live="polite"
               >
-                共 {avatarFilter === 'without-face' ? items.length : listQuery.total} 位
+                共 {listQuery.total} 位
                 {isFetching && !loading && items.length > 0 ? (
                   <span className="library-fetch-hint" aria-hidden>
                     {' '}
@@ -650,7 +663,7 @@ export default function ActressesPage(): JSX.Element {
               actresses={items}
               selectedIds={selectedIds}
               selectionMode={selectionMode}
-              hasMore={avatarFilter !== 'without-face' && listQuery.hasMore}
+              hasMore={listQuery.hasMore}
               loadingMore={listQuery.loadingMore}
               loadMoreFailed={listQuery.nextPageError}
               onLoadMore={listQuery.loadMore}

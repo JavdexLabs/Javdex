@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
   Ban,
@@ -12,16 +11,14 @@ import {
   UserRoundSearch,
   UsersRound
 } from 'lucide-react'
-import type { ActressListItem } from '@shared/actressTypes'
-import type { ActressNameConflictGroup, ActressPendingNameType, PendingActressNameClaim, PendingActressScrapeCandidate, ResolveActressConflictInput } from '@shared/actressConflictTypes'
+import type { ActressNameConflictGroup, ActressPendingNameType, PendingActressNameClaim, PendingActressScrapeCandidate } from '@shared/actressConflictTypes'
 import type { ActressScrapeField, ActressScrapeFieldImpact, ActressScrapeUpdateMode } from '@shared/scrapeTypes'
 import { ACTRESS_SCRAPE_FIELD_OPTIONS } from '@shared/scrapeTypes'
-import { api, resolveMediaSrc } from '../api'
+import { resolveMediaSrc } from '../api'
 import ActressAvatar from '../components/ActressAvatar'
 import ConfirmModal from '../components/ConfirmModal'
 import EmptyState from '../components/EmptyState'
 import { UI_ICON_SM } from '../components/iconDefaults'
-import { useToast } from '../components/Toast'
 import {
   WorkbenchMain,
   WorkbenchRail,
@@ -31,31 +28,15 @@ import {
   WorkbenchTabs,
   WorkbenchToolbar
 } from '../components/workbench'
-import { useDebounce } from '../hooks/useDebounce'
 import { navigateToActressList } from '../listView/listNavigation'
-import { actressKeys } from '../query/queryKeys'
-import { invalidateActressLibraryQueries } from '../query/invalidateLibraryQueries'
-import ConflictMergeActressesModal, {
-  type ConflictMergeActressesDecision
-} from './ConflictMergeActressesModal'
+import ConflictMergeActressesModal from './ConflictMergeActressesModal'
 import {
-  buildActressConflictDecisionSnapshot,
-  buildActressConflictMergeActors,
-  buildConflictQueueSections,
-  buildConflictReviewRefreshState,
   canConfirmIllegalName,
   CONFLICT_ACTION_SCOPE_LABEL,
-  conflictClaimantsNeedingReplacement,
   conflictFieldImpactsForProposedOwner,
-  createConflictReviewSelection,
-  inspectConflictNameEdit,
-  partitionConflictFieldImpacts,
-  selectConflictProposedOwner,
-  selectConflictSource,
-  type ConflictReviewProposedOwner,
-  type ConflictReviewSelection,
-  type IllegalNameReplacementValidationStatus
+  partitionConflictFieldImpacts
 } from './actressConflictReviewState'
+import { useConflictReviewController } from './useConflictReviewController'
 
 const FIELD_LABEL = new Map(
   ACTRESS_SCRAPE_FIELD_OPTIONS.map((option) => [option.id, option.label])
@@ -119,11 +100,6 @@ const RESULT_FIELDS: Array<{
   { key: 'sourceUrl', label: '资料页' }
 ]
 
-interface ConflictOwnerOption extends ConflictReviewProposedOwner {
-  avatarPath: string | null
-  roles: string[]
-}
-
 function formatValue(value: unknown): string | null {
   if (Array.isArray(value)) return value.length > 0 ? value.join('、') : null
   if (typeof value === 'number') return String(value)
@@ -139,45 +115,6 @@ function formatImpactValue(value: ActressScrapeFieldImpact['currentValue']): str
 
 function candidateFieldLabel(fields: ActressScrapeField[]): string {
   return fields.map((field) => FIELD_LABEL.get(field) ?? field).join('、') || '仅名称'
-}
-
-function buildOwnerOptions(group: ActressNameConflictGroup): ConflictOwnerOption[] {
-  const options = new Map<number, ConflictOwnerOption>()
-  const ensure = (
-    actressId: number,
-    revision: number,
-    mainName: string,
-    avatarPath: string | null,
-    role: string
-  ): void => {
-    const current = options.get(actressId)
-    if (current) {
-      if (!current.roles.includes(role)) current.roles.push(role)
-      return
-    }
-    options.set(actressId, { actressId, revision, mainName, avatarPath, roles: [role] })
-  }
-  for (const claimant of group.claimants) {
-    ensure(
-      claimant.actressId,
-      claimant.revision,
-      claimant.mainName,
-      claimant.avatarPath,
-      group.currentOwner?.actressId === claimant.actressId ? '当前归属' : '历史名称声明'
-    )
-  }
-  for (const candidate of group.candidates) {
-    ensure(
-      candidate.actressId,
-      candidate.actressRevision,
-      candidate.actressMainName,
-      candidate.actressAvatarPath,
-      '本次刮削目标'
-    )
-  }
-  return [...options.values()].sort((left, right) =>
-    left.mainName.localeCompare(right.mainName, 'zh-Hans-CN')
-  )
 }
 
 function ImpactRows({
@@ -317,151 +254,20 @@ function SourceDetails({
 export default function ActressConflictReviewPage(): JSX.Element {
   const navigate = useNavigate()
   const location = useLocation()
-  const queryClient = useQueryClient()
-  const toast = useToast()
   const backButtonRef = useRef<HTMLButtonElement>(null)
   const completeButtonRef = useRef<HTMLButtonElement>(null)
   const groupButtonRefs = useRef(new Map<string, HTMLButtonElement>())
-  const replacementValidationSeq = useRef(0)
-  const [selectedName, setSelectedName] = useState<string | null>(null)
-  const [selectionGroupName, setSelectionGroupName] = useState<string | null>(null)
-  const [selection, setSelection] = useState<ConflictReviewSelection | null>(null)
-  const [focusAfterRefresh, setFocusAfterRefresh] = useState<string | null | undefined>(undefined)
-  const [staleMessage, setStaleMessage] = useState<string | null>(null)
-  const [resolving, setResolving] = useState(false)
-  const [discarding, setDiscarding] = useState(false)
-  const [discardCandidate, setDiscardCandidate] = useState<PendingActressScrapeCandidate | null>(null)
-  const [otherOwnerOpen, setOtherOwnerOpen] = useState(false)
-  const [otherOwnerSearch, setOtherOwnerSearch] = useState('')
-  const [otherOwnerOptions, setOtherOwnerOptions] = useState<ActressListItem[]>([])
-  const [otherOwnerLoading, setOtherOwnerLoading] = useState(false)
-  const [selectedOtherOwner, setSelectedOtherOwner] = useState<ActressListItem | null>(null)
-  const [editNameOpen, setEditNameOpen] = useState(false)
-  const [editedName, setEditedName] = useState('')
-  const [liveEditInspection, setLiveEditInspection] = useState<{
-    normalizedName: string
-    status: 'available' | 'conflict'
-  } | null>(null)
-  const [editInspectionLoading, setEditInspectionLoading] = useState(false)
-  const [mergeOpen, setMergeOpen] = useState(false)
-  const [replacementDialog, setReplacementDialog] = useState<'ownership' | 'illegal' | null>(null)
-  const [replacementMainNames, setReplacementMainNames] = useState<Record<number, string>>({})
-  const [replacementValidationStatus, setReplacementValidationStatus] =
-    useState<IllegalNameReplacementValidationStatus>('idle')
-  const [replacementValidationErrors, setReplacementValidationErrors] =
-    useState<Record<number, string>>({})
-  const debouncedOwnerSearch = useDebounce(otherOwnerSearch, 250)
-  const debouncedEditedName = useDebounce(editedName, 250)
-
-  const groupsQuery = useQuery({
-    queryKey: actressKeys.conflicts(),
-    queryFn: () => api.actressScrape.listConflicts()
-  })
-  const summaryQuery = useQuery({
-    queryKey: actressKeys.conflictSummary(),
-    queryFn: () => api.actressScrape.conflictSummary()
-  })
-  const groups = groupsQuery.data ?? []
-  const sections = useMemo(() => buildConflictQueueSections(groups), [groups])
-  const selectedGroup =
-    groups.find((group) => group.normalizedName === selectedName) ?? groups[0] ?? null
-  const selectedCandidate =
-    selection?.source?.kind === 'scrape'
-      ? selectedGroup?.candidates.find((candidate) => candidate.pendingId === selection.source?.id) ?? null
-      : null
-  const selectedClaim =
-    selection?.source?.kind === 'claim'
-      ? selectedGroup?.pendingNameClaims.find((claim) => claim.claimId === selection.source?.id) ?? null
-      : null
-  const selectedConflict =
-    selectedCandidate?.conflicts.find(
-      (conflict) => conflict.normalizedName === selectedGroup?.normalizedName
-    ) ?? null
-  const ownerOptions = useMemo(
-    () => (selectedGroup ? buildOwnerOptions(selectedGroup) : []),
-    [selectedGroup]
-  )
-  const mergeActors = useMemo(
-    () => (selectedGroup ? buildActressConflictMergeActors(selectedGroup) : []),
-    [selectedGroup]
-  )
-  const proposedOwner = selection?.proposedOwner ?? null
-  const ownershipReplacementClaimants = useMemo(
-    () =>
-      selectedGroup
-        ? conflictClaimantsNeedingReplacement(selectedGroup, proposedOwner?.actressId)
-        : [],
-    [proposedOwner?.actressId, selectedGroup]
-  )
-  const illegalReplacementClaimants = useMemo(
-    () => (selectedGroup ? conflictClaimantsNeedingReplacement(selectedGroup, null) : []),
-    [selectedGroup]
-  )
-  const requiredReplacementClaimants =
-    replacementDialog === 'ownership'
-      ? ownershipReplacementClaimants
-      : replacementDialog === 'illegal'
-        ? illegalReplacementClaimants
-        : []
-  const replacementInputs = useMemo(
-    () =>
-      requiredReplacementClaimants.map((claimant) => ({
-        actressId: claimant.actressId,
-        mainName: replacementMainNames[claimant.actressId] ?? ''
-      })),
-    [replacementMainNames, requiredReplacementClaimants]
-  )
-  const debouncedReplacementInputs = useDebounce(replacementInputs, 250)
-  const editSourceName = selectedConflict?.name ?? selectedClaim?.name ?? ''
-  const editSourceType = selectedConflict?.type ?? selectedClaim?.type ?? null
-  const localEditInspection = inspectConflictNameEdit(editSourceName, editedName, groups)
-  const editInspection =
-    localEditInspection.status === 'empty' || localEditInspection.status === 'unchanged'
-      ? localEditInspection
-      : liveEditInspection
-        ? {
-            normalizedName: liveEditInspection.normalizedName,
-            status: liveEditInspection.status,
-            targetGroupName:
-              liveEditInspection.status === 'conflict'
-                ? localEditInspection.targetGroupName
-                : null
-          }
-        : localEditInspection
-  const editInspectionPending =
-    localEditInspection.status !== 'empty' &&
-    localEditInspection.status !== 'unchanged' &&
-    (editInspectionLoading || editedName !== debouncedEditedName || !liveEditInspection)
-  const summary = summaryQuery.data
-
-  const resetTransientState = useCallback((): void => {
-    setOtherOwnerOpen(false)
-    setOtherOwnerSearch('')
-    setSelectedOtherOwner(null)
-    setEditNameOpen(false)
-    setMergeOpen(false)
-    setReplacementDialog(null)
-    setReplacementMainNames({})
-    setReplacementValidationStatus('idle')
-    setReplacementValidationErrors({})
-  }, [])
-
-  useEffect(() => {
-    if (!selectedGroup) {
-      setSelectedName(null)
-      setSelection(null)
-      setSelectionGroupName(null)
-      return
-    }
-    if (selectedName !== selectedGroup.normalizedName) {
-      setSelectedName(selectedGroup.normalizedName)
-    }
-    if (selectionGroupName !== selectedGroup.normalizedName) {
-      setSelection(createConflictReviewSelection(selectedGroup))
-      setSelectionGroupName(selectedGroup.normalizedName)
-      resetTransientState()
-    }
-  }, [resetTransientState, selectedGroup, selectedName, selectionGroupName])
+  const controller = useConflictReviewController()
+  const {
+    groupsQuery, summary, groups, sections, selectedGroup, selectedCandidate, selectedClaim,
+    selectedConflict, ownerOptions, mergeActors, proposedOwner, ownershipReplacementClaimants,
+    illegalReplacementClaimants, requiredReplacementClaimants, selection, staleMessage,
+    resolving, discarding, discardCandidate, otherOwnerOpen, otherOwnerSearch,
+    otherOwnerOptions, otherOwnerLoading, selectedOtherOwner, editNameOpen, editedName,
+    mergeOpen, replacementDialog, replacementMainNames, replacementValidationStatus,
+    replacementValidationErrors, editSourceName, editSourceType, editInspection, editInspectionPending,
+    focusAfterRefresh
+  } = controller
 
   useEffect(() => {
     if (focusAfterRefresh === undefined) return
@@ -469,369 +275,8 @@ export default function ActressConflictReviewPage(): JSX.Element {
       ? groupButtonRefs.current.get(focusAfterRefresh)
       : completeButtonRef.current ?? backButtonRef.current
     target?.focus()
-    setFocusAfterRefresh(undefined)
-  }, [focusAfterRefresh])
-
-  useEffect(() => {
-    if (!otherOwnerOpen) return
-    let cancelled = false
-    setOtherOwnerLoading(true)
-    void api.actresses
-      .list(debouncedOwnerSearch.trim(), 'all')
-      .then((items) => {
-        if (cancelled) return
-        const visibleItems = items
-          .filter((item) => ownerOptions.every((owner) => owner.actressId !== item.id))
-          .slice(0, 40)
-        const shouldKeepSelectedVisible =
-          debouncedOwnerSearch.trim() === '' &&
-          selectedOtherOwner != null &&
-          !visibleItems.some((item) => item.id === selectedOtherOwner.id)
-        setOtherOwnerOptions(
-          shouldKeepSelectedVisible
-            ? [selectedOtherOwner, ...visibleItems].slice(0, 40)
-            : visibleItems
-        )
-      })
-      .catch((error) => {
-        if (!cancelled) toast.show(String((error as Error).message), 'error')
-      })
-      .finally(() => {
-        if (!cancelled) setOtherOwnerLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [debouncedOwnerSearch, otherOwnerOpen, ownerOptions, selectedOtherOwner, toast])
-
-  useEffect(() => {
-    setLiveEditInspection(null)
-    if (!editNameOpen || !selectedGroup) {
-      setEditInspectionLoading(false)
-      return
-    }
-    const local = inspectConflictNameEdit(editSourceName, debouncedEditedName, groups)
-    const actressId = selectedCandidate?.actressId ?? selectedClaim?.actressId
-    if (
-      actressId == null ||
-      local.status === 'empty' ||
-      local.status === 'unchanged'
-    ) {
-      setEditInspectionLoading(false)
-      return
-    }
-    let cancelled = false
-    setEditInspectionLoading(true)
-    void api.actressScrape
-      .inspectConflictName({
-        actressId,
-        name: debouncedEditedName,
-        ...(selectedCandidate ? { pendingId: selectedCandidate.pendingId } : {})
-      })
-      .then((inspection) => {
-        if (!cancelled) setLiveEditInspection(inspection)
-      })
-      .catch((error) => {
-        if (!cancelled) toast.show(String((error as Error).message), 'error')
-      })
-      .finally(() => {
-        if (!cancelled) setEditInspectionLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [
-    debouncedEditedName,
-    editNameOpen,
-    editSourceName,
-    groups,
-    selectedCandidate,
-    selectedClaim,
-    selectedGroup,
-    toast
-  ])
-
-  useEffect(() => {
-    replacementValidationSeq.current += 1
-    setReplacementValidationErrors({})
-    if (!replacementDialog) {
-      setReplacementValidationStatus('idle')
-    } else if (requiredReplacementClaimants.length === 0) {
-      setReplacementValidationStatus('valid')
-    } else if (replacementInputs.some((replacement) => !replacement.mainName.trim())) {
-      setReplacementValidationStatus('idle')
-    } else {
-      setReplacementValidationStatus('checking')
-    }
-  }, [replacementDialog, replacementInputs, requiredReplacementClaimants.length])
-
-  useEffect(() => {
-    if (
-      !replacementDialog ||
-      !selectedGroup ||
-      requiredReplacementClaimants.length === 0 ||
-      debouncedReplacementInputs.some((replacement) => !replacement.mainName.trim())
-    ) {
-      return
-    }
-    const seq = replacementValidationSeq.current
-    void api.actressScrape
-      .validateIllegalNameReplacements({
-        snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
-        replacementMainNames: debouncedReplacementInputs,
-        ...(replacementDialog === 'ownership' && proposedOwner
-          ? { destinationOwnerActressId: proposedOwner.actressId }
-          : {})
-      })
-      .then((result) => {
-        if (seq !== replacementValidationSeq.current) return
-        if (result.status === 'valid') {
-          setReplacementValidationStatus('valid')
-          return
-        }
-        if (result.status === 'invalid') {
-          setReplacementValidationStatus('invalid')
-          setReplacementValidationErrors(
-            Object.fromEntries(result.errors.map((error) => [error.actressId, error.message]))
-          )
-          return
-        }
-        setReplacementDialog(null)
-        setStaleMessage('数据已变化，已刷新，请重新确认')
-        setSelection((current) =>
-          current ? selectConflictProposedOwner(current, null) : current
-        )
-        setSelectedOtherOwner(null)
-        void invalidateActressLibraryQueries(queryClient)
-      })
-      .catch((error) => {
-        if (seq !== replacementValidationSeq.current) return
-        setReplacementValidationStatus('invalid')
-        toast.show(String((error as Error).message), 'error')
-      })
-  }, [
-    debouncedReplacementInputs,
-    queryClient,
-    proposedOwner,
-    replacementDialog,
-    requiredReplacementClaimants.length,
-    selectedGroup,
-    toast
-  ])
-
-  const chooseGroup = (group: ActressNameConflictGroup): void => {
-    setStaleMessage(null)
-    setSelectedName(group.normalizedName)
-    setSelectionGroupName(group.normalizedName)
-    setSelection(createConflictReviewSelection(group))
-    resetTransientState()
-  }
-
-  const selectAfterRefresh = (
-    previousGroups: ActressNameConflictGroup[],
-    refreshedGroups: ActressNameConflictGroup[],
-    previousSelectedName: string | null,
-    stale = false
-  ): void => {
-    const next = buildConflictReviewRefreshState(
-      previousGroups,
-      refreshedGroups,
-      previousSelectedName,
-      stale
-    )
-    setSelectedName(next.selectedNormalizedName)
-    setSelectionGroupName(null)
-    setSelection(next.selection)
-    setStaleMessage(next.staleMessage)
-    setFocusAfterRefresh(
-      next.focusTarget.kind === 'group' ? next.focusTarget.normalizedName : null
-    )
-  }
-
-  const resolveDecision = async (input: ResolveActressConflictInput): Promise<void> => {
-    if (resolving) return
-    const previousGroups = groups
-    const previousSelectedName = selectedGroup?.normalizedName ?? null
-    setResolving(true)
-    try {
-      const outcome = await api.actressScrape.resolveConflict(input)
-      await invalidateActressLibraryQueries(queryClient)
-      const refreshed = await groupsQuery.refetch()
-      if (outcome.status === 'stale') {
-        setReplacementDialog(null)
-        toast.show(outcome.message, 'info')
-      } else {
-        resetTransientState()
-        toast.show('名称冲突已处理', 'success')
-      }
-      selectAfterRefresh(
-        previousGroups,
-        refreshed.data ?? [],
-        previousSelectedName,
-        outcome.status === 'stale'
-      )
-    } catch (error) {
-      toast.show(String((error as Error).message), 'error')
-    } finally {
-      setResolving(false)
-    }
-  }
-
-  const submitOwnership = (): void => {
-    if (!selectedGroup || !proposedOwner) return
-    void resolveDecision({
-      kind: 'assignToExistingActress',
-      snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
-      ownerActressId: proposedOwner.actressId,
-      ownerActressRevision: proposedOwner.revision,
-      replacementMainNames: ownershipReplacementClaimants.map((claimant) => ({
-        actressId: claimant.actressId,
-        mainName: replacementMainNames[claimant.actressId] ?? ''
-      }))
-    })
-  }
-
-  const confirmOwnership = (): void => {
-    if (!proposedOwner) return
-    if (ownershipReplacementClaimants.length > 0) {
-      setReplacementMainNames({})
-      setReplacementDialog('ownership')
-      return
-    }
-    submitOwnership()
-  }
-
-  const applySelectedPending = (): void => {
-    if (!selectedGroup || !selectedCandidate) return
-    void resolveDecision({
-      kind: 'applyPending',
-      snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
-      pendingId: selectedCandidate.pendingId,
-      replacementMainNames: []
-    })
-  }
-
-  const submitEditedName = (): void => {
-    if (
-      !selectedGroup ||
-      !editSourceType ||
-      editInspectionPending ||
-      editInspection.status === 'empty' ||
-      editInspection.status === 'unchanged'
-    ) return
-    if (selectedCandidate && selectedConflict) {
-      void resolveDecision({
-        kind: 'editName',
-        snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
-        pendingId: selectedCandidate.pendingId,
-        name: selectedConflict.name,
-        nameType: selectedConflict.type,
-        newName: editedName,
-        replacementMainNames: []
-      })
-      return
-    }
-    if (selectedClaim) {
-      void resolveDecision({
-        kind: 'editPendingNameClaim',
-        snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
-        claimId: selectedClaim.claimId,
-        actressId: selectedClaim.actressId,
-        name: selectedClaim.name,
-        nameType: selectedClaim.type,
-        newName: editedName,
-        replacementMainNames: []
-      })
-    }
-  }
-
-  const submitIllegalName = (): void => {
-    if (!selectedGroup) return
-    void resolveDecision({
-      kind: 'markIllegalName',
-      snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
-      replacementMainNames: illegalReplacementClaimants.map((claimant) => ({
-        actressId: claimant.actressId,
-        mainName: replacementMainNames[claimant.actressId] ?? ''
-      }))
-    })
-  }
-
-  const submitMerge = (decision: ConflictMergeActressesDecision): void => {
-    if (!selectedGroup) return
-    const pending = selectedGroup.candidates.find(
-      (candidate) =>
-        candidate.actressId === decision.keepActressId ||
-        candidate.actressId === decision.mergeActressId
-    )
-    void resolveDecision({
-      kind: 'mergeActresses',
-      snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
-      ...(pending ? { pendingId: pending.pendingId } : {}),
-      ...decision,
-      replacementMainNames: []
-    })
-  }
-
-  const discard = async (): Promise<void> => {
-    if (!discardCandidate || discarding) return
-    const previousGroups = groups
-    const previousSelectedName = selectedGroup?.normalizedName ?? null
-    setDiscarding(true)
-    try {
-      await api.actressScrape.discardConflict({
-        pendingId: discardCandidate.pendingId,
-        expectedRevision: discardCandidate.revision
-      })
-      setDiscardCandidate(null)
-      await invalidateActressLibraryQueries(queryClient)
-      const refreshed = await groupsQuery.refetch()
-      selectAfterRefresh(previousGroups, refreshed.data ?? [], previousSelectedName)
-      toast.show('已丢弃错误匹配并清理暂存资源', 'success')
-    } catch (error) {
-      const message = String((error as Error).message)
-      await invalidateActressLibraryQueries(queryClient)
-      const refreshed = await groupsQuery.refetch()
-      setDiscardCandidate(null)
-      selectAfterRefresh(previousGroups, refreshed.data ?? [], previousSelectedName, true)
-      toast.show(message, 'error')
-    } finally {
-      setDiscarding(false)
-    }
-  }
-
-  const chooseOtherOwner = async (item: ActressListItem): Promise<void> => {
-    try {
-      const detail = item.revision == null ? await api.actresses.get(item.id) : null
-      const revision = item.revision ?? detail?.revision
-      if (revision == null) throw new Error('无法读取演员当前版本，请刷新后重试')
-      setSelection((current) =>
-        current
-          ? selectConflictProposedOwner(current, {
-              actressId: item.id,
-              revision,
-              mainName: item.main_name
-            })
-          : current
-      )
-      setSelectedOtherOwner(item)
-      setOtherOwnerOpen(false)
-      setOtherOwnerSearch('')
-    } catch (error) {
-      toast.show(String((error as Error).message), 'error')
-    }
-  }
-
-  const openEditName = (): void => {
-    if (!editSourceName) return
-    setEditedName(editSourceName)
-    setEditNameOpen(true)
-  }
-
-  const openIllegalName = (): void => {
-    setReplacementMainNames({})
-    setReplacementDialog('illegal')
-  }
+    controller.focusHandled()
+  }, [controller, focusAfterRefresh])
 
   const renderQueueSection = (
     title: string,
@@ -852,7 +297,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
             className={`conflict-workbench-group${
               selectedGroup?.normalizedName === group.normalizedName ? ' is-selected' : ''
             }`}
-            onClick={() => chooseGroup(group)}
+            onClick={() => controller.chooseGroup(group)}
           >
             <strong>{group.displayName}</strong>
             <span>
@@ -977,7 +422,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                     { id: 'process', label: '处理', panelId: 'actress-conflict-panel-process' },
                     { id: 'source', label: '来源详情', panelId: 'actress-conflict-panel-source' }
                   ]}
-                  onChange={(tab) => setSelection((current) => current ? { ...current, tab } : current)}
+                  onChange={controller.selectTab}
                 />
 
                 <div className="conflict-workbench-panel-stack">
@@ -1003,18 +448,11 @@ export default function ActressConflictReviewPage(): JSX.Element {
                               className={`conflict-workbench-owner${
                                 proposedOwner?.actressId === owner.actressId ? ' is-selected' : ''
                               }`}
-                              onClick={() => {
-                                setSelectedOtherOwner(null)
-                                setSelection((current) =>
-                                  current
-                                    ? selectConflictProposedOwner(current, {
-                                        actressId: owner.actressId,
-                                        revision: owner.revision,
-                                        mainName: owner.mainName
-                                      })
-                                    : current
-                                )
-                              }}
+                              onClick={() => controller.selectOwner({
+                                actressId: owner.actressId,
+                                revision: owner.revision,
+                                mainName: owner.mainName
+                              })}
                             >
                               <ActressAvatar
                                 src={resolveMediaSrc(owner.avatarPath)}
@@ -1031,10 +469,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                             className={`conflict-workbench-owner conflict-workbench-owner--other${
                               selectedOtherOwner ? ' is-selected' : ''
                             }`}
-                            onClick={() => {
-                              setOtherOwnerSearch('')
-                              setOtherOwnerOpen(true)
-                            }}
+                            onClick={controller.openOtherOwner}
                           >
                             {selectedOtherOwner ? (
                               <>
@@ -1072,7 +507,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                             type="button"
                             aria-pressed={selection.source?.kind === 'scrape' && selection.source.id === candidate.pendingId}
                             className={selection.source?.kind === 'scrape' && selection.source.id === candidate.pendingId ? 'is-selected' : ''}
-                            onClick={() => setSelection((current) => current ? selectConflictSource(current, { kind: 'scrape', id: candidate.pendingId }) : current)}
+                            onClick={() => controller.selectSource({ kind: 'scrape', id: candidate.pendingId })}
                           >
                             <ActressAvatar src={resolveMediaSrc(candidate.actressAvatarPath)} name={candidate.actressMainName} gender={null} decorative />
                             <span><strong>{candidate.actressMainName}</strong><small>刮削结果 · {candidate.plugin.name} · {MODE_LABEL[candidate.mode]}</small></span>
@@ -1087,7 +522,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                               type="button"
                               aria-pressed={selection.source?.kind === 'claim' && selection.source.id === claim.claimId}
                               className={selection.source?.kind === 'claim' && selection.source.id === claim.claimId ? 'is-selected' : ''}
-                              onClick={() => setSelection((current) => current ? selectConflictSource(current, { kind: 'claim', id: claim.claimId }) : current)}
+                              onClick={() => controller.selectSource({ kind: 'claim', id: claim.claimId })}
                             >
                               <ActressAvatar src={resolveMediaSrc(claimant?.avatarPath)} name={claimant?.mainName ?? claim.name} gender={null} decorative />
                               <span><strong>{claimant?.mainName ?? `演员 #${claim.actressId}`}</strong><small>历史声明 · {NAME_TYPE_LABEL[claim.type]}</small></span>
@@ -1192,17 +627,17 @@ export default function ActressConflictReviewPage(): JSX.Element {
                   </div>
                   <div>
                     {selectedCandidate ? (
-                      <button type="button" className="btn btn-sm btn-ghost" disabled={resolving} onClick={() => setDiscardCandidate(selectedCandidate)}>
+                      <button type="button" className="btn btn-sm btn-ghost" disabled={resolving} onClick={() => controller.requestDiscard(selectedCandidate)}>
                         <Trash2 {...UI_ICON_SM} aria-hidden />
                         {selectedGroup.status === 'applicable' ? '丢弃这份结果' : '丢弃这份错误匹配'}
                       </button>
                     ) : null}
                     {selectedGroup.status === 'applicable' ? (
-                      <button type="button" className="btn btn-sm btn-primary" disabled={resolving || !selectedCandidate} onClick={applySelectedPending}>
+                      <button type="button" className="btn btn-sm btn-primary" disabled={resolving || !selectedCandidate} onClick={controller.applySelectedPending}>
                         应用待确认资料
                       </button>
                     ) : (
-                      <button type="button" className="btn btn-sm btn-primary" disabled={resolving || !proposedOwner} onClick={confirmOwnership}>
+                      <button type="button" className="btn btn-sm btn-primary" disabled={resolving || !proposedOwner} onClick={controller.confirmOwnership}>
                         {resolving ? '处理中…' : '确认名称归属'}
                       </button>
                     )}
@@ -1212,13 +647,13 @@ export default function ActressConflictReviewPage(): JSX.Element {
                 {selectedGroup.status === 'conflict' ? (
                   <div className="conflict-workbench-secondary-actions" aria-label="其他处理方式">
                     <span>其他处理</span>
-                    <button type="button" className="btn btn-sm btn-ghost" disabled={!editSourceName || resolving} onClick={openEditName}>
+                    <button type="button" className="btn btn-sm btn-ghost" disabled={!editSourceName || resolving} onClick={controller.openEditName}>
                       <Pencil {...UI_ICON_SM} aria-hidden />修改本条返回名称
                     </button>
-                    <button type="button" className="btn btn-sm btn-ghost" disabled={mergeActors.length < 2 || resolving} onClick={() => setMergeOpen(true)}>
+                    <button type="button" className="btn btn-sm btn-ghost" disabled={mergeActors.length < 2 || resolving} onClick={controller.openMerge}>
                       <GitMerge {...UI_ICON_SM} aria-hidden />合并演员档案
                     </button>
-                    <button type="button" className="btn btn-sm btn-ghost conflict-workbench-illegal" disabled={resolving} onClick={openIllegalName}>
+                    <button type="button" className="btn btn-sm btn-ghost conflict-workbench-illegal" disabled={resolving} onClick={controller.openIllegalName}>
                       <Ban {...UI_ICON_SM} aria-hidden />这不是演员名称
                     </button>
                   </div>
@@ -1240,7 +675,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
           confirmText="选好后返回处理页确认"
           confirmDisabled
           onConfirm={() => undefined}
-          onCancel={() => { setOtherOwnerOpen(false); setOtherOwnerSearch('') }}
+          onCancel={controller.closeOtherOwner}
         >
           <p>这里只选择拟定归属；不会在弹窗内提交名称变更。</p>
           <div className="conflict-workbench-owner-picker">
@@ -1249,7 +684,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
               className="search-input form-control-full"
               placeholder="搜索演员主名或别名…"
               value={otherOwnerSearch}
-              onChange={(event) => setOtherOwnerSearch(event.target.value)}
+              onChange={(event) => controller.changeOtherOwnerSearch(event.target.value)}
             />
             <div className="conflict-workbench-owner-search" role="group" aria-label="其他演员">
               {otherOwnerLoading ? (
@@ -1262,7 +697,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                   type="button"
                   aria-pressed={selectedOtherOwner?.id === item.id}
                   className={selectedOtherOwner?.id === item.id ? 'is-selected' : ''}
-                  onClick={() => void chooseOtherOwner(item)}
+                  onClick={() => void controller.chooseOtherOwner(item)}
                 >
                   <ActressAvatar src={resolveMediaSrc(item.avatar_path)} name={item.main_name} gender={item.gender} decorative />
                   <span><strong>{item.main_name}</strong><small>{item.video_count} 部影片</small></span>
@@ -1281,8 +716,8 @@ export default function ActressConflictReviewPage(): JSX.Element {
           confirmDisabled={resolving || editInspectionPending || editInspection.status === 'empty' || editInspection.status === 'unchanged'}
           busy={resolving}
           closeDisabled={resolving}
-          onConfirm={submitEditedName}
-          onCancel={() => setEditNameOpen(false)}
+          onConfirm={controller.submitEditedName}
+          onCancel={controller.closeEditName}
         >
           <dl className="conflict-workbench-edit-context">
             <div><dt>当前名称</dt><dd className="copyable-text">{editSourceName}</dd></div>
@@ -1292,7 +727,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
           </dl>
           <label className="conflict-workbench-edit-field">
             <span>新名称</span>
-            <input autoFocus className="text-input form-control-full" value={editedName} onChange={(event) => setEditedName(event.target.value)} />
+            <input autoFocus className="text-input form-control-full" value={editedName} onChange={(event) => controller.changeEditedName(event.target.value)} />
           </label>
           <div className="conflict-workbench-edit-inspection" role="status">
             <span>标准化结果</span>
@@ -1330,8 +765,8 @@ export default function ActressConflictReviewPage(): JSX.Element {
           }
           busy={resolving}
           closeDisabled={resolving}
-          onConfirm={replacementDialog === 'illegal' ? submitIllegalName : submitOwnership}
-          onCancel={() => { setReplacementDialog(null); setReplacementMainNames({}) }}
+          onConfirm={replacementDialog === 'illegal' ? controller.submitIllegalName : controller.submitOwnership}
+          onCancel={controller.closeReplacement}
         >
           {replacementDialog === 'illegal' ? (
             <div>
@@ -1353,7 +788,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                   value={replacementMainNames[claimant.actressId] ?? ''}
                   aria-invalid={Boolean(error)}
                   aria-describedby={error ? errorId : undefined}
-                  onChange={(event) => setReplacementMainNames((current) => ({ ...current, [claimant.actressId]: event.target.value }))}
+                  onChange={(event) => controller.changeReplacementMainName(claimant.actressId, event.target.value)}
                 />
                 {error ? <small id={errorId} className="text-danger">{error}</small> : null}
               </label>
@@ -1368,8 +803,8 @@ export default function ActressConflictReviewPage(): JSX.Element {
           key={selectedGroup.normalizedName}
           actors={mergeActors}
           busy={resolving}
-          onConfirm={submitMerge}
-          onCancel={() => setMergeOpen(false)}
+          onConfirm={controller.submitMerge}
+          onCancel={controller.closeMerge}
         />
       ) : null}
 
@@ -1380,8 +815,8 @@ export default function ActressConflictReviewPage(): JSX.Element {
           confirmText={discarding ? '丢弃中…' : '确认丢弃'}
           busy={discarding}
           closeDisabled={discarding}
-          onConfirm={() => void discard()}
-          onCancel={() => setDiscardCandidate(null)}
+          onConfirm={() => void controller.discard()}
+          onCancel={controller.cancelDiscard}
         >
           <p>
             确认丢弃「{discardCandidate.actressMainName}」的

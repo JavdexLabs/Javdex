@@ -279,6 +279,8 @@ export interface ActressListQuery {
   avatar?: ActressAvatarFilter
   sortBy?: ActressListSortBy
   sortDir?: ListSortDir
+  limit?: number
+  offset?: number
 }
 
 /** Actresses per cumulative status within the current search and gender scope. */
@@ -286,6 +288,7 @@ export type ActressListStatusCounts = Record<ActressListStatusFilter, number>
 
 export interface ActressListPage {
   items: ActressListItem[]
+  total: number
   statusCounts: ActressListStatusCounts
 }
 

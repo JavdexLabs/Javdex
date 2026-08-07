@@ -1,4 +1,4 @@
-import type { VideoQuery } from '@shared/types'
+import type { ActressListQuery, VideoQuery } from '@shared/types'
 import { libraryQueryHash } from '../listView/listQueryParams'
 
 export const videoKeys = {
@@ -11,8 +11,8 @@ export const videoKeys = {
 
 export const actressKeys = {
   all: ['actresses'] as const,
-  list: (queryHash: string, search: string, gender: string, sortBy: string, sortDir: string) =>
-    ['actresses', 'list', queryHash, search, gender, sortBy, sortDir] as const,
+  list: (query: ActressListQuery, queryHash: string) =>
+    ['actresses', 'list', queryHash, query] as const,
   conflicts: () => ['actresses', 'conflicts'] as const,
   conflictCount: () => ['actresses', 'conflicts', 'count'] as const,
   conflictSummary: () => ['actresses', 'conflicts', 'summary'] as const

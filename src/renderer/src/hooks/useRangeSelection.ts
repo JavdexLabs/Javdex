@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { addSelectedRange, toggleSelectedId } from './rangeSelectionState'
 
 interface RangeSelectionEvent {
   shiftKey: boolean
@@ -40,25 +41,11 @@ export function useRangeSelection<T extends { id: number }>(
         index < items.length
       ) {
         event.preventDefault()
-        const start = Math.min(anchor, index)
-        const end = Math.max(anchor, index)
-        setSelectedIds((current) => {
-          const next = new Set(current)
-          for (let position = start; position <= end; position += 1) {
-            const id = items[position]?.id
-            if (id != null) next.add(id)
-          }
-          return next
-        })
+        setSelectedIds((current) => addSelectedRange(current, items, anchor, index))
         return
       }
 
-      setSelectedIds((current) => {
-        const next = new Set(current)
-        if (next.has(item.id)) next.delete(item.id)
-        else next.add(item.id)
-        return next
-      })
+      setSelectedIds((current) => toggleSelectedId(current, item.id))
       anchorIndexRef.current = index
     },
     [items]

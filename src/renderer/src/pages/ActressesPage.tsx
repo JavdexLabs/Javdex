@@ -13,20 +13,17 @@ import {
   type ActressScrapeField,
   type ActressScrapeUpdateMode
 } from '@shared/types'
-import { api, assetUrl } from '../api'
+import { api } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useRangeSelection } from '../hooks/useRangeSelection'
-import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useToast } from '../components/Toast'
 import ConfirmModal from '../components/ConfirmModal'
-import ActressName from '../components/ActressName'
 import AppliedFilterBar, { type AppliedFilterItem } from '../components/AppliedFilterBar'
 import ListToolbar from '../components/ListToolbar'
 import SelectionToolbar from '../components/SelectionToolbar'
 import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
-import ActressStatusBadge from '../components/ActressStatusBadge'
 import ActressFilterPopover, { type ActressFilterState } from '../components/ActressFilterPopover'
 import ActressFaceScanModal from '../components/ActressFaceScanModal'
 import { ACTRESS_STATUS_FILTER_LABELS } from '@shared/types'
@@ -50,8 +47,6 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { invalidateActressLibraryQueries } from '../query/invalidateLibraryQueries'
 import { actressKeys, overviewStatsKeys } from '../query/queryKeys'
-import ActressAvatar from '../components/ActressAvatar'
-import MediaTileActionButton from '../components/MediaTileActionButton'
 import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
 import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
@@ -71,6 +66,8 @@ import {
 } from '../actressFaceFilter/cache'
 import { useActressFaceScan, previousAvatarAfterFaceScan } from '../actressFaceFilter/useActressFaceScan'
 import { useAvatarAutoCropBatch } from '../contexts/AvatarAutoCropBatchContext'
+import { useInfiniteActressList } from '../query/useInfiniteActressList'
+import VirtualActressGrid from '../components/VirtualActressGrid'
 
 const ACTRESS_SORT_OPTIONS: SortSwitchOption<ActressListSortBy>[] = [
   { value: 'video_count', label: '影片', title: '本地影片数' },
@@ -127,7 +124,6 @@ export default function ActressesPage(): JSX.Element {
   )
   const queryHash = useMemo(() => actressQueryHash(searchParams), [searchParams])
   const scrollMemoryKey = `actresses:${queryHash}`
-  const { ref: scrollRef, showScrollToTop, scrollToTop } = useScrollContainerMemory(scrollMemoryKey)
 
   const patchParams = useCallback(
     (patch: Record<string, string | null | undefined>): void => {
@@ -154,19 +150,22 @@ export default function ActressesPage(): JSX.Element {
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
 
-  const listQuery = useQuery({
-    queryKey: actressKeys.list(queryHash, debouncedQ.trim(), genderFilter, sortBy, sortDir),
-    queryFn: () =>
-      api.actresses.listPage({
-        search: debouncedQ.trim(),
-        gender: genderFilter,
-        status: statusFilter,
-        avatar: avatarFilter === 'without-face' ? 'with' : avatarFilter,
-        sortBy,
-        sortDir
-      }),
-    placeholderData: (prev) => prev
-  })
+  const actressListQuery = useMemo(
+    () => ({
+      search: debouncedQ.trim(),
+      gender: genderFilter,
+      status: statusFilter,
+      avatar: avatarFilter,
+      sortBy,
+      sortDir
+    }),
+    [avatarFilter, debouncedQ, genderFilter, sortBy, sortDir, statusFilter]
+  )
+  const handleListError = useCallback(
+    (error: unknown) => toast.show(String((error as Error).message ?? error), 'error'),
+    [toast]
+  )
+  const listQuery = useInfiniteActressList(actressListQuery, queryHash, handleListError)
   const conflictSummaryQuery = useQuery({
     queryKey: actressKeys.conflictSummary(),
     queryFn: () => api.actressScrape.conflictSummary(),
@@ -174,27 +173,21 @@ export default function ActressesPage(): JSX.Element {
   })
   const pendingConflictCount = conflictSummaryQuery.data?.groupCount ?? 0
 
-  useEffect(() => {
-    if (listQuery.isError && listQuery.error) {
-      toast.show(String((listQuery.error as Error).message ?? listQuery.error), 'error')
-    }
-  }, [listQuery.isError, listQuery.error, toast])
-
   const { stats: overviewStats } = useLibraryOverviewStats()
   const refetchActressSurface = useCallback(() => {
-    void listQuery.refetch()
+    listQuery.refetchSilent()
     void queryClient.refetchQueries({ queryKey: overviewStatsKeys.all, type: 'all', stale: true })
   }, [listQuery, queryClient])
 
   useListSurfaceRefetch(detailOpen, refetchActressSurface)
 
-  const fetchedItems = listQuery.data?.items ?? []
+  const fetchedItems = listQuery.items
   const items =
     avatarFilter === 'without-face'
       ? actressesWithoutFace(fetchedItems, faceScan.cache)
       : fetchedItems
   const faceScanMissingIdentity = uncachedActressFaceScanIdentity(fetchedItems, faceScan.cache)
-  const loading = listQuery.isLoading && items.length === 0
+  const loading = listQuery.loading
   const isFetching = listQuery.isFetching
 
   const { scrapers, pluginDetails, defaultScraper } = useScraperPluginCatalog('actress')
@@ -346,7 +339,7 @@ export default function ActressesPage(): JSX.Element {
       setPendingDelete(null)
       toast.show(`已删除「${pendingDelete.main_name}」`, 'success')
       invalidateActressLibraryQueries(queryClient)
-      void listQuery.refetch()
+      listQuery.refetchSilent()
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     }
@@ -393,7 +386,7 @@ export default function ActressesPage(): JSX.Element {
       refetchActressSurface()
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
-      void listQuery.refetch()
+      listQuery.refetchSilent()
     } finally {
       setDeleting(false)
     }
@@ -592,7 +585,7 @@ export default function ActressesPage(): JSX.Element {
                 className="count-badge count-badge--stable count-badge--people"
                 aria-live="polite"
               >
-                共 {items.length} 位
+                共 {avatarFilter === 'without-face' ? items.length : listQuery.total} 位
                 {isFetching && !loading && items.length > 0 ? (
                   <span className="library-fetch-hint" aria-hidden>
                     {' '}
@@ -633,12 +626,7 @@ export default function ActressesPage(): JSX.Element {
         ) : null}
       </div>
 
-      <ListSurface
-        variant="scroll"
-        scrollRef={scrollRef}
-        showScrollToTop={showScrollToTop}
-        onScrollToTop={scrollToTop}
-      >
+      <ListSurface variant="fill" withInner={false}>
           {loading ? (
             <EmptyState loading variant="page" />
           ) : items.length === 0 ? (
@@ -658,55 +646,20 @@ export default function ActressesPage(): JSX.Element {
               }
             />
           ) : (
-            <div className="actress-grid">
-              {items.map((a, index) => {
-                const avatar = assetUrl(a.avatar_path)
-                const selected = selectedIds.has(a.id)
-                return (
-                  <div
-                    key={a.id}
-                    className={`actress-card-wrap${selected ? ' is-selected' : ''}${selectionMode ? ' is-selection-mode' : ''}`}
-                  >
-                    <button
-                      type="button"
-                      className={`poster-select-toggle poster-hover-control${selected || selectionMode ? ' is-visible' : ''}${selected ? ' is-checked' : ''}`}
-                      aria-label={selected ? `取消选择 ${a.main_name}` : `选择 ${a.main_name}`}
-                      aria-pressed={selected}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        toggleActressSelection(a, index, event)
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="actress-card card-interactive"
-                      aria-pressed={selectionMode ? selected : undefined}
-                      onClick={(event) => {
-                        if (selectionMode) {
-                          toggleActressSelection(a, index, event)
-                          return
-                        }
-                        navigateToActressDetail(navigate, location, a.id)
-                      }}
-                    >
-                      <span className="actress-card-avatar">
-                        <ActressAvatar src={avatar} name={a.main_name} gender={a.gender} />
-                        <ActressStatusBadge status={a.scraped_status} />
-                      </span>
-                      <ActressName name={a.main_name} gender={a.gender} className="actress-name" />
-                      <div className="actress-count">{a.video_count} 部</div>
-                    </button>
-                    {!selectionMode && a.video_count === 0 && (
-                      <MediaTileActionButton
-                        label={`删除演员 ${a.main_name}`}
-                        title="删除"
-                        onClick={() => setPendingDelete(a)}
-                      />
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+            <VirtualActressGrid
+              actresses={items}
+              selectedIds={selectedIds}
+              selectionMode={selectionMode}
+              hasMore={avatarFilter !== 'without-face' && listQuery.hasMore}
+              loadingMore={listQuery.loadingMore}
+              loadMoreFailed={listQuery.nextPageError}
+              onLoadMore={listQuery.loadMore}
+              onRetryLoadMore={listQuery.retryLoadMore}
+              onToggleSelect={toggleActressSelection}
+              onOpen={(actress) => navigateToActressDetail(navigate, location, actress.id)}
+              onDelete={setPendingDelete}
+              scrollMemoryKey={scrollMemoryKey}
+            />
           )}
       </ListSurface>
 

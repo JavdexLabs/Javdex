@@ -6,6 +6,7 @@ import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { findActressByNameOrAlias, getActressDetail } from '../db/actressRepo'
 import { createActressApplicationService } from './actressApplicationService'
+import type { ActressListItem } from '@shared/types'
 
 let tempRoot: string | null = null
 
@@ -55,6 +56,67 @@ afterEach(() => {
     fs.rmSync(tempRoot, { recursive: true, force: true })
     tempRoot = null
   }
+})
+
+describe('actressApplicationService.listActresses', () => {
+  it('returns a stable page and the full matching total from the real database', () => {
+    setupDb()
+    const service = createActressApplicationService()
+
+    const first = service.listActresses({ gender: 'all', sortBy: 'video_count', limit: 1, offset: 0 })
+    const second = service.listActresses({ gender: 'all', sortBy: 'video_count', limit: 1, offset: 1 })
+
+    assert.equal(first.total, 2)
+    assert.equal(second.total, 2)
+    assert.deepEqual(first.items.map((item) => item.main_name), ['Alpha'])
+    assert.deepEqual(second.items.map((item) => item.main_name), ['Beta'])
+  })
+
+  it('reuses one exact avatar-filter snapshot across subsequent pages', () => {
+    let reads = 0
+    const items = [1, 2, 3].map(
+      (id) => ({ id, main_name: `Actress ${id}` }) as ActressListItem
+    )
+    const service = createActressApplicationService({
+      listPage: () => {
+        reads += 1
+        return {
+          items,
+          total: items.length,
+          statusCounts: { all: 3, success: 0, unscraped: 3, failed: 0 }
+        }
+      }
+    })
+
+    const first = service.listActresses({ avatar: 'with', limit: 2, offset: 0 })
+    const second = service.listActresses({ avatar: 'with', limit: 2, offset: 2 })
+
+    assert.equal(reads, 1)
+    assert.deepEqual(first.items.map((item) => item.id), [1, 2])
+    assert.deepEqual(second.items.map((item) => item.id), [3])
+  })
+
+  it('refreshes the avatar-filter snapshot whenever the first page reloads', () => {
+    let reads = 0
+    const service = createActressApplicationService({
+      listPage: () => {
+        reads += 1
+        const item = { id: reads, main_name: `Read ${reads}` } as ActressListItem
+        return {
+          items: [item],
+          total: 1,
+          statusCounts: { all: 1, success: 0, unscraped: 1, failed: 0 }
+        }
+      }
+    })
+
+    const first = service.listActresses({ avatar: 'without', limit: 1, offset: 0 })
+    const refreshed = service.listActresses({ avatar: 'without', limit: 1, offset: 0 })
+
+    assert.equal(reads, 2)
+    assert.equal(first.items[0]?.id, 1)
+    assert.equal(refreshed.items[0]?.id, 2)
+  })
 })
 
 describe('actressApplicationService.deleteUnlinkedActresses', () => {

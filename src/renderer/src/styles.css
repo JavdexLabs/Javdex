@@ -5199,6 +5199,22 @@ button.tag-chip--custom-pick {
   grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
   gap: 12px;
 }
+.virtual-actress-grid {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.virtual-actress-grid-cell,
+.virtual-actress-grid-cell > .actress-card-wrap {
+  height: 100%;
+}
+.virtual-actress-grid-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
 .actress-card-wrap,
 .facet-card-wrap {
   position: relative;

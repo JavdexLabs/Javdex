@@ -1,8 +1,8 @@
 import { IPC } from '@shared/ipc-channels'
 import type {
-  ActressDeleteIpcArgs,
-  ActressDeleteIpcChannel,
-  ActressDeleteIpcResult
+  ActressIpcArgs,
+  ActressIpcChannel,
+  ActressIpcResult
 } from '@shared/actressIpcContract'
 import type {
   ActressDetail,
@@ -12,8 +12,6 @@ import type {
   ActressGenderFilter,
   ActressAvatarSourceInfo,
   ActressListItem,
-  ActressListPage,
-  ActressListQuery,
   ActressListSortBy,
   ActressMergeInput,
   ActressNameConflictGroup,
@@ -34,7 +32,6 @@ import {
   getActressDetail,
   getActressAvatarSourceInfo,
   listActresses,
-  listActressPage,
   markActressScrapeSucceeded,
   mergeActresses,
   setActressPosterPath
@@ -47,11 +44,11 @@ import { registerHandler } from './shared'
 import { actressIdentityConflictWorkflow } from '../scrapers/actressScraperManager'
 import { actressApplicationService } from '../services/actressApplicationService'
 
-function registerActressDeleteHandler<Channel extends ActressDeleteIpcChannel>(
+function registerActressHandler<Channel extends ActressIpcChannel>(
   channel: Channel,
-  handler: (...args: ActressDeleteIpcArgs<Channel>) => ActressDeleteIpcResult<Channel>
+  handler: (...args: ActressIpcArgs<Channel>) => ActressIpcResult<Channel>
 ): void {
-  registerHandler(channel, (_event, ...args: ActressDeleteIpcArgs<Channel>) => handler(...args))
+  registerHandler(channel, (_event, ...args: ActressIpcArgs<Channel>) => handler(...args))
 }
 
 export function registerActressHandlers(): void {
@@ -66,9 +63,8 @@ export function registerActressHandlers(): void {
     ): ActressListItem[] => listActresses(search, gender, sortBy, sortDir)
   )
 
-  registerHandler(
-    IPC.ACTRESS_LIST_PAGE,
-    (_e, query?: ActressListQuery): ActressListPage => listActressPage(query)
+  registerActressHandler(IPC.ACTRESS_LIST_PAGE, (query) =>
+    actressApplicationService.listActresses(query)
   )
 
   registerHandler(IPC.ACTRESS_GET, (_e, id: number): ActressDetail | null =>
@@ -85,11 +81,11 @@ export function registerActressHandlers(): void {
     return true
   })
 
-  registerActressDeleteHandler(IPC.ACTRESS_DELETE, (id) =>
+  registerActressHandler(IPC.ACTRESS_DELETE, (id) =>
     actressApplicationService.deleteUnlinkedActresses({ ids: [id] })
   )
 
-  registerActressDeleteHandler(IPC.ACTRESS_DELETE_BATCH, (ids) =>
+  registerActressHandler(IPC.ACTRESS_DELETE_BATCH, (ids) =>
     actressApplicationService.deleteUnlinkedActresses({ ids })
   )
 

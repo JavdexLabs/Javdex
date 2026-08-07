@@ -3,9 +3,9 @@ import { IPC } from '../shared/ipc-channels'
 import type { LlmModelDefinition } from '../shared/llmProviders'
 import type { UpdateCheckState } from '../shared/updateTypes'
 import type {
-  ActressDeleteIpcArgs,
-  ActressDeleteIpcChannel,
-  ActressDeleteIpcResult
+  ActressIpcArgs,
+  ActressIpcChannel,
+  ActressIpcResult
 } from '../shared/actressIpcContract'
 import type {
   AppSettings,
@@ -98,11 +98,11 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   return res.data as T
 }
 
-function invokeActressDelete<Channel extends ActressDeleteIpcChannel>(
+function invokeActress<Channel extends ActressIpcChannel>(
   channel: Channel,
-  ...args: ActressDeleteIpcArgs<Channel>
-): Promise<ActressDeleteIpcResult<Channel>> {
-  return invoke<ActressDeleteIpcResult<Channel>>(channel, ...args)
+  ...args: ActressIpcArgs<Channel>
+): Promise<ActressIpcResult<Channel>> {
+  return invoke<ActressIpcResult<Channel>>(channel, ...args)
 }
 
 const api = {
@@ -200,13 +200,13 @@ const api = {
       sortBy?: ActressListSortBy,
       sortDir?: ListSortDir
     ) => invoke<ActressListItem[]>(IPC.ACTRESS_LIST, search, gender, sortBy, sortDir),
-    listPage: (query: ActressListQuery) => invoke<ActressListPage>(IPC.ACTRESS_LIST_PAGE, query),
+    listPage: (query: ActressListQuery) => invokeActress(IPC.ACTRESS_LIST_PAGE, query),
     get: (id: number) => invoke<ActressDetail | null>(IPC.ACTRESS_GET, id),
     getAvatarSourceInfo: (id: number) =>
       invoke<ActressAvatarSourceInfo | null>(IPC.ACTRESS_AVATAR_SOURCE_INFO, id),
     edit: (id: number, input: ActressEditInput) => invoke<boolean>(IPC.ACTRESS_EDIT, id, input),
-    remove: (id: number) => invokeActressDelete(IPC.ACTRESS_DELETE, id),
-    removeBatch: (ids: number[]) => invokeActressDelete(IPC.ACTRESS_DELETE_BATCH, ids),
+    remove: (id: number) => invokeActress(IPC.ACTRESS_DELETE, id),
+    removeBatch: (ids: number[]) => invokeActress(IPC.ACTRESS_DELETE_BATCH, ids),
     clearMeta: (id: number) => invoke<boolean>(IPC.ACTRESS_CLEAR_META, id),
     importGalleryImage: (id: number, input: ActressGalleryImportInput) =>
       invoke<ActressGalleryAsset>(IPC.ACTRESS_GALLERY_IMPORT, id, input),

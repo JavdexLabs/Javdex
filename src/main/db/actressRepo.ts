@@ -687,18 +687,21 @@ function filterActressAvatars(
   return actresses.filter((actress) => actressHasUsableAvatar(actress) === wantsAvatar)
 }
 
-export function listActresses(
+function queryActressListRows(
   search?: string,
   gender: ActressGenderFilter = 'female',
   sortBy: ActressListSortBy = 'video_count',
   sortDir: ListSortDir = 'desc',
   status: ActressListStatusFilter = 'all',
-  avatar: ActressAvatarFilter = 'all'
+  limit?: number,
+  offset = 0
 ): ActressListItem[] {
   const db = getDb()
   const { sql: where, params } = buildActressListWhere(search, gender, status)
   const orderBy = buildActressListOrderBy(sortBy, sortDir)
-  const actresses = db
+  const pagination = limit == null ? '' : 'LIMIT ? OFFSET ?'
+  const queryParams = limit == null ? params : [...params, limit, offset]
+  return db
     .prepare(
       `SELECT a.*,
               COUNT(va.video_id) AS video_count,
@@ -707,15 +710,29 @@ export function listActresses(
        LEFT JOIN video_actress va ON va.actress_id = a.id
        ${where}
        GROUP BY a.id
-       ORDER BY ${orderBy}`
+       ORDER BY ${orderBy}
+       ${pagination}`
     )
-    .all(...params) as ActressListItem[]
-  return filterActressAvatars(actresses, avatar)
+    .all(...queryParams) as ActressListItem[]
+}
+
+export function listActresses(
+  search?: string,
+  gender: ActressGenderFilter = 'female',
+  sortBy: ActressListSortBy = 'video_count',
+  sortDir: ListSortDir = 'desc',
+  status: ActressListStatusFilter = 'all',
+  avatar: ActressAvatarFilter = 'all'
+): ActressListItem[] {
+  return filterActressAvatars(
+    queryActressListRows(search, gender, sortBy, sortDir, status),
+    avatar
+  )
 }
 
 function buildActressListOrderBy(sortBy: ActressListSortBy, sortDir: ListSortDir): string {
   const dir = sortDir === 'asc' ? 'ASC' : 'DESC'
-  const tie = 'a.main_name ASC'
+  const tie = 'a.main_name ASC, a.id ASC'
   switch (sortBy) {
     case 'gallery':
       return `gallery_count ${dir}, ${tie}`
@@ -758,24 +775,62 @@ function countActressListStatuses(
   return counts
 }
 
+function countActressListRows(
+  search: string | undefined,
+  gender: ActressGenderFilter,
+  status: ActressListStatusFilter
+): number {
+  const db = getDb()
+  const { sql: where, params } = buildActressListWhere(search, gender, status)
+  const row = db
+    .prepare(`SELECT COUNT(*) AS n FROM actresses a ${where}`)
+    .get(...params) as { n: number }
+  return row.n
+}
+
 /** Actress list read contract: filtered rows plus the status counts the toolbar shows. */
 export function listActressPage(query: ActressListQuery = {}): ActressListPage {
   const gender = query.gender ?? 'female'
-  const avatar = query.avatar === 'without-face' ? 'with' : query.avatar ?? 'all'
-  const actresses = listActresses(
-    query.search,
-    gender,
-    query.sortBy,
-    query.sortDir,
-    query.status ?? 'all',
-    avatar
-  )
+  const status = query.status ?? 'all'
+  const requestedAvatar = query.avatar ?? 'all'
+  const avatar = requestedAvatar === 'without-face' ? 'with' : requestedAvatar
+  const offset = Math.max(0, Math.trunc(query.offset ?? 0))
+  const limit = query.limit == null
+    ? undefined
+    : Math.max(1, Math.min(1000, Math.trunc(query.limit)))
+
+  let actresses: ActressListItem[]
+  let total: number
+  if (avatar === 'all') {
+    actresses = queryActressListRows(
+      query.search,
+      gender,
+      query.sortBy,
+      query.sortDir,
+      status,
+      limit,
+      offset
+    )
+    total = countActressListRows(query.search, gender, status)
+  } else {
+    const filtered = filterActressAvatars(
+      queryActressListRows(query.search, gender, query.sortBy, query.sortDir, status),
+      avatar
+    )
+    total = filtered.length
+    // ADR-0005 requires the renderer to scan the complete usable-avatar set.
+    // #55 replaces this compatibility path with a dedicated scan manifest.
+    actresses = requestedAvatar === 'without-face' || limit == null
+      ? filtered
+      : filtered.slice(offset, offset + limit)
+  }
   return {
     // Fingerprints are only needed when the renderer may run or apply the
     // local face filter. Avoid probing every avatar for ordinary list views.
-    items: query.avatar === 'with' || query.avatar === 'without-face'
+    items: requestedAvatar === 'with' || requestedAvatar === 'without-face'
       ? enrichActressListItems(actresses)
       : actresses,
+    total,
     statusCounts: countActressListStatuses(query.search, gender)
   }
 }

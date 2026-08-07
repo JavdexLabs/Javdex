@@ -362,6 +362,20 @@ describe('actressRepo.listActressPage', () => {
     update.run(1, 3)
   }
 
+  it('returns a stable slice with the total number of matching actresses', () => {
+    setupDb()
+
+    const first = listActressPage({ gender: 'all', limit: 2, offset: 0 })
+    const second = listActressPage({ gender: 'all', limit: 2, offset: 2 })
+
+    assert.equal(first.total, 4)
+    assert.equal(second.total, 4)
+    assert.deepEqual(
+      [...first.items, ...second.items].map((item) => item.main_name),
+      ['Complete', 'Missing Female', 'Missing Male', 'Unknown Gender']
+    )
+  })
+
   it('returns the cumulative status of every actress with per-status counts', () => {
     setupStatuses()
 

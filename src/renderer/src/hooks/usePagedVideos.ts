@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Video, VideoQuery } from '@shared/types'
+import type { Video, VideoQuery } from '@shared/videoTypes'
 import { api } from '../api'
 
 const DEFAULT_PAGE_SIZE = 240

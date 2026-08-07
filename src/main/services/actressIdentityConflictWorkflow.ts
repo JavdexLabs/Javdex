@@ -1,26 +1,5 @@
-import type {
-  ActressConflictCurrentOwner,
-  ActressConflictDecisionSnapshot,
-  ActressConflictReviewSummary,
-  ActressNameConflictGroup,
-  ActressPendingNameType,
-  ActressScrapeDisposition,
-  ActressScrapeField,
-  ActressScrapePluginRef,
-  ActressScrapeResult,
-  ActressScrapeUpdateMode,
-  DiscardPendingActressScrapeInput,
-  DiscardPendingActressScrapeResult,
-  InspectActressConflictNameInput,
-  InspectActressConflictNameResult,
-  PendingActressNameClaim,
-  PendingActressScrapeCandidate,
-  PendingActressScrapeResource,
-  ResolveActressConflictInput,
-  ResolveActressConflictResult,
-  ValidateIllegalNameReplacementsInput,
-  ValidateIllegalNameReplacementsResult
-} from '@shared/types'
+import type { ActressConflictCurrentOwner, ActressConflictDecisionSnapshot, ActressConflictReviewSummary, ActressNameConflictGroup, ActressPendingNameType, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, PendingActressNameClaim, PendingActressScrapeCandidate, PendingActressScrapeResource, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from '@shared/actressConflictTypes'
+import type { ActressScrapeDisposition, ActressScrapeField, ActressScrapePluginRef, ActressScrapeResult, ActressScrapeUpdateMode } from '@shared/scrapeTypes'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'

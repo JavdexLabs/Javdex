@@ -9,7 +9,7 @@ import {
   playlistCoversDir
 } from './assetService'
 import { invalidateAssetCache } from './assetCache'
-import type { AssetCryptoProgress } from '@shared/types'
+import type { AssetCryptoProgress } from '@shared/libraryTypes'
 import { encryptPlain, decryptBlob, isEncryptedBlob } from './assetCrypto'
 import { remapAssetPath } from '../db/videoRepo'
 import { buildOpaqueAssetBaseFromPlainRel, isOpaqueEncFilename } from './assetPathNaming'

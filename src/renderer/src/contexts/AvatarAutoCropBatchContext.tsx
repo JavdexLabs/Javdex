@@ -10,13 +10,9 @@ import {
   type ReactNode
 } from 'react'
 import { createAvatarCropV1, type ActressAvatarCommit } from '@shared/avatarCrop'
-import type {
-  ActressAvatarAutoCropOutcome,
-  ActressAvatarAutoCropRequest,
-  ActressAvatarAutoCropTarget,
-  ActressListItem,
-  BatchLogEntry
-} from '@shared/types'
+import type { ActressAvatarAutoCropOutcome, ActressAvatarAutoCropRequest, ActressAvatarAutoCropTarget } from '@shared/scrapeTypes'
+import type { ActressListItem } from '@shared/actressTypes'
+import type { BatchLogEntry } from '@shared/batchScrapeTypes'
 import { api, assetUrl } from '../api'
 import { createAvatarAnalysisBitmap } from '../avatarAutoCrop/image'
 import { notifyAvatarAutoCropSaved } from '../avatarAutoCrop/events'

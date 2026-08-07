@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 
 function sourceFiles(root) {
@@ -52,28 +52,64 @@ for (const expected of [
 
 const violations = []
 const channelSource = readFileSync('src/shared/ipc-channels.ts', 'utf8')
-for (const contract of [
-  {
-    file: 'src/shared/actressIpcContract.ts',
-    channelPattern: /\b(ACTRESS_(?!(?:SCRAPE|SCRAPER|AVATAR_AUTO_CROP)_)[A-Z0-9_]+)\s*:/g
-  },
-  {
-    file: 'src/shared/videoIpcContract.ts',
-    channelPattern: /\b(VIDEO_[A-Z0-9_]+)\s*:/g
-  },
-  {
-    file: 'src/shared/scrapeIpcContract.ts',
-    channelPattern:
-      /\b((?:SCRAPE|SCRAPER|BATCH_SCRAPE|AVATAR_AUTO_CROP_BATCH)_[A-Z0-9_]+|PLUGIN_IMPORT|ACTRESS_(?:SCRAPE|SCRAPER|AVATAR_AUTO_CROP)_[A-Z0-9_]+)\s*:/g
+const contractFiles = [
+  'src/shared/actressIpcContract.ts',
+  'src/shared/videoIpcContract.ts',
+  'src/shared/scrapeIpcContract.ts',
+  'src/shared/appIpcContract.ts'
+]
+const contractSources = contractFiles.map((file) => readFileSync(file, 'utf8'))
+const channels = [...channelSource.matchAll(/^\s{2}([A-Z0-9_]+):/gm)].map((match) => match[1])
+for (const channel of channels) {
+  const owners = contractFiles.filter((_, index) =>
+    contractSources[index].includes(`[IPC.${channel}]`)
+  )
+  if (owners.length === 0) {
+    violations.push(`src/shared/ipc-channels.ts: IPC.${channel} has no command or event contract`)
+  } else if (owners.length > 1) {
+    violations.push(`src/shared/ipc-channels.ts: IPC.${channel} belongs to multiple contracts: ${owners.join(', ')}`)
   }
-]) {
-  const contractSource = readFileSync(contract.file, 'utf8')
-  const channels = [...channelSource.matchAll(contract.channelPattern)].map((match) => match[1])
-  for (const channel of channels) {
-    if (!contractSource.includes(`[IPC.${channel}]`)) {
-      violations.push(`${contract.file}: missing contract for IPC.${channel}`)
+}
+
+const retiredAggregate = path.resolve('src/shared/types.ts')
+if (existsSync(retiredAggregate)) {
+  violations.push('src/shared/types.ts: retired aggregate type entry must not be restored')
+}
+for (const root of ['src', 'scripts']) {
+  for (const file of sourceFiles(root)) {
+    for (const specifier of importsOf(file)) {
+      const resolved = specifier === '@shared/types'
+        ? retiredAggregate
+        : specifier.startsWith('.')
+          ? path.resolve(path.dirname(file), `${specifier}.ts`)
+          : null
+      if (resolved === retiredAggregate) {
+        violations.push(`${file}: import types from the owning shared domain module, not ${specifier}`)
+      }
     }
   }
+}
+
+for (const file of sourceFiles('src/main/ipc')) {
+  if (['src/main/ipc/shared.ts', 'src/main/ipc/typedIpcAdapter.ts'].includes(file.replaceAll('\\', '/'))) {
+    continue
+  }
+  const source = readFileSync(file, 'utf8')
+  if (/\bregisterHandler\b/.test(source)) {
+    violations.push(`${file}: IPC handlers must register through a typed contract adapter`)
+  }
+  if (/webContents(?:\.|\?\.)send\s*\(/.test(source)) {
+    violations.push(`${file}: IPC events must send through a typed event adapter`)
+  }
+}
+
+const preloadSource = readFileSync('src/preload/index.ts', 'utf8')
+const preloadApiSource = preloadSource.slice(preloadSource.indexOf('const api ='))
+if (/\binvoke\s*</.test(preloadApiSource)) {
+  violations.push('src/preload/index.ts: exposed APIs must invoke through a typed domain helper')
+}
+if (/ipcRenderer\.on\s*\(\s*IPC\./.test(preloadApiSource)) {
+  violations.push('src/preload/index.ts: exposed event APIs must subscribe through a typed domain helper')
 }
 
 for (const file of sourceFiles('src/renderer/src')) {
@@ -137,4 +173,4 @@ if (violations.length > 0) {
   process.exit(1)
 }
 
-console.log('Actress, video, and scrape dependency boundaries are valid.')
+console.log('Domain IPC, shared types, and process dependency boundaries are valid.')

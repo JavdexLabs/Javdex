@@ -1,16 +1,8 @@
 import { dialog } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import type {
-  PluginDevAgentMessageInput,
-  PluginDevAgentSessionResult,
-  PluginDevAgentStartInput,
-  PluginDevDryRunInput,
-  PluginDevDryRunResult,
-  PluginDevInstallInput,
-  PluginDevVerifyInput,
-  ScraperPluginDescriptor
-} from '@shared/types'
-import type { PluginDevVerificationReport } from '@shared/types'
+import type { PluginDevAgentMessageInput, PluginDevAgentSessionResult, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevDryRunResult, PluginDevInstallInput, PluginDevVerifyInput } from '@shared/pluginDevTypes'
+import type { ScraperPluginDescriptor } from '@shared/scrapeTypes'
+import type { PluginDevVerificationReport } from '@shared/pluginDevTypes'
 import { dryRunPluginPackage, installDevPluginPackage } from '../services/pluginDevService'
 import {
   cancelPluginDevAgent,
@@ -25,12 +17,13 @@ import {
 } from '../services/pluginDevAgent/workLog'
 import { verifyDebugResultAgainstPages } from '../services/pluginDevVerification'
 import { getSettings } from '../settings/settingsStore'
-import { registerHandler, type IpcContext } from './shared'
+import type { IpcContext } from './shared'
+import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 
 export function registerPluginDevHandlers(ctx: IpcContext): void {
-  registerHandler(
+  appCommandAdapter.register(
     IPC.PLUGIN_DEV_AGENT_START,
-    (_e, input: PluginDevAgentStartInput): Promise<PluginDevAgentSessionResult> =>
+    (input): Promise<PluginDevAgentSessionResult> =>
       startPluginDevAgent(
         {
           ...input,
@@ -38,26 +31,26 @@ export function registerPluginDevHandlers(ctx: IpcContext): void {
           maxContextTokens: getSettings().pluginDevAgentMaxContextTokens
         },
         (event) => {
-          ctx.getWindow()?.webContents.send(IPC.PLUGIN_DEV_AGENT_EVENT, event)
+          appEventAdapter.send(ctx.getWindow()?.webContents, IPC.PLUGIN_DEV_AGENT_EVENT, event)
         }
       )
   )
 
-  registerHandler(
+  appCommandAdapter.register(
     IPC.PLUGIN_DEV_AGENT_MESSAGE,
-    (_e, input: PluginDevAgentMessageInput): Promise<PluginDevAgentSessionResult> =>
+    (input): Promise<PluginDevAgentSessionResult> =>
       continuePluginDevAgent(input, (event) => {
-        ctx.getWindow()?.webContents.send(IPC.PLUGIN_DEV_AGENT_EVENT, event)
+        appEventAdapter.send(ctx.getWindow()?.webContents, IPC.PLUGIN_DEV_AGENT_EVENT, event)
       })
   )
 
-  registerHandler(IPC.PLUGIN_DEV_AGENT_CANCEL, (_e, sessionId: string): void => {
+  appCommandAdapter.register(IPC.PLUGIN_DEV_AGENT_CANCEL, (sessionId): void => {
     cancelPluginDevAgent(sessionId)
   })
 
-  registerHandler(
+  appCommandAdapter.register(
     IPC.PLUGIN_DEV_AGENT_EXPORT_WORK_LOG,
-    async (_e, sessionId: string): Promise<string | null> => {
+    async (sessionId): Promise<string | null> => {
       const session = getSession(sessionId)
       if (!session) throw new Error('会话不存在或已过期，无法导出工作日志')
       const options: Electron.SaveDialogOptions = {
@@ -79,14 +72,14 @@ export function registerPluginDevHandlers(ctx: IpcContext): void {
     }
   )
 
-  registerHandler(
+  appCommandAdapter.register(
     IPC.PLUGIN_DEV_DRY_RUN,
-    (_e, input: PluginDevDryRunInput): Promise<PluginDevDryRunResult> => dryRunPluginPackage(input)
+    (input): Promise<PluginDevDryRunResult> => dryRunPluginPackage(input)
   )
 
-  registerHandler(
+  appCommandAdapter.register(
     IPC.PLUGIN_DEV_VERIFY,
-    (_e, input: PluginDevVerifyInput): Promise<PluginDevVerificationReport> =>
+    (input): Promise<PluginDevVerificationReport> =>
       verifyDebugResultAgainstPages({
         kind: input.kind,
         lastResult: input.lastResult,
@@ -98,9 +91,9 @@ export function registerPluginDevHandlers(ctx: IpcContext): void {
       })
   )
 
-  registerHandler(
+  appCommandAdapter.register(
     IPC.PLUGIN_DEV_INSTALL,
-    (_e, input: PluginDevInstallInput): Promise<ScraperPluginDescriptor> =>
+    (input): Promise<ScraperPluginDescriptor> =>
       installDevPluginPackage(input)
   )
 }

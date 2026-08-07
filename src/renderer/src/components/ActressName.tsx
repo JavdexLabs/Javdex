@@ -1,4 +1,4 @@
-import type { ActressGender } from '@shared/types'
+import type { ActressGender } from '@shared/actressTypes'
 
 interface Props {
   name: string

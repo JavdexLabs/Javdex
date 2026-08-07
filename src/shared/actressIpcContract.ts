@@ -4,31 +4,9 @@ import type {
   IpcContractChannel,
   IpcContractResult
 } from './typedIpcContract'
-import type {
-  ActressAvatarSourceInfo,
-  ActressConflictReviewSummary,
-  ActressDetail,
-  ActressEditInput,
-  ActressFaceScanManifestItem,
-  ActressGalleryAsset,
-  ActressGalleryImportInput,
-  ActressGenderFilter,
-  ActressListItem,
-  ActressListPage,
-  ActressListQuery,
-  ActressListSortBy,
-  ActressMergeInput,
-  ActressNameConflictGroup,
-  DiscardPendingActressScrapeInput,
-  DiscardPendingActressScrapeResult,
-  InspectActressConflictNameInput,
-  InspectActressConflictNameResult,
-  ListSortDir,
-  ResolveActressConflictInput,
-  ResolveActressConflictResult,
-  ValidateIllegalNameReplacementsInput,
-  ValidateIllegalNameReplacementsResult
-} from './types'
+import type { ActressAvatarSourceInfo, ActressEditInput, ActressFaceScanManifestItem, ActressGalleryAsset, ActressGalleryImportInput, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressMergeInput, ListSortDir } from './actressTypes'
+import type { ActressDetail } from './libraryTypes'
+import type { ActressConflictReviewSummary, ActressNameConflictGroup, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from './actressConflictTypes'
 
 export interface ActressDeleteCleanupFailure {
   path: string

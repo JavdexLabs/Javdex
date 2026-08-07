@@ -1,11 +1,7 @@
 import { app } from 'electron'
 import { Worker } from 'node:worker_threads'
 import path from 'node:path'
-import type {
-  ActressScrapeResult,
-  ScrapeResult,
-  ScraperPluginKind
-} from '@shared/types'
+import type { ActressScrapeResult, ScrapeResult, ScraperPluginKind } from '@shared/scrapeTypes'
 import { readTestUserDataPath } from '@shared/appIdentity'
 import { scrapeBrowser } from './scrapeBrowser'
 import {

@@ -1,10 +1,6 @@
-import type {
-  BatchProgress,
-  VideoBatchScrapeRequest,
-  VideoScrapeField,
-  VideoScrapeUpdateMode
-} from '@shared/types'
-import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS } from '@shared/types'
+import type { BatchProgress } from '@shared/batchScrapeTypes'
+import type { VideoBatchScrapeRequest, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/scrapeTypes'
+import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS } from '@shared/scrapeTypes'
 import { listVideosForBatchScrape } from '../db/videoRepo'
 import {
   resolveVideoScrapeFieldSources,

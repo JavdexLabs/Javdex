@@ -10,7 +10,7 @@ import { PLUGIN_DEV_TOOL_SCHEMAS } from '../main/services/pluginDevAgent/toolSch
 import { createSession } from '../main/services/pluginDevAgent/sessionStore'
 import { executeTool } from '../main/services/pluginDevAgent/toolExecutor'
 import type { PluginDevAgentStartInput } from '../main/services/pluginDevAgent/types'
-import type { ScraperPluginKind, VideoScrapeField } from '@shared/types'
+import type { ScraperPluginKind, VideoScrapeField } from '@shared/scrapeTypes'
 import { normalizeTestTargets, parseTestTargetList } from '@shared/pluginDevKindProfile'
 
 const MCP_SERVER_NAME = `${APP_PACKAGE_NAME}-plugin-dev`

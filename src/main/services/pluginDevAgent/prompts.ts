@@ -1,4 +1,5 @@
-import type { PluginDevAgentStartInput, ScraperPluginKind } from '@shared/types'
+import type { PluginDevAgentStartInput } from '@shared/pluginDevTypes'
+import type { ScraperPluginKind } from '@shared/scrapeTypes'
 import { APP_DISPLAY_NAME } from '@shared/appIdentity'
 import {
   buildDynamicSearchRules,
@@ -14,7 +15,7 @@ import {
   incrementalEditPolicyText,
   appendCheerioDryRunHint
 } from './pluginDevCodePolicy'
-import type { PluginDevDryRunResult } from '@shared/types'
+import type { PluginDevDryRunResult } from '@shared/pluginDevTypes'
 
 function describeTestTargets(input: PluginDevAgentStartInput): string {
   const unique = normalizeTestTargets(input)

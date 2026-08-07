@@ -7,7 +7,7 @@ import {
   setListScroll
 } from '../listView/listViewMemory'
 import { actressKeys } from './queryKeys'
-import type { ActressListPage } from '@shared/types'
+import type { ActressListPage } from '@shared/actressTypes'
 import { InfiniteQueryObserver, QueryClient, QueryObserver } from '@tanstack/react-query'
 import { actressInfiniteQueryOptions } from './actressInfiniteQueryOptions'
 import { actressFaceScanManifestQueryOptions } from '../actressFaceFilter/manifestQueryOptions'

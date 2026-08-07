@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import type { BatchProgress } from '@shared/types'
+import type { BatchProgress } from '@shared/batchScrapeTypes'
 
 export type BatchProgressPhase = 'advance' | 'finish'
 

@@ -1,13 +1,14 @@
 import { IPC } from '@shared/ipc-channels'
-import type { ManualImportResult, RenameImportResult, ScanResult } from '@shared/types'
+import type { ManualImportResult, RenameImportResult, ScanResult } from '@shared/libraryTypes'
 import { getSettings } from '../settings/settingsStore'
 import { importManual, renameAndImport, scanFolders } from '../scanner/scanner'
-import { registerHandler, type IpcContext } from './shared'
+import type { IpcContext } from './shared'
+import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 
 let activeScan: AbortController | null = null
 
 export function registerScanHandlers(ctx: IpcContext): void {
-  registerHandler(IPC.SCAN_RUN, async (_e, folders?: string[]): Promise<ScanResult> => {
+  appCommandAdapter.register(IPC.SCAN_RUN, async (folders): Promise<ScanResult> => {
     if (activeScan) throw new Error('Scan is already running')
 
     const settings = getSettings()
@@ -22,7 +23,7 @@ export function registerScanHandlers(ctx: IpcContext): void {
       return await scanFolders(
         target,
         (p) => {
-          win?.webContents.send(IPC.SCAN_PROGRESS, p)
+          appEventAdapter.send(win?.webContents, IPC.SCAN_PROGRESS, p)
         },
         { signal: controller.signal }
       )
@@ -31,21 +32,21 @@ export function registerScanHandlers(ctx: IpcContext): void {
     }
   })
 
-  registerHandler(IPC.SCAN_CANCEL, (): boolean => {
+  appCommandAdapter.register(IPC.SCAN_CANCEL, (): boolean => {
     if (!activeScan) return false
     activeScan.abort()
     return true
   })
 
-  registerHandler(
+  appCommandAdapter.register(
     IPC.FILE_RENAME,
-    (_e, oldPath: string, newName: string): Promise<RenameImportResult> =>
+    (oldPath, newName): Promise<RenameImportResult> =>
       renameAndImport(oldPath, newName)
   )
 
-  registerHandler(
+  appCommandAdapter.register(
     IPC.FILE_IMPORT_MANUAL,
-    (_e, filePath: string, code: string): Promise<ManualImportResult> =>
+    (filePath, code): Promise<ManualImportResult> =>
       importManual(filePath, code)
   )
 }

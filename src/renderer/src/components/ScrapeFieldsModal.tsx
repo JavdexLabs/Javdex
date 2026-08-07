@@ -2,7 +2,7 @@ import {
   formatActressScrapeMatchNameLabel,
   type ActressScrapeMatchNameOption
 } from '@shared/actressProfileOptions'
-import type { ScraperPluginDescriptor } from '@shared/types'
+import type { ScraperPluginDescriptor } from '@shared/scrapeTypes'
 import { useEffect, useMemo, useState } from 'react'
 import ScraperSiteSelect from './ScraperSiteSelect'
 import SelectControl from './SelectControl'

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import type { ActressNameConflictGroup } from '@shared/types'
+import type { ActressNameConflictGroup } from '@shared/actressConflictTypes'
 import {
   buildActressConflictDecisionSnapshot,
   buildActressConflictMergeActors,

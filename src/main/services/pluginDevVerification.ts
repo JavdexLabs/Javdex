@@ -1,18 +1,6 @@
-import type {
-  ActressScrapeField,
-  PluginDevAgentMode,
-  PluginDevDiscovery,
-  PluginDevFieldVerification,
-  PluginDevPageInsight,
-  PluginDevVerificationReport,
-  PluginDevVerificationStatus,
-  PluginDevVerifyInput,
-  ScraperPluginKind,
-  VideoScrapeField
-} from '@shared/types'
-import {
-  expandActressScrapeFields
-} from '@shared/types'
+import type { ActressScrapeField, ScraperPluginKind, VideoScrapeField } from '@shared/scrapeTypes'
+import type { PluginDevAgentMode, PluginDevDiscovery, PluginDevFieldVerification, PluginDevPageInsight, PluginDevVerificationReport, PluginDevVerificationStatus, PluginDevVerifyInput } from '@shared/pluginDevTypes'
+import { expandActressScrapeFields } from '@shared/scrapeTypes'
 import { requestAgentJson } from './agentJsonClient'
 import { formatPageInsightForPrompt } from './pluginDevPageFormat'
 import {

@@ -1,9 +1,5 @@
 import { infiniteQueryOptions } from '@tanstack/react-query'
-import type {
-  ActressListItem,
-  ActressListQuery,
-  ActressListStatusCounts
-} from '@shared/types'
+import type { ActressListItem, ActressListQuery, ActressListStatusCounts } from '@shared/actressTypes'
 import { nextActressPageOffset } from './actressListPages'
 import { actressKeys } from './queryKeys'
 

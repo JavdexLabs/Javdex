@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useImagePreviewById } from '../hooks/useImagePreviewById'
-import type { VideoAsset } from '@shared/types'
+import type { VideoAsset } from '@shared/videoTypes'
 import { prepareVideoSamplesForDisplay, SAMPLE_FALLBACK_RATIO } from '@shared/mediaGalleryDisplay'
 import { api, assetUrl } from '../api'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'

@@ -4,8 +4,13 @@ import type {
   PluginDevAgentMessageInput,
   PluginDevAgentSessionResult,
   PluginDevAgentStartInput,
-  PluginDevSessionStatus
-} from '@shared/types'
+  PluginDevAgentWorkLogEntry,
+  PluginDevDryRunResult,
+  PluginDevPageInsight,
+  PluginDevSessionStatus,
+  PluginDevVerificationReport
+} from '@shared/pluginDevTypes'
+import type { ScraperPluginPackage } from '@shared/scrapeTypes'
 
 export type {
   PluginDevAgentEvent,
@@ -15,7 +20,7 @@ export type {
   PluginDevAgentSessionResult,
   PluginDevAgentStartInput,
   PluginDevSessionStatus
-} from '@shared/types'
+} from '@shared/pluginDevTypes'
 
 export interface PluginDevSessionLimits {
   maxSteps: number
@@ -27,10 +32,10 @@ export interface PluginDevSessionLimits {
 export interface PluginDevSession extends PluginDevAgentStartInput {
   id: string
   status: PluginDevSessionStatus
-  package: import('@shared/types').ScraperPluginPackage
+  package: ScraperPluginPackage
   pageNotes: Array<{ text: string; at: number }>
-  lastDryRun?: import('@shared/types').PluginDevDryRunResult
-  lastVerification?: import('@shared/types').PluginDevVerificationReport
+  lastDryRun?: PluginDevDryRunResult
+  lastVerification?: PluginDevVerificationReport
   /** package.code hash when lastDryRun was produced; used to detect stale verify. */
   lastDryRunCodeHash?: string
   lastCodeHash?: string
@@ -45,7 +50,7 @@ export interface PluginDevSession extends PluginDevAgentStartInput {
   incrementalEditOnly: boolean
   /** Terminal sessions are eligible for in-memory cleanup after this timestamp is set. */
   endedAt?: number
-  lastInspectPage?: import('@shared/types').PluginDevPageInsight
+  lastInspectPage?: PluginDevPageInsight
   /** Last injected verification failure hash; avoids repeating identical feedback every loop. */
   lastVerificationPromptHash?: string
   /** Latest user instruction (start message or continue text). */
@@ -53,7 +58,7 @@ export interface PluginDevSession extends PluginDevAgentStartInput {
   /** Protocol-neutral conversation persisted across continue/resume. */
   transcript?: import('./agentMessages').AgentTranscript
   /** Full agent work log for export / workflow analysis (tool details untruncated). */
-  workLog?: import('@shared/types').PluginDevAgentWorkLogEntry[]
+  workLog?: PluginDevAgentWorkLogEntry[]
 }
 
 export interface ToolExecutionResult {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import type { ActressAvatarFilter, ActressFaceScanManifestItem } from '@shared/types'
+import type { ActressAvatarFilter, ActressFaceScanManifestItem } from '@shared/actressTypes'
 import { api, assetUrl } from '../api'
 import { cancelPendingAvatarAutoCrop } from '../avatarAutoCrop/service'
 import { detectActressAvatarFace } from './detect'

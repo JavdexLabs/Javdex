@@ -1,4 +1,4 @@
-import type { ActressFaceScanManifestItem } from '@shared/types'
+import type { ActressFaceScanManifestItem } from '@shared/actressTypes'
 import { actressKeys } from '../query/queryKeys'
 
 export function actressFaceScanManifestQueryOptions(

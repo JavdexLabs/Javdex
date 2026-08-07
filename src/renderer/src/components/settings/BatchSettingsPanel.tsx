@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react'
-import type { BatchProgress } from '@shared/types'
+import type { BatchProgress } from '@shared/batchScrapeTypes'
 import { batchStatusLabel } from '../../settings/settingsDisplay'
 import { SettingsEmptyPanel, SettingsStatusPill } from './SettingsPrimitives'
 import BatchTaskControls, { type BatchControlHandler } from './BatchTaskControls'

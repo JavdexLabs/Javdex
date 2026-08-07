@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ManualImportResult } from '@shared/types'
+import type { ManualImportResult } from '@shared/libraryTypes'
 import { api } from '../../api'
 import { useToast } from '../Toast'
 

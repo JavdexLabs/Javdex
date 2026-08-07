@@ -2,18 +2,8 @@ import { app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import process from 'node:process'
-import {
-  DEFAULT_SETTINGS,
-  type AppSettings,
-  type CompositeScraperDefinition,
-  type ScraperPluginDelaySettings,
-  expandActressScrapeFields,
-  normalizePluginDevAgentMaxContextTokens,
-  normalizePluginDevAgentMaxSteps,
-  normalizePrivacyModeScopes,
-  normalizeTheme,
-  normalizeMinScanImportDurationMinutes
-} from '@shared/types'
+import { DEFAULT_SETTINGS, normalizePluginDevAgentMaxContextTokens, normalizePluginDevAgentMaxSteps, normalizePrivacyModeScopes, normalizeTheme, normalizeMinScanImportDurationMinutes, type AppSettings } from '@shared/settingsTypes'
+import { expandActressScrapeFields, type CompositeScraperDefinition, type ScraperPluginDelaySettings } from '@shared/scrapeTypes'
 import {
   BUILT_IN_LLM_PROVIDER_BY_ID,
   isReservedLlmProviderId,

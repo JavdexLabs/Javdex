@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { PlaylistCreateInput, PlaylistDetail, PlaylistUpdateInput } from '@shared/types'
+import type { PlaylistCreateInput, PlaylistDetail, PlaylistUpdateInput } from '@shared/playlistTypes'
 import { AppFormField } from './FormPrimitives'
 import ImageImportField from './ImageImportField'
 import Modal from './Modal'

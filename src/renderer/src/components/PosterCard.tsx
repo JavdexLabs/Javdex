@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { navigateToVideoDetail } from '../listView/listNavigation'
-import type { Video } from '@shared/types'
+import type { Video } from '@shared/videoTypes'
 import { assetUrl } from '../api'
 import { useDisplayMode } from './DisplayModeContext'
 import { useEscapeKey } from '../hooks/useEscapeKey'

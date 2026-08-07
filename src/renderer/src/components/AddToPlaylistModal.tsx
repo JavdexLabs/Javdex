@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ListVideo, SearchX } from 'lucide-react'
-import type { PlaylistVideoMembership } from '@shared/types'
+import type { PlaylistVideoMembership } from '@shared/playlistTypes'
 import { api, assetUrl } from '../api'
 import { useToast } from './Toast'
 import Modal from './Modal'

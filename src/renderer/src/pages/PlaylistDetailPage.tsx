@@ -1,13 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
 import { Inbox, Pencil, SearchX } from 'lucide-react'
-import type {
-  PlaylistDetail,
-  PlaylistUpdateInput,
-  PlaylistVideoSortBy,
-  PlaylistVideoSortDir,
-  Video
-} from '@shared/types'
+import type { PlaylistDetail, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoSortDir } from '@shared/playlistTypes'
+import type { Video } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
 import { navigateToPlaylistList } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'

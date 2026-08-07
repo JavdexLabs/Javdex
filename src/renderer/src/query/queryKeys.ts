@@ -1,4 +1,5 @@
-import type { ActressListQuery, VideoQuery } from '@shared/types'
+import type { ActressListQuery } from '@shared/actressTypes'
+import type { VideoQuery } from '@shared/videoTypes'
 import { libraryQueryHash } from '../listView/listQueryParams'
 
 export const videoKeys = {

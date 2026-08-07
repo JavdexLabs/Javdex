@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import type { ScraperPluginDescriptor } from '@shared/types'
-import { ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS } from '@shared/types'
+import type { ScraperPluginDescriptor } from '@shared/scrapeTypes'
+import { ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS } from '@shared/scrapeTypes'
 import PluginCard from '../PluginCard'
 import SelectControl from '../SelectControl'
 import { SettingsCard, SettingsEmptyPanel, SettingsSectionBlock } from './SettingsPrimitives'

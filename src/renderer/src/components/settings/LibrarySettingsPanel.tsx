@@ -1,6 +1,7 @@
 import type { RefObject } from 'react'
 import { AlertTriangle, Clock, FolderOpen, FolderPlus, Play, Square, X } from 'lucide-react'
-import type { AppSettings, ScanResult } from '@shared/types'
+import type { AppSettings } from '@shared/settingsTypes'
+import type { ScanResult } from '@shared/libraryTypes'
 import { UI_ICON_SM } from '../iconDefaults'
 import {
   SettingsCard,

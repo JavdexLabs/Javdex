@@ -1,5 +1,6 @@
 import { useEffect, useRef, type RefObject } from 'react'
-import type { VideoQuery, ScrapedStatus } from '@shared/types'
+import type { VideoQuery } from '@shared/videoTypes'
+import type { ScrapedStatus } from '@shared/commonTypes'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 import SelectControl from './SelectControl'
 import TagFilter from './TagFilter'

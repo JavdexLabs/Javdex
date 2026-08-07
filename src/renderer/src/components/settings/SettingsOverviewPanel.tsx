@@ -12,11 +12,8 @@ import {
   SquareTerminal,
   UserRound
 } from 'lucide-react'
-import type {
-  AppSettings,
-  BatchProgress,
-  ThemeId
-} from '@shared/types'
+import type { AppSettings, ThemeId } from '@shared/settingsTypes'
+import type { BatchProgress } from '@shared/batchScrapeTypes'
 import {
   findLlmProviderViewModel,
   listModelsForProvider,

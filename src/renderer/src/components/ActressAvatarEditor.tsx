@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ActressGalleryAsset, Video } from '@shared/types'
+import type { ActressGalleryAsset } from '@shared/actressTypes'
+import type { Video } from '@shared/videoTypes'
 import { DEFAULT_AVATAR_FACE_RATIO } from '@shared/avatarFaceScale'
 import {
   DEFAULT_AVATAR_CENTERING_MODE,

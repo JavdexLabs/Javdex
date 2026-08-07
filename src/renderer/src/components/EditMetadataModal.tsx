@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { isIsoDate, toDateInputValue, actressMergeGenderGroup } from '@shared/actressProfileOptions'
-import type { Actress, VideoDetail, VideoEditInput } from '@shared/types'
+import type { Actress } from '@shared/actressTypes'
+import type { VideoDetail, VideoEditInput } from '@shared/videoTypes'
 import { assetUrl } from '../api'
 import EditFieldAiTranslate from './EditFieldAiTranslate'
 import { EditFormField, EditFormSection } from './FormPrimitives'

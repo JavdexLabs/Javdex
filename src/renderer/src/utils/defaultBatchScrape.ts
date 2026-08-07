@@ -1,8 +1,4 @@
-import {
-  ALL_ACTRESS_SCRAPE_FIELDS,
-  ALL_VIDEO_SCRAPE_FIELDS,
-  type ActressBatchScrapeScope
-} from '@shared/types'
+import { ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS, type ActressBatchScrapeScope } from '@shared/scrapeTypes'
 import { api } from '../api'
 
 export async function startDefaultUnscrapedVideoBatch(scraperName: string): Promise<void> {

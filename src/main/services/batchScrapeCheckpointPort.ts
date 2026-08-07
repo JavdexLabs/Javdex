@@ -1,4 +1,4 @@
-import type { BatchProgress } from '@shared/scrapeTypes'
+import type { BatchProgress } from '@shared/batchScrapeTypes'
 import type {
   BatchScrapeJobKind,
   BatchScrapeJobTarget,

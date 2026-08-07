@@ -1,33 +1,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import type {
-  ActressBatchScrapeScope,
-  ActressBatchScrapeStatus,
-  AppSettings,
-  ActressScrapeField,
-  ActressScrapeUpdateMode,
-  BatchProgress,
-  CompositeScraperInput,
-  ScanResult,
-  ScraperPluginDescriptor,
-  ScraperPluginPackage,
-  ScraperPluginUpdateInput,
-  VideoBatchScrapeStatus,
-  VideoScrapeField,
-  VideoScrapeUpdateMode
-} from '@shared/types'
-import {
-  ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS,
-  ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS,
-  ACTRESS_SCRAPE_FIELD_OPTIONS,
-  ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS,
-  ALL_ACTRESS_SCRAPE_FIELDS,
-  ALL_VIDEO_SCRAPE_FIELDS,
-  VIDEO_BATCH_SCRAPE_STATUS_OPTIONS,
-  VIDEO_SCRAPE_FIELD_OPTIONS,
-  VIDEO_SCRAPE_UPDATE_MODE_OPTIONS
-} from '@shared/types'
+import type { ActressBatchScrapeScope, ActressBatchScrapeStatus, ActressScrapeField, ActressScrapeUpdateMode, CompositeScraperInput, ScraperPluginDescriptor, ScraperPluginPackage, ScraperPluginUpdateInput, VideoBatchScrapeStatus, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/scrapeTypes'
+import type { AppSettings } from '@shared/settingsTypes'
+import type { BatchProgress } from '@shared/batchScrapeTypes'
+import type { ScanResult } from '@shared/libraryTypes'
+import { ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS, ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS, ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS, VIDEO_BATCH_SCRAPE_STATUS_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_UPDATE_MODE_OPTIONS } from '@shared/scrapeTypes'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { api } from '../api'
 import { actressKeys, overviewStatsKeys } from '../query/queryKeys'
@@ -77,7 +55,7 @@ import {
   type SettingsTab
 } from '../settings/settingsRoutes'
 import { THEME_OPTIONS } from '../theme'
-import type { ThemeId } from '@shared/types'
+import type { ThemeId } from '@shared/settingsTypes'
 import type { UpdateCheckState } from '@shared/updateTypes'
 
 function shouldAutoScrollBatchLog(container: HTMLDivElement): boolean {

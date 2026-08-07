@@ -1,20 +1,20 @@
 import { IPC } from '@shared/ipc-channels'
-import type { PlayResult } from '@shared/types'
+import type { PlayResult } from '@shared/libraryTypes'
 import { playVideo, playVideoFile, revealVideo, revealVideoFile } from '../services/playerService'
-import { registerHandler } from './shared'
+import { appCommandAdapter } from './appContractAdapter'
 
 export function registerPlayerHandlers(): void {
-  registerHandler(IPC.PLAYER_PLAY, (_e, videoId: number): Promise<PlayResult> =>
+  appCommandAdapter.register(IPC.PLAYER_PLAY, (videoId): Promise<PlayResult> =>
     playVideo(videoId)
   )
 
-  registerHandler(IPC.PLAYER_REVEAL, (_e, videoId: number): PlayResult => revealVideo(videoId))
+  appCommandAdapter.register(IPC.PLAYER_REVEAL, (videoId): PlayResult => revealVideo(videoId))
 
-  registerHandler(IPC.PLAYER_PLAY_FILE, (_e, fileId: number): Promise<PlayResult> =>
+  appCommandAdapter.register(IPC.PLAYER_PLAY_FILE, (fileId): Promise<PlayResult> =>
     playVideoFile(fileId)
   )
 
-  registerHandler(IPC.PLAYER_REVEAL_FILE, (_e, fileId: number): PlayResult =>
+  appCommandAdapter.register(IPC.PLAYER_REVEAL_FILE, (fileId): PlayResult =>
     revealVideoFile(fileId)
   )
 }

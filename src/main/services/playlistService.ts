@@ -1,4 +1,4 @@
-import type { PlaylistCreateInput, PlaylistUpdateInput } from '@shared/types'
+import type { PlaylistCreateInput, PlaylistUpdateInput } from '@shared/playlistTypes'
 import {
   createPlaylistRecord,
   deletePlaylistRecord,

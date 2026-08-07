@@ -1,4 +1,4 @@
-import type { ActressListItem, ActressListPage } from '@shared/types'
+import type { ActressListItem, ActressListPage } from '@shared/actressTypes'
 
 export function flattenActressListPages(pages: readonly ActressListPage[]): ActressListItem[] {
   return pages.flatMap((page) => page.items)

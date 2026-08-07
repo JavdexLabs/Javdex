@@ -1,5 +1,5 @@
 import { getDb } from './database'
-import type { Tag } from '@shared/types'
+import type { Tag } from '@shared/commonTypes'
 
 /** Find or create a tag, returning its id. */
 export function ensureTag(name: string): number {

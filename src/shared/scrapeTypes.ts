@@ -1,4 +1,5 @@
-import type { ActressGender, ActressGenderFilter, ScrapedStatus } from './types'
+import type { ActressGender, ActressGenderFilter } from './actressTypes'
+import type { ScrapedStatus } from './commonTypes'
 
 export interface ScrapeResult {
   code: string
@@ -244,26 +245,3 @@ export type ActressAvatarAutoCropStatus = 'success' | 'skipped' | 'failed'
 export interface ActressAvatarAutoCropOutcome { status: ActressAvatarAutoCropStatus; message?: string }
 export interface ActressAvatarAutoCropRequest extends ActressAvatarAutoCropTarget { requestId: string }
 export interface ActressAvatarAutoCropResponse extends ActressAvatarAutoCropOutcome { requestId: string }
-
-export interface BatchProgress {
-  total: number
-  current: number
-  success: number
-  pending: number
-  failed: number
-  currentCode: string | null
-  status: 'idle' | 'running' | 'paused' | 'done' | 'cancelled'
-  logs: BatchLogEntry[]
-}
-export interface BatchScrapeState {
-  kind: 'video' | 'actress' | null
-  progress: BatchProgress | null
-  recoverable: boolean
-  unrecoverableReason?: string
-}
-export interface BatchLogEntry {
-  time: string
-  code: string
-  level: 'info' | 'success' | 'error'
-  message: string
-}

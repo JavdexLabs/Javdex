@@ -1,20 +1,6 @@
-import type {
-  ActressAvatarAutoCropOutcome,
-  ActressAvatarAutoCropTarget,
-  ActressBatchScrapeRequest,
-  ActressBatchScrapeScope,
-  ActressBatchScrapeStatus,
-  ActressScrapeField,
-  ActressScrapeUpdateMode,
-  BatchProgress
-} from '@shared/types'
-import {
-  ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS,
-  ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS,
-  ACTRESS_BATCH_DEFAULT_MISSING_FIELDS,
-  ACTRESS_SCRAPE_FIELD_OPTIONS,
-  ALL_ACTRESS_SCRAPE_FIELDS
-} from '@shared/types'
+import type { ActressAvatarAutoCropOutcome, ActressAvatarAutoCropTarget, ActressBatchScrapeRequest, ActressBatchScrapeScope, ActressBatchScrapeStatus, ActressScrapeField, ActressScrapeUpdateMode } from '@shared/scrapeTypes'
+import type { BatchProgress } from '@shared/batchScrapeTypes'
+import { ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS, ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS, ACTRESS_BATCH_DEFAULT_MISSING_FIELDS, ACTRESS_SCRAPE_FIELD_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/scrapeTypes'
 import {
   normalizeActressBatchScrapeRequest,
   parseActressBatchScrapeStatus,

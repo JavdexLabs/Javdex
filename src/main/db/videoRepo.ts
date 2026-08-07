@@ -1,22 +1,8 @@
 import { getDb } from './database'
-import type {
-  ActressGender,
-  Video,
-  VideoFile,
-  VideoAsset,
-  VideoDetail,
-  VideoQuery,
-  VideoListResult,
-  ScrapeResult,
-  ScrapedActress,
-  VideoEditInput,
-  VideoBatchScrapeFilter,
-  VideoBatchScrapeStatus,
-  VideoScrapeField,
-  VideoScrapeUpdateMode,
-  VideoRematchScope
-} from '@shared/types'
-import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/types'
+import type { ActressGender } from '@shared/actressTypes'
+import type { Video, VideoFile, VideoAsset, VideoDetail, VideoQuery, VideoListResult, VideoEditInput } from '@shared/videoTypes'
+import type { ScrapeResult, ScrapedActress, VideoBatchScrapeFilter, VideoBatchScrapeStatus, VideoScrapeField, VideoScrapeUpdateMode, VideoRematchScope } from '@shared/scrapeTypes'
+import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/scrapeTypes'
 import { upsertActressFromScrape } from './actressRepo'
 import { actressOwnedNamePatternSearchSql } from './actressSearchSql'
 import { ensureTag, pruneTagIfUnused } from './tagRepo'

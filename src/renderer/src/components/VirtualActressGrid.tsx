@@ -1,6 +1,6 @@
 import { forwardRef, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { FixedSizeGrid, type GridChildComponentProps } from 'react-window'
-import type { ActressListItem } from '@shared/types'
+import type { ActressListItem } from '@shared/actressTypes'
 import { useElementSize } from '../hooks/useElementSize'
 import { useLayoutSpacing } from '../hooks/useLayoutSpacing'
 import { resolveScrollTopForKey, setListScroll } from '../listView/listViewMemory'

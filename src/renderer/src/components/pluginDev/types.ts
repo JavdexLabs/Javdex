@@ -1,4 +1,4 @@
-import type { PluginDevAgentPhase, PluginDevSessionStatus } from '@shared/types'
+import type { PluginDevAgentPhase, PluginDevSessionStatus } from '@shared/pluginDevTypes'
 
 export type PluginKind = 'video' | 'actress'
 

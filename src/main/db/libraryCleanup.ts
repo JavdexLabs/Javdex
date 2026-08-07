@@ -1,4 +1,5 @@
-import type { FacetType, Video } from '@shared/types'
+import type { FacetType } from '@shared/libraryTypes'
+import type { Video } from '@shared/videoTypes'
 import { deleteActress } from './actressRepo'
 import { getDb } from './database'
 

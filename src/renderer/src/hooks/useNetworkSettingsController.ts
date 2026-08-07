@@ -1,5 +1,5 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
-import type { AppSettings } from '@shared/types'
+import type { AppSettings } from '@shared/settingsTypes'
 import { api } from '../api'
 import { useToast } from '../components/Toast'
 

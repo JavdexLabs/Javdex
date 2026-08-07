@@ -1,13 +1,4 @@
-import type {
-  Playlist,
-  PlaylistCreateInput,
-  PlaylistDetail,
-  PlaylistListItem,
-  PlaylistUpdateInput,
-  PlaylistVideoSortBy,
-  PlaylistVideoSortDir,
-  PlaylistVideoMembership
-} from '@shared/types'
+import type { Playlist, PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoSortDir, PlaylistVideoMembership } from '@shared/playlistTypes'
 import { getDb } from './database'
 
 type PlaylistVideoTarget = { playlistId: number; videoId: number }

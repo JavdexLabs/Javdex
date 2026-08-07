@@ -13,9 +13,9 @@ import {
   updateVideoFileAfterProbe,
   videoExistsByPath
 } from '../db/videoRepo'
-import type { ManualImportResult, ScanProgress, ScanResult, RenameImportResult } from '@shared/types'
+import type { ManualImportResult, ScanProgress, ScanResult, RenameImportResult } from '@shared/libraryTypes'
 import type { NewVideo } from '../db/videoRepo'
-import type { VideoFile } from '@shared/types'
+import type { VideoFile } from '@shared/videoTypes'
 import {
   isBelowMinImportDuration,
   readLocalVideoDurationSeconds,

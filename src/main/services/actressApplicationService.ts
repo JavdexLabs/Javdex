@@ -25,31 +25,9 @@ import type {
   ActressDeleteRequest,
   ActressDeleteResult
 } from '@shared/actressIpcContract'
-import type {
-  ActressAvatarSourceInfo,
-  ActressConflictReviewSummary,
-  ActressDetail,
-  ActressEditInput,
-  ActressFaceScanManifestItem,
-  ActressGalleryAsset,
-  ActressGalleryImportInput,
-  ActressGenderFilter,
-  ActressListItem,
-  ActressListPage,
-  ActressListQuery,
-  ActressListSortBy,
-  ActressMergeInput,
-  ActressNameConflictGroup,
-  DiscardPendingActressScrapeInput,
-  DiscardPendingActressScrapeResult,
-  InspectActressConflictNameInput,
-  InspectActressConflictNameResult,
-  ListSortDir,
-  ResolveActressConflictInput,
-  ResolveActressConflictResult,
-  ValidateIllegalNameReplacementsInput,
-  ValidateIllegalNameReplacementsResult
-} from '@shared/types'
+import type { ActressAvatarSourceInfo, ActressEditInput, ActressFaceScanManifestItem, ActressGalleryAsset, ActressGalleryImportInput, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressMergeInput, ListSortDir } from '@shared/actressTypes'
+import type { ActressDetail } from '@shared/libraryTypes'
+import type { ActressConflictReviewSummary, ActressNameConflictGroup, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from '@shared/actressConflictTypes'
 
 export interface ActressApplicationService {
   listLegacy(

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import type { BatchProgress } from '@shared/types'
+import type { BatchProgress } from '@shared/batchScrapeTypes'
 import { isBatchScrapeActive } from './batchScrapeActivity'
 
 function batch(status: BatchProgress['status']): BatchProgress {

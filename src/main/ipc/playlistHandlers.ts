@@ -1,13 +1,5 @@
 import { IPC } from '@shared/ipc-channels'
-import type {
-  PlaylistCreateInput,
-  PlaylistDetail,
-  PlaylistListItem,
-  PlaylistUpdateInput,
-  PlaylistVideoSortBy,
-  PlaylistVideoSortDir,
-  PlaylistVideoMembership
-} from '@shared/types'
+import type { PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoSortDir, PlaylistVideoMembership } from '@shared/playlistTypes'
 import {
   addVideoToPlaylist,
   getPlaylistDetail,
@@ -16,44 +8,43 @@ import {
   removeVideoFromPlaylist
 } from '../db/playlistRepo'
 import { createPlaylist, deletePlaylist, updatePlaylist } from '../services/playlistService'
-import { registerHandler } from './shared'
+import { appCommandAdapter } from './appContractAdapter'
 
 export function registerPlaylistHandlers(): void {
-  registerHandler(IPC.PLAYLIST_LIST, (): PlaylistListItem[] => listPlaylists())
+  appCommandAdapter.register(IPC.PLAYLIST_LIST, (): PlaylistListItem[] => listPlaylists())
 
-  registerHandler(
+  appCommandAdapter.register(
     IPC.PLAYLIST_GET,
     (
-      _e,
       id: number,
       sortBy?: PlaylistVideoSortBy,
       sortDir?: PlaylistVideoSortDir
     ): PlaylistDetail | null => getPlaylistDetail(id, { sortBy, sortDir })
   )
 
-  registerHandler(IPC.PLAYLIST_CREATE, (_e, input: PlaylistCreateInput): number =>
+  appCommandAdapter.register(IPC.PLAYLIST_CREATE, (input): number =>
     createPlaylist(input)
   )
 
-  registerHandler(IPC.PLAYLIST_UPDATE, (_e, id: number, input: PlaylistUpdateInput): boolean => {
+  appCommandAdapter.register(IPC.PLAYLIST_UPDATE, (id, input): boolean => {
     updatePlaylist(id, input)
     return true
   })
 
-  registerHandler(IPC.PLAYLIST_DELETE, (_e, id: number): boolean => {
+  appCommandAdapter.register(IPC.PLAYLIST_DELETE, (id): boolean => {
     deletePlaylist(id)
     return true
   })
 
-  registerHandler(IPC.PLAYLIST_LIST_FOR_VIDEO, (_e, videoId: number): PlaylistVideoMembership[] =>
+  appCommandAdapter.register(IPC.PLAYLIST_LIST_FOR_VIDEO, (videoId): PlaylistVideoMembership[] =>
     listPlaylistsForVideo(videoId)
   )
 
-  registerHandler(IPC.PLAYLIST_ADD_VIDEO, (_e, playlistId: number, videoId: number): boolean =>
+  appCommandAdapter.register(IPC.PLAYLIST_ADD_VIDEO, (playlistId, videoId): boolean =>
     addVideoToPlaylist({ playlistId, videoId })
   )
 
-  registerHandler(IPC.PLAYLIST_REMOVE_VIDEO, (_e, playlistId: number, videoId: number): boolean =>
+  appCommandAdapter.register(IPC.PLAYLIST_REMOVE_VIDEO, (playlistId, videoId): boolean =>
     removeVideoFromPlaylist({ playlistId, videoId })
   )
 }

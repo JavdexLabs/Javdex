@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { SequentialBatchQueue } from './sequentialBatchQueue'
-import type { BatchProgress } from '@shared/types'
+import type { BatchProgress } from '@shared/batchScrapeTypes'
 
 describe('SequentialBatchQueue', () => {
   it('counts success, pending, and failure as disjoint processed outcomes', async () => {

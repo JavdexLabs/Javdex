@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
-import type { ScraperPluginKind, ScraperPluginPackage } from '@shared/types'
+import type { ScraperPluginKind, ScraperPluginPackage } from '@shared/scrapeTypes'
 import {
   builtInDescriptor,
   createCompositeScraper,

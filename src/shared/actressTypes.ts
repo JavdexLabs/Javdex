@@ -1,0 +1,203 @@
+import type { ScrapedStatus } from './commonTypes'
+export type { ActressAvatarCommit, AvatarCropV1 } from './avatarCrop'
+
+// 0-未刮削, 1-刮削成功, 2-刮削失败
+
+export type ActressGender = 'female' | 'male'
+
+export type ActressGenderFilter = ActressGender | 'all'
+
+export type ActressListSortBy = 'video_count' | 'gallery' | 'age' | 'cup_size'
+
+export type ListSortDir = 'asc' | 'desc'
+
+export const ACTRESS_LIST_DEFAULTS = {
+  sortBy: 'video_count' as ActressListSortBy,
+  sortDir: 'desc' as ListSortDir,
+  gender: 'female' as ActressGenderFilter
+}
+
+export interface Actress {
+  id: number
+  main_name: string
+  avatar_path: string | null
+  avatar_source_path: string | null
+  avatar_crop_json: string | null
+  poster_path: string | null
+  birth_date: string | null
+  debut_date: string | null
+  height_cm: number | null
+  bust_cm: number | null
+  waist_cm: number | null
+  hip_cm: number | null
+  /** Single cup letter (A–Z); display suffix added in UI. */
+  cup_size: string | null
+  blood_type: string | null
+  zodiac: string | null
+  nationality: string | null
+  profile_summary: string | null
+  scraped_status: ScrapedStatus
+  last_scraped_at: string | null
+  updated_at: string | null
+  gender: ActressGender | null
+  revision?: number
+}
+
+export interface ActressName {
+  id: number
+  actress_id: number
+  name: string
+  type: 'main' | 'alias' | 'former' | 'native' | 'romaji' | 'english' | 'zh' | string
+  locale: string | null
+  source: string | null
+  is_primary: number
+}
+
+export interface ActressGalleryAsset {
+  id: number
+  actress_id: number
+  type: 'profile' | 'gallery' | string
+  position: number
+  remote_url: string | null
+  local_path: string | null
+  width: number | null
+  height: number | null
+  created_at: string | null
+}
+
+export interface ActressGalleryImportInput {
+  source: 'file' | 'url'
+  /** Absolute local image path, supplied by Electron webUtils.getPathForFile. */
+  sourcePath?: string | null
+  remoteUrl?: string | null
+}
+
+export interface ActressListItem extends Actress {
+  video_count: number
+  /** SHA-256 fingerprint of the current readable display avatar, when available. */
+  avatar_fingerprint?: string | null
+}
+
+/** Minimal renderer-session input for local avatar face detection. */
+export interface ActressFaceScanManifestItem {
+  id: number
+  main_name: string
+  avatar_path: string
+  avatar_fingerprint: string
+}
+
+/** Canonical actress library status filter vocabulary (also the URL values). */
+export type ActressListStatusFilter = 'all' | 'success' | 'unscraped' | 'failed'
+
+/** Actress avatar filter, including the renderer-only local face-detection state. */
+export type ActressAvatarFilter = 'all' | 'with' | 'without' | 'without-face'
+
+export const ACTRESS_LIST_STATUS_SCRAPED_STATUS: Record<
+  Exclude<ActressListStatusFilter, 'all'>,
+  ScrapedStatus
+> = {
+  unscraped: 0,
+  success: 1,
+  failed: 2
+}
+
+const ACTRESS_LIST_STATUS_BY_SCRAPED_STATUS = new Map<
+  ScrapedStatus,
+  Exclude<ActressListStatusFilter, 'all'>
+>(
+  (
+    Object.entries(ACTRESS_LIST_STATUS_SCRAPED_STATUS) as [
+      Exclude<ActressListStatusFilter, 'all'>,
+      ScrapedStatus
+    ][]
+  ).map(([filter, status]) => [status, filter])
+)
+
+/** Filter vocabulary for a stored cumulative status value. */
+export function actressStatusFilterOf(
+  status: ScrapedStatus
+): Exclude<ActressListStatusFilter, 'all'> {
+  return ACTRESS_LIST_STATUS_BY_SCRAPED_STATUS.get(status) ?? 'unscraped'
+}
+
+/**
+ * Single label source for the three concrete cumulative scrape states, shared by the
+ * library filter, avatar badge, detail page, and batch scope so the strings never drift.
+ */
+export const ACTRESS_SCRAPE_STATUS_LABELS: Record<Exclude<ActressListStatusFilter, 'all'>, string> = {
+  unscraped: '未刮削',
+  success: '刮削成功',
+  failed: '刮削失败'
+}
+
+/** Actress library status-filter labels; the "all" option is filter-specific ("全部状态"). */
+export const ACTRESS_STATUS_FILTER_LABELS: Record<ActressListStatusFilter, string> = {
+  all: '全部状态',
+  ...ACTRESS_SCRAPE_STATUS_LABELS
+}
+
+export interface ActressListQuery {
+  search?: string
+  gender?: ActressGenderFilter
+  status?: ActressListStatusFilter
+  avatar?: ActressAvatarFilter
+  sortBy?: ActressListSortBy
+  sortDir?: ListSortDir
+  limit?: number
+  offset?: number
+  /** Renderer-session subset used to page already classified local face results. */
+  actressIds?: number[]
+}
+
+/** Actresses per cumulative status within the current search and gender scope. */
+export type ActressListStatusCounts = Record<ActressListStatusFilter, number>
+
+export interface ActressListPage {
+  items: ActressListItem[]
+  total: number
+  statusCounts: ActressListStatusCounts
+}
+
+/** Read-only source metadata used by renderer-side smart avatar composition. */
+export interface ActressAvatarSourceInfo {
+  assetPath: string
+  sourceFingerprint: string
+  /** True when the selected asset is a legacy display avatar that must become the source. */
+  requiresSourceAdoption: boolean
+}
+
+/** Which actress supplies the surviving main_name after a merge. */
+export type ActressMergeMainNameFrom = 'keep' | 'merge'
+
+export interface ActressMergeInput {
+  keepId: number
+  mergeId: number
+  mainNameFrom: ActressMergeMainNameFrom
+}
+
+export interface ActressEditInput {
+  main_name?: string
+  name_zh?: string | null
+  name_en?: string | null
+  gender?: ActressGender | null
+  birth_date?: string | null
+  debut_date?: string | null
+  height_cm?: number | null
+  bust_cm?: number | null
+  waist_cm?: number | null
+  hip_cm?: number | null
+  cup_size?: string | null
+  blood_type?: string | null
+  zodiac?: string | null
+  nationality?: string | null
+  profile_summary?: string | null
+  aliases?: string[]
+  /** Absolute path to a local image file to import as avatar. */
+  avatarSourcePath?: string
+  /** JPEG avatar bytes (base64) exported from the crop editor. */
+  avatarImageBase64?: string
+  /** Preferred avatar bundle commit (source + display + crop). */
+  avatar?: import('./avatarCrop').ActressAvatarCommit
+  /** Clear display/source/crop together. */
+  clearAvatar?: boolean
+}

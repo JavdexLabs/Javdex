@@ -1,4 +1,4 @@
-import type { AppSettings } from '@shared/types'
+import type { AppSettings } from '@shared/settingsTypes'
 import { FolderOpen, HardDrive, RotateCcw, ShieldCheck, ShieldOff } from 'lucide-react'
 import { UI_ICON_SM } from '../iconDefaults'
 import {

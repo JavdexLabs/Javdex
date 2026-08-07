@@ -1,4 +1,4 @@
-import type { ScrapeResult } from '@shared/types'
+import type { ScrapeResult } from '@shared/scrapeTypes'
 
 /**
  * Plugin contract for a metadata scraper. Implementations parse a remote

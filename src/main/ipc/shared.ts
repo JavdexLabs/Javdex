@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import type { IpcChannel } from '@shared/ipc-channels'
-import type { IpcResponse } from '@shared/types'
+import type { IpcResponse } from '@shared/ipcTypes'
 
 export interface IpcContext {
   getWindow: () => BrowserWindow | null

@@ -1,5 +1,6 @@
-import type { ScrapeResult } from '@shared/types'
-import { ALL_VIDEO_SCRAPE_FIELDS, DEFAULT_SETTINGS, resolveScrapeProxyUrl } from '@shared/types'
+import type { ScrapeResult } from '@shared/scrapeTypes'
+import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/scrapeTypes'
+import { DEFAULT_SETTINGS, resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import {
   applyScrapeResult,
   getVideoById,
@@ -9,7 +10,7 @@ import {
 import { deleteAsset, downloadCover, downloadAvatar, downloadSamples } from '../services/assetService'
 import { getSettings } from '../settings/settingsStore'
 import { scrapeBrowser } from './scrapeBrowser'
-import type { VideoScrapeField, VideoScrapeUpdateMode } from '@shared/types'
+import type { VideoScrapeField, VideoScrapeUpdateMode } from '@shared/scrapeTypes'
 
 /** Registry imports — see file bottom for registration. */
 import type { BaseScraper } from './BaseScraper'
@@ -21,7 +22,7 @@ import {
   loadUserVideoScrapers
 } from './scraperPluginService'
 import { normalizeVideoScrapeResult } from './scraperResultValidation'
-import type { ScraperPluginDescriptor } from '@shared/types'
+import type { ScraperPluginDescriptor } from '@shared/scrapeTypes'
 
 function buildRegistry(): Map<string, BaseScraper> {
   const registry = new Map<string, BaseScraper>()

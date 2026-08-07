@@ -1,9 +1,4 @@
-import type {
-  PluginDevDryRunCase,
-  PluginDevDryRunResult,
-  PluginDevFieldVerification,
-  PluginDevVerificationReport
-} from '@shared/types'
+import type { PluginDevDryRunCase, PluginDevDryRunResult, PluginDevFieldVerification, PluginDevVerificationReport } from '@shared/pluginDevTypes'
 import { SquareTerminal } from 'lucide-react'
 import { formatParseResultKeyLabel } from '@shared/scrapeFieldPromptDocs'
 import EmptyState from '../EmptyState'

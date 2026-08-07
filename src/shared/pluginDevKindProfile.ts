@@ -3,17 +3,8 @@ import {
   buildSupportedFieldsPromptSection,
   buildVideoReturnFieldGlossary
 } from '@shared/scrapeFieldPromptDocs'
-import {
-  ACTRESS_SCRAPE_FIELD_OPTIONS,
-  ALL_ACTRESS_SCRAPE_FIELDS,
-  ALL_VIDEO_SCRAPE_FIELDS,
-  VIDEO_SCRAPE_FIELD_OPTIONS,
-  type ActressScrapeField,
-  type PluginDevDryRunResult,
-  type PluginDevPageInsight,
-  type ScraperPluginKind,
-  type VideoScrapeField
-} from '@shared/types'
+import { ACTRESS_SCRAPE_FIELD_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS, VIDEO_SCRAPE_FIELD_OPTIONS, type ActressScrapeField, type ScraperPluginKind, type VideoScrapeField } from '@shared/scrapeTypes'
+import type { PluginDevDryRunResult, PluginDevPageInsight } from '@shared/pluginDevTypes'
 
 export interface PluginDevKindProfile {
   kind: ScraperPluginKind

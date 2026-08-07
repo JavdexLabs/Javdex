@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import type { ActressListItem } from '@shared/types'
+import type { ActressListItem } from '@shared/actressTypes'
 import {
   actressesWithoutFace,
   actressIdsWithoutFace,

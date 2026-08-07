@@ -4,9 +4,10 @@ import path from 'node:path'
 import axios from 'axios'
 import { createHttpClient } from '../utils/http'
 import { getSettings } from '../settings/settingsStore'
-import { resolveScrapeProxyUrl } from '@shared/types'
+import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import type {
   AppReleaseInfo,
+  ProjectPage,
   UpdateCheckErrorCode,
   UpdateCheckState
 } from '@shared/updateTypes'
@@ -18,7 +19,6 @@ const PROJECT_URLS = {
   releases: 'https://github.com/JavdexLabs/Javdex/releases',
   license: 'https://github.com/JavdexLabs/Javdex/blob/main/LICENSE'
 } as const
-export type ProjectPage = keyof typeof PROJECT_URLS
 const AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
 const MAX_RELEASE_NOTES_LENGTH = 20_000
 const MAX_RELEASE_NAME_LENGTH = 200

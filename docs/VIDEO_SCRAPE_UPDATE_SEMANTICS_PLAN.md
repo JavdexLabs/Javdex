@@ -174,7 +174,7 @@ interface ApplyVideoScrapeResult {
 
 修改以下调用链：
 
-- `src/shared/types.ts`
+- `src/shared/videoTypes.ts` 与 `src/shared/scrapeTypes.ts`
   - `VideoScrapeOneResult` 增加 `warnings: string[]`。
   - 修正 `applied` 注释，使其适用于三种更新方式。
 - `src/main/scrapers/scraperManager.ts`

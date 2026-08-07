@@ -1,7 +1,7 @@
 import { shell } from 'electron'
 import fs from 'node:fs'
 import { getPrimaryVideoFile, getVideoById, getVideoFileById } from '../db/videoRepo'
-import type { PlayResult } from '@shared/types'
+import type { PlayResult } from '@shared/libraryTypes'
 
 async function openFilePath(filePath: string): Promise<PlayResult> {
   if (!fs.existsSync(filePath)) {

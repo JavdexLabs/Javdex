@@ -1,9 +1,4 @@
-import type {
-  ActressBatchScrapeFilter,
-  ActressBatchScrapeRequest,
-  ActressBatchScrapeStatus,
-  LegacyActressBatchScrapeStatus
-} from '@shared/types'
+import type { ActressBatchScrapeFilter, ActressBatchScrapeRequest, ActressBatchScrapeStatus, LegacyActressBatchScrapeStatus } from '@shared/scrapeTypes'
 import { listActressesForBatchScrape, type ActressBatchTarget } from '../db/actressRepo'
 import type { PersistedBatchScrapeJob } from './batchScrapeJobStore'
 

@@ -1,4 +1,4 @@
-import type { ActressScrapeResult } from '@shared/types'
+import type { ActressScrapeResult } from '@shared/scrapeTypes'
 
 /** Plugin contract for actress-profile scrapers (separate from video scrapers). */
 export interface BaseActressScraper {

@@ -1,10 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
-import type {
-  ActressListItem,
-  ActressListQuery,
-  ActressListStatusCounts
-} from '@shared/types'
+import type { ActressListItem, ActressListQuery, ActressListStatusCounts } from '@shared/actressTypes'
 import { api } from '../api'
 import { flattenActressListPages } from './actressListPages'
 import { actressInfiniteQueryOptions } from './actressInfiniteQueryOptions'

@@ -4,7 +4,8 @@ import {
   actressGenderMergeLabel,
   canMergeActressGenders
 } from '@shared/actressProfileOptions'
-import type { ActressDetail, ActressGender, ActressListItem, ActressMergeMainNameFrom } from '@shared/types'
+import type { ActressGender, ActressListItem, ActressMergeMainNameFrom } from '@shared/actressTypes'
+import type { ActressDetail } from '@shared/libraryTypes'
 import { api, assetUrl } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
 import ActressName from './ActressName'

@@ -1,5 +1,5 @@
 import fs from 'node:fs'
-import type { CorrectImportResult, VideoAsset, VideoDetail, VideoEditInput, VideoSampleImportInput } from '@shared/types'
+import type { CorrectImportResult, VideoAsset, VideoDetail, VideoEditInput, VideoSampleImportInput } from '@shared/videoTypes'
 import {
   addVideoSampleAsset,
   addManualVideoTag,

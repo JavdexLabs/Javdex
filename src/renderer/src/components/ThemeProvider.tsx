@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode
 } from 'react'
-import { PRIVACY_MODE_SCOPES, type ThemeId } from '@shared/types'
+import { PRIVACY_MODE_SCOPES, type ThemeId } from '@shared/settingsTypes'
 import { api } from '../api'
 import {
   applyPrivacyMode,

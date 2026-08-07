@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useMatch, useNavigate, useSearchParams } from 'react-router-dom'
 import { ListVideo, SearchX } from 'lucide-react'
-import type { PlaylistCreateInput, PlaylistListItem } from '@shared/types'
+import type { PlaylistCreateInput, PlaylistListItem } from '@shared/playlistTypes'
 import { api, assetUrl } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'

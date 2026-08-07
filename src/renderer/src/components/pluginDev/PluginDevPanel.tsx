@@ -2,18 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Code2, Settings } from 'lucide-react'
 import { findLlmProviderViewModel, listModelsForProvider } from '@shared/llmProviders'
-import type {
-  AppSettings,
-  ActressScrapeField,
-  PluginDevAgentContextStats,
-  PluginDevAgentEvent,
-  PluginDevAgentPhase,
-  PluginDevDryRunResult,
-  PluginDevSessionStatus,
-  PluginDevVerificationReport,
-  ScraperPluginPackage,
-  VideoScrapeField
-} from '@shared/types'
+import type { AppSettings } from '@shared/settingsTypes'
+import type { ActressScrapeField, ScraperPluginPackage, VideoScrapeField } from '@shared/scrapeTypes'
+import type { PluginDevAgentContextStats, PluginDevAgentEvent, PluginDevAgentPhase, PluginDevDryRunResult, PluginDevSessionStatus, PluginDevVerificationReport } from '@shared/pluginDevTypes'
 import { api } from '../../api'
 import { settingsPath } from '../../settings/settingsRoutes'
 import IconButton from '../IconButton'

@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { AssetCryptoProgress } from '@shared/types'
+import type { AssetCryptoProgress } from '@shared/libraryTypes'
 import { invalidateAssetCache } from './assetCache'
 import {
   aliasStoreAbsAt,

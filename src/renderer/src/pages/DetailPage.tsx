@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
 import { ListPlus, Pencil, Play, SearchCheck, SearchX } from 'lucide-react'
-import type { VideoDetail, VideoFile } from '@shared/types'
+import type { VideoDetail, VideoFile } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
@@ -28,12 +28,9 @@ import EmptyState from '../components/EmptyState'
 import { UI_ICON } from '../components/iconDefaults'
 import { useAppBackground } from '../components/AppBackgroundContext'
 import ActressAvatar from '../components/ActressAvatar'
-import type { VideoEditInput, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/types'
-import {
-  VIDEO_SCRAPE_FIELD_OPTIONS,
-  VIDEO_SCRAPE_UPDATE_MODE_OPTIONS,
-  ALL_VIDEO_SCRAPE_FIELDS
-} from '@shared/types'
+import type { VideoEditInput } from '@shared/videoTypes'
+import type { VideoScrapeField, VideoScrapeUpdateMode } from '@shared/scrapeTypes'
+import { VIDEO_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_UPDATE_MODE_OPTIONS, ALL_VIDEO_SCRAPE_FIELDS } from '@shared/scrapeTypes'
 import { splitVideoCode } from '@shared/codeUtils'
 import { resolveVideoDetailDisplayBackgroundPath } from '@shared/detailDisplayBackground'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'

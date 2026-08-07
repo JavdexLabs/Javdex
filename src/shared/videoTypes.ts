@@ -1,4 +1,5 @@
-import type { Actress, ScrapedStatus, Tag } from './types'
+import type { Actress } from './actressTypes'
+import type { ScrapedStatus, Tag } from './commonTypes'
 
 export interface VideoFile {
   id: number

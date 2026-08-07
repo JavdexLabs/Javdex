@@ -110,7 +110,7 @@ const body = await ctx.fetchBuffer(url, {
 
 ### `supportedFields`（video）
 
-字段 id 与 `src/shared/types.ts` 中 `VideoScrapeField` 一致：
+字段 id 与 `src/shared/scrapeTypes.ts` 中 `VideoScrapeField` 一致：
 
 `title`、`summary`、`cover`、`releaseDate`、`maker`、`publisher`、`series`、`director`、`duration`、`actressesFemale`、`actressesMale`、`tags`、`source`、`rating`、`samples`
 

@@ -1,4 +1,4 @@
-import type { ActressListItem } from '@shared/types'
+import type { ActressListItem } from '@shared/actressTypes'
 import { assetUrl } from '../api'
 import ActressAvatar from './ActressAvatar'
 import ActressName from './ActressName'

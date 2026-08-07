@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { resolveScrapeProxyUrl } from '@shared/types'
+import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import { scrapeBrowser } from '../scrapers/scrapeBrowser'
 import { getSettings } from '../settings/settingsStore'
 import { readImageDimensionsFromBuffer } from './assetService'

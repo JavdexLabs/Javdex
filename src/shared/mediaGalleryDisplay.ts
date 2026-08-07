@@ -1,4 +1,5 @@
-import type { ActressGalleryAsset, VideoAsset } from './types'
+import type { ActressGalleryAsset } from './actressTypes'
+import type { VideoAsset } from './videoTypes'
 
 export const GALLERY_FALLBACK_RATIO = 3 / 4
 export const SAMPLE_FALLBACK_RATIO = 16 / 9

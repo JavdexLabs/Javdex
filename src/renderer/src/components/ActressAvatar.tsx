@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { ActressGender } from '@shared/types'
+import type { ActressGender } from '@shared/actressTypes'
 import { useTheme } from './ThemeProvider'
 
 interface Props {

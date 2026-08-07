@@ -1,4 +1,4 @@
-import type { LibraryOverviewStats } from '@shared/types'
+import type { LibraryOverviewStats } from '@shared/libraryTypes'
 import { getDb } from './database'
 
 export function getLibraryOverviewStats(): LibraryOverviewStats {

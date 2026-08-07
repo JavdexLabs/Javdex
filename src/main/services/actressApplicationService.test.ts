@@ -7,7 +7,7 @@ import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { findActressByNameOrAlias, getActressDetail } from '../db/actressRepo'
 import { insertTestVideoWithFile } from '../db/testVideoFixtures'
 import { createActressApplicationService } from './actressApplicationService'
-import type { ActressFaceScanManifestItem, ActressListItem } from '@shared/types'
+import type { ActressFaceScanManifestItem, ActressListItem } from '@shared/actressTypes'
 
 let tempRoot: string | null = null
 

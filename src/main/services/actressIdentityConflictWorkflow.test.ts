@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { ActressNameConflictGroup } from '@shared/types'
+import type { ActressNameConflictGroup } from '@shared/actressConflictTypes'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import {
   deleteActress,

@@ -3,40 +3,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { getDb } from './database'
 import { normalizeActressName } from './actressNameNormalization'
-import type {
-  Actress,
-  ActressDetail,
-  ActressGalleryAsset,
-  Video,
-  ActressScrapeResult,
-  ActressScrapeFieldImpact,
-  ActressEditInput,
-  ActressScrapeField,
-  ActressScrapeUpdateMode,
-  ActressBatchScrapeFilter,
-  ActressBatchScrapeStatus,
-  ActressGender,
-  ActressGenderFilter,
-  ActressFaceScanManifestItem,
-  ActressListItem,
-  ActressListPage,
-  ActressListQuery,
-  ActressListSortBy,
-  ActressListStatusCounts,
-  ActressListStatusFilter,
-  ActressAvatarSourceInfo,
-  ActressAvatarFilter,
-  ActressMergeMainNameFrom,
-  ListSortDir,
-  ScrapedStatus
-} from '@shared/types'
+import type { Actress, ActressGalleryAsset, ActressEditInput, ActressGender, ActressGenderFilter, ActressFaceScanManifestItem, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressListStatusCounts, ActressListStatusFilter, ActressAvatarSourceInfo, ActressAvatarFilter, ActressMergeMainNameFrom, ListSortDir } from '@shared/actressTypes'
+import type { ActressDetail } from '@shared/libraryTypes'
+import type { Video } from '@shared/videoTypes'
+import type { ActressScrapeResult, ActressScrapeFieldImpact, ActressScrapeField, ActressScrapeUpdateMode, ActressBatchScrapeFilter, ActressBatchScrapeStatus } from '@shared/scrapeTypes'
+import type { ScrapedStatus } from '@shared/commonTypes'
 import type { ActressDeleteImpact, ActressDeleteMode } from '@shared/actressIpcContract'
-import {
-  ALL_ACTRESS_SCRAPE_FIELDS,
-  ACTRESS_BATCH_DEFAULT_MISSING_FIELDS,
-  ACTRESS_LIST_STATUS_SCRAPED_STATUS,
-  actressStatusFilterOf
-} from '@shared/types'
+import { ALL_ACTRESS_SCRAPE_FIELDS, ACTRESS_BATCH_DEFAULT_MISSING_FIELDS } from '@shared/scrapeTypes'
+import { ACTRESS_LIST_STATUS_SCRAPED_STATUS, actressStatusFilterOf } from '@shared/actressTypes'
 import {
   createAvatarCropV1,
   parseAvatarCrop,

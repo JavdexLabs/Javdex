@@ -1,4 +1,4 @@
-import type { ActressListItem } from '@shared/types'
+import type { ActressListItem } from '@shared/actressTypes'
 
 interface ActressFaceCacheIdentity {
   id: number

@@ -1,9 +1,11 @@
-import {
-  type PluginDevPageInsight,
-  type PluginDevDryRunCase,
-  type PluginDevDryRunResult,
-  resolveScrapeProxyUrl
-} from '@shared/types'
+import type {
+  PluginDevFieldVerification,
+  PluginDevPageInsight,
+  PluginDevDryRunCase,
+  PluginDevDryRunResult
+} from '@shared/pluginDevTypes'
+import type { ActressScrapeField, ScraperPluginKind, VideoScrapeField } from '@shared/scrapeTypes'
+import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import { scrapeBrowser } from '../../scrapers/scrapeBrowser'
 import { getSettings } from '../../settings/settingsStore'
 import {
@@ -59,10 +61,10 @@ function toolError(
   }
 }
 
-function describeFields(kind: import('@shared/types').ScraperPluginKind, fields: string[]): string {
+function describeFields(kind: ScraperPluginKind, fields: string[]): string {
   return describeFieldsForKind(
     kind,
-    fields as import('@shared/types').VideoScrapeField[] | import('@shared/types').ActressScrapeField[]
+    fields as VideoScrapeField[] | ActressScrapeField[]
   )
 }
 
@@ -248,7 +250,7 @@ function syncSupportedFieldsAfterVerification(
     mode: session.mode,
     kind: session.kind,
     supportedFields: active,
-    verificationItems: verificationItems as import('@shared/types').PluginDevFieldVerification[],
+    verificationItems: verificationItems as PluginDevFieldVerification[],
     lastResults: dryRunResultsForSync(session)
   })
   if (!sync.changed) return []
@@ -320,7 +322,7 @@ function canPreserveVerificationForSupportedFieldsPatch(
   const removable = new Set(
     collectSiteUnsupportedSupportedFields(
       session.kind,
-      current as import('@shared/types').VideoScrapeField[] | import('@shared/types').ActressScrapeField[],
+      current as VideoScrapeField[] | ActressScrapeField[],
       session.lastVerification.items
     )
   )
@@ -342,7 +344,7 @@ function selectCodeForState(code: string, args: Record<string, unknown>): string
   return formatPackageCodeForAgent(selected)
 }
 
-function parserNameForKind(kind: import('@shared/types').ScraperPluginKind): string {
+function parserNameForKind(kind: ScraperPluginKind): string {
   return kind === 'video' ? 'parseVideo' : 'parseActress'
 }
 

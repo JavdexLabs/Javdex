@@ -1,10 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, type CSSProperties } from 'react'
 import { Bot, Download } from 'lucide-react'
-import type {
-  PluginDevAgentContextStats,
-  PluginDevAgentPhase,
-  PluginDevSessionStatus
-} from '@shared/types'
+import type { PluginDevAgentContextStats, PluginDevAgentPhase, PluginDevSessionStatus } from '@shared/pluginDevTypes'
 import { formatToolLabel, toolCategory } from './pluginDevFormat'
 import EmptyState from '../EmptyState'
 import { UI_ICON_SM } from '../iconDefaults'

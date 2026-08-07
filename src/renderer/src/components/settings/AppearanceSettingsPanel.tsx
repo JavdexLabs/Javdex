@@ -1,11 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
-import {
-  PRIVACY_MODE_SCOPES,
-  type AppSettings,
-  type PrivacyModeScope,
-  type ThemeId
-} from '@shared/types'
+import { PRIVACY_MODE_SCOPES, type AppSettings, type PrivacyModeScope, type ThemeId } from '@shared/settingsTypes'
 import {
   MAX_AVATAR_FACE_RATIO,
   MIN_AVATAR_FACE_RATIO,

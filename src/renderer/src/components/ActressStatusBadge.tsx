@@ -1,5 +1,5 @@
-import type { ScrapedStatus } from '@shared/types'
-import { actressStatusFilterOf, ACTRESS_STATUS_FILTER_LABELS } from '@shared/types'
+import type { ScrapedStatus } from '@shared/commonTypes'
+import { actressStatusFilterOf, ACTRESS_STATUS_FILTER_LABELS } from '@shared/actressTypes'
 
 /**
  * Corner badge for actresses that still need attention.

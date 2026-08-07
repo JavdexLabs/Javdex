@@ -5,8 +5,9 @@ import {
   ZODIAC_OPTIONS
 } from '@shared/actressProfileOptions'
 import { formatCupSizeDisplay, normalizeCupSize } from '@shared/cupSizeUtils'
-import type { ActressDetail, ScrapedStatus } from '@shared/types'
-import { ACTRESS_SCRAPE_STATUS_LABELS, actressStatusFilterOf } from '@shared/types'
+import type { ActressDetail } from '@shared/libraryTypes'
+import type { ScrapedStatus } from '@shared/commonTypes'
+import { ACTRESS_SCRAPE_STATUS_LABELS, actressStatusFilterOf } from '@shared/actressTypes'
 
 type MetaItem = { key: string; label: string; value: string; status?: ScrapedStatus }
 

@@ -6,7 +6,7 @@ import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
 import { insertTestVideoWithFile } from './testVideoFixtures'
 import { addAlias, upsertActressFromScrape } from './actressRepo'
-import type { ScrapeResult, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/types'
+import type { ScrapeResult, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/scrapeTypes'
 import {
   addManualVideoTag,
   countVideosForBatchScrape,

@@ -10,8 +10,6 @@ import type {
   ActressScrapeDisposition,
   ActressScrapeField,
   ActressScrapeUpdateMode,
-  BatchProgress,
-  BatchScrapeState,
   ScrapeResult,
   VideoBatchScrapeFilter,
   VideoBatchScrapeRequest,
@@ -22,8 +20,9 @@ import type {
   VideoScrapeOneResult,
   VideoScrapeUpdateMode
 } from '@shared/scrapeTypes'
+import type { BatchProgress, BatchScrapeState } from '@shared/batchScrapeTypes'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/scrapeTypes'
-import type { ActressDetail } from '@shared/types'
+import type { ActressDetail } from '@shared/libraryTypes'
 import type { PersistedBatchScrapeJob } from './batchScrapeJobStore'
 import type { BatchScrapeCheckpointPort } from './batchScrapeCheckpointPort'
 import { actressScrapeQueue } from './actressScrapeQueue'

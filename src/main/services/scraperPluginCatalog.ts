@@ -1,4 +1,4 @@
-import type { AppSettings } from '@shared/types'
+import type { AppSettings } from '@shared/settingsTypes'
 import type {
   CompositeScraperInput,
   ScraperPluginDescriptor,
@@ -6,7 +6,7 @@ import type {
   ScraperPluginPackage,
   ScraperPluginUpdateInput
 } from '@shared/scrapeTypes'
-import { DEFAULT_SETTINGS } from '@shared/types'
+import { DEFAULT_SETTINGS } from '@shared/settingsTypes'
 import { listActressScraperNames, listActressScraperPlugins } from '../scrapers/actressScraperManager'
 import { listScraperNames, listScraperPlugins } from '../scrapers/scraperManager'
 import {

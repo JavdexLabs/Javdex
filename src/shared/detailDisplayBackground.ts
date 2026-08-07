@@ -1,4 +1,5 @@
-import type { ActressGalleryAsset, VideoAsset } from './types'
+import type { ActressGalleryAsset } from './actressTypes'
+import type { VideoAsset } from './videoTypes'
 import {
   detailBackgroundPathFromAsset,
   firstActressGalleryForDisplay,

@@ -18,7 +18,8 @@ import {
   syncSupportedFieldsFromVerification,
   verifyDebugResultAgainstPages
 } from './pluginDevVerification'
-import type { ActressScrapeField, PluginDevDiscovery, VideoScrapeField } from '@shared/types'
+import type { ActressScrapeField, VideoScrapeField } from '@shared/scrapeTypes'
+import type { PluginDevDiscovery } from '@shared/pluginDevTypes'
 
 const discovery: PluginDevDiscovery = {
   pages: [

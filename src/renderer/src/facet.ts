@@ -1,4 +1,4 @@
-import type { FacetType } from '@shared/types'
+import type { FacetType } from '@shared/libraryTypes'
 
 export const FACET_LABEL: Record<FacetType, string> = {
   maker: '制作商',

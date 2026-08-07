@@ -1,10 +1,6 @@
 import { normalizeCupSize } from '@shared/cupSizeUtils'
-import type {
-  ActressGender,
-  ActressScrapeResult,
-  ScrapeResult,
-  ScrapedActress
-} from '@shared/types'
+import type { ActressGender } from '@shared/actressTypes'
+import type { ActressScrapeResult, ScrapeResult, ScrapedActress } from '@shared/scrapeTypes'
 
 type UnknownRecord = Record<string, unknown>
 

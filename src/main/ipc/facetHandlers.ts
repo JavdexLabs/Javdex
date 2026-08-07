@@ -1,23 +1,23 @@
 import { IPC } from '@shared/ipc-channels'
-import type { FacetItem, FacetType } from '@shared/types'
+import type { FacetItem, FacetType } from '@shared/libraryTypes'
 import { deleteFacetEntry, listFacet } from '../db/facetRepo'
 import { listTags, listManualTags } from '../db/tagRepo'
-import { registerHandler } from './shared'
+import { appCommandAdapter } from './appContractAdapter'
 
 export function registerFacetHandlers(): void {
-  registerHandler(
+  appCommandAdapter.register(
     IPC.TAG_LIST,
     (): Array<{ id: number; name: string; video_count: number }> => listTags()
   )
 
-  registerHandler(
+  appCommandAdapter.register(
     IPC.TAG_LIST_MANUAL,
     (): Array<{ id: number; name: string; video_count: number }> => listManualTags()
   )
 
-  registerHandler(IPC.FACET_LIST, (_e, type: FacetType): FacetItem[] => listFacet(type))
+  appCommandAdapter.register(IPC.FACET_LIST, (type): FacetItem[] => listFacet(type))
 
-  registerHandler(IPC.FACET_DELETE, (_e, type: FacetType, value: string): boolean => {
+  appCommandAdapter.register(IPC.FACET_DELETE, (type, value): boolean => {
     deleteFacetEntry(type, value)
     return true
   })

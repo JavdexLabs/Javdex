@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import type { ActressListItem, ActressListPage } from '@shared/types'
+import type { ActressListItem, ActressListPage } from '@shared/actressTypes'
 import { flattenActressListPages, nextActressPageOffset } from './actressListPages'
 
 const counts = { all: 3, success: 0, unscraped: 3, failed: 0 }

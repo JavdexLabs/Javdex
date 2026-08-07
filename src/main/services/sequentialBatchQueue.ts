@@ -1,4 +1,4 @@
-import type { BatchLogEntry, BatchProgress } from '@shared/types'
+import type { BatchLogEntry, BatchProgress } from '@shared/batchScrapeTypes'
 import { getSettings } from '../settings/settingsStore'
 
 type ProgressListener = (progress: BatchProgress) => void

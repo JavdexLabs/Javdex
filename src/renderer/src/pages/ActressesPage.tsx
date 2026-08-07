@@ -2,17 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMatch, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, CircleAlert, SearchCheck, SearchX, Trash2, Users } from 'lucide-react'
-import {
-  ACTRESS_LIST_DEFAULTS,
-  ACTRESS_SCRAPE_FIELD_OPTIONS,
-  ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS,
-  ALL_ACTRESS_SCRAPE_FIELDS,
-  type ActressAvatarFilter,
-  type ActressListItem,
-  type ActressListSortBy,
-  type ActressScrapeField,
-  type ActressScrapeUpdateMode
-} from '@shared/types'
+import { ACTRESS_LIST_DEFAULTS, type ActressAvatarFilter, type ActressListItem, type ActressListSortBy } from '@shared/actressTypes'
+import { ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS, type ActressScrapeField, type ActressScrapeUpdateMode } from '@shared/scrapeTypes'
 import { api } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
@@ -26,7 +17,7 @@ import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
 import ActressFilterPopover, { type ActressFilterState } from '../components/ActressFilterPopover'
 import ActressFaceScanModal from '../components/ActressFaceScanModal'
-import { ACTRESS_STATUS_FILTER_LABELS } from '@shared/types'
+import { ACTRESS_STATUS_FILTER_LABELS } from '@shared/actressTypes'
 import {
   actressQueryHash,
   actressAvatarParam,

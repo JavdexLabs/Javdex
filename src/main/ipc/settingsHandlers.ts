@@ -1,7 +1,8 @@
 import { dialog } from 'electron'
 import path from 'node:path'
 import { IPC } from '@shared/ipc-channels'
-import type { AppSettings, AssetCryptoProgress, LibraryOverviewStats } from '@shared/types'
+import type { AppSettings } from '@shared/settingsTypes'
+import type { AssetCryptoProgress, LibraryOverviewStats } from '@shared/libraryTypes'
 import { getSettings, updateSettings } from '../settings/settingsStore'
 import { getLibraryOverviewStats } from '../db/overviewRepo'
 import { migrateAssetStorage } from '../services/assetMigration'
@@ -14,7 +15,8 @@ import {
 import { listLlmProviderModels, testLlmModelConnection } from '../services/llmConnectionTest'
 import { testProxyConnection } from '../services/proxyConnectionTest'
 import { translateTextToChinese } from '../services/llmTextTranslate'
-import { registerHandler, type IpcContext } from './shared'
+import type { IpcContext } from './shared'
+import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 import type { LlmModelDefinition } from '@shared/llmProviders'
 
 function withResolvedMediaAssetsPath(settings: AppSettings): AppSettings {
@@ -25,16 +27,16 @@ function withResolvedMediaAssetsPath(settings: AppSettings): AppSettings {
 }
 
 export function registerSettingsHandlers(ctx: IpcContext): void {
-  registerHandler(IPC.SETTINGS_GET, (): AppSettings => withResolvedMediaAssetsPath(getSettings()))
+  appCommandAdapter.register(IPC.SETTINGS_GET, (): AppSettings => withResolvedMediaAssetsPath(getSettings()))
 
-  registerHandler(IPC.SETTINGS_OVERVIEW_STATS, (): LibraryOverviewStats => getLibraryOverviewStats())
+  appCommandAdapter.register(IPC.SETTINGS_OVERVIEW_STATS, (): LibraryOverviewStats => getLibraryOverviewStats())
 
-  registerHandler(IPC.SETTINGS_UPDATE, (_e, patch: Partial<AppSettings>): AppSettings => {
+  appCommandAdapter.register(IPC.SETTINGS_UPDATE, (patch): AppSettings => {
     const { assetEncryption: _ignoredCrypto, mediaAssetsPath: _ignoredPath, ...safePatch } = patch
     return withResolvedMediaAssetsPath(updateSettings(safePatch))
   })
 
-  registerHandler(IPC.SETTINGS_PICK_FOLDER, async (): Promise<string[]> => {
+  appCommandAdapter.register(IPC.SETTINGS_PICK_FOLDER, async (): Promise<string[]> => {
     const win = ctx.getWindow()
     const res = await dialog.showOpenDialog(win!, {
       properties: ['openDirectory', 'multiSelections']
@@ -42,48 +44,48 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
     return res.canceled ? [] : res.filePaths
   })
 
-  registerHandler(
+  appCommandAdapter.register(
     IPC.SETTINGS_LLM_TEST_MODEL,
-    async (_e, providerId: string, modelId: string): Promise<string> => {
+    async (providerId, modelId): Promise<string> => {
       return testLlmModelConnection(providerId, modelId)
     }
   )
 
-  registerHandler(
+  appCommandAdapter.register(
     IPC.SETTINGS_LLM_LIST_MODELS,
-    async (_e, providerId: string): Promise<LlmModelDefinition[]> => {
+    async (providerId): Promise<LlmModelDefinition[]> => {
       return listLlmProviderModels(providerId)
     }
   )
 
-  registerHandler(
+  appCommandAdapter.register(
     IPC.SETTINGS_PROXY_TEST,
-    async (_e, kind: unknown, proxyUrl: unknown): Promise<string> => {
+    async (kind, proxyUrl): Promise<string> => {
       if (kind !== 'scrape' && kind !== 'llm') throw new Error('无效的代理类型')
       if (typeof proxyUrl !== 'string') throw new Error('请填写代理地址')
       return testProxyConnection(kind, proxyUrl)
     }
   )
 
-  registerHandler(IPC.LLM_TRANSLATE_TO_CHINESE, async (_e, text: string): Promise<string> => {
+  appCommandAdapter.register(IPC.LLM_TRANSLATE_TO_CHINESE, async (text): Promise<string> => {
     if (typeof text !== 'string') throw new Error('无效的翻译内容')
     return translateTextToChinese(text)
   })
 
-  registerHandler(IPC.ASSET_CRYPTO_SET, async (_e, enabled: boolean): Promise<AppSettings> => {
+  appCommandAdapter.register(IPC.ASSET_CRYPTO_SET, async (enabled): Promise<AppSettings> => {
     const current = getSettings()
     if (current.assetEncryption === enabled) return withResolvedMediaAssetsPath(current)
 
     const win = ctx.getWindow()
     await migrateAssetStorage(enabled, (p: AssetCryptoProgress) => {
-      win?.webContents.send(IPC.ASSET_CRYPTO_PROGRESS, p)
+      appEventAdapter.send(win?.webContents, IPC.ASSET_CRYPTO_PROGRESS, p)
     })
     return withResolvedMediaAssetsPath(updateSettings({ assetEncryption: enabled }))
   })
 
-  registerHandler(
+  appCommandAdapter.register(
     IPC.ASSET_STORAGE_RELOCATE,
-    async (_e, targetPath?: string | null): Promise<AppSettings> => {
+    async (targetPath): Promise<AppSettings> => {
       const current = getSettings()
       const oldRoot = resolveMediaAssetsRoot()
       let newRoot: string
@@ -109,7 +111,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
 
       const win = ctx.getWindow()
       const storedPath = await migrateMediaAssetsLocation(oldRoot, newRoot, (p: AssetCryptoProgress) => {
-        win?.webContents.send(IPC.ASSET_CRYPTO_PROGRESS, p)
+        appEventAdapter.send(win?.webContents, IPC.ASSET_CRYPTO_PROGRESS, p)
       })
       return withResolvedMediaAssetsPath(updateSettings({ mediaAssetsPath: storedPath }))
     }

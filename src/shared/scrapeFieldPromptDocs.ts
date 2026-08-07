@@ -1,8 +1,4 @@
-import {
-  ACTRESS_SCRAPE_FIELD_OPTIONS,
-  VIDEO_SCRAPE_FIELD_OPTIONS,
-  type ScraperPluginKind
-} from './types'
+import { ACTRESS_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS, type ScraperPluginKind } from './scrapeTypes'
 
 const VIDEO_SUPPORTED_FIELD_RETURN_MAP: Record<string, string> = {
   title: 'title',

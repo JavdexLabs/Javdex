@@ -1,13 +1,7 @@
-import type {
-  ActressAvatarFilter,
-  ActressGenderFilter,
-  ActressListStatusFilter,
-  ScrapedStatus,
-  VideoQuery,
-  ActressListSortBy,
-  ListSortDir
-} from '@shared/types'
-import { ACTRESS_LIST_DEFAULTS } from '@shared/types'
+import type { ActressAvatarFilter, ActressGenderFilter, ActressListStatusFilter, ActressListSortBy, ListSortDir } from '@shared/actressTypes'
+import type { ScrapedStatus } from '@shared/commonTypes'
+import type { VideoQuery } from '@shared/videoTypes'
+import { ACTRESS_LIST_DEFAULTS } from '@shared/actressTypes'
 
 /** Shared list URL keys (library, actresses, facet list). */
 export const LIST_PARAM = {

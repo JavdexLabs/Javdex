@@ -1,4 +1,4 @@
-import type { BatchProgress } from '@shared/types'
+import type { BatchProgress } from '@shared/batchScrapeTypes'
 
 /** True only while a batch is in-flight; done/cancelled results stay visible but are not “active”. */
 export function isBatchScrapeActive(batch: BatchProgress | null): boolean {

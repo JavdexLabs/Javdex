@@ -1,10 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import {
-  normalizePluginDevAgentMaxContextTokens,
-  normalizePluginDevAgentMaxSteps
-} from '@shared/types'
+import { normalizePluginDevAgentMaxContextTokens, normalizePluginDevAgentMaxSteps } from '@shared/settingsTypes'
 import type { PluginDevAgentStartInput, PluginDevSession } from './types'
-import type { ScraperPluginPackage } from '@shared/types'
+import type { ScraperPluginPackage } from '@shared/scrapeTypes'
 import { getSettings } from '../../settings/settingsStore'
 import { hasSubstantialPluginCode } from './pluginDevCodePolicy'
 import {

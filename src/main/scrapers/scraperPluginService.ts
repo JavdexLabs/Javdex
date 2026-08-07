@@ -2,23 +2,7 @@ import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
-import {
-  ActressScrapeResult,
-  ALL_ACTRESS_SCRAPE_FIELDS,
-  ALL_VIDEO_SCRAPE_FIELDS,
-  expandActressScrapeFields,
-  ScrapeResult,
-  type ActressScrapeField,
-  type CompositeScraperInput,
-  type ScraperPluginDelay,
-  ScraperPluginDescriptor,
-  ScraperPluginKind,
-  ScraperPluginPackage,
-  type ScraperPluginUpdateInput,
-  type VideoScrapeField,
-  type ScraperPluginPackageExport,
-  type ScraperPluginPackageImport
-} from '@shared/types'
+import { ActressScrapeResult, ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS, expandActressScrapeFields, ScrapeResult, ScraperPluginDescriptor, ScraperPluginKind, ScraperPluginPackage, type ActressScrapeField, type CompositeScraperInput, type ScraperPluginDelay, type ScraperPluginUpdateInput, type VideoScrapeField, type ScraperPluginPackageExport, type ScraperPluginPackageImport } from '@shared/scrapeTypes'
 import type { BaseScraper } from './BaseScraper'
 import type { BaseActressScraper } from './BaseActressScraper'
 import {

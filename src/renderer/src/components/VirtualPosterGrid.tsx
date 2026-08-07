@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { FixedSizeGrid, type GridChildComponentProps } from 'react-window'
-import type { Video } from '@shared/types'
+import type { Video } from '@shared/videoTypes'
 import { useElementSize } from '../hooks/useElementSize'
 import { useLayoutSpacing } from '../hooks/useLayoutSpacing'
 import { resolveScrollTopForKey, setListScroll } from '../listView/listViewMemory'

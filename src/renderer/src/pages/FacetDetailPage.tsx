@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Outlet, useLocation, useMatch, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Inbox, SearchX } from 'lucide-react'
-import type { VideoQuery } from '@shared/types'
+import type { VideoQuery } from '@shared/videoTypes'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api'
 import { useToast } from '../components/Toast'

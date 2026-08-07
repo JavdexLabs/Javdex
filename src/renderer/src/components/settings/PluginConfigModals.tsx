@@ -1,17 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
-import type {
-  ActressScrapeField,
-  CompositeScraperInput,
-  ScraperPluginDescriptor,
-  ScraperPluginUpdateInput,
-  VideoScrapeField
-} from '@shared/types'
-import {
-  ACTRESS_SCRAPE_FIELD_OPTIONS,
-  ALL_ACTRESS_SCRAPE_FIELDS,
-  ALL_VIDEO_SCRAPE_FIELDS,
-  VIDEO_SCRAPE_FIELD_OPTIONS
-} from '@shared/types'
+import type { ActressScrapeField, CompositeScraperInput, ScraperPluginDescriptor, ScraperPluginUpdateInput, VideoScrapeField } from '@shared/scrapeTypes'
+import { ACTRESS_SCRAPE_FIELD_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS, VIDEO_SCRAPE_FIELD_OPTIONS } from '@shared/scrapeTypes'
 import Modal from '../Modal'
 import SelectControl from '../SelectControl'
 import { SettingsNumberStepper } from './SettingsPrimitives'

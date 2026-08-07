@@ -7,8 +7,6 @@ import type {
   ActressScrapeDisposition,
   ActressScrapeField,
   ActressScrapeUpdateMode,
-  BatchProgress,
-  BatchScrapeState,
   CompositeScraperInput,
   ScraperPluginDescriptor,
   ScraperPluginPackage,
@@ -21,6 +19,7 @@ import type {
   VideoScrapeOneResult,
   VideoScrapeUpdateMode
 } from './scrapeTypes'
+import type { BatchProgress, BatchScrapeState } from './batchScrapeTypes'
 import type {
   IpcContractArgs,
   IpcContractChannel,

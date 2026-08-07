@@ -7,7 +7,7 @@ import process from 'node:process'
 import { cleanupSessions, createSession, deleteSession, getSession, hashCode, markSessionEnded } from './sessionStore'
 import { executeTool } from './toolExecutor'
 
-import type { VideoScrapeField } from '@shared/types'
+import type { VideoScrapeField } from '@shared/scrapeTypes'
 
 const baseInput = {
   mode: 'create' as const,

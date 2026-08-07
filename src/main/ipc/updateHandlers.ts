@@ -6,26 +6,26 @@ import {
   openExternalReleaseLink,
   openProjectPage,
   openReleasePage,
-  onUpdateCheckStateChanged,
-  type ProjectPage
+  onUpdateCheckStateChanged
 } from '../services/appReleaseService'
+import type { ProjectPage } from '@shared/updateTypes'
 import type { IpcContext } from './shared'
-import { registerHandler } from './shared'
+import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 
 export function registerUpdateHandlers(ctx: IpcContext): void {
-  registerHandler(IPC.APP_UPDATE_GET_STATE, () => getUpdateCheckState())
-  registerHandler(IPC.APP_UPDATE_CHECK, () => checkForLatestRelease())
-  registerHandler(IPC.APP_UPDATE_OPEN_RELEASE, () => openReleasePage())
-  registerHandler(IPC.APP_UPDATE_OPEN_PROJECT_PAGE, (_event, page: ProjectPage) =>
+  appCommandAdapter.register(IPC.APP_UPDATE_GET_STATE, () => getUpdateCheckState())
+  appCommandAdapter.register(IPC.APP_UPDATE_CHECK, () => checkForLatestRelease())
+  appCommandAdapter.register(IPC.APP_UPDATE_OPEN_RELEASE, () => openReleasePage())
+  appCommandAdapter.register(IPC.APP_UPDATE_OPEN_PROJECT_PAGE, (page) =>
     openProjectPage(page)
   )
-  registerHandler(IPC.APP_UPDATE_OPEN_EXTERNAL_LINK, (_event, url: string) =>
+  appCommandAdapter.register(IPC.APP_UPDATE_OPEN_EXTERNAL_LINK, (url) =>
     openExternalReleaseLink(url)
   )
-  registerHandler(IPC.APP_UPDATE_IGNORE_VERSION, (_event, version: string) =>
+  appCommandAdapter.register(IPC.APP_UPDATE_IGNORE_VERSION, (version) =>
     ignoreUpdateVersion(version)
   )
   onUpdateCheckStateChanged((state) => {
-    ctx.getWindow()?.webContents.send(IPC.APP_UPDATE_STATE_CHANGED, state)
+    appEventAdapter.send(ctx.getWindow()?.webContents, IPC.APP_UPDATE_STATE_CHANGED, state)
   })
 }

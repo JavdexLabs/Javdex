@@ -1,4 +1,4 @@
-import type { ActressGalleryAsset, ActressGalleryImportInput } from '@shared/types'
+import type { ActressGalleryAsset, ActressGalleryImportInput } from '@shared/actressTypes'
 import {
   addActressGalleryAsset,
   deleteActressGalleryAsset,

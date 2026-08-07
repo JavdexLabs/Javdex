@@ -1,4 +1,4 @@
-import type { ScraperPluginPackage } from '@shared/types'
+import type { ScraperPluginPackage } from '@shared/scrapeTypes'
 
 export function fingerprintPluginPackage(pkg: ScraperPluginPackage): string {
   return JSON.stringify({

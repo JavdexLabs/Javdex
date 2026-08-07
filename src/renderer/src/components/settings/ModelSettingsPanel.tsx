@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import type { AppSettings } from '@shared/types'
+import type { AppSettings } from '@shared/settingsTypes'
 import {
   buildLlmProviderViewModels,
   findLlmProviderViewModel,

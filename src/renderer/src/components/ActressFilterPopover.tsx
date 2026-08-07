@@ -1,5 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react'
-import type { ActressAvatarFilter, ActressListStatusFilter } from '@shared/types'
+import type { ActressAvatarFilter, ActressListStatusFilter } from '@shared/actressTypes'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 import SelectControl from './SelectControl'
 

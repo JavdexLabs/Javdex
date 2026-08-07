@@ -2,7 +2,7 @@ import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
-import type { ScraperPluginKind } from '@shared/types'
+import type { ScraperPluginKind } from '@shared/scrapeTypes'
 import { BUNDLED_PLUGINS_ROOT_ENV } from '@shared/appIdentity'
 
 export interface BundledPluginRecord {

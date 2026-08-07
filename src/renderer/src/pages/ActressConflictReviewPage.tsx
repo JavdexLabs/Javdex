@@ -12,18 +12,10 @@ import {
   UserRoundSearch,
   UsersRound
 } from 'lucide-react'
-import type {
-  ActressListItem,
-  ActressNameConflictGroup,
-  ActressPendingNameType,
-  ActressScrapeField,
-  ActressScrapeFieldImpact,
-  ActressScrapeUpdateMode,
-  PendingActressNameClaim,
-  PendingActressScrapeCandidate,
-  ResolveActressConflictInput
-} from '@shared/types'
-import { ACTRESS_SCRAPE_FIELD_OPTIONS } from '@shared/types'
+import type { ActressListItem } from '@shared/actressTypes'
+import type { ActressNameConflictGroup, ActressPendingNameType, PendingActressNameClaim, PendingActressScrapeCandidate, ResolveActressConflictInput } from '@shared/actressConflictTypes'
+import type { ActressScrapeField, ActressScrapeFieldImpact, ActressScrapeUpdateMode } from '@shared/scrapeTypes'
+import { ACTRESS_SCRAPE_FIELD_OPTIONS } from '@shared/scrapeTypes'
 import { api, resolveMediaSrc } from '../api'
 import ActressAvatar from '../components/ActressAvatar'
 import ConfirmModal from '../components/ConfirmModal'

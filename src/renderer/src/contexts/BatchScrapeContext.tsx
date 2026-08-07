@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode
 } from 'react'
-import type { BatchProgress } from '@shared/types'
+import type { BatchProgress } from '@shared/batchScrapeTypes'
 import { api } from '../api'
 import { isBatchScrapeActive } from './batchScrapeActivity'
 

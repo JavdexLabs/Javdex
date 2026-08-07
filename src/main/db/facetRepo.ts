@@ -1,5 +1,5 @@
 import { getDb } from './database'
-import type { FacetType, FacetItem } from '@shared/types'
+import type { FacetType, FacetItem } from '@shared/libraryTypes'
 
 // Whitelist column mapping to prevent SQL injection via the facet type.
 const COLUMN: Record<FacetType, string> = {

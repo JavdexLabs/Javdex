@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createAvatarCropV1, parseAvatarCrop } from '@shared/avatarCrop'
-import type { ScrapedStatus } from '@shared/types'
+import type { ScrapedStatus } from '@shared/commonTypes'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
 import { insertTestVideoWithFile } from './testVideoFixtures'
 import {

@@ -6,10 +6,15 @@ import type {
   ActressDeleteMode,
   ActressIpcArgs,
   ActressIpcChannel,
-  ActressIpcEvent,
-  ActressIpcEventChannel,
   ActressIpcResult
 } from '../shared/actressIpcContract'
+import type {
+  ScrapeIpcArgs,
+  ScrapeIpcChannel,
+  ScrapeIpcEvent,
+  ScrapeIpcEventChannel,
+  ScrapeIpcResult
+} from '../shared/scrapeIpcContract'
 import type {
   VideoIpcArgs,
   VideoIpcChannel,
@@ -22,6 +27,31 @@ import type {
   VideoSampleImportInput
 } from '../shared/videoTypes'
 import type {
+  ActressAvatarAutoCropOutcome,
+  ActressAvatarAutoCropRequest,
+  ActressAvatarAutoCropResponse,
+  ActressBatchScrapeFilter,
+  ActressBatchScrapeRequest,
+  ActressScrapeDisposition,
+  ActressScrapeField,
+  ActressScrapeResult,
+  ActressScrapeUpdateMode,
+  BatchProgress,
+  BatchScrapeState,
+  CompositeScraperInput,
+  ScrapeResult,
+  ScraperPluginDescriptor,
+  ScraperPluginPackage,
+  ScraperPluginUpdateInput,
+  VideoBatchScrapeFilter,
+  VideoBatchScrapeRequest,
+  VideoRematchBatchRequest,
+  VideoRematchScope,
+  VideoScrapeField,
+  VideoScrapeOneResult,
+  VideoScrapeUpdateMode
+} from '../shared/scrapeTypes'
+import type {
   AppSettings,
   LibraryOverviewStats,
   ActressDetail,
@@ -31,12 +61,7 @@ import type {
   IpcResponse,
   ScanResult,
   ScanProgress,
-  BatchProgress,
-  BatchScrapeState,
   PlayResult,
-  ScrapeResult,
-  ActressScrapeResult,
-  ActressScrapeDisposition,
   ActressNameConflictGroup,
   ActressConflictReviewSummary,
   InspectActressConflictNameInput,
@@ -62,29 +87,11 @@ import type {
   PlaylistVideoSortBy,
   PlaylistVideoSortDir,
   PlaylistVideoMembership,
-  ActressBatchScrapeFilter,
-  ActressBatchScrapeRequest,
-  ActressAvatarAutoCropOutcome,
-  ActressAvatarAutoCropRequest,
-  ActressAvatarAutoCropResponse,
   FacetType,
   FacetItem,
   RenameImportResult,
   ManualImportResult,
   AssetCryptoProgress,
-  VideoBatchScrapeFilter,
-  VideoBatchScrapeRequest,
-  VideoScrapeField,
-  VideoRematchBatchRequest,
-  VideoRematchScope,
-  VideoScrapeOneResult,
-  VideoScrapeUpdateMode,
-  ActressScrapeField,
-  ActressScrapeUpdateMode,
-  ScraperPluginDescriptor,
-  ScraperPluginPackage,
-  ScraperPluginUpdateInput,
-  CompositeScraperInput,
   PluginDevAgentInput,
   PluginDevAgentEvent,
   PluginDevAgentMessageInput,
@@ -118,11 +125,18 @@ function invokeVideo<Channel extends VideoIpcChannel>(
   return invoke<VideoIpcResult<Channel>>(channel, ...args)
 }
 
-function onActressEvent<Channel extends ActressIpcEventChannel>(
+function invokeScrape<Channel extends ScrapeIpcChannel>(
   channel: Channel,
-  callback: (payload: ActressIpcEvent<Channel>) => void
+  ...args: ScrapeIpcArgs<Channel>
+): Promise<ScrapeIpcResult<Channel>> {
+  return invoke<ScrapeIpcResult<Channel>>(channel, ...args)
+}
+
+function onScrapeEvent<Channel extends ScrapeIpcEventChannel>(
+  channel: Channel,
+  callback: (payload: ScrapeIpcEvent<Channel>) => void
 ): () => void {
-  const listener = (_event: unknown, payload: ActressIpcEvent<Channel>): void => callback(payload)
+  const listener = (_event: unknown, payload: ScrapeIpcEvent<Channel>): void => callback(payload)
   ipcRenderer.on(channel, listener)
   return () => ipcRenderer.removeListener(channel, listener)
 }
@@ -259,51 +273,39 @@ const api = {
       scraperName?: string,
       fields?: VideoScrapeField[],
       mode?: VideoScrapeUpdateMode
-    ) => invoke<VideoScrapeOneResult>(IPC.SCRAPE_ONE, videoId, scraperName, fields, mode),
+    ) => invokeScrape(IPC.SCRAPE_ONE, videoId, scraperName, fields, mode),
     videoBatchCount: (filter: VideoBatchScrapeFilter) =>
-      invoke<number>(IPC.SCRAPE_VIDEO_BATCH_COUNT, filter),
+      invokeScrape(IPC.SCRAPE_VIDEO_BATCH_COUNT, filter),
     videoBatchStart: (request: VideoBatchScrapeRequest) =>
-      invoke<boolean>(IPC.SCRAPE_VIDEO_BATCH_START, request),
-    videoBatchCancel: () => invoke<boolean>(IPC.SCRAPE_VIDEO_BATCH_CANCEL),
-    batchStart: (scraperName?: string) => invoke<boolean>(IPC.SCRAPE_BATCH_START, scraperName),
-    batchCancel: () => invoke<boolean>(IPC.SCRAPE_BATCH_CANCEL),
-    rematchCount: (scope: VideoRematchScope) => invoke<number>(IPC.SCRAPE_REMATCH_COUNT, scope),
+      invokeScrape(IPC.SCRAPE_VIDEO_BATCH_START, request),
+    videoBatchCancel: () => invokeScrape(IPC.SCRAPE_VIDEO_BATCH_CANCEL),
+    batchStart: (scraperName?: string) => invokeScrape(IPC.SCRAPE_BATCH_START, scraperName),
+    batchCancel: () => invokeScrape(IPC.SCRAPE_BATCH_CANCEL),
+    rematchCount: (scope: VideoRematchScope) => invokeScrape(IPC.SCRAPE_REMATCH_COUNT, scope),
     rematchBatchStart: (request: VideoRematchBatchRequest) =>
-      invoke<boolean>(IPC.SCRAPE_REMATCH_BATCH_START, request),
-    rematchBatchCancel: () => invoke<boolean>(IPC.SCRAPE_REMATCH_BATCH_CANCEL),
-    listPlugins: () => invoke<string[]>(IPC.SCRAPER_LIST),
-    listPluginDetails: () => invoke<ScraperPluginDescriptor[]>(IPC.SCRAPER_PLUGIN_DETAILS),
-    exportPlugin: (name: string) => invoke<string | null>(IPC.SCRAPER_PLUGIN_EXPORT, name),
+      invokeScrape(IPC.SCRAPE_REMATCH_BATCH_START, request),
+    rematchBatchCancel: () => invokeScrape(IPC.SCRAPE_REMATCH_BATCH_CANCEL),
+    listPlugins: () => invokeScrape(IPC.SCRAPER_LIST),
+    listPluginDetails: () => invokeScrape(IPC.SCRAPER_PLUGIN_DETAILS),
+    exportPlugin: (name: string) => invokeScrape(IPC.SCRAPER_PLUGIN_EXPORT, name),
     getPluginPackage: (name: string) =>
-      invoke<ScraperPluginPackage>(IPC.SCRAPER_PLUGIN_PACKAGE, name),
+      invokeScrape(IPC.SCRAPER_PLUGIN_PACKAGE, name),
     updatePlugin: (name: string, input: ScraperPluginUpdateInput) =>
-      invoke<ScraperPluginDescriptor>(IPC.SCRAPER_PLUGIN_UPDATE, name, input),
-    deletePlugin: (name: string) => invoke<boolean>(IPC.SCRAPER_PLUGIN_DELETE, name),
+      invokeScrape(IPC.SCRAPER_PLUGIN_UPDATE, name, input),
+    deletePlugin: (name: string) => invokeScrape(IPC.SCRAPER_PLUGIN_DELETE, name),
     createComposite: (input: CompositeScraperInput) =>
-      invoke<ScraperPluginDescriptor>(IPC.SCRAPER_COMPOSITE_CREATE, input),
+      invokeScrape(IPC.SCRAPER_COMPOSITE_CREATE, input),
     updateComposite: (name: string, input: CompositeScraperInput) =>
-      invoke<ScraperPluginDescriptor>(IPC.SCRAPER_COMPOSITE_UPDATE, name, input),
-    deleteComposite: (name: string) => invoke<boolean>(IPC.SCRAPER_COMPOSITE_DELETE, name),
+      invokeScrape(IPC.SCRAPER_COMPOSITE_UPDATE, name, input),
+    deleteComposite: (name: string) => invokeScrape(IPC.SCRAPER_COMPOSITE_DELETE, name),
     onBatchProgress: (cb: (p: BatchProgress) => void) => {
-      const listener = (_e: unknown, p: BatchProgress): void => cb(p)
-      ipcRenderer.on(IPC.SCRAPE_BATCH_PROGRESS, listener)
-      return (): void => {
-        ipcRenderer.removeListener(IPC.SCRAPE_BATCH_PROGRESS, listener)
-      }
+      return onScrapeEvent(IPC.SCRAPE_BATCH_PROGRESS, cb)
     },
     onVideoBatchProgress: (cb: (p: BatchProgress) => void) => {
-      const listener = (_e: unknown, p: BatchProgress): void => cb(p)
-      ipcRenderer.on(IPC.SCRAPE_VIDEO_BATCH_PROGRESS, listener)
-      return (): void => {
-        ipcRenderer.removeListener(IPC.SCRAPE_VIDEO_BATCH_PROGRESS, listener)
-      }
+      return onScrapeEvent(IPC.SCRAPE_VIDEO_BATCH_PROGRESS, cb)
     },
     onRematchBatchProgress: (cb: (p: BatchProgress) => void) => {
-      const listener = (_e: unknown, p: BatchProgress): void => cb(p)
-      ipcRenderer.on(IPC.SCRAPE_REMATCH_BATCH_PROGRESS, listener)
-      return (): void => {
-        ipcRenderer.removeListener(IPC.SCRAPE_REMATCH_BATCH_PROGRESS, listener)
-      }
+      return onScrapeEvent(IPC.SCRAPE_REMATCH_BATCH_PROGRESS, cb)
     }
   },
   actressScrape: {
@@ -316,7 +318,7 @@ const api = {
       useAliases?: boolean,
       autoCropAvatar?: boolean
     ) =>
-      invokeActress(
+      invokeScrape(
         IPC.ACTRESS_SCRAPE_ONE,
         actressId,
         scraperName,
@@ -342,33 +344,33 @@ const api = {
         input
       ),
     batchCount: (filter: ActressBatchScrapeFilter) =>
-      invokeActress(IPC.ACTRESS_SCRAPE_BATCH_COUNT, filter),
+      invokeScrape(IPC.ACTRESS_SCRAPE_BATCH_COUNT, filter),
     batchStart: (request?: ActressBatchScrapeRequest | string) =>
-      invokeActress(IPC.ACTRESS_SCRAPE_BATCH_START, request),
-    batchCancel: () => invokeActress(IPC.ACTRESS_SCRAPE_BATCH_CANCEL),
-    listPlugins: () => invokeActress(IPC.ACTRESS_SCRAPER_LIST),
+      invokeScrape(IPC.ACTRESS_SCRAPE_BATCH_START, request),
+    batchCancel: () => invokeScrape(IPC.ACTRESS_SCRAPE_BATCH_CANCEL),
+    listPlugins: () => invokeScrape(IPC.ACTRESS_SCRAPER_LIST),
     listPluginDetails: () =>
-      invokeActress(IPC.ACTRESS_SCRAPER_PLUGIN_DETAILS),
+      invokeScrape(IPC.ACTRESS_SCRAPER_PLUGIN_DETAILS),
     exportPlugin: (name: string) =>
-      invokeActress(IPC.ACTRESS_SCRAPER_PLUGIN_EXPORT, name),
+      invokeScrape(IPC.ACTRESS_SCRAPER_PLUGIN_EXPORT, name),
     getPluginPackage: (name: string) =>
-      invokeActress(IPC.ACTRESS_SCRAPER_PLUGIN_PACKAGE, name),
+      invokeScrape(IPC.ACTRESS_SCRAPER_PLUGIN_PACKAGE, name),
     updatePlugin: (name: string, input: ScraperPluginUpdateInput) =>
-      invokeActress(IPC.ACTRESS_SCRAPER_PLUGIN_UPDATE, name, input),
-    deletePlugin: (name: string) => invokeActress(IPC.ACTRESS_SCRAPER_PLUGIN_DELETE, name),
+      invokeScrape(IPC.ACTRESS_SCRAPER_PLUGIN_UPDATE, name, input),
+    deletePlugin: (name: string) => invokeScrape(IPC.ACTRESS_SCRAPER_PLUGIN_DELETE, name),
     createComposite: (input: CompositeScraperInput) =>
-      invokeActress(IPC.ACTRESS_SCRAPER_COMPOSITE_CREATE, input),
+      invokeScrape(IPC.ACTRESS_SCRAPER_COMPOSITE_CREATE, input),
     updateComposite: (name: string, input: CompositeScraperInput) =>
-      invokeActress(IPC.ACTRESS_SCRAPER_COMPOSITE_UPDATE, name, input),
+      invokeScrape(IPC.ACTRESS_SCRAPER_COMPOSITE_UPDATE, name, input),
     deleteComposite: (name: string) =>
-      invokeActress(IPC.ACTRESS_SCRAPER_COMPOSITE_DELETE, name),
+      invokeScrape(IPC.ACTRESS_SCRAPER_COMPOSITE_DELETE, name),
     onBatchProgress: (cb: (p: BatchProgress) => void) => {
-      return onActressEvent(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, cb)
+      return onScrapeEvent(IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, cb)
     },
     onAvatarAutoCropRequest: (
       cb: (request: ActressAvatarAutoCropRequest) => Promise<ActressAvatarAutoCropOutcome>
     ) => {
-      return onActressEvent(IPC.ACTRESS_AVATAR_AUTO_CROP_REQUEST, (request) => {
+      return onScrapeEvent(IPC.ACTRESS_AVATAR_AUTO_CROP_REQUEST, (request) => {
         void Promise.resolve(cb(request))
           .catch(
             (error): ActressAvatarAutoCropOutcome => ({
@@ -377,7 +379,7 @@ const api = {
             })
           )
           .then((outcome) =>
-            invokeActress(IPC.ACTRESS_AVATAR_AUTO_CROP_RESULT, {
+            invokeScrape(IPC.ACTRESS_AVATAR_AUTO_CROP_RESULT, {
               requestId: request.requestId,
               ...outcome
             } satisfies ActressAvatarAutoCropResponse)
@@ -387,7 +389,7 @@ const api = {
     }
   },
   plugins: {
-    importPlugin: () => invoke<ScraperPluginDescriptor | null>(IPC.PLUGIN_IMPORT)
+    importPlugin: () => invokeScrape(IPC.PLUGIN_IMPORT)
   },
   pluginDev: {
     start: (input: PluginDevAgentStartInput) =>
@@ -412,14 +414,14 @@ const api = {
     }
   },
   batchScrape: {
-    getState: () => invoke<BatchScrapeState>(IPC.BATCH_SCRAPE_STATE),
-    pause: () => invoke<boolean>(IPC.BATCH_SCRAPE_PAUSE),
-    resume: () => invoke<boolean>(IPC.BATCH_SCRAPE_RESUME),
-    discard: () => invoke<boolean>(IPC.BATCH_SCRAPE_DISCARD)
+    getState: () => invokeScrape(IPC.BATCH_SCRAPE_STATE),
+    pause: () => invokeScrape(IPC.BATCH_SCRAPE_PAUSE),
+    resume: () => invokeScrape(IPC.BATCH_SCRAPE_RESUME),
+    discard: () => invokeScrape(IPC.BATCH_SCRAPE_DISCARD)
   },
   avatarAutoCropBatch: {
-    begin: () => invoke<string>(IPC.AVATAR_AUTO_CROP_BATCH_BEGIN),
-    end: (token: string) => invoke<boolean>(IPC.AVATAR_AUTO_CROP_BATCH_END, token)
+    begin: () => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_BEGIN),
+    end: (token: string) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_END, token)
   },
   player: {
     play: (videoId: number) => invoke<PlayResult>(IPC.PLAYER_PLAY, videoId),

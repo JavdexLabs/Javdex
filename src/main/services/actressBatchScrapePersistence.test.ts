@@ -9,6 +9,7 @@ import { actressIdentityConflictWorkflow } from '../scrapers/actressScraperManag
 import { installScraperPluginPackage } from '../scrapers/scraperPluginService'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import { actressScrapeQueue } from './actressScrapeQueue'
+import { createDefaultScrapeJobController } from './scrapeJobController'
 import { getBatchScrapeState } from './batchScrapeControl'
 import {
   loadBatchScrapeJob,
@@ -98,6 +99,10 @@ beforeEach(async () => {
   process.env.JAVDEX_TEST_USER_DATA = tempRoot
   resetSettingsCacheForTests()
   resetBatchScrapeJobCache()
+  createDefaultScrapeJobController({
+    emit: () => undefined,
+    rendererAvailable: () => false
+  }).initialize()
   initDatabaseAtPath(path.join(tempRoot, 'library.db'))
   actressIds.clear()
   seedActress('Persist A', 'female', 0)

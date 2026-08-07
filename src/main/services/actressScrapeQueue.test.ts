@@ -10,6 +10,7 @@ import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import { estimateActressBatchScrapeTargetCount } from './actressBatchScrapeTargets'
 import { actressScrapeQueue } from './actressScrapeQueue'
 import { resetBatchScrapeJobCache } from './batchScrapeJobStore'
+import { createDefaultScrapeJobController } from './scrapeJobController'
 
 const PLUGIN_NAME = 'Batch Target Profile Source'
 const SCRAPED_BIRTH_DATE = '1992-03-04'
@@ -50,6 +51,10 @@ beforeEach(async () => {
   process.env.JAVDEX_TEST_USER_DATA = tempRoot
   resetSettingsCacheForTests()
   resetBatchScrapeJobCache()
+  createDefaultScrapeJobController({
+    emit: () => undefined,
+    rendererAvailable: () => false
+  }).initialize()
   initDatabaseAtPath(path.join(tempRoot, 'library.db'))
   actressIds.clear()
   seedActress('Queue Unscraped A', 'female', 0)

@@ -1,543 +1,141 @@
 import { dialog } from 'electron'
-import { randomUUID } from 'node:crypto'
 import { IPC } from '@shared/ipc-channels'
-import type {
-  ActressAvatarAutoCropOutcome,
-  ActressAvatarAutoCropResponse,
-  ActressAvatarAutoCropTarget,
-  ActressBatchScrapeFilter,
-  ActressBatchScrapeRequest,
-  ActressScrapeField,
-  ActressScrapeDisposition,
-  ActressScrapeUpdateMode,
-  BatchProgress,
-  BatchScrapeState,
-  CompositeScraperInput,
-  ScraperPluginDescriptor,
-  ScraperPluginKind,
-  ScraperPluginUpdateInput,
-  VideoBatchScrapeFilter,
-  VideoBatchScrapeRequest,
-  VideoBatchScrapeStatus,
-  VideoScrapeField,
-  VideoScrapeOneResult,
-  VideoScrapeUpdateMode,
-  VideoRematchBatchRequest,
-  VideoRematchScope
-} from '@shared/types'
-import { ALL_VIDEO_SCRAPE_FIELDS, DEFAULT_SETTINGS } from '@shared/types'
-import {
-  listActressScraperNames,
-  listActressScraperPlugins,
-  scrapeActress
-} from '../scrapers/actressScraperManager'
-import {
-  listScraperNames,
-  listScraperPlugins,
-  resolveVideoScrapeFieldSources,
-  scrapeVideo
-} from '../scrapers/scraperManager'
-import {
-  deleteScraperPlugin,
-  createCompositeScraper,
-  deleteCompositeScraper,
-  exportScraperPluginPackage,
-  importScraperPluginPackage,
-  pluginPackageDefaultName,
-  readScraperPluginPackage,
-  updateCompositeScraper,
-  updateScraperPluginConfig
-} from '../scrapers/scraperPluginService'
-import { estimateActressBatchScrapeTargetCount } from '../services/actressBatchScrapeTargets'
-import { actressScrapeQueue } from '../services/actressScrapeQueue'
-import {
-  assertActressBatchJobRecoverable,
-  assertBatchScrapeAvailable,
-  getBatchScrapeState
-} from '../services/batchScrapeControl'
-import { loadBatchScrapeJob, saveBatchScrapeJob } from '../services/batchScrapeJobStore'
-import { scrapeRunCoordinator } from '../services/scrapeRunCoordinator'
-import { videoBatchScrapeQueue } from '../services/videoBatchScrapeQueue'
-import { getActressDetail } from '../db/actressRepo'
-import { countVideosForBatchScrape, countVideosForRematch } from '../db/videoRepo'
-import { getSettings, updateSettings } from '../settings/settingsStore'
-import { registerHandler, type IpcContext } from './shared'
-import { registerActressHandler, sendActressEvent } from './actressContractAdapter'
-
-const AVATAR_AUTO_CROP_TIMEOUT_MS = 5_000
-let avatarAutoCropBatchToken: string | null = null
+import type { ScraperPluginKind } from '@shared/scrapeTypes'
+import { createDefaultScrapeJobController } from '../services/scrapeJobController'
+import { createDefaultScraperPluginCatalog } from '../services/scraperPluginCatalog'
+import type { IpcContext } from './shared'
+import { registerScrapeHandler, sendScrapeEvent } from './scrapeContractAdapter'
 
 export function registerScrapeHandlers(ctx: IpcContext): void {
-  avatarAutoCropBatchToken = null
+  const plugins = createDefaultScraperPluginCatalog()
+  const jobs = createDefaultScrapeJobController({
+    rendererAvailable: () => {
+      const window = ctx.getWindow()
+      return Boolean(window && !window.isDestroyed() && !window.webContents.isDestroyed())
+    },
+    emit: (channel, payload) => sendScrapeEvent(ctx.getWindow()?.webContents, channel, payload)
+  })
+  jobs.initialize()
+
   const webContents = ctx.getWindow()?.webContents
-  const releaseAvatarAutoCropBatchLock = (): void => {
-    avatarAutoCropBatchToken = null
-  }
-  webContents?.on('render-process-gone', releaseAvatarAutoCropBatchLock)
+  webContents?.on('render-process-gone', () => jobs.rendererDisconnected())
   webContents?.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) releaseAvatarAutoCropBatchLock()
-  })
-  const interrupted = loadBatchScrapeJob()
-  if (interrupted?.status === 'running') {
-    saveBatchScrapeJob({ ...interrupted, status: 'paused' })
-  }
-
-  const pendingAvatarAutoCrops = new Map<
-    string,
-    {
-      resolve: (outcome: ActressAvatarAutoCropOutcome) => void
-      timeout: ReturnType<typeof setTimeout>
-    }
-  >()
-
-  registerActressHandler(
-    IPC.ACTRESS_AVATAR_AUTO_CROP_RESULT,
-    (response): boolean => {
-      const pending = pendingAvatarAutoCrops.get(response.requestId)
-      if (!pending) return false
-      clearTimeout(pending.timeout)
-      pendingAvatarAutoCrops.delete(response.requestId)
-      pending.resolve({ status: response.status, message: response.message })
-      return true
-    }
-  )
-
-  const requestAvatarAutoCrop = (
-    target: ActressAvatarAutoCropTarget
-  ): Promise<ActressAvatarAutoCropOutcome> => {
-    const window = ctx.getWindow()
-    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) {
-      return Promise.resolve({ status: 'failed', message: '应用窗口不可用' })
-    }
-
-    const requestId = randomUUID()
-    return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        pendingAvatarAutoCrops.delete(requestId)
-        resolve({ status: 'failed', message: '智能构图等待超时' })
-      }, AVATAR_AUTO_CROP_TIMEOUT_MS)
-      pendingAvatarAutoCrops.set(requestId, { resolve, timeout })
-      sendActressEvent(window.webContents, IPC.ACTRESS_AVATAR_AUTO_CROP_REQUEST, {
-        ...target,
-        requestId
-      })
-    })
-  }
-
-  actressScrapeQueue.setAvatarAutoCropListener(requestAvatarAutoCrop)
-
-  registerHandler(IPC.SCRAPER_LIST, (): string[] => listScraperNames())
-
-  registerHandler(IPC.SCRAPER_PLUGIN_DETAILS, (): ScraperPluginDescriptor[] =>
-    listScraperPlugins()
-  )
-
-  registerHandler(IPC.PLUGIN_IMPORT, async (): Promise<ScraperPluginDescriptor | null> =>
-    importPluginWithDialog(ctx)
-  )
-
-  registerHandler(IPC.SCRAPER_PLUGIN_EXPORT, async (_e, name: string): Promise<string | null> =>
-    exportPluginWithDialog(ctx, 'video', name)
-  )
-
-  registerHandler(
-    IPC.SCRAPER_PLUGIN_PACKAGE,
-    (_e, name: string) => readScraperPluginPackage('video', name)
-  )
-
-  registerHandler(
-    IPC.SCRAPER_PLUGIN_UPDATE,
-    (_e, name: string, input: ScraperPluginUpdateInput): ScraperPluginDescriptor =>
-      updateScraperPluginConfig('video', name, input)
-  )
-
-  registerHandler(IPC.SCRAPER_PLUGIN_DELETE, (_e, name: string): boolean => {
-    const ok = deleteScraperPlugin('video', name)
-    if (getSettings().defaultScraper === name) {
-      updateSettings({ defaultScraper: DEFAULT_SETTINGS.defaultScraper })
-    }
-    return ok
+    if (isMainFrame && !isInPlace) jobs.rendererDisconnected()
   })
 
-  registerHandler(
-    IPC.SCRAPER_COMPOSITE_CREATE,
-    (_e, input: CompositeScraperInput): ScraperPluginDescriptor =>
-      createCompositeScraper('video', input)
+  registerScrapeHandler(IPC.ACTRESS_AVATAR_AUTO_CROP_RESULT, (response) =>
+    jobs.completeAvatarAutoCrop(response)
   )
 
-  registerHandler(
-    IPC.SCRAPER_COMPOSITE_UPDATE,
-    (_e, name: string, input: CompositeScraperInput): ScraperPluginDescriptor =>
-      updateCompositeScraper('video', name, input)
+  registerScrapeHandler(IPC.SCRAPER_LIST, () => plugins.listNames('video'))
+  registerScrapeHandler(IPC.SCRAPER_PLUGIN_DETAILS, () => plugins.listPlugins('video'))
+  registerScrapeHandler(IPC.PLUGIN_IMPORT, () => importPluginWithDialog(ctx, plugins))
+  registerScrapeHandler(IPC.SCRAPER_PLUGIN_EXPORT, (name) =>
+    exportPluginWithDialog(ctx, plugins, 'video', name)
+  )
+  registerScrapeHandler(IPC.SCRAPER_PLUGIN_PACKAGE, (name) => plugins.readPackage('video', name))
+  registerScrapeHandler(IPC.SCRAPER_PLUGIN_UPDATE, (name, input) =>
+    plugins.updatePlugin('video', name, input)
+  )
+  registerScrapeHandler(IPC.SCRAPER_PLUGIN_DELETE, (name) => plugins.deletePlugin('video', name))
+  registerScrapeHandler(IPC.SCRAPER_COMPOSITE_CREATE, (input) =>
+    plugins.createComposite('video', input)
+  )
+  registerScrapeHandler(IPC.SCRAPER_COMPOSITE_UPDATE, (name, input) =>
+    plugins.updateComposite('video', name, input)
+  )
+  registerScrapeHandler(IPC.SCRAPER_COMPOSITE_DELETE, (name) =>
+    plugins.deleteComposite('video', name)
   )
 
-  registerHandler(IPC.SCRAPER_COMPOSITE_DELETE, (_e, name: string): boolean => {
-    const ok = deleteCompositeScraper('video', name)
-    if (getSettings().defaultScraper === name) {
-      updateSettings({ defaultScraper: DEFAULT_SETTINGS.defaultScraper })
-    }
-    return ok
-  })
-
-  registerHandler(
-    IPC.SCRAPE_ONE,
-    async (
-      _e,
-      videoId: number,
-      scraperName?: string,
-      fields?: VideoScrapeField[],
-      mode?: VideoScrapeUpdateMode
-    ): Promise<VideoScrapeOneResult> => {
-      assertBatchScrapeAvailable()
-      const outcome = await scrapeRunCoordinator.runExclusive('影片刮削', () =>
-        scrapeVideo(videoId, scraperName, { fields, mode })
-      )
-      if (!outcome.ok || !outcome.result) throw new Error(outcome.error)
-      return {
-        result: outcome.result,
-        applied: !outcome.skipped,
-        warnings: outcome.warnings ?? []
-      }
-    }
+  registerScrapeHandler(IPC.ACTRESS_SCRAPER_LIST, () => plugins.listNames('actress'))
+  registerScrapeHandler(IPC.ACTRESS_SCRAPER_PLUGIN_DETAILS, () => plugins.listPlugins('actress'))
+  registerScrapeHandler(IPC.ACTRESS_SCRAPER_PLUGIN_EXPORT, (name) =>
+    exportPluginWithDialog(ctx, plugins, 'actress', name)
+  )
+  registerScrapeHandler(IPC.ACTRESS_SCRAPER_PLUGIN_PACKAGE, (name) =>
+    plugins.readPackage('actress', name)
+  )
+  registerScrapeHandler(IPC.ACTRESS_SCRAPER_PLUGIN_UPDATE, (name, input) =>
+    plugins.updatePlugin('actress', name, input)
+  )
+  registerScrapeHandler(IPC.ACTRESS_SCRAPER_PLUGIN_DELETE, (name) =>
+    plugins.deletePlugin('actress', name)
+  )
+  registerScrapeHandler(IPC.ACTRESS_SCRAPER_COMPOSITE_CREATE, (input) =>
+    plugins.createComposite('actress', input)
+  )
+  registerScrapeHandler(IPC.ACTRESS_SCRAPER_COMPOSITE_UPDATE, (name, input) =>
+    plugins.updateComposite('actress', name, input)
+  )
+  registerScrapeHandler(IPC.ACTRESS_SCRAPER_COMPOSITE_DELETE, (name) =>
+    plugins.deleteComposite('actress', name)
   )
 
-  registerHandler(IPC.SCRAPE_BATCH_START, (_e, scraperName?: string): boolean => {
-    return startVideoBatch(ctx, IPC.SCRAPE_BATCH_PROGRESS, {
-      scraperName,
-      status: 0,
-      fields: ALL_VIDEO_SCRAPE_FIELDS,
-      mode: 'replace'
-    })
-  })
-
-  registerHandler(IPC.SCRAPE_BATCH_CANCEL, (): boolean => pauseVideoBatch())
-
-  registerHandler(IPC.BATCH_SCRAPE_STATE, (): BatchScrapeState => getBatchScrapeState())
-
-  registerHandler(IPC.BATCH_SCRAPE_PAUSE, (): boolean => pauseActiveBatch())
-
-  registerHandler(IPC.BATCH_SCRAPE_RESUME, (): boolean => resumeActiveBatch(ctx))
-
-  registerHandler(IPC.BATCH_SCRAPE_DISCARD, (): boolean => discardActiveBatch(ctx))
-
-  registerHandler(IPC.AVATAR_AUTO_CROP_BATCH_BEGIN, (): string => {
-    assertCanStartNewBatch()
-    const token = randomUUID()
-    avatarAutoCropBatchToken = token
-    return token
-  })
-
-  registerHandler(IPC.AVATAR_AUTO_CROP_BATCH_END, (_event, token: string): boolean => {
-    if (token !== avatarAutoCropBatchToken) return false
-    avatarAutoCropBatchToken = null
-    return true
-  })
-
-  registerHandler(
-    IPC.SCRAPE_VIDEO_BATCH_COUNT,
-    (_e, filter: VideoBatchScrapeFilter): number =>
-      countVideosForBatchScrape({
-        ...filter,
-        ...resolveVideoScrapeFieldSources(filter.scraperName)
-      })
+  registerScrapeHandler(IPC.SCRAPE_ONE, (...args) => jobs.scrapeOneVideo(...args))
+  registerScrapeHandler(IPC.SCRAPE_BATCH_START, (scraperName) =>
+    jobs.startLegacyVideoBatch(scraperName)
   )
-
-  registerHandler(
-    IPC.SCRAPE_VIDEO_BATCH_START,
-    (_e, request: VideoBatchScrapeRequest): boolean =>
-      startVideoBatch(ctx, IPC.SCRAPE_VIDEO_BATCH_PROGRESS, request)
+  registerScrapeHandler(IPC.SCRAPE_BATCH_CANCEL, () => jobs.pauseVideoBatch())
+  registerScrapeHandler(IPC.SCRAPE_VIDEO_BATCH_COUNT, (filter) => jobs.countVideoBatch(filter))
+  registerScrapeHandler(IPC.SCRAPE_VIDEO_BATCH_START, (request) =>
+    jobs.startVideoBatch(IPC.SCRAPE_VIDEO_BATCH_PROGRESS, request)
   )
-
-  registerHandler(IPC.SCRAPE_VIDEO_BATCH_CANCEL, (): boolean => pauseVideoBatch())
-
-  registerHandler(IPC.SCRAPE_REMATCH_COUNT, (_e, scope: VideoRematchScope): number =>
-    countVideosForRematch(scope)
+  registerScrapeHandler(IPC.SCRAPE_VIDEO_BATCH_CANCEL, () => jobs.pauseVideoBatch())
+  registerScrapeHandler(IPC.SCRAPE_REMATCH_COUNT, (scope) => jobs.countRematches(scope))
+  registerScrapeHandler(IPC.SCRAPE_REMATCH_BATCH_START, (request) =>
+    jobs.startRematchBatch(request)
   )
+  registerScrapeHandler(IPC.SCRAPE_REMATCH_BATCH_CANCEL, () => jobs.pauseVideoBatch())
 
-  registerHandler(IPC.SCRAPE_REMATCH_BATCH_START, (_e, request: VideoRematchBatchRequest): boolean => {
-    return startVideoBatch(ctx, IPC.SCRAPE_REMATCH_BATCH_PROGRESS, {
-      scraperName: request.scraperName,
-      fields: request.fields,
-      status: rematchScopeToBatchStatus(request.scope),
-      mode: request.mode ?? 'replace'
-    })
-  })
-
-  registerHandler(IPC.SCRAPE_REMATCH_BATCH_CANCEL, (): boolean => pauseVideoBatch())
-
-  registerActressHandler(IPC.ACTRESS_SCRAPER_LIST, () => listActressScraperNames())
-
-  registerActressHandler(IPC.ACTRESS_SCRAPER_PLUGIN_DETAILS, () =>
-    listActressScraperPlugins()
+  registerScrapeHandler(IPC.ACTRESS_SCRAPE_ONE, (...args) => jobs.scrapeOneActress(...args))
+  registerScrapeHandler(IPC.ACTRESS_SCRAPE_BATCH_COUNT, (filter) =>
+    jobs.countActressBatch(filter)
   )
-
-  registerActressHandler(
-    IPC.ACTRESS_SCRAPER_PLUGIN_EXPORT,
-    async (name) => exportPluginWithDialog(ctx, 'actress', name)
+  registerScrapeHandler(IPC.ACTRESS_SCRAPE_BATCH_START, (request) =>
+    jobs.startActressBatch(request)
   )
+  registerScrapeHandler(IPC.ACTRESS_SCRAPE_BATCH_CANCEL, () => jobs.pauseActressBatch())
 
-  registerActressHandler(
-    IPC.ACTRESS_SCRAPER_PLUGIN_PACKAGE,
-    (name) => readScraperPluginPackage('actress', name)
+  registerScrapeHandler(IPC.BATCH_SCRAPE_STATE, () => jobs.getBatchState())
+  registerScrapeHandler(IPC.BATCH_SCRAPE_PAUSE, () => jobs.pauseActiveBatch())
+  registerScrapeHandler(IPC.BATCH_SCRAPE_RESUME, () => jobs.resumeActiveBatch())
+  registerScrapeHandler(IPC.BATCH_SCRAPE_DISCARD, () => jobs.discardActiveBatch())
+  registerScrapeHandler(IPC.AVATAR_AUTO_CROP_BATCH_BEGIN, () => jobs.beginAvatarAutoCropBatch())
+  registerScrapeHandler(IPC.AVATAR_AUTO_CROP_BATCH_END, (token) =>
+    jobs.endAvatarAutoCropBatch(token)
   )
-
-  registerActressHandler(
-    IPC.ACTRESS_SCRAPER_PLUGIN_UPDATE,
-    (name, input) =>
-      updateScraperPluginConfig('actress', name, input)
-  )
-
-  registerActressHandler(IPC.ACTRESS_SCRAPER_PLUGIN_DELETE, (name) => {
-    const ok = deleteScraperPlugin('actress', name)
-    if (getSettings().defaultActressScraper === name) {
-      updateSettings({ defaultActressScraper: 'Xslist' })
-    }
-    return ok
-  })
-
-  registerActressHandler(
-    IPC.ACTRESS_SCRAPER_COMPOSITE_CREATE,
-    (input) =>
-      createCompositeScraper('actress', input)
-  )
-
-  registerActressHandler(
-    IPC.ACTRESS_SCRAPER_COMPOSITE_UPDATE,
-    (name, input) =>
-      updateCompositeScraper('actress', name, input)
-  )
-
-  registerActressHandler(IPC.ACTRESS_SCRAPER_COMPOSITE_DELETE, (name) => {
-    const ok = deleteCompositeScraper('actress', name)
-    if (getSettings().defaultActressScraper === name) {
-      updateSettings({ defaultActressScraper: 'Xslist' })
-    }
-    return ok
-  })
-
-  registerActressHandler(
-    IPC.ACTRESS_SCRAPE_ONE,
-    async (
-      actressId,
-      scraperName,
-      fields,
-      mode,
-      queryName,
-      useAliases,
-      autoCropAvatar
-    ) => {
-      assertBatchScrapeAvailable()
-      const outcome = await scrapeRunCoordinator.runExclusive('演员刮削', async () => {
-        const result = await scrapeActress(actressId, scraperName, {
-          fields,
-          mode,
-          queryName,
-          useAliases
-        })
-        if (
-          result.status === 'success' &&
-          autoCropAvatar &&
-          fields?.includes('avatar') &&
-          result.avatarUpdated &&
-          !result.skipped
-        ) {
-          const actress = getActressDetail(actressId)
-          if (actress) {
-            await requestAvatarAutoCrop({
-              actressId,
-              mainName: actress.main_name
-            })
-          }
-        }
-        return result
-      })
-      return outcome
-    }
-  )
-
-  registerActressHandler(
-    IPC.ACTRESS_SCRAPE_BATCH_COUNT,
-    (filter) =>
-      estimateActressBatchScrapeTargetCount(filter)
-  )
-
-  registerActressHandler(
-    IPC.ACTRESS_SCRAPE_BATCH_START,
-    (request) => startActressBatch(ctx, request)
-  )
-
-  registerActressHandler(IPC.ACTRESS_SCRAPE_BATCH_CANCEL, () => pauseActressBatch())
 }
 
-function pauseVideoBatch(): boolean {
-  if (!videoBatchScrapeQueue.isRunning()) return false
-  videoBatchScrapeQueue.pause()
-  return true
-}
-
-function pauseActressBatch(): boolean {
-  if (!actressScrapeQueue.isRunning()) return false
-  actressScrapeQueue.pause()
-  return true
-}
-
-function pauseActiveBatch(): boolean {
-  if (videoBatchScrapeQueue.isRunning()) return pauseVideoBatch()
-  if (actressScrapeQueue.isRunning()) return pauseActressBatch()
-  return false
-}
-
-function resumeActiveBatch(ctx: IpcContext): boolean {
-  assertCanResumeBatch()
-  const job = loadBatchScrapeJob()
-  if (!job) throw new Error('没有可继续的批量刮削任务')
-  const win = ctx.getWindow()
-  if (job.kind === 'video') {
-    videoBatchScrapeQueue.setListener((progress: BatchProgress) => {
-      win?.webContents.send(IPC.SCRAPE_VIDEO_BATCH_PROGRESS, progress)
-    })
-    void scrapeRunCoordinator
-      .runExclusive('影片批量更新', () => videoBatchScrapeQueue.resume())
-      .catch((err) => console.error('video batch scrape resume failed:', err))
-    return true
-  }
-  actressScrapeQueue.setListener((progress: BatchProgress) => {
-    sendActressEvent(win?.webContents, IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, progress)
-  })
-  void scrapeRunCoordinator
-    .runExclusive('演员批量刮削', () => actressScrapeQueue.resume())
-    .catch((err) => console.error('actress batch scrape resume failed:', err))
-  return true
-}
-
-function discardActiveBatch(ctx: IpcContext): boolean {
-  const job = loadBatchScrapeJob()
-  if (!job) return false
-  if (job.kind === 'video') {
-    videoBatchScrapeQueue.discard()
-    if (!videoBatchScrapeQueue.isRunning()) {
-      ctx.getWindow()?.webContents.send(IPC.SCRAPE_VIDEO_BATCH_PROGRESS, idleBatchProgress())
-    }
-    return true
-  }
-  actressScrapeQueue.discard()
-  if (!actressScrapeQueue.isRunning()) {
-    sendActressEvent(
-      ctx.getWindow()?.webContents,
-      IPC.ACTRESS_SCRAPE_BATCH_PROGRESS,
-      idleBatchProgress()
-    )
-  }
-  return true
-}
-
-function idleBatchProgress(): BatchProgress {
-  return {
-    total: 0,
-    current: 0,
-    success: 0,
-    pending: 0,
-    failed: 0,
-    currentCode: null,
-    status: 'idle',
-    logs: []
-  }
-}
-
-function startActressBatch(
+async function importPluginWithDialog(
   ctx: IpcContext,
-  request?: ActressBatchScrapeRequest | string
-): boolean {
-  assertCanStartNewBatch()
-  if (typeof request !== 'string' && request && !request.fields?.length) {
-    throw new Error('请至少选择一个要更新的字段')
-  }
-  const win = ctx.getWindow()
-  actressScrapeQueue.setListener((progress: BatchProgress) => {
-    sendActressEvent(win?.webContents, IPC.ACTRESS_SCRAPE_BATCH_PROGRESS, progress)
-  })
-  void scrapeRunCoordinator
-    .runExclusive('演员批量刮削', () => actressScrapeQueue.start(request))
-    .catch((err) => console.error('actress scrape batch failed:', err))
-  return true
-}
-
-function rematchScopeToBatchStatus(scope: VideoRematchScope): VideoBatchScrapeStatus {
-  if (scope === 'scraped') return 1
-  if (scope === 'failed') return 2
-  return 'all'
-}
-
-function startVideoBatch(
-  ctx: IpcContext,
-  progressChannel: string,
-  request: VideoBatchScrapeRequest
-): boolean {
-  assertCanStartNewBatch()
-  if (!request.fields?.length) throw new Error('请至少选择一个要更新的字段')
-  const win = ctx.getWindow()
-  videoBatchScrapeQueue.setListener((progress: BatchProgress) => {
-    win?.webContents.send(progressChannel, progress)
-  })
-  void scrapeRunCoordinator
-    .runExclusive('影片批量更新', () => videoBatchScrapeQueue.start(request))
-    .catch((err) => console.error('video batch scrape failed:', err))
-  return true
-}
-
-async function importPluginWithDialog(ctx: IpcContext): Promise<ScraperPluginDescriptor | null> {
-  const res = await dialog.showOpenDialog(ctx.getWindow()!, {
+  plugins: ReturnType<typeof createDefaultScraperPluginCatalog>
+) {
+  const result = await dialog.showOpenDialog(ctx.getWindow()!, {
     properties: ['openFile'],
     filters: [
       { name: 'Scraper Plugin Package', extensions: ['json', 'avscraper'] },
       { name: 'JSON', extensions: ['json'] }
     ]
   })
-  if (res.canceled || !res.filePaths[0]) return null
-  return importScraperPluginPackage(res.filePaths[0])
+  if (result.canceled || !result.filePaths[0]) return null
+  return plugins.importPackage(result.filePaths[0])
 }
 
 async function exportPluginWithDialog(
   ctx: IpcContext,
+  plugins: ReturnType<typeof createDefaultScraperPluginCatalog>,
   kind: ScraperPluginKind,
   name: string
 ): Promise<string | null> {
-  const res = await dialog.showSaveDialog(ctx.getWindow()!, {
-    defaultPath: pluginPackageDefaultName(kind, name),
+  const result = await dialog.showSaveDialog(ctx.getWindow()!, {
+    defaultPath: plugins.packageDefaultName(kind, name),
     filters: [
       { name: 'Scraper Plugin Package', extensions: ['json', 'avscraper'] },
       { name: 'JSON', extensions: ['json'] }
     ]
   })
-  if (res.canceled || !res.filePath) return null
-  exportScraperPluginPackage(kind, name, res.filePath)
-  return res.filePath
-}
-
-function assertCanStartNewBatch(): void {
-  if (avatarAutoCropBatchToken) {
-    throw new Error('批量智能构图正在进行中，请完成或停止后再试')
-  }
-  assertBatchScrapeAvailable()
-  if (videoBatchScrapeQueue.isRunning()) throw new Error('影片批量更新已在进行中')
-  if (actressScrapeQueue.isRunning()) throw new Error('演员批量刮削已在进行中')
-}
-
-function assertCanResumeBatch(): void {
-  if (avatarAutoCropBatchToken) {
-    throw new Error('批量智能构图正在进行中，请完成或停止后再试')
-  }
-  if (scrapeRunCoordinator.isRunning()) {
-    throw new Error(`${scrapeRunCoordinator.getActiveLabel()}进行中，请稍后再试`)
-  }
-  if (videoBatchScrapeQueue.isRunning() || actressScrapeQueue.isRunning()) {
-    throw new Error('批量刮削已在进行中')
-  }
-  const job = loadBatchScrapeJob()
-  if (!job) {
-    throw new Error('没有可继续的批量刮削任务')
-  }
-  if (job.kind === 'actress') {
-    assertActressBatchJobRecoverable(job)
-  }
+  if (result.canceled || !result.filePath) return null
+  plugins.exportPackage(kind, name, result.filePath)
+  return result.filePath
 }

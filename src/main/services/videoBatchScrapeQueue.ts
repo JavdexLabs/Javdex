@@ -12,20 +12,8 @@ import {
   type ScrapeOutcome
 } from '../scrapers/scraperManager'
 import { scrapeBrowser } from '../scrapers/scrapeBrowser'
-import {
-  createBatchScrapeJob,
-  discardBatchScrapeJob,
-  finishBatchScrapeJob,
-  getBatchScrapeState,
-  markBatchScrapePaused,
-  persistBatchScrapeCheckpoint,
-  restoreTargetsFromJob
-} from './batchScrapeControl'
-import {
-  jobToBatchProgress,
-  loadBatchScrapeJob,
-  type PersistedBatchScrapeJob
-} from './batchScrapeJobStore'
+import type { PersistedBatchScrapeJob } from './batchScrapeJobStore'
+import type { BatchScrapeCheckpointPort } from './batchScrapeCheckpointPort'
 import { ScraperDelayController } from './scraperDelayController'
 import { SequentialBatchQueue } from './sequentialBatchQueue'
 
@@ -105,6 +93,11 @@ export function formatVideoBatchScrapeOutcome(
 class VideoBatchScrapeQueue {
   private readonly queue = new SequentialBatchQueue<{ id: number; code: string }>()
   private activeJob: PersistedBatchScrapeJob | null = null
+  private checkpoints: BatchScrapeCheckpointPort | null = null
+
+  setCheckpointPort(port: BatchScrapeCheckpointPort): void {
+    this.checkpoints = port
+  }
 
   setListener(fn: ProgressListener | null): void {
     this.queue.setListener(fn)
@@ -112,8 +105,8 @@ class VideoBatchScrapeQueue {
 
   getProgress(): BatchProgress {
     if (this.queue.isRunning()) return this.queue.getProgress()
-    const job = loadBatchScrapeJob()
-    if (job?.kind === 'video') return jobToBatchProgress(job)
+    const job = this.checkpointPort().load()
+    if (job?.kind === 'video') return this.checkpointPort().toProgress(job)
     return this.queue.getProgress()
   }
 
@@ -122,7 +115,7 @@ class VideoBatchScrapeQueue {
   }
 
   isPaused(): boolean {
-    const job = loadBatchScrapeJob()
+    const job = this.checkpointPort().load()
     return job?.kind === 'video' && !this.queue.isRunning()
   }
 
@@ -136,13 +129,13 @@ class VideoBatchScrapeQueue {
       return
     }
     if (this.isPaused()) {
-      discardBatchScrapeJob()
+      this.checkpointPort().discard()
       this.activeJob = null
     }
   }
 
   async resume(): Promise<void> {
-    const job = loadBatchScrapeJob()
+    const job = this.checkpointPort().load()
     if (!job || job.kind !== 'video') {
       throw new Error('没有可继续的影片批量任务')
     }
@@ -151,9 +144,9 @@ class VideoBatchScrapeQueue {
 
   async start(request: VideoBatchScrapeRequest): Promise<void> {
     const targets = resolveVideoTargets(request)
-    const job = createBatchScrapeJob('video', request, targets, (target) => target.code)
+    const job = this.checkpointPort().create('video', request, targets, (target) => target.code)
     this.activeJob = job
-    persistBatchScrapeCheckpoint(job, jobToBatchProgress(job), 0, 'running')
+    this.checkpointPort().persist(job, this.checkpointPort().toProgress(job), 0, 'running')
     await this.runJob(job)
   }
 
@@ -164,7 +157,7 @@ class VideoBatchScrapeQueue {
 
     const mode = request.mode ?? 'replace'
     const missingFields = request.missingFields ?? []
-    const targets = restoreTargetsFromJob(job, (item) => ({
+    const targets = this.checkpointPort().restoreTargets(job, (item) => ({
       id: item.id,
       code: item.label
     }))
@@ -203,7 +196,7 @@ class VideoBatchScrapeQueue {
         getCode: (target) => target.code,
         onCheckpoint: (progress, nextIndex) => {
           if (!this.activeJob) return
-          persistBatchScrapeCheckpoint(this.activeJob, progress, nextIndex, 'running')
+          this.checkpointPort().persist(this.activeJob, progress, nextIndex, 'running')
         },
         runTarget: async ({ id, code }) => {
           const itemOutcome = await scrapeVideo(id, request.scraperName, {
@@ -219,18 +212,23 @@ class VideoBatchScrapeQueue {
       })
 
       if (outcome === 'paused' && this.activeJob) {
-        markBatchScrapePaused(this.activeJob, this.queue.getProgress())
+        this.checkpointPort().markPaused(this.activeJob, this.queue.getProgress())
       } else if (outcome === 'done') {
-        finishBatchScrapeJob()
+        this.checkpointPort().finish()
         this.activeJob = null
       } else if (outcome === 'cancelled') {
-        discardBatchScrapeJob()
+        this.checkpointPort().discard()
         this.activeJob = null
         this.queue.resetToIdle()
       }
     } finally {
       scrapeBrowser.close()
     }
+  }
+
+  private checkpointPort(): BatchScrapeCheckpointPort {
+    if (!this.checkpoints) throw new Error('批量刮削检查点尚未初始化')
+    return this.checkpoints
   }
 }
 

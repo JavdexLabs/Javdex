@@ -22,6 +22,61 @@ import type {
   VideoSampleImportInput,
   VideoTag
 } from './videoTypes'
+import {
+  ACTRESS_BATCH_DEFAULT_MISSING_FIELDS,
+  ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS,
+  ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS,
+  ACTRESS_SCRAPE_FIELD_OPTIONS,
+  ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS,
+  ALL_ACTRESS_SCRAPE_FIELDS,
+  ALL_VIDEO_SCRAPE_FIELDS,
+  VIDEO_BATCH_SCRAPE_STATUS_OPTIONS,
+  VIDEO_REMATCH_SCOPE_OPTIONS,
+  VIDEO_SCRAPE_FIELD_OPTIONS,
+  VIDEO_SCRAPE_UPDATE_MODE_OPTIONS,
+  expandActressScrapeFields,
+  type ActressAvatarAutoCropOutcome,
+  type ActressAvatarAutoCropRequest,
+  type ActressAvatarAutoCropResponse,
+  type ActressAvatarAutoCropStatus,
+  type ActressAvatarAutoCropTarget,
+  type ActressBatchScrapeFilter,
+  type ActressBatchScrapeRequest,
+  type ActressBatchScrapeScope,
+  type ActressBatchScrapeStatus,
+  type ActressScrapeDisposition,
+  type ActressScrapeField,
+  type ActressScrapeFieldImpact,
+  type ActressScrapePluginRef,
+  type ActressScrapeResult,
+  type ActressScrapeUpdateMode,
+  type BatchLogEntry,
+  type BatchProgress,
+  type BatchScrapeState,
+  type CompositeScraperDefinition,
+  type CompositeScraperInput,
+  type LegacyActressBatchScrapeStatus,
+  type ScrapeResult,
+  type ScrapeUpdateModeOption,
+  type ScrapedActress,
+  type ScraperPluginDelay,
+  type ScraperPluginDelaySettings,
+  type ScraperPluginDescriptor,
+  type ScraperPluginKind,
+  type ScraperPluginPackage,
+  type ScraperPluginPackageExport,
+  type ScraperPluginPackageImport,
+  type ScraperPluginSource,
+  type ScraperPluginUpdateInput,
+  type VideoBatchScrapeFilter,
+  type VideoBatchScrapeRequest,
+  type VideoBatchScrapeStatus,
+  type VideoRematchBatchRequest,
+  type VideoRematchScope,
+  type VideoScrapeField,
+  type VideoScrapeOneResult,
+  type VideoScrapeUpdateMode
+} from './scrapeTypes'
 
 export type {
   CorrectImportResult,
@@ -36,6 +91,64 @@ export type {
   VideoSampleImportInput,
   VideoTag
 } from './videoTypes'
+
+export {
+  ACTRESS_BATCH_DEFAULT_MISSING_FIELDS,
+  ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS,
+  ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS,
+  ACTRESS_SCRAPE_FIELD_OPTIONS,
+  ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS,
+  ALL_ACTRESS_SCRAPE_FIELDS,
+  ALL_VIDEO_SCRAPE_FIELDS,
+  VIDEO_BATCH_SCRAPE_STATUS_OPTIONS,
+  VIDEO_REMATCH_SCOPE_OPTIONS,
+  VIDEO_SCRAPE_FIELD_OPTIONS,
+  VIDEO_SCRAPE_UPDATE_MODE_OPTIONS,
+  expandActressScrapeFields
+} from './scrapeTypes'
+export type {
+  ActressAvatarAutoCropOutcome,
+  ActressAvatarAutoCropRequest,
+  ActressAvatarAutoCropResponse,
+  ActressAvatarAutoCropStatus,
+  ActressAvatarAutoCropTarget,
+  ActressBatchScrapeFilter,
+  ActressBatchScrapeRequest,
+  ActressBatchScrapeScope,
+  ActressBatchScrapeStatus,
+  ActressScrapeDisposition,
+  ActressScrapeField,
+  ActressScrapeFieldImpact,
+  ActressScrapePluginRef,
+  ActressScrapeResult,
+  ActressScrapeUpdateMode,
+  BatchLogEntry,
+  BatchProgress,
+  BatchScrapeState,
+  CompositeScraperDefinition,
+  CompositeScraperInput,
+  LegacyActressBatchScrapeStatus,
+  ScrapeResult,
+  ScrapeUpdateModeOption,
+  ScrapedActress,
+  ScraperPluginDelay,
+  ScraperPluginDelaySettings,
+  ScraperPluginDescriptor,
+  ScraperPluginKind,
+  ScraperPluginPackage,
+  ScraperPluginPackageExport,
+  ScraperPluginPackageImport,
+  ScraperPluginSource,
+  ScraperPluginUpdateInput,
+  VideoBatchScrapeFilter,
+  VideoBatchScrapeRequest,
+  VideoBatchScrapeStatus,
+  VideoRematchBatchRequest,
+  VideoRematchScope,
+  VideoScrapeField,
+  VideoScrapeOneResult,
+  VideoScrapeUpdateMode
+} from './scrapeTypes'
 
 export type { AvatarFaceScalePreset } from './avatarFaceScale'
 export type { AvatarCenteringMode } from './avatarCentering'
@@ -291,126 +404,6 @@ export interface ActressEditInput {
   avatar?: import('./avatarCrop').ActressAvatarCommit
   /** Clear display/source/crop together. */
   clearAvatar?: boolean
-}
-
-/** Result returned by a scraper plugin after parsing a remote page. */
-export interface ScrapeResult {
-  code: string
-  title?: string
-  summary?: string
-  coverUrl?: string
-  releaseDate?: string
-  maker?: string
-  publisher?: string
-  series?: string
-  director?: string
-  durationSeconds?: number
-  sourceUrl?: string
-  ratingAverage?: number
-  ratingCount?: number
-  sampleImageUrls?: string[]
-  actresses?: ScrapedActress[]
-  tags?: string[]
-}
-
-export interface ScrapedActress {
-  name: string
-  avatarUrl?: string
-  /** From site cast markers (e.g. JavDB ♀/♂); omitted when unknown. */
-  gender?: ActressGender
-}
-
-/** Result returned by an actress-profile scraper plugin. */
-export interface ActressScrapeResult {
-  mainName?: string
-  nameZh?: string
-  nameEn?: string
-  avatarUrl?: string
-  birthDate?: string
-  debutDate?: string
-  heightCm?: number
-  bustCm?: number
-  waistCm?: number
-  hipCm?: number
-  cupSize?: string
-  bloodType?: string
-  zodiac?: string
-  nationality?: string
-  profileSummary?: string
-  galleryImageUrls?: string[]
-  aliases?: string[]
-  /** Profile page URL used for scraping; used by plugin dev verify to open the correct reference page. */
-  sourceUrl?: string
-}
-
-export type ScraperPluginKind = 'video' | 'actress'
-export type ScraperPluginSource = 'builtin' | 'user' | 'composite'
-
-export interface ScraperPluginDelay {
-  minMs: number
-  maxMs: number
-}
-
-export interface ScraperPluginDelaySettings {
-  video: Record<string, ScraperPluginDelay>
-  actress: Record<string, ScraperPluginDelay>
-}
-
-export interface CompositeScraperDefinition {
-  kind: ScraperPluginKind
-  name: string
-  description?: string
-  fieldPluginMap: Partial<Record<VideoScrapeField | ActressScrapeField, string>>
-}
-
-export interface ScraperPluginDescriptor {
-  kind: ScraperPluginKind
-  name: string
-  version: string
-  description: string
-  author?: string
-  homepage?: string
-  source: ScraperPluginSource
-  removable: boolean
-  exportable: boolean
-  editable?: boolean
-  overridesBuiltIn?: boolean
-  supportedFields: Array<VideoScrapeField | ActressScrapeField>
-  delay?: ScraperPluginDelay
-  fieldPluginMap?: Partial<Record<VideoScrapeField | ActressScrapeField, string>>
-}
-
-export interface ScraperPluginPackage {
-  schemaVersion: 1
-  kind: ScraperPluginKind
-  name: string
-  version?: string
-  description?: string
-  author?: string
-  homepage?: string
-  supportedFields?: Array<VideoScrapeField | ActressScrapeField>
-  code: string
-}
-
-/** Plugin package JSON written to disk on export. */
-export type ScraperPluginPackageExport = ScraperPluginPackage
-
-/** Plugin package JSON accepted on import. */
-export type ScraperPluginPackageImport = ScraperPluginPackage
-
-export interface ScraperPluginUpdateInput {
-  version?: string
-  description?: string
-  author?: string
-  homepage?: string
-  supportedFields?: Array<VideoScrapeField | ActressScrapeField>
-  delay?: ScraperPluginDelay
-}
-
-export interface CompositeScraperInput {
-  name: string
-  description?: string
-  fieldPluginMap: Partial<Record<VideoScrapeField | ActressScrapeField, string>>
 }
 
 export type {
@@ -724,247 +717,6 @@ export interface PluginDevInstallInput {
   overwriteUser?: boolean
 }
 
-/** Selectable fields when manually re-scraping a video. */
-export type VideoScrapeField =
-  | 'title'
-  | 'summary'
-  | 'cover'
-  | 'releaseDate'
-  | 'maker'
-  | 'publisher'
-  | 'series'
-  | 'director'
-  | 'duration'
-  | 'actressesFemale'
-  | 'actressesMale'
-  | 'tags'
-  | 'source'
-  | 'rating'
-  | 'samples'
-
-export const VIDEO_SCRAPE_FIELD_OPTIONS: { id: VideoScrapeField; label: string }[] = [
-  { id: 'title', label: '标题' },
-  { id: 'summary', label: '简介' },
-  { id: 'cover', label: '封面' },
-  { id: 'releaseDate', label: '发行日期' },
-  { id: 'maker', label: '制作商' },
-  { id: 'publisher', label: '发行商' },
-  { id: 'series', label: '系列' },
-  { id: 'director', label: '导演' },
-  { id: 'duration', label: '时长' },
-  { id: 'actressesFemale', label: '女优' },
-  { id: 'actressesMale', label: '男优' },
-  { id: 'tags', label: '标签' },
-  { id: 'source', label: '来源链接' },
-  { id: 'rating', label: '站点评分' },
-  { id: 'samples', label: '样张' }
-]
-
-export const ALL_VIDEO_SCRAPE_FIELDS: VideoScrapeField[] = VIDEO_SCRAPE_FIELD_OPTIONS.map((o) => o.id)
-
-/** How rematch applies selected fields to existing video metadata. */
-export type VideoScrapeUpdateMode = 'replace' | 'fillEmpty' | 'replaceIfPresent'
-
-export interface ScrapeUpdateModeOption<M extends string = VideoScrapeUpdateMode> {
-  id: M
-  label: string
-  description: string
-}
-
-export const VIDEO_SCRAPE_UPDATE_MODE_OPTIONS: ScrapeUpdateModeOption<VideoScrapeUpdateMode>[] = [
-  {
-    id: 'fillEmpty',
-    label: '空字段补齐',
-    description: '只写入库内尚未填写的字段，已有内容保持不变'
-  },
-  {
-    id: 'replaceIfPresent',
-    label: '有值覆盖',
-    description: '已选字段在刮削有结果时更新，无结果则保留原值'
-  },
-  {
-    id: 'replace',
-    label: '覆盖更新',
-    description: '已选字段按刮削结果整体替换，无结果则清空'
-  }
-]
-
-/** Which videos to include in a unified batch scrape/update run. */
-export type VideoBatchScrapeStatus = ScrapedStatus | 'all'
-
-export const VIDEO_BATCH_SCRAPE_STATUS_OPTIONS: {
-  id: VideoBatchScrapeStatus
-  label: string
-}[] = [
-  { id: 0, label: '未刮削' },
-  { id: 1, label: '已刮削成功' },
-  { id: 2, label: '刮削失败' },
-  { id: 'all', label: '库内全部' }
-]
-
-export interface VideoBatchScrapeFilter {
-  /** Filter by current scrape status. */
-  status: VideoBatchScrapeStatus
-  /** Optional explicit target videos, used by library multi-select actions. */
-  videoIds?: number[]
-  /** Optional range filter: include videos missing any selected metadata field. */
-  missingFields?: VideoScrapeField[]
-  /** Actual plugins supplying site-scoped source and rating fields. */
-  sourceName?: string
-  ratingSourceName?: string
-  /** Scraper selected by the user; main process resolves its actual field sources. */
-  scraperName?: string
-}
-
-export interface VideoBatchScrapeRequest extends VideoBatchScrapeFilter {
-  fields: VideoScrapeField[]
-  /** Default: replace — only write into empty fields when fillEmpty. */
-  mode?: VideoScrapeUpdateMode
-}
-
-/** Which videos to include in a batch metadata rematch run. */
-export type VideoRematchScope = 'scraped' | 'failed' | 'all'
-
-export const VIDEO_REMATCH_SCOPE_OPTIONS: { id: VideoRematchScope; label: string }[] = [
-  { id: 'scraped', label: '已刮削成功' },
-  { id: 'failed', label: '刮削失败' },
-  { id: 'all', label: '库内全部' }
-]
-
-export interface VideoRematchBatchRequest {
-  scraperName?: string
-  fields: VideoScrapeField[]
-  scope: VideoRematchScope
-  /** Default: replace — only write into empty fields when fillEmpty. */
-  mode?: VideoScrapeUpdateMode
-}
-
-export interface VideoScrapeOneResult {
-  result: ScrapeResult
-  /** True only when at least one selected field was written or explicitly cleared. */
-  applied: boolean
-  warnings: string[]
-}
-
-/** Selectable fields when manually re-scraping an actress profile. */
-export type ActressScrapeField =
-  | 'avatar'
-  | 'gallery'
-  | 'birthDate'
-  | 'nameZh'
-  | 'nameEn'
-  | 'debutDate'
-  | 'heightCm'
-  | 'measurements'
-  | 'cupSize'
-  | 'bloodType'
-  | 'zodiac'
-  | 'nationality'
-  | 'profileSummary'
-  | 'aliases'
-
-export const ACTRESS_SCRAPE_FIELD_OPTIONS: { id: ActressScrapeField; label: string }[] = [
-  { id: 'avatar', label: '头像' },
-  { id: 'gallery', label: '写真' },
-  { id: 'birthDate', label: '生日' },
-  { id: 'nameZh', label: '中文名' },
-  { id: 'nameEn', label: '英文名' },
-  { id: 'debutDate', label: '出道日期' },
-  { id: 'heightCm', label: '身高' },
-  { id: 'measurements', label: '三围' },
-  { id: 'cupSize', label: '罩杯' },
-  { id: 'bloodType', label: '血型' },
-  { id: 'zodiac', label: '星座' },
-  { id: 'nationality', label: '国籍' },
-  { id: 'profileSummary', label: '简介' },
-  { id: 'aliases', label: '别名' }
-]
-
-export const ALL_ACTRESS_SCRAPE_FIELDS: ActressScrapeField[] = ACTRESS_SCRAPE_FIELD_OPTIONS.map(
-  (o) => o.id
-)
-
-/** Keep only canonical actress scrape field ids. */
-export function expandActressScrapeFields(fields: readonly string[]): ActressScrapeField[] {
-  const allowed = new Set(ALL_ACTRESS_SCRAPE_FIELDS)
-  const out: ActressScrapeField[] = []
-  const seen = new Set<string>()
-  for (const field of fields) {
-    if (!allowed.has(field as ActressScrapeField) || seen.has(field)) continue
-    seen.add(field)
-    out.push(field as ActressScrapeField)
-  }
-  return out
-}
-
-/** Default missing-field filter for actress batch profile scrape. */
-export const ACTRESS_BATCH_DEFAULT_MISSING_FIELDS: ActressScrapeField[] = [
-  'avatar',
-  'birthDate',
-  'heightCm',
-  'measurements'
-]
-
-export type ActressBatchScrapeScope = ActressGenderFilter
-
-/** Cumulative profile-scrape scopes for advanced actress batch scrape. */
-export type ActressBatchScrapeStatus = 'unscraped' | 'success' | 'failed' | 'all'
-
-/** Pre-cumulative two-state scope, accepted only as compatibility input. */
-export type LegacyActressBatchScrapeStatus = 'scraped'
-
-export const ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS: {
-  id: ActressBatchScrapeScope
-  label: string
-}[] = [
-  { id: 'female', label: '女优' },
-  { id: 'male', label: '男优' },
-  { id: 'all', label: '全部演员' }
-]
-
-export const ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS: {
-  id: ActressBatchScrapeStatus
-  label: string
-}[] = [
-  { id: 'unscraped', label: ACTRESS_SCRAPE_STATUS_LABELS.unscraped },
-  { id: 'success', label: ACTRESS_SCRAPE_STATUS_LABELS.success },
-  { id: 'failed', label: ACTRESS_SCRAPE_STATUS_LABELS.failed },
-  { id: 'all', label: '全部' }
-]
-
-export type ActressScrapeUpdateMode = 'replace' | 'fillEmpty' | 'replaceIfPresent'
-
-export type ActressScrapeFieldImpactAction =
-  | 'set'
-  | 'clear'
-  | 'append'
-  | 'replace'
-  | 'preserve'
-
-export type ActressScrapeFieldImpactReason =
-  | 'replace'
-  | 'fillEmpty'
-  | 'replaceIfPresent'
-  | 'noValue'
-  | 'existingValue'
-  | 'resourceUnavailable'
-
-export interface ActressScrapeFieldImpact {
-  field: ActressScrapeField
-  /** Measurements are planned independently even though they share one selectable field. */
-  part?: 'bustCm' | 'waistCm' | 'hipCm'
-  action: ActressScrapeFieldImpactAction
-  currentValue: string | number | string[] | null
-  nextValue: string | number | string[] | null
-  reason: ActressScrapeFieldImpactReason
-}
-
-export interface ActressScrapePluginRef {
-  name: string
-  source: ScraperPluginSource
-  version?: string
-}
-
 export type ActressPendingNameType = 'main' | 'zh' | 'en' | 'alias'
 
 export interface PendingActressScrapeCandidate {
@@ -1150,103 +902,6 @@ export type ResolveActressConflictInput = ActressConflictDecisionBase &
 export type ResolveActressConflictResult =
   | { status: 'success'; remainingPending: number }
   | { status: 'stale'; message: string }
-
-export type ActressScrapeDisposition =
-  | {
-      status: 'success'
-      ok: true
-      result: ActressScrapeResult
-      warnings?: string[]
-      skipped?: boolean
-      avatarUpdated?: boolean
-      pendingId?: never
-      error?: never
-    }
-  | {
-      status: 'pending'
-      ok: true
-      pendingId: number
-      result: ActressScrapeResult
-      warnings?: string[]
-      skipped?: false
-      avatarUpdated?: false
-      error?: never
-    }
-  | {
-      status: 'failure'
-      ok: false
-      error: string
-      warnings?: string[]
-      result?: never
-      skipped?: false
-      avatarUpdated?: false
-      pendingId?: never
-    }
-
-export const ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS: ScrapeUpdateModeOption<ActressScrapeUpdateMode>[] = [
-  {
-    id: 'fillEmpty',
-    label: '空字段补齐',
-    description: '只写入库内尚未填写的字段，已有内容保持不变'
-  },
-  {
-    id: 'replaceIfPresent',
-    label: '有值覆盖',
-    description: '已选字段在刮削有结果时更新，无结果则保留原值'
-  },
-  {
-    id: 'replace',
-    label: '覆盖更新',
-    description: '已选字段按刮削结果整体替换，无结果则清空'
-  }
-]
-
-export interface ActressBatchScrapeFilter {
-  /**
-   * Optional explicit target ids. When present they are the authoritative target set;
-   * an empty array matches no actresses.
-   */
-  actressIds?: number[]
-  /** Filter by actor gender. Unknown gender is treated as female for compatibility. */
-  scope: ActressBatchScrapeScope
-  /** Filter by cumulative profile-scrape status. Default: all. */
-  scrapeStatus?: ActressBatchScrapeStatus
-  /** Optional range filter: include actresses missing any selected profile field. */
-  missingFields?: ActressScrapeField[]
-}
-
-export interface ActressBatchScrapeRequest extends ActressBatchScrapeFilter {
-  scraperName?: string
-  fields: ActressScrapeField[]
-  mode?: ActressScrapeUpdateMode
-  /** When true, scrapers also try stored aliases / zh / en names. Default false. */
-  useAliases?: boolean
-  /** Smart-crop newly downloaded avatars with the saved local composition settings. */
-  autoCropAvatar?: boolean
-}
-
-/** Actress whose newly stored avatar should be smart-cropped before scraping continues. */
-export interface ActressAvatarAutoCropTarget {
-  actressId: number
-  mainName: string
-}
-
-export type ActressAvatarAutoCropStatus = 'success' | 'skipped' | 'failed'
-
-export interface ActressAvatarAutoCropOutcome {
-  status: ActressAvatarAutoCropStatus
-  message?: string
-}
-
-/** Main-to-renderer request for one scrape-integrated avatar crop. */
-export interface ActressAvatarAutoCropRequest extends ActressAvatarAutoCropTarget {
-  requestId: string
-}
-
-/** Renderer acknowledgement that lets the actress scrape queue continue. */
-export interface ActressAvatarAutoCropResponse extends ActressAvatarAutoCropOutcome {
-  requestId: string
-}
 
 /** UI color theme id (maps to CSS variables on html[data-theme]). */
 export type ThemeId = 'graphite' | 'warm' | 'slate' | 'light'
@@ -1513,39 +1168,6 @@ export interface ManualImportResult {
   skippedPath?: boolean
   /** Same code exists elsewhere — file path updated. */
   relocated?: boolean
-}
-
-// ---- Batch scrape progress ----
-
-export interface BatchProgress {
-  total: number
-  current: number
-  success: number
-  pending: number
-  failed: number
-  /** Code currently being processed. */
-  currentCode: string | null
-  status: 'idle' | 'running' | 'paused' | 'done' | 'cancelled'
-  logs: BatchLogEntry[]
-}
-
-export interface BatchScrapeState {
-  kind: 'video' | 'actress' | null
-  progress: BatchProgress | null
-  /**
-   * False when a persisted actress batch carries an unrecognized scrape-status
-   * scope. The task remains viewable and discardable, but resume is blocked.
-   */
-  recoverable: boolean
-  /** Present when recoverable is false. */
-  unrecoverableReason?: string
-}
-
-export interface BatchLogEntry {
-  time: string
-  code: string
-  level: 'info' | 'success' | 'error'
-  message: string
 }
 
 /** Progress for full-library asset encrypt/decrypt migration. */

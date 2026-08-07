@@ -2,16 +2,10 @@ import { IPC } from './ipc-channels'
 import type {
   IpcContractArgs,
   IpcContractChannel,
-  IpcContractResult,
-  IpcEventChannel,
-  IpcEventPayload
+  IpcContractResult
 } from './typedIpcContract'
 import type {
-  ActressAvatarAutoCropRequest,
-  ActressAvatarAutoCropResponse,
   ActressAvatarSourceInfo,
-  ActressBatchScrapeFilter,
-  ActressBatchScrapeRequest,
   ActressConflictReviewSummary,
   ActressDetail,
   ActressEditInput,
@@ -25,11 +19,6 @@ import type {
   ActressListSortBy,
   ActressMergeInput,
   ActressNameConflictGroup,
-  ActressScrapeDisposition,
-  ActressScrapeField,
-  ActressScrapeUpdateMode,
-  BatchProgress,
-  CompositeScraperInput,
   DiscardPendingActressScrapeInput,
   DiscardPendingActressScrapeResult,
   InspectActressConflictNameInput,
@@ -37,9 +26,6 @@ import type {
   ListSortDir,
   ResolveActressConflictInput,
   ResolveActressConflictResult,
-  ScraperPluginDescriptor,
-  ScraperPluginPackage,
-  ScraperPluginUpdateInput,
   ValidateIllegalNameReplacementsInput,
   ValidateIllegalNameReplacementsResult
 } from './types'
@@ -162,51 +148,6 @@ export interface ActressIpcContract {
     args: [input: ResolveActressConflictInput]
     result: ResolveActressConflictResult
   }
-  [IPC.ACTRESS_SCRAPER_LIST]: { args: []; result: string[] }
-  [IPC.ACTRESS_SCRAPER_PLUGIN_DETAILS]: { args: []; result: ScraperPluginDescriptor[] }
-  [IPC.ACTRESS_SCRAPER_PLUGIN_EXPORT]: { args: [name: string]; result: string | null }
-  [IPC.ACTRESS_SCRAPER_PLUGIN_PACKAGE]: { args: [name: string]; result: ScraperPluginPackage }
-  [IPC.ACTRESS_SCRAPER_PLUGIN_UPDATE]: {
-    args: [name: string, input: ScraperPluginUpdateInput]
-    result: ScraperPluginDescriptor
-  }
-  [IPC.ACTRESS_SCRAPER_PLUGIN_DELETE]: { args: [name: string]; result: boolean }
-  [IPC.ACTRESS_SCRAPER_COMPOSITE_CREATE]: {
-    args: [input: CompositeScraperInput]
-    result: ScraperPluginDescriptor
-  }
-  [IPC.ACTRESS_SCRAPER_COMPOSITE_UPDATE]: {
-    args: [name: string, input: CompositeScraperInput]
-    result: ScraperPluginDescriptor
-  }
-  [IPC.ACTRESS_SCRAPER_COMPOSITE_DELETE]: { args: [name: string]; result: boolean }
-  [IPC.ACTRESS_SCRAPE_ONE]: {
-    args: [
-      actressId: number,
-      scraperName?: string,
-      fields?: ActressScrapeField[],
-      mode?: ActressScrapeUpdateMode,
-      queryName?: string,
-      useAliases?: boolean,
-      autoCropAvatar?: boolean
-    ]
-    result: ActressScrapeDisposition
-  }
-  [IPC.ACTRESS_SCRAPE_BATCH_COUNT]: { args: [filter: ActressBatchScrapeFilter]; result: number }
-  [IPC.ACTRESS_SCRAPE_BATCH_START]: {
-    args: [request?: ActressBatchScrapeRequest | string]
-    result: boolean
-  }
-  [IPC.ACTRESS_SCRAPE_BATCH_CANCEL]: { args: []; result: boolean }
-  [IPC.ACTRESS_AVATAR_AUTO_CROP_RESULT]: {
-    args: [response: ActressAvatarAutoCropResponse]
-    result: boolean
-  }
-}
-
-export interface ActressIpcEventContract {
-  [IPC.ACTRESS_SCRAPE_BATCH_PROGRESS]: BatchProgress
-  [IPC.ACTRESS_AVATAR_AUTO_CROP_REQUEST]: ActressAvatarAutoCropRequest
 }
 
 export type ActressIpcChannel = IpcContractChannel<ActressIpcContract>
@@ -214,6 +155,3 @@ export type ActressIpcArgs<Channel extends ActressIpcChannel> =
   IpcContractArgs<ActressIpcContract, Channel>
 export type ActressIpcResult<Channel extends ActressIpcChannel> =
   IpcContractResult<ActressIpcContract, Channel>
-export type ActressIpcEventChannel = IpcEventChannel<ActressIpcEventContract>
-export type ActressIpcEvent<Channel extends ActressIpcEventChannel> =
-  IpcEventPayload<ActressIpcEventContract, Channel>

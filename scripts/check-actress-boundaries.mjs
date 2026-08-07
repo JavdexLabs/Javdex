@@ -55,11 +55,16 @@ const channelSource = readFileSync('src/shared/ipc-channels.ts', 'utf8')
 for (const contract of [
   {
     file: 'src/shared/actressIpcContract.ts',
-    channelPattern: /\b(ACTRESS_[A-Z0-9_]+)\s*:/g
+    channelPattern: /\b(ACTRESS_(?!(?:SCRAPE|SCRAPER|AVATAR_AUTO_CROP)_)[A-Z0-9_]+)\s*:/g
   },
   {
     file: 'src/shared/videoIpcContract.ts',
     channelPattern: /\b(VIDEO_[A-Z0-9_]+)\s*:/g
+  },
+  {
+    file: 'src/shared/scrapeIpcContract.ts',
+    channelPattern:
+      /\b((?:SCRAPE|SCRAPER|BATCH_SCRAPE|AVATAR_AUTO_CROP_BATCH)_[A-Z0-9_]+|PLUGIN_IMPORT|ACTRESS_(?:SCRAPE|SCRAPER|AVATAR_AUTO_CROP)_[A-Z0-9_]+)\s*:/g
   }
 ]) {
   const contractSource = readFileSync(contract.file, 'utf8')
@@ -101,6 +106,20 @@ for (const specifier of importsOf(videoHandler)) {
   }
 }
 
+const scrapeHandler = 'src/main/ipc/scrapeHandlers.ts'
+for (const specifier of importsOf(scrapeHandler)) {
+  if (
+    /\.\.\/(db|scrapers)\//.test(specifier) ||
+    (/\.\.\/services\//.test(specifier) &&
+      ![
+        '../services/scrapeJobController',
+        '../services/scraperPluginCatalog'
+      ].includes(specifier))
+  ) {
+    violations.push(`${scrapeHandler}: scrape IPC must delegate through its application modules`)
+  }
+}
+
 for (const file of sourceFiles('src/main/db')) {
   if (/\.test\.[cm]?[jt]sx?$/.test(file)) continue
   for (const specifier of importsOf(file)) {
@@ -118,4 +137,4 @@ if (violations.length > 0) {
   process.exit(1)
 }
 
-console.log('Actress and video dependency boundaries are valid.')
+console.log('Actress, video, and scrape dependency boundaries are valid.')

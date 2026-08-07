@@ -1,4 +1,3 @@
-import type { WebContents } from 'electron'
 import type {
   ActressIpcArgs,
   ActressIpcChannel,
@@ -6,7 +5,12 @@ import type {
   ActressIpcEventChannel,
   ActressIpcResult
 } from '@shared/actressIpcContract'
-import { registerHandler } from './shared'
+import { createTypedEventAdapter, createTypedIpcAdapter } from './typedIpcAdapter'
+import type { ActressIpcContract, ActressIpcEventContract } from '@shared/actressIpcContract'
+import type { WebContents } from 'electron'
+
+const commandAdapter = createTypedIpcAdapter<ActressIpcContract>()
+const eventAdapter = createTypedEventAdapter<ActressIpcEventContract>()
 
 export function registerActressHandler<Channel extends ActressIpcChannel>(
   channel: Channel,
@@ -14,7 +18,7 @@ export function registerActressHandler<Channel extends ActressIpcChannel>(
     ...args: ActressIpcArgs<Channel>
   ) => ActressIpcResult<Channel> | Promise<ActressIpcResult<Channel>>
 ): void {
-  registerHandler(channel, (_event, ...args: ActressIpcArgs<Channel>) => handler(...args))
+  commandAdapter.register(channel, handler)
 }
 
 export function sendActressEvent<Channel extends ActressIpcEventChannel>(
@@ -22,5 +26,5 @@ export function sendActressEvent<Channel extends ActressIpcEventChannel>(
   channel: Channel,
   payload: ActressIpcEvent<Channel>
 ): void {
-  webContents?.send(channel, payload)
+  eventAdapter.send(webContents, channel, payload)
 }

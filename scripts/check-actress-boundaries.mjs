@@ -52,13 +52,22 @@ for (const expected of [
 
 const violations = []
 const channelSource = readFileSync('src/shared/ipc-channels.ts', 'utf8')
-const contractSource = readFileSync('src/shared/actressIpcContract.ts', 'utf8')
-const actressChannels = [...channelSource.matchAll(/\b(ACTRESS_[A-Z0-9_]+)\s*:/g)].map(
-  (match) => match[1]
-)
-for (const channel of actressChannels) {
-  if (!contractSource.includes(`[IPC.${channel}]`)) {
-    violations.push(`src/shared/actressIpcContract.ts: missing contract for IPC.${channel}`)
+for (const contract of [
+  {
+    file: 'src/shared/actressIpcContract.ts',
+    channelPattern: /\b(ACTRESS_[A-Z0-9_]+)\s*:/g
+  },
+  {
+    file: 'src/shared/videoIpcContract.ts',
+    channelPattern: /\b(VIDEO_[A-Z0-9_]+)\s*:/g
+  }
+]) {
+  const contractSource = readFileSync(contract.file, 'utf8')
+  const channels = [...channelSource.matchAll(contract.channelPattern)].map((match) => match[1])
+  for (const channel of channels) {
+    if (!contractSource.includes(`[IPC.${channel}]`)) {
+      violations.push(`${contract.file}: missing contract for IPC.${channel}`)
+    }
   }
 }
 
@@ -81,6 +90,17 @@ for (const specifier of importsOf(actressHandler)) {
   }
 }
 
+const videoHandler = 'src/main/ipc/videoHandlers.ts'
+for (const specifier of importsOf(videoHandler)) {
+  if (
+    /\.\.\/(db|scrapers)\//.test(specifier) ||
+    (/\.\.\/services\//.test(specifier) &&
+      specifier !== '../services/videoApplicationService')
+  ) {
+    violations.push(`${videoHandler}: video IPC must delegate through its application service`)
+  }
+}
+
 for (const file of sourceFiles('src/main/db')) {
   if (/\.test\.[cm]?[jt]sx?$/.test(file)) continue
   for (const specifier of importsOf(file)) {
@@ -98,4 +118,4 @@ if (violations.length > 0) {
   process.exit(1)
 }
 
-console.log('Actress dependency boundaries are valid.')
+console.log('Actress and video dependency boundaries are valid.')

@@ -11,13 +11,19 @@ import type {
   ActressIpcResult
 } from '../shared/actressIpcContract'
 import type {
+  VideoIpcArgs,
+  VideoIpcChannel,
+  VideoIpcResult
+} from '../shared/videoIpcContract'
+import type {
+  Video,
+  VideoEditInput,
+  VideoQuery,
+  VideoSampleImportInput
+} from '../shared/videoTypes'
+import type {
   AppSettings,
   LibraryOverviewStats,
-  VideoQuery,
-  VideoListResult,
-  VideoAsset,
-  VideoDetail,
-  Video,
   ActressDetail,
   ActressAvatarSourceInfo,
   ActressGalleryAsset,
@@ -63,11 +69,8 @@ import type {
   ActressAvatarAutoCropResponse,
   FacetType,
   FacetItem,
-  VideoEditInput,
-  VideoSampleImportInput,
   RenameImportResult,
   ManualImportResult,
-  CorrectImportResult,
   AssetCryptoProgress,
   VideoBatchScrapeFilter,
   VideoBatchScrapeRequest,
@@ -106,6 +109,13 @@ function invokeActress<Channel extends ActressIpcChannel>(
   ...args: ActressIpcArgs<Channel>
 ): Promise<ActressIpcResult<Channel>> {
   return invoke<ActressIpcResult<Channel>>(channel, ...args)
+}
+
+function invokeVideo<Channel extends VideoIpcChannel>(
+  channel: Channel,
+  ...args: VideoIpcArgs<Channel>
+): Promise<VideoIpcResult<Channel>> {
+  return invoke<VideoIpcResult<Channel>>(channel, ...args)
 }
 
 function onActressEvent<Channel extends ActressIpcEventChannel>(
@@ -163,32 +173,32 @@ const api = {
     }
   },
   videos: {
-    list: (q: VideoQuery) => invoke<VideoListResult>(IPC.VIDEO_LIST, q),
-    get: (id: number) => invoke<VideoDetail | null>(IPC.VIDEO_GET, id),
-    update: (id: number, fields: Partial<Video>) => invoke<boolean>(IPC.VIDEO_UPDATE, id, fields),
-    edit: (id: number, input: VideoEditInput) => invoke<boolean>(IPC.VIDEO_EDIT, id, input),
-    clearMeta: (id: number) => invoke<boolean>(IPC.VIDEO_CLEAR_META, id),
-    markScrapeSuccess: (id: number) => invoke<boolean>(IPC.VIDEO_MARK_SCRAPE_SUCCESS, id),
-    remove: (id: number) => invoke<boolean>(IPC.VIDEO_DELETE, id),
+    list: (q: VideoQuery) => invokeVideo(IPC.VIDEO_LIST, q),
+    get: (id: number) => invokeVideo(IPC.VIDEO_GET, id),
+    update: (id: number, fields: Partial<Video>) => invokeVideo(IPC.VIDEO_UPDATE, id, fields),
+    edit: (id: number, input: VideoEditInput) => invokeVideo(IPC.VIDEO_EDIT, id, input),
+    clearMeta: (id: number) => invokeVideo(IPC.VIDEO_CLEAR_META, id),
+    markScrapeSuccess: (id: number) => invokeVideo(IPC.VIDEO_MARK_SCRAPE_SUCCESS, id),
+    remove: (id: number) => invokeVideo(IPC.VIDEO_DELETE, id),
     setRating: (id: number, rating: number) =>
-      invoke<boolean>(IPC.VIDEO_SET_RATING, id, rating),
+      invokeVideo(IPC.VIDEO_SET_RATING, id, rating),
     setPrimaryFile: (id: number, fileId: number) =>
-      invoke<boolean>(IPC.VIDEO_SET_PRIMARY_FILE, id, fileId),
+      invokeVideo(IPC.VIDEO_SET_PRIMARY_FILE, id, fileId),
     deleteFile: (id: number, fileId: number) =>
-      invoke<boolean>(IPC.VIDEO_DELETE_FILE, id, fileId),
+      invokeVideo(IPC.VIDEO_DELETE_FILE, id, fileId),
     correctImport: (id: number, code: string) =>
-      invoke<CorrectImportResult>(IPC.VIDEO_CORRECT_IMPORT, id, code),
-    years: () => invoke<number[]>(IPC.VIDEO_YEARS),
+      invokeVideo(IPC.VIDEO_CORRECT_IMPORT, id, code),
+    years: () => invokeVideo(IPC.VIDEO_YEARS),
     importSample: (id: number, input: VideoSampleImportInput) =>
-      invoke<VideoAsset>(IPC.VIDEO_SAMPLE_IMPORT, id, input),
+      invokeVideo(IPC.VIDEO_SAMPLE_IMPORT, id, input),
     deleteSample: (id: number, assetId: number) =>
-      invoke<boolean>(IPC.VIDEO_SAMPLE_DELETE, id, assetId),
+      invokeVideo(IPC.VIDEO_SAMPLE_DELETE, id, assetId),
     setPoster: (id: number, posterPath: string | null) =>
-      invoke<boolean>(IPC.VIDEO_POSTER_SET, id, posterPath),
+      invokeVideo(IPC.VIDEO_POSTER_SET, id, posterPath),
     addManualTag: (id: number, name: string) =>
-      invoke<boolean>(IPC.VIDEO_MANUAL_TAG_ADD, id, name),
+      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name),
     removeManualTag: (id: number, tagId: number) =>
-      invoke<boolean>(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId)
+      invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId)
   },
   playlists: {
     list: () => invoke<PlaylistListItem[]>(IPC.PLAYLIST_LIST),

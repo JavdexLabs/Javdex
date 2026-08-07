@@ -1,5 +1,12 @@
 import { IPC } from './ipc-channels'
 import type {
+  IpcContractArgs,
+  IpcContractChannel,
+  IpcContractResult,
+  IpcEventChannel,
+  IpcEventPayload
+} from './typedIpcContract'
+import type {
   ActressAvatarAutoCropRequest,
   ActressAvatarAutoCropResponse,
   ActressAvatarSourceInfo,
@@ -202,9 +209,11 @@ export interface ActressIpcEventContract {
   [IPC.ACTRESS_AVATAR_AUTO_CROP_REQUEST]: ActressAvatarAutoCropRequest
 }
 
-export type ActressIpcChannel = keyof ActressIpcContract
-export type ActressIpcArgs<Channel extends ActressIpcChannel> = ActressIpcContract[Channel]['args']
-export type ActressIpcResult<Channel extends ActressIpcChannel> = ActressIpcContract[Channel]['result']
-export type ActressIpcEventChannel = keyof ActressIpcEventContract
+export type ActressIpcChannel = IpcContractChannel<ActressIpcContract>
+export type ActressIpcArgs<Channel extends ActressIpcChannel> =
+  IpcContractArgs<ActressIpcContract, Channel>
+export type ActressIpcResult<Channel extends ActressIpcChannel> =
+  IpcContractResult<ActressIpcContract, Channel>
+export type ActressIpcEventChannel = IpcEventChannel<ActressIpcEventContract>
 export type ActressIpcEvent<Channel extends ActressIpcEventChannel> =
-  ActressIpcEventContract[Channel]
+  IpcEventPayload<ActressIpcEventContract, Channel>

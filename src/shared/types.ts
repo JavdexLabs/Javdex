@@ -9,47 +9,38 @@ import {
   DEFAULT_AVATAR_CENTERING_MODE,
   type AvatarCenteringMode
 } from './avatarCentering'
+import type {
+  CorrectImportResult,
+  Video,
+  VideoAsset,
+  VideoDetail,
+  VideoEditInput,
+  VideoExternalStats,
+  VideoFile,
+  VideoListResult,
+  VideoQuery,
+  VideoSampleImportInput,
+  VideoTag
+} from './videoTypes'
+
+export type {
+  CorrectImportResult,
+  Video,
+  VideoAsset,
+  VideoDetail,
+  VideoEditInput,
+  VideoExternalStats,
+  VideoFile,
+  VideoListResult,
+  VideoQuery,
+  VideoSampleImportInput,
+  VideoTag
+} from './videoTypes'
 
 export type { AvatarFaceScalePreset } from './avatarFaceScale'
 export type { AvatarCenteringMode } from './avatarCentering'
 
 export type ScrapedStatus = 0 | 1 | 2 // 0-未刮削, 1-刮削成功, 2-刮削失败
-
-export interface VideoFile {
-  id: number
-  video_id: number
-  file_path: string
-  file_size: number | null
-  file_duration_seconds: number | null
-  file_mtime_ms: number | null
-  label: string | null
-  is_primary: number
-  add_time: string
-}
-
-export interface Video {
-  id: number
-  code: string
-  title: string | null
-  summary: string | null
-  cover_path: string | null
-  poster_path: string | null
-  original_title: string | null
-  rating: number
-  release_date: string | null
-  maker: string | null
-  publisher: string | null
-  series: string | null
-  director: string | null
-  duration_seconds: number | null
-  scraped_status: ScrapedStatus
-  last_scraped_at: string | null
-  updated_at: string | null
-  add_time: string
-  /** Joined for list/detail UI; not stored on videos. */
-  primary_file_path?: string | null
-  file_count?: number
-}
 
 export type ActressGender = 'female' | 'male'
 export type ActressGenderFilter = ActressGender | 'all'
@@ -94,13 +85,6 @@ export interface Tag {
   name: string
 }
 
-export type TagOrigin = 'manual' | 'scraped'
-
-export interface VideoTag extends Tag {
-  origin: TagOrigin
-  source: string | null
-}
-
 export interface ActressName {
   id: number
   actress_id: number
@@ -109,35 +93,6 @@ export interface ActressName {
   locale: string | null
   source: string | null
   is_primary: number
-}
-
-export interface VideoAsset {
-  id: number
-  video_id: number
-  type: 'cover' | 'poster' | 'sample' | string
-  position: number
-  remote_url: string | null
-  local_path: string | null
-  width: number | null
-  height: number | null
-  is_primary: number
-  created_at: string | null
-}
-
-export interface VideoExternalStats {
-  id: number
-  video_id: number
-  source: string
-  rating_average: number | null
-  rating_count: number | null
-  fetched_at: string | null
-}
-
-export interface VideoSampleImportInput {
-  source: 'file' | 'url'
-  /** Absolute local image path, supplied by Electron webUtils.getPathForFile. */
-  sourcePath?: string | null
-  remoteUrl?: string | null
 }
 
 export interface ActressGalleryAsset {
@@ -157,17 +112,6 @@ export interface ActressGalleryImportInput {
   /** Absolute local image path, supplied by Electron webUtils.getPathForFile. */
   sourcePath?: string | null
   remoteUrl?: string | null
-}
-
-/** A video enriched with its related actresses and tags (for detail views). */
-export interface VideoDetail extends Video {
-  files: VideoFile[]
-  actresses: Actress[]
-  tags: VideoTag[]
-  assets: VideoAsset[]
-  external_stats: VideoExternalStats[]
-  /** Resolved for detail UI: scraped duration, else primary file duration. */
-  resolved_duration_seconds?: number | null
 }
 
 export interface Playlist {
@@ -1484,51 +1428,6 @@ export function resolveLlmProxyUrl(
   return settings.llmProxyUrlEnabled && settings.llmProxyUrl.trim() ? settings.llmProxyUrl.trim() : ''
 }
 
-// ---- Query / filter parameters ----
-
-export interface VideoQuery {
-  search?: string
-  scrapedStatus?: ScrapedStatus | 'all'
-  minRating?: number
-  year?: number | 'all'
-  actressId?: number
-  tagId?: number
-  /** Multi-tag filter (video must contain ALL of these tags). */
-  tagIds?: number[]
-  maker?: string
-  publisher?: string
-  series?: string
-  director?: string
-  /** Filter by code label prefix, e.g. MUKD matches MUKD-501. */
-  codePrefix?: string
-  sortBy?: 'add_time' | 'release_date' | 'rating' | 'code'
-  sortDir?: 'asc' | 'desc'
-  limit?: number
-  offset?: number
-}
-
-/** Payload for manual metadata editing. Provided keys are applied; scraped tags and
- * actresses, when present, fully replace the existing relations for that origin. */
-export interface VideoEditInput {
-  title?: string | null
-  summary?: string | null
-  release_date?: string | null
-  maker?: string | null
-  publisher?: string | null
-  series?: string | null
-  director?: string | null
-  duration_seconds?: number | null
-  rating?: number
-  /** Scraped tags only; custom tags are edited on the detail page. */
-  tags?: string[]
-  /** Female cast; when present, replaces female-linked cast for this video. */
-  actressesFemale?: string[]
-  /** Male cast; when present, replaces male-linked cast for this video. */
-  actressesMale?: string[]
-  /** Absolute path to a local image file to import as cover. */
-  coverSourcePath?: string
-}
-
 /** Free-text metadata dimensions backed by a column on `videos`. */
 export type FacetType = 'maker' | 'publisher' | 'series' | 'director'
 
@@ -1537,11 +1436,6 @@ export interface FacetItem {
   video_count: number
   /** A representative cover for the list thumbnail. */
   cover_path: string | null
-}
-
-export interface VideoListResult {
-  items: Video[]
-  total: number
 }
 
 /** Aggregate counts for the settings overview dashboard. */
@@ -1619,14 +1513,6 @@ export interface ManualImportResult {
   skippedPath?: boolean
   /** Same code exists elsewhere — file path updated. */
   relocated?: boolean
-}
-
-/** Outcome of correcting an existing video's code from the detail page. */
-export interface CorrectImportResult {
-  code: string
-  previousCode: string
-  /** Merged into another record; the current video row was removed. */
-  mergedIntoId?: number
 }
 
 // ---- Batch scrape progress ----

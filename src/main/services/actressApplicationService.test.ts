@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { findActressByNameOrAlias, getActressDetail } from '../db/actressRepo'
+import { insertTestVideoWithFile } from '../db/testVideoFixtures'
 import { createActressApplicationService } from './actressApplicationService'
 import type { ActressFaceScanManifestItem, ActressListItem } from '@shared/types'
 
@@ -133,14 +134,14 @@ describe('actressApplicationService.listFaceScanManifest', () => {
   })
 })
 
-describe('actressApplicationService.deleteUnlinkedActresses', () => {
+describe('actressApplicationService.deleteActresses', () => {
   it('deletes the complete batch and cleans stored resources', () => {
     setupDb()
     const service = createActressApplicationService()
 
-    const result = service.deleteUnlinkedActresses({ ids: [1, 2, 2] })
+    const result = service.deleteActresses({ ids: [1, 2, 2], mode: 'only-unlinked' })
 
-    assert.deepEqual(result, { deletedCount: 2, cleanupFailures: [] })
+    assert.deepEqual(result, { deletedCount: 2, unlinkedVideoCount: 0, cleanupFailures: [] })
     assert.equal(getActressDetail(1), null)
     assert.equal(getActressDetail(2), null)
     assert.equal(findActressByNameOrAlias('Alpha'), null)
@@ -162,7 +163,7 @@ describe('actressApplicationService.deleteUnlinkedActresses', () => {
     const service = createActressApplicationService()
 
     assert.throws(
-      () => service.deleteUnlinkedActresses({ ids: [1, 2] }),
+      () => service.deleteActresses({ ids: [1, 2], mode: 'only-unlinked' }),
       /1 位演员仍有关联影片，整批未删除/
     )
     assert.ok(getActressDetail(1))
@@ -177,11 +178,12 @@ describe('actressApplicationService.deleteUnlinkedActresses', () => {
       }
     })
 
-    const result = service.deleteUnlinkedActresses({ ids: [1] })
+    const result = service.deleteActresses({ ids: [1], mode: 'only-unlinked' })
 
     assert.equal(getActressDetail(1), null)
     assert.deepEqual(result, {
       deletedCount: 1,
+      unlinkedVideoCount: 0,
       cleanupFailures: [{ path: 'avatar_sources/alpha.jpg', error: 'file is locked' }]
     })
   })
@@ -200,12 +202,122 @@ describe('actressApplicationService.deleteUnlinkedActresses', () => {
     const service = createActressApplicationService()
 
     assert.throws(
-      () => service.deleteUnlinkedActresses({ ids: [1, 2] }),
+      () => service.deleteActresses({ ids: [1, 2], mode: 'only-unlinked' }),
       /forced actress delete failure/
     )
     assert.ok(getActressDetail(1))
     assert.ok(getActressDetail(2))
     assert.ok(findActressByNameOrAlias('Alpha'))
     assert.ok(findActressByNameOrAlias('Beta'))
+  })
+
+  it('previews current linked-actress and affected-video counts', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare("INSERT INTO videos (code, title) VALUES ('IMPACT-001', 'One')").run()
+    db.prepare("INSERT INTO videos (code, title) VALUES ('IMPACT-002', 'Two')").run()
+    db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (1, 1), (2, 1)').run()
+
+    assert.deepEqual(createActressApplicationService().previewDelete({ ids: [1, 2, 2] }), {
+      actressCount: 2,
+      linkedActressCount: 1,
+      affectedVideoCount: 2
+    })
+  })
+
+  it('explicitly unlinks videos, deletes a mixed batch, and preserves video records and files', () => {
+    setupDb()
+    const db = getDb()
+    const videoPath = path.join(tempRoot!, 'linked.mp4')
+    fs.writeFileSync(videoPath, 'video')
+    insertTestVideoWithFile(db, {
+      code: 'UNLINK-001',
+      filePath: videoPath,
+      title: 'Linked',
+      addTime: '2024-01-01'
+    })
+    db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (1, 1)').run()
+    const service = createActressApplicationService()
+
+    const result = service.deleteActresses({
+      ids: [1, 2],
+      mode: 'unlink-videos-and-delete'
+    })
+
+    assert.equal(result.deletedCount, 2)
+    assert.equal(result.unlinkedVideoCount, 1)
+    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM videos').get() as { n: number }).n, 1)
+    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM video_actress').get() as { n: number }).n, 0)
+    assert.equal(fs.existsSync(videoPath), true)
+    assert.equal(getActressDetail(1), null)
+    assert.equal(getActressDetail(2), null)
+  })
+
+  it('rolls back removed video links when a later actress delete fails', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare("INSERT INTO videos (code, title) VALUES ('ROLLBACK-001', 'Linked')").run()
+    db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (1, 1)').run()
+    db.exec(`
+      CREATE TRIGGER fail_linked_batch_delete
+      BEFORE DELETE ON actresses
+      WHEN OLD.id = 2
+      BEGIN
+        SELECT RAISE(ABORT, 'forced linked batch delete failure');
+      END;
+    `)
+
+    assert.throws(
+      () => createActressApplicationService().deleteActresses({
+        ids: [1, 2],
+        mode: 'unlink-videos-and-delete'
+      }),
+      /forced linked batch delete failure/
+    )
+    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM video_actress').get() as { n: number }).n, 1)
+    assert.ok(getActressDetail(1))
+    assert.ok(getActressDetail(2))
+  })
+
+  it('removes only the deleted actress ownership and pending result', () => {
+    setupDb()
+    const db = getDb()
+    const insertPending = db.prepare(
+      `INSERT INTO pending_actress_scrapes
+        (actress_id, target_actress_revision, plugin_name, plugin_source, query_name,
+         selected_fields_json, applicable_fields_json, update_mode, result_json,
+         warnings_json, created_at)
+       VALUES (?, 0, 'test', 'builtin', ?, '[]', '[]', 'fillEmpty', '{}', '[]', 'now')`
+    )
+    insertPending.run(1, 'Alpha')
+    insertPending.run(2, 'Beta')
+
+    createActressApplicationService().deleteActresses({
+      ids: [1],
+      mode: 'only-unlinked'
+    })
+
+    assert.equal(findActressByNameOrAlias('Alpha'), null)
+    assert.equal(findActressByNameOrAlias('Beta'), 2)
+    assert.deepEqual(
+      (
+        db.prepare(
+          'SELECT actress_id FROM pending_actress_scrapes ORDER BY actress_id'
+        ).all() as Array<{ actress_id: number }>
+      ).map((row) => row.actress_id),
+      [2]
+    )
+  })
+
+  it('rejects an unknown delete mode instead of falling through to a destructive path', () => {
+    setupDb()
+    assert.throws(
+      () => createActressApplicationService().deleteActresses({
+        ids: [1],
+        mode: 'force' as never
+      }),
+      /不支持的演员删除模式/
+    )
+    assert.ok(getActressDetail(1))
   })
 })

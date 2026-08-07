@@ -65,6 +65,7 @@ export const IPC = {
   ACTRESS_EDIT: 'actress:edit',
   ACTRESS_DELETE: 'actress:delete',
   ACTRESS_DELETE_BATCH: 'actress:deleteBatch',
+  ACTRESS_DELETE_PREVIEW: 'actress:deletePreview',
   ACTRESS_CLEAR_META: 'actress:clearMeta',
   ACTRESS_GALLERY_IMPORT: 'actress:galleryImport',
   ACTRESS_GALLERY_DELETE: 'actress:galleryDelete',

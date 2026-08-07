@@ -3,6 +3,7 @@ import { IPC } from '../shared/ipc-channels'
 import type { LlmModelDefinition } from '../shared/llmProviders'
 import type { UpdateCheckState } from '../shared/updateTypes'
 import type {
+  ActressDeleteMode,
   ActressIpcArgs,
   ActressIpcChannel,
   ActressIpcResult
@@ -206,8 +207,11 @@ const api = {
     getAvatarSourceInfo: (id: number) =>
       invoke<ActressAvatarSourceInfo | null>(IPC.ACTRESS_AVATAR_SOURCE_INFO, id),
     edit: (id: number, input: ActressEditInput) => invoke<boolean>(IPC.ACTRESS_EDIT, id, input),
-    remove: (id: number) => invokeActress(IPC.ACTRESS_DELETE, id),
-    removeBatch: (ids: number[]) => invokeActress(IPC.ACTRESS_DELETE_BATCH, ids),
+    deletePreview: (ids: number[]) => invokeActress(IPC.ACTRESS_DELETE_PREVIEW, ids),
+    remove: (id: number, mode: ActressDeleteMode = 'only-unlinked') =>
+      invokeActress(IPC.ACTRESS_DELETE, { ids: [id], mode }),
+    removeBatch: (ids: number[], mode: ActressDeleteMode = 'only-unlinked') =>
+      invokeActress(IPC.ACTRESS_DELETE_BATCH, { ids, mode }),
     clearMeta: (id: number) => invoke<boolean>(IPC.ACTRESS_CLEAR_META, id),
     importGalleryImage: (id: number, input: ActressGalleryImportInput) =>
       invoke<ActressGalleryAsset>(IPC.ACTRESS_GALLERY_IMPORT, id, input),

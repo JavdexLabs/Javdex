@@ -1,11 +1,14 @@
 import {
-  deleteUnlinkedActressRecords,
+  deleteActressRecords,
   listActressFaceScanManifest,
-  listActressPage
+  listActressPage,
+  previewActressDelete
 } from '../db/actressRepo'
 import { deleteAssetOrThrow } from './assetService'
 import type {
   ActressDeleteCleanupFailure,
+  ActressDeleteImpact,
+  ActressDeleteRequest,
   ActressDeleteResult
 } from '@shared/actressIpcContract'
 import type {
@@ -17,13 +20,16 @@ import type {
 export interface ActressApplicationService {
   listActresses(query?: ActressListQuery): ActressListPage
   listFaceScanManifest(): ActressFaceScanManifestItem[]
-  deleteUnlinkedActresses(input: { ids: number[] }): ActressDeleteResult
+  previewDelete(input: { ids: number[] }): ActressDeleteImpact
+  deleteActresses(input: ActressDeleteRequest): ActressDeleteResult
 }
 
 interface ActressApplicationServiceDependencies {
   deleteStoredAsset: (path: string) => void
   listPage: (query?: ActressListQuery) => ActressListPage
   listFaceScanManifest: () => ActressFaceScanManifestItem[]
+  previewDelete: (ids: number[]) => ActressDeleteImpact
+  deleteRecords: typeof deleteActressRecords
 }
 
 const MAX_AVATAR_PAGE_SNAPSHOTS = 8
@@ -46,11 +52,16 @@ export function createActressApplicationService(
   const deleteStoredAsset = dependencies.deleteStoredAsset ?? deleteAssetOrThrow
   const readListPage = dependencies.listPage ?? listActressPage
   const readFaceScanManifest = dependencies.listFaceScanManifest ?? listActressFaceScanManifest
+  const readDeleteImpact = dependencies.previewDelete ?? previewActressDelete
+  const removeActressRecords = dependencies.deleteRecords ?? deleteActressRecords
   const avatarPageSnapshots = new Map<string, ActressListPage>()
 
   return {
     listFaceScanManifest(): ActressFaceScanManifestItem[] {
       return readFaceScanManifest()
+    },
+    previewDelete(input): ActressDeleteImpact {
+      return readDeleteImpact(input.ids)
     },
     listActresses(query): ActressListPage {
       const requested = query ?? {}
@@ -80,8 +91,8 @@ export function createActressApplicationService(
         items: snapshot.items.slice(safeOffset, safeOffset + safeLimit)
       }
     },
-    deleteUnlinkedActresses(input): ActressDeleteResult {
-      const deleted = deleteUnlinkedActressRecords(input.ids)
+    deleteActresses(input): ActressDeleteResult {
+      const deleted = removeActressRecords(input.ids, input.mode)
       const cleanupFailures: ActressDeleteCleanupFailure[] = []
 
       for (const assetPath of deleted.assetPaths) {
@@ -96,7 +107,11 @@ export function createActressApplicationService(
         }
       }
 
-      return { deletedCount: deleted.deletedCount, cleanupFailures }
+      return {
+        deletedCount: deleted.deletedCount,
+        unlinkedVideoCount: deleted.unlinkedVideoCount,
+        cleanupFailures
+      }
     }
   }
 }

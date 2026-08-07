@@ -8,7 +8,21 @@ export interface ActressDeleteCleanupFailure {
 
 export interface ActressDeleteResult {
   deletedCount: number
+  unlinkedVideoCount: number
   cleanupFailures: ActressDeleteCleanupFailure[]
+}
+
+export type ActressDeleteMode = 'only-unlinked' | 'unlink-videos-and-delete'
+
+export interface ActressDeleteRequest {
+  ids: number[]
+  mode: ActressDeleteMode
+}
+
+export interface ActressDeleteImpact {
+  actressCount: number
+  linkedActressCount: number
+  affectedVideoCount: number
 }
 
 export interface ActressIpcContract {
@@ -21,12 +35,16 @@ export interface ActressIpcContract {
     result: ActressFaceScanManifestItem[]
   }
   [IPC.ACTRESS_DELETE]: {
-    args: [id: number]
+    args: [request: ActressDeleteRequest]
     result: ActressDeleteResult
   }
   [IPC.ACTRESS_DELETE_BATCH]: {
-    args: [ids: number[]]
+    args: [request: ActressDeleteRequest]
     result: ActressDeleteResult
+  }
+  [IPC.ACTRESS_DELETE_PREVIEW]: {
+    args: [ids: number[]]
+    result: ActressDeleteImpact
   }
 }
 

@@ -16857,3 +16857,24 @@ button.alias-tag-chip-name:disabled {
     flex-wrap: wrap;
   }
 }
+.actress-delete-confirmation {
+  display: grid;
+  gap: 10px;
+  color: var(--text-secondary);
+}
+
+.actress-delete-confirmation p {
+  margin: 0;
+}
+
+.actress-delete-confirmation__warning {
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-control);
+  color: var(--text-primary);
+}
+
+.actress-delete-confirmation__error {
+  color: var(--text-danger);
+}

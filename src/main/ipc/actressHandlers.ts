@@ -84,12 +84,16 @@ export function registerActressHandlers(): void {
     return true
   })
 
-  registerActressHandler(IPC.ACTRESS_DELETE, (id) =>
-    actressApplicationService.deleteUnlinkedActresses({ ids: [id] })
+  registerActressHandler(IPC.ACTRESS_DELETE_PREVIEW, (ids) =>
+    actressApplicationService.previewDelete({ ids })
   )
 
-  registerActressHandler(IPC.ACTRESS_DELETE_BATCH, (ids) =>
-    actressApplicationService.deleteUnlinkedActresses({ ids })
+  registerActressHandler(IPC.ACTRESS_DELETE, (request) =>
+    actressApplicationService.deleteActresses(request)
+  )
+
+  registerActressHandler(IPC.ACTRESS_DELETE_BATCH, (request) =>
+    actressApplicationService.deleteActresses(request)
   )
 
   registerHandler(IPC.ACTRESS_CLEAR_META, (_e, id: number): boolean => {

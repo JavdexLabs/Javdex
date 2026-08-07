@@ -30,6 +30,7 @@ import type {
   ListSortDir,
   ScrapedStatus
 } from '@shared/types'
+import type { ActressDeleteImpact, ActressDeleteMode } from '@shared/actressIpcContract'
 import {
   ALL_ACTRESS_SCRAPE_FIELDS,
   ACTRESS_BATCH_DEFAULT_MISSING_FIELDS,
@@ -1336,25 +1337,66 @@ export function deleteActress(id: number): void {
   deleteUnlinkedActresses([id])
 }
 
-export interface DeletedUnlinkedActressRecords {
+export interface DeletedActressRecords {
   deletedCount: number
+  unlinkedVideoCount: number
   assetPaths: string[]
 }
 
-/** Atomically delete actress records and return the stored resources they previously owned. */
-export function deleteUnlinkedActressRecords(ids: number[]): DeletedUnlinkedActressRecords {
-  const db = getDb()
-  const uniqueIds = Array.from(
+function normalizeActressDeleteIds(ids: number[]): number[] {
+  return Array.from(
     new Set(ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))
   )
-  if (uniqueIds.length === 0) return { deletedCount: 0, assetPaths: [] }
+}
 
-  const assetPaths = db.transaction(() => {
+function inspectActressDeleteImpact(ids: number[]): ActressDeleteImpact {
+  const db = getDb()
+  const uniqueIds = normalizeActressDeleteIds(ids)
+  if (uniqueIds.length === 0) {
+    return { actressCount: 0, linkedActressCount: 0, affectedVideoCount: 0 }
+  }
+
+  const payload = JSON.stringify(uniqueIds)
+  const actressCount = (
+    db.prepare(
+      'SELECT COUNT(*) AS n FROM actresses WHERE id IN (SELECT value FROM json_each(?))'
+    ).get(payload) as { n: number }
+  ).n
+  if (actressCount !== uniqueIds.length) {
+    throw new Error('选中的演员不存在，请刷新列表后重试')
+  }
+  const links = db.prepare(
+    `SELECT COUNT(DISTINCT actress_id) AS linkedActressCount,
+            COUNT(DISTINCT video_id) AS affectedVideoCount
+     FROM video_actress
+     WHERE actress_id IN (SELECT value FROM json_each(?))`
+  ).get(payload) as { linkedActressCount: number; affectedVideoCount: number }
+  return { actressCount, ...links }
+}
+
+/** Current database impact shown before an actress delete is confirmed. */
+export function previewActressDelete(ids: number[]): ActressDeleteImpact {
+  return getDb().transaction(() => inspectActressDeleteImpact(ids))()
+}
+
+/** Atomically apply the selected delete mode and return only actress-owned resources. */
+export function deleteActressRecords(
+  ids: number[],
+  mode: ActressDeleteMode
+): DeletedActressRecords {
+  if (mode !== 'only-unlinked' && mode !== 'unlink-videos-and-delete') {
+    throw new Error('不支持的演员删除模式')
+  }
+  const db = getDb()
+  const uniqueIds = normalizeActressDeleteIds(ids)
+  if (uniqueIds.length === 0) {
+    return { deletedCount: 0, unlinkedVideoCount: 0, assetPaths: [] }
+  }
+
+  const result = db.transaction(() => {
+    const impact = inspectActressDeleteImpact(uniqueIds)
     const findActress = db.prepare(
       'SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?'
-    )
-    const countLinks = db.prepare(
-      'SELECT COUNT(*) AS c FROM video_actress WHERE actress_id = ?'
     )
     const listGallery = db.prepare(
       'SELECT local_path FROM actress_gallery_assets WHERE actress_id = ?'
@@ -1365,17 +1407,15 @@ export function deleteUnlinkedActressRecords(ids: number[]): DeletedUnlinkedActr
        JOIN pending_actress_scrapes p ON p.id = r.pending_scrape_id
        WHERE p.actress_id = ?`
     )
+    const removeLinks = db.prepare('DELETE FROM video_actress WHERE actress_id = ?')
     const removeActress = db.prepare('DELETE FROM actresses WHERE id = ?')
     const paths: Array<string | null> = []
-    let linkedCount = 0
 
     for (const id of uniqueIds) {
       const actress = findActress.get(id) as
         | { avatar_path: string | null; avatar_source_path: string | null }
         | undefined
       if (!actress) throw new Error('选中的演员不存在，请刷新列表后重试')
-      const links = countLinks.get(id) as { c: number }
-      if (links.c > 0) linkedCount += 1
       paths.push(actress.avatar_path, actress.avatar_source_path)
       const gallery = listGallery.all(id) as { local_path: string | null }[]
       paths.push(...gallery.map((item) => item.local_path))
@@ -1383,19 +1423,29 @@ export function deleteUnlinkedActressRecords(ids: number[]): DeletedUnlinkedActr
       paths.push(...pendingResources.map((item) => item.staged_path))
     }
 
-    if (linkedCount > 0) {
-      throw new Error(`${linkedCount} 位演员仍有关联影片，整批未删除`)
+    if (mode === 'only-unlinked' && impact.linkedActressCount > 0) {
+      throw new Error(`${impact.linkedActressCount} 位演员仍有关联影片，整批未删除`)
     }
-    for (const id of uniqueIds) removeActress.run(id)
-    return paths
+    for (const id of uniqueIds) {
+      if (mode === 'unlink-videos-and-delete') removeLinks.run(id)
+      removeActress.run(id)
+    }
+    return { paths, impact }
   })()
 
   return {
     deletedCount: uniqueIds.length,
+    unlinkedVideoCount:
+      mode === 'unlink-videos-and-delete' ? result.impact.affectedVideoCount : 0,
     assetPaths: Array.from(
-      new Set(assetPaths.filter((assetPath): assetPath is string => Boolean(assetPath?.trim())))
+      new Set(result.paths.filter((assetPath): assetPath is string => Boolean(assetPath?.trim())))
     )
   }
+}
+
+/** Safe compatibility wrapper for callers that only permit unlinked actresses. */
+export function deleteUnlinkedActressRecords(ids: number[]): DeletedActressRecords {
+  return deleteActressRecords(ids, 'only-unlinked')
 }
 
 /** Atomically delete actress records only when every selected actress has no linked videos. */

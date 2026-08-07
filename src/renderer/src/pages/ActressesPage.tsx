@@ -18,7 +18,7 @@ import { useDebounce } from '../hooks/useDebounce'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useRangeSelection } from '../hooks/useRangeSelection'
 import { useToast } from '../components/Toast'
-import ConfirmModal from '../components/ConfirmModal'
+import ActressDeleteModal from '../components/ActressDeleteModal'
 import AppliedFilterBar, { type AppliedFilterItem } from '../components/AppliedFilterBar'
 import ListToolbar from '../components/ListToolbar'
 import SelectionToolbar from '../components/SelectionToolbar'
@@ -135,7 +135,6 @@ export default function ActressesPage(): JSX.Element {
   const [pendingDelete, setPendingDelete] = useState<ActressListItem | null>(null)
   const [showBulkScrape, setShowBulkScrape] = useState(false)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
-  const [deleting, setDeleting] = useState(false)
   const filterBtnRef = useRef<HTMLButtonElement>(null)
   const [filterOpen, setFilterOpen] = useState(false)
   const faceScan = useActressFaceScan()
@@ -218,18 +217,6 @@ export default function ActressesPage(): JSX.Element {
     toggleSelection: toggleActressSelection,
     clearSelection
   } = useRangeSelection(items, queryHash)
-
-  const selectedItems = useMemo(
-    () => items.filter((item) => selectedIds.has(item.id)),
-    [items, selectedIds]
-  )
-  const unavailableDeleteCount =
-    selectedItems.filter((item) => item.video_count > 0).length +
-    Math.max(0, selectedCount - selectedItems.length)
-  const canDeleteSelection =
-    selectedCount > 0 &&
-    selectedItems.length === selectedCount &&
-    selectedItems.every((item) => item.video_count === 0)
 
   const [unscrapedBannerHidden, setUnscrapedBannerHidden] = useState(() =>
     isMaintenanceHintDismissed(MAINTENANCE_HINT_KEYS.actressBanner)
@@ -345,19 +332,6 @@ export default function ActressesPage(): JSX.Element {
     }
   }
 
-  const doDelete = async (): Promise<void> => {
-    if (!pendingDelete) return
-    try {
-      await api.actresses.remove(pendingDelete.id)
-      setPendingDelete(null)
-      toast.show(`已删除「${pendingDelete.main_name}」`, 'success')
-      invalidateActressLibraryQueries(queryClient)
-      listQuery.refetchSilent()
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    }
-  }
-
   const startSelectedBatch = async (
     fields: ActressScrapeField[],
     site: string,
@@ -384,24 +358,6 @@ export default function ActressesPage(): JSX.Element {
       clearSelection()
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
-    }
-  }
-
-  const deleteSelectedActresses = async (): Promise<void> => {
-    if (deleting || selectedIds.size === 0) return
-    setDeleting(true)
-    try {
-      const result = await api.actresses.removeBatch([...selectedIds])
-      setConfirmBulkDelete(false)
-      clearSelection()
-      toast.show(`已删除 ${result.deletedCount} 位无关联演员`, 'success')
-      invalidateActressLibraryQueries(queryClient)
-      refetchActressSurface()
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-      listQuery.refetchSilent()
-    } finally {
-      setDeleting(false)
     }
   }
 
@@ -489,10 +445,7 @@ export default function ActressesPage(): JSX.Element {
                 label: '删除演员',
                 icon: <Trash2 {...UI_ICON_SM} aria-hidden />,
                 danger: true,
-                disabled: !canDeleteSelection,
-                title: canDeleteSelection
-                  ? undefined
-                  : `只能批量删除无关联演员；当前有 ${unavailableDeleteCount} 位仍关联影片`,
+                disabled: selectedCount === 0,
                 onClick: () => setConfirmBulkDelete(true)
               }
             ]}
@@ -677,17 +630,25 @@ export default function ActressesPage(): JSX.Element {
       </ListSurface>
 
       {pendingDelete && (
-        <ConfirmModal
-          title="删除演员"
-          danger
-          confirmText="删除"
-          onConfirm={() => void doDelete()}
+        <ActressDeleteModal
+          ids={[pendingDelete.id]}
+          subjectLabel={`演员「${pendingDelete.main_name}」`}
           onCancel={() => setPendingDelete(null)}
-        >
-          <p>
-            确定删除「{pendingDelete.main_name}」？仅删除演员档案，不影响已关联影片文件。
-          </p>
-        </ConfirmModal>
+          onDeleted={(result) => {
+            const name = pendingDelete.main_name
+            setPendingDelete(null)
+            toast.show(`已删除「${name}」`, 'success')
+            if (result.cleanupFailures.length > 0) {
+              const first = result.cleanupFailures[0]
+              toast.show(
+                `${result.cleanupFailures.length} 个演员资源清理失败：${first.path}（${first.error}）`,
+                'info'
+              )
+            }
+            void invalidateActressLibraryQueries(queryClient)
+            listQuery.refetchSilent()
+          }}
+        />
       )}
 
       {showBulkScrape && (
@@ -731,23 +692,32 @@ export default function ActressesPage(): JSX.Element {
       )}
 
       {confirmBulkDelete && (
-        <ConfirmModal
-          title="批量删除演员"
-          danger
-          confirmText={deleting ? '删除中…' : '删除'}
-          busy={deleting}
-          closeDisabled={deleting}
-          onConfirm={() => {
-            if (!deleting) void deleteSelectedActresses()
+        <ActressDeleteModal
+          ids={[...selectedIds]}
+          subjectLabel={`已选择的 ${selectedCount} 位演员`}
+          onCancel={() => setConfirmBulkDelete(false)}
+          onDeleted={(result) => {
+            setConfirmBulkDelete(false)
+            clearSelection()
+            toast.show(
+              `已删除 ${result.deletedCount} 位演员${
+                result.unlinkedVideoCount > 0
+                  ? `，并解除 ${result.unlinkedVideoCount} 部影片的演员关联`
+                  : ''
+              }`,
+              'success'
+            )
+            if (result.cleanupFailures.length > 0) {
+              const first = result.cleanupFailures[0]
+              toast.show(
+                `${result.cleanupFailures.length} 个演员资源清理失败：${first.path}（${first.error}）`,
+                'info'
+              )
+            }
+            void invalidateActressLibraryQueries(queryClient)
+            refetchActressSurface()
           }}
-          onCancel={() => {
-            if (!deleting) setConfirmBulkDelete(false)
-          }}
-        >
-          <p>
-            确定删除已选择的 {selectedCount} 位无关联演员吗？将删除演员档案、头像与写真，不会删除任何影片文件。
-          </p>
-        </ConfirmModal>
+        />
       )}
 
       {faceScan.state && (

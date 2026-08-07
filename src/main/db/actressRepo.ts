@@ -1235,15 +1235,20 @@ export function deleteActress(id: number): void {
   deleteUnlinkedActresses([id])
 }
 
-/** Atomically delete actress records only when every selected actress has no linked videos. */
-export function deleteUnlinkedActresses(ids: number[]): number {
+export interface DeletedUnlinkedActressRecords {
+  deletedCount: number
+  assetPaths: string[]
+}
+
+/** Atomically delete actress records and return the stored resources they previously owned. */
+export function deleteUnlinkedActressRecords(ids: number[]): DeletedUnlinkedActressRecords {
   const db = getDb()
   const uniqueIds = Array.from(
     new Set(ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))
   )
-  if (uniqueIds.length === 0) return 0
+  if (uniqueIds.length === 0) return { deletedCount: 0, assetPaths: [] }
 
-  const assets = db.transaction(() => {
+  const assetPaths = db.transaction(() => {
     const findActress = db.prepare(
       'SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?'
     )
@@ -1284,8 +1289,19 @@ export function deleteUnlinkedActresses(ids: number[]): number {
     return paths
   })()
 
-  for (const assetPath of assets) deleteAsset(assetPath)
-  return uniqueIds.length
+  return {
+    deletedCount: uniqueIds.length,
+    assetPaths: Array.from(
+      new Set(assetPaths.filter((assetPath): assetPath is string => Boolean(assetPath?.trim())))
+    )
+  }
+}
+
+/** Atomically delete actress records only when every selected actress has no linked videos. */
+export function deleteUnlinkedActresses(ids: number[]): number {
+  const result = deleteUnlinkedActressRecords(ids)
+  for (const assetPath of result.assetPaths) deleteAsset(assetPath)
+  return result.deletedCount
 }
 
 function assertActressNameAvailable(name: string, exceptId: number): void {

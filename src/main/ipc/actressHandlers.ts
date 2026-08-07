@@ -1,5 +1,10 @@
 import { IPC } from '@shared/ipc-channels'
 import type {
+  ActressDeleteIpcArgs,
+  ActressDeleteIpcChannel,
+  ActressDeleteIpcResult
+} from '@shared/actressIpcContract'
+import type {
   ActressDetail,
   ActressEditInput,
   ActressGalleryAsset,
@@ -24,8 +29,6 @@ import type {
   ListSortDir
 } from '@shared/types'
 import {
-  deleteActress,
-  deleteUnlinkedActresses,
   clearActressMetadataRecord,
   editActress,
   getActressDetail,
@@ -42,6 +45,14 @@ import {
 } from '../services/actressGalleryService'
 import { registerHandler } from './shared'
 import { actressIdentityConflictWorkflow } from '../scrapers/actressScraperManager'
+import { actressApplicationService } from '../services/actressApplicationService'
+
+function registerActressDeleteHandler<Channel extends ActressDeleteIpcChannel>(
+  channel: Channel,
+  handler: (...args: ActressDeleteIpcArgs<Channel>) => ActressDeleteIpcResult<Channel>
+): void {
+  registerHandler(channel, (_event, ...args: ActressDeleteIpcArgs<Channel>) => handler(...args))
+}
 
 export function registerActressHandlers(): void {
   registerHandler(
@@ -74,13 +85,12 @@ export function registerActressHandlers(): void {
     return true
   })
 
-  registerHandler(IPC.ACTRESS_DELETE, (_e, id: number): boolean => {
-    deleteActress(id)
-    return true
-  })
+  registerActressDeleteHandler(IPC.ACTRESS_DELETE, (id) =>
+    actressApplicationService.deleteUnlinkedActresses({ ids: [id] })
+  )
 
-  registerHandler(IPC.ACTRESS_DELETE_BATCH, (_e, ids: number[]): number =>
-    deleteUnlinkedActresses(ids)
+  registerActressDeleteHandler(IPC.ACTRESS_DELETE_BATCH, (ids) =>
+    actressApplicationService.deleteUnlinkedActresses({ ids })
   )
 
   registerHandler(IPC.ACTRESS_CLEAR_META, (_e, id: number): boolean => {

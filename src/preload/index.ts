@@ -3,6 +3,11 @@ import { IPC } from '../shared/ipc-channels'
 import type { LlmModelDefinition } from '../shared/llmProviders'
 import type { UpdateCheckState } from '../shared/updateTypes'
 import type {
+  ActressDeleteIpcArgs,
+  ActressDeleteIpcChannel,
+  ActressDeleteIpcResult
+} from '../shared/actressIpcContract'
+import type {
   AppSettings,
   LibraryOverviewStats,
   VideoQuery,
@@ -91,6 +96,13 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   const res = (await ipcRenderer.invoke(channel, ...args)) as IpcResponse<T>
   if (!res.ok) throw new Error(res.error ?? 'IPC 调用失败')
   return res.data as T
+}
+
+function invokeActressDelete<Channel extends ActressDeleteIpcChannel>(
+  channel: Channel,
+  ...args: ActressDeleteIpcArgs<Channel>
+): Promise<ActressDeleteIpcResult<Channel>> {
+  return invoke<ActressDeleteIpcResult<Channel>>(channel, ...args)
 }
 
 const api = {
@@ -193,8 +205,8 @@ const api = {
     getAvatarSourceInfo: (id: number) =>
       invoke<ActressAvatarSourceInfo | null>(IPC.ACTRESS_AVATAR_SOURCE_INFO, id),
     edit: (id: number, input: ActressEditInput) => invoke<boolean>(IPC.ACTRESS_EDIT, id, input),
-    remove: (id: number) => invoke<boolean>(IPC.ACTRESS_DELETE, id),
-    removeBatch: (ids: number[]) => invoke<number>(IPC.ACTRESS_DELETE_BATCH, ids),
+    remove: (id: number) => invokeActressDelete(IPC.ACTRESS_DELETE, id),
+    removeBatch: (ids: number[]) => invokeActressDelete(IPC.ACTRESS_DELETE_BATCH, ids),
     clearMeta: (id: number) => invoke<boolean>(IPC.ACTRESS_CLEAR_META, id),
     importGalleryImage: (id: number, input: ActressGalleryImportInput) =>
       invoke<ActressGalleryAsset>(IPC.ACTRESS_GALLERY_IMPORT, id, input),

@@ -175,16 +175,21 @@ export function inspectImageAsset(relPath: string | null | undefined): ImageAsse
   }
 }
 
+/** Delete a stored asset by its relative path and surface file-system errors to the caller. */
+export function deleteAssetOrThrow(relPath: string | null | undefined): void {
+  if (!relPath) return
+  const abs = resolveAssetPath(relPath)
+  const root = assetsRoot()
+  if (abs.startsWith(root) && fs.existsSync(abs)) {
+    fs.unlinkSync(abs)
+    invalidateAssetCache(relPath)
+  }
+}
+
 /** Delete a stored asset by its relative path. Silently ignores errors. */
 export function deleteAsset(relPath: string | null | undefined): void {
-  if (!relPath) return
   try {
-    const abs = resolveAssetPath(relPath)
-    const root = assetsRoot()
-    if (abs.startsWith(root) && fs.existsSync(abs)) {
-      fs.unlinkSync(abs)
-      invalidateAssetCache(relPath)
-    }
+    deleteAssetOrThrow(relPath)
   } catch (err) {
     console.error('deleteAsset failed:', relPath, (err as Error).message)
   }

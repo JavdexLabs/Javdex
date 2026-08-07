@@ -385,10 +385,10 @@ export default function ActressesPage(): JSX.Element {
     if (deleting || selectedIds.size === 0) return
     setDeleting(true)
     try {
-      const deleted = await api.actresses.removeBatch([...selectedIds])
+      const result = await api.actresses.removeBatch([...selectedIds])
       setConfirmBulkDelete(false)
       clearSelection()
-      toast.show(`已删除 ${deleted} 位无关联演员`, 'success')
+      toast.show(`已删除 ${result.deletedCount} 位无关联演员`, 'success')
       invalidateActressLibraryQueries(queryClient)
       refetchActressSurface()
     } catch (e) {

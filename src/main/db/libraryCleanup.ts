@@ -96,6 +96,7 @@ export function isStubActress(id: number): boolean {
        WHERE a.id = ?
          AND NOT EXISTS (SELECT 1 FROM video_actress va WHERE va.actress_id = a.id)
          AND (a.avatar_path IS NULL OR trim(a.avatar_path) = '')
+         AND (a.avatar_source_path IS NULL OR trim(a.avatar_source_path) = '')
          AND (a.poster_path IS NULL OR trim(a.poster_path) = '')
          AND NOT EXISTS (SELECT 1 FROM actress_gallery_assets ag WHERE ag.actress_id = a.id)
          AND a.birth_date IS NULL

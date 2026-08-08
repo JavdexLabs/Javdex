@@ -56,7 +56,12 @@ export function ensureAssetDirs(): void {
 
 /** Resolve a stored relative asset path to an absolute path. */
 export function resolveAssetPath(relPath: string): string {
-  return path.join(assetsRoot(), relPath)
+  const root = path.resolve(assetsRoot())
+  const resolved = path.resolve(root, relPath)
+  if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
+    throw new Error(`Asset path escapes media root: ${relPath}`)
+  }
+  return resolved
 }
 
 function writeAtomic(abs: string, data: Buffer): void {

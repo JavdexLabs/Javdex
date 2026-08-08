@@ -25,6 +25,7 @@ import {
   type VideoFileFingerprint
 } from './videoDuration'
 import { getSettings } from '../settings/settingsStore'
+import { mediaAssetStore } from '../services/mediaAssetStore'
 
 export type ScanProgressFn = (progress: ScanProgress) => void
 
@@ -321,7 +322,10 @@ export async function scanFolders(
       continue
     }
     try {
-      purgeVideoFile(file_id)
+      const purged = purgeVideoFile(file_id)
+      for (const assetPath of purged.obsoletePaths) {
+        mediaAssetStore.deleteBestEffort(assetPath)
+      }
       result.removed += 1
     } catch (err) {
       console.error('Purge error for', file_path, err)

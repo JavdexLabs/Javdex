@@ -466,6 +466,50 @@ describe('videoRepo.applyScrapeResult', () => {
     )
   })
 
+  it('keeps a committed scrape successful when post-commit library cleanup fails', () => {
+    setupDb()
+    const db = getDb()
+    const oldActressId = Number(
+      db.prepare('INSERT INTO actresses (main_name, gender) VALUES (?, ?)').run('Old Stub', 'female')
+        .lastInsertRowid
+    )
+    db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (1, ?)').run(oldActressId)
+    db.exec(`
+      CREATE TRIGGER fail_stub_cleanup
+      BEFORE DELETE ON actresses
+      WHEN OLD.id = ${oldActressId}
+      BEGIN
+        SELECT RAISE(ABORT, 'cleanup failed');
+      END
+    `)
+    const previousConsoleError = console.error
+    console.error = () => undefined
+    try {
+      const outcome = applyScrapeResult(
+        1,
+        { code: 'IPX-535', actresses: [{ name: 'New Actress', gender: 'female' }] },
+        'covers/new.jpg',
+        new Map(),
+        [],
+        ['cover', 'actressesFemale'],
+        'Example',
+        'replace'
+      )
+      assert.equal(outcome.applied, true)
+    } finally {
+      console.error = previousConsoleError
+    }
+
+    assert.deepEqual(
+      db.prepare('SELECT cover_path, scraped_status FROM videos WHERE id = 1').get(),
+      { cover_path: 'covers/new.jpg', scraped_status: 1 }
+    )
+    assert.deepEqual(
+      getVideoDetail(1)!.actresses.map((actress) => actress.main_name),
+      ['New Actress']
+    )
+  })
+
   it('reuses the unique name owner for canonically equivalent scraped cast names', () => {
     setupDb()
 
@@ -606,7 +650,7 @@ describe('videoRepo.applyScrapeResult', () => {
     )
   })
 
-  it('adopts cast avatars into per-actress bundles instead of sharing download paths', () => {
+  it('leaves downloaded cast avatars untouched for application-layer adoption', () => {
     setupDb()
     if (!tempRoot) throw new Error('test root not initialized')
     const mediaRoot = path.join(tempRoot, 'media_assets', 'avatars')
@@ -654,14 +698,19 @@ describe('videoRepo.applyScrapeResult', () => {
       avatar_crop_json: string | null
     }>
     assert.equal(rows.length, 2)
-    assert.ok(rows[0].avatar_path)
-    assert.ok(rows[1].avatar_path)
-    assert.notEqual(rows[0].avatar_path, rows[1].avatar_path)
-    assert.notEqual(rows[0].avatar_source_path, rows[1].avatar_source_path)
-    assert.ok(rows[0].avatar_crop_json)
-    assert.ok(rows[1].avatar_crop_json)
-    assert.notEqual(rows[0].avatar_path, 'avatars/cast-a.jpg')
-    assert.notEqual(rows[1].avatar_path, 'avatars/cast-b.jpg')
+    assert.deepEqual(
+      rows.map(({ avatar_path, avatar_source_path, avatar_crop_json }) => ({
+        avatar_path,
+        avatar_source_path,
+        avatar_crop_json
+      })),
+      [
+        { avatar_path: null, avatar_source_path: null, avatar_crop_json: null },
+        { avatar_path: null, avatar_source_path: null, avatar_crop_json: null }
+      ]
+    )
+    assert.equal(fs.existsSync(path.join(mediaRoot, 'cast-a.jpg')), true)
+    assert.equal(fs.existsSync(path.join(mediaRoot, 'cast-b.jpg')), true)
   })
 })
 

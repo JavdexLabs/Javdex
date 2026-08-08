@@ -8,7 +8,10 @@ import { actressOwnedNamePatternSearchSql } from './actressSearchSql'
 import { ensureTag, pruneTagIfUnused } from './tagRepo'
 import { ensureFacetEntries } from './facetRepo'
 import { collectVideoLibraryCleanupHints, runLibraryCleanup } from './libraryCleanup'
-import { deleteAsset, inspectImageAsset } from '../services/assetService'
+export interface VideoImageAvailabilityFacts {
+  coverAvailable?: boolean
+  samplePathsAvailable?: boolean
+}
 
 export interface NewVideo {
   code: string
@@ -218,26 +221,36 @@ export function relocateVideo(
 }
 
 /** Remove a video record and its cover asset (files on disk are already gone). */
-export function purgeVideo(id: number): void {
+export function purgeVideo(id: number): { obsoletePaths: string[] } {
   const hints = collectVideoLibraryCleanupHints(id)
   const video = getVideoById(id)
-  if (!video) return
-  deleteVideoAssets(id)
-  deleteAsset(video.cover_path)
-  deleteVideo(id)
-  runLibraryCleanup(hints)
+  if (!video) return { obsoletePaths: [] }
+  const db = getDb()
+  let obsoletePaths: string[] = []
+  db.transaction(() => {
+    obsoletePaths = deleteVideoAssetRows(id)
+    if (video.cover_path) obsoletePaths.push(video.cover_path)
+    deleteVideo(id)
+  })()
+  try {
+    runLibraryCleanup(hints)
+  } catch (error) {
+    console.error('Post-commit library cleanup failed:', error)
+  }
+  return { obsoletePaths: Array.from(new Set(obsoletePaths)) }
 }
 
 /** Remove one file row; purge the video work when no files remain. */
-export function purgeVideoFile(fileId: number): void {
+export function purgeVideoFile(fileId: number): { obsoletePaths: string[] } {
   const file = getVideoFileById(fileId)
-  if (!file) return
+  if (!file) return { obsoletePaths: [] }
   const videoId = file.video_id
   const db = getDb()
   db.prepare('DELETE FROM video_files WHERE id = ?').run(fileId)
   if (countVideoFiles(videoId) === 0) {
-    purgeVideo(videoId)
+    return purgeVideo(videoId)
   }
+  return { obsoletePaths: [] }
 }
 
 export function listVideoFileRefs(): { video_id: number; file_id: number; file_path: string }[] {
@@ -345,7 +358,10 @@ export function addVideoSampleAsset(
     .get(Number(info.lastInsertRowid)) as VideoAsset
 }
 
-export function deleteVideoSampleAsset(videoId: number, assetId: number): string | null {
+export function deleteVideoSampleAsset(
+  videoId: number,
+  assetId: number
+): { obsoletePaths: string[] } {
   const db = getDb()
   const asset = db
     .prepare("SELECT local_path FROM video_assets WHERE id = ? AND video_id = ? AND type = 'sample'")
@@ -356,7 +372,7 @@ export function deleteVideoSampleAsset(videoId: number, assetId: number): string
     assetId,
     videoId
   )
-  return asset.local_path
+  return { obsoletePaths: asset.local_path ? [asset.local_path] : [] }
 }
 
 /** Build a WHERE clause + bound params from a query object. */
@@ -730,6 +746,16 @@ function listVideoAssetPaths(videoId: number, type: string): Array<string | null
     .map((row) => (row as { local_path: string | null }).local_path)
 }
 
+export function getVideoImageCandidatePaths(videoId: number): {
+  coverPath: string | null
+  samplePaths: Array<string | null>
+} {
+  const coverPath = (getDb().prepare('SELECT cover_path FROM videos WHERE id = ?').get(videoId) as
+    | { cover_path: string | null }
+    | undefined)?.cover_path ?? null
+  return { coverPath, samplePaths: listVideoAssetPaths(videoId, 'sample') }
+}
+
 function isVideoFieldEmptyForFill(
   video: Video,
   field: VideoScrapeField,
@@ -737,7 +763,8 @@ function isVideoFieldEmptyForFill(
   maleCastCount: number,
   tagCount: number,
   sourceName?: string,
-  ratingSourceName?: string
+  ratingSourceName?: string,
+  imageFacts: VideoImageAvailabilityFacts = {}
 ): boolean {
   switch (field) {
     case 'title':
@@ -745,7 +772,7 @@ function isVideoFieldEmptyForFill(
     case 'summary':
       return isBlankText(video.summary)
     case 'cover':
-      return !inspectImageAsset(video.cover_path).usable
+      return !(imageFacts.coverAvailable ?? Boolean(video.cover_path?.trim()))
     case 'releaseDate':
       return isBlankText(video.release_date)
     case 'maker':
@@ -770,7 +797,7 @@ function isVideoFieldEmptyForFill(
       return countVideoExternalStats(video.id, ratingSourceName ?? sourceName) === 0
     case 'samples': {
       const paths = listVideoAssetPaths(video.id, 'sample')
-      return paths.length === 0 || paths.some((assetPath) => !inspectImageAsset(assetPath).usable)
+      return paths.length === 0 || !(imageFacts.samplePathsAvailable ?? paths.every(Boolean))
     }
     default:
       return false
@@ -786,7 +813,8 @@ export function resolveEffectiveScrapeFields(
   fields: VideoScrapeField[],
   mode: VideoScrapeUpdateMode = 'replace',
   sourceName?: string,
-  ratingSourceName?: string
+  ratingSourceName?: string,
+  imageFacts: VideoImageAvailabilityFacts = {}
 ): VideoScrapeField[] {
   if (mode !== 'fillEmpty') return fields
   const video = getVideoById(videoId)
@@ -807,7 +835,8 @@ export function resolveEffectiveScrapeFields(
       maleCastCount,
       tagCount,
       sourceName,
-      ratingSourceName
+      ratingSourceName,
+      imageFacts
     )
   )
 }
@@ -848,9 +877,12 @@ export function editVideoRecord(
   id: number,
   input: VideoEditInput,
   coverRelPath?: string
-): void {
+): { obsoletePaths: string[] } {
   const db = getDb()
   const cleanupHints = collectVideoLibraryCleanupHints(id)
+  const previousCover = (db.prepare('SELECT cover_path FROM videos WHERE id = ?').get(id) as
+    | { cover_path: string | null }
+    | undefined)?.cover_path ?? null
 
   const scalarKeys = [
     'title',
@@ -907,7 +939,15 @@ export function editVideoRecord(
     ensureFacetEntries(updated)
   })
   txn()
-  runLibraryCleanup(cleanupHints)
+  try {
+    runLibraryCleanup(cleanupHints)
+  } catch (error) {
+    console.error('Post-commit library cleanup failed:', error)
+  }
+  return {
+    obsoletePaths:
+      coverRelPath && previousCover && previousCover !== coverRelPath ? [previousCover] : []
+  }
 }
 
 /**
@@ -915,12 +955,13 @@ export function editVideoRecord(
  * Keeps the code, file path, custom rating and play stats; deletes the local cover
  * file, external site links/ratings, and removes actress/scraped-tag relations.
  */
-export function clearVideoMetadataRecord(id: number): void {
+export function clearVideoMetadataRecord(id: number): { obsoletePaths: string[] } {
   const db = getDb()
   const cleanupHints = collectVideoLibraryCleanupHints(id)
-  deleteVideoAssets(id)
 
+  let obsoletePaths: string[] = []
   const txn = db.transaction(() => {
+    obsoletePaths = deleteVideoAssetRows(id)
     db.prepare(
       `UPDATE videos SET
          title = NULL, summary = NULL, cover_path = NULL, poster_path = NULL,
@@ -936,7 +977,12 @@ export function clearVideoMetadataRecord(id: number): void {
     db.prepare('DELETE FROM video_external_stats WHERE video_id = ?').run(id)
   })
   txn()
-  runLibraryCleanup(cleanupHints)
+  try {
+    runLibraryCleanup(cleanupHints)
+  } catch (error) {
+    console.error('Post-commit library cleanup failed:', error)
+  }
+  return { obsoletePaths }
 }
 
 export function renameVideoCode(id: number, code: string): void {
@@ -1007,7 +1053,9 @@ function buildBatchScrapeWhere(filter: VideoBatchScrapeFilter): {
 }
 
 /** Videos eligible for unified batch scraping/updating. */
-export function listVideosForBatchScrape(filter: VideoBatchScrapeFilter): VideoBatchTarget[] {
+export function listVideosForBatchScrape(
+  filter: VideoBatchScrapeFilter
+): VideoBatchTarget[] {
   const db = getDb()
   const { sql: where, params } = buildBatchScrapeWhere(filter)
   const candidates = db
@@ -1027,7 +1075,9 @@ export function listVideosForBatchScrape(filter: VideoBatchScrapeFilter): VideoB
   )
 }
 
-export function countVideosForBatchScrape(filter: VideoBatchScrapeFilter): number {
+export function countVideosForBatchScrape(
+  filter: VideoBatchScrapeFilter
+): number {
   return listVideosForBatchScrape(filter).length
 }
 
@@ -1096,7 +1146,8 @@ export function planVideoScrapeResult(
   fields?: VideoScrapeField[],
   sourceName?: string,
   mode: VideoScrapeUpdateMode = 'replace',
-  ratingSourceName?: string
+  ratingSourceName?: string,
+  imageFacts: VideoImageAvailabilityFacts = {}
 ): VideoScrapeApplicationPlan {
   const requested = fields ?? ALL_VIDEO_SCRAPE_FIELDS
   const effectiveFields = resolveEffectiveScrapeFields(
@@ -1104,7 +1155,8 @@ export function planVideoScrapeResult(
     requested,
     mode,
     sourceName,
-    ratingSourceName
+    ratingSourceName,
+    imageFacts
   )
   const effective = new Set(effectiveFields)
   const video = getVideoById(videoId)
@@ -1220,6 +1272,7 @@ export function planVideoScrapeResult(
 export interface ApplyVideoScrapeResult {
   applied: boolean
   warnings: string[]
+  obsoleteAssetPaths: string[]
 }
 
 export function applyScrapeResult(
@@ -1231,7 +1284,8 @@ export function applyScrapeResult(
   fields?: VideoScrapeField[],
   sourceName?: string,
   mode: VideoScrapeUpdateMode = 'replace',
-  ratingSourceName?: string
+  ratingSourceName?: string,
+  imageFacts: VideoImageAvailabilityFacts = {}
 ): ApplyVideoScrapeResult {
   const db = getDb()
   const requested = fields ?? ALL_VIDEO_SCRAPE_FIELDS
@@ -1243,9 +1297,10 @@ export function applyScrapeResult(
     requested,
     sourceName,
     mode,
-    ratingSourceName
+    ratingSourceName,
+    imageFacts
   )
-  if (!plan.shouldApply) return { applied: false, warnings: plan.warnings }
+  if (!plan.shouldApply) return { applied: false, warnings: plan.warnings, obsoleteAssetPaths: [] }
 
   const impactFor = (field: VideoScrapeField): VideoScrapeFieldImpact | undefined =>
     plan.impacts.find((impact) => impact.field === field)
@@ -1253,7 +1308,7 @@ export function applyScrapeResult(
     impactFor(field)?.action ?? 'preserve'
   const writesField = (field: VideoScrapeField): boolean => impactAction(field) !== 'preserve'
   const existing = getVideoById(videoId)
-  if (!existing) return { applied: false, warnings: [] }
+  if (!existing) return { applied: false, warnings: [], obsoleteAssetPaths: [] }
   const cleanupHints = collectVideoLibraryCleanupHints(videoId)
   const scrapedAt = nowIso()
   const warnings = plan.warnings
@@ -1392,14 +1447,17 @@ export function applyScrapeResult(
 
   txn()
 
-  for (const assetPath of new Set(oldAssetPaths)) {
-    if (assetPath && assetPath !== coverRelPath && !sampleRelPaths.includes(assetPath)) {
-      deleteAsset(assetPath)
-    }
-  }
+  const obsoleteAssetPaths = Array.from(new Set(oldAssetPaths)).filter(
+    (assetPath): assetPath is string =>
+      Boolean(assetPath && assetPath !== coverRelPath && !sampleRelPaths.includes(assetPath))
+  )
 
-  runLibraryCleanup(cleanupHints)
-  return { applied: true, warnings }
+  try {
+    runLibraryCleanup(cleanupHints)
+  } catch (error) {
+    console.error('Post-commit library cleanup failed:', error)
+  }
+  return { applied: true, warnings, obsoleteAssetPaths }
 }
 
 /** Update stored relative asset paths after encrypt/decrypt migration. */
@@ -1537,14 +1595,14 @@ function deleteVideoExternalStats(videoId: number, source: string): void {
   )
 }
 
-function deleteVideoAssets(videoId: number): void {
+function deleteVideoAssetRows(videoId: number): string[] {
   const db = getDb()
   const rows = db
     .prepare('SELECT local_path FROM video_assets WHERE video_id = ?')
     .all(videoId) as { local_path: string | null }[]
   db.prepare('UPDATE videos SET poster_path = NULL WHERE id = ?').run(videoId)
-  for (const row of rows) deleteAsset(row.local_path)
   db.prepare('DELETE FROM video_assets WHERE video_id = ?').run(videoId)
+  return rows.flatMap((row) => row.local_path ? [row.local_path] : [])
 }
 
 function clearVideoPosterForPaths(videoId: number, paths: Array<string | null>): void {

@@ -1,27 +1,19 @@
 import type { ActressConflictCurrentOwner, ActressConflictDecisionSnapshot, ActressConflictReviewSummary, ActressNameConflictGroup, ActressPendingNameType, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, PendingActressNameClaim, PendingActressScrapeCandidate, PendingActressScrapeResource, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from '@shared/actressConflictTypes'
 import type { ActressScrapeDisposition, ActressScrapeField, ActressScrapePluginRef, ActressScrapeResult, ActressScrapeUpdateMode } from '@shared/scrapeTypes'
-import crypto from 'node:crypto'
-import fs from 'node:fs'
-import path from 'node:path'
 import { getDb } from '../db/database'
 import { normalizeActressName } from '../db/actressNameNormalization'
 import {
-  applyActressScrapeResult,
   markActressScrapeSucceeded,
-  mergeActresses,
-  planActressScrapeResult,
   recordActressScrapeFailure
 } from '../db/actressRepo'
+import {
+  applyActressScrapeResult,
+  mergeActressesWithAssets,
+  planActressScrapeResult
+} from './actressAssetService'
 import { synchronizeActressNameOwnership } from '../db/actressNameOwnership'
 import { setActressTypedName, upsertActressName } from '../db/actressNames'
-import {
-  assetsRoot,
-  deleteAsset,
-  detectImageExtensionFromBuffer,
-  isUsableImageBuffer,
-  storeScrapedActressAvatar,
-  storeScrapedActressGalleryImage
-} from './assetService'
+import { mediaAssetStore } from './mediaAssetStore'
 
 export interface PreparedActressScrapeResource {
   field: 'avatar' | 'gallery'
@@ -125,59 +117,14 @@ interface PreparedPendingFormalResources {
   stagedPaths: string[]
 }
 
-const STAGING_DIRNAME = '.actress_scrape_staging'
-const DEFAULT_ORPHAN_SAFETY_AGE_MS = 24 * 60 * 60 * 1000
-
 function stagePreparedResources(
   resources: PreparedActressScrapeResource[]
 ): PendingActressScrapeResource[] {
-  if (resources.length === 0) return []
-  const root = assetsRoot()
-  const token = crypto.randomUUID()
-  const relativeDir = path.posix.join(STAGING_DIRNAME, token)
-  const absoluteDir = path.join(root, STAGING_DIRNAME, token)
-  fs.mkdirSync(absoluteDir, { recursive: true })
-  const staged: PendingActressScrapeResource[] = []
-  try {
-    for (const resource of resources) {
-      if (!isUsableImageBuffer(resource.data)) {
-        throw new Error('暂存资源不是可用图片')
-      }
-      const extension = detectImageExtensionFromBuffer(resource.data) ?? '.jpg'
-      const filename = `${resource.field}-${resource.position}${extension}`
-      fs.writeFileSync(path.join(absoluteDir, filename), resource.data)
-      staged.push({
-        field: resource.field,
-        position: resource.position,
-        ...(resource.remoteUrl?.trim() ? { remoteUrl: resource.remoteUrl.trim() } : {}),
-        stagedPath: path.posix.join(relativeDir, filename),
-        width: resource.width ?? null,
-        height: resource.height ?? null
-      })
-    }
-    return staged
-  } catch (error) {
-    fs.rmSync(absoluteDir, { recursive: true, force: true })
-    throw error
-  }
+  return mediaAssetStore.stageActressScrapeImages(resources)
 }
 
 function cleanupStagedResourcePaths(stagedPaths: string[]): void {
-  const stagingRoot = path.resolve(assetsRoot(), STAGING_DIRNAME)
-  const directories = new Set<string>()
-  for (const stagedPath of stagedPaths) {
-    const absolutePath = path.resolve(assetsRoot(), stagedPath)
-    if (!absolutePath.startsWith(`${stagingRoot}${path.sep}`)) continue
-    directories.add(path.dirname(absolutePath))
-  }
-  for (const directory of directories) {
-    if (!directory.startsWith(`${stagingRoot}${path.sep}`)) continue
-    try {
-      fs.rmSync(directory, { recursive: true, force: true })
-    } catch (error) {
-      console.error('cleanup staged actress scrape resources failed:', (error as Error).message)
-    }
-  }
+  mediaAssetStore.cleanupActressScrapeStagingPaths(stagedPaths)
 }
 
 /** Remove crash leftovers while preserving every referenced or recently written staging dir. */
@@ -185,29 +132,12 @@ export function cleanupOrphanedActressScrapeStaging(options?: {
   now?: number
   olderThanMs?: number
 }): number {
-  const stagingRoot = path.resolve(assetsRoot(), STAGING_DIRNAME)
-  if (!fs.existsSync(stagingRoot)) return 0
-  const referencedDirectories = new Set(
-    (
-      getDb().prepare('SELECT staged_path FROM pending_actress_scrape_resources').all() as Array<{
-        staged_path: string
-      }>
-    ).map((row) => path.dirname(path.resolve(assetsRoot(), row.staged_path)))
-  )
-  const now = options?.now ?? Date.now()
-  const olderThanMs = options?.olderThanMs ?? DEFAULT_ORPHAN_SAFETY_AGE_MS
-  let removed = 0
-  for (const entry of fs.readdirSync(stagingRoot, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    const directory = path.resolve(stagingRoot, entry.name)
-    if (!directory.startsWith(`${stagingRoot}${path.sep}`)) continue
-    if (referencedDirectories.has(directory)) continue
-    const stat = fs.statSync(directory)
-    if (now - stat.mtimeMs < olderThanMs) continue
-    fs.rmSync(directory, { recursive: true, force: true })
-    removed += 1
-  }
-  return removed
+  const referencedPaths = (
+    getDb().prepare('SELECT staged_path FROM pending_actress_scrape_resources').all() as Array<{
+      staged_path: string
+    }>
+  ).map((row) => row.staged_path)
+  return mediaAssetStore.cleanupOrphanedActressScrapeStaging(referencedPaths, options)
 }
 
 function namesFromPreparedScrape(input: PreparedActressScrape): PendingName[] {
@@ -989,25 +919,19 @@ function promotePendingResources(pendingId: number): PreparedPendingFormalResour
     createdPaths: [],
     stagedPaths: resources.map((resource) => resource.staged_path)
   }
-  const stagingRoot = path.resolve(assetsRoot(), STAGING_DIRNAME)
   try {
     for (const resource of resources) {
-      const stagedAbsolutePath = path.resolve(assetsRoot(), resource.staged_path)
-      if (!stagedAbsolutePath.startsWith(`${stagingRoot}${path.sep}`)) {
-        throw new Error('待确认暂存资源路径无效')
-      }
-      const data = fs.readFileSync(stagedAbsolutePath)
-      if (!isUsableImageBuffer(data)) throw new Error('待确认暂存资源不可用')
+      const data = mediaAssetStore.readActressScrapeStagedImage(resource.staged_path)
       const remoteUrl = resource.remote_url?.trim() ?? ''
       if (resource.field === 'avatar') {
-        prepared.avatarRelPath = storeScrapedActressAvatar(
+        prepared.avatarRelPath = mediaAssetStore.storeScrapedActressAvatar(
           actress.main_name,
           remoteUrl,
           data
         )
         prepared.createdPaths.push(prepared.avatarRelPath)
       } else {
-        const stored = storeScrapedActressGalleryImage(
+        const stored = mediaAssetStore.storeScrapedActressGalleryImage(
           actress.main_name,
           actress.id,
           remoteUrl,
@@ -1024,7 +948,7 @@ function promotePendingResources(pendingId: number): PreparedPendingFormalResour
     }
     return prepared
   } catch (error) {
-    for (const createdPath of prepared.createdPaths) deleteAsset(createdPath)
+    for (const createdPath of prepared.createdPaths) mediaAssetStore.deleteBestEffort(createdPath)
     throw error
   }
 }
@@ -1065,14 +989,14 @@ export class ActressIdentityConflictWorkflow {
         for (const resource of input.resources) {
           const remoteUrl = resource.remoteUrl?.trim() ?? ''
           if (resource.field === 'avatar') {
-            avatarRelPath = storeScrapedActressAvatar(
+            avatarRelPath = mediaAssetStore.storeScrapedActressAvatar(
               detail.main_name,
               remoteUrl,
               resource.data
             )
             newlyStoredPaths.push(avatarRelPath)
           } else {
-            const stored = storeScrapedActressGalleryImage(
+            const stored = mediaAssetStore.storeScrapedActressGalleryImage(
               detail.main_name,
               input.actressId,
               remoteUrl,
@@ -1087,21 +1011,26 @@ export class ActressIdentityConflictWorkflow {
             })
           }
         }
-        const applied = applyActressScrapeResult(
-          input.actressId,
-          input.result,
-          avatarRelPath,
-          galleryAssets,
-          input.applicableFields,
-          input.mode,
-          () => {
-            db.prepare('DELETE FROM pending_actress_scrapes WHERE actress_id = ?').run(
-              input.actressId
-            )
-          }
+        const applied = mediaAssetStore.coordinateDatabaseChange(() =>
+          applyActressScrapeResult(
+            input.actressId,
+            input.result,
+            avatarRelPath,
+            galleryAssets,
+            input.applicableFields,
+            input.mode,
+            () => {
+              db.prepare('DELETE FROM pending_actress_scrapes WHERE actress_id = ?').run(
+                input.actressId
+              )
+            }
+          )
         )
+        for (const storedPath of applied.fileChanges?.obsoletePaths ?? []) {
+          mediaAssetStore.deleteBestEffort(storedPath)
+        }
         if (!applied.applied) {
-          for (const storedPath of newlyStoredPaths) deleteAsset(storedPath)
+          for (const storedPath of newlyStoredPaths) mediaAssetStore.deleteBestEffort(storedPath)
           recordActressScrapeFailure(input.actressId)
           return {
             status: 'failure',
@@ -1123,7 +1052,7 @@ export class ActressIdentityConflictWorkflow {
           avatarUpdated: applied.avatarApplied
         }
       } catch (error) {
-        for (const storedPath of newlyStoredPaths) deleteAsset(storedPath)
+        for (const storedPath of newlyStoredPaths) mediaAssetStore.deleteBestEffort(storedPath)
         recordActressScrapeFailure(input.actressId)
         return { status: 'failure', ok: false, error: (error as Error).message }
       }
@@ -2129,11 +2058,11 @@ export class ActressIdentityConflictWorkflow {
               'UPDATE pending_actress_scrapes SET actress_id = ? WHERE id = ?'
             ).run(input.keepActressId, pending.id)
           }
-          const merged = mergeActresses(
+          const merged = mergeActressesWithAssets(
             input.keepActressId,
             input.mergeActressId,
             mainNameFrom,
-            { deferFileCleanup: true }
+            { deferCleanup: true }
           )
           obsoleteAfterCommit.push(...(merged.fileChanges?.obsoletePaths ?? []))
           const keeper = db
@@ -2205,9 +2134,11 @@ export class ActressIdentityConflictWorkflow {
         }
         return this.countPendingReviewItems()
       })()
-      for (const obsoletePath of new Set(obsoleteAfterCommit)) deleteAsset(obsoletePath)
+      for (const obsoletePath of new Set(obsoleteAfterCommit)) {
+        mediaAssetStore.deleteBestEffort(obsoletePath)
+      }
       for (const prepared of preparedByPending.values()) {
-        if (prepared.avatarRelPath) deleteAsset(prepared.avatarRelPath)
+        if (prepared.avatarRelPath) mediaAssetStore.deleteBestEffort(prepared.avatarRelPath)
         cleanupStagedResourcePaths(prepared.stagedPaths)
       }
       return { status: 'success', remainingPending }
@@ -2216,7 +2147,7 @@ export class ActressIdentityConflictWorkflow {
         ...Array.from(preparedByPending.values()).flatMap((item) => item.createdPaths),
         ...createdDuringApply
       ])) {
-        deleteAsset(createdPath)
+        mediaAssetStore.deleteBestEffort(createdPath)
       }
       if ((error as Error).message === 'STALE_CONFLICT_SNAPSHOT') return stale()
       throw error

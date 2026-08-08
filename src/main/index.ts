@@ -3,7 +3,8 @@ import path from 'node:path'
 import { APP_DISPLAY_NAME } from '@shared/appIdentity'
 import { applyAppIcons, resolveWindowIcon } from './appIcon'
 import { configureAppIdentity } from './appPaths'
-import { initDatabase, closeDatabase } from './db/database'
+import fs from 'node:fs'
+import { initDatabaseAtPath, closeDatabase } from './db/database'
 import { ensureAssetDirs, assetsRoot, readAssetForServe } from './services/assetService'
 import { registerIpcHandlers } from './ipc'
 import { scrapeBrowser } from './scrapers/scrapeBrowser'
@@ -117,7 +118,9 @@ function registerAssetProtocol(): void {
 if (gotSingleInstanceLock) {
   app.whenReady().then(() => {
     applyAppIcons()
-    initDatabase()
+    const databaseDir = path.join(app.getPath('userData'), 'data')
+    fs.mkdirSync(databaseDir, { recursive: true })
+    initDatabaseAtPath(path.join(databaseDir, 'library.db'))
     ensureAssetDirs()
     cleanupOrphanedActressScrapeStaging()
     migrateUserPluginsAwayFromBuiltInNames()

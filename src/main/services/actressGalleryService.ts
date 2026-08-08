@@ -4,13 +4,7 @@ import {
   deleteActressGalleryAsset,
   getActressDetail
 } from '../db/actressRepo'
-import {
-  deleteAsset,
-  downloadActressGalleryImage,
-  importActressGalleryFromFile,
-  readImageDimensionsFromPath,
-  readImageDimensionsFromRelPath
-} from './assetService'
+import { mediaAssetStore } from './mediaAssetStore'
 import { fetchRemoteImageBuffer } from './remoteImageFetch'
 
 export async function importActressGalleryImage(
@@ -23,14 +17,24 @@ export async function importActressGalleryImage(
   if (input.source === 'file') {
     const sourcePath = input.sourcePath?.trim()
     if (!sourcePath) throw new Error('请选择本地图片文件')
-    const localPath = importActressGalleryFromFile(actress.main_name, sourcePath, actressId)
+    const localPath = mediaAssetStore.importActressGallery(
+      actress.main_name,
+      sourcePath,
+      actressId
+    )
     const dims =
-      readImageDimensionsFromRelPath(localPath) ?? readImageDimensionsFromPath(sourcePath)
-    return addActressGalleryAsset(actressId, {
-      localPath,
-      width: dims?.width ?? null,
-      height: dims?.height ?? null
-    })
+      mediaAssetStore.readStoredImageDimensions(localPath) ??
+      mediaAssetStore.readImageDimensionsAtPath(sourcePath)
+    try {
+      return addActressGalleryAsset(actressId, {
+        localPath,
+        width: dims?.width ?? null,
+        height: dims?.height ?? null
+      })
+    } catch (error) {
+      mediaAssetStore.deleteBestEffort(localPath)
+      throw error
+    }
   }
 
   const rawUrl = input.remoteUrl?.trim()
@@ -47,22 +51,27 @@ export async function importActressGalleryImage(
 
   const remoteUrl = parsed.toString()
   const buf = await fetchRemoteImageBuffer(remoteUrl)
-  const downloaded = await downloadActressGalleryImage(
+  const downloaded = await mediaAssetStore.downloadActressGalleryImage(
     actress.main_name,
     remoteUrl,
     async () => buf,
     actressId
   )
   if (!downloaded) throw new Error('写真链接下载失败')
-  return addActressGalleryAsset(actressId, {
-    remoteUrl,
-    localPath: downloaded.localPath,
-    width: downloaded.width,
-    height: downloaded.height
-  })
+  try {
+    return addActressGalleryAsset(actressId, {
+      remoteUrl,
+      localPath: downloaded.localPath,
+      width: downloaded.width,
+      height: downloaded.height
+    })
+  } catch (error) {
+    mediaAssetStore.deleteBestEffort(downloaded.localPath)
+    throw error
+  }
 }
 
 export function deleteActressGalleryImage(actressId: number, assetId: number): void {
   const localPath = deleteActressGalleryAsset(actressId, assetId)
-  deleteAsset(localPath)
+  mediaAssetStore.deleteBestEffort(localPath)
 }

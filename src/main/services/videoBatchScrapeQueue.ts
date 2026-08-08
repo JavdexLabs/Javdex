@@ -1,7 +1,6 @@
 import type { BatchProgress } from '@shared/batchScrapeTypes'
 import type { VideoBatchScrapeRequest, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/scrapeTypes'
 import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS } from '@shared/scrapeTypes'
-import { listVideosForBatchScrape } from '../db/videoRepo'
 import {
   resolveVideoScrapeFieldSources,
   scrapeVideo,
@@ -12,6 +11,7 @@ import type { PersistedBatchScrapeJob } from './batchScrapeJobStore'
 import type { BatchScrapeCheckpointPort } from './batchScrapeCheckpointPort'
 import { ScraperDelayController } from './scraperDelayController'
 import { SequentialBatchQueue } from './sequentialBatchQueue'
+import { resolveVideoBatchTargets } from './videoImageAvailability'
 
 type ProgressListener = (progress: BatchProgress) => void
 
@@ -38,12 +38,12 @@ function resolveVideoTargets(request: VideoBatchScrapeRequest): Array<{ id: numb
     ? Array.from(new Set(request.videoIds.filter((id) => Number.isFinite(id))))
     : []
   const fieldSources = resolveVideoScrapeFieldSources(request.scraperName)
-  return listVideosForBatchScrape({
-    status: request.status,
-    videoIds: explicitIds.length > 0 ? explicitIds : request.videoIds,
-    missingFields: request.missingFields,
-    ...fieldSources
-  })
+  return resolveVideoBatchTargets({
+      status: request.status,
+      videoIds: explicitIds.length > 0 ? explicitIds : request.videoIds,
+      missingFields: request.missingFields,
+      ...fieldSources
+    })
 }
 
 function buildStatusLabel(request: VideoBatchScrapeRequest): string {

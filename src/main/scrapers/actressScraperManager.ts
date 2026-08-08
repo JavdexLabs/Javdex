@@ -5,12 +5,9 @@ import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import {
   getActressDetail,
   recordActressScrapeFailure,
-  resolveEffectiveActressScrapeFields,
 } from '../db/actressRepo'
-import {
-  isUsableImageBuffer,
-  readImageDimensionsFromBuffer
-} from '../services/assetService'
+import { resolveEffectiveActressScrapeFields } from '../services/actressAssetService'
+import { mediaAssetStore } from '../services/mediaAssetStore'
 import {
   actressIdentityConflictWorkflow,
   type PreparedActressScrapeResource
@@ -272,8 +269,8 @@ export async function scrapeActress(
     if (selected.has('avatar') && result.avatarUrl) {
       try {
         const data = await scrapeBrowser.fetchBuffer(result.avatarUrl)
-        if (!isUsableImageBuffer(data)) throw new Error('响应不是可用图片')
-        const dimensions = readImageDimensionsFromBuffer(data)
+        if (!mediaAssetStore.isUsableImageBuffer(data)) throw new Error('响应不是可用图片')
+        const dimensions = mediaAssetStore.readImageDimensions(data)
         preparedResources.push({
           field: 'avatar',
           position: 0,
@@ -296,8 +293,8 @@ export async function scrapeActress(
       for (let index = 0; index < galleryUrls.length; index++) {
         try {
           const data = await scrapeBrowser.fetchBuffer(galleryUrls[index])
-          if (!isUsableImageBuffer(data)) throw new Error('响应不是可用图片')
-          const dimensions = readImageDimensionsFromBuffer(data)
+          if (!mediaAssetStore.isUsableImageBuffer(data)) throw new Error('响应不是可用图片')
+          const dimensions = mediaAssetStore.readImageDimensions(data)
           preparedResources.push({
             field: 'gallery',
             position: index,

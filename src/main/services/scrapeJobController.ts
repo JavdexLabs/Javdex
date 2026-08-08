@@ -48,7 +48,8 @@ import { estimateActressBatchScrapeTargetCount } from './actressBatchScrapeTarge
 import { scrapeActress } from '../scrapers/actressScraperManager'
 import { resolveVideoScrapeFieldSources, scrapeVideo } from '../scrapers/scraperManager'
 import { getActressDetail } from '../db/actressRepo'
-import { countVideosForBatchScrape, countVideosForRematch } from '../db/videoRepo'
+import { countVideosForRematch } from '../db/videoRepo'
+import { resolveVideoBatchTargets } from './videoImageAvailability'
 
 type ProgressListener = (progress: BatchProgress) => void
 
@@ -414,7 +415,7 @@ export function createDefaultScrapeJobController(
     scrapeVideo,
     scrapeActress,
     getActress: getActressDetail,
-    countVideos: countVideosForBatchScrape,
+    countVideos: (filter) => resolveVideoBatchTargets(filter).length,
     countRematches: countVideosForRematch,
     countActresses: estimateActressBatchScrapeTargetCount,
     resolveVideoFieldSources: resolveVideoScrapeFieldSources,

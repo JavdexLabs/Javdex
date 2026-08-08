@@ -6,11 +6,11 @@ import path from 'node:path'
 import type { ActressNameConflictGroup } from '@shared/actressConflictTypes'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import {
-  deleteActress,
   editActress,
   findActressByNameOrAlias,
   getActressDetail
 } from '../db/actressRepo'
+import { createActressApplicationService } from './actressApplicationService'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import {
   ActressIdentityConflictWorkflow,
@@ -2507,7 +2507,10 @@ describe('ActressIdentityConflictWorkflow', () => {
       workflow.listConflictGroups()[0].candidates[0].resources[0].stagedPath
     )
 
-    deleteActress(targetId)
+    createActressApplicationService().deleteActresses({
+      ids: [targetId],
+      mode: 'only-unlinked'
+    })
 
     assert.equal(fs.existsSync(stagedPath), false)
     assert.equal(workflow.countPendingScrapes(), 0)

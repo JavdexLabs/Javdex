@@ -10,6 +10,10 @@ import { createActressApplicationService } from './actressApplicationService'
 import type { ActressFaceScanManifestItem, ActressListItem } from '@shared/actressTypes'
 
 let tempRoot: string | null = null
+const PNG_1X1 = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64'
+)
 
 function setupDb(): void {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-actress-application-'))
@@ -46,7 +50,7 @@ function setupDb(): void {
   ]) {
     const absolutePath = path.join(tempRoot, 'media_assets', relPath)
     fs.mkdirSync(path.dirname(absolutePath), { recursive: true })
-    fs.writeFileSync(absolutePath, 'asset')
+    fs.writeFileSync(absolutePath, PNG_1X1)
   }
 }
 
@@ -79,6 +83,7 @@ describe('actressApplicationService.listActresses', () => {
       (id) => ({ id, main_name: `Actress ${id}` }) as ActressListItem
     )
     const service = createActressApplicationService({
+      inspectImage: () => ({ usable: true, fingerprint: 'test' }),
       listPage: () => {
         reads += 1
         return {
@@ -100,6 +105,7 @@ describe('actressApplicationService.listActresses', () => {
   it('refreshes the avatar-filter snapshot whenever the first page reloads', () => {
     let reads = 0
     const service = createActressApplicationService({
+      inspectImage: () => ({ usable: false, fingerprint: null }),
       listPage: () => {
         reads += 1
         const item = { id: reads, main_name: `Read ${reads}` } as ActressListItem
@@ -118,6 +124,24 @@ describe('actressApplicationService.listActresses', () => {
     assert.equal(first.items[0]?.id, 1)
     assert.equal(refreshed.items[0]?.id, 2)
   })
+
+  it('inspects avatar health and fingerprints outside the database repository', () => {
+    setupDb()
+    const service = createActressApplicationService()
+
+    const withAvatar = service.listActresses({ gender: 'all', avatar: 'with', limit: 10 })
+    const withoutAvatar = service.listActresses({ gender: 'all', avatar: 'without', limit: 10 })
+
+    assert.deepEqual(withAvatar.items.map((item) => item.main_name), ['Alpha'])
+    assert.ok(withAvatar.items[0]?.avatar_fingerprint)
+    assert.deepEqual(withoutAvatar.items.map((item) => item.main_name), ['Beta'])
+    assert.deepEqual(withAvatar.statusCounts, {
+      all: 1,
+      success: 0,
+      unscraped: 1,
+      failed: 0
+    })
+  })
 })
 
 describe('actressApplicationService.listFaceScanManifest', () => {
@@ -128,7 +152,10 @@ describe('actressApplicationService.listFaceScanManifest', () => {
       avatar_path: 'avatars/7.jpg',
       avatar_fingerprint: 'fingerprint-7'
     }]
-    const service = createActressApplicationService({ listFaceScanManifest: () => manifest })
+    const service = createActressApplicationService({
+      listFaceScanCandidates: () => manifest.map(({ avatar_fingerprint: _, ...candidate }) => candidate),
+      inspectImage: () => ({ usable: true, fingerprint: 'fingerprint-7' })
+    })
 
     assert.deepEqual(service.listFaceScanManifest(), manifest)
   })

@@ -2,18 +2,20 @@ import {
   backfillActressGalleryAssetDimensions,
   clearActressMetadataRecord,
   deleteActressRecords,
-  editActress,
-  getActressAvatarSourceInfo,
   getActressDetail,
   listActresses,
-  listActressFaceScanManifest,
+  listActressAvatarCandidates,
   listActressPage,
   markActressScrapeSucceeded,
-  mergeActresses,
   previewActressDelete,
   setActressPosterPath
 } from '../db/actressRepo'
-import { deleteAssetOrThrow } from './assetService'
+import {
+  editActressWithAssets,
+  getActressAvatarSourceInfo,
+  mergeActressesWithAssets
+} from './actressAssetService'
+import { mediaAssetStore } from './mediaAssetStore'
 import {
   deleteActressGalleryImage,
   importActressGalleryImage
@@ -26,6 +28,7 @@ import type {
   ActressDeleteResult
 } from '@shared/actressIpcContract'
 import type { ActressAvatarSourceInfo, ActressEditInput, ActressFaceScanManifestItem, ActressGalleryAsset, ActressGalleryImportInput, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressMergeInput, ListSortDir } from '@shared/actressTypes'
+import { actressStatusFilterOf } from '@shared/actressTypes'
 import type { ActressDetail } from '@shared/libraryTypes'
 import type { ActressConflictReviewSummary, ActressNameConflictGroup, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from '@shared/actressConflictTypes'
 
@@ -64,19 +67,20 @@ interface ActressApplicationServiceDependencies {
   deleteStoredAsset: (path: string) => void
   listLegacy: typeof listActresses
   listPage: (query?: ActressListQuery) => ActressListPage
-  listFaceScanManifest: () => ActressFaceScanManifestItem[]
+  listFaceScanCandidates: typeof listActressAvatarCandidates
   getActress: typeof getActressDetail
   getAvatarSourceInfo: typeof getActressAvatarSourceInfo
-  editActress: typeof editActress
+  editActress: typeof editActressWithAssets
   previewDelete: (ids: number[]) => ActressDeleteImpact
   deleteRecords: typeof deleteActressRecords
   clearMetadata: typeof clearActressMetadataRecord
-  mergeActresses: typeof mergeActresses
+  mergeActresses: typeof mergeActressesWithAssets
   markScrapeSucceeded: typeof markActressScrapeSucceeded
   importGalleryImage: typeof importActressGalleryImage
   deleteGalleryImage: typeof deleteActressGalleryImage
   setPoster: typeof setActressPosterPath
   repairGalleryDimensions: typeof backfillActressGalleryAssetDimensions
+  inspectImage: typeof mediaAssetStore.inspectImage
 }
 
 const MAX_AVATAR_PAGE_SNAPSHOTS = 8
@@ -96,23 +100,25 @@ function avatarPageSnapshotKey(query: ActressListQuery): string {
 export function createActressApplicationService(
   dependencies: Partial<ActressApplicationServiceDependencies> = {}
 ): ActressApplicationService {
-  const deleteStoredAsset = dependencies.deleteStoredAsset ?? deleteAssetOrThrow
+  const deleteStoredAsset = dependencies.deleteStoredAsset ?? ((path) => mediaAssetStore.delete(path))
   const readLegacyList = dependencies.listLegacy ?? listActresses
   const readListPage = dependencies.listPage ?? listActressPage
-  const readFaceScanManifest = dependencies.listFaceScanManifest ?? listActressFaceScanManifest
+  const readFaceScanCandidates =
+    dependencies.listFaceScanCandidates ?? listActressAvatarCandidates
   const readActress = dependencies.getActress ?? getActressDetail
   const readAvatarSourceInfo = dependencies.getAvatarSourceInfo ?? getActressAvatarSourceInfo
-  const updateActress = dependencies.editActress ?? editActress
+  const updateActress = dependencies.editActress ?? editActressWithAssets
   const readDeleteImpact = dependencies.previewDelete ?? previewActressDelete
   const removeActressRecords = dependencies.deleteRecords ?? deleteActressRecords
   const clearMetadataRecord = dependencies.clearMetadata ?? clearActressMetadataRecord
-  const mergeActressRecords = dependencies.mergeActresses ?? mergeActresses
+  const mergeActressRecords = dependencies.mergeActresses ?? mergeActressesWithAssets
   const recordScrapeSucceeded = dependencies.markScrapeSucceeded ?? markActressScrapeSucceeded
   const importGalleryAsset = dependencies.importGalleryImage ?? importActressGalleryImage
   const deleteGalleryAsset = dependencies.deleteGalleryImage ?? deleteActressGalleryImage
   const updatePoster = dependencies.setPoster ?? setActressPosterPath
   const repairGalleryAssetDimensions =
     dependencies.repairGalleryDimensions ?? backfillActressGalleryAssetDimensions
+  const inspectImage = dependencies.inspectImage ?? mediaAssetStore.inspectImage
   const avatarPageSnapshots = new Map<string, ActressListPage>()
 
   return {
@@ -120,7 +126,14 @@ export function createActressApplicationService(
       return readLegacyList(search, gender, sortBy, sortDir)
     },
     listFaceScanManifest(): ActressFaceScanManifestItem[] {
-      return readFaceScanManifest()
+      return readFaceScanCandidates().flatMap((candidate) => {
+        const inspection = inspectImage(candidate.avatar_path)
+        if (!inspection.usable || !inspection.fingerprint) return []
+        return [{
+          ...candidate,
+          avatar_fingerprint: inspection.fingerprint
+        }]
+      })
     },
     getActress(id): ActressDetail | null {
       return readActress(id)
@@ -148,7 +161,33 @@ export function createActressApplicationService(
       const key = avatarPageSnapshotKey(requested)
       let snapshot = safeOffset === 0 ? undefined : avatarPageSnapshots.get(key)
       if (!snapshot) {
-        snapshot = readListPage({ ...requested, limit: undefined, offset: 0 })
+        const unfiltered = readListPage({
+          ...requested,
+          avatar: 'all',
+          status: 'all',
+          limit: undefined,
+          offset: 0
+        })
+        const wantsAvatar = avatar === 'with'
+        const avatarFiltered = unfiltered.items.flatMap((actress) => {
+          const inspection = inspectImage(actress.avatar_path)
+          if (inspection.usable !== wantsAvatar) return []
+          return [wantsAvatar
+            ? { ...actress, avatar_fingerprint: inspection.fingerprint }
+            : actress]
+        })
+        const statusCounts = { all: 0, success: 0, unscraped: 0, failed: 0 }
+        for (const actress of avatarFiltered) {
+          statusCounts.all += 1
+          statusCounts[actressStatusFilterOf(actress.scraped_status)] += 1
+        }
+        const requestedStatus = requested.status ?? 'all'
+        const items = requestedStatus === 'all'
+          ? avatarFiltered
+          : avatarFiltered.filter(
+              (actress) => actressStatusFilterOf(actress.scraped_status) === requestedStatus
+            )
+        snapshot = { items, total: items.length, statusCounts }
         avatarPageSnapshots.delete(key)
         avatarPageSnapshots.set(key, snapshot)
         while (avatarPageSnapshots.size > MAX_AVATAR_PAGE_SNAPSHOTS) {
@@ -186,7 +225,8 @@ export function createActressApplicationService(
       }
     },
     clearMetadata(id): boolean {
-      clearMetadataRecord(id)
+      const obsoletePaths = mediaAssetStore.coordinateDatabaseChange(() => clearMetadataRecord(id))
+      for (const assetPath of obsoletePaths) mediaAssetStore.deleteBestEffort(assetPath)
       return true
     },
     mergeActresses(input): boolean {
@@ -199,7 +239,11 @@ export function createActressApplicationService(
     },
     async importGalleryImage(id, input): Promise<ActressGalleryAsset> {
       const asset = await importGalleryAsset(id, input)
-      repairGalleryAssetDimensions(undefined, id)
+      repairGalleryAssetDimensions(
+        undefined,
+        id,
+        (assetPath) => mediaAssetStore.readStoredImageDimensions(assetPath)
+      )
       return asset
     },
     deleteGalleryImage(id, assetId): boolean {

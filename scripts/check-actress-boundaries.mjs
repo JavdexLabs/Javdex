@@ -159,11 +159,28 @@ for (const specifier of importsOf(scrapeHandler)) {
 for (const file of sourceFiles('src/main/db')) {
   if (/\.test\.[cm]?[jt]sx?$/.test(file)) continue
   for (const specifier of importsOf(file)) {
-    const upperService =
-      /\.\.\/services\//.test(specifier) &&
-      !['../services/assetService', '../services/assetCrypto'].includes(specifier)
-    if (/\.\.\/(ipc|scrapers)\//.test(specifier) || upperService) {
-      violations.push(`${file}: database module must not depend on an upper application layer`)
+    if (
+      /\.\.\/(services|ipc|scrapers)\//.test(specifier) ||
+      specifier === 'electron' ||
+      specifier === 'node:fs' ||
+      specifier === 'node:path'
+    ) {
+      violations.push(`${file}: database module must only depend on database and shared types, not ${specifier}`)
+    }
+  }
+}
+
+for (const file of [
+  'src/main/services/videoService.ts',
+  'src/main/services/actressApplicationService.ts',
+  'src/main/services/actressGalleryService.ts',
+  'src/main/services/actressIdentityConflictWorkflow.ts',
+  'src/main/scrapers/actressScraperManager.ts',
+  'src/main/scrapers/scraperManager.ts'
+]) {
+  for (const specifier of importsOf(file)) {
+    if (specifier.endsWith('/assetService') || specifier === './assetService') {
+      violations.push(`${file}: media writes and downloads must go through MediaAssetStore`)
     }
   }
 }

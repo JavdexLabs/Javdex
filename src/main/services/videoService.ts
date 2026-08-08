@@ -20,7 +20,7 @@ import {
   renameVideoCode,
   setPrimaryVideoFile
 } from '../db/videoRepo'
-import { deleteAsset, downloadSamples, importCoverFromFile, importSampleFromFile } from './assetService'
+import { mediaAssetStore } from './mediaAssetStore'
 import { fetchRemoteImageBuffer } from './remoteImageFetch'
 import { resolveVideoDisplayDurationSeconds } from '../scanner/videoDuration'
 
@@ -40,22 +40,29 @@ export function editVideo(id: number, input: VideoEditInput): void {
   if (!video) throw new Error('Video not found')
 
   const coverRelPath = input.coverSourcePath
-    ? importCoverFromFile(video.code, input.coverSourcePath)
+    ? mediaAssetStore.importCover(video.code, input.coverSourcePath)
     : undefined
 
-  editVideoRecord(id, input, coverRelPath)
-
-  if (coverRelPath && video.cover_path && video.cover_path !== coverRelPath) {
-    deleteAsset(video.cover_path)
+  try {
+    const result = editVideoRecord(id, input, coverRelPath)
+    for (const assetPath of result.obsoletePaths) {
+      mediaAssetStore.deleteBestEffort(assetPath)
+    }
+  } catch (error) {
+    if (coverRelPath) mediaAssetStore.deleteBestEffort(coverRelPath)
+    throw error
   }
+
 }
 
 export function clearVideoMetadata(id: number): void {
   const video = getVideoById(id)
   if (!video) return
 
-  clearVideoMetadataRecord(id)
-  deleteAsset(video.cover_path)
+  const result = clearVideoMetadataRecord(id)
+  for (const assetPath of new Set([...result.obsoletePaths, video.cover_path])) {
+    mediaAssetStore.deleteBestEffort(assetPath)
+  }
 }
 
 export function markVideoScrapeSuccess(id: number): void {
@@ -71,8 +78,13 @@ export async function importVideoSample(id: number, input: VideoSampleImportInpu
   if (input.source === 'file') {
     const sourcePath = input.sourcePath?.trim()
     if (!sourcePath) throw new Error('请选择本地图片文件')
-    const localPath = importSampleFromFile(video.code, sourcePath)
-    return addVideoSampleAsset(id, { localPath })
+    const localPath = mediaAssetStore.importSample(video.code, sourcePath)
+    try {
+      return addVideoSampleAsset(id, { localPath })
+    } catch (error) {
+      mediaAssetStore.deleteBestEffort(localPath)
+      throw error
+    }
   }
 
   const rawUrl = input.remoteUrl?.trim()
@@ -88,14 +100,23 @@ export async function importVideoSample(id: number, input: VideoSampleImportInpu
   }
   const remoteUrl = parsed.toString()
   const buf = await fetchRemoteImageBuffer(remoteUrl)
-  const [localPath] = await downloadSamples(video.code, [remoteUrl], async () => buf)
+  const [localPath] = await mediaAssetStore.downloadSamples(
+    video.code,
+    [remoteUrl],
+    async () => buf
+  )
   if (!localPath) throw new Error('样张链接下载失败')
-  return addVideoSampleAsset(id, { remoteUrl, localPath })
+  try {
+    return addVideoSampleAsset(id, { remoteUrl, localPath })
+  } catch (error) {
+    mediaAssetStore.deleteBestEffort(localPath)
+    throw error
+  }
 }
 
 export function deleteVideoSample(id: number, assetId: number): void {
-  const localPath = deleteVideoSampleAsset(id, assetId)
-  deleteAsset(localPath)
+  const result = deleteVideoSampleAsset(id, assetId)
+  for (const localPath of result.obsoletePaths) mediaAssetStore.deleteBestEffort(localPath)
 }
 
 export function addVideoManualTag(id: number, name: string): void {
@@ -180,5 +201,7 @@ export function deleteVideoWithFile(id: number): void {
     }
   }
 
-  purgeVideo(id)
+  for (const assetPath of purgeVideo(id).obsoletePaths) {
+    mediaAssetStore.deleteBestEffort(assetPath)
+  }
 }

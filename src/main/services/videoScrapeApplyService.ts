@@ -761,6 +761,9 @@ export function resolveVideoBatchTargets(
   filter: VideoBatchScrapeFilter
 ): Array<{ id: number; code: string }> {
   const base = listVideosForBatchScrape({ ...filter, missingFields: [] })
+  // Intentional: explicit videoIds (library multi-select) are the scope — do not
+  // further filter by missingFields. Settings full-library batches pass status +
+  // missingFields without videoIds; only that path applies the fillEmpty filter.
   if (filter.videoIds || !(filter.missingFields ?? []).length) return base
   return base.filter(
     (video) =>

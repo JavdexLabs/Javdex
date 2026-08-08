@@ -11,7 +11,7 @@ import {
   CheckpointedSequentialBatchQueue,
   type CheckpointedBatchPolicy
 } from './checkpointedSequentialBatchQueue'
-import { resolveVideoBatchTargets } from './videoImageAvailability'
+import { resolveVideoBatchTargets } from './videoScrapeApplyService'
 
 type ProgressListener = (progress: BatchProgress) => void
 type VideoTarget = { id: number; code: string }

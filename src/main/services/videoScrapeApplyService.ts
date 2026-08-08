@@ -1,0 +1,966 @@
+import type { ActressGender } from '@shared/actressTypes'
+import type { Video } from '@shared/videoTypes'
+import type {
+  ScrapeResult,
+  ScrapedActress,
+  VideoBatchScrapeFilter,
+  VideoScrapeField,
+  VideoScrapeUpdateMode
+} from '@shared/videoScrapeTypes'
+import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
+import { findActressByNameOrAlias, upsertActressFromScrape } from '../db/actressRepo'
+import { getDb } from '../db/database'
+import { ensureFacetEntries } from '../db/facetRepo'
+import { collectVideoLibraryCleanupHints, runLibraryCleanup } from '../db/libraryCleanup'
+import { ensureTag } from '../db/tagRepo'
+import {
+  getVideoById,
+  getVideoImageCandidatePaths,
+  listVideosForBatchScrape
+} from '../db/videoRepo'
+import { adoptDownloadedAvatarIfMissing } from './actressAssetService'
+import { mediaAssetStore } from './mediaAssetStore'
+
+export interface VideoImageAvailabilityFacts {
+  coverAvailable?: boolean
+  samplePathsAvailable?: boolean
+}
+
+
+function replaceScrapedTags(
+  videoId: number,
+  names: string[],
+  source: string | null,
+  createdAt?: string
+): void {
+  const db = getDb()
+  db.prepare('DELETE FROM video_tag WHERE video_id = ? AND origin = ?').run(videoId, 'scraped')
+  const stampedAt = createdAt ?? nowIso()
+  for (const raw of names) {
+    const name = raw.trim()
+    if (!name) continue
+    const tagId = ensureTag(name)
+    db.prepare(
+      `INSERT OR IGNORE INTO video_tag
+         (video_id, tag_id, origin, source, created_at)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run(videoId, tagId, 'scraped', source, stampedAt)
+  }
+}
+
+function scrapedCastGender(a: ScrapedActress): ActressGender {
+  return a.gender ?? 'female'
+}
+
+/** Remove cast links for one gender only (NULL gender is treated as female). */
+function removeVideoActressesByGender(videoId: number, gender: ActressGender): void {
+  const db = getDb()
+  if (gender === 'female') {
+    db.prepare(
+      `DELETE FROM video_actress
+       WHERE video_id = ?
+         AND actress_id IN (
+           SELECT id FROM actresses WHERE gender IS NULL OR gender = 'female'
+         )`
+    ).run(videoId)
+  } else {
+    db.prepare(
+      `DELETE FROM video_actress
+       WHERE video_id = ?
+         AND actress_id IN (SELECT id FROM actresses WHERE gender = 'male')`
+    ).run(videoId)
+  }
+}
+
+function linkScrapedCastByGender(
+  videoId: number,
+  cast: ScrapedActress[],
+  gender: ActressGender,
+  actressAvatars: Map<string, string | null>
+): void {
+  const db = getDb()
+  for (const a of cast) {
+    if (scrapedCastGender(a) !== gender) continue
+    const actressId = upsertActressFromScrape(
+      a.name,
+      actressAvatars.get(a.name) ?? null,
+      gender
+    )
+    db.prepare('INSERT OR IGNORE INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(
+      videoId,
+      actressId
+    )
+  }
+}
+
+
+function isBlankText(value: string | null | undefined): boolean {
+  return value == null || value.trim() === ''
+}
+
+function countVideoCastByGender(videoId: number, gender: ActressGender): number {
+  const db = getDb()
+  const condition =
+    gender === 'female' ? "(a.gender = 'female' OR a.gender IS NULL)" : "a.gender = 'male'"
+  return (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n
+         FROM video_actress va
+         JOIN actresses a ON a.id = va.actress_id
+         WHERE va.video_id = ? AND ${condition}`
+      )
+      .get(videoId) as { n: number }
+  ).n
+}
+
+function countScrapedVideoTags(videoId: number): number {
+  const db = getDb()
+  return (
+    db
+      .prepare('SELECT COUNT(*) AS n FROM video_tag WHERE video_id = ? AND origin = ?')
+      .get(videoId, 'scraped') as { n: number }
+  ).n
+}
+
+function countVideoExternalIds(videoId: number, sourceName?: string): number {
+  const db = getDb()
+  const row = sourceName
+    ? db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM video_external_ids WHERE video_id = ? AND source = ? AND url IS NOT NULL AND trim(url) != ''"
+        )
+        .get(videoId, sourceName)
+    : db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM video_external_ids WHERE video_id = ? AND url IS NOT NULL AND trim(url) != ''"
+        )
+        .get(videoId)
+  return (row as { n: number }).n
+}
+
+function countVideoExternalStats(videoId: number, sourceName?: string): number {
+  const db = getDb()
+  const row = sourceName
+    ? db
+        .prepare(
+          'SELECT COUNT(*) AS n FROM video_external_stats WHERE video_id = ? AND source = ? AND rating_average IS NOT NULL'
+        )
+        .get(videoId, sourceName)
+    : db
+        .prepare(
+          'SELECT COUNT(*) AS n FROM video_external_stats WHERE video_id = ? AND rating_average IS NOT NULL'
+        )
+        .get(videoId)
+  return (row as { n: number }).n
+}
+
+function listVideoAssetPaths(videoId: number, type: string): Array<string | null> {
+  return getDb()
+    .prepare(
+      'SELECT local_path FROM video_assets WHERE video_id = ? AND type = ? ORDER BY position, id'
+    )
+    .all(videoId, type)
+    .map((row) => (row as { local_path: string | null }).local_path)
+}
+
+function isVideoFieldEmptyForFill(
+  video: Video,
+  field: VideoScrapeField,
+  femaleCastCount: number,
+  maleCastCount: number,
+  tagCount: number,
+  sourceName?: string,
+  ratingSourceName?: string,
+  imageFacts: VideoImageAvailabilityFacts = {}
+): boolean {
+  switch (field) {
+    case 'title':
+      return isBlankText(video.title)
+    case 'summary':
+      return isBlankText(video.summary)
+    case 'cover':
+      return !(imageFacts.coverAvailable ?? Boolean(video.cover_path?.trim()))
+    case 'releaseDate':
+      return isBlankText(video.release_date)
+    case 'maker':
+      return isBlankText(video.maker)
+    case 'publisher':
+      return isBlankText(video.publisher)
+    case 'series':
+      return isBlankText(video.series)
+    case 'director':
+      return isBlankText(video.director)
+    case 'duration':
+      return video.duration_seconds == null
+    case 'actressesFemale':
+      return femaleCastCount === 0
+    case 'actressesMale':
+      return maleCastCount === 0
+    case 'tags':
+      return tagCount === 0
+    case 'source':
+      return countVideoExternalIds(video.id, sourceName) === 0
+    case 'rating':
+      return countVideoExternalStats(video.id, ratingSourceName ?? sourceName) === 0
+    case 'samples': {
+      const paths = listVideoAssetPaths(video.id, 'sample')
+      return paths.length === 0 || !(imageFacts.samplePathsAvailable ?? paths.every(Boolean))
+    }
+    default:
+      return false
+  }
+}
+
+/**
+ * In fillEmpty mode, keep only selected fields that are currently empty on the video.
+ * Cast fields apply only when the video has no linked performers (no female and no male).
+ */
+export function resolveEffectiveScrapeFields(
+  videoId: number,
+  fields: VideoScrapeField[],
+  mode: VideoScrapeUpdateMode = 'replace',
+  sourceName?: string,
+  ratingSourceName?: string,
+  imageFacts: VideoImageAvailabilityFacts = {}
+): VideoScrapeField[] {
+  if (mode !== 'fillEmpty') return fields
+  const video = getVideoById(videoId)
+  if (!video) return []
+  const requested = new Set(fields)
+  const femaleCastCount = requested.has('actressesFemale')
+    ? countVideoCastByGender(videoId, 'female')
+    : 0
+  const maleCastCount = requested.has('actressesMale')
+    ? countVideoCastByGender(videoId, 'male')
+    : 0
+  const tagCount = requested.has('tags') ? countScrapedVideoTags(videoId) : 0
+  return fields.filter((field) =>
+    isVideoFieldEmptyForFill(
+      video,
+      field,
+      femaleCastCount,
+      maleCastCount,
+      tagCount,
+      sourceName,
+      ratingSourceName,
+      imageFacts
+    )
+  )
+}
+
+function nowIso(): string {
+  return new Date().toISOString()
+}
+
+function upsertVideoAsset(
+  videoId: number,
+  asset: {
+    type: string
+    position: number
+    remoteUrl: string | null
+    localPath: string | null
+    isPrimary: number
+    createdAt: string
+  }
+): void {
+  const db = getDb()
+  if (asset.isPrimary) {
+    db.prepare('UPDATE video_assets SET is_primary = 0 WHERE video_id = ? AND type = ?').run(
+      videoId,
+      asset.type
+    )
+  }
+  db.prepare(
+    `INSERT INTO video_assets
+       (video_id, type, position, remote_url, local_path, is_primary, created_at)
+     VALUES (@videoId, @type, @position, @remoteUrl, @localPath, @isPrimary, @createdAt)`
+  ).run({ videoId, ...asset })
+}
+
+function clearVideoPosterForPaths(videoId: number, paths: Array<string | null>): void {
+  const db = getDb()
+  const clear = db.prepare('UPDATE videos SET poster_path = NULL WHERE id = ? AND poster_path = ?')
+  for (const path of paths) {
+    if (path) clear.run(videoId, path)
+  }
+}
+
+function replaceVideoAssets(
+  videoId: number,
+  type: string,
+  assets: Array<{
+    type: string
+    position: number
+    remoteUrl: string | null
+    localPath: string | null
+    isPrimary: number
+    createdAt: string
+  }>
+): Array<string | null> {
+  const db = getDb()
+  const old = db
+    .prepare('SELECT local_path FROM video_assets WHERE video_id = ? AND type = ?')
+    .all(videoId, type) as { local_path: string | null }[]
+  clearVideoPosterForPaths(videoId, old.map((row) => row.local_path))
+  db.prepare('DELETE FROM video_assets WHERE video_id = ? AND type = ?').run(videoId, type)
+  for (const asset of assets) {
+    upsertVideoAsset(videoId, asset)
+  }
+  return old.map((row) => row.local_path)
+}
+
+function upsertVideoExternalId(
+  videoId: number,
+  source: string,
+  result: ScrapeResult,
+  fetchedAt: string
+): void {
+  const db = getDb()
+  db.prepare(
+    `INSERT INTO video_external_ids
+       (video_id, source, external_id, external_code, url, title, fetched_at)
+     VALUES (@videoId, @source, @externalId, @externalCode, @url, @title, @fetchedAt)
+     ON CONFLICT(video_id, source) DO UPDATE SET
+       external_id = excluded.external_id,
+       external_code = excluded.external_code,
+       url = excluded.url,
+       title = excluded.title,
+       fetched_at = excluded.fetched_at`
+  ).run({
+    videoId,
+    source,
+    externalId: null,
+    externalCode: result.code || null,
+    url: result.sourceUrl ?? null,
+    title: result.title ?? null,
+    fetchedAt
+  })
+}
+
+function deleteVideoExternalId(videoId: number, source: string): void {
+  getDb()
+    .prepare('DELETE FROM video_external_ids WHERE video_id = ? AND source = ?')
+    .run(videoId, source)
+}
+
+function upsertVideoExternalStats(
+  videoId: number,
+  source: string,
+  result: ScrapeResult,
+  fetchedAt: string
+): void {
+  if (result.ratingAverage === undefined && result.ratingCount === undefined) return
+  const db = getDb()
+  db.prepare(
+    `INSERT INTO video_external_stats
+       (video_id, source, rating_average, rating_count, fetched_at)
+     VALUES (@videoId, @source, @ratingAverage, @ratingCount, @fetchedAt)
+     ON CONFLICT(video_id, source) DO UPDATE SET
+       rating_average = excluded.rating_average,
+       rating_count = excluded.rating_count,
+       fetched_at = excluded.fetched_at`
+  ).run({
+    videoId,
+    source,
+    ratingAverage: result.ratingAverage ?? null,
+    ratingCount: result.ratingCount ?? null,
+    fetchedAt
+  })
+}
+
+function deleteVideoExternalStats(videoId: number, source: string): void {
+  const db = getDb()
+  db.prepare('DELETE FROM video_external_stats WHERE video_id = ? AND source = ?').run(
+    videoId,
+    source
+  )
+}
+
+export type VideoScrapeImpactAction = 'preserve' | 'set' | 'replace' | 'clear'
+export type VideoScrapeImpactReason =
+  | 'replace'
+  | 'fillEmpty'
+  | 'replaceIfPresent'
+  | 'existingValue'
+  | 'noValue'
+  | 'resourceUnavailable'
+
+export interface VideoScrapeFieldImpact {
+  field: VideoScrapeField
+  action: VideoScrapeImpactAction
+  reason: VideoScrapeImpactReason
+  currentValue: unknown
+  nextValue: unknown
+  sourceName?: string
+}
+
+export interface VideoScrapeApplicationPlan {
+  effectiveFields: VideoScrapeField[]
+  impacts: VideoScrapeFieldImpact[]
+  shouldApply: boolean
+  warnings: string[]
+}
+
+function normalizedScrapeText(value: string | null | undefined): string | null {
+  const normalized = value?.trim()
+  return normalized ? normalized : null
+}
+
+/** Build a read-only field plan before any database row or asset reference is changed. */
+export function planVideoScrapeResult(
+  videoId: number,
+  result: ScrapeResult,
+  coverRelPath: string | null,
+  sampleRelPaths: Array<string | null> = [],
+  fields?: VideoScrapeField[],
+  sourceName?: string,
+  mode: VideoScrapeUpdateMode = 'replace',
+  ratingSourceName?: string,
+  imageFacts: VideoImageAvailabilityFacts = {}
+): VideoScrapeApplicationPlan {
+  const requested = fields ?? ALL_VIDEO_SCRAPE_FIELDS
+  const effectiveFields = resolveEffectiveScrapeFields(
+    videoId,
+    requested,
+    mode,
+    sourceName,
+    ratingSourceName,
+    imageFacts
+  )
+  const effective = new Set(effectiveFields)
+  const video = getVideoById(videoId)
+  const warnings: string[] = []
+  const cast = result.actresses ?? []
+  const sampleUrls = (result.sampleImageUrls ?? []).filter((url) =>
+    Boolean(normalizedScrapeText(url))
+  )
+  const samplesReady =
+    sampleUrls.length > 0 &&
+    sampleRelPaths.length === sampleUrls.length &&
+    sampleRelPaths.every((assetPath) => Boolean(assetPath))
+  const coverUnavailable =
+    effective.has('cover') && Boolean(normalizedScrapeText(result.coverUrl)) && !coverRelPath
+  const samplesUnavailable = effective.has('samples') && sampleUrls.length > 0 && !samplesReady
+  if (coverUnavailable) warnings.push('封面下载失败，已保留原封面')
+  if (samplesUnavailable) warnings.push('样张下载不完整，已保留原样张')
+
+  const durationValue =
+    typeof result.durationSeconds === 'number' &&
+    Number.isFinite(result.durationSeconds) &&
+    result.durationSeconds >= 0
+      ? result.durationSeconds
+      : null
+  const ratingValue =
+    typeof result.ratingAverage === 'number' && Number.isFinite(result.ratingAverage)
+      ? result.ratingAverage
+      : null
+  const values = new Map<VideoScrapeField, unknown>([
+    ['title', normalizedScrapeText(result.title)],
+    ['summary', normalizedScrapeText(result.summary)],
+    ['cover', coverRelPath],
+    ['releaseDate', normalizedScrapeText(result.releaseDate)],
+    ['maker', normalizedScrapeText(result.maker)],
+    ['publisher', normalizedScrapeText(result.publisher)],
+    ['series', normalizedScrapeText(result.series)],
+    ['director', normalizedScrapeText(result.director)],
+    ['duration', durationValue],
+    ['actressesFemale', cast.filter((item) => scrapedCastGender(item) === 'female')],
+    ['actressesMale', cast.filter((item) => scrapedCastGender(item) === 'male')],
+    ['tags', result.tags ?? []],
+    ['source', normalizedScrapeText(result.sourceUrl)],
+    ['rating', ratingValue],
+    ['samples', samplesReady ? sampleRelPaths : []]
+  ])
+  const currentValues = new Map<VideoScrapeField, unknown>([
+    ['title', video?.title ?? null],
+    ['summary', video?.summary ?? null],
+    ['cover', video?.cover_path ?? null],
+    ['releaseDate', video?.release_date ?? null],
+    ['maker', video?.maker ?? null],
+    ['publisher', video?.publisher ?? null],
+    ['series', video?.series ?? null],
+    ['director', video?.director ?? null],
+    ['duration', video?.duration_seconds ?? null],
+    ['actressesFemale', countVideoCastByGender(videoId, 'female')],
+    ['actressesMale', countVideoCastByGender(videoId, 'male')],
+    ['tags', countScrapedVideoTags(videoId)],
+    ['source', countVideoExternalIds(videoId, sourceName)],
+    ['rating', countVideoExternalStats(videoId, ratingSourceName ?? sourceName)],
+    ['samples', listVideoAssetPaths(videoId, 'sample')]
+  ])
+
+  const impacts = requested.map((field): VideoScrapeFieldImpact => {
+    const nextValue = values.get(field) ?? null
+    const isCollection = Array.isArray(nextValue)
+    const hasValue = isCollection ? nextValue.length > 0 : nextValue !== null && nextValue !== undefined
+    const resourceUnavailable =
+      (field === 'cover' && coverUnavailable) || (field === 'samples' && samplesUnavailable)
+    const missingFieldSource =
+      (field === 'source' && !sourceName) ||
+      (field === 'rating' && !(ratingSourceName ?? sourceName))
+    let action: VideoScrapeImpactAction = 'preserve'
+    let reason: VideoScrapeImpactReason = effective.has(field) ? 'noValue' : 'existingValue'
+    if (effective.has(field) && missingFieldSource) {
+      reason = 'noValue'
+    } else if (effective.has(field) && resourceUnavailable) {
+      reason = 'resourceUnavailable'
+    } else if (effective.has(field) && mode === 'replace') {
+      action = hasValue ? 'replace' : 'clear'
+      reason = 'replace'
+    } else if (effective.has(field) && hasValue) {
+      action = mode === 'fillEmpty' ? 'set' : 'replace'
+      reason = mode
+    }
+    return {
+      field,
+      action,
+      reason,
+      currentValue: currentValues.get(field) ?? null,
+      nextValue,
+      sourceName:
+        field === 'rating'
+          ? (ratingSourceName ?? sourceName)
+          : field === 'source'
+            ? sourceName
+            : undefined
+    }
+  })
+
+  return {
+    effectiveFields,
+    impacts,
+    shouldApply: impacts.some((impact) => impact.action !== 'preserve'),
+    warnings
+  }
+}
+
+/**
+ * Apply a scrape result to a video, link actresses/tags, and store cover path.
+ * Wrapped in a transaction so a partial failure doesn't corrupt relations.
+ */
+export interface ApplyVideoScrapeResult {
+  applied: boolean
+  warnings: string[]
+  obsoleteAssetPaths: string[]
+}
+
+export function applyScrapeResult(
+  videoId: number,
+  result: ScrapeResult,
+  coverRelPath: string | null,
+  actressAvatars: Map<string, string | null>,
+  sampleRelPaths: Array<string | null> = [],
+  fields?: VideoScrapeField[],
+  sourceName?: string,
+  mode: VideoScrapeUpdateMode = 'replace',
+  ratingSourceName?: string,
+  imageFacts: VideoImageAvailabilityFacts = {}
+): ApplyVideoScrapeResult {
+  const db = getDb()
+  const requested = fields ?? ALL_VIDEO_SCRAPE_FIELDS
+  const plan = planVideoScrapeResult(
+    videoId,
+    result,
+    coverRelPath,
+    sampleRelPaths,
+    requested,
+    sourceName,
+    mode,
+    ratingSourceName,
+    imageFacts
+  )
+  if (!plan.shouldApply) return { applied: false, warnings: plan.warnings, obsoleteAssetPaths: [] }
+
+  const impactFor = (field: VideoScrapeField): VideoScrapeFieldImpact | undefined =>
+    plan.impacts.find((impact) => impact.field === field)
+  const impactAction = (field: VideoScrapeField): VideoScrapeImpactAction =>
+    impactFor(field)?.action ?? 'preserve'
+  const writesField = (field: VideoScrapeField): boolean => impactAction(field) !== 'preserve'
+  const existing = getVideoById(videoId)
+  if (!existing) return { applied: false, warnings: [], obsoleteAssetPaths: [] }
+  const cleanupHints = collectVideoLibraryCleanupHints(videoId)
+  const scrapedAt = nowIso()
+  const warnings = plan.warnings
+  const scalarColumns: Partial<Record<VideoScrapeField, { column: string; bindKey: string }>> = {
+    title: { column: 'title', bindKey: 'title' },
+    summary: { column: 'summary', bindKey: 'summary' },
+    releaseDate: { column: 'release_date', bindKey: 'release_date' },
+    maker: { column: 'maker', bindKey: 'maker' },
+    publisher: { column: 'publisher', bindKey: 'publisher' },
+    series: { column: 'series', bindKey: 'series' },
+    director: { column: 'director', bindKey: 'director' },
+    duration: { column: 'duration_seconds', bindKey: 'duration_seconds' }
+  }
+  const scalarWrites = plan.impacts.flatMap((impact) => {
+    const metadata = scalarColumns[impact.field]
+    return metadata && impact.action !== 'preserve'
+      ? [{ field: impact.field, value: impact.nextValue, ...metadata }]
+      : []
+  })
+
+  const cast = result.actresses ?? []
+  const writeFemale = writesField('actressesFemale')
+  const writeMale = writesField('actressesMale')
+  const writeTags = writesField('tags')
+
+  const sourceUrl = (impactFor('source')?.nextValue as string | null | undefined) ?? null
+  const writeSource = Boolean(sourceName && writesField('source'))
+  const ratingValue = (impactFor('rating')?.nextValue as number | null | undefined) ?? null
+  const statsSource = ratingSourceName ?? sourceName
+  const writeRating = Boolean(statsSource && writesField('rating'))
+
+  const writeCover = writesField('cover')
+
+  const sampleUrls = (result.sampleImageUrls ?? []).filter((url) =>
+    Boolean(normalizedScrapeText(url))
+  )
+  const writeSamples = writesField('samples')
+
+  const oldAssetPaths: Array<string | null> = []
+
+  const txn = db.transaction(() => {
+    const assignments: string[] = []
+    const bind: Record<string, unknown> = { id: videoId }
+
+    for (const { field, column, bindKey, value } of scalarWrites) {
+      assignments.push(`${column} = @${bindKey}`)
+      bind[bindKey] = value
+      if (field === 'title') {
+        assignments.push('original_title = @original_title')
+        bind.original_title = value
+      }
+    }
+
+    if (writeCover) {
+      assignments.push('cover_path = @cover_path')
+      bind.cover_path = coverRelPath
+      oldAssetPaths.push(existing.cover_path)
+      oldAssetPaths.push(
+        ...replaceVideoAssets(
+          videoId,
+          'cover',
+          coverRelPath
+            ? [
+                {
+                  type: 'cover',
+                  position: 0,
+                  remoteUrl: result.coverUrl ?? null,
+                  localPath: coverRelPath,
+                  isPrimary: 1,
+                  createdAt: scrapedAt
+                }
+              ]
+            : []
+        )
+      )
+    }
+
+    if (assignments.length > 0) {
+      db.prepare(`UPDATE videos SET ${assignments.join(', ')} WHERE id = @id`).run(bind)
+    }
+
+    if (writeFemale) {
+      removeVideoActressesByGender(videoId, 'female')
+      linkScrapedCastByGender(videoId, cast, 'female', actressAvatars)
+    }
+    if (writeMale) {
+      removeVideoActressesByGender(videoId, 'male')
+      linkScrapedCastByGender(videoId, cast, 'male', actressAvatars)
+    }
+
+    if (writeTags) {
+      replaceScrapedTags(videoId, result.tags ?? [], sourceName ?? null, scrapedAt)
+    }
+
+    ensureFacetEntries({
+      maker: writesField('maker') ? (result.maker ?? null) : null,
+      publisher: writesField('publisher') ? (result.publisher ?? null) : null,
+      series: writesField('series') ? (result.series ?? null) : null,
+      director: writesField('director') ? (result.director ?? null) : null
+    })
+
+    if (writeSamples) {
+      oldAssetPaths.push(
+        ...replaceVideoAssets(
+          videoId,
+          'sample',
+          sampleUrls.map((url, index) => ({
+            type: 'sample',
+            position: index,
+            remoteUrl: url,
+            localPath: sampleRelPaths[index]!,
+            isPrimary: 0,
+            createdAt: scrapedAt
+          }))
+        )
+      )
+    }
+
+    if (writeSource && sourceName) {
+      if (sourceUrl) upsertVideoExternalId(videoId, sourceName, result, scrapedAt)
+      else deleteVideoExternalId(videoId, sourceName)
+    }
+
+    if (writeRating && statsSource) {
+      if (ratingValue !== null) {
+        upsertVideoExternalStats(videoId, statsSource, result, scrapedAt)
+      } else {
+        deleteVideoExternalStats(videoId, statsSource)
+      }
+    }
+
+    db.prepare(
+      'UPDATE videos SET scraped_status = 1, last_scraped_at = ?, updated_at = ? WHERE id = ?'
+    ).run(scrapedAt, scrapedAt, videoId)
+  })
+
+  txn()
+
+  const obsoleteAssetPaths = Array.from(new Set(oldAssetPaths)).filter(
+    (assetPath): assetPath is string =>
+      Boolean(assetPath && assetPath !== coverRelPath && !sampleRelPaths.includes(assetPath))
+  )
+
+  try {
+    runLibraryCleanup(cleanupHints)
+  } catch (error) {
+    console.error('Post-commit library cleanup failed:', error)
+  }
+  return { applied: true, warnings, obsoleteAssetPaths }
+}
+
+export function inspectVideoImageAvailability(videoId: number): VideoImageAvailabilityFacts {
+  const paths = getVideoImageCandidatePaths(videoId)
+  return {
+    coverAvailable: mediaAssetStore.inspectImage(paths.coverPath).usable,
+    samplePathsAvailable:
+      paths.samplePaths.length > 0 &&
+      paths.samplePaths.every((storedPath) => mediaAssetStore.inspectImage(storedPath).usable)
+  }
+}
+
+export function resolveEffectiveVideoScrapeFields(
+  videoId: number,
+  fields: VideoScrapeField[],
+  mode: VideoScrapeUpdateMode = 'replace',
+  sourceName?: string,
+  ratingSourceName?: string
+): VideoScrapeField[] {
+  return resolveEffectiveScrapeFields(
+    videoId,
+    fields,
+    mode,
+    sourceName,
+    ratingSourceName,
+    inspectVideoImageAvailability(videoId)
+  )
+}
+
+export function resolveVideoBatchTargets(
+  filter: VideoBatchScrapeFilter
+): Array<{ id: number; code: string }> {
+  const base = listVideosForBatchScrape({ ...filter, missingFields: [] })
+  if (filter.videoIds || !(filter.missingFields ?? []).length) return base
+  return base.filter(
+    (video) =>
+      resolveEffectiveVideoScrapeFields(
+        video.id,
+        filter.missingFields ?? [],
+        'fillEmpty',
+        filter.sourceName,
+        filter.ratingSourceName
+      ).length > 0
+  )
+}
+
+/** Apply entry used by deliver; tests may replace this to force apply-phase failures. */
+export const videoScrapeApplyBridge = {
+  applyScrapeResult
+}
+
+export interface VideoScrapeDeliverInput {
+  videoId: number
+  code: string
+  result: ScrapeResult
+  selectedFields: VideoScrapeField[]
+  fieldsToApply: VideoScrapeField[]
+  mode: VideoScrapeUpdateMode
+  sourceName?: string
+  ratingSourceName?: string
+  imageFacts?: VideoImageAvailabilityFacts
+  fetcher: (url: string) => Promise<Buffer>
+}
+
+export interface VideoScrapeDeliverOutcome {
+  applied: boolean
+  warnings: string[]
+}
+
+export interface VideoScrapeApplyService {
+  inspectImageAvailability(videoId: number): VideoImageAvailabilityFacts
+  resolveEffectiveFields(
+    videoId: number,
+    fields: VideoScrapeField[],
+    mode?: VideoScrapeUpdateMode,
+    sourceName?: string,
+    ratingSourceName?: string
+  ): VideoScrapeField[]
+  resolveBatchTargets(filter: VideoBatchScrapeFilter): Array<{ id: number; code: string }>
+  plan: typeof planVideoScrapeResult
+  apply: typeof applyScrapeResult
+  deliverParsedResult(input: VideoScrapeDeliverInput): Promise<VideoScrapeDeliverOutcome>
+}
+
+interface VideoScrapeApplyServiceDependencies {
+  inspectImageAvailability: typeof inspectVideoImageAvailability
+  resolveEffectiveFields: typeof resolveEffectiveVideoScrapeFields
+  resolveBatchTargets: typeof resolveVideoBatchTargets
+  plan: typeof planVideoScrapeResult
+  apply: typeof applyScrapeResult
+  coordinateDatabaseChange: typeof mediaAssetStore.coordinateDatabaseChange
+  downloadCover: typeof mediaAssetStore.downloadCover
+  downloadAvatar: typeof mediaAssetStore.downloadAvatar
+  downloadSamples: typeof mediaAssetStore.downloadSamples
+  deleteBestEffort: typeof mediaAssetStore.deleteBestEffort
+  findActressByNameOrAlias: typeof findActressByNameOrAlias
+  adoptDownloadedAvatarIfMissing: typeof adoptDownloadedAvatarIfMissing
+}
+
+export function createVideoScrapeApplyService(
+  dependencies: Partial<VideoScrapeApplyServiceDependencies> = {}
+): VideoScrapeApplyService {
+  const inspectImageAvailability =
+    dependencies.inspectImageAvailability ?? inspectVideoImageAvailability
+  const resolveEffectiveFields =
+    dependencies.resolveEffectiveFields ?? resolveEffectiveVideoScrapeFields
+  const resolveBatchTargets = dependencies.resolveBatchTargets ?? resolveVideoBatchTargets
+  const plan = dependencies.plan ?? planVideoScrapeResult
+  const apply =
+    dependencies.apply ??
+    ((...args: Parameters<typeof applyScrapeResult>) =>
+      videoScrapeApplyBridge.applyScrapeResult(...args))
+  const coordinateDatabaseChange =
+    dependencies.coordinateDatabaseChange ??
+    mediaAssetStore.coordinateDatabaseChange.bind(mediaAssetStore)
+  const downloadCover =
+    dependencies.downloadCover ?? mediaAssetStore.downloadCover.bind(mediaAssetStore)
+  const downloadAvatar =
+    dependencies.downloadAvatar ?? mediaAssetStore.downloadAvatar.bind(mediaAssetStore)
+  const downloadSamples =
+    dependencies.downloadSamples ?? mediaAssetStore.downloadSamples.bind(mediaAssetStore)
+  const deleteBestEffort =
+    dependencies.deleteBestEffort ?? mediaAssetStore.deleteBestEffort.bind(mediaAssetStore)
+  const findActress = dependencies.findActressByNameOrAlias ?? findActressByNameOrAlias
+  const adoptAvatar =
+    dependencies.adoptDownloadedAvatarIfMissing ?? adoptDownloadedAvatarIfMissing
+
+  return {
+    inspectImageAvailability,
+    resolveEffectiveFields,
+    resolveBatchTargets,
+    plan,
+    apply: (...args) => apply(...args),
+    async deliverParsedResult(input): Promise<VideoScrapeDeliverOutcome> {
+      const selected = new Set(input.selectedFields)
+      const imageFacts = input.imageFacts ?? inspectImageAvailability(input.videoId)
+      const downloads = await coordinateDatabaseChange(async () => {
+        let coverRel: string | null = null
+        let sampleRels: Array<string | null> = []
+        const avatarMap = new Map<string, string | null>()
+
+        if (selected.has('cover') && input.result.coverUrl) {
+          coverRel = await downloadCover(
+            input.result.code || input.code,
+            input.result.coverUrl,
+            input.fetcher
+          )
+        }
+
+        const wantsFemale = selected.has('actressesFemale')
+        const wantsMale = selected.has('actressesMale')
+        if (wantsFemale || wantsMale) {
+          for (const a of input.result.actresses ?? []) {
+            const gender = a.gender ?? 'female'
+            if (gender === 'female' && !wantsFemale) continue
+            if (gender === 'male' && !wantsMale) continue
+            if (a.avatarUrl) {
+              const rel = await downloadAvatar(a.name, a.avatarUrl, input.fetcher)
+              avatarMap.set(a.name, rel)
+            }
+          }
+        }
+
+        if (selected.has('samples') && input.result.sampleImageUrls?.length) {
+          sampleRels = await downloadSamples(
+            input.result.code || input.code,
+            input.result.sampleImageUrls,
+            input.fetcher
+          )
+          if (sampleRels.some((assetPath) => !assetPath)) {
+            for (const assetPath of sampleRels) deleteBestEffort(assetPath)
+            sampleRels = input.result.sampleImageUrls.map(() => null)
+          }
+        }
+
+        return { coverRel, sampleRels, avatarMap }
+      })
+
+      const downloadedPaths = [
+        downloads.coverRel,
+        ...downloads.sampleRels,
+        ...downloads.avatarMap.values()
+      ].filter((assetPath): assetPath is string => Boolean(assetPath))
+
+      let application: ApplyVideoScrapeResult
+      try {
+        application = coordinateDatabaseChange(() => {
+          const applied = apply(
+            input.videoId,
+            input.result,
+            downloads.coverRel,
+            downloads.avatarMap,
+            downloads.sampleRels,
+            input.fieldsToApply,
+            input.sourceName,
+            input.mode,
+            input.ratingSourceName,
+            imageFacts
+          )
+          for (const assetPath of applied.obsoleteAssetPaths) {
+            deleteBestEffort(assetPath)
+          }
+          return applied
+        })
+      } catch (applyError) {
+        for (const assetPath of downloadedPaths) deleteBestEffort(assetPath)
+        throw applyError
+      }
+
+      if (!application.applied) {
+        for (const assetPath of downloadedPaths) deleteBestEffort(assetPath)
+      } else {
+        for (const [name, avatarPath] of downloads.avatarMap) {
+          if (!avatarPath) continue
+          const actressId = findActress(name)
+          if (actressId == null) {
+            deleteBestEffort(avatarPath)
+            continue
+          }
+          try {
+            adoptAvatar(actressId, avatarPath)
+          } catch (error) {
+            deleteBestEffort(avatarPath)
+            application.warnings.push(
+              `演员「${name}」头像未应用：${(error as Error).message}`
+            )
+          }
+        }
+      }
+
+      return { applied: application.applied, warnings: application.warnings }
+    }
+  }
+}
+
+export const videoScrapeApplyService = createVideoScrapeApplyService()

@@ -47,7 +47,7 @@ import { scrapeActress } from '../scrapers/actressScraperManager'
 import { resolveVideoScrapeFieldSources, scrapeVideo } from '../scrapers/scraperManager'
 import { getActressDetail } from '../db/actressRepo'
 import { countVideosForRematch } from '../db/videoRepo'
-import { resolveVideoBatchTargets } from './videoImageAvailability'
+import { resolveVideoBatchTargets } from './videoScrapeApplyService'
 import {
   AvatarAutoCropMediator,
   type AvatarAutoCropMediatorDependencies

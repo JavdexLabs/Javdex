@@ -29,7 +29,6 @@ import {
   removeVideoManualTag,
   setVideoPrimaryFile
 } from './videoService'
-import { mediaAssetStore } from './mediaAssetStore'
 
 export interface VideoApplicationService {
   list(query?: VideoQuery): VideoListResult
@@ -56,15 +55,16 @@ export function createVideoApplicationService(): VideoApplicationService {
     list: (query) => listVideos(query ?? {}),
     get: getVideoDetailForUi,
     update(id, fields) {
-      mediaAssetStore.coordinateDatabaseChange(() => updateVideoFields(id, fields))
+      updateVideoFields(id, fields)
       return true
     },
+    // edit/clear/delete/sample already self-coordinate inside videoService.
     edit(id, input) {
-      mediaAssetStore.coordinateDatabaseChange(() => editVideo(id, input))
+      editVideo(id, input)
       return true
     },
     clearMetadata(id) {
-      mediaAssetStore.coordinateDatabaseChange(() => clearVideoMetadata(id))
+      clearVideoMetadata(id)
       return true
     },
     markScrapeSucceeded(id) {
@@ -72,7 +72,7 @@ export function createVideoApplicationService(): VideoApplicationService {
       return true
     },
     delete(id) {
-      mediaAssetStore.coordinateDatabaseChange(() => deleteVideoWithFile(id))
+      deleteVideoWithFile(id)
       return true
     },
     setRating(id, ratingValue) {
@@ -91,7 +91,7 @@ export function createVideoApplicationService(): VideoApplicationService {
     listYears,
     importSample: importVideoSample,
     deleteSample(id, assetId) {
-      mediaAssetStore.coordinateDatabaseChange(() => deleteVideoSample(id, assetId))
+      deleteVideoSample(id, assetId)
       return true
     },
     setPoster(id, posterPath) {

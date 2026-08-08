@@ -1,10 +1,11 @@
-import type { ScrapeResult } from '@shared/scrapeTypes'
-import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/scrapeTypes'
+import type { ScraperPluginDescriptor } from '@shared/scraperPluginTypes'
+import type { ScrapeResult, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/videoScrapeTypes'
+import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import { DEFAULT_SETTINGS, resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import {
   applyScrapeResult,
   getVideoById,
-  markScrapeFailed,
+  markScrapeFailed
 } from '../db/videoRepo'
 import { findActressByNameOrAlias } from '../db/actressRepo'
 import { adoptDownloadedAvatarIfMissing } from '../services/actressAssetService'
@@ -15,7 +16,6 @@ import {
 } from '../services/videoImageAvailability'
 import { getSettings } from '../settings/settingsStore'
 import { scrapeBrowser } from './scrapeBrowser'
-import type { VideoScrapeField, VideoScrapeUpdateMode } from '@shared/scrapeTypes'
 
 /** Registry imports — see file bottom for registration. */
 import type { BaseScraper } from './BaseScraper'
@@ -27,7 +27,6 @@ import {
   loadUserVideoScrapers
 } from './scraperPluginService'
 import { normalizeVideoScrapeResult } from './scraperResultValidation'
-import type { ScraperPluginDescriptor } from '@shared/scrapeTypes'
 
 function buildRegistry(): Map<string, BaseScraper> {
   const registry = new Map<string, BaseScraper>()
@@ -181,9 +180,17 @@ export function resolveVideoScrapeFieldSources(scraperName?: string): {
   return resolveVideoFieldSourceNames(scraper, scraperName, settings.defaultScraper)
 }
 
+/** Apply entry used by scrapeVideo; tests may replace this to force apply-phase failures. */
+export const videoScrapeApplyBridge = {
+  applyScrapeResult
+}
+
 /**
  * Scrape a single video by id: run the plugin, download assets, persist.
- * Image download failures do not abort text data import.
+ * Downloads and DB apply use separate coordinated changes so a committed video
+ * row is never paired with a media-ledger rollback. Apply failure cleans the
+ * download set; avatar adopt stays isolated. Partial sample download failure
+ * still discards that sample set without aborting text import.
  */
 export async function scrapeVideo(
   videoId: number,
@@ -221,9 +228,6 @@ export async function scrapeVideo(
     ratingSourceName
   )
   const selected = new Set(effective)
-  let coverRel: string | null = null
-  let sampleRels: Array<string | null> = []
-  const avatarMap = new Map<string, string | null>()
 
   if (effective.length === 0) {
     return { ok: true, result: { code: video.code }, skipped: true, warnings: [] }
@@ -255,74 +259,100 @@ export async function scrapeVideo(
     }
 
     const fetcher = (url: string): Promise<Buffer> => scrapeBrowser.fetchBuffer(url)
+    const fieldsToApply = compositeOutcome?.matchedFields ?? requested
 
-    if (selected.has('cover') && result.coverUrl) {
-      coverRel = await mediaAssetStore.downloadCover(
-        result.code || video.code,
-        result.coverUrl,
-        fetcher
-      )
+    const downloads = await mediaAssetStore.coordinateDatabaseChange(async () => {
+      let coverRel: string | null = null
+      let sampleRels: Array<string | null> = []
+      const avatarMap = new Map<string, string | null>()
+
+      if (selected.has('cover') && result.coverUrl) {
+        coverRel = await mediaAssetStore.downloadCover(
+          result.code || video.code,
+          result.coverUrl,
+          fetcher
+        )
+      }
+
+      const wantsFemale = selected.has('actressesFemale')
+      const wantsMale = selected.has('actressesMale')
+      if (wantsFemale || wantsMale) {
+        for (const a of result.actresses ?? []) {
+          const gender = a.gender ?? 'female'
+          if (gender === 'female' && !wantsFemale) continue
+          if (gender === 'male' && !wantsMale) continue
+          if (a.avatarUrl) {
+            const rel = await mediaAssetStore.downloadAvatar(a.name, a.avatarUrl, fetcher)
+            avatarMap.set(a.name, rel)
+          }
+        }
+      }
+
+      if (selected.has('samples') && result.sampleImageUrls?.length) {
+        sampleRels = await mediaAssetStore.downloadSamples(
+          result.code || video.code,
+          result.sampleImageUrls,
+          fetcher
+        )
+        if (sampleRels.some((assetPath) => !assetPath)) {
+          for (const assetPath of sampleRels) mediaAssetStore.deleteBestEffort(assetPath)
+          sampleRels = result.sampleImageUrls.map(() => null)
+        }
+      }
+
+      return { coverRel, sampleRels, avatarMap }
+    })
+
+    const downloadedPaths = [
+      downloads.coverRel,
+      ...downloads.sampleRels,
+      ...downloads.avatarMap.values()
+    ].filter((assetPath): assetPath is string => Boolean(assetPath))
+
+    let application
+    try {
+      application = mediaAssetStore.coordinateDatabaseChange(() => {
+        const applied = videoScrapeApplyBridge.applyScrapeResult(
+          videoId,
+          result,
+          downloads.coverRel,
+          downloads.avatarMap,
+          downloads.sampleRels,
+          fieldsToApply,
+          sourceName,
+          mode,
+          ratingSourceName,
+          imageFacts
+        )
+        for (const assetPath of applied.obsoleteAssetPaths) {
+          mediaAssetStore.deleteBestEffort(assetPath)
+        }
+        return applied
+      })
+    } catch (applyError) {
+      for (const assetPath of downloadedPaths) mediaAssetStore.deleteBestEffort(assetPath)
+      throw applyError
     }
 
-    const wantsFemale = selected.has('actressesFemale')
-    const wantsMale = selected.has('actressesMale')
-    if (wantsFemale || wantsMale) {
-      for (const a of result.actresses ?? []) {
-        const gender = a.gender ?? 'female'
-        if (gender === 'female' && !wantsFemale) continue
-        if (gender === 'male' && !wantsMale) continue
-        if (a.avatarUrl) {
-          const rel = await mediaAssetStore.downloadAvatar(a.name, a.avatarUrl, fetcher)
-          avatarMap.set(a.name, rel)
+    if (!application.applied) {
+      for (const assetPath of downloadedPaths) mediaAssetStore.deleteBestEffort(assetPath)
+    } else {
+      for (const [name, avatarPath] of downloads.avatarMap) {
+        if (!avatarPath) continue
+        const actressId = findActressByNameOrAlias(name)
+        if (actressId == null) {
+          mediaAssetStore.deleteBestEffort(avatarPath)
+          continue
+        }
+        try {
+          adoptDownloadedAvatarIfMissing(actressId, avatarPath)
+        } catch (error) {
+          mediaAssetStore.deleteBestEffort(avatarPath)
+          application.warnings.push(`演员「${name}」头像未应用：${(error as Error).message}`)
         }
       }
     }
 
-    if (selected.has('samples') && result.sampleImageUrls?.length) {
-      sampleRels = await mediaAssetStore.downloadSamples(
-        result.code || video.code,
-        result.sampleImageUrls,
-        fetcher
-      )
-      if (sampleRels.some((assetPath) => !assetPath)) {
-        for (const assetPath of sampleRels) mediaAssetStore.deleteBestEffort(assetPath)
-        sampleRels = result.sampleImageUrls.map(() => null)
-      }
-    }
-
-    const fieldsToApply = compositeOutcome?.matchedFields ?? requested
-    const application = mediaAssetStore.coordinateDatabaseChange(() => {
-      const applied = applyScrapeResult(
-        videoId,
-        result,
-        coverRel,
-        avatarMap,
-        sampleRels,
-        fieldsToApply,
-        sourceName,
-        mode,
-        ratingSourceName,
-        imageFacts
-      )
-      for (const assetPath of applied.obsoleteAssetPaths) {
-        mediaAssetStore.deleteBestEffort(assetPath)
-      }
-      return applied
-    })
-    for (const [name, avatarPath] of avatarMap) {
-      if (!avatarPath) continue
-      const actressId = findActressByNameOrAlias(name)
-      if (actressId == null) {
-        mediaAssetStore.deleteBestEffort(avatarPath)
-        continue
-      }
-      try {
-        adoptDownloadedAvatarIfMissing(actressId, avatarPath)
-      } catch (error) {
-        mediaAssetStore.deleteBestEffort(avatarPath)
-        application.warnings.push(`演员「${name}」头像未应用：${(error as Error).message}`)
-      }
-    }
     return {
       ok: true,
       result,
@@ -330,9 +360,6 @@ export async function scrapeVideo(
       warnings: application.warnings
     }
   } catch (err) {
-    mediaAssetStore.deleteBestEffort(coverRel)
-    for (const assetPath of sampleRels) mediaAssetStore.deleteBestEffort(assetPath)
-    for (const assetPath of avatarMap.values()) mediaAssetStore.deleteBestEffort(assetPath)
     markScrapeFailed(videoId)
     return { ok: false, error: (err as Error).message }
   } finally {

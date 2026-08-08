@@ -47,7 +47,7 @@ export async function importActressGalleryImage(
   }
 
   const remoteUrl = parsed.toString()
-  return mediaAssetStore.coordinateDatabaseChangeAsync(async () => {
+  return mediaAssetStore.coordinateDatabaseChange(async () => {
     const buf = await fetchRemoteImageBuffer(remoteUrl)
     const downloaded = await mediaAssetStore.downloadActressGalleryImage(
       actress.main_name,

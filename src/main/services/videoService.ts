@@ -39,7 +39,7 @@ export function editVideo(id: number, input: VideoEditInput): void {
   const video = getVideoById(id)
   if (!video) throw new Error('Video not found')
 
-  mediaAssetStore.coordinateDatabaseChange(() => {
+  mediaAssetStore.runInCoordinatedChange(() => {
     const coverRelPath = input.coverSourcePath
       ? mediaAssetStore.importCover(video.code, input.coverSourcePath)
       : undefined
@@ -54,10 +54,12 @@ export function clearVideoMetadata(id: number): void {
   const video = getVideoById(id)
   if (!video) return
 
-  const result = clearVideoMetadataRecord(id)
-  for (const assetPath of new Set([...result.obsoletePaths, video.cover_path])) {
-    mediaAssetStore.deleteBestEffort(assetPath)
-  }
+  mediaAssetStore.runInCoordinatedChange(() => {
+    const result = clearVideoMetadataRecord(id)
+    for (const assetPath of new Set([...result.obsoletePaths, video.cover_path])) {
+      mediaAssetStore.deleteBestEffort(assetPath)
+    }
+  })
 }
 
 export function markVideoScrapeSuccess(id: number): void {
@@ -91,7 +93,7 @@ export async function importVideoSample(id: number, input: VideoSampleImportInpu
     throw new Error('样张链接仅支持 http/https')
   }
   const remoteUrl = parsed.toString()
-  return mediaAssetStore.coordinateDatabaseChangeAsync(async () => {
+  return mediaAssetStore.coordinateDatabaseChange(async () => {
     const buf = await fetchRemoteImageBuffer(remoteUrl)
     const [localPath] = await mediaAssetStore.downloadSamples(
       video.code,
@@ -104,8 +106,10 @@ export async function importVideoSample(id: number, input: VideoSampleImportInpu
 }
 
 export function deleteVideoSample(id: number, assetId: number): void {
-  const result = deleteVideoSampleAsset(id, assetId)
-  for (const localPath of result.obsoletePaths) mediaAssetStore.deleteBestEffort(localPath)
+  mediaAssetStore.runInCoordinatedChange(() => {
+    const result = deleteVideoSampleAsset(id, assetId)
+    for (const localPath of result.obsoletePaths) mediaAssetStore.deleteBestEffort(localPath)
+  })
 }
 
 export function addVideoManualTag(id: number, name: string): void {
@@ -180,17 +184,19 @@ export function deleteVideoWithFile(id: number): void {
   const video = getVideoById(id)
   if (!video) throw new Error('Video record not found')
 
-  for (const file of listVideoFiles(id)) {
-    if (fs.existsSync(file.file_path)) {
-      try {
-        fs.unlinkSync(file.file_path)
-      } catch (err) {
-        throw new Error(`Failed to delete video file: ${(err as Error).message}`)
+  mediaAssetStore.runInCoordinatedChange(() => {
+    for (const file of listVideoFiles(id)) {
+      if (fs.existsSync(file.file_path)) {
+        try {
+          fs.unlinkSync(file.file_path)
+        } catch (err) {
+          throw new Error(`Failed to delete video file: ${(err as Error).message}`)
+        }
       }
     }
-  }
 
-  for (const assetPath of purgeVideo(id).obsoletePaths) {
-    mediaAssetStore.deleteBestEffort(assetPath)
-  }
+    for (const assetPath of purgeVideo(id).obsoletePaths) {
+      mediaAssetStore.deleteBestEffort(assetPath)
+    }
+  })
 }

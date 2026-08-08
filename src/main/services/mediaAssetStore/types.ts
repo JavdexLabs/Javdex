@@ -19,3 +19,9 @@ export type ImageAssetSubdir =
   | 'actress_gallery'
   | 'samples'
   | 'playlist_covers'
+
+/** Result of rewriting a stored asset path during encrypt/decrypt migration. */
+export interface StoredAssetPathRewrite {
+  fromRel: string
+  toRel: string
+}

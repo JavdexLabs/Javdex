@@ -28,8 +28,8 @@ import type {
   ActressDeleteResult
 } from '@shared/actressIpcContract'
 import type { ActressAvatarSourceInfo, ActressDetail, ActressEditInput, ActressFaceScanManifestItem, ActressGalleryAsset, ActressGalleryImportInput, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressMergeInput } from '@shared/actressTypes'
-import type { SortDir } from '@shared/commonTypes'
 import { actressStatusFilterOf } from '@shared/actressTypes'
+import type { SortDir } from '@shared/commonTypes'
 import type { ActressConflictReviewSummary, ActressNameConflictGroup, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from '@shared/actressConflictTypes'
 
 export interface ActressApplicationService {
@@ -225,8 +225,10 @@ export function createActressApplicationService(
       }
     },
     clearMetadata(id): boolean {
-      const obsoletePaths = mediaAssetStore.coordinateDatabaseChange(() => clearMetadataRecord(id))
-      for (const assetPath of obsoletePaths) mediaAssetStore.deleteBestEffort(assetPath)
+      mediaAssetStore.coordinateDatabaseChange(() => {
+        const obsoletePaths = clearMetadataRecord(id)
+        for (const assetPath of obsoletePaths) mediaAssetStore.deleteBestEffort(assetPath)
+      })
       return true
     },
     mergeActresses(input): boolean {

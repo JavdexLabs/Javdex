@@ -57,7 +57,7 @@ export function resolveAssetPath(relPath: string): string {
   return resolved
 }
 
-function writeAtomic(abs: string, data: Buffer): void {
+export function writeAtomic(abs: string, data: Buffer): void {
   const tmp = `${abs}.tmp-${process.pid}`
   fs.writeFileSync(tmp, data)
   fs.renameSync(tmp, abs)
@@ -151,14 +151,6 @@ export function importSampleFromFile(code: string, sourcePath: string): string {
   return importImageFromFile('samples', code, sourcePath)
 }
 
-export function importAvatarFromFile(
-  name: string,
-  sourcePath: string,
-  actressId?: number | null
-): string {
-  return importImageFromFile('avatars', buildActressAssetSeed(name, actressId), sourcePath)
-}
-
 export function importActressGalleryFromFile(
   name: string,
   sourcePath: string,
@@ -169,23 +161,6 @@ export function importActressGalleryFromFile(
     buildActressAssetSeed(name, actressId),
     sourcePath
   )
-}
-
-export function importAvatarFromBuffer(
-  name: string,
-  data: Buffer,
-  actressId?: number | null
-): string {
-  const urlKey = `crop:${Date.now()}`
-  const rel = writeImageAsset(
-    'avatars',
-    buildActressAssetSeed(name, actressId),
-    urlKey,
-    '.jpg',
-    data
-  )
-  invalidateAssetCache(rel)
-  return rel
 }
 
 export function importAvatarSourceFromBuffer(

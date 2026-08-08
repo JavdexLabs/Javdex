@@ -1,5 +1,5 @@
 import type { ActressConflictCurrentOwner, ActressConflictDecisionSnapshot, ActressConflictReviewSummary, ActressNameConflictGroup, ActressPendingNameType, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, PendingActressNameClaim, PendingActressScrapeCandidate, PendingActressScrapeResource, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from '@shared/actressConflictTypes'
-import type { ActressScrapeDisposition, ActressScrapeField, ActressScrapePluginRef, ActressScrapeResult, ActressScrapeUpdateMode } from '@shared/scrapeTypes'
+import type { ActressScrapeDisposition, ActressScrapeField, ActressScrapePluginRef, ActressScrapeResult, ActressScrapeUpdateMode } from '@shared/actressScrapeTypes'
 import { getDb } from '../db/database'
 import { normalizeActressName } from '../db/actressNameNormalization'
 import {
@@ -113,7 +113,6 @@ interface PreparedPendingFormalResources {
     width: number | null
     height: number | null
   }>
-  createdPaths: string[]
   stagedPaths: string[]
 }
 
@@ -913,13 +912,12 @@ function promotePendingResources(pendingId: number): PreparedPendingFormalResour
        ORDER BY field, position`
     )
     .all(pendingId) as PendingResourceRow[]
-  const prepared: PreparedPendingFormalResources = {
-    avatarRelPath: null,
-    galleryAssets: [],
-    createdPaths: [],
-    stagedPaths: resources.map((resource) => resource.staged_path)
-  }
-  try {
+  return mediaAssetStore.runInCoordinatedChange(() => {
+    const prepared: PreparedPendingFormalResources = {
+      avatarRelPath: null,
+      galleryAssets: [],
+      stagedPaths: resources.map((resource) => resource.staged_path)
+    }
     for (const resource of resources) {
       const data = mediaAssetStore.readActressScrapeStagedImage(resource.staged_path)
       const remoteUrl = resource.remote_url?.trim() ?? ''
@@ -929,7 +927,6 @@ function promotePendingResources(pendingId: number): PreparedPendingFormalResour
           remoteUrl,
           data
         )
-        prepared.createdPaths.push(prepared.avatarRelPath)
       } else {
         const stored = mediaAssetStore.storeScrapedActressGalleryImage(
           actress.main_name,
@@ -937,7 +934,6 @@ function promotePendingResources(pendingId: number): PreparedPendingFormalResour
           remoteUrl,
           data
         )
-        prepared.createdPaths.push(stored.localPath)
         prepared.galleryAssets.push({
           remoteUrl,
           localPath: stored.localPath,
@@ -947,10 +943,7 @@ function promotePendingResources(pendingId: number): PreparedPendingFormalResour
       }
     }
     return prepared
-  } catch (error) {
-    for (const createdPath of prepared.createdPaths) mediaAssetStore.deleteBestEffort(createdPath)
-    throw error
-  }
+  })
 }
 
 export class ActressIdentityConflictWorkflow {
@@ -967,14 +960,6 @@ export class ActressIdentityConflictWorkflow {
         .prepare('SELECT main_name FROM actresses WHERE id = ?')
         .get(input.actressId) as { main_name: string } | undefined
       if (!detail) return { status: 'failure', ok: false, error: '演员不存在' }
-      let avatarRelPath: string | null = null
-      const galleryAssets: Array<{
-        remoteUrl: string
-        localPath: string
-        width: number | null
-        height: number | null
-      }> = []
-      const newlyStoredPaths: string[] = []
       const obsoleteStagedPaths = (
         db
           .prepare(
@@ -986,33 +971,38 @@ export class ActressIdentityConflictWorkflow {
           .all(input.actressId) as Array<{ staged_path: string }>
       ).map((row) => row.staged_path)
       try {
-        for (const resource of input.resources) {
-          const remoteUrl = resource.remoteUrl?.trim() ?? ''
-          if (resource.field === 'avatar') {
-            avatarRelPath = mediaAssetStore.storeScrapedActressAvatar(
-              detail.main_name,
-              remoteUrl,
-              resource.data
-            )
-            newlyStoredPaths.push(avatarRelPath)
-          } else {
-            const stored = mediaAssetStore.storeScrapedActressGalleryImage(
-              detail.main_name,
-              input.actressId,
-              remoteUrl,
-              resource.data
-            )
-            newlyStoredPaths.push(stored.localPath)
-            galleryAssets.push({
-              remoteUrl,
-              localPath: stored.localPath,
-              width: resource.width ?? stored.width,
-              height: resource.height ?? stored.height
-            })
+        const applied = mediaAssetStore.coordinateDatabaseChange(() => {
+          let avatarRelPath: string | null = null
+          const galleryAssets: Array<{
+            remoteUrl: string
+            localPath: string
+            width: number | null
+            height: number | null
+          }> = []
+          for (const resource of input.resources) {
+            const remoteUrl = resource.remoteUrl?.trim() ?? ''
+            if (resource.field === 'avatar') {
+              avatarRelPath = mediaAssetStore.storeScrapedActressAvatar(
+                detail.main_name,
+                remoteUrl,
+                resource.data
+              )
+            } else {
+              const stored = mediaAssetStore.storeScrapedActressGalleryImage(
+                detail.main_name,
+                input.actressId,
+                remoteUrl,
+                resource.data
+              )
+              galleryAssets.push({
+                remoteUrl,
+                localPath: stored.localPath,
+                width: resource.width ?? stored.width,
+                height: resource.height ?? stored.height
+              })
+            }
           }
-        }
-        const applied = mediaAssetStore.coordinateDatabaseChange(() =>
-          applyActressScrapeResult(
+          const result = applyActressScrapeResult(
             input.actressId,
             input.result,
             avatarRelPath,
@@ -1025,12 +1015,13 @@ export class ActressIdentityConflictWorkflow {
               )
             }
           )
-        )
-        for (const storedPath of applied.fileChanges?.obsoletePaths ?? []) {
-          mediaAssetStore.deleteBestEffort(storedPath)
-        }
+          if (!result.applied) {
+            if (avatarRelPath) mediaAssetStore.deleteBestEffort(avatarRelPath)
+            for (const asset of galleryAssets) mediaAssetStore.deleteBestEffort(asset.localPath)
+          }
+          return result
+        })
         if (!applied.applied) {
-          for (const storedPath of newlyStoredPaths) mediaAssetStore.deleteBestEffort(storedPath)
           recordActressScrapeFailure(input.actressId)
           return {
             status: 'failure',
@@ -1052,14 +1043,12 @@ export class ActressIdentityConflictWorkflow {
           avatarUpdated: applied.avatarApplied
         }
       } catch (error) {
-        for (const storedPath of newlyStoredPaths) mediaAssetStore.deleteBestEffort(storedPath)
         recordActressScrapeFailure(input.actressId)
         return { status: 'failure', ok: false, error: (error as Error).message }
       }
     }
 
     const createdAt = new Date().toISOString()
-    const stagedResources = stagePreparedResources(input.resources)
     const obsoleteStagedPaths = (
       db
         .prepare(
@@ -1070,9 +1059,9 @@ export class ActressIdentityConflictWorkflow {
         )
         .all(input.actressId) as Array<{ staged_path: string }>
     ).map((row) => row.staged_path)
-    let pendingId: number
-    try {
-      pendingId = db.transaction(() => {
+    const pendingId = mediaAssetStore.coordinateDatabaseChange(() => {
+      const stagedResources = stagePreparedResources(input.resources)
+      return db.transaction(() => {
         db.prepare('DELETE FROM pending_actress_scrapes WHERE actress_id = ?').run(input.actressId)
         const inserted = db
           .prepare(
@@ -1124,10 +1113,7 @@ export class ActressIdentityConflictWorkflow {
         }
         return id
       })()
-    } catch (error) {
-      cleanupStagedResourcePaths(stagedResources.map((resource) => resource.stagedPath))
-      throw error
-    }
+    })
     cleanupStagedResourcePaths(obsoleteStagedPaths)
 
     return {
@@ -1683,9 +1669,9 @@ export class ActressIdentityConflictWorkflow {
         )
         .map((candidate) => candidate.pendingId)
     }
-    const createdDuringApply: string[] = []
     const obsoleteAfterCommit: string[] = []
     try {
+      return mediaAssetStore.coordinateDatabaseChange(() => {
       for (const pendingId of pendingIdsUnlockedByDecision()) preparePending(pendingId)
       const remainingPending = db.transaction(() => {
         if (!snapshotMatches()) throw new Error('STALE_CONFLICT_SNAPSHOT')
@@ -1730,7 +1716,6 @@ export class ActressIdentityConflictWorkflow {
             { deferFileCleanup: true }
           )
           if (!applied.applied) throw new Error('待确认结果没有可应用的资料')
-          createdDuringApply.push(...(applied.fileChanges?.createdPaths ?? []))
           obsoleteAfterCommit.push(...(applied.fileChanges?.obsoletePaths ?? []))
         }
         const removeCurrentGroupFromCandidates = (): void => {
@@ -2142,13 +2127,8 @@ export class ActressIdentityConflictWorkflow {
         cleanupStagedResourcePaths(prepared.stagedPaths)
       }
       return { status: 'success', remainingPending }
+      })
     } catch (error) {
-      for (const createdPath of new Set([
-        ...Array.from(preparedByPending.values()).flatMap((item) => item.createdPaths),
-        ...createdDuringApply
-      ])) {
-        mediaAssetStore.deleteBestEffort(createdPath)
-      }
       if ((error as Error).message === 'STALE_CONFLICT_SNAPSHOT') return stale()
       throw error
     }

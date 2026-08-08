@@ -1,72 +1,74 @@
 import { IPC } from '@shared/ipc-channels'
-import { actressApplicationService } from '../services/actressApplicationService'
+import { actressIdentityConflictWorkflow } from '../services/actressIdentityConflictWorkflow'
+import { actressMaintenanceService } from '../services/actressMaintenanceService'
+import { actressQueryService } from '../services/actressQueryService'
 import { registerActressHandler } from './actressContractAdapter'
 
 export function registerActressHandlers(): void {
   registerActressHandler(IPC.ACTRESS_LIST, (...args) =>
-    actressApplicationService.listLegacy(...args)
+    actressQueryService.listLegacy(...args)
   )
   registerActressHandler(IPC.ACTRESS_LIST_PAGE, (query) =>
-    actressApplicationService.listActresses(query)
+    actressQueryService.listActresses(query)
   )
   registerActressHandler(IPC.ACTRESS_FACE_SCAN_MANIFEST, () =>
-    actressApplicationService.listFaceScanManifest()
+    actressQueryService.listFaceScanManifest()
   )
   registerActressHandler(IPC.ACTRESS_GET, (id) =>
-    actressApplicationService.getActress(id)
+    actressQueryService.getActress(id)
   )
   registerActressHandler(IPC.ACTRESS_AVATAR_SOURCE_INFO, (id) =>
-    actressApplicationService.getAvatarSourceInfo(id)
+    actressQueryService.getAvatarSourceInfo(id)
   )
   registerActressHandler(IPC.ACTRESS_EDIT, (id, input) =>
-    actressApplicationService.editActress(id, input)
+    actressMaintenanceService.editActress(id, input)
   )
   registerActressHandler(IPC.ACTRESS_DELETE_PREVIEW, (ids) =>
-    actressApplicationService.previewDelete({ ids })
+    actressMaintenanceService.previewDelete({ ids })
   )
   registerActressHandler(IPC.ACTRESS_DELETE, (request) =>
-    actressApplicationService.deleteActresses(request)
+    actressMaintenanceService.deleteActresses(request)
   )
   registerActressHandler(IPC.ACTRESS_DELETE_BATCH, (request) =>
-    actressApplicationService.deleteActresses(request)
+    actressMaintenanceService.deleteActresses(request)
   )
   registerActressHandler(IPC.ACTRESS_CLEAR_META, (id) =>
-    actressApplicationService.clearMetadata(id)
+    actressMaintenanceService.clearMetadata(id)
   )
   registerActressHandler(IPC.ACTRESS_MERGE, (input) =>
-    actressApplicationService.mergeActresses(input)
+    actressMaintenanceService.mergeActresses(input)
   )
   registerActressHandler(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, (id) =>
-    actressApplicationService.markScrapeSucceeded(id)
+    actressMaintenanceService.markScrapeSucceeded(id)
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_LIST, () =>
-    actressApplicationService.listConflicts()
+    actressIdentityConflictWorkflow.listConflictGroups()
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_COUNT, () =>
-    actressApplicationService.countConflicts()
+    actressIdentityConflictWorkflow.countPendingReviewItems()
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_SUMMARY, () =>
-    actressApplicationService.getConflictSummary()
+    actressIdentityConflictWorkflow.getConflictReviewSummary()
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_INSPECT_NAME, (input) =>
-    actressApplicationService.inspectConflictName(input)
+    actressIdentityConflictWorkflow.inspectConflictName(input)
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_DISCARD, (input) =>
-    actressApplicationService.discardConflict(input)
+    actressIdentityConflictWorkflow.discardPendingScrape(input)
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_VALIDATE_ILLEGAL, (input) =>
-    actressApplicationService.validateIllegalNames(input)
+    actressIdentityConflictWorkflow.validateIllegalNameReplacements(input)
   )
   registerActressHandler(IPC.ACTRESS_CONFLICT_RESOLVE, (input) =>
-    actressApplicationService.resolveConflict(input)
+    actressIdentityConflictWorkflow.resolveConflict(input)
   )
   registerActressHandler(IPC.ACTRESS_GALLERY_IMPORT, (id, input) =>
-    actressApplicationService.importGalleryImage(id, input)
+    actressMaintenanceService.importGalleryImage(id, input)
   )
   registerActressHandler(IPC.ACTRESS_GALLERY_DELETE, (id, assetId) =>
-    actressApplicationService.deleteGalleryImage(id, assetId)
+    actressMaintenanceService.deleteGalleryImage(id, assetId)
   )
   registerActressHandler(IPC.ACTRESS_POSTER_SET, (id, posterPath) =>
-    actressApplicationService.setPoster(id, posterPath)
+    actressMaintenanceService.setPoster(id, posterPath)
   )
 }

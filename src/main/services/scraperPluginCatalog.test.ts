@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { createScraperPluginCatalog } from './scraperPluginCatalog'
 
 describe('ScraperPluginCatalog', () => {
+  // Sole catalog policy: default-scraper restore after delete (see ADR-0013).
   it('restores the configured default after deleting a selected plugin', () => {
     const updates: unknown[] = []
     const catalog = createScraperPluginCatalog({

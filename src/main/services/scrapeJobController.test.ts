@@ -67,8 +67,10 @@ function dependencies(
     resolveVideoFieldSources: () => ({}),
     emit: () => undefined,
     rendererAvailable: () => true,
-    randomId: () => 'request-1',
-    autoCropTimeoutMs: 10,
+    avatarAutoCropOptions: {
+      randomId: () => 'request-1',
+      autoCropTimeoutMs: 10
+    },
     checkpoints: {
       load: () => null,
       create: () => ({}) as never,
@@ -167,44 +169,6 @@ describe('ScrapeJobController', () => {
       else process.env.JAVDEX_TEST_USER_DATA = previous
       fs.rmSync(root, { recursive: true, force: true })
     }
-  })
-
-  it('resolves automatic crop requests and rejects stale replies', async () => {
-    let requestId = ''
-    const controller = createScrapeJobController(
-      dependencies({
-        emit: (_channel, payload) => {
-          requestId = (payload as { requestId: string }).requestId
-        }
-      })
-    )
-    const pending = controller.requestAvatarAutoCrop({ actressId: 1, mainName: 'Test' })
-
-    assert.equal(controller.completeAvatarAutoCrop({ requestId, status: 'success' }), true)
-    assert.deepEqual(await pending, { status: 'success', message: undefined })
-    assert.equal(controller.completeAvatarAutoCrop({ requestId, status: 'success' }), false)
-  })
-
-  it('fails pending automatic crop requests after renderer disconnects', async () => {
-    const controller = createScrapeJobController(dependencies())
-    const pending = controller.requestAvatarAutoCrop({ actressId: 1, mainName: 'Test' })
-
-    controller.rendererDisconnected()
-
-    assert.deepEqual(await pending, { status: 'failed', message: '应用窗口不可用' })
-  })
-
-  it('times out automatic crop requests without accepting a late response', async () => {
-    const controller = createScrapeJobController(dependencies({ autoCropTimeoutMs: 1 }))
-
-    assert.deepEqual(await controller.requestAvatarAutoCrop({ actressId: 1, mainName: 'Test' }), {
-      status: 'failed',
-      message: '智能构图等待超时'
-    })
-    assert.equal(
-      controller.completeAvatarAutoCrop({ requestId: 'request-1', status: 'success' }),
-      false
-    )
   })
 
   it('publishes progress and supports pause, resume, and discard for persisted batches', async () => {

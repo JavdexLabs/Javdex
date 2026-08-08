@@ -121,24 +121,36 @@ for (const file of sourceFiles('src/renderer/src')) {
 }
 
 const actressHandler = 'src/main/ipc/actressHandlers.ts'
+const actressApplicationSeams = new Set([
+  '../services/actressQueryService',
+  '../services/actressMaintenanceService',
+  '../services/actressIdentityConflictWorkflow'
+])
 for (const specifier of importsOf(actressHandler)) {
   if (
     /\.\.\/(db|scrapers)\//.test(specifier) ||
-    (/\.\.\/services\//.test(specifier) &&
-      specifier !== '../services/actressApplicationService')
+    (/\.\.\/services\//.test(specifier) && !actressApplicationSeams.has(specifier))
   ) {
-    violations.push(`${actressHandler}: actress IPC must delegate through its application service`)
+    violations.push(
+      `${actressHandler}: actress IPC must delegate through query / maintenance / identity seams`
+    )
   }
 }
+
+const videoApplicationSeams = new Set([
+  '../services/videoQueryService',
+  '../services/videoMaintenanceService'
+])
 
 const videoHandler = 'src/main/ipc/videoHandlers.ts'
 for (const specifier of importsOf(videoHandler)) {
   if (
     /\.\.\/(db|scrapers)\//.test(specifier) ||
-    (/\.\.\/services\//.test(specifier) &&
-      specifier !== '../services/videoApplicationService')
+    (/\.\.\/services\//.test(specifier) && !videoApplicationSeams.has(specifier))
   ) {
-    violations.push(`${videoHandler}: video IPC must delegate through its application service`)
+    violations.push(
+      `${videoHandler}: video IPC must delegate through query / maintenance seams`
+    )
   }
 }
 
@@ -171,8 +183,10 @@ for (const file of sourceFiles('src/main/db')) {
 }
 
 for (const file of [
-  'src/main/services/videoService.ts',
-  'src/main/services/actressApplicationService.ts',
+  'src/main/services/videoMaintenanceService.ts',
+  'src/main/services/videoScrapeApplyService.ts',
+  'src/main/services/actressQueryService.ts',
+  'src/main/services/actressMaintenanceService.ts',
   'src/main/services/actressGalleryService.ts',
   'src/main/services/actressIdentityConflictWorkflow.ts',
   'src/main/scrapers/actressScraperManager.ts',

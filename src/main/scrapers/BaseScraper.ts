@@ -1,4 +1,4 @@
-import type { ScrapeResult } from '@shared/scrapeTypes'
+import type { ScrapeResult } from '@shared/videoScrapeTypes'
 
 /**
  * Plugin contract for a metadata scraper. Implementations parse a remote

@@ -1,4 +1,4 @@
-import type { ScraperPluginKind } from '@shared/scrapeTypes'
+import type { ScraperPluginKind } from '@shared/scraperPluginTypes'
 
 const IDENTIFIER_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
 

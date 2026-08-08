@@ -1,4 +1,4 @@
-import type { ScraperPluginKind } from '@shared/scrapeTypes'
+import type { ScraperPluginKind } from '@shared/scraperPluginTypes'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'

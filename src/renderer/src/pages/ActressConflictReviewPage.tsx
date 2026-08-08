@@ -12,8 +12,8 @@ import {
   UsersRound
 } from 'lucide-react'
 import type { ActressNameConflictGroup, ActressPendingNameType, PendingActressNameClaim, PendingActressScrapeCandidate } from '@shared/actressConflictTypes'
-import type { ActressScrapeField, ActressScrapeFieldImpact, ActressScrapeUpdateMode } from '@shared/scrapeTypes'
-import { ACTRESS_SCRAPE_FIELD_OPTIONS } from '@shared/scrapeTypes'
+import type { ActressScrapeField, ActressScrapeFieldImpact, ActressScrapeUpdateMode } from '@shared/actressScrapeTypes'
+import { ACTRESS_SCRAPE_FIELD_OPTIONS } from '@shared/actressScrapeTypes'
 import { resolveMediaSrc } from '../api'
 import ActressAvatar from '../components/ActressAvatar'
 import ConfirmModal from '../components/ConfirmModal'
@@ -31,7 +31,6 @@ import {
 import { navigateToActressList } from '../listView/listNavigation'
 import ConflictMergeActressesModal from './ConflictMergeActressesModal'
 import {
-  canConfirmIllegalName,
   CONFLICT_ACTION_SCOPE_LABEL,
   conflictFieldImpactsForProposedOwner,
   partitionConflictFieldImpacts
@@ -257,17 +256,35 @@ export default function ActressConflictReviewPage(): JSX.Element {
   const backButtonRef = useRef<HTMLButtonElement>(null)
   const completeButtonRef = useRef<HTMLButtonElement>(null)
   const groupButtonRefs = useRef(new Map<string, HTMLButtonElement>())
-  const controller = useConflictReviewController()
+  const { queue, detail, dialogs, busy } = useConflictReviewController()
   const {
-    groupsQuery, summary, groups, sections, selectedGroup, selectedCandidate, selectedClaim,
-    selectedConflict, ownerOptions, mergeActors, proposedOwner, ownershipReplacementClaimants,
-    illegalReplacementClaimants, requiredReplacementClaimants, selection, staleMessage,
-    resolving, discarding, discardCandidate, otherOwnerOpen, otherOwnerSearch,
-    otherOwnerOptions, otherOwnerLoading, selectedOtherOwner, editNameOpen, editedName,
-    mergeOpen, replacementDialog, replacementMainNames, replacementValidationStatus,
-    replacementValidationErrors, editSourceName, editSourceType, editInspection, editInspectionPending,
+    summary,
+    groups,
+    sections,
+    selectedGroup,
+    staleMessage,
     focusAfterRefresh
-  } = controller
+  } = queue
+  const {
+    selection,
+    selectedCandidate,
+    selectedClaim,
+    ownerOptions,
+    mergeActors,
+    proposedOwner,
+    editSourceName,
+    editSourceType,
+    editInspection,
+    editInspectionPending
+  } = detail
+  const { resolving } = busy
+  const {
+    otherOwner,
+    editName,
+    merge,
+    replacement,
+    discard
+  } = dialogs
 
   useEffect(() => {
     if (focusAfterRefresh === undefined) return
@@ -275,18 +292,18 @@ export default function ActressConflictReviewPage(): JSX.Element {
       ? groupButtonRefs.current.get(focusAfterRefresh)
       : completeButtonRef.current ?? backButtonRef.current
     target?.focus()
-    controller.focusHandled()
-  }, [controller, focusAfterRefresh])
+    queue.focusHandled()
+  }, [focusAfterRefresh, queue])
 
   const renderQueueSection = (
     title: string,
-    queue: ActressNameConflictGroup[]
+    queueGroups: ActressNameConflictGroup[]
   ): JSX.Element | null => {
-    if (queue.length === 0) return null
+    if (queueGroups.length === 0) return null
     return (
       <section className="conflict-workbench-queue-section">
-        <h2>{title}<span>{queue.length}</span></h2>
-        {queue.map((group) => (
+        <h2>{title}<span>{queueGroups.length}</span></h2>
+        {queueGroups.map((group) => (
           <button
             key={group.normalizedName}
             ref={(button) => {
@@ -297,7 +314,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
             className={`conflict-workbench-group${
               selectedGroup?.normalizedName === group.normalizedName ? ' is-selected' : ''
             }`}
-            onClick={() => controller.chooseGroup(group)}
+            onClick={() => queue.chooseGroup(group)}
           >
             <strong>{group.displayName}</strong>
             <span>
@@ -341,7 +358,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
           </div>
         </WorkbenchToolbar>
 
-        {groupsQuery.isLoading ? (
+        {queue.loading ? (
           <WorkbenchMain className="conflict-workbench-main" aria-busy="true">
             <WorkbenchRail className="conflict-workbench-rail" aria-label="名称冲突组">
               <WorkbenchRailHeader>
@@ -422,7 +439,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                     { id: 'process', label: '处理', panelId: 'actress-conflict-panel-process' },
                     { id: 'source', label: '来源详情', panelId: 'actress-conflict-panel-source' }
                   ]}
-                  onChange={controller.selectTab}
+                  onChange={detail.selectTab}
                 />
 
                 <div className="conflict-workbench-panel-stack">
@@ -448,7 +465,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                               className={`conflict-workbench-owner${
                                 proposedOwner?.actressId === owner.actressId ? ' is-selected' : ''
                               }`}
-                              onClick={() => controller.selectOwner({
+                              onClick={() => detail.selectOwner({
                                 actressId: owner.actressId,
                                 revision: owner.revision,
                                 mainName: owner.mainName
@@ -465,22 +482,22 @@ export default function ActressConflictReviewPage(): JSX.Element {
                           ))}
                           <button
                             type="button"
-                            aria-pressed={selectedOtherOwner != null}
+                            aria-pressed={otherOwner.selected != null}
                             className={`conflict-workbench-owner conflict-workbench-owner--other${
-                              selectedOtherOwner ? ' is-selected' : ''
+                              otherOwner.selected ? ' is-selected' : ''
                             }`}
-                            onClick={controller.openOtherOwner}
+                            onClick={detail.openOtherOwner}
                           >
-                            {selectedOtherOwner ? (
+                            {otherOwner.selected ? (
                               <>
                                 <ActressAvatar
-                                  src={resolveMediaSrc(selectedOtherOwner.avatar_path)}
-                                  name={selectedOtherOwner.main_name}
-                                  gender={selectedOtherOwner.gender}
+                                  src={resolveMediaSrc(otherOwner.selected.avatar_path)}
+                                  name={otherOwner.selected.main_name}
+                                  gender={otherOwner.selected.gender}
                                   decorative
                                 />
                                 <span>
-                                  <strong>{selectedOtherOwner.main_name}</strong>
+                                  <strong>{otherOwner.selected.main_name}</strong>
                                   <small>已从演员库选择 · 点击重新选择</small>
                                 </span>
                               </>
@@ -507,7 +524,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                             type="button"
                             aria-pressed={selection.source?.kind === 'scrape' && selection.source.id === candidate.pendingId}
                             className={selection.source?.kind === 'scrape' && selection.source.id === candidate.pendingId ? 'is-selected' : ''}
-                            onClick={() => controller.selectSource({ kind: 'scrape', id: candidate.pendingId })}
+                            onClick={() => detail.selectSource({ kind: 'scrape', id: candidate.pendingId })}
                           >
                             <ActressAvatar src={resolveMediaSrc(candidate.actressAvatarPath)} name={candidate.actressMainName} gender={null} decorative />
                             <span><strong>{candidate.actressMainName}</strong><small>刮削结果 · {candidate.plugin.name} · {MODE_LABEL[candidate.mode]}</small></span>
@@ -522,7 +539,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                               type="button"
                               aria-pressed={selection.source?.kind === 'claim' && selection.source.id === claim.claimId}
                               className={selection.source?.kind === 'claim' && selection.source.id === claim.claimId ? 'is-selected' : ''}
-                              onClick={() => controller.selectSource({ kind: 'claim', id: claim.claimId })}
+                              onClick={() => detail.selectSource({ kind: 'claim', id: claim.claimId })}
                             >
                               <ActressAvatar src={resolveMediaSrc(claimant?.avatarPath)} name={claimant?.mainName ?? claim.name} gender={null} decorative />
                               <span><strong>{claimant?.mainName ?? `演员 #${claim.actressId}`}</strong><small>历史声明 · {NAME_TYPE_LABEL[claim.type]}</small></span>
@@ -549,7 +566,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
                                 <li key={`claimant-${claimant.actressId}`}>
                                   「{claimant.mainName}」将不再使用名称「{selectedGroup.displayName}」
                                   {claimant.nameTypes.includes('main')
-                                    ? `；需将主名改为「${replacementMainNames[claimant.actressId]?.trim() || '尚未设置'}」`
+                                    ? `；需将主名改为「${replacement.mainNames[claimant.actressId]?.trim() || '尚未设置'}」`
                                     : ''}
                                 </li>
                               ))}
@@ -627,17 +644,17 @@ export default function ActressConflictReviewPage(): JSX.Element {
                   </div>
                   <div>
                     {selectedCandidate ? (
-                      <button type="button" className="btn btn-sm btn-ghost" disabled={resolving} onClick={() => controller.requestDiscard(selectedCandidate)}>
+                      <button type="button" className="btn btn-sm btn-ghost" disabled={resolving} onClick={() => detail.requestDiscard(selectedCandidate)}>
                         <Trash2 {...UI_ICON_SM} aria-hidden />
                         {selectedGroup.status === 'applicable' ? '丢弃这份结果' : '丢弃这份错误匹配'}
                       </button>
                     ) : null}
                     {selectedGroup.status === 'applicable' ? (
-                      <button type="button" className="btn btn-sm btn-primary" disabled={resolving || !selectedCandidate} onClick={controller.applySelectedPending}>
+                      <button type="button" className="btn btn-sm btn-primary" disabled={resolving || !selectedCandidate} onClick={detail.applySelectedPending}>
                         应用待确认资料
                       </button>
                     ) : (
-                      <button type="button" className="btn btn-sm btn-primary" disabled={resolving || !proposedOwner} onClick={controller.confirmOwnership}>
+                      <button type="button" className="btn btn-sm btn-primary" disabled={resolving || !proposedOwner} onClick={detail.confirmOwnership}>
                         {resolving ? '处理中…' : '确认名称归属'}
                       </button>
                     )}
@@ -647,13 +664,13 @@ export default function ActressConflictReviewPage(): JSX.Element {
                 {selectedGroup.status === 'conflict' ? (
                   <div className="conflict-workbench-secondary-actions" aria-label="其他处理方式">
                     <span>其他处理</span>
-                    <button type="button" className="btn btn-sm btn-ghost" disabled={!editSourceName || resolving} onClick={controller.openEditName}>
+                    <button type="button" className="btn btn-sm btn-ghost" disabled={!editSourceName || resolving} onClick={detail.openEditName}>
                       <Pencil {...UI_ICON_SM} aria-hidden />修改本条返回名称
                     </button>
-                    <button type="button" className="btn btn-sm btn-ghost" disabled={mergeActors.length < 2 || resolving} onClick={controller.openMerge}>
+                    <button type="button" className="btn btn-sm btn-ghost" disabled={mergeActors.length < 2 || resolving} onClick={detail.openMerge}>
                       <GitMerge {...UI_ICON_SM} aria-hidden />合并演员档案
                     </button>
-                    <button type="button" className="btn btn-sm btn-ghost conflict-workbench-illegal" disabled={resolving} onClick={controller.openIllegalName}>
+                    <button type="button" className="btn btn-sm btn-ghost conflict-workbench-illegal" disabled={resolving} onClick={detail.openIllegalName}>
                       <Ban {...UI_ICON_SM} aria-hidden />这不是演员名称
                     </button>
                   </div>
@@ -666,7 +683,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
         )}
       </WorkbenchShell>
 
-      {otherOwnerOpen ? (
+      {otherOwner.open ? (
         <ConfirmModal
           title="选择其他演员"
           size="md"
@@ -675,7 +692,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
           confirmText="选好后返回处理页确认"
           confirmDisabled
           onConfirm={() => undefined}
-          onCancel={controller.closeOtherOwner}
+          onCancel={otherOwner.close}
         >
           <p>这里只选择拟定归属；不会在弹窗内提交名称变更。</p>
           <div className="conflict-workbench-owner-picker">
@@ -683,21 +700,21 @@ export default function ActressConflictReviewPage(): JSX.Element {
               type="search"
               className="search-input form-control-full"
               placeholder="搜索演员主名或别名…"
-              value={otherOwnerSearch}
-              onChange={(event) => controller.changeOtherOwnerSearch(event.target.value)}
+              value={otherOwner.search}
+              onChange={(event) => otherOwner.changeSearch(event.target.value)}
             />
             <div className="conflict-workbench-owner-search" role="group" aria-label="其他演员">
-              {otherOwnerLoading ? (
+              {otherOwner.loading ? (
                 <EmptyState loading variant="modal" />
-              ) : otherOwnerOptions.length === 0 ? (
+              ) : otherOwner.options.length === 0 ? (
                 <EmptyState title="没有匹配的演员" variant="modal" />
-              ) : otherOwnerOptions.map((item) => (
+              ) : otherOwner.options.map((item) => (
                 <button
                   key={item.id}
                   type="button"
-                  aria-pressed={selectedOtherOwner?.id === item.id}
-                  className={selectedOtherOwner?.id === item.id ? 'is-selected' : ''}
-                  onClick={() => void controller.chooseOtherOwner(item)}
+                  aria-pressed={otherOwner.selected?.id === item.id}
+                  className={otherOwner.selected?.id === item.id ? 'is-selected' : ''}
+                  onClick={() => otherOwner.choose(item)}
                 >
                   <ActressAvatar src={resolveMediaSrc(item.avatar_path)} name={item.main_name} gender={item.gender} decorative />
                   <span><strong>{item.main_name}</strong><small>{item.video_count} 部影片</small></span>
@@ -708,16 +725,16 @@ export default function ActressConflictReviewPage(): JSX.Element {
         </ConfirmModal>
       ) : null}
 
-      {editNameOpen && selectedGroup && editSourceType ? (
+      {editName.open && selectedGroup && editSourceType ? (
         <ConfirmModal
           title="修改本条返回名称"
           size="sm"
           confirmText={resolving ? '处理中…' : '确认修改'}
-          confirmDisabled={resolving || editInspectionPending || editInspection.status === 'empty' || editInspection.status === 'unchanged'}
+          confirmDisabled={!editName.canSubmit || editInspectionPending || editInspection.status === 'empty' || editInspection.status === 'unchanged'}
           busy={resolving}
           closeDisabled={resolving}
-          onConfirm={controller.submitEditedName}
-          onCancel={controller.closeEditName}
+          onConfirm={editName.submit}
+          onCancel={editName.close}
         >
           <dl className="conflict-workbench-edit-context">
             <div><dt>当前名称</dt><dd className="copyable-text">{editSourceName}</dd></div>
@@ -727,7 +744,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
           </dl>
           <label className="conflict-workbench-edit-field">
             <span>新名称</span>
-            <input autoFocus className="text-input form-control-full" value={editedName} onChange={(event) => controller.changeEditedName(event.target.value)} />
+            <input autoFocus className="text-input form-control-full" value={editName.value} onChange={(event) => editName.change(event.target.value)} />
           </label>
           <div className="conflict-workbench-edit-inspection" role="status">
             <span>标准化结果</span>
@@ -749,26 +766,19 @@ export default function ActressConflictReviewPage(): JSX.Element {
         </ConfirmModal>
       ) : null}
 
-      {replacementDialog && selectedGroup ? (
+      {replacement.kind && selectedGroup ? (
         <ConfirmModal
-          title={replacementDialog === 'illegal' ? `从本组删除「${selectedGroup.displayName}」` : `确认归属给「${proposedOwner?.mainName ?? ''}」`}
+          title={replacement.kind === 'illegal' ? `从本组删除「${selectedGroup.displayName}」` : `确认归属给「${proposedOwner?.mainName ?? ''}」`}
           size="sm"
-          danger={replacementDialog === 'illegal'}
-          confirmText={resolving ? '处理中…' : replacementDialog === 'illegal' ? '确认从本组删除' : '确认名称归属'}
-          confirmDisabled={
-            resolving ||
-            !canConfirmIllegalName(
-              requiredReplacementClaimants,
-              replacementMainNames,
-              replacementValidationStatus
-            )
-          }
+          danger={replacement.kind === 'illegal'}
+          confirmText={resolving ? '处理中…' : replacement.kind === 'illegal' ? '确认从本组删除' : '确认名称归属'}
+          confirmDisabled={!replacement.canSubmit}
           busy={resolving}
           closeDisabled={resolving}
-          onConfirm={replacementDialog === 'illegal' ? controller.submitIllegalName : controller.submitOwnership}
-          onCancel={controller.closeReplacement}
+          onConfirm={replacement.submit}
+          onCancel={replacement.close}
         >
-          {replacementDialog === 'illegal' ? (
+          {replacement.kind === 'illegal' ? (
             <div>
               <p>这会删除该名称的现有归属和全部相关名称声明，并从本组所有待确认结果中排除该名称。</p>
               <p>其他有效资料继续写回原目标演员；不会保存黑名单、错误记录或长期规则。</p>
@@ -776,8 +786,8 @@ export default function ActressConflictReviewPage(): JSX.Element {
           ) : (
             <p>该名称当前是下列演员的主名。转移归属前，请为每位演员指定替代主名；所有更改将通过同一事务提交。</p>
           )}
-          {requiredReplacementClaimants.map((claimant, index) => {
-            const error = replacementValidationErrors[claimant.actressId]
+          {replacement.claimants.map((claimant, index) => {
+            const error = replacement.errors[claimant.actressId]
             const errorId = `conflict-replacement-error-${claimant.actressId}`
             return (
               <label className="conflict-workbench-edit-field" key={claimant.actressId}>
@@ -785,41 +795,41 @@ export default function ActressConflictReviewPage(): JSX.Element {
                 <input
                   autoFocus={index === 0}
                   className="text-input form-control-full"
-                  value={replacementMainNames[claimant.actressId] ?? ''}
+                  value={replacement.mainNames[claimant.actressId] ?? ''}
                   aria-invalid={Boolean(error)}
                   aria-describedby={error ? errorId : undefined}
-                  onChange={(event) => controller.changeReplacementMainName(claimant.actressId, event.target.value)}
+                  onChange={(event) => replacement.change(claimant.actressId, event.target.value)}
                 />
                 {error ? <small id={errorId} className="text-danger">{error}</small> : null}
               </label>
             )
           })}
-          {requiredReplacementClaimants.length > 0 && replacementValidationStatus === 'checking' ? <p role="status">正在检查替代主名…</p> : null}
+          {replacement.claimants.length > 0 && replacement.status === 'checking' ? <p role="status">正在检查替代主名…</p> : null}
         </ConfirmModal>
       ) : null}
 
-      {mergeOpen && selectedGroup ? (
+      {merge.open && selectedGroup ? (
         <ConflictMergeActressesModal
           key={selectedGroup.normalizedName}
-          actors={mergeActors}
+          actors={merge.actors}
           busy={resolving}
-          onConfirm={controller.submitMerge}
-          onCancel={controller.closeMerge}
+          onConfirm={merge.submit}
+          onCancel={merge.close}
         />
       ) : null}
 
-      {discardCandidate ? (
+      {discard.candidate ? (
         <ConfirmModal
           title={selectedGroup?.status === 'applicable' ? '丢弃这份结果' : '丢弃这份错误匹配'}
           danger
-          confirmText={discarding ? '丢弃中…' : '确认丢弃'}
-          busy={discarding}
-          closeDisabled={discarding}
-          onConfirm={() => void controller.discard()}
-          onCancel={controller.cancelDiscard}
+          confirmText={discard.busy ? '丢弃中…' : '确认丢弃'}
+          busy={discard.busy}
+          closeDisabled={discard.busy}
+          onConfirm={discard.confirm}
+          onCancel={discard.cancel}
         >
           <p>
-            确认丢弃「{discardCandidate.actressMainName}」的
+            确认丢弃「{discard.candidate.actressMainName}」的
             {selectedGroup?.status === 'applicable' ? '待确认资料' : '整份刮削结果'}吗？
           </p>
           <p>作用范围：{CONFLICT_ACTION_SCOPE_LABEL.discardScrape}</p>

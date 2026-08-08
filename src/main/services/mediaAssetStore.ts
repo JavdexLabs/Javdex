@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
@@ -5,7 +6,6 @@ import {
   deleteAssetOrThrow,
   ensureAssetDirs,
   importAvatarDisplayFromBuffer,
-  importAvatarFromFile,
   importAvatarSourceFromBuffer,
   importActressGalleryFromFile,
   importCoverFromFile,
@@ -20,7 +20,7 @@ import {
   detectImageExtensionFromBuffer,
   inspectImageAsset,
   isUsableImageAsset,
-  isUsableImageBuffer,
+  isUsableImageBuffer as isUsableImageBufferImpl,
   readImageDimensionsFromBuffer,
   readImageDimensionsFromPath,
   readImageDimensionsFromRelPath
@@ -39,11 +39,16 @@ import {
   type ActressScrapeStagingInput,
   type StagedActressScrapeImage
 } from './mediaAssetStore/download'
-import type { AssetFetcher, DownloadedImageAsset } from './mediaAssetStore/types'
+import {
+  clearPathAliases as clearPathAliasesImpl,
+  decryptStoredAsset as decryptStoredAssetImpl,
+  encryptStoredAsset as encryptStoredAssetImpl,
+  listStoredImageAssetRels as listStoredImageAssetRelsImpl
+} from './mediaAssetStore/cryptoMigration'
+import type { AssetFetcher, DownloadedImageAsset, StoredAssetPathRewrite } from './mediaAssetStore/types'
 import { mimeFromExt } from './assetCrypto'
 
-export type { AssetFetcher, DownloadedImageAsset }
-export type { ActressScrapeStagingInput, StagedActressScrapeImage }
+export type { StoredAssetPathRewrite }
 
 /** Stable media-asset layout directories under the media root. */
 export type MediaAssetSubdir =
@@ -61,14 +66,33 @@ const MEDIA_ASSET_SUBDIRS = new Set<MediaAssetSubdir>([
   'playlist_covers'
 ])
 
+interface CoordinatedChange {
+  created: Set<string>
+  obsolete: Set<string>
+  parent: CoordinatedChange | null
+  finished: boolean
+}
+
 /**
  * Deep module for media files owned by Javdex.
  *
  * Callers only learn the resource lifecycle and domain imports. Filesystem,
  * inspection, and download/staging live as private internal adapters.
+ *
+ * Coordinated changes bind one ledger per AsyncLocalStorage context. Nested
+ * work enters its own context (with a parent link), so an un-awaited nested
+ * async coordinator does not steal registrations from the caller. Successful
+ * nested commits promote created and obsolete paths to the parent; obsolete
+ * deletes stay deferred until the root commits. Isolated coordinators never
+ * nest under a parent (for independently committed DB units). Unrelated work
+ * that starts outside the async chain remains an independent root.
  */
 export class MediaAssetStore {
-  private activeChange: { created: Set<string>; obsolete: Set<string> } | null = null
+  private readonly changeStorage = new AsyncLocalStorage<CoordinatedChange>()
+
+  private activeChange(): CoordinatedChange | null {
+    return this.changeStorage.getStore() ?? null
+  }
 
   ensureReady(): void {
     ensureAssetDirs()
@@ -89,22 +113,52 @@ export class MediaAssetStore {
     return resolveAssetPath(storedPath)
   }
 
-  inspectImage = inspectImageAsset
-  isUsableImage = isUsableImageAsset
-  isUsableImageBuffer = isUsableImageBuffer
-  readBytes = readAssetBytes
-  readForServe = readAssetForServe
-  fingerprint = avatarSourceFingerprint
-  detectImageExtension = detectImageExtensionFromBuffer
-  readImageDimensions = readImageDimensionsFromBuffer
-  readImageDimensionsAtPath = readImageDimensionsFromPath
-  readStoredImageDimensions = readImageDimensionsFromRelPath
-  mimeFromExtension = mimeFromExt
+  inspectImage(relPath: string | null | undefined) {
+    return inspectImageAsset(relPath)
+  }
+
+  isUsableImage(relPath: string | null | undefined): boolean {
+    return isUsableImageAsset(relPath)
+  }
+
+  isUsableImageBuffer(body: Buffer): boolean {
+    return isUsableImageBufferImpl(body)
+  }
+
+  readBytes(relPath: string): Buffer {
+    return readAssetBytes(relPath)
+  }
+
+  readForServe(relPath: string): { body: Buffer; mime: string } {
+    return readAssetForServe(relPath)
+  }
+
+  fingerprint(data: Buffer): string {
+    return avatarSourceFingerprint(data)
+  }
+
+  detectImageExtension(buf: Buffer): string | null {
+    return detectImageExtensionFromBuffer(buf)
+  }
+
+  readImageDimensions(data: Buffer) {
+    return readImageDimensionsFromBuffer(data)
+  }
+
+  readImageDimensionsAtPath(filePath: string) {
+    return readImageDimensionsFromPath(filePath)
+  }
+
+  readStoredImageDimensions(relPath: string | null | undefined) {
+    return readImageDimensionsFromRelPath(relPath)
+  }
+
+  mimeFromExtension(ext: string): string {
+    return mimeFromExt(ext)
+  }
 
   importAvatarDisplay(name: string, actressId: number, data: Buffer): string {
-    const storedPath = importAvatarDisplayFromBuffer(name, actressId, data)
-    this.activeChange?.created.add(storedPath)
-    return storedPath
+    return this.registerCreated(importAvatarDisplayFromBuffer(name, actressId, data))
   }
 
   importAvatarSource(
@@ -114,18 +168,12 @@ export class MediaAssetStore {
     extension?: string
   ): { relPath: string; fingerprint: string } {
     const result = importAvatarSourceFromBuffer(name, actressId, data, extension)
-    this.activeChange?.created.add(result.relPath)
+    this.registerCreated(result.relPath)
     return result
   }
 
-  importAvatarFile(name: string, sourcePath: string, actressId?: number | null): string {
-    const storedPath = importAvatarFromFile(name, sourcePath, actressId)
-    this.activeChange?.created.add(storedPath)
-    return storedPath
-  }
-
   private registerCreated<T extends string | null>(storedPath: T): T {
-    if (storedPath) this.activeChange?.created.add(storedPath)
+    if (storedPath) this.activeChange()?.created.add(storedPath)
     return storedPath
   }
 
@@ -190,7 +238,9 @@ export class MediaAssetStore {
   }
 
   stageActressScrapeImages(resources: ActressScrapeStagingInput[]): StagedActressScrapeImage[] {
-    return stageActressScrapeImagesImpl(resources)
+    const staged = stageActressScrapeImagesImpl(resources)
+    for (const item of staged) this.registerCreated(item.stagedPath)
+    return staged
   }
 
   readActressScrapeStagedImage(stagedPath: string): Buffer {
@@ -208,16 +258,47 @@ export class MediaAssetStore {
     return cleanupOrphanedActressScrapeStagingImpl(referencedPaths, options)
   }
 
+  /** List posix relative paths under the stable image subdirectories (excludes staging). */
+  listStoredImageAssetRels(): string[] {
+    return listStoredImageAssetRelsImpl()
+  }
+
+  /**
+   * Encrypt one stored plain asset in place. Returns a path rewrite when callers
+   * must remap DB references; null when no remap is needed.
+   */
+  encryptStoredAsset(rel: string): StoredAssetPathRewrite | null {
+    return encryptStoredAssetImpl(rel)
+  }
+
+  /**
+   * Decrypt one stored encrypted asset in place. Returns a path rewrite when
+   * callers must remap DB references; null when skipped or unchanged.
+   */
+  decryptStoredAsset(rel: string): StoredAssetPathRewrite | null {
+    return decryptStoredAssetImpl(rel)
+  }
+
+  clearPathAliases(): void {
+    clearPathAliasesImpl()
+  }
+
   delete(storedPath: string | null | undefined): void {
     deleteAssetOrThrow(storedPath)
   }
 
   deleteBestEffort(storedPath: string | null | undefined): void {
     if (!storedPath) return
-    if (this.activeChange) {
-      this.activeChange.obsolete.add(storedPath)
+    const active = this.activeChange()
+    if (active) {
+      active.obsolete.add(storedPath)
       return
     }
+    this.deleteImmediateBestEffort(storedPath)
+  }
+
+  private deleteImmediateBestEffort(storedPath: string | null | undefined): void {
+    if (!storedPath) return
     try {
       this.delete(storedPath)
     } catch (error) {
@@ -227,57 +308,100 @@ export class MediaAssetStore {
 
   /**
    * Coordinate resource changes around one database use case.
-   * New files are compensated when the database operation fails; obsolete
-   * files are removed only after the operation commits successfully.
+   * Accepts sync or async operations. New files are compensated when the
+   * operation fails; obsolete files are removed only after it succeeds.
+   * Nested coordinated changes use an independent ledger; on success their
+   * created and obsolete paths are promoted to the parent change.
    */
-  coordinateDatabaseChange<T>(operation: () => T): T {
+  coordinateDatabaseChange<T>(operation: () => T): T
+  coordinateDatabaseChange<T>(operation: () => Promise<T>): Promise<T>
+  coordinateDatabaseChange<T>(operation: () => T | Promise<T>): T | Promise<T> {
     return this.runCoordinatedChange(operation)
   }
 
-  async coordinateDatabaseChangeAsync<T>(operation: () => Promise<T>): Promise<T> {
-    return this.runCoordinatedChange(operation)
+  /**
+   * Join the active coordinated change when one exists; otherwise start a root
+   * change. Use for helpers that may run alone or inside a larger shared use
+   * case (for example setActressAvatarBundle inside editActress).
+   */
+  runInCoordinatedChange<T>(operation: () => T): T {
+    if (this.activeChange()) return operation()
+    return this.coordinateDatabaseChange(operation)
+  }
+
+  /**
+   * Start a root coordinated change that never nests under an active parent.
+   * Use when this unit commits its own database changes independently of the
+   * caller's media ledger (for example cast-avatar adopt during video scrape).
+   */
+  coordinateDatabaseChangeIsolated<T>(operation: () => T): T {
+    return this.runCoordinatedChange(operation, null) as T
   }
 
   private runCoordinatedChange<T>(operation: () => T): T
   private runCoordinatedChange<T>(operation: () => Promise<T>): Promise<T>
-  private runCoordinatedChange<T>(operation: () => T | Promise<T>): T | Promise<T> {
-    if (this.activeChange) return operation()
-    const change = { created: new Set<string>(), obsolete: new Set<string>() }
-    this.activeChange = change
-    try {
-      const result = operation()
-      if (result instanceof Promise) {
-        return result.then(
-          (value) => {
-            this.finishCoordinatedChange(change, 'commit')
-            return value
-          },
-          (error) => {
-            this.finishCoordinatedChange(change, 'rollback')
-            throw error
-          }
-        )
-      }
-      this.finishCoordinatedChange(change, 'commit')
-      return result
-    } catch (error) {
-      this.finishCoordinatedChange(change, 'rollback')
-      throw error
+  private runCoordinatedChange<T>(
+    operation: () => T | Promise<T>,
+    parentOverride?: CoordinatedChange | null
+  ): T | Promise<T>
+  private runCoordinatedChange<T>(
+    operation: () => T | Promise<T>,
+    parentOverride?: CoordinatedChange | null
+  ): T | Promise<T> {
+    const change: CoordinatedChange = {
+      created: new Set(),
+      obsolete: new Set(),
+      parent: parentOverride === undefined ? this.activeChange() : parentOverride,
+      finished: false
     }
+    return this.changeStorage.run(change, () => {
+      try {
+        const result = operation()
+        if (result instanceof Promise) {
+          return result.then(
+            (value) => {
+              this.finishCoordinatedChange(change, 'commit')
+              return value
+            },
+            (error) => {
+              this.finishCoordinatedChange(change, 'rollback')
+              throw error
+            }
+          )
+        }
+        this.finishCoordinatedChange(change, 'commit')
+        return result
+      } catch (error) {
+        this.finishCoordinatedChange(change, 'rollback')
+        throw error
+      }
+    })
   }
 
   private finishCoordinatedChange(
-    change: { created: Set<string>; obsolete: Set<string> },
+    change: CoordinatedChange,
     outcome: 'commit' | 'rollback'
   ): void {
-    if (this.activeChange === change) this.activeChange = null
-    if (outcome === 'commit') {
-      for (const storedPath of change.obsolete) {
-        if (!change.created.has(storedPath)) this.deleteBestEffort(storedPath)
-      }
+    if (change.finished) {
+      throw new Error('MediaAssetStore coordinated change finished more than once')
+    }
+    change.finished = true
+
+    if (outcome === 'rollback') {
+      for (const storedPath of change.created) this.deleteImmediateBestEffort(storedPath)
       return
     }
-    for (const storedPath of change.created) this.deleteBestEffort(storedPath)
+
+    const parent = change.parent
+    if (parent) {
+      // Promote both sets so parent rollback can still compensate nested creates,
+      // while obsolete deletes of pre-existing files stay deferred until root commit.
+      for (const storedPath of change.created) parent.created.add(storedPath)
+      for (const storedPath of change.obsolete) parent.obsolete.add(storedPath)
+      return
+    }
+
+    for (const storedPath of change.obsolete) this.deleteImmediateBestEffort(storedPath)
   }
 
   readExternalFile(filePath: string): Buffer {

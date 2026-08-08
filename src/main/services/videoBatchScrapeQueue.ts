@@ -1,19 +1,20 @@
 import type { BatchProgress } from '@shared/batchScrapeTypes'
-import type { VideoBatchScrapeRequest, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/scrapeTypes'
-import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS } from '@shared/scrapeTypes'
+import type { VideoBatchScrapeRequest, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/videoScrapeTypes'
+import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS } from '@shared/videoScrapeTypes'
 import {
   resolveVideoScrapeFieldSources,
   scrapeVideo,
   type ScrapeOutcome
 } from '../scrapers/scraperManager'
-import { scrapeBrowser } from '../scrapers/scrapeBrowser'
-import type { PersistedBatchScrapeJob } from './batchScrapeJobStore'
 import type { BatchScrapeCheckpointPort } from './batchScrapeCheckpointPort'
-import { ScraperDelayController } from './scraperDelayController'
-import { SequentialBatchQueue } from './sequentialBatchQueue'
-import { resolveVideoBatchTargets } from './videoImageAvailability'
+import {
+  CheckpointedSequentialBatchQueue,
+  type CheckpointedBatchPolicy
+} from './checkpointedSequentialBatchQueue'
+import { resolveVideoBatchTargets } from './videoScrapeApplyService'
 
 type ProgressListener = (progress: BatchProgress) => void
+type VideoTarget = { id: number; code: string }
 
 const MODE_LABEL: Record<VideoScrapeUpdateMode, string> = {
   replace: '覆盖更新',
@@ -33,17 +34,17 @@ function fieldListLabel(fields: VideoScrapeField[]): string {
   return fields.map((field) => FIELD_LABEL.get(field) ?? field).join('、')
 }
 
-function resolveVideoTargets(request: VideoBatchScrapeRequest): Array<{ id: number; code: string }> {
+function resolveVideoTargets(request: VideoBatchScrapeRequest): VideoTarget[] {
   const explicitIds = request.videoIds
     ? Array.from(new Set(request.videoIds.filter((id) => Number.isFinite(id))))
     : []
   const fieldSources = resolveVideoScrapeFieldSources(request.scraperName)
   return resolveVideoBatchTargets({
-      status: request.status,
-      videoIds: explicitIds.length > 0 ? explicitIds : request.videoIds,
-      missingFields: request.missingFields,
-      ...fieldSources
-    })
+    status: request.status,
+    videoIds: explicitIds.length > 0 ? explicitIds : request.videoIds,
+    missingFields: request.missingFields,
+    ...fieldSources
+  })
 }
 
 function buildStatusLabel(request: VideoBatchScrapeRequest): string {
@@ -85,146 +86,85 @@ export function formatVideoBatchScrapeOutcome(
   }
 }
 
-/** Sequential batch queue for video metadata scraping/updating. */
-class VideoBatchScrapeQueue {
-  private readonly queue = new SequentialBatchQueue<{ id: number; code: string }>()
-  private activeJob: PersistedBatchScrapeJob | null = null
-  private checkpoints: BatchScrapeCheckpointPort | null = null
-
-  setCheckpointPort(port: BatchScrapeCheckpointPort): void {
-    this.checkpoints = port
-  }
-
-  setListener(fn: ProgressListener | null): void {
-    this.queue.setListener(fn)
-  }
-
-  getProgress(): BatchProgress {
-    if (this.queue.isRunning()) return this.queue.getProgress()
-    const job = this.checkpointPort().load()
-    if (job?.kind === 'video') return this.checkpointPort().toProgress(job)
-    return this.queue.getProgress()
-  }
-
-  isRunning(): boolean {
-    return this.queue.isRunning()
-  }
-
-  isPaused(): boolean {
-    const job = this.checkpointPort().load()
-    return job?.kind === 'video' && !this.queue.isRunning()
-  }
-
-  pause(): void {
-    this.queue.pause()
-  }
-
-  discard(): void {
-    if (this.queue.isRunning()) {
-      this.queue.cancel()
-      return
-    }
-    if (this.isPaused()) {
-      this.checkpointPort().discard()
-      this.activeJob = null
-    }
-  }
-
-  async resume(): Promise<void> {
-    const job = this.checkpointPort().load()
-    if (!job || job.kind !== 'video') {
-      throw new Error('没有可继续的影片批量任务')
-    }
-    await this.runJob(job)
-  }
-
-  async start(request: VideoBatchScrapeRequest): Promise<void> {
-    const targets = resolveVideoTargets(request)
-    const job = this.checkpointPort().create('video', request, targets, (target) => target.code)
-    this.activeJob = job
-    this.checkpointPort().persist(job, this.checkpointPort().toProgress(job), 0, 'running')
-    await this.runJob(job)
-  }
-
-  private async runJob(job: PersistedBatchScrapeJob): Promise<void> {
+const videoBatchPolicy: CheckpointedBatchPolicy<VideoTarget, VideoBatchScrapeRequest> = {
+  kind: 'video',
+  missingResumeError: '没有可继续的影片批量任务',
+  resolveTargets: resolveVideoTargets,
+  labelOf: (target) => target.code,
+  restoreTarget: (item) => ({ id: item.id, code: item.label }),
+  planRun: (job, _targets, helpers) => {
     const request = job.request as VideoBatchScrapeRequest
     const fields = request.fields
-    if (fields.length === 0) return
+    if (fields.length === 0) return null
 
     const mode = request.mode ?? 'replace'
     const missingFields = request.missingFields ?? []
-    const targets = this.checkpointPort().restoreTargets(job, (item) => ({
-      id: item.id,
-      code: item.label
-    }))
-    const delayController = new ScraperDelayController({
-      onWait: ({ pluginName, waitMs }) => {
-        this.queue.addLog(
-          '-',
-          'info',
-          `等待 ${(waitMs / 1000).toFixed(1)}s 后继续...（${pluginName}）`
-        )
-      }
-    })
+    const delayController = helpers.createDelayController()
     const statusLabel = buildStatusLabel(request)
     const missingLabel =
       missingFields.length > 0 ? `缺少任一：${fieldListLabel(missingFields)}` : '不按缺失字段筛选'
 
-    this.activeJob = job
-
-    try {
-      const outcome = await this.queue.start({
-        targets,
-        startIndex: job.nextIndex,
-        initialProgress: {
-          success: job.success,
-          pending: job.pending,
-          failed: job.failed,
-          logs: job.logs
-        },
-        resumeMessage: `影片批量更新从第 ${job.nextIndex + 1}/${job.total} 项继续`,
-        startMessage: (total) =>
-          `影片批量更新开始（${statusLabel}，${missingLabel}，${MODE_LABEL[mode]}），共 ${total} 部，更新 ${fields.length} 个字段`,
-        pausedMessage: '用户暂停了影片批量更新',
-        cancelledMessage: '用户终止了影片批量更新',
-        doneMessage: (progress) =>
-          `影片批量更新完成：成功 ${progress.success}，失败 ${progress.failed}`,
-        getCode: (target) => target.code,
-        onCheckpoint: (progress, nextIndex) => {
-          if (!this.activeJob) return
-          this.checkpointPort().persist(this.activeJob, progress, nextIndex, 'running')
-        },
-        runTarget: async ({ id, code }) => {
-          const itemOutcome = await scrapeVideo(id, request.scraperName, {
-            closeBrowser: false,
-            fields,
-            mode,
-            delayController
-          })
-          return formatVideoBatchScrapeOutcome(itemOutcome, code)
-        },
-        exceptionMessage: (_target, err) => `更新异常：${err.message}`,
-        delayAfterTarget: false
-      })
-
-      if (outcome === 'paused' && this.activeJob) {
-        this.checkpointPort().markPaused(this.activeJob, this.queue.getProgress())
-      } else if (outcome === 'done') {
-        this.checkpointPort().finish()
-        this.activeJob = null
-      } else if (outcome === 'cancelled') {
-        this.checkpointPort().discard()
-        this.activeJob = null
-        this.queue.resetToIdle()
-      }
-    } finally {
-      scrapeBrowser.close()
+    return {
+      resumeMessage: `影片批量更新从第 ${job.nextIndex + 1}/${job.total} 项继续`,
+      startMessage: (total) =>
+        `影片批量更新开始（${statusLabel}，${missingLabel}，${MODE_LABEL[mode]}），共 ${total} 部，更新 ${fields.length} 个字段`,
+      pausedMessage: '用户暂停了影片批量更新',
+      cancelledMessage: '用户终止了影片批量更新',
+      doneMessage: (progress) =>
+        `影片批量更新完成：成功 ${progress.success}，失败 ${progress.failed}`,
+      getCode: (target) => target.code,
+      runTarget: async ({ id, code }) => {
+        const itemOutcome = await scrapeVideo(id, request.scraperName, {
+          closeBrowser: false,
+          fields,
+          mode,
+          delayController
+        })
+        return formatVideoBatchScrapeOutcome(itemOutcome, code)
+      },
+      exceptionMessage: (_target, err) => `更新异常：${err.message}`
     }
   }
+}
 
-  private checkpointPort(): BatchScrapeCheckpointPort {
-    if (!this.checkpoints) throw new Error('批量刮削检查点尚未初始化')
-    return this.checkpoints
+/** Sequential batch queue for video metadata scraping/updating. */
+class VideoBatchScrapeQueue {
+  private readonly lifecycle = new CheckpointedSequentialBatchQueue(videoBatchPolicy)
+
+  setCheckpointPort(port: BatchScrapeCheckpointPort): void {
+    this.lifecycle.setCheckpointPort(port)
+  }
+
+  setListener(fn: ProgressListener | null): void {
+    this.lifecycle.setListener(fn)
+  }
+
+  getProgress(): BatchProgress {
+    return this.lifecycle.getProgress()
+  }
+
+  isRunning(): boolean {
+    return this.lifecycle.isRunning()
+  }
+
+  isPaused(): boolean {
+    return this.lifecycle.isPaused()
+  }
+
+  pause(): void {
+    this.lifecycle.pause()
+  }
+
+  discard(): void {
+    this.lifecycle.discard()
+  }
+
+  async resume(): Promise<void> {
+    await this.lifecycle.resume()
+  }
+
+  async start(request: VideoBatchScrapeRequest): Promise<void> {
+    await this.lifecycle.start(request)
   }
 }
 

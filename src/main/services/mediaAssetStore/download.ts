@@ -66,6 +66,7 @@ export async function downloadAvatar(
   try {
     const ext = extFromUrl(url)
     const buf = await fetcher(url)
+    if (!isUsableImageBuffer(buf)) throw new Error('response is not a usable image')
     // Name-hash seed only: actress id may not exist yet; adopt later scopes permanent files.
     return writeImageAsset('avatars', buildActressAssetSeed(name), url, ext, buf)
   } catch (err) {

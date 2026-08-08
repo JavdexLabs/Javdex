@@ -1,3 +1,10 @@
+/**
+ * Scraper plugin catalog: kind-routed list/mutate adapters for scrape IPC.
+ *
+ * Sole owned policy: after deleting a selected plugin or composite, restore the
+ * kind's default scraper setting (`restoreDefaultIfDeleted`). Install/export/
+ * composite CRUD still live in scraperPluginService; hosts own scrape-run.
+ */
 import type { AppSettings } from '@shared/settingsTypes'
 import type {
   CompositeScraperInput,
@@ -5,7 +12,7 @@ import type {
   ScraperPluginKind,
   ScraperPluginPackage,
   ScraperPluginUpdateInput
-} from '@shared/scrapeTypes'
+} from '@shared/scraperPluginTypes'
 import { DEFAULT_SETTINGS } from '@shared/settingsTypes'
 import { listActressScraperNames, listActressScraperPlugins } from '../scrapers/actressScraperManager'
 import { listScraperNames, listScraperPlugins } from '../scrapers/scraperManager'

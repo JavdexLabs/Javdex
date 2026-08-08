@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
+import { useEffect, useMemo, useReducer, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ActressListItem } from '@shared/actressTypes'
 import type {
+  ActressConflictReviewSummary,
   ActressNameConflictGroup,
-  PendingActressScrapeCandidate,
-  ResolveActressConflictInput
+  PendingActressNameClaim,
+  PendingActressScrapeCandidate
 } from '@shared/actressConflictTypes'
 import { api } from '../api'
 import { useToast } from '../components/Toast'
@@ -15,101 +16,156 @@ import type { ConflictMergeActressesDecision } from './ConflictMergeActressesMod
 import { createLatestRequestGate } from './latestRequestGate'
 import {
   buildActressConflictDecisionSnapshot,
-  buildActressConflictMergeActors,
-  buildConflictQueueSections,
-  buildConflictReviewRefreshState,
-  conflictClaimantsNeedingReplacement,
-  createConflictReviewSelection,
-  inspectConflictNameEdit,
-  selectConflictProposedOwner,
-  selectConflictSource,
+  type ConflictNameEditInspection,
   type ConflictReviewProposedOwner,
   type ConflictReviewSelection,
   type ConflictReviewTab,
   type IllegalNameReplacementValidationStatus
 } from './actressConflictReviewState'
-
-type ReplacementDialog = 'ownership' | 'illegal' | null
-
-interface ControllerState {
-  selectedName: string | null
-  selectionGroupName: string | null
-  selection: ConflictReviewSelection | null
-  focusAfterRefresh: string | null | undefined
-  staleMessage: string | null
-  resolving: boolean
-  discarding: boolean
-  discardCandidate: PendingActressScrapeCandidate | null
-  otherOwnerOpen: boolean
-  otherOwnerSearch: string
-  otherOwnerOptions: ActressListItem[]
-  otherOwnerLoading: boolean
-  selectedOtherOwner: ActressListItem | null
-  editNameOpen: boolean
-  editedName: string
-  liveEditInspection: { normalizedName: string; status: 'available' | 'conflict' } | null
-  editInspectionLoading: boolean
-  mergeOpen: boolean
-  replacementDialog: ReplacementDialog
-  replacementMainNames: Record<number, string>
-  replacementValidationStatus: IllegalNameReplacementValidationStatus
-  replacementValidationErrors: Record<number, string>
-}
-
-type ControllerAction =
-  | { type: 'patch'; patch: Partial<ControllerState> }
-  | { type: 'update'; update: (state: ControllerState) => Partial<ControllerState> }
-  | { type: 'resetTransient' }
-
-const initialState: ControllerState = {
-  selectedName: null,
-  selectionGroupName: null,
-  selection: null,
-  focusAfterRefresh: undefined,
-  staleMessage: null,
-  resolving: false,
-  discarding: false,
-  discardCandidate: null,
-  otherOwnerOpen: false,
-  otherOwnerSearch: '',
-  otherOwnerOptions: [],
-  otherOwnerLoading: false,
-  selectedOtherOwner: null,
-  editNameOpen: false,
-  editedName: '',
-  liveEditInspection: null,
-  editInspectionLoading: false,
-  mergeOpen: false,
-  replacementDialog: null,
-  replacementMainNames: {},
-  replacementValidationStatus: 'idle',
-  replacementValidationErrors: {}
-}
+import {
+  beginReplacementValidationStatus,
+  chooseOtherOwnerRemote,
+  discardConflictCandidate,
+  resolveConflictDecision,
+  runNameInspection,
+  runOwnerSearch,
+  runReplacementValidation,
+  type ConflictReviewRemoteDeps
+} from './conflictReviewRemote'
+import {
+  deriveConflictReviewDetail,
+  initialConflictReviewSessionState,
+  reduceConflictReviewSession,
+  type ConflictReviewOwnerOption,
+  type ConflictReviewSessionState,
+  type ReplacementDialog
+} from './conflictReviewSession'
+import type { ActressConflictMergeActor } from './actressConflictReviewState'
 
 const EMPTY_GROUPS: ActressNameConflictGroup[] = []
-const EMPTY_REPLACEMENT_CLAIMANTS: ActressNameConflictGroup['claimants'] = []
 
-function reducer(state: ControllerState, action: ControllerAction): ControllerState {
-  if (action.type === 'patch') return { ...state, ...action.patch }
-  if (action.type === 'update') return { ...state, ...action.update(state) }
-  return {
-    ...state,
-    otherOwnerOpen: false,
-    otherOwnerSearch: '',
-    selectedOtherOwner: null,
-    editNameOpen: false,
-    mergeOpen: false,
-    replacementDialog: null,
-    replacementMainNames: {},
-    replacementValidationStatus: 'idle',
-    replacementValidationErrors: {}
+export interface ConflictReviewViewModel {
+  queue: {
+    loading: boolean
+    error: string | null
+    summary: ActressConflictReviewSummary | undefined
+    groups: ActressNameConflictGroup[]
+    sections: { pending: ActressNameConflictGroup[]; applicable: ActressNameConflictGroup[] }
+    selectedGroup: ActressNameConflictGroup | null
+    staleMessage: string | null
+    focusAfterRefresh: string | null | undefined
+    chooseGroup(group: ActressNameConflictGroup): void
+    focusHandled(): void
+  }
+  detail: {
+    selection: ConflictReviewSelection | null
+    selectedCandidate: PendingActressScrapeCandidate | null
+    selectedClaim: PendingActressNameClaim | null
+    selectedConflict: PendingActressScrapeCandidate['conflicts'][number] | null
+    ownerOptions: ConflictReviewOwnerOption[]
+    mergeActors: ActressConflictMergeActor[]
+    proposedOwner: ConflictReviewProposedOwner | null
+    editSourceName: string
+    editSourceType:
+      | PendingActressScrapeCandidate['conflicts'][number]['type']
+      | PendingActressNameClaim['type']
+      | null
+    editInspection: ConflictNameEditInspection
+    editInspectionPending: boolean
+    selectTab(tab: ConflictReviewTab): void
+    selectOwner(owner: ConflictReviewProposedOwner): void
+    selectSource(source: NonNullable<ConflictReviewSelection['source']>): void
+    openEditName(): void
+    openMerge(): void
+    openIllegalName(): void
+    openOtherOwner(): void
+    confirmOwnership(): void
+    applySelectedPending(): void
+    requestDiscard(candidate: PendingActressScrapeCandidate): void
+  }
+  dialogs: {
+    otherOwner: {
+      open: boolean
+      search: string
+      options: ActressListItem[]
+      loading: boolean
+      selected: ActressListItem | null
+      changeSearch(value: string): void
+      choose(item: ActressListItem): void
+      close(): void
+    }
+    editName: {
+      open: boolean
+      value: string
+      change(value: string): void
+      submit(): void
+      close(): void
+      canSubmit: boolean
+    }
+    merge: {
+      open: boolean
+      actors: ActressConflictMergeActor[]
+      submit(decision: ConflictMergeActressesDecision): void
+      close(): void
+    }
+    replacement: {
+      kind: ReplacementDialog
+      claimants: ActressNameConflictGroup['claimants']
+      mainNames: Record<number, string>
+      status: IllegalNameReplacementValidationStatus
+      errors: Record<number, string>
+      change(actressId: number, value: string): void
+      submit(): void
+      close(): void
+      canSubmit: boolean
+    }
+    discard: {
+      candidate: PendingActressScrapeCandidate | null
+      busy: boolean
+      confirm(): void
+      cancel(): void
+    }
+  }
+  busy: {
+    resolving: boolean
   }
 }
 
-export function useConflictReviewController() {
+function createRemoteDeps(
+  toast: { show(message: string, tone: 'success' | 'error' | 'info'): void },
+  invalidateLibrary: () => Promise<void>,
+  refetchGroups: () => Promise<ActressNameConflictGroup[]>
+): ConflictReviewRemoteDeps {
+  return {
+    api: {
+      listActresses: (search) => api.actresses.list(search, 'all'),
+      getActress: (id) => api.actresses.get(id),
+      inspectConflictName: (input) => api.actressScrape.inspectConflictName(input),
+      validateIllegalNameReplacements: (input) =>
+        api.actressScrape.validateIllegalNameReplacements(input),
+      resolveConflict: (input) => api.actressScrape.resolveConflict(input),
+      discardConflict: (input) => api.actressScrape.discardConflict(input)
+    },
+    toast,
+    invalidateLibrary,
+    refetchGroups
+  }
+}
+
+export function useConflictReviewController(): ConflictReviewViewModel {
   const queryClient = useQueryClient()
   const toast = useToast()
-  const [state, dispatch] = useReducer(reducer, initialState)
+  const [state, dispatch] = useReducer(reduceConflictReviewSession, initialConflictReviewSessionState)
+  const resolvingRef = useRef(false)
+  const discardingRef = useRef(false)
+  const discardCandidateRef = useRef(state.discardCandidate)
+  discardCandidateRef.current = state.discardCandidate
+  const editedNameRef = useRef(state.editedName)
+  editedNameRef.current = state.editedName
+  const replacementDialogRef = useRef(state.replacementDialog)
+  replacementDialogRef.current = state.replacementDialog
+  const replacementMainNamesRef = useRef(state.replacementMainNames)
+  replacementMainNamesRef.current = state.replacementMainNames
   const editInspectionGate = useRef(createLatestRequestGate())
   const ownerSearchGate = useRef(createLatestRequestGate())
   const replacementValidationGate = useRef(createLatestRequestGate())
@@ -125,483 +181,354 @@ export function useConflictReviewController() {
     queryFn: () => api.actressScrape.conflictSummary()
   })
   const groups = groupsQuery.data ?? EMPTY_GROUPS
-  const sections = useMemo(() => buildConflictQueueSections(groups), [groups])
-  const selectedGroup =
-    groups.find((group) => group.normalizedName === state.selectedName) ?? groups[0] ?? null
-  const selectedCandidate =
-    state.selection?.source?.kind === 'scrape'
-      ? selectedGroup?.candidates.find((candidate) => candidate.pendingId === state.selection?.source?.id) ?? null
-      : null
-  const selectedClaim =
-    state.selection?.source?.kind === 'claim'
-      ? selectedGroup?.pendingNameClaims.find((claim) => claim.claimId === state.selection?.source?.id) ?? null
-      : null
-  const selectedConflict =
-    selectedCandidate?.conflicts.find(
-      (conflict) => conflict.normalizedName === selectedGroup?.normalizedName
-    ) ?? null
-  const ownerOptions = useMemo(
-    () => (selectedGroup ? buildOwnerOptions(selectedGroup) : []),
-    [selectedGroup]
+  const derived = useMemo(
+    () => deriveConflictReviewDetail(state, groups, debouncedEditedName),
+    [debouncedEditedName, groups, state]
   )
-  const mergeActors = useMemo(
-    () => (selectedGroup ? buildActressConflictMergeActors(selectedGroup) : []),
-    [selectedGroup]
-  )
-  const proposedOwner = state.selection?.proposedOwner ?? null
-  const ownershipReplacementClaimants = useMemo(
-    () => selectedGroup ? conflictClaimantsNeedingReplacement(selectedGroup, proposedOwner?.actressId) : [],
-    [proposedOwner?.actressId, selectedGroup]
-  )
-  const illegalReplacementClaimants = useMemo(
-    () => selectedGroup ? conflictClaimantsNeedingReplacement(selectedGroup, null) : [],
-    [selectedGroup]
-  )
-  const requiredReplacementClaimants =
-    state.replacementDialog === 'ownership'
-      ? ownershipReplacementClaimants
-      : state.replacementDialog === 'illegal'
-        ? illegalReplacementClaimants
-        : EMPTY_REPLACEMENT_CLAIMANTS
+  const replacementInputsKey = derived.replacementInputs
+    .map((item) => `${item.actressId}:${item.mainName}`)
+    .join('|')
   const replacementInputs = useMemo(
-    () => requiredReplacementClaimants.map((claimant) => ({
-      actressId: claimant.actressId,
-      mainName: state.replacementMainNames[claimant.actressId] ?? ''
-    })),
-    [requiredReplacementClaimants, state.replacementMainNames]
+    () => derived.replacementInputs,
+    // Intentionally key by contents; derive returns a fresh array each time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [replacementInputsKey]
   )
   const debouncedReplacementInputs = useDebounce(replacementInputs, 250)
-  const editSourceName = selectedConflict?.name ?? selectedClaim?.name ?? ''
-  const editSourceType = selectedConflict?.type ?? selectedClaim?.type ?? null
-  const localEditInspection = inspectConflictNameEdit(editSourceName, state.editedName, groups)
-  const editInspection =
-    localEditInspection.status === 'empty' || localEditInspection.status === 'unchanged'
-      ? localEditInspection
-      : state.liveEditInspection
-        ? {
-            normalizedName: state.liveEditInspection.normalizedName,
-            status: state.liveEditInspection.status,
-            targetGroupName: state.liveEditInspection.status === 'conflict'
-              ? localEditInspection.targetGroupName
-              : null
+
+  const applyPatch = (patch: Partial<ConflictReviewSessionState>): void => {
+    if (patch.resolving !== undefined) resolvingRef.current = patch.resolving
+    if (patch.discarding !== undefined) discardingRef.current = patch.discarding
+    dispatch({ type: 'patch', patch })
+  }
+
+  const toastRef = useRef(toast)
+  toastRef.current = toast
+  const refetchGroupsRef = useRef(groupsQuery.refetch)
+  refetchGroupsRef.current = groupsQuery.refetch
+
+  const remoteDeps = useMemo(
+    () =>
+      createRemoteDeps(
+        {
+          show(message, tone) {
+            toastRef.current.show(message, tone)
           }
-        : localEditInspection
-  const editInspectionPending =
-    localEditInspection.status !== 'empty' &&
-    localEditInspection.status !== 'unchanged' &&
-    (state.editInspectionLoading || state.editedName !== debouncedEditedName || !state.liveEditInspection)
-
-  const resetTransientState = useCallback(() => dispatch({ type: 'resetTransient' }), [])
-
-  useEffect(() => {
-    if (!selectedGroup) {
-      if (state.selectedName !== null || state.selection !== null || state.selectionGroupName !== null) {
-        dispatch({ type: 'patch', patch: { selectedName: null, selection: null, selectionGroupName: null } })
-      }
-      return
-    }
-    if (state.selectionGroupName !== selectedGroup.normalizedName) {
-      dispatch({
-        type: 'patch',
-        patch: {
-          selectedName: selectedGroup.normalizedName,
-          selection: createConflictReviewSelection(selectedGroup),
-          selectionGroupName: selectedGroup.normalizedName
+        },
+        () => invalidateActressLibraryQueries(queryClient),
+        async () => {
+          const refreshed = await refetchGroupsRef.current()
+          return refreshed.data ?? []
         }
-      })
-      resetTransientState()
-    } else if (state.selectedName !== selectedGroup.normalizedName) {
-      dispatch({ type: 'patch', patch: { selectedName: selectedGroup.normalizedName } })
-    }
-  }, [resetTransientState, selectedGroup, state.selectedName, state.selectionGroupName])
+      ),
+    [queryClient]
+  )
 
   useEffect(() => {
-    const requestId = ownerSearchGate.current.next()
-    if (!state.otherOwnerOpen) return
-    dispatch({ type: 'patch', patch: { otherOwnerLoading: true } })
-    void api.actresses.list(debouncedOwnerSearch.trim(), 'all')
-      .then((items) => {
-        if (!ownerSearchGate.current.isLatest(requestId)) return
-        const visibleItems = items
-          .filter((item) => ownerOptions.every((owner) => owner.actressId !== item.id))
-          .slice(0, 40)
-        const keepSelected = debouncedOwnerSearch.trim() === '' &&
-          state.selectedOtherOwner != null &&
-          !visibleItems.some((item) => item.id === state.selectedOtherOwner?.id)
-        dispatch({
-          type: 'patch',
-          patch: {
-            otherOwnerOptions: keepSelected
-              ? [state.selectedOtherOwner!, ...visibleItems].slice(0, 40)
-              : visibleItems
-          }
-        })
-      })
-      .catch((error) => {
-        if (ownerSearchGate.current.isLatest(requestId)) toast.show(String((error as Error).message), 'error')
-      })
-      .finally(() => {
-        if (ownerSearchGate.current.isLatest(requestId)) dispatch({ type: 'patch', patch: { otherOwnerLoading: false } })
-      })
-    return () => ownerSearchGate.current.invalidate(requestId)
-  }, [debouncedOwnerSearch, ownerOptions, state.otherOwnerOpen, state.selectedOtherOwner, toast])
+    dispatch({ type: 'syncSelectedGroup', group: derived.selectedGroup })
+  }, [derived.selectedGroup])
+
+  const ownerOptionsKey = derived.ownerOptions.map((owner) => owner.actressId).join(',')
+  useEffect(() => {
+    return runOwnerSearch({
+      gate: ownerSearchGate.current,
+      deps: remoteDeps,
+      open: state.otherOwnerOpen,
+      search: debouncedOwnerSearch,
+      ownerOptions: derived.ownerOptions,
+      selectedOtherOwner: state.selectedOtherOwner,
+      apply: applyPatch
+    })
+    // ownerOptions identity changes every derive; key contents instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    debouncedOwnerSearch,
+    ownerOptionsKey,
+    remoteDeps,
+    state.otherOwnerOpen,
+    state.selectedOtherOwner
+  ])
 
   useEffect(() => {
-    const requestId = editInspectionGate.current.next()
-    dispatch({ type: 'patch', patch: { liveEditInspection: null } })
-    if (!state.editNameOpen || !selectedGroup) {
-      dispatch({ type: 'patch', patch: { editInspectionLoading: false } })
+    return runNameInspection({
+      gate: editInspectionGate.current,
+      deps: remoteDeps,
+      editNameOpen: state.editNameOpen,
+      selectedGroup: derived.selectedGroup,
+      groups,
+      editSourceName: derived.editSourceName,
+      debouncedEditedName,
+      selectedCandidate: derived.selectedCandidate,
+      selectedClaim: derived.selectedClaim,
+      apply: applyPatch
+    })
+  }, [
+    debouncedEditedName,
+    derived.editSourceName,
+    derived.selectedCandidate,
+    derived.selectedClaim,
+    derived.selectedGroup,
+    groups,
+    remoteDeps,
+    state.editNameOpen
+  ])
+
+  useEffect(() => {
+    const patch = beginReplacementValidationStatus({
+      gate: replacementValidationGate.current,
+      replacementDialog: state.replacementDialog,
+      requiredCount: derived.requiredReplacementClaimants.length,
+      replacementInputs
+    })
+    if (
+      patch.replacementValidationStatus === state.replacementValidationStatus &&
+      Object.keys(state.replacementValidationErrors).length === 0
+    ) {
       return
     }
-    const local = inspectConflictNameEdit(editSourceName, debouncedEditedName, groups)
-    const actressId = selectedCandidate?.actressId ?? selectedClaim?.actressId
-    if (actressId == null || local.status === 'empty' || local.status === 'unchanged') {
-      dispatch({ type: 'patch', patch: { editInspectionLoading: false } })
-      return
-    }
-    dispatch({ type: 'patch', patch: { editInspectionLoading: true } })
-    void api.actressScrape.inspectConflictName({
-      actressId,
-      name: debouncedEditedName,
-      ...(selectedCandidate ? { pendingId: selectedCandidate.pendingId } : {})
-    }).then((inspection) => {
-      if (editInspectionGate.current.isLatest(requestId)) dispatch({ type: 'patch', patch: { liveEditInspection: inspection } })
-    }).catch((error) => {
-      if (editInspectionGate.current.isLatest(requestId)) toast.show(String((error as Error).message), 'error')
-    }).finally(() => {
-      if (editInspectionGate.current.isLatest(requestId)) dispatch({ type: 'patch', patch: { editInspectionLoading: false } })
-    })
-    return () => editInspectionGate.current.invalidate(requestId)
-  }, [debouncedEditedName, editSourceName, groups, selectedCandidate, selectedClaim, selectedGroup, state.editNameOpen, toast])
+    applyPatch(patch)
+  }, [
+    derived.requiredReplacementClaimants.length,
+    replacementInputs,
+    state.replacementDialog,
+    state.replacementValidationErrors,
+    state.replacementValidationStatus
+  ])
 
   useEffect(() => {
-    replacementValidationGate.current.next()
-    const status: IllegalNameReplacementValidationStatus = !state.replacementDialog
-      ? 'idle'
-      : requiredReplacementClaimants.length === 0
-        ? 'valid'
-        : replacementInputs.some((replacement) => !replacement.mainName.trim())
-          ? 'idle'
-          : 'checking'
-    dispatch({ type: 'patch', patch: { replacementValidationErrors: {}, replacementValidationStatus: status } })
-  }, [replacementInputs, requiredReplacementClaimants.length, state.replacementDialog])
-
-  useEffect(() => {
-    if (!state.replacementDialog || !selectedGroup || requiredReplacementClaimants.length === 0 ||
-        debouncedReplacementInputs.some((replacement) => !replacement.mainName.trim())) return
-    const requestId = replacementValidationGate.current.next()
-    void api.actressScrape.validateIllegalNameReplacements({
-      snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
-      replacementMainNames: debouncedReplacementInputs,
-      ...(state.replacementDialog === 'ownership' && proposedOwner
-        ? { destinationOwnerActressId: proposedOwner.actressId }
-        : {})
-    }).then((result) => {
-      if (!replacementValidationGate.current.isLatest(requestId)) return
-      if (result.status === 'valid') {
-        dispatch({ type: 'patch', patch: { replacementValidationStatus: 'valid' } })
-      } else if (result.status === 'invalid') {
-        dispatch({
-          type: 'patch',
-          patch: {
-            replacementValidationStatus: 'invalid',
-            replacementValidationErrors: Object.fromEntries(result.errors.map((error) => [error.actressId, error.message]))
-          }
-        })
-      } else {
-        dispatch({
-          type: 'update',
-          update: (current) => ({
-            replacementDialog: null,
-            staleMessage: '数据已变化，已刷新，请重新确认',
-            selection: current.selection ? selectConflictProposedOwner(current.selection, null) : current.selection,
-            selectedOtherOwner: null
-          })
-        })
-        void invalidateActressLibraryQueries(queryClient)
-      }
-    }).catch((error) => {
-      if (!replacementValidationGate.current.isLatest(requestId)) return
-      dispatch({ type: 'patch', patch: { replacementValidationStatus: 'invalid' } })
-      toast.show(String((error as Error).message), 'error')
+    return runReplacementValidation({
+      gate: replacementValidationGate.current,
+      deps: remoteDeps,
+      replacementDialog: state.replacementDialog,
+      selectedGroup: derived.selectedGroup,
+      requiredCount: derived.requiredReplacementClaimants.length,
+      debouncedReplacementInputs,
+      proposedOwner: derived.proposedOwner,
+      apply: applyPatch,
+      onStale: () => dispatch({ type: 'staleReplacementValidation' })
     })
-    return () => replacementValidationGate.current.invalidate(requestId)
-  }, [debouncedReplacementInputs, proposedOwner, queryClient, requiredReplacementClaimants.length, selectedGroup, state.replacementDialog, toast])
+  }, [
+    debouncedReplacementInputs,
+    derived.proposedOwner,
+    derived.requiredReplacementClaimants.length,
+    derived.selectedGroup,
+    remoteDeps,
+    state.replacementDialog
+  ])
 
-  const chooseGroup = (group: ActressNameConflictGroup): void => {
+  const applyRefresh = (args: {
+    previousGroups: ActressNameConflictGroup[]
+    refreshedGroups: ActressNameConflictGroup[]
+    previousSelectedName: string | null
+    stale: boolean
+  }): void => {
     dispatch({
-      type: 'patch',
-      patch: {
-        staleMessage: null,
-        selectedName: group.normalizedName,
-        selectionGroupName: group.normalizedName,
-        selection: createConflictReviewSelection(group)
-      }
-    })
-    resetTransientState()
-  }
-
-  const selectAfterRefresh = (
-    previousGroups: ActressNameConflictGroup[],
-    refreshedGroups: ActressNameConflictGroup[],
-    previousSelectedName: string | null,
-    stale = false
-  ): void => {
-    const next = buildConflictReviewRefreshState(previousGroups, refreshedGroups, previousSelectedName, stale)
-    dispatch({
-      type: 'patch',
-      patch: {
-        selectedName: next.selectedNormalizedName,
-        selectionGroupName: null,
-        selection: next.selection,
-        staleMessage: next.staleMessage,
-        focusAfterRefresh: next.focusTarget.kind === 'group' ? next.focusTarget.normalizedName : null
-      }
+      type: 'applyRefresh',
+      previousGroups: args.previousGroups,
+      refreshedGroups: args.refreshedGroups,
+      previousSelectedName: args.previousSelectedName,
+      stale: args.stale
     })
   }
 
-  const resolveDecision = async (input: ResolveActressConflictInput): Promise<void> => {
-    if (state.resolving) return
-    const previousGroups = groups
-    const previousSelectedName = selectedGroup?.normalizedName ?? null
-    dispatch({ type: 'patch', patch: { resolving: true } })
-    try {
-      const outcome = await api.actressScrape.resolveConflict(input)
-      await invalidateActressLibraryQueries(queryClient)
-      const refreshed = await groupsQuery.refetch()
-      if (outcome.status === 'stale') {
-        dispatch({ type: 'patch', patch: { replacementDialog: null } })
-        toast.show(outcome.message, 'info')
-      } else {
-        resetTransientState()
-        toast.show('名称冲突已处理', 'success')
-      }
-      selectAfterRefresh(previousGroups, refreshed.data ?? [], previousSelectedName, outcome.status === 'stale')
-    } catch (error) {
-      toast.show(String((error as Error).message), 'error')
-    } finally {
-      dispatch({ type: 'patch', patch: { resolving: false } })
-    }
+  const resolveDecision = (input: Parameters<typeof resolveConflictDecision>[0]['input']): void => {
+    void resolveConflictDecision({
+      deps: remoteDeps,
+      resolving: resolvingRef.current,
+      groups,
+      selectedGroupName: derived.selectedGroup?.normalizedName ?? null,
+      input,
+      apply: applyPatch,
+      applyRefresh,
+      resetTransient: () => dispatch({ type: 'resetTransient' })
+    })
   }
 
   const submitOwnership = (): void => {
-    if (!selectedGroup || !proposedOwner) return
-    void resolveDecision({
+    if (!derived.selectedGroup || !derived.proposedOwner) return
+    resolveDecision({
       kind: 'assignToExistingActress',
-      snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
-      ownerActressId: proposedOwner.actressId,
-      ownerActressRevision: proposedOwner.revision,
-      replacementMainNames: ownershipReplacementClaimants.map((claimant) => ({
+      snapshot: buildActressConflictDecisionSnapshot(derived.selectedGroup),
+      ownerActressId: derived.proposedOwner.actressId,
+      ownerActressRevision: derived.proposedOwner.revision,
+      replacementMainNames: derived.ownershipReplacementClaimants.map((claimant) => ({
         actressId: claimant.actressId,
-        mainName: state.replacementMainNames[claimant.actressId] ?? ''
+        mainName: replacementMainNamesRef.current[claimant.actressId] ?? ''
       }))
     })
-  }
-
-  const confirmOwnership = (): void => {
-    if (!proposedOwner) return
-    if (ownershipReplacementClaimants.length > 0) {
-      dispatch({ type: 'patch', patch: { replacementMainNames: {}, replacementDialog: 'ownership' } })
-    } else submitOwnership()
-  }
-
-  const applySelectedPending = (): void => {
-    if (!selectedGroup || !selectedCandidate) return
-    void resolveDecision({
-      kind: 'applyPending',
-      snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
-      pendingId: selectedCandidate.pendingId,
-      replacementMainNames: []
-    })
-  }
-
-  const submitEditedName = (): void => {
-    if (!selectedGroup || !editSourceType || editInspectionPending ||
-        editInspection.status === 'empty' || editInspection.status === 'unchanged') return
-    if (selectedCandidate && selectedConflict) {
-      void resolveDecision({
-        kind: 'editName',
-        snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
-        pendingId: selectedCandidate.pendingId,
-        name: selectedConflict.name,
-        nameType: selectedConflict.type,
-        newName: state.editedName,
-        replacementMainNames: []
-      })
-    } else if (selectedClaim) {
-      void resolveDecision({
-        kind: 'editPendingNameClaim',
-        snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
-        claimId: selectedClaim.claimId,
-        actressId: selectedClaim.actressId,
-        name: selectedClaim.name,
-        nameType: selectedClaim.type,
-        newName: state.editedName,
-        replacementMainNames: []
-      })
-    }
   }
 
   const submitIllegalName = (): void => {
-    if (!selectedGroup) return
-    void resolveDecision({
+    if (!derived.selectedGroup) return
+    resolveDecision({
       kind: 'markIllegalName',
-      snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
-      replacementMainNames: illegalReplacementClaimants.map((claimant) => ({
+      snapshot: buildActressConflictDecisionSnapshot(derived.selectedGroup),
+      replacementMainNames: derived.illegalReplacementClaimants.map((claimant) => ({
         actressId: claimant.actressId,
-        mainName: state.replacementMainNames[claimant.actressId] ?? ''
+        mainName: replacementMainNamesRef.current[claimant.actressId] ?? ''
       }))
     })
   }
 
-  const submitMerge = (decision: ConflictMergeActressesDecision): void => {
-    if (!selectedGroup) return
-    const pending = selectedGroup.candidates.find((candidate) =>
-      candidate.actressId === decision.keepActressId || candidate.actressId === decision.mergeActressId)
-    void resolveDecision({
-      kind: 'mergeActresses',
-      snapshot: buildActressConflictDecisionSnapshot(selectedGroup),
-      ...(pending ? { pendingId: pending.pendingId } : {}),
-      ...decision,
-      replacementMainNames: []
-    })
-  }
-
-  const discard = async (): Promise<void> => {
-    if (!state.discardCandidate || state.discarding) return
-    const previousGroups = groups
-    const previousSelectedName = selectedGroup?.normalizedName ?? null
-    dispatch({ type: 'patch', patch: { discarding: true } })
-    try {
-      await api.actressScrape.discardConflict({
-        pendingId: state.discardCandidate.pendingId,
-        expectedRevision: state.discardCandidate.revision
-      })
-      dispatch({ type: 'patch', patch: { discardCandidate: null } })
-      await invalidateActressLibraryQueries(queryClient)
-      const refreshed = await groupsQuery.refetch()
-      selectAfterRefresh(previousGroups, refreshed.data ?? [], previousSelectedName)
-      toast.show('已丢弃错误匹配并清理暂存资源', 'success')
-    } catch (error) {
-      const message = String((error as Error).message)
-      await invalidateActressLibraryQueries(queryClient)
-      const refreshed = await groupsQuery.refetch()
-      dispatch({ type: 'patch', patch: { discardCandidate: null } })
-      selectAfterRefresh(previousGroups, refreshed.data ?? [], previousSelectedName, true)
-      toast.show(message, 'error')
-    } finally {
-      dispatch({ type: 'patch', patch: { discarding: false } })
-    }
-  }
-
-  const chooseOtherOwner = async (item: ActressListItem): Promise<void> => {
-    try {
-      const detail = item.revision == null ? await api.actresses.get(item.id) : null
-      const revision = item.revision ?? detail?.revision
-      if (revision == null) throw new Error('无法读取演员当前版本，请刷新后重试')
-      dispatch({
-        type: 'update',
-        update: (current) => ({
-          selection: current.selection
-            ? selectConflictProposedOwner(current.selection, { actressId: item.id, revision, mainName: item.main_name })
-            : current.selection,
-          selectedOtherOwner: item,
-          otherOwnerOpen: false,
-          otherOwnerSearch: ''
-        })
-      })
-    } catch (error) {
-      toast.show(String((error as Error).message), 'error')
-    }
-  }
-
   return {
-    ...state,
-    groupsQuery,
-    summary: summaryQuery.data,
-    groups,
-    sections,
-    selectedGroup,
-    selectedCandidate,
-    selectedClaim,
-    selectedConflict,
-    ownerOptions,
-    mergeActors,
-    proposedOwner,
-    ownershipReplacementClaimants,
-    illegalReplacementClaimants,
-    requiredReplacementClaimants,
-    editSourceName,
-    editSourceType,
-    editInspection,
-    editInspectionPending,
-    chooseGroup,
-    selectTab: (tab: ConflictReviewTab) => dispatch({ type: 'update', update: (current) => ({
-      selection: current.selection ? { ...current.selection, tab } : current.selection
-    }) }),
-    selectOwner: (owner: ConflictReviewProposedOwner) => dispatch({ type: 'update', update: (current) => ({
-      selectedOtherOwner: null,
-      selection: current.selection ? selectConflictProposedOwner(current.selection, owner) : current.selection
-    }) }),
-    selectSource: (source: NonNullable<ConflictReviewSelection['source']>) => dispatch({ type: 'update', update: (current) => ({
-      selection: current.selection ? selectConflictSource(current.selection, source) : current.selection
-    }) }),
-    openOtherOwner: () => dispatch({ type: 'patch', patch: { otherOwnerOpen: true, otherOwnerSearch: '' } }),
-    closeOtherOwner: () => dispatch({ type: 'patch', patch: { otherOwnerOpen: false, otherOwnerSearch: '' } }),
-    changeOtherOwnerSearch: (value: string) => dispatch({ type: 'patch', patch: { otherOwnerSearch: value } }),
-    chooseOtherOwner,
-    openEditName: () => {
-      if (editSourceName) dispatch({ type: 'patch', patch: { editedName: editSourceName, editNameOpen: true } })
+    queue: {
+      loading: groupsQuery.isLoading,
+      error: groupsQuery.error ? String((groupsQuery.error as Error).message) : null,
+      summary: summaryQuery.data,
+      groups,
+      sections: derived.sections,
+      selectedGroup: derived.selectedGroup,
+      staleMessage: state.staleMessage,
+      focusAfterRefresh: state.focusAfterRefresh,
+      chooseGroup: (group) => dispatch({ type: 'chooseGroup', group }),
+      focusHandled: () => dispatch({ type: 'focusHandled' })
     },
-    closeEditName: () => dispatch({ type: 'patch', patch: { editNameOpen: false } }),
-    changeEditedName: (value: string) => dispatch({ type: 'patch', patch: { editedName: value } }),
-    openMerge: () => dispatch({ type: 'patch', patch: { mergeOpen: true } }),
-    closeMerge: () => dispatch({ type: 'patch', patch: { mergeOpen: false } }),
-    openIllegalName: () => dispatch({ type: 'patch', patch: { replacementMainNames: {}, replacementDialog: 'illegal' } }),
-    closeReplacement: () => dispatch({ type: 'patch', patch: { replacementDialog: null, replacementMainNames: {} } }),
-    changeReplacementMainName: (actressId: number, value: string) => dispatch({ type: 'update', update: (current) => ({
-      replacementMainNames: { ...current.replacementMainNames, [actressId]: value }
-    }) }),
-    requestDiscard: (candidate: PendingActressScrapeCandidate) => dispatch({ type: 'patch', patch: { discardCandidate: candidate } }),
-    cancelDiscard: () => dispatch({ type: 'patch', patch: { discardCandidate: null } }),
-    confirmOwnership,
-    applySelectedPending,
-    submitEditedName,
-    submitIllegalName,
-    submitOwnership,
-    submitMerge,
-    discard,
-    focusHandled: () => dispatch({ type: 'patch', patch: { focusAfterRefresh: undefined } })
-  }
-}
-
-function buildOwnerOptions(group: ActressNameConflictGroup) {
-  const options = new Map<number, {
-    actressId: number
-    revision: number
-    mainName: string
-    avatarPath: string | null
-    roles: string[]
-  }>()
-  const ensure = (actressId: number, revision: number, mainName: string, avatarPath: string | null, role: string) => {
-    const current = options.get(actressId)
-    if (current) {
-      if (!current.roles.includes(role)) current.roles.push(role)
-      return
+    detail: {
+      selection: state.selection,
+      selectedCandidate: derived.selectedCandidate,
+      selectedClaim: derived.selectedClaim,
+      selectedConflict: derived.selectedConflict,
+      ownerOptions: derived.ownerOptions,
+      mergeActors: derived.mergeActors,
+      proposedOwner: derived.proposedOwner,
+      editSourceName: derived.editSourceName,
+      editSourceType: derived.editSourceType,
+      editInspection: derived.editInspection,
+      editInspectionPending: derived.editInspectionPending,
+      selectTab: (tab) => dispatch({ type: 'selectTab', tab }),
+      selectOwner: (owner) => dispatch({ type: 'selectOwner', owner }),
+      selectSource: (source) => dispatch({ type: 'selectSource', source }),
+      openEditName: () => dispatch({ type: 'openEditName', sourceName: derived.editSourceName }),
+      openMerge: () => dispatch({ type: 'openMerge' }),
+      openIllegalName: () => dispatch({ type: 'openIllegalName' }),
+      openOtherOwner: () => dispatch({ type: 'openOtherOwner' }),
+      confirmOwnership: () => {
+        if (!derived.proposedOwner) return
+        if (derived.ownershipReplacementClaimants.length > 0) {
+          dispatch({ type: 'openOwnershipReplacement' })
+        } else submitOwnership()
+      },
+      applySelectedPending: () => {
+        if (!derived.selectedGroup || !derived.selectedCandidate) return
+        resolveDecision({
+          kind: 'applyPending',
+          snapshot: buildActressConflictDecisionSnapshot(derived.selectedGroup),
+          pendingId: derived.selectedCandidate.pendingId,
+          replacementMainNames: []
+        })
+      },
+      requestDiscard: (candidate) => dispatch({ type: 'requestDiscard', candidate })
+    },
+    dialogs: {
+      otherOwner: {
+        open: state.otherOwnerOpen,
+        search: state.otherOwnerSearch,
+        options: state.otherOwnerOptions,
+        loading: state.otherOwnerLoading,
+        selected: state.selectedOtherOwner,
+        changeSearch: (value) => dispatch({ type: 'changeOtherOwnerSearch', value }),
+        choose: (item) => {
+          void chooseOtherOwnerRemote({
+            deps: remoteDeps,
+            item,
+            onChosen: (chosen, revision) =>
+              dispatch({ type: 'chooseOtherOwner', item: chosen, revision })
+          })
+        },
+        close: () => dispatch({ type: 'closeOtherOwner' })
+      },
+      editName: {
+        open: state.editNameOpen,
+        value: state.editedName,
+        change: (value) => dispatch({ type: 'changeEditedName', value }),
+        submit: () => {
+          if (
+            !derived.selectedGroup ||
+            !derived.editSourceType ||
+            !derived.canSubmitEditedName
+          ) {
+            return
+          }
+          if (derived.selectedCandidate && derived.selectedConflict) {
+            resolveDecision({
+              kind: 'editName',
+              snapshot: buildActressConflictDecisionSnapshot(derived.selectedGroup),
+              pendingId: derived.selectedCandidate.pendingId,
+              name: derived.selectedConflict.name,
+              nameType: derived.selectedConflict.type,
+              newName: editedNameRef.current,
+              replacementMainNames: []
+            })
+          } else if (derived.selectedClaim) {
+            resolveDecision({
+              kind: 'editPendingNameClaim',
+              snapshot: buildActressConflictDecisionSnapshot(derived.selectedGroup),
+              claimId: derived.selectedClaim.claimId,
+              actressId: derived.selectedClaim.actressId,
+              name: derived.selectedClaim.name,
+              nameType: derived.selectedClaim.type,
+              newName: editedNameRef.current,
+              replacementMainNames: []
+            })
+          }
+        },
+        close: () => dispatch({ type: 'closeEditName' }),
+        canSubmit: derived.canSubmitEditedName && !state.resolving
+      },
+      merge: {
+        open: state.mergeOpen,
+        actors: derived.mergeActors,
+        submit: (decision) => {
+          if (!derived.selectedGroup) return
+          const pending = derived.selectedGroup.candidates.find(
+            (item) =>
+              item.actressId === decision.keepActressId ||
+              item.actressId === decision.mergeActressId
+          )
+          resolveDecision({
+            kind: 'mergeActresses',
+            snapshot: buildActressConflictDecisionSnapshot(derived.selectedGroup),
+            ...(pending ? { pendingId: pending.pendingId } : {}),
+            ...decision,
+            replacementMainNames: []
+          })
+        },
+        close: () => dispatch({ type: 'closeMerge' })
+      },
+      replacement: {
+        kind: state.replacementDialog,
+        claimants: derived.requiredReplacementClaimants,
+        mainNames: state.replacementMainNames,
+        status: state.replacementValidationStatus,
+        errors: state.replacementValidationErrors,
+        change: (actressId, value) =>
+          dispatch({ type: 'changeReplacementMainName', actressId, value }),
+        submit: () => {
+          if (replacementDialogRef.current === 'illegal') submitIllegalName()
+          else submitOwnership()
+        },
+        close: () => dispatch({ type: 'closeReplacement' }),
+        canSubmit: derived.canSubmitReplacement && !state.resolving
+      },
+      discard: {
+        candidate: state.discardCandidate,
+        busy: state.discarding,
+        confirm: () => {
+          void discardConflictCandidate({
+            deps: remoteDeps,
+            discarding: discardingRef.current,
+            discardCandidate: discardCandidateRef.current,
+            groups,
+            selectedGroupName: derived.selectedGroup?.normalizedName ?? null,
+            apply: applyPatch,
+            applyRefresh
+          })
+        },
+        cancel: () => dispatch({ type: 'cancelDiscard' })
+      }
+    },
+    busy: {
+      resolving: state.resolving
     }
-    options.set(actressId, { actressId, revision, mainName, avatarPath, roles: [role] })
   }
-  for (const claimant of group.claimants) {
-    ensure(
-      claimant.actressId,
-      claimant.revision,
-      claimant.mainName,
-      claimant.avatarPath,
-      group.currentOwner?.actressId === claimant.actressId ? '当前归属' : '历史名称声明'
-    )
-  }
-  for (const candidate of group.candidates) {
-    ensure(candidate.actressId, candidate.actressRevision, candidate.actressMainName, candidate.actressAvatarPath, '本次刮削目标')
-  }
-  return [...options.values()].sort((left, right) => left.mainName.localeCompare(right.mainName, 'zh-Hans-CN'))
 }

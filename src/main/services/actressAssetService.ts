@@ -7,7 +7,7 @@ import type {
   ActressScrapeField,
   ActressScrapeResult,
   ActressScrapeUpdateMode
-} from '@shared/scrapeTypes'
+} from '@shared/actressScrapeTypes'
 import { createAvatarCropV1, parseAvatarCrop, type ActressAvatarCommit } from '@shared/avatarCrop'
 import {
   applyActressScrapeResult as applyActressScrapeResultRecord,
@@ -122,7 +122,7 @@ function createDefaultAvatarBundle(id: number, mainName: string, bytes: Buffer, 
 }
 
 export function setActressAvatarBundle(id: number, mainName: string, commit: ActressAvatarCommit): void {
-  mediaAssetStore.coordinateDatabaseChange(() => {
+  mediaAssetStore.runInCoordinatedChange(() => {
     const current = getActressAvatarRecord(id)
     if (!current) throw new Error('演员不存在')
     const displayBytes = Buffer.from(commit.displayImageBase64, 'base64')
@@ -307,7 +307,7 @@ export function applyActressScrapeResult(
   beforeCommit?: () => void,
   options?: { deferFileCleanup?: boolean }
 ) {
-  return mediaAssetStore.coordinateDatabaseChange(() => {
+  return mediaAssetStore.runInCoordinatedChange(() => {
     if (mode === 'fillEmpty') clearBrokenActressAvatarIfNeeded(actressId)
     const current = getActressAvatarRecord(actressId)
     const currentAvatarUsable = Boolean(
@@ -342,26 +342,29 @@ export function applyActressScrapeResult(
 }
 
 export function adoptDownloadedAvatarIfMissing(id: number, downloadedPath: string): void {
-  mediaAssetStore.coordinateDatabaseChange(() => {
-    clearBrokenActressAvatarIfNeeded(id)
-    const current = getActressAvatarRecord(id)
-    if (!current || mediaAssetStore.isUsableImage(current.avatar_path)) {
-      mediaAssetStore.deleteBestEffort(downloadedPath)
-      return
-    }
-    const bytes = mediaAssetStore.readBytes(downloadedPath)
-    const bundle = createDefaultAvatarBundle(
-      id,
-      current.main_name,
-      bytes,
-      mediaAssetStore.extensionOf(downloadedPath)
-    )
-    const result = updateActressAvatarRecord(id, bundle)
-    for (const storedPath of [...result.obsoletePaths, downloadedPath]) {
-      if (storedPath !== bundle.displayPath && storedPath !== bundle.sourcePath) {
-        mediaAssetStore.deleteBestEffort(storedPath)
+  // Isolated: avatar DB commits independently of any outer video-scrape media ledger.
+  mediaAssetStore.coordinateDatabaseChangeIsolated(() => {
+    getDb().transaction(() => {
+      clearBrokenActressAvatarIfNeeded(id)
+      const current = getActressAvatarRecord(id)
+      if (!current || mediaAssetStore.isUsableImage(current.avatar_path)) {
+        mediaAssetStore.deleteBestEffort(downloadedPath)
+        return
       }
-    }
+      const bytes = mediaAssetStore.readBytes(downloadedPath)
+      const bundle = createDefaultAvatarBundle(
+        id,
+        current.main_name,
+        bytes,
+        mediaAssetStore.extensionOf(downloadedPath)
+      )
+      const result = updateActressAvatarRecord(id, bundle)
+      for (const storedPath of [...result.obsoletePaths, downloadedPath]) {
+        if (storedPath !== bundle.displayPath && storedPath !== bundle.sourcePath) {
+          mediaAssetStore.deleteBestEffort(storedPath)
+        }
+      }
+    })()
   })
 }
 

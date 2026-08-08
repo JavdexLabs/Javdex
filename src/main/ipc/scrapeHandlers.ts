@@ -1,6 +1,6 @@
 import { dialog } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import type { ScraperPluginKind } from '@shared/scrapeTypes'
+import type { ScraperPluginKind } from '@shared/scraperPluginTypes'
 import { createDefaultScrapeJobController } from '../services/scrapeJobController'
 import { createDefaultScraperPluginCatalog } from '../services/scraperPluginCatalog'
 import type { IpcContext } from './shared'

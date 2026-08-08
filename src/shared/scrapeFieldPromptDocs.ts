@@ -1,4 +1,6 @@
-import { ACTRESS_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS, type ScraperPluginKind } from './scrapeTypes'
+import { ACTRESS_SCRAPE_FIELD_OPTIONS } from './actressScrapeTypes'
+import type { ScraperPluginKind } from './scraperPluginTypes'
+import { VIDEO_SCRAPE_FIELD_OPTIONS } from './videoScrapeTypes'
 
 const VIDEO_SUPPORTED_FIELD_RETURN_MAP: Record<string, string> = {
   title: 'title',
@@ -33,6 +35,12 @@ const ACTRESS_SUPPORTED_FIELD_RETURN_MAP: Record<string, string> = {
   nationality: 'nationality（国籍）',
   profileSummary: 'profileSummary（个人简介）',
   aliases: 'aliases（别名数组）'
+}
+
+function fieldOptionLabels(
+  options: ReadonlyArray<{ id: string; label: string }>
+): Record<string, string> {
+  return Object.fromEntries(options.map((option) => [option.id, option.label]))
 }
 
 export function buildSupportedFieldsPromptSection(kind: ScraperPluginKind): string {
@@ -93,54 +101,27 @@ export function buildActressReturnFieldGlossary(): string {
 
 /** Chinese labels for keys returned by parseVideo / dry-run result objects. */
 export const VIDEO_PARSE_RESULT_KEY_LABELS: Record<string, string> = {
+  ...fieldOptionLabels(VIDEO_SCRAPE_FIELD_OPTIONS),
   code: '番号',
-  title: '标题',
-  summary: '简介',
   coverUrl: '封面',
-  cover: '封面',
-  releaseDate: '发行日期',
-  maker: '制作商',
-  publisher: '发行商',
-  series: '系列',
-  director: '导演',
   durationSeconds: '时长',
-  duration: '时长',
   sourceUrl: '来源链接',
-  source: '来源链接',
   ratingAverage: '站点评分',
   ratingCount: '站点评分人数',
-  rating: '站点评分',
   sampleImageUrls: '样张',
-  samples: '样张',
-  actresses: '演员',
-  actressesFemale: '女优',
-  actressesMale: '男优',
-  tags: '标签'
+  actresses: '演员'
 }
 
 /** Chinese labels for keys returned by parseActress / dry-run result objects. */
 export const ACTRESS_PARSE_RESULT_KEY_LABELS: Record<string, string> = {
+  ...fieldOptionLabels(ACTRESS_SCRAPE_FIELD_OPTIONS),
   mainName: '主名',
-  nameZh: '中文名',
-  nameEn: '英文名',
   avatarUrl: '头像',
-  avatar: '头像',
-  birthDate: '生日',
-  debutDate: '出道日期',
-  heightCm: '身高',
   bustCm: '胸围',
   waistCm: '腰围',
   hipCm: '臀围',
-  cupSize: '罩杯',
-  bloodType: '血型',
-  zodiac: '星座',
-  nationality: '国籍',
-  profileSummary: '资料',
-  profile: '资料',
   galleryImageUrls: '写真',
-  gallery: '写真',
-  aliases: '别名',
-  measurements: '三围',
+  profile: '简介',
   sourceUrl: '来源链接'
 }
 

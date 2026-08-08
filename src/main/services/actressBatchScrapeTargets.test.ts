@@ -16,7 +16,7 @@ import {
 } from './actressBatchScrapeTargets'
 import { createBatchScrapeJob } from './batchScrapeControl'
 import type { PersistedBatchScrapeJob } from './batchScrapeJobStore'
-import { ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/scrapeTypes'
+import { ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/actressScrapeTypes'
 
 let tempRoot: string | null = null
 

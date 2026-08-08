@@ -1,5 +1,5 @@
-import type { ActressAvatarFilter, ActressGenderFilter, ActressListStatusFilter, ActressListSortBy, ListSortDir } from '@shared/actressTypes'
-import type { ScrapedStatus } from '@shared/commonTypes'
+import type { ActressAvatarFilter, ActressGenderFilter, ActressListStatusFilter, ActressListSortBy } from '@shared/actressTypes'
+import type { ScrapedStatus, SortDir } from '@shared/commonTypes'
 import type { VideoQuery } from '@shared/videoTypes'
 import { ACTRESS_LIST_DEFAULTS } from '@shared/actressTypes'
 
@@ -54,7 +54,7 @@ export function actressAvatarParam(avatar: ActressAvatarFilter): string | null {
 export function parseActressSort(
   rawSort: string | null,
   rawDir: string | null
-): { sortBy: ActressListSortBy; sortDir: ListSortDir } {
+): { sortBy: ActressListSortBy; sortDir: SortDir } {
   const sortBy =
     rawSort === 'video_count' ||
     rawSort === 'gallery' ||

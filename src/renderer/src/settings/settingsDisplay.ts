@@ -1,5 +1,5 @@
 import type { BatchProgress } from '@shared/batchScrapeTypes'
-import type { ScraperPluginDelay, ScraperPluginDescriptor } from '@shared/scrapeTypes'
+import type { ScraperPluginDelay, ScraperPluginDescriptor } from '@shared/scraperPluginTypes'
 
 export function batchStatusLabel(status: BatchProgress['status'] | undefined): string {
   if (status === 'running') return '进行中'

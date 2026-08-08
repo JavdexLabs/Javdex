@@ -15,7 +15,7 @@ import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { buildActressScrapeMatchNameOptions } from '@shared/actressProfileOptions'
-import type { ActressDetail } from '@shared/libraryTypes'
+import type { ActressDetail } from '@shared/actressTypes'
 import type { ActressDeleteResult } from '@shared/actressIpcContract'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
@@ -44,9 +44,9 @@ import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavig
 import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import { onAvatarAutoCropSaved } from '../avatarAutoCrop/events'
 import type { ActressEditInput } from '@shared/actressTypes'
-import type { ActressScrapeField, ActressScrapeUpdateMode } from '@shared/scrapeTypes'
+import type { ActressScrapeField, ActressScrapeUpdateMode } from '@shared/actressScrapeTypes'
 import { resolveActressDetailDisplayBackgroundPath } from '@shared/detailDisplayBackground'
-import { ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/scrapeTypes'
+import { ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/actressScrapeTypes'
 
 export default function ActressDetailPage(): JSX.Element {
   const { id, actressId: actressIdParam } = useParams()

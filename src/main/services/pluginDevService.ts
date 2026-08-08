@@ -1,5 +1,5 @@
 import type { PluginDevAgentInput, PluginDevDryRunInput, PluginDevDryRunResult, PluginDevInstallInput } from '@shared/pluginDevTypes'
-import type { ScraperPluginKind, ScraperPluginPackage } from '@shared/scrapeTypes'
+import type { ScraperPluginKind, ScraperPluginPackage } from '@shared/scraperPluginTypes'
 import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import { installScraperPluginPackage } from '../scrapers/scraperPluginService'
 import {

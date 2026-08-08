@@ -26,6 +26,6 @@
 ## 回归检查
 
 - `actressRepo.test.ts`：分页边界、总数和稳定排序。
-- `actressApplicationService.test.ts`：真实 SQLite 分页，以及头像筛选快照跨页复用与首屏刷新。
+- `actressQueryService.test.ts`：真实 SQLite 分页，以及头像筛选快照跨页复用与首屏刷新。
 - `actressListBehavior.test.ts`：条件切换、失败重试 offset、跨页选择和详情返回滚动恢复。
 - `actressGridLayout.test.ts`：响应式列数、状态行位置和虚拟网格结构边界。

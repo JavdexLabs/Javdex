@@ -16,7 +16,7 @@ import {
 import { parseAvatarCrop, type ActressAvatarCommit } from '@shared/avatarCrop'
 import { normalizeCupSize } from '@shared/cupSizeUtils'
 import type { ActressEditInput, ActressGender } from '@shared/actressTypes'
-import type { ActressDetail } from '@shared/libraryTypes'
+import type { ActressDetail } from '@shared/actressTypes'
 import { assetUrl } from '../api'
 import ActressAvatarEditor from './ActressAvatarEditor'
 import AliasTagEditor from './AliasTagEditor'

@@ -101,14 +101,3 @@ export interface PlayResult {
   fileMissing?: boolean
   error?: string
 }
-import type { Actress, ActressGalleryAsset, ActressName } from './actressTypes'
-import type { Video } from './videoTypes'
-
-export interface ActressDetail extends Actress {
-  name_zh: string | null
-  name_en: string | null
-  aliases: string[]
-  names: ActressName[]
-  gallery: ActressGalleryAsset[]
-  videos: Video[]
-}

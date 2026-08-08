@@ -1,4 +1,4 @@
-import type { ActressScrapeField, ActressScrapeFieldImpact, ActressScrapePluginRef, ActressScrapeResult, ActressScrapeUpdateMode } from './scrapeTypes'
+import type { ActressScrapeField, ActressScrapeFieldImpact, ActressScrapePluginRef, ActressScrapeResult, ActressScrapeUpdateMode } from './actressScrapeTypes'
 
 export type ActressPendingNameType = 'main' | 'zh' | 'en' | 'alias'
 

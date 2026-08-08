@@ -22,8 +22,7 @@ import type {
 } from '@shared/scrapeTypes'
 import type { BatchProgress, BatchScrapeState } from '@shared/batchScrapeTypes'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/scrapeTypes'
-import type { ActressDetail } from '@shared/libraryTypes'
-import type { PersistedBatchScrapeJob } from './batchScrapeJobStore'
+import type { ActressDetail } from '@shared/actressTypes'
 import type { BatchScrapeCheckpointPort } from './batchScrapeCheckpointPort'
 import { actressScrapeQueue } from './actressScrapeQueue'
 import { videoBatchScrapeQueue } from './videoBatchScrapeQueue'
@@ -41,15 +40,18 @@ import {
 } from './batchScrapeControl'
 import {
   jobToBatchProgress,
-  loadBatchScrapeJob,
-  saveBatchScrapeJob
+  loadBatchScrapeJob
 } from './batchScrapeJobStore'
 import { estimateActressBatchScrapeTargetCount } from './actressBatchScrapeTargets'
 import { scrapeActress } from '../scrapers/actressScraperManager'
 import { resolveVideoScrapeFieldSources, scrapeVideo } from '../scrapers/scraperManager'
 import { getActressDetail } from '../db/actressRepo'
 import { countVideosForRematch } from '../db/videoRepo'
-import { resolveVideoBatchTargets } from './videoImageAvailability'
+import { resolveVideoBatchTargets } from './videoScrapeApplyService'
+import {
+  AvatarAutoCropMediator,
+  type AvatarAutoCropMediatorDependencies
+} from './avatarAutoCropMediator'
 
 type ProgressListener = (progress: BatchProgress) => void
 
@@ -114,25 +116,30 @@ export interface ScrapeJobControllerDependencies {
     payload: ScrapeIpcEvent<Channel>
   ): void
   rendererAvailable(): boolean
-  randomId(): string
-  autoCropTimeoutMs: number
   checkpoints: BatchScrapeCheckpointPort
+  avatarAutoCrop?: AvatarAutoCropMediator
+  avatarAutoCropOptions?: Partial<
+    Pick<AvatarAutoCropMediatorDependencies, 'randomId' | 'autoCropTimeoutMs'>
+  >
 }
 
 export class ScrapeJobController {
-  private avatarAutoCropBatchToken: string | null = null
-  private readonly pendingAvatarAutoCrops = new Map<
-    string,
-    {
-      resolve: (outcome: ActressAvatarAutoCropOutcome) => void
-      timeout: ReturnType<typeof setTimeout>
-    }
-  >()
+  private readonly avatarAutoCrop: AvatarAutoCropMediator
 
-  constructor(private readonly dependencies: ScrapeJobControllerDependencies) {}
+  constructor(private readonly dependencies: ScrapeJobControllerDependencies) {
+    this.avatarAutoCrop =
+      dependencies.avatarAutoCrop ??
+      new AvatarAutoCropMediator({
+        emit: (channel, payload) => this.dependencies.emit(channel, payload),
+        rendererAvailable: () => this.dependencies.rendererAvailable(),
+        randomId: dependencies.avatarAutoCropOptions?.randomId ?? randomUUID,
+        autoCropTimeoutMs: dependencies.avatarAutoCropOptions?.autoCropTimeoutMs ?? 5_000,
+        assertCanBeginBatch: () => this.assertQueuesIdleForNewBatch()
+      })
+  }
 
   initialize(): void {
-    this.avatarAutoCropBatchToken = null
+    this.avatarAutoCrop.clearBatchToken()
     const interrupted = this.dependencies.checkpoints.load()
     if (interrupted?.status === 'running') {
       this.dependencies.checkpoints.markPaused(
@@ -141,45 +148,24 @@ export class ScrapeJobController {
       )
     }
     this.dependencies.actressQueue.setAvatarAutoCropListener((target) =>
-      this.requestAvatarAutoCrop(target)
+      this.avatarAutoCrop.request(target)
     )
     this.dependencies.videoQueue.setCheckpointPort(this.dependencies.checkpoints)
     this.dependencies.actressQueue.setCheckpointPort(this.dependencies.checkpoints)
   }
 
   rendererDisconnected(): void {
-    this.avatarAutoCropBatchToken = null
-    for (const [requestId, pending] of this.pendingAvatarAutoCrops) {
-      clearTimeout(pending.timeout)
-      this.pendingAvatarAutoCrops.delete(requestId)
-      pending.resolve({ status: 'failed', message: '应用窗口不可用' })
-    }
+    this.avatarAutoCrop.rendererDisconnected()
   }
 
   requestAvatarAutoCrop(
     target: ActressAvatarAutoCropTarget
   ): Promise<ActressAvatarAutoCropOutcome> {
-    if (!this.dependencies.rendererAvailable()) {
-      return Promise.resolve({ status: 'failed', message: '应用窗口不可用' })
-    }
-    const requestId = this.dependencies.randomId()
-    return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        this.pendingAvatarAutoCrops.delete(requestId)
-        resolve({ status: 'failed', message: '智能构图等待超时' })
-      }, this.dependencies.autoCropTimeoutMs)
-      this.pendingAvatarAutoCrops.set(requestId, { resolve, timeout })
-      this.dependencies.emit(IPC.ACTRESS_AVATAR_AUTO_CROP_REQUEST, { ...target, requestId })
-    })
+    return this.avatarAutoCrop.request(target)
   }
 
   completeAvatarAutoCrop(response: ActressAvatarAutoCropResponse): boolean {
-    const pending = this.pendingAvatarAutoCrops.get(response.requestId)
-    if (!pending) return false
-    clearTimeout(pending.timeout)
-    this.pendingAvatarAutoCrops.delete(response.requestId)
-    pending.resolve({ status: response.status, message: response.message })
-    return true
+    return this.avatarAutoCrop.complete(response)
   }
 
   async scrapeOneVideo(
@@ -226,7 +212,7 @@ export class ScrapeJobController {
       ) {
         const actress = this.dependencies.getActress(actressId)
         if (actress) {
-          await this.requestAvatarAutoCrop({ actressId, mainName: actress.main_name })
+          await this.avatarAutoCrop.request({ actressId, mainName: actress.main_name })
         }
       }
       return result
@@ -360,29 +346,28 @@ export class ScrapeJobController {
   }
 
   beginAvatarAutoCropBatch(): string {
-    this.assertCanStartNewBatch()
-    const token = this.dependencies.randomId()
-    this.avatarAutoCropBatchToken = token
-    return token
+    return this.avatarAutoCrop.beginBatch()
   }
 
   endAvatarAutoCropBatch(token: string): boolean {
-    if (token !== this.avatarAutoCropBatchToken) return false
-    this.avatarAutoCropBatchToken = null
-    return true
+    return this.avatarAutoCrop.endBatch(token)
   }
 
-  private assertCanStartNewBatch(): void {
-    if (this.avatarAutoCropBatchToken) {
-      throw new Error('批量智能构图正在进行中，请完成或停止后再试')
-    }
+  private assertQueuesIdleForNewBatch(): void {
     this.dependencies.assertBatchAvailable()
     if (this.dependencies.videoQueue.isRunning()) throw new Error('影片批量更新已在进行中')
     if (this.dependencies.actressQueue.isRunning()) throw new Error('演员批量刮削已在进行中')
   }
 
+  private assertCanStartNewBatch(): void {
+    if (this.avatarAutoCrop.hasActiveBatch()) {
+      throw new Error('批量智能构图正在进行中，请完成或停止后再试')
+    }
+    this.assertQueuesIdleForNewBatch()
+  }
+
   private assertCanResumeBatch(): void {
-    if (this.avatarAutoCropBatchToken) {
+    if (this.avatarAutoCrop.hasActiveBatch()) {
       throw new Error('批量智能构图正在进行中，请完成或停止后再试')
     }
     if (this.dependencies.coordinator.isRunning()) {
@@ -420,14 +405,8 @@ export function createDefaultScrapeJobController(
     countActresses: estimateActressBatchScrapeTargetCount,
     resolveVideoFieldSources: resolveVideoScrapeFieldSources,
     checkpoints: defaultBatchScrapeCheckpoints,
-    ...boundary,
-    ...defaultScrapeJobControllerRuntime
+    ...boundary
   })
-}
-
-export const defaultScrapeJobControllerRuntime = {
-  randomId: randomUUID,
-  autoCropTimeoutMs: 5_000
 }
 
 const defaultBatchScrapeCheckpoints: BatchScrapeCheckpointPort = {

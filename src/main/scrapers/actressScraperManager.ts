@@ -1,6 +1,12 @@
 import type { BaseActressScraper } from './BaseActressScraper'
-import type { ActressScrapeDisposition, ActressScrapeResult, ActressScrapeField, ActressScrapeUpdateMode } from '@shared/scrapeTypes'
-import { ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/scrapeTypes'
+import type {
+  ActressScrapeDisposition,
+  ActressScrapeResult,
+  ActressScrapeField,
+  ActressScrapeUpdateMode
+} from '@shared/actressScrapeTypes'
+import { ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/actressScrapeTypes'
+import type { ScraperPluginDescriptor } from '@shared/scraperPluginTypes'
 import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import {
   getActressDetail,
@@ -14,6 +20,7 @@ import {
 } from '../services/actressIdentityConflictWorkflow'
 import { getSettings } from '../settings/settingsStore'
 import { scrapeBrowser } from './scrapeBrowser'
+import { buildPluginRegistry, runCompositeFieldGroups } from './compositeScrapeRun'
 import {
   findCompositeScraper,
   listMergedPluginDescriptors,
@@ -22,19 +29,9 @@ import {
   loadUserActressScrapers
 } from './scraperPluginService'
 import { normalizeActressScrapeResult } from './scraperResultValidation'
-import type { ScraperPluginDescriptor } from '@shared/scrapeTypes'
 
 function buildRegistry(): Map<string, BaseActressScraper> {
-  const registry = new Map<string, BaseActressScraper>()
-  for (const scraper of loadUserActressScrapers()) {
-    registry.set(scraper.scraperName, scraper)
-  }
-  for (const scraper of loadBundledActressScrapers()) {
-    if (!registry.has(scraper.scraperName)) {
-      registry.set(scraper.scraperName, scraper)
-    }
-  }
-  return registry
+  return buildPluginRegistry(loadUserActressScrapers, loadBundledActressScrapers)
 }
 
 export function listActressScraperNames(): string[] {
@@ -127,37 +124,22 @@ async function scrapeCompositeActress(
 ): Promise<CompositeActressScrapeOutcome> {
   const composite = findCompositeScraper('actress', compositeName)
   if (!composite) return { result: null, warnings: [], matchedFields: [] }
-  const grouped = new Map<string, ActressScrapeField[]>()
-  for (const field of fields) {
-    const pluginName = composite.fieldPluginMap[field]
-    if (!pluginName) continue
-    grouped.set(pluginName, [...(grouped.get(pluginName) ?? []), field])
-  }
-  let merged: ActressScrapeResult | null = null
-  let failedSources = 0
-  const warnings: string[] = []
-  const matchedFields = new Set<ActressScrapeField>()
-  for (const [pluginName, pluginFields] of grouped) {
-    try {
+  return runCompositeFieldGroups<ActressScrapeField, ActressScrapeResult>({
+    fieldPluginMap: composite.fieldPluginMap,
+    fields,
+    onPluginError: 'collect',
+    runPlugin: async (pluginName) => {
       const scraper = getActressScraper(pluginName)
       const rawResult = delayController
         ? await delayController.run('actress', pluginName, () =>
             scraper.parseTask(queryName, aliases, proxyUrl)
           )
         : await scraper.parseTask(queryName, aliases, proxyUrl)
-      const result = normalizeActressScrapeResult(rawResult)
-      if (!result) continue
-      for (const field of pluginFields) matchedFields.add(field)
-      merged = mergeActressResults(merged, pickActressFields(result, new Set(pluginFields)))
-    } catch (error) {
-      failedSources += 1
-      warnings.push(`字段源「${pluginName}」失败：${(error as Error).message}`)
-    }
-  }
-  if (grouped.size > 0 && failedSources === grouped.size) {
-    throw new Error(warnings.join('；'))
-  }
-  return { result: merged, warnings, matchedFields: [...matchedFields] }
+      return normalizeActressScrapeResult(rawResult)
+    },
+    pick: (result, pluginFields) => pickActressFields(result, new Set(pluginFields)),
+    merge: mergeActressResults
+  })
 }
 
 function dedupeActressNameList(names: string[]): string[] {

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
 import { Inbox, Pencil, SearchX } from 'lucide-react'
-import type { PlaylistDetail, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoSortDir } from '@shared/playlistTypes'
+import type { SortDir } from '@shared/commonTypes'
+import type { PlaylistDetail, PlaylistUpdateInput, PlaylistVideoSortBy } from '@shared/playlistTypes'
 import type { Video } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
 import { navigateToPlaylistList } from '../listView/listNavigation'
@@ -42,7 +43,7 @@ export default function PlaylistDetailPage(): JSX.Element {
   const [videoRemoveTarget, setVideoRemoveTarget] = useState<Video | null>(null)
   const [removingVideoId, setRemovingVideoId] = useState<number | null>(null)
   const [videoSortBy, setVideoSortBy] = useState<PlaylistVideoSortBy>('added_at')
-  const [videoSortDir, setVideoSortDir] = useState<PlaylistVideoSortDir>('desc')
+  const [videoSortDir, setVideoSortDir] = useState<SortDir>('desc')
 
   const dismissOverlays = useCallback(() => {
     setShowEdit(false)

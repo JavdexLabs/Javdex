@@ -6,8 +6,7 @@ import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { findActressByNameOrAlias, getActressDetail } from '../db/actressRepo'
 import { insertTestVideoWithFile } from '../db/testVideoFixtures'
-import { createActressApplicationService } from './actressApplicationService'
-import type { ActressFaceScanManifestItem, ActressListItem } from '@shared/actressTypes'
+import { createActressMaintenanceService } from './actressMaintenanceService'
 
 let tempRoot: string | null = null
 const PNG_1X1 = Buffer.from(
@@ -16,7 +15,7 @@ const PNG_1X1 = Buffer.from(
 )
 
 function setupDb(): void {
-  tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-actress-application-'))
+  tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-actress-maintenance-'))
   process.env.JAVDEX_TEST_USER_DATA = tempRoot
   initDatabaseAtPath(path.join(tempRoot, 'library.db'))
   const db = getDb()
@@ -63,109 +62,11 @@ afterEach(() => {
   }
 })
 
-describe('actressApplicationService.listActresses', () => {
-  it('returns a stable page and the full matching total from the real database', () => {
-    setupDb()
-    const service = createActressApplicationService()
-
-    const first = service.listActresses({ gender: 'all', sortBy: 'video_count', limit: 1, offset: 0 })
-    const second = service.listActresses({ gender: 'all', sortBy: 'video_count', limit: 1, offset: 1 })
-
-    assert.equal(first.total, 2)
-    assert.equal(second.total, 2)
-    assert.deepEqual(first.items.map((item) => item.main_name), ['Alpha'])
-    assert.deepEqual(second.items.map((item) => item.main_name), ['Beta'])
-  })
-
-  it('reuses one exact avatar-filter snapshot across subsequent pages', () => {
-    let reads = 0
-    const items = [1, 2, 3].map(
-      (id) => ({ id, main_name: `Actress ${id}` }) as ActressListItem
-    )
-    const service = createActressApplicationService({
-      inspectImage: () => ({ usable: true, fingerprint: 'test' }),
-      listPage: () => {
-        reads += 1
-        return {
-          items,
-          total: items.length,
-          statusCounts: { all: 3, success: 0, unscraped: 3, failed: 0 }
-        }
-      }
-    })
-
-    const first = service.listActresses({ avatar: 'with', limit: 2, offset: 0 })
-    const second = service.listActresses({ avatar: 'with', limit: 2, offset: 2 })
-
-    assert.equal(reads, 1)
-    assert.deepEqual(first.items.map((item) => item.id), [1, 2])
-    assert.deepEqual(second.items.map((item) => item.id), [3])
-  })
-
-  it('refreshes the avatar-filter snapshot whenever the first page reloads', () => {
-    let reads = 0
-    const service = createActressApplicationService({
-      inspectImage: () => ({ usable: false, fingerprint: null }),
-      listPage: () => {
-        reads += 1
-        const item = { id: reads, main_name: `Read ${reads}` } as ActressListItem
-        return {
-          items: [item],
-          total: 1,
-          statusCounts: { all: 1, success: 0, unscraped: 1, failed: 0 }
-        }
-      }
-    })
-
-    const first = service.listActresses({ avatar: 'without', limit: 1, offset: 0 })
-    const refreshed = service.listActresses({ avatar: 'without', limit: 1, offset: 0 })
-
-    assert.equal(reads, 2)
-    assert.equal(first.items[0]?.id, 1)
-    assert.equal(refreshed.items[0]?.id, 2)
-  })
-
-  it('inspects avatar health and fingerprints outside the database repository', () => {
-    setupDb()
-    const service = createActressApplicationService()
-
-    const withAvatar = service.listActresses({ gender: 'all', avatar: 'with', limit: 10 })
-    const withoutAvatar = service.listActresses({ gender: 'all', avatar: 'without', limit: 10 })
-
-    assert.deepEqual(withAvatar.items.map((item) => item.main_name), ['Alpha'])
-    assert.ok(withAvatar.items[0]?.avatar_fingerprint)
-    assert.deepEqual(withoutAvatar.items.map((item) => item.main_name), ['Beta'])
-    assert.deepEqual(withAvatar.statusCounts, {
-      all: 1,
-      success: 0,
-      unscraped: 1,
-      failed: 0
-    })
-  })
-})
-
-describe('actressApplicationService.listFaceScanManifest', () => {
-  it('exposes the dedicated minimal manifest through the application boundary', () => {
-    const manifest: ActressFaceScanManifestItem[] = [{
-      id: 7,
-      main_name: 'Face Candidate',
-      avatar_path: 'avatars/7.jpg',
-      avatar_fingerprint: 'fingerprint-7'
-    }]
-    const service = createActressApplicationService({
-      listFaceScanCandidates: () => manifest.map(({ avatar_fingerprint: _, ...candidate }) => candidate),
-      inspectImage: () => ({ usable: true, fingerprint: 'fingerprint-7' })
-    })
-
-    assert.deepEqual(service.listFaceScanManifest(), manifest)
-  })
-})
-
-describe('actressApplicationService.importGalleryImage', () => {
+describe('actressMaintenanceService.importGalleryImage', () => {
   it('runs legacy dimension repair as part of the explicit gallery write flow', async () => {
     const calls: Array<number | undefined> = []
     const asset = { id: 9, actress_id: 7 } as never
-    const service = createActressApplicationService({
+    const service = createActressMaintenanceService({
       importGalleryImage: async () => asset,
       repairGalleryDimensions: (_database, actressId) => {
         calls.push(actressId)
@@ -178,10 +79,10 @@ describe('actressApplicationService.importGalleryImage', () => {
   })
 })
 
-describe('actressApplicationService.deleteActresses', () => {
+describe('actressMaintenanceService.deleteActresses', () => {
   it('deletes the complete batch and cleans stored resources', () => {
     setupDb()
-    const service = createActressApplicationService()
+    const service = createActressMaintenanceService()
 
     const result = service.deleteActresses({ ids: [1, 2, 2], mode: 'only-unlinked' })
 
@@ -204,7 +105,7 @@ describe('actressApplicationService.deleteActresses', () => {
     const db = getDb()
     db.prepare("INSERT INTO videos (code, title) VALUES ('SAFE-001', 'Linked')").run()
     db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (1, 1)').run()
-    const service = createActressApplicationService()
+    const service = createActressMaintenanceService()
 
     assert.throws(
       () => service.deleteActresses({ ids: [1, 2], mode: 'only-unlinked' }),
@@ -216,7 +117,7 @@ describe('actressApplicationService.deleteActresses', () => {
 
   it('reports resource cleanup failures after the database transaction commits', () => {
     setupDb()
-    const service = createActressApplicationService({
+    const service = createActressMaintenanceService({
       deleteStoredAsset: (assetPath) => {
         if (assetPath === 'avatar_sources/alpha.jpg') throw new Error('file is locked')
       }
@@ -243,7 +144,7 @@ describe('actressApplicationService.deleteActresses', () => {
         SELECT RAISE(ABORT, 'forced actress delete failure');
       END;
     `)
-    const service = createActressApplicationService()
+    const service = createActressMaintenanceService()
 
     assert.throws(
       () => service.deleteActresses({ ids: [1, 2], mode: 'only-unlinked' }),
@@ -262,7 +163,7 @@ describe('actressApplicationService.deleteActresses', () => {
     db.prepare("INSERT INTO videos (code, title) VALUES ('IMPACT-002', 'Two')").run()
     db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (1, 1), (2, 1)').run()
 
-    assert.deepEqual(createActressApplicationService().previewDelete({ ids: [1, 2, 2] }), {
+    assert.deepEqual(createActressMaintenanceService().previewDelete({ ids: [1, 2, 2] }), {
       actressCount: 2,
       linkedActressCount: 1,
       affectedVideoCount: 2
@@ -281,7 +182,7 @@ describe('actressApplicationService.deleteActresses', () => {
       addTime: '2024-01-01'
     })
     db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (1, 1)').run()
-    const service = createActressApplicationService()
+    const service = createActressMaintenanceService()
 
     const result = service.deleteActresses({
       ids: [1, 2],
@@ -312,7 +213,7 @@ describe('actressApplicationService.deleteActresses', () => {
     `)
 
     assert.throws(
-      () => createActressApplicationService().deleteActresses({
+      () => createActressMaintenanceService().deleteActresses({
         ids: [1, 2],
         mode: 'unlink-videos-and-delete'
       }),
@@ -336,7 +237,7 @@ describe('actressApplicationService.deleteActresses', () => {
     insertPending.run(1, 'Alpha')
     insertPending.run(2, 'Beta')
 
-    createActressApplicationService().deleteActresses({
+    createActressMaintenanceService().deleteActresses({
       ids: [1],
       mode: 'only-unlinked'
     })
@@ -356,7 +257,7 @@ describe('actressApplicationService.deleteActresses', () => {
   it('rejects an unknown delete mode instead of falling through to a destructive path', () => {
     setupDb()
     assert.throws(
-      () => createActressApplicationService().deleteActresses({
+      () => createActressMaintenanceService().deleteActresses({
         ids: [1],
         mode: 'force' as never
       }),

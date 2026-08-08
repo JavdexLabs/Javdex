@@ -10,7 +10,7 @@ import {
   findActressByNameOrAlias,
   getActressDetail
 } from '../db/actressRepo'
-import { createActressApplicationService } from './actressApplicationService'
+import { createActressMaintenanceService } from './actressMaintenanceService'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import {
   ActressIdentityConflictWorkflow,
@@ -2507,7 +2507,7 @@ describe('ActressIdentityConflictWorkflow', () => {
       workflow.listConflictGroups()[0].candidates[0].resources[0].stagedPath
     )
 
-    createActressApplicationService().deleteActresses({
+    createActressMaintenanceService().deleteActresses({
       ids: [targetId],
       mode: 'only-unlinked'
     })

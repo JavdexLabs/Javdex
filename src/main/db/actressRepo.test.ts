@@ -37,7 +37,7 @@ import {
   setActressAvatarBundle,
   upsertActressFromScrapeWithAssets as upsertActressFromScrape
 } from '../services/actressAssetService'
-import { avatarSourceFingerprint, readImageDimensionsFromRelPath } from '../services/assetService'
+import { mediaAssetStore } from '../services/mediaAssetStore'
 import { findActressIdByOwnedName } from './actressNameOwnership'
 
 let tempRoot: string | null = null
@@ -1109,7 +1109,7 @@ describe('actressRepo.clearBrokenActressAvatarIfNeeded', () => {
   it('clears broken avatar source and crop while keeping a usable display avatar', () => {
     setupDb()
     const db = getDb()
-    const fingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+    const fingerprint = mediaAssetStore.fingerprint(MINIMAL_JPEG)
     db.prepare(
       `UPDATE actresses
        SET avatar_source_path = ?, avatar_crop_json = ?
@@ -1149,14 +1149,14 @@ describe('actressRepo.getActressAvatarSourceInfo', () => {
 
     assert.deepEqual(getActressAvatarSourceInfo(1), {
       assetPath: 'avatars/complete.jpg',
-      sourceFingerprint: avatarSourceFingerprint(MINIMAL_JPEG),
+      sourceFingerprint: mediaAssetStore.fingerprint(MINIMAL_JPEG),
       requiresSourceAdoption: true
     })
   })
 
   it('prefers the saved original source after an avatar bundle is created', () => {
     setupDb()
-    const fingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+    const fingerprint = mediaAssetStore.fingerprint(MINIMAL_JPEG)
     setActressAvatarBundle(2, 'Missing Female', {
       displayImageBase64: MINIMAL_JPEG.toString('base64'),
       sourceImageBase64: MINIMAL_JPEG.toString('base64'),
@@ -1182,7 +1182,7 @@ describe('actressRepo.setActressAvatarBundle', () => {
     const db = getDb()
     const displayImageBase64 = MINIMAL_JPEG.toString('base64')
     const sourceImageBase64 = MINIMAL_JPEG.toString('base64')
-    const sourceFingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+    const sourceFingerprint = mediaAssetStore.fingerprint(MINIMAL_JPEG)
 
     setActressAvatarBundle(1, 'Complete', {
       displayImageBase64,
@@ -1267,7 +1267,7 @@ describe('actressRepo.setActressAvatarBundle', () => {
   it('repairs an existing source whose stored extension does not match its bytes', () => {
     setupDb()
     const db = getDb()
-    const sourceFingerprint = avatarSourceFingerprint(WEBP_CONTAINER)
+    const sourceFingerprint = mediaAssetStore.fingerprint(WEBP_CONTAINER)
     writeTestAsset('avatars/mislabeled.jpg', WEBP_CONTAINER)
     db.prepare(
       `UPDATE actresses
@@ -1306,7 +1306,7 @@ describe('actressRepo.setActressAvatarBundle', () => {
 
   it('rejects invalid display bytes before writing the avatar bundle', () => {
     setupDb()
-    const sourceFingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+    const sourceFingerprint = mediaAssetStore.fingerprint(MINIMAL_JPEG)
 
     assert.throws(
       () =>
@@ -1333,7 +1333,7 @@ describe('actressRepo.setActressAvatarBundle', () => {
       displayImageBase64: MINIMAL_JPEG.toString('base64'),
       sourceImageBase64: MINIMAL_JPEG.toString('base64'),
       crop: createAvatarCropV1({
-        sourceFingerprint: avatarSourceFingerprint(MINIMAL_JPEG),
+        sourceFingerprint: mediaAssetStore.fingerprint(MINIMAL_JPEG),
         zoom: 1,
         offsetX: 0,
         offsetY: 0
@@ -1393,7 +1393,7 @@ describe('actressRepo cumulative scrape status maintenance invariants', () => {
         displayImageBase64: MINIMAL_JPEG.toString('base64'),
         sourceImageBase64: MINIMAL_JPEG.toString('base64'),
         crop: createAvatarCropV1({
-          sourceFingerprint: avatarSourceFingerprint(MINIMAL_JPEG),
+          sourceFingerprint: mediaAssetStore.fingerprint(MINIMAL_JPEG),
           zoom: 1.4,
           offsetX: 2,
           offsetY: -2
@@ -1486,7 +1486,7 @@ describe('actressRepo.backfillActressGalleryAssetDimensions', () => {
       backfillActressGalleryAssetDimensions(
         db,
         1,
-        (assetPath) => readImageDimensionsFromRelPath(assetPath)
+        (assetPath) => mediaAssetStore.readStoredImageDimensions(assetPath)
       ),
       1
     )
@@ -1971,7 +1971,7 @@ describe('actressRepo.applyActressScrapeResult', () => {
   it('replace keeps manual crop when scraped avatar bytes match existing source', () => {
     setupDb()
     const db = getDb()
-    const sourceFingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+    const sourceFingerprint = mediaAssetStore.fingerprint(MINIMAL_JPEG)
     setActressAvatarBundle(1, 'Complete', {
       displayImageBase64: MINIMAL_JPEG.toString('base64'),
       sourceImageBase64: MINIMAL_JPEG.toString('base64'),
@@ -2043,7 +2043,7 @@ describe('actressRepo.applyActressScrapeResult', () => {
   it('replace adopts a new avatar when scraped bytes differ from existing source', () => {
     setupDb()
     const db = getDb()
-    const sourceFingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+    const sourceFingerprint = mediaAssetStore.fingerprint(MINIMAL_JPEG)
     setActressAvatarBundle(1, 'Complete', {
       displayImageBase64: MINIMAL_JPEG.toString('base64'),
       sourceImageBase64: MINIMAL_JPEG.toString('base64'),

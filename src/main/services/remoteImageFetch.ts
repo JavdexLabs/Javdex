@@ -2,10 +2,10 @@ import path from 'node:path'
 import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import { scrapeBrowser } from '../scrapers/scrapeBrowser'
 import { getSettings } from '../settings/settingsStore'
-import { readImageDimensionsFromBuffer } from './assetService'
+import { mediaAssetStore } from './mediaAssetStore'
 
 function isValidImageBuffer(buf: Buffer): boolean {
-  return buf.length > 0 && readImageDimensionsFromBuffer(buf) != null
+  return buf.length > 0 && mediaAssetStore.readImageDimensions(buf) != null
 }
 
 async function tryFetch(

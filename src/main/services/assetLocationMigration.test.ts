@@ -7,7 +7,7 @@ import { closeDatabase, initDatabaseAtPath } from '../db/database'
 import { encryptPlain, resetAssetKeyCacheForTests } from './assetCrypto'
 import { migrateMediaAssetsLocation } from './assetLocationMigration'
 import { ASSET_PATH_ALIAS_FILENAME } from './assetPathAliases'
-import { coversDir, ensureAssetDirs } from './assetService'
+import { mediaAssetStore } from './mediaAssetStore'
 import { defaultMediaAssetsRoot, ensureMediaAssetDirsAt } from './assetStoragePaths'
 import { resetSettingsCacheForTests, updateSettings } from '../settings/settingsStore'
 
@@ -26,7 +26,7 @@ beforeEach(() => {
   process.env.JAVDEX_TEST_USER_DATA = tempRoot
   initDatabaseAtPath(path.join(tempRoot, 'library.db'))
   updateSettings({ mediaAssetsPath: oldRoot! })
-  ensureAssetDirs()
+  mediaAssetStore.ensureReady()
 })
 
 afterEach(() => {
@@ -44,8 +44,8 @@ describe('assetLocationMigration', () => {
   it('moves plain and encrypted files including alias store', async () => {
     const plainName = 'IPX-535_ab12cd34.jpg'
     const encName = 'a1b2c3d4e5f67890.enc'
-    fs.writeFileSync(path.join(coversDir(), plainName), MIN_JPEG)
-    fs.writeFileSync(path.join(coversDir(), encName), encryptPlain(MIN_JPEG, '.jpg'))
+    fs.writeFileSync(path.join(mediaAssetStore.subdirPath('covers'), plainName), MIN_JPEG)
+    fs.writeFileSync(path.join(mediaAssetStore.subdirPath('covers'), encName), encryptPlain(MIN_JPEG, '.jpg'))
     fs.writeFileSync(
       path.join(oldRoot!, ASSET_PATH_ALIAS_FILENAME),
       encryptPlain(Buffer.from(JSON.stringify({ [`covers/${encName}`]: `covers/${plainName}` })), '.json')
@@ -61,7 +61,7 @@ describe('assetLocationMigration', () => {
   })
 
   it('maps default path setting when relocating back to userData', async () => {
-    fs.writeFileSync(path.join(coversDir(), 'sample.jpg'), MIN_JPEG)
+    fs.writeFileSync(path.join(mediaAssetStore.subdirPath('covers'), 'sample.jpg'), MIN_JPEG)
     const defaultRoot = defaultMediaAssetsRoot()
     const customRoot = path.join(tempRoot!, 'custom_assets')
     fs.mkdirSync(customRoot, { recursive: true })
@@ -73,7 +73,7 @@ describe('assetLocationMigration', () => {
   })
 
   it('allows relocating back to default when only empty asset subfolders remain', async () => {
-    fs.writeFileSync(path.join(coversDir(), 'sample.jpg'), MIN_JPEG)
+    fs.writeFileSync(path.join(mediaAssetStore.subdirPath('covers'), 'sample.jpg'), MIN_JPEG)
     const defaultRoot = defaultMediaAssetsRoot()
     const customRoot = path.join(tempRoot!, 'custom_assets')
     fs.mkdirSync(customRoot, { recursive: true })

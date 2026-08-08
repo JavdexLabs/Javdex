@@ -5,7 +5,7 @@ import { applyAppIcons, resolveWindowIcon } from './appIcon'
 import { configureAppIdentity } from './appPaths'
 import fs from 'node:fs'
 import { initDatabaseAtPath, closeDatabase } from './db/database'
-import { ensureAssetDirs, assetsRoot, readAssetForServe } from './services/assetService'
+import { mediaAssetStore } from './services/mediaAssetStore'
 import { registerIpcHandlers } from './ipc'
 import { scrapeBrowser } from './scrapers/scrapeBrowser'
 import { migrateUserPluginsAwayFromBuiltInNames } from './scrapers/scraperPluginService'
@@ -89,7 +89,7 @@ function createWindow(): void {
 /** Serve files from the media_assets directory through the media:// scheme. */
 function registerAssetProtocol(): void {
   protocol.handle('media', (request) => {
-    const root = assetsRoot()
+    const root = mediaAssetStore.rootPath()
     const abs = resolveMediaAssetPath(request.url, root)
 
     const corsHeaders = {
@@ -105,7 +105,7 @@ function registerAssetProtocol(): void {
     }
     try {
       const relPosix = toStoredAssetPath(abs, root)
-      const { body, mime } = readAssetForServe(relPosix)
+      const { body, mime } = mediaAssetStore.readForServe(relPosix)
       return new Response(body, {
         headers: { 'Content-Type': mime, ...corsHeaders }
       })
@@ -121,7 +121,7 @@ if (gotSingleInstanceLock) {
     const databaseDir = path.join(app.getPath('userData'), 'data')
     fs.mkdirSync(databaseDir, { recursive: true })
     initDatabaseAtPath(path.join(databaseDir, 'library.db'))
-    ensureAssetDirs()
+    mediaAssetStore.ensureReady()
     cleanupOrphanedActressScrapeStaging()
     migrateUserPluginsAwayFromBuiltInNames()
     registerAssetProtocol()

@@ -1,68 +1,89 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import crypto from 'node:crypto'
 import {
   assetsRoot,
-  avatarSourceFingerprint,
-  downloadActressGalleryImage,
-  downloadAvatar,
-  downloadCover,
-  downloadSamples,
   deleteAssetOrThrow,
-  detectImageExtensionFromBuffer,
+  ensureAssetDirs,
   importAvatarDisplayFromBuffer,
   importAvatarFromFile,
   importAvatarSourceFromBuffer,
   importActressGalleryFromFile,
   importCoverFromFile,
+  importPlaylistCoverFromFile,
   importSampleFromFile,
-  inspectImageAsset,
-  isUsableImageBuffer,
-  isUsableImageAsset,
   readAssetBytes,
   readAssetForServe,
+  resolveAssetPath
+} from './mediaAssetStore/filesystem'
+import {
+  avatarSourceFingerprint,
+  detectImageExtensionFromBuffer,
+  inspectImageAsset,
+  isUsableImageAsset,
+  isUsableImageBuffer,
   readImageDimensionsFromBuffer,
   readImageDimensionsFromPath,
-  readImageDimensionsFromRelPath,
-  resolveAssetPath,
-  storeScrapedActressAvatar,
-  storeScrapedActressGalleryImage,
-  type AssetFetcher,
-  type DownloadedImageAsset
-} from './assetService'
+  readImageDimensionsFromRelPath
+} from './mediaAssetStore/inspection'
+import {
+  cleanupActressScrapeStagingPaths as cleanupActressScrapeStagingPathsImpl,
+  cleanupOrphanedActressScrapeStaging as cleanupOrphanedActressScrapeStagingImpl,
+  downloadActressGalleryImage as downloadActressGalleryImageImpl,
+  downloadAvatar as downloadAvatarImpl,
+  downloadCover as downloadCoverImpl,
+  downloadSamples as downloadSamplesImpl,
+  readActressScrapeStagedImage as readActressScrapeStagedImageImpl,
+  stageActressScrapeImages as stageActressScrapeImagesImpl,
+  storeScrapedActressAvatar as storeScrapedActressAvatarImpl,
+  storeScrapedActressGalleryImage as storeScrapedActressGalleryImageImpl,
+  type ActressScrapeStagingInput,
+  type StagedActressScrapeImage
+} from './mediaAssetStore/download'
+import type { AssetFetcher, DownloadedImageAsset } from './mediaAssetStore/types'
 import { mimeFromExt } from './assetCrypto'
 
-const ACTRESS_SCRAPE_STAGING_DIRNAME = '.actress_scrape_staging'
-const DEFAULT_STAGING_ORPHAN_SAFETY_AGE_MS = 24 * 60 * 60 * 1000
+export type { AssetFetcher, DownloadedImageAsset }
+export type { ActressScrapeStagingInput, StagedActressScrapeImage }
 
-export interface ActressScrapeStagingInput {
-  field: 'avatar' | 'gallery'
-  position: number
-  remoteUrl?: string
-  data: Buffer
-  width?: number | null
-  height?: number | null
-}
+/** Stable media-asset layout directories under the media root. */
+export type MediaAssetSubdir =
+  | 'covers'
+  | 'avatars'
+  | 'actress_gallery'
+  | 'samples'
+  | 'playlist_covers'
 
-export interface StagedActressScrapeImage {
-  field: 'avatar' | 'gallery'
-  position: number
-  remoteUrl?: string
-  stagedPath: string
-  width: number | null
-  height: number | null
-}
+const MEDIA_ASSET_SUBDIRS = new Set<MediaAssetSubdir>([
+  'covers',
+  'avatars',
+  'actress_gallery',
+  'samples',
+  'playlist_covers'
+])
 
 /**
- * Concrete boundary for media files owned by Javdex.
+ * Deep module for media files owned by Javdex.
  *
- * Database repositories receive this capability through a port and therefore
- * never resolve paths or touch the file system directly. Application services
- * remain responsible for deciding when resource work happens relative to a
- * database transaction.
+ * Callers only learn the resource lifecycle and domain imports. Filesystem,
+ * inspection, and download/staging live as private internal adapters.
  */
 export class MediaAssetStore {
   private activeChange: { created: Set<string>; obsolete: Set<string> } | null = null
+
+  ensureReady(): void {
+    ensureAssetDirs()
+  }
+
+  rootPath(): string {
+    return assetsRoot()
+  }
+
+  subdirPath(kind: MediaAssetSubdir): string {
+    if (!MEDIA_ASSET_SUBDIRS.has(kind)) {
+      throw new Error(`Unknown media asset subdirectory: ${kind}`)
+    }
+    return path.join(this.rootPath(), kind)
+  }
 
   resolve(storedPath: string): string {
     return resolveAssetPath(storedPath)
@@ -112,6 +133,10 @@ export class MediaAssetStore {
     return this.registerCreated(importCoverFromFile(code, sourcePath))
   }
 
+  importPlaylistCover(name: string, sourcePath: string): string {
+    return this.registerCreated(importPlaylistCoverFromFile(name, sourcePath))
+  }
+
   importSample(code: string, sourcePath: string): string {
     return this.registerCreated(importSampleFromFile(code, sourcePath))
   }
@@ -121,11 +146,11 @@ export class MediaAssetStore {
   }
 
   async downloadCover(code: string, url: string, fetcher: AssetFetcher): Promise<string | null> {
-    return this.registerCreated(await downloadCover(code, url, fetcher))
+    return this.registerCreated(await downloadCoverImpl(code, url, fetcher))
   }
 
   async downloadAvatar(name: string, url: string, fetcher: AssetFetcher): Promise<string | null> {
-    return this.registerCreated(await downloadAvatar(name, url, fetcher))
+    return this.registerCreated(await downloadAvatarImpl(name, url, fetcher))
   }
 
   async downloadSamples(
@@ -133,13 +158,13 @@ export class MediaAssetStore {
     urls: string[],
     fetcher: AssetFetcher
   ): Promise<Array<string | null>> {
-    const paths = await downloadSamples(code, urls, fetcher)
+    const paths = await downloadSamplesImpl(code, urls, fetcher)
     for (const storedPath of paths) this.registerCreated(storedPath)
     return paths
   }
 
   storeScrapedActressAvatar(name: string, url: string, data: Buffer): string {
-    return this.registerCreated(storeScrapedActressAvatar(name, url, data))
+    return this.registerCreated(storeScrapedActressAvatarImpl(name, url, data))
   }
 
   storeScrapedActressGalleryImage(
@@ -148,7 +173,7 @@ export class MediaAssetStore {
     url: string,
     data: Buffer
   ): DownloadedImageAsset {
-    const result = storeScrapedActressGalleryImage(name, actressId, url, data)
+    const result = storeScrapedActressGalleryImageImpl(name, actressId, url, data)
     this.registerCreated(result.localPath)
     return result
   }
@@ -159,106 +184,28 @@ export class MediaAssetStore {
     fetcher: AssetFetcher,
     actressId?: number | null
   ): Promise<DownloadedImageAsset | null> {
-    const result = await downloadActressGalleryImage(name, url, fetcher, actressId)
+    const result = await downloadActressGalleryImageImpl(name, url, fetcher, actressId)
     if (result) this.registerCreated(result.localPath)
     return result
   }
 
-  private actressScrapeStagingRoot(): string {
-    return path.resolve(assetsRoot(), ACTRESS_SCRAPE_STAGING_DIRNAME)
-  }
-
-  private resolveActressScrapeStagedPath(stagedPath: string): string {
-    const stagingRoot = this.actressScrapeStagingRoot()
-    const absolutePath = path.resolve(assetsRoot(), stagedPath)
-    const relative = path.relative(stagingRoot, absolutePath)
-    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
-      throw new Error('待确认暂存资源路径无效')
-    }
-    return absolutePath
-  }
-
   stageActressScrapeImages(resources: ActressScrapeStagingInput[]): StagedActressScrapeImage[] {
-    if (resources.length === 0) return []
-    const token = crypto.randomUUID()
-    const relativeDir = path.posix.join(ACTRESS_SCRAPE_STAGING_DIRNAME, token)
-    const absoluteDir = path.join(this.actressScrapeStagingRoot(), token)
-    fs.mkdirSync(absoluteDir, { recursive: true })
-    const staged: StagedActressScrapeImage[] = []
-    try {
-      for (const resource of resources) {
-        if (!this.isUsableImageBuffer(resource.data)) throw new Error('暂存资源不是可用图片')
-        const extension = this.detectImageExtension(resource.data) ?? '.jpg'
-        const filename = `${resource.field}-${resource.position}${extension}`
-        fs.writeFileSync(path.join(absoluteDir, filename), resource.data)
-        staged.push({
-          field: resource.field,
-          position: resource.position,
-          ...(resource.remoteUrl?.trim() ? { remoteUrl: resource.remoteUrl.trim() } : {}),
-          stagedPath: path.posix.join(relativeDir, filename),
-          width: resource.width ?? null,
-          height: resource.height ?? null
-        })
-      }
-      return staged
-    } catch (error) {
-      fs.rmSync(absoluteDir, { recursive: true, force: true })
-      throw error
-    }
+    return stageActressScrapeImagesImpl(resources)
   }
 
   readActressScrapeStagedImage(stagedPath: string): Buffer {
-    const data = fs.readFileSync(this.resolveActressScrapeStagedPath(stagedPath))
-    if (!this.isUsableImageBuffer(data)) throw new Error('待确认暂存资源不可用')
-    return data
+    return readActressScrapeStagedImageImpl(stagedPath)
   }
 
   cleanupActressScrapeStagingPaths(stagedPaths: string[]): void {
-    const directories = new Set<string>()
-    for (const stagedPath of stagedPaths) {
-      try {
-        directories.add(path.dirname(this.resolveActressScrapeStagedPath(stagedPath)))
-      } catch {
-        continue
-      }
-    }
-    for (const directory of directories) {
-      try {
-        fs.rmSync(directory, { recursive: true, force: true })
-      } catch (error) {
-        console.error('cleanup staged actress scrape resources failed:', (error as Error).message)
-      }
-    }
+    cleanupActressScrapeStagingPathsImpl(stagedPaths)
   }
 
   cleanupOrphanedActressScrapeStaging(
     referencedPaths: string[],
     options?: { now?: number; olderThanMs?: number }
   ): number {
-    const stagingRoot = this.actressScrapeStagingRoot()
-    if (!fs.existsSync(stagingRoot)) return 0
-    const referencedDirectories = new Set<string>()
-    for (const stagedPath of referencedPaths) {
-      try {
-        referencedDirectories.add(path.dirname(this.resolveActressScrapeStagedPath(stagedPath)))
-      } catch {
-        continue
-      }
-    }
-    const now = options?.now ?? Date.now()
-    const olderThanMs = options?.olderThanMs ?? DEFAULT_STAGING_ORPHAN_SAFETY_AGE_MS
-    let removed = 0
-    for (const entry of fs.readdirSync(stagingRoot, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      const directory = path.resolve(stagingRoot, entry.name)
-      const relative = path.relative(stagingRoot, directory)
-      if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) continue
-      if (referencedDirectories.has(directory)) continue
-      if (now - fs.statSync(directory).mtimeMs < olderThanMs) continue
-      fs.rmSync(directory, { recursive: true, force: true })
-      removed += 1
-    }
-    return removed
+    return cleanupOrphanedActressScrapeStagingImpl(referencedPaths, options)
   }
 
   delete(storedPath: string | null | undefined): void {
@@ -279,26 +226,58 @@ export class MediaAssetStore {
   }
 
   /**
-   * Coordinate resource changes around one synchronous database use case.
+   * Coordinate resource changes around one database use case.
    * New files are compensated when the database operation fails; obsolete
    * files are removed only after the operation commits successfully.
    */
   coordinateDatabaseChange<T>(operation: () => T): T {
+    return this.runCoordinatedChange(operation)
+  }
+
+  async coordinateDatabaseChangeAsync<T>(operation: () => Promise<T>): Promise<T> {
+    return this.runCoordinatedChange(operation)
+  }
+
+  private runCoordinatedChange<T>(operation: () => T): T
+  private runCoordinatedChange<T>(operation: () => Promise<T>): Promise<T>
+  private runCoordinatedChange<T>(operation: () => T | Promise<T>): T | Promise<T> {
     if (this.activeChange) return operation()
     const change = { created: new Set<string>(), obsolete: new Set<string>() }
     this.activeChange = change
     try {
       const result = operation()
-      this.activeChange = null
+      if (result instanceof Promise) {
+        return result.then(
+          (value) => {
+            this.finishCoordinatedChange(change, 'commit')
+            return value
+          },
+          (error) => {
+            this.finishCoordinatedChange(change, 'rollback')
+            throw error
+          }
+        )
+      }
+      this.finishCoordinatedChange(change, 'commit')
+      return result
+    } catch (error) {
+      this.finishCoordinatedChange(change, 'rollback')
+      throw error
+    }
+  }
+
+  private finishCoordinatedChange(
+    change: { created: Set<string>; obsolete: Set<string> },
+    outcome: 'commit' | 'rollback'
+  ): void {
+    if (this.activeChange === change) this.activeChange = null
+    if (outcome === 'commit') {
       for (const storedPath of change.obsolete) {
         if (!change.created.has(storedPath)) this.deleteBestEffort(storedPath)
       }
-      return result
-    } catch (error) {
-      this.activeChange = null
-      for (const storedPath of change.created) this.deleteBestEffort(storedPath)
-      throw error
+      return
     }
+    for (const storedPath of change.created) this.deleteBestEffort(storedPath)
   }
 
   readExternalFile(filePath: string): Buffer {

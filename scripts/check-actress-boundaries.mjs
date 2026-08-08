@@ -179,7 +179,14 @@ for (const file of [
   'src/main/scrapers/scraperManager.ts'
 ]) {
   for (const specifier of importsOf(file)) {
-    if (specifier.endsWith('/assetService') || specifier === './assetService') {
+    if (
+      specifier.endsWith('/assetService') ||
+      specifier === './assetService' ||
+      specifier.endsWith('/mediaAssetStoreFs') ||
+      specifier === './mediaAssetStoreFs' ||
+      specifier.includes('/mediaAssetStore/') ||
+      specifier.startsWith('./mediaAssetStore/')
+    ) {
       violations.push(`${file}: media writes and downloads must go through MediaAssetStore`)
     }
   }

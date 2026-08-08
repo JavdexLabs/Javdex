@@ -1,26 +1,27 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import {
-  assetsRoot,
-  coversDir,
-  avatarsDir,
-  actressGalleryDir,
-  samplesDir,
-  playlistCoversDir
-} from './assetService'
 import { invalidateAssetCache } from './assetCache'
 import type { AssetCryptoProgress } from '@shared/libraryTypes'
 import { encryptPlain, decryptBlob, isEncryptedBlob } from './assetCrypto'
 import { remapAssetPath } from '../db/videoRepo'
-import { buildOpaqueAssetBaseFromPlainRel, isOpaqueEncFilename } from './assetPathNaming'
+import { buildOpaqueAssetBaseFromPlainRel } from './assetPathNaming'
 import {
   clearPathAliasStore,
   getPathAlias,
   removePathAlias,
   setPathAlias
 } from './assetPathAliases'
+import { mediaAssetStore, type MediaAssetSubdir } from './mediaAssetStore'
 
 type ProgressFn = (p: AssetCryptoProgress) => void
+
+const MIGRATION_SUBDIRS: MediaAssetSubdir[] = [
+  'covers',
+  'avatars',
+  'actress_gallery',
+  'samples',
+  'playlist_covers'
+]
 
 function writeAtomic(abs: string, data: Buffer): void {
   const tmp = `${abs}.tmp-${process.pid}`
@@ -29,18 +30,13 @@ function writeAtomic(abs: string, data: Buffer): void {
 }
 
 function toPosixRel(abs: string): string {
-  return path.relative(assetsRoot(), abs).split(path.sep).join('/')
+  return path.relative(mediaAssetStore.rootPath(), abs).split(path.sep).join('/')
 }
 
 function listAssetAbsPaths(): string[] {
   const out: string[] = []
-  for (const dir of [
-    coversDir(),
-    avatarsDir(),
-    actressGalleryDir(),
-    samplesDir(),
-    playlistCoversDir()
-  ]) {
+  for (const kind of MIGRATION_SUBDIRS) {
+    const dir = mediaAssetStore.subdirPath(kind)
     if (!fs.existsSync(dir)) continue
     for (const name of fs.readdirSync(dir)) {
       const abs = path.join(dir, name)
@@ -58,7 +54,7 @@ function filesToMigrate(enable: boolean, files: string[]): string[] {
 }
 
 function resolvePlainAbs(plainRel: string): string {
-  return path.join(assetsRoot(), ...plainRel.split('/'))
+  return path.join(mediaAssetStore.rootPath(), ...plainRel.split('/'))
 }
 
 function opaqueEncRelForPlain(plainRel: string): string {

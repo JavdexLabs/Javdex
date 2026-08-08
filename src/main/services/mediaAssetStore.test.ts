@@ -49,6 +49,15 @@ describe('MediaAssetStore', () => {
     assert.throws(() => mediaAssetStore.resolve(path.resolve('outside.jpg')), /escapes media root/)
   })
 
+  it('exposes bootstrap and layout paths under the media root', () => {
+    const testRoot = setup()
+    mediaAssetStore.ensureReady()
+    const root = mediaAssetStore.rootPath()
+    assert.equal(root, path.join(testRoot, 'media_assets'))
+    assert.equal(mediaAssetStore.subdirPath('covers'), path.join(root, 'covers'))
+    assert.equal(fs.existsSync(mediaAssetStore.subdirPath('playlist_covers')), true)
+  })
+
   it('compensates newly-created resources when the database operation fails', () => {
     setup()
     let createdPath = ''
@@ -77,6 +86,33 @@ describe('MediaAssetStore', () => {
     }), /database failed/)
     assert.equal(fs.existsSync(mediaAssetStore.resolve(coverPath)), false)
     assert.equal(fs.existsSync(mediaAssetStore.resolve(samplePath)), false)
+  })
+
+  it('compensates newly imported playlist covers when a database operation fails', () => {
+    const testRoot = setup()
+    const sourcePath = path.join(testRoot, 'playlist-cover.jpg')
+    fs.writeFileSync(sourcePath, JPEG_1X1)
+    let coverPath = ''
+    assert.throws(() => mediaAssetStore.coordinateDatabaseChange(() => {
+      coverPath = mediaAssetStore.importPlaylistCover('Watch Later', sourcePath)
+      throw new Error('database failed')
+    }), /database failed/)
+    assert.equal(fs.existsSync(mediaAssetStore.resolve(coverPath)), false)
+  })
+
+  it('compensates async downloads when the database operation fails', async () => {
+    setup()
+    let createdPath = ''
+    await assert.rejects(
+      () =>
+        mediaAssetStore.coordinateDatabaseChangeAsync(async () => {
+          createdPath = mediaAssetStore.importAvatarDisplay('测试演员', 9, JPEG_1X1)
+          await Promise.resolve()
+          throw new Error('async database failed')
+        }),
+      /async database failed/
+    )
+    assert.equal(fs.existsSync(mediaAssetStore.resolve(createdPath)), false)
   })
 
   it('deletes obsolete resources only after the database operation succeeds', () => {

@@ -136,7 +136,7 @@ interface VideoScrapeFieldSources {
 
 ### 4. 图片资源先验证、后提交
 
-在 `src/main/services/assetService.ts` 和 `src/main/scrapers/scraperManager.ts` 调整下载流程：
+在 `MediaAssetStore`（`src/main/services/mediaAssetStore.ts` 及其内部 download/filesystem adapter）和 `src/main/scrapers/scraperManager.ts` 调整下载流程：
 
 - `downloadCover`、`downloadSamples` 在落盘前用 `isUsableImageBuffer` 校验响应，HTML、空响应和损坏图片均视为失败。
 - 封面 URL 存在但下载失败时，向计划传入 `resourceUnavailable`。

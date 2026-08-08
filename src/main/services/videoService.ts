@@ -39,20 +39,15 @@ export function editVideo(id: number, input: VideoEditInput): void {
   const video = getVideoById(id)
   if (!video) throw new Error('Video not found')
 
-  const coverRelPath = input.coverSourcePath
-    ? mediaAssetStore.importCover(video.code, input.coverSourcePath)
-    : undefined
-
-  try {
+  mediaAssetStore.coordinateDatabaseChange(() => {
+    const coverRelPath = input.coverSourcePath
+      ? mediaAssetStore.importCover(video.code, input.coverSourcePath)
+      : undefined
     const result = editVideoRecord(id, input, coverRelPath)
     for (const assetPath of result.obsoletePaths) {
       mediaAssetStore.deleteBestEffort(assetPath)
     }
-  } catch (error) {
-    if (coverRelPath) mediaAssetStore.deleteBestEffort(coverRelPath)
-    throw error
-  }
-
+  })
 }
 
 export function clearVideoMetadata(id: number): void {
@@ -78,13 +73,10 @@ export async function importVideoSample(id: number, input: VideoSampleImportInpu
   if (input.source === 'file') {
     const sourcePath = input.sourcePath?.trim()
     if (!sourcePath) throw new Error('请选择本地图片文件')
-    const localPath = mediaAssetStore.importSample(video.code, sourcePath)
-    try {
+    return mediaAssetStore.coordinateDatabaseChange(() => {
+      const localPath = mediaAssetStore.importSample(video.code, sourcePath)
       return addVideoSampleAsset(id, { localPath })
-    } catch (error) {
-      mediaAssetStore.deleteBestEffort(localPath)
-      throw error
-    }
+    })
   }
 
   const rawUrl = input.remoteUrl?.trim()
@@ -99,19 +91,16 @@ export async function importVideoSample(id: number, input: VideoSampleImportInpu
     throw new Error('样张链接仅支持 http/https')
   }
   const remoteUrl = parsed.toString()
-  const buf = await fetchRemoteImageBuffer(remoteUrl)
-  const [localPath] = await mediaAssetStore.downloadSamples(
-    video.code,
-    [remoteUrl],
-    async () => buf
-  )
-  if (!localPath) throw new Error('样张链接下载失败')
-  try {
+  return mediaAssetStore.coordinateDatabaseChangeAsync(async () => {
+    const buf = await fetchRemoteImageBuffer(remoteUrl)
+    const [localPath] = await mediaAssetStore.downloadSamples(
+      video.code,
+      [remoteUrl],
+      async () => buf
+    )
+    if (!localPath) throw new Error('样张链接下载失败')
     return addVideoSampleAsset(id, { remoteUrl, localPath })
-  } catch (error) {
-    mediaAssetStore.deleteBestEffort(localPath)
-    throw error
-  }
+  })
 }
 
 export function deleteVideoSample(id: number, assetId: number): void {

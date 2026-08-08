@@ -1,4 +1,5 @@
-import type { ScrapedStatus } from './commonTypes'
+import type { ScrapedStatus, SortDir } from './commonTypes'
+import type { Video } from './videoTypes'
 export type { ActressAvatarCommit, AvatarCropV1 } from './avatarCrop'
 
 // 0-未刮削, 1-刮削成功, 2-刮削失败
@@ -9,11 +10,9 @@ export type ActressGenderFilter = ActressGender | 'all'
 
 export type ActressListSortBy = 'video_count' | 'gallery' | 'age' | 'cup_size'
 
-export type ListSortDir = 'asc' | 'desc'
-
 export const ACTRESS_LIST_DEFAULTS = {
   sortBy: 'video_count' as ActressListSortBy,
-  sortDir: 'desc' as ListSortDir,
+  sortDir: 'desc' as SortDir,
   gender: 'female' as ActressGenderFilter
 }
 
@@ -78,6 +77,15 @@ export interface ActressListItem extends Actress {
   avatar_fingerprint?: string | null
 }
 
+export interface ActressDetail extends Actress {
+  name_zh: string | null
+  name_en: string | null
+  aliases: string[]
+  names: ActressName[]
+  gallery: ActressGalleryAsset[]
+  videos: Video[]
+}
+
 /** Minimal renderer-session input for local avatar face detection. */
 export interface ActressFaceScanManifestItem {
   id: number
@@ -86,8 +94,14 @@ export interface ActressFaceScanManifestItem {
   avatar_fingerprint: string
 }
 
-/** Canonical actress library status filter vocabulary (also the URL values). */
-export type ActressListStatusFilter = 'all' | 'success' | 'unscraped' | 'failed'
+/**
+ * Canonical cumulative actress scrape-status filter vocabulary (ADR-0003).
+ * Shared by library list URL filters and batch scrape status scope.
+ */
+export type ActressScrapeStatusFilter = 'all' | 'success' | 'unscraped' | 'failed'
+
+/** Actress library list filter; same id set as batch scrape status. */
+export type ActressListStatusFilter = ActressScrapeStatusFilter
 
 /** Actress avatar filter, including the renderer-only local face-detection state. */
 export type ActressAvatarFilter = 'all' | 'with' | 'without' | 'without-face'
@@ -142,7 +156,7 @@ export interface ActressListQuery {
   status?: ActressListStatusFilter
   avatar?: ActressAvatarFilter
   sortBy?: ActressListSortBy
-  sortDir?: ListSortDir
+  sortDir?: SortDir
   limit?: number
   offset?: number
   /** Renderer-session subset used to page already classified local face results. */

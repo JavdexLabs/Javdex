@@ -5,7 +5,7 @@ import {
   ZODIAC_OPTIONS
 } from '@shared/actressProfileOptions'
 import { formatCupSizeDisplay, normalizeCupSize } from '@shared/cupSizeUtils'
-import type { ActressDetail } from '@shared/libraryTypes'
+import type { ActressDetail } from '@shared/actressTypes'
 import type { ScrapedStatus } from '@shared/commonTypes'
 import { ACTRESS_SCRAPE_STATUS_LABELS, actressStatusFilterOf } from '@shared/actressTypes'
 

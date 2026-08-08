@@ -1,5 +1,5 @@
 import type { PluginDevAgentStartInput } from '@shared/pluginDevTypes'
-import type { ScraperPluginKind } from '@shared/scrapeTypes'
+import type { ScraperPluginKind } from '@shared/scraperPluginTypes'
 import { APP_DISPLAY_NAME } from '@shared/appIdentity'
 import {
   buildDynamicSearchRules,

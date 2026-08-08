@@ -4,8 +4,8 @@ import type {
   IpcContractChannel,
   IpcContractResult
 } from './typedIpcContract'
-import type { ActressAvatarSourceInfo, ActressEditInput, ActressFaceScanManifestItem, ActressGalleryAsset, ActressGalleryImportInput, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressMergeInput, ListSortDir } from './actressTypes'
-import type { ActressDetail } from './libraryTypes'
+import type { SortDir } from './commonTypes'
+import type { ActressAvatarSourceInfo, ActressDetail, ActressEditInput, ActressFaceScanManifestItem, ActressGalleryAsset, ActressGalleryImportInput, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressMergeInput } from './actressTypes'
 import type { ActressConflictReviewSummary, ActressNameConflictGroup, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from './actressConflictTypes'
 
 export interface ActressDeleteCleanupFailure {
@@ -38,7 +38,7 @@ export interface ActressIpcContract {
       search?: string,
       gender?: ActressGenderFilter,
       sortBy?: ActressListSortBy,
-      sortDir?: ListSortDir
+      sortDir?: SortDir
     ]
     result: ActressListItem[]
   }

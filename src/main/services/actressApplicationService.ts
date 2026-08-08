@@ -27,9 +27,9 @@ import type {
   ActressDeleteRequest,
   ActressDeleteResult
 } from '@shared/actressIpcContract'
-import type { ActressAvatarSourceInfo, ActressEditInput, ActressFaceScanManifestItem, ActressGalleryAsset, ActressGalleryImportInput, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressMergeInput, ListSortDir } from '@shared/actressTypes'
+import type { ActressAvatarSourceInfo, ActressDetail, ActressEditInput, ActressFaceScanManifestItem, ActressGalleryAsset, ActressGalleryImportInput, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressMergeInput } from '@shared/actressTypes'
+import type { SortDir } from '@shared/commonTypes'
 import { actressStatusFilterOf } from '@shared/actressTypes'
-import type { ActressDetail } from '@shared/libraryTypes'
 import type { ActressConflictReviewSummary, ActressNameConflictGroup, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from '@shared/actressConflictTypes'
 
 export interface ActressApplicationService {
@@ -37,7 +37,7 @@ export interface ActressApplicationService {
     search?: string,
     gender?: ActressGenderFilter,
     sortBy?: ActressListSortBy,
-    sortDir?: ListSortDir
+    sortDir?: SortDir
   ): ActressListItem[]
   listActresses(query?: ActressListQuery): ActressListPage
   listFaceScanManifest(): ActressFaceScanManifestItem[]

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { ScraperPluginDescriptor } from '@shared/scrapeTypes'
+import type { ScraperPluginDescriptor } from '@shared/scraperPluginTypes'
 import { api } from '../api'
 
 type ScraperKind = 'video' | 'actress'

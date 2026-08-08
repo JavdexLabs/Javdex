@@ -1,4 +1,6 @@
-import type { ActressScrapeField, ActressScrapeResult, ScrapeResult, ScraperPluginDescriptor, ScraperPluginKind, ScraperPluginPackage, VideoScrapeField } from './scrapeTypes'
+import type { ActressScrapeField, ActressScrapeResult } from './actressScrapeTypes'
+import type { ScraperPluginDescriptor, ScraperPluginKind, ScraperPluginPackage } from './scraperPluginTypes'
+import type { ScrapeResult, VideoScrapeField } from './videoScrapeTypes'
 
 export interface PluginDevAgentInput {
   kind: ScraperPluginKind

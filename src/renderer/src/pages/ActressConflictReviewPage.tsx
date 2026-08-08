@@ -12,8 +12,8 @@ import {
   UsersRound
 } from 'lucide-react'
 import type { ActressNameConflictGroup, ActressPendingNameType, PendingActressNameClaim, PendingActressScrapeCandidate } from '@shared/actressConflictTypes'
-import type { ActressScrapeField, ActressScrapeFieldImpact, ActressScrapeUpdateMode } from '@shared/scrapeTypes'
-import { ACTRESS_SCRAPE_FIELD_OPTIONS } from '@shared/scrapeTypes'
+import type { ActressScrapeField, ActressScrapeFieldImpact, ActressScrapeUpdateMode } from '@shared/actressScrapeTypes'
+import { ACTRESS_SCRAPE_FIELD_OPTIONS } from '@shared/actressScrapeTypes'
 import { resolveMediaSrc } from '../api'
 import ActressAvatar from '../components/ActressAvatar'
 import ConfirmModal from '../components/ConfirmModal'

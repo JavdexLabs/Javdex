@@ -1,16 +1,22 @@
 import { IPC } from './ipc-channels'
 import type {
   ActressAvatarAutoCropRequest,
-  ActressAvatarAutoCropResponse,
+  ActressAvatarAutoCropResponse
+} from './actressAvatarCropTypes'
+import type {
   ActressBatchScrapeFilter,
   ActressBatchScrapeRequest,
   ActressScrapeDisposition,
   ActressScrapeField,
-  ActressScrapeUpdateMode,
+  ActressScrapeUpdateMode
+} from './actressScrapeTypes'
+import type {
   CompositeScraperInput,
   ScraperPluginDescriptor,
   ScraperPluginPackage,
-  ScraperPluginUpdateInput,
+  ScraperPluginUpdateInput
+} from './scraperPluginTypes'
+import type {
   VideoBatchScrapeFilter,
   VideoBatchScrapeRequest,
   VideoRematchBatchRequest,
@@ -18,7 +24,7 @@ import type {
   VideoScrapeField,
   VideoScrapeOneResult,
   VideoScrapeUpdateMode
-} from './scrapeTypes'
+} from './videoScrapeTypes'
 import type { BatchProgress, BatchScrapeState } from './batchScrapeTypes'
 import type {
   IpcContractArgs,

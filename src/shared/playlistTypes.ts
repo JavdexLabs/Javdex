@@ -1,3 +1,4 @@
+import type { SortDir } from './commonTypes'
 import type { Video } from './videoTypes'
 
 export interface Playlist {
@@ -19,8 +20,6 @@ export interface PlaylistDetail extends Playlist {
 }
 
 export type PlaylistVideoSortBy = 'added_at' | 'release_date'
-
-export type PlaylistVideoSortDir = 'asc' | 'desc'
 
 export interface PlaylistVideoMembership extends PlaylistListItem {
   contains_video: boolean

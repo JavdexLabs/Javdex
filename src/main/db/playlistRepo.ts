@@ -1,8 +1,9 @@
-import type { Playlist, PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoSortDir, PlaylistVideoMembership } from '@shared/playlistTypes'
+import type { SortDir } from '@shared/commonTypes'
+import type { Playlist, PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoMembership } from '@shared/playlistTypes'
 import { getDb } from './database'
 
 type PlaylistVideoTarget = { playlistId: number; videoId: number }
-type PlaylistVideoSort = { sortBy?: PlaylistVideoSortBy; sortDir?: PlaylistVideoSortDir }
+type PlaylistVideoSort = { sortBy?: PlaylistVideoSortBy; sortDir?: SortDir }
 
 function nowIso(): string {
   return new Date().toISOString()

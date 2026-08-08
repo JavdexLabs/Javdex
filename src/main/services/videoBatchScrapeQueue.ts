@@ -1,6 +1,6 @@
 import type { BatchProgress } from '@shared/batchScrapeTypes'
-import type { VideoBatchScrapeRequest, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/scrapeTypes'
-import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS } from '@shared/scrapeTypes'
+import type { VideoBatchScrapeRequest, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/videoScrapeTypes'
+import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS } from '@shared/videoScrapeTypes'
 import {
   resolveVideoScrapeFieldSources,
   scrapeVideo,

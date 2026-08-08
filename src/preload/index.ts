@@ -59,11 +59,11 @@ import type {
 import type { BatchProgress, BatchScrapeState } from '../shared/batchScrapeTypes'
 import type { AppSettings } from '../shared/settingsTypes'
 import type { LibraryOverviewStats, ScanResult, ScanProgress, PlayResult, FacetType, FacetItem, RenameImportResult, ManualImportResult, AssetCryptoProgress } from '../shared/libraryTypes'
-import type { ActressAvatarSourceInfo, ActressGalleryAsset, ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressMergeInput, ListSortDir } from '../shared/actressTypes'
-import type { ActressDetail } from '../shared/libraryTypes'
+import type { ActressAvatarSourceInfo, ActressDetail, ActressGalleryAsset, ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../shared/actressTypes'
 import type { IpcResponse } from '../shared/ipcTypes'
 import type { ActressNameConflictGroup, ActressConflictReviewSummary, InspectActressConflictNameInput, InspectActressConflictNameResult, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from '../shared/actressConflictTypes'
-import type { PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoSortDir, PlaylistVideoMembership } from '../shared/playlistTypes'
+import type { SortDir } from '../shared/commonTypes'
+import type { PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoMembership } from '../shared/playlistTypes'
 import type { PluginDevAgentInput, PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentSessionResult, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevDryRunResult, PluginDevInstallInput, PluginDevVerificationReport, PluginDevVerifyInput } from '../shared/pluginDevTypes'
 
 /** Helper that unwraps the IpcResponse envelope, throwing on failure. */
@@ -183,7 +183,7 @@ const api = {
   },
   playlists: {
     list: () => invokeApp(IPC.PLAYLIST_LIST),
-    get: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: PlaylistVideoSortDir) =>
+    get: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
       invokeApp(IPC.PLAYLIST_GET, id, sortBy, sortDir),
     create: (input: PlaylistCreateInput) => invokeApp(IPC.PLAYLIST_CREATE, input),
     update: (id: number, input: PlaylistUpdateInput) =>
@@ -201,7 +201,7 @@ const api = {
       search?: string,
       gender?: ActressGenderFilter,
       sortBy?: ActressListSortBy,
-      sortDir?: ListSortDir
+      sortDir?: SortDir
     ) => invokeActress(IPC.ACTRESS_LIST, search, gender, sortBy, sortDir),
     listPage: (query: ActressListQuery) => invokeActress(IPC.ACTRESS_LIST_PAGE, query),
     faceScanManifest: () => invokeActress(IPC.ACTRESS_FACE_SCAN_MANIFEST),

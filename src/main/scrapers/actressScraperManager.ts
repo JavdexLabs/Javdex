@@ -1,6 +1,12 @@
 import type { BaseActressScraper } from './BaseActressScraper'
-import type { ActressScrapeDisposition, ActressScrapeResult, ActressScrapeField, ActressScrapeUpdateMode } from '@shared/scrapeTypes'
-import { ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/scrapeTypes'
+import type {
+  ActressScrapeDisposition,
+  ActressScrapeResult,
+  ActressScrapeField,
+  ActressScrapeUpdateMode
+} from '@shared/actressScrapeTypes'
+import { ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/actressScrapeTypes'
+import type { ScraperPluginDescriptor } from '@shared/scraperPluginTypes'
 import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import {
   getActressDetail,
@@ -22,7 +28,6 @@ import {
   loadUserActressScrapers
 } from './scraperPluginService'
 import { normalizeActressScrapeResult } from './scraperResultValidation'
-import type { ScraperPluginDescriptor } from '@shared/scrapeTypes'
 
 function buildRegistry(): Map<string, BaseActressScraper> {
   const registry = new Map<string, BaseActressScraper>()

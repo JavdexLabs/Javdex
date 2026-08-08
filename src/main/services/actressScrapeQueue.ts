@@ -1,12 +1,14 @@
 import type {
   ActressAvatarAutoCropOutcome,
-  ActressAvatarAutoCropTarget,
+  ActressAvatarAutoCropTarget
+} from '@shared/actressAvatarCropTypes'
+import type {
   ActressBatchScrapeRequest,
   ActressBatchScrapeScope,
   ActressBatchScrapeStatus,
   ActressScrapeField,
   ActressScrapeUpdateMode
-} from '@shared/scrapeTypes'
+} from '@shared/actressScrapeTypes'
 import type { BatchProgress } from '@shared/batchScrapeTypes'
 import {
   ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS,
@@ -14,7 +16,7 @@ import {
   ACTRESS_BATCH_DEFAULT_MISSING_FIELDS,
   ACTRESS_SCRAPE_FIELD_OPTIONS,
   ALL_ACTRESS_SCRAPE_FIELDS
-} from '@shared/scrapeTypes'
+} from '@shared/actressScrapeTypes'
 import {
   normalizeActressBatchScrapeRequest,
   parseActressBatchScrapeStatus,

@@ -12,8 +12,8 @@ import {
   Trash2
 } from 'lucide-react'
 import type { Video, VideoDetail, VideoEditInput, VideoQuery } from '@shared/videoTypes'
-import type { VideoScrapeField, VideoScrapeUpdateMode } from '@shared/scrapeTypes'
-import { ALL_VIDEO_SCRAPE_FIELDS, VIDEO_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_UPDATE_MODE_OPTIONS } from '@shared/scrapeTypes'
+import type { VideoScrapeField, VideoScrapeUpdateMode } from '@shared/videoScrapeTypes'
+import { ALL_VIDEO_SCRAPE_FIELDS, VIDEO_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_UPDATE_MODE_OPTIONS } from '@shared/videoScrapeTypes'
 import { api } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'

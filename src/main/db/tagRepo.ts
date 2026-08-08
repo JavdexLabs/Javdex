@@ -1,5 +1,5 @@
 import { getDb } from './database'
-import type { Tag } from '@shared/commonTypes'
+import type { TagListItem } from '@shared/commonTypes'
 
 /** Find or create a tag, returning its id. */
 export function ensureTag(name: string): number {
@@ -13,9 +13,7 @@ export function ensureTag(name: string): number {
   return Number(info.lastInsertRowid)
 }
 
-export interface TagListItem extends Tag {
-  video_count: number
-}
+export type { TagListItem }
 
 export function listTags(): TagListItem[] {
   const db = getDb()

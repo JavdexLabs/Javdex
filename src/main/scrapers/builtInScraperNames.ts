@@ -1,4 +1,4 @@
-import type { ScraperPluginKind } from '@shared/scrapeTypes'
+import type { ScraperPluginKind } from '@shared/scraperPluginTypes'
 
 export const BUILT_IN_VIDEO_SCRAPER_NAMES = ['JavDB', 'JavLibrary'] as const
 export const BUILT_IN_ACTRESS_SCRAPER_NAMES = ['Xslist', 'Gfriends'] as const

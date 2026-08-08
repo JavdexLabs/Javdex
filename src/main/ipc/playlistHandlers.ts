@@ -1,5 +1,6 @@
 import { IPC } from '@shared/ipc-channels'
-import type { PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoSortDir, PlaylistVideoMembership } from '@shared/playlistTypes'
+import type { SortDir } from '@shared/commonTypes'
+import type { PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoMembership } from '@shared/playlistTypes'
 import {
   addVideoToPlaylist,
   getPlaylistDetail,
@@ -18,7 +19,7 @@ export function registerPlaylistHandlers(): void {
     (
       id: number,
       sortBy?: PlaylistVideoSortBy,
-      sortDir?: PlaylistVideoSortDir
+      sortDir?: SortDir
     ): PlaylistDetail | null => getPlaylistDetail(id, { sortBy, sortDir })
   )
 

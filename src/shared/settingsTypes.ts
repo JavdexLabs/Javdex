@@ -1,6 +1,6 @@
 import { DEFAULT_AVATAR_FACE_RATIO, DEFAULT_AVATAR_FACE_SCALE_PRESET, type AvatarFaceScalePreset } from './avatarFaceScale'
 import { DEFAULT_AVATAR_CENTERING_MODE, type AvatarCenteringMode } from './avatarCentering'
-import type { CompositeScraperDefinition, ScraperPluginDelaySettings } from './scrapeTypes'
+import type { CompositeScraperDefinition, ScraperPluginDelaySettings } from './scraperPluginTypes'
 
 /** UI color theme id (maps to CSS variables on html[data-theme]). */
 export type ThemeId = 'graphite' | 'warm' | 'slate' | 'light'

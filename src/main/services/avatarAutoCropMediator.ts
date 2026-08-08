@@ -4,7 +4,7 @@ import type {
   ActressAvatarAutoCropOutcome,
   ActressAvatarAutoCropResponse,
   ActressAvatarAutoCropTarget
-} from '@shared/scrapeTypes'
+} from '@shared/actressAvatarCropTypes'
 
 export interface AvatarAutoCropMediatorDependencies {
   emit<Channel extends ScrapeIpcEventChannel>(

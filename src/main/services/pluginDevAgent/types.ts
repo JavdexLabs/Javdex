@@ -10,7 +10,7 @@ import type {
   PluginDevSessionStatus,
   PluginDevVerificationReport
 } from '@shared/pluginDevTypes'
-import type { ScraperPluginPackage } from '@shared/scrapeTypes'
+import type { ScraperPluginPackage } from '@shared/scraperPluginTypes'
 
 export type {
   PluginDevAgentEvent,

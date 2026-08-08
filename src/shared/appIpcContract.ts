@@ -11,14 +11,14 @@ import type {
   ScanProgress,
   ScanResult
 } from './libraryTypes'
+import type { TagListItem, SortDir } from './commonTypes'
 import type {
   PlaylistCreateInput,
   PlaylistDetail,
   PlaylistListItem,
   PlaylistUpdateInput,
   PlaylistVideoMembership,
-  PlaylistVideoSortBy,
-  PlaylistVideoSortDir
+  PlaylistVideoSortBy
 } from './playlistTypes'
 import type {
   PluginDevAgentEvent,
@@ -31,7 +31,7 @@ import type {
   PluginDevVerificationReport,
   PluginDevVerifyInput
 } from './pluginDevTypes'
-import type { ScraperPluginDescriptor } from './scrapeTypes'
+import type { ScraperPluginDescriptor } from './scraperPluginTypes'
 import type { AppSettings } from './settingsTypes'
 import type {
   IpcContractArgs,
@@ -45,12 +45,6 @@ import type { ProjectPage, UpdateCheckState } from './updateTypes'
 export interface RemoteImagePreviewResult {
   mimeType: string
   dataBase64: string
-}
-
-export interface TagListItem {
-  id: number
-  name: string
-  video_count: number
 }
 
 export interface AppIpcContract {
@@ -76,7 +70,7 @@ export interface AppIpcContract {
 
   [IPC.PLAYLIST_LIST]: { args: []; result: PlaylistListItem[] }
   [IPC.PLAYLIST_GET]: {
-    args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: PlaylistVideoSortDir]
+    args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir]
     result: PlaylistDetail | null
   }
   [IPC.PLAYLIST_CREATE]: { args: [input: PlaylistCreateInput]; result: number }

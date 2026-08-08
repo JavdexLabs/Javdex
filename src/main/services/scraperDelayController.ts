@@ -1,4 +1,4 @@
-import type { ScraperPluginKind } from '@shared/scrapeTypes'
+import type { ScraperPluginKind } from '@shared/scraperPluginTypes'
 import { getSettings } from '../settings/settingsStore'
 
 export interface ScraperDelayWaitEvent {

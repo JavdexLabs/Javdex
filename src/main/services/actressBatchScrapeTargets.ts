@@ -1,4 +1,4 @@
-import type { ActressBatchScrapeFilter, ActressBatchScrapeRequest, ActressBatchScrapeStatus, LegacyActressBatchScrapeStatus } from '@shared/scrapeTypes'
+import type { ActressBatchScrapeFilter, ActressBatchScrapeRequest, ActressBatchScrapeStatus, LegacyActressBatchScrapeStatus } from '@shared/actressScrapeTypes'
 import {
   listActressBatchAvatarCandidates,
   listActressesForBatchScrape,

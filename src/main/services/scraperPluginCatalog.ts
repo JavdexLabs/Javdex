@@ -5,7 +5,7 @@ import type {
   ScraperPluginKind,
   ScraperPluginPackage,
   ScraperPluginUpdateInput
-} from '@shared/scrapeTypes'
+} from '@shared/scraperPluginTypes'
 import { DEFAULT_SETTINGS } from '@shared/settingsTypes'
 import { listActressScraperNames, listActressScraperPlugins } from '../scrapers/actressScraperManager'
 import { listScraperNames, listScraperPlugins } from '../scrapers/scraperManager'

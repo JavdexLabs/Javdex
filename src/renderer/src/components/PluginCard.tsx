@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import type { ScraperPluginDescriptor } from '@shared/scrapeTypes'
+import type { ScraperPluginDescriptor } from '@shared/scraperPluginTypes'
 import FloatingLayer from './FloatingLayer'
 import IconButton from './IconButton'
 import { Ellipsis, Pencil } from 'lucide-react'

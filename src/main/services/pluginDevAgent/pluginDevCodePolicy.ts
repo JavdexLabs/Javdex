@@ -1,4 +1,4 @@
-import type { ScraperPluginKind } from '@shared/scrapeTypes'
+import type { ScraperPluginKind } from '@shared/scraperPluginTypes'
 import { appendCheerioDryRunHint, buildCheerioPluginRules } from '@shared/scrapeFieldPromptDocs'
 import { getPluginDevKindProfile } from '@shared/pluginDevKindProfile'
 import { hashCode } from './sessionStore'

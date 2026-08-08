@@ -1,13 +1,12 @@
 import type { Database as SqliteDatabase } from 'better-sqlite3'
 import { getDb } from './database'
 import { normalizeActressName } from './actressNameNormalization'
-import type { Actress, ActressGalleryAsset, ActressEditInput, ActressGender, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressListStatusCounts, ActressListStatusFilter, ActressAvatarFilter, ActressMergeMainNameFrom, ListSortDir } from '@shared/actressTypes'
-import type { ActressDetail } from '@shared/libraryTypes'
+import type { Actress, ActressDetail, ActressGalleryAsset, ActressEditInput, ActressGender, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressListStatusCounts, ActressListStatusFilter, ActressAvatarFilter, ActressMergeMainNameFrom } from '@shared/actressTypes'
 import type { Video } from '@shared/videoTypes'
-import type { ActressScrapeResult, ActressScrapeFieldImpact, ActressScrapeField, ActressScrapeUpdateMode, ActressBatchScrapeFilter, ActressBatchScrapeStatus } from '@shared/scrapeTypes'
-import type { ScrapedStatus } from '@shared/commonTypes'
+import type { ActressScrapeResult, ActressScrapeFieldImpact, ActressScrapeField, ActressScrapeUpdateMode, ActressBatchScrapeFilter, ActressBatchScrapeStatus } from '@shared/actressScrapeTypes'
+import type { ScrapedStatus, SortDir } from '@shared/commonTypes'
 import type { ActressDeleteImpact, ActressDeleteMode } from '@shared/actressIpcContract'
-import { ALL_ACTRESS_SCRAPE_FIELDS, ACTRESS_BATCH_DEFAULT_MISSING_FIELDS } from '@shared/scrapeTypes'
+import { ALL_ACTRESS_SCRAPE_FIELDS, ACTRESS_BATCH_DEFAULT_MISSING_FIELDS } from '@shared/actressScrapeTypes'
 import { ACTRESS_LIST_STATUS_SCRAPED_STATUS, actressStatusFilterOf } from '@shared/actressTypes'
 import { canMergeActressGenders } from '@shared/actressProfileOptions'
 import { normalizeCupSize } from '@shared/cupSizeUtils'
@@ -357,7 +356,7 @@ function queryActressListRows(
   search?: string,
   gender: ActressGenderFilter = 'female',
   sortBy: ActressListSortBy = 'video_count',
-  sortDir: ListSortDir = 'desc',
+  sortDir: SortDir = 'desc',
   status: ActressListStatusFilter = 'all',
   limit?: number,
   offset = 0,
@@ -405,14 +404,14 @@ export function listActresses(
   search?: string,
   gender: ActressGenderFilter = 'female',
   sortBy: ActressListSortBy = 'video_count',
-  sortDir: ListSortDir = 'desc',
+  sortDir: SortDir = 'desc',
   status: ActressListStatusFilter = 'all',
   _avatar: ActressAvatarFilter = 'all'
 ): ActressListItem[] {
   return queryActressListRows(search, gender, sortBy, sortDir, status)
 }
 
-function buildActressListOrderBy(sortBy: ActressListSortBy, sortDir: ListSortDir): string {
+function buildActressListOrderBy(sortBy: ActressListSortBy, sortDir: SortDir): string {
   const dir = sortDir === 'asc' ? 'ASC' : 'DESC'
   const tie = 'a.main_name ASC, a.id ASC'
   switch (sortBy) {

@@ -2,7 +2,7 @@ import type {
   VideoBatchScrapeFilter,
   VideoScrapeField,
   VideoScrapeUpdateMode
-} from '@shared/scrapeTypes'
+} from '@shared/videoScrapeTypes'
 import {
   getVideoImageCandidatePaths,
   listVideosForBatchScrape,

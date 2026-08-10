@@ -177,6 +177,20 @@ describe('MediaAssetStore', () => {
     assert.equal(fs.existsSync(absolutePath), false)
   })
 
+  it('uses distinct paths for avatar display replacements created in the same millisecond', () => {
+    setup()
+    const originalNow = Date.now
+    Date.now = () => 1_700_000_000_000
+    try {
+      const firstPath = mediaAssetStore.importAvatarDisplay('测试演员', 9, JPEG_1X1)
+      const secondPath = mediaAssetStore.importAvatarDisplay('测试演员', 9, JPEG_1X1)
+
+      assert.notEqual(secondPath, firstPath)
+    } finally {
+      Date.now = originalNow
+    }
+  })
+
   it('discards newly created resources marked obsolete in the same coordinated change', () => {
     setup()
     let createdPath = ''

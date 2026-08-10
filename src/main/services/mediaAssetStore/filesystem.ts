@@ -1,5 +1,6 @@
 import path from 'node:path'
 import fs from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { getSettings } from '../../settings/settingsStore'
 import { encryptPlain, decryptBlob, isEncryptedBlob, mimeFromExt } from '../assetCrypto'
 import { invalidateAssetCache } from '../assetCache'
@@ -133,7 +134,7 @@ function importImageFromFile(subdir: ImageAssetSubdir, seed: string, sourcePath:
   if (!fs.existsSync(sourcePath)) throw new Error('图片文件不存在')
   const ext = extFromPath(sourcePath)
   const buf = fs.readFileSync(sourcePath)
-  const urlKey = `${sourcePath}:${Date.now()}`
+  const urlKey = `${sourcePath}:${randomUUID()}`
   const rel = writeImageAsset(subdir, seed, urlKey, ext, buf)
   invalidateAssetCache(rel)
   return rel
@@ -190,7 +191,7 @@ export function importAvatarDisplayFromBuffer(
   actressId: number,
   data: Buffer
 ): string {
-  const urlKey = `avatar-display:${actressId}:${Date.now()}`
+  const urlKey = `avatar-display:${actressId}:${randomUUID()}`
   const rel = writeImageAsset(
     'avatars',
     buildActressAssetSeed(name, actressId),

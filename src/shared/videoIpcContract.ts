@@ -12,6 +12,8 @@ import type {
   VideoResourceImportResult,
   VideoResourceLinkCheckResult,
   VideoResource,
+  LastVideoResourceRemovalMode,
+  VideoResourceRemovalResult,
   VideoSampleImportInput
 } from './videoTypes'
 import type {
@@ -61,6 +63,22 @@ export interface VideoIpcContract {
   [IPC.VIDEO_RESOURCE_UPDATE]: {
     args: [videoId: number, resourceId: number, input: VideoLinkResourceUpdateInput]
     result: VideoResource
+  }
+  [IPC.VIDEO_RESOURCE_UPDATE_LOCAL_LABEL]: {
+    args: [videoId: number, resourceId: number, label: string | null]
+    result: VideoResource
+  }
+  [IPC.VIDEO_RESOURCE_SET_PRIMARY]: {
+    args: [videoId: number, resourceId: number]
+    result: boolean
+  }
+  [IPC.VIDEO_RESOURCE_REMOVE]: {
+    args: [
+      videoId: number,
+      resourceId: number,
+      lastResourceMode?: LastVideoResourceRemovalMode
+    ]
+    result: VideoResourceRemovalResult
   }
 }
 

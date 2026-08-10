@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import type {
   CorrectImportResult,
+  LastVideoResourceRemovalMode,
   Video,
   VideoAsset,
   VideoEditInput,
@@ -9,6 +10,7 @@ import type {
   VideoResource,
   VideoResourceImportResult,
   VideoResourceLinkCheckResult,
+  VideoResourceRemovalResult,
   VideoSampleImportInput
 } from '@shared/videoTypes'
 import {
@@ -21,18 +23,23 @@ import {
   getVideoByCode,
   getVideoById,
   getVideoFileById,
+  getVideoResourceById,
   importVideoLinkResourceRecord,
   updateVideoLinkResourceRecord,
   listVideoFiles,
+  listVideoResources,
   markScrapeSucceeded,
   mergeVideoIntoExistingCode,
   purgeVideo,
   removeManualVideoTag,
   removeVideoFileRecord,
+  removeVideoResourceRecord,
   renameVideoCode,
   setPrimaryVideoFile,
+  setPrimaryVideoResource,
   setRating,
   setVideoPosterPath,
+  updateLocalVideoResourceLabel,
   updateVideoFields
 } from '../db/videoRepo'
 import { normalizeExternalVideoResource } from '@shared/videoResourceLinks'
@@ -62,6 +69,13 @@ export interface VideoMaintenanceService {
     resourceId: number,
     input: VideoLinkResourceUpdateInput
   ): VideoResource
+  updateLocalResourceLabel(videoId: number, resourceId: number, label: string | null): VideoResource
+  setPrimaryResource(videoId: number, resourceId: number): boolean
+  removeResource(
+    videoId: number,
+    resourceId: number,
+    lastResourceMode?: LastVideoResourceRemovalMode
+  ): VideoResourceRemovalResult
 }
 
 interface VideoMaintenanceServiceDependencies {
@@ -88,6 +102,11 @@ interface VideoMaintenanceServiceDependencies {
   importVideoLinkResourceRecord: typeof importVideoLinkResourceRecord
   checkLinkResource: typeof videoResourceLinkService.check
   updateVideoLinkResourceRecord: typeof updateVideoLinkResourceRecord
+  getVideoResourceById: typeof getVideoResourceById
+  listVideoResources: typeof listVideoResources
+  setPrimaryVideoResource: typeof setPrimaryVideoResource
+  updateLocalVideoResourceLabel: typeof updateLocalVideoResourceLabel
+  removeVideoResourceRecord: typeof removeVideoResourceRecord
   runInCoordinatedChange: typeof mediaAssetStore.runInCoordinatedChange
   coordinateDatabaseChange: typeof mediaAssetStore.coordinateDatabaseChange
   importCover: typeof mediaAssetStore.importCover
@@ -127,6 +146,13 @@ export function createVideoMaintenanceService(
   const checkLinkResource = dependencies.checkLinkResource ?? videoResourceLinkService.check
   const updateLinkResourceRecord =
     dependencies.updateVideoLinkResourceRecord ?? updateVideoLinkResourceRecord
+  const readVideoResourceById = dependencies.getVideoResourceById ?? getVideoResourceById
+  const readVideoResources = dependencies.listVideoResources ?? listVideoResources
+  const writePrimaryResource = dependencies.setPrimaryVideoResource ?? setPrimaryVideoResource
+  const writeLocalResourceLabel =
+    dependencies.updateLocalVideoResourceLabel ?? updateLocalVideoResourceLabel
+  const removeResourceRecord =
+    dependencies.removeVideoResourceRecord ?? removeVideoResourceRecord
   const runInCoordinatedChange =
     dependencies.runInCoordinatedChange ?? mediaAssetStore.runInCoordinatedChange.bind(mediaAssetStore)
   const coordinateDatabaseChange =
@@ -142,6 +168,73 @@ export function createVideoMaintenanceService(
   const fetchRemoteBuffer = dependencies.fetchRemoteImageBuffer ?? fetchRemoteImageBuffer
   const fileExists = dependencies.fileExists ?? ((path) => fs.existsSync(path))
   const unlinkSync = dependencies.unlinkSync ?? ((path) => fs.unlinkSync(path))
+
+  const deleteLocalFile = (filePath: string): void => {
+    if (!fileExists(filePath)) return
+    try {
+      unlinkSync(filePath)
+    } catch (error) {
+      throw new Error(`删除影片文件失败：${(error as Error).message}`)
+    }
+  }
+
+  const deleteWholeVideo = (id: number): boolean => {
+    if (!readVideoById(id)) throw new Error('影片不存在')
+    runInCoordinatedChange(() => {
+      for (const file of readVideoFiles(id)) deleteLocalFile(file.file_path)
+      for (const assetPath of purgeVideoRecord(id).obsoletePaths) deleteBestEffort(assetPath)
+    })
+    return true
+  }
+
+  const promotionRank = (resource: VideoResource): number => {
+    if (resource.kind === 'local') return fileExists(resource.locator) ? 0 : Number.MAX_SAFE_INTEGER
+    if (resource.kind === 'direct') return 1
+    if (resource.kind === 'magnet') return 2
+    if (resource.kind === 'ed2k') return 3
+    return 4
+  }
+
+  const removeResource = (
+    videoId: number,
+    resourceId: number,
+    lastResourceMode?: LastVideoResourceRemovalMode
+  ): VideoResourceRemovalResult => {
+    if (!readVideoById(videoId)) throw new Error('影片不存在')
+    const resource = readVideoResourceById(resourceId)
+    if (!resource || resource.video_id !== videoId) throw new Error('资源不属于当前影片')
+    const resources = readVideoResources(videoId)
+    if (resources.length === 1) {
+      if (!lastResourceMode) {
+        throw new Error('正在移除最后一个资源，请选择保留影片元数据或删除影片')
+      }
+      if (lastResourceMode === 'delete-video') {
+        deleteWholeVideo(videoId)
+        return { videoDeleted: true, promotedResourceId: null }
+      }
+    }
+
+    let promotedResourceId: number | null = null
+    runInCoordinatedChange(() => {
+      if (resource.kind === 'local') deleteLocalFile(resource.locator)
+      removeResourceRecord(resourceId)
+      if (resource.is_primary) {
+        const candidate = resources
+          .filter((item) => item.id !== resourceId)
+          .sort((left, right) => {
+            const rank = promotionRank(left) - promotionRank(right)
+            if (rank !== 0) return rank
+            const added = left.add_time.localeCompare(right.add_time)
+            return added !== 0 ? added : left.id - right.id
+          })[0]
+        if (candidate && promotionRank(candidate) < Number.MAX_SAFE_INTEGER) {
+          writePrimaryResource(videoId, candidate.id)
+          promotedResourceId = candidate.id
+        }
+      }
+    })
+    return { videoDeleted: false, promotedResourceId }
+  }
 
   return {
     update(id, fields): boolean {
@@ -182,25 +275,7 @@ export function createVideoMaintenanceService(
       return true
     },
     delete(id): boolean {
-      const video = readVideoById(id)
-      if (!video) throw new Error('Video record not found')
-
-      runInCoordinatedChange(() => {
-        for (const file of readVideoFiles(id)) {
-          if (fileExists(file.file_path)) {
-            try {
-              unlinkSync(file.file_path)
-            } catch (err) {
-              throw new Error(`Failed to delete video file: ${(err as Error).message}`)
-            }
-          }
-        }
-
-        for (const assetPath of purgeVideoRecord(id).obsoletePaths) {
-          deleteBestEffort(assetPath)
-        }
-      })
-      return true
+      return deleteWholeVideo(id)
     },
     setRating(id, ratingValue): boolean {
       writeRating(id, ratingValue)
@@ -212,30 +287,9 @@ export function createVideoMaintenanceService(
       return true
     },
     deleteFile(videoId, fileId): boolean {
-      if (!readVideoById(videoId)) throw new Error('影片不存在')
-
       const file = readVideoFileById(fileId)
-      if (!file || file.video_id !== videoId) {
-        throw new Error('文件不属于当前影片')
-      }
-
-      const files = readVideoFiles(videoId)
-      if (files.length <= 1) {
-        throw new Error('至少需要保留一个文件')
-      }
-      if (file.is_primary) {
-        throw new Error('主文件不能直接删除，请先设置其它文件为主文件')
-      }
-
-      if (fileExists(file.file_path)) {
-        try {
-          unlinkSync(file.file_path)
-        } catch (err) {
-          throw new Error(`Failed to delete video file: ${(err as Error).message}`)
-        }
-      }
-
-      removeFileRecord(fileId)
+      if (!file || file.video_id !== videoId) throw new Error('文件不属于当前影片')
+      removeResource(videoId, fileId)
       return true
     },
     correctImport(id, codeRaw): CorrectImportResult {
@@ -361,6 +415,18 @@ export function createVideoMaintenanceService(
         throw new Error(`该资源链接已属于影片 ${result.duplicateOwnerCode}`)
       }
       return result
+    },
+    updateLocalResourceLabel(videoId, resourceId, label): VideoResource {
+      if (!readVideoById(videoId)) throw new Error('影片不存在')
+      return writeLocalResourceLabel(videoId, resourceId, label?.trim() || null)
+    },
+    setPrimaryResource(videoId, resourceId): boolean {
+      if (!readVideoById(videoId)) throw new Error('影片不存在')
+      writePrimaryResource(videoId, resourceId)
+      return true
+    },
+    removeResource(videoId, resourceId, lastResourceMode): VideoResourceRemovalResult {
+      return removeResource(videoId, resourceId, lastResourceMode)
     }
   }
 }

@@ -60,6 +60,13 @@ export interface VideoResourceLinkCheckResult {
   error?: string
 }
 
+export type LastVideoResourceRemovalMode = 'retain-video' | 'delete-video'
+
+export interface VideoResourceRemovalResult {
+  videoDeleted: boolean
+  promotedResourceId: number | null
+}
+
 export interface Video {
   id: number
   code: string

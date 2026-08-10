@@ -57,4 +57,17 @@ export function registerVideoHandlers(): void {
   commandAdapter.register(IPC.VIDEO_RESOURCE_UPDATE, (videoId, resourceId, input) =>
     videoMaintenanceService.updateLinkResource(videoId, resourceId, input)
   )
+  commandAdapter.register(
+    IPC.VIDEO_RESOURCE_UPDATE_LOCAL_LABEL,
+    (videoId, resourceId, label) =>
+      videoMaintenanceService.updateLocalResourceLabel(videoId, resourceId, label)
+  )
+  commandAdapter.register(IPC.VIDEO_RESOURCE_SET_PRIMARY, (videoId, resourceId) =>
+    videoMaintenanceService.setPrimaryResource(videoId, resourceId)
+  )
+  commandAdapter.register(
+    IPC.VIDEO_RESOURCE_REMOVE,
+    (videoId, resourceId, lastResourceMode) =>
+      videoMaintenanceService.removeResource(videoId, resourceId, lastResourceMode)
+  )
 }

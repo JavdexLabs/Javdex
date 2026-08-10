@@ -42,7 +42,7 @@ function listFileSelectExtras(): string {
   return `,
     (SELECT vr.locator FROM video_resources vr WHERE vr.video_id = v.id AND vr.kind = 'local' ${PRIMARY_FILE_ORDER} LIMIT 1) AS primary_file_path,
     (SELECT COUNT(*) FROM video_resources vr WHERE vr.video_id = v.id AND vr.kind = 'local') AS file_count,
-    (SELECT vr.kind FROM video_resources vr WHERE vr.video_id = v.id ${PRIMARY_FILE_ORDER} LIMIT 1) AS primary_resource_kind,
+    (SELECT vr.kind FROM video_resources vr WHERE vr.video_id = v.id AND vr.is_primary = 1 ORDER BY vr.id ASC LIMIT 1) AS primary_resource_kind,
     (SELECT COUNT(*) FROM video_resources vr WHERE vr.video_id = v.id) AS resource_count`
 }
 
@@ -339,9 +339,46 @@ export function getPrimaryVideoResource(videoId: number): VideoResource | null {
   const db = getDb()
   return (
     (db
-      .prepare(`SELECT * FROM video_resources WHERE video_id = ? ${PRIMARY_FILE_ORDER} LIMIT 1`)
+      .prepare(
+        'SELECT * FROM video_resources WHERE video_id = ? AND is_primary = 1 ORDER BY id ASC LIMIT 1'
+      )
       .get(videoId) as VideoResource | undefined) ?? null
   )
+}
+
+export function setPrimaryVideoResource(videoId: number, resourceId: number): void {
+  const db = getDb()
+  const resource = getVideoResourceById(resourceId)
+  if (!resource || resource.video_id !== videoId) {
+    throw new Error('资源不属于当前影片')
+  }
+  db.transaction(() => {
+    db.prepare('UPDATE video_resources SET is_primary = 0 WHERE video_id = ?').run(videoId)
+    db.prepare('UPDATE video_resources SET is_primary = 1 WHERE id = ?').run(resourceId)
+  })()
+}
+
+export function updateLocalVideoResourceLabel(
+  videoId: number,
+  resourceId: number,
+  displayName: string | null
+): VideoResource {
+  const db = getDb()
+  const info = db
+    .prepare(
+      `UPDATE video_resources
+       SET display_name = ?
+       WHERE id = ? AND video_id = ? AND kind = 'local'`
+    )
+    .run(displayName, resourceId, videoId)
+  if (info.changes === 0) throw new Error('本地影片资源不存在')
+  const resource = getVideoResourceById(resourceId)
+  if (!resource) throw new Error('本地影片资源更新失败')
+  return resource
+}
+
+export function removeVideoResourceRecord(resourceId: number): void {
+  getDb().prepare('DELETE FROM video_resources WHERE id = ?').run(resourceId)
 }
 
 export function importVideoLinkResourceRecord(input: {
@@ -487,7 +524,7 @@ export function getVideoDetail(id: number): VideoDetail | null {
 
   const resources = listVideoResources(id)
   const files = listVideoFiles(id)
-  const primaryResource = resources[0]
+  const primaryResource = resources.find((resource) => Boolean(resource.is_primary))
   const primaryFile = files[0]
   return {
     ...video,

@@ -48,6 +48,9 @@ export const IPC = {
   VIDEO_RESOURCE_IMPORT: 'video:resourceImport',
   VIDEO_RESOURCE_CHECK: 'video:resourceCheck',
   VIDEO_RESOURCE_UPDATE: 'video:resourceUpdate',
+  VIDEO_RESOURCE_UPDATE_LOCAL_LABEL: 'video:resourceUpdateLocalLabel',
+  VIDEO_RESOURCE_SET_PRIMARY: 'video:resourceSetPrimary',
+  VIDEO_RESOURCE_REMOVE: 'video:resourceRemove',
 
   // Playlists
   PLAYLIST_LIST: 'playlist:list',

@@ -2,7 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
 import { Link2, ListPlus, Pencil, Play, SearchCheck, SearchX } from 'lucide-react'
-import type { VideoDetail, VideoFile, VideoResource } from '@shared/videoTypes'
+import type {
+  LastVideoResourceRemovalMode,
+  VideoDetail,
+  VideoResource
+} from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
@@ -96,8 +100,9 @@ export default function DetailPage(): JSX.Element {
     open: openCoverPreview,
     close: closeCoverPreview
   } = useHistoryBackedImagePreviewState()
-  const [deleteFileTarget, setDeleteFileTarget] = useState<VideoFile | null>(null)
-  const [deletingFile, setDeletingFile] = useState(false)
+  const [removeResourceTarget, setRemoveResourceTarget] = useState<VideoResource | null>(null)
+  const [removingResource, setRemovingResource] = useState(false)
+  const [localResourceLabel, setLocalResourceLabel] = useState('')
 
   const dismissOverlays = useCallback(() => {
     setConfirmDelete(false)
@@ -111,7 +116,7 @@ export default function DetailPage(): JSX.Element {
     setShowResourceImport(false)
     setEditResourceTarget(null)
     closeCoverPreview()
-    setDeleteFileTarget(null)
+    setRemoveResourceTarget(null)
   }, [closeCoverPreview])
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
@@ -248,10 +253,10 @@ export default function DetailPage(): JSX.Element {
     }
   }
 
-  const handleSetPrimaryFile = async (fileId: number): Promise<void> => {
+  const handleSetPrimaryResource = async (resourceId: number): Promise<void> => {
     try {
-      await api.videos.setPrimaryFile(videoId, fileId)
-      toast.show('已设为主文件', 'success')
+      await api.videos.setPrimaryResource(videoId, resourceId)
+      toast.show('已设为主资源', 'success')
       invalidateVideos()
       void load({ silent: true })
     } catch (e) {
@@ -259,19 +264,52 @@ export default function DetailPage(): JSX.Element {
     }
   }
 
-  const doDeleteFile = async (): Promise<void> => {
-    if (!deleteFileTarget || deletingFile) return
-    setDeletingFile(true)
+  const doRemoveResource = async (
+    lastResourceMode?: LastVideoResourceRemovalMode
+  ): Promise<void> => {
+    if (!removeResourceTarget || removingResource) return
+    setRemovingResource(true)
     try {
-      await api.videos.deleteFile(videoId, deleteFileTarget.id)
-      setDeleteFileTarget(null)
-      toast.show('文件已删除', 'success')
+      const result = await api.videos.removeResource(
+        videoId,
+        removeResourceTarget.id,
+        lastResourceMode
+      )
+      const removedLocal = removeResourceTarget.kind === 'local'
+      setRemoveResourceTarget(null)
       invalidateVideos()
-      void load({ silent: true })
+      if (result.videoDeleted) {
+        toast.show('影片及全部数据已删除', 'success')
+        navigateBackFromVideoDetail(navigate, location)
+      } else {
+        toast.show(removedLocal ? '本地文件已删除' : '链接资源已移除', 'success')
+        void load({ silent: true })
+      }
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     } finally {
-      setDeletingFile(false)
+      setRemovingResource(false)
+    }
+  }
+
+  const openResourceEditor = (resource: VideoResource): void => {
+    setEditResourceTarget(resource)
+    setLocalResourceLabel(resource.display_name ?? '')
+  }
+
+  const saveLocalResourceLabel = async (): Promise<void> => {
+    if (!editResourceTarget || editResourceTarget.kind !== 'local') return
+    try {
+      await api.videos.updateLocalResourceLabel(
+        videoId,
+        editResourceTarget.id,
+        localResourceLabel
+      )
+      setEditResourceTarget(null)
+      toast.show('本地资源标签已更新', 'success')
+      void load({ silent: true })
+    } catch (error) {
+      toast.show(String((error as Error).message), 'error')
     }
   }
 
@@ -420,6 +458,7 @@ export default function DetailPage(): JSX.Element {
   }
 
   const codeParts = splitVideoCode(video.code)
+  const hasPrimaryResource = video.resources.some((resource) => Boolean(resource.is_primary))
   return (
     <div className={`detail-pane${actressStackOpen ? ' detail-pane--stacked' : ''}`}>
       <DetailScrollBody onBack={() => navigateBackFromVideoDetail(navigate, location)}>
@@ -506,8 +545,9 @@ export default function DetailPage(): JSX.Element {
               <DetailActionBar
                 ariaLabel="影片操作"
                 primary={{
-                  label: '播放',
+                  label: hasPrimaryResource ? '播放' : '无可用资源',
                   icon: <Play {...UI_ICON} aria-hidden />,
+                  disabled: !hasPrimaryResource,
                   onClick: () => {
                     void handlePlay()
                   }
@@ -648,14 +688,14 @@ export default function DetailPage(): JSX.Element {
         onRevealFile={(fileId) => {
           void handleRevealFile(fileId)
         }}
-        onSetPrimaryFile={(fileId) => {
-          void handleSetPrimaryFile(fileId)
-        }}
-        onDeleteFile={setDeleteFileTarget}
         onOpenResource={(resourceId) => {
           void handleOpenResource(resourceId)
         }}
-        onEditResource={setEditResourceTarget}
+        onEditResource={openResourceEditor}
+        onSetPrimaryResource={(resourceId) => {
+          void handleSetPrimaryResource(resourceId)
+        }}
+        onRemoveResource={setRemoveResourceTarget}
       />
 
       <VideoSampleGallery
@@ -752,7 +792,7 @@ export default function DetailPage(): JSX.Element {
         />
       )}
 
-      {editResourceTarget && (
+      {editResourceTarget && editResourceTarget.kind !== 'local' && (
         <VideoResourceImportModal
           fixedCode={video.code}
           resource={editResourceTarget}
@@ -764,6 +804,29 @@ export default function DetailPage(): JSX.Element {
             void load({ silent: true })
           }}
         />
+      )}
+
+      {editResourceTarget?.kind === 'local' && (
+        <Modal
+          title="编辑本地资源"
+          subtitle="本地路径与文件大小由扫描器维护"
+          confirmText="保存"
+          onConfirm={() => void saveLocalResourceLabel()}
+          onCancel={() => setEditResourceTarget(null)}
+        >
+          <label className="settings-form-field">
+            <span className="settings-form-label">资源标签</span>
+            <input
+              className="text-input form-control-full"
+              value={localResourceLabel}
+              onChange={(event) => setLocalResourceLabel(event.target.value)}
+              placeholder="可选"
+              autoFocus
+            />
+            <small className="settings-form-hint">留空时显示文件名。</small>
+          </label>
+          <div className="modal-path-text">{editResourceTarget.locator}</div>
+        </Modal>
       )}
 
       {showAddToPlaylist && (
@@ -812,7 +875,7 @@ export default function DetailPage(): JSX.Element {
           }}
           onCancel={() => setConfirmDelete(false)}
         >
-          确定要永久删除「{video.code}」吗？将同时删除磁盘上的视频文件、封面及所有元数据，此操作不可恢复。
+          确定要永久删除「{video.code}」吗？将删除全部本地文件、链接资源、关系、应用自有图片及所有元数据，此操作不可恢复。
           {video.files.length > 0 ? (
             video.files.map((file) => (
               <div key={file.id} className="modal-path-text">
@@ -823,20 +886,56 @@ export default function DetailPage(): JSX.Element {
         </Modal>
       )}
 
-      {deleteFileTarget && (
+      {removeResourceTarget && (
         <Modal
-          title="删除文件"
+          title={removeResourceTarget.kind === 'local' ? '删除本地文件' : '移除链接资源'}
           danger
-          confirmText={deletingFile ? '删除中…' : '删除'}
-          onConfirm={() => {
-            void doDeleteFile()
-          }}
+          confirmText={removingResource ? '处理中…' : removeResourceTarget.kind === 'local' ? '删除文件' : '移除资源'}
+          onConfirm={() => void doRemoveResource()}
           onCancel={() => {
-            if (!deletingFile) setDeleteFileTarget(null)
+            if (!removingResource) setRemoveResourceTarget(null)
           }}
+          actions={
+            video.resources.length === 1 ? (
+              <>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={removingResource}
+                  onClick={() => setRemoveResourceTarget(null)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={removingResource}
+                  onClick={() => void doRemoveResource('retain-video')}
+                >
+                  保留影片元数据
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  disabled={removingResource}
+                  onClick={() => void doRemoveResource('delete-video')}
+                >
+                  删除影片全部数据
+                </button>
+              </>
+            ) : undefined
+          }
         >
-          确定要删除这个非主文件吗？会删除磁盘文件并移除这条文件记录，影片条目、封面和元数据会保留。
-          <div className="modal-path-text">{deleteFileTarget.file_path}</div>
+          {video.resources.length === 1
+            ? '这是影片的最后一个资源。请选择仅移除资源并保留影片元数据，或删除整部影片的全部数据。'
+            : removeResourceTarget.kind === 'local'
+              ? '将删除磁盘上的本地文件及资源记录；影片与其它资源会保留。'
+              : '将只移除这条链接资源记录，不会访问或删除远程内容。'}
+          <div className="modal-path-text">
+            {removeResourceTarget.kind === 'local'
+              ? removeResourceTarget.locator
+              : removeResourceTarget.display_name || '链接资源'}
+          </div>
         </Modal>
       )}
 

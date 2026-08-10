@@ -28,6 +28,7 @@ import type {
   VideoIpcResult
 } from '../shared/videoIpcContract'
 import type {
+  LastVideoResourceRemovalMode,
   Video,
   VideoEditInput,
   VideoLinkResourceImportInput,
@@ -189,7 +190,16 @@ const api = {
       videoId: number,
       resourceId: number,
       input: VideoLinkResourceUpdateInput
-    ) => invokeVideo(IPC.VIDEO_RESOURCE_UPDATE, videoId, resourceId, input)
+    ) => invokeVideo(IPC.VIDEO_RESOURCE_UPDATE, videoId, resourceId, input),
+    updateLocalResourceLabel: (videoId: number, resourceId: number, label: string | null) =>
+      invokeVideo(IPC.VIDEO_RESOURCE_UPDATE_LOCAL_LABEL, videoId, resourceId, label),
+    setPrimaryResource: (videoId: number, resourceId: number) =>
+      invokeVideo(IPC.VIDEO_RESOURCE_SET_PRIMARY, videoId, resourceId),
+    removeResource: (
+      videoId: number,
+      resourceId: number,
+      lastResourceMode?: LastVideoResourceRemovalMode
+    ) => invokeVideo(IPC.VIDEO_RESOURCE_REMOVE, videoId, resourceId, lastResourceMode)
   },
   playlists: {
     list: () => invokeApp(IPC.PLAYLIST_LIST),

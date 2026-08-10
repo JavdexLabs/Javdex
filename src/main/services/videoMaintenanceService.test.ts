@@ -224,6 +224,110 @@ describe('VideoMaintenanceService', () => {
     assert.equal(query.get(1), null)
   })
 
+  it('sets any resource as primary and promotes deterministic fallbacks after removal', () => {
+    setupDb()
+    const videos = createVideoMaintenanceService()
+    const directOne = videos.importLinkResource({
+      code: 'APP-001',
+      url: 'https://cdn.example/one.mp4',
+      kind: 'direct'
+    }).resource
+    const directTwo = videos.importLinkResource({
+      code: 'APP-001',
+      url: 'https://cdn.example/two.mp4',
+      kind: 'direct'
+    }).resource
+    const web = videos.importLinkResource({
+      code: 'APP-001',
+      url: 'https://example.com/watch',
+      kind: 'web'
+    }).resource
+    const webFallback = videos.importLinkResource({
+      code: 'APP-001',
+      url: 'https://example.com/fallback',
+      kind: 'web'
+    }).resource
+    const magnet = videos.importLinkResource({
+      code: 'APP-001',
+      url: 'magnet:?xt=urn:btih:ABCDEF1234567890&dn=Fallback'
+    }).resource
+    const ed2k = videos.importLinkResource({
+      code: 'APP-001',
+      url: 'ed2k://|file|Fallback.mp4|1|ABCDEF0123456789ABCDEF0123456789|/'
+    }).resource
+
+    videos.setPrimaryResource(1, web.id)
+    assert.equal(createVideoQueryService().get(1)?.resources[0]?.id, web.id)
+
+    videos.removeResource(1, web.id)
+    assert.equal(createVideoQueryService().get(1)?.resources[0]?.id, 1)
+    videos.removeResource(1, 1)
+    assert.equal(createVideoQueryService().get(1)?.resources[0]?.id, directOne.id)
+    videos.removeResource(1, directOne.id)
+    assert.equal(createVideoQueryService().get(1)?.resources[0]?.id, directTwo.id)
+    videos.removeResource(1, directTwo.id)
+    assert.equal(createVideoQueryService().get(1)?.resources[0]?.id, magnet.id)
+    videos.removeResource(1, magnet.id)
+    assert.equal(createVideoQueryService().get(1)?.resources[0]?.id, ed2k.id)
+    videos.removeResource(1, ed2k.id)
+    assert.equal(createVideoQueryService().get(1)?.resources[0]?.id, webFallback.id)
+  })
+
+  it('does not promote an inaccessible local resource over an available web link', () => {
+    const { videoPath } = setupDb()
+    const videos = createVideoMaintenanceService()
+    const direct = videos.importLinkResource({
+      code: 'APP-001',
+      url: 'https://cdn.example/current.mp4',
+      kind: 'direct'
+    }).resource
+    const web = videos.importLinkResource({
+      code: 'APP-001',
+      url: 'https://example.com/fallback',
+      kind: 'web'
+    }).resource
+    fs.unlinkSync(videoPath)
+    videos.setPrimaryResource(1, direct.id)
+
+    videos.removeResource(1, direct.id)
+
+    assert.equal(createVideoQueryService().get(1)?.resources[0]?.id, web.id)
+  })
+
+  it('requires an explicit decision when manually removing the last resource', () => {
+    setupDb()
+    const videos = createVideoMaintenanceService()
+    const retained = videos.importLinkResource({
+      code: 'ONLY-001',
+      url: 'https://example.com/only'
+    })
+
+    assert.throws(() => videos.removeResource(retained.videoId, retained.resource.id), /最后一个资源/)
+    assert.deepEqual(
+      videos.removeResource(retained.videoId, retained.resource.id, 'retain-video'),
+      { videoDeleted: false, promotedResourceId: null }
+    )
+    assert.equal(createVideoQueryService().get(retained.videoId)?.resources.length, 0)
+
+    const deleted = videos.importLinkResource({
+      code: 'ONLY-002',
+      url: 'https://example.com/delete'
+    })
+    assert.deepEqual(
+      videos.removeResource(deleted.videoId, deleted.resource.id, 'delete-video'),
+      { videoDeleted: true, promotedResourceId: null }
+    )
+    assert.equal(createVideoQueryService().get(deleted.videoId), null)
+  })
+
+  it('updates only the display label of a local resource', () => {
+    setupDb()
+    const videos = createVideoMaintenanceService()
+    const updated = videos.updateLocalResourceLabel(1, 1, 'Director cut')
+    assert.equal(updated.display_name, 'Director cut')
+    assert.equal(updated.locator.endsWith('APP-001.mp4'), true)
+  })
+
   it('deletes a symbolic link without deleting its target file', () => {
     const { videoPath } = setupDb()
     const targetPath = path.join(tempRoot!, 'target.mp4')
@@ -257,6 +361,11 @@ describe('VideoMaintenanceService', () => {
   it('deletes the source file and database row', () => {
     const { videoPath } = setupPolicyDb()
     const videos = createVideoMaintenanceService()
+    videos.importLinkResource({
+      code: 'IPX-535',
+      url: 'https://example.com/watch?id=535',
+      kind: 'web'
+    })
 
     videos.delete(1)
 

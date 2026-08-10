@@ -1,8 +1,9 @@
 import type Database from 'better-sqlite3'
 import { normalizeActressName } from './actressNameNormalization'
-import { SCHEMA_SQL } from './schema'
+import { normalizeClassificationName } from '../../shared/classificationNameNormalization'
+import { CLASSIFICATION_V8_SCHEMA_SQL, SCHEMA_SQL } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 7
+export const CURRENT_SCHEMA_VERSION = 8
 
 type Migration = {
   version: number
@@ -355,6 +356,292 @@ function migrateToV7(database: Database.Database): void {
   `)
 }
 
+type ClassificationKind = 'organization' | 'director' | 'series'
+type OrganizationRole = 'maker' | 'publisher'
+
+type LegacyNameVariant = {
+  name: string
+  videoIds: Set<number>
+}
+
+type LegacyNameGroup = {
+  normalizedName: string
+  variants: Map<string, LegacyNameVariant>
+  roles: Set<OrganizationRole>
+}
+
+function compareStableText(left: string, right: string): number {
+  if (left === right) return 0
+  return left < right ? -1 : 1
+}
+
+function addLegacyClassificationName(
+  groups: Map<string, LegacyNameGroup>,
+  rawName: string,
+  videoId?: number,
+  role?: OrganizationRole
+): void {
+  const name = rawName.trim()
+  let normalizedName: string
+  try {
+    normalizedName = normalizeClassificationName(name)
+  } catch {
+    return
+  }
+
+  let group = groups.get(normalizedName)
+  if (!group) {
+    group = {
+      normalizedName,
+      variants: new Map(),
+      roles: new Set()
+    }
+    groups.set(normalizedName, group)
+  }
+  let variant = group.variants.get(name)
+  if (!variant) {
+    variant = { name, videoIds: new Set() }
+    group.variants.set(name, variant)
+  }
+  if (videoId !== undefined) variant.videoIds.add(videoId)
+  if (role) group.roles.add(role)
+}
+
+function collectLegacyClassificationGroups(
+  database: Database.Database,
+  kind: ClassificationKind
+): Map<string, LegacyNameGroup> {
+  const groups = new Map<string, LegacyNameGroup>()
+  if (tableExists(database, 'videos')) {
+    const columns = columnNames(database, 'videos')
+    const fields: Array<{ column: string; role?: OrganizationRole }> =
+      kind === 'organization'
+        ? [
+            { column: 'maker', role: 'maker' },
+            { column: 'publisher', role: 'publisher' }
+          ]
+        : [{ column: kind === 'director' ? 'director' : 'series' }]
+
+    for (const field of fields) {
+      if (!columns.has(field.column)) continue
+      const rows = database
+        .prepare(
+          `SELECT id, ${field.column} AS name
+           FROM videos
+           WHERE ${field.column} IS NOT NULL`
+        )
+        .all() as Array<{ id: number; name: string }>
+      for (const row of rows) {
+        addLegacyClassificationName(groups, row.name, row.id, field.role)
+      }
+    }
+  }
+
+  if (tableExists(database, 'facet_entries')) {
+    const facetTypes =
+      kind === 'organization' ? ['maker', 'publisher'] : [kind === 'director' ? 'director' : 'series']
+    const placeholders = facetTypes.map(() => '?').join(', ')
+    const rows = database
+      .prepare(
+        `SELECT type, value
+         FROM facet_entries
+         WHERE type IN (${placeholders})`
+      )
+      .all(...facetTypes) as Array<{ type: OrganizationRole | 'director' | 'series'; value: string }>
+    for (const row of rows) {
+      const role = row.type === 'maker' || row.type === 'publisher' ? row.type : undefined
+      addLegacyClassificationName(groups, row.value, undefined, role)
+    }
+  }
+  return groups
+}
+
+function orderedLegacyVariants(group: LegacyNameGroup): LegacyNameVariant[] {
+  return [...group.variants.values()].sort((left, right) => {
+    const countDifference = right.videoIds.size - left.videoIds.size
+    return countDifference || compareStableText(left.name, right.name)
+  })
+}
+
+function migrateLegacyNameGroups(
+  groups: Map<string, LegacyNameGroup>,
+  insertEntity: (mainName: string) => number,
+  insertName: (
+    entityId: number,
+    name: string,
+    normalizedName: string,
+    type: 'main' | 'alias',
+    position: number
+  ) => void,
+  afterEntity: (group: LegacyNameGroup, entityId: number) => void = () => undefined
+): Map<string, number> {
+  const entityIds = new Map<string, number>()
+  for (const group of [...groups.values()].sort((left, right) =>
+    compareStableText(left.normalizedName, right.normalizedName)
+  )) {
+    const variants = orderedLegacyVariants(group)
+    const mainName = variants[0].name
+    const entityId = insertEntity(mainName)
+    entityIds.set(group.normalizedName, entityId)
+    insertName(entityId, mainName, group.normalizedName, 'main', 0)
+    variants
+      .slice(1)
+      .sort((left, right) => compareStableText(left.name, right.name))
+      .forEach((variant, position) => {
+        insertName(entityId, variant.name, group.normalizedName, 'alias', position)
+      })
+    afterEntity(group, entityId)
+  }
+  return entityIds
+}
+
+const CLASSIFICATION_VIDEO_REFERENCES = [
+  {
+    source: 'maker',
+    target: 'maker_organization_id',
+    targetTable: 'organizations',
+    kind: 'organization'
+  },
+  {
+    source: 'publisher',
+    target: 'publisher_organization_id',
+    targetTable: 'organizations',
+    kind: 'organization'
+  },
+  { source: 'series', target: 'series_id', targetTable: 'series', kind: 'series' },
+  { source: 'director', target: 'director_id', targetTable: 'directors', kind: 'director' }
+] as const
+
+function addClassificationVideoReferenceColumns(database: Database.Database): void {
+  if (!tableExists(database, 'videos')) return
+  let columns = columnNames(database, 'videos')
+  for (const reference of CLASSIFICATION_VIDEO_REFERENCES) {
+    if (columns.has(reference.target)) continue
+    database.exec(
+      `ALTER TABLE videos ADD COLUMN ${reference.target} INTEGER REFERENCES ${reference.targetTable}(id) ON DELETE SET NULL`
+    )
+    columns = columnNames(database, 'videos')
+  }
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_videos_maker_organization_id
+      ON videos(maker_organization_id);
+    CREATE INDEX IF NOT EXISTS idx_videos_publisher_organization_id
+      ON videos(publisher_organization_id);
+    CREATE INDEX IF NOT EXISTS idx_videos_series_id ON videos(series_id);
+    CREATE INDEX IF NOT EXISTS idx_videos_director_id ON videos(director_id);
+  `)
+}
+
+function migrateOrganizations(database: Database.Database): Map<string, number> {
+  const groups = collectLegacyClassificationGroups(database, 'organization')
+  const insertOrganization = database.prepare('INSERT INTO organizations (main_name) VALUES (?)')
+  const insertName = database.prepare(
+    `INSERT INTO organization_names (
+       organization_id, name, normalized_name, type, position
+     ) VALUES (?, ?, ?, ?, ?)`
+  )
+  const insertOwnership = database.prepare(
+    `INSERT INTO organization_name_ownership (normalized_name, organization_id)
+     VALUES (?, ?)`
+  )
+  const insertRole = database.prepare(
+    'INSERT INTO organization_roles (organization_id, role) VALUES (?, ?)'
+  )
+
+  return migrateLegacyNameGroups(
+    groups,
+    (mainName) => Number(insertOrganization.run(mainName).lastInsertRowid),
+    (organizationId, name, normalizedName, type, position) => {
+      insertName.run(organizationId, name, normalizedName, type, position)
+    },
+    (group, organizationId) => {
+      insertOwnership.run(group.normalizedName, organizationId)
+      for (const role of [...group.roles].sort(compareStableText)) {
+        insertRole.run(organizationId, role)
+      }
+    }
+  )
+}
+
+function migrateDirectors(database: Database.Database): Map<string, number> {
+  const groups = collectLegacyClassificationGroups(database, 'director')
+  const insertDirector = database.prepare('INSERT INTO directors (main_name) VALUES (?)')
+  const insertName = database.prepare(
+    `INSERT INTO director_names (director_id, name, normalized_name, type, position)
+     VALUES (?, ?, ?, ?, ?)`
+  )
+
+  return migrateLegacyNameGroups(
+    groups,
+    (mainName) => Number(insertDirector.run(mainName).lastInsertRowid),
+    (directorId, name, normalizedName, type, position) => {
+      insertName.run(directorId, name, normalizedName, type, position)
+    }
+  )
+}
+
+function migrateSeries(database: Database.Database): Map<string, number> {
+  const groups = collectLegacyClassificationGroups(database, 'series')
+  const insertSeries = database.prepare('INSERT INTO series (main_name) VALUES (?)')
+  const insertName = database.prepare(
+    `INSERT INTO series_names (series_id, name, normalized_name, type, position)
+     VALUES (?, ?, ?, ?, ?)`
+  )
+  const insertOwnership = database.prepare(
+    `INSERT INTO series_name_ownership (
+       owner_organization_id, normalized_name, series_id
+     ) VALUES (NULL, ?, ?)`
+  )
+
+  return migrateLegacyNameGroups(
+    groups,
+    (mainName) => Number(insertSeries.run(mainName).lastInsertRowid),
+    (seriesId, name, normalizedName, type, position) => {
+      insertName.run(seriesId, name, normalizedName, type, position)
+    },
+    (group, seriesId) => insertOwnership.run(group.normalizedName, seriesId)
+  )
+}
+
+function migrateVideoClassificationReferences(
+  database: Database.Database,
+  organizationIds: Map<string, number>,
+  directorIds: Map<string, number>,
+  seriesIds: Map<string, number>
+): void {
+  if (!tableExists(database, 'videos')) return
+  const columns = columnNames(database, 'videos')
+  const idsByKind = { organization: organizationIds, director: directorIds, series: seriesIds }
+  for (const reference of CLASSIFICATION_VIDEO_REFERENCES) {
+    if (!columns.has(reference.source) || !columns.has(reference.target)) continue
+    const rows = database
+      .prepare(
+        `SELECT id, ${reference.source} AS name FROM videos WHERE ${reference.source} IS NOT NULL`
+      )
+      .all() as Array<{ id: number; name: string }>
+    const update = database.prepare(`UPDATE videos SET ${reference.target} = ? WHERE id = ?`)
+    for (const row of rows) {
+      let normalizedName: string
+      try {
+        normalizedName = normalizeClassificationName(row.name.trim())
+      } catch {
+        continue
+      }
+      const entityId = idsByKind[reference.kind].get(normalizedName)
+      if (entityId !== undefined) update.run(entityId, row.id)
+    }
+  }
+}
+
+function migrateToV8(database: Database.Database): void {
+  database.exec(CLASSIFICATION_V8_SCHEMA_SQL)
+  addClassificationVideoReferenceColumns(database)
+  const organizationIds = migrateOrganizations(database)
+  const directorIds = migrateDirectors(database)
+  const seriesIds = migrateSeries(database)
+  migrateVideoClassificationReferences(database, organizationIds, directorIds, seriesIds)
+}
+
 const MIGRATIONS: Migration[] = [
   {
     version: 2,
@@ -379,6 +666,10 @@ const MIGRATIONS: Migration[] = [
   {
     version: 7,
     migrate: migrateToV7
+  },
+  {
+    version: 8,
+    migrate: migrateToV8
   }
 ]
 

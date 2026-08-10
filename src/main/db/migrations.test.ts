@@ -19,6 +19,12 @@ function rowCount(db: Database.Database, table: string): number {
   return (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n
 }
 
+function tableExistsForTest(db: Database.Database, table: string): boolean {
+  return Boolean(
+    db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)
+  )
+}
+
 function createV3ActressSchema(db: Database.Database): void {
   db.exec(`
     CREATE TABLE actresses (
@@ -93,7 +99,331 @@ function createV4ActressSchema(db: Database.Database): void {
   db.pragma('user_version = 4')
 }
 
+function createV7ClassificationSchema(db: Database.Database): void {
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE videos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT UNIQUE NOT NULL,
+      maker TEXT,
+      publisher TEXT,
+      series TEXT,
+      director TEXT
+    );
+    CREATE TABLE facet_entries (
+      type TEXT NOT NULL CHECK(type IN ('maker', 'publisher', 'series', 'director')),
+      value TEXT NOT NULL,
+      PRIMARY KEY (type, value)
+    );
+  `)
+  db.pragma('user_version = 7')
+}
+
 describe('database schema', () => {
+  it('migrates legacy classification text into stable entities without changing legacy browsing data', () => {
+    const db = new Database(':memory:')
+    try {
+      createV7ClassificationSchema(db)
+      db.exec(`
+        INSERT INTO videos (id, code, maker, publisher, series, director) VALUES
+          (1, 'ONE',   'Ｓ １', 'Publisher A', 'Series A',       'Director A'),
+          (2, 'TWO',   'S1',    'Ｓ １',        'Ｓｅｒｉｅｓ　Ａ', 'Ｄirector A'),
+          (3, 'THREE', 'S1',    NULL,           NULL,             'Director A'),
+          (4, 'FOUR',  NULL,    's 1',          NULL,             NULL);
+        INSERT INTO facet_entries (type, value) VALUES
+          ('maker', 'Lonely Org'),
+          ('publisher', 'Ｌonely　Ｏrg'),
+          ('director', 'Empty Director'),
+          ('series', 'Empty Series');
+      `)
+
+      migrateDatabase(db)
+
+      assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+      assert.deepEqual(
+        db.prepare('SELECT main_name FROM organizations ORDER BY main_name').all(),
+        [{ main_name: 'Lonely Org' }, { main_name: 'Publisher A' }, { main_name: 'S1' }]
+      )
+      const s1 = db
+        .prepare("SELECT id FROM organizations WHERE main_name = 'S1'")
+        .get() as { id: number }
+      assert.deepEqual(
+        db
+          .prepare(
+            `SELECT name, type
+             FROM organization_names
+             WHERE organization_id = ?
+             ORDER BY CASE type WHEN 'main' THEN 0 ELSE 1 END, position, name`
+          )
+          .all(s1.id),
+        [
+          { name: 'S1', type: 'main' },
+          { name: 's 1', type: 'alias' },
+          { name: 'Ｓ １', type: 'alias' }
+        ]
+      )
+      assert.deepEqual(
+        db
+          .prepare(
+            'SELECT role FROM organization_roles WHERE organization_id = ? ORDER BY role'
+          )
+          .all(s1.id),
+        [{ role: 'maker' }, { role: 'publisher' }]
+      )
+      assert.deepEqual(
+        db
+          .prepare(
+            `SELECT ono.normalized_name, o.main_name
+             FROM organization_name_ownership ono
+             JOIN organizations o ON o.id = ono.organization_id
+             ORDER BY ono.normalized_name`
+          )
+          .all(),
+        [
+          { normalized_name: 'lonelyorg', main_name: 'Lonely Org' },
+          { normalized_name: 'publishera', main_name: 'Publisher A' },
+          { normalized_name: 's1', main_name: 'S1' }
+        ]
+      )
+      assert.deepEqual(
+        db.prepare('SELECT main_name FROM directors ORDER BY main_name').all(),
+        [{ main_name: 'Director A' }, { main_name: 'Empty Director' }]
+      )
+      assert.deepEqual(
+        db
+          .prepare(
+            `SELECT s.main_name, s.owner_organization_id, sno.normalized_name
+             FROM series s
+             JOIN series_name_ownership sno ON sno.series_id = s.id
+             ORDER BY s.main_name`
+          )
+          .all(),
+        [
+          {
+            main_name: 'Empty Series',
+            owner_organization_id: null,
+            normalized_name: 'emptyseries'
+          },
+          {
+            main_name: 'Series A',
+            owner_organization_id: null,
+            normalized_name: 'seriesa'
+          }
+        ]
+      )
+
+      assert.deepEqual(
+        db
+          .prepare(
+            `SELECT v.code,
+                    maker.main_name AS maker,
+                    publisher.main_name AS publisher,
+                    s.main_name AS series,
+                    d.main_name AS director
+             FROM videos v
+             LEFT JOIN organizations maker ON maker.id = v.maker_organization_id
+             LEFT JOIN organizations publisher ON publisher.id = v.publisher_organization_id
+             LEFT JOIN series s ON s.id = v.series_id
+             LEFT JOIN directors d ON d.id = v.director_id
+             ORDER BY v.id`
+          )
+          .all(),
+        [
+          { code: 'ONE', maker: 'S1', publisher: 'Publisher A', series: 'Series A', director: 'Director A' },
+          { code: 'TWO', maker: 'S1', publisher: 'S1', series: 'Series A', director: 'Director A' },
+          { code: 'THREE', maker: 'S1', publisher: null, series: null, director: 'Director A' },
+          { code: 'FOUR', maker: null, publisher: 'S1', series: null, director: null }
+        ]
+      )
+
+      assert.deepEqual(
+        db.prepare('SELECT maker, publisher, series, director FROM videos WHERE id = 1').get(),
+        {
+          maker: 'Ｓ １',
+          publisher: 'Publisher A',
+          series: 'Series A',
+          director: 'Director A'
+        }
+      )
+      assert.equal(rowCount(db, 'facet_entries'), 4)
+
+      const snapshot = {
+        organizations: rowCount(db, 'organizations'),
+        organizationNames: rowCount(db, 'organization_names'),
+        organizationRoles: rowCount(db, 'organization_roles'),
+        directors: rowCount(db, 'directors'),
+        directorNames: rowCount(db, 'director_names'),
+        series: rowCount(db, 'series'),
+        seriesNames: rowCount(db, 'series_names')
+      }
+      migrateDatabase(db)
+      assert.deepEqual(
+        {
+          organizations: rowCount(db, 'organizations'),
+          organizationNames: rowCount(db, 'organization_names'),
+          organizationRoles: rowCount(db, 'organization_roles'),
+          directors: rowCount(db, 'directors'),
+          directorNames: rowCount(db, 'director_names'),
+          series: rowCount(db, 'series'),
+          seriesNames: rowCount(db, 'series_names')
+        },
+        snapshot
+      )
+    } finally {
+      db.close()
+    }
+  })
+
+  it('stores classification profiles, hierarchy, roles, links, and video references', () => {
+    const db = new Database(':memory:')
+    try {
+      migrateDatabase(db)
+      const parentOrganizationId = Number(
+        db.prepare("INSERT INTO organizations (main_name) VALUES ('Parent Org')").run()
+          .lastInsertRowid
+      )
+      const organizationId = Number(
+        db
+          .prepare(
+            `INSERT INTO organizations (
+               main_name, summary, country_region, founded_year, status, parent_organization_id
+             ) VALUES ('Studio One', 'Profile', 'JP', 2001, 'active', ?)`
+          )
+          .run(parentOrganizationId).lastInsertRowid
+      )
+      db.prepare(
+        `INSERT INTO organization_names (
+           organization_id, name, normalized_name, type, position
+         ) VALUES (?, 'Studio One', 'studioone', 'main', 0)`
+      ).run(organizationId)
+      db.prepare(
+        `INSERT INTO organization_name_ownership (normalized_name, organization_id)
+         VALUES ('studioone', ?)`
+      ).run(organizationId)
+      db.prepare(
+        `INSERT INTO organization_roles (organization_id, role)
+         VALUES (?, 'maker'), (?, 'publisher')`
+      ).run(organizationId, organizationId)
+      db.prepare(
+        `INSERT INTO organization_links (
+           organization_id, label, url, normalized_url, position
+         ) VALUES (?, 'Official', 'https://example.com/', 'https://example.com/', 0)`
+      ).run(organizationId)
+
+      const directorId = Number(
+        db.prepare("INSERT INTO directors (main_name, status) VALUES ('Director One', 'active')").run()
+          .lastInsertRowid
+      )
+      db.prepare(
+        `INSERT INTO director_names (director_id, name, normalized_name, type, position)
+         VALUES (?, 'Director One', 'directorone', 'main', 0)`
+      ).run(directorId)
+      db.prepare(
+        `INSERT INTO director_links (director_id, label, url, normalized_url, position)
+         VALUES (?, 'Profile', 'https://example.com/director', 'https://example.com/director', 0)`
+      ).run(directorId)
+
+      const parentSeriesId = Number(
+        db.prepare("INSERT INTO series (main_name) VALUES ('Parent Series')").run().lastInsertRowid
+      )
+      const seriesId = Number(
+        db
+          .prepare(
+            `INSERT INTO series (
+               main_name, owner_organization_id, parent_series_id, start_year, status
+             ) VALUES ('Series One', ?, ?, 2020, 'ongoing')`
+          )
+          .run(organizationId, parentSeriesId).lastInsertRowid
+      )
+      db.prepare(
+        `INSERT INTO series_names (series_id, name, normalized_name, type, position)
+         VALUES (?, 'Series One', 'seriesone', 'main', 0)`
+      ).run(seriesId)
+      db.prepare(
+        `INSERT INTO series_name_ownership (
+           owner_organization_id, normalized_name, series_id
+         ) VALUES (?, 'seriesone', ?)`
+      ).run(organizationId, seriesId)
+      db.prepare(
+        `INSERT INTO series_links (series_id, label, url, normalized_url, position)
+         VALUES (?, 'Official', 'https://example.com/series', 'https://example.com/series', 0)`
+      ).run(seriesId)
+
+      db.prepare(
+        `INSERT INTO videos (
+           code, maker_organization_id, publisher_organization_id, director_id, series_id
+         ) VALUES ('ENTITY-ONE', ?, ?, ?, ?)`
+      ).run(organizationId, organizationId, directorId, seriesId)
+
+      assert.deepEqual(
+        db
+          .prepare(
+            `SELECT o.main_name AS organization,
+                    parent.main_name AS parent_organization,
+                    d.main_name AS director,
+                    s.main_name AS series,
+                    parent_series.main_name AS parent_series
+             FROM videos v
+             JOIN organizations o ON o.id = v.maker_organization_id
+             LEFT JOIN organizations parent ON parent.id = o.parent_organization_id
+             JOIN directors d ON d.id = v.director_id
+             JOIN series s ON s.id = v.series_id
+             LEFT JOIN series parent_series ON parent_series.id = s.parent_series_id
+             WHERE v.code = 'ENTITY-ONE'`
+          )
+          .get(),
+        {
+          organization: 'Studio One',
+          parent_organization: 'Parent Org',
+          director: 'Director One',
+          series: 'Series One',
+          parent_series: 'Parent Series'
+        }
+      )
+      assert.equal(rowCount(db, 'organization_links'), 1)
+      assert.equal(rowCount(db, 'director_links'), 1)
+      assert.equal(rowCount(db, 'series_links'), 1)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('rolls back the complete classification migration when entity creation fails', () => {
+    const db = new Database(':memory:')
+    try {
+      createV7ClassificationSchema(db)
+      db.exec(`
+        CREATE TABLE organizations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          main_name TEXT NOT NULL,
+          parent_organization_id INTEGER,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TRIGGER reject_classification_migration
+        BEFORE INSERT ON organizations
+        BEGIN
+          SELECT RAISE(ABORT, 'forced classification migration failure');
+        END;
+        INSERT INTO videos (code, maker) VALUES ('ROLLBACK', 'Broken Org');
+      `)
+
+      assert.throws(() => migrateDatabase(db), /forced classification migration failure/)
+      assert.equal(db.pragma('user_version', { simple: true }), 7)
+      assert.equal(rowCount(db, 'organizations'), 0)
+      assert.equal(tableExistsForTest(db, 'directors'), false)
+      assert.equal(tableExistsForTest(db, 'series'), false)
+      const videoColumns = (db.prepare('PRAGMA table_info(videos)').all() as { name: string }[]).map(
+        (column) => column.name
+      )
+      assert.equal(videoColumns.includes('maker_organization_id'), false)
+      assert.deepEqual(db.prepare("SELECT maker FROM videos WHERE code = 'ROLLBACK'").get(), {
+        maker: 'Broken Org'
+      })
+    } finally {
+      db.close()
+    }
+  })
+
   it('migrates uncontested names to ownership and preserves cross-actress collisions for review', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-name-ownership-'))
     const dbPath = path.join(tempDir, 'library.db')

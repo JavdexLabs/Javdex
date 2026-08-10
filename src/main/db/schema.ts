@@ -1,7 +1,196 @@
 // SQLite schema. Executed on startup (idempotent via IF NOT EXISTS).
 
+// Immutable v8 schema snapshot. Later classification changes belong in later migrations.
+export const CLASSIFICATION_V8_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS organizations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    main_name TEXT NOT NULL,
+    image_path TEXT,
+    summary TEXT,
+    country_region TEXT,
+    founded_year INTEGER,
+    ended_year INTEGER,
+    status TEXT NOT NULL DEFAULT 'unknown'
+        CHECK(status IN ('unknown', 'active', 'inactive')),
+    parent_organization_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (parent_organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+    CHECK(founded_year IS NULL OR founded_year BETWEEN 1 AND 9999),
+    CHECK(ended_year IS NULL OR ended_year BETWEEN 1 AND 9999),
+    CHECK(founded_year IS NULL OR ended_year IS NULL OR founded_year <= ended_year)
+);
+CREATE INDEX IF NOT EXISTS idx_organizations_parent
+    ON organizations(parent_organization_id);
+CREATE INDEX IF NOT EXISTS idx_organizations_updated_at
+    ON organizations(updated_at);
+
+CREATE TABLE IF NOT EXISTS organization_names (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER NOT NULL,
+    name TEXT NOT NULL CHECK(length(trim(name)) > 0),
+    normalized_name TEXT NOT NULL CHECK(length(normalized_name) > 0),
+    type TEXT NOT NULL CHECK(type IN ('main', 'alias')),
+    position INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    UNIQUE (organization_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_organization_names_normalized
+    ON organization_names(normalized_name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_organization_names_one_main
+    ON organization_names(organization_id)
+    WHERE type = 'main';
+
+CREATE TABLE IF NOT EXISTS organization_name_ownership (
+    normalized_name TEXT PRIMARY KEY CHECK(length(normalized_name) > 0),
+    organization_id INTEGER NOT NULL,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_organization_name_ownership_organization
+    ON organization_name_ownership(organization_id);
+
+CREATE TABLE IF NOT EXISTS organization_roles (
+    organization_id INTEGER NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('maker', 'publisher')),
+    PRIMARY KEY (organization_id, role),
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_organization_roles_role
+    ON organization_roles(role);
+
+CREATE TABLE IF NOT EXISTS organization_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    url TEXT NOT NULL,
+    normalized_url TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    UNIQUE (organization_id, normalized_url)
+);
+CREATE INDEX IF NOT EXISTS idx_organization_links_organization
+    ON organization_links(organization_id, position);
+
+CREATE TABLE IF NOT EXISTS directors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    main_name TEXT NOT NULL,
+    image_path TEXT,
+    summary TEXT,
+    country_region TEXT,
+    birth_date TEXT,
+    death_date TEXT,
+    birth_place TEXT,
+    career_start_year INTEGER,
+    career_end_year INTEGER,
+    status TEXT NOT NULL DEFAULT 'unknown'
+        CHECK(status IN ('unknown', 'active', 'paused', 'retired', 'deceased')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK(career_start_year IS NULL OR career_start_year BETWEEN 1 AND 9999),
+    CHECK(career_end_year IS NULL OR career_end_year BETWEEN 1 AND 9999),
+    CHECK(career_start_year IS NULL OR career_end_year IS NULL OR career_start_year <= career_end_year),
+    CHECK(birth_date IS NULL OR death_date IS NULL OR birth_date <= death_date)
+);
+CREATE INDEX IF NOT EXISTS idx_directors_updated_at ON directors(updated_at);
+
+CREATE TABLE IF NOT EXISTS director_names (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    director_id INTEGER NOT NULL,
+    name TEXT NOT NULL CHECK(length(trim(name)) > 0),
+    normalized_name TEXT NOT NULL CHECK(length(normalized_name) > 0),
+    type TEXT NOT NULL CHECK(type IN ('main', 'alias')),
+    position INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (director_id) REFERENCES directors(id) ON DELETE CASCADE,
+    UNIQUE (director_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_director_names_normalized
+    ON director_names(normalized_name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_director_names_one_main
+    ON director_names(director_id)
+    WHERE type = 'main';
+
+CREATE TABLE IF NOT EXISTS director_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    director_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    url TEXT NOT NULL,
+    normalized_url TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (director_id) REFERENCES directors(id) ON DELETE CASCADE,
+    UNIQUE (director_id, normalized_url)
+);
+CREATE INDEX IF NOT EXISTS idx_director_links_director
+    ON director_links(director_id, position);
+
+CREATE TABLE IF NOT EXISTS series (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    main_name TEXT NOT NULL,
+    image_path TEXT,
+    summary TEXT,
+    owner_organization_id INTEGER,
+    parent_series_id INTEGER,
+    start_year INTEGER,
+    end_year INTEGER,
+    status TEXT NOT NULL DEFAULT 'unknown'
+        CHECK(status IN ('unknown', 'ongoing', 'completed', 'discontinued')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (owner_organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+    FOREIGN KEY (parent_series_id) REFERENCES series(id) ON DELETE SET NULL,
+    CHECK(start_year IS NULL OR start_year BETWEEN 1 AND 9999),
+    CHECK(end_year IS NULL OR end_year BETWEEN 1 AND 9999),
+    CHECK(start_year IS NULL OR end_year IS NULL OR start_year <= end_year)
+);
+CREATE INDEX IF NOT EXISTS idx_series_owner ON series(owner_organization_id);
+CREATE INDEX IF NOT EXISTS idx_series_parent ON series(parent_series_id);
+CREATE INDEX IF NOT EXISTS idx_series_updated_at ON series(updated_at);
+
+CREATE TABLE IF NOT EXISTS series_names (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    series_id INTEGER NOT NULL,
+    name TEXT NOT NULL CHECK(length(trim(name)) > 0),
+    normalized_name TEXT NOT NULL CHECK(length(normalized_name) > 0),
+    type TEXT NOT NULL CHECK(type IN ('main', 'alias')),
+    position INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE CASCADE,
+    UNIQUE (series_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_series_names_normalized
+    ON series_names(normalized_name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_series_names_one_main
+    ON series_names(series_id)
+    WHERE type = 'main';
+
+CREATE TABLE IF NOT EXISTS series_name_ownership (
+    owner_organization_id INTEGER,
+    normalized_name TEXT NOT NULL CHECK(length(normalized_name) > 0),
+    series_id INTEGER NOT NULL,
+    FOREIGN KEY (owner_organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_series_name_ownership_scope
+    ON series_name_ownership(COALESCE(owner_organization_id, 0), normalized_name);
+CREATE INDEX IF NOT EXISTS idx_series_name_ownership_series
+    ON series_name_ownership(series_id);
+
+CREATE TABLE IF NOT EXISTS series_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    series_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    url TEXT NOT NULL,
+    normalized_url TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE CASCADE,
+    UNIQUE (series_id, normalized_url)
+);
+CREATE INDEX IF NOT EXISTS idx_series_links_series
+    ON series_links(series_id, position);
+`
+
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
+
+${CLASSIFICATION_V8_SCHEMA_SQL}
 
 CREATE TABLE IF NOT EXISTS videos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -17,11 +206,19 @@ CREATE TABLE IF NOT EXISTS videos (
     publisher TEXT,
     series TEXT,
     director TEXT,
+    maker_organization_id INTEGER,
+    publisher_organization_id INTEGER,
+    series_id INTEGER,
+    director_id INTEGER,
     duration_seconds INTEGER,
     scraped_status INTEGER DEFAULT 0,
     last_scraped_at TEXT,
     updated_at TEXT,
-    add_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    add_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (maker_organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+    FOREIGN KEY (publisher_organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+    FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE SET NULL,
+    FOREIGN KEY (director_id) REFERENCES directors(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_videos_code ON videos(code);
 CREATE INDEX IF NOT EXISTS idx_videos_add_time ON videos(add_time);
@@ -32,6 +229,10 @@ CREATE INDEX IF NOT EXISTS idx_videos_maker ON videos(maker);
 CREATE INDEX IF NOT EXISTS idx_videos_publisher ON videos(publisher);
 CREATE INDEX IF NOT EXISTS idx_videos_series ON videos(series);
 CREATE INDEX IF NOT EXISTS idx_videos_director ON videos(director);
+CREATE INDEX IF NOT EXISTS idx_videos_maker_organization_id ON videos(maker_organization_id);
+CREATE INDEX IF NOT EXISTS idx_videos_publisher_organization_id ON videos(publisher_organization_id);
+CREATE INDEX IF NOT EXISTS idx_videos_series_id ON videos(series_id);
+CREATE INDEX IF NOT EXISTS idx_videos_director_id ON videos(director_id);
 
 CREATE TABLE IF NOT EXISTS video_resources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

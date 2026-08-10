@@ -1,6 +1,7 @@
 import { DEFAULT_AVATAR_FACE_RATIO, DEFAULT_AVATAR_FACE_SCALE_PRESET, type AvatarFaceScalePreset } from './avatarFaceScale'
 import { DEFAULT_AVATAR_CENTERING_MODE, type AvatarCenteringMode } from './avatarCentering'
 import type { CompositeScraperDefinition, ScraperPluginDelaySettings } from './scraperPluginTypes'
+import type { LibraryScanSummary } from './libraryTypes'
 
 /** UI color theme id (maps to CSS variables on html[data-theme]). */
 export type ThemeId = 'graphite' | 'warm' | 'slate' | 'light'
@@ -36,6 +37,10 @@ export interface AppSettings {
   libraryPaths: string[]
   /** Internal queue: roots whose local resource records are removed after the next successful scan. */
   pendingLibraryPathCleanups: string[]
+  /** Opt-in destructive cleanup run only after a safe full library scan. */
+  autoDeleteResourceLessVideos: boolean
+  /** Most recent scan audit record. */
+  lastLibraryScanSummary: LibraryScanSummary | null
   /** Minimum local file duration (minutes) required for scan import; 0 disables the filter. */
   minScanImportDurationMinutes: number
   /** Optional HTTP/HTTPS proxy for scraping, e.g. http://127.0.0.1:7890 */
@@ -138,6 +143,8 @@ export function normalizePluginDevAgentMaxContextTokens(value: unknown): number 
 export const DEFAULT_SETTINGS: AppSettings = {
   libraryPaths: [],
   pendingLibraryPathCleanups: [],
+  autoDeleteResourceLessVideos: false,
+  lastLibraryScanSummary: null,
   minScanImportDurationMinutes: 30,
   proxyUrl: '',
   proxyUrlEnabled: false,

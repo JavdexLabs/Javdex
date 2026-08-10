@@ -41,6 +41,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
       assetEncryption: _ignoredCrypto,
       mediaAssetsPath: _ignoredPath,
       pendingLibraryPathCleanups: _ignoredCleanupQueue,
+      lastLibraryScanSummary: _ignoredScanSummary,
       ...safePatch
     } = patch
     let guardedPatch: Partial<AppSettings> = safePatch

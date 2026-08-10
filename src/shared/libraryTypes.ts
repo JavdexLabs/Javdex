@@ -44,6 +44,26 @@ export interface LibraryPathRemovalPreview {
   videosBecomingResourceLess: number
 }
 
+export type LibraryScanTrigger = 'manual' | 'startup' | 'interval' | 'resume'
+export type LibraryScanStatus = 'success' | 'cancelled' | 'failed'
+
+export interface LibraryScanSummary {
+  trigger: LibraryScanTrigger
+  startedAt: string
+  finishedAt: string
+  status: LibraryScanStatus
+  scannedFiles: number
+  resourcesAdded: number
+  resourcesUpdated: number
+  resourcesRemoved: number
+  primaryResourcesPromoted: number
+  videosDeleted: number
+  skippedFiles: number
+  failedFiles: number
+  offlineFolders: string[]
+  errorSummary: string | null
+}
+
 // ---- Scan results ----
 
 export interface ScanResult {
@@ -60,6 +80,8 @@ export interface ScanResult {
   removed: number
   /** Primary resources promoted after missing local resources were removed. */
   promoted: number
+  /** Resource-less videos removed by the opt-in safe post-scan cleanup. */
+  deletedVideos: number
   /** Configured roots that were missing or unreadable and therefore preserved. */
   offlineFolders: string[]
   newCodes: string[]

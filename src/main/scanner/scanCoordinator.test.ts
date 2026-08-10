@@ -1,9 +1,23 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import type { ScanResult } from '@shared/libraryTypes'
+import type { LibraryScanSummary, ScanResult } from '@shared/libraryTypes'
 import type { VideoResource } from '@shared/videoTypes'
 import { MaintenanceTaskGate } from '../services/maintenanceTaskGate'
 import { createScanCoordinator } from './scanCoordinator'
+
+type CoordinatorDependencies = Parameters<typeof createScanCoordinator>[0]
+
+function createTestScanCoordinator(
+  dependencies: CoordinatorDependencies
+): ReturnType<typeof createScanCoordinator> {
+  return createScanCoordinator({
+    shouldAutoDeleteResourceLessVideos: () => false,
+    deleteResourceLessVideos: () => 0,
+    recordScanSummary: () => undefined,
+    now: () => '2026-08-10T00:00:00.000Z',
+    ...dependencies
+  })
+}
 
 function emptyScanResult(): ScanResult {
   return {
@@ -15,6 +29,7 @@ function emptyScanResult(): ScanResult {
     relocated: 0,
     removed: 0,
     promoted: 0,
+    deletedVideos: 0,
     offlineFolders: [],
     newCodes: [],
     unrecognizedFiles: []
@@ -64,7 +79,8 @@ describe('ScanCoordinator', () => {
     const removed: number[] = []
     const promoted: number[] = []
     const scannedRoots: string[][] = []
-    const coordinator = createScanCoordinator({
+    const summaries: LibraryScanSummary[] = []
+    const coordinator = createTestScanCoordinator({
       gate: new MaintenanceTaskGate(),
       getConfiguredFolders: () => ['/online', '/offline'],
       inspectFolder: async (folder) => folder === '/online',
@@ -86,7 +102,12 @@ describe('ScanCoordinator', () => {
       },
       setPrimaryResource: (_videoId, id) => promoted.push(id),
       pathExists: () => false,
-      consumePendingPathCleanups: () => ({ removed: 0, promoted: 0, consumedRoots: [] })
+      consumePendingPathCleanups: () => ({ removed: 0, promoted: 0, consumedRoots: [] }),
+      shouldAutoDeleteResourceLessVideos: () => true,
+      deleteResourceLessVideos: () => {
+        throw new Error('offline scans must not auto-delete videos')
+      },
+      recordScanSummary: (summary) => summaries.push(summary)
     })
 
     const result = await coordinator.run({ trigger: 'manual' })
@@ -99,6 +120,8 @@ describe('ScanCoordinator', () => {
     assert.equal(result.promoted, 1)
     assert.equal(resources.has(1), true)
     assert.equal(resources.has(3), true)
+    assert.equal(summaries[0].status, 'success')
+    assert.deepEqual(summaries[0].offlineFolders, ['/offline'])
   })
 
   it('does not run cleanup after cancellation and releases the mutual-exclusion lease', async () => {
@@ -108,7 +131,8 @@ describe('ScanCoordinator', () => {
     const started = new Promise<void>((resolve) => {
       scanningStarted = resolve
     })
-    const coordinator = createScanCoordinator({
+    const summaries: LibraryScanSummary[] = []
+    const coordinator = createTestScanCoordinator({
       gate,
       getConfiguredFolders: () => ['/online'],
       inspectFolder: async () => true,
@@ -122,7 +146,12 @@ describe('ScanCoordinator', () => {
       listLocalResources: () => {
         cleanupReads += 1
         return []
-      }
+      },
+      shouldAutoDeleteResourceLessVideos: () => true,
+      deleteResourceLessVideos: () => {
+        throw new Error('cancelled scans must not auto-delete videos')
+      },
+      recordScanSummary: (summary) => summaries.push(summary)
     })
 
     const running = coordinator.run()
@@ -131,12 +160,13 @@ describe('ScanCoordinator', () => {
     assert.equal((await running).cancelled, true)
     assert.equal(cleanupReads, 0)
     assert.equal(gate.active, null)
+    assert.equal(summaries[0].status, 'cancelled')
   })
 
   it('keeps resources after a coordinator-level failure', async () => {
     let cleanupReads = 0
     let deferredCleanupRuns = 0
-    const coordinator = createScanCoordinator({
+    const coordinator = createTestScanCoordinator({
       gate: new MaintenanceTaskGate(),
       getConfiguredFolders: () => ['/online'],
       inspectFolder: async () => true,
@@ -160,7 +190,7 @@ describe('ScanCoordinator', () => {
 
   it('consumes deferred path cleanup only after a successful uncancelled scan', async () => {
     let deferredCleanupRuns = 0
-    const coordinator = createScanCoordinator({
+    const coordinator = createTestScanCoordinator({
       gate: new MaintenanceTaskGate(),
       getConfiguredFolders: () => ['/online'],
       inspectFolder: async () => true,
@@ -181,7 +211,7 @@ describe('ScanCoordinator', () => {
 
   it('keeps deferred path cleanup queued after a partial folder scan', async () => {
     let deferredCleanupRuns = 0
-    const coordinator = createScanCoordinator({
+    const coordinator = createTestScanCoordinator({
       gate: new MaintenanceTaskGate(),
       getConfiguredFolders: () => ['/one', '/two'],
       inspectFolder: async () => true,
@@ -190,6 +220,10 @@ describe('ScanCoordinator', () => {
       consumePendingPathCleanups: () => {
         deferredCleanupRuns += 1
         return { removed: 1, promoted: 0, consumedRoots: ['/removed'] }
+      },
+      shouldAutoDeleteResourceLessVideos: () => true,
+      deleteResourceLessVideos: () => {
+        throw new Error('partial scans must not auto-delete videos')
       }
     })
 
@@ -201,7 +235,7 @@ describe('ScanCoordinator', () => {
 
   it('allows a full cleanup-only scan after the final configured folder was removed', async () => {
     let scannedFolders: string[] | null = null
-    const coordinator = createScanCoordinator({
+    const coordinator = createTestScanCoordinator({
       gate: new MaintenanceTaskGate(),
       getConfiguredFolders: () => [],
       hasPendingPathCleanups: () => true,
@@ -223,11 +257,82 @@ describe('ScanCoordinator', () => {
     assert.equal(result.removed, 2)
   })
 
+  it('auto-deletes zero-resource videos after deferred cleanup on a safe full scan', async () => {
+    const order: string[] = []
+    const summaries: LibraryScanSummary[] = []
+    const times = ['2026-08-10T01:00:00.000Z', '2026-08-10T01:00:03.000Z']
+    const coordinator = createTestScanCoordinator({
+      gate: new MaintenanceTaskGate(),
+      getConfiguredFolders: () => ['/online'],
+      inspectFolder: async () => true,
+      scanFolders: async () => ({ ...emptyScanResult(), imported: 2, relocated: 1 }),
+      listLocalResources: () => [],
+      consumePendingPathCleanups: () => {
+        order.push('pending-cleanup')
+        return { removed: 4, promoted: 1, consumedRoots: ['/removed'] }
+      },
+      shouldAutoDeleteResourceLessVideos: () => true,
+      deleteResourceLessVideos: () => {
+        order.push('delete-videos')
+        return 3
+      },
+      recordScanSummary: (summary) => summaries.push(summary),
+      now: () => times.shift() ?? 'unexpected'
+    })
+
+    const result = await coordinator.run({ trigger: 'manual' })
+
+    assert.deepEqual(order, ['pending-cleanup', 'delete-videos'])
+    assert.equal(result.deletedVideos, 3)
+    assert.equal(result.removed, 4)
+    assert.equal(result.promoted, 1)
+    assert.deepEqual(summaries, [
+      {
+        trigger: 'manual',
+        startedAt: '2026-08-10T01:00:00.000Z',
+        finishedAt: '2026-08-10T01:00:03.000Z',
+        status: 'success',
+        scannedFiles: 0,
+        resourcesAdded: 2,
+        resourcesUpdated: 1,
+        resourcesRemoved: 4,
+        primaryResourcesPromoted: 1,
+        videosDeleted: 3,
+        skippedFiles: 0,
+        failedFiles: 0,
+        offlineFolders: [],
+        errorSummary: null
+      }
+    ])
+  })
+
+  it('persists a sanitized failed summary without running destructive cleanup', async () => {
+    const summaries: LibraryScanSummary[] = []
+    const coordinator = createTestScanCoordinator({
+      gate: new MaintenanceTaskGate(),
+      getConfiguredFolders: () => ['/online'],
+      inspectFolder: async () => true,
+      scanFolders: async () => {
+        throw new Error('adapter https://example.test/watch?token=secret failed')
+      },
+      shouldAutoDeleteResourceLessVideos: () => true,
+      deleteResourceLessVideos: () => {
+        throw new Error('failed scans must not auto-delete videos')
+      },
+      recordScanSummary: (summary) => summaries.push(summary)
+    })
+
+    await assert.rejects(() => coordinator.run(), /https:\/\/example\.test\/watch/)
+    assert.equal(summaries.length, 1)
+    assert.equal(summaries[0].status, 'failed')
+    assert.equal(summaries[0].errorSummary?.includes('secret'), false)
+  })
+
   it('rejects duplicate scans and scans blocked by resource maintenance', async () => {
     const gate = new MaintenanceTaskGate()
     const resourceLease = gate.tryAcquire('resource-maintenance')
     assert.ok(resourceLease)
-    const coordinator = createScanCoordinator({
+    const coordinator = createTestScanCoordinator({
       gate,
       getConfiguredFolders: () => ['/online']
     })
@@ -239,7 +344,7 @@ describe('ScanCoordinator', () => {
     const pendingScan = new Promise<void>((resolve) => {
       releaseScan = resolve
     })
-    const coordinatorWithPendingScan = createScanCoordinator({
+    const coordinatorWithPendingScan = createTestScanCoordinator({
       gate,
       getConfiguredFolders: () => ['/online'],
       inspectFolder: async () => true,

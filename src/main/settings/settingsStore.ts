@@ -22,6 +22,7 @@ import {
   normalizeAvatarFaceScalePreset
 } from '@shared/avatarFaceScale'
 import { normalizeAvatarCenteringMode } from '@shared/avatarCentering'
+import { normalizeLibraryScanSummary } from '@shared/libraryScanSummary'
 
 let cache: AppSettings | null = null
 
@@ -174,6 +175,11 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
       DEFAULT_SETTINGS.showVideoResourceTypeBadges
     ),
     pendingLibraryPathCleanups: normalizeStringList(parsed.pendingLibraryPathCleanups),
+    autoDeleteResourceLessVideos: normalizeBooleanSetting(
+      parsed.autoDeleteResourceLessVideos,
+      DEFAULT_SETTINGS.autoDeleteResourceLessVideos
+    ),
+    lastLibraryScanSummary: normalizeLibraryScanSummary(parsed.lastLibraryScanSummary),
     mediaAssetsPath:
       typeof parsed.mediaAssetsPath === 'string' ? parsed.mediaAssetsPath.trim() : '',
     minScanImportDurationMinutes: normalizeMinScanImportDurationMinutes(

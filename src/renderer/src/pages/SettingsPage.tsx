@@ -5,6 +5,7 @@ import type { ActressBatchScrapeScope, ActressBatchScrapeStatus, ActressScrapeFi
 import type { AppSettings } from '@shared/settingsTypes'
 import type { BatchProgress } from '@shared/batchScrapeTypes'
 import type { LibraryPathRemovalPreview, ScanResult } from '@shared/libraryTypes'
+import { buildLibraryScanNotification } from '@shared/libraryScanNotification'
 import { ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS, ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS, ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS, VIDEO_BATCH_SCRAPE_STATUS_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_UPDATE_MODE_OPTIONS } from '@shared/scrapeTypes'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { api } from '../api'
@@ -572,7 +573,9 @@ export default function SettingsPage(): JSX.Element {
   }
 
   const patchLibrarySettings = async (
-    patch: Partial<Pick<AppSettings, 'minScanImportDurationMinutes'>>
+    patch: Partial<
+      Pick<AppSettings, 'minScanImportDurationMinutes' | 'autoDeleteResourceLessVideos'>
+    >
   ): Promise<void> => {
     if (!settings) return
     try {
@@ -662,16 +665,17 @@ export default function SettingsPage(): JSX.Element {
       setScanResult(res)
       setUnrecognized(res.unrecognizedFiles)
       setScanStatus('')
-      if (res.cancelled) {
+      const notification = buildLibraryScanNotification(res)
+      if (notification) {
         toast.show(
-          `扫描已取消：已扫描 ${res.scannedFiles} 个文件，新增 ${res.imported} 部`,
-          'info'
+          notification.message,
+          notification.tone === 'warning' ? 'info' : notification.tone
         )
-      } else {
-        toast.show(
-          `扫描完成：新增 ${res.imported} 部，路径更新 ${res.relocated} 部，移除 ${res.removed} 部，跳过 ${res.skipped} 部`,
-          'success'
-        )
+      }
+      try {
+        setSettings(await api.settings.get())
+      } catch {
+        /* The scan result remains usable when refreshing its persisted summary fails. */
       }
       invalidateAllLibraryQueries(queryClient)
       setOverviewStatsRefreshKey((key) => key + 1)
@@ -695,6 +699,11 @@ export default function SettingsPage(): JSX.Element {
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
       setScanStatus('')
+      try {
+        setSettings(await api.settings.get())
+      } catch {
+        /* Keep the current settings snapshot when refreshing the failed summary fails. */
+      }
     } finally {
       setScanning(false)
     }

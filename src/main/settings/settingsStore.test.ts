@@ -82,6 +82,45 @@ describe('settingsStore deferred library path cleanup', () => {
   })
 })
 
+describe('settingsStore scan cleanup defaults', () => {
+  it('keeps automatic deletion disabled and has no summary for new and existing users', () => {
+    writeSettings({})
+    assert.equal(getSettings().autoDeleteResourceLessVideos, false)
+    assert.equal(getSettings().lastLibraryScanSummary, null)
+  })
+
+  it('preserves an explicit automatic deletion preference', () => {
+    writeSettings({ autoDeleteResourceLessVideos: true })
+    assert.equal(getSettings().autoDeleteResourceLessVideos, true)
+  })
+
+  it('normalizes and sanitizes the persisted latest scan summary', () => {
+    writeSettings({
+      lastLibraryScanSummary: {
+        trigger: 'interval',
+        startedAt: '2026-08-10T01:00:00.000Z',
+        finishedAt: '2026-08-10T01:00:02.000Z',
+        status: 'failed',
+        scannedFiles: 2,
+        resourcesAdded: 1,
+        resourcesUpdated: 0,
+        resourcesRemoved: 0,
+        primaryResourcesPromoted: 0,
+        videosDeleted: 0,
+        skippedFiles: 1,
+        failedFiles: 1,
+        offlineFolders: ['/offline'],
+        errorSummary: 'failed https://example.test/watch?token=secret'
+      }
+    })
+
+    const summary = getSettings().lastLibraryScanSummary
+    assert.equal(summary?.trigger, 'interval')
+    assert.equal(summary?.offlineFolders[0], '/offline')
+    assert.equal(summary?.errorSummary?.includes('secret'), false)
+  })
+})
+
 describe('settingsStore retired actress scrapers', () => {
   it('rewrites the retired idol archive default to Xslist', () => {
     writeSettings({ defaultActressScraper: '偶像档案库' })

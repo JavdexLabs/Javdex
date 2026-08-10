@@ -1,8 +1,9 @@
 import type { RefObject } from 'react'
 import { AlertTriangle, Clock, FolderOpen, FolderPlus, Play, Square, X } from 'lucide-react'
 import type { AppSettings } from '@shared/settingsTypes'
-import type { ScanResult } from '@shared/libraryTypes'
+import type { LibraryScanSummary, ScanResult } from '@shared/libraryTypes'
 import { UI_ICON_SM } from '../iconDefaults'
+import SettingsSwitchRow from '../SettingsSwitchRow'
 import {
   SettingsCard,
   SettingsEmptyPanel,
@@ -24,8 +25,10 @@ function buildScanMetrics(result: ScanResult): ScanMetric[] {
   const items: ScanMetric[] = [
     { key: 'scanned', label: '扫描', value: result.scannedFiles },
     { key: 'imported', label: '新导入', value: result.imported, tone: 'accent' },
-    { key: 'relocated', label: '路径更新', value: result.relocated },
+    { key: 'relocated', label: '更新资源', value: result.relocated },
     { key: 'removed', label: '移除', value: result.removed },
+    { key: 'promoted', label: '提升主资源', value: result.promoted },
+    { key: 'deletedVideos', label: '删除影片', value: result.deletedVideos },
     { key: 'skipped', label: '跳过', value: result.skipped }
   ]
   if (result.skippedShort > 0) {
@@ -35,6 +38,72 @@ function buildScanMetrics(result: ScanResult): ScanMetric[] {
     items.push({ key: 'failed', label: '无法识别', value: result.failed, tone: 'warn' })
   }
   return items
+}
+
+const SCAN_TRIGGER_LABEL: Record<LibraryScanSummary['trigger'], string> = {
+  manual: '手动',
+  startup: '启动后',
+  interval: '定时',
+  resume: '唤醒后'
+}
+
+const SCAN_STATUS_LABEL: Record<LibraryScanSummary['status'], string> = {
+  success: '成功',
+  cancelled: '已取消',
+  failed: '失败'
+}
+
+function formatScanTime(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
+}
+
+function ScanSummary({ summary }: { summary: LibraryScanSummary }): JSX.Element {
+  const metrics = [
+    ['新增资源', summary.resourcesAdded],
+    ['更新资源', summary.resourcesUpdated],
+    ['移除资源', summary.resourcesRemoved],
+    ['提升主资源', summary.primaryResourcesPromoted],
+    ['删除影片', summary.videosDeleted],
+    ['扫描文件', summary.scannedFiles],
+    ['跳过文件', summary.skippedFiles],
+    ['异常文件', summary.failedFiles]
+  ] as const
+  return (
+    <div className="library-scan-summary">
+      <div className="library-scan-summary-head">
+        <div>
+          <strong>{SCAN_TRIGGER_LABEL[summary.trigger]}扫描</strong>
+          <span>{formatScanTime(summary.startedAt)} 至 {formatScanTime(summary.finishedAt)}</span>
+        </div>
+        <SettingsStatusPill status={summary.status === 'failed' ? 'warning' : summary.status}>
+          {SCAN_STATUS_LABEL[summary.status]}
+        </SettingsStatusPill>
+      </div>
+      <div className="library-scan-summary-metrics">
+        {metrics.map(([label, value]) => (
+          <div key={label}>
+            <strong>{value}</strong>
+            <span>{label}</span>
+          </div>
+        ))}
+      </div>
+      {summary.offlineFolders.length > 0 ? (
+        <div className="library-scan-summary-detail is-warning">
+          <strong>{summary.offlineFolders.length} 个离线目录</strong>
+          {summary.offlineFolders.map((folder) => (
+            <span className="copyable-text" key={folder}>{folder}</span>
+          ))}
+        </div>
+      ) : null}
+      {summary.errorSummary ? (
+        <div className="library-scan-summary-detail is-error">
+          <strong>错误摘要</strong>
+          <span className="copyable-text">{summary.errorSummary}</span>
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 export default function LibrarySettingsPanel({
@@ -67,7 +136,11 @@ export default function LibrarySettingsPanel({
   onCancelScan: () => void
   onRequestRemovePath: (path: string) => void
   onResolvedUnrecognized: (path: string) => void
-  onPatchSettings: (patch: Partial<Pick<AppSettings, 'minScanImportDurationMinutes'>>) => void
+  onPatchSettings: (
+    patch: Partial<
+      Pick<AppSettings, 'minScanImportDurationMinutes' | 'autoDeleteResourceLessVideos'>
+    >
+  ) => void
   scanScrapePrompt?: { imported: number; unscraped: number } | null
   videoBatchActive?: boolean
   defaultScraper?: string
@@ -250,6 +323,44 @@ export default function LibrarySettingsPanel({
           ) : null}
         </section>
       </div>
+
+      <SettingsSectionBlock
+        className="library-safety-block"
+        title="扫描后清理"
+        hint="只在完整扫描成功且所有目录在线时执行。"
+      >
+        <div className="settings-toggle-list settings-toggle-list--compact">
+          <SettingsSwitchRow
+            title="扫描后自动删除无资源影片"
+            description="仅按资源记录为零判断；链接可用性不会触发删除"
+            checked={settings.autoDeleteResourceLessVideos}
+            disabled={scanning}
+            onChange={(checked) => onPatchSettings({ autoDeleteResourceLessVideos: checked })}
+          />
+        </div>
+        <div className="settings-notice settings-notice--warning library-destructive-warning">
+          <AlertTriangle {...UI_ICON_SM} aria-hidden />
+          <div className="settings-notice-copy">
+            <strong>不可逆清理</strong>
+            <span>
+              开启后会删除无资源影片的元数据、标签关系和应用自有图片，且无法恢复；
+              不会删除媒体目录中的源文件。扫描失败、取消或存在离线目录时不会执行。
+            </span>
+          </div>
+        </div>
+      </SettingsSectionBlock>
+
+      <SettingsSectionBlock
+        className="library-summary-block"
+        title="最近一次扫描"
+        hint="只保留最近一次手动或后台扫描的审计摘要。"
+      >
+        {settings.lastLibraryScanSummary ? (
+          <ScanSummary summary={settings.lastLibraryScanSummary} />
+        ) : (
+          <SettingsEmptyPanel variant="compact">尚无扫描记录</SettingsEmptyPanel>
+        )}
+      </SettingsSectionBlock>
 
       {unrecognized.length > 0 ? (
         <SettingsSectionBlock

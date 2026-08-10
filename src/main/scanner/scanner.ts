@@ -185,6 +185,7 @@ export async function scanFolders(
     relocated: 0,
     removed: 0,
     promoted: 0,
+    deletedVideos: 0,
     offlineFolders: [],
     newCodes: [],
     unrecognizedFiles: []

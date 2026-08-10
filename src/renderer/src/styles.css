@@ -8525,6 +8525,108 @@ button.actress-mini:focus-visible .actress-avatar {
   border-top: 1px solid var(--border-subtle);
 }
 
+.library-safety-block,
+.library-summary-block {
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.library-destructive-warning {
+  justify-content: flex-start;
+  margin-top: 8px;
+}
+
+.library-destructive-warning > svg {
+  flex: 0 0 auto;
+  color: var(--warning);
+}
+
+.library-scan-summary {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-control) 38%, transparent);
+}
+
+.library-scan-summary-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.library-scan-summary-head > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.library-scan-summary-head strong,
+.library-scan-summary-detail strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.library-scan-summary-head span,
+.library-scan-summary-detail span {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.library-scan-summary-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 6px;
+}
+
+.library-scan-summary-metrics > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 8px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+}
+
+.library-scan-summary-metrics strong {
+  color: var(--text-primary);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.library-scan-summary-metrics span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.library-scan-summary-detail {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.library-scan-summary-detail.is-warning {
+  border-color: var(--border-warning);
+  background: var(--surface-warning);
+}
+
+.library-scan-summary-detail.is-error {
+  border-color: var(--border-danger);
+  background: var(--surface-danger);
+}
+
+@media (max-width: 980px) {
+  .library-scan-summary-metrics {
+    grid-template-columns: repeat(3, minmax(72px, 1fr));
+  }
+}
+
 .library-unrec {
   margin-top: 0;
 }

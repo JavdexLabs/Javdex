@@ -288,6 +288,59 @@ export function purgeVideo(id: number): { obsoletePaths: string[] } {
   return { obsoletePaths: Array.from(new Set(obsoletePaths)) }
 }
 
+export function purgeResourceLessVideos(): { deleted: number; obsoletePaths: string[] } {
+  const db = getDb()
+  const candidates = db
+    .prepare(
+      `SELECT id, cover_path
+       FROM videos v
+       WHERE NOT EXISTS (
+         SELECT 1 FROM video_resources vr WHERE vr.video_id = v.id
+       )
+       ORDER BY id ASC`
+    )
+    .all() as Array<{ id: number; cover_path: string | null }>
+  if (candidates.length === 0) return { deleted: 0, obsoletePaths: [] }
+
+  const hints = candidates.map((candidate) => collectVideoLibraryCleanupHints(candidate.id))
+  const tagIds = (
+    db
+      .prepare(
+        `SELECT DISTINCT vt.tag_id
+         FROM video_tag vt
+         WHERE NOT EXISTS (
+           SELECT 1 FROM video_resources vr WHERE vr.video_id = vt.video_id
+         )`
+      )
+      .all() as Array<{ tag_id: number }>
+  ).map((row) => row.tag_id)
+  const obsoletePaths = db.transaction(() => {
+    const paths: string[] = []
+    for (const candidate of candidates) {
+      paths.push(...deleteVideoAssetRows(candidate.id))
+      if (candidate.cover_path) paths.push(candidate.cover_path)
+      deleteVideo(candidate.id)
+    }
+    for (const tagId of tagIds) pruneTagIfUnused(tagId)
+    return Array.from(new Set(paths))
+  })()
+
+  try {
+    runLibraryCleanup({
+      actressIds: hints.flatMap((hint) => hint.actressIds ?? []),
+      facets: {
+        maker: hints.flatMap((hint) => hint.facets?.maker ?? []),
+        publisher: hints.flatMap((hint) => hint.facets?.publisher ?? []),
+        series: hints.flatMap((hint) => hint.facets?.series ?? []),
+        director: hints.flatMap((hint) => hint.facets?.director ?? [])
+      }
+    })
+  } catch (error) {
+    console.error('Post-commit library cleanup failed:', error)
+  }
+  return { deleted: candidates.length, obsoletePaths }
+}
+
 /** Remove one file row; purge the video work when no files remain. */
 export function purgeVideoFile(fileId: number): { obsoletePaths: string[] } {
   const file = getVideoFileById(fileId)

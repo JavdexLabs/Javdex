@@ -5,6 +5,7 @@ import { IPC } from '@shared/ipc-channels'
 import type { ClassificationQueryService } from '../services/classificationQueryService'
 import type { ClassificationMaintenanceService } from '../services/classificationMaintenanceService'
 import type { ClassificationImageService } from '../services/classificationImageService'
+import type { DirectorMergeService } from '../services/directorMergeService'
 import { appCommandAdapter } from './appContractAdapter'
 import { registerOrganizationHandlers } from './facetHandlers'
 
@@ -94,6 +95,18 @@ describe('organization IPC contract', () => {
         return { imagePath: 'covers/classification.jpg', cleanupFailures: [] }
       }
     }
+    const directorMergeService: DirectorMergeService = {
+      merge(input) {
+        calls.push(['director-merge', input])
+        return {
+          targetId: input.targetId,
+          sourceId: input.sourceId,
+          transferredVideoCount: 2,
+          imagePath: 'avatars/director.jpg',
+          cleanupFailures: []
+        }
+      }
+    }
     const handlers = new Map<IpcChannel, (...args: unknown[]) => unknown>()
     const adapter = {
       register(channel: IpcChannel, handler: (...args: unknown[]) => unknown) {
@@ -101,7 +114,12 @@ describe('organization IPC contract', () => {
       }
     } as typeof appCommandAdapter
 
-    registerOrganizationHandlers(adapter, { queryService, maintenanceService, imageService })
+    registerOrganizationHandlers(adapter, {
+      queryService,
+      maintenanceService,
+      imageService,
+      directorMergeService
+    })
 
     const listQuery = { role: 'maker' as const, search: 'studio' }
     const createInput = { role: 'publisher' as const, mainName: 'Studio' }
@@ -118,6 +136,14 @@ describe('organization IPC contract', () => {
     assert.deepEqual(handlers.get(IPC.DIRECTOR_OPTIONS)?.('alex'), [])
     assert.equal(handlers.get(IPC.DIRECTOR_CREATE)?.(directorInput), 23)
     assert.equal(handlers.get(IPC.DIRECTOR_UPDATE)?.(23, directorInput), true)
+    const directorMergeInput = { targetId: 23, sourceId: 24 }
+    assert.deepEqual(handlers.get(IPC.DIRECTOR_MERGE)?.(directorMergeInput), {
+      targetId: 23,
+      sourceId: 24,
+      transferredVideoCount: 2,
+      imagePath: 'avatars/director.jpg',
+      cleanupFailures: []
+    })
     const seriesQuery = { search: 'collection' }
     const seriesInput = { mainName: 'Collection' }
     assert.deepEqual(handlers.get(IPC.SERIES_LIST)?.(seriesQuery), [])
@@ -143,6 +169,7 @@ describe('organization IPC contract', () => {
       ['director-options', 'alex'],
       ['director-create', directorInput],
       ['director-update', 23, directorInput],
+      ['director-merge', directorMergeInput],
       ['series-list', seriesQuery],
       ['series-get', 31],
       ['series-options', 'collection'],

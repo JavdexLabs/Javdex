@@ -6,11 +6,13 @@ import { appCommandAdapter } from './appContractAdapter'
 import { classificationQueryService } from '../services/classificationQueryService'
 import { classificationMaintenanceService } from '../services/classificationMaintenanceService'
 import { classificationImageService } from '../services/classificationImageService'
+import { directorMergeService } from '../services/directorMergeService'
 
 interface OrganizationHandlerDependencies {
   queryService: typeof classificationQueryService
   maintenanceService: typeof classificationMaintenanceService
   imageService: typeof classificationImageService
+  directorMergeService: typeof directorMergeService
 }
 
 export function registerOrganizationHandlers(
@@ -18,7 +20,8 @@ export function registerOrganizationHandlers(
   dependencies: OrganizationHandlerDependencies = {
     queryService: classificationQueryService,
     maintenanceService: classificationMaintenanceService,
-    imageService: classificationImageService
+    imageService: classificationImageService,
+    directorMergeService
   }
 ): void {
   adapter.register(IPC.ORGANIZATION_LIST, (query) =>
@@ -46,6 +49,9 @@ export function registerOrganizationHandlers(
   )
   adapter.register(IPC.DIRECTOR_UPDATE, (id, input) =>
     dependencies.maintenanceService.updateDirector(id, input)
+  )
+  adapter.register(IPC.DIRECTOR_MERGE, (input) =>
+    dependencies.directorMergeService.merge(input)
   )
   adapter.register(IPC.SERIES_LIST, (query) => dependencies.queryService.listSeries(query))
   adapter.register(IPC.SERIES_GET, (id) => dependencies.queryService.getSeries(id))

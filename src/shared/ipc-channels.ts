@@ -108,6 +108,7 @@ export const IPC = {
   DIRECTOR_OPTIONS: 'director:options',
   DIRECTOR_CREATE: 'director:create',
   DIRECTOR_UPDATE: 'director:update',
+  DIRECTOR_MERGE: 'director:merge',
   SERIES_LIST: 'series:list',
   SERIES_GET: 'series:get',
   SERIES_OPTIONS: 'series:options',

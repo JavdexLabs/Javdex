@@ -181,6 +181,19 @@ export interface DirectorAssignmentResult {
   mainName: string | null
 }
 
+export interface DirectorMergeInput {
+  targetId: number
+  sourceId: number
+}
+
+export interface DirectorMergeResult {
+  targetId: number
+  sourceId: number
+  transferredVideoCount: number
+  imagePath: string | null
+  cleanupFailures: ClassificationImageCleanupFailure[]
+}
+
 export interface SeriesProfileInput {
   mainName: string
   aliases?: string[]

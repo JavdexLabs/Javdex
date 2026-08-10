@@ -50,6 +50,8 @@ import type {
   DirectorDetail,
   DirectorListItem,
   DirectorListQuery,
+  DirectorMergeInput,
+  DirectorMergeResult,
   DirectorOption,
   DirectorProfileInput,
   DirectorUpdateInput,
@@ -137,6 +139,7 @@ export interface AppIpcContract {
   [IPC.DIRECTOR_OPTIONS]: { args: [search?: string]; result: DirectorOption[] }
   [IPC.DIRECTOR_CREATE]: { args: [input: DirectorProfileInput]; result: number }
   [IPC.DIRECTOR_UPDATE]: { args: [id: number, input: DirectorUpdateInput]; result: boolean }
+  [IPC.DIRECTOR_MERGE]: { args: [input: DirectorMergeInput]; result: DirectorMergeResult }
   [IPC.SERIES_LIST]: { args: [query: SeriesListQuery]; result: SeriesListItem[] }
   [IPC.SERIES_GET]: { args: [id: number]; result: SeriesDetail | null }
   [IPC.SERIES_OPTIONS]: { args: [search?: string]; result: SeriesOption[] }

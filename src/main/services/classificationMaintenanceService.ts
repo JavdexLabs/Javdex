@@ -22,6 +22,7 @@ import type {
 } from '@shared/classificationTypes'
 import { normalizeClassificationName } from '@shared/classificationNameNormalization'
 import { getDb } from '../db/database'
+import { writeDirectorLinks, writeDirectorNames } from './directorProfilePersistence'
 
 const VIDEO_ROLE_FIELDS: Record<
   OrganizationRole,
@@ -462,44 +463,6 @@ function prepareDirectorProfile(
     status,
     links: prepareLinks(input.links ?? links)
   }
-}
-
-function writeDirectorNames(
-  database: Database.Database,
-  id: number,
-  mainName: string,
-  aliases: string[]
-): void {
-  const names = prepareNames(mainName, aliases).normalizedNames
-  database.prepare('DELETE FROM director_names WHERE director_id = ?').run(id)
-  const insert = database.prepare(
-    `INSERT INTO director_names (director_id, name, normalized_name, type, position)
-     VALUES (?, ?, ?, ?, ?)`
-  )
-  names.forEach((name, position) =>
-    insert.run(
-      id,
-      name.name,
-      name.normalizedName,
-      name.type,
-      name.type === 'main' ? 0 : position - 1
-    )
-  )
-}
-
-function writeDirectorLinks(
-  database: Database.Database,
-  id: number,
-  links: OrganizationLink[]
-): void {
-  database.prepare('DELETE FROM director_links WHERE director_id = ?').run(id)
-  const insert = database.prepare(
-    `INSERT INTO director_links (director_id, label, url, normalized_url, position)
-     VALUES (?, ?, ?, ?, ?)`
-  )
-  links.forEach((link) =>
-    insert.run(id, link.label, link.url, normalizedUrl(link.url), link.position)
-  )
 }
 
 function createDirectorRecord(database: Database.Database, input: DirectorProfileInput): number {

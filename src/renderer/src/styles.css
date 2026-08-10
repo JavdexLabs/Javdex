@@ -161,6 +161,21 @@
   --classification-image-caption-gap: 4px;
   --classification-image-candidate-pad: 7px;
   --classification-image-meta-gap: 12px;
+  --director-merge-modal-w: 640px;
+  --director-merge-gap: 14px;
+  --director-merge-control-gap: 8px;
+  --director-merge-pad: 14px;
+  --director-merge-card-min-h: 120px;
+  --director-merge-picker-h: 220px;
+  --director-merge-badge-pad-y: 2px;
+  --director-merge-candidate-min-h: 48px;
+  --director-merge-choice-size: 16px;
+  --director-merge-choice-border-w: 2px;
+  --director-merge-choice-inset: 3px;
+  --director-merge-focus-offset: -2px;
+  --director-merge-text-xs: 11px;
+  --director-merge-text-sm: 12px;
+  --director-merge-text-md: 13px;
   --focus-outline: 2px solid var(--accent);
   --focus-ring: 0 0 0 3px var(--accent-soft);
   --privacy-glass-background: color-mix(in srgb, var(--surface-base) 42%, transparent);
@@ -6203,6 +6218,223 @@ button.tag-chip--custom-pick {
   object-fit: cover;
   user-select: none;
   -webkit-user-drag: none;
+}
+
+.modal.director-merge-modal {
+  width: min(var(--director-merge-modal-w), calc(100vw - var(--modal-viewport-inset)));
+}
+
+.director-merge-body {
+  display: grid;
+  gap: var(--director-merge-gap);
+  min-height: 0;
+}
+
+.director-merge-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--director-merge-control-gap);
+}
+
+.director-merge-card {
+  position: relative;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: var(--director-merge-control-gap);
+  min-width: 0;
+  min-height: var(--director-merge-card-min-h);
+  padding: var(--director-merge-pad);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.director-merge-card--target,
+.director-merge-card--source {
+  border-style: solid;
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+  color: var(--text-accent);
+}
+
+.director-merge-card strong,
+.director-merge-card small {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.director-merge-card strong {
+  color: var(--text-primary);
+}
+
+.director-merge-card small {
+  color: var(--text-muted);
+}
+
+.director-merge-badge {
+  position: absolute;
+  inset-block-start: var(--director-merge-control-gap);
+  inset-inline-start: var(--director-merge-control-gap);
+  padding: var(--director-merge-badge-pad-y) var(--director-merge-control-gap);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--surface-elevated);
+  color: var(--text-secondary);
+  font-size: var(--director-merge-text-xs);
+  line-height: 1.35;
+}
+
+.director-merge-arrow {
+  color: var(--text-muted);
+}
+
+.director-merge-picker {
+  display: grid;
+  gap: var(--director-merge-control-gap);
+  min-height: 0;
+}
+
+.director-merge-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--director-merge-control-gap);
+}
+
+.director-merge-section-head > strong {
+  font-size: var(--director-merge-text-sm);
+}
+
+.director-merge-section-head > span {
+  color: var(--text-muted);
+  font-size: var(--director-merge-text-xs);
+}
+
+.director-merge-picker > .search-input {
+  width: 100%;
+}
+
+.director-merge-candidates {
+  min-height: var(--empty-inline-min-h, 140px);
+  max-height: var(--director-merge-picker-h);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-base);
+}
+
+.director-merge-candidates > :is(.empty-state--modal, .empty-state--compact) {
+  min-height: var(--empty-inline-min-h, 140px);
+  border: 0;
+  background: transparent;
+}
+
+.director-merge-candidate {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--director-merge-control-gap);
+  width: 100%;
+  min-height: var(--director-merge-candidate-min-h);
+  padding: var(--director-merge-control-gap) var(--director-merge-pad);
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.director-merge-candidate:last-child {
+  border-bottom: 0;
+}
+
+.director-merge-candidate:hover,
+.director-merge-candidate:focus-visible,
+.director-merge-candidate.is-selected {
+  background: var(--surface-selected);
+}
+
+.director-merge-candidate:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--director-merge-focus-offset);
+}
+
+.director-merge-radio {
+  position: relative;
+  width: var(--director-merge-choice-size);
+  height: var(--director-merge-choice-size);
+  border: var(--director-merge-choice-border-w) solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface-panel);
+}
+
+.director-merge-candidate.is-selected .director-merge-radio {
+  border-color: var(--border-accent);
+}
+
+.director-merge-candidate.is-selected .director-merge-radio::after {
+  content: '';
+  position: absolute;
+  inset: var(--director-merge-choice-inset);
+  border-radius: 50%;
+  background: var(--text-accent);
+}
+
+.director-merge-candidate-main {
+  display: grid;
+  min-width: 0;
+}
+
+.director-merge-candidate-main > strong,
+.director-merge-candidate-main > small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.director-merge-candidate-main > strong {
+  color: var(--text-primary);
+  font-size: var(--director-merge-text-md);
+}
+
+.director-merge-candidate-main > small {
+  color: var(--text-muted);
+  font-size: var(--director-merge-text-xs);
+}
+
+.director-merge-plan {
+  padding: var(--director-merge-pad);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+}
+
+.director-merge-plan > strong {
+  font-size: var(--director-merge-text-sm);
+}
+
+.director-merge-plan > ul {
+  margin: var(--director-merge-control-gap) 0 0;
+  padding-inline-start: var(--director-merge-gap);
+  color: var(--text-secondary);
+  font-size: var(--director-merge-text-sm);
+  line-height: 1.55;
+}
+
+.director-merge-error {
+  margin: 0;
+  color: var(--text-danger);
+  font-size: var(--director-merge-text-sm);
 }
 
 .classification-picker-options {

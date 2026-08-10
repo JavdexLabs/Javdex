@@ -72,6 +72,7 @@ import type {
   ClassificationEntityRef,
   ClassificationImageInput,
   DirectorListQuery,
+  DirectorMergeInput,
   DirectorProfileInput,
   DirectorUpdateInput,
   OrganizationCreateInput,
@@ -286,7 +287,8 @@ const api = {
     options: (search?: string) => invokeApp(IPC.DIRECTOR_OPTIONS, search),
     create: (input: DirectorProfileInput) => invokeApp(IPC.DIRECTOR_CREATE, input),
     update: (id: number, input: DirectorUpdateInput) =>
-      invokeApp(IPC.DIRECTOR_UPDATE, id, input)
+      invokeApp(IPC.DIRECTOR_UPDATE, id, input),
+    merge: (input: DirectorMergeInput) => invokeApp(IPC.DIRECTOR_MERGE, input)
   },
   series: {
     list: (query: SeriesListQuery) => invokeApp(IPC.SERIES_LIST, query),

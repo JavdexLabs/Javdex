@@ -1,12 +1,13 @@
 import { useCallback, useMemo, useState } from 'react'
-import { Clapperboard, ExternalLink, ImagePlus, Pencil, SearchX } from 'lucide-react'
+import { Clapperboard, ExternalLink, GitMerge, ImagePlus, Pencil, SearchX } from 'lucide-react'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { DirectorUpdateInput } from '@shared/classificationTypes'
+import type { DirectorMergeResult, DirectorUpdateInput } from '@shared/classificationTypes'
 import type { VideoQuery } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
 import BackButton from '../components/BackButton'
 import ClassificationImageModal from '../components/ClassificationImageModal'
+import DirectorMergeModal from '../components/DirectorMergeModal'
 import DirectorEditModal from '../components/DirectorEditModal'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
@@ -15,7 +16,7 @@ import PosterCard from '../components/PosterCard'
 import { useToast } from '../components/Toast'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { useInfiniteVideoList } from '../query/useInfiniteVideoList'
-import { directorKeys } from '../query/queryKeys'
+import { directorKeys, videoKeys } from '../query/queryKeys'
 import { hashListQuery } from '../listView/listQueryParams'
 import { navigateToFacetList } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
@@ -39,6 +40,7 @@ export default function DirectorDetailPage(): JSX.Element {
   const client = useQueryClient()
   const [editing, setEditing] = useState(false)
   const [editingImage, setEditingImage] = useState(false)
+  const [mergingDirector, setMergingDirector] = useState(false)
   const stacked = Boolean(useMatch({ path: ROUTE_MATCH.directorVideoStack, end: false }))
   const detailQuery = useQuery({
     queryKey: directorKeys.detail(id),
@@ -67,6 +69,20 @@ export default function DirectorDetailPage(): JSX.Element {
     } catch (error) {
       toast.show(String((error as Error).message), 'error')
     }
+  }
+  const merged = async (result: DirectorMergeResult): Promise<void> => {
+    setMergingDirector(false)
+    await Promise.all([
+      client.invalidateQueries({ queryKey: directorKeys.all }),
+      client.invalidateQueries({ queryKey: videoKeys.all })
+    ])
+    void refetchSilent()
+    toast.show(
+      result.cleanupFailures.length > 0
+        ? '导演已合并，但来源肖像清理失败，可稍后重试'
+        : `导演已合并，转移 ${result.transferredVideoCount} 部影片`,
+      result.cleanupFailures.length > 0 ? 'info' : 'success'
+    )
   }
   const director = detailQuery.data
   const overlay = stacked ? (
@@ -112,6 +128,14 @@ export default function DirectorDetailPage(): JSX.Element {
             title={director.mainName}
             controls={
               <>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setMergingDirector(true)}
+                >
+                  <GitMerge {...UI_ICON_SM} aria-hidden />
+                  合并导演
+                </button>
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
@@ -239,6 +263,13 @@ export default function DirectorDetailPage(): JSX.Element {
             fallbackCoverPath={director.fallbackCoverPath}
             onCancel={() => setEditingImage(false)}
             onChanged={() => client.invalidateQueries({ queryKey: directorKeys.all })}
+          />
+        )}
+        {mergingDirector && (
+          <DirectorMergeModal
+            target={director}
+            onCancel={() => setMergingDirector(false)}
+            onMerged={merged}
           />
         )}
       </div>

@@ -8,15 +8,17 @@ import { normalizeClassificationName } from '@shared/classificationNameNormaliza
 import { getDb } from '../db/database'
 import {
   assertClassificationMergeInput,
-  cleanupClassificationImage,
   mergeClassificationAliases,
   mergeClassificationLinks,
-  obsoleteSourceImagePath,
   resolveClassificationMergeParent,
   targetFirstMeaningfulText,
   type ClassificationMergeLink,
   type ClassificationMergeName
 } from './classificationMergeSupport'
+import {
+  cleanupClassificationImage,
+  obsoleteSourceImagePath
+} from './classificationImageCleanup'
 import { mediaAssetStore } from './mediaAssetStore'
 import {
   assertSeriesNamesAvailable,

@@ -48,6 +48,8 @@ import type {
   ClassificationImageInput,
   ClassificationImageUpdateResult,
   DirectorDetail,
+  DirectorDeleteImpact,
+  DirectorDeleteResult,
   DirectorListItem,
   DirectorListQuery,
   DirectorMergeInput,
@@ -66,6 +68,8 @@ import type {
   OrganizationRole,
   OrganizationUpdateInput,
   SeriesDetail,
+  SeriesDeleteImpact,
+  SeriesDeleteResult,
   SeriesListItem,
   SeriesListQuery,
   SeriesMergeInput,
@@ -153,12 +157,16 @@ export interface AppIpcContract {
   [IPC.DIRECTOR_CREATE]: { args: [input: DirectorProfileInput]; result: number }
   [IPC.DIRECTOR_UPDATE]: { args: [id: number, input: DirectorUpdateInput]; result: boolean }
   [IPC.DIRECTOR_MERGE]: { args: [input: DirectorMergeInput]; result: DirectorMergeResult }
+  [IPC.DIRECTOR_DELETE_PREVIEW]: { args: [id: number]; result: DirectorDeleteImpact }
+  [IPC.DIRECTOR_DELETE]: { args: [id: number]; result: DirectorDeleteResult }
   [IPC.SERIES_LIST]: { args: [query: SeriesListQuery]; result: SeriesListItem[] }
   [IPC.SERIES_GET]: { args: [id: number]; result: SeriesDetail | null }
   [IPC.SERIES_OPTIONS]: { args: [search?: string]; result: SeriesOption[] }
   [IPC.SERIES_CREATE]: { args: [input: SeriesProfileInput]; result: number }
   [IPC.SERIES_UPDATE]: { args: [id: number, input: SeriesUpdateInput]; result: boolean }
   [IPC.SERIES_MERGE]: { args: [input: SeriesMergeInput]; result: SeriesMergeResult }
+  [IPC.SERIES_DELETE_PREVIEW]: { args: [id: number]; result: SeriesDeleteImpact }
+  [IPC.SERIES_DELETE]: { args: [id: number]; result: SeriesDeleteResult }
   [IPC.CLASSIFICATION_IMAGE_CANDIDATES]: {
     args: [entity: ClassificationEntityRef]
     result: ClassificationImageCandidate[]

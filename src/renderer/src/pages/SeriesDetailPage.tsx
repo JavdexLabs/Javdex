@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { ExternalLink, GitMerge, ImagePlus, Layers3, Pencil, SearchX } from 'lucide-react'
+import { ExternalLink, GitMerge, ImagePlus, Layers3, Pencil, SearchX, Trash2 } from 'lucide-react'
 import {
   Outlet,
   useLocation,
@@ -9,11 +9,16 @@ import {
   useSearchParams
 } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { SeriesMergeResult, SeriesUpdateInput } from '@shared/classificationTypes'
+import type {
+  SeriesDeleteResult,
+  SeriesMergeResult,
+  SeriesUpdateInput
+} from '@shared/classificationTypes'
 import type { VideoQuery } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
 import BackButton from '../components/BackButton'
 import ClassificationImageModal from '../components/ClassificationImageModal'
+import ClassificationDeleteModal from '../components/ClassificationDeleteModal'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import ListToolbar from '../components/ListToolbar'
@@ -55,6 +60,7 @@ export default function SeriesDetailPage(): JSX.Element {
   const [editing, setEditing] = useState(false)
   const [editingImage, setEditingImage] = useState(false)
   const [mergingSeries, setMergingSeries] = useState(false)
+  const [deletingSeries, setDeletingSeries] = useState(false)
   const stacked = Boolean(useMatch({ path: ROUTE_MATCH.seriesVideoStack, end: false }))
   const releaseDir = parseSeriesReleaseDir(params.get(LIST_PARAM.releaseDir))
   const detailQuery = useQuery({
@@ -101,6 +107,22 @@ export default function SeriesDetailPage(): JSX.Element {
         : `系列已合并，转移 ${result.transferredVideoCount} 部影片和 ${result.transferredChildCount} 个直接子系列`,
       result.cleanupFailures.length > 0 ? 'info' : 'success'
     )
+  }
+  const deleted = async (result: SeriesDeleteResult): Promise<void> => {
+    setDeletingSeries(false)
+    await Promise.all([
+      client.invalidateQueries({ queryKey: seriesKeys.all }),
+      client.invalidateQueries({ queryKey: videoKeys.all })
+    ])
+    toast.show(
+      result.cleanupFailures.length > 0
+        ? '系列已删除，但正式封面清理失败，可稍后重试'
+        : `系列已删除，解除 ${result.unlinkedVideoCount} 部影片关联，${result.detachedChildCount} 个直接子系列已变为无上级`,
+      result.cleanupFailures.length > 0 ? 'info' : 'success'
+    )
+    navigateToFacetList(navigate, location, 'series', {
+      [LIST_PARAM.releaseDir]: null
+    })
   }
   const series = detailQuery.data
   const overlay = stacked ? (
@@ -190,6 +212,14 @@ export default function SeriesDetailPage(): JSX.Element {
                 >
                   <Pencil {...UI_ICON_SM} aria-hidden />
                   编辑资料
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setDeletingSeries(true)}
+                >
+                  <Trash2 {...UI_ICON_SM} aria-hidden />
+                  删除系列
                 </button>
               </>
             }
@@ -315,6 +345,16 @@ export default function SeriesDetailPage(): JSX.Element {
             fallbackCoverPath={series.fallbackCoverPath}
             onCancel={() => setEditingImage(false)}
             onChanged={() => client.invalidateQueries({ queryKey: seriesKeys.all })}
+          />
+        )}
+        {deletingSeries && (
+          <ClassificationDeleteModal
+            entityLabel="系列"
+            entityName={series.mainName}
+            loadImpact={() => api.series.deletePreview(id)}
+            remove={() => api.series.remove(id)}
+            onCancel={() => setDeletingSeries(false)}
+            onDeleted={deleted}
           />
         )}
       </div>

@@ -7,14 +7,16 @@ import type {
 import { getDb } from '../db/database'
 import {
   assertClassificationMergeInput,
-  cleanupClassificationImage,
   mergeClassificationAliases,
   mergeClassificationLinks,
-  obsoleteSourceImagePath,
   targetFirstMeaningfulText,
   type ClassificationMergeLink,
   type ClassificationMergeName
 } from './classificationMergeSupport'
+import {
+  cleanupClassificationImage,
+  obsoleteSourceImagePath
+} from './classificationImageCleanup'
 import { writeDirectorLinks, writeDirectorNames } from './directorProfilePersistence'
 import { mediaAssetStore } from './mediaAssetStore'
 

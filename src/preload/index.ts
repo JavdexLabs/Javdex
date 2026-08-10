@@ -292,7 +292,9 @@ const api = {
     create: (input: DirectorProfileInput) => invokeApp(IPC.DIRECTOR_CREATE, input),
     update: (id: number, input: DirectorUpdateInput) =>
       invokeApp(IPC.DIRECTOR_UPDATE, id, input),
-    merge: (input: DirectorMergeInput) => invokeApp(IPC.DIRECTOR_MERGE, input)
+    merge: (input: DirectorMergeInput) => invokeApp(IPC.DIRECTOR_MERGE, input),
+    deletePreview: (id: number) => invokeApp(IPC.DIRECTOR_DELETE_PREVIEW, id),
+    remove: (id: number) => invokeApp(IPC.DIRECTOR_DELETE, id)
   },
   series: {
     list: (query: SeriesListQuery) => invokeApp(IPC.SERIES_LIST, query),
@@ -300,7 +302,9 @@ const api = {
     options: (search?: string) => invokeApp(IPC.SERIES_OPTIONS, search),
     create: (input: SeriesProfileInput) => invokeApp(IPC.SERIES_CREATE, input),
     update: (id: number, input: SeriesUpdateInput) => invokeApp(IPC.SERIES_UPDATE, id, input),
-    merge: (input: SeriesMergeInput) => invokeApp(IPC.SERIES_MERGE, input)
+    merge: (input: SeriesMergeInput) => invokeApp(IPC.SERIES_MERGE, input),
+    deletePreview: (id: number) => invokeApp(IPC.SERIES_DELETE_PREVIEW, id),
+    remove: (id: number) => invokeApp(IPC.SERIES_DELETE, id)
   },
   classificationImages: {
     candidates: (entity: ClassificationEntityRef) =>

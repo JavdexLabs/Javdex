@@ -9,12 +9,14 @@ import { classificationImageService } from '../services/classificationImageServi
 import { directorMergeService } from '../services/directorMergeService'
 import { seriesMergeService } from '../services/seriesMergeService'
 import { organizationMergeService } from '../services/organizationMergeService'
+import { classificationDeletionService } from '../services/classificationDeletionService'
 
 interface ClassificationHandlerDependencies {
   queryService: typeof classificationQueryService
   maintenanceService: typeof classificationMaintenanceService
   imageService: typeof classificationImageService
   organizationMergeService: typeof organizationMergeService
+  deletionService: typeof classificationDeletionService
   directorMergeService: typeof directorMergeService
   seriesMergeService: typeof seriesMergeService
 }
@@ -26,6 +28,7 @@ export function registerClassificationHandlers(
     maintenanceService: classificationMaintenanceService,
     imageService: classificationImageService,
     organizationMergeService,
+    deletionService: classificationDeletionService,
     directorMergeService,
     seriesMergeService
   }
@@ -65,6 +68,10 @@ export function registerClassificationHandlers(
   adapter.register(IPC.DIRECTOR_MERGE, (input) =>
     dependencies.directorMergeService.merge(input)
   )
+  adapter.register(IPC.DIRECTOR_DELETE_PREVIEW, (id) =>
+    dependencies.deletionService.previewDirector(id)
+  )
+  adapter.register(IPC.DIRECTOR_DELETE, (id) => dependencies.deletionService.deleteDirector(id))
   adapter.register(IPC.SERIES_LIST, (query) => dependencies.queryService.listSeries(query))
   adapter.register(IPC.SERIES_GET, (id) => dependencies.queryService.getSeries(id))
   adapter.register(IPC.SERIES_OPTIONS, (search) => dependencies.queryService.listSeriesOptions(search))
@@ -73,6 +80,10 @@ export function registerClassificationHandlers(
     dependencies.maintenanceService.updateSeries(id, input)
   )
   adapter.register(IPC.SERIES_MERGE, (input) => dependencies.seriesMergeService.merge(input))
+  adapter.register(IPC.SERIES_DELETE_PREVIEW, (id) =>
+    dependencies.deletionService.previewSeries(id)
+  )
+  adapter.register(IPC.SERIES_DELETE, (id) => dependencies.deletionService.deleteSeries(id))
   adapter.register(IPC.CLASSIFICATION_IMAGE_CANDIDATES, (entity) =>
     dependencies.queryService.listImageCandidates(entity)
   )

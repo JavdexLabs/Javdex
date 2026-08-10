@@ -136,6 +136,30 @@ export interface OrganizationMergeResult {
   cleanupFailures: ClassificationImageCleanupFailure[]
 }
 
+export interface DirectorDeleteImpact {
+  id: number
+  videoCount: number
+}
+
+export interface DirectorDeleteResult {
+  id: number
+  unlinkedVideoCount: number
+  cleanupFailures: ClassificationImageCleanupFailure[]
+}
+
+export interface SeriesDeleteImpact {
+  id: number
+  videoCount: number
+  directChildCount: number
+}
+
+export interface SeriesDeleteResult {
+  id: number
+  unlinkedVideoCount: number
+  detachedChildCount: number
+  cleanupFailures: ClassificationImageCleanupFailure[]
+}
+
 export interface DirectorProfileInput {
   mainName: string
   aliases?: string[]

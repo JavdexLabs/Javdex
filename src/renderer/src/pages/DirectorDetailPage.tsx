@@ -1,12 +1,17 @@
 import { useCallback, useMemo, useState } from 'react'
-import { Clapperboard, ExternalLink, GitMerge, ImagePlus, Pencil, SearchX } from 'lucide-react'
+import { Clapperboard, ExternalLink, GitMerge, ImagePlus, Pencil, SearchX, Trash2 } from 'lucide-react'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { DirectorMergeResult, DirectorUpdateInput } from '@shared/classificationTypes'
+import type {
+  DirectorDeleteResult,
+  DirectorMergeResult,
+  DirectorUpdateInput
+} from '@shared/classificationTypes'
 import type { VideoQuery } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
 import BackButton from '../components/BackButton'
 import ClassificationImageModal from '../components/ClassificationImageModal'
+import ClassificationDeleteModal from '../components/ClassificationDeleteModal'
 import DirectorMergeModal from '../components/DirectorMergeModal'
 import DirectorEditModal from '../components/DirectorEditModal'
 import EmptyState from '../components/EmptyState'
@@ -41,6 +46,7 @@ export default function DirectorDetailPage(): JSX.Element {
   const [editing, setEditing] = useState(false)
   const [editingImage, setEditingImage] = useState(false)
   const [mergingDirector, setMergingDirector] = useState(false)
+  const [deletingDirector, setDeletingDirector] = useState(false)
   const stacked = Boolean(useMatch({ path: ROUTE_MATCH.directorVideoStack, end: false }))
   const detailQuery = useQuery({
     queryKey: directorKeys.detail(id),
@@ -83,6 +89,20 @@ export default function DirectorDetailPage(): JSX.Element {
         : `导演已合并，转移 ${result.transferredVideoCount} 部影片`,
       result.cleanupFailures.length > 0 ? 'info' : 'success'
     )
+  }
+  const deleted = async (result: DirectorDeleteResult): Promise<void> => {
+    setDeletingDirector(false)
+    await Promise.all([
+      client.invalidateQueries({ queryKey: directorKeys.all }),
+      client.invalidateQueries({ queryKey: videoKeys.all })
+    ])
+    toast.show(
+      result.cleanupFailures.length > 0
+        ? '导演已删除，但正式肖像清理失败，可稍后重试'
+        : `导演已删除，解除 ${result.unlinkedVideoCount} 部影片关联`,
+      result.cleanupFailures.length > 0 ? 'info' : 'success'
+    )
+    navigateToFacetList(navigate, location, 'director')
   }
   const director = detailQuery.data
   const overlay = stacked ? (
@@ -151,6 +171,14 @@ export default function DirectorDetailPage(): JSX.Element {
                 >
                   <Pencil {...UI_ICON_SM} />
                   编辑资料
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setDeletingDirector(true)}
+                >
+                  <Trash2 {...UI_ICON_SM} aria-hidden />
+                  删除导演
                 </button>
               </>
             }
@@ -270,6 +298,16 @@ export default function DirectorDetailPage(): JSX.Element {
             target={director}
             onCancel={() => setMergingDirector(false)}
             onMerged={merged}
+          />
+        )}
+        {deletingDirector && (
+          <ClassificationDeleteModal
+            entityLabel="导演"
+            entityName={director.mainName}
+            loadImpact={() => api.directors.deletePreview(id)}
+            remove={() => api.directors.remove(id)}
+            onCancel={() => setDeletingDirector(false)}
+            onDeleted={deleted}
           />
         )}
       </div>

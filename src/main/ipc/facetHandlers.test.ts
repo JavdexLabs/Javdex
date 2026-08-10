@@ -8,6 +8,7 @@ import type { ClassificationImageService } from '../services/classificationImage
 import type { DirectorMergeService } from '../services/directorMergeService'
 import type { SeriesMergeService } from '../services/seriesMergeService'
 import type { OrganizationMergeService } from '../services/organizationMergeService'
+import type { ClassificationDeletionService } from '../services/classificationDeletionService'
 import { appCommandAdapter } from './appContractAdapter'
 import { registerClassificationHandlers } from './facetHandlers'
 
@@ -141,6 +142,24 @@ describe('classification IPC contract', () => {
         }
       }
     }
+    const deletionService: ClassificationDeletionService = {
+      previewDirector(id) {
+        calls.push(['director-delete-preview', id])
+        return { id, videoCount: 2 }
+      },
+      deleteDirector(id) {
+        calls.push(['director-delete', id])
+        return { id, unlinkedVideoCount: 3, cleanupFailures: [] }
+      },
+      previewSeries(id) {
+        calls.push(['series-delete-preview', id])
+        return { id, videoCount: 4, directChildCount: 1 }
+      },
+      deleteSeries(id) {
+        calls.push(['series-delete', id])
+        return { id, unlinkedVideoCount: 5, detachedChildCount: 2, cleanupFailures: [] }
+      }
+    }
     const handlers = new Map<IpcChannel, (...args: unknown[]) => unknown>()
     const adapter = {
       register(channel: IpcChannel, handler: (...args: unknown[]) => unknown) {
@@ -152,6 +171,7 @@ describe('classification IPC contract', () => {
       queryService,
       maintenanceService,
       imageService,
+      deletionService,
       organizationMergeService,
       directorMergeService,
       seriesMergeService
@@ -192,6 +212,12 @@ describe('classification IPC contract', () => {
       imagePath: 'avatars/director.jpg',
       cleanupFailures: []
     })
+    assert.deepEqual(handlers.get(IPC.DIRECTOR_DELETE_PREVIEW)?.(23), { id: 23, videoCount: 2 })
+    assert.deepEqual(handlers.get(IPC.DIRECTOR_DELETE)?.(23), {
+      id: 23,
+      unlinkedVideoCount: 3,
+      cleanupFailures: []
+    })
     const seriesQuery = { search: 'collection' }
     const seriesInput = { mainName: 'Collection' }
     assert.deepEqual(handlers.get(IPC.SERIES_LIST)?.(seriesQuery), [])
@@ -206,6 +232,17 @@ describe('classification IPC contract', () => {
       transferredVideoCount: 3,
       transferredChildCount: 2,
       imagePath: 'covers/series.jpg',
+      cleanupFailures: []
+    })
+    assert.deepEqual(handlers.get(IPC.SERIES_DELETE_PREVIEW)?.(31), {
+      id: 31,
+      videoCount: 4,
+      directChildCount: 1
+    })
+    assert.deepEqual(handlers.get(IPC.SERIES_DELETE)?.(31), {
+      id: 31,
+      unlinkedVideoCount: 5,
+      detachedChildCount: 2,
       cleanupFailures: []
     })
     const imageEntity = { kind: 'series' as const, id: 31 }
@@ -229,12 +266,16 @@ describe('classification IPC contract', () => {
       ['director-create', directorInput],
       ['director-update', 23, directorInput],
       ['director-merge', directorMergeInput],
+      ['director-delete-preview', 23],
+      ['director-delete', 23],
       ['series-list', seriesQuery],
       ['series-get', 31],
       ['series-options', 'collection'],
       ['series-create', seriesInput],
       ['series-update', 31, seriesInput],
       ['series-merge', seriesMergeInput],
+      ['series-delete-preview', 31],
+      ['series-delete', 31],
       ['image-candidates', imageEntity],
       ['image-set', imageEntity, imageInput]
     ])

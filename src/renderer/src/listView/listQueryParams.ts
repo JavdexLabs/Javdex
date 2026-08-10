@@ -1,6 +1,6 @@
 import type { ActressAvatarFilter, ActressGenderFilter, ActressListStatusFilter, ActressListSortBy } from '@shared/actressTypes'
 import type { ScrapedStatus, SortDir } from '@shared/commonTypes'
-import type { VideoQuery } from '@shared/videoTypes'
+import type { VideoQuery, VideoResourceFilter } from '@shared/videoTypes'
 import { ACTRESS_LIST_DEFAULTS } from '@shared/actressTypes'
 
 /** Shared list URL keys (library, actresses, facet list). */
@@ -13,8 +13,18 @@ export const LIST_PARAM = {
   status: 'status',
   avatar: 'avatar',
   year: 'year',
-  gender: 'gender'
+  gender: 'gender',
+  resources: 'resources'
 } as const
+
+export const VIDEO_RESOURCE_FILTER_ORDER: VideoResourceFilter[] = [
+  'local',
+  'direct',
+  'web',
+  'magnet',
+  'ed2k',
+  'none'
+]
 
 export const LIBRARY_DEFAULTS = {
   status: 'all' as ScrapedStatus | 'all',
@@ -85,6 +95,28 @@ export function parseYear(raw: string | null): number | 'all' {
   return Number.isInteger(y) && y > 1900 ? y : 'all'
 }
 
+export function parseVideoResourceFilters(raw: string | null): VideoResourceFilter[] {
+  if (!raw) return []
+  const selected = new Set(raw.split(','))
+  return VIDEO_RESOURCE_FILTER_ORDER.filter((kind) => selected.has(kind))
+}
+
+export function videoResourceFiltersParam(filters: VideoResourceFilter[]): string | null {
+  const selected = new Set(filters)
+  const canonical = VIDEO_RESOURCE_FILTER_ORDER.filter((kind) => selected.has(kind))
+  return canonical.length > 0 ? canonical.join(',') : null
+}
+
+export function canonicalizeLibrarySearchParams(params: URLSearchParams): URLSearchParams {
+  const next = new URLSearchParams(params)
+  const canonicalResources = videoResourceFiltersParam(
+    parseVideoResourceFilters(params.get(LIST_PARAM.resources))
+  )
+  if (canonicalResources) next.set(LIST_PARAM.resources, canonicalResources)
+  else next.delete(LIST_PARAM.resources)
+  return next
+}
+
 export function parseSort(
   rawSort: string | null,
   rawDir: string | null
@@ -110,6 +142,7 @@ export function libraryVideoQueryFromSearchParams(params: URLSearchParams): Vide
   const tagIds = parseTagIds(params.get(LIST_PARAM.tags))
   const codePrefix = (params.get(LIST_PARAM.prefix) ?? '').trim().toUpperCase()
   const q = (params.get(LIST_PARAM.q) ?? '').trim()
+  const resourceKinds = parseVideoResourceFilters(params.get(LIST_PARAM.resources))
 
   return {
     search: q || undefined,
@@ -117,6 +150,7 @@ export function libraryVideoQueryFromSearchParams(params: URLSearchParams): Vide
     year: parseYear(params.get(LIST_PARAM.year)),
     tagIds: tagIds.length ? tagIds : undefined,
     codePrefix: codePrefix || undefined,
+    resourceKinds: resourceKinds.length ? resourceKinds : undefined,
     sortBy,
     sortDir
   }
@@ -137,7 +171,8 @@ export function libraryQueryHash(params: URLSearchParams): string {
     sort: q.sortBy ?? '',
     dir: q.sortDir ?? '',
     tags: q.tagIds?.join(',') ?? '',
-    prefix: q.codePrefix ?? ''
+    prefix: q.codePrefix ?? '',
+    resources: q.resourceKinds?.join(',') ?? ''
   })
 }
 
@@ -199,6 +234,7 @@ export function isDefaultLibraryParams(params: URLSearchParams): boolean {
     q.sortBy === LIBRARY_DEFAULTS.sortBy &&
     q.sortDir === LIBRARY_DEFAULTS.sortDir &&
     !q.tagIds?.length &&
-    !q.codePrefix
+    !q.codePrefix &&
+    !q.resourceKinds?.length
   )
 }

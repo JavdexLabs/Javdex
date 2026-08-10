@@ -14,6 +14,7 @@ export interface VideoFile {
 }
 
 export type VideoResourceKind = 'local' | 'direct' | 'web' | 'magnet' | 'ed2k'
+export type VideoResourceFilter = VideoResourceKind | 'none'
 export type LinkVideoResourceKind = Extract<VideoResourceKind, 'direct' | 'web'>
 export type ExternalVideoResourceKind = Exclude<VideoResourceKind, 'local'>
 export type VideoResourceSizeUnit = 'MB' | 'GB' | 'TB'
@@ -90,6 +91,8 @@ export interface Video {
   file_count?: number
   primary_resource_kind?: VideoResourceKind | null
   resource_count?: number
+  /** Primary kind first, followed by each remaining kind at most once. */
+  resource_kinds?: VideoResourceKind[]
 }
 
 export type TagOrigin = 'manual' | 'scraped'
@@ -150,6 +153,8 @@ export interface VideoQuery {
   series?: string
   director?: string
   codePrefix?: string
+  /** OR filter; `none` matches videos with zero resource rows. */
+  resourceKinds?: VideoResourceFilter[]
   sortBy?: 'add_time' | 'release_date' | 'rating' | 'code'
   sortDir?: 'asc' | 'desc'
   limit?: number

@@ -169,6 +169,10 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
       parsed.actressDetailUseFirstGalleryBackground,
       DEFAULT_SETTINGS.actressDetailUseFirstGalleryBackground
     ),
+    showVideoResourceTypeBadges: normalizeBooleanSetting(
+      parsed.showVideoResourceTypeBadges,
+      DEFAULT_SETTINGS.showVideoResourceTypeBadges
+    ),
     mediaAssetsPath:
       typeof parsed.mediaAssetsPath === 'string' ? parsed.mediaAssetsPath.trim() : '',
     minScanImportDurationMinutes: normalizeMinScanImportDurationMinutes(

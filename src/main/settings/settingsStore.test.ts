@@ -58,6 +58,18 @@ describe('settingsStore avatar composition defaults', () => {
   })
 })
 
+describe('settingsStore video card preferences', () => {
+  it('keeps resource type badges disabled for new and existing users by default', () => {
+    writeSettings({})
+    assert.equal(getSettings().showVideoResourceTypeBadges, false)
+  })
+
+  it('preserves an explicit resource type badge preference', () => {
+    writeSettings({ showVideoResourceTypeBadges: true })
+    assert.equal(getSettings().showVideoResourceTypeBadges, true)
+  })
+})
+
 describe('settingsStore retired actress scrapers', () => {
   it('rewrites the retired idol archive default to Xslist', () => {
     writeSettings({ defaultActressScraper: '偶像档案库' })

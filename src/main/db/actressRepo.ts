@@ -12,6 +12,11 @@ import { canMergeActressGenders } from '@shared/actressProfileOptions'
 import { normalizeCupSize } from '@shared/cupSizeUtils'
 import { actressSearchLikeParams, actressTextSearchSql } from './actressSearchSql'
 import {
+  hydrateVideoListRows,
+  videoListSelectExtras,
+  type VideoListProjectionRow
+} from './videoListProjection'
+import {
   findActressIdByOwnedName,
   isActressNameOwnershipAvailable as isActressNameAvailable,
   validateAndReleaseActressNameOwnershipForMerge,
@@ -561,12 +566,12 @@ export function getActressDetail(id: number): ActressDetail | null {
 
   const videos = db
     .prepare(
-      `SELECT v.* FROM videos v
+      `SELECT v.*${videoListSelectExtras()} FROM videos v
        JOIN video_actress va ON va.video_id = v.id
        WHERE va.actress_id = ?
        ORDER BY v.release_date DESC, v.add_time DESC`
     )
-    .all(id) as Video[]
+    .all(id) as VideoListProjectionRow[]
 
   return {
     ...actress,
@@ -575,7 +580,7 @@ export function getActressDetail(id: number): ActressDetail | null {
     aliases: listActressAliasNames(id, names),
     names,
     gallery,
-    videos
+    videos: hydrateVideoListRows(videos)
   }
 }
 

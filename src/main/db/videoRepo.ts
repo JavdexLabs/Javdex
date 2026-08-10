@@ -17,6 +17,11 @@ import { actressOwnedNamePatternSearchSql } from './actressSearchSql'
 import { ensureTag, pruneTagIfUnused } from './tagRepo'
 import { ensureFacetEntries } from './facetRepo'
 import { collectVideoLibraryCleanupHints, runLibraryCleanup } from './libraryCleanup'
+import {
+  hydrateVideoListRows,
+  videoListSelectExtras,
+  type VideoListProjectionRow
+} from './videoListProjection'
 
 export interface NewVideo {
   code: string
@@ -37,14 +42,6 @@ const LOCAL_FILE_SELECT = `
   display_name AS label,
   is_primary,
   add_time`
-
-function listFileSelectExtras(): string {
-  return `,
-    (SELECT vr.locator FROM video_resources vr WHERE vr.video_id = v.id AND vr.kind = 'local' ${PRIMARY_FILE_ORDER} LIMIT 1) AS primary_file_path,
-    (SELECT COUNT(*) FROM video_resources vr WHERE vr.video_id = v.id AND vr.kind = 'local') AS file_count,
-    (SELECT vr.kind FROM video_resources vr WHERE vr.video_id = v.id AND vr.is_primary = 1 ORDER BY vr.id ASC LIMIT 1) AS primary_resource_kind,
-    (SELECT COUNT(*) FROM video_resources vr WHERE vr.video_id = v.id) AS resource_count`
-}
 
 export function insertVideoFile(input: {
   video_id: number
@@ -673,6 +670,27 @@ function buildWhere(q: VideoQuery): { sql: string; params: unknown[]; joins: str
     params.push(`${q.codePrefix.trim().toUpperCase()}-%`)
   }
 
+  if (q.resourceKinds && q.resourceKinds.length > 0) {
+    const kinds = Array.from(new Set(q.resourceKinds))
+    const includeNone = kinds.includes('none')
+    const concreteKinds = kinds.filter((kind) => kind !== 'none')
+    const alternatives: string[] = []
+    if (concreteKinds.length > 0) {
+      alternatives.push(
+        `EXISTS (
+           SELECT 1 FROM video_resources vrf
+           WHERE vrf.video_id = v.id
+             AND vrf.kind IN (${concreteKinds.map(() => '?').join(',')})
+         )`
+      )
+      params.push(...concreteKinds)
+    }
+    if (includeNone) {
+      alternatives.push('NOT EXISTS (SELECT 1 FROM video_resources vrf WHERE vrf.video_id = v.id)')
+    }
+    if (alternatives.length > 0) conditions.push(`(${alternatives.join(' OR ')})`)
+  }
+
   const sql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
   return { sql, params, joins }
 }
@@ -709,15 +727,15 @@ export function listVideos(q: VideoQuery = {}): VideoListResult {
   const limit = q.limit ?? 60
   const offset = q.offset ?? 0
 
-  const items = db
+  const rows = db
     .prepare(
-      `SELECT DISTINCT v.*${listFileSelectExtras()} FROM videos v ${joins} ${where}
+      `SELECT DISTINCT v.*${videoListSelectExtras()} FROM videos v ${joins} ${where}
        ORDER BY ${orderBy}
        LIMIT ? OFFSET ?`
     )
-    .all(...params, limit, offset) as Video[]
+    .all(...params, limit, offset) as VideoListProjectionRow[]
 
-  return { items, total: totalRow.c }
+  return { items: hydrateVideoListRows(rows), total: totalRow.c }
 }
 
 /** Distinct release years present in the library (descending). */

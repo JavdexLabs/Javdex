@@ -69,6 +69,8 @@ export interface AppSettings {
   videoDetailUseFirstSampleBackground: boolean
   /** Display-only: use first local gallery photo as actress detail background when no poster is set. */
   actressDetailUseFirstGalleryBackground: boolean
+  /** Display compact resource-kind badges on every video card. */
+  showVideoResourceTypeBadges: boolean
   /** Encrypt cover/avatar files on disk as .enc blobs. */
   assetEncryption: boolean
   /** Custom folder for cover/avatar storage; empty uses default userData/media_assets. */
@@ -151,6 +153,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   avatarPreserveFullHead: false,
   videoDetailUseFirstSampleBackground: false,
   actressDetailUseFirstGalleryBackground: true,
+  showVideoResourceTypeBadges: false,
   assetEncryption: false,
   mediaAssetsPath: '',
   scraperPluginDelays: {

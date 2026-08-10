@@ -573,6 +573,7 @@ export default function SettingsPage(): JSX.Element {
         AppSettings,
         | 'videoDetailUseFirstSampleBackground'
         | 'actressDetailUseFirstGalleryBackground'
+        | 'showVideoResourceTypeBadges'
         | 'privacyModeEnabled'
         | 'privacyModeScopes'
         | 'avatarFaceRatio'

@@ -1,5 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react'
-import type { VideoQuery } from '@shared/videoTypes'
+import type { VideoQuery, VideoResourceFilter } from '@shared/videoTypes'
 import type { ScrapedStatus } from '@shared/commonTypes'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 import SelectControl from './SelectControl'
@@ -12,7 +12,17 @@ export interface LibraryFilterState {
   sortBy: NonNullable<VideoQuery['sortBy']>
   sortDir: NonNullable<VideoQuery['sortDir']>
   tagIds: number[]
+  resourceKinds: VideoResourceFilter[]
 }
+
+const RESOURCE_FILTER_OPTIONS: Array<{ value: VideoResourceFilter; label: string }> = [
+  { value: 'local', label: '本地' },
+  { value: 'direct', label: '视频直链' },
+  { value: 'web', label: '网页链接' },
+  { value: 'magnet', label: 'Magnet' },
+  { value: 'ed2k', label: 'ED2K' },
+  { value: 'none', label: '无资源' }
+]
 
 interface Props {
   open: boolean
@@ -120,6 +130,32 @@ export default function LibraryFilterPopover({
           />
         </label>
       </div>
+
+      <fieldset className="library-resource-filter">
+        <legend className="library-filter-field-label">资源类型</legend>
+        <div className="library-resource-filter-grid">
+          {RESOURCE_FILTER_OPTIONS.map((option) => {
+            const checked = state.resourceKinds.includes(option.value)
+            return (
+              <label key={option.value} className="library-resource-filter-option">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(event) =>
+                    onChange({
+                      resourceKinds: event.target.checked
+                        ? [...state.resourceKinds, option.value]
+                        : state.resourceKinds.filter((kind) => kind !== option.value)
+                    })
+                  }
+                />
+                <span>{option.label}</span>
+              </label>
+            )
+          })}
+        </div>
+        <span className="library-resource-filter-hint">多选条件满足任一即可</span>
+      </fieldset>
 
       <div className="library-filter-popover-tags">
         <div className="library-filter-tags-head">

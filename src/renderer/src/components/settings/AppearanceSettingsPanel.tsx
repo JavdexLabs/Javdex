@@ -25,6 +25,7 @@ import { useTheme } from '../ThemeProvider'
 import { useToast } from '../Toast'
 import { UI_ICON_SM } from '../iconDefaults'
 import { SettingsCard, SettingsHeaderSwitch } from './SettingsPrimitives'
+import { useDisplayMode } from '../DisplayModeContext'
 
 const AVATAR_COMPOSITION_PREVIEW_SIZE = 172
 
@@ -252,6 +253,7 @@ export default function AppearanceSettingsPanel({
 }): JSX.Element {
   const toast = useToast()
   const { syncPrivacyMode } = useTheme()
+  const { syncResourceTypeBadges } = useDisplayMode()
   const avatarAutoCropBatch = useAvatarAutoCropBatch()
   const [isEditingAvatarComposition, setIsEditingAvatarComposition] = useState(false)
   const [isSavingAvatarComposition, setIsSavingAvatarComposition] = useState(false)
@@ -417,6 +419,11 @@ export default function AppearanceSettingsPanel({
     }
   }
 
+  const toggleResourceTypeBadges = async (checked: boolean): Promise<void> => {
+    const saved = await onPatchSettings({ showVideoResourceTypeBadges: checked })
+    if (saved !== false) syncResourceTypeBadges(checked)
+  }
+
   return (
     <>
       <SettingsCard title="主题" hint="界面配色，立即生效。">
@@ -433,6 +440,17 @@ export default function AppearanceSettingsPanel({
               <span className="theme-option-hint">{option.hint}</span>
             </button>
           ))}
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="影片卡片" hint="控制媒体库及其它影片列表中的辅助信息。">
+        <div className="settings-toggle-list">
+          <SettingsSwitchRow
+            title="显示资源类型标签"
+            description="最多显示两个类型，其余以 +N 收起"
+            checked={settings.showVideoResourceTypeBadges}
+            onChange={(checked) => void toggleResourceTypeBadges(checked)}
+          />
         </div>
       </SettingsCard>
 

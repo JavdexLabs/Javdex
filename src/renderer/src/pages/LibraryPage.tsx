@@ -12,7 +12,13 @@ import {
   SearchX,
   Trash2
 } from 'lucide-react'
-import type { Video, VideoDetail, VideoEditInput, VideoQuery } from '@shared/videoTypes'
+import type {
+  Video,
+  VideoDetail,
+  VideoEditInput,
+  VideoQuery,
+  VideoResourceFilter
+} from '@shared/videoTypes'
 import type { VideoScrapeField, VideoScrapeUpdateMode } from '@shared/videoScrapeTypes'
 import { ALL_VIDEO_SCRAPE_FIELDS, VIDEO_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_UPDATE_MODE_OPTIONS } from '@shared/videoScrapeTypes'
 import { api } from '../api'
@@ -34,13 +40,16 @@ import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
 import {
   LIBRARY_DEFAULTS,
   LIST_PARAM,
+  canonicalizeLibrarySearchParams,
   libraryQueryHash,
   libraryVideoQueryFromSearchParams,
   parseScrapedStatus,
   parseSort,
   parseTagIds,
+  parseVideoResourceFilters,
   parseYear,
-  patchSearchParams
+  patchSearchParams,
+  videoResourceFiltersParam
 } from '../listView/listQueryParams'
 import { ROUTE_MATCH, ROUTE_PATH } from '../listView/routePaths'
 import { forgetPrimaryListLocation } from '../listView/primaryNavigationMemory'
@@ -84,6 +93,15 @@ const SORT_SWITCH_OPTIONS: SortSwitchOption<NonNullable<VideoQuery['sortBy']>>[]
   { value: 'code', label: '番号' }
 ]
 
+const RESOURCE_FILTER_LABELS: Record<VideoResourceFilter, string> = {
+  local: '本地',
+  direct: '视频直链',
+  web: '网页链接',
+  magnet: 'Magnet',
+  ed2k: 'ED2K',
+  none: '无资源'
+}
+
 export default function LibraryPage(): JSX.Element {
   const queryClient = useQueryClient()
   const toast = useToast()
@@ -121,6 +139,13 @@ export default function LibraryPage(): JSX.Element {
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
 
+  useEffect(() => {
+    const canonical = canonicalizeLibrarySearchParams(searchParams)
+    if (canonical.toString() !== searchParams.toString()) {
+      setSearchParams(canonical, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
+
   const urlQ = searchParams.get(LIST_PARAM.q) ?? ''
   const [searchInput, setSearchInput] = useState(urlQ)
   useEffect(() => {
@@ -156,6 +181,10 @@ export default function LibraryPage(): JSX.Element {
     [searchParams]
   )
   const codePrefix = (searchParams.get(LIST_PARAM.prefix) ?? '').trim().toUpperCase()
+  const resourceKinds = useMemo(
+    () => parseVideoResourceFilters(searchParams.get(LIST_PARAM.resources)),
+    [searchParams]
+  )
 
   const patchParams = useCallback(
     (patch: Record<string, string | null | undefined>): void => {
@@ -213,7 +242,8 @@ export default function LibraryPage(): JSX.Element {
     codePrefix,
     sortBy,
     sortDir,
-    tagIds
+    tagIds,
+    resourceKinds
   }
 
   const patchFilters = (patch: Partial<LibraryFilterState>): void => {
@@ -232,6 +262,9 @@ export default function LibraryPage(): JSX.Element {
     if (patch.tagIds !== undefined) {
       updates[LIST_PARAM.tags] = patch.tagIds.length ? patch.tagIds.join(',') : null
     }
+    if (patch.resourceKinds !== undefined) {
+      updates[LIST_PARAM.resources] = videoResourceFiltersParam(patch.resourceKinds)
+    }
     patchParams(updates)
   }
 
@@ -244,6 +277,7 @@ export default function LibraryPage(): JSX.Element {
           [LIST_PARAM.year]: null,
           [LIST_PARAM.prefix]: null,
           [LIST_PARAM.tags]: null,
+          [LIST_PARAM.resources]: null,
           [LIST_PARAM.sort]: null,
           [LIST_PARAM.dir]: null
         }),
@@ -258,6 +292,7 @@ export default function LibraryPage(): JSX.Element {
     year !== 'all' ||
     !!codePrefix ||
     tagIds.length > 0 ||
+    resourceKinds.length > 0 ||
     hasNonDefaultSort
 
   const handlePageError = useCallback(
@@ -479,6 +514,14 @@ export default function LibraryPage(): JSX.Element {
       key: `tag:${id}`,
       label: tagNames.get(id) ?? String(id),
       onRemove: () => patchFilters({ tagIds: tagIds.filter((x) => x !== id) })
+    })
+  }
+  for (const kind of resourceKinds) {
+    appliedFilters.push({
+      key: `resource:${kind}`,
+      label: RESOURCE_FILTER_LABELS[kind],
+      onRemove: () =>
+        patchFilters({ resourceKinds: resourceKinds.filter((item) => item !== kind) })
     })
   }
   const emptyDueToFilter = Boolean(debouncedQ.trim()) || hasAppliedFilters

@@ -1,6 +1,11 @@
 import type { SortDir } from '@shared/commonTypes'
 import type { Playlist, PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoMembership } from '@shared/playlistTypes'
 import { getDb } from './database'
+import {
+  hydrateVideoListRows,
+  videoListSelectExtras,
+  type VideoListProjectionRow
+} from './videoListProjection'
 
 type PlaylistVideoTarget = { playlistId: number; videoId: number }
 type PlaylistVideoSort = { sortBy?: PlaylistVideoSortBy; sortDir?: SortDir }
@@ -141,14 +146,14 @@ export function getPlaylistDetail(id: number, sort: PlaylistVideoSort = {}): Pla
   const orderBy = playlistVideoOrderBy(sortBy, sortDir)
   const videos = db
     .prepare(
-      `SELECT v.*
+      `SELECT v.*${videoListSelectExtras()}
        FROM playlist_video pv
        JOIN videos v ON v.id = pv.video_id
        WHERE pv.playlist_id = ?
        ORDER BY ${orderBy}`
     )
-    .all(id) as PlaylistDetail['videos']
-  return { ...playlist, videos }
+    .all(id) as VideoListProjectionRow[]
+  return { ...playlist, videos: hydrateVideoListRows(videos) }
 }
 
 export function listPlaylistsForVideo(videoId: number): PlaylistVideoMembership[] {

@@ -167,6 +167,50 @@ describe('videoRepo.listVideos', () => {
     assert.equal(result.items[0].code, 'IPX-535')
   })
 
+  it('filters resource kinds with OR semantics and treats no-resource as zero rows', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare(
+      `INSERT INTO video_resources
+         (video_id, kind, locator, resource_key, is_primary, add_time)
+       VALUES (1, 'direct', 'https://cdn.example.test/IPX-535.mp4', 'http:ipx-direct', 0, '2024-02-01')`
+    ).run()
+    db.prepare(
+      `INSERT INTO videos (code, scraped_status, add_time)
+       VALUES ('EMPTY-001', 0, '2024-02-02')`
+    ).run()
+
+    const result = listVideos({ resourceKinds: ['direct', 'none'], sortBy: 'code', sortDir: 'asc' })
+
+    assert.equal(result.total, 2)
+    assert.deepEqual(
+      result.items.map((video) => video.code),
+      ['EMPTY-001', 'IPX-535']
+    )
+    assert.deepEqual(listVideos({ resourceKinds: ['none'] }).items.map((video) => video.code), [
+      'EMPTY-001'
+    ])
+  })
+
+  it('projects resource count and primary-first deduplicated resource kinds', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare('UPDATE video_resources SET is_primary = 0 WHERE video_id = 1').run()
+    db.prepare(
+      `INSERT INTO video_resources
+         (video_id, kind, locator, resource_key, is_primary, add_time)
+       VALUES
+         (1, 'direct', 'https://cdn.example.test/one.mp4', 'http:one', 0, '2024-02-01'),
+         (1, 'web', 'https://example.test/watch/1', 'http:web-one', 1, '2024-03-01'),
+         (1, 'direct', 'https://cdn.example.test/two.mp4', 'http:two', 0, '2024-04-01')`
+    ).run()
+
+    const [video] = listVideos({ search: 'IPX-535' }).items
+
+    assert.equal(video.resource_count, 4)
+    assert.deepEqual(video.resource_kinds, ['web', 'local', 'direct'])
+  })
+
   it('searches videos by actress alias', () => {
     setupDb()
     const db = getDb()

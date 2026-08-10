@@ -7,15 +7,35 @@ import {
   removeLocalVideoResourcesBatch,
   type VideoResourceBatchRemovalPlan
 } from '../db/videoRepo'
+import { getDb } from '../db/database'
 import { isPathUnderRoot, isSameLibraryPath } from '../scanner/libraryPathUtils'
 import { getSettings, updateSettings } from '../settings/settingsStore'
 import { maintenanceTaskGate } from './maintenanceTaskGate'
+import { mediaAssetStore } from './mediaAssetStore'
 import { selectPrimaryVideoResourceCandidate } from './videoResourcePromotion'
 
 export interface PendingLibraryPathCleanupResult {
   removed: number
   promoted: number
   consumedRoots: string[]
+}
+
+export function listPendingLibraryPathCleanupRoots(): string[] {
+  return [...getSettings().pendingLibraryPathCleanups]
+}
+
+export function clearPendingLibraryPathCleanups(roots: string[]): void {
+  if (roots.length === 0) return
+  const pending = getSettings().pendingLibraryPathCleanups
+  updateSettings({
+    pendingLibraryPathCleanups: pending.filter(
+      (item) => !roots.some((root) => isSameLibraryPath(item, root))
+    )
+  })
+}
+
+export function runLibraryScanCleanupTransaction<T>(operation: () => T): T {
+  return mediaAssetStore.coordinateDatabaseChange(() => getDb().transaction(operation)())
 }
 
 export function previewLibraryPathRemoval(root: string): LibraryPathRemovalPreview {
@@ -58,9 +78,9 @@ export function confirmLibraryPathRemoval(root: string): AppSettings {
   })
 }
 
-export function consumePendingLibraryPathCleanups(): PendingLibraryPathCleanupResult {
-  const settings = getSettings()
-  const roots = settings.pendingLibraryPathCleanups
+export function applyPendingLibraryPathCleanups(
+  roots: string[]
+): PendingLibraryPathCleanupResult {
   if (roots.length === 0) return { removed: 0, promoted: 0, consumedRoots: [] }
 
   const affectedRefs = listLocalVideoResourceRefs().filter((ref) =>
@@ -92,6 +112,14 @@ export function consumePendingLibraryPathCleanups(): PendingLibraryPathCleanupRe
   }
 
   const result = removeLocalVideoResourcesBatch(plans)
-  updateSettings({ pendingLibraryPathCleanups: [] })
   return { ...result, consumedRoots: roots }
+}
+
+export function consumePendingLibraryPathCleanups(): PendingLibraryPathCleanupResult {
+  const roots = listPendingLibraryPathCleanupRoots()
+  const result = runLibraryScanCleanupTransaction(() =>
+    applyPendingLibraryPathCleanups(roots)
+  )
+  clearPendingLibraryPathCleanups(roots)
+  return result
 }

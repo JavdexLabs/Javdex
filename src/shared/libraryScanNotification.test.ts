@@ -11,6 +11,7 @@ function result(patch: Partial<ScanResult> = {}): ScanResult {
     skippedShort: 0,
     failed: 0,
     relocated: 0,
+    refreshed: 0,
     removed: 0,
     promoted: 0,
     deletedVideos: 0,
@@ -32,6 +33,13 @@ describe('buildLibraryScanNotification', () => {
     )
     assert.equal(notification?.tone, 'success')
     assert.match(notification?.message ?? '', /新增 2.*更新 1.*移除 3.*提升主资源 1.*删除影片 4/)
+  })
+
+  it('reports a metadata-only resource refresh as an update', () => {
+    assert.deepEqual(buildLibraryScanNotification(result({ refreshed: 2 })), {
+      message: '扫描完成：新增 0，更新 2，移除 0，提升主资源 0，删除影片 0',
+      tone: 'success'
+    })
   })
 
   it('prioritizes offline and error outcomes over ordinary change notices', () => {

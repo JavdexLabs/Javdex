@@ -6,7 +6,7 @@ import type {
   VideoResourceImportResult,
   ExternalVideoResourceKind,
   VideoAsset,
-  VideoDetail,
+  StoredVideoDetail,
   VideoQuery,
   VideoListResult,
   VideoEditInput
@@ -525,7 +525,7 @@ export function getVideoById(id: number): Video | null {
   return (db.prepare('SELECT * FROM videos WHERE id = ?').get(id) as Video) ?? null
 }
 
-export function getVideoDetail(id: number): VideoDetail | null {
+export function getVideoDetail(id: number): StoredVideoDetail | null {
   const db = getDb()
   const video = getVideoById(id)
   if (!video) return null
@@ -537,7 +537,7 @@ export function getVideoDetail(id: number): VideoDetail | null {
        WHERE va.video_id = ?
        ORDER BY CASE WHEN a.gender = 'male' THEN 1 ELSE 0 END, a.main_name`
     )
-    .all(id) as VideoDetail['actresses']
+    .all(id) as StoredVideoDetail['actresses']
 
   const tags = db
     .prepare(
@@ -546,7 +546,7 @@ export function getVideoDetail(id: number): VideoDetail | null {
        WHERE vt.video_id = ?
        ORDER BY CASE WHEN vt.origin = 'manual' THEN 1 ELSE 0 END, t.name`
     )
-    .all(id) as VideoDetail['tags']
+    .all(id) as StoredVideoDetail['tags']
 
   const assets = db
     .prepare(
@@ -554,7 +554,7 @@ export function getVideoDetail(id: number): VideoDetail | null {
        WHERE video_id = ?
        ORDER BY type, position, id`
     )
-    .all(id) as VideoDetail['assets']
+    .all(id) as StoredVideoDetail['assets']
 
   const external_stats = db
     .prepare(
@@ -562,7 +562,7 @@ export function getVideoDetail(id: number): VideoDetail | null {
        WHERE video_id = ?
        ORDER BY fetched_at DESC, source ASC`
     )
-    .all(id) as VideoDetail['external_stats']
+    .all(id) as StoredVideoDetail['external_stats']
 
   const resources = listVideoResources(id)
   const primaryResource = resources.find((resource) => Boolean(resource.is_primary))

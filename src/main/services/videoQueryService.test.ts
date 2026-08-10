@@ -77,4 +77,29 @@ describe('VideoQueryService', () => {
     assert.equal(fs.statSync(videoPath).mtimeMs, videoModifiedBefore)
     assert.equal(fs.statSync(imagePath).mtimeMs, imageModifiedBefore)
   })
+
+  it('redacts external resource locators in detail projections until explicitly requested', () => {
+    setupDb()
+    const db = getDb()
+    const locator = 'https://cdn.example/APP-001.mp4?token=secret'
+    const resourceId = Number(
+      db
+        .prepare(
+          `INSERT INTO video_resources
+             (video_id, kind, locator, resource_key, is_primary)
+           VALUES (1, 'direct', ?, ?, 0)`
+        )
+        .run(locator, `http:${locator}`).lastInsertRowid
+    )
+    const videos = createVideoQueryService()
+
+    const projected = videos.get(1)?.resources.find((resource) => resource.id === resourceId)
+
+    assert.ok(projected)
+    assert.equal(projected.display_locator, 'cdn.example / APP-001.mp4')
+    assert.equal('locator' in projected, false)
+    assert.equal('resource_key' in projected, false)
+    assert.equal(videos.getResource(1, resourceId)?.locator, locator)
+    assert.equal(videos.getResource(2, resourceId), null)
+  })
 })

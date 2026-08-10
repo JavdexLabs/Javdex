@@ -45,6 +45,9 @@ export function registerVideoHandlers(): void {
   commandAdapter.register(IPC.VIDEO_RESOURCE_IMPORT, (input) =>
     videoMaintenanceService.importLinkResource(input)
   )
+  commandAdapter.register(IPC.VIDEO_RESOURCE_GET, (videoId, resourceId) =>
+    videoQueryService.getResource(videoId, resourceId)
+  )
   commandAdapter.register(IPC.VIDEO_RESOURCE_CHECK, (url) =>
     videoMaintenanceService.checkLinkResource(url)
   )

@@ -51,6 +51,10 @@ export interface VideoIpcContract {
     args: [input: VideoLinkResourceImportInput]
     result: VideoResourceImportResult
   }
+  [IPC.VIDEO_RESOURCE_GET]: {
+    args: [videoId: number, resourceId: number]
+    result: VideoResource | null
+  }
   [IPC.VIDEO_RESOURCE_CHECK]: {
     args: [url: string]
     result: VideoResourceLinkCheckResult

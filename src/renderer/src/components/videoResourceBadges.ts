@@ -1,12 +1,5 @@
 import type { VideoResourceKind } from '@shared/videoTypes'
-
-export const VIDEO_RESOURCE_KIND_LABELS: Record<VideoResourceKind, string> = {
-  local: '本地',
-  direct: '直链',
-  web: '网页',
-  magnet: 'Magnet',
-  ed2k: 'ED2K'
-}
+import { VIDEO_RESOURCE_KIND_BADGE_LABELS } from './videoResourcePresentation'
 
 export interface VideoResourceBadgeSummary {
   visible: Array<{ kind: VideoResourceKind; label: string }>
@@ -21,9 +14,9 @@ export function getVideoResourceBadgeSummary(
   return {
     visible: uniqueKinds.slice(0, 2).map((kind) => ({
       kind,
-      label: VIDEO_RESOURCE_KIND_LABELS[kind]
+      label: VIDEO_RESOURCE_KIND_BADGE_LABELS[kind]
     })),
     overflow: Math.max(0, uniqueKinds.length - 2),
-    title: uniqueKinds.map((kind) => VIDEO_RESOURCE_KIND_LABELS[kind]).join('、')
+    title: uniqueKinds.map((kind) => VIDEO_RESOURCE_KIND_BADGE_LABELS[kind]).join('、')
   }
 }

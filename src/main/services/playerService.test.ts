@@ -62,11 +62,14 @@ describe('PlayerService', () => {
       getPrimaryVideoResource: () => resource(),
       openExternal: async () => {
         calls += 1
-        throw new Error('No URL handler')
+        throw new Error('No URL handler for https://cdn.example/movie.mp4?token=secret')
       }
     })
 
-    assert.deepEqual(await service.playVideo(7), { ok: false, error: 'No URL handler' })
+    assert.deepEqual(await service.playVideo(7), {
+      ok: false,
+      error: '系统无法打开该资源'
+    })
     assert.equal(calls, 1)
   })
 

@@ -63,6 +63,7 @@ import ListMaintenanceBanner from '../components/ListMaintenanceBanner'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import SelectionToolbar from '../components/SelectionToolbar'
+import { VIDEO_RESOURCE_FILTER_LABELS } from '../components/videoResourcePresentation'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { startDefaultUnscrapedVideoBatch } from '../utils/defaultBatchScrape'
 import VideoResourceImportModal from '../components/VideoResourceImportModal'
@@ -92,15 +93,6 @@ const SORT_SWITCH_OPTIONS: SortSwitchOption<NonNullable<VideoQuery['sortBy']>>[]
   { value: 'rating', label: '评分' },
   { value: 'code', label: '番号' }
 ]
-
-const RESOURCE_FILTER_LABELS: Record<VideoResourceFilter, string> = {
-  local: '本地',
-  direct: '视频直链',
-  web: '网页链接',
-  magnet: 'Magnet',
-  ed2k: 'ED2K',
-  none: '无资源'
-}
 
 export default function LibraryPage(): JSX.Element {
   const queryClient = useQueryClient()
@@ -519,7 +511,7 @@ export default function LibraryPage(): JSX.Element {
   for (const kind of resourceKinds) {
     appliedFilters.push({
       key: `resource:${kind}`,
-      label: RESOURCE_FILTER_LABELS[kind],
+      label: VIDEO_RESOURCE_FILTER_LABELS[kind],
       onRemove: () =>
         patchFilters({ resourceKinds: resourceKinds.filter((item) => item !== kind) })
     })

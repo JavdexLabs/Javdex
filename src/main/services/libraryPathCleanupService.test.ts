@@ -7,9 +7,12 @@ import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { insertScannedVideo } from '../db/videoRepo'
 import { getSettings, resetSettingsCacheForTests, updateSettings } from '../settings/settingsStore'
 import {
+  applyPendingLibraryPathCleanups,
   confirmLibraryPathRemoval,
   consumePendingLibraryPathCleanups,
-  previewLibraryPathRemoval
+  listPendingLibraryPathCleanupRoots,
+  previewLibraryPathRemoval,
+  runLibraryScanCleanupTransaction
 } from './libraryPathCleanupService'
 
 let tempRoot = ''
@@ -188,5 +191,31 @@ describe('libraryPathCleanupService', () => {
     assert.deepEqual(getSettings().pendingLibraryPathCleanups, [])
     assert.equal(fs.existsSync(onlyPath), true)
     assert.equal(fs.existsSync(linkedPath), true)
+  })
+
+  it('rolls back applied resource removals when a later cleanup step fails', () => {
+    const filePath = path.join(libraryRoot, 'rollback.mp4')
+    const videoId = createLocalVideo('ROLLBACK-001', filePath)
+    updateSettings({ pendingLibraryPathCleanups: [libraryRoot] })
+    const roots = listPendingLibraryPathCleanupRoots()
+
+    assert.throws(
+      () =>
+        runLibraryScanCleanupTransaction(() => {
+          applyPendingLibraryPathCleanups(roots)
+          throw new Error('forced later cleanup failure')
+        }),
+      /forced later cleanup failure/
+    )
+
+    assert.equal(
+      (
+        getDb()
+          .prepare('SELECT COUNT(*) AS n FROM video_resources WHERE video_id = ?')
+          .get(videoId) as { n: number }
+      ).n,
+      1
+    )
+    assert.deepEqual(getSettings().pendingLibraryPathCleanups, [libraryRoot])
   })
 })

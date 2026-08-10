@@ -5,7 +5,8 @@ import { Link2, ListPlus, Pencil, Play, SearchCheck, SearchX } from 'lucide-reac
 import type {
   LastVideoResourceRemovalMode,
   VideoDetail,
-  VideoResource
+  VideoResource,
+  VideoResourceDetail
 } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
@@ -99,7 +100,7 @@ export default function DetailPage(): JSX.Element {
     open: openCoverPreview,
     close: closeCoverPreview
   } = useHistoryBackedImagePreviewState()
-  const [removeResourceTarget, setRemoveResourceTarget] = useState<VideoResource | null>(null)
+  const [removeResourceTarget, setRemoveResourceTarget] = useState<VideoResourceDetail | null>(null)
   const [removingResource, setRemovingResource] = useState(false)
   const [localResourceLabel, setLocalResourceLabel] = useState('')
 
@@ -289,9 +290,26 @@ export default function DetailPage(): JSX.Element {
     }
   }
 
-  const openResourceEditor = (resource: VideoResource): void => {
-    setEditResourceTarget(resource)
-    setLocalResourceLabel(resource.display_name ?? '')
+  const readFullResource = async (resourceId: number): Promise<VideoResource | null> => {
+    try {
+      const resource = await api.videos.getResource(videoId, resourceId)
+      if (!resource) toast.show('资源记录不存在', 'error')
+      return resource
+    } catch (error) {
+      toast.show(String((error as Error).message), 'error')
+      return null
+    }
+  }
+
+  const readResourceLocator = async (resourceId: number): Promise<string | null> => {
+    return (await readFullResource(resourceId))?.locator ?? null
+  }
+
+  const openResourceEditor = async (resource: VideoResourceDetail): Promise<void> => {
+    const fullResource = await readFullResource(resource.id)
+    if (!fullResource) return
+    setEditResourceTarget(fullResource)
+    setLocalResourceLabel(fullResource.display_name ?? '')
   }
 
   const saveLocalResourceLabel = async (): Promise<void> => {
@@ -685,7 +703,10 @@ export default function DetailPage(): JSX.Element {
         onRevealResource={(resourceId) => {
           void handleRevealResource(resourceId)
         }}
-        onEditResource={openResourceEditor}
+        onReadResourceLocator={readResourceLocator}
+        onEditResource={(resource) => {
+          void openResourceEditor(resource)
+        }}
         onSetPrimaryResource={(resourceId) => {
           void handleSetPrimaryResource(resourceId)
         }}
@@ -873,7 +894,7 @@ export default function DetailPage(): JSX.Element {
           {video.resources.some((resource) => resource.kind === 'local') ? (
             video.resources.filter((resource) => resource.kind === 'local').map((resource) => (
               <div key={resource.id} className="modal-path-text">
-                {resource.locator}
+                {resource.display_locator}
               </div>
             ))
           ) : null}
@@ -927,7 +948,7 @@ export default function DetailPage(): JSX.Element {
               : '将只移除这条链接资源记录，不会访问或删除远程内容。'}
           <div className="modal-path-text">
             {removeResourceTarget.kind === 'local'
-              ? removeResourceTarget.locator
+              ? removeResourceTarget.display_locator
               : removeResourceTarget.display_name || '链接资源'}
           </div>
         </Modal>

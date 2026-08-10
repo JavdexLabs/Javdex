@@ -14,6 +14,7 @@ import {
   resourceBytesToFormSize,
   type VideoResourceKindSelection
 } from './videoResourceImportForm'
+import { VIDEO_RESOURCE_KIND_LABELS } from './videoResourcePresentation'
 
 export default function VideoResourceImportModal({
   fixedCode,
@@ -43,14 +44,7 @@ export default function VideoResourceImportModal({
   const [checkResult, setCheckResult] = useState<VideoResourceLinkCheckResult | null>(null)
 
   const inferredKind = inferVideoResourceKind(url)
-  const inferredKindLabel =
-    inferredKind === 'direct'
-      ? '视频直链'
-      : inferredKind === 'web'
-        ? '网页链接'
-        : inferredKind === 'magnet'
-          ? 'Magnet'
-          : 'ED2K'
+  const inferredKindLabel = VIDEO_RESOURCE_KIND_LABELS[inferredKind]
   const canCheckLink = inferredKind === 'direct' || inferredKind === 'web'
 
   const checkLink = async (): Promise<void> => {
@@ -170,8 +164,8 @@ export default function VideoResourceImportModal({
             disabled={saving}
           >
             <option value="auto">自动识别（{inferredKindLabel}）</option>
-            <option value="direct">视频直链</option>
-            <option value="web">网页链接</option>
+            <option value="direct">{VIDEO_RESOURCE_KIND_LABELS.direct}</option>
+            <option value="web">{VIDEO_RESOURCE_KIND_LABELS.web}</option>
           </select>
         </EditFormField>
         <EditFormField label="展示名称" htmlFor="resource-name" hint="可选，不填写时显示脱敏域名或路径。">

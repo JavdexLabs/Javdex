@@ -29,7 +29,7 @@ function buildScanMetrics(result: ScanResult): ScanMetric[] {
   const items: ScanMetric[] = [
     { key: 'scanned', label: '扫描', value: result.scannedFiles },
     { key: 'imported', label: '新导入', value: result.imported, tone: 'accent' },
-    { key: 'relocated', label: '更新资源', value: result.relocated },
+    { key: 'updated', label: '更新资源', value: result.relocated + result.refreshed },
     { key: 'removed', label: '移除', value: result.removed },
     { key: 'promoted', label: '提升主资源', value: result.promoted },
     { key: 'deletedVideos', label: '删除影片', value: result.deletedVideos },

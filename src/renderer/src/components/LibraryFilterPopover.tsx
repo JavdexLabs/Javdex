@@ -4,6 +4,8 @@ import type { ScrapedStatus } from '@shared/commonTypes'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 import SelectControl from './SelectControl'
 import TagFilter from './TagFilter'
+import { VIDEO_RESOURCE_FILTER_ORDER } from '../listView/listQueryParams'
+import { VIDEO_RESOURCE_FILTER_LABELS } from './videoResourcePresentation'
 
 export interface LibraryFilterState {
   status: ScrapedStatus | 'all'
@@ -15,14 +17,11 @@ export interface LibraryFilterState {
   resourceKinds: VideoResourceFilter[]
 }
 
-const RESOURCE_FILTER_OPTIONS: Array<{ value: VideoResourceFilter; label: string }> = [
-  { value: 'local', label: '本地' },
-  { value: 'direct', label: '视频直链' },
-  { value: 'web', label: '网页链接' },
-  { value: 'magnet', label: 'Magnet' },
-  { value: 'ed2k', label: 'ED2K' },
-  { value: 'none', label: '无资源' }
-]
+const RESOURCE_FILTER_OPTIONS: Array<{ value: VideoResourceFilter; label: string }> =
+  VIDEO_RESOURCE_FILTER_ORDER.map((value) => ({
+    value,
+    label: VIDEO_RESOURCE_FILTER_LABELS[value]
+  }))
 
 interface Props {
   open: boolean

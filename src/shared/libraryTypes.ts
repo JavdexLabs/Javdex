@@ -76,6 +76,8 @@ export interface ScanResult {
   cancelled?: boolean
   /** Videos whose file was moved/renamed but code matched — metadata kept, path updated. */
   relocated: number
+  /** Existing local resources whose fingerprint, size, or duration was refreshed. */
+  refreshed: number
   /** Missing local resource records removed from accessible configured folders. */
   removed: number
   /** Primary resources promoted after missing local resources were removed. */

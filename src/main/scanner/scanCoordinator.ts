@@ -18,7 +18,10 @@ import { getSettings, updateSettings } from '../settings/settingsStore'
 import { maintenanceTaskGate, type MaintenanceTaskGate } from '../services/maintenanceTaskGate'
 import { selectPrimaryVideoResourceCandidate } from '../services/videoResourcePromotion'
 import {
-  consumePendingLibraryPathCleanups,
+  applyPendingLibraryPathCleanups,
+  clearPendingLibraryPathCleanups,
+  listPendingLibraryPathCleanupRoots,
+  runLibraryScanCleanupTransaction,
   type PendingLibraryPathCleanupResult
 } from '../services/libraryPathCleanupService'
 import { isPathUnderRoot, isSameLibraryPath } from './libraryPathUtils'
@@ -54,7 +57,10 @@ interface ScanCoordinatorDependencies {
   removeResourceRecord: (resourceId: number) => void
   setPrimaryResource: (videoId: number, resourceId: number) => void
   pathExists: (filePath: string) => boolean
-  consumePendingPathCleanups: () => PendingLibraryPathCleanupResult
+  getPendingPathCleanupRoots: () => string[]
+  applyPendingPathCleanups: (roots: string[]) => PendingLibraryPathCleanupResult
+  clearPendingPathCleanups: (roots: string[]) => void
+  runCleanupTransaction: <T>(operation: () => T) => T
   shouldAutoDeleteResourceLessVideos: () => boolean
   deleteResourceLessVideos: () => number
   recordScanSummary: (summary: LibraryScanSummary) => void
@@ -129,7 +135,8 @@ export class ScanCoordinator {
         accessibleFolders,
         request.onProgress,
         {
-          signal: controller.signal
+          signal: controller.signal,
+          unavailableRoots: offlineFolders
         }
       )
       result.offlineFolders = offlineFolders
@@ -141,19 +148,31 @@ export class ScanCoordinator {
         return result
       }
 
-      this.removeMissingAccessibleResources(result, accessibleFolders, offlineFolders)
-      if (isFullScan) {
-        const deferredCleanup = this.dependencies.consumePendingPathCleanups()
-        result.removed += deferredCleanup.removed
-        result.promoted += deferredCleanup.promoted
-      }
-      if (
+      const pendingCleanupRoots = isFullScan
+        ? this.dependencies.getPendingPathCleanupRoots()
+        : []
+      const shouldDeleteResourceLessVideos =
         isFullScan &&
         offlineFolders.length === 0 &&
         this.dependencies.shouldAutoDeleteResourceLessVideos()
-      ) {
-        result.deletedVideos = this.dependencies.deleteResourceLessVideos()
-      }
+      const cleanup = this.dependencies.runCleanupTransaction(() => {
+        const missingResources = this.removeMissingAccessibleResources(
+          accessibleFolders,
+          offlineFolders
+        )
+        const deferredCleanup =
+          pendingCleanupRoots.length > 0
+            ? this.dependencies.applyPendingPathCleanups(pendingCleanupRoots)
+            : { removed: 0, promoted: 0, consumedRoots: [] }
+        const deletedVideos = shouldDeleteResourceLessVideos
+          ? this.dependencies.deleteResourceLessVideos()
+          : 0
+        return { missingResources, deferredCleanup, deletedVideos }
+      })
+      this.dependencies.clearPendingPathCleanups(pendingCleanupRoots)
+      result.removed += cleanup.missingResources.removed + cleanup.deferredCleanup.removed
+      result.promoted += cleanup.missingResources.promoted + cleanup.deferredCleanup.promoted
+      result.deletedVideos = cleanup.deletedVideos
       this.recordSummary(trigger, startedAt, 'success', result)
       return result
     } catch (error) {
@@ -175,6 +194,7 @@ export class ScanCoordinator {
       skippedShort: 0,
       failed: 0,
       relocated: 0,
+      refreshed: 0,
       removed: 0,
       promoted: 0,
       deletedVideos: 0,
@@ -206,7 +226,7 @@ export class ScanCoordinator {
       status,
       scannedFiles: result.scannedFiles,
       resourcesAdded: result.imported,
-      resourcesUpdated: result.relocated,
+      resourcesUpdated: result.relocated + result.refreshed,
       resourcesRemoved: result.removed,
       primaryResourcesPromoted: result.promoted,
       videosDeleted: result.deletedVideos,
@@ -223,10 +243,11 @@ export class ScanCoordinator {
   }
 
   private removeMissingAccessibleResources(
-    result: ScanResult,
     accessibleFolders: string[],
     offlineFolders: string[]
-  ): void {
+  ): { removed: number; promoted: number } {
+    let removed = 0
+    let promoted = 0
     for (const ref of this.dependencies.listLocalResources()) {
       if (offlineFolders.some((folder) => isPathUnderRoot(ref.locator, folder))) continue
       if (!accessibleFolders.some((folder) => isPathUnderRoot(ref.locator, folder))) continue
@@ -238,13 +259,17 @@ export class ScanCoordinator {
         .listResources(ref.video_id)
         .filter((item) => item.id !== resource.id)
       this.dependencies.removeResourceRecord(resource.id)
-      result.removed += 1
+      removed += 1
       if (!resource.is_primary) continue
-      const promoted = selectPrimaryVideoResourceCandidate(remaining, this.dependencies.pathExists)
-      if (!promoted) continue
-      this.dependencies.setPrimaryResource(ref.video_id, promoted.id)
-      result.promoted += 1
+      const promotedResource = selectPrimaryVideoResourceCandidate(
+        remaining,
+        this.dependencies.pathExists
+      )
+      if (!promotedResource) continue
+      this.dependencies.setPrimaryResource(ref.video_id, promotedResource.id)
+      promoted += 1
     }
+    return { removed, promoted }
   }
 }
 
@@ -264,8 +289,14 @@ export function createScanCoordinator(
     removeResourceRecord: dependencies.removeResourceRecord ?? removeVideoResourceRecord,
     setPrimaryResource: dependencies.setPrimaryResource ?? setPrimaryVideoResource,
     pathExists: dependencies.pathExists ?? fs.existsSync,
-    consumePendingPathCleanups:
-      dependencies.consumePendingPathCleanups ?? consumePendingLibraryPathCleanups,
+    getPendingPathCleanupRoots:
+      dependencies.getPendingPathCleanupRoots ?? listPendingLibraryPathCleanupRoots,
+    applyPendingPathCleanups:
+      dependencies.applyPendingPathCleanups ?? applyPendingLibraryPathCleanups,
+    clearPendingPathCleanups:
+      dependencies.clearPendingPathCleanups ?? clearPendingLibraryPathCleanups,
+    runCleanupTransaction:
+      dependencies.runCleanupTransaction ?? runLibraryScanCleanupTransaction,
     shouldAutoDeleteResourceLessVideos:
       dependencies.shouldAutoDeleteResourceLessVideos ??
       (() => getSettings().autoDeleteResourceLessVideos),

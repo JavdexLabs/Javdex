@@ -30,12 +30,13 @@ export function buildLibraryScanNotification(
   const changed =
     result.imported +
     result.relocated +
+    result.refreshed +
     result.removed +
     result.promoted +
     result.deletedVideos
   if (changed === 0) return null
   return {
-    message: `扫描完成：新增 ${result.imported}，更新 ${result.relocated}，移除 ${result.removed}，提升主资源 ${result.promoted}，删除影片 ${result.deletedVideos}`,
+    message: `扫描完成：新增 ${result.imported}，更新 ${result.relocated + result.refreshed}，移除 ${result.removed}，提升主资源 ${result.promoted}，删除影片 ${result.deletedVideos}`,
     tone: 'success'
   }
 }

@@ -185,6 +185,8 @@ const api = {
       invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId),
     importLinkResource: (input: VideoLinkResourceImportInput) =>
       invokeVideo(IPC.VIDEO_RESOURCE_IMPORT, input),
+    getResource: (videoId: number, resourceId: number) =>
+      invokeVideo(IPC.VIDEO_RESOURCE_GET, videoId, resourceId),
     checkResourceLink: (url: string) => invokeVideo(IPC.VIDEO_RESOURCE_CHECK, url),
     updateLinkResource: (
       videoId: number,

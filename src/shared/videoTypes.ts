@@ -23,6 +23,11 @@ export interface VideoResource {
 
 export type LocalVideoResource = VideoResource & { kind: 'local' }
 
+export interface VideoResourceDetail extends Omit<VideoResource, 'locator' | 'resource_key'> {
+  /** Safe display value; external resource credentials and query parameters are omitted. */
+  display_locator: string
+}
+
 export interface VideoLinkResourceImportInput {
   code: string
   url: string
@@ -119,12 +124,16 @@ export interface VideoSampleImportInput {
 }
 
 export interface VideoDetail extends Video {
-  resources: VideoResource[]
+  resources: VideoResourceDetail[]
   actresses: Actress[]
   tags: VideoTag[]
   assets: VideoAsset[]
   external_stats: VideoExternalStats[]
   resolved_duration_seconds?: number | null
+}
+
+export type StoredVideoDetail = Omit<VideoDetail, 'resources'> & {
+  resources: VideoResource[]
 }
 
 export interface VideoQuery {

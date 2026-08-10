@@ -11,6 +11,10 @@ function createTestScanCoordinator(
   dependencies: CoordinatorDependencies
 ): ReturnType<typeof createScanCoordinator> {
   return createScanCoordinator({
+    getPendingPathCleanupRoots: () => [],
+    applyPendingPathCleanups: (roots) => ({ removed: 0, promoted: 0, consumedRoots: roots }),
+    clearPendingPathCleanups: () => undefined,
+    runCleanupTransaction: (operation) => operation(),
     shouldAutoDeleteResourceLessVideos: () => false,
     deleteResourceLessVideos: () => 0,
     recordScanSummary: () => undefined,
@@ -27,6 +31,7 @@ function emptyScanResult(): ScanResult {
     skippedShort: 0,
     failed: 0,
     relocated: 0,
+    refreshed: 0,
     removed: 0,
     promoted: 0,
     deletedVideos: 0,
@@ -87,6 +92,7 @@ describe('ScanCoordinator', () => {
       scanFolders: async (folders, _progress, options) => {
         scannedRoots.push(folders)
         assert.ok(options?.signal)
+        assert.deepEqual(options?.unavailableRoots, ['/offline'])
         return emptyScanResult()
       },
       listLocalResources: () => [
@@ -102,7 +108,6 @@ describe('ScanCoordinator', () => {
       },
       setPrimaryResource: (_videoId, id) => promoted.push(id),
       pathExists: () => false,
-      consumePendingPathCleanups: () => ({ removed: 0, promoted: 0, consumedRoots: [] }),
       shouldAutoDeleteResourceLessVideos: () => true,
       deleteResourceLessVideos: () => {
         throw new Error('offline scans must not auto-delete videos')
@@ -177,7 +182,8 @@ describe('ScanCoordinator', () => {
         cleanupReads += 1
         return []
       },
-      consumePendingPathCleanups: () => {
+      getPendingPathCleanupRoots: () => ['/removed'],
+      applyPendingPathCleanups: () => {
         deferredCleanupRuns += 1
         return { removed: 0, promoted: 0, consumedRoots: [] }
       }
@@ -196,7 +202,8 @@ describe('ScanCoordinator', () => {
       inspectFolder: async () => true,
       scanFolders: async () => emptyScanResult(),
       listLocalResources: () => [],
-      consumePendingPathCleanups: () => {
+      getPendingPathCleanupRoots: () => ['/removed'],
+      applyPendingPathCleanups: () => {
         deferredCleanupRuns += 1
         return { removed: 4, promoted: 2, consumedRoots: ['/removed'] }
       }
@@ -217,7 +224,8 @@ describe('ScanCoordinator', () => {
       inspectFolder: async () => true,
       scanFolders: async () => emptyScanResult(),
       listLocalResources: () => [],
-      consumePendingPathCleanups: () => {
+      getPendingPathCleanupRoots: () => ['/removed'],
+      applyPendingPathCleanups: () => {
         deferredCleanupRuns += 1
         return { removed: 1, promoted: 0, consumedRoots: ['/removed'] }
       },
@@ -244,7 +252,8 @@ describe('ScanCoordinator', () => {
         return emptyScanResult()
       },
       listLocalResources: () => [],
-      consumePendingPathCleanups: () => ({
+      getPendingPathCleanupRoots: () => ['/removed'],
+      applyPendingPathCleanups: () => ({
         removed: 2,
         promoted: 0,
         consumedRoots: ['/removed']
@@ -265,9 +274,15 @@ describe('ScanCoordinator', () => {
       gate: new MaintenanceTaskGate(),
       getConfiguredFolders: () => ['/online'],
       inspectFolder: async () => true,
-      scanFolders: async () => ({ ...emptyScanResult(), imported: 2, relocated: 1 }),
+      scanFolders: async () => ({
+        ...emptyScanResult(),
+        imported: 2,
+        relocated: 1,
+        refreshed: 2
+      }),
       listLocalResources: () => [],
-      consumePendingPathCleanups: () => {
+      getPendingPathCleanupRoots: () => ['/removed'],
+      applyPendingPathCleanups: () => {
         order.push('pending-cleanup')
         return { removed: 4, promoted: 1, consumedRoots: ['/removed'] }
       },
@@ -294,7 +309,7 @@ describe('ScanCoordinator', () => {
         status: 'success',
         scannedFiles: 0,
         resourcesAdded: 2,
-        resourcesUpdated: 1,
+        resourcesUpdated: 3,
         resourcesRemoved: 4,
         primaryResourcesPromoted: 1,
         videosDeleted: 3,
@@ -328,6 +343,80 @@ describe('ScanCoordinator', () => {
     assert.equal(summaries[0].errorSummary?.includes('secret'), false)
   })
 
+  it('rolls back resource cleanup and keeps pending roots when auto-delete fails', async () => {
+    const state = { resourcePresent: true, pending: true }
+    const summaries: LibraryScanSummary[] = []
+    const coordinator = createTestScanCoordinator({
+      gate: new MaintenanceTaskGate(),
+      getConfiguredFolders: () => ['/online'],
+      inspectFolder: async () => true,
+      scanFolders: async () => emptyScanResult(),
+      listLocalResources: () => [],
+      getPendingPathCleanupRoots: () => (state.pending ? ['/removed'] : []),
+      applyPendingPathCleanups: (roots) => {
+        state.resourcePresent = false
+        return { removed: 1, promoted: 0, consumedRoots: roots }
+      },
+      clearPendingPathCleanups: () => {
+        state.pending = false
+      },
+      runCleanupTransaction: (operation) => {
+        const snapshot = { ...state }
+        try {
+          return operation()
+        } catch (error) {
+          Object.assign(state, snapshot)
+          throw error
+        }
+      },
+      shouldAutoDeleteResourceLessVideos: () => true,
+      deleteResourceLessVideos: () => {
+        throw new Error('forced auto-delete failure')
+      },
+      recordScanSummary: (summary) => summaries.push(summary)
+    })
+
+    await assert.rejects(() => coordinator.run(), /forced auto-delete failure/)
+
+    assert.equal(state.resourcePresent, true)
+    assert.equal(state.pending, true)
+    assert.equal(summaries.at(-1)?.status, 'failed')
+    assert.equal(summaries.at(-1)?.resourcesRemoved, 0)
+  })
+
+  it('keeps pending roots when the cleanup transaction cannot commit', async () => {
+    const state = { resourcePresent: true, pending: true }
+    let clearRuns = 0
+    const coordinator = createTestScanCoordinator({
+      gate: new MaintenanceTaskGate(),
+      getConfiguredFolders: () => ['/online'],
+      inspectFolder: async () => true,
+      scanFolders: async () => emptyScanResult(),
+      listLocalResources: () => [],
+      getPendingPathCleanupRoots: () => (state.pending ? ['/removed'] : []),
+      applyPendingPathCleanups: (roots) => {
+        state.resourcePresent = false
+        return { removed: 1, promoted: 0, consumedRoots: roots }
+      },
+      clearPendingPathCleanups: () => {
+        clearRuns += 1
+        state.pending = false
+      },
+      runCleanupTransaction: (operation) => {
+        const snapshot = { ...state }
+        operation()
+        Object.assign(state, snapshot)
+        throw new Error('forced transaction commit failure')
+      }
+    })
+
+    await assert.rejects(() => coordinator.run(), /forced transaction commit failure/)
+
+    assert.equal(state.resourcePresent, true)
+    assert.equal(state.pending, true)
+    assert.equal(clearRuns, 0)
+  })
+
   it('rejects duplicate scans and scans blocked by resource maintenance', async () => {
     const gate = new MaintenanceTaskGate()
     const resourceLease = gate.tryAcquire('resource-maintenance')
@@ -352,8 +441,7 @@ describe('ScanCoordinator', () => {
         await pendingScan
         return emptyScanResult()
       },
-      listLocalResources: () => [],
-      consumePendingPathCleanups: () => ({ removed: 0, promoted: 0, consumedRoots: [] })
+      listLocalResources: () => []
     })
     const first = coordinatorWithPendingScan.run()
     await new Promise((resolve) => setImmediate(resolve))

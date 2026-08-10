@@ -150,6 +150,40 @@ describe('scanFolders', () => {
     )
   })
 
+  it('keeps a resource under an unavailable root when the same code appears online', async () => {
+    const root = makeTempRoot()
+    const unavailableLibrary = path.join(root, 'unavailable-library')
+    const onlineLibrary = path.join(root, 'online-library')
+    fs.mkdirSync(unavailableLibrary, { recursive: true })
+    fs.mkdirSync(onlineLibrary, { recursive: true })
+    const unavailablePath = path.join(unavailableLibrary, 'IPX-782.mp4')
+    const onlinePath = path.join(onlineLibrary, 'IPX-782.mp4')
+    fs.writeFileSync(unavailablePath, 'offline copy')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const options = {
+      readDurationSeconds: async (): Promise<number> => 3661,
+      minImportDurationSeconds: null
+    }
+
+    await scanFolders([unavailableLibrary], undefined, options)
+    fs.rmSync(unavailableLibrary, { recursive: true })
+    fs.writeFileSync(onlinePath, 'online copy')
+    const result = await scanFolders([onlineLibrary], undefined, {
+      ...options,
+      unavailableRoots: [unavailableLibrary]
+    })
+
+    assert.equal(result.imported, 1)
+    assert.equal(result.relocated, 0)
+    const [video] = listVideos({ search: 'IPX-782' }).items
+    assert.deepEqual(
+      listLocalVideoResources(video.id)
+        .map((resource) => resource.locator)
+        .sort(),
+      [onlinePath, unavailablePath].sort()
+    )
+  })
+
   it('imports recognized videos and reports unrecognized files', async () => {
     const root = makeTempRoot()
     const library = path.join(root, 'library')
@@ -322,6 +356,7 @@ describe('scanFolders', () => {
 
     assert.equal(result.imported, 0)
     assert.equal(result.skipped, 1)
+    assert.equal(result.refreshed, 1)
     const row = getDb()
       .prepare("SELECT duration_seconds AS file_duration_seconds FROM video_resources WHERE kind = 'local' AND locator = ?")
       .get(filePath) as { file_duration_seconds: number | null }

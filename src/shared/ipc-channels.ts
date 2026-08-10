@@ -46,6 +46,7 @@ export const IPC = {
   VIDEO_MANUAL_TAG_ADD: 'video:manualTagAdd',
   VIDEO_MANUAL_TAG_REMOVE: 'video:manualTagRemove',
   VIDEO_RESOURCE_IMPORT: 'video:resourceImport',
+  VIDEO_RESOURCE_GET: 'video:resourceGet',
   VIDEO_RESOURCE_CHECK: 'video:resourceCheck',
   VIDEO_RESOURCE_UPDATE: 'video:resourceUpdate',
   VIDEO_RESOURCE_UPDATE_LOCAL_LABEL: 'video:resourceUpdateLocalLabel',

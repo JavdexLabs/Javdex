@@ -41,6 +41,7 @@ function scanResult(): ScanResult {
     skippedShort: 0,
     failed: 0,
     relocated: 0,
+    refreshed: 0,
     removed: 0,
     promoted: 0,
     deletedVideos: 0,

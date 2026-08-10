@@ -48,8 +48,8 @@ export function createPlayerService(
     try {
       await openExternal(resource.locator)
       return { ok: true }
-    } catch (error) {
-      return { ok: false, error: (error as Error).message || '系统无法打开该资源' }
+    } catch {
+      return { ok: false, error: '系统无法打开该资源' }
     }
   }
 

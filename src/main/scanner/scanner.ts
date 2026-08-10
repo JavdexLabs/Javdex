@@ -23,6 +23,7 @@ import {
   type VideoFileFingerprint
 } from './videoDuration'
 import { getSettings } from '../settings/settingsStore'
+import { isPathUnderRoot } from './libraryPathUtils'
 
 export type ScanProgressFn = (progress: ScanProgress) => void
 
@@ -33,6 +34,8 @@ export interface ScanOptions {
   readDurationSeconds?: (filePath: string) => Promise<number | null>
   /** Minimum seconds required to import during scan; null disables the filter. */
   minImportDurationSeconds?: number | null
+  /** Missing resources below these temporarily unavailable roots must not be relocated. */
+  unavailableRoots?: string[]
 }
 
 const DEFAULT_YIELD_EVERY = 50
@@ -134,12 +137,12 @@ function resolveRefreshTarget(file: string): LocalVideoResource | null {
 async function refreshScannedFileDuration(
   file: string,
   readDurationSeconds: DurationReader
-): Promise<void> {
+): Promise<boolean> {
   const fingerprint = statFileFingerprint(file)
-  if (!fingerprint) return
+  if (!fingerprint) return false
 
   const record = resolveRefreshTarget(file)
-  if (!record) return
+  if (!record) return false
 
   if (!shouldProbeLocalVideoResourceDuration(record, fingerprint)) {
     if (record.file_mtime_ms == null) {
@@ -147,12 +150,13 @@ async function refreshScannedFileDuration(
         sizeBytes: fingerprint.file_size,
         fileMtimeMs: fingerprint.file_mtime_ms
       })
+      return true
     }
-    return
+    return false
   }
 
   const fileDurationSeconds = await readDurationSeconds(file)
-  if (fileDurationSeconds == null || fileDurationSeconds <= 0) return
+  if (fileDurationSeconds == null || fileDurationSeconds <= 0) return false
 
   const nextDuration = shouldRefreshLocalVideoResourceDuration(
     record.duration_seconds,
@@ -166,6 +170,7 @@ async function refreshScannedFileDuration(
     sizeBytes: fingerprint.file_size,
     fileMtimeMs: fingerprint.file_mtime_ms
   })
+  return true
 }
 
 /**
@@ -185,6 +190,7 @@ export async function scanFolders(
     skippedShort: 0,
     failed: 0,
     relocated: 0,
+    refreshed: 0,
     removed: 0,
     promoted: 0,
     deletedVideos: 0,
@@ -218,7 +224,9 @@ export async function scanFolders(
 
     try {
       if (localVideoResourceExistsByLocator(file)) {
-        await refreshScannedFileDuration(file, readDurationSeconds)
+        if (await refreshScannedFileDuration(file, readDurationSeconds)) {
+          result.refreshed += 1
+        }
         result.skipped += 1
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
@@ -257,9 +265,15 @@ export async function scanFolders(
       if (existing) {
         const localResource = getPreferredLocalVideoResource(existing.id)
         if (localResource && samePath(localResource.locator, file)) {
-          await refreshScannedFileDuration(file, readDurationSeconds)
+          if (await refreshScannedFileDuration(file, readDurationSeconds)) {
+            result.refreshed += 1
+          }
           result.skipped += 1
-        } else if (localResource && !fs.existsSync(localResource.locator)) {
+        } else if (
+          localResource &&
+          !options.unavailableRoots?.some((root) => isPathUnderRoot(localResource.locator, root)) &&
+          !fs.existsSync(localResource.locator)
+        ) {
           relocateLocalVideoResource(
             existing.id,
             file,
@@ -275,7 +289,9 @@ export async function scanFolders(
           if (id !== null) {
             result.imported += 1
           } else {
-            await refreshScannedFileDuration(file, readDurationSeconds)
+            if (await refreshScannedFileDuration(file, readDurationSeconds)) {
+              result.refreshed += 1
+            }
             result.skipped += 1
           }
         }
@@ -291,7 +307,9 @@ export async function scanFolders(
         result.imported += 1
         result.newCodes.push(code)
       } else {
-        await refreshScannedFileDuration(file, readDurationSeconds)
+        if (await refreshScannedFileDuration(file, readDurationSeconds)) {
+          result.refreshed += 1
+        }
         result.skipped += 1
       }
     } catch (err) {

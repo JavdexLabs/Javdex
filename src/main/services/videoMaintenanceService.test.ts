@@ -217,7 +217,7 @@ describe('VideoMaintenanceService', () => {
     videos.setPrimaryResource(1, secondaryId)
     videos.removeResource(1, 1)
     assert.equal(fs.existsSync(videoPath), false)
-    assert.equal(query.get(1)?.resources[0]?.locator, secondaryPath)
+    assert.equal(query.get(1)?.resources[0]?.display_locator, secondaryPath)
 
     videos.delete(1)
     assert.equal(fs.existsSync(secondaryPath), false)

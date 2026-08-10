@@ -4,11 +4,9 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import type { FacetType } from '@shared/libraryTypes'
 import type { ScrapedStatus } from '@shared/commonTypes'
 import type {
-  ExternalVideoResourceKind,
   VideoDetail,
-  VideoResource
+  VideoResourceDetail
 } from '@shared/videoTypes'
-import { maskVideoResourceLocator } from '@shared/videoResourceLinks'
 import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS } from '@shared/videoScrapeTypes'
 import MetaLink from './MetaLink'
 import IconButton from './IconButton'
@@ -16,6 +14,7 @@ import { UI_ICON } from './iconDefaults'
 import { navigateToFacetDetail } from '../listView/listNavigation'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
+import { VIDEO_RESOURCE_KIND_LABELS } from './videoResourcePresentation'
 
 type PrimaryItem =
   | { key: string; label: string; type: 'text'; value: string }
@@ -114,11 +113,11 @@ function fileBaseName(filePath: string): string {
   return normalized.slice(normalized.lastIndexOf('/') + 1) || filePath
 }
 
-function localResourceDisplayName(resource: VideoResource, multi: boolean): string | null {
+function localResourceDisplayName(resource: VideoResourceDetail, multi: boolean): string | null {
   const label = resource.display_name?.trim()
   if (label) return label
   if (!multi) return null
-  return fileBaseName(resource.locator)
+  return fileBaseName(resource.display_locator)
 }
 
 function buildRecordItems(video: VideoDetail): SecondaryItem[] {
@@ -155,17 +154,17 @@ function VideoLocalResourceRow({
   onEditResource,
   onRemoveResource
 }: {
-  resource: VideoResource
+  resource: VideoResourceDetail
   multiResources: boolean
   onOpenResource?: (resourceId: number) => void
   onRevealResource?: (resourceId: number) => void
   onSetPrimaryResource?: (resourceId: number) => void
-  onEditResource?: (resource: VideoResource) => void
-  onRemoveResource?: (resource: VideoResource) => void
+  onEditResource?: (resource: VideoResourceDetail) => void
+  onRemoveResource?: (resource: VideoResourceDetail) => void
 }): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  const path = resource.locator.trim()
+  const path = resource.display_locator.trim()
   const title = localResourceDisplayName(resource, multiResources) ?? fileBaseName(path)
   const isPrimary = Boolean(resource.is_primary)
   const facts = [
@@ -198,7 +197,7 @@ function VideoLocalResourceRow({
       <div className="detail-meta-file-main">
         <div className="detail-meta-file-label-row">
           <span className="detail-meta-file-label">{title}</span>
-          <span className="detail-meta-file-badge">本地文件</span>
+          <span className="detail-meta-file-badge">{VIDEO_RESOURCE_KIND_LABELS.local}</span>
           {isPrimary ? (
             <span className="detail-meta-file-badge" title="顶部播放将使用此资源">
               主资源
@@ -294,40 +293,43 @@ function VideoLinkResourceRow({
   resource,
   multiResources,
   onOpenResource,
+  onReadResourceLocator,
   onEditResource,
   onSetPrimaryResource,
   onRemoveResource
 }: {
-  resource: VideoResource
+  resource: VideoResourceDetail
   multiResources: boolean
   onOpenResource?: (resourceId: number) => void
-  onEditResource?: (resource: VideoResource) => void
+  onReadResourceLocator?: (resourceId: number) => Promise<string | null>
+  onEditResource?: (resource: VideoResourceDetail) => void
   onSetPrimaryResource?: (resourceId: number) => void
-  onRemoveResource?: (resource: VideoResource) => void
+  onRemoveResource?: (resource: VideoResourceDetail) => void
 }): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  const [showFullLink, setShowFullLink] = useState(false)
+  const [fullLink, setFullLink] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const kind =
-    resource.kind === 'direct'
-      ? '视频直链'
-      : resource.kind === 'web'
-        ? '网页链接'
-        : resource.kind === 'magnet'
-          ? 'Magnet'
-          : 'ED2K'
-  const masked = maskVideoResourceLocator(
-    resource.locator,
-    resource.kind as ExternalVideoResourceKind
-  )
+  const kind = VIDEO_RESOURCE_KIND_LABELS[resource.kind]
+  const masked = resource.display_locator
   const title = resource.display_name?.trim() || masked
   const isPrimary = Boolean(resource.is_primary)
 
   const copyFullLink = async (): Promise<void> => {
-    await navigator.clipboard.writeText(resource.locator)
+    const locator = fullLink ?? (await onReadResourceLocator?.(resource.id))
+    if (!locator) return
+    await navigator.clipboard.writeText(locator)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1600)
+  }
+
+  const toggleFullLink = async (): Promise<void> => {
+    if (fullLink !== null) {
+      setFullLink(null)
+      return
+    }
+    const locator = await onReadResourceLocator?.(resource.id)
+    if (locator) setFullLink(locator)
   }
 
   useEscapeKey(() => setMenuOpen(false), menuOpen)
@@ -364,7 +366,7 @@ function VideoLinkResourceRow({
             </span>
           </div>
         ) : null}
-        {showFullLink ? <div className="detail-meta-path detail-meta-path--full">{resource.locator}</div> : null}
+        {fullLink ? <div className="detail-meta-path detail-meta-path--full">{fullLink}</div> : null}
       </div>
       <div className="detail-meta-file-actions">
         <IconButton
@@ -390,6 +392,7 @@ function VideoLinkResourceRow({
                 role="menuitem"
                 onClick={() => {
                   setMenuOpen(false)
+                  setFullLink(null)
                   onEditResource?.(resource)
                 }}
               >
@@ -414,10 +417,10 @@ function VideoLinkResourceRow({
                 role="menuitem"
                 onClick={() => {
                   setMenuOpen(false)
-                  setShowFullLink((visible) => !visible)
+                  void toggleFullLink()
                 }}
               >
-                {showFullLink ? '隐藏完整链接' : '查看完整链接'}
+                {fullLink ? '隐藏完整链接' : '查看完整链接'}
               </button>
               <button
                 type="button"
@@ -512,6 +515,7 @@ export function VideoDetailSecondaryMeta({
   video,
   onOpenResource,
   onRevealResource,
+  onReadResourceLocator,
   onEditResource,
   onSetPrimaryResource,
   onRemoveResource
@@ -519,9 +523,10 @@ export function VideoDetailSecondaryMeta({
   video: VideoDetail
   onOpenResource?: (resourceId: number) => void
   onRevealResource?: (resourceId: number) => void
-  onEditResource?: (resource: VideoResource) => void
+  onReadResourceLocator?: (resourceId: number) => Promise<string | null>
+  onEditResource?: (resource: VideoResourceDetail) => void
   onSetPrimaryResource?: (resourceId: number) => void
-  onRemoveResource?: (resource: VideoResource) => void
+  onRemoveResource?: (resource: VideoResourceDetail) => void
 }): JSX.Element | null {
   const multiResources = video.resources.length > 1
   if (video.resources.length === 0) return null
@@ -552,6 +557,7 @@ export function VideoDetailSecondaryMeta({
                 resource={resource}
                 multiResources={multiResources}
                 onOpenResource={onOpenResource}
+                onReadResourceLocator={onReadResourceLocator}
                 onEditResource={onEditResource}
                 onSetPrimaryResource={onSetPrimaryResource}
                 onRemoveResource={onRemoveResource}

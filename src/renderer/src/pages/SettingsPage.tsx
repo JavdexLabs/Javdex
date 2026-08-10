@@ -4,7 +4,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import type { ActressBatchScrapeScope, ActressBatchScrapeStatus, ActressScrapeField, ActressScrapeUpdateMode, CompositeScraperInput, ScraperPluginDescriptor, ScraperPluginPackage, ScraperPluginUpdateInput, VideoBatchScrapeStatus, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/scrapeTypes'
 import type { AppSettings } from '@shared/settingsTypes'
 import type { BatchProgress } from '@shared/batchScrapeTypes'
-import type { ScanResult } from '@shared/libraryTypes'
+import type { LibraryPathRemovalPreview, ScanResult } from '@shared/libraryTypes'
 import { ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS, ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS, ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS, VIDEO_BATCH_SCRAPE_STATUS_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_UPDATE_MODE_OPTIONS } from '@shared/scrapeTypes'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { api } from '../api'
@@ -114,7 +114,11 @@ export default function SettingsPage(): JSX.Element {
   const [editingPlugin, setEditingPlugin] = useState<PluginEditState | null>(null)
   const [editingComposite, setEditingComposite] = useState<CompositeEditState | null>(null)
   const [pluginDeleteTarget, setPluginDeleteTarget] = useState<PluginDeleteTarget | null>(null)
-  const [pathRemoveTarget, setPathRemoveTarget] = useState<string | null>(null)
+  const [pathRemoval, setPathRemoval] = useState<{
+    path: string
+    preview: LibraryPathRemovalPreview | null
+  } | null>(null)
+  const [pathRemoveBusy, setPathRemoveBusy] = useState<'preview' | 'confirm' | null>(null)
   const [devLoadPackage, setDevLoadPackage] = useState<ScraperPluginPackage | null>(null)
   const [scanning, setScanning] = useState(false)
   const [scanStatus, setScanStatus] = useState('')
@@ -163,7 +167,7 @@ export default function SettingsPage(): JSX.Element {
     setEditingPlugin(null)
     setEditingComposite(null)
     setPluginDeleteTarget(null)
-    setPathRemoveTarget(null)
+    setPathRemoval(null)
     setShowVideoBatchModal(false)
     setShowActressBatchModal(false)
     setBatchDetailScope(null)
@@ -325,23 +329,35 @@ export default function SettingsPage(): JSX.Element {
     }
   }
 
-  const removeFolder = async (path: string): Promise<void> => {
-    if (!settings) return
+  const requestRemovePath = async (path: string): Promise<void> => {
+    setPathRemoval({ path, preview: null })
+    setPathRemoveBusy('preview')
     try {
-      const merged = settings.libraryPaths.filter((p) => p !== path)
-      const next = await api.settings.update({ libraryPaths: merged })
-      setSettings(next)
-      toast.show('已移除媒体库路径', 'success')
+      const preview = await api.settings.previewLibraryPathRemoval(path)
+      setPathRemoval((current) =>
+        current?.path === path ? { path, preview } : current
+      )
     } catch (e) {
+      setPathRemoval(null)
       toast.show(String((e as Error).message), 'error')
+    } finally {
+      setPathRemoveBusy(null)
     }
   }
 
   const confirmRemovePath = async (): Promise<void> => {
-    if (!pathRemoveTarget) return
-    const target = pathRemoveTarget
-    setPathRemoveTarget(null)
-    await removeFolder(target)
+    if (!pathRemoval?.preview || pathRemoveBusy) return
+    setPathRemoveBusy('confirm')
+    try {
+      const next = await api.settings.confirmLibraryPathRemoval(pathRemoval.path)
+      setSettings(next)
+      setPathRemoval(null)
+      toast.show('已移除路径，资源记录将在下次成功扫描后清理', 'success')
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+    } finally {
+      setPathRemoveBusy(null)
+    }
   }
 
   const changeScraper = async (name: string): Promise<void> => {
@@ -634,7 +650,7 @@ export default function SettingsPage(): JSX.Element {
   }
 
   const runScan = async (): Promise<void> => {
-    if (!settings.libraryPaths.length) {
+    if (!settings.libraryPaths.length && !settings.pendingLibraryPathCleanups.length) {
       toast.show('请先添加媒体库路径', 'error')
       return
     }
@@ -1025,7 +1041,7 @@ export default function SettingsPage(): JSX.Element {
                   onAddFolders={() => void addFolders()}
                   onRunScan={() => void runScan()}
                   onCancelScan={() => void cancelScan()}
-                  onRequestRemovePath={setPathRemoveTarget}
+                  onRequestRemovePath={(path) => void requestRemovePath(path)}
                   onResolvedUnrecognized={handleResolved}
                   onPatchSettings={(patch) => void patchLibrarySettings(patch)}
                   scanScrapePrompt={scanScrapePrompt}
@@ -1337,17 +1353,42 @@ export default function SettingsPage(): JSX.Element {
           onCancel={() => setEditingComposite(null)}
         />
       )}
-      {pathRemoveTarget && (
+      {pathRemoval && (
         <ConfirmModal
           title="移除媒体库路径"
-          confirmText="移除"
+          confirmText={
+            pathRemoveBusy === 'preview'
+              ? '正在统计…'
+              : pathRemoveBusy === 'confirm'
+                ? '移除中…'
+                : '确认移除'
+          }
           danger
-          onCancel={() => setPathRemoveTarget(null)}
+          busy={Boolean(pathRemoveBusy)}
+          confirmDisabled={!pathRemoval.preview}
+          onCancel={() => setPathRemoval(null)}
           onConfirm={() => void confirmRemovePath()}
         >
           <p>确定从媒体库中移除以下路径？</p>
-          <div className="modal-path-text">{pathRemoveTarget}</div>
-          <p className="modal-field-hint">不会删除磁盘上的文件，仅停止扫描该路径。</p>
+          <div className="modal-path-text">{pathRemoval.path}</div>
+          {pathRemoval.preview ? (
+            <div className="library-path-removal-impact" aria-label="目录移除影响">
+              <div>
+                <strong>{pathRemoval.preview.localResourceCount}</strong>
+                <span>条本地资源记录</span>
+              </div>
+              <div>
+                <strong>{pathRemoval.preview.videosBecomingResourceLess}</strong>
+                <span>部影片可能变为无资源</span>
+              </div>
+            </div>
+          ) : (
+            <p className="modal-field-hint" aria-live="polite">正在统计目录影响…</p>
+          )}
+          <p className="modal-field-hint library-path-removal-note">
+            确认后会立即停止扫描该路径。下一次成功完成的扫描将移除上述资源记录，
+            但不会删除目录中的影片文件；此操作不提供保留资源记录选项。
+          </p>
         </ConfirmModal>
       )}
       {pluginDeleteTarget && (

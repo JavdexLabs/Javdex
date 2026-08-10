@@ -378,6 +378,39 @@ export function removeVideoResourceRecord(resourceId: number): void {
   getDb().prepare('DELETE FROM video_resources WHERE id = ?').run(resourceId)
 }
 
+export interface VideoResourceBatchRemovalPlan {
+  videoId: number
+  resourceIds: number[]
+  promotedResourceId: number | null
+}
+
+export function removeLocalVideoResourcesBatch(
+  plans: VideoResourceBatchRemovalPlan[]
+): { removed: number; promoted: number } {
+  const db = getDb()
+  return db.transaction(() => {
+    const remove = db.prepare(
+      "DELETE FROM video_resources WHERE id = ? AND video_id = ? AND kind = 'local'"
+    )
+    const clearPrimary = db.prepare('UPDATE video_resources SET is_primary = 0 WHERE video_id = ?')
+    const setPrimary = db.prepare(
+      'UPDATE video_resources SET is_primary = 1 WHERE id = ? AND video_id = ?'
+    )
+    let removed = 0
+    let promoted = 0
+
+    for (const plan of plans) {
+      for (const resourceId of plan.resourceIds) {
+        removed += remove.run(resourceId, plan.videoId).changes
+      }
+      if (plan.promotedResourceId === null) continue
+      clearPrimary.run(plan.videoId)
+      if (setPrimary.run(plan.promotedResourceId, plan.videoId).changes > 0) promoted += 1
+    }
+    return { removed, promoted }
+  })()
+}
+
 export function importVideoLinkResourceRecord(input: {
   code: string
   kind: ExternalVideoResourceKind

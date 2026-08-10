@@ -78,6 +78,8 @@ export default function LibrarySettingsPanel({
   const scanMetrics = scanResult ? buildScanMetrics(scanResult) : null
   const canScan = settings.libraryPaths.length > 0
   const pathCount = settings.libraryPaths.length
+  const pendingCleanupCount = settings.pendingLibraryPathCleanups.length
+  const canScanOrCleanup = canScan || pendingCleanupCount > 0
   const scanStateLabel = scanning ? '扫描中' : scanResult ? '已完成' : '待扫描'
   const scanStateTone = scanning ? 'running' : scanResult ? 'success' : 'muted'
 
@@ -94,6 +96,9 @@ export default function LibrarySettingsPanel({
           <SettingsStatusPill status={scanStateTone}>{scanStateLabel}</SettingsStatusPill>
           {unrecognized.length > 0 ? (
             <SettingsStatusPill status="warning">{unrecognized.length} 个待处理</SettingsStatusPill>
+          ) : null}
+          {pendingCleanupCount > 0 ? (
+            <SettingsStatusPill status="warning">{pendingCleanupCount} 个路径待清理</SettingsStatusPill>
           ) : null}
         </div>
       }
@@ -132,6 +137,8 @@ export default function LibrarySettingsPanel({
                     type="button"
                     className="path-row-remove"
                     aria-label={`移除路径 ${path}`}
+                    title={scanning ? '扫描期间无法移除路径' : '移除路径'}
+                    disabled={scanning}
                     onClick={() => onRequestRemovePath(path)}
                   >
                     <X {...UI_ICON_SM} />
@@ -160,7 +167,7 @@ export default function LibrarySettingsPanel({
             <button
               type="button"
               className={`btn ${scanning ? '' : 'btn-primary'}`}
-              disabled={!scanning && !canScan}
+              disabled={!scanning && !canScanOrCleanup}
               onClick={scanning ? onCancelScan : onRunScan}
             >
               {scanning ? (
@@ -171,7 +178,7 @@ export default function LibrarySettingsPanel({
               ) : (
                 <>
                   <Play {...UI_ICON_SM} aria-hidden />
-                  扫描并导入
+                  {canScan ? '扫描并导入' : '执行待清理'}
                 </>
               )}
             </button>

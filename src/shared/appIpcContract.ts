@@ -5,6 +5,7 @@ import type {
   FacetItem,
   FacetType,
   LibraryOverviewStats,
+  LibraryPathRemovalPreview,
   ManualImportResult,
   PlayResult,
   RenameImportResult,
@@ -51,6 +52,11 @@ export interface AppIpcContract {
   [IPC.SETTINGS_GET]: { args: []; result: AppSettings }
   [IPC.SETTINGS_UPDATE]: { args: [patch: Partial<AppSettings>]; result: AppSettings }
   [IPC.SETTINGS_PICK_FOLDER]: { args: []; result: string[] }
+  [IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW]: {
+    args: [path: string]
+    result: LibraryPathRemovalPreview
+  }
+  [IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM]: { args: [path: string]; result: AppSettings }
   [IPC.SETTINGS_LLM_TEST_MODEL]: { args: [providerId: string, modelId: string]; result: string }
   [IPC.SETTINGS_LLM_LIST_MODELS]: { args: [providerId: string]; result: LlmModelDefinition[] }
   [IPC.SETTINGS_PROXY_TEST]: { args: [kind: 'scrape' | 'llm', proxyUrl: string]; result: string }

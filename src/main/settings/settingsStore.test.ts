@@ -70,6 +70,18 @@ describe('settingsStore video card preferences', () => {
   })
 })
 
+describe('settingsStore deferred library path cleanup', () => {
+  it('normalizes unique non-empty roots and preserves them across cache resets', () => {
+    writeSettings({
+      pendingLibraryPathCleanups: ['/library/a', ' /library/b ', '/library/a', '', 42]
+    })
+
+    assert.deepEqual(getSettings().pendingLibraryPathCleanups, ['/library/a', '/library/b'])
+    resetSettingsCacheForTests()
+    assert.deepEqual(getSettings().pendingLibraryPathCleanups, ['/library/a', '/library/b'])
+  })
+})
+
 describe('settingsStore retired actress scrapers', () => {
   it('rewrites the retired idol archive default to Xslist', () => {
     writeSettings({ defaultActressScraper: '偶像档案库' })

@@ -173,6 +173,7 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
       parsed.showVideoResourceTypeBadges,
       DEFAULT_SETTINGS.showVideoResourceTypeBadges
     ),
+    pendingLibraryPathCleanups: normalizeStringList(parsed.pendingLibraryPathCleanups),
     mediaAssetsPath:
       typeof parsed.mediaAssetsPath === 'string' ? parsed.mediaAssetsPath.trim() : '',
     minScanImportDurationMinutes: normalizeMinScanImportDurationMinutes(
@@ -207,6 +208,18 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
 
 function normalizeBooleanSetting(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return Array.from(
+    new Set(
+      value
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  )
 }
 
 function normalizeLlmSettings(parsed: ParsedSettings): Pick<

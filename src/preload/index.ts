@@ -139,6 +139,10 @@ const api = {
     get: () => invokeApp(IPC.SETTINGS_GET),
     update: (patch: Partial<AppSettings>) => invokeApp(IPC.SETTINGS_UPDATE, patch),
     pickFolder: () => invokeApp(IPC.SETTINGS_PICK_FOLDER),
+    previewLibraryPathRemoval: (path: string) =>
+      invokeApp(IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW, path),
+    confirmLibraryPathRemoval: (path: string) =>
+      invokeApp(IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM, path),
     testLlmModel: (providerId: string, modelId: string) =>
       invokeApp(IPC.SETTINGS_LLM_TEST_MODEL, providerId, modelId),
     listLlmModels: (providerId: string) =>

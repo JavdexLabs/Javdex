@@ -34,6 +34,8 @@ export function normalizePrivacyModeScopes(value: unknown): PrivacyModeScope[] {
 export interface AppSettings {
   /** Folders to scan for media files. */
   libraryPaths: string[]
+  /** Internal queue: roots whose local resource records are removed after the next successful scan. */
+  pendingLibraryPathCleanups: string[]
   /** Minimum local file duration (minutes) required for scan import; 0 disables the filter. */
   minScanImportDurationMinutes: number
   /** Optional HTTP/HTTPS proxy for scraping, e.g. http://127.0.0.1:7890 */
@@ -135,6 +137,7 @@ export function normalizePluginDevAgentMaxContextTokens(value: unknown): number 
 
 export const DEFAULT_SETTINGS: AppSettings = {
   libraryPaths: [],
+  pendingLibraryPathCleanups: [],
   minScanImportDurationMinutes: 30,
   proxyUrl: '',
   proxyUrlEnabled: false,

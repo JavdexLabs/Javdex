@@ -85,7 +85,8 @@ describe('ScanCoordinator', () => {
         resources.delete(id)
       },
       setPrimaryResource: (_videoId, id) => promoted.push(id),
-      pathExists: () => false
+      pathExists: () => false,
+      consumePendingPathCleanups: () => ({ removed: 0, promoted: 0, consumedRoots: [] })
     })
 
     const result = await coordinator.run({ trigger: 'manual' })
@@ -134,6 +135,7 @@ describe('ScanCoordinator', () => {
 
   it('keeps resources after a coordinator-level failure', async () => {
     let cleanupReads = 0
+    let deferredCleanupRuns = 0
     const coordinator = createScanCoordinator({
       gate: new MaintenanceTaskGate(),
       getConfiguredFolders: () => ['/online'],
@@ -144,11 +146,81 @@ describe('ScanCoordinator', () => {
       listLocalResources: () => {
         cleanupReads += 1
         return []
+      },
+      consumePendingPathCleanups: () => {
+        deferredCleanupRuns += 1
+        return { removed: 0, promoted: 0, consumedRoots: [] }
       }
     })
 
     await assert.rejects(() => coordinator.run(), /adapter failed/)
     assert.equal(cleanupReads, 0)
+    assert.equal(deferredCleanupRuns, 0)
+  })
+
+  it('consumes deferred path cleanup only after a successful uncancelled scan', async () => {
+    let deferredCleanupRuns = 0
+    const coordinator = createScanCoordinator({
+      gate: new MaintenanceTaskGate(),
+      getConfiguredFolders: () => ['/online'],
+      inspectFolder: async () => true,
+      scanFolders: async () => emptyScanResult(),
+      listLocalResources: () => [],
+      consumePendingPathCleanups: () => {
+        deferredCleanupRuns += 1
+        return { removed: 4, promoted: 2, consumedRoots: ['/removed'] }
+      }
+    })
+
+    const result = await coordinator.run()
+
+    assert.equal(deferredCleanupRuns, 1)
+    assert.equal(result.removed, 4)
+    assert.equal(result.promoted, 2)
+  })
+
+  it('keeps deferred path cleanup queued after a partial folder scan', async () => {
+    let deferredCleanupRuns = 0
+    const coordinator = createScanCoordinator({
+      gate: new MaintenanceTaskGate(),
+      getConfiguredFolders: () => ['/one', '/two'],
+      inspectFolder: async () => true,
+      scanFolders: async () => emptyScanResult(),
+      listLocalResources: () => [],
+      consumePendingPathCleanups: () => {
+        deferredCleanupRuns += 1
+        return { removed: 1, promoted: 0, consumedRoots: ['/removed'] }
+      }
+    })
+
+    const result = await coordinator.run({ folders: ['/one'] })
+
+    assert.equal(deferredCleanupRuns, 0)
+    assert.equal(result.removed, 0)
+  })
+
+  it('allows a full cleanup-only scan after the final configured folder was removed', async () => {
+    let scannedFolders: string[] | null = null
+    const coordinator = createScanCoordinator({
+      gate: new MaintenanceTaskGate(),
+      getConfiguredFolders: () => [],
+      hasPendingPathCleanups: () => true,
+      scanFolders: async (folders) => {
+        scannedFolders = folders
+        return emptyScanResult()
+      },
+      listLocalResources: () => [],
+      consumePendingPathCleanups: () => ({
+        removed: 2,
+        promoted: 0,
+        consumedRoots: ['/removed']
+      })
+    })
+
+    const result = await coordinator.run()
+
+    assert.deepEqual(scannedFolders, [])
+    assert.equal(result.removed, 2)
   })
 
   it('rejects duplicate scans and scans blocked by resource maintenance', async () => {
@@ -175,7 +247,8 @@ describe('ScanCoordinator', () => {
         await pendingScan
         return emptyScanResult()
       },
-      listLocalResources: () => []
+      listLocalResources: () => [],
+      consumePendingPathCleanups: () => ({ removed: 0, promoted: 0, consumedRoots: [] })
     })
     const first = coordinatorWithPendingScan.run()
     await new Promise((resolve) => setImmediate(resolve))

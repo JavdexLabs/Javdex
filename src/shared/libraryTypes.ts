@@ -38,6 +38,12 @@ export interface LibraryOverviewStats {
   }
 }
 
+export interface LibraryPathRemovalPreview {
+  path: string
+  localResourceCount: number
+  videosBecomingResourceLess: number
+}
+
 // ---- Scan results ----
 
 export interface ScanResult {

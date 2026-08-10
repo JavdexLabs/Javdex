@@ -1,5 +1,4 @@
 import fs from 'node:fs'
-import path from 'node:path'
 import type { ScanProgress, ScanResult } from '@shared/libraryTypes'
 import type { VideoResource } from '@shared/videoTypes'
 import {
@@ -12,6 +11,11 @@ import {
 import { getSettings } from '../settings/settingsStore'
 import { maintenanceTaskGate, type MaintenanceTaskGate } from '../services/maintenanceTaskGate'
 import { selectPrimaryVideoResourceCandidate } from '../services/videoResourcePromotion'
+import {
+  consumePendingLibraryPathCleanups,
+  type PendingLibraryPathCleanupResult
+} from '../services/libraryPathCleanupService'
+import { isPathUnderRoot, isSameLibraryPath } from './libraryPathUtils'
 import { scanFolders, type ScanOptions, type ScanProgressFn } from './scanner'
 
 export type ScanTrigger = 'manual' | 'startup' | 'interval' | 'resume'
@@ -30,6 +34,7 @@ interface LocalResourceRef {
 
 interface ScanCoordinatorDependencies {
   getConfiguredFolders: () => string[]
+  hasPendingPathCleanups: () => boolean
   inspectFolder: (folder: string) => Promise<boolean>
   scanFolders: (
     folders: string[],
@@ -42,13 +47,8 @@ interface ScanCoordinatorDependencies {
   removeResourceRecord: (resourceId: number) => void
   setPrimaryResource: (videoId: number, resourceId: number) => void
   pathExists: (filePath: string) => boolean
+  consumePendingPathCleanups: () => PendingLibraryPathCleanupResult
   gate: MaintenanceTaskGate
-}
-
-function isUnderFolder(filePath: string, folder: string): boolean {
-  const resolvedFile = path.resolve(filePath)
-  const resolvedFolder = path.resolve(folder)
-  return resolvedFile === resolvedFolder || resolvedFile.startsWith(resolvedFolder + path.sep)
 }
 
 async function inspectReadableDirectory(folder: string): Promise<boolean> {
@@ -82,10 +82,16 @@ export class ScanCoordinator {
     const lease = this.dependencies.gate.tryAcquire('scan')
     if (!lease) throw new Error('已有扫描或资源维护任务正在运行')
 
+    const configuredFolders = Array.from(new Set(this.dependencies.getConfiguredFolders()))
     const folders = request.folders?.length
       ? Array.from(new Set(request.folders))
-      : Array.from(new Set(this.dependencies.getConfiguredFolders()))
-    if (folders.length === 0) {
+      : configuredFolders
+    const isFullScan =
+      folders.length === configuredFolders.length &&
+      folders.every((folder) =>
+        configuredFolders.some((configured) => isSameLibraryPath(folder, configured))
+      )
+    if (folders.length === 0 && !this.dependencies.hasPendingPathCleanups()) {
       lease.release()
       throw new Error('尚未配置媒体库路径')
     }
@@ -116,6 +122,11 @@ export class ScanCoordinator {
       }
 
       this.removeMissingAccessibleResources(result, accessibleFolders, offlineFolders)
+      if (isFullScan) {
+        const deferredCleanup = this.dependencies.consumePendingPathCleanups()
+        result.removed += deferredCleanup.removed
+        result.promoted += deferredCleanup.promoted
+      }
       return result
     } finally {
       if (this.activeController === controller) this.activeController = null
@@ -146,8 +157,8 @@ export class ScanCoordinator {
     offlineFolders: string[]
   ): void {
     for (const ref of this.dependencies.listLocalResources()) {
-      if (offlineFolders.some((folder) => isUnderFolder(ref.file_path, folder))) continue
-      if (!accessibleFolders.some((folder) => isUnderFolder(ref.file_path, folder))) continue
+      if (offlineFolders.some((folder) => isPathUnderRoot(ref.file_path, folder))) continue
+      if (!accessibleFolders.some((folder) => isPathUnderRoot(ref.file_path, folder))) continue
       if (this.dependencies.pathExists(ref.file_path)) continue
 
       const resource = this.dependencies.getResourceById(ref.file_id)
@@ -171,6 +182,9 @@ export function createScanCoordinator(
 ): ScanCoordinator {
   return new ScanCoordinator({
     getConfiguredFolders: dependencies.getConfiguredFolders ?? (() => getSettings().libraryPaths),
+    hasPendingPathCleanups:
+      dependencies.hasPendingPathCleanups ??
+      (() => getSettings().pendingLibraryPathCleanups.length > 0),
     inspectFolder: dependencies.inspectFolder ?? inspectReadableDirectory,
     scanFolders: dependencies.scanFolders ?? scanFolders,
     listLocalResources: dependencies.listLocalResources ?? listVideoFileRefs,
@@ -179,6 +193,8 @@ export function createScanCoordinator(
     removeResourceRecord: dependencies.removeResourceRecord ?? removeVideoResourceRecord,
     setPrimaryResource: dependencies.setPrimaryResource ?? setPrimaryVideoResource,
     pathExists: dependencies.pathExists ?? fs.existsSync,
+    consumePendingPathCleanups:
+      dependencies.consumePendingPathCleanups ?? consumePendingLibraryPathCleanups,
     gate: dependencies.gate ?? maintenanceTaskGate
   })
 }

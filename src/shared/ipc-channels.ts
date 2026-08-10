@@ -6,6 +6,8 @@ export const IPC = {
   SETTINGS_GET: 'settings:get',
   SETTINGS_UPDATE: 'settings:update',
   SETTINGS_PICK_FOLDER: 'settings:pickFolder',
+  SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW: 'settings:libraryPathRemovePreview',
+  SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM: 'settings:libraryPathRemoveConfirm',
   SETTINGS_LLM_TEST_MODEL: 'settings:llmTestModel',
   SETTINGS_LLM_LIST_MODELS: 'settings:llmListModels',
   SETTINGS_PROXY_TEST: 'settings:proxyTest',

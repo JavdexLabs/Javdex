@@ -10,12 +10,14 @@ import { directorMergeService } from '../services/directorMergeService'
 import { seriesMergeService } from '../services/seriesMergeService'
 import { organizationMergeService } from '../services/organizationMergeService'
 import { classificationDeletionService } from '../services/classificationDeletionService'
+import { organizationDeletionService } from '../services/organizationDeletionService'
 
 interface ClassificationHandlerDependencies {
   queryService: typeof classificationQueryService
   maintenanceService: typeof classificationMaintenanceService
   imageService: typeof classificationImageService
   organizationMergeService: typeof organizationMergeService
+  organizationDeletionService: typeof organizationDeletionService
   deletionService: typeof classificationDeletionService
   directorMergeService: typeof directorMergeService
   seriesMergeService: typeof seriesMergeService
@@ -28,6 +30,7 @@ export function registerClassificationHandlers(
     maintenanceService: classificationMaintenanceService,
     imageService: classificationImageService,
     organizationMergeService,
+    organizationDeletionService,
     deletionService: classificationDeletionService,
     directorMergeService,
     seriesMergeService
@@ -53,6 +56,18 @@ export function registerClassificationHandlers(
   )
   adapter.register(IPC.ORGANIZATION_MERGE, (input) =>
     dependencies.organizationMergeService.merge(input)
+  )
+  adapter.register(IPC.ORGANIZATION_ROLE_REMOVE_PREVIEW, (id, role) =>
+    dependencies.organizationDeletionService.previewRoleRemoval(id, role)
+  )
+  adapter.register(IPC.ORGANIZATION_ROLE_REMOVE, (id, role) =>
+    dependencies.organizationDeletionService.removeRole(id, role)
+  )
+  adapter.register(IPC.ORGANIZATION_DELETE_PREVIEW, (id) =>
+    dependencies.organizationDeletionService.previewOrganization(id)
+  )
+  adapter.register(IPC.ORGANIZATION_DELETE, (id) =>
+    dependencies.organizationDeletionService.deleteOrganization(id)
   )
   adapter.register(IPC.DIRECTOR_LIST, (query) => dependencies.queryService.listDirectors(query))
   adapter.register(IPC.DIRECTOR_GET, (id) => dependencies.queryService.getDirector(id))

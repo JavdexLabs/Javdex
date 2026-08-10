@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   DirectorDeleteImpact,
   DirectorDeleteResult,
   SeriesDeleteImpact,
   SeriesDeleteResult
 } from '@shared/classificationTypes'
+import { usePreviewCommand } from '../hooks/usePreviewCommand'
 import Modal from './Modal'
 
 type DeleteImpact = DirectorDeleteImpact | SeriesDeleteImpact
@@ -34,56 +34,12 @@ export default function ClassificationDeleteModal<
   onCancel,
   onDeleted
 }: Props<TImpact, TResult>): JSX.Element {
-  const [impact, setImpact] = useState<TImpact | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [deleting, setDeleting] = useState(false)
-  const requestSequence = useRef(0)
-
-  const refreshImpact = useCallback(
-    async (clearError = true): Promise<void> => {
-      const sequence = requestSequence.current + 1
-      requestSequence.current = sequence
-      setImpact(null)
-      if (clearError) setError(null)
-      try {
-        const nextImpact = await loadImpact()
-        if (requestSequence.current === sequence) setImpact(nextImpact)
-      } catch (loadError) {
-        if (requestSequence.current === sequence) {
-          setError(String((loadError as Error).message ?? loadError))
-        }
-      }
-    },
-    [loadImpact]
-  )
-
-  useEffect(() => {
-    void refreshImpact()
-    return () => {
-      requestSequence.current += 1
-    }
-  }, [refreshImpact])
-
-  const execute = async (): Promise<void> => {
-    if (!impact || deleting) return
-    setDeleting(true)
-    setError(null)
-    let result: TResult
-    try {
-      result = await remove()
-    } catch (deleteError) {
-      setError(String((deleteError as Error).message ?? deleteError))
-      await refreshImpact(false)
-      setDeleting(false)
-      return
-    }
-    setDeleting(false)
-    try {
-      await onDeleted(result)
-    } catch (completionError) {
-      console.error(`已删除${entityLabel}，但页面收尾失败`, completionError)
-    }
-  }
+  const { impact, error, running: deleting, execute } = usePreviewCommand({
+    loadImpact,
+    command: remove,
+    onCompleted: onDeleted,
+    completionErrorMessage: `已删除${entityLabel}，但页面收尾失败`
+  })
 
   const children = impact ? directChildCount(impact) : 0
   return (
@@ -111,7 +67,7 @@ export default function ClassificationDeleteModal<
             </p>
           </>
         ) : null}
-        {error ? <p className="classification-merge-error">{error}</p> : null}
+        {error ? <p className="classification-maintenance-error">{error}</p> : null}
       </div>
     </Modal>
   )

@@ -283,7 +283,13 @@ const api = {
     create: (input: OrganizationCreateInput) => invokeApp(IPC.ORGANIZATION_CREATE, input),
     update: (id: number, input: OrganizationUpdateInput) =>
       invokeApp(IPC.ORGANIZATION_UPDATE, id, input),
-    merge: (input: OrganizationMergeInput) => invokeApp(IPC.ORGANIZATION_MERGE, input)
+    merge: (input: OrganizationMergeInput) => invokeApp(IPC.ORGANIZATION_MERGE, input),
+    roleRemovalPreview: (id: number, role: OrganizationRole) =>
+      invokeApp(IPC.ORGANIZATION_ROLE_REMOVE_PREVIEW, id, role),
+    removeRole: (id: number, role: OrganizationRole) =>
+      invokeApp(IPC.ORGANIZATION_ROLE_REMOVE, id, role),
+    deletePreview: (id: number) => invokeApp(IPC.ORGANIZATION_DELETE_PREVIEW, id),
+    remove: (id: number) => invokeApp(IPC.ORGANIZATION_DELETE, id)
   },
   directors: {
     list: (query: DirectorListQuery) => invokeApp(IPC.DIRECTOR_LIST, query),

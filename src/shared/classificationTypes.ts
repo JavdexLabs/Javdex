@@ -160,6 +160,38 @@ export interface SeriesDeleteResult {
   cleanupFailures: ClassificationImageCleanupFailure[]
 }
 
+export interface OrganizationRoleRemovalImpact {
+  id: number
+  role: OrganizationRole
+  roleVideoCount: number
+  remainingRoles: OrganizationRole[]
+  canRemove: boolean
+}
+
+export interface OrganizationRoleRemovalResult {
+  id: number
+  role: OrganizationRole
+  unlinkedVideoCount: number
+  remainingRoles: OrganizationRole[]
+}
+
+export interface OrganizationDeleteImpact {
+  id: number
+  makerVideoCount: number
+  publisherVideoCount: number
+  directChildCount: number
+  ownedSeriesCount: number
+}
+
+export interface OrganizationDeleteResult {
+  id: number
+  unlinkedMakerVideoCount: number
+  unlinkedPublisherVideoCount: number
+  detachedChildCount: number
+  detachedSeriesCount: number
+  cleanupFailures: ClassificationImageCleanupFailure[]
+}
+
 export interface DirectorProfileInput {
   mainName: string
   aliases?: string[]

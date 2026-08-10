@@ -6431,7 +6431,8 @@ button.tag-chip--custom-pick {
   line-height: 1.55;
 }
 
-.classification-merge-error {
+.classification-merge-error,
+.classification-maintenance-error {
   margin: 0;
   color: var(--text-danger);
   font-size: var(--classification-merge-text-sm);

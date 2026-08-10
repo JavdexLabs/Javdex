@@ -26,6 +26,7 @@ import {
   writeOrganizationLinks,
   writeOrganizationNames
 } from './organizationProfilePersistence'
+import { findSeriesOwnershipScopeConflict } from './seriesOwnershipScopeConflict'
 
 type StoredOrganization = {
   id: number
@@ -88,40 +89,16 @@ function assertSeriesScopeAvailable(
   targetOrganizationId: number,
   sourceOrganizationId: number
 ): void {
-  const conflict = database
-    .prepare(
-      `SELECT incoming.series_id AS incoming_series_id,
-              incoming_series.main_name AS incoming_series_name,
-              COALESCE(incoming_name.name, incoming_series.main_name) AS conflicting_name,
-              existing.series_id AS existing_series_id,
-              existing_series.main_name AS existing_series_name
-       FROM series_name_ownership incoming
-       JOIN series incoming_series ON incoming_series.id = incoming.series_id
-       JOIN series_name_ownership existing
-         ON existing.owner_organization_id = ?
-        AND existing.normalized_name = incoming.normalized_name
-       JOIN series existing_series ON existing_series.id = existing.series_id
-       LEFT JOIN series_names incoming_name
-         ON incoming_name.series_id = incoming.series_id
-        AND incoming_name.normalized_name = incoming.normalized_name
-       WHERE incoming.owner_organization_id = ?
-         AND incoming.series_id <> existing.series_id
-       LIMIT 1`
-    )
-    .get(targetOrganizationId, sourceOrganizationId) as
-    | {
-        incoming_series_id: number
-        incoming_series_name: string
-        conflicting_name: string
-        existing_series_id: number
-        existing_series_name: string
-      }
-    | undefined
+  const conflict = findSeriesOwnershipScopeConflict(
+    database,
+    sourceOrganizationId,
+    targetOrganizationId
+  )
   if (!conflict) return
   throw new Error(
-    `来源系列 #${conflict.incoming_series_id}“${conflict.incoming_series_name}”的名称` +
-      `“${conflict.conflicting_name}”与目标机构内系列 #${conflict.existing_series_id}` +
-      `“${conflict.existing_series_name}”冲突；请先修改或合并冲突系列`
+    `来源系列 #${conflict.incomingSeriesId}“${conflict.incomingSeriesName}”的名称` +
+      `“${conflict.conflictingName}”与目标机构内系列 #${conflict.existingSeriesId}` +
+      `“${conflict.existingSeriesName}”冲突；请先修改或合并冲突系列`
   )
 }
 

@@ -58,6 +58,8 @@ import type {
   DirectorProfileInput,
   DirectorUpdateInput,
   OrganizationCreateInput,
+  OrganizationDeleteImpact,
+  OrganizationDeleteResult,
   OrganizationDetail,
   OrganizationListItem,
   OrganizationListQuery,
@@ -66,6 +68,8 @@ import type {
   OrganizationMergeResult,
   OrganizationOption,
   OrganizationRole,
+  OrganizationRoleRemovalImpact,
+  OrganizationRoleRemovalResult,
   OrganizationUpdateInput,
   SeriesDetail,
   SeriesDeleteImpact,
@@ -150,6 +154,22 @@ export interface AppIpcContract {
   [IPC.ORGANIZATION_MERGE]: {
     args: [input: OrganizationMergeInput]
     result: OrganizationMergeResult
+  }
+  [IPC.ORGANIZATION_ROLE_REMOVE_PREVIEW]: {
+    args: [id: number, role: OrganizationRole]
+    result: OrganizationRoleRemovalImpact
+  }
+  [IPC.ORGANIZATION_ROLE_REMOVE]: {
+    args: [id: number, role: OrganizationRole]
+    result: OrganizationRoleRemovalResult
+  }
+  [IPC.ORGANIZATION_DELETE_PREVIEW]: {
+    args: [id: number]
+    result: OrganizationDeleteImpact
+  }
+  [IPC.ORGANIZATION_DELETE]: {
+    args: [id: number]
+    result: OrganizationDeleteResult
   }
   [IPC.DIRECTOR_LIST]: { args: [query: DirectorListQuery]; result: DirectorListItem[] }
   [IPC.DIRECTOR_GET]: { args: [id: number]; result: DirectorDetail | null }

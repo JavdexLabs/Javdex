@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { ExternalLink, GitMerge, ImagePlus, Inbox, Pencil, SearchX } from 'lucide-react'
+import { BadgeMinus, ExternalLink, GitMerge, ImagePlus, Inbox, Pencil, SearchX, Trash2 } from 'lucide-react'
 import {
   Outlet,
   useLocation,
@@ -9,8 +9,10 @@ import {
 } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
+  OrganizationDeleteResult,
   OrganizationMergeResult,
   OrganizationRole,
+  OrganizationRoleRemovalResult,
   OrganizationUpdateInput
 } from '@shared/classificationTypes'
 import type { VideoQuery } from '@shared/videoTypes'
@@ -22,6 +24,7 @@ import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import ListToolbar from '../components/ListToolbar'
 import OrganizationEditModal from '../components/OrganizationEditModal'
+import OrganizationDeleteModal from '../components/OrganizationDeleteModal'
 import OrganizationMergeModal from '../components/OrganizationMergeModal'
 import { organizationMergeSuccessMessage } from '../components/organizationMergePresentation'
 import PosterCard from '../components/PosterCard'
@@ -61,6 +64,7 @@ export default function OrganizationDetailPage(): JSX.Element {
   const [editing, setEditing] = useState(false)
   const [editingImage, setEditingImage] = useState(false)
   const [mergingOrganization, setMergingOrganization] = useState(false)
+  const [deleteAction, setDeleteAction] = useState<'role' | 'organization' | null>(null)
   const detailQuery = useQuery({
     queryKey: organizationKeys.detail(role, organizationId),
     queryFn: () => api.organizations.get(organizationId, role!),
@@ -101,6 +105,7 @@ export default function OrganizationDetailPage(): JSX.Element {
     setEditing(false)
     setEditingImage(false)
     setMergingOrganization(false)
+    setDeleteAction(null)
   }, [])
   useDismissOverlaysOnNavigate(dismissEditing, location.pathname)
 
@@ -130,6 +135,32 @@ export default function OrganizationDetailPage(): JSX.Element {
         : organizationMergeSuccessMessage(result),
       result.cleanupFailures.length > 0 ? 'info' : 'success'
     )
+  }
+
+  const roleRemoved = async (result: OrganizationRoleRemovalResult): Promise<void> => {
+    setDeleteAction(null)
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: organizationKeys.all }),
+      queryClient.invalidateQueries({ queryKey: videoKeys.all })
+    ])
+    toast.show(`已移除${FACET_LABEL[result.role]}角色并解除 ${result.unlinkedVideoCount} 部影片关联`, 'success')
+    navigateToFacetList(navigate, location, result.role)
+  }
+
+  const organizationDeleted = async (result: OrganizationDeleteResult): Promise<void> => {
+    setDeleteAction(null)
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: organizationKeys.all }),
+      queryClient.invalidateQueries({ queryKey: seriesKeys.all }),
+      queryClient.invalidateQueries({ queryKey: videoKeys.all })
+    ])
+    toast.show(
+      result.cleanupFailures.length > 0
+        ? '机构已删除，但品牌图清理失败，可稍后手动清理'
+        : '机构已完整删除，相关影片和系列资料已保留',
+      result.cleanupFailures.length > 0 ? 'info' : 'success'
+    )
+    if (role) navigateToFacetList(navigate, location, role)
   }
 
   const videoOverlay = videoStackOpen ? (
@@ -202,6 +233,22 @@ export default function OrganizationDetailPage(): JSX.Element {
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>
                   <Pencil {...UI_ICON_SM} aria-hidden />
                   编辑资料
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setDeleteAction('role')}
+                >
+                  <BadgeMinus {...UI_ICON_SM} aria-hidden />
+                  移除{FACET_LABEL[role]}角色
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setDeleteAction('organization')}
+                >
+                  <Trash2 {...UI_ICON_SM} aria-hidden />
+                  完整删除机构
                 </button>
               </>
             }
@@ -327,6 +374,27 @@ export default function OrganizationDetailPage(): JSX.Element {
             target={organization}
             onCancel={() => setMergingOrganization(false)}
             onMerged={merged}
+          />
+        ) : null}
+        {deleteAction === 'role' ? (
+          <OrganizationDeleteModal
+            mode="role"
+            role={role}
+            organizationName={organization.mainName}
+            loadImpact={() => api.organizations.roleRemovalPreview(organizationId, role)}
+            remove={() => api.organizations.removeRole(organizationId, role)}
+            onCancel={() => setDeleteAction(null)}
+            onCompleted={roleRemoved}
+          />
+        ) : null}
+        {deleteAction === 'organization' ? (
+          <OrganizationDeleteModal
+            mode="organization"
+            organizationName={organization.mainName}
+            loadImpact={() => api.organizations.deletePreview(organizationId)}
+            remove={() => api.organizations.remove(organizationId)}
+            onCancel={() => setDeleteAction(null)}
+            onCompleted={organizationDeleted}
           />
         ) : null}
       </div>

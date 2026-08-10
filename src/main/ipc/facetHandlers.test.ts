@@ -8,6 +8,7 @@ import type { ClassificationImageService } from '../services/classificationImage
 import type { DirectorMergeService } from '../services/directorMergeService'
 import type { SeriesMergeService } from '../services/seriesMergeService'
 import type { OrganizationMergeService } from '../services/organizationMergeService'
+import type { OrganizationDeletionService } from '../services/organizationDeletionService'
 import type { ClassificationDeletionService } from '../services/classificationDeletionService'
 import { appCommandAdapter } from './appContractAdapter'
 import { registerClassificationHandlers } from './facetHandlers'
@@ -129,6 +130,48 @@ describe('classification IPC contract', () => {
         }
       }
     }
+    const organizationDeletionService: OrganizationDeletionService = {
+      previewRoleRemoval(id, role) {
+        calls.push(['organization-role-remove-preview', id, role])
+        return {
+          id,
+          role,
+          roleVideoCount: 6,
+          remainingRoles: role === 'maker' ? ['publisher'] : ['maker'],
+          canRemove: true
+        }
+      },
+      removeRole(id, role) {
+        calls.push(['organization-role-remove', id, role])
+        return {
+          id,
+          role,
+          unlinkedVideoCount: 7,
+          remainingRoles: role === 'maker' ? ['publisher'] : ['maker']
+        }
+      },
+      previewOrganization(id) {
+        calls.push(['organization-delete-preview', id])
+        return {
+          id,
+          makerVideoCount: 8,
+          publisherVideoCount: 9,
+          directChildCount: 2,
+          ownedSeriesCount: 3
+        }
+      },
+      deleteOrganization(id) {
+        calls.push(['organization-delete', id])
+        return {
+          id,
+          unlinkedMakerVideoCount: 8,
+          unlinkedPublisherVideoCount: 9,
+          detachedChildCount: 2,
+          detachedSeriesCount: 3,
+          cleanupFailures: []
+        }
+      }
+    }
     const seriesMergeService: SeriesMergeService = {
       merge(input) {
         calls.push(['series-merge', input])
@@ -173,6 +216,7 @@ describe('classification IPC contract', () => {
       imageService,
       deletionService,
       organizationMergeService,
+      organizationDeletionService,
       directorMergeService,
       seriesMergeService
     })
@@ -195,6 +239,34 @@ describe('classification IPC contract', () => {
       transferredChildCount: 2,
       transferredSeriesCount: 1,
       imagePath: 'covers/organization.jpg',
+      cleanupFailures: []
+    })
+    assert.deepEqual(handlers.get(IPC.ORGANIZATION_ROLE_REMOVE_PREVIEW)?.(12, 'maker'), {
+      id: 12,
+      role: 'maker',
+      roleVideoCount: 6,
+      remainingRoles: ['publisher'],
+      canRemove: true
+    })
+    assert.deepEqual(handlers.get(IPC.ORGANIZATION_ROLE_REMOVE)?.(12, 'maker'), {
+      id: 12,
+      role: 'maker',
+      unlinkedVideoCount: 7,
+      remainingRoles: ['publisher']
+    })
+    assert.deepEqual(handlers.get(IPC.ORGANIZATION_DELETE_PREVIEW)?.(12), {
+      id: 12,
+      makerVideoCount: 8,
+      publisherVideoCount: 9,
+      directChildCount: 2,
+      ownedSeriesCount: 3
+    })
+    assert.deepEqual(handlers.get(IPC.ORGANIZATION_DELETE)?.(12), {
+      id: 12,
+      unlinkedMakerVideoCount: 8,
+      unlinkedPublisherVideoCount: 9,
+      detachedChildCount: 2,
+      detachedSeriesCount: 3,
       cleanupFailures: []
     })
     const directorQuery = { search: 'lee' }
@@ -260,6 +332,10 @@ describe('classification IPC contract', () => {
       ['create', createInput],
       ['update', 12, updateInput],
       ['organization-merge', organizationMergeInput],
+      ['organization-role-remove-preview', 12, 'maker'],
+      ['organization-role-remove', 12, 'maker'],
+      ['organization-delete-preview', 12],
+      ['organization-delete', 12],
       ['director-list', directorQuery],
       ['director-get', 23],
       ['director-options', 'alex'],

@@ -8,7 +8,11 @@ import type {
   OrganizationListItem,
   OrganizationListQuery,
   OrganizationOption,
-  OrganizationRole
+  OrganizationRole,
+  SeriesDetail,
+  SeriesListItem,
+  SeriesListQuery,
+  SeriesOption
 } from '@shared/classificationTypes'
 import { normalizeClassificationName } from '@shared/classificationNameNormalization'
 import { getDb } from '../db/database'
@@ -41,6 +45,9 @@ export interface ClassificationQueryService {
   listDirectors(query: DirectorListQuery): DirectorListItem[]
   getDirector(id: number): DirectorDetail | null
   listDirectorOptions(search?: string): DirectorOption[]
+  listSeries(query: SeriesListQuery): SeriesListItem[]
+  getSeries(id: number): SeriesDetail | null
+  listSeriesOptions(search?: string): SeriesOption[]
 }
 
 export const classificationQueryService: ClassificationQueryService = {
@@ -390,6 +397,190 @@ export const classificationQueryService: ClassificationQueryService = {
       birthDate: row.birth_date,
       careerStartYear: row.career_start_year,
       careerEndYear: row.career_end_year,
+      videoCount: row.video_count
+    }))
+  },
+
+  listSeries(query): SeriesListItem[] {
+    const search = searchLikePattern(query.search)
+    const sortBy = query.sortBy === 'updated_at' ? 'updated_at' : 'video_count'
+    const sortDir = query.sortDir === 'asc' ? 'ASC' : 'DESC'
+    const order = sortBy === 'updated_at' ? `s.updated_at ${sortDir}` : `video_count ${sortDir}`
+    const rows = getDb()
+      .prepare(
+        `SELECT s.id, s.main_name, s.image_path, s.updated_at,
+                owner.id AS owner_id, owner.main_name AS owner_name,
+                COUNT(v.id) AS video_count,
+                (SELECT cover_path FROM videos cv
+                 WHERE cv.series_id = s.id AND cv.cover_path IS NOT NULL
+                 ORDER BY cv.release_date DESC, cv.add_time DESC, cv.id DESC LIMIT 1)
+                  AS fallback_cover_path
+         FROM series s
+         LEFT JOIN organizations owner ON owner.id = s.owner_organization_id
+         LEFT JOIN videos v ON v.series_id = s.id
+         WHERE ? = '' OR EXISTS (
+           SELECT 1 FROM series_names n
+           WHERE n.series_id = s.id AND n.normalized_name LIKE ? ESCAPE '\\'
+         )
+         GROUP BY s.id
+         ORDER BY ${order}, s.id ASC`
+      )
+      .all(search, search) as Array<{
+      id: number
+      main_name: string
+      image_path: string | null
+      updated_at: string
+      owner_id: number | null
+      owner_name: string | null
+      video_count: number
+      fallback_cover_path: string | null
+    }>
+    return rows.map((row) => ({
+      id: row.id,
+      mainName: row.main_name,
+      imagePath: row.image_path,
+      fallbackCoverPath: row.fallback_cover_path,
+      ownerOrganization:
+        row.owner_id == null || row.owner_name == null
+          ? null
+          : { id: row.owner_id, mainName: row.owner_name },
+      videoCount: row.video_count,
+      updatedAt: row.updated_at
+    }))
+  },
+
+  getSeries(id): SeriesDetail | null {
+    const row = getDb()
+      .prepare(
+        `SELECT s.*,
+                owner.id AS owner_id, owner.main_name AS owner_name,
+                parent.id AS parent_id, parent.main_name AS parent_name,
+                parent_owner.id AS parent_owner_id,
+                parent_owner.main_name AS parent_owner_name,
+                COUNT(v.id) AS video_count,
+                MIN(CASE WHEN v.release_date GLOB '[0-9][0-9][0-9][0-9]-*'
+                         THEN CAST(substr(v.release_date, 1, 4) AS INTEGER) END) AS release_year_start,
+                MAX(CASE WHEN v.release_date GLOB '[0-9][0-9][0-9][0-9]-*'
+                         THEN CAST(substr(v.release_date, 1, 4) AS INTEGER) END) AS release_year_end,
+                (SELECT cover_path FROM videos cv
+                 WHERE cv.series_id = s.id AND cv.cover_path IS NOT NULL
+                 ORDER BY cv.release_date DESC, cv.add_time DESC, cv.id DESC LIMIT 1)
+                  AS fallback_cover_path
+         FROM series s
+         LEFT JOIN organizations owner ON owner.id = s.owner_organization_id
+         LEFT JOIN series parent ON parent.id = s.parent_series_id
+         LEFT JOIN organizations parent_owner ON parent_owner.id = parent.owner_organization_id
+         LEFT JOIN videos v ON v.series_id = s.id
+         WHERE s.id = ?
+         GROUP BY s.id`
+      )
+      .get(id) as
+      | {
+          id: number
+          main_name: string
+          image_path: string | null
+          summary: string | null
+          start_year: number | null
+          end_year: number | null
+          status: SeriesDetail['status']
+          updated_at: string
+          owner_id: number | null
+          owner_name: string | null
+          parent_id: number | null
+          parent_name: string | null
+          parent_owner_id: number | null
+          parent_owner_name: string | null
+          video_count: number
+          release_year_start: number | null
+          release_year_end: number | null
+          fallback_cover_path: string | null
+        }
+      | undefined
+    if (!row) return null
+    const aliases = getDb()
+      .prepare(
+        `SELECT name FROM series_names
+         WHERE series_id = ? AND type = 'alias'
+         ORDER BY position, id`
+      )
+      .all(id) as Array<{ name: string }>
+    const links = getDb()
+      .prepare(
+        `SELECT label, url, position FROM series_links
+         WHERE series_id = ? ORDER BY position, id`
+      )
+      .all(id) as OrganizationLink[]
+    return {
+      id: row.id,
+      mainName: row.main_name,
+      imagePath: row.image_path,
+      fallbackCoverPath: row.fallback_cover_path,
+      ownerOrganization:
+        row.owner_id == null || row.owner_name == null
+          ? null
+          : { id: row.owner_id, mainName: row.owner_name },
+      parentSeries:
+        row.parent_id == null || row.parent_name == null
+          ? null
+          : {
+              id: row.parent_id,
+              mainName: row.parent_name,
+              ownerOrganization:
+                row.parent_owner_id == null || row.parent_owner_name == null
+                  ? null
+                  : { id: row.parent_owner_id, mainName: row.parent_owner_name }
+            },
+      aliases: aliases.map((item) => item.name),
+      summary: row.summary,
+      startYear: row.start_year,
+      endYear: row.end_year,
+      status: row.status,
+      links,
+      videoCount: row.video_count,
+      releaseYearStart: row.release_year_start,
+      releaseYearEnd: row.release_year_end,
+      updatedAt: row.updated_at
+    }
+  },
+
+  listSeriesOptions(search): SeriesOption[] {
+    const normalized = searchLikePattern(search)
+    const rows = getDb()
+      .prepare(
+        `SELECT s.id, s.main_name,
+                owner.id AS owner_id, owner.main_name AS owner_name,
+                COUNT(v.id) AS video_count
+         FROM series s
+         LEFT JOIN organizations owner ON owner.id = s.owner_organization_id
+         LEFT JOIN videos v ON v.series_id = s.id
+         WHERE ? = '' OR EXISTS (
+           SELECT 1 FROM series_names n
+           WHERE n.series_id = s.id AND n.normalized_name LIKE ? ESCAPE '\\'
+         )
+         GROUP BY s.id
+         ORDER BY s.main_name, s.id
+         LIMIT 100`
+      )
+      .all(normalized, normalized) as Array<{
+      id: number
+      main_name: string
+      owner_id: number | null
+      owner_name: string | null
+      video_count: number
+    }>
+    const readAliases = getDb().prepare(
+      `SELECT name FROM series_names
+       WHERE series_id = ? AND type = 'alias'
+       ORDER BY position, id`
+    )
+    return rows.map((row) => ({
+      id: row.id,
+      mainName: row.main_name,
+      ownerOrganization:
+        row.owner_id == null || row.owner_name == null
+          ? null
+          : { id: row.owner_id, mainName: row.owner_name },
+      aliases: (readAliases.all(row.id) as Array<{ name: string }>).map((item) => item.name),
       videoCount: row.video_count
     }))
   }

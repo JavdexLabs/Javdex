@@ -34,6 +34,18 @@ describe('organization IPC contract', () => {
       listDirectorOptions(search) {
         calls.push(['director-options', search])
         return []
+      },
+      listSeries(query) {
+        calls.push(['series-list', query])
+        return []
+      },
+      getSeries(id) {
+        calls.push(['series-get', id])
+        return null
+      },
+      listSeriesOptions(search) {
+        calls.push(['series-options', search])
+        return []
       }
     }
     const maintenanceService: ClassificationMaintenanceService = {
@@ -58,6 +70,17 @@ describe('organization IPC contract', () => {
       },
       assignVideoDirector() {
         throw new Error('not used by director IPC')
+      },
+      createSeries(input) {
+        calls.push(['series-create', input])
+        return 31
+      },
+      updateSeries(id, input) {
+        calls.push(['series-update', id, input])
+        return true
+      },
+      assignVideoSeries() {
+        throw new Error('not used by series IPC')
       }
     }
     const handlers = new Map<IpcChannel, (...args: unknown[]) => unknown>()
@@ -84,6 +107,13 @@ describe('organization IPC contract', () => {
     assert.deepEqual(handlers.get(IPC.DIRECTOR_OPTIONS)?.('alex'), [])
     assert.equal(handlers.get(IPC.DIRECTOR_CREATE)?.(directorInput), 23)
     assert.equal(handlers.get(IPC.DIRECTOR_UPDATE)?.(23, directorInput), true)
+    const seriesQuery = { search: 'collection' }
+    const seriesInput = { mainName: 'Collection' }
+    assert.deepEqual(handlers.get(IPC.SERIES_LIST)?.(seriesQuery), [])
+    assert.equal(handlers.get(IPC.SERIES_GET)?.(31), null)
+    assert.deepEqual(handlers.get(IPC.SERIES_OPTIONS)?.('collection'), [])
+    assert.equal(handlers.get(IPC.SERIES_CREATE)?.(seriesInput), 31)
+    assert.equal(handlers.get(IPC.SERIES_UPDATE)?.(31, seriesInput), true)
     assert.deepEqual(calls, [
       ['list', listQuery],
       ['get', 12, 'publisher'],
@@ -94,7 +124,12 @@ describe('organization IPC contract', () => {
       ['director-get', 23],
       ['director-options', 'alex'],
       ['director-create', directorInput],
-      ['director-update', 23, directorInput]
+      ['director-update', 23, directorInput],
+      ['series-list', seriesQuery],
+      ['series-get', 31],
+      ['series-options', 'collection'],
+      ['series-create', seriesInput],
+      ['series-update', 31, seriesInput]
     ])
   })
 })

@@ -15,7 +15,8 @@ export const LIST_PARAM = {
   avatar: 'avatar',
   year: 'year',
   gender: 'gender',
-  resources: 'resources'
+  resources: 'resources',
+  releaseDir: 'releaseDir'
 } as const
 
 export const VIDEO_RESOURCE_FILTER_ORDER: VideoResourceFilter[] = [
@@ -57,6 +58,14 @@ export function parseClassificationSort(
       : CLASSIFICATION_LIST_DEFAULTS.sortBy
   const sortDir = rawDir === 'asc' || rawDir === 'desc' ? rawDir : CLASSIFICATION_LIST_DEFAULTS.sortDir
   return { sortBy, sortDir }
+}
+
+export function parseSeriesReleaseDir(raw: string | null): SortDir {
+  return raw === 'asc' ? 'asc' : 'desc'
+}
+
+export function seriesReleaseDirParam(direction: SortDir): string | null {
+  return direction === 'asc' ? 'asc' : null
 }
 
 export function parseActressStatus(raw: string | null): ActressListStatusFilter {

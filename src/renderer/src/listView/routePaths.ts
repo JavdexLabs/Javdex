@@ -26,6 +26,9 @@ export const ROUTE_PATH = {
   directorDetail: '/facet/director/d/:directorId',
   directorVideoStack: '/facet/director/d/:directorId/:id',
   directorActressStack: '/facet/director/d/:directorId/:id/actress/:actressId',
+  seriesDetail: '/facet/series/s/:seriesId',
+  seriesVideoStack: '/facet/series/s/:seriesId/:id',
+  seriesActressStack: '/facet/series/s/:seriesId/:id/actress/:actressId',
   settings: '/settings',
   settingsTree: '/settings/*',
   settingsGroup: '/settings/:group/:tab',
@@ -45,7 +48,9 @@ export const ROUTE_SEGMENT = {
   organizationDetail: 'o/:organizationId',
   organizationVideo: ':id',
   directorDetail: 'd/:directorId',
-  directorVideo: ':id'
+  directorVideo: ':id',
+  seriesDetail: 's/:seriesId',
+  seriesVideo: ':id'
 } as const
 
 export const ROUTE_MATCH = {
@@ -66,5 +71,8 @@ export const ROUTE_MATCH = {
   organizationActressStack: ROUTE_PATH.organizationActressStack,
   directorDetailOpen: ROUTE_PATH.directorDetail,
   directorVideoStack: ROUTE_PATH.directorVideoStack,
-  directorActressStack: ROUTE_PATH.directorActressStack
+  directorActressStack: ROUTE_PATH.directorActressStack,
+  seriesDetailOpen: ROUTE_PATH.seriesDetail,
+  seriesVideoStack: ROUTE_PATH.seriesVideoStack,
+  seriesActressStack: ROUTE_PATH.seriesActressStack
 } as const

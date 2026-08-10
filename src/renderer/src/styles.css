@@ -1974,6 +1974,9 @@ textarea.text-input {
   > img,
 :root[data-privacy-mode='true'][data-privacy-covers='true'] .facet-thumb > img,
 :root[data-privacy-mode='true'][data-privacy-covers='true']
+  .organization-profile-image
+  > img,
+:root[data-privacy-mode='true'][data-privacy-covers='true']
   .detail-cover
   > img,
 :root[data-privacy-mode='true'][data-privacy-covers='true']
@@ -5925,6 +5928,16 @@ button.tag-chip--custom-pick {
   color: var(--text-2);
 }
 
+.facet-card-subtitle {
+  padding: 2px 12px 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .organization-detail-page {
   min-height: 0;
 }
@@ -5974,8 +5987,37 @@ button.tag-chip--custom-pick {
   object-fit: cover;
 }
 
+.series-profile .organization-profile-image img {
+  object-fit: cover;
+}
+
+.meta-inline-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  cursor: pointer;
+}
+
+.meta-inline-link:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .classification-picker {
   position: relative;
+}
+
+.classification-picker-error {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-danger);
+  font-size: 12px;
 }
 
 .classification-picker-options {

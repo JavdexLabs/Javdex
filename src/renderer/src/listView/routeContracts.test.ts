@@ -18,7 +18,10 @@ import {
   organizationVideoDetailPath,
   parseOrganizationPath,
   parseDirectorPath,
-  parseFacetVideoPath
+  parseFacetVideoPath,
+  parseSeriesPath,
+  seriesDetailPath,
+  seriesVideoDetailPath
 } from './facetRoutes'
 import { libraryVideoActressPath, libraryVideoDetailPath, parseLibraryVideoPath } from './libraryRoutes'
 import {
@@ -30,6 +33,7 @@ import {
   navigateToFacetDetail,
   navigateToDirectorDetail,
   navigateToOrganizationDetail,
+  navigateToSeriesDetail,
   navigateToVideoDetail
 } from './listNavigation'
 import {
@@ -41,6 +45,8 @@ import {
   parseActressStatus,
   classificationListQueryHash,
   parseClassificationSort,
+  parseSeriesReleaseDir,
+  seriesReleaseDirParam,
   patchSearchParams
 } from './listQueryParams'
 import {
@@ -116,6 +122,13 @@ describe('route builders and parsers', () => {
       videoId: 5,
       actressId: 7
     })
+    assert.equal(seriesDetailPath(31), '/facet/series/s/31')
+    assert.equal(seriesVideoDetailPath(31, 5), '/facet/series/s/31/5')
+    assert.deepEqual(parseSeriesPath('/facet/series/s/31/5/actress/7'), {
+      seriesId: 31,
+      videoId: 5,
+      actressId: 7
+    })
   })
 
   it('rejects malformed detail ids', () => {
@@ -146,6 +159,14 @@ describe('classification list query contract', () => {
       classificationListQueryHash('maker', new URLSearchParams('q=studio&sort=updated_at&dir=asc')),
       'dir=asc&q=studio&sort=updated_at&type=maker'
     )
+  })
+
+  it('keeps series release sorting separate from classification-list sorting', () => {
+    assert.equal(parseSeriesReleaseDir(null), 'desc')
+    assert.equal(parseSeriesReleaseDir('asc'), 'asc')
+    assert.equal(parseSeriesReleaseDir('invalid'), 'desc')
+    assert.equal(seriesReleaseDirParam('desc'), null)
+    assert.equal(seriesReleaseDirParam('asc'), 'asc')
   })
 })
 
@@ -365,6 +386,38 @@ describe('primary navigation memory', () => {
 })
 
 describe('navigation helpers', () => {
+  it('keeps stable series identity and release direction through its detail stack', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const list = {
+      pathname: '/facet/series',
+      search: '?q=collection&sort=updated_at&dir=asc',
+      hash: '',
+      state: null,
+      key: 's'
+    } as Location
+    navigateToSeriesDetail(navigate, list, 31)
+    const detail = {
+      ...list,
+      pathname: '/facet/series/s/31',
+      search: '?q=collection&sort=updated_at&dir=asc&releaseDir=asc'
+    } as Location
+    navigateToVideoDetail(navigate, detail, 8)
+    const video = { ...detail, pathname: '/facet/series/s/31/8' } as Location
+    navigateBackFromVideoDetail(navigate, video)
+    assert.deepEqual(destinations, [
+      { pathname: '/facet/series/s/31', search: '?q=collection&sort=updated_at&dir=asc' },
+      {
+        pathname: '/facet/series/s/31/8',
+        search: '?q=collection&sort=updated_at&dir=asc&releaseDir=asc'
+      },
+      {
+        pathname: '/facet/series/s/31',
+        search: 'q=collection&sort=updated_at&dir=asc&releaseDir=asc'
+      }
+    ])
+  })
+
   it('keeps director identity and query state through its stable detail stack', () => {
     const destinations: unknown[] = []
     const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction

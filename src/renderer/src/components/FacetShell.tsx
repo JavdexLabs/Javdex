@@ -11,7 +11,8 @@ export default function FacetShell(): JSX.Element {
       detailMatchPath={[
         ROUTE_MATCH.facetDetailOpen,
         ROUTE_MATCH.organizationDetailOpen,
-        ROUTE_MATCH.directorDetailOpen
+        ROUTE_MATCH.directorDetailOpen,
+        ROUTE_MATCH.seriesDetailOpen
       ]}
       detailMatchEnd={false}
     />

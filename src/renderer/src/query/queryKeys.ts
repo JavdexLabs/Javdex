@@ -42,6 +42,13 @@ export const directorKeys = {
   options: (search = '') => ['directors', 'options', search] as const
 }
 
+export const seriesKeys = {
+  all: ['series'] as const,
+  list: (queryHash: string) => ['series', 'list', queryHash] as const,
+  detail: (id: number) => ['series', 'detail', id] as const,
+  options: (search = '') => ['series', 'options', search] as const
+}
+
 export const overviewStatsKeys = {
   all: ['settings', 'overviewStats'] as const,
   detail: (refreshKey = 0) => ['settings', 'overviewStats', refreshKey] as const

@@ -74,7 +74,8 @@ describe('VideoMaintenanceService', () => {
       title: 'With organization',
       makerOrganization: { createName: 'Studio One' },
       publisherOrganization: { createName: 'Ｓtudio　Ｏne' },
-      directorAssignment: { createName: 'Alex Lee' }
+      directorAssignment: { createName: 'Alex Lee' },
+      seriesAssignment: { createName: 'Collection' }
     })
 
     const video = query.get(1)
@@ -84,6 +85,8 @@ describe('VideoMaintenanceService', () => {
     assert.equal(video?.publisher_organization_id, video?.maker_organization_id)
     assert.equal(video?.director, 'Alex Lee')
     assert.ok(video?.director_id)
+    assert.equal(video?.series, 'Collection')
+    assert.ok(video?.series_id)
     assert.deepEqual(
       classificationQueryService.listOrganizationOptions().map((option) => ({
         id: option.id,

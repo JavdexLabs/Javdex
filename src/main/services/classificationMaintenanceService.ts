@@ -13,7 +13,12 @@ import type {
   OrganizationProfileInput,
   OrganizationRole,
   OrganizationStatus,
-  OrganizationUpdateInput
+  OrganizationUpdateInput,
+  SeriesAssignmentInput,
+  SeriesAssignmentResult,
+  SeriesProfileInput,
+  SeriesStatus,
+  SeriesUpdateInput
 } from '@shared/classificationTypes'
 import { normalizeClassificationName } from '@shared/classificationNameNormalization'
 import { getDb } from '../db/database'
@@ -33,6 +38,12 @@ const DIRECTOR_STATUSES = new Set<DirectorStatus>([
   'paused',
   'retired',
   'deceased'
+])
+const SERIES_STATUSES = new Set<SeriesStatus>([
+  'unknown',
+  'ongoing',
+  'completed',
+  'discontinued'
 ])
 
 type StoredOrganization = {
@@ -521,6 +532,241 @@ function createDirectorRecord(database: Database.Database, input: DirectorProfil
   return id
 }
 
+type StoredSeries = {
+  id: number
+  main_name: string
+  summary: string | null
+  owner_organization_id: number | null
+  parent_series_id: number | null
+  start_year: number | null
+  end_year: number | null
+  status: SeriesStatus
+}
+
+type PreparedSeriesProfile = {
+  mainName: string
+  aliases: string[]
+  summary: string | null
+  ownerOrganizationId: number | null
+  parentSeriesId: number | null
+  startYear: number | null
+  endYear: number | null
+  status: SeriesStatus
+  links: OrganizationLink[]
+}
+
+function readStoredSeries(database: Database.Database, id: number): StoredSeries {
+  const row = database
+    .prepare(
+      `SELECT id, main_name, summary, owner_organization_id, parent_series_id,
+              start_year, end_year, status
+       FROM series WHERE id = ?`
+    )
+    .get(id) as StoredSeries | undefined
+  if (!row) throw new Error('系列不存在')
+  return row
+}
+
+function readSeriesAliases(database: Database.Database, id: number): string[] {
+  return (
+    database
+      .prepare(
+        `SELECT name FROM series_names
+         WHERE series_id = ? AND type = 'alias'
+         ORDER BY position, id`
+      )
+      .all(id) as Array<{ name: string }>
+  ).map((item) => item.name)
+}
+
+function readSeriesLinks(database: Database.Database, id: number): OrganizationLink[] {
+  return database
+    .prepare(
+      `SELECT label, url, position FROM series_links
+       WHERE series_id = ? ORDER BY position, id`
+    )
+    .all(id) as OrganizationLink[]
+}
+
+function assertSeriesOwnerExists(
+  database: Database.Database,
+  ownerOrganizationId: number | null
+): void {
+  if (ownerOrganizationId == null) return
+  if (!database.prepare('SELECT 1 FROM organizations WHERE id = ?').get(ownerOrganizationId)) {
+    throw new Error('所属机构不存在')
+  }
+}
+
+function assertSeriesParentIsValid(
+  database: Database.Database,
+  seriesId: number | null,
+  parentSeriesId: number | null
+): void {
+  if (parentSeriesId == null) return
+  if (!database.prepare('SELECT 1 FROM series WHERE id = ?').get(parentSeriesId)) {
+    throw new Error('上级系列不存在')
+  }
+  if (seriesId == null) return
+  if (parentSeriesId === seriesId) throw new Error('上级系列不能是自身或形成循环')
+  const descendant = database
+    .prepare(
+      `WITH RECURSIVE descendants(id) AS (
+         SELECT id FROM series WHERE parent_series_id = ?
+         UNION
+         SELECT s.id
+         FROM series s
+         JOIN descendants d ON s.parent_series_id = d.id
+       )
+       SELECT 1 FROM descendants WHERE id = ?`
+    )
+    .get(seriesId, parentSeriesId)
+  if (descendant) throw new Error('上级系列不能是自身或形成循环')
+}
+
+function assertSeriesNamesAvailable(
+  database: Database.Database,
+  ownerOrganizationId: number | null,
+  normalizedNames: string[],
+  seriesId?: number
+): void {
+  const findOwner = database.prepare(
+    `SELECT series_id FROM series_name_ownership
+     WHERE COALESCE(owner_organization_id, 0) = COALESCE(?, 0)
+       AND normalized_name = ?`
+  )
+  for (const normalizedName of normalizedNames) {
+    const owner = findOwner.get(ownerOrganizationId, normalizedName) as
+      | { series_id: number }
+      | undefined
+    if (owner && owner.series_id !== seriesId) {
+      throw new Error('系列名称已归属于目标机构作用域内的其他系列')
+    }
+  }
+}
+
+function prepareSeriesProfile(
+  input: SeriesProfileInput,
+  current?: StoredSeries,
+  aliases: string[] = [],
+  links: OrganizationLink[] = []
+): PreparedSeriesProfile {
+  const names = prepareNames(input.mainName, input.aliases ?? aliases)
+  const startYear =
+    input.startYear === undefined
+      ? current?.start_year ?? null
+      : validateYear(input.startYear, '开始年份')
+  const endYear =
+    input.endYear === undefined ? current?.end_year ?? null : validateYear(input.endYear, '结束年份')
+  if (startYear != null && endYear != null && startYear > endYear) {
+    throw new Error('开始年份不能晚于结束年份')
+  }
+  const status = input.status ?? current?.status ?? 'unknown'
+  if (!SERIES_STATUSES.has(status)) throw new Error('系列状态无效')
+  return {
+    mainName: names.mainName,
+    aliases: names.aliases,
+    summary: input.summary === undefined ? current?.summary ?? null : optionalText(input.summary),
+    ownerOrganizationId:
+      input.ownerOrganizationId === undefined
+        ? current?.owner_organization_id ?? null
+        : input.ownerOrganizationId,
+    parentSeriesId:
+      input.parentSeriesId === undefined ? current?.parent_series_id ?? null : input.parentSeriesId,
+    startYear,
+    endYear,
+    status,
+    links: prepareLinks(input.links ?? links)
+  }
+}
+
+function writeSeriesNames(
+  database: Database.Database,
+  id: number,
+  ownerOrganizationId: number | null,
+  mainName: string,
+  aliases: string[]
+): void {
+  const names = prepareNames(mainName, aliases).normalizedNames
+  assertSeriesNamesAvailable(
+    database,
+    ownerOrganizationId,
+    names.map((item) => item.normalizedName),
+    id
+  )
+  database.prepare('DELETE FROM series_names WHERE series_id = ?').run(id)
+  database.prepare('DELETE FROM series_name_ownership WHERE series_id = ?').run(id)
+  const insertName = database.prepare(
+    `INSERT INTO series_names (series_id, name, normalized_name, type, position)
+     VALUES (?, ?, ?, ?, ?)`
+  )
+  const insertOwnership = database.prepare(
+    `INSERT INTO series_name_ownership (owner_organization_id, normalized_name, series_id)
+     VALUES (?, ?, ?)`
+  )
+  names.forEach((name, position) => {
+    insertName.run(
+      id,
+      name.name,
+      name.normalizedName,
+      name.type,
+      name.type === 'main' ? 0 : position - 1
+    )
+    insertOwnership.run(ownerOrganizationId, name.normalizedName, id)
+  })
+}
+
+function writeSeriesLinks(
+  database: Database.Database,
+  id: number,
+  links: OrganizationLink[]
+): void {
+  database.prepare('DELETE FROM series_links WHERE series_id = ?').run(id)
+  const insert = database.prepare(
+    `INSERT INTO series_links (series_id, label, url, normalized_url, position)
+     VALUES (?, ?, ?, ?, ?)`
+  )
+  links.forEach((link) =>
+    insert.run(id, link.label, link.url, normalizedUrl(link.url), link.position)
+  )
+}
+
+function createSeriesRecord(database: Database.Database, input: SeriesProfileInput): number {
+  const profile = prepareSeriesProfile(input)
+  assertSeriesOwnerExists(database, profile.ownerOrganizationId)
+  assertSeriesParentIsValid(database, null, profile.parentSeriesId)
+  const names = prepareNames(profile.mainName, profile.aliases)
+  assertSeriesNamesAvailable(
+    database,
+    profile.ownerOrganizationId,
+    names.normalizedNames.map((item) => item.normalizedName)
+  )
+  const now = new Date().toISOString()
+  const id = Number(
+    database
+      .prepare(
+        `INSERT INTO series (
+           main_name, summary, owner_organization_id, parent_series_id,
+           start_year, end_year, status, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        profile.mainName,
+        profile.summary,
+        profile.ownerOrganizationId,
+        profile.parentSeriesId,
+        profile.startYear,
+        profile.endYear,
+        profile.status,
+        now,
+        now
+      ).lastInsertRowid
+  )
+  writeSeriesNames(database, id, profile.ownerOrganizationId, profile.mainName, profile.aliases)
+  writeSeriesLinks(database, id, profile.links)
+  return id
+}
+
 export interface ClassificationMaintenanceService {
   createOrganization(input: OrganizationCreateInput): number
   updateOrganization(id: number, input: OrganizationUpdateInput): boolean
@@ -535,6 +781,12 @@ export interface ClassificationMaintenanceService {
     videoId: number,
     assignment: DirectorAssignmentInput | null
   ): DirectorAssignmentResult
+  createSeries(input: SeriesProfileInput): number
+  updateSeries(id: number, input: SeriesUpdateInput): boolean
+  assignVideoSeries(
+    videoId: number,
+    assignment: SeriesAssignmentInput | null
+  ): SeriesAssignmentResult
 }
 
 export const classificationMaintenanceService: ClassificationMaintenanceService = {
@@ -714,6 +966,95 @@ export const classificationMaintenanceService: ClassificationMaintenanceService 
         .prepare('UPDATE videos SET director_id = ?, director = ?, updated_at = ? WHERE id = ?')
         .run(id, director.main_name, new Date().toISOString(), videoId)
       return { directorId: id, mainName: director.main_name }
+    })()
+  },
+
+  createSeries(input): number {
+    const database = getDb()
+    return database.transaction(() => createSeriesRecord(database, input))()
+  },
+
+  updateSeries(id, input): boolean {
+    const database = getDb()
+    return database.transaction(() => {
+      const current = readStoredSeries(database, id)
+      const currentAliases = readSeriesAliases(database, id)
+      const aliases = [...(input.aliases ?? currentAliases)]
+      if (input.keepPreviousMainName && input.mainName.trim() !== current.main_name) {
+        aliases.unshift(current.main_name)
+      }
+      const profile = prepareSeriesProfile(
+        { ...input, aliases },
+        current,
+        currentAliases,
+        readSeriesLinks(database, id)
+      )
+      assertSeriesOwnerExists(database, profile.ownerOrganizationId)
+      assertSeriesParentIsValid(database, id, profile.parentSeriesId)
+      const names = prepareNames(profile.mainName, profile.aliases)
+      assertSeriesNamesAvailable(
+        database,
+        profile.ownerOrganizationId,
+        names.normalizedNames.map((item) => item.normalizedName),
+        id
+      )
+      const now = new Date().toISOString()
+      database
+        .prepare(
+          `UPDATE series
+           SET main_name = ?, summary = ?, owner_organization_id = ?, parent_series_id = ?,
+               start_year = ?, end_year = ?, status = ?, updated_at = ?
+           WHERE id = ?`
+        )
+        .run(
+          profile.mainName,
+          profile.summary,
+          profile.ownerOrganizationId,
+          profile.parentSeriesId,
+          profile.startYear,
+          profile.endYear,
+          profile.status,
+          now,
+          id
+        )
+      writeSeriesNames(database, id, profile.ownerOrganizationId, profile.mainName, profile.aliases)
+      writeSeriesLinks(database, id, profile.links)
+      database.prepare('UPDATE videos SET series = ? WHERE series_id = ?').run(profile.mainName, id)
+      return true
+    })()
+  },
+
+  assignVideoSeries(videoId, assignment): SeriesAssignmentResult {
+    const database = getDb()
+    return database.transaction(() => {
+      if (!database.prepare('SELECT 1 FROM videos WHERE id = ?').get(videoId)) {
+        throw new Error('影片不存在')
+      }
+      if (assignment == null) {
+        database
+          .prepare('UPDATE videos SET series_id = NULL, series = NULL, updated_at = ? WHERE id = ?')
+          .run(new Date().toISOString(), videoId)
+        return { seriesId: null, mainName: null }
+      }
+      let id: number
+      if ('seriesId' in assignment) {
+        id = assignment.seriesId
+      } else {
+        const name = assignment.createName.trim()
+        const normalizedName = normalizeClassificationName(name)
+        const existing = database
+          .prepare(
+            `SELECT series_id FROM series_name_ownership
+             WHERE owner_organization_id IS NULL AND normalized_name = ?`
+          )
+          .get(normalizedName) as { series_id: number } | undefined
+        id = existing?.series_id ?? createSeriesRecord(database, { mainName: name })
+      }
+      const series = readStoredSeries(database, id)
+      database
+        .prepare('UPDATE videos SET series_id = ?, series = ?, updated_at = ? WHERE id = ?')
+        .run(id, series.main_name, new Date().toISOString(), videoId)
+      return { seriesId: id, mainName: series.main_name }
     })()
   }
 }

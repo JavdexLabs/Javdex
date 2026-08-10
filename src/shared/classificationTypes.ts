@@ -3,6 +3,7 @@ import type { SortDir } from './commonTypes'
 export type OrganizationRole = 'maker' | 'publisher'
 export type OrganizationStatus = 'unknown' | 'active' | 'inactive'
 export type DirectorStatus = 'unknown' | 'active' | 'paused' | 'retired' | 'deceased'
+export type SeriesStatus = 'unknown' | 'ongoing' | 'completed' | 'discontinued'
 export type ClassificationListSortBy = 'video_count' | 'updated_at'
 
 export interface ClassificationLinkInput {
@@ -149,5 +150,67 @@ export type DirectorAssignmentInput = { directorId: number } | { createName: str
 
 export interface DirectorAssignmentResult {
   directorId: number | null
+  mainName: string | null
+}
+
+export interface SeriesProfileInput {
+  mainName: string
+  aliases?: string[]
+  summary?: string | null
+  ownerOrganizationId?: number | null
+  parentSeriesId?: number | null
+  startYear?: number | null
+  endYear?: number | null
+  status?: SeriesStatus
+  links?: ClassificationLinkInput[]
+}
+
+export interface SeriesUpdateInput extends SeriesProfileInput {
+  keepPreviousMainName?: boolean
+}
+
+export interface SeriesListQuery {
+  search?: string
+  sortBy?: ClassificationListSortBy
+  sortDir?: SortDir
+}
+
+export interface SeriesListItem {
+  id: number
+  mainName: string
+  imagePath: string | null
+  fallbackCoverPath: string | null
+  ownerOrganization: OrganizationSummary | null
+  videoCount: number
+  updatedAt: string
+}
+
+export interface SeriesSummary {
+  id: number
+  mainName: string
+  ownerOrganization: OrganizationSummary | null
+}
+
+export interface SeriesDetail extends SeriesListItem {
+  aliases: string[]
+  summary: string | null
+  parentSeries: SeriesSummary | null
+  startYear: number | null
+  endYear: number | null
+  status: SeriesStatus
+  links: ClassificationLink[]
+  releaseYearStart: number | null
+  releaseYearEnd: number | null
+}
+
+export interface SeriesOption extends SeriesSummary {
+  aliases: string[]
+  videoCount: number
+}
+
+export type SeriesAssignmentInput = { seriesId: number } | { createName: string }
+
+export interface SeriesAssignmentResult {
+  seriesId: number | null
   mainName: string | null
 }

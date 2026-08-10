@@ -88,4 +88,13 @@ describe('video primary metadata classification navigation', () => {
       { key: 'director', label: '导演', type: 'facet', facet: 'director', value: 'Legacy' }
     ])
   })
+
+  it('uses the stable series id while keeping legacy text as a temporary fallback', () => {
+    assert.deepEqual(buildVideoPrimaryMetaItems(video({ series: 'Collection', series_id: 17 })), [
+      { key: 'series', label: '系列', type: 'series', seriesId: 17, value: 'Collection' }
+    ])
+    assert.deepEqual(buildVideoPrimaryMetaItems(video({ series: 'Legacy' })), [
+      { key: 'series', label: '系列', type: 'facet', facet: 'series', value: 'Legacy' }
+    ])
+  })
 })

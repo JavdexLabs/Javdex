@@ -54,6 +54,34 @@ export function directorVideoDetailPath(directorId: number, videoId: number): st
   return `${directorDetailPath(directorId)}/${videoId}`
 }
 
+export function seriesDetailPath(seriesId: number): string {
+  return generatePath(ROUTE_PATH.seriesDetail, { seriesId: String(seriesId) })
+}
+
+export function seriesVideoDetailPath(seriesId: number, videoId: number): string {
+  return `${seriesDetailPath(seriesId)}/${videoId}`
+}
+
+export function parseSeriesPath(pathname: string): {
+  seriesId: number
+  videoId?: number
+  actressId?: number
+} | null {
+  const match =
+    matchPath({ path: ROUTE_PATH.seriesActressStack, end: true }, pathname) ??
+    matchPath({ path: ROUTE_PATH.seriesVideoStack, end: true }, pathname) ??
+    matchPath({ path: ROUTE_PATH.seriesDetail, end: true }, pathname)
+  if (!match) return null
+  const params = match.params as Record<string, string | undefined>
+  const seriesId = Number(params.seriesId)
+  const videoId = params.id ? Number(params.id) : undefined
+  const actressId = params.actressId ? Number(params.actressId) : undefined
+  if (!Number.isInteger(seriesId) || seriesId <= 0) return null
+  if (videoId !== undefined && (!Number.isInteger(videoId) || videoId <= 0)) return null
+  if (actressId !== undefined && (!Number.isInteger(actressId) || actressId <= 0)) return null
+  return { seriesId, videoId, actressId }
+}
+
 export function parseDirectorPath(pathname: string): {
   directorId: number
   videoId?: number

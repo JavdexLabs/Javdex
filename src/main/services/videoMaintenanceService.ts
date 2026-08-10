@@ -113,6 +113,7 @@ interface VideoMaintenanceServiceDependencies {
   withResourceMaintenance: <T>(work: () => T) => T
   assignVideoOrganization: typeof classificationMaintenanceService.assignVideoOrganization
   assignVideoDirector: typeof classificationMaintenanceService.assignVideoDirector
+  assignVideoSeries: typeof classificationMaintenanceService.assignVideoSeries
 }
 
 export function createVideoMaintenanceService(
@@ -169,6 +170,8 @@ export function createVideoMaintenanceService(
     dependencies.assignVideoOrganization ?? classificationMaintenanceService.assignVideoOrganization
   const assignVideoDirector =
     dependencies.assignVideoDirector ?? classificationMaintenanceService.assignVideoDirector
+  const assignVideoSeries =
+    dependencies.assignVideoSeries ?? classificationMaintenanceService.assignVideoSeries
 
   const deleteLocalFile = (filePath: string): void => {
     if (!fileExists(filePath)) return
@@ -251,6 +254,9 @@ export function createVideoMaintenanceService(
           }
           if ('directorAssignment' in input) {
             assignVideoDirector(id, input.directorAssignment ?? null)
+          }
+          if ('seriesAssignment' in input) {
+            assignVideoSeries(id, input.seriesAssignment ?? null)
           }
         })()
         for (const assetPath of result.obsoletePaths) {

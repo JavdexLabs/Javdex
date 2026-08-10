@@ -8,9 +8,13 @@ import {
 } from '../listView/actressRoutes'
 import {
   facetVideoDetailPath,
+  directorVideoDetailPath,
   organizationVideoDetailPath,
   parseFacetVideoPath,
-  parseOrganizationPath
+  parseOrganizationPath,
+  parseDirectorPath,
+  parseSeriesPath,
+  seriesVideoDetailPath
 } from '../listView/facetRoutes'
 import { libraryVideoDetailPath } from '../listView/libraryRoutes'
 import { playlistVideoDetailPath, parsePlaylistVideoPath } from '../listView/playlistRoutes'
@@ -54,6 +58,10 @@ import { resolveActressDetailDisplayBackgroundPath } from '@shared/detailDisplay
 import { ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/actressScrapeTypes'
 
 function parentVideoDetailPath(pathname: string, videoId: number): string {
+  const series = parseSeriesPath(pathname)
+  if (series?.videoId != null) return seriesVideoDetailPath(series.seriesId, videoId)
+  const director = parseDirectorPath(pathname)
+  if (director?.videoId != null) return directorVideoDetailPath(director.directorId, videoId)
   const organization = parseOrganizationPath(pathname)
   if (organization?.videoId != null) {
     return organizationVideoDetailPath(organization.role, organization.organizationId, videoId)
@@ -80,6 +88,8 @@ export default function ActressDetailPage(): JSX.Element {
   const libraryActressStack = useMatch(ROUTE_MATCH.libraryActressStack)
   const facetActressStack = useMatch(ROUTE_MATCH.facetActressStack)
   const organizationActressStack = useMatch(ROUTE_MATCH.organizationActressStack)
+  const directorActressStack = useMatch(ROUTE_MATCH.directorActressStack)
+  const seriesActressStack = useMatch(ROUTE_MATCH.seriesActressStack)
   const playlistActressStack = useMatch(ROUTE_MATCH.playlistActressStack)
   const actressActressStack = useMatch(ROUTE_MATCH.actressActressStack)
   const actressVideoStack = useMatch({ path: ROUTE_MATCH.actressVideoStack, end: false })
@@ -87,12 +97,22 @@ export default function ActressDetailPage(): JSX.Element {
     libraryActressStack ??
     facetActressStack ??
     organizationActressStack ??
+    directorActressStack ??
+    seriesActressStack ??
     playlistActressStack ??
     actressActressStack
   const actressVideoPath = parseActressVideoPath(location.pathname)
   const organizationVideoPath = parseOrganizationPath(location.pathname)
+  const directorVideoPath = parseDirectorPath(location.pathname)
+  const seriesVideoPath = parseSeriesPath(location.pathname)
   const fromVideoId = fromVideo
-    ? Number(organizationVideoPath?.videoId ?? actressVideoPath?.videoId ?? fromVideo.params.id)
+    ? Number(
+        organizationVideoPath?.videoId ??
+          directorVideoPath?.videoId ??
+          seriesVideoPath?.videoId ??
+          actressVideoPath?.videoId ??
+          fromVideo.params.id
+      )
     : undefined
   const videoStackOpen = !fromVideo && Boolean(actressVideoStack)
   const actressId = Number(actressIdParam ?? id)

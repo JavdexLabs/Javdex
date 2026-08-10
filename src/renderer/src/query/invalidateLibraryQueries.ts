@@ -1,5 +1,13 @@
 import type { QueryClient } from '@tanstack/react-query'
-import { actressKeys, directorKeys, facetKeys, organizationKeys, overviewStatsKeys, videoKeys } from './queryKeys'
+import {
+  actressKeys,
+  directorKeys,
+  facetKeys,
+  organizationKeys,
+  overviewStatsKeys,
+  seriesKeys,
+  videoKeys
+} from './queryKeys'
 
 /** Invalidate list queries and overview counters after library mutations (scrape, edit, scan). */
 export function invalidateVideoLibraryQueries(queryClient: QueryClient): void {
@@ -7,6 +15,7 @@ export function invalidateVideoLibraryQueries(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: facetKeys.all })
   void queryClient.invalidateQueries({ queryKey: organizationKeys.all })
   void queryClient.invalidateQueries({ queryKey: directorKeys.all })
+  void queryClient.invalidateQueries({ queryKey: seriesKeys.all })
   void queryClient.invalidateQueries({ queryKey: overviewStatsKeys.all })
 }
 
@@ -28,6 +37,7 @@ export function invalidateAllLibraryQueries(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: facetKeys.all })
   void queryClient.invalidateQueries({ queryKey: organizationKeys.all })
   void queryClient.invalidateQueries({ queryKey: directorKeys.all })
+  void queryClient.invalidateQueries({ queryKey: seriesKeys.all })
   void queryClient.invalidateQueries({ queryKey: overviewStatsKeys.all })
 }
 
@@ -38,5 +48,6 @@ export function refetchStaleLibraryQueries(queryClient: QueryClient): void {
   void queryClient.refetchQueries({ queryKey: facetKeys.all, type: 'all', stale: true })
   void queryClient.refetchQueries({ queryKey: organizationKeys.all, type: 'all', stale: true })
   void queryClient.refetchQueries({ queryKey: directorKeys.all, type: 'all', stale: true })
+  void queryClient.refetchQueries({ queryKey: seriesKeys.all, type: 'all', stale: true })
   void queryClient.refetchQueries({ queryKey: overviewStatsKeys.all, type: 'all', stale: true })
 }

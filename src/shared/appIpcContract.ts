@@ -55,7 +55,13 @@ import type {
   OrganizationListQuery,
   OrganizationOption,
   OrganizationRole,
-  OrganizationUpdateInput
+  OrganizationUpdateInput,
+  SeriesDetail,
+  SeriesListItem,
+  SeriesListQuery,
+  SeriesOption,
+  SeriesProfileInput,
+  SeriesUpdateInput
 } from './classificationTypes'
 
 export interface RemoteImagePreviewResult {
@@ -127,6 +133,11 @@ export interface AppIpcContract {
   [IPC.DIRECTOR_OPTIONS]: { args: [search?: string]; result: DirectorOption[] }
   [IPC.DIRECTOR_CREATE]: { args: [input: DirectorProfileInput]; result: number }
   [IPC.DIRECTOR_UPDATE]: { args: [id: number, input: DirectorUpdateInput]; result: boolean }
+  [IPC.SERIES_LIST]: { args: [query: SeriesListQuery]; result: SeriesListItem[] }
+  [IPC.SERIES_GET]: { args: [id: number]; result: SeriesDetail | null }
+  [IPC.SERIES_OPTIONS]: { args: [search?: string]; result: SeriesOption[] }
+  [IPC.SERIES_CREATE]: { args: [input: SeriesProfileInput]; result: number }
+  [IPC.SERIES_UPDATE]: { args: [id: number, input: SeriesUpdateInput]; result: boolean }
 
   [IPC.PLUGIN_DEV_AGENT_START]: {
     args: [input: PluginDevAgentStartInput]

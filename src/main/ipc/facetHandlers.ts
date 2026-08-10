@@ -44,6 +44,13 @@ export function registerOrganizationHandlers(
   adapter.register(IPC.DIRECTOR_UPDATE, (id, input) =>
     dependencies.maintenanceService.updateDirector(id, input)
   )
+  adapter.register(IPC.SERIES_LIST, (query) => dependencies.queryService.listSeries(query))
+  adapter.register(IPC.SERIES_GET, (id) => dependencies.queryService.getSeries(id))
+  adapter.register(IPC.SERIES_OPTIONS, (search) => dependencies.queryService.listSeriesOptions(search))
+  adapter.register(IPC.SERIES_CREATE, (input) => dependencies.maintenanceService.createSeries(input))
+  adapter.register(IPC.SERIES_UPDATE, (id, input) =>
+    dependencies.maintenanceService.updateSeries(id, input)
+  )
 }
 
 export function registerFacetHandlers(): void {

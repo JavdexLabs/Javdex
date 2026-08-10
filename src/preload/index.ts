@@ -75,7 +75,10 @@ import type {
   OrganizationCreateInput,
   OrganizationListQuery,
   OrganizationRole,
-  OrganizationUpdateInput
+  OrganizationUpdateInput,
+  SeriesListQuery,
+  SeriesProfileInput,
+  SeriesUpdateInput
 } from '../shared/classificationTypes'
 
 /** Helper that unwraps the IpcResponse envelope, throwing on failure. */
@@ -282,6 +285,13 @@ const api = {
     create: (input: DirectorProfileInput) => invokeApp(IPC.DIRECTOR_CREATE, input),
     update: (id: number, input: DirectorUpdateInput) =>
       invokeApp(IPC.DIRECTOR_UPDATE, id, input)
+  },
+  series: {
+    list: (query: SeriesListQuery) => invokeApp(IPC.SERIES_LIST, query),
+    get: (id: number) => invokeApp(IPC.SERIES_GET, id),
+    options: (search?: string) => invokeApp(IPC.SERIES_OPTIONS, search),
+    create: (input: SeriesProfileInput) => invokeApp(IPC.SERIES_CREATE, input),
+    update: (id: number, input: SeriesUpdateInput) => invokeApp(IPC.SERIES_UPDATE, id, input)
   },
   scrape: {
     one: (

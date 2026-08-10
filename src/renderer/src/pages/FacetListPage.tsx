@@ -22,6 +22,7 @@ import ListSurface from '../components/ListSurface'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import OrganizationListPage from './OrganizationListPage'
 import DirectorListPage from './DirectorListPage'
+import SeriesListPage from './SeriesListPage'
 
 export default function FacetListPage(): JSX.Element {
   const { type } = useParams()
@@ -29,6 +30,7 @@ export default function FacetListPage(): JSX.Element {
     return <OrganizationListPage role={type} />
   }
   if (type === 'director') return <DirectorListPage />
+  if (type === 'series') return <SeriesListPage />
   return <LegacyFacetListPage facetType={isFacetType(type) ? type : null} />
 }
 

@@ -708,6 +708,10 @@ function buildWhere(q: VideoQuery): { sql: string; params: unknown[]; joins: str
     conditions.push('v.series = ?')
     params.push(q.series)
   }
+  if (q.seriesId !== undefined) {
+    conditions.push('v.series_id = ?')
+    params.push(q.seriesId)
+  }
   if (q.director) {
     conditions.push('v.director = ?')
     params.push(q.director)
@@ -988,7 +992,6 @@ export function editVideoRecord(
     'release_date',
     'maker',
     'publisher',
-    'series',
     'duration_seconds',
     'rating'
   ] as const

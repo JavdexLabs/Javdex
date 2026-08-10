@@ -10,9 +10,11 @@ import Modal from './Modal'
 import { useTheme } from './ThemeProvider'
 import OrganizationPickerField from './OrganizationPickerField'
 import DirectorPickerField from './DirectorPickerField'
+import SeriesPickerField from './SeriesPickerField'
 import type {
   DirectorAssignmentInput,
-  OrganizationAssignmentInput
+  OrganizationAssignmentInput,
+  SeriesAssignmentInput
 } from '@shared/classificationTypes'
 
 interface Props {
@@ -49,6 +51,9 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
         : null
     )
   const [series, setSeries] = useState(video.series ?? '')
+  const [seriesAssignment, setSeriesAssignment] = useState<SeriesAssignmentInput | null>(
+    video.series_id ? { seriesId: video.series_id } : null
+  )
   const [summary, setSummary] = useState(video.summary ?? '')
   const [tags, setTags] = useState(
     video.tags
@@ -86,7 +91,7 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
         release_date: releaseDate.trim() || null,
         makerOrganization,
         publisherOrganization,
-        series: series.trim() || null,
+        seriesAssignment,
         directorAssignment,
         summary: summary.trim() || null,
         tags: splitList(tags),
@@ -213,12 +218,24 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
               />
             </EditFormField>
 
-            <EditFormField label="系列" htmlFor="video-edit-series" span={2}>
-              <input
+            <EditFormField
+              label="系列"
+              htmlFor="video-edit-series"
+              hint="搜索已有系列；保留未选择的输入会新建未归属系列"
+              span={2}
+            >
+              <SeriesPickerField
                 id="video-edit-series"
-                className="text-input"
                 value={series}
-                onChange={(e) => setSeries(e.target.value)}
+                selectedId={
+                  seriesAssignment && 'seriesId' in seriesAssignment
+                    ? seriesAssignment.seriesId
+                    : null
+                }
+                onChange={(value, assignment) => {
+                  setSeries(value)
+                  setSeriesAssignment(assignment)
+                }}
               />
             </EditFormField>
           </div>

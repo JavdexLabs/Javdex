@@ -80,6 +80,7 @@ import type {
   OrganizationRole,
   OrganizationUpdateInput,
   SeriesListQuery,
+  SeriesMergeInput,
   SeriesProfileInput,
   SeriesUpdateInput
 } from '../shared/classificationTypes'
@@ -295,7 +296,8 @@ const api = {
     get: (id: number) => invokeApp(IPC.SERIES_GET, id),
     options: (search?: string) => invokeApp(IPC.SERIES_OPTIONS, search),
     create: (input: SeriesProfileInput) => invokeApp(IPC.SERIES_CREATE, input),
-    update: (id: number, input: SeriesUpdateInput) => invokeApp(IPC.SERIES_UPDATE, id, input)
+    update: (id: number, input: SeriesUpdateInput) => invokeApp(IPC.SERIES_UPDATE, id, input),
+    merge: (input: SeriesMergeInput) => invokeApp(IPC.SERIES_MERGE, input)
   },
   classificationImages: {
     candidates: (entity: ClassificationEntityRef) =>

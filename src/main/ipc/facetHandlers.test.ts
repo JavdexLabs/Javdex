@@ -6,10 +6,11 @@ import type { ClassificationQueryService } from '../services/classificationQuery
 import type { ClassificationMaintenanceService } from '../services/classificationMaintenanceService'
 import type { ClassificationImageService } from '../services/classificationImageService'
 import type { DirectorMergeService } from '../services/directorMergeService'
+import type { SeriesMergeService } from '../services/seriesMergeService'
 import { appCommandAdapter } from './appContractAdapter'
-import { registerOrganizationHandlers } from './facetHandlers'
+import { registerClassificationHandlers } from './facetHandlers'
 
-describe('organization IPC contract', () => {
+describe('classification IPC contract', () => {
   it('registers every command and forwards typed arguments to the public services', async () => {
     const calls: unknown[] = []
     const queryService: ClassificationQueryService = {
@@ -107,6 +108,19 @@ describe('organization IPC contract', () => {
         }
       }
     }
+    const seriesMergeService: SeriesMergeService = {
+      merge(input) {
+        calls.push(['series-merge', input])
+        return {
+          targetId: input.targetId,
+          sourceId: input.sourceId,
+          transferredVideoCount: 3,
+          transferredChildCount: 2,
+          imagePath: 'covers/series.jpg',
+          cleanupFailures: []
+        }
+      }
+    }
     const handlers = new Map<IpcChannel, (...args: unknown[]) => unknown>()
     const adapter = {
       register(channel: IpcChannel, handler: (...args: unknown[]) => unknown) {
@@ -114,11 +128,12 @@ describe('organization IPC contract', () => {
       }
     } as typeof appCommandAdapter
 
-    registerOrganizationHandlers(adapter, {
+    registerClassificationHandlers(adapter, {
       queryService,
       maintenanceService,
       imageService,
-      directorMergeService
+      directorMergeService,
+      seriesMergeService
     })
 
     const listQuery = { role: 'maker' as const, search: 'studio' }
@@ -151,6 +166,15 @@ describe('organization IPC contract', () => {
     assert.deepEqual(handlers.get(IPC.SERIES_OPTIONS)?.('collection'), [])
     assert.equal(handlers.get(IPC.SERIES_CREATE)?.(seriesInput), 31)
     assert.equal(handlers.get(IPC.SERIES_UPDATE)?.(31, seriesInput), true)
+    const seriesMergeInput = { targetId: 31, sourceId: 32 }
+    assert.deepEqual(handlers.get(IPC.SERIES_MERGE)?.(seriesMergeInput), {
+      targetId: 31,
+      sourceId: 32,
+      transferredVideoCount: 3,
+      transferredChildCount: 2,
+      imagePath: 'covers/series.jpg',
+      cleanupFailures: []
+    })
     const imageEntity = { kind: 'series' as const, id: 31 }
     const imageInput = { source: 'video-cover' as const, videoId: 8 }
     assert.deepEqual(handlers.get(IPC.CLASSIFICATION_IMAGE_CANDIDATES)?.(imageEntity), [])
@@ -175,6 +199,7 @@ describe('organization IPC contract', () => {
       ['series-options', 'collection'],
       ['series-create', seriesInput],
       ['series-update', 31, seriesInput],
+      ['series-merge', seriesMergeInput],
       ['image-candidates', imageEntity],
       ['image-set', imageEntity, imageInput]
     ])

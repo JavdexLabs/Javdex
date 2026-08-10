@@ -65,6 +65,8 @@ import type {
   SeriesDetail,
   SeriesListItem,
   SeriesListQuery,
+  SeriesMergeInput,
+  SeriesMergeResult,
   SeriesOption,
   SeriesProfileInput,
   SeriesUpdateInput
@@ -145,6 +147,7 @@ export interface AppIpcContract {
   [IPC.SERIES_OPTIONS]: { args: [search?: string]; result: SeriesOption[] }
   [IPC.SERIES_CREATE]: { args: [input: SeriesProfileInput]; result: number }
   [IPC.SERIES_UPDATE]: { args: [id: number, input: SeriesUpdateInput]; result: boolean }
+  [IPC.SERIES_MERGE]: { args: [input: SeriesMergeInput]; result: SeriesMergeResult }
   [IPC.CLASSIFICATION_IMAGE_CANDIDATES]: {
     args: [entity: ClassificationEntityRef]
     result: ClassificationImageCandidate[]

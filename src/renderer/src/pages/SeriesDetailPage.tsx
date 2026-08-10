@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { ExternalLink, ImagePlus, Layers3, Pencil, SearchX } from 'lucide-react'
+import { ExternalLink, GitMerge, ImagePlus, Layers3, Pencil, SearchX } from 'lucide-react'
 import {
   Outlet,
   useLocation,
@@ -9,7 +9,7 @@ import {
   useSearchParams
 } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { SeriesUpdateInput } from '@shared/classificationTypes'
+import type { SeriesMergeResult, SeriesUpdateInput } from '@shared/classificationTypes'
 import type { VideoQuery } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
 import BackButton from '../components/BackButton'
@@ -19,11 +19,12 @@ import ListSurface from '../components/ListSurface'
 import ListToolbar from '../components/ListToolbar'
 import PosterCard from '../components/PosterCard'
 import SeriesEditModal from '../components/SeriesEditModal'
+import SeriesMergeModal from '../components/SeriesMergeModal'
 import SortSwitch from '../components/SortSwitch'
 import { useToast } from '../components/Toast'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { useInfiniteVideoList } from '../query/useInfiniteVideoList'
-import { seriesKeys } from '../query/queryKeys'
+import { seriesKeys, videoKeys } from '../query/queryKeys'
 import {
   hashListQuery,
   LIST_PARAM,
@@ -53,6 +54,7 @@ export default function SeriesDetailPage(): JSX.Element {
   const client = useQueryClient()
   const [editing, setEditing] = useState(false)
   const [editingImage, setEditingImage] = useState(false)
+  const [mergingSeries, setMergingSeries] = useState(false)
   const stacked = Boolean(useMatch({ path: ROUTE_MATCH.seriesVideoStack, end: false }))
   const releaseDir = parseSeriesReleaseDir(params.get(LIST_PARAM.releaseDir))
   const detailQuery = useQuery({
@@ -85,6 +87,20 @@ export default function SeriesDetailPage(): JSX.Element {
     } catch (error) {
       toast.show(String((error as Error).message), 'error')
     }
+  }
+  const merged = async (result: SeriesMergeResult): Promise<void> => {
+    setMergingSeries(false)
+    await Promise.all([
+      client.invalidateQueries({ queryKey: seriesKeys.all }),
+      client.invalidateQueries({ queryKey: videoKeys.all })
+    ])
+    void refetchSilent()
+    toast.show(
+      result.cleanupFailures.length > 0
+        ? '系列已合并，但来源封面清理失败，可稍后重试'
+        : `系列已合并，转移 ${result.transferredVideoCount} 部影片和 ${result.transferredChildCount} 个直接子系列`,
+      result.cleanupFailures.length > 0 ? 'info' : 'success'
+    )
   }
   const series = detailQuery.data
   const overlay = stacked ? (
@@ -151,6 +167,14 @@ export default function SeriesDetailPage(): JSX.Element {
                     )
                   }
                 />
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setMergingSeries(true)}
+                >
+                  <GitMerge {...UI_ICON_SM} aria-hidden />
+                  合并系列
+                </button>
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
@@ -275,6 +299,13 @@ export default function SeriesDetailPage(): JSX.Element {
         </ListSurface>
         {editing && (
           <SeriesEditModal series={series} onCancel={() => setEditing(false)} onSave={save} />
+        )}
+        {mergingSeries && (
+          <SeriesMergeModal
+            target={series}
+            onCancel={() => setMergingSeries(false)}
+            onMerged={merged}
+          />
         )}
         {editingImage && (
           <ClassificationImageModal

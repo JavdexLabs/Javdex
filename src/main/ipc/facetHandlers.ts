@@ -7,21 +7,24 @@ import { classificationQueryService } from '../services/classificationQueryServi
 import { classificationMaintenanceService } from '../services/classificationMaintenanceService'
 import { classificationImageService } from '../services/classificationImageService'
 import { directorMergeService } from '../services/directorMergeService'
+import { seriesMergeService } from '../services/seriesMergeService'
 
-interface OrganizationHandlerDependencies {
+interface ClassificationHandlerDependencies {
   queryService: typeof classificationQueryService
   maintenanceService: typeof classificationMaintenanceService
   imageService: typeof classificationImageService
   directorMergeService: typeof directorMergeService
+  seriesMergeService: typeof seriesMergeService
 }
 
-export function registerOrganizationHandlers(
+export function registerClassificationHandlers(
   adapter: typeof appCommandAdapter = appCommandAdapter,
-  dependencies: OrganizationHandlerDependencies = {
+  dependencies: ClassificationHandlerDependencies = {
     queryService: classificationQueryService,
     maintenanceService: classificationMaintenanceService,
     imageService: classificationImageService,
-    directorMergeService
+    directorMergeService,
+    seriesMergeService
   }
 ): void {
   adapter.register(IPC.ORGANIZATION_LIST, (query) =>
@@ -60,6 +63,7 @@ export function registerOrganizationHandlers(
   adapter.register(IPC.SERIES_UPDATE, (id, input) =>
     dependencies.maintenanceService.updateSeries(id, input)
   )
+  adapter.register(IPC.SERIES_MERGE, (input) => dependencies.seriesMergeService.merge(input))
   adapter.register(IPC.CLASSIFICATION_IMAGE_CANDIDATES, (entity) =>
     dependencies.queryService.listImageCandidates(entity)
   )
@@ -86,5 +90,5 @@ export function registerFacetHandlers(): void {
     return true
   })
 
-  registerOrganizationHandlers()
+  registerClassificationHandlers()
 }

@@ -23,6 +23,11 @@ import type {
 import { normalizeClassificationName } from '@shared/classificationNameNormalization'
 import { getDb } from '../db/database'
 import { writeDirectorLinks, writeDirectorNames } from './directorProfilePersistence'
+import {
+  assertSeriesNamesAvailable,
+  writeSeriesLinks,
+  writeSeriesNames
+} from './seriesProfilePersistence'
 
 const VIDEO_ROLE_FIELDS: Record<
   OrganizationRole,
@@ -587,27 +592,6 @@ function assertSeriesParentIsValid(
   if (descendant) throw new Error('上级系列不能是自身或形成循环')
 }
 
-function assertSeriesNamesAvailable(
-  database: Database.Database,
-  ownerOrganizationId: number | null,
-  normalizedNames: string[],
-  seriesId?: number
-): void {
-  const findOwner = database.prepare(
-    `SELECT series_id FROM series_name_ownership
-     WHERE COALESCE(owner_organization_id, 0) = COALESCE(?, 0)
-       AND normalized_name = ?`
-  )
-  for (const normalizedName of normalizedNames) {
-    const owner = findOwner.get(ownerOrganizationId, normalizedName) as
-      | { series_id: number }
-      | undefined
-    if (owner && owner.series_id !== seriesId) {
-      throw new Error('系列名称已归属于目标机构作用域内的其他系列')
-    }
-  }
-}
-
 function prepareSeriesProfile(
   input: SeriesProfileInput,
   current?: StoredSeries,
@@ -641,57 +625,6 @@ function prepareSeriesProfile(
     status,
     links: prepareLinks(input.links ?? links)
   }
-}
-
-function writeSeriesNames(
-  database: Database.Database,
-  id: number,
-  ownerOrganizationId: number | null,
-  mainName: string,
-  aliases: string[]
-): void {
-  const names = prepareNames(mainName, aliases).normalizedNames
-  assertSeriesNamesAvailable(
-    database,
-    ownerOrganizationId,
-    names.map((item) => item.normalizedName),
-    id
-  )
-  database.prepare('DELETE FROM series_names WHERE series_id = ?').run(id)
-  database.prepare('DELETE FROM series_name_ownership WHERE series_id = ?').run(id)
-  const insertName = database.prepare(
-    `INSERT INTO series_names (series_id, name, normalized_name, type, position)
-     VALUES (?, ?, ?, ?, ?)`
-  )
-  const insertOwnership = database.prepare(
-    `INSERT INTO series_name_ownership (owner_organization_id, normalized_name, series_id)
-     VALUES (?, ?, ?)`
-  )
-  names.forEach((name, position) => {
-    insertName.run(
-      id,
-      name.name,
-      name.normalizedName,
-      name.type,
-      name.type === 'main' ? 0 : position - 1
-    )
-    insertOwnership.run(ownerOrganizationId, name.normalizedName, id)
-  })
-}
-
-function writeSeriesLinks(
-  database: Database.Database,
-  id: number,
-  links: OrganizationLink[]
-): void {
-  database.prepare('DELETE FROM series_links WHERE series_id = ?').run(id)
-  const insert = database.prepare(
-    `INSERT INTO series_links (series_id, label, url, normalized_url, position)
-     VALUES (?, ?, ?, ?, ?)`
-  )
-  links.forEach((link) =>
-    insert.run(id, link.label, link.url, normalizedUrl(link.url), link.position)
-  )
 }
 
 function createSeriesRecord(database: Database.Database, input: SeriesProfileInput): number {

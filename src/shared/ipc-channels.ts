@@ -114,6 +114,7 @@ export const IPC = {
   SERIES_OPTIONS: 'series:options',
   SERIES_CREATE: 'series:create',
   SERIES_UPDATE: 'series:update',
+  SERIES_MERGE: 'series:merge',
   CLASSIFICATION_IMAGE_CANDIDATES: 'classificationImage:candidates',
   CLASSIFICATION_IMAGE_SET: 'classificationImage:set',
 

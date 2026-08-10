@@ -1,13 +1,20 @@
 import type Database from 'better-sqlite3'
 import type {
-  ClassificationImageCleanupFailure,
-  ClassificationLink,
   DirectorMergeInput,
   DirectorMergeResult,
   DirectorStatus
 } from '@shared/classificationTypes'
-import { normalizeClassificationName } from '@shared/classificationNameNormalization'
 import { getDb } from '../db/database'
+import {
+  assertClassificationMergeInput,
+  cleanupClassificationImage,
+  mergeClassificationAliases,
+  mergeClassificationLinks,
+  obsoleteSourceImagePath,
+  targetFirstMeaningfulText,
+  type ClassificationMergeLink,
+  type ClassificationMergeName
+} from './classificationMergeSupport'
 import { writeDirectorLinks, writeDirectorNames } from './directorProfilePersistence'
 import { mediaAssetStore } from './mediaAssetStore'
 
@@ -25,15 +32,6 @@ type StoredDirector = {
   status: DirectorStatus
 }
 
-type StoredName = {
-  name: string
-  normalized_name: string
-}
-
-type StoredLink = ClassificationLink & {
-  normalized_url: string
-}
-
 interface DirectorMergeServiceDependencies {
   database: () => Database.Database
   deleteStoredImage: (storedPath: string) => void
@@ -41,19 +39,6 @@ interface DirectorMergeServiceDependencies {
 
 export interface DirectorMergeService {
   merge(input: DirectorMergeInput): DirectorMergeResult
-}
-
-function assertMergeInput(input: DirectorMergeInput): void {
-  if (
-    !input ||
-    !Number.isInteger(input.targetId) ||
-    input.targetId <= 0 ||
-    !Number.isInteger(input.sourceId) ||
-    input.sourceId <= 0
-  ) {
-    throw new Error('导演合并参数无效')
-  }
-  if (input.targetId === input.sourceId) throw new Error('不能合并同一导演')
 }
 
 function readDirector(database: Database.Database, id: number): StoredDirector {
@@ -64,58 +49,23 @@ function readDirector(database: Database.Database, id: number): StoredDirector {
   return director
 }
 
-function readNames(database: Database.Database, id: number): StoredName[] {
+function readNames(database: Database.Database, id: number): ClassificationMergeName[] {
   return database
     .prepare(
       `SELECT name, normalized_name FROM director_names
        WHERE director_id = ? AND type = 'alias'
        ORDER BY position, id`
     )
-    .all(id) as StoredName[]
+    .all(id) as ClassificationMergeName[]
 }
 
-function mergedAliases(
-  target: StoredDirector,
-  targetAliases: StoredName[],
-  source: StoredDirector,
-  sourceAliases: StoredName[]
-): string[] {
-  const seen = new Set([normalizeClassificationName(target.main_name)])
-  const aliases: string[] = []
-  const append = (name: string, normalizedName?: string): void => {
-    const normalized = normalizedName ?? normalizeClassificationName(name)
-    if (seen.has(normalized)) return
-    seen.add(normalized)
-    aliases.push(name)
-  }
-  targetAliases.forEach((alias) => append(alias.name, alias.normalized_name))
-  append(source.main_name)
-  sourceAliases.forEach((alias) => append(alias.name, alias.normalized_name))
-  return aliases
-}
-
-function readLinks(database: Database.Database, id: number): StoredLink[] {
+function readLinks(database: Database.Database, id: number): ClassificationMergeLink[] {
   return database
     .prepare(
       `SELECT label, url, normalized_url, position FROM director_links
        WHERE director_id = ? ORDER BY position, id`
     )
-    .all(id) as StoredLink[]
-}
-
-function mergedLinks(targetLinks: StoredLink[], sourceLinks: StoredLink[]): StoredLink[] {
-  const seen = new Set<string>()
-  const links: StoredLink[] = []
-  for (const link of [...targetLinks, ...sourceLinks]) {
-    if (seen.has(link.normalized_url)) continue
-    seen.add(link.normalized_url)
-    links.push({ ...link, position: links.length })
-  }
-  return links
-}
-
-function meaningfulText(target: string | null, source: string | null): string | null {
-  return target?.trim() ? target : source?.trim() ? source : null
+    .all(id) as ClassificationMergeLink[]
 }
 
 function validateMergedTimeline(director: StoredDirector): void {
@@ -140,27 +90,33 @@ export function createDirectorMergeService(
 
   return {
     merge(input): DirectorMergeResult {
-      assertMergeInput(input)
+      assertClassificationMergeInput(input, '导演')
       const db = database()
       const committed = db.transaction(() => {
         const target = readDirector(db, input.targetId)
         const source = readDirector(db, input.sourceId)
-        const aliases = mergedAliases(
-          target,
+        const aliases = mergeClassificationAliases(
+          target.main_name,
           readNames(db, target.id),
-          source,
+          source.main_name,
           readNames(db, source.id)
         )
-        const links = mergedLinks(readLinks(db, target.id), readLinks(db, source.id))
+        const links = mergeClassificationLinks(
+          readLinks(db, target.id),
+          readLinks(db, source.id)
+        )
         const now = new Date().toISOString()
         const merged: StoredDirector = {
           ...target,
           image_path: target.image_path ?? source.image_path,
-          summary: meaningfulText(target.summary, source.summary),
-          country_region: meaningfulText(target.country_region, source.country_region),
+          summary: targetFirstMeaningfulText(target.summary, source.summary),
+          country_region: targetFirstMeaningfulText(
+            target.country_region,
+            source.country_region
+          ),
           birth_date: target.birth_date ?? source.birth_date,
           death_date: target.death_date ?? source.death_date,
-          birth_place: meaningfulText(target.birth_place, source.birth_place),
+          birth_place: targetFirstMeaningfulText(target.birth_place, source.birth_place),
           career_start_year: target.career_start_year ?? source.career_start_year,
           career_end_year: target.career_end_year ?? source.career_end_year,
           status: target.status !== 'unknown' ? target.status : source.status
@@ -198,26 +154,15 @@ export function createDirectorMergeService(
           sourceId: source.id,
           transferredVideoCount,
           imagePath: merged.image_path,
-          obsoleteImagePath:
-            target.image_path && source.image_path && target.image_path !== source.image_path
-              ? source.image_path
-              : null
+          obsoleteImagePath: obsoleteSourceImagePath(target.image_path, source.image_path)
         }
       })()
 
-      const cleanupFailures: ClassificationImageCleanupFailure[] = []
       const { obsoleteImagePath, ...result } = committed
-      if (obsoleteImagePath) {
-        try {
-          deleteStoredImage(obsoleteImagePath)
-        } catch (error) {
-          cleanupFailures.push({
-            path: obsoleteImagePath,
-            error: error instanceof Error ? error.message : String(error)
-          })
-        }
+      return {
+        ...result,
+        cleanupFailures: cleanupClassificationImage(obsoleteImagePath, deleteStoredImage)
       }
-      return { ...result, cleanupFailures }
     }
   }
 }

@@ -181,10 +181,12 @@ export interface DirectorAssignmentResult {
   mainName: string | null
 }
 
-export interface DirectorMergeInput {
+export interface ClassificationMergeInput {
   targetId: number
   sourceId: number
 }
+
+export type DirectorMergeInput = ClassificationMergeInput
 
 export interface DirectorMergeResult {
   targetId: number
@@ -254,4 +256,15 @@ export type SeriesAssignmentInput = { seriesId: number } | { createName: string 
 export interface SeriesAssignmentResult {
   seriesId: number | null
   mainName: string | null
+}
+
+export type SeriesMergeInput = ClassificationMergeInput
+
+export interface SeriesMergeResult {
+  targetId: number
+  sourceId: number
+  transferredVideoCount: number
+  transferredChildCount: number
+  imagePath: string | null
+  cleanupFailures: ClassificationImageCleanupFailure[]
 }

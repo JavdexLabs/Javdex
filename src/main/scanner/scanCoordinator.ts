@@ -9,7 +9,7 @@ import { sanitizeLibraryScanError } from '@shared/libraryScanSummary'
 import type { VideoResource } from '@shared/videoTypes'
 import {
   getVideoResourceById,
-  listVideoFileRefs,
+  listLocalVideoResourceRefs,
   listVideoResources,
   removeVideoResourceRecord,
   setPrimaryVideoResource
@@ -35,8 +35,8 @@ export interface ScanCoordinatorRequest {
 
 interface LocalResourceRef {
   video_id: number
-  file_id: number
-  file_path: string
+  resource_id: number
+  locator: string
 }
 
 interface ScanCoordinatorDependencies {
@@ -228,11 +228,11 @@ export class ScanCoordinator {
     offlineFolders: string[]
   ): void {
     for (const ref of this.dependencies.listLocalResources()) {
-      if (offlineFolders.some((folder) => isPathUnderRoot(ref.file_path, folder))) continue
-      if (!accessibleFolders.some((folder) => isPathUnderRoot(ref.file_path, folder))) continue
-      if (this.dependencies.pathExists(ref.file_path)) continue
+      if (offlineFolders.some((folder) => isPathUnderRoot(ref.locator, folder))) continue
+      if (!accessibleFolders.some((folder) => isPathUnderRoot(ref.locator, folder))) continue
+      if (this.dependencies.pathExists(ref.locator)) continue
 
-      const resource = this.dependencies.getResourceById(ref.file_id)
+      const resource = this.dependencies.getResourceById(ref.resource_id)
       if (!resource || resource.kind !== 'local') continue
       const remaining = this.dependencies
         .listResources(ref.video_id)
@@ -258,7 +258,7 @@ export function createScanCoordinator(
       (() => getSettings().pendingLibraryPathCleanups.length > 0),
     inspectFolder: dependencies.inspectFolder ?? inspectReadableDirectory,
     scanFolders: dependencies.scanFolders ?? scanFolders,
-    listLocalResources: dependencies.listLocalResources ?? listVideoFileRefs,
+    listLocalResources: dependencies.listLocalResources ?? listLocalVideoResourceRefs,
     getResourceById: dependencies.getResourceById ?? getVideoResourceById,
     listResources: dependencies.listResources ?? listVideoResources,
     removeResourceRecord: dependencies.removeResourceRecord ?? removeVideoResourceRecord,

@@ -78,7 +78,6 @@ export default function DetailPage(): JSX.Element {
   const [loading, setLoading] = useState(true)
   const [scraping, setScraping] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [missingPrompt, setMissingPrompt] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
   const { scrapers, pluginDetails, defaultScraper } = useScraperPluginCatalog('video')
@@ -106,7 +105,6 @@ export default function DetailPage(): JSX.Element {
 
   const dismissOverlays = useCallback(() => {
     setConfirmDelete(false)
-    setMissingPrompt(false)
     setShowEdit(false)
     setConfirmClear(false)
     setShowScrapeFields(false)
@@ -201,23 +199,9 @@ export default function DetailPage(): JSX.Element {
         toast.show('已交给系统打开', 'success')
         void load({ silent: true })
       } else if (res.fileMissing) {
-        setMissingPrompt(true)
-      } else {
-        toast.show(res.error ?? '播放失败', 'error')
-      }
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    }
-  }
-
-  const handlePlayFile = async (fileId: number): Promise<void> => {
-    try {
-      const res = await api.player.playFile(fileId)
-      if (res.ok) {
-        toast.show('已唤起系统播放器', 'success')
-        void load({ silent: true })
-      } else if (res.fileMissing) {
-        setMissingPrompt(true)
+        const primary = video?.resources.find((resource) => resource.is_primary === 1)
+        if (primary?.kind === 'local') setRemoveResourceTarget(primary)
+        else toast.show(res.error ?? '本地主资源不存在', 'error')
       } else {
         toast.show(res.error ?? '播放失败', 'error')
       }
@@ -229,7 +213,15 @@ export default function DetailPage(): JSX.Element {
   const handleOpenResource = async (resourceId: number): Promise<void> => {
     try {
       const result = await api.player.openResource(resourceId)
-      toast.show(result.ok ? '已交给系统打开' : (result.error ?? '打开资源失败'), result.ok ? 'success' : 'error')
+      if (result.ok) {
+        toast.show('已交给系统打开', 'success')
+      } else if (result.fileMissing) {
+        const resource = video?.resources.find((item) => item.id === resourceId)
+        if (resource?.kind === 'local') setRemoveResourceTarget(resource)
+        else toast.show(result.error ?? '本地资源不存在', 'error')
+      } else {
+        toast.show(result.error ?? '打开资源失败', 'error')
+      }
     } catch (error) {
       toast.show(String((error as Error).message), 'error')
     }
@@ -244,9 +236,14 @@ export default function DetailPage(): JSX.Element {
     }
   }
 
-  const handleRevealFile = async (fileId: number): Promise<void> => {
+  const handleRevealResource = async (resourceId: number): Promise<void> => {
     try {
-      const res = await api.player.revealFile(fileId)
+      const res = await api.player.revealResource(resourceId)
+      if (res.fileMissing) {
+        const resource = video?.resources.find((item) => item.id === resourceId)
+        if (resource?.kind === 'local') setRemoveResourceTarget(resource)
+        return
+      }
       if (!res.ok) toast.show(res.error ?? '打开文件夹失败', 'error')
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
@@ -682,14 +679,11 @@ export default function DetailPage(): JSX.Element {
 
       <VideoDetailSecondaryMeta
         video={video}
-        onPlayFile={(fileId) => {
-          void handlePlayFile(fileId)
-        }}
-        onRevealFile={(fileId) => {
-          void handleRevealFile(fileId)
-        }}
         onOpenResource={(resourceId) => {
           void handleOpenResource(resourceId)
+        }}
+        onRevealResource={(resourceId) => {
+          void handleRevealResource(resourceId)
         }}
         onEditResource={openResourceEditor}
         onSetPrimaryResource={(resourceId) => {
@@ -860,7 +854,7 @@ export default function DetailPage(): JSX.Element {
           }}
           onCancel={() => setConfirmClear(false)}
         >
-          确定要清除「{video.code}」的所有刮削元数据吗？将清空标题、简介、封面、演员、标签、外部评分等并恢复为「未刮削」状态（不影响视频文件与自定义评分）。
+          确定要清除「{video.code}」的所有刮削元数据吗？将清空标题、简介、封面、演员、标签、外部评分等并恢复为「未刮削」状态（不影响影片资源与自定义评分）。
         </Modal>
       )}
 
@@ -876,10 +870,10 @@ export default function DetailPage(): JSX.Element {
           onCancel={() => setConfirmDelete(false)}
         >
           确定要永久删除「{video.code}」吗？将删除全部本地文件、链接资源、关系、应用自有图片及所有元数据，此操作不可恢复。
-          {video.files.length > 0 ? (
-            video.files.map((file) => (
-              <div key={file.id} className="modal-path-text">
-                {file.file_path}
+          {video.resources.some((resource) => resource.kind === 'local') ? (
+            video.resources.filter((resource) => resource.kind === 'local').map((resource) => (
+              <div key={resource.id} className="modal-path-text">
+                {resource.locator}
               </div>
             ))
           ) : null}
@@ -939,21 +933,6 @@ export default function DetailPage(): JSX.Element {
         </Modal>
       )}
 
-      {missingPrompt && (
-        <Modal
-          title="文件不存在"
-          danger
-          confirmText="删除记录"
-          cancelText="保留"
-          onConfirm={() => {
-            setMissingPrompt(false)
-            void doDelete()
-          }}
-          onCancel={() => setMissingPrompt(false)}
-        >
-          该视频文件在磁盘上不存在（可能已被移动或删除）。是否删除该影片的元数据与封面？
-        </Modal>
-      )}
       {actressStackOpen && (
         <div className="detail-pane-overlay">
           <Outlet />

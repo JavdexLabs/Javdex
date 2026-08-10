@@ -9,8 +9,8 @@
    - 不拥有：写库、资源清理、刮削 apply。
 
 2. **`videoMaintenanceService`**（[`videoMaintenanceService.ts`](../../src/main/services/videoMaintenanceService.ts)）
-   - 拥有：编辑 / 清元数据 / 删除、样张与海报、文件主备切换与删除、番号纠正、手动标签、累计刮削成功标记、部分字段更新与评分。
-   - Policy 示例：`edit` / `clearMetadata` / `delete` / 样张路径经 `MediaAssetStore` coordinator；番号纠正在缺文件时可合并到已有番号。
+   - 拥有：编辑 / 清元数据 / 删除、样张与海报、影片资源设主与移除、番号纠正、手动标签、累计刮削成功标记、部分字段更新与评分。
+   - Policy 示例：`edit` / `clearMetadata` / `delete` / 样张路径经 `MediaAssetStore` coordinator；番号纠正在缺少本地资源时可合并到已有番号。
 
 [`videoHandlers.ts`](../../src/main/ipc/videoHandlers.ts) 只做 typed adapter，分别委托上述两条 seam。`check-actress-boundaries` 白名单锁定该接线。
 

@@ -248,7 +248,7 @@ export default function PlaylistDetailPage(): JSX.Element {
           onConfirm={() => void deletePlaylist()}
           onCancel={() => setConfirmDelete(false)}
         >
-          确定删除「{detail.name}」？不会删除清单中的影片文件。
+          确定删除「{detail.name}」？不会删除清单中的影片资源。
         </Modal>
       )}
 
@@ -261,7 +261,7 @@ export default function PlaylistDetailPage(): JSX.Element {
           onConfirm={() => void removeVideo(videoRemoveTarget)}
           onCancel={() => setVideoRemoveTarget(null)}
         >
-          确定将「{videoRemoveTarget.code}」从清单「{detail.name}」中移出？不会删除本地影片文件。
+          确定将「{videoRemoveTarget.code}」从清单「{detail.name}」中移出？不会删除影片资源。
         </Modal>
       )}
 

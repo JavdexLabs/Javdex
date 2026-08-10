@@ -21,6 +21,26 @@ function resource(overrides: Partial<VideoResource> = {}): VideoResource {
 }
 
 describe('PlayerService', () => {
+  it('opens and reveals a local resource through system file operations', async () => {
+    const opened: string[] = []
+    const revealed: string[] = []
+    const local = resource({ kind: 'local', locator: '/library/ABC-123.mp4' })
+    const service = createPlayerService({
+      getVideoResourceById: () => local,
+      fileExists: () => true,
+      openPath: async (filePath) => {
+        opened.push(filePath)
+        return ''
+      },
+      showItemInFolder: (filePath) => revealed.push(filePath)
+    })
+
+    assert.deepEqual(await service.openResource(local.id), { ok: true })
+    assert.deepEqual(service.revealResource(local.id), { ok: true })
+    assert.deepEqual(opened, [local.locator])
+    assert.deepEqual(revealed, [local.locator])
+  })
+
   it('opens the primary direct resource with the system URL handler', async () => {
     const opened: string[] = []
     const service = createPlayerService({

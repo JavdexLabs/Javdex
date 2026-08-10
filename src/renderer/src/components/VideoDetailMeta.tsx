@@ -6,7 +6,6 @@ import type { ScrapedStatus } from '@shared/commonTypes'
 import type {
   ExternalVideoResourceKind,
   VideoDetail,
-  VideoFile,
   VideoResource
 } from '@shared/videoTypes'
 import { maskVideoResourceLocator } from '@shared/videoResourceLinks'
@@ -115,11 +114,11 @@ function fileBaseName(filePath: string): string {
   return normalized.slice(normalized.lastIndexOf('/') + 1) || filePath
 }
 
-function fileDisplayName(file: VideoFile, multi: boolean): string | null {
-  const label = file.label?.trim()
+function localResourceDisplayName(resource: VideoResource, multi: boolean): string | null {
+  const label = resource.display_name?.trim()
   if (label) return label
   if (!multi) return null
-  return fileBaseName(file.file_path)
+  return fileBaseName(resource.locator)
 }
 
 function buildRecordItems(video: VideoDetail): SecondaryItem[] {
@@ -147,36 +146,34 @@ function buildRecordItems(video: VideoDetail): SecondaryItem[] {
   return recordItems
 }
 
-function VideoFileRow({
-  file,
+function VideoLocalResourceRow({
   resource,
-  multiFiles,
-  onPlayFile,
-  onRevealFile,
+  multiResources,
+  onOpenResource,
+  onRevealResource,
   onSetPrimaryResource,
   onEditResource,
   onRemoveResource
 }: {
-  file: VideoFile
   resource: VideoResource
-  multiFiles: boolean
-  onPlayFile?: (fileId: number) => void
-  onRevealFile?: (fileId: number) => void
+  multiResources: boolean
+  onOpenResource?: (resourceId: number) => void
+  onRevealResource?: (resourceId: number) => void
   onSetPrimaryResource?: (resourceId: number) => void
   onEditResource?: (resource: VideoResource) => void
   onRemoveResource?: (resource: VideoResource) => void
 }): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  const path = file.file_path.trim()
-  const title = fileDisplayName(file, multiFiles) ?? fileBaseName(path)
-  const isPrimary = Boolean(file.is_primary)
+  const path = resource.locator.trim()
+  const title = localResourceDisplayName(resource, multiResources) ?? fileBaseName(path)
+  const isPrimary = Boolean(resource.is_primary)
   const facts = [
-    file.file_size != null && file.file_size > 0
-      ? { key: 'size', label: '大小', value: formatFileSize(file.file_size) }
+    resource.size_bytes != null && resource.size_bytes > 0
+      ? { key: 'size', label: '大小', value: formatFileSize(resource.size_bytes) }
       : null,
-    file.file_duration_seconds != null && file.file_duration_seconds > 0
-      ? { key: 'duration', label: '时长', value: formatDuration(file.file_duration_seconds) }
+    resource.duration_seconds != null && resource.duration_seconds > 0
+      ? { key: 'duration', label: '时长', value: formatDuration(resource.duration_seconds) }
       : null
   ].filter(Boolean) as Array<{ key: string; label: string; value: string }>
 
@@ -196,7 +193,7 @@ function VideoFileRow({
 
   return (
     <div
-      className={`detail-meta-file${isPrimary && multiFiles ? ' detail-meta-file--primary' : ''}`}
+      className={`detail-meta-file${isPrimary && multiResources ? ' detail-meta-file--primary' : ''}`}
     >
       <div className="detail-meta-file-main">
         <div className="detail-meta-file-label-row">
@@ -225,7 +222,7 @@ function VideoFileRow({
           className="detail-icon-action"
           icon={<Play {...UI_ICON} />}
           label="播放此文件"
-          onClick={() => onPlayFile?.(file.id)}
+          onClick={() => onOpenResource?.(resource.id)}
         />
         <div className="detail-more-actions" ref={menuRef}>
           <IconButton
@@ -255,7 +252,7 @@ function VideoFileRow({
                 role="menuitem"
                 onClick={() => {
                   setMenuOpen(false)
-                  onRevealFile?.(file.id)
+                  onRevealResource?.(resource.id)
                 }}
               >
                 在文件夹中显示
@@ -513,23 +510,19 @@ export function VideoMaintenanceInfo({ video }: { video: VideoDetail }): JSX.Ele
 
 export function VideoDetailSecondaryMeta({
   video,
-  onPlayFile,
-  onRevealFile,
   onOpenResource,
+  onRevealResource,
   onEditResource,
   onSetPrimaryResource,
   onRemoveResource
 }: {
   video: VideoDetail
-  onPlayFile?: (fileId: number) => void
-  onRevealFile?: (fileId: number) => void
   onOpenResource?: (resourceId: number) => void
+  onRevealResource?: (resourceId: number) => void
   onEditResource?: (resource: VideoResource) => void
   onSetPrimaryResource?: (resourceId: number) => void
   onRemoveResource?: (resource: VideoResource) => void
 }): JSX.Element | null {
-  const resourceById = new Map(video.resources.map((resource) => [resource.id, resource]))
-  const linkResources = video.resources.filter((resource) => resource.kind !== 'local')
   const multiResources = video.resources.length > 1
   if (video.resources.length === 0) return null
 
@@ -541,33 +534,30 @@ export function VideoDetailSecondaryMeta({
           <span className="detail-section-count">{video.resources.length} 个</span>
         </div>
         <div className="detail-meta-files">
-          {video.files.map((file) => {
-            const resource = resourceById.get(file.id)
-            return resource ? (
-              <VideoFileRow
-                key={file.id}
-                file={file}
+          {video.resources.map((resource) =>
+            resource.kind === 'local' ? (
+              <VideoLocalResourceRow
+                key={resource.id}
                 resource={resource}
-                multiFiles={multiResources}
-                onPlayFile={onPlayFile}
-                onRevealFile={onRevealFile}
+                multiResources={multiResources}
+                onOpenResource={onOpenResource}
+                onRevealResource={onRevealResource}
                 onSetPrimaryResource={onSetPrimaryResource}
                 onEditResource={onEditResource}
                 onRemoveResource={onRemoveResource}
               />
-            ) : null
-          })}
-          {linkResources.map((resource) => (
-            <VideoLinkResourceRow
-              key={resource.id}
-              resource={resource}
-              multiResources={multiResources}
-              onOpenResource={onOpenResource}
-              onEditResource={onEditResource}
-              onSetPrimaryResource={onSetPrimaryResource}
-              onRemoveResource={onRemoveResource}
-            />
-          ))}
+            ) : (
+              <VideoLinkResourceRow
+                key={resource.id}
+                resource={resource}
+                multiResources={multiResources}
+                onOpenResource={onOpenResource}
+                onEditResource={onEditResource}
+                onSetPrimaryResource={onSetPrimaryResource}
+                onRemoveResource={onRemoveResource}
+              />
+            )
+          )}
         </div>
       </section>
     </div>

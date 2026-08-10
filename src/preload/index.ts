@@ -170,10 +170,6 @@ const api = {
     remove: (id: number) => invokeVideo(IPC.VIDEO_DELETE, id),
     setRating: (id: number, rating: number) =>
       invokeVideo(IPC.VIDEO_SET_RATING, id, rating),
-    setPrimaryFile: (id: number, fileId: number) =>
-      invokeVideo(IPC.VIDEO_SET_PRIMARY_FILE, id, fileId),
-    deleteFile: (id: number, fileId: number) =>
-      invokeVideo(IPC.VIDEO_DELETE_FILE, id, fileId),
     correctImport: (id: number, code: string) =>
       invokeVideo(IPC.VIDEO_CORRECT_IMPORT, id, code),
     years: () => invokeVideo(IPC.VIDEO_YEARS),
@@ -412,9 +408,9 @@ const api = {
   player: {
     play: (videoId: number) => invokeApp(IPC.PLAYER_PLAY, videoId),
     reveal: (videoId: number) => invokeApp(IPC.PLAYER_REVEAL, videoId),
-    playFile: (fileId: number) => invokeApp(IPC.PLAYER_PLAY_FILE, fileId),
-    revealFile: (fileId: number) => invokeApp(IPC.PLAYER_REVEAL_FILE, fileId),
-    openResource: (resourceId: number) => invokeApp(IPC.PLAYER_OPEN_RESOURCE, resourceId)
+    openResource: (resourceId: number) => invokeApp(IPC.PLAYER_OPEN_RESOURCE, resourceId),
+    revealResource: (resourceId: number) =>
+      invokeApp(IPC.PLAYER_REVEAL_RESOURCE, resourceId)
   },
   assetCrypto: {
     setEnabled: (enabled: boolean) => invokeApp(IPC.ASSET_CRYPTO_SET, enabled),

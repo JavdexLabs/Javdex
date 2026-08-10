@@ -38,8 +38,6 @@ export const IPC = {
   VIDEO_MARK_SCRAPE_SUCCESS: 'video:markScrapeSuccess',
   VIDEO_DELETE: 'video:delete',
   VIDEO_SET_RATING: 'video:setRating',
-  VIDEO_SET_PRIMARY_FILE: 'video:setPrimaryFile',
-  VIDEO_DELETE_FILE: 'video:deleteFile',
   VIDEO_CORRECT_IMPORT: 'video:correctImport',
   VIDEO_YEARS: 'video:years',
   VIDEO_SAMPLE_IMPORT: 'video:sampleImport',
@@ -157,9 +155,8 @@ export const IPC = {
   // Player
   PLAYER_PLAY: 'player:play',
   PLAYER_REVEAL: 'player:reveal',
-  PLAYER_PLAY_FILE: 'player:playFile',
-  PLAYER_REVEAL_FILE: 'player:revealFile',
   PLAYER_OPEN_RESOURCE: 'player:openResource',
+  PLAYER_REVEAL_RESOURCE: 'player:revealResource',
 
   // Asset encryption
   ASSET_CRYPTO_SET: 'assetCrypto:set',

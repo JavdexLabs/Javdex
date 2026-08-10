@@ -1,7 +1,7 @@
 import { getDb } from './database'
 import type {
   Video,
-  VideoFile,
+  LocalVideoResource,
   VideoResource,
   VideoResourceImportResult,
   ExternalVideoResourceKind,
@@ -23,103 +23,101 @@ import {
   type VideoListProjectionRow
 } from './videoListProjection'
 
-export interface NewVideo {
+export interface ScannedVideoInput {
   code: string
-  file_path: string
-  file_size: number | null
-  file_duration_seconds?: number | null
+  locator: string
+  size_bytes: number | null
+  duration_seconds?: number | null
   file_mtime_ms?: number | null
 }
 
-const PRIMARY_FILE_ORDER = 'ORDER BY is_primary DESC, id ASC'
-const LOCAL_FILE_SELECT = `
-  id,
-  video_id,
-  locator AS file_path,
-  size_bytes AS file_size,
-  duration_seconds AS file_duration_seconds,
-  file_mtime_ms,
-  display_name AS label,
-  is_primary,
-  add_time`
+const PRIMARY_RESOURCE_ORDER = 'ORDER BY is_primary DESC, id ASC'
 
-export function insertVideoFile(input: {
-  video_id: number
-  file_path: string
-  file_size: number | null
-  file_duration_seconds?: number | null
-  file_mtime_ms?: number | null
-  label?: string | null
-  is_primary?: boolean
-  add_time?: string
+export function insertLocalVideoResource(input: {
+  videoId: number
+  locator: string
+  sizeBytes: number | null
+  durationSeconds?: number | null
+  fileMtimeMs?: number | null
+  displayName?: string | null
+  isPrimary?: boolean
+  addTime?: string
 }): number | null {
   const db = getDb()
-  const isPrimary = input.is_primary ? 1 : 0
-  if (isPrimary) {
-    db.prepare('UPDATE video_resources SET is_primary = 0 WHERE video_id = ?').run(input.video_id)
-  }
-  const info = db
-    .prepare(
-      `INSERT OR IGNORE INTO video_resources
-         (video_id, kind, locator, resource_key, size_bytes, duration_seconds,
-          file_mtime_ms, display_name, is_primary, add_time)
-       VALUES (@video_id, 'local', @file_path, 'local:' || @file_path, @file_size,
-               @file_duration_seconds, @file_mtime_ms, @label, @is_primary, @add_time)`
-    )
-    .run({
-      video_id: input.video_id,
-      file_path: input.file_path,
-      file_size: input.file_size,
-      file_duration_seconds: input.file_duration_seconds ?? null,
-      file_mtime_ms: input.file_mtime_ms ?? null,
-      label: input.label ?? null,
-      is_primary: isPrimary,
-      add_time: input.add_time ?? nowIso()
-    })
-  return info.changes > 0 ? Number(info.lastInsertRowid) : null
+  const hasResources = Boolean(
+    db.prepare('SELECT 1 FROM video_resources WHERE video_id = ? LIMIT 1').get(input.videoId)
+  )
+  const isPrimary = input.isPrimary || !hasResources ? 1 : 0
+  return db.transaction(() => {
+    const info = db
+      .prepare(
+        `INSERT OR IGNORE INTO video_resources
+           (video_id, kind, locator, resource_key, size_bytes, duration_seconds,
+            file_mtime_ms, display_name, is_primary, add_time)
+         VALUES (@videoId, 'local', @locator, 'local:' || @locator, @sizeBytes,
+                 @durationSeconds, @fileMtimeMs, @displayName, 0, @addTime)`
+      )
+      .run({
+        videoId: input.videoId,
+        locator: input.locator,
+        sizeBytes: input.sizeBytes,
+        durationSeconds: input.durationSeconds ?? null,
+        fileMtimeMs: input.fileMtimeMs ?? null,
+        displayName: input.displayName ?? null,
+        addTime: input.addTime ?? nowIso()
+      })
+    if (info.changes === 0) return null
+
+    const resourceId = Number(info.lastInsertRowid)
+    if (isPrimary) {
+      db.prepare(
+        'UPDATE video_resources SET is_primary = CASE WHEN id = ? THEN 1 ELSE 0 END WHERE video_id = ?'
+      ).run(resourceId, input.videoId)
+    }
+    return resourceId
+  })()
 }
 
 /**
  * Insert an initial (un-scraped) video record from a scan.
  * Returns the video id, or null if the path already exists.
  */
-export function insertScannedVideo(v: NewVideo): number | null {
+export function insertScannedVideo(v: ScannedVideoInput): number | null {
   const db = getDb()
-  if (videoExistsByPath(v.file_path)) return null
+  if (localVideoResourceExistsByLocator(v.locator)) return null
 
   const existing = getVideoByCode(v.code)
   if (existing) {
-    const fileId = insertVideoFile({
-      video_id: existing.id,
-      file_path: v.file_path,
-      file_size: v.file_size,
-      file_duration_seconds: v.file_duration_seconds ?? null,
-      file_mtime_ms: v.file_mtime_ms ?? null,
-      is_primary: false
+    const resourceId = insertLocalVideoResource({
+      videoId: existing.id,
+      locator: v.locator,
+      sizeBytes: v.size_bytes,
+      durationSeconds: v.duration_seconds ?? null,
+      fileMtimeMs: v.file_mtime_ms ?? null
     })
-    return fileId != null ? existing.id : null
+    return resourceId != null ? existing.id : null
   }
 
   return db.transaction(() => {
     const info = db.prepare('INSERT INTO videos (code, scraped_status) VALUES (?, 0)').run(v.code)
     const videoId = Number(info.lastInsertRowid)
-    const fileId = insertVideoFile({
-      video_id: videoId,
-      file_path: v.file_path,
-      file_size: v.file_size,
-      file_duration_seconds: v.file_duration_seconds ?? null,
-      file_mtime_ms: v.file_mtime_ms ?? null,
-      is_primary: true
+    const resourceId = insertLocalVideoResource({
+      videoId,
+      locator: v.locator,
+      sizeBytes: v.size_bytes,
+      durationSeconds: v.duration_seconds ?? null,
+      fileMtimeMs: v.file_mtime_ms ?? null,
+      isPrimary: true
     })
-    return fileId != null ? videoId : null
+    return resourceId != null ? videoId : null
   })()
 }
 
-export function videoExistsByPath(filePath: string): boolean {
+export function localVideoResourceExistsByLocator(locator: string): boolean {
   const db = getDb()
   const row = db
     .prepare("SELECT 1 FROM video_resources WHERE kind = 'local' AND locator = ?")
-    .get(filePath)
+    .get(locator)
   return !!row
 }
 
@@ -138,21 +136,21 @@ export function getVideoByCode(code: string): Pick<Video, 'id' | 'code'> | null 
   )
 }
 
-export function getVideoFileById(fileId: number): VideoFile | null {
+export function getLocalVideoResourceById(resourceId: number): LocalVideoResource | null {
   const db = getDb()
   return (
     (db
-      .prepare(`SELECT ${LOCAL_FILE_SELECT} FROM video_resources WHERE id = ? AND kind = 'local'`)
-      .get(fileId) as VideoFile | undefined) ?? null
+      .prepare("SELECT * FROM video_resources WHERE id = ? AND kind = 'local'")
+      .get(resourceId) as LocalVideoResource | undefined) ?? null
   )
 }
 
-export function updateVideoFileAfterProbe(
-  fileId: number,
+export function updateLocalVideoResourceAfterProbe(
+  resourceId: number,
   input: {
-    file_duration_seconds: number | null
-    file_size: number | null
-    file_mtime_ms: number | null
+    durationSeconds: number | null
+    sizeBytes: number | null
+    fileMtimeMs: number | null
   }
 ): void {
   const db = getDb()
@@ -160,87 +158,61 @@ export function updateVideoFileAfterProbe(
     `UPDATE video_resources
      SET duration_seconds = ?, size_bytes = ?, file_mtime_ms = ?
      WHERE id = ? AND kind = 'local'`
-  ).run(input.file_duration_seconds, input.file_size, input.file_mtime_ms, fileId)
+  ).run(input.durationSeconds, input.sizeBytes, input.fileMtimeMs, resourceId)
 }
 
-export function backfillVideoFileFingerprint(
-  fileId: number,
-  input: { file_size: number | null; file_mtime_ms: number | null }
+export function backfillLocalVideoResourceFingerprint(
+  resourceId: number,
+  input: { sizeBytes: number | null; fileMtimeMs: number | null }
 ): void {
   const db = getDb()
   db.prepare(
     "UPDATE video_resources SET size_bytes = ?, file_mtime_ms = ? WHERE id = ? AND kind = 'local'"
   ).run(
-    input.file_size,
-    input.file_mtime_ms,
-    fileId
+    input.sizeBytes,
+    input.fileMtimeMs,
+    resourceId
   )
 }
 
-export function getVideoFileByPath(filePath: string): VideoFile | null {
+export function getLocalVideoResourceByLocator(locator: string): LocalVideoResource | null {
   const db = getDb()
   return (
     (db
       .prepare(
-        `SELECT ${LOCAL_FILE_SELECT}
-         FROM video_resources
+        `SELECT * FROM video_resources
          WHERE kind = 'local' AND locator = ?`
       )
-      .get(filePath) as VideoFile | undefined) ?? null
+      .get(locator) as LocalVideoResource | undefined) ?? null
   )
 }
 
-export function getPrimaryVideoFile(videoId: number): VideoFile | null {
+export function getPreferredLocalVideoResource(videoId: number): LocalVideoResource | null {
   const db = getDb()
   return (
     (db
       .prepare(
-        `SELECT ${LOCAL_FILE_SELECT}
-         FROM video_resources
+        `SELECT * FROM video_resources
          WHERE video_id = ? AND kind = 'local'
-         ${PRIMARY_FILE_ORDER} LIMIT 1`
+         ${PRIMARY_RESOURCE_ORDER} LIMIT 1`
       )
-      .get(videoId) as VideoFile | undefined) ?? null
+      .get(videoId) as LocalVideoResource | undefined) ?? null
   )
 }
 
-export function listVideoFiles(videoId: number): VideoFile[] {
+export function listLocalVideoResources(videoId: number): LocalVideoResource[] {
   const db = getDb()
   return db
     .prepare(
-      `SELECT ${LOCAL_FILE_SELECT}
-       FROM video_resources
+      `SELECT * FROM video_resources
        WHERE video_id = ? AND kind = 'local'
-       ${PRIMARY_FILE_ORDER}, id ASC`
+       ${PRIMARY_RESOURCE_ORDER}`
     )
-    .all(videoId) as VideoFile[]
+    .all(videoId) as LocalVideoResource[]
 }
 
-export function countVideoFiles(videoId: number): number {
-  const db = getDb()
-  return (
-    db
-      .prepare("SELECT COUNT(*) AS n FROM video_resources WHERE video_id = ? AND kind = 'local'")
-      .get(videoId) as { n: number }
-  ).n
-}
-
-export function setPrimaryVideoFile(videoId: number, fileId: number): void {
-  const db = getDb()
-  const file = getVideoFileById(fileId)
-  if (!file || file.video_id !== videoId) {
-    throw new Error('File not found for this video')
-  }
-  db.transaction(() => {
-    db.prepare('UPDATE video_resources SET is_primary = 0 WHERE video_id = ?').run(videoId)
-    db.prepare("UPDATE video_resources SET is_primary = 1 WHERE id = ? AND kind = 'local'").run(
-      fileId
-    )
-  })()
-}
-
-/** Update primary file path/size after a move/rename; keeps scraped metadata and relations. */
-export function relocateVideo(
+/** Relocate the preferred local resource after a move/rename; keep metadata and relations. */
+export function relocateLocalVideoResource(
   id: number,
   filePath: string,
   fileSize: number | null,
@@ -248,23 +220,23 @@ export function relocateVideo(
   fileMtimeMs: number | null = null
 ): void {
   const db = getDb()
-  const primary = getPrimaryVideoFile(id)
-  if (primary) {
+  const resource = getPreferredLocalVideoResource(id)
+  if (resource) {
     db.prepare(
       `UPDATE video_resources
        SET locator = ?, resource_key = 'local:' || ?, size_bytes = ?, duration_seconds = ?,
            file_mtime_ms = ?
        WHERE id = ? AND kind = 'local'`
-    ).run(filePath, filePath, fileSize, fileDurationSeconds, fileMtimeMs, primary.id)
+    ).run(filePath, filePath, fileSize, fileDurationSeconds, fileMtimeMs, resource.id)
     return
   }
-  insertVideoFile({
-    video_id: id,
-    file_path: filePath,
-    file_size: fileSize,
-    file_duration_seconds: fileDurationSeconds,
-    file_mtime_ms: fileMtimeMs,
-    is_primary: true
+  insertLocalVideoResource({
+    videoId: id,
+    locator: filePath,
+    sizeBytes: fileSize,
+    durationSeconds: fileDurationSeconds,
+    fileMtimeMs,
+    isPrimary: true
   })
 }
 
@@ -341,32 +313,19 @@ export function purgeResourceLessVideos(): { deleted: number; obsoletePaths: str
   return { deleted: candidates.length, obsoletePaths }
 }
 
-/** Remove one file row; purge the video work when no files remain. */
-export function purgeVideoFile(fileId: number): { obsoletePaths: string[] } {
-  const file = getVideoFileById(fileId)
-  if (!file) return { obsoletePaths: [] }
-  const videoId = file.video_id
-  const db = getDb()
-  db.prepare("DELETE FROM video_resources WHERE id = ? AND kind = 'local'").run(fileId)
-  if (countVideoFiles(videoId) === 0) {
-    return purgeVideo(videoId)
-  }
-  return { obsoletePaths: [] }
+export interface LocalVideoResourceRef {
+  video_id: number
+  resource_id: number
+  locator: string
 }
 
-export function listVideoFileRefs(): { video_id: number; file_id: number; file_path: string }[] {
+export function listLocalVideoResourceRefs(): LocalVideoResourceRef[] {
   const db = getDb()
   return db
     .prepare(
-      "SELECT id AS file_id, video_id, locator AS file_path FROM video_resources WHERE kind = 'local'"
+      "SELECT id AS resource_id, video_id, locator FROM video_resources WHERE kind = 'local'"
     )
-    .all() as { video_id: number; file_id: number; file_path: string }[]
-}
-
-/** Delete a file row without purging the parent video. */
-export function removeVideoFileRecord(fileId: number): void {
-  const db = getDb()
-  db.prepare("DELETE FROM video_resources WHERE id = ? AND kind = 'local'").run(fileId)
+    .all() as LocalVideoResourceRef[]
 }
 
 export function getVideoResourceById(resourceId: number): VideoResource | null {
@@ -381,7 +340,7 @@ export function getVideoResourceById(resourceId: number): VideoResource | null {
 export function listVideoResources(videoId: number): VideoResource[] {
   const db = getDb()
   return db
-    .prepare(`SELECT * FROM video_resources WHERE video_id = ? ${PRIMARY_FILE_ORDER}`)
+    .prepare(`SELECT * FROM video_resources WHERE video_id = ? ${PRIMARY_RESOURCE_ORDER}`)
     .all(videoId) as VideoResource[]
 }
 
@@ -606,20 +565,15 @@ export function getVideoDetail(id: number): VideoDetail | null {
     .all(id) as VideoDetail['external_stats']
 
   const resources = listVideoResources(id)
-  const files = listVideoFiles(id)
   const primaryResource = resources.find((resource) => Boolean(resource.is_primary))
-  const primaryFile = files[0]
   return {
     ...video,
-    primary_file_path: primaryFile?.file_path ?? null,
-    file_count: files.length,
     primary_resource_kind: primaryResource?.kind ?? null,
     resource_count: resources.length,
     actresses,
     tags,
     assets,
     external_stats,
-    files,
     resources
   }
 }
@@ -1126,14 +1080,14 @@ export function mergeVideoIntoExistingCode(sourceId: number, targetId: number): 
   const db = getDb()
   const cleanupHints = collectVideoLibraryCleanupHints(sourceId)
   db.transaction(() => {
-    const targetPrimary = getPrimaryVideoFile(targetId)
-    const files = listVideoFiles(sourceId)
-    for (const file of files) {
-      const isPrimary = !targetPrimary && file.is_primary ? 1 : 0
+    const targetPrimary = getPrimaryVideoResource(targetId)
+    const resources = listVideoResources(sourceId)
+    for (const resource of resources) {
+      const isPrimary = !targetPrimary && resource.is_primary ? 1 : 0
       db.prepare('UPDATE video_resources SET video_id = ?, is_primary = ? WHERE id = ?').run(
         targetId,
         isPrimary,
-        file.id
+        resource.id
       )
     }
     deleteVideo(sourceId)

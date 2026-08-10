@@ -13,14 +13,6 @@ export type VideoListProjectionRow = Video & { resource_kinds_csv?: string | nul
 /** Shared projection for every surface that renders a video card. */
 export function videoListSelectExtras(videoAlias = 'v'): string {
   return `,
-    (SELECT vr.locator
-     FROM video_resources vr
-     WHERE vr.video_id = ${videoAlias}.id AND vr.kind = 'local'
-     ORDER BY vr.is_primary DESC, vr.id ASC
-     LIMIT 1) AS primary_file_path,
-    (SELECT COUNT(*)
-     FROM video_resources vr
-     WHERE vr.video_id = ${videoAlias}.id AND vr.kind = 'local') AS file_count,
     (SELECT vr.kind
      FROM video_resources vr
      WHERE vr.video_id = ${videoAlias}.id AND vr.is_primary = 1

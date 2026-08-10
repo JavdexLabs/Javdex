@@ -12,14 +12,15 @@ import {
   deleteVideoSampleAsset,
   editVideoRecord,
   getVideoDetail,
-  getPrimaryVideoFile,
+  getPrimaryVideoResource,
+  insertLocalVideoResource,
   listVideos,
   listVideosForBatchScrape,
   markScrapeFailed,
   markScrapeSucceeded,
   removeManualVideoTag,
   setVideoPosterPath,
-  setPrimaryVideoFile
+  setPrimaryVideoResource
 } from './videoRepo'
 
 let tempRoot: string | null = null
@@ -209,6 +210,8 @@ describe('videoRepo.listVideos', () => {
 
     assert.equal(video.resource_count, 4)
     assert.deepEqual(video.resource_kinds, ['web', 'local', 'direct'])
+    assert.equal('file_count' in video, false)
+    assert.equal('primary_file_path' in video, false)
   })
 
   it('searches videos by actress alias', () => {
@@ -305,8 +308,41 @@ describe('videoRepo.getVideoDetail', () => {
   })
 })
 
-describe('videoRepo.setPrimaryVideoFile', () => {
-  it('marks one file as primary and clears the previous primary', () => {
+describe('videoRepo.setPrimaryVideoResource', () => {
+  it('automatically marks the first resource as primary', () => {
+    setupDb()
+    const db = getDb()
+    const videoId = Number(
+      db.prepare("INSERT INTO videos (code, scraped_status) VALUES ('EMPTY-001', 0)").run()
+        .lastInsertRowid
+    )
+
+    const resourceId = insertLocalVideoResource({
+      videoId,
+      locator: 'first.mp4',
+      sizeBytes: 1024
+    })
+
+    assert.ok(resourceId)
+    assert.equal(getPrimaryVideoResource(videoId)?.id, resourceId)
+  })
+
+  it('keeps the current primary when a requested primary insert is a duplicate', () => {
+    setupDb()
+
+    assert.equal(
+      insertLocalVideoResource({
+        videoId: 1,
+        locator: 'a.mp4',
+        sizeBytes: 1024,
+        isPrimary: true
+      }),
+      null
+    )
+    assert.equal(getPrimaryVideoResource(1)?.locator, 'a.mp4')
+  })
+
+  it('marks one resource as primary and clears the previous primary', () => {
     setupDb()
     const db = getDb()
     const info = db
@@ -316,18 +352,18 @@ describe('videoRepo.setPrimaryVideoFile', () => {
          VALUES (?, 'local', ?, 'local:' || ?, ?, 0, ?)`
       )
       .run(1, 'alt.mp4', 'alt.mp4', 2048, '2024-01-05')
-    const altFileId = Number(info.lastInsertRowid)
+    const altResourceId = Number(info.lastInsertRowid)
 
-    setPrimaryVideoFile(1, altFileId)
+    setPrimaryVideoResource(1, altResourceId)
 
     const files = db
       .prepare('SELECT id, is_primary FROM video_resources WHERE video_id = 1 ORDER BY id')
       .all() as Array<{ id: number; is_primary: number }>
     assert.deepEqual(files, [
       { id: 1, is_primary: 0 },
-      { id: altFileId, is_primary: 1 }
+      { id: altResourceId, is_primary: 1 }
     ])
-    assert.equal(getPrimaryVideoFile(1)?.id, altFileId)
+    assert.equal(getPrimaryVideoResource(1)?.id, altResourceId)
   })
 })
 

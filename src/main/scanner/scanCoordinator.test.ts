@@ -90,8 +90,8 @@ describe('ScanCoordinator', () => {
         return emptyScanResult()
       },
       listLocalResources: () => [
-        { video_id: 1, file_id: 1, file_path: offlineLocal.locator },
-        { video_id: 2, file_id: 2, file_path: onlineLocal.locator }
+        { video_id: 1, resource_id: 1, locator: offlineLocal.locator },
+        { video_id: 2, resource_id: 2, locator: onlineLocal.locator }
       ],
       getResourceById: (id) => resources.get(id) ?? null,
       listResources: (videoId) =>

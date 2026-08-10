@@ -19,23 +19,19 @@ import {
   clearVideoMetadataRecord,
   deleteVideoSampleAsset,
   editVideoRecord,
-  getPrimaryVideoFile,
+  getPrimaryVideoResource,
   getVideoByCode,
   getVideoById,
-  getVideoFileById,
   getVideoResourceById,
   importVideoLinkResourceRecord,
   updateVideoLinkResourceRecord,
-  listVideoFiles,
   listVideoResources,
   markScrapeSucceeded,
   mergeVideoIntoExistingCode,
   purgeVideo,
   removeManualVideoTag,
-  removeVideoFileRecord,
   removeVideoResourceRecord,
   renameVideoCode,
-  setPrimaryVideoFile,
   setPrimaryVideoResource,
   setRating,
   setVideoPosterPath,
@@ -56,8 +52,6 @@ export interface VideoMaintenanceService {
   markScrapeSucceeded(id: number): boolean
   delete(id: number): boolean
   setRating(id: number, rating: number): boolean
-  setPrimaryFile(videoId: number, fileId: number): boolean
-  deleteFile(videoId: number, fileId: number): boolean
   correctImport(id: number, code: string): CorrectImportResult
   importSample(id: number, input: VideoSampleImportInput): Promise<VideoAsset>
   deleteSample(id: number, assetId: number): boolean
@@ -83,16 +77,12 @@ export interface VideoMaintenanceService {
 interface VideoMaintenanceServiceDependencies {
   getVideoById: typeof getVideoById
   getVideoByCode: typeof getVideoByCode
-  getVideoFileById: typeof getVideoFileById
-  getPrimaryVideoFile: typeof getPrimaryVideoFile
-  listVideoFiles: typeof listVideoFiles
+  getPrimaryVideoResource: typeof getPrimaryVideoResource
   updateVideoFields: typeof updateVideoFields
   editVideoRecord: typeof editVideoRecord
   clearVideoMetadataRecord: typeof clearVideoMetadataRecord
   markScrapeSucceeded: typeof markScrapeSucceeded
   setRating: typeof setRating
-  setPrimaryVideoFile: typeof setPrimaryVideoFile
-  removeVideoFileRecord: typeof removeVideoFileRecord
   renameVideoCode: typeof renameVideoCode
   mergeVideoIntoExistingCode: typeof mergeVideoIntoExistingCode
   purgeVideo: typeof purgeVideo
@@ -126,16 +116,13 @@ export function createVideoMaintenanceService(
 ): VideoMaintenanceService {
   const readVideoById = dependencies.getVideoById ?? getVideoById
   const readVideoByCode = dependencies.getVideoByCode ?? getVideoByCode
-  const readVideoFileById = dependencies.getVideoFileById ?? getVideoFileById
-  const readPrimaryVideoFile = dependencies.getPrimaryVideoFile ?? getPrimaryVideoFile
-  const readVideoFiles = dependencies.listVideoFiles ?? listVideoFiles
+  const readPrimaryVideoResource =
+    dependencies.getPrimaryVideoResource ?? getPrimaryVideoResource
   const writeVideoFields = dependencies.updateVideoFields ?? updateVideoFields
   const writeVideoRecord = dependencies.editVideoRecord ?? editVideoRecord
   const clearMetadataRecord = dependencies.clearVideoMetadataRecord ?? clearVideoMetadataRecord
   const recordScrapeSucceeded = dependencies.markScrapeSucceeded ?? markScrapeSucceeded
   const writeRating = dependencies.setRating ?? setRating
-  const writePrimaryFile = dependencies.setPrimaryVideoFile ?? setPrimaryVideoFile
-  const removeFileRecord = dependencies.removeVideoFileRecord ?? removeVideoFileRecord
   const renameCode = dependencies.renameVideoCode ?? renameVideoCode
   const mergeIntoExistingCode = dependencies.mergeVideoIntoExistingCode ?? mergeVideoIntoExistingCode
   const purgeVideoRecord = dependencies.purgeVideo ?? purgeVideo
@@ -187,7 +174,9 @@ export function createVideoMaintenanceService(
   const deleteWholeVideo = (id: number): boolean => {
     if (!readVideoById(id)) throw new Error('影片不存在')
     runInCoordinatedChange(() => {
-      for (const file of readVideoFiles(id)) deleteLocalFile(file.file_path)
+      for (const resource of readVideoResources(id)) {
+        if (resource.kind === 'local') deleteLocalFile(resource.locator)
+      }
       for (const assetPath of purgeVideoRecord(id).obsoletePaths) deleteBestEffort(assetPath)
     })
     return true
@@ -275,21 +264,6 @@ export function createVideoMaintenanceService(
       writeRating(id, ratingValue)
       return true
     },
-    setPrimaryFile(videoId, fileId): boolean {
-      return withResourceMaintenance(() => {
-        if (!readVideoById(videoId)) throw new Error('Video not found')
-        writePrimaryFile(videoId, fileId)
-        return true
-      })
-    },
-    deleteFile(videoId, fileId): boolean {
-      return withResourceMaintenance(() => {
-        const file = readVideoFileById(fileId)
-        if (!file || file.video_id !== videoId) throw new Error('文件不属于当前影片')
-        removeResource(videoId, fileId)
-        return true
-      })
-    },
     correctImport(id, codeRaw): CorrectImportResult {
       const newCode = codeRaw.trim()
       if (!newCode) throw new Error('Code cannot be empty')
@@ -303,13 +277,15 @@ export function createVideoMaintenanceService(
 
       const existing = readVideoByCode(newCode)
       if (existing && existing.id !== id) {
-        const primary = readPrimaryVideoFile(existing.id)
-        if (!primary || !fileExists(primary.file_path)) {
-          if (primary) removeFileRecord(primary.id)
+        const primary = readPrimaryVideoResource(existing.id)
+        const canReplacePrimary =
+          !primary || (primary.kind === 'local' && !fileExists(primary.locator))
+        if (canReplacePrimary) {
+          if (primary) removeResourceRecord(primary.id)
           mergeIntoExistingCode(id, existing.id)
           return { code: newCode, previousCode: video.code, mergedIntoId: existing.id }
         }
-        throw new Error(`Code ${newCode} already exists and its source file is still present`)
+        throw new Error(`番号 ${newCode} 已存在且仍有可用主资源`)
       }
 
       renameCode(id, newCode)

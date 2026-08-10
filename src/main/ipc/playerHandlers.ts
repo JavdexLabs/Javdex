@@ -3,9 +3,8 @@ import type { PlayResult } from '@shared/libraryTypes'
 import {
   openVideoResource,
   playVideo,
-  playVideoFile,
   revealVideo,
-  revealVideoFile
+  revealVideoResource
 } from '../services/playerService'
 import { appCommandAdapter } from './appContractAdapter'
 
@@ -16,15 +15,11 @@ export function registerPlayerHandlers(): void {
 
   appCommandAdapter.register(IPC.PLAYER_REVEAL, (videoId): PlayResult => revealVideo(videoId))
 
-  appCommandAdapter.register(IPC.PLAYER_PLAY_FILE, (fileId): Promise<PlayResult> =>
-    playVideoFile(fileId)
-  )
-
-  appCommandAdapter.register(IPC.PLAYER_REVEAL_FILE, (fileId): PlayResult =>
-    revealVideoFile(fileId)
-  )
-
   appCommandAdapter.register(IPC.PLAYER_OPEN_RESOURCE, (resourceId): Promise<PlayResult> =>
     openVideoResource(resourceId)
+  )
+
+  appCommandAdapter.register(IPC.PLAYER_REVEAL_RESOURCE, (resourceId): PlayResult =>
+    revealVideoResource(resourceId)
   )
 }

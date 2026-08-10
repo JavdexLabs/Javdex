@@ -58,7 +58,11 @@ describe('VideoQueryService', () => {
     assert.deepEqual(videos.list({ search: 'APP-001' }).items.map((item) => item.code), [
       'APP-001'
     ])
-    assert.equal(videos.get(1)?.title, 'Application boundary')
+    const detail = videos.get(1)
+    assert.equal(detail?.title, 'Application boundary')
+    assert.equal(detail?.resources.length, 1)
+    assert.equal(detail?.resources[0]?.kind, 'local')
+    assert.equal(detail ? 'files' in detail : true, false)
     assert.deepEqual(db.prepare('SELECT * FROM videos WHERE id = 1').all(), rowsBefore)
     assert.deepEqual(
       db.prepare('SELECT * FROM video_resources WHERE video_id = 1 ORDER BY id').all(),

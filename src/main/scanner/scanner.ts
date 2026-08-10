@@ -2,24 +2,24 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { isVideoFile, parseCode } from './codeParser'
 import {
-  backfillVideoFileFingerprint,
+  backfillLocalVideoResourceFingerprint,
   getVideoByCode,
-  getPrimaryVideoFile,
-  getVideoFileByPath,
+  getLocalVideoResourceByLocator,
+  getPreferredLocalVideoResource,
   insertScannedVideo,
-  relocateVideo,
-  updateVideoFileAfterProbe,
-  videoExistsByPath
+  localVideoResourceExistsByLocator,
+  relocateLocalVideoResource,
+  updateLocalVideoResourceAfterProbe
 } from '../db/videoRepo'
 import type { ManualImportResult, ScanProgress, ScanResult, RenameImportResult } from '@shared/libraryTypes'
-import type { NewVideo } from '../db/videoRepo'
-import type { VideoFile } from '@shared/videoTypes'
+import type { ScannedVideoInput } from '../db/videoRepo'
+import type { LocalVideoResource } from '@shared/videoTypes'
 import {
   isBelowMinImportDuration,
   readLocalVideoDurationSeconds,
   resolveMinScanImportDurationSeconds,
-  shouldProbeVideoFileDuration,
-  shouldRefreshVideoFileDuration,
+  shouldProbeLocalVideoResourceDuration,
+  shouldRefreshLocalVideoResourceDuration,
   type VideoFileFingerprint
 } from './videoDuration'
 import { getSettings } from '../settings/settingsStore'
@@ -107,27 +107,27 @@ function buildScannedVideoImport(
   file: string,
   fileDurationSeconds: number | null,
   fingerprint: VideoFileFingerprint | null
-): NewVideo {
+): ScannedVideoInput {
   return {
     code,
-    file_path: file,
-    file_size: fingerprint?.file_size ?? null,
-    file_duration_seconds: fileDurationSeconds,
+    locator: file,
+    size_bytes: fingerprint?.file_size ?? null,
+    duration_seconds: fileDurationSeconds,
     file_mtime_ms: fingerprint?.file_mtime_ms ?? null
   }
 }
 
-function resolveRefreshTarget(file: string): VideoFile | null {
-  const existingFile = getVideoFileByPath(file)
-  if (existingFile) return existingFile
+function resolveRefreshTarget(file: string): LocalVideoResource | null {
+  const existingResource = getLocalVideoResourceByLocator(file)
+  if (existingResource) return existingResource
 
   const base = path.basename(file, path.extname(file))
   const code = parseCode(base)
   if (!code) return null
   const video = getVideoByCode(code)
   if (!video) return null
-  const primary = getPrimaryVideoFile(video.id)
-  if (primary && samePath(primary.file_path, file)) return primary
+  const localResource = getPreferredLocalVideoResource(video.id)
+  if (localResource && samePath(localResource.locator, file)) return localResource
   return null
 }
 
@@ -141,9 +141,12 @@ async function refreshScannedFileDuration(
   const record = resolveRefreshTarget(file)
   if (!record) return
 
-  if (!shouldProbeVideoFileDuration(record, fingerprint)) {
+  if (!shouldProbeLocalVideoResourceDuration(record, fingerprint)) {
     if (record.file_mtime_ms == null) {
-      backfillVideoFileFingerprint(record.id, fingerprint)
+      backfillLocalVideoResourceFingerprint(record.id, {
+        sizeBytes: fingerprint.file_size,
+        fileMtimeMs: fingerprint.file_mtime_ms
+      })
     }
     return
   }
@@ -151,25 +154,24 @@ async function refreshScannedFileDuration(
   const fileDurationSeconds = await readDurationSeconds(file)
   if (fileDurationSeconds == null || fileDurationSeconds <= 0) return
 
-  const nextDuration = shouldRefreshVideoFileDuration(
-    record.file_duration_seconds,
+  const nextDuration = shouldRefreshLocalVideoResourceDuration(
+    record.duration_seconds,
     fileDurationSeconds
   )
     ? fileDurationSeconds
-    : record.file_duration_seconds
+    : record.duration_seconds
 
-  updateVideoFileAfterProbe(record.id, {
-    file_duration_seconds: nextDuration,
-    file_size: fingerprint.file_size,
-    file_mtime_ms: fingerprint.file_mtime_ms
+  updateLocalVideoResourceAfterProbe(record.id, {
+    durationSeconds: nextDuration,
+    sizeBytes: fingerprint.file_size,
+    fileMtimeMs: fingerprint.file_mtime_ms
   })
 }
 
 /**
- * Scan the given folders, parse codes, and import new videos.
- * Relocates metadata when a known code appears at a new path and the old file is gone.
- * Purges records when the path is outside scanned library folders, or the file
- * is missing under a library folder.
+ * Scan the given folders, parse codes, and add or refresh local video resources.
+ * Missing-resource reconciliation is owned by the scan coordinator so it can
+ * distinguish accessible folders from offline folders.
  */
 export async function scanFolders(
   folders: string[],
@@ -215,7 +217,7 @@ export async function scanFolders(
     result.scannedFiles += 1
 
     try {
-      if (videoExistsByPath(file)) {
+      if (localVideoResourceExistsByLocator(file)) {
         await refreshScannedFileDuration(file, readDurationSeconds)
         result.skipped += 1
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
@@ -253,12 +255,12 @@ export async function scanFolders(
         probedDuration
       )
       if (existing) {
-        const primary = getPrimaryVideoFile(existing.id)
-        if (primary && samePath(primary.file_path, file)) {
+        const localResource = getPreferredLocalVideoResource(existing.id)
+        if (localResource && samePath(localResource.locator, file)) {
           await refreshScannedFileDuration(file, readDurationSeconds)
           result.skipped += 1
-        } else if (primary && !fs.existsSync(primary.file_path)) {
-          relocateVideo(
+        } else if (localResource && !fs.existsSync(localResource.locator)) {
+          relocateLocalVideoResource(
             existing.id,
             file,
             fingerprint?.file_size ?? null,
@@ -340,12 +342,12 @@ export async function renameAndImport(oldPath: string, newNameRaw: string): Prom
   const fingerprint = statFileFingerprint(newPath)
   const fileDurationSeconds = await readLocalVideoDurationSeconds(newPath)
   let imported = false
-  if (code && !videoExistsByPath(newPath)) {
+  if (code && !localVideoResourceExistsByLocator(newPath)) {
     const existing = getVideoByCode(code)
     if (existing) {
-      const primary = getPrimaryVideoFile(existing.id)
-      if (primary && !fs.existsSync(primary.file_path)) {
-        relocateVideo(
+      const localResource = getPreferredLocalVideoResource(existing.id)
+      if (localResource && !fs.existsSync(localResource.locator)) {
+        relocateLocalVideoResource(
           existing.id,
           newPath,
           fingerprint?.file_size ?? null,
@@ -353,7 +355,7 @@ export async function renameAndImport(oldPath: string, newNameRaw: string): Prom
           fingerprint?.file_mtime_ms ?? null
         )
         imported = true
-      } else if (!primary) {
+      } else if (!localResource) {
         const id = insertScannedVideo(
           buildScannedVideoImport(code, newPath, fileDurationSeconds, fingerprint)
         )
@@ -380,7 +382,7 @@ export async function importManual(filePath: string, codeRaw: string): Promise<M
   const code = codeRaw.trim()
   if (!code) throw new Error('番号不能为空')
 
-  if (videoExistsByPath(filePath)) {
+  if (localVideoResourceExistsByLocator(filePath)) {
     return { code, imported: false, skippedPath: true }
   }
 
@@ -388,9 +390,9 @@ export async function importManual(filePath: string, codeRaw: string): Promise<M
   const fileDurationSeconds = await readLocalVideoDurationSeconds(filePath)
   const existing = getVideoByCode(code)
   if (existing) {
-    const primary = getPrimaryVideoFile(existing.id)
-    if (primary && !fs.existsSync(primary.file_path)) {
-      relocateVideo(
+    const localResource = getPreferredLocalVideoResource(existing.id)
+    if (localResource && !fs.existsSync(localResource.locator)) {
+      relocateLocalVideoResource(
         existing.id,
         filePath,
         fingerprint?.file_size ?? null,
@@ -399,7 +401,7 @@ export async function importManual(filePath: string, codeRaw: string): Promise<M
       )
       return { code, imported: true, relocated: true }
     }
-    if (!videoExistsByPath(filePath)) {
+    if (!localVideoResourceExistsByLocator(filePath)) {
       const id = insertScannedVideo(
         buildScannedVideoImport(code, filePath, fileDurationSeconds, fingerprint)
       )

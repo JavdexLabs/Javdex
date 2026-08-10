@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
-import { listVideoFiles, listVideos } from '../db/videoRepo'
+import { listLocalVideoResources, listVideos } from '../db/videoRepo'
 import { scanFolders } from './scanner'
 
 let tempRoot: string | null = null
@@ -49,7 +49,7 @@ describe('scanFolders', () => {
     assert.deepEqual(result.newCodes, ['IPX-777'])
     const videos = listVideos({ limit: 10, offset: 0 })
     assert.equal(videos.total, 1)
-    assert.equal(videos.items[0].primary_file_path, linkPath)
+    assert.equal(listLocalVideoResources(videos.items[0].id)[0]?.locator, linkPath)
   })
 
   it('does not follow symbolic-link directories', async () => {
@@ -140,9 +140,9 @@ describe('scanFolders', () => {
     assert.equal(result.imported, 2)
     const videos = listVideos({ limit: 10, offset: 0 })
     assert.equal(videos.total, 1)
-    const files = listVideoFiles(videos.items[0].id)
+    const resources = listLocalVideoResources(videos.items[0].id)
     assert.deepEqual(
-      files.map((file) => file.file_path),
+      resources.map((resource) => resource.locator),
       [
         path.join(firstDir, 'IPX-781.mp4'),
         path.join(secondDir, 'IPX-781.mp4')
@@ -196,7 +196,9 @@ describe('scanFolders', () => {
     assert.equal(result.imported, 1)
     assert.equal(video.title, 'Preserved metadata')
     assert.equal(video.scraped_status, 1)
-    assert.deepEqual(listVideoFiles(video.id).map((file) => file.file_path), [filePath])
+    const [resource] = listLocalVideoResources(video.id)
+    assert.equal(resource?.locator, filePath)
+    assert.equal(resource?.is_primary, 1)
   })
 
   it('yields while scanning large batches', async () => {

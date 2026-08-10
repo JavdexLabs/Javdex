@@ -26,12 +26,6 @@ export function registerVideoHandlers(): void {
   commandAdapter.register(IPC.VIDEO_SET_RATING, (id, rating) =>
     videoMaintenanceService.setRating(id, rating)
   )
-  commandAdapter.register(IPC.VIDEO_SET_PRIMARY_FILE, (videoId, fileId) =>
-    videoMaintenanceService.setPrimaryFile(videoId, fileId)
-  )
-  commandAdapter.register(IPC.VIDEO_DELETE_FILE, (videoId, fileId) =>
-    videoMaintenanceService.deleteFile(videoId, fileId)
-  )
   commandAdapter.register(IPC.VIDEO_YEARS, () => videoQueryService.listYears())
   commandAdapter.register(IPC.VIDEO_SAMPLE_IMPORT, (id, input) =>
     videoMaintenanceService.importSample(id, input)

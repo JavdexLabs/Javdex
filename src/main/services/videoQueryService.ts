@@ -30,10 +30,10 @@ export function createVideoQueryService(
     get(id): VideoDetail | null {
       const detail = readDetail(id)
       if (!detail) return null
-      const primary = detail.files[0]
+      const primary = detail.resources.find((resource) => resource.is_primary === 1)
       const resolved_duration_seconds = resolveDuration({
         duration_seconds: detail.duration_seconds,
-        file_duration_seconds: primary?.file_duration_seconds ?? null
+        primary_resource_duration_seconds: primary?.duration_seconds ?? null
       })
       return { ...detail, resolved_duration_seconds }
     },

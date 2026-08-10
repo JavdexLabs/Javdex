@@ -812,12 +812,9 @@ export default function LibraryPage(): JSX.Element {
             if (!deleting) setDeleteTarget(null)
           }}
         >
-          确定要永久删除「{deleteTarget.code}」吗？将同时删除磁盘上的视频文件、封面及所有元数据，此操作不可恢复。
-          {deleteTarget.primary_file_path ? (
-            <div className="modal-path-text">{deleteTarget.primary_file_path}</div>
-          ) : null}
-          {(deleteTarget.file_count ?? 0) > 1 ? (
-            <div className="modal-path-hint">另有 {(deleteTarget.file_count ?? 0) - 1} 个关联文件将一并删除</div>
+          确定要永久删除「{deleteTarget.code}」吗？将删除全部影片资源、应用自有图片及所有元数据；其中本地资源会同时删除磁盘文件，此操作不可恢复。
+          {(deleteTarget.resource_count ?? 0) > 0 ? (
+            <div className="modal-path-hint">共关联 {deleteTarget.resource_count} 个影片资源</div>
           ) : null}
         </Modal>
       )}
@@ -834,7 +831,7 @@ export default function LibraryPage(): JSX.Element {
             if (!deleting) setConfirmBulkDelete(false)
           }}
         >
-          确定要永久删除已选择的 {selectedCount} 部影片吗？将同时删除磁盘上的视频文件、封面及所有元数据，此操作不可恢复。
+          确定要永久删除已选择的 {selectedCount} 部影片吗？将删除全部影片资源、应用自有图片及所有元数据；其中本地资源会同时删除磁盘文件，此操作不可恢复。
         </Modal>
       )}
     </div>

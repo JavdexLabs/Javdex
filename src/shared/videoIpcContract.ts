@@ -31,11 +31,6 @@ export interface VideoIpcContract {
   [IPC.VIDEO_MARK_SCRAPE_SUCCESS]: { args: [id: number]; result: boolean }
   [IPC.VIDEO_DELETE]: { args: [id: number]; result: boolean }
   [IPC.VIDEO_SET_RATING]: { args: [id: number, rating: number]; result: boolean }
-  [IPC.VIDEO_SET_PRIMARY_FILE]: {
-    args: [videoId: number, fileId: number]
-    result: boolean
-  }
-  [IPC.VIDEO_DELETE_FILE]: { args: [videoId: number, fileId: number]; result: boolean }
   [IPC.VIDEO_CORRECT_IMPORT]: {
     args: [id: number, code: string]
     result: CorrectImportResult

@@ -21,9 +21,8 @@ interface PlayerServiceDependencies {
 export interface PlayerService {
   playVideo(videoId: number): Promise<PlayResult>
   openResource(resourceId: number): Promise<PlayResult>
-  playVideoFile(fileId: number): Promise<PlayResult>
   revealVideo(videoId: number): PlayResult
-  revealVideoFile(fileId: number): PlayResult
+  revealResource(resourceId: number): PlayResult
 }
 
 export function createPlayerService(
@@ -77,19 +76,12 @@ export function createPlayerService(
       if (!resource) return { ok: false, error: '资源记录不存在' }
       return openResource(resource)
     },
-    async playVideoFile(fileId): Promise<PlayResult> {
-      const resource = readResource(fileId)
-      if (!resource || resource.kind !== 'local') {
-        return { ok: false, error: '文件记录不存在' }
-      }
-      return openResource(resource)
-    },
     revealVideo(videoId): PlayResult {
       if (!readVideo(videoId)) return { ok: false, error: '视频记录不存在' }
       return revealResource(readPrimaryResource(videoId))
     },
-    revealVideoFile(fileId): PlayResult {
-      return revealResource(readResource(fileId))
+    revealResource(resourceId): PlayResult {
+      return revealResource(readResource(resourceId))
     }
   }
 }
@@ -98,6 +90,5 @@ const playerService = createPlayerService()
 
 export const playVideo = playerService.playVideo
 export const openVideoResource = playerService.openResource
-export const playVideoFile = playerService.playVideoFile
 export const revealVideo = playerService.revealVideo
-export const revealVideoFile = playerService.revealVideoFile
+export const revealVideoResource = playerService.revealResource

@@ -17,7 +17,7 @@ describe('ActressDeleteModal confirmation model', () => {
     assert.match(copy.description, /均未关联影片/)
   })
 
-  it('requires the dedicated acknowledgement action and explains file preservation', () => {
+  it('requires the dedicated acknowledgement action and explains resource preservation', () => {
     const impact = { actressCount: 2, linkedActressCount: 1, affectedVideoCount: 3 }
     const copy = actressDeleteConfirmationCopy(
       impact,
@@ -27,7 +27,7 @@ describe('ActressDeleteModal confirmation model', () => {
     assert.equal(copy.highRisk, true)
     assert.equal(copy.confirmText, '我已了解，仍要删除')
     assert.match(copy.description, /解除这些关联/)
-    assert.match(copy.description, /不会删除影片文件/)
+    assert.match(copy.description, /不会删除影片资源/)
     assert.equal(actressDeleteModeForAction(impact, 'cancel'), null)
     assert.equal(actressDeleteModeForAction(impact, 'ordinary-confirm'), null)
     assert.equal(

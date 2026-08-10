@@ -199,7 +199,7 @@ describe('VideoMaintenanceService', () => {
     assert.equal(query.get(1)?.poster_path, null)
   })
 
-  it('switches the primary file, deletes a secondary source, then deletes the video', () => {
+  it('switches the primary resource, deletes a local resource, then deletes the video', () => {
     const { videoPath } = setupDb()
     const secondaryPath = path.join(tempRoot!, 'APP-001-CD2.mp4')
     fs.writeFileSync(secondaryPath, 'video 2')
@@ -214,10 +214,10 @@ describe('VideoMaintenanceService', () => {
     const videos = createVideoMaintenanceService()
     const query = createVideoQueryService()
 
-    videos.setPrimaryFile(1, secondaryId)
-    videos.deleteFile(1, 1)
+    videos.setPrimaryResource(1, secondaryId)
+    videos.removeResource(1, 1)
     assert.equal(fs.existsSync(videoPath), false)
-    assert.equal(query.get(1)?.files[0]?.file_path, secondaryPath)
+    assert.equal(query.get(1)?.resources[0]?.locator, secondaryPath)
 
     videos.delete(1)
     assert.equal(fs.existsSync(secondaryPath), false)
@@ -425,6 +425,11 @@ describe('VideoMaintenanceService', () => {
       scrapedStatus: 0
     })
     const videos = createVideoMaintenanceService()
+    const linked = videos.importLinkResource({
+      code: 'IPX-535',
+      url: 'https://example.com/watch/source',
+      kind: 'web'
+    }).resource
 
     const result = videos.correctImport(1, 'MUKD-501')
 
@@ -434,10 +439,13 @@ describe('VideoMaintenanceService', () => {
       code: string
     }>
     assert.deepEqual(videosRows, [{ id: 2, code: 'MUKD-501' }])
-    const files = db
-      .prepare("SELECT video_id, locator AS file_path FROM video_resources WHERE kind = 'local' ORDER BY id")
-      .all() as Array<{ video_id: number; file_path: string }>
-    assert.deepEqual(files, [{ video_id: 2, file_path: videoPath }])
+    const resources = db
+      .prepare('SELECT video_id, kind, locator FROM video_resources ORDER BY id')
+      .all() as Array<{ video_id: number; kind: string; locator: string }>
+    assert.deepEqual(resources, [
+      { video_id: 2, kind: 'local', locator: videoPath },
+      { video_id: 2, kind: 'web', locator: linked.locator }
+    ])
   })
 })
 

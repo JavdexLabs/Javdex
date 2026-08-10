@@ -22,8 +22,8 @@ function createLocalVideo(code: string, filePath: string): number {
   fs.writeFileSync(filePath, code)
   const videoId = insertScannedVideo({
     code,
-    file_path: filePath,
-    file_size: code.length
+    locator: filePath,
+    size_bytes: code.length
   })
   assert.ok(videoId)
   return videoId

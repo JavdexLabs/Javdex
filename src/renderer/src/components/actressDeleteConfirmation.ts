@@ -30,7 +30,7 @@ export function actressDeleteConfirmationCopy(
     return {
       highRisk: true,
       confirmText: '我已了解，仍要删除',
-      description: `${subjectLabel}中有 ${impact.linkedActressCount} 位演员关联了 ${impact.affectedVideoCount} 部影片。继续后会解除这些关联并删除演员档案、头像与写真，但不会删除影片文件。`
+      description: `${subjectLabel}中有 ${impact.linkedActressCount} 位演员关联了 ${impact.affectedVideoCount} 部影片。继续后会解除这些关联并删除演员档案、头像与写真，但不会删除影片资源。`
     }
   }
   return {

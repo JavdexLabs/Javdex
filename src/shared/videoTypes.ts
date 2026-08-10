@@ -1,18 +1,6 @@
 import type { Actress } from './actressTypes'
 import type { ScrapedStatus, Tag } from './commonTypes'
 
-export interface VideoFile {
-  id: number
-  video_id: number
-  file_path: string
-  file_size: number | null
-  file_duration_seconds: number | null
-  file_mtime_ms: number | null
-  label: string | null
-  is_primary: number
-  add_time: string
-}
-
 export type VideoResourceKind = 'local' | 'direct' | 'web' | 'magnet' | 'ed2k'
 export type VideoResourceFilter = VideoResourceKind | 'none'
 export type LinkVideoResourceKind = Extract<VideoResourceKind, 'direct' | 'web'>
@@ -32,6 +20,8 @@ export interface VideoResource {
   is_primary: number
   add_time: string
 }
+
+export type LocalVideoResource = VideoResource & { kind: 'local' }
 
 export interface VideoLinkResourceImportInput {
   code: string
@@ -87,8 +77,6 @@ export interface Video {
   last_scraped_at: string | null
   updated_at: string | null
   add_time: string
-  primary_file_path?: string | null
-  file_count?: number
   primary_resource_kind?: VideoResourceKind | null
   resource_count?: number
   /** Primary kind first, followed by each remaining kind at most once. */
@@ -131,7 +119,6 @@ export interface VideoSampleImportInput {
 }
 
 export interface VideoDetail extends Video {
-  files: VideoFile[]
   resources: VideoResource[]
   actresses: Actress[]
   tags: VideoTag[]

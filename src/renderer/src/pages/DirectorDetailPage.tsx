@@ -1,11 +1,12 @@
 import { useCallback, useMemo, useState } from 'react'
-import { Clapperboard, ExternalLink, Pencil, SearchX } from 'lucide-react'
+import { Clapperboard, ExternalLink, ImagePlus, Pencil, SearchX } from 'lucide-react'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { DirectorUpdateInput } from '@shared/classificationTypes'
 import type { VideoQuery } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
 import BackButton from '../components/BackButton'
+import ClassificationImageModal from '../components/ClassificationImageModal'
 import DirectorEditModal from '../components/DirectorEditModal'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
@@ -37,6 +38,7 @@ export default function DirectorDetailPage(): JSX.Element {
   const toast = useToast()
   const client = useQueryClient()
   const [editing, setEditing] = useState(false)
+  const [editingImage, setEditingImage] = useState(false)
   const stacked = Boolean(useMatch({ path: ROUTE_MATCH.directorVideoStack, end: false }))
   const detailQuery = useQuery({
     queryKey: directorKeys.detail(id),
@@ -109,14 +111,24 @@ export default function DirectorDetailPage(): JSX.Element {
             }
             title={director.mainName}
             controls={
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setEditing(true)}
-              >
-                <Pencil {...UI_ICON_SM} />
-                编辑资料
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setEditingImage(true)}
+                >
+                  <ImagePlus {...UI_ICON_SM} aria-hidden />
+                  管理主图
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setEditing(true)}
+                >
+                  <Pencil {...UI_ICON_SM} />
+                  编辑资料
+                </button>
+              </>
             }
             resultCount={
               <span className="count-badge count-badge--stable count-badge--media">
@@ -218,6 +230,16 @@ export default function DirectorDetailPage(): JSX.Element {
         </ListSurface>
         {editing && (
           <DirectorEditModal director={director} onCancel={() => setEditing(false)} onSave={save} />
+        )}
+        {editingImage && (
+          <ClassificationImageModal
+            entity={{ kind: 'director', id }}
+            entityLabel="导演"
+            imagePath={director.imagePath}
+            fallbackCoverPath={director.fallbackCoverPath}
+            onCancel={() => setEditingImage(false)}
+            onChanged={() => client.invalidateQueries({ queryKey: directorKeys.all })}
+          />
         )}
       </div>
       {overlay}

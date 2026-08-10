@@ -43,6 +43,10 @@ import type {
 } from './typedIpcContract'
 import type { ProjectPage, UpdateCheckState } from './updateTypes'
 import type {
+  ClassificationEntityRef,
+  ClassificationImageCandidate,
+  ClassificationImageInput,
+  ClassificationImageUpdateResult,
   DirectorDetail,
   DirectorListItem,
   DirectorListQuery,
@@ -138,6 +142,14 @@ export interface AppIpcContract {
   [IPC.SERIES_OPTIONS]: { args: [search?: string]; result: SeriesOption[] }
   [IPC.SERIES_CREATE]: { args: [input: SeriesProfileInput]; result: number }
   [IPC.SERIES_UPDATE]: { args: [id: number, input: SeriesUpdateInput]; result: boolean }
+  [IPC.CLASSIFICATION_IMAGE_CANDIDATES]: {
+    args: [entity: ClassificationEntityRef]
+    result: ClassificationImageCandidate[]
+  }
+  [IPC.CLASSIFICATION_IMAGE_SET]: {
+    args: [entity: ClassificationEntityRef, input: ClassificationImageInput | null]
+    result: ClassificationImageUpdateResult
+  }
 
   [IPC.PLUGIN_DEV_AGENT_START]: {
     args: [input: PluginDevAgentStartInput]

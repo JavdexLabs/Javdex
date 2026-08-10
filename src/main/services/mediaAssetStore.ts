@@ -8,6 +8,8 @@ import {
   importAvatarDisplayFromBuffer,
   importAvatarSourceFromBuffer,
   importActressGalleryFromFile,
+  importClassificationImageFromBuffer,
+  importClassificationImageFromFile,
   importCoverFromFile,
   importPlaylistCoverFromFile,
   importSampleFromFile,
@@ -191,6 +193,24 @@ export class MediaAssetStore {
 
   importActressGallery(name: string, sourcePath: string, actressId?: number | null): string {
     return this.registerCreated(importActressGalleryFromFile(name, sourcePath, actressId))
+  }
+
+  importClassificationImage(
+    kind: 'organization' | 'director' | 'series',
+    id: number,
+    name: string,
+    sourcePath: string
+  ): string {
+    return this.registerCreated(importClassificationImageFromFile(kind, id, name, sourcePath))
+  }
+
+  storeClassificationImage(
+    kind: 'organization' | 'director' | 'series',
+    id: number,
+    name: string,
+    data: Buffer
+  ): string {
+    return this.registerCreated(importClassificationImageFromBuffer(kind, id, name, data))
   }
 
   async downloadCover(code: string, url: string, fetcher: AssetFetcher): Promise<string | null> {

@@ -192,7 +192,7 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
                     title={item.mainName}
                     onClick={() => navigateToOrganizationDetail(navigate, location, role, item.id)}
                   >
-                    <div className="facet-thumb">
+                    <div className="facet-thumb facet-thumb--contain">
                       {cover ? (
                         <img src={cover} alt="" loading="lazy" />
                       ) : (

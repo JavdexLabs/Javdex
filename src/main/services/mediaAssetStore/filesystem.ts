@@ -13,7 +13,8 @@ import {
 import { setPathAlias } from '../assetPathAliases'
 import {
   avatarSourceFingerprint,
-  detectImageExtensionFromBuffer
+  detectImageExtensionFromBuffer,
+  isUsableImageBuffer
 } from './imageBytes'
 import type { ImageAssetSubdir } from './types'
 
@@ -138,6 +139,43 @@ function importImageFromFile(subdir: ImageAssetSubdir, seed: string, sourcePath:
   const rel = writeImageAsset(subdir, seed, urlKey, ext, buf)
   invalidateAssetCache(rel)
   return rel
+}
+
+type ClassificationImageKind = 'organization' | 'director' | 'series'
+
+function classificationImageSubdir(kind: ClassificationImageKind): ImageAssetSubdir {
+  return kind === 'director' ? 'avatars' : 'covers'
+}
+
+function classificationImageSeed(kind: ClassificationImageKind, id: number, name: string): string {
+  return `classification-${kind}-${id}-${name}`
+}
+
+export function importClassificationImageFromBuffer(
+  kind: ClassificationImageKind,
+  id: number,
+  name: string,
+  data: Buffer
+): string {
+  if (!isUsableImageBuffer(data)) throw new Error('分类主图不是可用图片')
+  const extension = detectImageExtensionFromBuffer(data) ?? '.jpg'
+  return writeImageAsset(
+    classificationImageSubdir(kind),
+    classificationImageSeed(kind, id, name),
+    `classification-image:${randomUUID()}`,
+    extension,
+    data
+  )
+}
+
+export function importClassificationImageFromFile(
+  kind: ClassificationImageKind,
+  id: number,
+  name: string,
+  sourcePath: string
+): string {
+  if (!fs.existsSync(sourcePath)) throw new Error('图片文件不存在')
+  return importClassificationImageFromBuffer(kind, id, name, fs.readFileSync(sourcePath))
 }
 
 export function importCoverFromFile(code: string, sourcePath: string): string {

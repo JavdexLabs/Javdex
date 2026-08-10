@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { ExternalLink, Inbox, Pencil, SearchX } from 'lucide-react'
+import { ExternalLink, ImagePlus, Inbox, Pencil, SearchX } from 'lucide-react'
 import {
   Outlet,
   useLocation,
@@ -13,6 +13,7 @@ import type { VideoQuery } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
 import { FACET_LABEL } from '../facet'
 import BackButton from '../components/BackButton'
+import ClassificationImageModal from '../components/ClassificationImageModal'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import ListToolbar from '../components/ListToolbar'
@@ -52,6 +53,7 @@ export default function OrganizationDetailPage(): JSX.Element {
     useMatch({ path: ROUTE_MATCH.organizationVideoStack, end: false })
   )
   const [editing, setEditing] = useState(false)
+  const [editingImage, setEditingImage] = useState(false)
   const detailQuery = useQuery({
     queryKey: organizationKeys.detail(role, organizationId),
     queryFn: () => api.organizations.get(organizationId, role!),
@@ -88,7 +90,10 @@ export default function OrganizationDetailPage(): JSX.Element {
     useInfiniteVideoList(videoQuery, videoQueryHash, handlePageError, Boolean(role && validId))
 
   useListSurfaceRefetch(videoStackOpen, refetchSilent)
-  const dismissEditing = useCallback(() => setEditing(false), [])
+  const dismissEditing = useCallback(() => {
+    setEditing(false)
+    setEditingImage(false)
+  }, [])
   useDismissOverlaysOnNavigate(dismissEditing, location.pathname)
 
   const save = async (input: OrganizationUpdateInput): Promise<void> => {
@@ -153,10 +158,20 @@ export default function OrganizationDetailPage(): JSX.Element {
             leading={<BackButton variant="inline" onClick={() => navigateToFacetList(navigate, location, role)} />}
             title={organization.mainName}
             controls={
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>
-                <Pencil {...UI_ICON_SM} aria-hidden />
-                编辑资料
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setEditingImage(true)}
+                >
+                  <ImagePlus {...UI_ICON_SM} aria-hidden />
+                  管理主图
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>
+                  <Pencil {...UI_ICON_SM} aria-hidden />
+                  编辑资料
+                </button>
+              </>
             }
             resultCount={
               <span className="count-badge count-badge--stable count-badge--media" aria-live="polite">
@@ -263,6 +278,16 @@ export default function OrganizationDetailPage(): JSX.Element {
             organization={organization}
             onCancel={() => setEditing(false)}
             onSave={save}
+          />
+        ) : null}
+        {editingImage ? (
+          <ClassificationImageModal
+            entity={{ kind: 'organization', id: organizationId }}
+            entityLabel="机构"
+            imagePath={organization.imagePath}
+            fallbackCoverPath={organization.fallbackCoverPath}
+            onCancel={() => setEditingImage(false)}
+            onChanged={() => queryClient.invalidateQueries({ queryKey: organizationKeys.all })}
           />
         ) : null}
       </div>

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { ExternalLink, Layers3, Pencil, SearchX } from 'lucide-react'
+import { ExternalLink, ImagePlus, Layers3, Pencil, SearchX } from 'lucide-react'
 import {
   Outlet,
   useLocation,
@@ -13,6 +13,7 @@ import type { SeriesUpdateInput } from '@shared/classificationTypes'
 import type { VideoQuery } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
 import BackButton from '../components/BackButton'
+import ClassificationImageModal from '../components/ClassificationImageModal'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import ListToolbar from '../components/ListToolbar'
@@ -51,6 +52,7 @@ export default function SeriesDetailPage(): JSX.Element {
   const toast = useToast()
   const client = useQueryClient()
   const [editing, setEditing] = useState(false)
+  const [editingImage, setEditingImage] = useState(false)
   const stacked = Boolean(useMatch({ path: ROUTE_MATCH.seriesVideoStack, end: false }))
   const releaseDir = parseSeriesReleaseDir(params.get(LIST_PARAM.releaseDir))
   const detailQuery = useQuery({
@@ -149,6 +151,14 @@ export default function SeriesDetailPage(): JSX.Element {
                     )
                   }
                 />
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setEditingImage(true)}
+                >
+                  <ImagePlus {...UI_ICON_SM} aria-hidden />
+                  管理主图
+                </button>
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
@@ -265,6 +275,16 @@ export default function SeriesDetailPage(): JSX.Element {
         </ListSurface>
         {editing && (
           <SeriesEditModal series={series} onCancel={() => setEditing(false)} onSave={save} />
+        )}
+        {editingImage && (
+          <ClassificationImageModal
+            entity={{ kind: 'series', id }}
+            entityLabel="系列"
+            imagePath={series.imagePath}
+            fallbackCoverPath={series.fallbackCoverPath}
+            onCancel={() => setEditingImage(false)}
+            onChanged={() => client.invalidateQueries({ queryKey: seriesKeys.all })}
+          />
         )}
       </div>
       {overlay}

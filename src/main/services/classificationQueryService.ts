@@ -1,4 +1,6 @@
 import type {
+  ClassificationEntityRef,
+  ClassificationImageCandidate,
   DirectorDetail,
   DirectorListItem,
   DirectorListQuery,
@@ -39,6 +41,7 @@ function searchLikePattern(search: string | undefined): string {
 }
 
 export interface ClassificationQueryService {
+  listImageCandidates(entity: ClassificationEntityRef): ClassificationImageCandidate[]
   listOrganizations(query: OrganizationListQuery): OrganizationListItem[]
   getOrganization(id: number, role: OrganizationRole): OrganizationDetail | null
   listOrganizationOptions(search?: string): OrganizationOption[]
@@ -51,6 +54,40 @@ export interface ClassificationQueryService {
 }
 
 export const classificationQueryService: ClassificationQueryService = {
+  listImageCandidates(entity): ClassificationImageCandidate[] {
+    if (!Number.isInteger(entity.id) || entity.id <= 0) throw new Error('分类实体参数无效')
+    const predicate =
+      entity.kind === 'organization'
+        ? '(v.maker_organization_id = ? OR v.publisher_organization_id = ?)'
+        : entity.kind === 'director'
+          ? 'v.director_id = ?'
+          : entity.kind === 'series'
+            ? 'v.series_id = ?'
+            : null
+    if (!predicate) throw new Error('分类实体参数无效')
+    const parameters = entity.kind === 'organization' ? [entity.id, entity.id] : [entity.id]
+    const rows = getDb()
+      .prepare(
+        `SELECT v.id AS video_id, v.code, v.title, v.cover_path
+         FROM videos v
+         WHERE ${predicate} AND v.cover_path IS NOT NULL AND trim(v.cover_path) != ''
+         ORDER BY (v.release_date IS NULL OR trim(v.release_date) = '') ASC,
+                  v.release_date DESC, v.add_time DESC, v.id DESC`
+      )
+      .all(...parameters) as Array<{
+      video_id: number
+      code: string
+      title: string | null
+      cover_path: string
+    }>
+    return rows.map((row) => ({
+      videoId: row.video_id,
+      code: row.code,
+      title: row.title,
+      coverPath: row.cover_path
+    }))
+  },
+
   listOrganizations(query): OrganizationListItem[] {
     const role = requireRole(query.role)
     const videoColumn = VIDEO_ROLE_COLUMN[role]

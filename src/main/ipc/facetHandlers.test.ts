@@ -4,13 +4,18 @@ import type { IpcChannel } from '@shared/ipc-channels'
 import { IPC } from '@shared/ipc-channels'
 import type { ClassificationQueryService } from '../services/classificationQueryService'
 import type { ClassificationMaintenanceService } from '../services/classificationMaintenanceService'
+import type { ClassificationImageService } from '../services/classificationImageService'
 import { appCommandAdapter } from './appContractAdapter'
 import { registerOrganizationHandlers } from './facetHandlers'
 
 describe('organization IPC contract', () => {
-  it('registers every command and forwards typed arguments to the public services', () => {
+  it('registers every command and forwards typed arguments to the public services', async () => {
     const calls: unknown[] = []
     const queryService: ClassificationQueryService = {
+      listImageCandidates(entity) {
+        calls.push(['image-candidates', entity])
+        return []
+      },
       listOrganizations(query) {
         calls.push(['list', query])
         return []
@@ -83,6 +88,12 @@ describe('organization IPC contract', () => {
         throw new Error('not used by series IPC')
       }
     }
+    const imageService: ClassificationImageService = {
+      async setImage(entity, input) {
+        calls.push(['image-set', entity, input])
+        return { imagePath: 'covers/classification.jpg', cleanupFailures: [] }
+      }
+    }
     const handlers = new Map<IpcChannel, (...args: unknown[]) => unknown>()
     const adapter = {
       register(channel: IpcChannel, handler: (...args: unknown[]) => unknown) {
@@ -90,7 +101,7 @@ describe('organization IPC contract', () => {
       }
     } as typeof appCommandAdapter
 
-    registerOrganizationHandlers(adapter, { queryService, maintenanceService })
+    registerOrganizationHandlers(adapter, { queryService, maintenanceService, imageService })
 
     const listQuery = { role: 'maker' as const, search: 'studio' }
     const createInput = { role: 'publisher' as const, mainName: 'Studio' }
@@ -114,6 +125,13 @@ describe('organization IPC contract', () => {
     assert.deepEqual(handlers.get(IPC.SERIES_OPTIONS)?.('collection'), [])
     assert.equal(handlers.get(IPC.SERIES_CREATE)?.(seriesInput), 31)
     assert.equal(handlers.get(IPC.SERIES_UPDATE)?.(31, seriesInput), true)
+    const imageEntity = { kind: 'series' as const, id: 31 }
+    const imageInput = { source: 'video-cover' as const, videoId: 8 }
+    assert.deepEqual(handlers.get(IPC.CLASSIFICATION_IMAGE_CANDIDATES)?.(imageEntity), [])
+    assert.deepEqual(
+      await handlers.get(IPC.CLASSIFICATION_IMAGE_SET)?.(imageEntity, imageInput),
+      { imagePath: 'covers/classification.jpg', cleanupFailures: [] }
+    )
     assert.deepEqual(calls, [
       ['list', listQuery],
       ['get', 12, 'publisher'],
@@ -129,7 +147,9 @@ describe('organization IPC contract', () => {
       ['series-get', 31],
       ['series-options', 'collection'],
       ['series-create', seriesInput],
-      ['series-update', 31, seriesInput]
+      ['series-update', 31, seriesInput],
+      ['image-candidates', imageEntity],
+      ['image-set', imageEntity, imageInput]
     ])
   })
 })

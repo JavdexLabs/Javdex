@@ -5,17 +5,20 @@ import { listTags, listManualTags } from '../db/tagRepo'
 import { appCommandAdapter } from './appContractAdapter'
 import { classificationQueryService } from '../services/classificationQueryService'
 import { classificationMaintenanceService } from '../services/classificationMaintenanceService'
+import { classificationImageService } from '../services/classificationImageService'
 
 interface OrganizationHandlerDependencies {
   queryService: typeof classificationQueryService
   maintenanceService: typeof classificationMaintenanceService
+  imageService: typeof classificationImageService
 }
 
 export function registerOrganizationHandlers(
   adapter: typeof appCommandAdapter = appCommandAdapter,
   dependencies: OrganizationHandlerDependencies = {
     queryService: classificationQueryService,
-    maintenanceService: classificationMaintenanceService
+    maintenanceService: classificationMaintenanceService,
+    imageService: classificationImageService
   }
 ): void {
   adapter.register(IPC.ORGANIZATION_LIST, (query) =>
@@ -50,6 +53,12 @@ export function registerOrganizationHandlers(
   adapter.register(IPC.SERIES_CREATE, (input) => dependencies.maintenanceService.createSeries(input))
   adapter.register(IPC.SERIES_UPDATE, (id, input) =>
     dependencies.maintenanceService.updateSeries(id, input)
+  )
+  adapter.register(IPC.CLASSIFICATION_IMAGE_CANDIDATES, (entity) =>
+    dependencies.queryService.listImageCandidates(entity)
+  )
+  adapter.register(IPC.CLASSIFICATION_IMAGE_SET, (entity, input) =>
+    dependencies.imageService.setImage(entity, input)
   )
 }
 

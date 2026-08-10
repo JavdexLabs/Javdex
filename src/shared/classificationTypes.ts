@@ -5,6 +5,34 @@ export type OrganizationStatus = 'unknown' | 'active' | 'inactive'
 export type DirectorStatus = 'unknown' | 'active' | 'paused' | 'retired' | 'deceased'
 export type SeriesStatus = 'unknown' | 'ongoing' | 'completed' | 'discontinued'
 export type ClassificationListSortBy = 'video_count' | 'updated_at'
+export type ClassificationEntityKind = 'organization' | 'director' | 'series'
+
+export interface ClassificationEntityRef {
+  kind: ClassificationEntityKind
+  id: number
+}
+
+export type ClassificationImageInput =
+  | { source: 'file'; sourcePath: string }
+  | { source: 'url'; remoteUrl: string }
+  | { source: 'video-cover'; videoId: number }
+
+export interface ClassificationImageCleanupFailure {
+  path: string
+  error: string
+}
+
+export interface ClassificationImageUpdateResult {
+  imagePath: string | null
+  cleanupFailures: ClassificationImageCleanupFailure[]
+}
+
+export interface ClassificationImageCandidate {
+  videoId: number
+  code: string
+  title: string | null
+  coverPath: string
+}
 
 export interface ClassificationLinkInput {
   label: string

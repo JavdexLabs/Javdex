@@ -1,6 +1,6 @@
 import type { ActressListQuery } from '@shared/actressTypes'
 import type { VideoQuery } from '@shared/videoTypes'
-import type { OrganizationRole } from '@shared/classificationTypes'
+import type { ClassificationEntityRef, OrganizationRole } from '@shared/classificationTypes'
 import { libraryQueryHash } from '../listView/listQueryParams'
 
 export const videoKeys = {
@@ -47,6 +47,12 @@ export const seriesKeys = {
   list: (queryHash: string) => ['series', 'list', queryHash] as const,
   detail: (id: number) => ['series', 'detail', id] as const,
   options: (search = '') => ['series', 'options', search] as const
+}
+
+export const classificationImageKeys = {
+  all: ['classification-images'] as const,
+  candidates: (entity: ClassificationEntityRef) =>
+    ['classification-images', 'candidates', entity.kind, entity.id] as const
 }
 
 export const overviewStatsKeys = {

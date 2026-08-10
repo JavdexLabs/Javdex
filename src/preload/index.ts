@@ -69,6 +69,8 @@ import type { SortDir } from '../shared/commonTypes'
 import type { PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoMembership } from '../shared/playlistTypes'
 import type { PluginDevAgentInput, PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentSessionResult, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevDryRunResult, PluginDevInstallInput, PluginDevVerificationReport, PluginDevVerifyInput } from '../shared/pluginDevTypes'
 import type {
+  ClassificationEntityRef,
+  ClassificationImageInput,
   DirectorListQuery,
   DirectorProfileInput,
   DirectorUpdateInput,
@@ -292,6 +294,12 @@ const api = {
     options: (search?: string) => invokeApp(IPC.SERIES_OPTIONS, search),
     create: (input: SeriesProfileInput) => invokeApp(IPC.SERIES_CREATE, input),
     update: (id: number, input: SeriesUpdateInput) => invokeApp(IPC.SERIES_UPDATE, id, input)
+  },
+  classificationImages: {
+    candidates: (entity: ClassificationEntityRef) =>
+      invokeApp(IPC.CLASSIFICATION_IMAGE_CANDIDATES, entity),
+    set: (entity: ClassificationEntityRef, input: ClassificationImageInput | null) =>
+      invokeApp(IPC.CLASSIFICATION_IMAGE_SET, entity, input)
   },
   scrape: {
     one: (

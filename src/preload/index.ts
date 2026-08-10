@@ -69,6 +69,9 @@ import type { SortDir } from '../shared/commonTypes'
 import type { PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoMembership } from '../shared/playlistTypes'
 import type { PluginDevAgentInput, PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentSessionResult, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevDryRunResult, PluginDevInstallInput, PluginDevVerificationReport, PluginDevVerifyInput } from '../shared/pluginDevTypes'
 import type {
+  DirectorListQuery,
+  DirectorProfileInput,
+  DirectorUpdateInput,
   OrganizationCreateInput,
   OrganizationListQuery,
   OrganizationRole,
@@ -271,6 +274,14 @@ const api = {
     create: (input: OrganizationCreateInput) => invokeApp(IPC.ORGANIZATION_CREATE, input),
     update: (id: number, input: OrganizationUpdateInput) =>
       invokeApp(IPC.ORGANIZATION_UPDATE, id, input)
+  },
+  directors: {
+    list: (query: DirectorListQuery) => invokeApp(IPC.DIRECTOR_LIST, query),
+    get: (id: number) => invokeApp(IPC.DIRECTOR_GET, id),
+    options: (search?: string) => invokeApp(IPC.DIRECTOR_OPTIONS, search),
+    create: (input: DirectorProfileInput) => invokeApp(IPC.DIRECTOR_CREATE, input),
+    update: (id: number, input: DirectorUpdateInput) =>
+      invokeApp(IPC.DIRECTOR_UPDATE, id, input)
   },
   scrape: {
     one: (

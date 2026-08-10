@@ -43,6 +43,12 @@ import type {
 } from './typedIpcContract'
 import type { ProjectPage, UpdateCheckState } from './updateTypes'
 import type {
+  DirectorDetail,
+  DirectorListItem,
+  DirectorListQuery,
+  DirectorOption,
+  DirectorProfileInput,
+  DirectorUpdateInput,
   OrganizationCreateInput,
   OrganizationDetail,
   OrganizationListItem,
@@ -116,6 +122,11 @@ export interface AppIpcContract {
     args: [id: number, input: OrganizationUpdateInput]
     result: boolean
   }
+  [IPC.DIRECTOR_LIST]: { args: [query: DirectorListQuery]; result: DirectorListItem[] }
+  [IPC.DIRECTOR_GET]: { args: [id: number]; result: DirectorDetail | null }
+  [IPC.DIRECTOR_OPTIONS]: { args: [search?: string]; result: DirectorOption[] }
+  [IPC.DIRECTOR_CREATE]: { args: [input: DirectorProfileInput]; result: number }
+  [IPC.DIRECTOR_UPDATE]: { args: [id: number, input: DirectorUpdateInput]; result: boolean }
 
   [IPC.PLUGIN_DEV_AGENT_START]: {
     args: [input: PluginDevAgentStartInput]

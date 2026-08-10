@@ -35,6 +35,13 @@ export const organizationKeys = {
   options: (search = '') => ['organizations', 'options', search] as const
 }
 
+export const directorKeys = {
+  all: ['directors'] as const,
+  list: (queryHash: string) => ['directors', 'list', queryHash] as const,
+  detail: (id: number) => ['directors', 'detail', id] as const,
+  options: (search = '') => ['directors', 'options', search] as const
+}
+
 export const overviewStatsKeys = {
   all: ['settings', 'overviewStats'] as const,
   detail: (refreshKey = 0) => ['settings', 'overviewStats', refreshKey] as const

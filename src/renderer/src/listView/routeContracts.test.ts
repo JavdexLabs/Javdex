@@ -10,11 +10,14 @@ import {
 } from './actressRoutes'
 import {
   facetListPath,
+  directorDetailPath,
+  directorVideoDetailPath,
   facetVideoDetailPath,
   facetVideoListPath,
   organizationDetailPath,
   organizationVideoDetailPath,
   parseOrganizationPath,
+  parseDirectorPath,
   parseFacetVideoPath
 } from './facetRoutes'
 import { libraryVideoActressPath, libraryVideoDetailPath, parseLibraryVideoPath } from './libraryRoutes'
@@ -25,6 +28,7 @@ import {
   navigateToActressFromVideoDetail,
   navigateBackFromVideoDetail,
   navigateToFacetDetail,
+  navigateToDirectorDetail,
   navigateToOrganizationDetail,
   navigateToVideoDetail
 } from './listNavigation'
@@ -102,6 +106,13 @@ describe('route builders and parsers', () => {
     assert.deepEqual(parseOrganizationPath('/facet/publisher/o/12/5/actress/7'), {
       role: 'publisher',
       organizationId: 12,
+      videoId: 5,
+      actressId: 7
+    })
+    assert.equal(directorDetailPath(21), '/facet/director/d/21')
+    assert.equal(directorVideoDetailPath(21, 5), '/facet/director/d/21/5')
+    assert.deepEqual(parseDirectorPath('/facet/director/d/21/5/actress/7'), {
+      directorId: 21,
       videoId: 5,
       actressId: 7
     })
@@ -354,6 +365,28 @@ describe('primary navigation memory', () => {
 })
 
 describe('navigation helpers', () => {
+  it('keeps director identity and query state through its stable detail stack', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const list = {
+      pathname: '/facet/director',
+      search: '?q=lee',
+      hash: '',
+      state: null,
+      key: 'd'
+    } as Location
+    navigateToDirectorDetail(navigate, list, 21)
+    const detail = { ...list, pathname: '/facet/director/d/21' } as Location
+    navigateToVideoDetail(navigate, detail, 8)
+    const video = { ...list, pathname: '/facet/director/d/21/8' } as Location
+    navigateBackFromVideoDetail(navigate, video)
+    assert.deepEqual(destinations, [
+      { pathname: '/facet/director/d/21', search: '?q=lee' },
+      { pathname: '/facet/director/d/21/8', search: '?q=lee' },
+      { pathname: '/facet/director/d/21', search: 'q=lee' }
+    ])
+  })
+
   it('opens an organization by stable id while preserving its role-list query', () => {
     let destination: unknown
     const navigate = ((to: unknown) => {

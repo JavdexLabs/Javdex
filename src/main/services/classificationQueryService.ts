@@ -1,4 +1,8 @@
 import type {
+  DirectorDetail,
+  DirectorListItem,
+  DirectorListQuery,
+  DirectorOption,
   OrganizationDetail,
   OrganizationLink,
   OrganizationListItem,
@@ -34,6 +38,9 @@ export interface ClassificationQueryService {
   listOrganizations(query: OrganizationListQuery): OrganizationListItem[]
   getOrganization(id: number, role: OrganizationRole): OrganizationDetail | null
   listOrganizationOptions(search?: string): OrganizationOption[]
+  listDirectors(query: DirectorListQuery): DirectorListItem[]
+  getDirector(id: number): DirectorDetail | null
+  listDirectorOptions(search?: string): DirectorOption[]
 }
 
 export const classificationQueryService: ClassificationQueryService = {
@@ -232,6 +239,158 @@ export const classificationQueryService: ClassificationQueryService = {
       roles: (readRoles.all(row.id) as Array<{ role: OrganizationRole }>).map(
         (item) => item.role
       )
+    }))
+  },
+
+  listDirectors(query): DirectorListItem[] {
+    const search = searchLikePattern(query.search)
+    const sortBy = query.sortBy === 'updated_at' ? 'updated_at' : 'video_count'
+    const sortDir = query.sortDir === 'asc' ? 'ASC' : 'DESC'
+    const order = sortBy === 'updated_at' ? `d.updated_at ${sortDir}` : `video_count ${sortDir}`
+    const rows = getDb()
+      .prepare(
+        `SELECT d.id, d.main_name, d.image_path, d.updated_at,
+                COUNT(v.id) AS video_count,
+                (SELECT cover_path FROM videos cv
+                 WHERE cv.director_id = d.id AND cv.cover_path IS NOT NULL
+                 ORDER BY cv.release_date DESC, cv.add_time DESC, cv.id DESC LIMIT 1)
+                  AS fallback_cover_path
+         FROM directors d
+         LEFT JOIN videos v ON v.director_id = d.id
+         WHERE ? = '' OR EXISTS (
+           SELECT 1 FROM director_names n
+           WHERE n.director_id = d.id AND n.normalized_name LIKE ? ESCAPE '\\'
+         )
+         GROUP BY d.id
+         ORDER BY ${order}, d.id ASC`
+      )
+      .all(search, search) as Array<{
+      id: number
+      main_name: string
+      image_path: string | null
+      updated_at: string
+      video_count: number
+      fallback_cover_path: string | null
+    }>
+    return rows.map((row) => ({
+      id: row.id,
+      mainName: row.main_name,
+      imagePath: row.image_path,
+      fallbackCoverPath: row.fallback_cover_path,
+      videoCount: row.video_count,
+      updatedAt: row.updated_at
+    }))
+  },
+
+  getDirector(id): DirectorDetail | null {
+    const row = getDb()
+      .prepare(
+        `SELECT d.*,
+                COUNT(v.id) AS video_count,
+                MIN(CASE WHEN v.release_date GLOB '[0-9][0-9][0-9][0-9]-*'
+                         THEN CAST(substr(v.release_date, 1, 4) AS INTEGER) END) AS release_year_start,
+                MAX(CASE WHEN v.release_date GLOB '[0-9][0-9][0-9][0-9]-*'
+                         THEN CAST(substr(v.release_date, 1, 4) AS INTEGER) END) AS release_year_end,
+                (SELECT cover_path FROM videos cv
+                 WHERE cv.director_id = d.id AND cv.cover_path IS NOT NULL
+                 ORDER BY cv.release_date DESC, cv.add_time DESC, cv.id DESC LIMIT 1)
+                  AS fallback_cover_path
+         FROM directors d
+         LEFT JOIN videos v ON v.director_id = d.id
+         WHERE d.id = ?
+         GROUP BY d.id`
+      )
+      .get(id) as
+      | {
+          id: number
+          main_name: string
+          image_path: string | null
+          summary: string | null
+          country_region: string | null
+          birth_date: string | null
+          death_date: string | null
+          birth_place: string | null
+          career_start_year: number | null
+          career_end_year: number | null
+          status: DirectorDetail['status']
+          updated_at: string
+          video_count: number
+          release_year_start: number | null
+          release_year_end: number | null
+          fallback_cover_path: string | null
+        }
+      | undefined
+    if (!row) return null
+    const aliases = getDb()
+      .prepare(
+        `SELECT name FROM director_names WHERE director_id = ? AND type = 'alias'
+         ORDER BY position, id`
+      )
+      .all(id) as Array<{ name: string }>
+    const links = getDb()
+      .prepare(
+        `SELECT label, url, position FROM director_links
+         WHERE director_id = ? ORDER BY position, id`
+      )
+      .all(id) as OrganizationLink[]
+    return {
+      id: row.id,
+      mainName: row.main_name,
+      imagePath: row.image_path,
+      fallbackCoverPath: row.fallback_cover_path,
+      videoCount: row.video_count,
+      updatedAt: row.updated_at,
+      aliases: aliases.map((item) => item.name),
+      summary: row.summary,
+      countryRegion: row.country_region,
+      birthDate: row.birth_date,
+      deathDate: row.death_date,
+      birthPlace: row.birth_place,
+      careerStartYear: row.career_start_year,
+      careerEndYear: row.career_end_year,
+      status: row.status,
+      links,
+      releaseYearStart: row.release_year_start,
+      releaseYearEnd: row.release_year_end
+    }
+  },
+
+  listDirectorOptions(search): DirectorOption[] {
+    const normalized = searchLikePattern(search)
+    const rows = getDb()
+      .prepare(
+        `SELECT d.id, d.main_name, d.country_region, d.birth_date,
+                d.career_start_year, d.career_end_year, COUNT(v.id) AS video_count
+         FROM directors d
+         LEFT JOIN videos v ON v.director_id = d.id
+         WHERE ? = '' OR EXISTS (
+           SELECT 1 FROM director_names n
+           WHERE n.director_id = d.id AND n.normalized_name LIKE ? ESCAPE '\\'
+         )
+         GROUP BY d.id ORDER BY d.main_name, d.id LIMIT 100`
+      )
+      .all(normalized, normalized) as Array<{
+      id: number
+      main_name: string
+      country_region: string | null
+      birth_date: string | null
+      career_start_year: number | null
+      career_end_year: number | null
+      video_count: number
+    }>
+    const readAliases = getDb().prepare(
+      `SELECT name FROM director_names WHERE director_id = ? AND type = 'alias'
+       ORDER BY position, id`
+    )
+    return rows.map((row) => ({
+      id: row.id,
+      mainName: row.main_name,
+      aliases: (readAliases.all(row.id) as Array<{ name: string }>).map((item) => item.name),
+      countryRegion: row.country_region,
+      birthDate: row.birth_date,
+      careerStartYear: row.career_start_year,
+      careerEndYear: row.career_end_year,
+      videoCount: row.video_count
     }))
   }
 }

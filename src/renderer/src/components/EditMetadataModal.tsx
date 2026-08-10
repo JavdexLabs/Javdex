@@ -9,7 +9,11 @@ import ImageImportField from './ImageImportField'
 import Modal from './Modal'
 import { useTheme } from './ThemeProvider'
 import OrganizationPickerField from './OrganizationPickerField'
-import type { OrganizationAssignmentInput } from '@shared/classificationTypes'
+import DirectorPickerField from './DirectorPickerField'
+import type {
+  DirectorAssignmentInput,
+  OrganizationAssignmentInput
+} from '@shared/classificationTypes'
 
 interface Props {
   video: VideoDetail
@@ -30,6 +34,9 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
   const [title, setTitle] = useState(video.title ?? '')
   const [releaseDate, setReleaseDate] = useState(toDateInputValue(video.release_date))
   const [director, setDirector] = useState(video.director ?? '')
+  const [directorAssignment, setDirectorAssignment] = useState<DirectorAssignmentInput | null>(
+    video.director_id ? { directorId: video.director_id } : null
+  )
   const [maker, setMaker] = useState(video.maker ?? '')
   const [publisher, setPublisher] = useState(video.publisher ?? '')
   const [makerOrganization, setMakerOrganization] = useState<OrganizationAssignmentInput | null>(
@@ -80,7 +87,7 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
         makerOrganization,
         publisherOrganization,
         series: series.trim() || null,
-        director: director.trim() || null,
+        directorAssignment,
         summary: summary.trim() || null,
         tags: splitList(tags),
         actressesFemale: splitList(actressesFemale),
@@ -150,11 +157,18 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
             </EditFormField>
 
             <EditFormField label="导演" htmlFor="video-edit-director">
-              <input
+              <DirectorPickerField
                 id="video-edit-director"
-                className="text-input"
                 value={director}
-                onChange={(e) => setDirector(e.target.value)}
+                selectedId={
+                  directorAssignment && 'directorId' in directorAssignment
+                    ? directorAssignment.directorId
+                    : null
+                }
+                onChange={(value, assignment) => {
+                  setDirector(value)
+                  setDirectorAssignment(assignment)
+                }}
               />
             </EditFormField>
 

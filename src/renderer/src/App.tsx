@@ -10,6 +10,7 @@ import ActressDetailPage from './pages/ActressDetailPage'
 import ActressConflictReviewPage from './pages/ActressConflictReviewPage'
 import FacetDetailPage from './pages/FacetDetailPage'
 import OrganizationDetailPage from './pages/OrganizationDetailPage'
+import DirectorDetailPage from './pages/DirectorDetailPage'
 import PlaylistShell from './components/PlaylistShell'
 import PlaylistDetailPage from './pages/PlaylistDetailPage'
 import SettingsPage from './pages/SettingsPage'
@@ -88,6 +89,14 @@ function AppContent(): JSX.Element {
                         element={<OrganizationDetailPage />}
                       >
                         <Route path={ROUTE_SEGMENT.organizationVideo} element={<DetailPage />}>
+                          <Route
+                            path={ROUTE_SEGMENT.detailActress}
+                            element={<ActressDetailPage />}
+                          />
+                        </Route>
+                      </Route>
+                      <Route path={ROUTE_SEGMENT.directorDetail} element={<DirectorDetailPage />}>
+                        <Route path={ROUTE_SEGMENT.directorVideo} element={<DetailPage />}>
                           <Route
                             path={ROUTE_SEGMENT.detailActress}
                             element={<ActressDetailPage />}

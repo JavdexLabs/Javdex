@@ -103,6 +103,11 @@ export const IPC = {
   ORGANIZATION_OPTIONS: 'organization:options',
   ORGANIZATION_CREATE: 'organization:create',
   ORGANIZATION_UPDATE: 'organization:update',
+  DIRECTOR_LIST: 'director:list',
+  DIRECTOR_GET: 'director:get',
+  DIRECTOR_OPTIONS: 'director:options',
+  DIRECTOR_CREATE: 'director:create',
+  DIRECTOR_UPDATE: 'director:update',
 
   // Scraping
   SCRAPE_ONE: 'scrape:one',

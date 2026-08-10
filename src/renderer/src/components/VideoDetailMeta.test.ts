@@ -79,4 +79,13 @@ describe('video primary metadata classification navigation', () => {
       }
     ])
   })
+
+  it('uses the stable director id while keeping legacy text as a temporary fallback', () => {
+    assert.deepEqual(buildVideoPrimaryMetaItems(video({ director: 'Alex Lee', director_id: 21 })), [
+      { key: 'director', label: '导演', type: 'director', directorId: 21, value: 'Alex Lee' }
+    ])
+    assert.deepEqual(buildVideoPrimaryMetaItems(video({ director: 'Legacy' })), [
+      { key: 'director', label: '导演', type: 'facet', facet: 'director', value: 'Legacy' }
+    ])
+  })
 })

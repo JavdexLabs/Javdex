@@ -112,6 +112,7 @@ interface VideoMaintenanceServiceDependencies {
   unlinkSync: (path: string) => void
   withResourceMaintenance: <T>(work: () => T) => T
   assignVideoOrganization: typeof classificationMaintenanceService.assignVideoOrganization
+  assignVideoDirector: typeof classificationMaintenanceService.assignVideoDirector
 }
 
 export function createVideoMaintenanceService(
@@ -166,6 +167,8 @@ export function createVideoMaintenanceService(
     (<T>(work: () => T): T => maintenanceTaskGate.runSync('resource-maintenance', work))
   const assignVideoOrganization =
     dependencies.assignVideoOrganization ?? classificationMaintenanceService.assignVideoOrganization
+  const assignVideoDirector =
+    dependencies.assignVideoDirector ?? classificationMaintenanceService.assignVideoDirector
 
   const deleteLocalFile = (filePath: string): void => {
     if (!fileExists(filePath)) return
@@ -245,6 +248,9 @@ export function createVideoMaintenanceService(
           }
           if ('publisherOrganization' in input) {
             assignVideoOrganization(id, 'publisher', input.publisherOrganization ?? null)
+          }
+          if ('directorAssignment' in input) {
+            assignVideoDirector(id, input.directorAssignment ?? null)
           }
         })()
         for (const assetPath of result.obsoletePaths) {

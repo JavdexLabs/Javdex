@@ -33,6 +33,17 @@ export function registerOrganizationHandlers(
   adapter.register(IPC.ORGANIZATION_UPDATE, (id, input) =>
     dependencies.maintenanceService.updateOrganization(id, input)
   )
+  adapter.register(IPC.DIRECTOR_LIST, (query) => dependencies.queryService.listDirectors(query))
+  adapter.register(IPC.DIRECTOR_GET, (id) => dependencies.queryService.getDirector(id))
+  adapter.register(IPC.DIRECTOR_OPTIONS, (search) =>
+    dependencies.queryService.listDirectorOptions(search)
+  )
+  adapter.register(IPC.DIRECTOR_CREATE, (input) =>
+    dependencies.maintenanceService.createDirector(input)
+  )
+  adapter.register(IPC.DIRECTOR_UPDATE, (id, input) =>
+    dependencies.maintenanceService.updateDirector(id, input)
+  )
 }
 
 export function registerFacetHandlers(): void {

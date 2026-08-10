@@ -1,5 +1,5 @@
 import { parseActressVideoPath } from './actressRoutes'
-import { parseFacetVideoPath, parseOrganizationPath } from './facetRoutes'
+import { parseDirectorPath, parseFacetVideoPath, parseOrganizationPath } from './facetRoutes'
 import { parseLibraryVideoPath } from './libraryRoutes'
 import { parsePlaylistVideoPath } from './playlistRoutes'
 
@@ -17,6 +17,10 @@ export function getDetailPosterScope(pathname: string): string | null {
   const organization = parseOrganizationPath(pathname)
   if (organization?.actressId != null) return `actress:${organization.actressId}`
   if (organization?.videoId != null) return `video:${organization.videoId}`
+
+  const director = parseDirectorPath(pathname)
+  if (director?.actressId != null) return `actress:${director.actressId}`
+  if (director?.videoId != null) return `video:${director.videoId}`
 
   const facet = parseFacetVideoPath(pathname)
   if (facet?.actressId != null) return `actress:${facet.actressId}`

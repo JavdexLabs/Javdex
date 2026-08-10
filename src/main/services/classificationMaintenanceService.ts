@@ -1,5 +1,10 @@
 import type Database from 'better-sqlite3'
 import type {
+  DirectorAssignmentInput,
+  DirectorAssignmentResult,
+  DirectorProfileInput,
+  DirectorStatus,
+  DirectorUpdateInput,
   OrganizationAssignmentInput,
   OrganizationAssignmentResult,
   OrganizationCreateInput,
@@ -22,6 +27,13 @@ const VIDEO_ROLE_FIELDS: Record<
 }
 
 const ORGANIZATION_STATUSES = new Set<OrganizationStatus>(['unknown', 'active', 'inactive'])
+const DIRECTOR_STATUSES = new Set<DirectorStatus>([
+  'unknown',
+  'active',
+  'paused',
+  'retired',
+  'deceased'
+])
 
 type StoredOrganization = {
   id: number
@@ -337,6 +349,178 @@ function createOrganizationRecord(
   return organizationId
 }
 
+type StoredDirector = {
+  id: number
+  main_name: string
+  summary: string | null
+  country_region: string | null
+  birth_date: string | null
+  death_date: string | null
+  birth_place: string | null
+  career_start_year: number | null
+  career_end_year: number | null
+  status: DirectorStatus
+}
+
+function validateDate(value: string | null | undefined, label: string): string | null {
+  const date = optionalText(value)
+  if (!date) return null
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`${label}必须是有效日期`)
+  if (Number(date.slice(0, 4)) < 1) throw new Error(`${label}必须是有效日期`)
+  const parsed = new Date(`${date}T00:00:00.000Z`)
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
+    throw new Error(`${label}必须是有效日期`)
+  }
+  return date
+}
+
+function readStoredDirector(database: Database.Database, id: number): StoredDirector {
+  const row = database
+    .prepare(
+      `SELECT id, main_name, summary, country_region, birth_date, death_date, birth_place,
+              career_start_year, career_end_year, status FROM directors WHERE id = ?`
+    )
+    .get(id) as StoredDirector | undefined
+  if (!row) throw new Error('导演不存在')
+  return row
+}
+
+function readDirectorAliases(database: Database.Database, id: number): string[] {
+  return (
+    database
+      .prepare(
+        `SELECT name FROM director_names WHERE director_id = ? AND type = 'alias'
+         ORDER BY position, id`
+      )
+      .all(id) as Array<{ name: string }>
+  ).map((item) => item.name)
+}
+
+function readDirectorLinks(database: Database.Database, id: number): OrganizationLink[] {
+  return database
+    .prepare(
+      `SELECT label, url, position FROM director_links
+       WHERE director_id = ? ORDER BY position, id`
+    )
+    .all(id) as OrganizationLink[]
+}
+
+function prepareDirectorProfile(
+  input: DirectorProfileInput,
+  current?: StoredDirector,
+  aliases: string[] = [],
+  links: OrganizationLink[] = []
+): DirectorProfileInput & { aliases: string[]; links: OrganizationLink[]; status: DirectorStatus } {
+  const names = prepareNames(input.mainName, input.aliases ?? aliases)
+  const birthDate =
+    input.birthDate === undefined
+      ? current?.birth_date ?? null
+      : validateDate(input.birthDate, '出生日期')
+  const deathDate =
+    input.deathDate === undefined
+      ? current?.death_date ?? null
+      : validateDate(input.deathDate, '去世日期')
+  if (birthDate && deathDate && birthDate > deathDate) throw new Error('出生日期不能晚于去世日期')
+  const careerStartYear =
+    input.careerStartYear === undefined
+      ? current?.career_start_year ?? null
+      : validateYear(input.careerStartYear, '从业开始年份')
+  const careerEndYear =
+    input.careerEndYear === undefined
+      ? current?.career_end_year ?? null
+      : validateYear(input.careerEndYear, '从业结束年份')
+  if (careerStartYear && careerEndYear && careerStartYear > careerEndYear) {
+    throw new Error('从业开始年份不能晚于结束年份')
+  }
+  const status = input.status ?? current?.status ?? 'unknown'
+  if (!DIRECTOR_STATUSES.has(status)) throw new Error('导演状态无效')
+  return {
+    mainName: names.mainName,
+    aliases: names.aliases,
+    summary: input.summary === undefined ? current?.summary ?? null : optionalText(input.summary),
+    countryRegion:
+      input.countryRegion === undefined
+        ? current?.country_region ?? null
+        : optionalText(input.countryRegion),
+    birthDate,
+    deathDate,
+    birthPlace:
+      input.birthPlace === undefined ? current?.birth_place ?? null : optionalText(input.birthPlace),
+    careerStartYear,
+    careerEndYear,
+    status,
+    links: prepareLinks(input.links ?? links)
+  }
+}
+
+function writeDirectorNames(
+  database: Database.Database,
+  id: number,
+  mainName: string,
+  aliases: string[]
+): void {
+  const names = prepareNames(mainName, aliases).normalizedNames
+  database.prepare('DELETE FROM director_names WHERE director_id = ?').run(id)
+  const insert = database.prepare(
+    `INSERT INTO director_names (director_id, name, normalized_name, type, position)
+     VALUES (?, ?, ?, ?, ?)`
+  )
+  names.forEach((name, position) =>
+    insert.run(
+      id,
+      name.name,
+      name.normalizedName,
+      name.type,
+      name.type === 'main' ? 0 : position - 1
+    )
+  )
+}
+
+function writeDirectorLinks(
+  database: Database.Database,
+  id: number,
+  links: OrganizationLink[]
+): void {
+  database.prepare('DELETE FROM director_links WHERE director_id = ?').run(id)
+  const insert = database.prepare(
+    `INSERT INTO director_links (director_id, label, url, normalized_url, position)
+     VALUES (?, ?, ?, ?, ?)`
+  )
+  links.forEach((link) =>
+    insert.run(id, link.label, link.url, normalizedUrl(link.url), link.position)
+  )
+}
+
+function createDirectorRecord(database: Database.Database, input: DirectorProfileInput): number {
+  const profile = prepareDirectorProfile(input)
+  const now = new Date().toISOString()
+  const id = Number(
+    database
+      .prepare(
+        `INSERT INTO directors (
+           main_name, summary, country_region, birth_date, death_date, birth_place,
+           career_start_year, career_end_year, status, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        profile.mainName,
+        profile.summary,
+        profile.countryRegion,
+        profile.birthDate,
+        profile.deathDate,
+        profile.birthPlace,
+        profile.careerStartYear,
+        profile.careerEndYear,
+        profile.status,
+        now,
+        now
+      ).lastInsertRowid
+  )
+  writeDirectorNames(database, id, profile.mainName, profile.aliases)
+  writeDirectorLinks(database, id, profile.links)
+  return id
+}
+
 export interface ClassificationMaintenanceService {
   createOrganization(input: OrganizationCreateInput): number
   updateOrganization(id: number, input: OrganizationUpdateInput): boolean
@@ -345,6 +529,12 @@ export interface ClassificationMaintenanceService {
     role: OrganizationRole,
     assignment: OrganizationAssignmentInput | null
   ): OrganizationAssignmentResult
+  createDirector(input: DirectorProfileInput): number
+  updateDirector(id: number, input: DirectorUpdateInput): boolean
+  assignVideoDirector(
+    videoId: number,
+    assignment: DirectorAssignmentInput | null
+  ): DirectorAssignmentResult
 }
 
 export const classificationMaintenanceService: ClassificationMaintenanceService = {
@@ -452,6 +642,78 @@ export const classificationMaintenanceService: ClassificationMaintenanceService 
         )
         .run(organizationId, organization.main_name, new Date().toISOString(), videoId)
       return { organizationId, mainName: organization.main_name }
+    })()
+  },
+
+  createDirector(input): number {
+    const database = getDb()
+    return database.transaction(() => createDirectorRecord(database, input))()
+  },
+
+  updateDirector(id, input): boolean {
+    const database = getDb()
+    return database.transaction(() => {
+      const current = readStoredDirector(database, id)
+      const currentAliases = readDirectorAliases(database, id)
+      const aliases = [...(input.aliases ?? currentAliases)]
+      if (input.keepPreviousMainName && input.mainName.trim() !== current.main_name) {
+        aliases.unshift(current.main_name)
+      }
+      const profile = prepareDirectorProfile(
+        { ...input, aliases },
+        current,
+        currentAliases,
+        readDirectorLinks(database, id)
+      )
+      const now = new Date().toISOString()
+      database
+        .prepare(
+          `UPDATE directors
+           SET main_name = ?, summary = ?, country_region = ?, birth_date = ?,
+               death_date = ?, birth_place = ?, career_start_year = ?, career_end_year = ?,
+               status = ?, updated_at = ? WHERE id = ?`
+        )
+        .run(
+          profile.mainName,
+          profile.summary,
+          profile.countryRegion,
+          profile.birthDate,
+          profile.deathDate,
+          profile.birthPlace,
+          profile.careerStartYear,
+          profile.careerEndYear,
+          profile.status,
+          now,
+          id
+        )
+      writeDirectorNames(database, id, profile.mainName, profile.aliases)
+      writeDirectorLinks(database, id, profile.links)
+      database.prepare('UPDATE videos SET director = ? WHERE director_id = ?').run(profile.mainName, id)
+      return true
+    })()
+  },
+
+  assignVideoDirector(videoId, assignment): DirectorAssignmentResult {
+    const database = getDb()
+    return database.transaction(() => {
+      if (!database.prepare('SELECT 1 FROM videos WHERE id = ?').get(videoId)) {
+        throw new Error('影片不存在')
+      }
+      if (assignment == null) {
+        database
+          .prepare('UPDATE videos SET director_id = NULL, director = NULL, updated_at = ? WHERE id = ?')
+          .run(new Date().toISOString(), videoId)
+        return { directorId: null, mainName: null }
+      }
+      const id =
+        'directorId' in assignment
+          ? assignment.directorId
+          : createDirectorRecord(database, { mainName: assignment.createName })
+      const director = readStoredDirector(database, id)
+      database
+        .prepare('UPDATE videos SET director_id = ?, director = ?, updated_at = ? WHERE id = ?')
+        .run(id, director.main_name, new Date().toISOString(), videoId)
+      return { directorId: id, mainName: director.main_name }
     })()
   }
 }

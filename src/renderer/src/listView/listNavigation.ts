@@ -11,9 +11,12 @@ import {
   facetListPath,
   facetVideoDetailPath,
   facetVideoListPath,
+  directorDetailPath,
+  directorVideoDetailPath,
   organizationDetailPath,
   organizationVideoDetailPath,
   parseOrganizationPath,
+  parseDirectorPath,
   parseFacetVideoPath
 } from './facetRoutes'
 import type { OrganizationRole } from '@shared/classificationTypes'
@@ -33,6 +36,17 @@ export function navigateToVideoDetail(
   videoId: number,
   options?: { replace?: boolean }
 ): void {
+  const director = parseDirectorPath(location.pathname)
+  if (director) {
+    navigate(
+      {
+        pathname: directorVideoDetailPath(director.directorId, videoId),
+        search: location.search
+      },
+      { replace: options?.replace }
+    )
+    return
+  }
   const organization = parseOrganizationPath(location.pathname)
   if (organization) {
     navigate(
@@ -97,6 +111,17 @@ export function navigateBackFromVideoDetail(
   location: Location,
   patch?: Record<string, string | null | undefined>
 ): void {
+  const director = parseDirectorPath(location.pathname)
+  if (director?.videoId != null) {
+    const nextSearch = patch
+      ? patchSearchParams(new URLSearchParams(location.search), patch)
+      : new URLSearchParams(location.search)
+    navigate({
+      pathname: directorDetailPath(director.directorId),
+      search: nextSearch.toString()
+    })
+    return
+  }
   const organization = parseOrganizationPath(location.pathname)
   if (organization?.videoId != null) {
     const nextSearch = patch
@@ -184,6 +209,14 @@ export function navigateToActressFromVideoDetail(
   videoId: number,
   actressId: number
 ): void {
+  const director = parseDirectorPath(location.pathname)
+  if (director?.videoId != null) {
+    navigate({
+      pathname: `${directorVideoDetailPath(director.directorId, videoId)}/actress/${actressId}`,
+      search: location.search
+    })
+    return
+  }
   const organization = parseOrganizationPath(location.pathname)
   if (organization?.videoId != null) {
     navigate({
@@ -295,6 +328,20 @@ export function navigateToOrganizationDetail(
   )
   navigate({
     pathname: organizationDetailPath(role, organizationId),
+    search: fromFacetList ? location.search : ''
+  })
+}
+
+export function navigateToDirectorDetail(
+  navigate: NavigateFunction,
+  location: Location,
+  directorId: number
+): void {
+  const fromFacetList = Boolean(
+    matchPath({ path: ROUTE_PATH.facetList, end: true }, location.pathname)
+  )
+  navigate({
+    pathname: directorDetailPath(directorId),
     search: fromFacetList ? location.search : ''
   })
 }

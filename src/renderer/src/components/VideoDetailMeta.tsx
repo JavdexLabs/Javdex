@@ -14,6 +14,7 @@ import IconButton from './IconButton'
 import { UI_ICON } from './iconDefaults'
 import {
   navigateToFacetDetail,
+  navigateToDirectorDetail,
   navigateToOrganizationDetail
 } from '../listView/listNavigation'
 import { useEscapeKey } from '../hooks/useEscapeKey'
@@ -31,6 +32,7 @@ export type VideoPrimaryMetaItem =
       organizationId: number
       value: string
     }
+  | { key: string; label: string; type: 'director'; directorId: number; value: string }
 
 type SecondaryItem =
   | { key: string; label: string; type: 'text'; value: string }
@@ -130,13 +132,23 @@ export function buildVideoPrimaryMetaItems(video: VideoDetail): VideoPrimaryMeta
     items.push({ key: 'series', label: '系列', type: 'facet', facet: 'series', value: video.series!.trim() })
   }
   if (!isBlank(video.director)) {
-    items.push({
-      key: 'director',
-      label: '导演',
-      type: 'facet',
-      facet: 'director',
-      value: video.director!.trim()
-    })
+    items.push(
+      video.director_id == null
+        ? {
+            key: 'director',
+            label: '导演',
+            type: 'facet',
+            facet: 'director',
+            value: video.director!.trim()
+          }
+        : {
+            key: 'director',
+            label: '导演',
+            type: 'director',
+            directorId: video.director_id,
+            value: video.director!.trim()
+          }
+    )
   }
 
   return items
@@ -515,6 +527,12 @@ export function VideoDetailPrimaryMeta({ video }: { video: VideoDetail }): JSX.E
                     item.organizationId
                   )
                 }
+              >
+                {item.value}
+              </MetaLink>
+            ) : item.type === 'director' ? (
+              <MetaLink
+                onClick={() => navigateToDirectorDetail(navigate, location, item.directorId)}
               >
                 {item.value}
               </MetaLink>

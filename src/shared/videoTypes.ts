@@ -1,6 +1,6 @@
 import type { Actress } from './actressTypes'
 import type { ScrapedStatus, Tag } from './commonTypes'
-import type { OrganizationAssignmentInput } from './classificationTypes'
+import type { DirectorAssignmentInput, OrganizationAssignmentInput } from './classificationTypes'
 
 export type VideoResourceKind = 'local' | 'direct' | 'web' | 'magnet' | 'ed2k'
 export type VideoResourceFilter = VideoResourceKind | 'none'
@@ -155,6 +155,7 @@ export interface VideoQuery {
   publisherOrganizationId?: number
   series?: string
   director?: string
+  directorId?: number
   codePrefix?: string
   /** OR filter; `none` matches videos with zero resource rows. */
   resourceKinds?: VideoResourceFilter[]
@@ -172,6 +173,7 @@ export interface VideoEditInput {
   publisher?: string | null
   makerOrganization?: OrganizationAssignmentInput | null
   publisherOrganization?: OrganizationAssignmentInput | null
+  directorAssignment?: DirectorAssignmentInput | null
   series?: string | null
   director?: string | null
   duration_seconds?: number | null

@@ -22,6 +22,18 @@ describe('organization IPC contract', () => {
       listOrganizationOptions(search) {
         calls.push(['options', search])
         return []
+      },
+      listDirectors(query) {
+        calls.push(['director-list', query])
+        return []
+      },
+      getDirector(id) {
+        calls.push(['director-get', id])
+        return null
+      },
+      listDirectorOptions(search) {
+        calls.push(['director-options', search])
+        return []
       }
     }
     const maintenanceService: ClassificationMaintenanceService = {
@@ -35,6 +47,17 @@ describe('organization IPC contract', () => {
       },
       assignVideoOrganization() {
         throw new Error('not used by organization IPC')
+      },
+      createDirector(input) {
+        calls.push(['director-create', input])
+        return 23
+      },
+      updateDirector(id, input) {
+        calls.push(['director-update', id, input])
+        return true
+      },
+      assignVideoDirector() {
+        throw new Error('not used by director IPC')
       }
     }
     const handlers = new Map<IpcChannel, (...args: unknown[]) => unknown>()
@@ -54,12 +77,24 @@ describe('organization IPC contract', () => {
     assert.deepEqual(handlers.get(IPC.ORGANIZATION_OPTIONS)?.('alias'), [])
     assert.equal(handlers.get(IPC.ORGANIZATION_CREATE)?.(createInput), 17)
     assert.equal(handlers.get(IPC.ORGANIZATION_UPDATE)?.(12, updateInput), true)
+    const directorQuery = { search: 'lee' }
+    const directorInput = { mainName: 'Alex Lee' }
+    assert.deepEqual(handlers.get(IPC.DIRECTOR_LIST)?.(directorQuery), [])
+    assert.equal(handlers.get(IPC.DIRECTOR_GET)?.(23), null)
+    assert.deepEqual(handlers.get(IPC.DIRECTOR_OPTIONS)?.('alex'), [])
+    assert.equal(handlers.get(IPC.DIRECTOR_CREATE)?.(directorInput), 23)
+    assert.equal(handlers.get(IPC.DIRECTOR_UPDATE)?.(23, directorInput), true)
     assert.deepEqual(calls, [
       ['list', listQuery],
       ['get', 12, 'publisher'],
       ['options', 'alias'],
       ['create', createInput],
-      ['update', 12, updateInput]
+      ['update', 12, updateInput],
+      ['director-list', directorQuery],
+      ['director-get', 23],
+      ['director-options', 'alex'],
+      ['director-create', directorInput],
+      ['director-update', 23, directorInput]
     ])
   })
 })

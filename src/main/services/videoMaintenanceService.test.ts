@@ -110,10 +110,11 @@ describe('VideoMaintenanceService', () => {
     fs.writeFileSync(secondaryPath, 'video 2')
     const fileInfo = getDb()
       .prepare(
-        `INSERT INTO video_files (video_id, file_path, is_primary)
-         VALUES (1, ?, 0)`
+        `INSERT INTO video_resources
+           (video_id, kind, locator, resource_key, is_primary)
+         VALUES (1, 'local', ?, 'local:' || ?, 0)`
       )
-      .run(secondaryPath)
+      .run(secondaryPath, secondaryPath)
     const secondaryId = Number(fileInfo.lastInsertRowid)
     const videos = createVideoMaintenanceService()
     const query = createVideoQueryService()
@@ -134,7 +135,9 @@ describe('VideoMaintenanceService', () => {
     const linkPath = path.join(tempRoot!, 'linked.mp4')
     fs.writeFileSync(targetPath, 'target')
     fs.symlinkSync(targetPath, linkPath, 'file')
-    getDb().prepare('UPDATE video_files SET file_path = ? WHERE id = 1').run(linkPath)
+    getDb()
+      .prepare("UPDATE video_resources SET locator = ?, resource_key = 'local:' || ? WHERE id = 1")
+      .run(linkPath, linkPath)
     const videos = createVideoMaintenanceService()
 
     videos.delete(1)
@@ -164,7 +167,10 @@ describe('VideoMaintenanceService', () => {
 
     assert.equal(fs.existsSync(videoPath), false)
     assert.equal((getDb().prepare('SELECT COUNT(*) AS c FROM videos').get() as { c: number }).c, 0)
-    assert.equal((getDb().prepare('SELECT COUNT(*) AS c FROM video_files').get() as { c: number }).c, 0)
+    assert.equal(
+      (getDb().prepare('SELECT COUNT(*) AS c FROM video_resources').get() as { c: number }).c,
+      0
+    )
   })
 
   it('clears scraped metadata and relations but keeps manual tags', () => {
@@ -225,7 +231,7 @@ describe('VideoMaintenanceService', () => {
     }>
     assert.deepEqual(videosRows, [{ id: 2, code: 'MUKD-501' }])
     const files = db
-      .prepare('SELECT video_id, file_path FROM video_files ORDER BY id')
+      .prepare("SELECT video_id, locator AS file_path FROM video_resources WHERE kind = 'local' ORDER BY id")
       .all() as Array<{ video_id: number; file_path: string }>
     assert.deepEqual(files, [{ video_id: 2, file_path: videoPath }])
   })

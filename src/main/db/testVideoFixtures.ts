@@ -39,11 +39,13 @@ export function insertTestVideoWithFile(
   const videoId = Number(info.lastInsertRowid)
   const fileInfo = db
     .prepare(
-      `INSERT INTO video_files (video_id, file_path, file_size, is_primary, add_time)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO video_resources
+         (video_id, kind, locator, resource_key, size_bytes, is_primary, add_time)
+       VALUES (?, 'local', ?, 'local:' || ?, ?, ?, ?)`
     )
     .run(
       videoId,
+      opts.filePath,
       opts.filePath,
       opts.fileSize ?? null,
       opts.isPrimary !== false ? 1 : 0,

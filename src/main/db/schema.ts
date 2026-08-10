@@ -33,21 +33,24 @@ CREATE INDEX IF NOT EXISTS idx_videos_publisher ON videos(publisher);
 CREATE INDEX IF NOT EXISTS idx_videos_series ON videos(series);
 CREATE INDEX IF NOT EXISTS idx_videos_director ON videos(director);
 
-CREATE TABLE IF NOT EXISTS video_files (
+CREATE TABLE IF NOT EXISTS video_resources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     video_id INTEGER NOT NULL,
-    file_path TEXT NOT NULL UNIQUE,
-    file_size INTEGER,
-    file_duration_seconds INTEGER,
+    kind TEXT NOT NULL CHECK(kind IN ('local', 'direct', 'web', 'magnet', 'ed2k')),
+    locator TEXT NOT NULL,
+    resource_key TEXT NOT NULL UNIQUE,
+    size_bytes INTEGER,
+    duration_seconds INTEGER,
     file_mtime_ms INTEGER,
-    label TEXT,
+    display_name TEXT,
     is_primary INTEGER NOT NULL DEFAULT 0,
     add_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_video_files_video_id ON video_files(video_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_video_files_file_path ON video_files(file_path);
-CREATE INDEX IF NOT EXISTS idx_video_files_primary ON video_files(video_id, is_primary);
+CREATE INDEX IF NOT EXISTS idx_video_resources_video_id ON video_resources(video_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_video_resources_key ON video_resources(resource_key);
+CREATE INDEX IF NOT EXISTS idx_video_resources_primary ON video_resources(video_id, is_primary);
+CREATE INDEX IF NOT EXISTS idx_video_resources_kind ON video_resources(kind);
 
 CREATE TABLE IF NOT EXISTS actresses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

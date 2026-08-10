@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3'
 import { normalizeActressName } from './actressNameNormalization'
 import { SCHEMA_SQL } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 6
+export const CURRENT_SCHEMA_VERSION = 7
 
 type Migration = {
   version: number
@@ -319,6 +319,42 @@ function migrateToV6(database: Database.Database): void {
   `)
 }
 
+function migrateToV7(database: Database.Database): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS video_resources (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      video_id INTEGER NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('local', 'direct', 'web', 'magnet', 'ed2k')),
+      locator TEXT NOT NULL,
+      resource_key TEXT NOT NULL UNIQUE,
+      size_bytes INTEGER,
+      duration_seconds INTEGER,
+      file_mtime_ms INTEGER,
+      display_name TEXT,
+      is_primary INTEGER NOT NULL DEFAULT 0,
+      add_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_video_resources_video_id ON video_resources(video_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_video_resources_key ON video_resources(resource_key);
+    CREATE INDEX IF NOT EXISTS idx_video_resources_primary ON video_resources(video_id, is_primary);
+    CREATE INDEX IF NOT EXISTS idx_video_resources_kind ON video_resources(kind);
+  `)
+
+  if (!tableExists(database, 'video_files')) return
+  database.exec(`
+    INSERT OR IGNORE INTO video_resources (
+      id, video_id, kind, locator, resource_key, size_bytes, duration_seconds,
+      file_mtime_ms, display_name, is_primary, add_time
+    )
+    SELECT
+      id, video_id, 'local', file_path, 'local:' || file_path, file_size,
+      file_duration_seconds, file_mtime_ms, label, is_primary, add_time
+    FROM video_files;
+    DROP TABLE video_files;
+  `)
+}
+
 const MIGRATIONS: Migration[] = [
   {
     version: 2,
@@ -339,6 +375,10 @@ const MIGRATIONS: Migration[] = [
   {
     version: 6,
     migrate: migrateToV6
+  },
+  {
+    version: 7,
+    migrate: migrateToV7
   }
 ]
 

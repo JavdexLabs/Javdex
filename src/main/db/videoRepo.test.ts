@@ -267,16 +267,17 @@ describe('videoRepo.setPrimaryVideoFile', () => {
     const db = getDb()
     const info = db
       .prepare(
-        `INSERT INTO video_files (video_id, file_path, file_size, is_primary, add_time)
-         VALUES (?, ?, ?, 0, ?)`
+        `INSERT INTO video_resources
+           (video_id, kind, locator, resource_key, size_bytes, is_primary, add_time)
+         VALUES (?, 'local', ?, 'local:' || ?, ?, 0, ?)`
       )
-      .run(1, 'alt.mp4', 2048, '2024-01-05')
+      .run(1, 'alt.mp4', 'alt.mp4', 2048, '2024-01-05')
     const altFileId = Number(info.lastInsertRowid)
 
     setPrimaryVideoFile(1, altFileId)
 
     const files = db
-      .prepare('SELECT id, is_primary FROM video_files WHERE video_id = 1 ORDER BY id')
+      .prepare('SELECT id, is_primary FROM video_resources WHERE video_id = 1 ORDER BY id')
       .all() as Array<{ id: number; is_primary: number }>
     assert.deepEqual(files, [
       { id: 1, is_primary: 0 },

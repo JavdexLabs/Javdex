@@ -46,8 +46,8 @@ describe('VideoQueryService', () => {
     const videos = createVideoQueryService()
     const db = getDb()
     const rowsBefore = db.prepare('SELECT * FROM videos WHERE id = 1').all()
-    const filesBefore = db
-      .prepare('SELECT * FROM video_files WHERE video_id = 1 ORDER BY id')
+    const resourcesBefore = db
+      .prepare('SELECT * FROM video_resources WHERE video_id = 1 ORDER BY id')
       .all()
     const changesBefore = (db.prepare('SELECT total_changes() AS n').get() as { n: number }).n
     const videoBefore = fs.readFileSync(videoPath)
@@ -61,8 +61,8 @@ describe('VideoQueryService', () => {
     assert.equal(videos.get(1)?.title, 'Application boundary')
     assert.deepEqual(db.prepare('SELECT * FROM videos WHERE id = 1').all(), rowsBefore)
     assert.deepEqual(
-      db.prepare('SELECT * FROM video_files WHERE video_id = 1 ORDER BY id').all(),
-      filesBefore
+      db.prepare('SELECT * FROM video_resources WHERE video_id = 1 ORDER BY id').all(),
+      resourcesBefore
     )
     assert.equal(
       (db.prepare('SELECT total_changes() AS n').get() as { n: number }).n,

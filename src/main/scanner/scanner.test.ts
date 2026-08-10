@@ -268,7 +268,7 @@ describe('scanFolders', () => {
     })
 
     const row = getDb()
-      .prepare('SELECT file_duration_seconds FROM video_files WHERE file_path = ?')
+      .prepare("SELECT duration_seconds AS file_duration_seconds FROM video_resources WHERE kind = 'local' AND locator = ?")
       .get(filePath) as { file_duration_seconds: number | null }
     assert.equal(row.file_duration_seconds, 3661)
   })
@@ -295,7 +295,7 @@ describe('scanFolders', () => {
     assert.equal(result.imported, 0)
     assert.equal(result.skipped, 1)
     const row = getDb()
-      .prepare('SELECT file_duration_seconds FROM video_files WHERE file_path = ?')
+      .prepare("SELECT duration_seconds AS file_duration_seconds FROM video_resources WHERE kind = 'local' AND locator = ?")
       .get(filePath) as { file_duration_seconds: number | null }
     assert.equal(row.file_duration_seconds, 2000)
   })
@@ -324,7 +324,9 @@ describe('scanFolders', () => {
 
     assert.equal(probeCount, afterFirst)
     const row = getDb()
-      .prepare('SELECT file_duration_seconds, file_mtime_ms FROM video_files WHERE file_path = ?')
+      .prepare(
+        "SELECT duration_seconds AS file_duration_seconds, file_mtime_ms FROM video_resources WHERE kind = 'local' AND locator = ?"
+      )
       .get(filePath) as { file_duration_seconds: number | null; file_mtime_ms: number | null }
     assert.equal(row.file_duration_seconds, 3661)
     assert.notEqual(row.file_mtime_ms, null)

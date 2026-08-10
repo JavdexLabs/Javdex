@@ -13,6 +13,22 @@ export interface VideoFile {
   add_time: string
 }
 
+export type VideoResourceKind = 'local' | 'direct' | 'web' | 'magnet' | 'ed2k'
+
+export interface VideoResource {
+  id: number
+  video_id: number
+  kind: VideoResourceKind
+  locator: string
+  resource_key: string
+  size_bytes: number | null
+  duration_seconds: number | null
+  file_mtime_ms: number | null
+  display_name: string | null
+  is_primary: number
+  add_time: string
+}
+
 export interface Video {
   id: number
   code: string
@@ -34,6 +50,8 @@ export interface Video {
   add_time: string
   primary_file_path?: string | null
   file_count?: number
+  primary_resource_kind?: VideoResourceKind | null
+  resource_count?: number
 }
 
 export type TagOrigin = 'manual' | 'scraped'
@@ -73,6 +91,7 @@ export interface VideoSampleImportInput {
 
 export interface VideoDetail extends Video {
   files: VideoFile[]
+  resources: VideoResource[]
   actresses: Actress[]
   tags: VideoTag[]
   assets: VideoAsset[]

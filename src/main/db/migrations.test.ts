@@ -300,7 +300,7 @@ describe('database schema', () => {
       )
       const expectedTables = [
         'videos',
-        'video_files',
+        'video_resources',
         'actresses',
         'video_actress',
         'tags',
@@ -331,7 +331,7 @@ describe('database schema', () => {
         expectedTables.map(() => true)
       )
       assert.equal(indexNames(db).includes('idx_videos_release_date'), true)
-      assert.equal(indexNames(db).includes('idx_video_files_file_path'), true)
+      assert.equal(indexNames(db).includes('idx_video_resources_key'), true)
       assert.equal(indexNames(db).includes('idx_video_tag_tag_id'), true)
       assert.equal(indexNames(db).includes('idx_videos_maker'), true)
       assert.equal(indexNames(db).includes('idx_playlist_video_video_id'), true)
@@ -373,10 +373,100 @@ describe('database schema', () => {
         /CHECK constraint failed/
       )
 
-      const fileCols = (db.prepare('PRAGMA table_info(video_files)').all() as { name: string }[]).map(
-        (c) => c.name
+      const resourceCols = (
+        db.prepare('PRAGMA table_info(video_resources)').all() as { name: string }[]
+      ).map((c) => c.name)
+      assert.deepEqual(
+        [
+          'kind',
+          'locator',
+          'resource_key',
+          'size_bytes',
+          'duration_seconds',
+          'file_mtime_ms',
+          'display_name'
+        ].filter((column) => !resourceCols.includes(column)),
+        []
       )
-      assert.equal(fileCols.includes('file_mtime_ms'), true)
+      assert.equal(
+        Boolean(
+          db
+            .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'video_files'")
+            .get()
+        ),
+        false
+      )
+    } finally {
+      db.close()
+    }
+  })
+
+  it('migrates v6 video files to local resources without losing data', () => {
+    const db = new Database(':memory:')
+    try {
+      db.exec(`
+        PRAGMA foreign_keys = ON;
+        CREATE TABLE videos (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          code TEXT UNIQUE NOT NULL
+        );
+        CREATE TABLE video_files (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          video_id INTEGER NOT NULL,
+          file_path TEXT NOT NULL UNIQUE,
+          file_size INTEGER,
+          file_duration_seconds INTEGER,
+          file_mtime_ms INTEGER,
+          label TEXT,
+          is_primary INTEGER NOT NULL DEFAULT 0,
+          add_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+        );
+        INSERT INTO videos (id, code) VALUES (7, 'ABC-123');
+        INSERT INTO video_files (
+          id, video_id, file_path, file_size, file_duration_seconds,
+          file_mtime_ms, label, is_primary, add_time
+        ) VALUES (
+          19, 7, '/library/ABC-123.mp4', 123456789, 5400,
+          1786300000000, 'Main cut', 1, '2026-08-10T10:00:00.000Z'
+        );
+      `)
+      db.pragma('user_version = 6')
+
+      migrateDatabase(db)
+      migrateDatabase(db)
+
+      assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+      assert.deepEqual(
+        db
+          .prepare(
+            `SELECT id, video_id, kind, locator, resource_key, size_bytes,
+                    duration_seconds, file_mtime_ms, display_name, is_primary, add_time
+             FROM video_resources`
+          )
+          .get(),
+        {
+          id: 19,
+          video_id: 7,
+          kind: 'local',
+          locator: '/library/ABC-123.mp4',
+          resource_key: 'local:/library/ABC-123.mp4',
+          size_bytes: 123456789,
+          duration_seconds: 5400,
+          file_mtime_ms: 1786300000000,
+          display_name: 'Main cut',
+          is_primary: 1,
+          add_time: '2026-08-10T10:00:00.000Z'
+        }
+      )
+      assert.equal(
+        Boolean(
+          db
+            .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'video_files'")
+            .get()
+        ),
+        false
+      )
     } finally {
       db.close()
     }

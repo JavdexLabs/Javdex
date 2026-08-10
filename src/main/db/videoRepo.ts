@@ -696,6 +696,14 @@ function buildWhere(q: VideoQuery): { sql: string; params: unknown[]; joins: str
     conditions.push('v.publisher = ?')
     params.push(q.publisher)
   }
+  if (q.makerOrganizationId !== undefined) {
+    conditions.push('v.maker_organization_id = ?')
+    params.push(q.makerOrganizationId)
+  }
+  if (q.publisherOrganizationId !== undefined) {
+    conditions.push('v.publisher_organization_id = ?')
+    params.push(q.publisherOrganizationId)
+  }
   if (q.series) {
     conditions.push('v.series = ?')
     params.push(q.series)
@@ -1053,6 +1061,8 @@ export function clearVideoMetadataRecord(id: number): { obsoletePaths: string[] 
          title = NULL, summary = NULL, cover_path = NULL, poster_path = NULL,
          original_title = NULL, release_date = NULL,
          maker = NULL, publisher = NULL, series = NULL, director = NULL,
+         maker_organization_id = NULL, publisher_organization_id = NULL,
+         series_id = NULL, director_id = NULL,
          duration_seconds = NULL, last_scraped_at = NULL, updated_at = NULL,
          scraped_status = 0
        WHERE id = ?`

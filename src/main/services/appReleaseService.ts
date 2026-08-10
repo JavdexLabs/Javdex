@@ -246,18 +246,6 @@ export async function openProjectPage(page: ProjectPage): Promise<boolean> {
   return true
 }
 
-export async function openExternalReleaseLink(rawUrl: string): Promise<boolean> {
-  if (typeof rawUrl !== 'string' || rawUrl.length > MAX_EXTERNAL_URL_LENGTH) return false
-  try {
-    const url = new URL(rawUrl)
-    if (url.protocol !== 'https:') return false
-    await shell.openExternal(url.toString())
-    return true
-  } catch {
-    return false
-  }
-}
-
 export function ignoreUpdateVersion(version: string): UpdateCheckState {
   const release = getUpdateCheckState().latestRelease
   if (!release || release.version !== version) return getUpdateCheckState()

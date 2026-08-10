@@ -1,5 +1,6 @@
 import type { Actress } from './actressTypes'
 import type { ScrapedStatus, Tag } from './commonTypes'
+import type { OrganizationAssignmentInput } from './classificationTypes'
 
 export type VideoResourceKind = 'local' | 'direct' | 'web' | 'magnet' | 'ed2k'
 export type VideoResourceFilter = VideoResourceKind | 'none'
@@ -75,8 +76,12 @@ export interface Video {
   release_date: string | null
   maker: string | null
   publisher: string | null
+  maker_organization_id: number | null
+  publisher_organization_id: number | null
   series: string | null
   director: string | null
+  series_id: number | null
+  director_id: number | null
   duration_seconds: number | null
   scraped_status: ScrapedStatus
   last_scraped_at: string | null
@@ -146,6 +151,8 @@ export interface VideoQuery {
   tagIds?: number[]
   maker?: string
   publisher?: string
+  makerOrganizationId?: number
+  publisherOrganizationId?: number
   series?: string
   director?: string
   codePrefix?: string
@@ -163,6 +170,8 @@ export interface VideoEditInput {
   release_date?: string | null
   maker?: string | null
   publisher?: string | null
+  makerOrganization?: OrganizationAssignmentInput | null
+  publisherOrganization?: OrganizationAssignmentInput | null
   series?: string | null
   director?: string | null
   duration_seconds?: number | null

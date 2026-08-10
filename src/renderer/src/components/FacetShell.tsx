@@ -8,7 +8,7 @@ export default function FacetShell(): JSX.Element {
   return (
     <ListDetailShell
       list={FACET_LIST}
-      detailMatchPath={ROUTE_MATCH.facetDetailOpen}
+      detailMatchPath={[ROUTE_MATCH.facetDetailOpen, ROUTE_MATCH.organizationDetailOpen]}
       detailMatchEnd={false}
     />
   )

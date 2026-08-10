@@ -54,7 +54,11 @@ export function primaryListRoot(pathname: string): string | null {
 }
 
 function scopedSearch(root: string, search: string): string {
-  const allowedKeys = root.startsWith('/facet/') ? [LIST_PARAM.q] : SEARCH_KEYS_BY_ROOT[root]
+  const allowedKeys = root.startsWith('/facet/')
+    ? /^\/facet\/(maker|publisher)$/.test(root)
+      ? [LIST_PARAM.q, LIST_PARAM.sort, LIST_PARAM.dir]
+      : [LIST_PARAM.q]
+    : SEARCH_KEYS_BY_ROOT[root]
   if (!allowedKeys) return ''
   const source = new URLSearchParams(search)
   const next = new URLSearchParams()

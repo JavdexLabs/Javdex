@@ -7,6 +7,7 @@ import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { insertTestVideoWithFile } from '../db/testVideoFixtures'
 import { createVideoMaintenanceService } from './videoMaintenanceService'
 import { createVideoQueryService } from './videoQueryService'
+import { classificationQueryService } from './classificationQueryService'
 
 let tempRoot: string | null = null
 
@@ -64,6 +65,56 @@ afterEach(() => {
 })
 
 describe('VideoMaintenanceService', () => {
+  it('creates and reuses organization identities while editing video metadata', () => {
+    setupDb()
+    const videos = createVideoMaintenanceService()
+    const query = createVideoQueryService()
+
+    videos.edit(1, {
+      title: 'With organization',
+      makerOrganization: { createName: 'Studio One' },
+      publisherOrganization: { createName: 'Ｓtudio　Ｏne' }
+    })
+
+    const video = query.get(1)
+    assert.equal(video?.maker, 'Studio One')
+    assert.equal(video?.publisher, 'Studio One')
+    assert.ok(video?.maker_organization_id)
+    assert.equal(video?.publisher_organization_id, video?.maker_organization_id)
+    assert.deepEqual(
+      classificationQueryService.listOrganizationOptions().map((option) => ({
+        id: option.id,
+        name: option.mainName,
+        roles: option.roles
+      })),
+      [
+        {
+          id: video?.maker_organization_id,
+          name: 'Studio One',
+          roles: ['maker', 'publisher']
+        }
+      ]
+    )
+  })
+
+  it('rolls back video fields when organization assignment fails', () => {
+    setupDb()
+    const videos = createVideoMaintenanceService()
+    const query = createVideoQueryService()
+
+    assert.throws(
+      () =>
+        videos.edit(1, {
+          title: 'Must not persist',
+          makerOrganization: { createName: '   ' }
+        }),
+      /分类名称不能为空/
+    )
+
+    assert.equal(query.get(1)?.title, 'Application boundary')
+    assert.equal(query.get(1)?.maker_organization_id, null)
+  })
+
   it('creates or appends HTTP resources without scraping and keeps one primary resource', () => {
     setupDb()
     const videos = createVideoMaintenanceService()

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useMatch, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Inbox, SearchX } from 'lucide-react'
-import type { FacetItem } from '@shared/libraryTypes'
+import type { FacetItem, FacetType } from '@shared/libraryTypes'
 import { api, assetUrl } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
@@ -20,16 +20,23 @@ import MediaTileActionButton from '../components/MediaTileActionButton'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import { UI_ICON_SM } from '../components/iconDefaults'
+import OrganizationListPage from './OrganizationListPage'
 
 export default function FacetListPage(): JSX.Element {
   const { type } = useParams()
+  if (type === 'maker' || type === 'publisher') {
+    return <OrganizationListPage role={type} />
+  }
+  return <LegacyFacetListPage facetType={isFacetType(type) ? type : null} />
+}
+
+function LegacyFacetListPage({ facetType }: { facetType: FacetType | null }): JSX.Element {
   const navigate = useNavigate()
   const location = useLocation()
   const toast = useToast()
   const [searchParams, setSearchParams] = useSearchParams()
   const detailOpen = Boolean(useMatch({ path: ROUTE_MATCH.facetDetailOpen, end: false }))
 
-  const facetType = isFacetType(type) ? type : null
   const label = facetType ? FACET_LABEL[facetType] : ''
 
   const urlQ = searchParams.get(LIST_PARAM.q) ?? ''

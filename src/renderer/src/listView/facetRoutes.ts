@@ -1,3 +1,7 @@
+import type { OrganizationRole } from '@shared/classificationTypes'
+import { generatePath, matchPath } from 'react-router-dom'
+import { ROUTE_PATH } from './routePaths'
+
 /** Encode a facet label for a URL path segment (HashRouter-safe). */
 export function encodeFacetValueKey(value: string): string {
   return encodeURIComponent(value)
@@ -27,6 +31,43 @@ export function facetVideoDetailPath(facetType: string, value: string, videoId: 
   return `${facetVideoListPath(facetType, value)}/${videoId}`
 }
 
+export function organizationDetailPath(role: OrganizationRole, organizationId: number): string {
+  return generatePath(ROUTE_PATH.organizationDetail, {
+    type: role,
+    organizationId: String(organizationId)
+  })
+}
+
+export function organizationVideoDetailPath(
+  role: OrganizationRole,
+  organizationId: number,
+  videoId: number
+): string {
+  return `${organizationDetailPath(role, organizationId)}/${videoId}`
+}
+
+export function parseOrganizationPath(pathname: string): {
+  role: OrganizationRole
+  organizationId: number
+  videoId?: number
+  actressId?: number
+} | null {
+  const match =
+    matchPath({ path: ROUTE_PATH.organizationActressStack, end: true }, pathname) ??
+    matchPath({ path: ROUTE_PATH.organizationVideoStack, end: true }, pathname) ??
+    matchPath({ path: ROUTE_PATH.organizationDetail, end: true }, pathname)
+  if (!match) return null
+  const params = match.params as Record<string, string | undefined>
+  if (params.type !== 'maker' && params.type !== 'publisher') return null
+  const organizationId = Number(params.organizationId)
+  const videoId = params.id ? Number(params.id) : undefined
+  const actressId = params.actressId ? Number(params.actressId) : undefined
+  if (!Number.isInteger(organizationId) || organizationId <= 0) return null
+  if (videoId !== undefined && (!Number.isInteger(videoId) || videoId <= 0)) return null
+  if (actressId !== undefined && (!Number.isInteger(actressId) || actressId <= 0)) return null
+  return { role: params.type, organizationId, videoId, actressId }
+}
+
 export function parseFacetVideoPath(pathname: string): {
   facetType: string
   valueKey: string
@@ -48,5 +89,3 @@ export function parseFacetVideoPath(pathname: string): {
     actressId: actressId != null && !Number.isNaN(actressId) ? actressId : undefined
   }
 }
-import { generatePath, matchPath } from 'react-router-dom'
-import { ROUTE_PATH } from './routePaths'

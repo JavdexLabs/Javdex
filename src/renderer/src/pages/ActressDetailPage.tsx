@@ -6,7 +6,12 @@ import {
   actressVideoDetailPath,
   parseActressVideoPath
 } from '../listView/actressRoutes'
-import { facetVideoDetailPath, parseFacetVideoPath } from '../listView/facetRoutes'
+import {
+  facetVideoDetailPath,
+  organizationVideoDetailPath,
+  parseFacetVideoPath,
+  parseOrganizationPath
+} from '../listView/facetRoutes'
 import { libraryVideoDetailPath } from '../listView/libraryRoutes'
 import { playlistVideoDetailPath, parsePlaylistVideoPath } from '../listView/playlistRoutes'
 import { navigateToActressList } from '../listView/listNavigation'
@@ -48,20 +53,46 @@ import type { ActressScrapeField, ActressScrapeUpdateMode } from '@shared/actres
 import { resolveActressDetailDisplayBackgroundPath } from '@shared/detailDisplayBackground'
 import { ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/actressScrapeTypes'
 
+function parentVideoDetailPath(pathname: string, videoId: number): string {
+  const organization = parseOrganizationPath(pathname)
+  if (organization?.videoId != null) {
+    return organizationVideoDetailPath(organization.role, organization.organizationId, videoId)
+  }
+  const facet = parseFacetVideoPath(pathname)
+  if (facet?.videoId != null) {
+    return facetVideoDetailPath(
+      facet.facetType,
+      decodeURIComponent(facet.valueKey),
+      videoId
+    )
+  }
+  const playlist = parsePlaylistVideoPath(pathname)
+  if (playlist?.videoId != null) return playlistVideoDetailPath(playlist.playlistId, videoId)
+  const actress = parseActressVideoPath(pathname)
+  if (actress?.videoId != null) return actressVideoDetailPath(actress.actressId, videoId)
+  return libraryVideoDetailPath(videoId)
+}
+
 export default function ActressDetailPage(): JSX.Element {
   const { id, actressId: actressIdParam } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
   const libraryActressStack = useMatch(ROUTE_MATCH.libraryActressStack)
   const facetActressStack = useMatch(ROUTE_MATCH.facetActressStack)
+  const organizationActressStack = useMatch(ROUTE_MATCH.organizationActressStack)
   const playlistActressStack = useMatch(ROUTE_MATCH.playlistActressStack)
   const actressActressStack = useMatch(ROUTE_MATCH.actressActressStack)
   const actressVideoStack = useMatch({ path: ROUTE_MATCH.actressVideoStack, end: false })
   const fromVideo =
-    libraryActressStack ?? facetActressStack ?? playlistActressStack ?? actressActressStack
+    libraryActressStack ??
+    facetActressStack ??
+    organizationActressStack ??
+    playlistActressStack ??
+    actressActressStack
   const actressVideoPath = parseActressVideoPath(location.pathname)
+  const organizationVideoPath = parseOrganizationPath(location.pathname)
   const fromVideoId = fromVideo
-    ? Number(actressVideoPath?.videoId ?? fromVideo.params.id)
+    ? Number(organizationVideoPath?.videoId ?? actressVideoPath?.videoId ?? fromVideo.params.id)
     : undefined
   const videoStackOpen = !fromVideo && Boolean(actressVideoStack)
   const actressId = Number(actressIdParam ?? id)
@@ -216,22 +247,10 @@ export default function ActressDetailPage(): JSX.Element {
     }
     void invalidateActressLibraryQueries(queryClient)
     if (fromVideoId != null && !Number.isNaN(fromVideoId)) {
-      const facet = parseFacetVideoPath(location.pathname)
-      const playlist = parsePlaylistVideoPath(location.pathname)
-      const actress = parseActressVideoPath(location.pathname)
-      const pathname =
-        facet?.videoId != null
-          ? facetVideoDetailPath(
-              facet.facetType,
-              decodeURIComponent(facet.valueKey),
-              fromVideoId
-            )
-          : playlist?.videoId != null
-            ? playlistVideoDetailPath(playlist.playlistId, fromVideoId)
-            : actress?.videoId != null
-              ? actressVideoDetailPath(actress.actressId, fromVideoId)
-            : libraryVideoDetailPath(fromVideoId)
-      navigate({ pathname, search: location.search })
+      navigate({
+        pathname: parentVideoDetailPath(location.pathname, fromVideoId),
+        search: location.search
+      })
     } else {
       navigateToActressList(navigate, location)
     }
@@ -278,22 +297,10 @@ export default function ActressDetailPage(): JSX.Element {
 
   const handleBack = useCallback((): void => {
     if (fromVideoId != null && !Number.isNaN(fromVideoId)) {
-      const facet = parseFacetVideoPath(location.pathname)
-      const playlist = parsePlaylistVideoPath(location.pathname)
-      const actressRoute = parseActressVideoPath(location.pathname)
-      const pathname =
-        facet?.videoId != null
-          ? facetVideoDetailPath(
-              facet.facetType,
-              decodeURIComponent(facet.valueKey),
-              fromVideoId
-            )
-          : playlist?.videoId != null
-            ? playlistVideoDetailPath(playlist.playlistId, fromVideoId)
-            : actressRoute?.videoId != null
-              ? actressVideoDetailPath(actressRoute.actressId, fromVideoId)
-              : libraryVideoDetailPath(fromVideoId)
-      navigate({ pathname, search: location.search })
+      navigate({
+        pathname: parentVideoDetailPath(location.pathname, fromVideoId),
+        search: location.search
+      })
       return
     }
     navigateToActressList(navigate, location)

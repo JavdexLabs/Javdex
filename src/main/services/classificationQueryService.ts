@@ -1,0 +1,237 @@
+import type {
+  OrganizationDetail,
+  OrganizationLink,
+  OrganizationListItem,
+  OrganizationListQuery,
+  OrganizationOption,
+  OrganizationRole
+} from '@shared/classificationTypes'
+import { normalizeClassificationName } from '@shared/classificationNameNormalization'
+import { getDb } from '../db/database'
+
+const VIDEO_ROLE_COLUMN: Record<OrganizationRole, string> = {
+  maker: 'maker_organization_id',
+  publisher: 'publisher_organization_id'
+}
+
+function requireRole(role: OrganizationRole): OrganizationRole {
+  if (role !== 'maker' && role !== 'publisher') throw new Error('无效的机构角色')
+  return role
+}
+
+function normalizedSearch(search: string | undefined): string {
+  const trimmed = search?.trim()
+  if (!trimmed) return ''
+  return normalizeClassificationName(trimmed)
+}
+
+function searchLikePattern(search: string | undefined): string {
+  const normalized = normalizedSearch(search)
+  return normalized ? `%${normalized.replace(/[\\%_]/g, '\\$&')}%` : ''
+}
+
+export interface ClassificationQueryService {
+  listOrganizations(query: OrganizationListQuery): OrganizationListItem[]
+  getOrganization(id: number, role: OrganizationRole): OrganizationDetail | null
+  listOrganizationOptions(search?: string): OrganizationOption[]
+}
+
+export const classificationQueryService: ClassificationQueryService = {
+  listOrganizations(query): OrganizationListItem[] {
+    const role = requireRole(query.role)
+    const videoColumn = VIDEO_ROLE_COLUMN[role]
+    const search = searchLikePattern(query.search)
+    const sortBy = query.sortBy === 'updated_at' ? 'updated_at' : 'video_count'
+    const sortDir = query.sortDir === 'asc' ? 'ASC' : 'DESC'
+    const order = sortBy === 'updated_at' ? `o.updated_at ${sortDir}` : `video_count ${sortDir}`
+    const rows = getDb()
+      .prepare(
+        `SELECT o.id,
+                o.main_name,
+                o.image_path,
+                o.updated_at,
+                (SELECT COUNT(*) FROM videos v WHERE v.${videoColumn} = o.id) AS video_count,
+                (
+                  SELECT v.cover_path
+                  FROM videos v
+                  WHERE v.${videoColumn} = o.id
+                    AND v.cover_path IS NOT NULL
+                  ORDER BY v.release_date DESC, v.add_time DESC, v.id DESC
+                  LIMIT 1
+                ) AS fallback_cover_path
+         FROM organizations o
+         WHERE EXISTS (
+                 SELECT 1 FROM organization_roles r
+                 WHERE r.organization_id = o.id AND r.role = ?
+               )
+           AND (
+             ? = '' OR EXISTS (
+               SELECT 1 FROM organization_names n
+               WHERE n.organization_id = o.id
+                 AND n.normalized_name LIKE ? ESCAPE '\\'
+             )
+           )
+         ORDER BY ${order}, o.id ASC`
+      )
+      .all(role, search, search) as Array<{
+      id: number
+      main_name: string
+      image_path: string | null
+      updated_at: string
+      video_count: number
+      fallback_cover_path: string | null
+    }>
+    return rows.map((row) => ({
+      id: row.id,
+      mainName: row.main_name,
+      imagePath: row.image_path,
+      fallbackCoverPath: row.fallback_cover_path,
+      videoCount: row.video_count,
+      updatedAt: row.updated_at
+    }))
+  },
+
+  getOrganization(id, role): OrganizationDetail | null {
+    requireRole(role)
+    const videoColumn = VIDEO_ROLE_COLUMN[role]
+    const row = getDb()
+      .prepare(
+        `SELECT o.id,
+                o.main_name,
+                o.image_path,
+                o.summary,
+                o.country_region,
+                o.founded_year,
+                o.ended_year,
+                o.status,
+                o.updated_at,
+                parent.id AS parent_id,
+                parent.main_name AS parent_name,
+                (SELECT COUNT(*) FROM videos v WHERE v.${videoColumn} = o.id) AS video_count,
+                (
+                  SELECT MIN(CAST(substr(v.release_date, 1, 4) AS INTEGER))
+                  FROM videos v
+                  WHERE v.${videoColumn} = o.id
+                    AND v.release_date GLOB '[0-9][0-9][0-9][0-9]-*'
+                ) AS release_year_start,
+                (
+                  SELECT MAX(CAST(substr(v.release_date, 1, 4) AS INTEGER))
+                  FROM videos v
+                  WHERE v.${videoColumn} = o.id
+                    AND v.release_date GLOB '[0-9][0-9][0-9][0-9]-*'
+                ) AS release_year_end,
+                (
+                  SELECT v.cover_path
+                  FROM videos v
+                  WHERE v.${videoColumn} = o.id
+                    AND v.cover_path IS NOT NULL
+                  ORDER BY v.release_date DESC, v.add_time DESC, v.id DESC
+                  LIMIT 1
+                ) AS fallback_cover_path
+         FROM organizations o
+         LEFT JOIN organizations parent ON parent.id = o.parent_organization_id
+         WHERE o.id = ?
+           AND EXISTS (
+             SELECT 1 FROM organization_roles r
+             WHERE r.organization_id = o.id AND r.role = ?
+           )`
+      )
+      .get(id, role) as
+      | {
+          id: number
+          main_name: string
+          image_path: string | null
+          summary: string | null
+          country_region: string | null
+          founded_year: number | null
+          ended_year: number | null
+          status: OrganizationDetail['status']
+          updated_at: string
+          parent_id: number | null
+          parent_name: string | null
+          video_count: number
+          release_year_start: number | null
+          release_year_end: number | null
+          fallback_cover_path: string | null
+        }
+      | undefined
+    if (!row) return null
+
+    const aliases = getDb()
+      .prepare(
+        `SELECT name FROM organization_names
+         WHERE organization_id = ? AND type = 'alias'
+         ORDER BY position, id`
+      )
+      .all(id) as Array<{ name: string }>
+    const links = getDb()
+      .prepare(
+        `SELECT label, url, position FROM organization_links
+         WHERE organization_id = ? ORDER BY position, id`
+      )
+      .all(id) as OrganizationLink[]
+    const roles = getDb()
+      .prepare(
+        `SELECT role FROM organization_roles
+         WHERE organization_id = ? ORDER BY role`
+      )
+      .all(id) as Array<{ role: OrganizationRole }>
+
+    return {
+      id: row.id,
+      mainName: row.main_name,
+      imagePath: row.image_path,
+      fallbackCoverPath: row.fallback_cover_path,
+      videoCount: row.video_count,
+      updatedAt: row.updated_at,
+      summary: row.summary,
+      countryRegion: row.country_region,
+      foundedYear: row.founded_year,
+      endedYear: row.ended_year,
+      status: row.status,
+      parent:
+        row.parent_id == null || row.parent_name == null
+          ? null
+          : { id: row.parent_id, mainName: row.parent_name },
+      aliases: aliases.map((alias) => alias.name),
+      links,
+      roles: roles.map((item) => item.role),
+      releaseYearStart: row.release_year_start,
+      releaseYearEnd: row.release_year_end
+    }
+  },
+
+  listOrganizationOptions(search): OrganizationOption[] {
+    const normalized = searchLikePattern(search)
+    const rows = getDb()
+      .prepare(
+        `SELECT o.id, o.main_name
+         FROM organizations o
+         WHERE ? = '' OR EXISTS (
+           SELECT 1 FROM organization_names n
+           WHERE n.organization_id = o.id
+             AND n.normalized_name LIKE ? ESCAPE '\\'
+         )
+         ORDER BY o.main_name, o.id
+         LIMIT 100`
+      )
+      .all(normalized, normalized) as Array<{ id: number; main_name: string }>
+    const readAliases = getDb().prepare(
+      `SELECT name FROM organization_names
+       WHERE organization_id = ? AND type = 'alias'
+       ORDER BY position, id`
+    )
+    const readRoles = getDb().prepare(
+      `SELECT role FROM organization_roles
+       WHERE organization_id = ? ORDER BY role`
+    )
+    return rows.map((row) => ({
+      id: row.id,
+      mainName: row.main_name,
+      aliases: (readAliases.all(row.id) as Array<{ name: string }>).map((item) => item.name),
+      roles: (readRoles.all(row.id) as Array<{ role: OrganizationRole }>).map(
+        (item) => item.role
+      )
+    }))
+  }
+}

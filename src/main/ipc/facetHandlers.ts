@@ -3,6 +3,37 @@ import type { FacetItem, FacetType } from '@shared/libraryTypes'
 import { deleteFacetEntry, listFacet } from '../db/facetRepo'
 import { listTags, listManualTags } from '../db/tagRepo'
 import { appCommandAdapter } from './appContractAdapter'
+import { classificationQueryService } from '../services/classificationQueryService'
+import { classificationMaintenanceService } from '../services/classificationMaintenanceService'
+
+interface OrganizationHandlerDependencies {
+  queryService: typeof classificationQueryService
+  maintenanceService: typeof classificationMaintenanceService
+}
+
+export function registerOrganizationHandlers(
+  adapter: typeof appCommandAdapter = appCommandAdapter,
+  dependencies: OrganizationHandlerDependencies = {
+    queryService: classificationQueryService,
+    maintenanceService: classificationMaintenanceService
+  }
+): void {
+  adapter.register(IPC.ORGANIZATION_LIST, (query) =>
+    dependencies.queryService.listOrganizations(query)
+  )
+  adapter.register(IPC.ORGANIZATION_GET, (id, role) =>
+    dependencies.queryService.getOrganization(id, role)
+  )
+  adapter.register(IPC.ORGANIZATION_OPTIONS, (search) =>
+    dependencies.queryService.listOrganizationOptions(search)
+  )
+  adapter.register(IPC.ORGANIZATION_CREATE, (input) =>
+    dependencies.maintenanceService.createOrganization(input)
+  )
+  adapter.register(IPC.ORGANIZATION_UPDATE, (id, input) =>
+    dependencies.maintenanceService.updateOrganization(id, input)
+  )
+}
 
 export function registerFacetHandlers(): void {
   appCommandAdapter.register(
@@ -21,4 +52,6 @@ export function registerFacetHandlers(): void {
     deleteFacetEntry(type, value)
     return true
   })
+
+  registerOrganizationHandlers()
 }

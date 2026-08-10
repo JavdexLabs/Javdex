@@ -2,6 +2,7 @@ import type { ActressAvatarFilter, ActressGenderFilter, ActressListStatusFilter,
 import type { ScrapedStatus, SortDir } from '@shared/commonTypes'
 import type { VideoQuery, VideoResourceFilter } from '@shared/videoTypes'
 import { ACTRESS_LIST_DEFAULTS } from '@shared/actressTypes'
+import type { ClassificationListSortBy } from '@shared/classificationTypes'
 
 /** Shared list URL keys (library, actresses, facet list). */
 export const LIST_PARAM = {
@@ -40,6 +41,23 @@ export const ACTRESS_DEFAULT_STATUS: ActressListStatusFilter = 'all'
 
 /** All avatar states are the default and are never written to the URL. */
 export const ACTRESS_DEFAULT_AVATAR: ActressAvatarFilter = 'all'
+
+export const CLASSIFICATION_LIST_DEFAULTS = {
+  sortBy: 'video_count' as ClassificationListSortBy,
+  sortDir: 'desc' as SortDir
+}
+
+export function parseClassificationSort(
+  rawSort: string | null,
+  rawDir: string | null
+): { sortBy: ClassificationListSortBy; sortDir: SortDir } {
+  const sortBy =
+    rawSort === 'video_count' || rawSort === 'updated_at'
+      ? rawSort
+      : CLASSIFICATION_LIST_DEFAULTS.sortBy
+  const sortDir = rawDir === 'asc' || rawDir === 'desc' ? rawDir : CLASSIFICATION_LIST_DEFAULTS.sortDir
+  return { sortBy, sortDir }
+}
 
 export function parseActressStatus(raw: string | null): ActressListStatusFilter {
   if (raw === 'success' || raw === 'unscraped' || raw === 'failed') return raw
@@ -195,6 +213,19 @@ export function facetListQueryHash(type: string, params: URLSearchParams): strin
   return hashListQuery({
     type,
     q: (params.get(LIST_PARAM.q) ?? '').trim()
+  })
+}
+
+export function classificationListQueryHash(type: string, params: URLSearchParams): string {
+  const { sortBy, sortDir } = parseClassificationSort(
+    params.get(LIST_PARAM.sort),
+    params.get(LIST_PARAM.dir)
+  )
+  return hashListQuery({
+    type,
+    q: (params.get(LIST_PARAM.q) ?? '').trim(),
+    sort: sortBy,
+    dir: sortDir
   })
 }
 

@@ -8,6 +8,8 @@ import { EditFormField, EditFormSection } from './FormPrimitives'
 import ImageImportField from './ImageImportField'
 import Modal from './Modal'
 import { useTheme } from './ThemeProvider'
+import OrganizationPickerField from './OrganizationPickerField'
+import type { OrganizationAssignmentInput } from '@shared/classificationTypes'
 
 interface Props {
   video: VideoDetail
@@ -30,6 +32,15 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
   const [director, setDirector] = useState(video.director ?? '')
   const [maker, setMaker] = useState(video.maker ?? '')
   const [publisher, setPublisher] = useState(video.publisher ?? '')
+  const [makerOrganization, setMakerOrganization] = useState<OrganizationAssignmentInput | null>(
+    video.maker_organization_id ? { organizationId: video.maker_organization_id } : null
+  )
+  const [publisherOrganization, setPublisherOrganization] =
+    useState<OrganizationAssignmentInput | null>(
+      video.publisher_organization_id
+        ? { organizationId: video.publisher_organization_id }
+        : null
+    )
   const [series, setSeries] = useState(video.series ?? '')
   const [summary, setSummary] = useState(video.summary ?? '')
   const [tags, setTags] = useState(
@@ -66,8 +77,8 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
       await onSave({
         title: title.trim() || null,
         release_date: releaseDate.trim() || null,
-        maker: maker.trim() || null,
-        publisher: publisher.trim() || null,
+        makerOrganization,
+        publisherOrganization,
         series: series.trim() || null,
         director: director.trim() || null,
         summary: summary.trim() || null,
@@ -169,20 +180,22 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
         <EditFormSection title="出品信息">
           <div className="entity-edit-fields">
             <EditFormField label="制作商" htmlFor="video-edit-maker">
-              <input
+              <OrganizationPickerField
                 id="video-edit-maker"
-                className="text-input"
+                role="maker"
                 value={maker}
-                onChange={(e) => setMaker(e.target.value)}
+                onChange={setMaker}
+                onAssignmentChange={setMakerOrganization}
               />
             </EditFormField>
 
             <EditFormField label="发行商" htmlFor="video-edit-publisher">
-              <input
+              <OrganizationPickerField
                 id="video-edit-publisher"
-                className="text-input"
+                role="publisher"
                 value={publisher}
-                onChange={(e) => setPublisher(e.target.value)}
+                onChange={setPublisher}
+                onAssignmentChange={setPublisherOrganization}
               />
             </EditFormField>
 

@@ -129,7 +129,7 @@ export default function AppUpdatePanel(): JSX.Element {
                         href={href}
                         onClick={(event) => {
                           event.preventDefault()
-                          if (href) void api.appUpdate.openExternalLink(href)
+                          if (href) void api.externalLinks.open(href)
                         }}
                       >
                         {children}

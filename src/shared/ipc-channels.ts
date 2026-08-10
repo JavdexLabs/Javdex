@@ -13,12 +13,14 @@ export const IPC = {
   SETTINGS_PROXY_TEST: 'settings:proxyTest',
   SETTINGS_OVERVIEW_STATS: 'settings:overviewStats',
 
+  // External links
+  EXTERNAL_LINK_OPEN: 'externalLink:open',
+
   // Application release checks
   APP_UPDATE_GET_STATE: 'appUpdate:getState',
   APP_UPDATE_CHECK: 'appUpdate:check',
   APP_UPDATE_OPEN_RELEASE: 'appUpdate:openRelease',
   APP_UPDATE_OPEN_PROJECT_PAGE: 'appUpdate:openProjectPage',
-  APP_UPDATE_OPEN_EXTERNAL_LINK: 'appUpdate:openExternalLink',
   APP_UPDATE_IGNORE_VERSION: 'appUpdate:ignoreVersion',
   APP_UPDATE_STATE_CHANGED: 'appUpdate:stateChanged', // main -> renderer event
 
@@ -94,6 +96,13 @@ export const IPC = {
   // Facets (studio / series / director)
   FACET_LIST: 'facet:list',
   FACET_DELETE: 'facet:delete',
+
+  // Classification entities
+  ORGANIZATION_LIST: 'organization:list',
+  ORGANIZATION_GET: 'organization:get',
+  ORGANIZATION_OPTIONS: 'organization:options',
+  ORGANIZATION_CREATE: 'organization:create',
+  ORGANIZATION_UPDATE: 'organization:update',
 
   // Scraping
   SCRAPE_ONE: 'scrape:one',

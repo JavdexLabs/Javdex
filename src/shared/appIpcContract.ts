@@ -42,6 +42,15 @@ import type {
   IpcEventPayload
 } from './typedIpcContract'
 import type { ProjectPage, UpdateCheckState } from './updateTypes'
+import type {
+  OrganizationCreateInput,
+  OrganizationDetail,
+  OrganizationListItem,
+  OrganizationListQuery,
+  OrganizationOption,
+  OrganizationRole,
+  OrganizationUpdateInput
+} from './classificationTypes'
 
 export interface RemoteImagePreviewResult {
   mimeType: string
@@ -66,7 +75,7 @@ export interface AppIpcContract {
   [IPC.APP_UPDATE_CHECK]: { args: []; result: UpdateCheckState }
   [IPC.APP_UPDATE_OPEN_RELEASE]: { args: []; result: boolean }
   [IPC.APP_UPDATE_OPEN_PROJECT_PAGE]: { args: [page: ProjectPage]; result: boolean }
-  [IPC.APP_UPDATE_OPEN_EXTERNAL_LINK]: { args: [url: string]; result: boolean }
+  [IPC.EXTERNAL_LINK_OPEN]: { args: [url: string]; result: boolean }
   [IPC.APP_UPDATE_IGNORE_VERSION]: { args: [version: string]; result: UpdateCheckState }
 
   [IPC.SCAN_RUN]: { args: [folders?: string[]]; result: ScanResult }
@@ -90,6 +99,23 @@ export interface AppIpcContract {
   [IPC.TAG_LIST_MANUAL]: { args: []; result: TagListItem[] }
   [IPC.FACET_LIST]: { args: [type: FacetType]; result: FacetItem[] }
   [IPC.FACET_DELETE]: { args: [type: FacetType, value: string]; result: boolean }
+  [IPC.ORGANIZATION_LIST]: {
+    args: [query: OrganizationListQuery]
+    result: OrganizationListItem[]
+  }
+  [IPC.ORGANIZATION_GET]: {
+    args: [id: number, role: OrganizationRole]
+    result: OrganizationDetail | null
+  }
+  [IPC.ORGANIZATION_OPTIONS]: {
+    args: [search?: string]
+    result: OrganizationOption[]
+  }
+  [IPC.ORGANIZATION_CREATE]: { args: [input: OrganizationCreateInput]; result: number }
+  [IPC.ORGANIZATION_UPDATE]: {
+    args: [id: number, input: OrganizationUpdateInput]
+    result: boolean
+  }
 
   [IPC.PLUGIN_DEV_AGENT_START]: {
     args: [input: PluginDevAgentStartInput]

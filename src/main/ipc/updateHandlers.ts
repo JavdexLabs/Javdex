@@ -3,11 +3,11 @@ import {
   checkForLatestRelease,
   getUpdateCheckState,
   ignoreUpdateVersion,
-  openExternalReleaseLink,
   openProjectPage,
   openReleasePage,
   onUpdateCheckStateChanged
 } from '../services/appReleaseService'
+import { openExternalLink } from '../services/externalLinkService'
 import type { ProjectPage } from '@shared/updateTypes'
 import type { IpcContext } from './shared'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
@@ -19,9 +19,7 @@ export function registerUpdateHandlers(ctx: IpcContext): void {
   appCommandAdapter.register(IPC.APP_UPDATE_OPEN_PROJECT_PAGE, (page) =>
     openProjectPage(page)
   )
-  appCommandAdapter.register(IPC.APP_UPDATE_OPEN_EXTERNAL_LINK, (url) =>
-    openExternalReleaseLink(url)
-  )
+  appCommandAdapter.register(IPC.EXTERNAL_LINK_OPEN, (url) => openExternalLink(url))
   appCommandAdapter.register(IPC.APP_UPDATE_IGNORE_VERSION, (version) =>
     ignoreUpdateVersion(version)
   )

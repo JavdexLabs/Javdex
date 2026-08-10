@@ -44,6 +44,8 @@ import { mediaAssetStore } from './mediaAssetStore'
 import { fetchRemoteImageBuffer } from './remoteImageFetch'
 import { maintenanceTaskGate } from './maintenanceTaskGate'
 import { selectPrimaryVideoResourceCandidate } from './videoResourcePromotion'
+import { classificationMaintenanceService } from './classificationMaintenanceService'
+import { getDb } from '../db/database'
 
 export interface VideoMaintenanceService {
   update(id: number, fields: Partial<Video>): boolean
@@ -109,6 +111,7 @@ interface VideoMaintenanceServiceDependencies {
   fileExists: (path: string) => boolean
   unlinkSync: (path: string) => void
   withResourceMaintenance: <T>(work: () => T) => T
+  assignVideoOrganization: typeof classificationMaintenanceService.assignVideoOrganization
 }
 
 export function createVideoMaintenanceService(
@@ -161,6 +164,8 @@ export function createVideoMaintenanceService(
   const withResourceMaintenance =
     dependencies.withResourceMaintenance ??
     (<T>(work: () => T): T => maintenanceTaskGate.runSync('resource-maintenance', work))
+  const assignVideoOrganization =
+    dependencies.assignVideoOrganization ?? classificationMaintenanceService.assignVideoOrganization
 
   const deleteLocalFile = (filePath: string): void => {
     if (!fileExists(filePath)) return
@@ -232,7 +237,16 @@ export function createVideoMaintenanceService(
         const coverRelPath = input.coverSourcePath
           ? importCover(video.code, input.coverSourcePath)
           : undefined
-        const result = writeVideoRecord(id, input, coverRelPath)
+        let result: { obsoletePaths: string[] } = { obsoletePaths: [] }
+        getDb().transaction(() => {
+          result = writeVideoRecord(id, input, coverRelPath)
+          if ('makerOrganization' in input) {
+            assignVideoOrganization(id, 'maker', input.makerOrganization ?? null)
+          }
+          if ('publisherOrganization' in input) {
+            assignVideoOrganization(id, 'publisher', input.publisherOrganization ?? null)
+          }
+        })()
         for (const assetPath of result.obsoletePaths) {
           deleteBestEffort(assetPath)
         }

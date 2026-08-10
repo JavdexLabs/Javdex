@@ -68,6 +68,12 @@ import type { ActressNameConflictGroup, ActressConflictReviewSummary, InspectAct
 import type { SortDir } from '../shared/commonTypes'
 import type { PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoMembership } from '../shared/playlistTypes'
 import type { PluginDevAgentInput, PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentSessionResult, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevDryRunResult, PluginDevInstallInput, PluginDevVerificationReport, PluginDevVerifyInput } from '../shared/pluginDevTypes'
+import type {
+  OrganizationCreateInput,
+  OrganizationListQuery,
+  OrganizationRole,
+  OrganizationUpdateInput
+} from '../shared/classificationTypes'
 
 /** Helper that unwraps the IpcResponse envelope, throwing on failure. */
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
@@ -123,13 +129,15 @@ function onScrapeEvent<Channel extends ScrapeIpcEventChannel>(
 }
 
 const api = {
+  externalLinks: {
+    open: (url: string) => invokeApp(IPC.EXTERNAL_LINK_OPEN, url)
+  },
   appUpdate: {
     getState: () => invokeApp(IPC.APP_UPDATE_GET_STATE),
     check: () => invokeApp(IPC.APP_UPDATE_CHECK),
     openRelease: () => invokeApp(IPC.APP_UPDATE_OPEN_RELEASE),
     openProjectPage: (page: 'project' | 'releases' | 'license') =>
       invokeApp(IPC.APP_UPDATE_OPEN_PROJECT_PAGE, page),
-    openExternalLink: (url: string) => invokeApp(IPC.APP_UPDATE_OPEN_EXTERNAL_LINK, url),
     ignoreVersion: (version: string) =>
       invokeApp(IPC.APP_UPDATE_IGNORE_VERSION, version),
     onStateChanged: (cb: (state: UpdateCheckState) => void) =>
@@ -255,6 +263,14 @@ const api = {
   facets: {
     list: (type: FacetType) => invokeApp(IPC.FACET_LIST, type),
     remove: (type: FacetType, value: string) => invokeApp(IPC.FACET_DELETE, type, value)
+  },
+  organizations: {
+    list: (query: OrganizationListQuery) => invokeApp(IPC.ORGANIZATION_LIST, query),
+    get: (id: number, role: OrganizationRole) => invokeApp(IPC.ORGANIZATION_GET, id, role),
+    options: (search?: string) => invokeApp(IPC.ORGANIZATION_OPTIONS, search),
+    create: (input: OrganizationCreateInput) => invokeApp(IPC.ORGANIZATION_CREATE, input),
+    update: (id: number, input: OrganizationUpdateInput) =>
+      invokeApp(IPC.ORGANIZATION_UPDATE, id, input)
   },
   scrape: {
     one: (

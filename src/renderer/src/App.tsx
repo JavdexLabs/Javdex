@@ -9,6 +9,7 @@ import DetailPage from './pages/DetailPage'
 import ActressDetailPage from './pages/ActressDetailPage'
 import ActressConflictReviewPage from './pages/ActressConflictReviewPage'
 import FacetDetailPage from './pages/FacetDetailPage'
+import OrganizationDetailPage from './pages/OrganizationDetailPage'
 import PlaylistShell from './components/PlaylistShell'
 import PlaylistDetailPage from './pages/PlaylistDetailPage'
 import SettingsPage from './pages/SettingsPage'
@@ -76,6 +77,17 @@ function AppContent(): JSX.Element {
                       <Route index element={null} />
                       <Route path={ROUTE_SEGMENT.facetDetail} element={<FacetDetailPage />}>
                         <Route path={ROUTE_SEGMENT.facetVideo} element={<DetailPage />}>
+                          <Route
+                            path={ROUTE_SEGMENT.detailActress}
+                            element={<ActressDetailPage />}
+                          />
+                        </Route>
+                      </Route>
+                      <Route
+                        path={ROUTE_SEGMENT.organizationDetail}
+                        element={<OrganizationDetailPage />}
+                      >
+                        <Route path={ROUTE_SEGMENT.organizationVideo} element={<DetailPage />}>
                           <Route
                             path={ROUTE_SEGMENT.detailActress}
                             element={<ActressDetailPage />}

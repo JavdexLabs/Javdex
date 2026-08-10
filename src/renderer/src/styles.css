@@ -142,6 +142,15 @@
   --radius-md: 8px;
   --radius-lg: 10px;
   --radius-overlay: 12px;
+  --radius-pill: 999px;
+  --organization-profile-media-w: 148px;
+  --organization-profile-media-w-compact: 96px;
+  --organization-profile-pad: 16px;
+  --organization-profile-gap: 18px;
+  --organization-section-gap: 14px;
+  --organization-inline-gap: 6px;
+  --organization-meta-gap: 12px;
+  --organization-link-label-min: 110px;
   --focus-outline: 2px solid var(--accent);
   --focus-ring: 0 0 0 3px var(--accent-soft);
   --privacy-glass-background: color-mix(in srgb, var(--surface-base) 42%, transparent);
@@ -5914,6 +5923,179 @@ button.tag-chip--custom-pick {
   padding: 0 12px 11px;
   font-size: 12px;
   color: var(--text-2);
+}
+
+.organization-detail-page {
+  min-height: 0;
+}
+
+.organization-detail-scroll-inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--organization-section-gap);
+}
+
+.organization-profile {
+  display: grid;
+  grid-template-columns: var(--organization-profile-media-w) minmax(0, 1fr);
+  gap: var(--organization-profile-gap);
+  padding: var(--organization-profile-pad);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.organization-profile-image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--organization-profile-media-w);
+  aspect-ratio: 1.49 / 1;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--thumb-gradient-start), var(--thumb-gradient-end));
+  color: var(--text-muted);
+}
+
+.organization-profile-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.organization-profile-main {
+  min-width: 0;
+}
+
+.organization-profile-kicker {
+  margin-bottom: 3px;
+  color: var(--text-accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.organization-profile h1 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 22px;
+  line-height: 1.25;
+}
+
+.organization-profile-meta,
+.organization-aliases,
+.organization-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--organization-inline-gap) var(--organization-meta-gap);
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.organization-profile-meta > span:not(:last-child)::after {
+  content: '·';
+  margin-left: var(--organization-meta-gap);
+  color: var(--text-muted);
+}
+
+.organization-aliases span {
+  padding: 2px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--surface-control);
+}
+
+.organization-summary {
+  max-width: 76ch;
+  margin: 10px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.organization-summary--empty {
+  color: var(--text-muted);
+}
+
+.organization-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  color: var(--text-accent);
+}
+
+.organization-video-heading {
+  padding-block-start: var(--organization-section-gap);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.organization-link-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--organization-inline-gap);
+}
+
+.organization-parent-picker {
+  display: grid;
+  gap: var(--organization-inline-gap);
+}
+
+.organization-link-editor-row {
+  display: grid;
+  grid-template-columns: minmax(var(--organization-link-label-min), 0.35fr) minmax(0, 1fr) auto;
+  gap: var(--organization-inline-gap);
+  align-items: center;
+}
+
+.organization-link-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.organization-link-action {
+  width: var(--control-h-sm);
+  min-width: var(--control-h-sm);
+  min-height: var(--control-h-sm);
+  padding-inline: 0;
+}
+
+.organization-link-add {
+  align-self: flex-start;
+}
+
+.organization-load-more {
+  align-self: center;
+}
+
+@media (max-width: 680px) {
+  .organization-profile {
+    grid-template-columns: var(--organization-profile-media-w-compact) minmax(0, 1fr);
+    gap: var(--organization-meta-gap);
+  }
+
+  .organization-profile-image {
+    width: var(--organization-profile-media-w-compact);
+  }
+
+  .organization-link-editor-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .organization-link-editor-row > :nth-child(2) {
+    grid-column: 1 / 2;
+  }
+
+  .organization-link-editor-row > :last-child {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
 }
 
 .actress-row-avatars {

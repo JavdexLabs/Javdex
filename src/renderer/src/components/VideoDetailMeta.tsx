@@ -3,6 +3,7 @@ import { Ellipsis, Play } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import type { FacetType } from '@shared/libraryTypes'
 import type { ScrapedStatus } from '@shared/commonTypes'
+import type { OrganizationRole } from '@shared/classificationTypes'
 import type {
   VideoDetail,
   VideoResourceDetail
@@ -11,14 +12,25 @@ import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS } from '@shared/videoScrapeTypes'
 import MetaLink from './MetaLink'
 import IconButton from './IconButton'
 import { UI_ICON } from './iconDefaults'
-import { navigateToFacetDetail } from '../listView/listNavigation'
+import {
+  navigateToFacetDetail,
+  navigateToOrganizationDetail
+} from '../listView/listNavigation'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 import { VIDEO_RESOURCE_KIND_LABELS } from './videoResourcePresentation'
 
-type PrimaryItem =
+export type VideoPrimaryMetaItem =
   | { key: string; label: string; type: 'text'; value: string }
   | { key: string; label: string; type: 'facet'; facet: FacetType; value: string }
+  | {
+      key: string
+      label: string
+      type: 'organization'
+      role: OrganizationRole
+      organizationId: number
+      value: string
+    }
 
 type SecondaryItem =
   | { key: string; label: string; type: 'text'; value: string }
@@ -65,8 +77,8 @@ export function getVideoScrapeStatusLabel(status: ScrapedStatus): string {
   return VIDEO_BATCH_SCRAPE_STATUS_OPTIONS.find((option) => option.id === status)?.label ?? '未知'
 }
 
-function buildPrimaryItems(video: VideoDetail): PrimaryItem[] {
-  const items: PrimaryItem[] = []
+export function buildVideoPrimaryMetaItems(video: VideoDetail): VideoPrimaryMetaItem[] {
+  const items: VideoPrimaryMetaItem[] = []
 
   if (!isBlank(video.release_date)) {
     items.push({ key: 'release_date', label: '发行日期', type: 'text', value: video.release_date!.trim() })
@@ -81,16 +93,38 @@ function buildPrimaryItems(video: VideoDetail): PrimaryItem[] {
     })
   }
   if (!isBlank(video.maker)) {
-    items.push({ key: 'maker', label: '制作商', type: 'facet', facet: 'maker', value: video.maker!.trim() })
+    items.push(
+      video.maker_organization_id == null
+        ? { key: 'maker', label: '制作商', type: 'facet', facet: 'maker', value: video.maker!.trim() }
+        : {
+            key: 'maker',
+            label: '制作商',
+            type: 'organization',
+            role: 'maker',
+            organizationId: video.maker_organization_id,
+            value: video.maker!.trim()
+          }
+    )
   }
   if (!isBlank(video.publisher)) {
-    items.push({
-      key: 'publisher',
-      label: '发行商',
-      type: 'facet',
-      facet: 'publisher',
-      value: video.publisher!.trim()
-    })
+    items.push(
+      video.publisher_organization_id == null
+        ? {
+            key: 'publisher',
+            label: '发行商',
+            type: 'facet',
+            facet: 'publisher',
+            value: video.publisher!.trim()
+          }
+        : {
+            key: 'publisher',
+            label: '发行商',
+            type: 'organization',
+            role: 'publisher',
+            organizationId: video.publisher_organization_id,
+            value: video.publisher!.trim()
+          }
+    )
   }
   if (!isBlank(video.series)) {
     items.push({ key: 'series', label: '系列', type: 'facet', facet: 'series', value: video.series!.trim() })
@@ -456,7 +490,7 @@ function VideoLinkResourceRow({
 export function VideoDetailPrimaryMeta({ video }: { video: VideoDetail }): JSX.Element | null {
   const navigate = useNavigate()
   const location = useLocation()
-  const items = buildPrimaryItems(video)
+  const items = buildVideoPrimaryMetaItems(video)
   if (items.length === 0) return null
 
   return (
@@ -468,6 +502,19 @@ export function VideoDetailPrimaryMeta({ video }: { video: VideoDetail }): JSX.E
             {item.type === 'facet' ? (
               <MetaLink
                 onClick={() => navigateToFacetDetail(navigate, location, item.facet, item.value)}
+              >
+                {item.value}
+              </MetaLink>
+            ) : item.type === 'organization' ? (
+              <MetaLink
+                onClick={() =>
+                  navigateToOrganizationDetail(
+                    navigate,
+                    location,
+                    item.role,
+                    item.organizationId
+                  )
+                }
               >
                 {item.value}
               </MetaLink>

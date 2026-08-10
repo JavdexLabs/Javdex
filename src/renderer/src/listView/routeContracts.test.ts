@@ -12,6 +12,9 @@ import {
   facetListPath,
   facetVideoDetailPath,
   facetVideoListPath,
+  organizationDetailPath,
+  organizationVideoDetailPath,
+  parseOrganizationPath,
   parseFacetVideoPath
 } from './facetRoutes'
 import { libraryVideoActressPath, libraryVideoDetailPath, parseLibraryVideoPath } from './libraryRoutes'
@@ -19,7 +22,11 @@ import {
   navigateToActressConflicts,
   navigateToActressDetail,
   navigateToActressList,
-  navigateToFacetDetail
+  navigateToActressFromVideoDetail,
+  navigateBackFromVideoDetail,
+  navigateToFacetDetail,
+  navigateToOrganizationDetail,
+  navigateToVideoDetail
 } from './listNavigation'
 import {
   actressQueryHash,
@@ -28,6 +35,8 @@ import {
   LIST_PARAM,
   parseActressAvatar,
   parseActressStatus,
+  classificationListQueryHash,
+  parseClassificationSort,
   patchSearchParams
 } from './listQueryParams'
 import {
@@ -87,12 +96,45 @@ describe('route builders and parsers', () => {
       videoId: 5,
       actressId: 7
     })
+
+    assert.equal(organizationDetailPath('maker', 12), '/facet/maker/o/12')
+    assert.equal(organizationVideoDetailPath('publisher', 12, 5), '/facet/publisher/o/12/5')
+    assert.deepEqual(parseOrganizationPath('/facet/publisher/o/12/5/actress/7'), {
+      role: 'publisher',
+      organizationId: 12,
+      videoId: 5,
+      actressId: 7
+    })
   })
 
   it('rejects malformed detail ids', () => {
     assert.equal(parseLibraryVideoPath('/detail/not-a-number'), null)
     assert.equal(parseActressVideoPath('/actresses/x'), null)
     assert.equal(parsePlaylistVideoPath('/playlists/x'), null)
+  })
+})
+
+describe('classification list query contract', () => {
+  it('accepts only video count and update time sorting with video count descending by default', () => {
+    assert.deepEqual(parseClassificationSort(null, null), {
+      sortBy: 'video_count',
+      sortDir: 'desc'
+    })
+    assert.deepEqual(parseClassificationSort('updated_at', 'asc'), {
+      sortBy: 'updated_at',
+      sortDir: 'asc'
+    })
+    assert.deepEqual(parseClassificationSort('name', 'asc'), {
+      sortBy: 'video_count',
+      sortDir: 'asc'
+    })
+  })
+
+  it('includes organization search and sorting in the shareable query identity', () => {
+    assert.equal(
+      classificationListQueryHash('maker', new URLSearchParams('q=studio&sort=updated_at&dir=asc')),
+      'dir=asc&q=studio&sort=updated_at&type=maker'
+    )
   })
 })
 
@@ -231,6 +273,10 @@ describe('primary navigation memory', () => {
     rememberPrimaryListLocation('/detail/42', '?q=hero&status=1')
     rememberPrimaryListLocation('/actresses/8', '?q=sara&gender=female')
     rememberPrimaryListLocation('/facet/director/v/Test', '?q=miike&sort=rating')
+    rememberPrimaryListLocation(
+      '/facet/maker/o/12',
+      '?q=studio&sort=updated_at&dir=asc&status=1'
+    )
 
     assert.deepEqual(primaryNavigationTarget('/'), {
       pathname: '/',
@@ -243,6 +289,10 @@ describe('primary navigation memory', () => {
     assert.deepEqual(primaryNavigationTarget('/facet/director'), {
       pathname: '/facet/director',
       search: '?q=miike'
+    })
+    assert.deepEqual(primaryNavigationTarget('/facet/maker'), {
+      pathname: '/facet/maker',
+      search: '?q=studio&sort=updated_at&dir=asc'
     })
     assert.equal(primaryListRoot('/settings/overview/status'), null)
   })
@@ -304,6 +354,63 @@ describe('primary navigation memory', () => {
 })
 
 describe('navigation helpers', () => {
+  it('opens an organization by stable id while preserving its role-list query', () => {
+    let destination: unknown
+    const navigate = ((to: unknown) => {
+      destination = to
+    }) as NavigateFunction
+    const location = {
+      pathname: '/facet/maker',
+      search: '?q=studio&sort=updated_at&dir=asc',
+      hash: '',
+      state: null,
+      key: 'test'
+    } as Location
+
+    navigateToOrganizationDetail(navigate, location, 'maker', 12)
+    assert.deepEqual(destination, {
+      pathname: '/facet/maker/o/12',
+      search: '?q=studio&sort=updated_at&dir=asc'
+    })
+  })
+
+  it('keeps video and actress navigation inside the stable organization stack', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
+    const detailLocation = {
+      pathname: '/facet/publisher/o/12',
+      search: '?q=studio&sort=updated_at&dir=asc',
+      hash: '',
+      state: null,
+      key: 'organization'
+    } as Location
+
+    navigateToVideoDetail(navigate, detailLocation, 42)
+    const videoLocation = {
+      ...detailLocation,
+      pathname: '/facet/publisher/o/12/42'
+    } as Location
+    navigateToActressFromVideoDetail(navigate, videoLocation, 42, 7)
+    navigateBackFromVideoDetail(navigate, videoLocation)
+
+    assert.deepEqual(destinations, [
+      {
+        pathname: '/facet/publisher/o/12/42',
+        search: '?q=studio&sort=updated_at&dir=asc'
+      },
+      {
+        pathname: '/facet/publisher/o/12/42/actress/7',
+        search: '?q=studio&sort=updated_at&dir=asc'
+      },
+      {
+        pathname: '/facet/publisher/o/12',
+        search: 'q=studio&sort=updated_at&dir=asc'
+      }
+    ])
+  })
+
   it('preserves the parent facet query when opening its detail', () => {
     let destination: unknown
     const navigate = ((to: unknown) => {

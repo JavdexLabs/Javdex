@@ -3,6 +3,8 @@ import type {
   Video,
   VideoFile,
   VideoResource,
+  VideoResourceImportResult,
+  LinkVideoResourceKind,
   VideoAsset,
   VideoDetail,
   VideoQuery,
@@ -331,6 +333,70 @@ export function listVideoResources(videoId: number): VideoResource[] {
   return db
     .prepare(`SELECT * FROM video_resources WHERE video_id = ? ${PRIMARY_FILE_ORDER}`)
     .all(videoId) as VideoResource[]
+}
+
+export function getPrimaryVideoResource(videoId: number): VideoResource | null {
+  const db = getDb()
+  return (
+    (db
+      .prepare(`SELECT * FROM video_resources WHERE video_id = ? ${PRIMARY_FILE_ORDER} LIMIT 1`)
+      .get(videoId) as VideoResource | undefined) ?? null
+  )
+}
+
+export function importVideoLinkResourceRecord(input: {
+  code: string
+  kind: LinkVideoResourceKind
+  locator: string
+  resourceKey: string
+  displayName: string | null
+  sizeBytes: number | null
+}): VideoResourceImportResult | { duplicateOwnerCode: string } {
+  const db = getDb()
+  return db.transaction(() => {
+    const duplicate = db
+      .prepare(
+        `SELECT v.code
+         FROM video_resources vr
+         JOIN videos v ON v.id = vr.video_id
+         WHERE vr.resource_key = ?`
+      )
+      .get(input.resourceKey) as { code: string } | undefined
+    if (duplicate) return { duplicateOwnerCode: duplicate.code }
+
+    let video = getVideoByCode(input.code)
+    const createdVideo = !video
+    if (!video) {
+      const info = db
+        .prepare('INSERT INTO videos (code, scraped_status) VALUES (?, 0)')
+        .run(input.code)
+      video = { id: Number(info.lastInsertRowid), code: input.code }
+    }
+    const resourceCount = (
+      db.prepare('SELECT COUNT(*) AS count FROM video_resources WHERE video_id = ?').get(video.id) as {
+        count: number
+      }
+    ).count
+    const info = db
+      .prepare(
+        `INSERT INTO video_resources (
+           video_id, kind, locator, resource_key, size_bytes, display_name, is_primary, add_time
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        video.id,
+        input.kind,
+        input.locator,
+        input.resourceKey,
+        input.sizeBytes,
+        input.displayName,
+        resourceCount === 0 ? 1 : 0,
+        nowIso()
+      )
+    const resource = getVideoResourceById(Number(info.lastInsertRowid))
+    if (!resource) throw new Error('影片资源写入失败')
+    return { videoId: video.id, resource, createdVideo }
+  })()
 }
 
 export function getVideoById(id: number): Video | null {

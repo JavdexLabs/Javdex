@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { Ellipsis, Play } from 'lucide-react'
+import { Copy, Ellipsis, Eye, Play } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import type { FacetType } from '@shared/libraryTypes'
 import type { ScrapedStatus } from '@shared/commonTypes'
-import type { VideoDetail, VideoFile } from '@shared/videoTypes'
+import type { VideoDetail, VideoFile, VideoResource } from '@shared/videoTypes'
+import { maskVideoResourceLocator } from '@shared/videoResourceLinks'
 import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS } from '@shared/videoScrapeTypes'
 import MetaLink from './MetaLink'
 import IconButton from './IconButton'
@@ -273,6 +274,78 @@ function VideoFileRow({
   )
 }
 
+function VideoLinkResourceRow({
+  resource,
+  multiResources,
+  onOpenResource
+}: {
+  resource: VideoResource
+  multiResources: boolean
+  onOpenResource?: (resourceId: number) => void
+}): JSX.Element {
+  const [showFullLink, setShowFullLink] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const kind = resource.kind === 'direct' ? '视频直链' : '网页链接'
+  const masked = maskVideoResourceLocator(resource.locator, resource.kind as 'direct' | 'web')
+  const title = resource.display_name?.trim() || masked
+  const isPrimary = Boolean(resource.is_primary)
+
+  const copyFullLink = async (): Promise<void> => {
+    await navigator.clipboard.writeText(resource.locator)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1600)
+  }
+
+  return (
+    <div
+      className={`detail-meta-file${isPrimary && multiResources ? ' detail-meta-file--primary' : ''}`}
+    >
+      <div className="detail-meta-file-main">
+        <div className="detail-meta-file-label-row">
+          <span className="detail-meta-file-label">{title}</span>
+          <span className="detail-meta-file-badge">{kind}</span>
+          {isPrimary ? (
+            <span className="detail-meta-file-badge" title="顶部播放将打开此资源">
+              主资源
+            </span>
+          ) : null}
+        </div>
+        {resource.display_name?.trim() ? <div className="detail-meta-path">{masked}</div> : null}
+        {resource.size_bytes != null && resource.size_bytes > 0 ? (
+          <div className="detail-meta-file-facts">
+            <span className="detail-meta-file-fact">
+              <span>大小</span>
+              <strong>{formatFileSize(resource.size_bytes)}</strong>
+            </span>
+          </div>
+        ) : null}
+        {showFullLink ? <div className="detail-meta-path detail-meta-path--full">{resource.locator}</div> : null}
+      </div>
+      <div className="detail-meta-file-actions">
+        <IconButton
+          className="detail-icon-action"
+          icon={<Play {...UI_ICON} />}
+          label={`打开${kind}`}
+          onClick={() => onOpenResource?.(resource.id)}
+        />
+        <IconButton
+          className="detail-icon-action"
+          icon={<Eye {...UI_ICON} />}
+          label={showFullLink ? '隐藏完整链接' : '查看完整链接'}
+          aria-pressed={showFullLink}
+          onClick={() => setShowFullLink((visible) => !visible)}
+        />
+        <IconButton
+          className="detail-icon-action"
+          icon={<Copy {...UI_ICON} />}
+          label={copied ? '已复制完整链接' : '复制完整链接'}
+          onClick={() => void copyFullLink()}
+        />
+      </div>
+    </div>
+  )
+}
+
 export function VideoDetailPrimaryMeta({ video }: { video: VideoDetail }): JSX.Element | null {
   const navigate = useNavigate()
   const location = useLocation()
@@ -336,35 +409,45 @@ export function VideoDetailSecondaryMeta({
   onPlayFile,
   onRevealFile,
   onSetPrimaryFile,
-  onDeleteFile
+  onDeleteFile,
+  onOpenResource
 }: {
   video: VideoDetail
   onPlayFile?: (fileId: number) => void
   onRevealFile?: (fileId: number) => void
   onSetPrimaryFile?: (fileId: number) => void
   onDeleteFile?: (file: VideoFile) => void
+  onOpenResource?: (resourceId: number) => void
 }): JSX.Element | null {
-  const multiFiles = video.files.length > 1
-  const hasFiles = video.files.length > 0
-  if (!hasFiles) return null
+  const linkResources = video.resources.filter((resource) => resource.kind !== 'local')
+  const multiResources = video.resources.length > 1
+  if (video.resources.length === 0) return null
 
   return (
     <div className="detail-meta-sections">
       <section className="detail-section detail-meta-section">
         <div className="detail-section-head">
-          <h2 className="section-title">文件</h2>
-          <span className="detail-section-count">{video.files.length} 个</span>
+          <h2 className="section-title">影片资源</h2>
+          <span className="detail-section-count">{video.resources.length} 个</span>
         </div>
         <div className="detail-meta-files">
           {video.files.map((file) => (
             <VideoFileRow
               key={file.id}
               file={file}
-              multiFiles={multiFiles}
+              multiFiles={multiResources}
               onPlayFile={onPlayFile}
               onRevealFile={onRevealFile}
               onSetPrimaryFile={onSetPrimaryFile}
               onDeleteFile={onDeleteFile}
+            />
+          ))}
+          {linkResources.map((resource) => (
+            <VideoLinkResourceRow
+              key={resource.id}
+              resource={resource}
+              multiResources={multiResources}
+              onOpenResource={onOpenResource}
             />
           ))}
         </div>

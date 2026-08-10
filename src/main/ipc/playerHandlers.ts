@@ -1,6 +1,12 @@
 import { IPC } from '@shared/ipc-channels'
 import type { PlayResult } from '@shared/libraryTypes'
-import { playVideo, playVideoFile, revealVideo, revealVideoFile } from '../services/playerService'
+import {
+  openVideoResource,
+  playVideo,
+  playVideoFile,
+  revealVideo,
+  revealVideoFile
+} from '../services/playerService'
 import { appCommandAdapter } from './appContractAdapter'
 
 export function registerPlayerHandlers(): void {
@@ -16,5 +22,9 @@ export function registerPlayerHandlers(): void {
 
   appCommandAdapter.register(IPC.PLAYER_REVEAL_FILE, (fileId): PlayResult =>
     revealVideoFile(fileId)
+  )
+
+  appCommandAdapter.register(IPC.PLAYER_OPEN_RESOURCE, (resourceId): Promise<PlayResult> =>
+    openVideoResource(resourceId)
   )
 }

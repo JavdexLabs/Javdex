@@ -45,6 +45,8 @@ export const IPC = {
   VIDEO_POSTER_SET: 'video:posterSet',
   VIDEO_MANUAL_TAG_ADD: 'video:manualTagAdd',
   VIDEO_MANUAL_TAG_REMOVE: 'video:manualTagRemove',
+  VIDEO_RESOURCE_IMPORT: 'video:resourceImport',
+  VIDEO_RESOURCE_CHECK: 'video:resourceCheck',
 
   // Playlists
   PLAYLIST_LIST: 'playlist:list',
@@ -151,6 +153,7 @@ export const IPC = {
   PLAYER_REVEAL: 'player:reveal',
   PLAYER_PLAY_FILE: 'player:playFile',
   PLAYER_REVEAL_FILE: 'player:revealFile',
+  PLAYER_OPEN_RESOURCE: 'player:openResource',
 
   // Asset encryption
   ASSET_CRYPTO_SET: 'assetCrypto:set',

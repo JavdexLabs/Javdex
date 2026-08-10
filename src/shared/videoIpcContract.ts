@@ -6,7 +6,10 @@ import type {
   VideoDetail,
   VideoEditInput,
   VideoListResult,
+  VideoLinkResourceImportInput,
   VideoQuery,
+  VideoResourceImportResult,
+  VideoResourceLinkCheckResult,
   VideoSampleImportInput
 } from './videoTypes'
 import type {
@@ -45,6 +48,14 @@ export interface VideoIpcContract {
   }
   [IPC.VIDEO_MANUAL_TAG_ADD]: { args: [id: number, name: string]; result: boolean }
   [IPC.VIDEO_MANUAL_TAG_REMOVE]: { args: [id: number, tagId: number]; result: boolean }
+  [IPC.VIDEO_RESOURCE_IMPORT]: {
+    args: [input: VideoLinkResourceImportInput]
+    result: VideoResourceImportResult
+  }
+  [IPC.VIDEO_RESOURCE_CHECK]: {
+    args: [url: string]
+    result: VideoResourceLinkCheckResult
+  }
 }
 
 export type VideoIpcChannel = IpcContractChannel<VideoIpcContract>

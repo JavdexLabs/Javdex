@@ -109,6 +109,7 @@ export interface AppIpcContract {
   [IPC.PLAYER_REVEAL]: { args: [videoId: number]; result: PlayResult }
   [IPC.PLAYER_PLAY_FILE]: { args: [fileId: number]; result: PlayResult }
   [IPC.PLAYER_REVEAL_FILE]: { args: [fileId: number]; result: PlayResult }
+  [IPC.PLAYER_OPEN_RESOURCE]: { args: [resourceId: number]; result: PlayResult }
 
   [IPC.ASSET_CRYPTO_SET]: { args: [enabled: boolean]; result: AppSettings }
   [IPC.ASSET_STORAGE_RELOCATE]: { args: [targetPath?: string | null]; result: AppSettings }

@@ -4,6 +4,9 @@ import type {
   Video,
   VideoAsset,
   VideoEditInput,
+  VideoLinkResourceImportInput,
+  VideoResourceImportResult,
+  VideoResourceLinkCheckResult,
   VideoSampleImportInput
 } from '@shared/videoTypes'
 import {
@@ -16,6 +19,7 @@ import {
   getVideoByCode,
   getVideoById,
   getVideoFileById,
+  importVideoLinkResourceRecord,
   listVideoFiles,
   markScrapeSucceeded,
   mergeVideoIntoExistingCode,
@@ -28,6 +32,8 @@ import {
   setVideoPosterPath,
   updateVideoFields
 } from '../db/videoRepo'
+import { inferHttpVideoResourceKind, normalizeHttpVideoResource } from '@shared/videoResourceLinks'
+import { videoResourceLinkService } from './videoResourceLinkService'
 import { mediaAssetStore } from './mediaAssetStore'
 import { fetchRemoteImageBuffer } from './remoteImageFetch'
 
@@ -46,6 +52,8 @@ export interface VideoMaintenanceService {
   setPoster(id: number, posterPath: string | null): boolean
   addManualTag(id: number, name: string): boolean
   removeManualTag(id: number, tagId: number): boolean
+  importLinkResource(input: VideoLinkResourceImportInput): VideoResourceImportResult
+  checkLinkResource(url: string): Promise<VideoResourceLinkCheckResult>
 }
 
 interface VideoMaintenanceServiceDependencies {
@@ -69,6 +77,8 @@ interface VideoMaintenanceServiceDependencies {
   setVideoPosterPath: typeof setVideoPosterPath
   addManualVideoTag: typeof addManualVideoTag
   removeManualVideoTag: typeof removeManualVideoTag
+  importVideoLinkResourceRecord: typeof importVideoLinkResourceRecord
+  checkLinkResource: typeof videoResourceLinkService.check
   runInCoordinatedChange: typeof mediaAssetStore.runInCoordinatedChange
   coordinateDatabaseChange: typeof mediaAssetStore.coordinateDatabaseChange
   importCover: typeof mediaAssetStore.importCover
@@ -103,6 +113,9 @@ export function createVideoMaintenanceService(
   const writePoster = dependencies.setVideoPosterPath ?? setVideoPosterPath
   const writeManualTag = dependencies.addManualVideoTag ?? addManualVideoTag
   const deleteManualTag = dependencies.removeManualVideoTag ?? removeManualVideoTag
+  const importLinkResourceRecord =
+    dependencies.importVideoLinkResourceRecord ?? importVideoLinkResourceRecord
+  const checkLinkResource = dependencies.checkLinkResource ?? videoResourceLinkService.check
   const runInCoordinatedChange =
     dependencies.runInCoordinatedChange ?? mediaAssetStore.runInCoordinatedChange.bind(mediaAssetStore)
   const coordinateDatabaseChange =
@@ -291,6 +304,32 @@ export function createVideoMaintenanceService(
       if (!readVideoById(id)) throw new Error('Video not found')
       deleteManualTag(id, tagId)
       return true
+    },
+    importLinkResource(input): VideoResourceImportResult {
+      const code = input.code.trim()
+      if (!code) throw new Error('影片番号不能为空')
+      const normalized = normalizeHttpVideoResource(input.url)
+      const kind = input.kind ?? inferHttpVideoResourceKind(normalized.locator)
+      const displayName = input.displayName?.trim() || null
+      const sizeBytes = input.sizeBytes ?? null
+      if (sizeBytes != null && (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0)) {
+        throw new Error('文件大小必须是大于 0 的整数字节数')
+      }
+      const result = importLinkResourceRecord({
+        code,
+        kind,
+        locator: normalized.locator,
+        resourceKey: normalized.resourceKey,
+        displayName,
+        sizeBytes
+      })
+      if ('duplicateOwnerCode' in result) {
+        throw new Error(`该资源链接已属于影片 ${result.duplicateOwnerCode}`)
+      }
+      return result
+    },
+    checkLinkResource(url): Promise<VideoResourceLinkCheckResult> {
+      return checkLinkResource(url)
     }
   }
 }

@@ -4,6 +4,7 @@ import { useMatch, useLocation, useSearchParams } from 'react-router-dom'
 import {
   ChevronDown,
   Film,
+  Link2,
   ListPlus,
   RectangleHorizontal,
   RectangleVertical,
@@ -55,6 +56,7 @@ import ListSurface from '../components/ListSurface'
 import SelectionToolbar from '../components/SelectionToolbar'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { startDefaultUnscrapedVideoBatch } from '../utils/defaultBatchScrape'
+import VideoResourceImportModal from '../components/VideoResourceImportModal'
 import {
   dismissMaintenanceHint,
   isMaintenanceHintDismissed,
@@ -100,6 +102,7 @@ export default function LibraryPage(): JSX.Element {
   const [deleteTarget, setDeleteTarget] = useState<Video | null>(null)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [showResourceImport, setShowResourceImport] = useState(false)
   const { scrapers, pluginDetails, defaultScraper } = useScraperPluginCatalog('video')
   const [scraperName, setScraperName] = useState('')
 
@@ -113,6 +116,7 @@ export default function LibraryPage(): JSX.Element {
     setShowBulkScrape(false)
     setDeleteTarget(null)
     setConfirmBulkDelete(false)
+    setShowResourceImport(false)
   }, [])
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
@@ -518,6 +522,14 @@ export default function LibraryPage(): JSX.Element {
             }}
             controls={
               <>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => setShowResourceImport(true)}
+                >
+                  <Link2 {...UI_ICON_SM} aria-hidden />
+                  <span>导入链接</span>
+                </button>
                 <div className="library-filter-anchor">
                   <button
                     ref={filterBtnRef}
@@ -673,6 +685,17 @@ export default function LibraryPage(): JSX.Element {
           videoId={playlistTarget.id}
           videoCode={playlistTarget.code}
           onCancel={() => setPlaylistTarget(null)}
+        />
+      )}
+
+      {showResourceImport && (
+        <VideoResourceImportModal
+          onCancel={() => setShowResourceImport(false)}
+          onImported={(result) => {
+            setShowResourceImport(false)
+            toast.show(result.createdVideo ? '影片已导入' : '资源已添加', 'success')
+            invalidateVideoLibraryQueries(queryClient)
+          }}
         />
       )}
 

@@ -3268,6 +3268,13 @@ textarea.text-input {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.detail-meta-file .detail-meta-path--full {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  -webkit-user-select: text;
+  user-select: text;
+}
 .detail-meta-status {
   display: inline-flex;
   align-items: center;
@@ -3511,6 +3518,51 @@ button.meta-link:focus-visible {
   word-break: break-all;
   -webkit-user-select: text;
   user-select: text;
+}
+.video-resource-import-grid {
+  gap: 12px 14px;
+}
+.video-resource-url-control,
+.video-resource-size-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.video-resource-url-control .text-input,
+.video-resource-size-control .text-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.video-resource-url-control .btn,
+.video-resource-size-control .select {
+  flex: 0 0 auto;
+}
+.video-resource-size-control .select {
+  width: 88px;
+}
+.video-resource-check {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.video-resource-check.is-success {
+  color: var(--text-success);
+}
+.video-resource-check.is-error,
+.form-error-banner {
+  color: var(--text-danger);
+}
+.form-error-banner {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--text-danger) 28%, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--text-danger) 6%, var(--surface-panel));
+  font-size: 12px;
+  line-height: 1.45;
 }
 .form-control-full {
   width: 100%;

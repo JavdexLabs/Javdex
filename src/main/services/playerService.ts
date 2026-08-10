@@ -1,59 +1,103 @@
 import { shell } from 'electron'
 import fs from 'node:fs'
-import { getPrimaryVideoFile, getVideoById, getVideoFileById } from '../db/videoRepo'
+import {
+  getPrimaryVideoResource,
+  getVideoById,
+  getVideoResourceById
+} from '../db/videoRepo'
 import type { PlayResult } from '@shared/libraryTypes'
+import type { VideoResource } from '@shared/videoTypes'
 
-async function openFilePath(filePath: string): Promise<PlayResult> {
-  if (!fs.existsSync(filePath)) {
-    return { ok: false, fileMissing: true, error: '文件不存在' }
+interface PlayerServiceDependencies {
+  getVideoById: typeof getVideoById
+  getPrimaryVideoResource: typeof getPrimaryVideoResource
+  getVideoResourceById: typeof getVideoResourceById
+  fileExists: (filePath: string) => boolean
+  openPath: (filePath: string) => Promise<string>
+  openExternal: (url: string) => Promise<void>
+  showItemInFolder: (filePath: string) => void
+}
+
+export interface PlayerService {
+  playVideo(videoId: number): Promise<PlayResult>
+  openResource(resourceId: number): Promise<PlayResult>
+  playVideoFile(fileId: number): Promise<PlayResult>
+  revealVideo(videoId: number): PlayResult
+  revealVideoFile(fileId: number): PlayResult
+}
+
+export function createPlayerService(
+  dependencies: Partial<PlayerServiceDependencies> = {}
+): PlayerService {
+  const readVideo = dependencies.getVideoById ?? getVideoById
+  const readPrimaryResource = dependencies.getPrimaryVideoResource ?? getPrimaryVideoResource
+  const readResource = dependencies.getVideoResourceById ?? getVideoResourceById
+  const fileExists = dependencies.fileExists ?? fs.existsSync
+  const openPath = dependencies.openPath ?? ((filePath) => shell.openPath(filePath))
+  const openExternal = dependencies.openExternal ?? ((url) => shell.openExternal(url))
+  const showItemInFolder =
+    dependencies.showItemInFolder ?? ((filePath) => shell.showItemInFolder(filePath))
+
+  async function openResource(resource: VideoResource): Promise<PlayResult> {
+    if (resource.kind === 'local') {
+      if (!fileExists(resource.locator)) {
+        return { ok: false, fileMissing: true, error: '文件不存在' }
+      }
+      const error = await openPath(resource.locator)
+      return error ? { ok: false, error } : { ok: true }
+    }
+    try {
+      await openExternal(resource.locator)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: (error as Error).message || '系统无法打开该资源' }
+    }
   }
 
-  const errMsg = await shell.openPath(filePath)
-  if (errMsg) {
-    return { ok: false, error: errMsg }
+  function revealResource(resource: VideoResource | null): PlayResult {
+    if (!resource || resource.kind !== 'local') {
+      return { ok: false, error: '该资源不是本地文件' }
+    }
+    if (!fileExists(resource.locator)) {
+      return { ok: false, fileMissing: true, error: '文件不存在' }
+    }
+    showItemInFolder(resource.locator)
+    return { ok: true }
   }
 
-  return { ok: true }
-}
-
-/**
- * Open a video in the OS default player via the system shell.
- * Reports fileMissing when the path is gone.
- */
-export async function playVideo(videoId: number): Promise<PlayResult> {
-  const video = getVideoById(videoId)
-  if (!video) return { ok: false, error: '视频记录不存在' }
-
-  const file = getPrimaryVideoFile(videoId)
-  if (!file) return { ok: false, fileMissing: true, error: '文件不存在' }
-
-  return openFilePath(file.file_path)
-}
-
-export async function playVideoFile(fileId: number): Promise<PlayResult> {
-  const file = getVideoFileById(fileId)
-  if (!file) return { ok: false, error: '文件记录不存在' }
-  return openFilePath(file.file_path)
-}
-
-/** Reveal the file in the system file explorer. */
-export function revealVideo(videoId: number): PlayResult {
-  const video = getVideoById(videoId)
-  if (!video) return { ok: false, error: '视频记录不存在' }
-  const file = getPrimaryVideoFile(videoId)
-  if (!file || !fs.existsSync(file.file_path)) {
-    return { ok: false, fileMissing: true, error: '文件不存在' }
+  return {
+    async playVideo(videoId): Promise<PlayResult> {
+      if (!readVideo(videoId)) return { ok: false, error: '视频记录不存在' }
+      const resource = readPrimaryResource(videoId)
+      if (!resource) return { ok: false, error: '影片没有可打开的资源' }
+      return openResource(resource)
+    },
+    async openResource(resourceId): Promise<PlayResult> {
+      const resource = readResource(resourceId)
+      if (!resource) return { ok: false, error: '资源记录不存在' }
+      return openResource(resource)
+    },
+    async playVideoFile(fileId): Promise<PlayResult> {
+      const resource = readResource(fileId)
+      if (!resource || resource.kind !== 'local') {
+        return { ok: false, error: '文件记录不存在' }
+      }
+      return openResource(resource)
+    },
+    revealVideo(videoId): PlayResult {
+      if (!readVideo(videoId)) return { ok: false, error: '视频记录不存在' }
+      return revealResource(readPrimaryResource(videoId))
+    },
+    revealVideoFile(fileId): PlayResult {
+      return revealResource(readResource(fileId))
+    }
   }
-  shell.showItemInFolder(file.file_path)
-  return { ok: true }
 }
 
-export function revealVideoFile(fileId: number): PlayResult {
-  const file = getVideoFileById(fileId)
-  if (!file) return { ok: false, error: '文件记录不存在' }
-  if (!fs.existsSync(file.file_path)) {
-    return { ok: false, fileMissing: true, error: '文件不存在' }
-  }
-  shell.showItemInFolder(file.file_path)
-  return { ok: true }
-}
+const playerService = createPlayerService()
+
+export const playVideo = playerService.playVideo
+export const openVideoResource = playerService.openResource
+export const playVideoFile = playerService.playVideoFile
+export const revealVideo = playerService.revealVideo
+export const revealVideoFile = playerService.revealVideoFile

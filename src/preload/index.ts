@@ -30,6 +30,7 @@ import type {
 import type {
   Video,
   VideoEditInput,
+  VideoLinkResourceImportInput,
   VideoQuery,
   VideoSampleImportInput
 } from '../shared/videoTypes'
@@ -179,7 +180,10 @@ const api = {
     addManualTag: (id: number, name: string) =>
       invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name),
     removeManualTag: (id: number, tagId: number) =>
-      invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId)
+      invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId),
+    importLinkResource: (input: VideoLinkResourceImportInput) =>
+      invokeVideo(IPC.VIDEO_RESOURCE_IMPORT, input),
+    checkResourceLink: (url: string) => invokeVideo(IPC.VIDEO_RESOURCE_CHECK, url)
   },
   playlists: {
     list: () => invokeApp(IPC.PLAYLIST_LIST),
@@ -389,7 +393,8 @@ const api = {
     play: (videoId: number) => invokeApp(IPC.PLAYER_PLAY, videoId),
     reveal: (videoId: number) => invokeApp(IPC.PLAYER_REVEAL, videoId),
     playFile: (fileId: number) => invokeApp(IPC.PLAYER_PLAY_FILE, fileId),
-    revealFile: (fileId: number) => invokeApp(IPC.PLAYER_REVEAL_FILE, fileId)
+    revealFile: (fileId: number) => invokeApp(IPC.PLAYER_REVEAL_FILE, fileId),
+    openResource: (resourceId: number) => invokeApp(IPC.PLAYER_OPEN_RESOURCE, resourceId)
   },
   assetCrypto: {
     setEnabled: (enabled: boolean) => invokeApp(IPC.ASSET_CRYPTO_SET, enabled),

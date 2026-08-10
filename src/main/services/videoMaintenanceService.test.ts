@@ -64,6 +64,59 @@ afterEach(() => {
 })
 
 describe('VideoMaintenanceService', () => {
+  it('creates or appends HTTP resources without scraping and keeps one primary resource', () => {
+    setupDb()
+    const videos = createVideoMaintenanceService()
+    const query = createVideoQueryService()
+
+    const appended = videos.importLinkResource({
+      code: 'APP-001',
+      url: 'https://cdn.example/APP-001.mp4?token=one',
+      kind: 'direct',
+      displayName: 'Remote copy',
+      sizeBytes: 1024
+    })
+    const created = videos.importLinkResource({
+      code: 'NEW-002',
+      url: 'https://example.com/watch?id=2',
+      kind: 'web'
+    })
+
+    assert.equal(appended.createdVideo, false)
+    assert.equal(appended.resource.is_primary, 0)
+    assert.equal(created.createdVideo, true)
+    assert.equal(created.resource.is_primary, 1)
+    assert.equal(query.get(created.videoId)?.scraped_status, 0)
+    assert.deepEqual(
+      query.get(1)?.resources.map((resource) => [resource.kind, resource.display_name]),
+      [
+        ['local', null],
+        ['direct', 'Remote copy']
+      ]
+    )
+  })
+
+  it('reports the owning video when a normalized HTTP resource already exists', () => {
+    setupDb()
+    const videos = createVideoMaintenanceService()
+    videos.importLinkResource({
+      code: 'APP-001',
+      url: 'https://EXAMPLE.com:443/watch?a=1#first',
+      kind: 'web'
+    })
+
+    assert.throws(
+      () =>
+        videos.importLinkResource({
+          code: 'OTHER-002',
+          url: 'https://example.com/watch?a=1#second',
+          kind: 'direct'
+        }),
+      /APP-001/
+    )
+    assert.equal(queryResourceCount(), 2)
+  })
+
   it('edits metadata, status, rating, poster, and manual tags', () => {
     setupDb()
     const videos = createVideoMaintenanceService()
@@ -236,3 +289,9 @@ describe('VideoMaintenanceService', () => {
     assert.deepEqual(files, [{ video_id: 2, file_path: videoPath }])
   })
 })
+
+function queryResourceCount(): number {
+  return (
+    getDb().prepare('SELECT COUNT(*) AS count FROM video_resources').get() as { count: number }
+  ).count
+}

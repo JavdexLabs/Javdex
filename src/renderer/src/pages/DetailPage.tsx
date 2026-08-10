@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
-import { ListPlus, Pencil, Play, SearchCheck, SearchX } from 'lucide-react'
+import { Link2, ListPlus, Pencil, Play, SearchCheck, SearchX } from 'lucide-react'
 import type { VideoDetail, VideoFile } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
@@ -46,6 +46,7 @@ import { ROUTE_MATCH } from '../listView/routePaths'
 import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import { invalidateVideoLibraryQueries } from '../query/invalidateLibraryQueries'
 import { settingsPath } from '../settings/settingsRoutes'
+import VideoResourceImportModal from '../components/VideoResourceImportModal'
 
 export default function DetailPage(): JSX.Element {
   const { id, videoId: videoIdParam } = useParams()
@@ -84,6 +85,7 @@ export default function DetailPage(): JSX.Element {
   const [showCorrectImport, setShowCorrectImport] = useState(false)
   const [showAddToPlaylist, setShowAddToPlaylist] = useState(false)
   const [showMaintenanceInfo, setShowMaintenanceInfo] = useState(false)
+  const [showResourceImport, setShowResourceImport] = useState(false)
   const [correctCode, setCorrectCode] = useState('')
   const [correcting, setCorrecting] = useState(false)
   const [tallCover, setTallCover] = useState(false)
@@ -105,6 +107,7 @@ export default function DetailPage(): JSX.Element {
     setShowCorrectImport(false)
     setShowAddToPlaylist(false)
     setShowMaintenanceInfo(false)
+    setShowResourceImport(false)
     closeCoverPreview()
     setDeleteFileTarget(null)
   }, [closeCoverPreview])
@@ -188,7 +191,7 @@ export default function DetailPage(): JSX.Element {
     try {
       const res = await api.player.play(videoId)
       if (res.ok) {
-        toast.show('已唤起系统播放器', 'success')
+        toast.show('已交给系统打开', 'success')
         void load({ silent: true })
       } else if (res.fileMissing) {
         setMissingPrompt(true)
@@ -213,6 +216,15 @@ export default function DetailPage(): JSX.Element {
       }
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
+    }
+  }
+
+  const handleOpenResource = async (resourceId: number): Promise<void> => {
+    try {
+      const result = await api.player.openResource(resourceId)
+      toast.show(result.ok ? '已交给系统打开' : (result.error ?? '打开资源失败'), result.ok ? 'success' : 'error')
+    } catch (error) {
+      toast.show(String((error as Error).message), 'error')
     }
   }
 
@@ -500,6 +512,12 @@ export default function DetailPage(): JSX.Element {
                 }}
                 actions={[
                   {
+                    key: 'resource',
+                    icon: <Link2 {...UI_ICON} />,
+                    label: '添加资源',
+                    onClick: () => setShowResourceImport(true)
+                  },
+                  {
                     key: 'playlist',
                     icon: <ListPlus {...UI_ICON} />,
                     label: '加入清单',
@@ -530,6 +548,7 @@ export default function DetailPage(): JSX.Element {
                   {
                     key: 'reveal',
                     label: '打开所在文件夹',
+                    hidden: video.primary_resource_kind !== 'local',
                     onClick: () => {
                       void handleReveal()
                     }
@@ -631,6 +650,9 @@ export default function DetailPage(): JSX.Element {
           void handleSetPrimaryFile(fileId)
         }}
         onDeleteFile={setDeleteFileTarget}
+        onOpenResource={(resourceId) => {
+          void handleOpenResource(resourceId)
+        }}
       />
 
       <VideoSampleGallery
@@ -711,6 +733,19 @@ export default function DetailPage(): JSX.Element {
           video={video}
           onCancel={() => setShowEdit(false)}
           onSave={handleEditSave}
+        />
+      )}
+
+      {showResourceImport && (
+        <VideoResourceImportModal
+          fixedCode={video.code}
+          onCancel={() => setShowResourceImport(false)}
+          onImported={() => {
+            setShowResourceImport(false)
+            toast.show('资源已添加', 'success')
+            invalidateVideos()
+            void load({ silent: true })
+          }}
         />
       )}
 

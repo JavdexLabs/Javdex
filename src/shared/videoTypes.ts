@@ -14,6 +14,8 @@ export interface VideoFile {
 }
 
 export type VideoResourceKind = 'local' | 'direct' | 'web' | 'magnet' | 'ed2k'
+export type LinkVideoResourceKind = Extract<VideoResourceKind, 'direct' | 'web'>
+export type VideoResourceSizeUnit = 'MB' | 'GB' | 'TB'
 
 export interface VideoResource {
   id: number
@@ -27,6 +29,27 @@ export interface VideoResource {
   display_name: string | null
   is_primary: number
   add_time: string
+}
+
+export interface VideoLinkResourceImportInput {
+  code: string
+  url: string
+  kind?: LinkVideoResourceKind
+  displayName?: string | null
+  sizeBytes?: number | null
+}
+
+export interface VideoResourceImportResult {
+  videoId: number
+  resource: VideoResource
+  createdVideo: boolean
+}
+
+export interface VideoResourceLinkCheckResult {
+  ok: boolean
+  status?: number
+  sizeBytes?: number | null
+  error?: string
 }
 
 export interface Video {

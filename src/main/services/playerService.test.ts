@@ -49,4 +49,18 @@ describe('PlayerService', () => {
     assert.deepEqual(await service.playVideo(7), { ok: false, error: 'No URL handler' })
     assert.equal(calls, 1)
   })
+
+  it('hands Magnet resources to the registered system protocol handler', async () => {
+    const opened: string[] = []
+    const service = createPlayerService({
+      getVideoResourceById: () =>
+        resource({ kind: 'magnet', locator: 'magnet:?xt=urn:btih:abcdef1234567890' }),
+      openExternal: async (url) => {
+        opened.push(url)
+      }
+    })
+
+    assert.deepEqual(await service.openResource(3), { ok: true })
+    assert.deepEqual(opened, ['magnet:?xt=urn:btih:abcdef1234567890'])
+  })
 })

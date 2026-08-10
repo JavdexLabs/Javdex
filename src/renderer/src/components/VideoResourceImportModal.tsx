@@ -2,9 +2,10 @@ import { useState } from 'react'
 import type {
   VideoResourceImportResult,
   VideoResourceLinkCheckResult,
+  VideoResource,
   VideoResourceSizeUnit
 } from '@shared/videoTypes'
-import { inferHttpVideoResourceKind } from '@shared/videoResourceLinks'
+import { inferVideoResourceKind } from '@shared/videoResourceLinks'
 import { api } from '../api'
 import Modal from './Modal'
 import { EditFormField } from './FormPrimitives'
@@ -16,25 +17,41 @@ import {
 
 export default function VideoResourceImportModal({
   fixedCode,
+  resource,
   onCancel,
-  onImported
+  onImported,
+  onUpdated
 }: {
   fixedCode?: string
+  resource?: VideoResource
   onCancel: () => void
-  onImported: (result: VideoResourceImportResult) => void
+  onImported?: (result: VideoResourceImportResult) => void
+  onUpdated?: (resource: VideoResource) => void
 }): JSX.Element {
   const [code, setCode] = useState(fixedCode ?? '')
-  const [url, setUrl] = useState('')
-  const [kind, setKind] = useState<VideoResourceKindSelection>('auto')
-  const [displayName, setDisplayName] = useState('')
-  const [size, setSize] = useState('')
-  const [sizeUnit, setSizeUnit] = useState<VideoResourceSizeUnit>('GB')
+  const [url, setUrl] = useState(resource?.locator ?? '')
+  const [kind, setKind] = useState<VideoResourceKindSelection>(
+    resource?.kind === 'direct' || resource?.kind === 'web' ? resource.kind : 'auto'
+  )
+  const [displayName, setDisplayName] = useState(resource?.display_name ?? '')
+  const initialSize = resource?.size_bytes ? resourceBytesToFormSize(resource.size_bytes) : null
+  const [size, setSize] = useState(initialSize?.value ?? '')
+  const [sizeUnit, setSizeUnit] = useState<VideoResourceSizeUnit>(initialSize?.unit ?? 'GB')
   const [checking, setChecking] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [checkResult, setCheckResult] = useState<VideoResourceLinkCheckResult | null>(null)
 
-  const inferredKind = inferHttpVideoResourceKind(url)
+  const inferredKind = inferVideoResourceKind(url)
+  const inferredKindLabel =
+    inferredKind === 'direct'
+      ? '视频直链'
+      : inferredKind === 'web'
+        ? '网页链接'
+        : inferredKind === 'magnet'
+          ? 'Magnet'
+          : 'ED2K'
+  const canCheckLink = inferredKind === 'direct' || inferredKind === 'web'
 
   const checkLink = async (): Promise<void> => {
     setError('')
@@ -65,7 +82,17 @@ export default function VideoResourceImportModal({
     }
     setSaving(true)
     try {
-      onImported(await api.videos.importLinkResource(input))
+      if (resource) {
+        const updated = await api.videos.updateLinkResource(resource.video_id, resource.id, {
+          url: input.url,
+          kind: input.kind,
+          displayName: input.displayName,
+          sizeBytes: input.sizeBytes
+        })
+        onUpdated?.(updated)
+      } else {
+        onImported?.(await api.videos.importLinkResource(input))
+      }
     } catch (reason) {
       setError(String((reason as Error).message ?? reason))
     } finally {
@@ -75,10 +102,10 @@ export default function VideoResourceImportModal({
 
   return (
     <Modal
-      title="导入影片资源"
-      subtitle={fixedCode ? `追加到 ${fixedCode}` : '通过链接创建影片或追加资源'}
+      title={resource ? '编辑影片资源' : '导入影片资源'}
+      subtitle={resource ? `更新 ${fixedCode ?? code} 的链接资源` : fixedCode ? `追加到 ${fixedCode}` : '通过链接创建影片或追加资源'}
       size="md"
-      confirmText={saving ? '导入中…' : '导入'}
+      confirmText={saving ? '保存中…' : resource ? '保存' : '导入'}
       confirmDisabled={saving || checking}
       busy={saving}
       onConfirm={() => void save()}
@@ -115,14 +142,16 @@ export default function VideoResourceImportModal({
               autoFocus={Boolean(fixedCode)}
               placeholder="https://…"
             />
-            <button
-              type="button"
-              className="btn btn-sm"
-              disabled={checking || saving || !url.trim()}
-              onClick={() => void checkLink()}
-            >
-              {checking ? '检测中…' : '检测链接'}
-            </button>
+            {canCheckLink ? (
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={checking || saving || !url.trim()}
+                onClick={() => void checkLink()}
+              >
+                {checking ? '检测中…' : '检测链接'}
+              </button>
+            ) : null}
           </div>
           {checkResult ? (
             <span className={`video-resource-check ${checkResult.ok ? 'is-success' : 'is-error'}`}>
@@ -140,7 +169,7 @@ export default function VideoResourceImportModal({
             onChange={(event) => setKind(event.target.value as VideoResourceKindSelection)}
             disabled={saving}
           >
-            <option value="auto">自动识别（{inferredKind === 'direct' ? '视频直链' : '网页链接'}）</option>
+            <option value="auto">自动识别（{inferredKindLabel}）</option>
             <option value="direct">视频直链</option>
             <option value="web">网页链接</option>
           </select>

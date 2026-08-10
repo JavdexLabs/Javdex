@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
 import { Link2, ListPlus, Pencil, Play, SearchCheck, SearchX } from 'lucide-react'
-import type { VideoDetail, VideoFile } from '@shared/videoTypes'
+import type { VideoDetail, VideoFile, VideoResource } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
@@ -86,6 +86,7 @@ export default function DetailPage(): JSX.Element {
   const [showAddToPlaylist, setShowAddToPlaylist] = useState(false)
   const [showMaintenanceInfo, setShowMaintenanceInfo] = useState(false)
   const [showResourceImport, setShowResourceImport] = useState(false)
+  const [editResourceTarget, setEditResourceTarget] = useState<VideoResource | null>(null)
   const [correctCode, setCorrectCode] = useState('')
   const [correcting, setCorrecting] = useState(false)
   const [tallCover, setTallCover] = useState(false)
@@ -108,6 +109,7 @@ export default function DetailPage(): JSX.Element {
     setShowAddToPlaylist(false)
     setShowMaintenanceInfo(false)
     setShowResourceImport(false)
+    setEditResourceTarget(null)
     closeCoverPreview()
     setDeleteFileTarget(null)
   }, [closeCoverPreview])
@@ -653,6 +655,7 @@ export default function DetailPage(): JSX.Element {
         onOpenResource={(resourceId) => {
           void handleOpenResource(resourceId)
         }}
+        onEditResource={setEditResourceTarget}
       />
 
       <VideoSampleGallery
@@ -743,6 +746,20 @@ export default function DetailPage(): JSX.Element {
           onImported={() => {
             setShowResourceImport(false)
             toast.show('资源已添加', 'success')
+            invalidateVideos()
+            void load({ silent: true })
+          }}
+        />
+      )}
+
+      {editResourceTarget && (
+        <VideoResourceImportModal
+          fixedCode={video.code}
+          resource={editResourceTarget}
+          onCancel={() => setEditResourceTarget(null)}
+          onUpdated={() => {
+            setEditResourceTarget(null)
+            toast.show('资源已更新', 'success')
             invalidateVideos()
             void load({ silent: true })
           }}

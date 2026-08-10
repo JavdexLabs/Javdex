@@ -23,4 +23,24 @@ describe('video resource import form', () => {
     )
     assert.deepEqual(resourceBytesToFormSize(1610612736), { value: '1.5', unit: 'GB' })
   })
+
+  it('auto-detects Magnet and keeps its protocol-derived default name', () => {
+    assert.deepEqual(
+      buildVideoResourceImportInput({
+        code: 'MAG-001',
+        url: 'magnet:?xt=urn:btih:ABCDEF1234567890&dn=Example%20Movie',
+        kind: 'auto',
+        displayName: '',
+        size: '',
+        sizeUnit: 'GB'
+      }),
+      {
+        code: 'MAG-001',
+        url: 'magnet:?xt=urn:btih:ABCDEF1234567890&dn=Example%20Movie',
+        kind: 'magnet',
+        displayName: 'Example Movie',
+        sizeBytes: null
+      }
+    )
+  })
 })

@@ -5,6 +5,8 @@ import type {
   VideoAsset,
   VideoEditInput,
   VideoLinkResourceImportInput,
+  VideoLinkResourceUpdateInput,
+  VideoResource,
   VideoResourceImportResult,
   VideoResourceLinkCheckResult,
   VideoSampleImportInput
@@ -20,6 +22,7 @@ import {
   getVideoById,
   getVideoFileById,
   importVideoLinkResourceRecord,
+  updateVideoLinkResourceRecord,
   listVideoFiles,
   markScrapeSucceeded,
   mergeVideoIntoExistingCode,
@@ -32,7 +35,7 @@ import {
   setVideoPosterPath,
   updateVideoFields
 } from '../db/videoRepo'
-import { inferHttpVideoResourceKind, normalizeHttpVideoResource } from '@shared/videoResourceLinks'
+import { normalizeExternalVideoResource } from '@shared/videoResourceLinks'
 import { videoResourceLinkService } from './videoResourceLinkService'
 import { mediaAssetStore } from './mediaAssetStore'
 import { fetchRemoteImageBuffer } from './remoteImageFetch'
@@ -54,6 +57,11 @@ export interface VideoMaintenanceService {
   removeManualTag(id: number, tagId: number): boolean
   importLinkResource(input: VideoLinkResourceImportInput): VideoResourceImportResult
   checkLinkResource(url: string): Promise<VideoResourceLinkCheckResult>
+  updateLinkResource(
+    videoId: number,
+    resourceId: number,
+    input: VideoLinkResourceUpdateInput
+  ): VideoResource
 }
 
 interface VideoMaintenanceServiceDependencies {
@@ -79,6 +87,7 @@ interface VideoMaintenanceServiceDependencies {
   removeManualVideoTag: typeof removeManualVideoTag
   importVideoLinkResourceRecord: typeof importVideoLinkResourceRecord
   checkLinkResource: typeof videoResourceLinkService.check
+  updateVideoLinkResourceRecord: typeof updateVideoLinkResourceRecord
   runInCoordinatedChange: typeof mediaAssetStore.runInCoordinatedChange
   coordinateDatabaseChange: typeof mediaAssetStore.coordinateDatabaseChange
   importCover: typeof mediaAssetStore.importCover
@@ -116,6 +125,8 @@ export function createVideoMaintenanceService(
   const importLinkResourceRecord =
     dependencies.importVideoLinkResourceRecord ?? importVideoLinkResourceRecord
   const checkLinkResource = dependencies.checkLinkResource ?? videoResourceLinkService.check
+  const updateLinkResourceRecord =
+    dependencies.updateVideoLinkResourceRecord ?? updateVideoLinkResourceRecord
   const runInCoordinatedChange =
     dependencies.runInCoordinatedChange ?? mediaAssetStore.runInCoordinatedChange.bind(mediaAssetStore)
   const coordinateDatabaseChange =
@@ -308,16 +319,15 @@ export function createVideoMaintenanceService(
     importLinkResource(input): VideoResourceImportResult {
       const code = input.code.trim()
       if (!code) throw new Error('影片番号不能为空')
-      const normalized = normalizeHttpVideoResource(input.url)
-      const kind = input.kind ?? inferHttpVideoResourceKind(normalized.locator)
-      const displayName = input.displayName?.trim() || null
+      const normalized = normalizeExternalVideoResource(input.url, input.kind)
+      const displayName = input.displayName?.trim() || normalized.suggestedDisplayName
       const sizeBytes = input.sizeBytes ?? null
       if (sizeBytes != null && (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0)) {
         throw new Error('文件大小必须是大于 0 的整数字节数')
       }
       const result = importLinkResourceRecord({
         code,
-        kind,
+        kind: normalized.kind,
         locator: normalized.locator,
         resourceKey: normalized.resourceKey,
         displayName,
@@ -330,6 +340,27 @@ export function createVideoMaintenanceService(
     },
     checkLinkResource(url): Promise<VideoResourceLinkCheckResult> {
       return checkLinkResource(url)
+    },
+    updateLinkResource(videoId, resourceId, input): VideoResource {
+      if (!readVideoById(videoId)) throw new Error('影片不存在')
+      const normalized = normalizeExternalVideoResource(input.url, input.kind)
+      const sizeBytes = input.sizeBytes ?? null
+      if (sizeBytes != null && (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0)) {
+        throw new Error('文件大小必须是大于 0 的整数字节数')
+      }
+      const result = updateLinkResourceRecord({
+        resourceId,
+        videoId,
+        kind: normalized.kind,
+        locator: normalized.locator,
+        resourceKey: normalized.resourceKey,
+        displayName: input.displayName?.trim() || normalized.suggestedDisplayName,
+        sizeBytes
+      })
+      if ('duplicateOwnerCode' in result) {
+        throw new Error(`该资源链接已属于影片 ${result.duplicateOwnerCode}`)
+      }
+      return result
     }
   }
 }

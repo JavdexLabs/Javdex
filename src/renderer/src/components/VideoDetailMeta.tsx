@@ -1,9 +1,14 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { Copy, Ellipsis, Eye, Play } from 'lucide-react'
+import { Copy, Ellipsis, Eye, Pencil, Play } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import type { FacetType } from '@shared/libraryTypes'
 import type { ScrapedStatus } from '@shared/commonTypes'
-import type { VideoDetail, VideoFile, VideoResource } from '@shared/videoTypes'
+import type {
+  ExternalVideoResourceKind,
+  VideoDetail,
+  VideoFile,
+  VideoResource
+} from '@shared/videoTypes'
 import { maskVideoResourceLocator } from '@shared/videoResourceLinks'
 import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS } from '@shared/videoScrapeTypes'
 import MetaLink from './MetaLink'
@@ -277,16 +282,28 @@ function VideoFileRow({
 function VideoLinkResourceRow({
   resource,
   multiResources,
-  onOpenResource
+  onOpenResource,
+  onEditResource
 }: {
   resource: VideoResource
   multiResources: boolean
   onOpenResource?: (resourceId: number) => void
+  onEditResource?: (resource: VideoResource) => void
 }): JSX.Element {
   const [showFullLink, setShowFullLink] = useState(false)
   const [copied, setCopied] = useState(false)
-  const kind = resource.kind === 'direct' ? '视频直链' : '网页链接'
-  const masked = maskVideoResourceLocator(resource.locator, resource.kind as 'direct' | 'web')
+  const kind =
+    resource.kind === 'direct'
+      ? '视频直链'
+      : resource.kind === 'web'
+        ? '网页链接'
+        : resource.kind === 'magnet'
+          ? 'Magnet'
+          : 'ED2K'
+  const masked = maskVideoResourceLocator(
+    resource.locator,
+    resource.kind as ExternalVideoResourceKind
+  )
   const title = resource.display_name?.trim() || masked
   const isPrimary = Boolean(resource.is_primary)
 
@@ -322,6 +339,12 @@ function VideoLinkResourceRow({
         {showFullLink ? <div className="detail-meta-path detail-meta-path--full">{resource.locator}</div> : null}
       </div>
       <div className="detail-meta-file-actions">
+        <IconButton
+          className="detail-icon-action"
+          icon={<Pencil {...UI_ICON} />}
+          label={`编辑${kind}`}
+          onClick={() => onEditResource?.(resource)}
+        />
         <IconButton
           className="detail-icon-action"
           icon={<Play {...UI_ICON} />}
@@ -410,7 +433,8 @@ export function VideoDetailSecondaryMeta({
   onRevealFile,
   onSetPrimaryFile,
   onDeleteFile,
-  onOpenResource
+  onOpenResource,
+  onEditResource
 }: {
   video: VideoDetail
   onPlayFile?: (fileId: number) => void
@@ -418,6 +442,7 @@ export function VideoDetailSecondaryMeta({
   onSetPrimaryFile?: (fileId: number) => void
   onDeleteFile?: (file: VideoFile) => void
   onOpenResource?: (resourceId: number) => void
+  onEditResource?: (resource: VideoResource) => void
 }): JSX.Element | null {
   const linkResources = video.resources.filter((resource) => resource.kind !== 'local')
   const multiResources = video.resources.length > 1
@@ -448,6 +473,7 @@ export function VideoDetailSecondaryMeta({
               resource={resource}
               multiResources={multiResources}
               onOpenResource={onOpenResource}
+              onEditResource={onEditResource}
             />
           ))}
         </div>

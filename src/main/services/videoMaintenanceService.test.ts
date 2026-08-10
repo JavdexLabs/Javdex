@@ -117,6 +117,48 @@ describe('VideoMaintenanceService', () => {
     assert.equal(queryResourceCount(), 2)
   })
 
+  it('imports Magnet and ED2K resources and deduplicates their protocol identities', () => {
+    setupDb()
+    const videos = createVideoMaintenanceService()
+    const magnet = videos.importLinkResource({
+      code: 'MAG-001',
+      url: 'magnet:?xt=urn:btih:ABCDEF1234567890&dn=Example%20Movie'
+    })
+    const ed2k = videos.importLinkResource({
+      code: 'ED2K-001',
+      url: 'ed2k://|file|Example%20Movie.mp4|123456|ABCDEF0123456789ABCDEF0123456789|/',
+      sizeBytes: 123456
+    })
+
+    assert.equal(magnet.resource.kind, 'magnet')
+    assert.equal(magnet.resource.display_name, 'Example Movie')
+    assert.equal(ed2k.resource.kind, 'ed2k')
+    assert.equal(ed2k.resource.display_name, 'Example Movie.mp4')
+    assert.equal(ed2k.resource.size_bytes, 123456)
+    assert.throws(
+      () =>
+        videos.importLinkResource({
+          code: 'OTHER-001',
+          url: 'magnet:?dn=Renamed&xt=urn:btih:abcdef1234567890'
+        }),
+      /MAG-001/
+    )
+
+    const updated = videos.updateLinkResource(magnet.videoId, magnet.resource.id, {
+      url: 'magnet:?xt=urn:btih:ABCDEF1234567890&dn=Updated%20Name',
+      displayName: 'Custom name',
+      sizeBytes: 2048
+    })
+    assert.equal(updated.display_name, 'Custom name')
+    assert.equal(updated.size_bytes, 2048)
+    const cleared = videos.updateLinkResource(magnet.videoId, magnet.resource.id, {
+      url: updated.locator,
+      displayName: updated.display_name,
+      sizeBytes: null
+    })
+    assert.equal(cleared.size_bytes, null)
+  })
+
   it('edits metadata, status, rating, poster, and manual tags', () => {
     setupDb()
     const videos = createVideoMaintenanceService()

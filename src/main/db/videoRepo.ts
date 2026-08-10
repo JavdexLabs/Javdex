@@ -4,7 +4,7 @@ import type {
   VideoFile,
   VideoResource,
   VideoResourceImportResult,
-  LinkVideoResourceKind,
+  ExternalVideoResourceKind,
   VideoAsset,
   VideoDetail,
   VideoQuery,
@@ -346,7 +346,7 @@ export function getPrimaryVideoResource(videoId: number): VideoResource | null {
 
 export function importVideoLinkResourceRecord(input: {
   code: string
-  kind: LinkVideoResourceKind
+  kind: ExternalVideoResourceKind
   locator: string
   resourceKey: string
   displayName: string | null
@@ -396,6 +396,48 @@ export function importVideoLinkResourceRecord(input: {
     const resource = getVideoResourceById(Number(info.lastInsertRowid))
     if (!resource) throw new Error('影片资源写入失败')
     return { videoId: video.id, resource, createdVideo }
+  })()
+}
+
+export function updateVideoLinkResourceRecord(input: {
+  resourceId: number
+  videoId: number
+  kind: ExternalVideoResourceKind
+  locator: string
+  resourceKey: string
+  displayName: string | null
+  sizeBytes: number | null
+}): VideoResource | { duplicateOwnerCode: string } {
+  const db = getDb()
+  return db.transaction(() => {
+    const duplicate = db
+      .prepare(
+        `SELECT v.code
+         FROM video_resources vr
+         JOIN videos v ON v.id = vr.video_id
+         WHERE vr.resource_key = ? AND vr.id != ?`
+      )
+      .get(input.resourceKey, input.resourceId) as { code: string } | undefined
+    if (duplicate) return { duplicateOwnerCode: duplicate.code }
+    const info = db
+      .prepare(
+        `UPDATE video_resources
+         SET kind = ?, locator = ?, resource_key = ?, display_name = ?, size_bytes = ?
+         WHERE id = ? AND video_id = ? AND kind != 'local'`
+      )
+      .run(
+        input.kind,
+        input.locator,
+        input.resourceKey,
+        input.displayName,
+        input.sizeBytes,
+        input.resourceId,
+        input.videoId
+      )
+    if (info.changes === 0) throw new Error('影片链接资源不存在')
+    const resource = getVideoResourceById(input.resourceId)
+    if (!resource) throw new Error('影片资源更新失败')
+    return resource
   })()
 }
 

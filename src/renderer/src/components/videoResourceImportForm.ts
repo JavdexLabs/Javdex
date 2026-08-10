@@ -4,8 +4,7 @@ import type {
   VideoResourceSizeUnit
 } from '@shared/videoTypes'
 import {
-  inferHttpVideoResourceKind,
-  normalizeHttpVideoResource,
+  normalizeExternalVideoResource,
   resourceSizeToBytes
 } from '@shared/videoResourceLinks'
 
@@ -21,12 +20,15 @@ export function buildVideoResourceImportInput(input: {
 }): VideoLinkResourceImportInput {
   const code = input.code.trim()
   if (!code) throw new Error('请输入影片番号')
-  const { locator } = normalizeHttpVideoResource(input.url)
+  const normalized = normalizeExternalVideoResource(
+    input.url,
+    input.kind === 'auto' ? undefined : input.kind
+  )
   return {
     code,
-    url: locator,
-    kind: input.kind === 'auto' ? inferHttpVideoResourceKind(locator) : input.kind,
-    displayName: input.displayName.trim() || null,
+    url: normalized.locator,
+    kind: normalized.kind,
+    displayName: input.displayName.trim() || normalized.suggestedDisplayName,
     sizeBytes: resourceSizeToBytes(input.size, input.sizeUnit)
   }
 }

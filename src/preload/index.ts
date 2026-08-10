@@ -31,6 +31,7 @@ import type {
   Video,
   VideoEditInput,
   VideoLinkResourceImportInput,
+  VideoLinkResourceUpdateInput,
   VideoQuery,
   VideoSampleImportInput
 } from '../shared/videoTypes'
@@ -183,7 +184,12 @@ const api = {
       invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId),
     importLinkResource: (input: VideoLinkResourceImportInput) =>
       invokeVideo(IPC.VIDEO_RESOURCE_IMPORT, input),
-    checkResourceLink: (url: string) => invokeVideo(IPC.VIDEO_RESOURCE_CHECK, url)
+    checkResourceLink: (url: string) => invokeVideo(IPC.VIDEO_RESOURCE_CHECK, url),
+    updateLinkResource: (
+      videoId: number,
+      resourceId: number,
+      input: VideoLinkResourceUpdateInput
+    ) => invokeVideo(IPC.VIDEO_RESOURCE_UPDATE, videoId, resourceId, input)
   },
   playlists: {
     list: () => invokeApp(IPC.PLAYLIST_LIST),

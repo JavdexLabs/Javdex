@@ -7,9 +7,11 @@ import type {
   VideoEditInput,
   VideoListResult,
   VideoLinkResourceImportInput,
+  VideoLinkResourceUpdateInput,
   VideoQuery,
   VideoResourceImportResult,
   VideoResourceLinkCheckResult,
+  VideoResource,
   VideoSampleImportInput
 } from './videoTypes'
 import type {
@@ -55,6 +57,10 @@ export interface VideoIpcContract {
   [IPC.VIDEO_RESOURCE_CHECK]: {
     args: [url: string]
     result: VideoResourceLinkCheckResult
+  }
+  [IPC.VIDEO_RESOURCE_UPDATE]: {
+    args: [videoId: number, resourceId: number, input: VideoLinkResourceUpdateInput]
+    result: VideoResource
   }
 }
 

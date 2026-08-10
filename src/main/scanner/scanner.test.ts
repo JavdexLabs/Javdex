@@ -94,7 +94,7 @@ describe('scanFolders', () => {
     assert.equal(result.unrecognizedFiles.length, 0)
   })
 
-  it('removes an imported symbolic-link video after its target disappears', async () => {
+  it('leaves missing-resource cleanup to the high-level scan coordinator', async () => {
     const root = makeTempRoot()
     const library = path.join(root, 'library')
     const targetPath = path.join(root, 'target.mp4')
@@ -114,8 +114,8 @@ describe('scanFolders', () => {
 
     assert.equal(first.imported, 1)
     assert.equal(second.scannedFiles, 0)
-    assert.equal(second.removed, 1)
-    assert.equal(listVideos({ limit: 10, offset: 0 }).total, 0)
+    assert.equal(second.removed, 0)
+    assert.equal(listVideos({ limit: 10, offset: 0 }).total, 1)
   })
 
   it('keeps distinct symbolic-link paths that point to the same target', async () => {
@@ -171,6 +171,32 @@ describe('scanFolders', () => {
     const videos = listVideos({ limit: 10, offset: 0 })
     assert.equal(videos.total, 1)
     assert.equal(videos.items[0].code, 'IPX-535')
+  })
+
+  it('reattaches a scanned file to an existing no-resource video without replacing metadata', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const filePath = path.join(library, 'KEEP-001.mp4')
+    fs.writeFileSync(filePath, 'video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    getDb()
+      .prepare(
+        `INSERT INTO videos (code, title, scraped_status, add_time)
+         VALUES ('KEEP-001', 'Preserved metadata', 1, '2026-01-01')`
+      )
+      .run()
+
+    const result = await scanFolders([library], undefined, {
+      readDurationSeconds: async () => 3661,
+      minImportDurationSeconds: null
+    })
+    const [video] = listVideos({ search: 'KEEP-001' }).items
+
+    assert.equal(result.imported, 1)
+    assert.equal(video.title, 'Preserved metadata')
+    assert.equal(video.scraped_status, 1)
+    assert.deepEqual(listVideoFiles(video.id).map((file) => file.file_path), [filePath])
   })
 
   it('yields while scanning large batches', async () => {

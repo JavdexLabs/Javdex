@@ -50,8 +50,12 @@ export interface ScanResult {
   cancelled?: boolean
   /** Videos whose file was moved/renamed but code matched — metadata kept, path updated. */
   relocated: number
-  /** Videos removed: path outside library folders, or file missing under a library folder. */
+  /** Missing local resource records removed from accessible configured folders. */
   removed: number
+  /** Primary resources promoted after missing local resources were removed. */
+  promoted: number
+  /** Configured roots that were missing or unreadable and therefore preserved. */
+  offlineFolders: string[]
   newCodes: string[]
   /** Absolute paths of files whose 番号 could not be parsed from the filename. */
   unrecognizedFiles: string[]

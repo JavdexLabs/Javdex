@@ -7,8 +7,6 @@ import {
   getPrimaryVideoFile,
   getVideoFileByPath,
   insertScannedVideo,
-  listVideoFileRefs,
-  purgeVideoFile,
   relocateVideo,
   updateVideoFileAfterProbe,
   videoExistsByPath
@@ -25,7 +23,6 @@ import {
   type VideoFileFingerprint
 } from './videoDuration'
 import { getSettings } from '../settings/settingsStore'
-import { mediaAssetStore } from '../services/mediaAssetStore'
 
 export type ScanProgressFn = (progress: ScanProgress) => void
 
@@ -83,14 +80,6 @@ async function collectVideoFiles(
 
 function samePath(a: string, b: string): boolean {
   return path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase()
-}
-
-function isUnderFolder(filePath: string, folders: string[]): boolean {
-  const resolved = path.resolve(filePath)
-  return folders.some((folder) => {
-    const root = path.resolve(folder)
-    return resolved === root || resolved.startsWith(root + path.sep)
-  })
 }
 
 export function statFileFingerprint(filePath: string): VideoFileFingerprint | null {
@@ -195,6 +184,8 @@ export async function scanFolders(
     failed: 0,
     relocated: 0,
     removed: 0,
+    promoted: 0,
+    offlineFolders: [],
     newCodes: [],
     unrecognizedFiles: []
   }
@@ -307,30 +298,6 @@ export async function scanFolders(
 
     onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
     await maybeYield(result.scannedFiles, yieldEvery)
-  }
-
-  let checkedExisting = 0
-  for (const { file_id, file_path } of listVideoFileRefs()) {
-    if (options.signal?.aborted) {
-      result.cancelled = true
-      break
-    }
-    checkedExisting += 1
-    const underLibrary = isUnderFolder(file_path, folders)
-    if (underLibrary && fs.existsSync(file_path)) {
-      await maybeYield(checkedExisting, yieldEvery)
-      continue
-    }
-    try {
-      const purged = purgeVideoFile(file_id)
-      for (const assetPath of purged.obsoletePaths) {
-        mediaAssetStore.deleteBestEffort(assetPath)
-      }
-      result.removed += 1
-    } catch (err) {
-      console.error('Purge error for', file_path, err)
-    }
-    await maybeYield(checkedExisting, yieldEvery)
   }
 
   return result

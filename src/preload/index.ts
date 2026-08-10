@@ -77,6 +77,7 @@ import type {
   DirectorUpdateInput,
   OrganizationCreateInput,
   OrganizationListQuery,
+  OrganizationMergeInput,
   OrganizationRole,
   OrganizationUpdateInput,
   SeriesListQuery,
@@ -278,9 +279,11 @@ const api = {
     list: (query: OrganizationListQuery) => invokeApp(IPC.ORGANIZATION_LIST, query),
     get: (id: number, role: OrganizationRole) => invokeApp(IPC.ORGANIZATION_GET, id, role),
     options: (search?: string) => invokeApp(IPC.ORGANIZATION_OPTIONS, search),
+    mergeOptions: (search?: string) => invokeApp(IPC.ORGANIZATION_MERGE_OPTIONS, search),
     create: (input: OrganizationCreateInput) => invokeApp(IPC.ORGANIZATION_CREATE, input),
     update: (id: number, input: OrganizationUpdateInput) =>
-      invokeApp(IPC.ORGANIZATION_UPDATE, id, input)
+      invokeApp(IPC.ORGANIZATION_UPDATE, id, input),
+    merge: (input: OrganizationMergeInput) => invokeApp(IPC.ORGANIZATION_MERGE, input)
   },
   directors: {
     list: (query: DirectorListQuery) => invokeApp(IPC.DIRECTOR_LIST, query),

@@ -32,7 +32,8 @@ export const organizationKeys = {
     ['organizations', 'list', role, queryHash] as const,
   detail: (role: OrganizationRole | null, id: number) =>
     ['organizations', 'detail', role, id] as const,
-  options: (search = '') => ['organizations', 'options', search] as const
+  options: (search = '') => ['organizations', 'options', search] as const,
+  mergeOptions: (search = '') => ['organizations', 'merge-options', search] as const
 }
 
 export const directorKeys = {

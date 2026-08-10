@@ -28,6 +28,8 @@ describe('organization form state', () => {
         { label: 'First', url: 'https://example.com/1', position: 1 }
       ],
       roles: ['maker'],
+      makerVideoCount: 0,
+      publisherVideoCount: 0,
       releaseYearStart: null,
       releaseYearEnd: null
     })

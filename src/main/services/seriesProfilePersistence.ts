@@ -1,33 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { ClassificationLink } from '@shared/classificationTypes'
-import { normalizeClassificationName } from '@shared/classificationNameNormalization'
-
-type PreparedSeriesName = {
-  name: string
-  normalizedName: string
-  type: 'main' | 'alias'
-}
-
-function prepareSeriesNames(
-  mainNameInput: string,
-  aliasesInput: readonly string[]
-): PreparedSeriesName[] {
-  const mainName = mainNameInput.trim()
-  const mainNormalized = normalizeClassificationName(mainName)
-  const names: PreparedSeriesName[] = [
-    { name: mainName, normalizedName: mainNormalized, type: 'main' }
-  ]
-  const seen = new Set([mainNormalized])
-  for (const rawAlias of aliasesInput) {
-    const alias = rawAlias.trim()
-    if (!alias) continue
-    const normalizedName = normalizeClassificationName(alias)
-    if (seen.has(normalizedName)) continue
-    seen.add(normalizedName)
-    names.push({ name: alias, normalizedName, type: 'alias' })
-  }
-  return names
-}
+import { writeClassificationLinks } from './classificationLinkPersistence'
+import { prepareClassificationNames } from './classificationNamePreparation'
 
 export function assertSeriesNamesAvailable(
   database: Database.Database,
@@ -77,7 +51,7 @@ export function writeSeriesNames(
   mainName: string,
   aliases: readonly string[]
 ): void {
-  const names = prepareSeriesNames(mainName, aliases)
+  const names = prepareClassificationNames(mainName, aliases).normalizedNames
   assertSeriesNamesAvailable(
     database,
     ownerOrganizationId,
@@ -111,14 +85,5 @@ export function writeSeriesLinks(
   seriesId: number,
   links: readonly ClassificationLink[]
 ): void {
-  database.prepare('DELETE FROM series_links WHERE series_id = ?').run(seriesId)
-  const insert = database.prepare(
-    `INSERT INTO series_links (series_id, label, url, normalized_url, position)
-     VALUES (?, ?, ?, ?, ?)`
-  )
-  links.forEach((link) => {
-    const normalizedUrl = new URL(link.url)
-    normalizedUrl.hash = ''
-    insert.run(seriesId, link.label, link.url, normalizedUrl.toString(), link.position)
-  })
+  writeClassificationLinks(database, 'series', seriesId, links)
 }

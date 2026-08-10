@@ -8,11 +8,13 @@ import { classificationMaintenanceService } from '../services/classificationMain
 import { classificationImageService } from '../services/classificationImageService'
 import { directorMergeService } from '../services/directorMergeService'
 import { seriesMergeService } from '../services/seriesMergeService'
+import { organizationMergeService } from '../services/organizationMergeService'
 
 interface ClassificationHandlerDependencies {
   queryService: typeof classificationQueryService
   maintenanceService: typeof classificationMaintenanceService
   imageService: typeof classificationImageService
+  organizationMergeService: typeof organizationMergeService
   directorMergeService: typeof directorMergeService
   seriesMergeService: typeof seriesMergeService
 }
@@ -23,6 +25,7 @@ export function registerClassificationHandlers(
     queryService: classificationQueryService,
     maintenanceService: classificationMaintenanceService,
     imageService: classificationImageService,
+    organizationMergeService,
     directorMergeService,
     seriesMergeService
   }
@@ -36,11 +39,17 @@ export function registerClassificationHandlers(
   adapter.register(IPC.ORGANIZATION_OPTIONS, (search) =>
     dependencies.queryService.listOrganizationOptions(search)
   )
+  adapter.register(IPC.ORGANIZATION_MERGE_OPTIONS, (search) =>
+    dependencies.queryService.listOrganizationMergeOptions(search)
+  )
   adapter.register(IPC.ORGANIZATION_CREATE, (input) =>
     dependencies.maintenanceService.createOrganization(input)
   )
   adapter.register(IPC.ORGANIZATION_UPDATE, (id, input) =>
     dependencies.maintenanceService.updateOrganization(id, input)
+  )
+  adapter.register(IPC.ORGANIZATION_MERGE, (input) =>
+    dependencies.organizationMergeService.merge(input)
   )
   adapter.register(IPC.DIRECTOR_LIST, (query) => dependencies.queryService.listDirectors(query))
   adapter.register(IPC.DIRECTOR_GET, (id) => dependencies.queryService.getDirector(id))

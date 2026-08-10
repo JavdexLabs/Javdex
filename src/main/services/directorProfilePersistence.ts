@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { ClassificationLink } from '@shared/classificationTypes'
 import { normalizeClassificationName } from '@shared/classificationNameNormalization'
+import { writeClassificationLinks } from './classificationLinkPersistence'
 
 export function writeDirectorNames(
   database: Database.Database,
@@ -24,14 +25,5 @@ export function writeDirectorLinks(
   directorId: number,
   links: readonly ClassificationLink[]
 ): void {
-  database.prepare('DELETE FROM director_links WHERE director_id = ?').run(directorId)
-  const insert = database.prepare(
-    `INSERT INTO director_links (director_id, label, url, normalized_url, position)
-     VALUES (?, ?, ?, ?, ?)`
-  )
-  links.forEach((link) => {
-    const normalizedUrl = new URL(link.url)
-    normalizedUrl.hash = ''
-    insert.run(directorId, link.label, link.url, normalizedUrl.toString(), link.position)
-  })
+  writeClassificationLinks(database, 'director', directorId, links)
 }

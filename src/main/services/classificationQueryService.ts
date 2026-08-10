@@ -9,6 +9,7 @@ import type {
   OrganizationLink,
   OrganizationListItem,
   OrganizationListQuery,
+  OrganizationMergeOption,
   OrganizationOption,
   OrganizationRole,
   SeriesDetail,
@@ -45,6 +46,7 @@ export interface ClassificationQueryService {
   listOrganizations(query: OrganizationListQuery): OrganizationListItem[]
   getOrganization(id: number, role: OrganizationRole): OrganizationDetail | null
   listOrganizationOptions(search?: string): OrganizationOption[]
+  listOrganizationMergeOptions(search?: string): OrganizationMergeOption[]
   listDirectors(query: DirectorListQuery): DirectorListItem[]
   getDirector(id: number): DirectorDetail | null
   listDirectorOptions(search?: string): DirectorOption[]
@@ -159,6 +161,10 @@ export const classificationQueryService: ClassificationQueryService = {
                 parent.id AS parent_id,
                 parent.main_name AS parent_name,
                 (SELECT COUNT(*) FROM videos v WHERE v.${videoColumn} = o.id) AS video_count,
+                (SELECT COUNT(*) FROM videos v WHERE v.maker_organization_id = o.id)
+                  AS maker_video_count,
+                (SELECT COUNT(*) FROM videos v WHERE v.publisher_organization_id = o.id)
+                  AS publisher_video_count,
                 (
                   SELECT MIN(CAST(substr(v.release_date, 1, 4) AS INTEGER))
                   FROM videos v
@@ -201,6 +207,8 @@ export const classificationQueryService: ClassificationQueryService = {
           parent_id: number | null
           parent_name: string | null
           video_count: number
+          maker_video_count: number
+          publisher_video_count: number
           release_year_start: number | null
           release_year_end: number | null
           fallback_cover_path: string | null
@@ -247,6 +255,8 @@ export const classificationQueryService: ClassificationQueryService = {
       aliases: aliases.map((alias) => alias.name),
       links,
       roles: roles.map((item) => item.role),
+      makerVideoCount: row.maker_video_count,
+      publisherVideoCount: row.publisher_video_count,
       releaseYearStart: row.release_year_start,
       releaseYearEnd: row.release_year_end
     }
@@ -283,6 +293,56 @@ export const classificationQueryService: ClassificationQueryService = {
       roles: (readRoles.all(row.id) as Array<{ role: OrganizationRole }>).map(
         (item) => item.role
       )
+    }))
+  },
+
+  listOrganizationMergeOptions(search): OrganizationMergeOption[] {
+    const normalized = searchLikePattern(search)
+    const rows = getDb()
+      .prepare(
+        `SELECT o.id, o.main_name,
+                (SELECT COUNT(*) FROM videos v
+                 WHERE v.maker_organization_id = o.id OR v.publisher_organization_id = o.id)
+                  AS video_count,
+                (SELECT COUNT(*) FROM videos v WHERE v.maker_organization_id = o.id)
+                  AS maker_video_count,
+                (SELECT COUNT(*) FROM videos v WHERE v.publisher_organization_id = o.id)
+                  AS publisher_video_count
+         FROM organizations o
+         WHERE ? = '' OR EXISTS (
+           SELECT 1 FROM organization_names n
+           WHERE n.organization_id = o.id
+             AND n.normalized_name LIKE ? ESCAPE '\\'
+         )
+         ORDER BY o.main_name, o.id
+         LIMIT 100`
+      )
+      .all(normalized, normalized) as Array<{
+      id: number
+      main_name: string
+      video_count: number
+      maker_video_count: number
+      publisher_video_count: number
+    }>
+    const readAliases = getDb().prepare(
+      `SELECT name FROM organization_names
+       WHERE organization_id = ? AND type = 'alias'
+       ORDER BY position, id`
+    )
+    const readRoles = getDb().prepare(
+      `SELECT role FROM organization_roles
+       WHERE organization_id = ? ORDER BY role`
+    )
+    return rows.map((row) => ({
+      id: row.id,
+      mainName: row.main_name,
+      aliases: (readAliases.all(row.id) as Array<{ name: string }>).map((item) => item.name),
+      roles: (readRoles.all(row.id) as Array<{ role: OrganizationRole }>).map(
+        (item) => item.role
+      ),
+      videoCount: row.video_count,
+      makerVideoCount: row.maker_video_count,
+      publisherVideoCount: row.publisher_video_count
     }))
   },
 

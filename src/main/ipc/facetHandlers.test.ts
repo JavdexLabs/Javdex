@@ -7,6 +7,7 @@ import type { ClassificationMaintenanceService } from '../services/classificatio
 import type { ClassificationImageService } from '../services/classificationImageService'
 import type { DirectorMergeService } from '../services/directorMergeService'
 import type { SeriesMergeService } from '../services/seriesMergeService'
+import type { OrganizationMergeService } from '../services/organizationMergeService'
 import { appCommandAdapter } from './appContractAdapter'
 import { registerClassificationHandlers } from './facetHandlers'
 
@@ -28,6 +29,10 @@ describe('classification IPC contract', () => {
       },
       listOrganizationOptions(search) {
         calls.push(['options', search])
+        return []
+      },
+      listOrganizationMergeOptions(search) {
+        calls.push(['merge-options', search])
         return []
       },
       listDirectors(query) {
@@ -108,6 +113,21 @@ describe('classification IPC contract', () => {
         }
       }
     }
+    const organizationMergeService: OrganizationMergeService = {
+      merge(input) {
+        calls.push(['organization-merge', input])
+        return {
+          targetId: input.targetId,
+          sourceId: input.sourceId,
+          transferredMakerVideoCount: 3,
+          transferredPublisherVideoCount: 4,
+          transferredChildCount: 2,
+          transferredSeriesCount: 1,
+          imagePath: 'covers/organization.jpg',
+          cleanupFailures: []
+        }
+      }
+    }
     const seriesMergeService: SeriesMergeService = {
       merge(input) {
         calls.push(['series-merge', input])
@@ -132,6 +152,7 @@ describe('classification IPC contract', () => {
       queryService,
       maintenanceService,
       imageService,
+      organizationMergeService,
       directorMergeService,
       seriesMergeService
     })
@@ -142,8 +163,20 @@ describe('classification IPC contract', () => {
     assert.deepEqual(handlers.get(IPC.ORGANIZATION_LIST)?.(listQuery), [])
     assert.equal(handlers.get(IPC.ORGANIZATION_GET)?.(12, 'publisher'), null)
     assert.deepEqual(handlers.get(IPC.ORGANIZATION_OPTIONS)?.('alias'), [])
+    assert.deepEqual(handlers.get(IPC.ORGANIZATION_MERGE_OPTIONS)?.('source'), [])
     assert.equal(handlers.get(IPC.ORGANIZATION_CREATE)?.(createInput), 17)
     assert.equal(handlers.get(IPC.ORGANIZATION_UPDATE)?.(12, updateInput), true)
+    const organizationMergeInput = { targetId: 12, sourceId: 13 }
+    assert.deepEqual(handlers.get(IPC.ORGANIZATION_MERGE)?.(organizationMergeInput), {
+      targetId: 12,
+      sourceId: 13,
+      transferredMakerVideoCount: 3,
+      transferredPublisherVideoCount: 4,
+      transferredChildCount: 2,
+      transferredSeriesCount: 1,
+      imagePath: 'covers/organization.jpg',
+      cleanupFailures: []
+    })
     const directorQuery = { search: 'lee' }
     const directorInput = { mainName: 'Alex Lee' }
     assert.deepEqual(handlers.get(IPC.DIRECTOR_LIST)?.(directorQuery), [])
@@ -186,8 +219,10 @@ describe('classification IPC contract', () => {
       ['list', listQuery],
       ['get', 12, 'publisher'],
       ['options', 'alias'],
+      ['merge-options', 'source'],
       ['create', createInput],
       ['update', 12, updateInput],
+      ['organization-merge', organizationMergeInput],
       ['director-list', directorQuery],
       ['director-get', 23],
       ['director-options', 'alex'],

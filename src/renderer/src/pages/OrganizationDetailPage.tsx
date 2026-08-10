@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { ExternalLink, ImagePlus, Inbox, Pencil, SearchX } from 'lucide-react'
+import { ExternalLink, GitMerge, ImagePlus, Inbox, Pencil, SearchX } from 'lucide-react'
 import {
   Outlet,
   useLocation,
@@ -8,7 +8,11 @@ import {
   useParams
 } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { OrganizationRole, OrganizationUpdateInput } from '@shared/classificationTypes'
+import type {
+  OrganizationMergeResult,
+  OrganizationRole,
+  OrganizationUpdateInput
+} from '@shared/classificationTypes'
 import type { VideoQuery } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
 import { FACET_LABEL } from '../facet'
@@ -18,6 +22,8 @@ import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import ListToolbar from '../components/ListToolbar'
 import OrganizationEditModal from '../components/OrganizationEditModal'
+import OrganizationMergeModal from '../components/OrganizationMergeModal'
+import { organizationMergeSuccessMessage } from '../components/organizationMergePresentation'
 import PosterCard from '../components/PosterCard'
 import { useToast } from '../components/Toast'
 import { UI_ICON_SM } from '../components/iconDefaults'
@@ -27,7 +33,7 @@ import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavig
 import { hashListQuery } from '../listView/listQueryParams'
 import { navigateToFacetList } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
-import { organizationKeys } from '../query/queryKeys'
+import { organizationKeys, seriesKeys, videoKeys } from '../query/queryKeys'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 
 const STATUS_LABEL = {
@@ -54,6 +60,7 @@ export default function OrganizationDetailPage(): JSX.Element {
   )
   const [editing, setEditing] = useState(false)
   const [editingImage, setEditingImage] = useState(false)
+  const [mergingOrganization, setMergingOrganization] = useState(false)
   const detailQuery = useQuery({
     queryKey: organizationKeys.detail(role, organizationId),
     queryFn: () => api.organizations.get(organizationId, role!),
@@ -93,6 +100,7 @@ export default function OrganizationDetailPage(): JSX.Element {
   const dismissEditing = useCallback(() => {
     setEditing(false)
     setEditingImage(false)
+    setMergingOrganization(false)
   }, [])
   useDismissOverlaysOnNavigate(dismissEditing, location.pathname)
 
@@ -106,6 +114,22 @@ export default function OrganizationDetailPage(): JSX.Element {
     } catch (error) {
       toast.show(String((error as Error).message), 'error')
     }
+  }
+
+  const merged = async (result: OrganizationMergeResult): Promise<void> => {
+    setMergingOrganization(false)
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: organizationKeys.all }),
+      queryClient.invalidateQueries({ queryKey: seriesKeys.all }),
+      queryClient.invalidateQueries({ queryKey: videoKeys.all })
+    ])
+    void refetchSilent()
+    toast.show(
+      result.cleanupFailures.length > 0
+        ? '机构已合并，但来源品牌图清理失败，可稍后重试'
+        : organizationMergeSuccessMessage(result),
+      result.cleanupFailures.length > 0 ? 'info' : 'success'
+    )
   }
 
   const videoOverlay = videoStackOpen ? (
@@ -166,6 +190,14 @@ export default function OrganizationDetailPage(): JSX.Element {
                 >
                   <ImagePlus {...UI_ICON_SM} aria-hidden />
                   管理主图
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setMergingOrganization(true)}
+                >
+                  <GitMerge {...UI_ICON_SM} aria-hidden />
+                  合并机构
                 </button>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>
                   <Pencil {...UI_ICON_SM} aria-hidden />
@@ -288,6 +320,13 @@ export default function OrganizationDetailPage(): JSX.Element {
             fallbackCoverPath={organization.fallbackCoverPath}
             onCancel={() => setEditingImage(false)}
             onChanged={() => queryClient.invalidateQueries({ queryKey: organizationKeys.all })}
+          />
+        ) : null}
+        {mergingOrganization ? (
+          <OrganizationMergeModal
+            target={organization}
+            onCancel={() => setMergingOrganization(false)}
+            onMerged={merged}
           />
         ) : null}
       </div>

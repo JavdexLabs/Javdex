@@ -23,6 +23,12 @@ import type {
 import { normalizeClassificationName } from '@shared/classificationNameNormalization'
 import { getDb } from '../db/database'
 import { writeDirectorLinks, writeDirectorNames } from './directorProfilePersistence'
+import { prepareClassificationNames } from './classificationNamePreparation'
+import {
+  assertOrganizationNamesAvailable,
+  writeOrganizationLinks,
+  writeOrganizationNames
+} from './organizationProfilePersistence'
 import {
   assertSeriesNamesAvailable,
   writeSeriesLinks,
@@ -130,32 +136,6 @@ function prepareLinks(inputs: OrganizationLinkInput[]): OrganizationLink[] {
   return links
 }
 
-function prepareNames(mainNameInput: string, aliasesInput: string[]): {
-  mainName: string
-  aliases: string[]
-  normalizedNames: Array<{ name: string; normalizedName: string; type: 'main' | 'alias' }>
-} {
-  const mainName = mainNameInput.trim()
-  const mainNormalized = normalizeClassificationName(mainName)
-  const normalizedNames: Array<{
-    name: string
-    normalizedName: string
-    type: 'main' | 'alias'
-  }> = [{ name: mainName, normalizedName: mainNormalized, type: 'main' }]
-  const seen = new Set([mainNormalized])
-  const aliases: string[] = []
-  for (const rawAlias of aliasesInput) {
-    const alias = rawAlias.trim()
-    if (!alias) continue
-    const normalizedName = normalizeClassificationName(alias)
-    if (seen.has(normalizedName)) continue
-    seen.add(normalizedName)
-    aliases.push(alias)
-    normalizedNames.push({ name: alias, normalizedName, type: 'alias' })
-  }
-  return { mainName, aliases, normalizedNames }
-}
-
 function assertParentIsValid(
   database: Database.Database,
   organizationId: number | null,
@@ -181,22 +161,6 @@ function assertParentIsValid(
     )
     .get(organizationId, parentOrganizationId)
   if (descendant) throw new Error('上级机构不能是自身或形成循环')
-}
-
-function assertNamesAvailable(
-  database: Database.Database,
-  normalizedNames: string[],
-  organizationId?: number
-): void {
-  const findOwner = database.prepare(
-    'SELECT organization_id FROM organization_name_ownership WHERE normalized_name = ?'
-  )
-  for (const normalizedName of normalizedNames) {
-    const owner = findOwner.get(normalizedName) as { organization_id: number } | undefined
-    if (owner && owner.organization_id !== organizationId) {
-      throw new Error('名称已归属于其他机构')
-    }
-  }
 }
 
 function readStoredOrganization(database: Database.Database, id: number): StoredOrganization {
@@ -251,7 +215,7 @@ function prepareProfile(
   }
   const status = input.status ?? current?.status ?? 'unknown'
   if (!ORGANIZATION_STATUSES.has(status)) throw new Error('机构状态无效')
-  const names = prepareNames(input.mainName, input.aliases ?? currentAliases)
+  const names = prepareClassificationNames(input.mainName, input.aliases ?? currentAliases)
   return {
     mainName: names.mainName,
     aliases: names.aliases,
@@ -272,59 +236,6 @@ function prepareProfile(
   }
 }
 
-function writeNames(
-  database: Database.Database,
-  organizationId: number,
-  mainName: string,
-  aliases: string[]
-): void {
-  const names = prepareNames(mainName, aliases).normalizedNames
-  assertNamesAvailable(
-    database,
-    names.map((name) => name.normalizedName),
-    organizationId
-  )
-  database.prepare('DELETE FROM organization_names WHERE organization_id = ?').run(organizationId)
-  database
-    .prepare('DELETE FROM organization_name_ownership WHERE organization_id = ?')
-    .run(organizationId)
-  const insertName = database.prepare(
-    `INSERT INTO organization_names (
-       organization_id, name, normalized_name, type, position
-     ) VALUES (?, ?, ?, ?, ?)`
-  )
-  const insertOwnership = database.prepare(
-    `INSERT INTO organization_name_ownership (normalized_name, organization_id)
-     VALUES (?, ?)`
-  )
-  names.forEach((name, position) => {
-    insertName.run(
-      organizationId,
-      name.name,
-      name.normalizedName,
-      name.type,
-      name.type === 'main' ? 0 : position - 1
-    )
-    insertOwnership.run(name.normalizedName, organizationId)
-  })
-}
-
-function writeLinks(
-  database: Database.Database,
-  organizationId: number,
-  links: OrganizationLink[]
-): void {
-  database.prepare('DELETE FROM organization_links WHERE organization_id = ?').run(organizationId)
-  const insert = database.prepare(
-    `INSERT INTO organization_links (
-       organization_id, label, url, normalized_url, position
-     ) VALUES (?, ?, ?, ?, ?)`
-  )
-  for (const link of links) {
-    insert.run(organizationId, link.label, link.url, normalizedUrl(link.url), link.position)
-  }
-}
-
 function createOrganizationRecord(
   database: Database.Database,
   input: OrganizationCreateInput
@@ -332,8 +243,8 @@ function createOrganizationRecord(
   const role = requireRole(input.role)
   const profile = prepareProfile(input)
   assertParentIsValid(database, null, profile.parentOrganizationId)
-  const names = prepareNames(profile.mainName, profile.aliases)
-  assertNamesAvailable(
+  const names = prepareClassificationNames(profile.mainName, profile.aliases)
+  assertOrganizationNamesAvailable(
     database,
     names.normalizedNames.map((name) => name.normalizedName)
   )
@@ -358,8 +269,8 @@ function createOrganizationRecord(
         now
       ).lastInsertRowid
   )
-  writeNames(database, organizationId, profile.mainName, profile.aliases)
-  writeLinks(database, organizationId, profile.links)
+  writeOrganizationNames(database, organizationId, profile.mainName, profile.aliases)
+  writeOrganizationLinks(database, organizationId, profile.links)
   database
     .prepare('INSERT INTO organization_roles (organization_id, role) VALUES (?, ?)')
     .run(organizationId, role)
@@ -428,7 +339,7 @@ function prepareDirectorProfile(
   aliases: string[] = [],
   links: OrganizationLink[] = []
 ): DirectorProfileInput & { aliases: string[]; links: OrganizationLink[]; status: DirectorStatus } {
-  const names = prepareNames(input.mainName, input.aliases ?? aliases)
+  const names = prepareClassificationNames(input.mainName, input.aliases ?? aliases)
   const birthDate =
     input.birthDate === undefined
       ? current?.birth_date ?? null
@@ -598,7 +509,7 @@ function prepareSeriesProfile(
   aliases: string[] = [],
   links: OrganizationLink[] = []
 ): PreparedSeriesProfile {
-  const names = prepareNames(input.mainName, input.aliases ?? aliases)
+  const names = prepareClassificationNames(input.mainName, input.aliases ?? aliases)
   const startYear =
     input.startYear === undefined
       ? current?.start_year ?? null
@@ -631,7 +542,7 @@ function createSeriesRecord(database: Database.Database, input: SeriesProfileInp
   const profile = prepareSeriesProfile(input)
   assertSeriesOwnerExists(database, profile.ownerOrganizationId)
   assertSeriesParentIsValid(database, null, profile.parentSeriesId)
-  const names = prepareNames(profile.mainName, profile.aliases)
+  const names = prepareClassificationNames(profile.mainName, profile.aliases)
   assertSeriesNamesAvailable(
     database,
     profile.ownerOrganizationId,
@@ -702,8 +613,8 @@ export const classificationMaintenanceService: ClassificationMaintenanceService 
       }
       const profile = prepareProfile({ ...input, aliases }, current, currentAliases, readLinks(database, id))
       assertParentIsValid(database, id, profile.parentOrganizationId)
-      const names = prepareNames(profile.mainName, profile.aliases)
-      assertNamesAvailable(
+      const names = prepareClassificationNames(profile.mainName, profile.aliases)
+      assertOrganizationNamesAvailable(
         database,
         names.normalizedNames.map((name) => name.normalizedName),
         id
@@ -727,8 +638,8 @@ export const classificationMaintenanceService: ClassificationMaintenanceService 
           now,
           id
         )
-      writeNames(database, id, profile.mainName, profile.aliases)
-      writeLinks(database, id, profile.links)
+      writeOrganizationNames(database, id, profile.mainName, profile.aliases)
+      writeOrganizationLinks(database, id, profile.links)
       database
         .prepare('UPDATE videos SET maker = ? WHERE maker_organization_id = ?')
         .run(profile.mainName, id)
@@ -887,7 +798,7 @@ export const classificationMaintenanceService: ClassificationMaintenanceService 
       )
       assertSeriesOwnerExists(database, profile.ownerOrganizationId)
       assertSeriesParentIsValid(database, id, profile.parentSeriesId)
-      const names = prepareNames(profile.mainName, profile.aliases)
+      const names = prepareClassificationNames(profile.mainName, profile.aliases)
       assertSeriesNamesAvailable(
         database,
         profile.ownerOrganizationId,

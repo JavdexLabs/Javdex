@@ -59,6 +59,9 @@ import type {
   OrganizationDetail,
   OrganizationListItem,
   OrganizationListQuery,
+  OrganizationMergeInput,
+  OrganizationMergeOption,
+  OrganizationMergeResult,
   OrganizationOption,
   OrganizationRole,
   OrganizationUpdateInput,
@@ -131,10 +134,18 @@ export interface AppIpcContract {
     args: [search?: string]
     result: OrganizationOption[]
   }
+  [IPC.ORGANIZATION_MERGE_OPTIONS]: {
+    args: [search?: string]
+    result: OrganizationMergeOption[]
+  }
   [IPC.ORGANIZATION_CREATE]: { args: [input: OrganizationCreateInput]; result: number }
   [IPC.ORGANIZATION_UPDATE]: {
     args: [id: number, input: OrganizationUpdateInput]
     result: boolean
+  }
+  [IPC.ORGANIZATION_MERGE]: {
+    args: [input: OrganizationMergeInput]
+    result: OrganizationMergeResult
   }
   [IPC.DIRECTOR_LIST]: { args: [query: DirectorListQuery]; result: DirectorListItem[] }
   [IPC.DIRECTOR_GET]: { args: [id: number]; result: DirectorDetail | null }

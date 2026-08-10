@@ -97,6 +97,8 @@ export interface OrganizationDetail extends OrganizationListItem {
   aliases: string[]
   links: ClassificationLink[]
   roles: OrganizationRole[]
+  makerVideoCount: number
+  publisherVideoCount: number
   releaseYearStart: number | null
   releaseYearEnd: number | null
 }
@@ -106,6 +108,12 @@ export interface OrganizationOption extends OrganizationSummary {
   roles: OrganizationRole[]
 }
 
+export interface OrganizationMergeOption extends OrganizationOption {
+  videoCount: number
+  makerVideoCount: number
+  publisherVideoCount: number
+}
+
 export type OrganizationAssignmentInput =
   | { organizationId: number }
   | { createName: string }
@@ -113,6 +121,19 @@ export type OrganizationAssignmentInput =
 export interface OrganizationAssignmentResult {
   organizationId: number | null
   mainName: string | null
+}
+
+export type OrganizationMergeInput = ClassificationMergeInput
+
+export interface OrganizationMergeResult {
+  targetId: number
+  sourceId: number
+  transferredMakerVideoCount: number
+  transferredPublisherVideoCount: number
+  transferredChildCount: number
+  transferredSeriesCount: number
+  imagePath: string | null
+  cleanupFailures: ClassificationImageCleanupFailure[]
 }
 
 export interface DirectorProfileInput {

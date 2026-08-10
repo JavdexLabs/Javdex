@@ -12,6 +12,7 @@ import {
   mergeClassificationAliases,
   mergeClassificationLinks,
   obsoleteSourceImagePath,
+  resolveClassificationMergeParent,
   targetFirstMeaningfulText,
   type ClassificationMergeLink,
   type ClassificationMergeName
@@ -71,43 +72,6 @@ function readLinks(database: Database.Database, id: number): ClassificationMerge
     .all(id) as ClassificationMergeLink[]
 }
 
-function isDescendant(
-  database: Database.Database,
-  ancestorId: number,
-  candidateId: number
-): boolean {
-  return Boolean(
-    database
-      .prepare(
-        `WITH RECURSIVE descendants(id) AS (
-           SELECT id FROM series WHERE parent_series_id = ?
-           UNION
-           SELECT s.id FROM series s JOIN descendants d ON s.parent_series_id = d.id
-         )
-         SELECT 1 FROM descendants WHERE id = ?`
-      )
-      .get(ancestorId, candidateId)
-  )
-}
-
-function mergedParentId(
-  database: Database.Database,
-  target: StoredSeries,
-  source: StoredSeries
-): number | null {
-  const targetIsSourceDescendant = isDescendant(database, source.id, target.id)
-  if (targetIsSourceDescendant) {
-    if (target.parent_series_id !== source.id) {
-      throw new Error(
-        '目标系列位于来源系列的多级子层级中，转移直接子系列会形成循环；请先调整上级系列'
-      )
-    }
-    return source.parent_series_id
-  }
-  if (isDescendant(database, target.id, source.id)) return target.parent_series_id
-  return target.parent_series_id ?? source.parent_series_id
-}
-
 function validateMergedLifecycle(series: StoredSeries): void {
   if (
     series.start_year != null &&
@@ -148,7 +112,12 @@ export function createSeriesMergeService(
           summary: targetFirstMeaningfulText(target.summary, source.summary),
           owner_organization_id:
             target.owner_organization_id ?? source.owner_organization_id,
-          parent_series_id: mergedParentId(db, target, source),
+          parent_series_id: resolveClassificationMergeParent(
+            db,
+            'series',
+            { id: target.id, parentId: target.parent_series_id },
+            { id: source.id, parentId: source.parent_series_id }
+          ),
           start_year: target.start_year ?? source.start_year,
           end_year: target.end_year ?? source.end_year,
           status: target.status !== 'unknown' ? target.status : source.status

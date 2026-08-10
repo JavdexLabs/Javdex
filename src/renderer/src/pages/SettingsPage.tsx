@@ -574,7 +574,13 @@ export default function SettingsPage(): JSX.Element {
 
   const patchLibrarySettings = async (
     patch: Partial<
-      Pick<AppSettings, 'minScanImportDurationMinutes' | 'autoDeleteResourceLessVideos'>
+      Pick<
+        AppSettings,
+        | 'minScanImportDurationMinutes'
+        | 'autoDeleteResourceLessVideos'
+        | 'autoScanEnabled'
+        | 'autoScanIntervalMinutes'
+      >
     >
   ): Promise<void> => {
     if (!settings) return

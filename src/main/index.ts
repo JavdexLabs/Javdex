@@ -1,4 +1,4 @@
-import { app, BrowserWindow, protocol } from 'electron'
+import { app, BrowserWindow, powerMonitor, protocol } from 'electron'
 import path from 'node:path'
 import { APP_DISPLAY_NAME } from '@shared/appIdentity'
 import { applyAppIcons, resolveWindowIcon } from './appIcon'
@@ -12,6 +12,7 @@ import { migrateUserPluginsAwayFromBuiltInNames } from './scrapers/scraperPlugin
 import { resolveMediaAssetPath, toStoredAssetPath } from './services/mediaProtocol'
 import { checkForLatestRelease, shouldRunAutomaticCheck } from './services/appReleaseService'
 import { cleanupOrphanedActressScrapeStaging } from './services/actressIdentityConflictWorkflow'
+import { automaticScanScheduler } from './services/automaticScanScheduler'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -127,6 +128,8 @@ if (gotSingleInstanceLock) {
     registerAssetProtocol()
     registerIpcHandlers(() => mainWindow)
     createWindow()
+    automaticScanScheduler.start()
+    powerMonitor.on('resume', handleSystemResume)
     setTimeout(() => {
       if (shouldRunAutomaticCheck()) void checkForLatestRelease()
     }, 15_000)
@@ -145,7 +148,13 @@ if (gotSingleInstanceLock) {
   })
 
   app.on('before-quit', () => {
+    automaticScanScheduler.stop()
+    powerMonitor.off('resume', handleSystemResume)
     scrapeBrowser.close()
     closeDatabase()
   })
+}
+
+function handleSystemResume(): void {
+  automaticScanScheduler.handleResume()
 }

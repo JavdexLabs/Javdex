@@ -24,6 +24,17 @@ export const PRIVACY_MODE_SCOPES = [
 
 export type PrivacyModeScope = (typeof PRIVACY_MODE_SCOPES)[number]
 
+export const AUTO_SCAN_INTERVAL_MINUTES = [15, 30, 60, 180, 360] as const
+
+export type AutoScanIntervalMinutes = (typeof AUTO_SCAN_INTERVAL_MINUTES)[number]
+
+export function normalizeAutoScanIntervalMinutes(value: unknown): AutoScanIntervalMinutes {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return AUTO_SCAN_INTERVAL_MINUTES.includes(parsed as AutoScanIntervalMinutes)
+    ? (parsed as AutoScanIntervalMinutes)
+    : 60
+}
+
 export function normalizePrivacyModeScopes(value: unknown): PrivacyModeScope[] {
   if (!Array.isArray(value)) return [...PRIVACY_MODE_SCOPES]
   const validScopes = new Set<unknown>(PRIVACY_MODE_SCOPES)
@@ -39,6 +50,10 @@ export interface AppSettings {
   pendingLibraryPathCleanups: string[]
   /** Opt-in destructive cleanup run only after a safe full library scan. */
   autoDeleteResourceLessVideos: boolean
+  /** Run a full library scan in the background when the configured interval is due. */
+  autoScanEnabled: boolean
+  /** Minimum elapsed minutes between automatic full-library scans. */
+  autoScanIntervalMinutes: AutoScanIntervalMinutes
   /** Most recent scan audit record. */
   lastLibraryScanSummary: LibraryScanSummary | null
   /** Minimum local file duration (minutes) required for scan import; 0 disables the filter. */
@@ -144,6 +159,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   libraryPaths: [],
   pendingLibraryPathCleanups: [],
   autoDeleteResourceLessVideos: false,
+  autoScanEnabled: false,
+  autoScanIntervalMinutes: 60,
   lastLibraryScanSummary: null,
   minScanImportDurationMinutes: 30,
   proxyUrl: '',

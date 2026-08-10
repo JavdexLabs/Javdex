@@ -1,6 +1,10 @@
 import type { RefObject } from 'react'
 import { AlertTriangle, Clock, FolderOpen, FolderPlus, Play, Square, X } from 'lucide-react'
-import type { AppSettings } from '@shared/settingsTypes'
+import {
+  AUTO_SCAN_INTERVAL_MINUTES,
+  type AppSettings,
+  type AutoScanIntervalMinutes
+} from '@shared/settingsTypes'
 import type { LibraryScanSummary, ScanResult } from '@shared/libraryTypes'
 import { UI_ICON_SM } from '../iconDefaults'
 import SettingsSwitchRow from '../SettingsSwitchRow'
@@ -138,7 +142,13 @@ export default function LibrarySettingsPanel({
   onResolvedUnrecognized: (path: string) => void
   onPatchSettings: (
     patch: Partial<
-      Pick<AppSettings, 'minScanImportDurationMinutes' | 'autoDeleteResourceLessVideos'>
+      Pick<
+        AppSettings,
+        | 'minScanImportDurationMinutes'
+        | 'autoDeleteResourceLessVideos'
+        | 'autoScanEnabled'
+        | 'autoScanIntervalMinutes'
+      >
     >
   ) => void
   scanScrapePrompt?: { imported: number; unscraped: number } | null
@@ -323,6 +333,45 @@ export default function LibrarySettingsPanel({
           ) : null}
         </section>
       </div>
+
+      <SettingsSectionBlock
+        className="library-auto-scan-block"
+        title="自动扫描"
+        hint="应用启动、系统唤醒及运行期间会检查是否已达到扫描间隔。"
+      >
+        <div className="settings-toggle-list settings-toggle-list--compact">
+          <SettingsSwitchRow
+            title="按固定间隔自动扫描媒体库"
+            description="默认关闭；开启或保存设置后不会立即扫描"
+            checked={settings.autoScanEnabled}
+            disabled={scanning}
+            onChange={(checked) => onPatchSettings({ autoScanEnabled: checked })}
+          />
+        </div>
+        <label className={`library-auto-scan-interval${settings.autoScanEnabled ? '' : ' is-disabled'}`}>
+          <span>
+            <strong>扫描间隔</strong>
+            <small>以上一次扫描完成时间为起点</small>
+          </span>
+          <select
+            className="select"
+            aria-label="自动扫描间隔"
+            value={settings.autoScanIntervalMinutes}
+            disabled={!settings.autoScanEnabled || scanning}
+            onChange={(event) =>
+              onPatchSettings({
+                autoScanIntervalMinutes: Number(event.target.value) as AutoScanIntervalMinutes
+              })
+            }
+          >
+            {AUTO_SCAN_INTERVAL_MINUTES.map((minutes) => (
+              <option key={minutes} value={minutes}>
+                {minutes < 60 ? `${minutes} 分钟` : `${minutes / 60} 小时`}
+              </option>
+            ))}
+          </select>
+        </label>
+      </SettingsSectionBlock>
 
       <SettingsSectionBlock
         className="library-safety-block"

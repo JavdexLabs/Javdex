@@ -8525,10 +8525,51 @@ button.actress-mini:focus-visible .actress-avatar {
   border-top: 1px solid var(--border-subtle);
 }
 
+.library-auto-scan-block,
 .library-safety-block,
 .library-summary-block {
   padding-top: 12px;
   border-top: 1px solid var(--border-subtle);
+}
+
+.library-auto-scan-interval {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-control) 44%, transparent);
+}
+
+.library-auto-scan-interval > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.library-auto-scan-interval strong {
+  color: var(--text-primary);
+  font-size: var(--settings-fs-body, 13px);
+  font-weight: var(--settings-fw-label, 600);
+}
+
+.library-auto-scan-interval small {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption, 11px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.library-auto-scan-interval .select {
+  width: 132px;
+  flex: 0 0 auto;
+}
+
+.library-auto-scan-interval.is-disabled {
+  opacity: 0.58;
 }
 
 .library-destructive-warning {

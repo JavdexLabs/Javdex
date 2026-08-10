@@ -2,7 +2,7 @@ import { app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import process from 'node:process'
-import { DEFAULT_SETTINGS, normalizePluginDevAgentMaxContextTokens, normalizePluginDevAgentMaxSteps, normalizePrivacyModeScopes, normalizeTheme, normalizeMinScanImportDurationMinutes, type AppSettings } from '@shared/settingsTypes'
+import { DEFAULT_SETTINGS, normalizeAutoScanIntervalMinutes, normalizePluginDevAgentMaxContextTokens, normalizePluginDevAgentMaxSteps, normalizePrivacyModeScopes, normalizeTheme, normalizeMinScanImportDurationMinutes, type AppSettings } from '@shared/settingsTypes'
 import { expandActressScrapeFields, type CompositeScraperDefinition, type ScraperPluginDelaySettings } from '@shared/scrapeTypes'
 import {
   BUILT_IN_LLM_PROVIDER_BY_ID,
@@ -178,6 +178,13 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
     autoDeleteResourceLessVideos: normalizeBooleanSetting(
       parsed.autoDeleteResourceLessVideos,
       DEFAULT_SETTINGS.autoDeleteResourceLessVideos
+    ),
+    autoScanEnabled: normalizeBooleanSetting(
+      parsed.autoScanEnabled,
+      DEFAULT_SETTINGS.autoScanEnabled
+    ),
+    autoScanIntervalMinutes: normalizeAutoScanIntervalMinutes(
+      parsed.autoScanIntervalMinutes
     ),
     lastLibraryScanSummary: normalizeLibraryScanSummary(parsed.lastLibraryScanSummary),
     mediaAssetsPath:

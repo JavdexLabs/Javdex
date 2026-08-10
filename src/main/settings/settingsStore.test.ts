@@ -121,6 +121,23 @@ describe('settingsStore scan cleanup defaults', () => {
   })
 })
 
+describe('settingsStore automatic scan defaults', () => {
+  it('keeps automatic scans disabled and defaults to one hour', () => {
+    writeSettings({})
+    assert.equal(getSettings().autoScanEnabled, false)
+    assert.equal(getSettings().autoScanIntervalMinutes, 60)
+  })
+
+  it('accepts only supported automatic scan intervals', () => {
+    for (const interval of [15, 30, 60, 180, 360]) {
+      writeSettings({ autoScanIntervalMinutes: interval })
+      assert.equal(getSettings().autoScanIntervalMinutes, interval)
+    }
+    writeSettings({ autoScanIntervalMinutes: 45 })
+    assert.equal(getSettings().autoScanIntervalMinutes, 60)
+  })
+})
+
 describe('settingsStore retired actress scrapers', () => {
   it('rewrites the retired idol archive default to Xslist', () => {
     writeSettings({ defaultActressScraper: '偶像档案库' })

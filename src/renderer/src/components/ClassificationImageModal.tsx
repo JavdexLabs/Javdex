@@ -56,6 +56,7 @@ export default function ClassificationImageModal({
   const { privacyMode } = useTheme()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const objectUrlRef = useRef<string | null>(null)
+  const remoteRequestRef = useRef(0)
   const current = classificationImageDisplayState(imagePath, fallbackCoverPath)
   const [mode, setMode] = useState<SourceMode>('file')
   const [pending, setPending] = useState<ClassificationImageInput | null | undefined>(undefined)
@@ -87,12 +88,15 @@ export default function ClassificationImageModal({
 
   useEffect(
     () => () => {
+      remoteRequestRef.current += 1
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
     },
     []
   )
 
   const resetPending = (): void => {
+    remoteRequestRef.current += 1
+    setLoadingRemote(false)
     clearObjectUrl()
     setPending(undefined)
     setPreviewUrl(assetUrl(current.path))
@@ -115,17 +119,20 @@ export default function ClassificationImageModal({
       toast.show('请输入有效的 HTTP/HTTPS 图片链接', 'error')
       return
     }
+    const requestId = ++remoteRequestRef.current
     setLoadingRemote(true)
     try {
       const preview = await api.assets.fetchRemoteImagePreview(parsed.toString())
+      if (requestId !== remoteRequestRef.current) return
       clearObjectUrl()
       setPending({ source: 'url', remoteUrl: parsed.toString() })
       setPreviewUrl(remotePreviewUrl(preview.mimeType, preview.dataBase64))
       setPreviewLabel('待保存主图')
     } catch (error) {
+      if (requestId !== remoteRequestRef.current) return
       toast.show(String((error as Error).message), 'error')
     } finally {
-      setLoadingRemote(false)
+      if (requestId === remoteRequestRef.current) setLoadingRemote(false)
     }
   }
 
@@ -187,6 +194,8 @@ export default function ClassificationImageModal({
                 type="button"
                 className="btn btn-ghost btn-sm"
                 onClick={() => {
+                  remoteRequestRef.current += 1
+                  setLoadingRemote(false)
                   clearObjectUrl()
                   setPending(null)
                   setPreviewUrl(assetUrl(fallbackCoverPath))
@@ -270,7 +279,7 @@ export default function ClassificationImageModal({
                 value={remoteUrl}
                 onChange={(event) => {
                   setRemoteUrl(event.target.value)
-                  if (pending?.source === 'url') resetPending()
+                  resetPending()
                 }}
               />
               <button

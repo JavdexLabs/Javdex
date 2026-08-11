@@ -26,6 +26,7 @@ import {
   navigateToActressDetail,
   navigateToActressList,
   navigateToActressFromVideoDetail,
+  navigateBackFromActressDetail,
   navigateBackFromVideoDetail,
   navigateToDirectorDetail,
   navigateToOrganizationDetail,
@@ -290,7 +291,7 @@ describe('actress status filter query contract', () => {
 describe('primary navigation memory', () => {
   it('restores query state per list and removes unrelated nested query keys', () => {
     clearPrimaryNavigationMemory()
-    rememberPrimaryListLocation('/detail/42', '?q=hero&status=1')
+    rememberPrimaryListLocation('/detail/42', '?q=hero&status=1&resources=local,web')
     rememberPrimaryListLocation('/actresses/8', '?q=sara&gender=female')
     rememberPrimaryListLocation('/facet/director/d/21', '?q=miike&sort=rating')
     rememberPrimaryListLocation(
@@ -300,7 +301,7 @@ describe('primary navigation memory', () => {
 
     assert.deepEqual(primaryNavigationTarget('/'), {
       pathname: '/',
-      search: '?q=hero&status=1'
+      search: '?q=hero&status=1&resources=local%2Cweb'
     })
     assert.deepEqual(primaryNavigationTarget('/actresses'), {
       pathname: '/actresses',
@@ -374,6 +375,34 @@ describe('primary navigation memory', () => {
 })
 
 describe('navigation helpers', () => {
+  it('closes nested actress details back to their parent video context', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const paths = [
+      ['/detail/8/actress/7', '/detail/8'],
+      ['/actresses/3/8/actress/7', '/actresses/3/8'],
+      ['/playlists/4/8/actress/7', '/playlists/4/8'],
+      ['/facet/maker/o/5/8/actress/7', '/facet/maker/o/5/8'],
+      ['/facet/director/d/6/8/actress/7', '/facet/director/d/6/8'],
+      ['/facet/series/s/9/8/actress/7', '/facet/series/s/9/8']
+    ] as const
+
+    for (const [pathname] of paths) {
+      navigateBackFromActressDetail(navigate, {
+        pathname,
+        search: '?q=kept',
+        hash: '',
+        state: null,
+        key: pathname
+      })
+    }
+
+    assert.deepEqual(
+      destinations,
+      paths.map(([, pathname]) => ({ pathname, search: '?q=kept' }))
+    )
+  })
+
   it('keeps stable series identity and release direction through its detail stack', () => {
     const destinations: unknown[] = []
     const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
@@ -446,6 +475,36 @@ describe('navigation helpers', () => {
       pathname: '/facet/maker/o/12',
       search: '?q=studio&sort=updated_at&dir=asc'
     })
+  })
+
+  it('keeps classification query only inside the same classification stack', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const search = '?q=kept&sort=updated_at&dir=asc'
+
+    navigateToOrganizationDetail(
+      navigate,
+      { pathname: '/facet/maker/o/1/8', search, hash: '', state: null, key: 'maker' },
+      'maker',
+      2
+    )
+    navigateToDirectorDetail(
+      navigate,
+      { pathname: '/facet/director/d/1/8', search, hash: '', state: null, key: 'director' },
+      2
+    )
+    navigateToOrganizationDetail(
+      navigate,
+      { pathname: '/facet/publisher/o/1/8', search, hash: '', state: null, key: 'cross' },
+      'maker',
+      2
+    )
+
+    assert.deepEqual(destinations, [
+      { pathname: '/facet/maker/o/2', search },
+      { pathname: '/facet/director/d/2', search },
+      { pathname: '/facet/maker/o/2', search: '' }
+    ])
   })
 
   it('keeps video and actress navigation inside the stable organization stack', () => {

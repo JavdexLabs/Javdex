@@ -192,6 +192,50 @@ describe('classificationImageService', () => {
     assert.equal(storedImagePath('series', seriesId), previousPath)
   })
 
+  it('cleans the latest replaced image when a remote update finishes after another edit', async () => {
+    const { sourcePath } = setup()
+    const seriesId = classificationMaintenanceService.createSeries({ mainName: 'Concurrent Image' })
+    await classificationImageService.setImage(
+      { kind: 'series', id: seriesId },
+      { source: 'file', sourcePath }
+    )
+    let releaseDownload!: () => void
+    let downloadStarted!: () => void
+    const downloadGate = new Promise<void>((resolve) => {
+      releaseDownload = resolve
+    })
+    const started = new Promise<void>((resolve) => {
+      downloadStarted = resolve
+    })
+    const remoteService = createClassificationImageService({
+      fetchRemoteImage: async () => {
+        downloadStarted()
+        await downloadGate
+        return JPEG_1X1
+      }
+    })
+    const remoteUpdate = remoteService.setImage(
+      { kind: 'series', id: seriesId },
+      { source: 'url', remoteUrl: 'https://example.com/concurrent.jpg' }
+    )
+    await started
+
+    await classificationImageService.setImage(
+      { kind: 'series', id: seriesId },
+      { source: 'file', sourcePath }
+    )
+    const interveningPath = storedImagePath('series', seriesId)
+    assert.ok(interveningPath)
+    releaseDownload()
+    await remoteUpdate
+
+    const finalPath = storedImagePath('series', seriesId)
+    assert.ok(finalPath)
+    assert.notEqual(finalPath, interveningPath)
+    assert.equal(fs.existsSync(mediaAssetStore.resolve(interveningPath)), false)
+    assert.equal(fs.existsSync(mediaAssetStore.resolve(finalPath)), true)
+  })
+
   it('commits replacement and reports a post-commit cleanup failure', async () => {
     const { sourcePath } = setup()
     const organizationId = classificationMaintenanceService.createOrganization({

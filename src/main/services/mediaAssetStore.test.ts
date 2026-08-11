@@ -166,6 +166,51 @@ describe('MediaAssetStore', () => {
     assert.equal(fs.existsSync(avatarDir) ? fs.readdirSync(avatarDir).length : 0, 0)
   })
 
+  it('keeps an existing download when replacing the same URL later rolls back', async () => {
+    setup()
+    const url = 'https://example.test/cover.jpg'
+    const originalPath = await mediaAssetStore.downloadCover('SAFE-001', url, async () => JPEG_1X1)
+    assert.ok(originalPath)
+    let replacementPath: string | null = null
+
+    await assert.rejects(
+      () =>
+        mediaAssetStore.coordinateDatabaseChange(async () => {
+          replacementPath = await mediaAssetStore.downloadCover('SAFE-001', url, async () => JPEG_1X1)
+          throw new Error('database failed')
+        }),
+      /database failed/
+    )
+
+    assert.ok(replacementPath)
+    assert.notEqual(replacementPath, originalPath)
+    assert.equal(fs.existsSync(mediaAssetStore.resolve(originalPath)), true)
+    assert.equal(fs.existsSync(mediaAssetStore.resolve(replacementPath)), false)
+  })
+
+  it('keeps an existing avatar source when importing the same bytes later rolls back', async () => {
+    setup()
+    const original = mediaAssetStore.importAvatarSource('Same Source', 7, JPEG_1X1)
+    let replacementPath = ''
+
+    assert.throws(
+      () =>
+        mediaAssetStore.coordinateDatabaseChange(() => {
+          replacementPath = mediaAssetStore.importAvatarSource(
+            'Same Source',
+            7,
+            JPEG_1X1
+          ).relPath
+          throw new Error('database failed')
+        }),
+      /database failed/
+    )
+
+    assert.notEqual(replacementPath, original.relPath)
+    assert.equal(fs.existsSync(mediaAssetStore.resolve(original.relPath)), true)
+    assert.equal(fs.existsSync(mediaAssetStore.resolve(replacementPath)), false)
+  })
+
   it('deletes obsolete resources only after the database operation succeeds', () => {
     setup()
     const storedPath = mediaAssetStore.importAvatarDisplay('测试演员', 8, JPEG_1X1)
@@ -327,6 +372,44 @@ describe('MediaAssetStore', () => {
 
     assert.equal(fs.existsSync(mediaAssetStore.resolve(outerPath)), false)
     assert.equal(fs.existsSync(mediaAssetStore.resolve(siblingPath)), true)
+  })
+
+  it('keeps relocation exclusive with coordinated and direct media mutations', async () => {
+    setup()
+    const store = new MediaAssetStore()
+    let releaseChange!: () => void
+    const changeGate = new Promise<void>((resolve) => {
+      releaseChange = resolve
+    })
+    const activeChange = store.coordinateDatabaseChange(async () => {
+      await changeGate
+    })
+    await Promise.resolve()
+
+    await assert.rejects(
+      () => store.runExclusiveRelocation(async () => undefined),
+      /已有媒体资源任务/
+    )
+    releaseChange()
+    await activeChange
+
+    let releaseRelocation!: () => void
+    let relocationStarted!: () => void
+    const relocationGate = new Promise<void>((resolve) => {
+      releaseRelocation = resolve
+    })
+    const started = new Promise<void>((resolve) => {
+      relocationStarted = resolve
+    })
+    const relocation = store.runExclusiveRelocation(async () => {
+      relocationStarted()
+      assert.doesNotThrow(() => store.importAvatarDisplay('Owner', 98, JPEG_1X1))
+      await relocationGate
+    })
+    await started
+    assert.throws(() => store.importAvatarDisplay('Blocked', 99, JPEG_1X1), /维护正在进行/)
+    releaseRelocation()
+    await relocation
   })
 
   it('keeps caller registrations off an un-awaited nested async coordinated change', async () => {

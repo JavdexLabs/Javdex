@@ -6,7 +6,8 @@ import type { AssetCryptoProgress, LibraryOverviewStats } from '@shared/libraryT
 import { getSettings, updateSettings } from '../settings/settingsStore'
 import { getLibraryOverviewStats } from '../db/overviewRepo'
 import { migrateAssetStorage } from '../services/assetMigration'
-import { migrateMediaAssetsLocation } from '../services/assetLocationMigration'
+import { prepareMediaAssetsLocationMigration } from '../services/assetLocationMigration'
+import { mediaAssetStore } from '../services/mediaAssetStore'
 import {
   defaultMediaAssetsRoot,
   resolveMediaAssetsRoot,
@@ -121,21 +122,21 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
   })
 
   appCommandAdapter.register(IPC.ASSET_CRYPTO_SET, async (enabled): Promise<AppSettings> => {
-    const current = getSettings()
-    if (current.assetEncryption === enabled) return withResolvedMediaAssetsPath(current)
-
-    const win = ctx.getWindow()
-    await migrateAssetStorage(enabled, (p: AssetCryptoProgress) => {
-      appEventAdapter.send(win?.webContents, IPC.ASSET_CRYPTO_PROGRESS, p)
+    return mediaAssetStore.runExclusiveRelocation(async () => {
+      const latest = getSettings()
+      if (latest.assetEncryption === enabled) return withResolvedMediaAssetsPath(latest)
+      const win = ctx.getWindow()
+      await migrateAssetStorage(enabled, (p: AssetCryptoProgress) => {
+        appEventAdapter.send(win?.webContents, IPC.ASSET_CRYPTO_PROGRESS, p)
+      })
+      return withResolvedMediaAssetsPath(updateSettings({ assetEncryption: enabled }))
     })
-    return withResolvedMediaAssetsPath(updateSettings({ assetEncryption: enabled }))
   })
 
   appCommandAdapter.register(
     IPC.ASSET_STORAGE_RELOCATE,
     async (targetPath): Promise<AppSettings> => {
       const current = getSettings()
-      const oldRoot = resolveMediaAssetsRoot()
       let newRoot: string
 
       if (targetPath === null) {
@@ -153,15 +154,42 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
         newRoot = validateMediaAssetsPath(res.filePaths[0])
       }
 
-      if (path.resolve(oldRoot) === path.resolve(newRoot)) {
-        return withResolvedMediaAssetsPath(current)
-      }
-
-      const win = ctx.getWindow()
-      const storedPath = await migrateMediaAssetsLocation(oldRoot, newRoot, (p: AssetCryptoProgress) => {
-        appEventAdapter.send(win?.webContents, IPC.ASSET_CRYPTO_PROGRESS, p)
+      return mediaAssetStore.runExclusiveRelocation(async () => {
+        const latest = getSettings()
+        const oldRoot = resolveMediaAssetsRoot()
+        if (path.resolve(oldRoot) === path.resolve(newRoot)) {
+          return withResolvedMediaAssetsPath(latest)
+        }
+        const win = ctx.getWindow()
+        const migration = await prepareMediaAssetsLocationMigration(
+          oldRoot,
+          newRoot,
+          (p: AssetCryptoProgress) => {
+            appEventAdapter.send(win?.webContents, IPC.ASSET_CRYPTO_PROGRESS, p)
+          }
+        )
+        let updated: AppSettings
+        try {
+          updated = updateSettings({ mediaAssetsPath: migration.storedPath })
+        } catch (error) {
+          migration.rollback()
+          throw error
+        }
+        try {
+          migration.commit()
+        } catch (error) {
+          try {
+            updateSettings({ mediaAssetsPath: latest.mediaAssetsPath })
+          } catch (settingsRollbackError) {
+            throw new Error(
+              `${(error as Error).message}；恢复原媒体目录设置失败：${(settingsRollbackError as Error).message}`
+            )
+          }
+          migration.rollback()
+          throw error
+        }
+        return withResolvedMediaAssetsPath(updated)
       })
-      return withResolvedMediaAssetsPath(updateSettings({ mediaAssetsPath: storedPath }))
     }
   )
 }

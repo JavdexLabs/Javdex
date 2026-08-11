@@ -76,7 +76,8 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
   const listQuery = useQuery({
     queryKey: organizationKeys.list(role, queryHash),
     queryFn: () => api.organizations.list({ role, search: urlQ, sortBy, sortDir }),
-    placeholderData: (previous) => previous
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2] === role ? previous : undefined
   })
   const items = listQuery.data ?? []
   const loading = listQuery.isLoading && items.length === 0

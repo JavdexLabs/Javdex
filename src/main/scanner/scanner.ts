@@ -24,6 +24,7 @@ import {
 } from './videoDuration'
 import { getSettings } from '../settings/settingsStore'
 import { isPathUnderRoot } from './libraryPathUtils'
+import { normalizeVideoCode } from '@shared/videoCode'
 
 export type ScanProgressFn = (progress: ScanProgress) => void
 
@@ -36,9 +37,23 @@ export interface ScanOptions {
   minImportDurationSeconds?: number | null
   /** Missing resources below these temporarily unavailable roots must not be relocated. */
   unavailableRoots?: string[]
+  /** Override directory reads (tests). Read failures abort cleanup-safe scans. */
+  readDirectory?: (dir: string) => Promise<fs.Dirent[]>
+  /** Override local resource inspection (tests). */
+  inspectPath?: (filePath: string) => 'present' | 'missing' | 'unknown'
 }
 
 const DEFAULT_YIELD_EVERY = 50
+
+function inspectScannedResourcePath(filePath: string): 'present' | 'missing' | 'unknown' {
+  try {
+    fs.statSync(filePath)
+    return 'present'
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'unknown'
+  }
+}
 
 function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve))
@@ -54,20 +69,21 @@ async function maybeYield(count: number, yieldEvery: number): Promise<void> {
 async function collectVideoFiles(
   dir: string,
   acc: string[],
-  signal?: AbortSignal
+  signal: AbortSignal | undefined,
+  readDirectory: (dir: string) => Promise<fs.Dirent[]>
 ): Promise<void> {
   if (signal?.aborted) return
   let entries: fs.Dirent[]
   try {
-    entries = await fs.promises.readdir(dir, { withFileTypes: true })
-  } catch {
-    return // permission / missing dir — skip
+    entries = await readDirectory(dir)
+  } catch (error) {
+    throw new Error(`无法读取媒体目录 ${dir}：${(error as Error).message}`)
   }
   for (const entry of entries) {
     if (signal?.aborted) return
     const full = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      await collectVideoFiles(full, acc, signal)
+      await collectVideoFiles(full, acc, signal, readDirectory)
     } else if (entry.isFile() && isVideoFile(full)) {
       acc.push(full)
     } else if (entry.isSymbolicLink() && isVideoFile(full)) {
@@ -200,12 +216,16 @@ export async function scanFolders(
   }
 
   const files: string[] = []
+  const readDirectory =
+    options.readDirectory ??
+    ((dir: string) => fs.promises.readdir(dir, { withFileTypes: true }))
+  const inspectPath = options.inspectPath ?? inspectScannedResourcePath
   for (const folder of folders) {
     if (options.signal?.aborted) {
       result.cancelled = true
       return result
     }
-    await collectVideoFiles(folder, files, options.signal)
+    await collectVideoFiles(folder, files, options.signal, readDirectory)
   }
 
   const yieldEvery = Math.max(1, options.yieldEvery ?? DEFAULT_YIELD_EVERY)
@@ -264,15 +284,25 @@ export async function scanFolders(
       )
       if (existing) {
         const localResource = getPreferredLocalVideoResource(existing.id)
+        const localResourceUnavailable = Boolean(
+          localResource &&
+            options.unavailableRoots?.some((root) => isPathUnderRoot(localResource.locator, root))
+        )
+        const localResourceState =
+          localResource && !samePath(localResource.locator, file) && !localResourceUnavailable
+            ? inspectPath(localResource.locator)
+            : 'present'
         if (localResource && samePath(localResource.locator, file)) {
           if (await refreshScannedFileDuration(file, readDurationSeconds)) {
             result.refreshed += 1
           }
           result.skipped += 1
+        } else if (localResource && localResourceState === 'unknown') {
+          throw new Error(`无法确认已有本地资源是否存在：${localResource.locator}`)
         } else if (
           localResource &&
-          !options.unavailableRoots?.some((root) => isPathUnderRoot(localResource.locator, root)) &&
-          !fs.existsSync(localResource.locator)
+          !localResourceUnavailable &&
+          localResourceState === 'missing'
         ) {
           relocateLocalVideoResource(
             existing.id,
@@ -392,13 +422,12 @@ export async function renameAndImport(oldPath: string, newNameRaw: string): Prom
 
 /**
  * Import a file with a user-supplied code. Does not rename the file and does not
- * validate code format — only trims whitespace and rejects empty strings.
+ * validate code format beyond the shared trim-and-uppercase identity rule.
  */
 export async function importManual(filePath: string, codeRaw: string): Promise<ManualImportResult> {
   if (!fs.existsSync(filePath)) throw new Error('原文件不存在或已被移动')
 
-  const code = codeRaw.trim()
-  if (!code) throw new Error('番号不能为空')
+  const code = normalizeVideoCode(codeRaw)
 
   if (localVideoResourceExistsByLocator(filePath)) {
     return { code, imported: false, skippedPath: true }

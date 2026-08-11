@@ -2,10 +2,10 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   createOrganizationFormDraft,
-  moveOrganizationLink,
   organizationUpdateInputFromDraft,
   retainSelectedParentOption
 } from './organizationFormState'
+import { moveClassificationLink } from './classificationLinkForm'
 
 describe('organization form state', () => {
   it('defaults to preserving the previous main name while retaining ordered aliases and links', () => {
@@ -58,9 +58,9 @@ describe('organization form state', () => {
       { label: 'Wiki', url: 'https://example.com/wiki' }
     ]
 
-    assert.deepEqual(moveOrganizationLink(links, 1, 0), [links[1], links[0]])
+    assert.deepEqual(moveClassificationLink(links, 1, 0), [links[1], links[0]])
     assert.deepEqual(links.map((link) => link.label), ['Official', 'Wiki'])
-    assert.deepEqual(moveOrganizationLink(links, 0, -1), links)
+    assert.deepEqual(moveClassificationLink(links, 0, -1), links)
   })
 
   it('retains a selected parent while search results change', () => {

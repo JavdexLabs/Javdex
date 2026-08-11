@@ -13,6 +13,7 @@ import { resolveMediaAssetPath, toStoredAssetPath } from './services/mediaProtoc
 import { checkForLatestRelease, shouldRunAutomaticCheck } from './services/appReleaseService'
 import { cleanupOrphanedActressScrapeStaging } from './services/actressIdentityConflictWorkflow'
 import { automaticScanScheduler } from './services/automaticScanScheduler'
+import { recoverPendingLocalFileDeletions } from './services/pendingLocalFileDeletionService'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -122,6 +123,7 @@ if (gotSingleInstanceLock) {
     const databaseDir = path.join(app.getPath('userData'), 'data')
     fs.mkdirSync(databaseDir, { recursive: true })
     initDatabaseAtPath(path.join(databaseDir, 'library.db'))
+    recoverPendingLocalFileDeletions()
     mediaAssetStore.ensureReady()
     cleanupOrphanedActressScrapeStaging()
     migrateUserPluginsAwayFromBuiltInNames()

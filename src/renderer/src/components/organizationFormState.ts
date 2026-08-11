@@ -20,26 +20,6 @@ export interface OrganizationFormDraft {
   keepPreviousMainName: boolean
 }
 
-export function moveOrganizationLink(
-  links: readonly OrganizationLinkInput[],
-  fromIndex: number,
-  toIndex: number
-): OrganizationLinkInput[] {
-  if (
-    fromIndex < 0 ||
-    fromIndex >= links.length ||
-    toIndex < 0 ||
-    toIndex >= links.length ||
-    fromIndex === toIndex
-  ) {
-    return [...links]
-  }
-  const next = [...links]
-  const [moved] = next.splice(fromIndex, 1)
-  next.splice(toIndex, 0, moved)
-  return next
-}
-
 export function retainSelectedParentOption(
   options: readonly OrganizationOption[],
   selected: OrganizationSummary | null,

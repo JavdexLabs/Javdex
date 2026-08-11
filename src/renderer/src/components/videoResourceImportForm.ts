@@ -7,6 +7,7 @@ import {
   normalizeExternalVideoResource,
   resourceSizeToBytes
 } from '@shared/videoResourceLinks'
+import { normalizeVideoCode } from '@shared/videoCode'
 
 export type VideoResourceKindSelection = 'auto' | LinkVideoResourceKind
 
@@ -18,8 +19,7 @@ export function buildVideoResourceImportInput(input: {
   size: string
   sizeUnit: VideoResourceSizeUnit
 }): VideoLinkResourceImportInput {
-  const code = input.code.trim()
-  if (!code) throw new Error('请输入影片番号')
+  const code = normalizeVideoCode(input.code)
   const normalized = normalizeExternalVideoResource(
     input.url,
     input.kind === 'auto' ? undefined : input.kind

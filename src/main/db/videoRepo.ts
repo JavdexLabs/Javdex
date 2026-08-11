@@ -125,14 +125,22 @@ export function localVideoResourceExistsByLocator(locator: string): boolean {
 
 export function videoExistsByCode(code: string): boolean {
   const db = getDb()
-  const row = db.prepare('SELECT 1 FROM videos WHERE code = ?').get(code)
+  const row = db.prepare('SELECT 1 FROM videos WHERE code = ? COLLATE NOCASE').get(code)
   return !!row
 }
 
 export function getVideoByCode(code: string): Pick<Video, 'id' | 'code'> | null {
   const db = getDb()
   return (
-    (db.prepare('SELECT id, code FROM videos WHERE code = ?').get(code) as
+    (db
+      .prepare(
+        `SELECT id, code
+         FROM videos
+         WHERE code = ? COLLATE NOCASE
+         ORDER BY CASE WHEN code = ? THEN 0 ELSE 1 END, id ASC
+         LIMIT 1`
+      )
+      .get(code, code) as
       | Pick<Video, 'id' | 'code'>
       | undefined) ?? null
   )

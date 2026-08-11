@@ -6,7 +6,7 @@ describe('video resource import form', () => {
   it('shares auto detection, normalization, and size conversion across entry points', () => {
     assert.deepEqual(
       buildVideoResourceImportInput({
-        code: ' ABC-123 ',
+        code: ' abc-123 ',
         url: 'HTTPS://CDN.Example:443/movie.mp4?b=2&a=1#preview',
         kind: 'auto',
         displayName: ' Remote ',

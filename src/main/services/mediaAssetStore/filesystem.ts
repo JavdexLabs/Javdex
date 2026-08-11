@@ -212,7 +212,7 @@ export function importAvatarSourceFromBuffer(
   const detectedExt = detectImageExtensionFromBuffer(data)
   const normalizedExt =
     detectedExt ?? (IMAGE_EXTENSIONS.includes(ext.toLowerCase()) ? ext.toLowerCase() : '.jpg')
-  const urlKey = `avatar-source:${fingerprint}`
+  const urlKey = `avatar-source:${fingerprint}:${randomUUID()}`
   const rel = writeImageAsset(
     'avatars',
     buildActressAssetSeed(name, actressId),

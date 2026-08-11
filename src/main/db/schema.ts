@@ -187,6 +187,19 @@ CREATE INDEX IF NOT EXISTS idx_series_links_series
     ON series_links(series_id, position);
 `
 
+export const PENDING_LOCAL_FILE_DELETIONS_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS pending_local_file_deletions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    original_path TEXT NOT NULL UNIQUE,
+    staged_path TEXT NOT NULL UNIQUE,
+    device_id INTEGER NOT NULL,
+    state TEXT NOT NULL DEFAULT 'prepared' CHECK(state IN ('prepared', 'committed')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_pending_local_file_deletions_state
+    ON pending_local_file_deletions(state);
+`
+
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
 
@@ -244,6 +257,8 @@ CREATE INDEX IF NOT EXISTS idx_video_resources_video_id ON video_resources(video
 CREATE UNIQUE INDEX IF NOT EXISTS idx_video_resources_key ON video_resources(resource_key);
 CREATE INDEX IF NOT EXISTS idx_video_resources_primary ON video_resources(video_id, is_primary);
 CREATE INDEX IF NOT EXISTS idx_video_resources_kind ON video_resources(kind);
+
+${PENDING_LOCAL_FILE_DELETIONS_SCHEMA_SQL}
 
 CREATE TABLE IF NOT EXISTS actresses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -151,13 +151,13 @@ export default function VirtualActressGrid({
           width={renderWidth}
           height={renderHeight}
           innerElementType={innerElementType}
+          className="virtual-actress-grid-scroller"
           initialScrollTop={scrollTopRef.current}
           onScroll={({ scrollTop }) => persistScroll(scrollTop)}
           onItemsRendered={({ overscanRowStopIndex }) => {
             persistScroll(scrollTopRef.current, overscanRowStopIndex)
             if (hasMore && !loadMoreFailed && overscanRowStopIndex >= rowCount - 3) onLoadMore()
           }}
-          style={{ overflowX: 'hidden', scrollbarGutter: 'stable' }}
         >
           {Cell}
         </FixedSizeGrid>

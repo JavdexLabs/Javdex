@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type {
   VideoResourceImportResult,
   VideoResourceLinkCheckResult,
@@ -38,30 +38,48 @@ export default function VideoResourceImportModal({
   const initialSize = resource?.size_bytes ? resourceBytesToFormSize(resource.size_bytes) : null
   const [size, setSize] = useState(initialSize?.value ?? '')
   const [sizeUnit, setSizeUnit] = useState<VideoResourceSizeUnit>(initialSize?.unit ?? 'GB')
+  const [sizeSource, setSizeSource] = useState<'initial' | 'manual' | 'detected'>(
+    initialSize ? 'initial' : 'manual'
+  )
   const [checking, setChecking] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [checkResult, setCheckResult] = useState<VideoResourceLinkCheckResult | null>(null)
+  const checkRequestRef = useRef(0)
 
   const inferredKind = inferVideoResourceKind(url)
   const inferredKindLabel = VIDEO_RESOURCE_KIND_LABELS[inferredKind]
   const canCheckLink = inferredKind === 'direct' || inferredKind === 'web'
 
+  const invalidateLinkCheck = (): void => {
+    checkRequestRef.current += 1
+    setChecking(false)
+    setCheckResult(null)
+  }
+
   const checkLink = async (): Promise<void> => {
+    const requestId = ++checkRequestRef.current
+    const requestedUrl = url
     setError('')
     setChecking(true)
     try {
-      const result = await api.videos.checkResourceLink(url)
+      const result = await api.videos.checkResourceLink(requestedUrl)
+      if (requestId !== checkRequestRef.current) return
       setCheckResult(result)
       if (result.sizeBytes) {
         const converted = resourceBytesToFormSize(result.sizeBytes)
         setSize(converted.value)
         setSizeUnit(converted.unit)
+        setSizeSource('detected')
+      } else if (sizeSource === 'detected') {
+        setSize('')
+        setSizeSource('manual')
       }
     } catch (reason) {
+      if (requestId !== checkRequestRef.current) return
       setCheckResult({ ok: false, error: String((reason as Error).message ?? reason) })
     } finally {
-      setChecking(false)
+      if (requestId === checkRequestRef.current) setChecking(false)
     }
   }
 
@@ -121,7 +139,7 @@ export default function VideoResourceImportModal({
           label="资源链接"
           htmlFor="resource-url"
           span={2}
-          hint="仅支持 HTTP/HTTPS。检测失败不会阻止导入。"
+          hint="支持 HTTP/HTTPS、Magnet 与 ED2K；仅 HTTP/HTTPS 可检测可访问性。"
         >
           <div className="video-resource-url-control">
             <input
@@ -130,7 +148,11 @@ export default function VideoResourceImportModal({
               value={url}
               onChange={(event) => {
                 setUrl(event.target.value)
-                setCheckResult(null)
+                if (sizeSource === 'detected') {
+                  setSize('')
+                  setSizeSource('manual')
+                }
+                invalidateLinkCheck()
               }}
               disabled={saving}
               autoFocus={Boolean(fixedCode)}
@@ -187,14 +209,22 @@ export default function VideoResourceImportModal({
               min="0"
               step="any"
               value={size}
-              onChange={(event) => setSize(event.target.value)}
+              onChange={(event) => {
+                setSize(event.target.value)
+                setSizeSource('manual')
+                invalidateLinkCheck()
+              }}
               disabled={saving}
               placeholder="未设置"
             />
             <select
               className="select"
               value={sizeUnit}
-              onChange={(event) => setSizeUnit(event.target.value as VideoResourceSizeUnit)}
+              onChange={(event) => {
+                setSizeUnit(event.target.value as VideoResourceSizeUnit)
+                setSizeSource('manual')
+                invalidateLinkCheck()
+              }}
               disabled={saving}
               aria-label="大小单位"
             >

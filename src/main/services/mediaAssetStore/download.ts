@@ -51,7 +51,7 @@ export async function downloadCover(
     const ext = extFromUrl(url)
     const buf = await fetcher(url)
     if (!isUsableImageBuffer(buf)) throw new Error('response is not a usable image')
-    return writeImageAsset('covers', code, url, ext, buf)
+    return writeImageAsset('covers', code, `${url}\0${randomUUID()}`, ext, buf)
   } catch (err) {
     console.error('downloadCover failed:', code, url, (err as Error).message)
     return null
@@ -68,7 +68,13 @@ export async function downloadAvatar(
     const buf = await fetcher(url)
     if (!isUsableImageBuffer(buf)) throw new Error('response is not a usable image')
     // Name-hash seed only: actress id may not exist yet; adopt later scopes permanent files.
-    return writeImageAsset('avatars', buildActressAssetSeed(name), url, ext, buf)
+    return writeImageAsset(
+      'avatars',
+      buildActressAssetSeed(name),
+      `${url}\0${randomUUID()}`,
+      ext,
+      buf
+    )
   } catch (err) {
     console.error('downloadAvatar failed:', name, url, (err as Error).message)
     return null
@@ -123,7 +129,7 @@ export async function downloadActressGalleryImage(
     const localPath = writeImageAsset(
       'actress_gallery',
       buildActressAssetSeed(name, actressId),
-      url,
+      `${url}\0${randomUUID()}`,
       ext,
       buf
     )
@@ -152,7 +158,9 @@ export async function downloadSamples(
       const ext = extFromUrl(url)
       const buf = await fetcher(url)
       if (!isUsableImageBuffer(buf)) throw new Error('response is not a usable image')
-      out.push(writeImageAsset('samples', `${code}_${index}`, url, ext, buf))
+      out.push(
+        writeImageAsset('samples', `${code}_${index}`, `${url}\0${randomUUID()}`, ext, buf)
+      )
     } catch (err) {
       console.error('downloadSamples failed:', code, index, url, (err as Error).message)
       out.push(null)

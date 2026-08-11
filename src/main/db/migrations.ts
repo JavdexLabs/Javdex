@@ -1,9 +1,13 @@
 import type Database from 'better-sqlite3'
 import { normalizeActressName } from './actressNameNormalization'
 import { normalizeClassificationName } from '../../shared/classificationNameNormalization'
-import { CLASSIFICATION_V8_SCHEMA_SQL, SCHEMA_SQL } from './schema'
+import {
+  CLASSIFICATION_V8_SCHEMA_SQL,
+  PENDING_LOCAL_FILE_DELETIONS_SCHEMA_SQL,
+  SCHEMA_SQL
+} from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 9
+export const CURRENT_SCHEMA_VERSION = 10
 
 type Migration = {
   version: number
@@ -342,18 +346,40 @@ function migrateToV7(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_video_resources_kind ON video_resources(kind);
   `)
 
-  if (!tableExists(database, 'video_files')) return
+  if (tableExists(database, 'video_files')) {
+    database.exec(`
+      INSERT OR IGNORE INTO video_resources (
+        id, video_id, kind, locator, resource_key, size_bytes, duration_seconds,
+        file_mtime_ms, display_name, is_primary, add_time
+      )
+      SELECT
+        id, video_id, 'local', file_path, 'local:' || file_path, file_size,
+        file_duration_seconds, file_mtime_ms, label, is_primary, add_time
+      FROM video_files;
+      DROP TABLE video_files;
+    `)
+    return
+  }
+
+  const videoColumns = columnNames(database, 'videos')
+  if (!videoColumns.has('file_path')) return
   database.exec(`
-    INSERT OR IGNORE INTO video_resources (
-      id, video_id, kind, locator, resource_key, size_bytes, duration_seconds,
+    INSERT INTO video_resources (
+      video_id, kind, locator, resource_key, size_bytes, duration_seconds,
       file_mtime_ms, display_name, is_primary, add_time
     )
     SELECT
-      id, video_id, 'local', file_path, 'local:' || file_path, file_size,
-      file_duration_seconds, file_mtime_ms, label, is_primary, add_time
-    FROM video_files;
-    DROP TABLE video_files;
+      id, 'local', file_path, 'local:' || file_path,
+      ${videoColumns.has('file_size') ? 'file_size' : 'NULL'},
+      ${videoColumns.has('duration_seconds') ? 'duration_seconds' : 'NULL'},
+      NULL, NULL, 1, add_time
+    FROM videos;
+    DROP INDEX IF EXISTS idx_videos_file_path;
+    ALTER TABLE videos DROP COLUMN file_path;
   `)
+  if (videoColumns.has('file_size')) {
+    database.exec('ALTER TABLE videos DROP COLUMN file_size')
+  }
 }
 
 type ClassificationKind = 'organization' | 'director' | 'series'
@@ -660,6 +686,10 @@ function migrateToV9(database: Database.Database): void {
   database.exec('DROP TABLE IF EXISTS facet_entries')
 }
 
+function migrateToV10(database: Database.Database): void {
+  database.exec(PENDING_LOCAL_FILE_DELETIONS_SCHEMA_SQL)
+}
+
 const MIGRATIONS: Migration[] = [
   {
     version: 2,
@@ -692,6 +722,10 @@ const MIGRATIONS: Migration[] = [
   {
     version: 9,
     migrate: migrateToV9
+  },
+  {
+    version: 10,
+    migrate: migrateToV10
   }
 ]
 
@@ -714,14 +748,14 @@ export function migrateDatabase(database: Database.Database): void {
     })()
     return
   }
-  for (let next = current + 1; next <= CURRENT_SCHEMA_VERSION; next += 1) {
-    const migration = migrationForVersion(next)
-    if (!migration) {
-      throw new Error(`Missing database migration for schema version ${next}.`)
-    }
-    database.transaction(() => {
+  database.transaction(() => {
+    for (let next = current + 1; next <= CURRENT_SCHEMA_VERSION; next += 1) {
+      const migration = migrationForVersion(next)
+      if (!migration) {
+        throw new Error(`Missing database migration for schema version ${next}.`)
+      }
       migration.migrate(database)
       database.pragma(`user_version = ${next}`)
-    })()
-  }
+    }
+  })()
 }

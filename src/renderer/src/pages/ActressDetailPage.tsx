@@ -2,21 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
 import { Inbox, Pencil, SearchCheck, SearchX } from 'lucide-react'
-import {
-  actressVideoDetailPath,
-  parseActressVideoPath
-} from '../listView/actressRoutes'
-import {
-  directorVideoDetailPath,
-  organizationVideoDetailPath,
-  parseOrganizationPath,
-  parseDirectorPath,
-  parseSeriesPath,
-  seriesVideoDetailPath
-} from '../listView/facetRoutes'
-import { libraryVideoDetailPath } from '../listView/libraryRoutes'
-import { playlistVideoDetailPath, parsePlaylistVideoPath } from '../listView/playlistRoutes'
-import { navigateToActressList } from '../listView/listNavigation'
+import { navigateBackFromActressDetail } from '../listView/listNavigation'
 import { invalidateActressLibraryQueries } from '../query/invalidateLibraryQueries'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
@@ -55,22 +41,6 @@ import type { ActressScrapeField, ActressScrapeUpdateMode } from '@shared/actres
 import { resolveActressDetailDisplayBackgroundPath } from '@shared/detailDisplayBackground'
 import { ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/actressScrapeTypes'
 
-function parentVideoDetailPath(pathname: string, videoId: number): string {
-  const series = parseSeriesPath(pathname)
-  if (series?.videoId != null) return seriesVideoDetailPath(series.seriesId, videoId)
-  const director = parseDirectorPath(pathname)
-  if (director?.videoId != null) return directorVideoDetailPath(director.directorId, videoId)
-  const organization = parseOrganizationPath(pathname)
-  if (organization?.videoId != null) {
-    return organizationVideoDetailPath(organization.role, organization.organizationId, videoId)
-  }
-  const playlist = parsePlaylistVideoPath(pathname)
-  if (playlist?.videoId != null) return playlistVideoDetailPath(playlist.playlistId, videoId)
-  const actress = parseActressVideoPath(pathname)
-  if (actress?.videoId != null) return actressVideoDetailPath(actress.actressId, videoId)
-  return libraryVideoDetailPath(videoId)
-}
-
 export default function ActressDetailPage(): JSX.Element {
   const { id, actressId: actressIdParam } = useParams()
   const navigate = useNavigate()
@@ -89,19 +59,6 @@ export default function ActressDetailPage(): JSX.Element {
     seriesActressStack ??
     playlistActressStack ??
     actressActressStack
-  const actressVideoPath = parseActressVideoPath(location.pathname)
-  const organizationVideoPath = parseOrganizationPath(location.pathname)
-  const directorVideoPath = parseDirectorPath(location.pathname)
-  const seriesVideoPath = parseSeriesPath(location.pathname)
-  const fromVideoId = fromVideo
-    ? Number(
-        organizationVideoPath?.videoId ??
-          directorVideoPath?.videoId ??
-          seriesVideoPath?.videoId ??
-          actressVideoPath?.videoId ??
-          fromVideo.params.id
-      )
-    : undefined
   const videoStackOpen = !fromVideo && Boolean(actressVideoStack)
   const actressId = Number(actressIdParam ?? id)
 
@@ -254,14 +211,7 @@ export default function ActressDetailPage(): JSX.Element {
       )
     }
     void invalidateActressLibraryQueries(queryClient)
-    if (fromVideoId != null && !Number.isNaN(fromVideoId)) {
-      navigate({
-        pathname: parentVideoDetailPath(location.pathname, fromVideoId),
-        search: location.search
-      })
-    } else {
-      navigateToActressList(navigate, location)
-    }
+    navigateBackFromActressDetail(navigate, location)
   }
 
   const handleEditSave = async (input: ActressEditInput): Promise<void> => {
@@ -304,15 +254,8 @@ export default function ActressDetailPage(): JSX.Element {
   )
 
   const handleBack = useCallback((): void => {
-    if (fromVideoId != null && !Number.isNaN(fromVideoId)) {
-      navigate({
-        pathname: parentVideoDetailPath(location.pathname, fromVideoId),
-        search: location.search
-      })
-      return
-    }
-    navigateToActressList(navigate, location)
-  }, [fromVideoId, location, navigate])
+    navigateBackFromActressDetail(navigate, location)
+  }, [location, navigate])
 
   const videoOverlay = videoStackOpen ? (
     <div className="detail-pane-overlay">

@@ -7,7 +7,8 @@ import process from 'node:process'
 import {
   getSettings,
   migrateRetiredVideoScraperSettings,
-  resetSettingsCacheForTests
+  resetSettingsCacheForTests,
+  updateSettings
 } from './settingsStore'
 
 let tempRoot: string | null = null
@@ -79,6 +80,18 @@ describe('settingsStore deferred library path cleanup', () => {
     assert.deepEqual(getSettings().pendingLibraryPathCleanups, ['/library/a', '/library/b'])
     resetSettingsCacheForTests()
     assert.deepEqual(getSettings().pendingLibraryPathCleanups, ['/library/a', '/library/b'])
+  })
+})
+
+describe('settingsStore persistence', () => {
+  it('does not update the cache when the settings file cannot be replaced', () => {
+    updateSettings({ autoScanEnabled: false })
+    const settingsFile = path.join(tempRoot!, 'settings.json')
+    fs.rmSync(settingsFile)
+    fs.mkdirSync(settingsFile)
+
+    assert.throws(() => updateSettings({ autoScanEnabled: true }), /保存设置失败/)
+    assert.equal(getSettings().autoScanEnabled, false)
   })
 })
 

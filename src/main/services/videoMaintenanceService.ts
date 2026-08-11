@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import type {
   CorrectImportResult,
   LastVideoResourceRemovalMode,
@@ -39,6 +40,7 @@ import {
   updateVideoFields
 } from '../db/videoRepo'
 import { normalizeExternalVideoResource } from '@shared/videoResourceLinks'
+import { normalizeVideoCode } from '@shared/videoCode'
 import { videoResourceLinkService } from './videoResourceLinkService'
 import { mediaAssetStore } from './mediaAssetStore'
 import { fetchRemoteImageBuffer } from './remoteImageFetch'
@@ -46,6 +48,13 @@ import { maintenanceTaskGate } from './maintenanceTaskGate'
 import { selectPrimaryVideoResourceCandidate } from './videoResourcePromotion'
 import { classificationMaintenanceService } from './classificationMaintenanceService'
 import { getDb } from '../db/database'
+import {
+  getPendingLocalFileDeletionByOriginalPath,
+  markLocalFileDeletionsCommitted,
+  prepareLocalFileDeletion,
+  removePendingLocalFileDeletions
+} from '../db/pendingLocalFileDeletionRepo'
+import { inspectWritableLocalPath } from './localFileAvailability'
 
 export interface VideoMaintenanceService {
   update(id: number, fields: VideoFieldUpdateInput): boolean
@@ -110,6 +119,12 @@ interface VideoMaintenanceServiceDependencies {
   fetchRemoteImageBuffer: typeof fetchRemoteImageBuffer
   fileExists: (path: string) => boolean
   unlinkSync: (path: string) => void
+  renameSync: (oldPath: string, newPath: string) => void
+  runDatabaseTransaction: <T>(work: () => T) => T
+  getPendingLocalFileDeletionByOriginalPath: typeof getPendingLocalFileDeletionByOriginalPath
+  prepareLocalFileDeletion: typeof prepareLocalFileDeletion
+  markLocalFileDeletionsCommitted: typeof markLocalFileDeletionsCommitted
+  removePendingLocalFileDeletions: typeof removePendingLocalFileDeletions
   withResourceMaintenance: <T>(work: () => T) => T
   assignVideoOrganization: typeof classificationMaintenanceService.assignVideoOrganization
   assignVideoDirector: typeof classificationMaintenanceService.assignVideoDirector
@@ -163,6 +178,19 @@ export function createVideoMaintenanceService(
   const fetchRemoteBuffer = dependencies.fetchRemoteImageBuffer ?? fetchRemoteImageBuffer
   const fileExists = dependencies.fileExists ?? ((path) => fs.existsSync(path))
   const unlinkSync = dependencies.unlinkSync ?? ((path) => fs.unlinkSync(path))
+  const renameSync = dependencies.renameSync ?? ((oldPath, newPath) => fs.renameSync(oldPath, newPath))
+  const runDatabaseTransaction =
+    dependencies.runDatabaseTransaction ??
+    (<T>(work: () => T): T => getDb().transaction(work)())
+  const readPendingFileDeletion =
+    dependencies.getPendingLocalFileDeletionByOriginalPath ??
+    getPendingLocalFileDeletionByOriginalPath
+  const preparePendingFileDeletion =
+    dependencies.prepareLocalFileDeletion ?? prepareLocalFileDeletion
+  const markPendingFileDeletionsCommitted =
+    dependencies.markLocalFileDeletionsCommitted ?? markLocalFileDeletionsCommitted
+  const removePendingFileDeletions =
+    dependencies.removePendingLocalFileDeletions ?? removePendingLocalFileDeletions
   const withResourceMaintenance =
     dependencies.withResourceMaintenance ??
     (<T>(work: () => T): T => maintenanceTaskGate.runSync('resource-maintenance', work))
@@ -173,22 +201,190 @@ export function createVideoMaintenanceService(
   const assignVideoSeries =
     dependencies.assignVideoSeries ?? classificationMaintenanceService.assignVideoSeries
 
-  const deleteLocalFile = (filePath: string): void => {
-    if (!fileExists(filePath)) return
+  interface StagedLocalFile {
+    originalPath: string
+    stagedPath: string
+    deviceId: number
+  }
+
+  const restoreStagedLocalFiles = (files: StagedLocalFile[]): void => {
+    const failures: string[] = []
+    for (const file of [...files].reverse()) {
+      const stagedInspection = inspectWritableLocalPath(file.stagedPath, {
+        expectedDeviceId: file.deviceId,
+        acceptPresentDeviceChange: true
+      })
+      if (stagedInspection.state === 'unknown') {
+        failures.push(`${file.originalPath}：暂存文件所在存储当前不可用`)
+        continue
+      }
+      if (stagedInspection.state === 'missing') {
+        const originalInspection = inspectWritableLocalPath(file.originalPath, {
+          expectedDeviceId: file.deviceId
+        })
+        if (originalInspection.state !== 'present') {
+          failures.push(`${file.originalPath}：暂存文件和原文件均不可用`)
+        }
+        continue
+      }
+      const originalInspection = inspectWritableLocalPath(file.originalPath, {
+        expectedDeviceId: stagedInspection.deviceId ?? file.deviceId
+      })
+      if (originalInspection.state === 'unknown') {
+        failures.push(`${file.originalPath}：无法确认原路径状态`)
+        continue
+      }
+      if (originalInspection.state === 'present') {
+        failures.push(`${file.originalPath}：原路径已被占用`)
+        continue
+      }
+      try {
+        renameSync(file.stagedPath, file.originalPath)
+      } catch (error) {
+        failures.push(`${file.originalPath}：${(error as Error).message}`)
+      }
+    }
+    if (failures.length > 0) {
+      throw new Error(`恢复影片文件失败：${failures.join('；')}`)
+    }
+  }
+
+  const stageLocalFiles = (filePaths: string[]): StagedLocalFile[] => {
+    const staged: StagedLocalFile[] = []
     try {
-      unlinkSync(filePath)
+      for (const originalPath of new Set(filePaths)) {
+        const existing = readPendingFileDeletion(originalPath)
+        if (existing) {
+          if (existing.state === 'committed') {
+            throw new Error(`影片文件已有待完成的删除任务：${originalPath}`)
+          }
+          const stagedInspection = inspectWritableLocalPath(existing.staged_path, {
+            expectedDeviceId: existing.device_id,
+            acceptPresentDeviceChange: true
+          })
+          if (stagedInspection.state === 'present') {
+            const originalInspection = inspectWritableLocalPath(originalPath, {
+              expectedDeviceId: stagedInspection.deviceId ?? existing.device_id
+            })
+            if (originalInspection.state === 'unknown') {
+              throw new Error(`无法确认影片原路径是否可用：${originalPath}`)
+            }
+            if (originalInspection.state === 'present') {
+              throw new Error(`影片原路径已被占用，无法继续删除：${originalPath}`)
+            }
+            staged.push({
+              originalPath,
+              stagedPath: existing.staged_path,
+              deviceId: stagedInspection.deviceId ?? existing.device_id
+            })
+            continue
+          }
+          const originalInspection = inspectWritableLocalPath(originalPath, {
+            expectedDeviceId: existing.device_id
+          })
+          if (originalInspection.state !== 'present') {
+            throw new Error(
+              originalInspection.state === 'unknown'
+                ? `无法确认影片文件是否存在：${originalPath}`
+                : `待恢复的暂存文件和原文件均不存在：${originalPath}`
+            )
+          }
+          removePendingFileDeletions([existing.staged_path])
+        }
+
+        const originalInspection = inspectWritableLocalPath(originalPath)
+        if (originalInspection.state === 'unknown') {
+          throw new Error(`无法确认影片文件是否存在：${originalPath}`)
+        }
+        if (originalInspection.state === 'missing') continue
+        if (originalInspection.deviceId == null) {
+          throw new Error(`无法确认影片文件所在存储：${originalPath}`)
+        }
+        const stagedPath = `${originalPath}.javdex-delete-${randomUUID()}`
+        preparePendingFileDeletion(originalPath, stagedPath, originalInspection.deviceId)
+        staged.push({ originalPath, stagedPath, deviceId: originalInspection.deviceId })
+        renameSync(originalPath, stagedPath)
+      }
+      return staged
     } catch (error) {
-      throw new Error(`删除影片文件失败：${(error as Error).message}`)
+      const recoveryErrors: string[] = []
+      let restored = true
+      try {
+        restoreStagedLocalFiles(staged)
+      } catch (restoreError) {
+        restored = false
+        recoveryErrors.push((restoreError as Error).message)
+      }
+      if (restored) {
+        try {
+          removePendingFileDeletions(staged.map((file) => file.stagedPath))
+        } catch (queueError) {
+          recoveryErrors.push(`清理待删除记录失败：${(queueError as Error).message}`)
+        }
+      }
+      const recoverySuffix = recoveryErrors.length > 0 ? `；${recoveryErrors.join('；')}` : ''
+      throw new Error(`准备删除影片文件失败：${(error as Error).message}${recoverySuffix}`)
+    }
+  }
+
+  const finalizeStagedLocalFiles = (files: StagedLocalFile[]): void => {
+    for (const file of files) {
+      try {
+        unlinkSync(file.stagedPath)
+      } catch (error) {
+        console.error('Staged video file remains queued for deletion:', file.stagedPath, error)
+        continue
+      }
+      try {
+        removePendingFileDeletions([file.stagedPath])
+      } catch (error) {
+        console.error('Failed to clear completed local file deletion:', file.stagedPath, error)
+      }
+    }
+  }
+
+  const withStagedLocalFileDeletion = <T>(filePaths: string[], databaseChange: () => T): T => {
+    const staged = stageLocalFiles(filePaths)
+    try {
+      const result = runDatabaseTransaction(() => {
+        const value = databaseChange()
+        markPendingFileDeletionsCommitted(staged.map((file) => file.stagedPath))
+        return value
+      })
+      finalizeStagedLocalFiles(staged)
+      return result
+    } catch (error) {
+      const recoveryErrors: string[] = []
+      let restored = true
+      try {
+        restoreStagedLocalFiles(staged)
+      } catch (restoreError) {
+        restored = false
+        recoveryErrors.push((restoreError as Error).message)
+      }
+      if (restored) {
+        try {
+          removePendingFileDeletions(staged.map((file) => file.stagedPath))
+        } catch (queueError) {
+          recoveryErrors.push(`清理待删除记录失败：${(queueError as Error).message}`)
+        }
+      }
+      if (recoveryErrors.length > 0) {
+        throw new Error(`${(error as Error).message}；${recoveryErrors.join('；')}`)
+      }
+      throw error
     }
   }
 
   const deleteWholeVideo = (id: number): boolean => {
     if (!readVideoById(id)) throw new Error('影片不存在')
     runInCoordinatedChange(() => {
-      for (const resource of readVideoResources(id)) {
-        if (resource.kind === 'local') deleteLocalFile(resource.locator)
-      }
-      for (const assetPath of purgeVideoRecord(id).obsoletePaths) deleteBestEffort(assetPath)
+      const resources = readVideoResources(id)
+      const result = withStagedLocalFileDeletion(
+        resources.filter((resource) => resource.kind === 'local').map((resource) => resource.locator),
+        () => purgeVideoRecord(id)
+      )
+      for (const assetPath of result.obsoletePaths) deleteBestEffort(assetPath)
     })
     return true
   }
@@ -214,18 +410,19 @@ export function createVideoMaintenanceService(
 
     let promotedResourceId: number | null = null
     runInCoordinatedChange(() => {
-      if (resource.kind === 'local') deleteLocalFile(resource.locator)
-      removeResourceRecord(resourceId)
-      if (resource.is_primary) {
-        const candidate = selectPrimaryVideoResourceCandidate(
-          resources.filter((item) => item.id !== resourceId),
-          fileExists
-        )
-        if (candidate) {
-          writePrimaryResource(videoId, candidate.id)
-          promotedResourceId = candidate.id
+      withStagedLocalFileDeletion(resource.kind === 'local' ? [resource.locator] : [], () => {
+        removeResourceRecord(resourceId)
+        if (resource.is_primary) {
+          const candidate = selectPrimaryVideoResourceCandidate(
+            resources.filter((item) => item.id !== resourceId),
+            fileExists
+          )
+          if (candidate) {
+            writePrimaryResource(videoId, candidate.id)
+            promotedResourceId = candidate.id
+          }
         }
-      }
+      })
     })
     return { videoDeleted: false, promotedResourceId }
   }
@@ -291,8 +488,7 @@ export function createVideoMaintenanceService(
       return true
     },
     correctImport(id, codeRaw): CorrectImportResult {
-      const newCode = codeRaw.trim()
-      if (!newCode) throw new Error('Code cannot be empty')
+      const newCode = normalizeVideoCode(codeRaw)
 
       const video = readVideoById(id)
       if (!video) throw new Error('Video not found')
@@ -372,8 +568,7 @@ export function createVideoMaintenanceService(
     },
     importLinkResource(input): VideoResourceImportResult {
       return withResourceMaintenance(() => {
-        const code = input.code.trim()
-        if (!code) throw new Error('影片番号不能为空')
+        const code = normalizeVideoCode(input.code)
         const normalized = normalizeExternalVideoResource(input.url, input.kind)
         const displayName = input.displayName?.trim() || normalized.suggestedDisplayName
         const sizeBytes = input.sizeBytes ?? null

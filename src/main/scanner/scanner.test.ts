@@ -6,7 +6,7 @@ import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import { listLocalVideoResources, listVideos } from '../db/videoRepo'
-import { scanFolders } from './scanner'
+import { importManual, scanFolders } from './scanner'
 
 let tempRoot: string | null = null
 
@@ -27,6 +27,48 @@ afterEach(() => {
 })
 
 describe('scanFolders', () => {
+  it('normalizes a manual code and attaches to an existing case-insensitive identity', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const existingPath = path.join(library, 'ABC-123.mp4')
+    const manualPath = path.join(library, 'manual-copy.mp4')
+    fs.writeFileSync(existingPath, 'existing')
+    fs.writeFileSync(manualPath, 'manual')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    await scanFolders([library], undefined, {
+      readDurationSeconds: async () => 3600,
+      minImportDurationSeconds: null
+    })
+
+    const result = await importManual(manualPath, ' abc-123 ')
+
+    assert.equal(result.code, 'ABC-123')
+    assert.equal(result.imported, true)
+    assert.equal(listVideos({}).total, 1)
+    assert.equal(listLocalVideoResources(1).length, 2)
+  })
+
+  it('aborts when a nested directory cannot be audited', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    const inaccessible = path.join(library, 'inaccessible')
+    fs.mkdirSync(inaccessible, { recursive: true })
+    initDatabaseAtPath(path.join(root, 'library.db'))
+
+    await assert.rejects(
+      () =>
+        scanFolders([library], undefined, {
+          minImportDurationSeconds: null,
+          readDirectory: async (dir) => {
+            if (dir === inaccessible) throw new Error('EACCES')
+            return fs.promises.readdir(dir, { withFileTypes: true })
+          }
+        }),
+      /无法读取媒体目录.*EACCES/
+    )
+  })
+
   it('imports a symbolic-link video by its link path and file name', async () => {
     const root = makeTempRoot()
     const library = path.join(root, 'library')
@@ -181,6 +223,37 @@ describe('scanFolders', () => {
         .map((resource) => resource.locator)
         .sort(),
       [onlinePath, unavailablePath].sort()
+    )
+  })
+
+  it('does not relocate a resource whose existing path cannot be audited', async () => {
+    const root = makeTempRoot()
+    const oldLibrary = path.join(root, 'old-library')
+    const newLibrary = path.join(root, 'new-library')
+    fs.mkdirSync(oldLibrary)
+    fs.mkdirSync(newLibrary)
+    const oldPath = path.join(oldLibrary, 'IPX-783.mp4')
+    const newPath = path.join(newLibrary, 'IPX-783.mp4')
+    fs.writeFileSync(oldPath, 'old copy')
+    fs.writeFileSync(newPath, 'new copy')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const baseOptions = {
+      readDurationSeconds: async (): Promise<number> => 3661,
+      minImportDurationSeconds: null
+    }
+    await scanFolders([oldLibrary], undefined, baseOptions)
+
+    const result = await scanFolders([newLibrary], undefined, {
+      ...baseOptions,
+      inspectPath: (filePath) => (filePath === oldPath ? 'unknown' : 'present')
+    })
+
+    assert.equal(result.failed, 1)
+    assert.equal(result.relocated, 0)
+    const [video] = listVideos({ search: 'IPX-783' }).items
+    assert.deepEqual(
+      listLocalVideoResources(video.id).map((resource) => resource.locator),
+      [oldPath]
     )
   })
 

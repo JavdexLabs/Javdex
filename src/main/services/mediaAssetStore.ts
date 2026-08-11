@@ -91,12 +91,45 @@ interface CoordinatedChange {
  */
 export class MediaAssetStore {
   private readonly changeStorage = new AsyncLocalStorage<CoordinatedChange>()
+  private readonly exclusiveMutationStorage = new AsyncLocalStorage<boolean>()
+  private activeMutationCount = 0
+  private relocationActive = false
+
+  private assertMutationAllowed(): void {
+    if (this.relocationActive && !this.exclusiveMutationStorage.getStore()) {
+      throw new Error('媒体资源维护正在进行，请稍后重试')
+    }
+  }
+
+  private acquireMutationLease(): () => void {
+    this.assertMutationAllowed()
+    this.activeMutationCount += 1
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      this.activeMutationCount -= 1
+    }
+  }
+
+  async runExclusiveRelocation<T>(work: () => Promise<T>): Promise<T> {
+    if (this.relocationActive || this.activeMutationCount > 0) {
+      throw new Error('已有媒体资源任务正在运行，请稍后重试')
+    }
+    this.relocationActive = true
+    try {
+      return await this.exclusiveMutationStorage.run(true, work)
+    } finally {
+      this.relocationActive = false
+    }
+  }
 
   private activeChange(): CoordinatedChange | null {
     return this.changeStorage.getStore() ?? null
   }
 
   ensureReady(): void {
+    this.assertMutationAllowed()
     ensureAssetDirs()
   }
 
@@ -160,6 +193,7 @@ export class MediaAssetStore {
   }
 
   importAvatarDisplay(name: string, actressId: number, data: Buffer): string {
+    this.assertMutationAllowed()
     return this.registerCreated(importAvatarDisplayFromBuffer(name, actressId, data))
   }
 
@@ -169,6 +203,7 @@ export class MediaAssetStore {
     data: Buffer,
     extension?: string
   ): { relPath: string; fingerprint: string } {
+    this.assertMutationAllowed()
     const result = importAvatarSourceFromBuffer(name, actressId, data, extension)
     this.registerCreated(result.relPath)
     return result
@@ -180,18 +215,22 @@ export class MediaAssetStore {
   }
 
   importCover(code: string, sourcePath: string): string {
+    this.assertMutationAllowed()
     return this.registerCreated(importCoverFromFile(code, sourcePath))
   }
 
   importPlaylistCover(name: string, sourcePath: string): string {
+    this.assertMutationAllowed()
     return this.registerCreated(importPlaylistCoverFromFile(name, sourcePath))
   }
 
   importSample(code: string, sourcePath: string): string {
+    this.assertMutationAllowed()
     return this.registerCreated(importSampleFromFile(code, sourcePath))
   }
 
   importActressGallery(name: string, sourcePath: string, actressId?: number | null): string {
+    this.assertMutationAllowed()
     return this.registerCreated(importActressGalleryFromFile(name, sourcePath, actressId))
   }
 
@@ -201,6 +240,7 @@ export class MediaAssetStore {
     name: string,
     sourcePath: string
   ): string {
+    this.assertMutationAllowed()
     return this.registerCreated(importClassificationImageFromFile(kind, id, name, sourcePath))
   }
 
@@ -210,15 +250,26 @@ export class MediaAssetStore {
     name: string,
     data: Buffer
   ): string {
+    this.assertMutationAllowed()
     return this.registerCreated(importClassificationImageFromBuffer(kind, id, name, data))
   }
 
   async downloadCover(code: string, url: string, fetcher: AssetFetcher): Promise<string | null> {
-    return this.registerCreated(await downloadCoverImpl(code, url, fetcher))
+    const release = this.acquireMutationLease()
+    try {
+      return this.registerCreated(await downloadCoverImpl(code, url, fetcher))
+    } finally {
+      release()
+    }
   }
 
   async downloadAvatar(name: string, url: string, fetcher: AssetFetcher): Promise<string | null> {
-    return this.registerCreated(await downloadAvatarImpl(name, url, fetcher))
+    const release = this.acquireMutationLease()
+    try {
+      return this.registerCreated(await downloadAvatarImpl(name, url, fetcher))
+    } finally {
+      release()
+    }
   }
 
   async downloadSamples(
@@ -226,12 +277,18 @@ export class MediaAssetStore {
     urls: string[],
     fetcher: AssetFetcher
   ): Promise<Array<string | null>> {
-    const paths = await downloadSamplesImpl(code, urls, fetcher)
-    for (const storedPath of paths) this.registerCreated(storedPath)
-    return paths
+    const release = this.acquireMutationLease()
+    try {
+      const paths = await downloadSamplesImpl(code, urls, fetcher)
+      for (const storedPath of paths) this.registerCreated(storedPath)
+      return paths
+    } finally {
+      release()
+    }
   }
 
   storeScrapedActressAvatar(name: string, url: string, data: Buffer): string {
+    this.assertMutationAllowed()
     return this.registerCreated(storeScrapedActressAvatarImpl(name, url, data))
   }
 
@@ -241,6 +298,7 @@ export class MediaAssetStore {
     url: string,
     data: Buffer
   ): DownloadedImageAsset {
+    this.assertMutationAllowed()
     const result = storeScrapedActressGalleryImageImpl(name, actressId, url, data)
     this.registerCreated(result.localPath)
     return result
@@ -252,12 +310,18 @@ export class MediaAssetStore {
     fetcher: AssetFetcher,
     actressId?: number | null
   ): Promise<DownloadedImageAsset | null> {
-    const result = await downloadActressGalleryImageImpl(name, url, fetcher, actressId)
-    if (result) this.registerCreated(result.localPath)
-    return result
+    const release = this.acquireMutationLease()
+    try {
+      const result = await downloadActressGalleryImageImpl(name, url, fetcher, actressId)
+      if (result) this.registerCreated(result.localPath)
+      return result
+    } finally {
+      release()
+    }
   }
 
   stageActressScrapeImages(resources: ActressScrapeStagingInput[]): StagedActressScrapeImage[] {
+    this.assertMutationAllowed()
     const staged = stageActressScrapeImagesImpl(resources)
     for (const item of staged) this.registerCreated(item.stagedPath)
     return staged
@@ -268,6 +332,7 @@ export class MediaAssetStore {
   }
 
   cleanupActressScrapeStagingPaths(stagedPaths: string[]): void {
+    this.assertMutationAllowed()
     cleanupActressScrapeStagingPathsImpl(stagedPaths)
   }
 
@@ -275,6 +340,7 @@ export class MediaAssetStore {
     referencedPaths: string[],
     options?: { now?: number; olderThanMs?: number }
   ): number {
+    this.assertMutationAllowed()
     return cleanupOrphanedActressScrapeStagingImpl(referencedPaths, options)
   }
 
@@ -288,6 +354,7 @@ export class MediaAssetStore {
    * must remap DB references; null when no remap is needed.
    */
   encryptStoredAsset(rel: string): StoredAssetPathRewrite | null {
+    this.assertMutationAllowed()
     return encryptStoredAssetImpl(rel)
   }
 
@@ -296,14 +363,17 @@ export class MediaAssetStore {
    * callers must remap DB references; null when skipped or unchanged.
    */
   decryptStoredAsset(rel: string): StoredAssetPathRewrite | null {
+    this.assertMutationAllowed()
     return decryptStoredAssetImpl(rel)
   }
 
   clearPathAliases(): void {
+    this.assertMutationAllowed()
     clearPathAliasesImpl()
   }
 
   delete(storedPath: string | null | undefined): void {
+    this.assertMutationAllowed()
     deleteAssetOrThrow(storedPath)
   }
 
@@ -368,6 +438,7 @@ export class MediaAssetStore {
     operation: () => T | Promise<T>,
     parentOverride?: CoordinatedChange | null
   ): T | Promise<T> {
+    const releaseMutation = this.acquireMutationLease()
     const change: CoordinatedChange = {
       created: new Set(),
       obsolete: new Set(),
@@ -380,19 +451,29 @@ export class MediaAssetStore {
         if (result instanceof Promise) {
           return result.then(
             (value) => {
-              this.finishCoordinatedChange(change, 'commit')
-              return value
+              try {
+                this.finishCoordinatedChange(change, 'commit')
+                return value
+              } finally {
+                releaseMutation()
+              }
             },
             (error) => {
-              this.finishCoordinatedChange(change, 'rollback')
-              throw error
+              try {
+                this.finishCoordinatedChange(change, 'rollback')
+                throw error
+              } finally {
+                releaseMutation()
+              }
             }
           )
         }
         this.finishCoordinatedChange(change, 'commit')
+        releaseMutation()
         return result
       } catch (error) {
-        this.finishCoordinatedChange(change, 'rollback')
+        if (!change.finished) this.finishCoordinatedChange(change, 'rollback')
+        releaseMutation()
         throw error
       }
     })

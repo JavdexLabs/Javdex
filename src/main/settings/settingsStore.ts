@@ -61,12 +61,20 @@ export function updateSettings(patch: Partial<AppSettings>): AppSettings {
     ...patch,
     ...(patch.theme !== undefined ? { theme: normalizeTheme(patch.theme) } : {})
   })
-  cache = next
+  const file = settingsFilePath()
+  const temporaryFile = `${file}.tmp-${process.pid}`
   try {
-    fs.writeFileSync(settingsFilePath(), JSON.stringify(next, null, 2), 'utf-8')
+    fs.writeFileSync(temporaryFile, JSON.stringify(next, null, 2), 'utf-8')
+    fs.renameSync(temporaryFile, file)
   } catch (err) {
-    console.error('Failed to persist settings:', err)
+    try {
+      fs.rmSync(temporaryFile, { force: true })
+    } catch {
+      // Preserve the original persistence error.
+    }
+    throw new Error(`保存设置失败：${(err as Error).message}`)
   }
+  cache = next
   return next
 }
 

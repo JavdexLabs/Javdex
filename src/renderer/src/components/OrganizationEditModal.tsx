@@ -13,10 +13,10 @@ import Modal from './Modal'
 import { EditFormField, EditFormSection } from './FormPrimitives'
 import {
   createOrganizationFormDraft,
-  moveOrganizationLink,
   organizationUpdateInputFromDraft,
   retainSelectedParentOption
 } from './organizationFormState'
+import { moveClassificationLink, useClassificationLinkKeys } from './classificationLinkForm'
 import { UI_ICON_SM } from './iconDefaults'
 import IconButton from './IconButton'
 import { FACET_LABEL } from '../facet'
@@ -35,6 +35,8 @@ export default function OrganizationEditModal({
   onSave
 }: Props): JSX.Element {
   const [draft, setDraft] = useState(() => createOrganizationFormDraft(organization))
+  const { linkKeys, moveLinkKey, removeLinkKey, appendLinkKey } =
+    useClassificationLinkKeys(draft.links.length)
   const [parentSearch, setParentSearch] = useState(organization?.parent?.mainName ?? '')
   const [selectedParent, setSelectedParent] = useState<OrganizationSummary | null>(
     organization?.parent ?? null
@@ -208,7 +210,7 @@ export default function OrganizationEditModal({
         <EditFormSection title="相关链接">
           <div className="organization-link-editor">
             {draft.links.map((link, index) => (
-              <div className="organization-link-editor-row" key={index}>
+              <div className="organization-link-editor-row" key={linkKeys[index]}>
                 <input
                   className="text-input"
                   value={link.label}
@@ -237,35 +239,38 @@ export default function OrganizationEditModal({
                     label={`上移链接 ${index + 1}`}
                     icon={<ChevronUp {...UI_ICON_SM} aria-hidden />}
                     disabled={index === 0}
-                    onClick={() =>
+                    onClick={() => {
                       setDraft({
                         ...draft,
-                        links: moveOrganizationLink(draft.links, index, index - 1)
+                        links: moveClassificationLink(draft.links, index, index - 1)
                       })
-                    }
+                      moveLinkKey(index, index - 1)
+                    }}
                   />
                   <IconButton
                     className="organization-link-action"
                     label={`下移链接 ${index + 1}`}
                     icon={<ChevronDown {...UI_ICON_SM} aria-hidden />}
                     disabled={index === draft.links.length - 1}
-                    onClick={() =>
+                    onClick={() => {
                       setDraft({
                         ...draft,
-                        links: moveOrganizationLink(draft.links, index, index + 1)
+                        links: moveClassificationLink(draft.links, index, index + 1)
                       })
-                    }
+                      moveLinkKey(index, index + 1)
+                    }}
                   />
                   <IconButton
                     className="organization-link-action icon-btn--danger"
                     label={`移除链接 ${index + 1}`}
                     icon={<Trash2 {...UI_ICON_SM} aria-hidden />}
-                    onClick={() =>
+                    onClick={() => {
                       setDraft({
                         ...draft,
                         links: draft.links.filter((_, itemIndex) => itemIndex !== index)
                       })
-                    }
+                      removeLinkKey(index)
+                    }}
                   />
                 </div>
               </div>
@@ -273,9 +278,10 @@ export default function OrganizationEditModal({
             <button
               type="button"
               className="btn btn-ghost btn-sm organization-link-add"
-              onClick={() =>
+              onClick={() => {
                 setDraft({ ...draft, links: [...draft.links, { label: '', url: '' }] })
-              }
+                appendLinkKey()
+              }}
             >
               <Plus {...UI_ICON_SM} aria-hidden />
               添加链接

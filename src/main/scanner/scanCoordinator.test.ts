@@ -107,7 +107,7 @@ describe('ScanCoordinator', () => {
         resources.delete(id)
       },
       setPrimaryResource: (_videoId, id) => promoted.push(id),
-      pathExists: () => false,
+      inspectPath: () => 'missing',
       shouldAutoDeleteResourceLessVideos: () => true,
       deleteResourceLessVideos: () => {
         throw new Error('offline scans must not auto-delete videos')
@@ -127,6 +127,64 @@ describe('ScanCoordinator', () => {
     assert.equal(resources.has(3), true)
     assert.equal(summaries[0].status, 'success')
     assert.deepEqual(summaries[0].offlineFolders, ['/offline'])
+  })
+
+  it('aborts cleanup when a local path cannot be audited', async () => {
+    const local = resource({
+      id: 1,
+      video_id: 1,
+      kind: 'local',
+      locator: '/online/LOCKED-001.mp4',
+      is_primary: 1
+    })
+    const removed: number[] = []
+    const coordinator = createTestScanCoordinator({
+      gate: new MaintenanceTaskGate(),
+      getConfiguredFolders: () => ['/online'],
+      inspectFolder: async () => true,
+      scanFolders: async () => emptyScanResult(),
+      listLocalResources: () => [
+        { video_id: 1, resource_id: 1, locator: local.locator }
+      ],
+      getResourceById: () => local,
+      listResources: () => [local],
+      removeResourceRecord: (id) => removed.push(id),
+      inspectPath: () => 'unknown'
+    })
+
+    await assert.rejects(() => coordinator.run(), /无法确认本地资源是否存在/)
+    assert.deepEqual(removed, [])
+  })
+
+  it('treats a root that becomes unreadable after traversal as offline', async () => {
+    let inspections = 0
+    let cleanupReads = 0
+    let autoDeleteRuns = 0
+    const coordinator = createTestScanCoordinator({
+      gate: new MaintenanceTaskGate(),
+      getConfiguredFolders: () => ['/online'],
+      inspectFolder: async () => {
+        inspections += 1
+        return inspections === 1
+      },
+      scanFolders: async () => emptyScanResult(),
+      listLocalResources: () => {
+        cleanupReads += 1
+        return [{ video_id: 1, resource_id: 1, locator: '/online/A-001.mp4' }]
+      },
+      shouldAutoDeleteResourceLessVideos: () => true,
+      deleteResourceLessVideos: () => {
+        autoDeleteRuns += 1
+        return 0
+      }
+    })
+
+    const result = await coordinator.run()
+
+    assert.deepEqual(result.offlineFolders, ['/online'])
+    assert.equal(cleanupReads, 1)
+    assert.equal(result.removed, 0)
+    assert.equal(autoDeleteRuns, 0)
   })
 
   it('does not run cleanup after cancellation and releases the mutual-exclusion lease', async () => {
@@ -192,6 +250,44 @@ describe('ScanCoordinator', () => {
     await assert.rejects(() => coordinator.run(), /adapter failed/)
     assert.equal(cleanupReads, 0)
     assert.equal(deferredCleanupRuns, 0)
+  })
+
+  it('skips every destructive cleanup after a file processing failure', async () => {
+    let missingCleanupReads = 0
+    let deferredCleanupRuns = 0
+    let autoDeleteRuns = 0
+    const summaries: LibraryScanSummary[] = []
+    const coordinator = createTestScanCoordinator({
+      gate: new MaintenanceTaskGate(),
+      getConfiguredFolders: () => ['/online'],
+      inspectFolder: async () => true,
+      scanFolders: async () => ({ ...emptyScanResult(), failed: 1 }),
+      listLocalResources: () => {
+        missingCleanupReads += 1
+        return []
+      },
+      getPendingPathCleanupRoots: () => ['/removed'],
+      applyPendingPathCleanups: () => {
+        deferredCleanupRuns += 1
+        return { removed: 1, promoted: 0, consumedRoots: ['/removed'] }
+      },
+      shouldAutoDeleteResourceLessVideos: () => true,
+      deleteResourceLessVideos: () => {
+        autoDeleteRuns += 1
+        return 1
+      },
+      recordScanSummary: (summary) => summaries.push(summary)
+    })
+
+    const result = await coordinator.run()
+
+    assert.equal(result.failed, 1)
+    assert.equal(result.removed, 0)
+    assert.equal(result.deletedVideos, 0)
+    assert.equal(missingCleanupReads, 0)
+    assert.equal(deferredCleanupRuns, 0)
+    assert.equal(autoDeleteRuns, 0)
+    assert.equal(summaries[0].status, 'failed')
   })
 
   it('consumes deferred path cleanup only after a successful uncancelled scan', async () => {

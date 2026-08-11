@@ -12,7 +12,7 @@ import { organizationKeys, seriesKeys } from '../query/queryKeys'
 import Modal from './Modal'
 import { EditFormField, EditFormSection } from './FormPrimitives'
 import { createSeriesFormDraft, seriesInputFromDraft } from './seriesFormState'
-import { moveOrganizationLink } from './organizationFormState'
+import { moveClassificationLink, useClassificationLinkKeys } from './classificationLinkForm'
 import { UI_ICON_SM } from './iconDefaults'
 import IconButton from './IconButton'
 
@@ -24,6 +24,8 @@ interface Props {
 
 export default function SeriesEditModal({ series, onCancel, onSave }: Props): JSX.Element {
   const [draft, setDraft] = useState(() => createSeriesFormDraft(series))
+  const { linkKeys, moveLinkKey, removeLinkKey, appendLinkKey } =
+    useClassificationLinkKeys(draft.links.length)
   const [ownerSearch, setOwnerSearch] = useState(series?.ownerOrganization?.mainName ?? '')
   const [parentSearch, setParentSearch] = useState(series?.parentSeries?.mainName ?? '')
   const [selectedOwner, setSelectedOwner] = useState<OrganizationSummary | null>(
@@ -239,7 +241,7 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
         <EditFormSection title="相关链接">
           <div className="organization-link-editor">
             {draft.links.map((link, index) => (
-              <div className="organization-link-editor-row" key={index}>
+              <div className="organization-link-editor-row" key={linkKeys[index]}>
                 <input
                   className="text-input"
                   aria-label={`链接 ${index + 1} 名称`}
@@ -268,29 +270,38 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
                     label={`上移链接 ${index + 1}`}
                     icon={<ChevronUp {...UI_ICON_SM} aria-hidden />}
                     disabled={index === 0}
-                    onClick={() =>
-                      setDraft({ ...draft, links: moveOrganizationLink(draft.links, index, index - 1) })
-                    }
+                    onClick={() => {
+                      setDraft({
+                        ...draft,
+                        links: moveClassificationLink(draft.links, index, index - 1)
+                      })
+                      moveLinkKey(index, index - 1)
+                    }}
                   />
                   <IconButton
                     className="organization-link-action"
                     label={`下移链接 ${index + 1}`}
                     icon={<ChevronDown {...UI_ICON_SM} aria-hidden />}
                     disabled={index === draft.links.length - 1}
-                    onClick={() =>
-                      setDraft({ ...draft, links: moveOrganizationLink(draft.links, index, index + 1) })
-                    }
+                    onClick={() => {
+                      setDraft({
+                        ...draft,
+                        links: moveClassificationLink(draft.links, index, index + 1)
+                      })
+                      moveLinkKey(index, index + 1)
+                    }}
                   />
                   <IconButton
                     className="organization-link-action icon-btn--danger"
                     label={`移除链接 ${index + 1}`}
                     icon={<Trash2 {...UI_ICON_SM} aria-hidden />}
-                    onClick={() =>
+                    onClick={() => {
                       setDraft({
                         ...draft,
                         links: draft.links.filter((_, itemIndex) => itemIndex !== index)
                       })
-                    }
+                      removeLinkKey(index)
+                    }}
                   />
                 </div>
               </div>
@@ -298,7 +309,10 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
             <button
               type="button"
               className="btn btn-ghost btn-sm organization-link-add"
-              onClick={() => setDraft({ ...draft, links: [...draft.links, { label: '', url: '' }] })}
+              onClick={() => {
+                setDraft({ ...draft, links: [...draft.links, { label: '', url: '' }] })
+                appendLinkKey()
+              }}
             >
               <Plus {...UI_ICON_SM} aria-hidden />
               添加链接

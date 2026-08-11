@@ -42,6 +42,8 @@ interface LocalResourceRef {
   locator: string
 }
 
+type LocalPathState = 'present' | 'missing' | 'unknown'
+
 interface ScanCoordinatorDependencies {
   getConfiguredFolders: () => string[]
   hasPendingPathCleanups: () => boolean
@@ -56,7 +58,7 @@ interface ScanCoordinatorDependencies {
   listResources: (videoId: number) => VideoResource[]
   removeResourceRecord: (resourceId: number) => void
   setPrimaryResource: (videoId: number, resourceId: number) => void
-  pathExists: (filePath: string) => boolean
+  inspectPath: (filePath: string) => LocalPathState
   getPendingPathCleanupRoots: () => string[]
   applyPendingPathCleanups: (roots: string[]) => PendingLibraryPathCleanupResult
   clearPendingPathCleanups: (roots: string[]) => void
@@ -77,6 +79,16 @@ async function inspectReadableDirectory(folder: string): Promise<boolean> {
     return true
   } catch {
     return false
+  }
+}
+
+function inspectLocalPath(filePath: string): LocalPathState {
+  try {
+    fs.statSync(filePath)
+    return 'present'
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'unknown'
   }
 }
 
@@ -139,12 +151,31 @@ export class ScanCoordinator {
           unavailableRoots: offlineFolders
         }
       )
+      for (const folder of [...accessibleFolders]) {
+        if (await this.dependencies.inspectFolder(folder)) continue
+        accessibleFolders.splice(accessibleFolders.indexOf(folder), 1)
+        offlineFolders.push(folder)
+      }
       result.offlineFolders = offlineFolders
       result.promoted ??= 0
       result.deletedVideos ??= 0
       if (controller.signal.aborted || result.cancelled) {
         result.cancelled = true
         this.recordSummary(trigger, startedAt, 'cancelled', result)
+        return result
+      }
+      const processingFailures = Math.max(
+        0,
+        result.failed - result.unrecognizedFiles.length
+      )
+      if (processingFailures > 0) {
+        this.recordSummary(
+          trigger,
+          startedAt,
+          'failed',
+          result,
+          `有 ${processingFailures} 个文件处理失败，已跳过资源清理`
+        )
         return result
       }
 
@@ -251,7 +282,11 @@ export class ScanCoordinator {
     for (const ref of this.dependencies.listLocalResources()) {
       if (offlineFolders.some((folder) => isPathUnderRoot(ref.locator, folder))) continue
       if (!accessibleFolders.some((folder) => isPathUnderRoot(ref.locator, folder))) continue
-      if (this.dependencies.pathExists(ref.locator)) continue
+      const pathState = this.dependencies.inspectPath(ref.locator)
+      if (pathState === 'present') continue
+      if (pathState === 'unknown') {
+        throw new Error(`无法确认本地资源是否存在：${ref.locator}`)
+      }
 
       const resource = this.dependencies.getResourceById(ref.resource_id)
       if (!resource || resource.kind !== 'local') continue
@@ -263,7 +298,7 @@ export class ScanCoordinator {
       if (!resource.is_primary) continue
       const promotedResource = selectPrimaryVideoResourceCandidate(
         remaining,
-        this.dependencies.pathExists
+        (locator) => this.dependencies.inspectPath(locator) === 'present'
       )
       if (!promotedResource) continue
       this.dependencies.setPrimaryResource(ref.video_id, promotedResource.id)
@@ -288,7 +323,7 @@ export function createScanCoordinator(
     listResources: dependencies.listResources ?? listVideoResources,
     removeResourceRecord: dependencies.removeResourceRecord ?? removeVideoResourceRecord,
     setPrimaryResource: dependencies.setPrimaryResource ?? setPrimaryVideoResource,
-    pathExists: dependencies.pathExists ?? fs.existsSync,
+    inspectPath: dependencies.inspectPath ?? inspectLocalPath,
     getPendingPathCleanupRoots:
       dependencies.getPendingPathCleanupRoots ?? listPendingLibraryPathCleanupRoots,
     applyPendingPathCleanups:

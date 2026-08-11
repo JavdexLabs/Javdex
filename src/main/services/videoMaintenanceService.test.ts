@@ -8,6 +8,7 @@ import { insertTestVideoWithFile } from '../db/testVideoFixtures'
 import { createVideoMaintenanceService } from './videoMaintenanceService'
 import { createVideoQueryService } from './videoQueryService'
 import { classificationQueryService } from './classificationQueryService'
+import { recoverPendingLocalFileDeletions } from './pendingLocalFileDeletionService'
 
 let tempRoot: string | null = null
 
@@ -153,6 +154,41 @@ describe('VideoMaintenanceService', () => {
     )
   })
 
+  it('normalizes a manually entered code before attaching a resource', () => {
+    setupDb()
+    const videos = createVideoMaintenanceService()
+
+    const result = videos.importLinkResource({
+      code: ' app-001 ',
+      url: 'https://example.com/watch/app-001'
+    })
+
+    assert.equal(result.createdVideo, false)
+    assert.equal(result.videoId, 1)
+    assert.equal(
+      (getDb().prepare('SELECT COUNT(*) AS count FROM videos').get() as { count: number }).count,
+      1
+    )
+  })
+
+  it('attaches a normalized link to an existing legacy lowercase code', () => {
+    setupDb()
+    getDb().prepare("UPDATE videos SET code = 'app-001' WHERE id = 1").run()
+    const videos = createVideoMaintenanceService()
+
+    const result = videos.importLinkResource({
+      code: 'APP-001',
+      url: 'https://example.com/watch/legacy'
+    })
+
+    assert.equal(result.createdVideo, false)
+    assert.equal(result.videoId, 1)
+    assert.equal(
+      (getDb().prepare('SELECT COUNT(*) AS count FROM videos').get() as { count: number }).count,
+      1
+    )
+  })
+
   it('reports the owning video when a normalized HTTP resource already exists', () => {
     setupDb()
     const videos = createVideoMaintenanceService()
@@ -279,6 +315,36 @@ describe('VideoMaintenanceService', () => {
     videos.delete(1)
     assert.equal(fs.existsSync(secondaryPath), false)
     assert.equal(query.get(1), null)
+  })
+
+  it('restores a staged local file and rolls back resource removal when promotion fails', () => {
+    const { videoPath } = setupDb()
+    const videos = createVideoMaintenanceService()
+    const fallback = videos.importLinkResource({
+      code: 'APP-001',
+      url: 'https://example.com/fallback'
+    }).resource
+    getDb().exec(`
+      CREATE TRIGGER reject_primary_promotion
+      BEFORE UPDATE OF is_primary ON video_resources
+      WHEN NEW.is_primary = 1
+      BEGIN
+        SELECT RAISE(ABORT, 'forced promotion failure');
+      END;
+    `)
+
+    assert.throws(() => videos.removeResource(1, 1), /forced promotion failure/)
+
+    assert.equal(fs.existsSync(videoPath), true)
+    assert.deepEqual(
+      createVideoQueryService()
+        .get(1)
+        ?.resources.map((resource) => [resource.id, resource.is_primary]),
+      [
+        [1, 1],
+        [fallback.id, 0]
+      ]
+    )
   })
 
   it('sets any resource as primary and promotes deterministic fallbacks after removal', () => {
@@ -408,7 +474,7 @@ describe('VideoMaintenanceService', () => {
     const videos = createVideoMaintenanceService()
     const query = createVideoQueryService()
 
-    assert.deepEqual(videos.correctImport(1, 'APP-002'), {
+    assert.deepEqual(videos.correctImport(1, ' app-002 '), {
       code: 'APP-002',
       previousCode: 'APP-001'
     })
@@ -432,6 +498,327 @@ describe('VideoMaintenanceService', () => {
       (getDb().prepare('SELECT COUNT(*) AS c FROM video_resources').get() as { c: number }).c,
       0
     )
+  })
+
+  it('persists a committed cleanup task when physical deletion must be retried', () => {
+    const { videoPath } = setupPolicyDb()
+    const videos = createVideoMaintenanceService({
+      unlinkSync: () => {
+        throw new Error('file is busy')
+      }
+    })
+
+    videos.delete(1)
+
+    assert.equal(fs.existsSync(videoPath), false)
+    assert.equal((getDb().prepare('SELECT COUNT(*) AS c FROM videos').get() as { c: number }).c, 0)
+    const pending = getDb()
+      .prepare(
+        `SELECT original_path, staged_path, state
+         FROM pending_local_file_deletions`
+      )
+      .get() as { original_path: string; staged_path: string; state: string }
+    assert.equal(pending.original_path, videoPath)
+    assert.equal(pending.state, 'committed')
+    assert.equal(fs.existsSync(pending.staged_path), true)
+
+    assert.deepEqual(recoverPendingLocalFileDeletions(), {
+      cleaned: 1,
+      restored: 0,
+      failed: 0
+    })
+    assert.equal(fs.existsSync(pending.staged_path), false)
+    assert.equal(
+      (
+        getDb().prepare('SELECT COUNT(*) AS c FROM pending_local_file_deletions').get() as {
+          c: number
+        }
+      ).c,
+      0
+    )
+  })
+
+  it('does not delete database records when the file storage cannot be audited', () => {
+    setupPolicyDb()
+    const offlinePath = path.join(tempRoot!, 'offline-volume', 'IPX-535.mp4')
+    getDb()
+      .prepare("UPDATE video_resources SET locator = ?, resource_key = 'local:' || ? WHERE id = 1")
+      .run(offlinePath, offlinePath)
+    const videos = createVideoMaintenanceService()
+
+    assert.throws(() => videos.delete(1), /无法确认影片文件是否存在/)
+    assert.equal(
+      (getDb().prepare('SELECT COUNT(*) AS c FROM videos').get() as { c: number }).c,
+      1
+    )
+    assert.equal(
+      (
+        getDb().prepare('SELECT COUNT(*) AS c FROM pending_local_file_deletions').get() as {
+          c: number
+        }
+      ).c,
+      0
+    )
+  })
+
+  it('adopts an interrupted prepared task when deletion is retried', () => {
+    const { videoPath } = setupPolicyDb()
+    const stagedPath = `${videoPath}.javdex-delete-retry`
+    const deviceId = fs.lstatSync(videoPath).dev
+    getDb()
+      .prepare(
+        `INSERT INTO pending_local_file_deletions (
+           original_path, staged_path, device_id, state
+         ) VALUES (?, ?, ?, 'prepared')`
+      )
+      .run(videoPath, stagedPath, deviceId)
+    fs.renameSync(videoPath, stagedPath)
+
+    createVideoMaintenanceService().delete(1)
+
+    assert.equal(fs.existsSync(videoPath), false)
+    assert.equal(fs.existsSync(stagedPath), false)
+    assert.equal((getDb().prepare('SELECT COUNT(*) AS c FROM videos').get() as { c: number }).c, 0)
+    assert.equal(
+      (
+        getDb().prepare('SELECT COUNT(*) AS c FROM pending_local_file_deletions').get() as {
+          c: number
+        }
+      ).c,
+      0
+    )
+  })
+
+  it('does not adopt a prepared task when the original path was replaced', () => {
+    const { videoPath } = setupPolicyDb()
+    const stagedPath = `${videoPath}.javdex-delete-conflict`
+    const deviceId = fs.lstatSync(videoPath).dev
+    getDb()
+      .prepare(
+        `INSERT INTO pending_local_file_deletions (
+           original_path, staged_path, device_id, state
+         ) VALUES (?, ?, ?, 'prepared')`
+      )
+      .run(videoPath, stagedPath, deviceId)
+    fs.renameSync(videoPath, stagedPath)
+    fs.writeFileSync(videoPath, 'replacement')
+
+    assert.throws(() => createVideoMaintenanceService().delete(1), /原路径已被占用/)
+
+    assert.equal(fs.existsSync(videoPath), true)
+    assert.equal(fs.existsSync(stagedPath), true)
+    assert.equal(
+      (getDb().prepare('SELECT COUNT(*) AS c FROM videos').get() as { c: number }).c,
+      1
+    )
+  })
+
+  it('restores an interrupted pre-commit file staging task', () => {
+    const { videoPath } = setupPolicyDb()
+    const stagedPath = `${videoPath}.javdex-delete-interrupted`
+    const deviceId = fs.lstatSync(videoPath).dev
+    getDb()
+      .prepare(
+        `INSERT INTO pending_local_file_deletions (
+           original_path, staged_path, device_id, state
+         ) VALUES (?, ?, ?, 'prepared')`
+      )
+      .run(videoPath, stagedPath, deviceId)
+    fs.renameSync(videoPath, stagedPath)
+
+    assert.deepEqual(recoverPendingLocalFileDeletions(), {
+      cleaned: 0,
+      restored: 1,
+      failed: 0
+    })
+    assert.equal(fs.existsSync(videoPath), true)
+    assert.equal(fs.existsSync(stagedPath), false)
+  })
+
+  it('keeps a cleanup task queued while its original storage is unavailable', () => {
+    setupPolicyDb()
+    const offlineRoot = path.join(tempRoot!, 'offline-volume')
+    const originalPath = path.join(offlineRoot, 'movie.mp4')
+    const stagedPath = `${originalPath}.javdex-delete-interrupted`
+    const expectedDeviceId = fs.lstatSync(tempRoot!).dev + 1
+    fs.mkdirSync(offlineRoot)
+    getDb()
+      .prepare(
+        `INSERT INTO pending_local_file_deletions (
+           original_path, staged_path, device_id, state
+         ) VALUES (?, ?, ?, 'committed')`
+      )
+      .run(originalPath, stagedPath, expectedDeviceId)
+
+    assert.deepEqual(recoverPendingLocalFileDeletions(), {
+      cleaned: 0,
+      restored: 0,
+      failed: 1
+    })
+    assert.equal(
+      (
+        getDb().prepare('SELECT COUNT(*) AS c FROM pending_local_file_deletions').get() as {
+          c: number
+        }
+      ).c,
+      1
+    )
+  })
+
+  it('finishes cleanup after a storage remount changes its device id', () => {
+    setupPolicyDb()
+    const stagedPath = path.join(tempRoot!, 'remounted.mp4.javdex-delete-interrupted')
+    fs.writeFileSync(stagedPath, 'staged')
+    getDb()
+      .prepare(
+        `INSERT INTO pending_local_file_deletions (
+           original_path, staged_path, device_id, state
+         ) VALUES (?, ?, ?, 'committed')`
+      )
+      .run(path.join(tempRoot!, 'remounted.mp4'), stagedPath, fs.lstatSync(stagedPath).dev + 1)
+
+    assert.deepEqual(recoverPendingLocalFileDeletions(), {
+      cleaned: 1,
+      restored: 0,
+      failed: 0
+    })
+    assert.equal(fs.existsSync(stagedPath), false)
+  })
+
+  it('retains a pre-rename prepared task when another device occupies the original path', () => {
+    const { videoPath } = setupPolicyDb()
+    const stagedPath = `${videoPath}.javdex-delete-before-rename`
+    getDb()
+      .prepare(
+        `INSERT INTO pending_local_file_deletions (
+           original_path, staged_path, device_id, state
+         ) VALUES (?, ?, ?, 'prepared')`
+      )
+      .run(videoPath, stagedPath, fs.lstatSync(videoPath).dev + 1)
+
+    assert.deepEqual(recoverPendingLocalFileDeletions(), {
+      cleaned: 0,
+      restored: 0,
+      failed: 1
+    })
+    assert.equal(fs.existsSync(videoPath), true)
+    assert.equal(
+      (
+        getDb().prepare('SELECT COUNT(*) AS c FROM pending_local_file_deletions').get() as {
+          c: number
+        }
+      ).c,
+      1
+    )
+  })
+
+  it('retains prepared state and database records when both file paths are missing', () => {
+    setupPolicyDb()
+    const originalPath = path.join(tempRoot!, 'missing.mp4')
+    const stagedPath = `${originalPath}.javdex-delete-missing`
+    const deviceId = fs.lstatSync(tempRoot!).dev
+    getDb()
+      .prepare(
+        `INSERT INTO pending_local_file_deletions (
+           original_path, staged_path, device_id, state
+         ) VALUES (?, ?, ?, 'prepared')`
+      )
+      .run(originalPath, stagedPath, deviceId)
+    getDb()
+      .prepare("UPDATE video_resources SET locator = ?, resource_key = 'local:' || ? WHERE id = 1")
+      .run(originalPath, originalPath)
+
+    assert.deepEqual(recoverPendingLocalFileDeletions(), {
+      cleaned: 0,
+      restored: 0,
+      failed: 1
+    })
+    assert.throws(
+      () => createVideoMaintenanceService().delete(1),
+      /暂存文件和原文件均不存在/
+    )
+    assert.equal(
+      (getDb().prepare('SELECT COUNT(*) AS c FROM videos').get() as { c: number }).c,
+      1
+    )
+    assert.equal(
+      (
+        getDb().prepare('SELECT COUNT(*) AS c FROM pending_local_file_deletions').get() as {
+          c: number
+        }
+      ).c,
+      1
+    )
+  })
+
+  it('restores staged local files when deleting the video record fails', () => {
+    const { videoPath } = setupPolicyDb()
+    const videos = createVideoMaintenanceService()
+    getDb().exec(`
+      CREATE TRIGGER reject_video_deletion
+      BEFORE DELETE ON videos
+      BEGIN
+        SELECT RAISE(ABORT, 'forced video deletion failure');
+      END;
+    `)
+
+    assert.throws(() => videos.delete(1), /forced video deletion failure/)
+
+    assert.equal(fs.existsSync(videoPath), true)
+    assert.equal(
+      (getDb().prepare('SELECT COUNT(*) AS count FROM videos WHERE id = 1').get() as {
+        count: number
+      }).count,
+      1
+    )
+    assert.equal(
+      (
+        getDb()
+          .prepare('SELECT locator FROM video_resources WHERE video_id = 1 AND kind = \'local\'')
+          .get() as { locator: string }
+      ).locator,
+      videoPath
+    )
+  })
+
+  it('keeps the prepared task when storage disappears during transaction rollback', () => {
+    const { videoPath } = setupPolicyDb()
+    const mediaDir = path.join(tempRoot!, 'media-volume')
+    const offlineDir = path.join(tempRoot!, 'media-volume-offline')
+    const relocatedPath = path.join(mediaDir, path.basename(videoPath))
+    fs.mkdirSync(mediaDir)
+    fs.renameSync(videoPath, relocatedPath)
+    getDb()
+      .prepare("UPDATE video_resources SET locator = ?, resource_key = 'local:' || ? WHERE id = 1")
+      .run(relocatedPath, relocatedPath)
+    const videos = createVideoMaintenanceService({
+      runDatabaseTransaction: <T>(_work: () => T): T => {
+        fs.renameSync(mediaDir, offlineDir)
+        throw new Error('forced transaction failure')
+      }
+    })
+
+    assert.throws(() => videos.delete(1), /暂存文件所在存储当前不可用/)
+    const pending = getDb()
+      .prepare(
+        `SELECT staged_path, state
+         FROM pending_local_file_deletions`
+      )
+      .get() as { staged_path: string; state: string }
+    assert.equal(pending.state, 'prepared')
+    assert.equal(
+      (getDb().prepare('SELECT COUNT(*) AS c FROM videos').get() as { c: number }).c,
+      1
+    )
+
+    fs.renameSync(offlineDir, mediaDir)
+    assert.deepEqual(recoverPendingLocalFileDeletions(), {
+      cleaned: 0,
+      restored: 1,
+      failed: 0
+    })
+    assert.equal(fs.existsSync(relocatedPath), true)
+    assert.equal(fs.existsSync(pending.staged_path), false)
   })
 
   it('clears scraped metadata and relations but keeps manual tags', () => {

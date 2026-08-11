@@ -1,8 +1,9 @@
 import type { VideoResourceLinkCheckResult } from '@shared/videoTypes'
 import { normalizeHttpVideoResource } from '@shared/videoResourceLinks'
+import { fetchPublicHttpHead } from './publicHttpFetch'
 
 interface VideoResourceLinkServiceDependencies {
-  fetchImpl: typeof fetch
+  requestHead: typeof fetchPublicHttpHead
 }
 
 export interface VideoResourceLinkService {
@@ -12,7 +13,7 @@ export interface VideoResourceLinkService {
 export function createVideoResourceLinkService(
   dependencies: Partial<VideoResourceLinkServiceDependencies> = {}
 ): VideoResourceLinkService {
-  const fetchImpl = dependencies.fetchImpl ?? fetch
+  const requestHead = dependencies.requestHead ?? fetchPublicHttpHead
   return {
     async check(rawUrl): Promise<VideoResourceLinkCheckResult> {
       let locator: string
@@ -22,20 +23,11 @@ export function createVideoResourceLinkService(
         return { ok: false, error: (error as Error).message }
       }
       try {
-        const response = await fetchImpl(locator, {
-          method: 'HEAD',
-          redirect: 'follow',
-          signal: AbortSignal.timeout(8000)
-        })
-        const rawLength = response.headers.get('content-length')
-        const parsedLength = rawLength == null ? null : Number(rawLength)
+        const response = await requestHead(locator)
         return {
           ok: response.ok,
           status: response.status,
-          sizeBytes:
-            parsedLength != null && Number.isSafeInteger(parsedLength) && parsedLength > 0
-              ? parsedLength
-              : null,
+          sizeBytes: response.sizeBytes,
           ...(!response.ok ? { error: `链接返回 HTTP ${response.status}` } : {})
         }
       } catch {

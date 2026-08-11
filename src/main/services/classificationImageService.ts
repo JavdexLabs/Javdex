@@ -116,13 +116,13 @@ export function createClassificationImageService(
       assertImageInput(input)
       const db = database()
       const change = await mediaAssetStore.coordinateDatabaseChange(async () => {
-        const current = readEntity(db, entity)
+        const entityAtStart = readEntity(db, entity)
         let imagePath: string | null = null
         if (input?.source === 'file') {
           imagePath = mediaAssetStore.importClassificationImage(
             entity.kind,
             entity.id,
-            current.main_name,
+            entityAtStart.main_name,
             input.sourcePath
           )
         } else if (input?.source === 'url') {
@@ -130,7 +130,7 @@ export function createClassificationImageService(
           imagePath = mediaAssetStore.storeClassificationImage(
             entity.kind,
             entity.id,
-            current.main_name,
+            entityAtStart.main_name,
             data
           )
         } else if (input?.source === 'video-cover') {
@@ -138,16 +138,18 @@ export function createClassificationImageService(
           imagePath = mediaAssetStore.storeClassificationImage(
             entity.kind,
             entity.id,
-            current.main_name,
+            entityAtStart.main_name,
             mediaAssetStore.readBytes(coverPath)
           )
         }
-        db.transaction(() => {
-          db.prepare(
+        return db.transaction(() => {
+          const current = readEntity(db, entity)
+          const update = db.prepare(
             `UPDATE ${ENTITY_TABLE[entity.kind]} SET image_path = ?, updated_at = ? WHERE id = ?`
           ).run(imagePath, new Date().toISOString(), entity.id)
+          if (update.changes !== 1) throw new Error('分类实体主图更新失败')
+          return { imagePath, previousPath: current.image_path }
         })()
-        return { imagePath, previousPath: current.image_path }
       })
 
       const cleanupFailures: ClassificationImageCleanupFailure[] = []

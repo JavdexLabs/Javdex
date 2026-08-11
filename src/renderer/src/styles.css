@@ -5425,6 +5425,10 @@ button.tag-chip--custom-pick {
   height: 100%;
   overflow: hidden;
 }
+.virtual-actress-grid-scroller {
+  overflow-x: hidden !important;
+  scrollbar-gutter: stable;
+}
 .virtual-actress-grid-cell,
 .virtual-actress-grid-cell > .actress-card-wrap {
   height: 100%;

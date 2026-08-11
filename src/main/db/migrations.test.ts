@@ -523,6 +523,26 @@ describe('database schema', () => {
     }
   })
 
+  it('rolls back classification entities when retiring legacy storage fails', () => {
+    const db = new Database(':memory:')
+    try {
+      createV7ClassificationSchema(db)
+      db.exec(`
+        INSERT INTO videos (id, code, maker) VALUES (1, 'ROLLBACK-001', 'Legacy Studio');
+        CREATE VIEW legacy_video_makers AS SELECT maker FROM videos;
+      `)
+
+      assert.throws(() => migrateDatabase(db))
+
+      assert.equal(db.pragma('user_version', { simple: true }), 7)
+      assert.equal(tableExistsForTest(db, 'organizations'), false)
+      assert.equal(columnNamesForTest(db, 'videos').has('maker_organization_id'), false)
+      assert.deepEqual(db.prepare('SELECT maker FROM videos').get(), { maker: 'Legacy Studio' })
+    } finally {
+      db.close()
+    }
+  })
+
   it('migrates uncontested names to ownership and preserves cross-actress collisions for review', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-name-ownership-'))
     const dbPath = path.join(tempDir, 'library.db')
@@ -730,6 +750,7 @@ describe('database schema', () => {
       const expectedTables = [
         'videos',
         'video_resources',
+        'pending_local_file_deletions',
         'actresses',
         'video_actress',
         'tags',
@@ -895,6 +916,81 @@ describe('database schema', () => {
             .get()
         ),
         false
+      )
+    } finally {
+      db.close()
+    }
+  })
+
+  it('migrates released v1 inline video files and removes the obsolete write constraint', () => {
+    const db = new Database(':memory:')
+    try {
+      db.exec(`
+        PRAGMA foreign_keys = ON;
+        CREATE TABLE videos (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          code TEXT UNIQUE NOT NULL,
+          title TEXT,
+          summary TEXT,
+          file_path TEXT NOT NULL,
+          file_size INTEGER,
+          cover_path TEXT,
+          poster_path TEXT,
+          original_title TEXT,
+          rating INTEGER DEFAULT 0,
+          release_date TEXT,
+          maker TEXT,
+          publisher TEXT,
+          series TEXT,
+          director TEXT,
+          duration_seconds INTEGER,
+          scraped_status INTEGER DEFAULT 0,
+          last_scraped_at TEXT,
+          updated_at TEXT,
+          add_time DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE UNIQUE INDEX idx_videos_file_path ON videos(file_path);
+        CREATE TABLE actresses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          main_name TEXT UNIQUE NOT NULL,
+          last_scraped_at TEXT
+        );
+        INSERT INTO videos (
+          id, code, title, file_path, file_size, duration_seconds, add_time
+        ) VALUES (
+          7, 'V1-007', 'Legacy video', '/library/V1-007.mp4', 987654321, 3600,
+          '2024-01-02T03:04:05.000Z'
+        );
+      `)
+      db.pragma('user_version = 1')
+
+      migrateDatabase(db)
+
+      assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+      assert.deepEqual(
+        db
+          .prepare(
+            `SELECT video_id, kind, locator, resource_key, size_bytes,
+                    duration_seconds, is_primary, add_time
+             FROM video_resources`
+          )
+          .get(),
+        {
+          video_id: 7,
+          kind: 'local',
+          locator: '/library/V1-007.mp4',
+          resource_key: 'local:/library/V1-007.mp4',
+          size_bytes: 987654321,
+          duration_seconds: 3600,
+          is_primary: 1,
+          add_time: '2024-01-02T03:04:05.000Z'
+        }
+      )
+      const videoColumns = columnNamesForTest(db, 'videos')
+      assert.equal(videoColumns.has('file_path'), false)
+      assert.equal(videoColumns.has('file_size'), false)
+      assert.doesNotThrow(() =>
+        db.prepare("INSERT INTO videos (code, title) VALUES ('NEW-008', 'New video')").run()
       )
     } finally {
       db.close()

@@ -96,6 +96,53 @@ function dependencies(
 }
 
 describe('ScrapeJobController', () => {
+  it('forwards an explicit director choice and returns structured classification outcomes', async () => {
+    let receivedOptions: Parameters<ScrapeJobControllerDependencies['scrapeVideo']>[2]
+    const controller = createScrapeJobController(
+      dependencies({
+        scrapeVideo: async (_videoId, _scraperName, options) => {
+          receivedOptions = options
+          return {
+            ok: true,
+            result: { code: 'TEST-001', director: 'Shared Director' },
+            skipped: false,
+            classifications: [
+              {
+                field: 'director',
+                status: 'matched',
+                inputName: 'Shared Director',
+                entityId: 42
+              }
+            ]
+          }
+        }
+      })
+    )
+
+    const outcome = await controller.scrapeOneVideo(
+      1,
+      'Test Source',
+      ['director'],
+      'replaceIfPresent',
+      42
+    )
+
+    assert.deepEqual(receivedOptions, {
+      fields: ['director'],
+      mode: 'replaceIfPresent',
+      directorSelectionId: 42,
+      directorAmbiguity: 'choice'
+    })
+    assert.deepEqual(outcome.classifications, [
+      {
+        field: 'director',
+        status: 'matched',
+        inputName: 'Shared Director',
+        entityId: 42
+      }
+    ])
+  })
+
   it('serializes single video and actress scrape runs', async () => {
     let release!: () => void
     const first = new Promise<void>((resolve) => {

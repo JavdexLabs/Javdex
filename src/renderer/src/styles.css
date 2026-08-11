@@ -6321,7 +6321,7 @@ button.tag-chip--custom-pick {
   width: 100%;
 }
 
-.classification-merge-candidates {
+.classification-choice-list {
   min-height: var(--empty-inline-min-h, 140px);
   max-height: var(--classification-merge-picker-h);
   overflow-y: auto;
@@ -6331,15 +6331,14 @@ button.tag-chip--custom-pick {
   background: var(--surface-base);
 }
 
-.classification-merge-candidates > :is(.empty-state--modal, .empty-state--compact) {
+.classification-choice-list > :is(.empty-state--modal, .empty-state--compact) {
   min-height: var(--empty-inline-min-h, 140px);
   border: 0;
   background: transparent;
 }
 
-.classification-merge-candidate {
+.classification-choice-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--classification-merge-control-gap);
   width: 100%;
@@ -6354,22 +6353,35 @@ button.tag-chip--custom-pick {
   cursor: pointer;
 }
 
-.classification-merge-candidate:last-child {
+.classification-merge-candidate {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.director-scrape-choice-item {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.classification-choice-item:last-child {
   border-bottom: 0;
 }
 
-.classification-merge-candidate:hover,
-.classification-merge-candidate:focus-visible,
-.classification-merge-candidate.is-selected {
+.classification-choice-item:hover,
+.classification-choice-item:focus-visible,
+.classification-choice-item.is-selected {
   background: var(--surface-selected);
 }
 
-.classification-merge-candidate:focus-visible {
+.classification-choice-item:focus-visible {
   outline: var(--focus-outline);
   outline-offset: var(--classification-merge-focus-offset);
 }
 
-.classification-merge-radio {
+.classification-choice-item:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.classification-choice-radio {
   position: relative;
   width: var(--classification-merge-choice-size);
   height: var(--classification-merge-choice-size);
@@ -6378,11 +6390,11 @@ button.tag-chip--custom-pick {
   background: var(--surface-panel);
 }
 
-.classification-merge-candidate.is-selected .classification-merge-radio {
+.classification-choice-item.is-selected .classification-choice-radio {
   border-color: var(--border-accent);
 }
 
-.classification-merge-candidate.is-selected .classification-merge-radio::after {
+.classification-choice-item.is-selected .classification-choice-radio::after {
   content: '';
   position: absolute;
   inset: var(--classification-merge-choice-inset);
@@ -6390,26 +6402,30 @@ button.tag-chip--custom-pick {
   background: var(--text-accent);
 }
 
-.classification-merge-candidate-main {
+.classification-choice-main {
   display: grid;
   min-width: 0;
 }
 
-.classification-merge-candidate-main > strong,
-.classification-merge-candidate-main > small {
+.classification-choice-main > strong,
+.classification-choice-main > small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.classification-merge-candidate-main > strong {
+.classification-choice-main > strong {
   color: var(--text-primary);
   font-size: var(--classification-merge-text-md);
 }
 
-.classification-merge-candidate-main > small {
+.classification-choice-main > small {
   color: var(--text-muted);
   font-size: var(--classification-merge-text-xs);
+}
+
+.director-scrape-choice-main {
+  gap: var(--classification-merge-badge-pad-y);
 }
 
 .classification-merge-plan {

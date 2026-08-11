@@ -1,5 +1,11 @@
 import type { ScraperPluginDescriptor } from '@shared/scraperPluginTypes'
-import type { ScrapeResult, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/videoScrapeTypes'
+import type {
+  ScrapeResult,
+  VideoClassificationResolutionOutcome,
+  VideoDirectorChoiceRequired,
+  VideoScrapeField,
+  VideoScrapeUpdateMode
+} from '@shared/videoScrapeTypes'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import { DEFAULT_SETTINGS, resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import { getVideoById, markScrapeFailed } from '../db/videoRepo'
@@ -50,12 +56,16 @@ export interface ScrapeOutcome {
   /** True when the plugin matched but no selected field could be applied. */
   skipped?: boolean
   warnings?: string[]
+  classifications?: VideoClassificationResolutionOutcome[]
+  directorChoice?: VideoDirectorChoiceRequired
 }
 
 export interface ScrapeVideoOptions {
   closeBrowser?: boolean
   fields?: VideoScrapeField[]
   mode?: VideoScrapeUpdateMode
+  directorSelectionId?: number
+  directorAmbiguity?: 'choice' | 'preserve'
   delayController?: {
     run<T>(kind: 'video', pluginName: string, task: () => Promise<T>): Promise<T>
   }
@@ -233,6 +243,27 @@ export async function scrapeVideo(
     }
 
     const fieldsToApply = compositeOutcome?.matchedFields ?? requested
+    const classificationOptions = {
+      directorSelectionId: options?.directorSelectionId,
+      directorAmbiguity: options?.directorAmbiguity ?? ('preserve' as const)
+    }
+    const classificationPreflight = videoScrapeApplyService.preflightClassifications(
+      videoId,
+      result,
+      fieldsToApply,
+      mode,
+      classificationOptions
+    )
+    if (classificationPreflight.directorChoice) {
+      return {
+        ok: true,
+        result,
+        skipped: true,
+        warnings: classificationPreflight.warnings,
+        classifications: classificationPreflight.classifications,
+        directorChoice: classificationPreflight.directorChoice
+      }
+    }
     const delivery = await videoScrapeApplyService.deliverParsedResult({
       videoId,
       code: video.code,
@@ -242,6 +273,7 @@ export async function scrapeVideo(
       mode,
       sourceName,
       ratingSourceName,
+      classificationOptions,
       fetcher: (url) => scrapeBrowser.fetchBuffer(url)
     })
 
@@ -249,7 +281,9 @@ export async function scrapeVideo(
       ok: true,
       result,
       skipped: !delivery.applied,
-      warnings: delivery.warnings
+      warnings: delivery.warnings,
+      classifications: delivery.classifications,
+      directorChoice: delivery.directorChoice
     }
   } catch (err) {
     markScrapeFailed(videoId)

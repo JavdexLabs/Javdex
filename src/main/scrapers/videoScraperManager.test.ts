@@ -7,6 +7,7 @@ import { upsertActressFromScrape } from '../db/actressRepo'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { insertTestVideoWithFile } from '../db/testVideoFixtures'
 import { mediaAssetStore } from '../services/mediaAssetStore'
+import { classificationMaintenanceService } from '../services/classificationMaintenanceService'
 import { resetAssetKeyCacheForTests } from '../services/assetCrypto'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import { scrapeBrowser } from './scrapeBrowser'
@@ -54,6 +55,92 @@ afterEach(() => {
 })
 
 describe('scraperManager.scrapeVideo', () => {
+  it('returns director candidates before writes and applies an explicit choice on retry', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'video',
+      name: 'Ambiguous Director Source',
+      version: '1.0.0',
+      description: 'Returns a title and an ambiguous director',
+      supportedFields: ['title', 'director'],
+      code: `module.exports = { async parseVideo(ctx) {
+        return { code: ctx.code, title: 'Chosen title', director: 'Duplicate Director' };
+      } };`
+    })
+    const firstId = classificationMaintenanceService.createDirector({
+      mainName: 'Duplicate Director',
+      countryRegion: 'JP'
+    })
+    const secondId = classificationMaintenanceService.createDirector({
+      mainName: 'Ｄｕｐｌｉｃａｔｅ　Ｄｉｒｅｃｔｏｒ',
+      countryRegion: 'US'
+    })
+
+    const pending = await scrapeVideo(1, 'Ambiguous Director Source', {
+      fields: ['title', 'director'],
+      mode: 'replaceIfPresent',
+      directorAmbiguity: 'choice',
+      closeBrowser: false
+    })
+
+    assert.equal(pending.ok, true)
+    assert.equal(pending.skipped, true)
+    assert.deepEqual(
+      pending.directorChoice?.candidates.map((candidate) => candidate.id),
+      [firstId, secondId]
+    )
+    assert.deepEqual(
+      getDb().prepare('SELECT title, director_id, scraped_status FROM videos WHERE id = 1').get(),
+      { title: null, director_id: null, scraped_status: 0 }
+    )
+
+    const applied = await scrapeVideo(1, 'Ambiguous Director Source', {
+      fields: ['title', 'director'],
+      mode: 'replaceIfPresent',
+      directorAmbiguity: 'choice',
+      directorSelectionId: secondId,
+      closeBrowser: false
+    })
+
+    assert.equal(applied.ok, true)
+    assert.equal(applied.skipped, false)
+    assert.deepEqual(
+      getDb().prepare('SELECT title, director_id, scraped_status FROM videos WHERE id = 1').get(),
+      { title: 'Chosen title', director_id: secondId, scraped_status: 1 }
+    )
+  })
+
+  it('keeps an ambiguous director during batch-style scraping and applies safe fields', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'video',
+      name: 'Batch Director Source',
+      version: '1.0.0',
+      description: 'Returns a safe title and an ambiguous director',
+      supportedFields: ['title', 'director'],
+      code: `module.exports = { async parseVideo(ctx) {
+        return { code: ctx.code, title: 'Batch safe title', director: 'Batch Duplicate' };
+      } };`
+    })
+    classificationMaintenanceService.createDirector({ mainName: 'Batch Duplicate' })
+    classificationMaintenanceService.createDirector({ mainName: 'Ｂａｔｃｈ　Ｄｕｐｌｉｃａｔｅ' })
+
+    const outcome = await scrapeVideo(1, 'Batch Director Source', {
+      fields: ['title', 'director'],
+      mode: 'replaceIfPresent',
+      closeBrowser: false
+    })
+
+    assert.equal(outcome.ok, true)
+    assert.equal(outcome.skipped, false)
+    assert.equal(outcome.classifications?.[0]?.status, 'ambiguous')
+    assert.match(outcome.warnings?.[0] ?? '', /手动选择或合并重复导演/)
+    assert.deepEqual(
+      getDb().prepare('SELECT title, director_id, scraped_status FROM videos WHERE id = 1').get(),
+      { title: 'Batch safe title', director_id: null, scraped_status: 1 }
+    )
+  })
+
   it('reports a matched result as skipped when no selected value can be applied', async () => {
     await installScraperPluginPackage({
       schemaVersion: 1,

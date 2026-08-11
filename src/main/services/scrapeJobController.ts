@@ -14,6 +14,8 @@ import type {
   VideoBatchScrapeFilter,
   VideoBatchScrapeRequest,
   VideoBatchScrapeStatus,
+  VideoClassificationResolutionOutcome,
+  VideoDirectorChoiceRequired,
   VideoRematchBatchRequest,
   VideoRematchScope,
   VideoScrapeField,
@@ -82,6 +84,8 @@ interface VideoScrapeOutcome {
   result?: ScrapeResult | null
   skipped?: boolean
   warnings?: string[]
+  classifications?: VideoClassificationResolutionOutcome[]
+  directorChoice?: VideoDirectorChoiceRequired
   error?: string
 }
 
@@ -94,7 +98,12 @@ export interface ScrapeJobControllerDependencies {
   scrapeVideo(
     videoId: number,
     scraperName?: string,
-    options?: { fields?: VideoScrapeField[]; mode?: VideoScrapeUpdateMode }
+    options?: {
+      fields?: VideoScrapeField[]
+      mode?: VideoScrapeUpdateMode
+      directorSelectionId?: number
+      directorAmbiguity?: 'choice' | 'preserve'
+    }
   ): Promise<VideoScrapeOutcome>
   scrapeActress(
     actressId: number,
@@ -172,17 +181,25 @@ export class ScrapeJobController {
     videoId: number,
     scraperName?: string,
     fields?: VideoScrapeField[],
-    mode?: VideoScrapeUpdateMode
+    mode?: VideoScrapeUpdateMode,
+    directorSelectionId?: number
   ): Promise<VideoScrapeOneResult> {
     this.dependencies.assertBatchAvailable()
     const outcome = await this.dependencies.coordinator.runExclusive('影片刮削', () =>
-      this.dependencies.scrapeVideo(videoId, scraperName, { fields, mode })
+      this.dependencies.scrapeVideo(videoId, scraperName, {
+        fields,
+        mode,
+        directorSelectionId,
+        directorAmbiguity: 'choice'
+      })
     )
     if (!outcome.ok || !outcome.result) throw new Error(outcome.error)
     return {
       result: outcome.result,
       applied: !outcome.skipped,
-      warnings: outcome.warnings ?? []
+      warnings: outcome.warnings ?? [],
+      classifications: outcome.classifications ?? [],
+      directorChoice: outcome.directorChoice
     }
   }
 

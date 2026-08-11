@@ -145,7 +145,7 @@ export default function ClassificationMergeModal<
             onChange={(event) => setSearchInput(event.target.value)}
             autoFocus
           />
-          <div className="classification-merge-candidates">
+          <div className="classification-choice-list classification-merge-candidates">
             {candidatesQuery.isLoading ? (
               <EmptyState loading variant="modal" />
             ) : candidatesQuery.isError ? (
@@ -172,15 +172,15 @@ export default function ClassificationMergeModal<
                     <button
                       key={candidate.id}
                       type="button"
-                      className={`classification-merge-candidate${
+                      className={`classification-choice-item classification-merge-candidate${
                         isSelected ? ' is-selected' : ''
                       }`}
                       role="option"
                       aria-selected={isSelected}
                       onClick={() => setSelected(candidate)}
                     >
-                      <span className="classification-merge-radio" aria-hidden />
-                      <span className="classification-merge-candidate-main">
+                      <span className="classification-choice-radio" aria-hidden />
+                      <span className="classification-choice-main">
                         <strong>{candidate.mainName}</strong>
                         <small>{candidateMeta(candidate)}</small>
                       </span>

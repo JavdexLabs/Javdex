@@ -19,7 +19,11 @@ import type {
   VideoQuery,
   VideoResourceFilter
 } from '@shared/videoTypes'
-import type { VideoScrapeField, VideoScrapeUpdateMode } from '@shared/videoScrapeTypes'
+import type {
+  VideoDirectorChoiceRequired,
+  VideoScrapeField,
+  VideoScrapeUpdateMode
+} from '@shared/videoScrapeTypes'
 import { ALL_VIDEO_SCRAPE_FIELDS, VIDEO_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_UPDATE_MODE_OPTIONS } from '@shared/videoScrapeTypes'
 import { api } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
@@ -67,6 +71,7 @@ import { VIDEO_RESOURCE_FILTER_LABELS } from '../components/videoResourcePresent
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { startDefaultUnscrapedVideoBatch } from '../utils/defaultBatchScrape'
 import VideoResourceImportModal from '../components/VideoResourceImportModal'
+import DirectorScrapeChoiceModal from '../components/DirectorScrapeChoiceModal'
 import {
   dismissMaintenanceHint,
   isMaintenanceHintDismissed,
@@ -94,6 +99,17 @@ const SORT_SWITCH_OPTIONS: SortSwitchOption<NonNullable<VideoQuery['sortBy']>>[]
   { value: 'code', label: '番号' }
 ]
 
+interface SingleScrapeRequest {
+  target: Pick<Video, 'id' | 'code'>
+  fields: VideoScrapeField[]
+  site: string
+  mode?: VideoScrapeUpdateMode
+}
+
+interface PendingDirectorChoice extends SingleScrapeRequest {
+  choice: VideoDirectorChoiceRequired
+}
+
 export default function LibraryPage(): JSX.Element {
   const queryClient = useQueryClient()
   const toast = useToast()
@@ -108,6 +124,9 @@ export default function LibraryPage(): JSX.Element {
   const [editingVideo, setEditingVideo] = useState<VideoDetail | null>(null)
   const [editLoadingId, setEditLoadingId] = useState<number | null>(null)
   const [scrapeTarget, setScrapeTarget] = useState<Video | null>(null)
+  const [pendingDirectorChoice, setPendingDirectorChoice] =
+    useState<PendingDirectorChoice | null>(null)
+  const [directorChoiceBusy, setDirectorChoiceBusy] = useState(false)
   const [showBulkScrape, setShowBulkScrape] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Video | null>(null)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
@@ -123,6 +142,8 @@ export default function LibraryPage(): JSX.Element {
     setEditingVideo(null)
     setEditLoadingId(null)
     setScrapeTarget(null)
+    setPendingDirectorChoice(null)
+    setDirectorChoiceBusy(false)
     setShowBulkScrape(false)
     setDeleteTarget(null)
     setConfirmBulkDelete(false)
@@ -372,25 +393,33 @@ export default function LibraryPage(): JSX.Element {
     }
   }
 
-  const runSingleScrape = async (
-    fields: VideoScrapeField[],
-    site: string,
-    mode?: VideoScrapeUpdateMode
+  const executeSingleScrape = async (
+    request: SingleScrapeRequest,
+    directorSelectionId?: number
   ): Promise<void> => {
-    if (!scrapeTarget) return
-    const target = scrapeTarget
-    setScrapeTarget(null)
-    setScraperName(site)
+    setScraperName(request.site)
+    if (directorSelectionId != null) setDirectorChoiceBusy(true)
     try {
-      const res = await api.scrape.one(target.id, site || undefined, fields, mode)
+      const res = await api.scrape.one(
+        request.target.id,
+        request.site || undefined,
+        request.fields,
+        request.mode,
+        directorSelectionId
+      )
+      if (res.directorChoice) {
+        setPendingDirectorChoice({ ...request, choice: res.directorChoice })
+        return
+      }
+      setPendingDirectorChoice(null)
       const hasWarnings = res.warnings.length > 0
       toast.show(
         res.applied
           ? hasWarnings
-            ? `已更新 ${target.code}，部分图片未应用：${res.warnings.join('；')}`
-            : `已更新 ${target.code}`
+            ? `已更新 ${request.target.code}，部分字段未应用：${res.warnings.join('；')}`
+            : `已更新 ${request.target.code}`
           : hasWarnings
-            ? `资源不可用，已保留原数据：${res.warnings.join('；')}`
+            ? `所选字段未应用：${res.warnings.join('；')}`
             : '所选字段无可写入内容',
         res.applied && !hasWarnings ? 'success' : 'info'
       )
@@ -400,7 +429,25 @@ export default function LibraryPage(): JSX.Element {
       }
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
+    } finally {
+      setDirectorChoiceBusy(false)
     }
+  }
+
+  const runSingleScrape = (
+    fields: VideoScrapeField[],
+    site: string,
+    mode?: VideoScrapeUpdateMode
+  ): void => {
+    if (!scrapeTarget) return
+    const request: SingleScrapeRequest = {
+      target: { id: scrapeTarget.id, code: scrapeTarget.code },
+      fields,
+      site,
+      mode
+    }
+    setScrapeTarget(null)
+    void executeSingleScrape(request)
   }
 
   const markScrapeSuccess = async (video: Video): Promise<void> => {
@@ -768,7 +815,18 @@ export default function LibraryPage(): JSX.Element {
           confirmText="开始刮削"
           onCancel={() => setScrapeTarget(null)}
           onConfirm={(fields, site, _scope, mode) => {
-            void runSingleScrape(fields, site, mode as VideoScrapeUpdateMode | undefined)
+            runSingleScrape(fields, site, mode as VideoScrapeUpdateMode | undefined)
+          }}
+        />
+      )}
+
+      {pendingDirectorChoice && (
+        <DirectorScrapeChoiceModal
+          choice={pendingDirectorChoice.choice}
+          busy={directorChoiceBusy}
+          onCancel={() => setPendingDirectorChoice(null)}
+          onChoose={(directorId) => {
+            void executeSingleScrape(pendingDirectorChoice, directorId)
           }}
         />
       )}

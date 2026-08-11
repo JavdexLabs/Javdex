@@ -23,7 +23,23 @@ describe('videoBatchScrapeQueue feedback', () => {
       {
         status: 'success',
         level: 'info',
-        message: '更新成功，部分图片未应用：C（封面下载失败，已保留原封面）'
+        message: '更新成功，部分字段未应用：C（封面下载失败，已保留原封面）'
+      }
+    )
+    assert.deepEqual(
+      formatVideoBatchScrapeOutcome(
+        {
+          ok: true,
+          result: { code: 'D', title: 'Safe title' },
+          warnings: ['导演“同名导演”匹配到 2 个候选，已保留现有关联；请先手动选择或合并重复导演']
+        },
+        'D'
+      ),
+      {
+        status: 'success',
+        level: 'info',
+        message:
+          '更新成功，部分字段未应用：Safe title（导演“同名导演”匹配到 2 个候选，已保留现有关联；请先手动选择或合并重复导演）'
       }
     )
   })

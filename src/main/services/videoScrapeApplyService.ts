@@ -4,13 +4,15 @@ import type {
   ScrapeResult,
   ScrapedActress,
   VideoBatchScrapeFilter,
+  VideoClassificationField,
+  VideoClassificationResolutionOutcome,
+  VideoDirectorChoiceRequired,
   VideoScrapeField,
   VideoScrapeUpdateMode
 } from '@shared/videoScrapeTypes'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import { findActressByNameOrAlias, upsertActressFromScrape } from '../db/actressRepo'
 import { getDb } from '../db/database'
-import { ensureFacetEntries } from '../db/facetRepo'
 import { collectVideoLibraryCleanupHints, runLibraryCleanup } from '../db/libraryCleanup'
 import { ensureTag } from '../db/tagRepo'
 import {
@@ -19,6 +21,14 @@ import {
   listVideosForBatchScrape
 } from '../db/videoRepo'
 import { adoptDownloadedAvatarIfMissing } from './actressAssetService'
+import {
+  classificationFieldLabel,
+  resolveDirectorIdentity,
+  resolveOrganizationIdentity,
+  resolveSeriesIdentity,
+  type ClassificationIdentityResolution
+} from './classificationIdentityResolver'
+import { classificationMaintenanceService } from './classificationMaintenanceService'
 import { mediaAssetStore } from './mediaAssetStore'
 
 export interface VideoImageAvailabilityFacts {
@@ -184,13 +194,13 @@ function isVideoFieldEmptyForFill(
     case 'releaseDate':
       return isBlankText(video.release_date)
     case 'maker':
-      return isBlankText(video.maker)
+      return video.maker_organization_id == null
     case 'publisher':
-      return isBlankText(video.publisher)
+      return video.publisher_organization_id == null
     case 'series':
-      return isBlankText(video.series)
+      return video.series_id == null
     case 'director':
-      return isBlankText(video.director)
+      return video.director_id == null
     case 'duration':
       return video.duration_seconds == null
     case 'actressesFemale':
@@ -385,6 +395,24 @@ export type VideoScrapeImpactReason =
   | 'existingValue'
   | 'noValue'
   | 'resourceUnavailable'
+  | 'sameEntity'
+  | 'ambiguous'
+  | 'invalidName'
+
+export interface VideoClassificationResolutionOptions {
+  directorSelectionId?: number
+  directorAmbiguity?: 'choice' | 'preserve'
+}
+
+type PlannedEntityReference =
+  | { referenceKind: 'existing'; entityId: number }
+  | { referenceKind: 'create'; createName: string }
+
+type PlannedClassificationAssignment =
+  | { kind: 'clear' }
+  | ({ kind: 'organization'; role: 'maker' | 'publisher' } & PlannedEntityReference)
+  | ({ kind: 'director' } & PlannedEntityReference)
+  | ({ kind: 'series' } & PlannedEntityReference)
 
 export interface VideoScrapeFieldImpact {
   field: VideoScrapeField
@@ -400,11 +428,167 @@ export interface VideoScrapeApplicationPlan {
   impacts: VideoScrapeFieldImpact[]
   shouldApply: boolean
   warnings: string[]
+  classifications: VideoClassificationResolutionOutcome[]
+  directorChoice?: VideoDirectorChoiceRequired
+  classificationAssignments: Map<VideoClassificationField, PlannedClassificationAssignment>
 }
 
 function normalizedScrapeText(value: string | null | undefined): string | null {
   const normalized = value?.trim()
   return normalized ? normalized : null
+}
+
+const CLASSIFICATION_FIELDS: VideoClassificationField[] = [
+  'maker',
+  'publisher',
+  'series',
+  'director'
+]
+
+function currentClassificationId(video: Video, field: VideoClassificationField): number | null {
+  return {
+    maker: video.maker_organization_id,
+    publisher: video.publisher_organization_id,
+    series: video.series_id,
+    director: video.director_id
+  }[field]
+}
+
+function resolveClassificationIdentity(
+  field: VideoClassificationField,
+  inputName: string
+): ClassificationIdentityResolution {
+  if (field === 'maker' || field === 'publisher') return resolveOrganizationIdentity(inputName)
+  if (field === 'series') return resolveSeriesIdentity(inputName)
+  return resolveDirectorIdentity(inputName)
+}
+
+function plannedEntityAssignment(
+  field: VideoClassificationField,
+  reference: PlannedEntityReference
+): PlannedClassificationAssignment {
+  if (field === 'maker' || field === 'publisher') {
+    return { kind: 'organization', role: field, ...reference }
+  }
+  return field === 'series'
+    ? { kind: 'series', ...reference }
+    : { kind: 'director', ...reference }
+}
+
+function ambiguousWarning(
+  field: VideoClassificationField,
+  inputName: string,
+  candidateCount: number
+): string {
+  return `${classificationFieldLabel(field)}“${inputName}”匹配到 ${candidateCount} 个候选，` +
+    `已保留现有关联；请先手动选择或合并重复${classificationFieldLabel(field)}`
+}
+
+function planClassificationResolutions(
+  video: Video,
+  impacts: VideoScrapeFieldImpact[],
+  warnings: string[],
+  options: VideoClassificationResolutionOptions
+): {
+  classifications: VideoClassificationResolutionOutcome[]
+  directorChoice?: VideoDirectorChoiceRequired
+  assignments: Map<VideoClassificationField, PlannedClassificationAssignment>
+} {
+  const classifications: VideoClassificationResolutionOutcome[] = []
+  const assignments = new Map<VideoClassificationField, PlannedClassificationAssignment>()
+  let directorChoice: VideoDirectorChoiceRequired | undefined
+  for (const field of CLASSIFICATION_FIELDS) {
+    const impact = impacts.find((item) => item.field === field)
+    if (!impact || impact.action === 'preserve') continue
+    const inputName = typeof impact.nextValue === 'string' ? impact.nextValue : null
+    if (impact.action === 'clear' || !inputName) {
+      assignments.set(field, { kind: 'clear' })
+      classifications.push({ field, status: 'cleared', inputName: null, entityId: null })
+      continue
+    }
+
+    const resolution = resolveClassificationIdentity(field, inputName)
+    const currentId = currentClassificationId(video, field)
+    if (resolution.status === 'invalid') {
+      impact.action = 'preserve'
+      impact.reason = 'invalidName'
+      const message = `${classificationFieldLabel(field)}名称无效：${resolution.message}`
+      warnings.push(message)
+      classifications.push({
+        field,
+        status: 'invalid',
+        inputName,
+        entityId: currentId,
+        message
+      })
+      continue
+    }
+    if (resolution.status === 'notFound') {
+      assignments.set(
+        field,
+        plannedEntityAssignment(field, { referenceKind: 'create', createName: inputName })
+      )
+      classifications.push({ field, status: 'create', inputName, entityId: null })
+      continue
+    }
+
+    const candidates =
+      resolution.status === 'unique' ? [resolution.candidate] : resolution.candidates
+    const explicitlySelected =
+      field === 'director' && options.directorSelectionId != null
+        ? candidates.find((candidate) => candidate.id === options.directorSelectionId)
+        : undefined
+    if (field === 'director' && options.directorSelectionId != null && !explicitlySelected) {
+      throw new Error('所选导演不再匹配本次刮削名称，请重新选择')
+    }
+    const currentCandidate = candidates.find((candidate) => candidate.id === currentId)
+    const selected = explicitlySelected ?? currentCandidate
+    if (selected) {
+      if (selected.id === currentId) {
+        impact.action = 'preserve'
+        impact.reason = 'sameEntity'
+        classifications.push({
+          field,
+          status: 'preserved',
+          inputName,
+          entityId: selected.id
+        })
+      } else {
+        assignments.set(
+          field,
+          plannedEntityAssignment(field, { referenceKind: 'existing', entityId: selected.id })
+        )
+        classifications.push({ field, status: 'matched', inputName, entityId: selected.id })
+      }
+      continue
+    }
+
+    if (resolution.status === 'unique') {
+      const candidate = resolution.candidate
+      assignments.set(
+        field,
+        plannedEntityAssignment(field, { referenceKind: 'existing', entityId: candidate.id })
+      )
+      classifications.push({ field, status: 'matched', inputName, entityId: candidate.id })
+      continue
+    }
+
+    impact.action = 'preserve'
+    impact.reason = 'ambiguous'
+    classifications.push({
+      field,
+      status: 'ambiguous',
+      inputName,
+      entityId: currentId,
+      candidates: resolution.candidates
+    })
+    if (field === 'director' && options.directorAmbiguity === 'choice') {
+      directorChoice = { scrapedName: inputName, candidates: resolution.candidates }
+    } else {
+      warnings.push(ambiguousWarning(field, inputName, resolution.candidates.length))
+    }
+  }
+  return { classifications, directorChoice, assignments }
 }
 
 /** Build a read-only field plan before any database row or asset reference is changed. */
@@ -417,7 +601,8 @@ export function planVideoScrapeResult(
   sourceName?: string,
   mode: VideoScrapeUpdateMode = 'replace',
   ratingSourceName?: string,
-  imageFacts: VideoImageAvailabilityFacts = {}
+  imageFacts: VideoImageAvailabilityFacts = {},
+  classificationOptions: VideoClassificationResolutionOptions = {}
 ): VideoScrapeApplicationPlan {
   const requested = fields ?? ALL_VIDEO_SCRAPE_FIELDS
   const effectiveFields = resolveEffectiveScrapeFields(
@@ -527,11 +712,23 @@ export function planVideoScrapeResult(
     }
   })
 
+  const classificationPlan = video
+    ? planClassificationResolutions(video, impacts, warnings, classificationOptions)
+    : {
+        classifications: [],
+        assignments: new Map<VideoClassificationField, PlannedClassificationAssignment>()
+      }
+
   return {
     effectiveFields,
     impacts,
-    shouldApply: impacts.some((impact) => impact.action !== 'preserve'),
-    warnings
+    shouldApply:
+      !classificationPlan.directorChoice &&
+      impacts.some((impact) => impact.action !== 'preserve'),
+    warnings,
+    classifications: classificationPlan.classifications,
+    directorChoice: classificationPlan.directorChoice,
+    classificationAssignments: classificationPlan.assignments
   }
 }
 
@@ -543,6 +740,8 @@ export interface ApplyVideoScrapeResult {
   applied: boolean
   warnings: string[]
   obsoleteAssetPaths: string[]
+  classifications: VideoClassificationResolutionOutcome[]
+  directorChoice?: VideoDirectorChoiceRequired
 }
 
 export function applyScrapeResult(
@@ -555,7 +754,8 @@ export function applyScrapeResult(
   sourceName?: string,
   mode: VideoScrapeUpdateMode = 'replace',
   ratingSourceName?: string,
-  imageFacts: VideoImageAvailabilityFacts = {}
+  imageFacts: VideoImageAvailabilityFacts = {},
+  classificationOptions: VideoClassificationResolutionOptions = {}
 ): ApplyVideoScrapeResult {
   const db = getDb()
   const requested = fields ?? ALL_VIDEO_SCRAPE_FIELDS
@@ -568,9 +768,18 @@ export function applyScrapeResult(
     sourceName,
     mode,
     ratingSourceName,
-    imageFacts
+    imageFacts,
+    classificationOptions
   )
-  if (!plan.shouldApply) return { applied: false, warnings: plan.warnings, obsoleteAssetPaths: [] }
+  if (!plan.shouldApply) {
+    return {
+      applied: false,
+      warnings: plan.warnings,
+      obsoleteAssetPaths: [],
+      classifications: plan.classifications,
+      directorChoice: plan.directorChoice
+    }
+  }
 
   const impactFor = (field: VideoScrapeField): VideoScrapeFieldImpact | undefined =>
     plan.impacts.find((impact) => impact.field === field)
@@ -578,7 +787,14 @@ export function applyScrapeResult(
     impactFor(field)?.action ?? 'preserve'
   const writesField = (field: VideoScrapeField): boolean => impactAction(field) !== 'preserve'
   const existing = getVideoById(videoId)
-  if (!existing) return { applied: false, warnings: [], obsoleteAssetPaths: [] }
+  if (!existing) {
+    return {
+      applied: false,
+      warnings: [],
+      obsoleteAssetPaths: [],
+      classifications: []
+    }
+  }
   const cleanupHints = collectVideoLibraryCleanupHints(videoId)
   const scrapedAt = nowIso()
   const warnings = plan.warnings
@@ -586,10 +802,6 @@ export function applyScrapeResult(
     title: { column: 'title', bindKey: 'title' },
     summary: { column: 'summary', bindKey: 'summary' },
     releaseDate: { column: 'release_date', bindKey: 'release_date' },
-    maker: { column: 'maker', bindKey: 'maker' },
-    publisher: { column: 'publisher', bindKey: 'publisher' },
-    series: { column: 'series', bindKey: 'series' },
-    director: { column: 'director', bindKey: 'director' },
     duration: { column: 'duration_seconds', bindKey: 'duration_seconds' }
   }
   const scalarWrites = plan.impacts.flatMap((impact) => {
@@ -660,6 +872,49 @@ export function applyScrapeResult(
       db.prepare(`UPDATE videos SET ${assignments.join(', ')} WHERE id = @id`).run(bind)
     }
 
+    for (const [field, assignment] of plan.classificationAssignments) {
+      let entityId: number | null = null
+      if (assignment.kind === 'clear') {
+        if (field === 'maker' || field === 'publisher') {
+          classificationMaintenanceService.assignVideoOrganization(videoId, field, null)
+        } else if (field === 'director') {
+          classificationMaintenanceService.assignVideoDirector(videoId, null)
+        } else {
+          classificationMaintenanceService.assignVideoSeries(videoId, null)
+        }
+      } else if (assignment.kind === 'organization') {
+        const resolved = classificationMaintenanceService.assignVideoOrganization(
+          videoId,
+          assignment.role,
+          assignment.referenceKind === 'existing'
+            ? { organizationId: assignment.entityId }
+            : { createName: assignment.createName }
+        )
+        entityId = resolved.organizationId
+      } else if (assignment.kind === 'director') {
+        const resolved = classificationMaintenanceService.assignVideoDirector(
+          videoId,
+          assignment.referenceKind === 'existing'
+            ? { directorId: assignment.entityId }
+            : { createName: assignment.createName }
+        )
+        entityId = resolved.directorId
+      } else {
+        const resolved = classificationMaintenanceService.assignVideoSeries(
+          videoId,
+          assignment.referenceKind === 'existing'
+            ? { seriesId: assignment.entityId }
+            : { createName: assignment.createName }
+        )
+        entityId = resolved.seriesId
+      }
+      const outcome = plan.classifications.find((item) => item.field === field)
+      if (outcome && outcome.status === 'create') {
+        outcome.status = 'created'
+        outcome.entityId = entityId
+      }
+    }
+
     if (writeFemale) {
       removeVideoActressesByGender(videoId, 'female')
       linkScrapedCastByGender(videoId, cast, 'female', actressAvatars)
@@ -672,13 +927,6 @@ export function applyScrapeResult(
     if (writeTags) {
       replaceScrapedTags(videoId, result.tags ?? [], sourceName ?? null, scrapedAt)
     }
-
-    ensureFacetEntries({
-      maker: writesField('maker') ? (result.maker ?? null) : null,
-      publisher: writesField('publisher') ? (result.publisher ?? null) : null,
-      series: writesField('series') ? (result.series ?? null) : null,
-      director: writesField('director') ? (result.director ?? null) : null
-    })
 
     if (writeSamples) {
       oldAssetPaths.push(
@@ -727,7 +975,12 @@ export function applyScrapeResult(
   } catch (error) {
     console.error('Post-commit library cleanup failed:', error)
   }
-  return { applied: true, warnings, obsoleteAssetPaths }
+  return {
+    applied: true,
+    warnings,
+    obsoleteAssetPaths,
+    classifications: plan.classifications
+  }
 }
 
 export function inspectVideoImageAvailability(videoId: number): VideoImageAvailabilityFacts {
@@ -792,12 +1045,15 @@ export interface VideoScrapeDeliverInput {
   sourceName?: string
   ratingSourceName?: string
   imageFacts?: VideoImageAvailabilityFacts
+  classificationOptions?: VideoClassificationResolutionOptions
   fetcher: (url: string) => Promise<Buffer>
 }
 
 export interface VideoScrapeDeliverOutcome {
   applied: boolean
   warnings: string[]
+  classifications: VideoClassificationResolutionOutcome[]
+  directorChoice?: VideoDirectorChoiceRequired
 }
 
 export interface VideoScrapeApplyService {
@@ -810,6 +1066,13 @@ export interface VideoScrapeApplyService {
     ratingSourceName?: string
   ): VideoScrapeField[]
   resolveBatchTargets(filter: VideoBatchScrapeFilter): Array<{ id: number; code: string }>
+  preflightClassifications(
+    videoId: number,
+    result: ScrapeResult,
+    fields: VideoScrapeField[],
+    mode: VideoScrapeUpdateMode,
+    options?: VideoClassificationResolutionOptions
+  ): VideoScrapeApplicationPlan
   plan: typeof planVideoScrapeResult
   apply: typeof applyScrapeResult
   deliverParsedResult(input: VideoScrapeDeliverInput): Promise<VideoScrapeDeliverOutcome>
@@ -862,6 +1125,22 @@ export function createVideoScrapeApplyService(
     inspectImageAvailability,
     resolveEffectiveFields,
     resolveBatchTargets,
+    preflightClassifications(videoId, result, fields, mode, options) {
+      return plan(
+        videoId,
+        result,
+        null,
+        [],
+        fields.filter((field): field is VideoClassificationField =>
+          CLASSIFICATION_FIELDS.includes(field as VideoClassificationField)
+        ),
+        undefined,
+        mode,
+        undefined,
+        {},
+        options
+      )
+    },
     plan,
     apply: (...args) => apply(...args),
     async deliverParsedResult(input): Promise<VideoScrapeDeliverOutcome> {
@@ -928,7 +1207,8 @@ export function createVideoScrapeApplyService(
             input.sourceName,
             input.mode,
             input.ratingSourceName,
-            imageFacts
+            imageFacts,
+            input.classificationOptions
           )
           for (const assetPath of applied.obsoleteAssetPaths) {
             deleteBestEffort(assetPath)
@@ -961,7 +1241,12 @@ export function createVideoScrapeApplyService(
         }
       }
 
-      return { applied: application.applied, warnings: application.warnings }
+      return {
+        applied: application.applied,
+        warnings: application.warnings,
+        classifications: application.classifications,
+        directorChoice: application.directorChoice
+      }
     }
   }
 }

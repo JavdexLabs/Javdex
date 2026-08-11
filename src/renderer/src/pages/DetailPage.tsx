@@ -34,7 +34,11 @@ import { UI_ICON } from '../components/iconDefaults'
 import { useAppBackground } from '../components/AppBackgroundContext'
 import ActressAvatar from '../components/ActressAvatar'
 import type { VideoEditInput } from '@shared/videoTypes'
-import type { VideoScrapeField, VideoScrapeUpdateMode } from '@shared/videoScrapeTypes'
+import type {
+  VideoDirectorChoiceRequired,
+  VideoScrapeField,
+  VideoScrapeUpdateMode
+} from '@shared/videoScrapeTypes'
 import { VIDEO_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_UPDATE_MODE_OPTIONS, ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import { splitVideoCode } from '@shared/codeUtils'
 import { resolveVideoDetailDisplayBackgroundPath } from '@shared/detailDisplayBackground'
@@ -52,6 +56,14 @@ import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import { invalidateVideoLibraryQueries } from '../query/invalidateLibraryQueries'
 import { settingsPath } from '../settings/settingsRoutes'
 import VideoResourceImportModal from '../components/VideoResourceImportModal'
+import DirectorScrapeChoiceModal from '../components/DirectorScrapeChoiceModal'
+
+interface PendingDirectorChoice {
+  fields: VideoScrapeField[]
+  site: string
+  mode?: VideoScrapeUpdateMode
+  choice: VideoDirectorChoiceRequired
+}
 
 export default function DetailPage(): JSX.Element {
   const { id, videoId: videoIdParam } = useParams()
@@ -91,6 +103,9 @@ export default function DetailPage(): JSX.Element {
     useState(false)
   const [scraperName, setScraperName] = useState<string>('')
   const [showScrapeFields, setShowScrapeFields] = useState(false)
+  const [pendingDirectorChoice, setPendingDirectorChoice] =
+    useState<PendingDirectorChoice | null>(null)
+  const [directorChoiceBusy, setDirectorChoiceBusy] = useState(false)
   const [showCorrectImport, setShowCorrectImport] = useState(false)
   const [showAddToPlaylist, setShowAddToPlaylist] = useState(false)
   const [showMaintenanceInfo, setShowMaintenanceInfo] = useState(false)
@@ -114,6 +129,8 @@ export default function DetailPage(): JSX.Element {
     setShowEdit(false)
     setConfirmClear(false)
     setShowScrapeFields(false)
+    setPendingDirectorChoice(null)
+    setDirectorChoiceBusy(false)
     setShowCorrectImport(false)
     setShowAddToPlaylist(false)
     setShowMaintenanceInfo(false)
@@ -333,24 +350,36 @@ export default function DetailPage(): JSX.Element {
     }
   }
 
-  const handleRescrape = async (
+  const executeRescrape = async (
     fields: VideoScrapeField[],
     site: string,
-    mode?: VideoScrapeUpdateMode
+    mode?: VideoScrapeUpdateMode,
+    directorSelectionId?: number
   ): Promise<void> => {
-    setShowScrapeFields(false)
     setScraperName(site)
     setScraping(true)
+    if (directorSelectionId != null) setDirectorChoiceBusy(true)
     try {
-      const res = await api.scrape.one(videoId, site || undefined, fields, mode)
+      const res = await api.scrape.one(
+        videoId,
+        site || undefined,
+        fields,
+        mode,
+        directorSelectionId
+      )
+      if (res.directorChoice) {
+        setPendingDirectorChoice({ fields, site, mode, choice: res.directorChoice })
+        return
+      }
+      setPendingDirectorChoice(null)
       const hasWarnings = res.warnings.length > 0
       toast.show(
         res.applied
           ? hasWarnings
-            ? `已更新，部分图片未应用：${res.warnings.join('；')}`
+            ? `已更新，部分字段未应用：${res.warnings.join('；')}`
             : '匹配完成'
           : hasWarnings
-            ? `资源不可用，已保留原数据：${res.warnings.join('；')}`
+            ? `所选字段未应用：${res.warnings.join('；')}`
             : '所选字段无可写入内容',
         res.applied && !hasWarnings ? 'success' : 'info'
       )
@@ -362,7 +391,17 @@ export default function DetailPage(): JSX.Element {
       toast.show(`匹配失败：${(e as Error).message}`, 'error')
     } finally {
       setScraping(false)
+      setDirectorChoiceBusy(false)
     }
+  }
+
+  const handleRescrape = (
+    fields: VideoScrapeField[],
+    site: string,
+    mode?: VideoScrapeUpdateMode
+  ): void => {
+    setShowScrapeFields(false)
+    void executeRescrape(fields, site, mode)
   }
 
   const handleRating = async (rating: number): Promise<void> => {
@@ -786,7 +825,23 @@ export default function DetailPage(): JSX.Element {
           initialUpdateMode="fillEmpty"
           onCancel={() => setShowScrapeFields(false)}
           onConfirm={(fields, site, _scope, mode) => {
-            void handleRescrape(fields, site, mode as VideoScrapeUpdateMode | undefined)
+            handleRescrape(fields, site, mode as VideoScrapeUpdateMode | undefined)
+          }}
+        />
+      )}
+
+      {pendingDirectorChoice && (
+        <DirectorScrapeChoiceModal
+          choice={pendingDirectorChoice.choice}
+          busy={directorChoiceBusy}
+          onCancel={() => setPendingDirectorChoice(null)}
+          onChoose={(directorId) => {
+            void executeRescrape(
+              pendingDirectorChoice.fields,
+              pendingDirectorChoice.site,
+              pendingDirectorChoice.mode,
+              directorId
+            )
           }}
         />
       )}

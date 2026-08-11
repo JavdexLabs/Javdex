@@ -13,6 +13,7 @@ import {
   resolveEffectiveScrapeFields,
   resolveVideoBatchTargets
 } from './videoScrapeApplyService'
+import { classificationMaintenanceService } from './classificationMaintenanceService'
 
 let tempRoot: string | null = null
 
@@ -45,6 +46,17 @@ function setupDb(): void {
     scrapedStatus: 0,
     addTime: '2024-01-04'
   })
+
+  classificationMaintenanceService.assignVideoOrganization(1, 'maker', {
+    createName: 'Maker A'
+  })
+  classificationMaintenanceService.assignVideoSeries(1, { createName: 'Series A' })
+  classificationMaintenanceService.assignVideoDirector(1, { createName: 'Director A' })
+  classificationMaintenanceService.assignVideoOrganization(2, 'maker', {
+    createName: 'Maker B'
+  })
+  classificationMaintenanceService.assignVideoSeries(2, { createName: 'Series B' })
+  classificationMaintenanceService.assignVideoDirector(2, { createName: 'Director B' })
 
   db.prepare('INSERT INTO tags (name) VALUES (?)').run('Drama')
   db.prepare('INSERT INTO tags (name) VALUES (?)').run('HD')
@@ -162,14 +174,32 @@ describe('videoScrapeApplyService.resolveEffectiveScrapeFields', () => {
 
 function configureMatrixCurrent(field: VideoScrapeField, videoId: number, present: boolean): void {
   const db = getDb()
+  if (field === 'maker' || field === 'publisher') {
+    classificationMaintenanceService.assignVideoOrganization(
+      videoId,
+      field,
+      present ? { createName: `Existing ${field} ${videoId}` } : null
+    )
+    return
+  }
+  if (field === 'series') {
+    classificationMaintenanceService.assignVideoSeries(
+      videoId,
+      present ? { createName: `Existing series ${videoId}` } : null
+    )
+    return
+  }
+  if (field === 'director') {
+    classificationMaintenanceService.assignVideoDirector(
+      videoId,
+      present ? { createName: `Existing director ${videoId}` } : null
+    )
+    return
+  }
   const scalarColumns: Partial<Record<VideoScrapeField, string>> = {
     title: 'title',
     summary: 'summary',
     releaseDate: 'release_date',
-    maker: 'maker',
-    publisher: 'publisher',
-    series: 'series',
-    director: 'director',
     duration: 'duration_seconds'
   }
   const scalarColumn = scalarColumns[field]
@@ -353,29 +383,25 @@ describe('videoScrapeApplyService.applyScrapeResult', () => {
   it('applies scalar fields consistently across the three update modes', () => {
     setupDb()
     const db = getDb()
-    db.prepare(
-      `UPDATE videos SET summary = 'Old summary', publisher = 'Old publisher',
-       duration_seconds = 100 WHERE id = 1`
-    ).run()
+    db.prepare("UPDATE videos SET summary = 'Old summary', duration_seconds = 100 WHERE id = 1").run()
 
     const preserve = applyScrapeResult(
       1,
-      { code: 'IPX-535', title: 'New title', summary: undefined, publisher: '', durationSeconds: 200 },
+      { code: 'IPX-535', title: 'New title', summary: undefined, durationSeconds: 200 },
       null,
       new Map(),
       [],
-      ['title', 'summary', 'publisher', 'duration'],
+      ['title', 'summary', 'duration'],
       undefined,
       'replaceIfPresent'
     )
     assert.equal(preserve.applied, true)
     assert.deepEqual(
-      db.prepare('SELECT title, original_title, summary, publisher, duration_seconds FROM videos WHERE id = 1').get(),
+      db.prepare('SELECT title, original_title, summary, duration_seconds FROM videos WHERE id = 1').get(),
       {
         title: 'New title',
         original_title: 'New title',
         summary: 'Old summary',
-        publisher: 'Old publisher',
         duration_seconds: 200
       }
     )
@@ -386,18 +412,17 @@ describe('videoScrapeApplyService.applyScrapeResult', () => {
       null,
       new Map(),
       [],
-      ['title', 'summary', 'publisher', 'duration'],
+      ['title', 'summary', 'duration'],
       undefined,
       'replace'
     )
     assert.equal(clear.applied, true)
     assert.deepEqual(
-      db.prepare('SELECT title, original_title, summary, publisher, duration_seconds FROM videos WHERE id = 1').get(),
+      db.prepare('SELECT title, original_title, summary, duration_seconds FROM videos WHERE id = 1').get(),
       {
         title: null,
         original_title: null,
         summary: null,
-        publisher: null,
         duration_seconds: null
       }
     )
@@ -408,23 +433,21 @@ describe('videoScrapeApplyService.applyScrapeResult', () => {
         code: 'IPX-535',
         title: 'Filled title',
         summary: 'Filled summary',
-        publisher: 'Filled publisher',
         durationSeconds: 300
       },
       null,
       new Map(),
       [],
-      ['title', 'summary', 'publisher', 'duration'],
+      ['title', 'summary', 'duration'],
       undefined,
       'fillEmpty'
     )
     assert.equal(fill.applied, true)
     assert.deepEqual(
-      db.prepare('SELECT title, summary, publisher, duration_seconds FROM videos WHERE id = 1').get(),
+      db.prepare('SELECT title, summary, duration_seconds FROM videos WHERE id = 1').get(),
       {
         title: 'Filled title',
         summary: 'Filled summary',
-        publisher: 'Filled publisher',
         duration_seconds: 300
       }
     )
@@ -827,6 +850,572 @@ describe('videoScrapeApplyService.applyScrapeResult', () => {
     )
     assert.equal(fs.existsSync(path.join(mediaRoot, 'cast-a.jpg')), true)
     assert.equal(fs.existsSync(path.join(mediaRoot, 'cast-b.jpg')), true)
+  })
+})
+
+describe('videoScrapeApplyService classification entity resolution', () => {
+  it('preserves entity update semantics across fillEmpty, replaceIfPresent, and replace', () => {
+    setupDb()
+    const db = getDb()
+    const originalMakerId = (
+      db.prepare('SELECT maker_organization_id AS id FROM videos WHERE id = 1').get() as {
+        id: number
+      }
+    ).id
+
+    const fill = applyScrapeResult(
+      1,
+      { code: 'IPX-535', maker: 'Replacement Maker' },
+      null,
+      new Map(),
+      [],
+      ['maker'],
+      undefined,
+      'fillEmpty'
+    )
+    assert.equal(fill.applied, false)
+    assert.equal(
+      (db.prepare('SELECT maker_organization_id AS id FROM videos WHERE id = 1').get() as { id: number }).id,
+      originalMakerId
+    )
+
+    const absent = applyScrapeResult(
+      1,
+      { code: 'IPX-535' },
+      null,
+      new Map(),
+      [],
+      ['maker'],
+      undefined,
+      'replaceIfPresent'
+    )
+    assert.equal(absent.applied, false)
+    assert.equal(
+      (db.prepare('SELECT maker_organization_id AS id FROM videos WHERE id = 1').get() as { id: number }).id,
+      originalMakerId
+    )
+
+    const cleared = applyScrapeResult(
+      1,
+      { code: 'IPX-535' },
+      null,
+      new Map(),
+      [],
+      ['maker'],
+      undefined,
+      'replace'
+    )
+    assert.equal(cleared.applied, true)
+    assert.deepEqual(
+      db.prepare('SELECT maker_organization_id, maker FROM videos WHERE id = 1').get(),
+      { maker_organization_id: null, maker: null }
+    )
+
+    const filled = applyScrapeResult(
+      1,
+      { code: 'IPX-535', maker: 'Replacement Maker' },
+      null,
+      new Map(),
+      [],
+      ['maker'],
+      undefined,
+      'fillEmpty'
+    )
+    assert.equal(filled.applied, true)
+    assert.equal(filled.classifications[0]?.status, 'created')
+    assert.equal(
+      (db.prepare('SELECT maker FROM videos WHERE id = 1').get() as { maker: string }).maker,
+      'Replacement Maker'
+    )
+  })
+
+  it('matches main names, aliases, and normalized equivalents without overwriting profiles', () => {
+    setupDb()
+    const db = getDb()
+    const organizationId = classificationMaintenanceService.createOrganization({
+      role: 'maker',
+      mainName: 'Main Studio',
+      aliases: ['Publishing Label'],
+      summary: 'Curated organization profile',
+      countryRegion: 'JP',
+      foundedYear: 1998,
+      status: 'active'
+    })
+    const directorId = classificationMaintenanceService.createDirector({
+      mainName: 'Canonical Director',
+      aliases: ['Director Alias'],
+      summary: 'Curated director profile',
+      countryRegion: 'JP',
+      birthDate: '1970-01-02',
+      status: 'active'
+    })
+    const seriesId = classificationMaintenanceService.createSeries({
+      mainName: 'Canonical Series',
+      aliases: ['Series Alias'],
+      summary: 'Curated series profile',
+      startYear: 2010,
+      status: 'ongoing'
+    })
+
+    const outcome = applyScrapeResult(
+      1,
+      {
+        code: 'IPX-535',
+        maker: 'ｍａｉｎ　ｓｔｕｄｉｏ',
+        publisher: 'Publishing Label',
+        director: 'Director Alias',
+        series: 'Series Alias'
+      },
+      null,
+      new Map(),
+      [],
+      ['maker', 'publisher', 'director', 'series'],
+      undefined,
+      'replaceIfPresent'
+    )
+
+    assert.equal(outcome.applied, true)
+    assert.deepEqual(
+      db.prepare(
+        `SELECT maker_organization_id, publisher_organization_id, director_id, series_id
+         FROM videos WHERE id = 1`
+      ).get(),
+      {
+        maker_organization_id: organizationId,
+        publisher_organization_id: organizationId,
+        director_id: directorId,
+        series_id: seriesId
+      }
+    )
+    assert.deepEqual(
+      outcome.classifications.map(({ field, status, entityId }) => ({ field, status, entityId })),
+      [
+        { field: 'maker', status: 'matched', entityId: organizationId },
+        { field: 'publisher', status: 'matched', entityId: organizationId },
+        { field: 'series', status: 'matched', entityId: seriesId },
+        { field: 'director', status: 'matched', entityId: directorId }
+      ]
+    )
+    assert.ok(
+      db.prepare(
+        "SELECT 1 FROM organization_roles WHERE organization_id = ? AND role = 'publisher'"
+      ).get(organizationId)
+    )
+    assert.deepEqual(
+      db.prepare(
+        `SELECT summary, country_region, founded_year, status
+         FROM organizations WHERE id = ?`
+      ).get(organizationId),
+      {
+        summary: 'Curated organization profile',
+        country_region: 'JP',
+        founded_year: 1998,
+        status: 'active'
+      }
+    )
+    assert.deepEqual(
+      db.prepare(
+        'SELECT summary, country_region, birth_date, status FROM directors WHERE id = ?'
+      ).get(directorId),
+      {
+        summary: 'Curated director profile',
+        country_region: 'JP',
+        birth_date: '1970-01-02',
+        status: 'active'
+      }
+    )
+    assert.deepEqual(
+      db.prepare('SELECT summary, start_year, status FROM series WHERE id = ?').get(seriesId),
+      { summary: 'Curated series profile', start_year: 2010, status: 'ongoing' }
+    )
+  })
+
+  it('creates only basic entities, reuses one organization across roles, and leaves series unowned', () => {
+    setupDb()
+    const db = getDb()
+    const outcome = applyScrapeResult(
+      1,
+      {
+        code: 'IPX-535',
+        maker: 'Shared New Organization',
+        publisher: 'Shared New Organization',
+        director: 'New Director',
+        series: 'New Series'
+      },
+      null,
+      new Map(),
+      [],
+      ['maker', 'publisher', 'director', 'series'],
+      undefined,
+      'replaceIfPresent'
+    )
+
+    assert.equal(outcome.applied, true)
+    const video = db.prepare(
+      `SELECT maker_organization_id, publisher_organization_id, director_id, series_id
+       FROM videos WHERE id = 1`
+    ).get() as {
+      maker_organization_id: number
+      publisher_organization_id: number
+      director_id: number
+      series_id: number
+    }
+    assert.equal(video.maker_organization_id, video.publisher_organization_id)
+    assert.deepEqual(
+      db.prepare(
+        'SELECT role FROM organization_roles WHERE organization_id = ? ORDER BY role'
+      ).all(video.maker_organization_id),
+      [{ role: 'maker' }, { role: 'publisher' }]
+    )
+    assert.deepEqual(
+      db.prepare(
+        `SELECT summary, country_region, founded_year, ended_year, status,
+                parent_organization_id
+         FROM organizations WHERE id = ?`
+      ).get(video.maker_organization_id),
+      {
+        summary: null,
+        country_region: null,
+        founded_year: null,
+        ended_year: null,
+        status: 'unknown',
+        parent_organization_id: null
+      }
+    )
+    assert.deepEqual(
+      db.prepare(
+        `SELECT summary, country_region, birth_date, death_date, birth_place,
+                career_start_year, career_end_year, status
+         FROM directors WHERE id = ?`
+      ).get(video.director_id),
+      {
+        summary: null,
+        country_region: null,
+        birth_date: null,
+        death_date: null,
+        birth_place: null,
+        career_start_year: null,
+        career_end_year: null,
+        status: 'unknown'
+      }
+    )
+    assert.deepEqual(
+      db.prepare(
+        `SELECT summary, owner_organization_id, parent_series_id, start_year, end_year, status
+         FROM series WHERE id = ?`
+      ).get(video.series_id),
+      {
+        summary: null,
+        owner_organization_id: null,
+        parent_series_id: null,
+        start_year: null,
+        end_year: null,
+        status: 'unknown'
+      }
+    )
+    assert.ok(outcome.classifications.every((item) => item.status === 'created'))
+  })
+
+  it('rolls back scalar writes and newly created entities when a classification assignment fails', () => {
+    setupDb()
+    const db = getDb()
+    db.exec(`
+      CREATE TRIGGER reject_scraped_director
+      BEFORE UPDATE OF director_id ON videos
+      WHEN NEW.id = 1
+      BEGIN
+        SELECT RAISE(ABORT, 'forced director assignment failure');
+      END
+    `)
+
+    assert.throws(
+      () =>
+        applyScrapeResult(
+          1,
+          {
+            code: 'IPX-535',
+            title: 'Must roll back',
+            maker: 'Rollback Organization',
+            director: 'Rollback Director'
+          },
+          null,
+          new Map(),
+          [],
+          ['title', 'maker', 'director'],
+          undefined,
+          'replaceIfPresent'
+        ),
+      /forced director assignment failure/
+    )
+    assert.deepEqual(
+      db.prepare('SELECT title, maker FROM videos WHERE id = 1').get(),
+      { title: 'First', maker: 'Maker A' }
+    )
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM organizations WHERE main_name = 'Rollback Organization'").get() as { n: number }).n,
+      0
+    )
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM directors WHERE main_name = 'Rollback Director'").get() as { n: number }).n,
+      0
+    )
+  })
+
+  it('keeps the current director when its alias is one of multiple candidates without updating the video', () => {
+    setupDb()
+    const db = getDb()
+    const currentDirectorId = (
+      db.prepare('SELECT director_id AS id FROM videos WHERE id = 1').get() as { id: number }
+    ).id
+    classificationMaintenanceService.updateDirector(currentDirectorId, {
+      mainName: 'Director A',
+      aliases: ['Shared Director']
+    })
+    classificationMaintenanceService.createDirector({
+      mainName: 'Shared Director',
+      countryRegion: 'US'
+    })
+    db.prepare(
+      "UPDATE videos SET updated_at = '2020-01-01T00:00:00.000Z', last_scraped_at = NULL WHERE id = 1"
+    ).run()
+
+    const outcome = applyScrapeResult(
+      1,
+      { code: 'IPX-535', director: 'Shared Director' },
+      null,
+      new Map(),
+      [],
+      ['director'],
+      undefined,
+      'replaceIfPresent',
+      undefined,
+      {},
+      { directorAmbiguity: 'choice' }
+    )
+
+    assert.equal(outcome.applied, false)
+    assert.equal(outcome.directorChoice, undefined)
+    assert.deepEqual(outcome.classifications, [
+      {
+        field: 'director',
+        status: 'preserved',
+        inputName: 'Shared Director',
+        entityId: currentDirectorId
+      }
+    ])
+    assert.deepEqual(
+      db.prepare('SELECT director_id, updated_at, last_scraped_at FROM videos WHERE id = 1').get(),
+      {
+        director_id: currentDirectorId,
+        updated_at: '2020-01-01T00:00:00.000Z',
+        last_scraped_at: null
+      }
+    )
+  })
+
+  it('pauses a single scrape for director choice and applies the selected candidate on retry', () => {
+    setupDb()
+    const db = getDb()
+    classificationMaintenanceService.assignVideoDirector(1, null)
+    const firstId = classificationMaintenanceService.createDirector({
+      mainName: 'Duplicate Director',
+      countryRegion: 'JP',
+      birthDate: '1960-01-01'
+    })
+    const secondId = classificationMaintenanceService.createDirector({
+      mainName: 'Ｄｕｐｌｉｃａｔｅ　Ｄｉｒｅｃｔｏｒ',
+      countryRegion: 'US',
+      birthDate: '1980-01-01'
+    })
+
+    const choiceRequired = applyScrapeResult(
+      1,
+      { code: 'IPX-535', title: 'Deferred title', director: 'Duplicate Director' },
+      null,
+      new Map(),
+      [],
+      ['title', 'director'],
+      undefined,
+      'replaceIfPresent',
+      undefined,
+      {},
+      { directorAmbiguity: 'choice' }
+    )
+
+    assert.equal(choiceRequired.applied, false)
+    assert.deepEqual(
+      choiceRequired.directorChoice?.candidates.map((candidate) => candidate.id),
+      [firstId, secondId]
+    )
+    assert.equal(
+      (db.prepare('SELECT title FROM videos WHERE id = 1').get() as { title: string }).title,
+      'First'
+    )
+
+    const selected = applyScrapeResult(
+      1,
+      { code: 'IPX-535', title: 'Deferred title', director: 'Duplicate Director' },
+      null,
+      new Map(),
+      [],
+      ['title', 'director'],
+      undefined,
+      'replaceIfPresent',
+      undefined,
+      {},
+      { directorAmbiguity: 'choice', directorSelectionId: secondId }
+    )
+
+    assert.equal(selected.applied, true)
+    assert.deepEqual(
+      db.prepare('SELECT title, director_id FROM videos WHERE id = 1').get(),
+      { title: 'Deferred title', director_id: secondId }
+    )
+  })
+
+  it('preserves an ambiguous director in batch mode while applying safe fields with an actionable warning', () => {
+    setupDb()
+    const db = getDb()
+    classificationMaintenanceService.assignVideoDirector(1, null)
+    classificationMaintenanceService.createDirector({ mainName: 'Batch Duplicate' })
+    classificationMaintenanceService.createDirector({ mainName: 'Ｂａｔｃｈ　Ｄｕｐｌｉｃａｔｅ' })
+
+    const outcome = applyScrapeResult(
+      1,
+      { code: 'IPX-535', title: 'Safe batch title', director: 'Batch Duplicate' },
+      null,
+      new Map(),
+      [],
+      ['title', 'director'],
+      undefined,
+      'replaceIfPresent',
+      undefined,
+      {},
+      { directorAmbiguity: 'preserve' }
+    )
+
+    assert.equal(outcome.applied, true)
+    assert.equal(
+      (db.prepare('SELECT title FROM videos WHERE id = 1').get() as { title: string }).title,
+      'Safe batch title'
+    )
+    assert.equal(
+      (db.prepare('SELECT director_id FROM videos WHERE id = 1').get() as { director_id: null })
+        .director_id,
+      null
+    )
+    assert.match(outcome.warnings[0] ?? '', /已保留现有关联.*手动选择或合并/)
+    assert.equal(outcome.classifications[0]?.status, 'ambiguous')
+  })
+
+  it('reports an invalid classification name structurally while applying safe fields', () => {
+    setupDb()
+    const db = getDb()
+    const currentDirectorId = (
+      db.prepare('SELECT director_id AS id FROM videos WHERE id = 1').get() as { id: number }
+    ).id
+
+    const outcome = applyScrapeResult(
+      1,
+      { code: 'IPX-535', title: 'Safe invalid-name title', director: '\u0085' },
+      null,
+      new Map(),
+      [],
+      ['title', 'director'],
+      undefined,
+      'replaceIfPresent'
+    )
+
+    assert.equal(outcome.applied, true)
+    assert.deepEqual(
+      db.prepare('SELECT title, director_id FROM videos WHERE id = 1').get(),
+      { title: 'Safe invalid-name title', director_id: currentDirectorId }
+    )
+    assert.equal(outcome.classifications[0]?.status, 'invalid')
+    assert.match(outcome.classifications[0]?.message ?? '', /导演名称无效/)
+    assert.match(outcome.warnings[0] ?? '', /导演名称无效/)
+  })
+
+  it('treats same-name series in different owner scopes as ambiguous and never infers an owner', () => {
+    setupDb()
+    const db = getDb()
+    classificationMaintenanceService.assignVideoSeries(1, null)
+    const firstOwnerId = classificationMaintenanceService.createOrganization({
+      role: 'maker',
+      mainName: 'First Series Owner'
+    })
+    const secondOwnerId = classificationMaintenanceService.createOrganization({
+      role: 'maker',
+      mainName: 'Second Series Owner'
+    })
+    classificationMaintenanceService.createSeries({
+      mainName: 'Scoped Series',
+      ownerOrganizationId: firstOwnerId
+    })
+    classificationMaintenanceService.createSeries({
+      mainName: 'Ｓｃｏｐｅｄ　Ｓｅｒｉｅｓ',
+      ownerOrganizationId: secondOwnerId
+    })
+
+    const ambiguous = applyScrapeResult(
+      1,
+      { code: 'IPX-535', title: 'Safe series title', series: 'Scoped Series' },
+      null,
+      new Map(),
+      [],
+      ['title', 'series'],
+      undefined,
+      'replaceIfPresent'
+    )
+    assert.equal(ambiguous.applied, true)
+    assert.equal(
+      (db.prepare('SELECT series_id FROM videos WHERE id = 1').get() as { series_id: null }).series_id,
+      null
+    )
+    assert.equal(ambiguous.classifications[0]?.status, 'ambiguous')
+
+    const uniqueOwnedSeriesId = classificationMaintenanceService.createSeries({
+      mainName: 'Unique Owned Series',
+      ownerOrganizationId: firstOwnerId
+    })
+    const matched = applyScrapeResult(
+      1,
+      { code: 'IPX-535', series: 'Unique Owned Series' },
+      null,
+      new Map(),
+      [],
+      ['series'],
+      undefined,
+      'replaceIfPresent'
+    )
+    assert.equal(matched.classifications[0]?.status, 'matched')
+    assert.equal(
+      (db.prepare('SELECT series_id FROM videos WHERE id = 1').get() as { series_id: number })
+        .series_id,
+      uniqueOwnedSeriesId
+    )
+    classificationMaintenanceService.assignVideoSeries(1, null)
+
+    const created = applyScrapeResult(
+      1,
+      { code: 'IPX-535', series: 'Unowned Scraped Series' },
+      null,
+      new Map(),
+      [],
+      ['series'],
+      undefined,
+      'replaceIfPresent'
+    )
+    const seriesId = created.classifications[0]?.entityId
+    assert.equal(created.classifications[0]?.status, 'created')
+    assert.equal(
+      (
+        db.prepare('SELECT owner_organization_id FROM series WHERE id = ?').get(seriesId) as {
+          owner_organization_id: null
+        }
+      ).owner_organization_id,
+      null
+    )
   })
 })
 

@@ -323,8 +323,9 @@ const api = {
       videoId: number,
       scraperName?: string,
       fields?: VideoScrapeField[],
-      mode?: VideoScrapeUpdateMode
-    ) => invokeScrape(IPC.SCRAPE_ONE, videoId, scraperName, fields, mode),
+      mode?: VideoScrapeUpdateMode,
+      directorSelectionId?: number
+    ) => invokeScrape(IPC.SCRAPE_ONE, videoId, scraperName, fields, mode, directorSelectionId),
     videoBatchCount: (filter: VideoBatchScrapeFilter) =>
       invokeScrape(IPC.SCRAPE_VIDEO_BATCH_COUNT, filter),
     videoBatchStart: (request: VideoBatchScrapeRequest) =>

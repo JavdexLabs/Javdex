@@ -73,7 +73,7 @@ export function formatVideoBatchScrapeOutcome(
       status: 'success',
       level: 'info',
       message: warningText
-        ? `跳过：资源不可用，已保留原数据（${warningText}）`
+        ? `跳过：部分字段无法安全应用（${warningText}）`
         : '跳过：所选字段无可写入内容'
     }
   }
@@ -81,7 +81,7 @@ export function formatVideoBatchScrapeOutcome(
     status: 'success',
     level: warningText ? 'info' : 'success',
     message: warningText
-      ? `更新成功，部分图片未应用：${outcome.result?.title ?? fallbackCode}（${warningText}）`
+      ? `更新成功，部分字段未应用：${outcome.result?.title ?? fallbackCode}（${warningText}）`
       : `更新成功：${outcome.result?.title ?? fallbackCode}`
   }
 }

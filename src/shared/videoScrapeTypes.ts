@@ -1,6 +1,38 @@
 import type { ActressGender } from './actressTypes'
 import type { ScrapedStatus } from './commonTypes'
 
+export type VideoClassificationField = 'maker' | 'publisher' | 'series' | 'director'
+
+export interface VideoClassificationCandidate {
+  id: number
+  mainName: string
+  aliases: string[]
+  description: string | null
+}
+
+export type VideoClassificationResolutionStatus =
+  | 'matched'
+  | 'create'
+  | 'created'
+  | 'cleared'
+  | 'preserved'
+  | 'ambiguous'
+  | 'invalid'
+
+export interface VideoClassificationResolutionOutcome {
+  field: VideoClassificationField
+  status: VideoClassificationResolutionStatus
+  inputName: string | null
+  entityId: number | null
+  candidates?: VideoClassificationCandidate[]
+  message?: string
+}
+
+export interface VideoDirectorChoiceRequired {
+  scrapedName: string
+  candidates: VideoClassificationCandidate[]
+}
+
 export interface ScrapeResult {
   code: string
   title?: string
@@ -89,4 +121,6 @@ export interface VideoScrapeOneResult {
   result: ScrapeResult
   applied: boolean
   warnings: string[]
+  classifications: VideoClassificationResolutionOutcome[]
+  directorChoice?: VideoDirectorChoiceRequired
 }

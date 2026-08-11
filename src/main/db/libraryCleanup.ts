@@ -1,58 +1,17 @@
-import type { FacetType } from '@shared/libraryTypes'
-import type { Video } from '@shared/videoTypes'
 import { deleteActress } from './actressRepo'
 import { getDb } from './database'
 
-const FACET_TYPES: FacetType[] = ['maker', 'publisher', 'series', 'director']
-
-const FACET_COLUMN: Record<FacetType, keyof Pick<Video, 'maker' | 'publisher' | 'series' | 'director'>> =
-  {
-    maker: 'maker',
-    publisher: 'publisher',
-    series: 'series',
-    director: 'director'
-  }
-
 export interface LibraryCleanupHints {
   actressIds?: number[]
-  facets?: Partial<Record<FacetType, string[]>>
 }
 
 export interface LibraryCleanupResult {
-  facetsRemoved: number
   stubActressesRemoved: number
-}
-
-function trimFacetValues(values: string[] | undefined): string[] {
-  if (!values?.length) return []
-  const out: string[] = []
-  const seen = new Set<string>()
-  for (const raw of values) {
-    const trimmed = raw.trim()
-    if (!trimmed || seen.has(trimmed)) continue
-    seen.add(trimmed)
-    out.push(trimmed)
-  }
-  return out
-}
-
-export function facetHintsFromVideo(
-  video: Pick<Video, 'maker' | 'publisher' | 'series' | 'director'>
-): Partial<Record<FacetType, string[]>> {
-  return {
-    maker: video.maker?.trim() ? [video.maker.trim()] : [],
-    publisher: video.publisher?.trim() ? [video.publisher.trim()] : [],
-    series: video.series?.trim() ? [video.series.trim()] : [],
-    director: video.director?.trim() ? [video.director.trim()] : []
-  }
 }
 
 export function collectVideoLibraryCleanupHints(videoId: number): LibraryCleanupHints {
   const db = getDb()
-  const video = db.prepare('SELECT maker, publisher, series, director FROM videos WHERE id = ?').get(
-    videoId
-  ) as Pick<Video, 'maker' | 'publisher' | 'series' | 'director'> | undefined
-  if (!video) return {}
+  if (!db.prepare('SELECT 1 FROM videos WHERE id = ?').get(videoId)) return {}
 
   const actressIds = (
     db.prepare('SELECT actress_id FROM video_actress WHERE video_id = ?').all(videoId) as {
@@ -60,30 +19,7 @@ export function collectVideoLibraryCleanupHints(videoId: number): LibraryCleanup
     }[]
   ).map((row) => row.actress_id)
 
-  return {
-    actressIds,
-    facets: facetHintsFromVideo(video)
-  }
-}
-
-function facetValueUnused(type: FacetType, value: string): boolean {
-  const col = FACET_COLUMN[type]
-  const db = getDb()
-  const row = db.prepare(`SELECT COUNT(*) AS c FROM videos WHERE ${col} = ?`).get(value) as {
-    c: number
-  }
-  return row.c === 0
-}
-
-/** Remove a facet registry row when no video references that column value. */
-export function pruneFacetEntryIfUnused(type: FacetType, value: string | null | undefined): boolean {
-  const trimmed = value?.trim()
-  if (!trimmed || !facetValueUnused(type, trimmed)) return false
-
-  const info = getDb()
-    .prepare('DELETE FROM facet_entries WHERE type = ? AND value = ?')
-    .run(type, trimmed)
-  return info.changes > 0
+  return { actressIds }
 }
 
 /** Actress with no videos and no meaningful profile beyond the main name. */
@@ -125,18 +61,9 @@ export function pruneStubActressIfOrphan(id: number): boolean {
   return true
 }
 
-/** Remove orphan facet registry rows and stub actresses after library mutations. */
+/** Remove stub actresses after library mutations. Classification entities are explicit records. */
 export function runLibraryCleanup(hints: LibraryCleanupHints = {}): LibraryCleanupResult {
-  let facetsRemoved = 0
   let stubActressesRemoved = 0
-
-  if (hints.facets) {
-    for (const type of FACET_TYPES) {
-      for (const value of trimFacetValues(hints.facets[type])) {
-        if (pruneFacetEntryIfUnused(type, value)) facetsRemoved += 1
-      }
-    }
-  }
 
   if (hints.actressIds?.length) {
     const seen = new Set<number>()
@@ -147,5 +74,5 @@ export function runLibraryCleanup(hints: LibraryCleanupHints = {}): LibraryClean
     }
   }
 
-  return { facetsRemoved, stubActressesRemoved }
+  return { stubActressesRemoved }
 }

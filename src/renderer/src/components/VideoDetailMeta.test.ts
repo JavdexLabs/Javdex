@@ -68,33 +68,21 @@ describe('video primary metadata classification navigation', () => {
     ])
   })
 
-  it('keeps a legacy text route only while an organization id is absent', () => {
-    assert.deepEqual(buildVideoPrimaryMetaItems(video({ maker: 'Legacy Maker' })), [
-      {
-        key: 'maker',
-        label: '制作商',
-        type: 'facet',
-        facet: 'maker',
-        value: 'Legacy Maker'
-      }
-    ])
+  it('does not expose a name-only organization route', () => {
+    assert.deepEqual(buildVideoPrimaryMetaItems(video({ maker: 'Unlinked Maker' })), [])
   })
 
-  it('uses the stable director id while keeping legacy text as a temporary fallback', () => {
+  it('uses only the stable director id', () => {
     assert.deepEqual(buildVideoPrimaryMetaItems(video({ director: 'Alex Lee', director_id: 21 })), [
       { key: 'director', label: '导演', type: 'director', directorId: 21, value: 'Alex Lee' }
     ])
-    assert.deepEqual(buildVideoPrimaryMetaItems(video({ director: 'Legacy' })), [
-      { key: 'director', label: '导演', type: 'facet', facet: 'director', value: 'Legacy' }
-    ])
+    assert.deepEqual(buildVideoPrimaryMetaItems(video({ director: 'Unlinked' })), [])
   })
 
-  it('uses the stable series id while keeping legacy text as a temporary fallback', () => {
+  it('uses only the stable series id', () => {
     assert.deepEqual(buildVideoPrimaryMetaItems(video({ series: 'Collection', series_id: 17 })), [
       { key: 'series', label: '系列', type: 'series', seriesId: 17, value: 'Collection' }
     ])
-    assert.deepEqual(buildVideoPrimaryMetaItems(video({ series: 'Legacy' })), [
-      { key: 'series', label: '系列', type: 'facet', facet: 'series', value: 'Legacy' }
-    ])
+    assert.deepEqual(buildVideoPrimaryMetaItems(video({ series: 'Unlinked' })), [])
   })
 })

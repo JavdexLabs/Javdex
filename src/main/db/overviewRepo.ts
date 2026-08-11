@@ -56,13 +56,15 @@ export function getLibraryOverviewStats(): LibraryOverviewStats {
     db.prepare('SELECT COUNT(*) AS n FROM actress_gallery_assets').get() as { n: number }
   ).n
 
-  const facetCounts = { director: 0, maker: 0, publisher: 0, series: 0 }
-  const facetRows = db
-    .prepare('SELECT type, COUNT(*) AS n FROM facet_entries GROUP BY type')
-    .all() as Array<{ type: keyof typeof facetCounts; n: number }>
-  for (const row of facetRows) {
-    if (row.type in facetCounts) facetCounts[row.type] = row.n
-  }
+  const facetCounts = db
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM directors) AS director,
+         (SELECT COUNT(*) FROM organization_roles WHERE role = 'maker') AS maker,
+         (SELECT COUNT(*) FROM organization_roles WHERE role = 'publisher') AS publisher,
+         (SELECT COUNT(*) FROM series) AS series`
+    )
+    .get() as { director: number; maker: number; publisher: number; series: number }
 
   return {
     videos: {

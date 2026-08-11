@@ -86,14 +86,14 @@ describe('organizationDeletionService', () => {
       remainingRoles: ['publisher']
     })
     assert.deepEqual(
-      getDb().prepare('SELECT maker_organization_id, maker FROM videos WHERE id = ?').get(makerVideoId),
-      { maker_organization_id: null, maker: null }
+      getDb().prepare('SELECT maker_organization_id FROM videos WHERE id = ?').get(makerVideoId),
+      { maker_organization_id: null }
     )
     assert.deepEqual(
       getDb()
-        .prepare('SELECT publisher_organization_id, publisher FROM videos WHERE id = ?')
+        .prepare('SELECT publisher_organization_id FROM videos WHERE id = ?')
         .get(publisherVideoId),
-      { publisher_organization_id: id, publisher: 'Dual Role Studio' }
+      { publisher_organization_id: id }
     )
     assert.deepEqual(
       getDb().prepare('SELECT role FROM organization_roles WHERE organization_id = ?').all(id),
@@ -192,8 +192,8 @@ describe('organizationDeletionService', () => {
       cleanupFailures: []
     })
     assert.deepEqual(
-      getDb().prepare('SELECT title, summary, maker_organization_id, maker FROM videos WHERE id = ?').get(makerVideoId),
-      { title: 'Keep title', summary: 'Keep metadata', maker_organization_id: null, maker: null }
+      getDb().prepare('SELECT title, summary, maker_organization_id FROM videos WHERE id = ?').get(makerVideoId),
+      { title: 'Keep title', summary: 'Keep metadata', maker_organization_id: null }
     )
     assert.equal(
       (getDb().prepare('SELECT COUNT(*) AS count FROM video_resources WHERE video_id = ?').get(
@@ -273,8 +273,8 @@ describe('organizationDeletionService', () => {
 
     assert.throws(() => service.deleteOrganization(id), /forced organization delete failure/)
     assert.deepEqual(
-      getDb().prepare('SELECT maker_organization_id, maker FROM videos WHERE id = ?').get(videoId),
-      { maker_organization_id: id, maker: 'Rollback Organization' }
+      getDb().prepare('SELECT maker_organization_id FROM videos WHERE id = ?').get(videoId),
+      { maker_organization_id: id }
     )
     assert.ok(getDb().prepare('SELECT 1 FROM organizations WHERE id = ?').get(id))
     assert.deepEqual(deletedImages, [])

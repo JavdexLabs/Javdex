@@ -1,12 +1,5 @@
-/** Free-text metadata dimensions backed by a column on `videos`. */
+/** Classification dimensions represented by stable entities. */
 export type FacetType = 'maker' | 'publisher' | 'series' | 'director'
-
-export interface FacetItem {
-  value: string
-  video_count: number
-  /** A representative cover for the list thumbnail. */
-  cover_path: string | null
-}
 
 /** Aggregate counts for the settings overview dashboard. */
 export interface LibraryOverviewStats {

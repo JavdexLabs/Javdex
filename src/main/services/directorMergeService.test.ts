@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
+import { getVideoById } from '../db/videoRepo'
 import { classificationMaintenanceService } from './classificationMaintenanceService'
 import { classificationQueryService } from './classificationQueryService'
 import { createDirectorMergeService, directorMergeService } from './directorMergeService'
@@ -18,8 +19,8 @@ function setup(): void {
 function createVideo(code: string, directorId: number): number {
   return Number(
     getDb()
-      .prepare('INSERT INTO videos (code, director_id, director) VALUES (?, ?, ?)')
-      .run(code, directorId, classificationQueryService.getDirector(directorId)?.mainName)
+      .prepare('INSERT INTO videos (code, director_id) VALUES (?, ?)')
+      .run(code, directorId)
       .lastInsertRowid
   )
 }
@@ -105,8 +106,8 @@ describe('directorMergeService', () => {
       ]
     )
     assert.deepEqual(
-      getDb().prepare('SELECT director_id, director FROM videos WHERE id = ?').get(sourceVideoId),
-      { director_id: targetId, director: 'Target Director' }
+      { directorId: getVideoById(sourceVideoId)?.director_id, director: getVideoById(sourceVideoId)?.director },
+      { directorId: targetId, director: 'Target Director' }
     )
     assert.equal(result.transferredVideoCount, 1)
     assert.equal(result.imagePath, 'avatars/target.jpg')
@@ -160,8 +161,8 @@ describe('directorMergeService', () => {
     assert.equal(classificationQueryService.getDirector(targetId)?.countryRegion, null)
     assert.equal(classificationQueryService.getDirector(sourceId)?.mainName, 'Source')
     assert.deepEqual(
-      getDb().prepare('SELECT director_id, director FROM videos WHERE id = ?').get(sourceVideoId),
-      { director_id: sourceId, director: 'Source' }
+      { directorId: getVideoById(sourceVideoId)?.director_id, director: getVideoById(sourceVideoId)?.director },
+      { directorId: sourceId, director: 'Source' }
     )
     assert.deepEqual(deletedImages, [])
   })

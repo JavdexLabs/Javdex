@@ -82,8 +82,8 @@ describe('classificationImageService', () => {
     const videoCover = mediaAssetStore.importCover('COVER-1', sourcePath)
     const videoId = Number(
       getDb()
-        .prepare('INSERT INTO videos (code, cover_path, series_id, series) VALUES (?, ?, ?, ?)')
-        .run('COVER-1', videoCover, seriesId, 'Cover Series').lastInsertRowid
+        .prepare('INSERT INTO videos (code, cover_path, series_id) VALUES (?, ?, ?)')
+        .run('COVER-1', videoCover, seriesId).lastInsertRowid
     )
 
     await classificationImageService.setImage(
@@ -101,11 +101,11 @@ describe('classificationImageService', () => {
     ])
 
     const insertVideo = getDb().prepare(
-      'INSERT INTO videos (code, cover_path, series_id, series) VALUES (?, ?, ?, ?)'
+      'INSERT INTO videos (code, cover_path, series_id) VALUES (?, ?, ?)'
     )
     getDb().transaction(() => {
       for (let index = 2; index <= 101; index += 1) {
-        insertVideo.run(`COVER-${index}`, videoCover, seriesId, 'Cover Series')
+        insertVideo.run(`COVER-${index}`, videoCover, seriesId)
       }
     })()
     const candidates = classificationQueryService.listImageCandidates({

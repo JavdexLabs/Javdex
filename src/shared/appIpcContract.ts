@@ -2,8 +2,6 @@ import { IPC } from './ipc-channels'
 import type { LlmModelDefinition } from './llmProviders'
 import type {
   AssetCryptoProgress,
-  FacetItem,
-  FacetType,
   LibraryOverviewStats,
   LibraryPathRemovalPreview,
   ManualImportResult,
@@ -128,8 +126,6 @@ export interface AppIpcContract {
 
   [IPC.TAG_LIST]: { args: []; result: TagListItem[] }
   [IPC.TAG_LIST_MANUAL]: { args: []; result: TagListItem[] }
-  [IPC.FACET_LIST]: { args: [type: FacetType]; result: FacetItem[] }
-  [IPC.FACET_DELETE]: { args: [type: FacetType, value: string]; result: boolean }
   [IPC.ORGANIZATION_LIST]: {
     args: [query: OrganizationListQuery]
     result: OrganizationListItem[]

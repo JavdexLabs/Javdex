@@ -147,9 +147,9 @@ export function createDirectorMergeService(
         writeDirectorLinks(db, target.id, links)
         const transferredVideoCount = db
           .prepare(
-            'UPDATE videos SET director_id = ?, director = ?, updated_at = ? WHERE director_id = ?'
+            'UPDATE videos SET director_id = ?, updated_at = ? WHERE director_id = ?'
           )
-          .run(target.id, target.main_name, now, source.id).changes
+          .run(target.id, now, source.id).changes
         db.prepare('DELETE FROM directors WHERE id = ?').run(source.id)
         return {
           targetId: target.id,

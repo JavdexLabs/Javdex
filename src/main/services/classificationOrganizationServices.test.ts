@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
+import { getVideoById } from '../db/videoRepo'
 import { classificationQueryService } from './classificationQueryService'
 import { classificationMaintenanceService } from './classificationMaintenanceService'
 
@@ -215,13 +216,11 @@ describe('classification organization query and maintenance services', () => {
       assert.equal(detail?.endedYear, 2024)
       assert.equal(detail?.links.length, 2)
       assert.deepEqual(
-        getDb()
-          .prepare(
-            `SELECT maker_organization_id, maker
-             FROM videos WHERE id = ?`
-          )
-          .get(videoId),
-        { maker_organization_id: organizationId, maker: 'After' }
+        {
+          organizationId: getVideoById(videoId)?.maker_organization_id,
+          maker: getVideoById(videoId)?.maker
+        },
+        { organizationId, maker: 'After' }
       )
     })
   })

@@ -453,13 +453,18 @@ describe('VideoMaintenanceService', () => {
 
     videos.clearMetadata(1)
 
-    const row = db.prepare('SELECT title, summary, maker, scraped_status FROM videos WHERE id = 1').get() as {
+    const row = db.prepare('SELECT title, summary, maker_organization_id, scraped_status FROM videos WHERE id = 1').get() as {
       title: string | null
       summary: string | null
-      maker: string | null
+      maker_organization_id: number | null
       scraped_status: number
     }
-    assert.deepEqual(row, { title: null, summary: null, maker: null, scraped_status: 0 })
+    assert.deepEqual(row, {
+      title: null,
+      summary: null,
+      maker_organization_id: null,
+      scraped_status: 0
+    })
     assert.equal((db.prepare('SELECT COUNT(*) AS c FROM video_tag').get() as { c: number }).c, 1)
     const kept = db.prepare('SELECT t.name FROM tags t JOIN video_tag vt ON vt.tag_id = t.id').get() as {
       name: string

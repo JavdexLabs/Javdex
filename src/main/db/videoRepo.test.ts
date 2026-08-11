@@ -20,7 +20,8 @@ import {
   markScrapeSucceeded,
   removeManualVideoTag,
   setVideoPosterPath,
-  setPrimaryVideoResource
+  setPrimaryVideoResource,
+  updateVideoFields
 } from './videoRepo'
 
 let tempRoot: string | null = null
@@ -110,6 +111,15 @@ describe('videoRepo.scrapeStatus', () => {
 })
 
 describe('videoRepo.listVideos', () => {
+  it('rejects attempts to restore classification text storage through generic updates', () => {
+    setupDb()
+    assert.throws(
+      () => updateVideoFields(1, { maker: 'Legacy Maker' } as never),
+      /更新参数无效/
+    )
+    assert.equal(listVideos({ makerOrganizationId: 1 }).items[0]?.maker, 'Maker A')
+  })
+
   it('sorts and paginates videos', () => {
     setupDb()
     const page = listVideos({ sortBy: 'add_time', sortDir: 'desc', limit: 1, offset: 0 })
@@ -132,7 +142,10 @@ describe('videoRepo.listVideos', () => {
       addTime: '2024-06-01'
     })
 
-    const result = listVideos({ director: 'Director A', sortBy: 'release_date', sortDir: 'desc' })
+    const directorId = (db.prepare("SELECT id FROM directors WHERE main_name = 'Director A'").get() as {
+      id: number
+    }).id
+    const result = listVideos({ directorId, sortBy: 'release_date', sortDir: 'desc' })
 
     assert.equal(result.total, 2)
     assert.deepEqual(
@@ -143,10 +156,14 @@ describe('videoRepo.listVideos', () => {
 
   it('filters by status, year and facet fields', () => {
     setupDb()
+    const db = getDb()
+    const makerOrganizationId = (
+      db.prepare("SELECT id FROM organizations WHERE main_name = 'Maker A'").get() as { id: number }
+    ).id
     const result = listVideos({
       scrapedStatus: 1,
       year: 2024,
-      maker: 'Maker A',
+      makerOrganizationId,
       sortBy: 'code',
       sortDir: 'asc'
     })

@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
+import { getVideoById } from '../db/videoRepo'
 import { classificationMaintenanceService } from './classificationMaintenanceService'
 import { classificationQueryService } from './classificationQueryService'
 import { videoQueryService } from './videoQueryService'
@@ -69,8 +70,8 @@ describe('classification series query and maintenance services', () => {
       assert.equal(detail?.releaseYearEnd, 2022)
       assert.equal(detail?.fallbackCoverPath, 'covers/series.jpg')
       assert.deepEqual(
-        getDb().prepare('SELECT series_id, series FROM videos WHERE id = ?').get(videoId),
-        { series_id: seriesId, series: 'After' }
+        { seriesId: getVideoById(videoId)?.series_id, series: getVideoById(videoId)?.series },
+        { seriesId, series: 'After' }
       )
     })
   })

@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
+import { getVideoById } from '../db/videoRepo'
 import { classificationMaintenanceService } from './classificationMaintenanceService'
 import { classificationQueryService } from './classificationQueryService'
 
@@ -81,8 +82,8 @@ describe('classification director query and maintenance services', () => {
       assert.equal(detail?.fallbackCoverPath, 'covers/dir.jpg')
       assert.equal(detail?.links[0]?.label, 'example.com')
       assert.deepEqual(
-        getDb().prepare('SELECT director_id, director FROM videos WHERE id = ?').get(videoId),
-        { director_id: id, director: 'After' },
+        { directorId: getVideoById(videoId)?.director_id, director: getVideoById(videoId)?.director },
+        { directorId: id, director: 'After' }
       )
     })
   })

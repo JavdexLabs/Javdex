@@ -1,10 +1,10 @@
 import { IPC } from './ipc-channels'
 import type {
   CorrectImportResult,
-  Video,
   VideoAsset,
   VideoDetail,
   VideoEditInput,
+  VideoFieldUpdateInput,
   VideoListResult,
   VideoLinkResourceImportInput,
   VideoLinkResourceUpdateInput,
@@ -25,7 +25,7 @@ import type {
 export interface VideoIpcContract {
   [IPC.VIDEO_LIST]: { args: [query?: VideoQuery]; result: VideoListResult }
   [IPC.VIDEO_GET]: { args: [id: number]; result: VideoDetail | null }
-  [IPC.VIDEO_UPDATE]: { args: [id: number, fields: Partial<Video>]; result: boolean }
+  [IPC.VIDEO_UPDATE]: { args: [id: number, fields: VideoFieldUpdateInput]; result: boolean }
   [IPC.VIDEO_EDIT]: { args: [id: number, input: VideoEditInput]; result: boolean }
   [IPC.VIDEO_CLEAR_META]: { args: [id: number]; result: boolean }
   [IPC.VIDEO_MARK_SCRAPE_SUCCESS]: { args: [id: number]; result: boolean }

@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
+import { getVideoById } from '../db/videoRepo'
 import { classificationMaintenanceService } from './classificationMaintenanceService'
 import { classificationQueryService } from './classificationQueryService'
 import {
@@ -139,17 +140,18 @@ describe('organizationMergeService', () => {
         ['Source', 'https://example.com/source']
       ]
     )
+    const mergedVideo = getVideoById(bothVideoId)
     assert.deepEqual(
-      getDb()
-        .prepare(
-          `SELECT maker_organization_id, maker, publisher_organization_id, publisher
-           FROM videos WHERE id = ?`
-        )
-        .get(bothVideoId),
       {
-        maker_organization_id: targetId,
+        makerOrganizationId: mergedVideo?.maker_organization_id,
+        maker: mergedVideo?.maker,
+        publisherOrganizationId: mergedVideo?.publisher_organization_id,
+        publisher: mergedVideo?.publisher
+      },
+      {
+        makerOrganizationId: targetId,
         maker: 'Target Studio',
-        publisher_organization_id: targetId,
+        publisherOrganizationId: targetId,
         publisher: 'Target Studio'
       }
     )

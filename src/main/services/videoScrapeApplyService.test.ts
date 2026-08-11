@@ -907,8 +907,8 @@ describe('videoScrapeApplyService classification entity resolution', () => {
     )
     assert.equal(cleared.applied, true)
     assert.deepEqual(
-      db.prepare('SELECT maker_organization_id, maker FROM videos WHERE id = 1').get(),
-      { maker_organization_id: null, maker: null }
+      db.prepare('SELECT maker_organization_id FROM videos WHERE id = 1').get(),
+      { maker_organization_id: null }
     )
 
     const filled = applyScrapeResult(
@@ -924,7 +924,7 @@ describe('videoScrapeApplyService classification entity resolution', () => {
     assert.equal(filled.applied, true)
     assert.equal(filled.classifications[0]?.status, 'created')
     assert.equal(
-      (db.prepare('SELECT maker FROM videos WHERE id = 1').get() as { maker: string }).maker,
+      getVideoDetail(1)?.maker,
       'Replacement Maker'
     )
   })
@@ -1148,7 +1148,7 @@ describe('videoScrapeApplyService classification entity resolution', () => {
       /forced director assignment failure/
     )
     assert.deepEqual(
-      db.prepare('SELECT title, maker FROM videos WHERE id = 1').get(),
+      { title: getVideoDetail(1)?.title, maker: getVideoDetail(1)?.maker },
       { title: 'First', maker: 'Maker A' }
     )
     assert.equal(

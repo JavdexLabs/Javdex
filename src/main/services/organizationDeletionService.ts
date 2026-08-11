@@ -13,10 +13,10 @@ import { findSeriesOwnershipScopeConflict } from './seriesOwnershipScopeConflict
 
 const ROLE_COLUMNS: Record<
   OrganizationRole,
-  { idColumn: 'maker_organization_id' | 'publisher_organization_id'; textColumn: 'maker' | 'publisher' }
+  { idColumn: 'maker_organization_id' | 'publisher_organization_id' }
 > = {
-  maker: { idColumn: 'maker_organization_id', textColumn: 'maker' },
-  publisher: { idColumn: 'publisher_organization_id', textColumn: 'publisher' }
+  maker: { idColumn: 'maker_organization_id' },
+  publisher: { idColumn: 'publisher_organization_id' }
 }
 
 interface OrganizationDeletionServiceDependencies {
@@ -152,7 +152,7 @@ export function createOrganizationDeletionService(
         const unlinkedVideoCount = db
           .prepare(
             `UPDATE videos
-             SET ${columns.idColumn} = NULL, ${columns.textColumn} = NULL, updated_at = ?
+             SET ${columns.idColumn} = NULL, updated_at = ?
              WHERE ${columns.idColumn} = ?`
           )
           .run(new Date().toISOString(), id).changes
@@ -177,13 +177,13 @@ export function createOrganizationDeletionService(
         const now = new Date().toISOString()
         const unlinkedMakerVideoCount = db
           .prepare(
-            `UPDATE videos SET maker_organization_id = NULL, maker = NULL, updated_at = ?
+            `UPDATE videos SET maker_organization_id = NULL, updated_at = ?
              WHERE maker_organization_id = ?`
           )
           .run(now, id).changes
         const unlinkedPublisherVideoCount = db
           .prepare(
-            `UPDATE videos SET publisher_organization_id = NULL, publisher = NULL, updated_at = ?
+            `UPDATE videos SET publisher_organization_id = NULL, updated_at = ?
              WHERE publisher_organization_id = ?`
           )
           .run(now, id).changes

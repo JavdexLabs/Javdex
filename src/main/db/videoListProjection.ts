@@ -10,9 +10,18 @@ const VIDEO_RESOURCE_KINDS = new Set<VideoResourceKind>([
 
 export type VideoListProjectionRow = Video & { resource_kinds_csv?: string | null }
 
+/** Classification names are read-model projections; videos persist only stable entity ids. */
+export function videoClassificationSelectExtras(videoAlias = 'v'): string {
+  return `,
+    (SELECT o.main_name FROM organizations o WHERE o.id = ${videoAlias}.maker_organization_id) AS maker,
+    (SELECT o.main_name FROM organizations o WHERE o.id = ${videoAlias}.publisher_organization_id) AS publisher,
+    (SELECT s.main_name FROM series s WHERE s.id = ${videoAlias}.series_id) AS series,
+    (SELECT d.main_name FROM directors d WHERE d.id = ${videoAlias}.director_id) AS director`
+}
+
 /** Shared projection for every surface that renders a video card. */
 export function videoListSelectExtras(videoAlias = 'v'): string {
-  return `,
+  return `${videoClassificationSelectExtras(videoAlias)},
     (SELECT vr.kind
      FROM video_resources vr
      WHERE vr.video_id = ${videoAlias}.id AND vr.is_primary = 1

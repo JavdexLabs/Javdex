@@ -1,8 +1,6 @@
 import { IPC } from '@shared/ipc-channels'
-import type { FacetItem, FacetType } from '@shared/libraryTypes'
-import { deleteFacetEntry, listFacet } from '../db/facetRepo'
-import { listTags, listManualTags } from '../db/tagRepo'
 import { appCommandAdapter } from './appContractAdapter'
+import { tagQueryService } from '../services/tagQueryService'
 import { classificationQueryService } from '../services/classificationQueryService'
 import { classificationMaintenanceService } from '../services/classificationMaintenanceService'
 import { classificationImageService } from '../services/classificationImageService'
@@ -110,20 +108,13 @@ export function registerClassificationHandlers(
 export function registerFacetHandlers(): void {
   appCommandAdapter.register(
     IPC.TAG_LIST,
-    (): Array<{ id: number; name: string; video_count: number }> => listTags()
+    (): Array<{ id: number; name: string; video_count: number }> => tagQueryService.list()
   )
 
   appCommandAdapter.register(
     IPC.TAG_LIST_MANUAL,
-    (): Array<{ id: number; name: string; video_count: number }> => listManualTags()
+    (): Array<{ id: number; name: string; video_count: number }> => tagQueryService.listManual()
   )
-
-  appCommandAdapter.register(IPC.FACET_LIST, (type): FacetItem[] => listFacet(type))
-
-  appCommandAdapter.register(IPC.FACET_DELETE, (type, value): boolean => {
-    deleteFacetEntry(type, value)
-    return true
-  })
 
   registerClassificationHandlers()
 }

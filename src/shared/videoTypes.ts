@@ -153,13 +153,9 @@ export interface VideoQuery {
   actressId?: number
   tagId?: number
   tagIds?: number[]
-  maker?: string
-  publisher?: string
   makerOrganizationId?: number
   publisherOrganizationId?: number
-  series?: string
   seriesId?: number
-  director?: string
   directorId?: number
   codePrefix?: string
   /** OR filter; `none` matches videos with zero resource rows. */
@@ -170,17 +166,25 @@ export interface VideoQuery {
   offset?: number
 }
 
+export const VIDEO_FIELD_UPDATE_KEYS = [
+  'title',
+  'summary',
+  'release_date',
+  'duration_seconds'
+] as const
+
+export type VideoFieldUpdateInput = Partial<
+  Pick<Video, (typeof VIDEO_FIELD_UPDATE_KEYS)[number]>
+>
+
 export interface VideoEditInput {
   title?: string | null
   summary?: string | null
   release_date?: string | null
-  maker?: string | null
-  publisher?: string | null
   makerOrganization?: OrganizationAssignmentInput | null
   publisherOrganization?: OrganizationAssignmentInput | null
   directorAssignment?: DirectorAssignmentInput | null
   seriesAssignment?: SeriesAssignmentInput | null
-  director?: string | null
   duration_seconds?: number | null
   rating?: number
   tags?: string[]

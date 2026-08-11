@@ -19,6 +19,14 @@ function rowCount(db: Database.Database, table: string): number {
   return (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n
 }
 
+function columnNamesForTest(db: Database.Database, table: string): Set<string> {
+  return new Set(
+    (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(
+      (column) => column.name
+    )
+  )
+}
+
 function tableExistsForTest(db: Database.Database, table: string): boolean {
   return Boolean(
     db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)
@@ -120,7 +128,7 @@ function createV7ClassificationSchema(db: Database.Database): void {
 }
 
 describe('database schema', () => {
-  it('migrates legacy classification text into stable entities without changing legacy browsing data', () => {
+  it('migrates legacy classification text into stable entities and retires legacy storage', () => {
     const db = new Database(':memory:')
     try {
       createV7ClassificationSchema(db)
@@ -236,16 +244,12 @@ describe('database schema', () => {
         ]
       )
 
-      assert.deepEqual(
-        db.prepare('SELECT maker, publisher, series, director FROM videos WHERE id = 1').get(),
-        {
-          maker: 'Ｓ １',
-          publisher: 'Publisher A',
-          series: 'Series A',
-          director: 'Director A'
-        }
-      )
-      assert.equal(rowCount(db, 'facet_entries'), 4)
+      const videoColumns = columnNamesForTest(db, 'videos')
+      assert.equal(videoColumns.has('maker'), false)
+      assert.equal(videoColumns.has('publisher'), false)
+      assert.equal(videoColumns.has('series'), false)
+      assert.equal(videoColumns.has('director'), false)
+      assert.equal(tableExistsForTest(db, 'facet_entries'), false)
 
       const snapshot = {
         organizations: rowCount(db, 'organizations'),
@@ -269,6 +273,101 @@ describe('database schema', () => {
         },
         snapshot
       )
+    } finally {
+      db.close()
+    }
+  })
+
+  it('retires v8 text storage without changing video metadata, entity ids, or child resources', () => {
+    const db = new Database(':memory:')
+    try {
+      migrateDatabase(db)
+      db.exec(`
+        ALTER TABLE videos ADD COLUMN maker TEXT;
+        ALTER TABLE videos ADD COLUMN publisher TEXT;
+        ALTER TABLE videos ADD COLUMN series TEXT;
+        ALTER TABLE videos ADD COLUMN director TEXT;
+        CREATE INDEX idx_videos_maker ON videos(maker);
+        CREATE INDEX idx_videos_publisher ON videos(publisher);
+        CREATE INDEX idx_videos_series ON videos(series);
+        CREATE INDEX idx_videos_director ON videos(director);
+        CREATE TABLE facet_entries (
+          type TEXT NOT NULL,
+          value TEXT NOT NULL,
+          PRIMARY KEY (type, value)
+        );
+      `)
+      const organizationId = Number(
+        db.prepare("INSERT INTO organizations (main_name) VALUES ('Studio')").run().lastInsertRowid
+      )
+      const directorId = Number(
+        db.prepare("INSERT INTO directors (main_name) VALUES ('Director')").run().lastInsertRowid
+      )
+      const seriesId = Number(
+        db.prepare("INSERT INTO series (main_name) VALUES ('Series')").run().lastInsertRowid
+      )
+      const videoId = Number(
+        db
+          .prepare(
+            `INSERT INTO videos (
+               code, title, summary, rating, release_date, maker, publisher, series, director,
+               maker_organization_id, publisher_organization_id, series_id, director_id,
+               duration_seconds, scraped_status, updated_at, add_time
+             ) VALUES (
+               'V8-KEEP', 'Title', 'Summary', 5, '2024-01-02', 'Studio', 'Studio', 'Series',
+               'Director', ?, ?, ?, ?, 7200, 1, '2024-01-03', '2024-01-04'
+             )`
+          )
+          .run(organizationId, organizationId, seriesId, directorId).lastInsertRowid
+      )
+      db.prepare(
+        `INSERT INTO video_resources
+           (video_id, kind, locator, resource_key, size_bytes, is_primary)
+         VALUES (?, 'web', 'https://example.test/watch', 'http:v8-keep', 1234, 1)`
+      ).run(videoId)
+      db.prepare(
+        `INSERT INTO video_assets (video_id, type, position, remote_url)
+         VALUES (?, 'sample', 0, 'https://example.test/sample.jpg')`
+      ).run(videoId)
+      db.prepare("INSERT INTO facet_entries (type, value) VALUES ('maker', 'Unused')").run()
+      db.pragma('user_version = 8')
+
+      migrateDatabase(db)
+
+      assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+      assert.deepEqual(
+        db
+          .prepare(
+            `SELECT code, title, summary, rating, release_date, maker_organization_id,
+                    publisher_organization_id, series_id, director_id, duration_seconds,
+                    scraped_status, updated_at, add_time
+             FROM videos WHERE id = ?`
+          )
+          .get(videoId),
+        {
+          code: 'V8-KEEP',
+          title: 'Title',
+          summary: 'Summary',
+          rating: 5,
+          release_date: '2024-01-02',
+          maker_organization_id: organizationId,
+          publisher_organization_id: organizationId,
+          series_id: seriesId,
+          director_id: directorId,
+          duration_seconds: 7200,
+          scraped_status: 1,
+          updated_at: '2024-01-03',
+          add_time: '2024-01-04'
+        }
+      )
+      assert.equal(rowCount(db, 'video_resources'), 1)
+      assert.equal(rowCount(db, 'video_assets'), 1)
+      assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
+      assert.equal(tableExistsForTest(db, 'facet_entries'), false)
+      const columns = columnNamesForTest(db, 'videos')
+      for (const column of ['maker', 'publisher', 'series', 'director']) {
+        assert.equal(columns.has(column), false)
+      }
     } finally {
       db.close()
     }
@@ -635,7 +734,6 @@ describe('database schema', () => {
         'video_actress',
         'tags',
         'video_tag',
-        'facet_entries',
         'video_external_ids',
         'video_external_stats',
         'video_assets',
@@ -663,7 +761,8 @@ describe('database schema', () => {
       assert.equal(indexNames(db).includes('idx_videos_release_date'), true)
       assert.equal(indexNames(db).includes('idx_video_resources_key'), true)
       assert.equal(indexNames(db).includes('idx_video_tag_tag_id'), true)
-      assert.equal(indexNames(db).includes('idx_videos_maker'), true)
+      assert.equal(indexNames(db).includes('idx_videos_maker'), false)
+      assert.equal(indexNames(db).includes('idx_videos_maker_organization_id'), true)
       assert.equal(indexNames(db).includes('idx_playlist_video_video_id'), true)
       assert.equal(indexNames(db).includes('idx_actress_names_one_main'), true)
       assert.equal(indexNames(db).includes('idx_actresses_scraped_status'), true)

@@ -37,10 +37,10 @@ import {
 
 const VIDEO_ROLE_FIELDS: Record<
   OrganizationRole,
-  { idColumn: 'maker_organization_id' | 'publisher_organization_id'; textColumn: 'maker' | 'publisher' }
+  { idColumn: 'maker_organization_id' | 'publisher_organization_id' }
 > = {
-  maker: { idColumn: 'maker_organization_id', textColumn: 'maker' },
-  publisher: { idColumn: 'publisher_organization_id', textColumn: 'publisher' }
+  maker: { idColumn: 'maker_organization_id' },
+  publisher: { idColumn: 'publisher_organization_id' }
 }
 
 const ORGANIZATION_STATUSES = new Set<OrganizationStatus>(['unknown', 'active', 'inactive'])
@@ -640,12 +640,6 @@ export const classificationMaintenanceService: ClassificationMaintenanceService 
         )
       writeOrganizationNames(database, id, profile.mainName, profile.aliases)
       writeOrganizationLinks(database, id, profile.links)
-      database
-        .prepare('UPDATE videos SET maker = ? WHERE maker_organization_id = ?')
-        .run(profile.mainName, id)
-      database
-        .prepare('UPDATE videos SET publisher = ? WHERE publisher_organization_id = ?')
-        .run(profile.mainName, id)
       return true
     })()
   },
@@ -662,7 +656,7 @@ export const classificationMaintenanceService: ClassificationMaintenanceService 
         database
           .prepare(
             `UPDATE videos
-             SET ${fields.idColumn} = NULL, ${fields.textColumn} = NULL, updated_at = ?
+             SET ${fields.idColumn} = NULL, updated_at = ?
              WHERE id = ?`
           )
           .run(new Date().toISOString(), videoId)
@@ -696,10 +690,10 @@ export const classificationMaintenanceService: ClassificationMaintenanceService 
       database
         .prepare(
           `UPDATE videos
-           SET ${fields.idColumn} = ?, ${fields.textColumn} = ?, updated_at = ?
+           SET ${fields.idColumn} = ?, updated_at = ?
            WHERE id = ?`
         )
-        .run(organizationId, organization.main_name, new Date().toISOString(), videoId)
+        .run(organizationId, new Date().toISOString(), videoId)
       return { organizationId, mainName: organization.main_name }
     })()
   },
@@ -747,7 +741,6 @@ export const classificationMaintenanceService: ClassificationMaintenanceService 
         )
       writeDirectorNames(database, id, profile.mainName, profile.aliases)
       writeDirectorLinks(database, id, profile.links)
-      database.prepare('UPDATE videos SET director = ? WHERE director_id = ?').run(profile.mainName, id)
       return true
     })()
   },
@@ -760,7 +753,7 @@ export const classificationMaintenanceService: ClassificationMaintenanceService 
       }
       if (assignment == null) {
         database
-          .prepare('UPDATE videos SET director_id = NULL, director = NULL, updated_at = ? WHERE id = ?')
+          .prepare('UPDATE videos SET director_id = NULL, updated_at = ? WHERE id = ?')
           .run(new Date().toISOString(), videoId)
         return { directorId: null, mainName: null }
       }
@@ -770,8 +763,8 @@ export const classificationMaintenanceService: ClassificationMaintenanceService 
           : createDirectorRecord(database, { mainName: assignment.createName })
       const director = readStoredDirector(database, id)
       database
-        .prepare('UPDATE videos SET director_id = ?, director = ?, updated_at = ? WHERE id = ?')
-        .run(id, director.main_name, new Date().toISOString(), videoId)
+        .prepare('UPDATE videos SET director_id = ?, updated_at = ? WHERE id = ?')
+        .run(id, new Date().toISOString(), videoId)
       return { directorId: id, mainName: director.main_name }
     })()
   },
@@ -826,7 +819,6 @@ export const classificationMaintenanceService: ClassificationMaintenanceService 
         )
       writeSeriesNames(database, id, profile.ownerOrganizationId, profile.mainName, profile.aliases)
       writeSeriesLinks(database, id, profile.links)
-      database.prepare('UPDATE videos SET series = ? WHERE series_id = ?').run(profile.mainName, id)
       return true
     })()
   },
@@ -839,7 +831,7 @@ export const classificationMaintenanceService: ClassificationMaintenanceService 
       }
       if (assignment == null) {
         database
-          .prepare('UPDATE videos SET series_id = NULL, series = NULL, updated_at = ? WHERE id = ?')
+          .prepare('UPDATE videos SET series_id = NULL, updated_at = ? WHERE id = ?')
           .run(new Date().toISOString(), videoId)
         return { seriesId: null, mainName: null }
       }
@@ -859,8 +851,8 @@ export const classificationMaintenanceService: ClassificationMaintenanceService 
       }
       const series = readStoredSeries(database, id)
       database
-        .prepare('UPDATE videos SET series_id = ?, series = ?, updated_at = ? WHERE id = ?')
-        .run(id, series.main_name, new Date().toISOString(), videoId)
+        .prepare('UPDATE videos SET series_id = ?, updated_at = ? WHERE id = ?')
+        .run(id, new Date().toISOString(), videoId)
       return { seriesId: id, mainName: series.main_name }
     })()
   }

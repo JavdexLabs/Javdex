@@ -192,17 +192,17 @@ export function createOrganizationMergeService(
         const transferredMakerVideoCount = db
           .prepare(
             `UPDATE videos
-             SET maker_organization_id = ?, maker = ?, updated_at = ?
+             SET maker_organization_id = ?, updated_at = ?
              WHERE maker_organization_id = ?`
           )
-          .run(target.id, target.main_name, now, source.id).changes
+          .run(target.id, now, source.id).changes
         const transferredPublisherVideoCount = db
           .prepare(
             `UPDATE videos
-             SET publisher_organization_id = ?, publisher = ?, updated_at = ?
+             SET publisher_organization_id = ?, updated_at = ?
              WHERE publisher_organization_id = ?`
           )
-          .run(target.id, target.main_name, now, source.id).changes
+          .run(target.id, now, source.id).changes
         const transferredChildCount = db
           .prepare(
             `UPDATE organizations SET parent_organization_id = ?, updated_at = ?

@@ -85,7 +85,7 @@ export function createClassificationDeletionService(
         const impact = readDirectorImpact(db, id)
         const unlinked = db
           .prepare(
-            `UPDATE videos SET director_id = NULL, director = NULL, updated_at = ?
+            `UPDATE videos SET director_id = NULL, updated_at = ?
              WHERE director_id = ?`
           )
           .run(new Date().toISOString(), id).changes
@@ -111,7 +111,7 @@ export function createClassificationDeletionService(
         const now = new Date().toISOString()
         const unlinked = db
           .prepare(
-            `UPDATE videos SET series_id = NULL, series = NULL, updated_at = ?
+            `UPDATE videos SET series_id = NULL, updated_at = ?
              WHERE series_id = ?`
           )
           .run(now, id).changes

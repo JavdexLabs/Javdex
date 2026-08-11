@@ -202,10 +202,6 @@ CREATE TABLE IF NOT EXISTS videos (
     original_title TEXT,
     rating INTEGER DEFAULT 0,
     release_date TEXT,
-    maker TEXT,
-    publisher TEXT,
-    series TEXT,
-    director TEXT,
     maker_organization_id INTEGER,
     publisher_organization_id INTEGER,
     series_id INTEGER,
@@ -225,10 +221,6 @@ CREATE INDEX IF NOT EXISTS idx_videos_add_time ON videos(add_time);
 CREATE INDEX IF NOT EXISTS idx_videos_release_date ON videos(release_date);
 CREATE INDEX IF NOT EXISTS idx_videos_rating ON videos(rating);
 CREATE INDEX IF NOT EXISTS idx_videos_scraped_status ON videos(scraped_status);
-CREATE INDEX IF NOT EXISTS idx_videos_maker ON videos(maker);
-CREATE INDEX IF NOT EXISTS idx_videos_publisher ON videos(publisher);
-CREATE INDEX IF NOT EXISTS idx_videos_series ON videos(series);
-CREATE INDEX IF NOT EXISTS idx_videos_director ON videos(director);
 CREATE INDEX IF NOT EXISTS idx_videos_maker_organization_id ON videos(maker_organization_id);
 CREATE INDEX IF NOT EXISTS idx_videos_publisher_organization_id ON videos(publisher_organization_id);
 CREATE INDEX IF NOT EXISTS idx_videos_series_id ON videos(series_id);
@@ -311,14 +303,6 @@ CREATE TABLE IF NOT EXISTS video_tag (
 );
 CREATE INDEX IF NOT EXISTS idx_video_tag_tag_id ON video_tag(tag_id);
 CREATE INDEX IF NOT EXISTS idx_video_tag_origin ON video_tag(origin);
-
--- Registry of known facet values (maker / publisher / series / director). Keeps entries
--- visible after all linked videos lose that field, so they can be deleted.
-CREATE TABLE IF NOT EXISTS facet_entries (
-    type TEXT NOT NULL CHECK(type IN ('maker', 'publisher', 'series', 'director')),
-    value TEXT NOT NULL,
-    PRIMARY KEY (type, value)
-);
 
 CREATE TABLE IF NOT EXISTS video_external_ids (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

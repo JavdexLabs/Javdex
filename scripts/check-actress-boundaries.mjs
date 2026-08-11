@@ -154,6 +154,29 @@ for (const specifier of importsOf(videoHandler)) {
   }
 }
 
+const classificationHandler = 'src/main/ipc/facetHandlers.ts'
+const classificationApplicationSeams = new Set([
+  '../services/tagQueryService',
+  '../services/classificationQueryService',
+  '../services/classificationMaintenanceService',
+  '../services/classificationImageService',
+  '../services/directorMergeService',
+  '../services/seriesMergeService',
+  '../services/organizationMergeService',
+  '../services/classificationDeletionService',
+  '../services/organizationDeletionService'
+])
+for (const specifier of importsOf(classificationHandler)) {
+  if (
+    /\.\.\/(db|scrapers)\//.test(specifier) ||
+    (/\.\.\/services\//.test(specifier) && !classificationApplicationSeams.has(specifier))
+  ) {
+    violations.push(
+      `${classificationHandler}: classification IPC must delegate through approved application seams`
+    )
+  }
+}
+
 const scrapeHandler = 'src/main/ipc/scrapeHandlers.ts'
 for (const specifier of importsOf(scrapeHandler)) {
   if (
@@ -168,17 +191,41 @@ for (const specifier of importsOf(scrapeHandler)) {
   }
 }
 
+function isForbiddenDatabaseImport(specifier) {
+  return (
+    /\.\.\/(services|ipc|scrapers)\//.test(specifier) ||
+    specifier === 'electron' ||
+    /^(?:node:)?(?:fs|path)(?:\/|$)/.test(specifier)
+  )
+}
+
+for (const probe of ['node:fs', 'node:fs/promises', 'node:path', 'node:path/posix']) {
+  if (!isForbiddenDatabaseImport(probe)) {
+    throw new Error(`Database dependency guard missed ${probe}`)
+  }
+}
+
 for (const file of sourceFiles('src/main/db')) {
   if (/\.test\.[cm]?[jt]sx?$/.test(file)) continue
   for (const specifier of importsOf(file)) {
-    if (
-      /\.\.\/(services|ipc|scrapers)\//.test(specifier) ||
-      specifier === 'electron' ||
-      specifier === 'node:fs' ||
-      specifier === 'node:path'
-    ) {
+    if (isForbiddenDatabaseImport(specifier)) {
       violations.push(`${file}: database module must only depend on database and shared types, not ${specifier}`)
     }
+  }
+}
+
+const classificationHandlerSource = readFileSync(classificationHandler, 'utf8')
+const classificationHandlerPolicyPatterns = [
+  [/(?:^|\s)(?:if|switch|for|while|try)\s*(?:\(|\{)/m, 'control flow'],
+  [/\.(?:prepare|exec|transaction)\s*\(/, 'database operations'],
+  [/\b(?:readFile|writeFile|unlink|rename|copyFile|mkdir|rm)\w*\s*\(/, 'filesystem operations'],
+  [/adapter\.register\([\s\S]*?=>\s*\{/, 'block-bodied IPC callbacks']
+]
+for (const [pattern, label] of classificationHandlerPolicyPatterns) {
+  if (pattern.test(classificationHandlerSource)) {
+    violations.push(
+      `${classificationHandler}: ${label} belong in an application service, not an IPC handler`
+    )
   }
 }
 

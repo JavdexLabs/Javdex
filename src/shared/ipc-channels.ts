@@ -93,10 +93,6 @@ export const IPC = {
   TAG_LIST: 'tag:list',
   TAG_LIST_MANUAL: 'tag:listManual',
 
-  // Facets (studio / series / director)
-  FACET_LIST: 'facet:list',
-  FACET_DELETE: 'facet:delete',
-
   // Classification entities
   ORGANIZATION_LIST: 'organization:list',
   ORGANIZATION_GET: 'organization:get',

@@ -3,7 +3,7 @@ import { normalizeActressName } from './actressNameNormalization'
 import { normalizeClassificationName } from '../../shared/classificationNameNormalization'
 import { CLASSIFICATION_V8_SCHEMA_SQL, SCHEMA_SQL } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 8
+export const CURRENT_SCHEMA_VERSION = 9
 
 type Migration = {
   version: number
@@ -642,6 +642,24 @@ function migrateToV8(database: Database.Database): void {
   migrateVideoClassificationReferences(database, organizationIds, directorIds, seriesIds)
 }
 
+function migrateToV9(database: Database.Database): void {
+  if (tableExists(database, 'videos')) {
+    database.exec(`
+      DROP INDEX IF EXISTS idx_videos_maker;
+      DROP INDEX IF EXISTS idx_videos_publisher;
+      DROP INDEX IF EXISTS idx_videos_series;
+      DROP INDEX IF EXISTS idx_videos_director;
+    `)
+    let columns = columnNames(database, 'videos')
+    for (const column of ['maker', 'publisher', 'series', 'director']) {
+      if (!columns.has(column)) continue
+      database.exec(`ALTER TABLE videos DROP COLUMN ${column}`)
+      columns = columnNames(database, 'videos')
+    }
+  }
+  database.exec('DROP TABLE IF EXISTS facet_entries')
+}
+
 const MIGRATIONS: Migration[] = [
   {
     version: 2,
@@ -670,6 +688,10 @@ const MIGRATIONS: Migration[] = [
   {
     version: 8,
     migrate: migrateToV8
+  },
+  {
+    version: 9,
+    migrate: migrateToV9
   }
 ]
 

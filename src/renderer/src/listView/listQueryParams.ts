@@ -218,13 +218,6 @@ export function actressQueryHash(params: URLSearchParams): string {
   })
 }
 
-export function facetListQueryHash(type: string, params: URLSearchParams): string {
-  return hashListQuery({
-    type,
-    q: (params.get(LIST_PARAM.q) ?? '').trim()
-  })
-}
-
 export function classificationListQueryHash(type: string, params: URLSearchParams): string {
   const { sortBy, sortDir } = parseClassificationSort(
     params.get(LIST_PARAM.sort),
@@ -233,21 +226,6 @@ export function classificationListQueryHash(type: string, params: URLSearchParam
   return hashListQuery({
     type,
     q: (params.get(LIST_PARAM.q) ?? '').trim(),
-    sort: sortBy,
-    dir: sortDir
-  })
-}
-
-export function facetDetailQueryHash(
-  type: string,
-  value: string,
-  params: URLSearchParams
-): string {
-  const { sortBy, sortDir } = parseSort(params.get(LIST_PARAM.sort), params.get(LIST_PARAM.dir))
-  return hashListQuery({
-    scope: 'facet-detail',
-    type,
-    value,
     sort: sortBy,
     dir: sortDir
   })

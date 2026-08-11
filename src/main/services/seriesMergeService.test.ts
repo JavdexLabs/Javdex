@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
+import { getVideoById } from '../db/videoRepo'
 import { classificationMaintenanceService } from './classificationMaintenanceService'
 import { classificationQueryService } from './classificationQueryService'
 import { createSeriesMergeService, seriesMergeService } from './seriesMergeService'
@@ -18,8 +19,8 @@ function setup(): void {
 function createVideo(code: string, seriesId: number): number {
   return Number(
     getDb()
-      .prepare('INSERT INTO videos (code, series_id, series) VALUES (?, ?, ?)')
-      .run(code, seriesId, classificationQueryService.getSeries(seriesId)?.mainName)
+      .prepare('INSERT INTO videos (code, series_id) VALUES (?, ?)')
+      .run(code, seriesId)
       .lastInsertRowid
   )
 }
@@ -114,8 +115,8 @@ describe('seriesMergeService', () => {
       ]
     )
     assert.deepEqual(
-      getDb().prepare('SELECT series_id, series FROM videos WHERE id = ?').get(sourceVideoId),
-      { series_id: targetId, series: 'Target Series' }
+      { seriesId: getVideoById(sourceVideoId)?.series_id, series: getVideoById(sourceVideoId)?.series },
+      { seriesId: targetId, series: 'Target Series' }
     )
     assert.equal(classificationQueryService.getSeries(childId)?.parentSeries?.id, targetId)
     assert.equal(result.transferredVideoCount, 1)
@@ -179,8 +180,8 @@ describe('seriesMergeService', () => {
     assert.equal(classificationQueryService.getSeries(sourceId)?.mainName, 'Source')
     assert.equal(classificationQueryService.getSeries(childId)?.parentSeries?.id, sourceId)
     assert.deepEqual(
-      getDb().prepare('SELECT series_id, series FROM videos WHERE id = ?').get(sourceVideoId),
-      { series_id: sourceId, series: 'Source' }
+      { seriesId: getVideoById(sourceVideoId)?.series_id, series: getVideoById(sourceVideoId)?.series },
+      { seriesId: sourceId, series: 'Source' }
     )
     assert.deepEqual(deletedImages, [])
   })
@@ -258,8 +259,8 @@ describe('seriesMergeService', () => {
     assert.equal(classificationQueryService.getSeries(sourceId)?.mainName, 'Source')
     assert.equal(classificationQueryService.getSeries(childId)?.parentSeries?.id, sourceId)
     assert.deepEqual(
-      getDb().prepare('SELECT series_id, series FROM videos WHERE id = ?').get(sourceVideoId),
-      { series_id: sourceId, series: 'Source' }
+      { seriesId: getVideoById(sourceVideoId)?.series_id, series: getVideoById(sourceVideoId)?.series },
+      { seriesId: sourceId, series: 'Source' }
     )
     assert.deepEqual(deletedImages, [])
   })

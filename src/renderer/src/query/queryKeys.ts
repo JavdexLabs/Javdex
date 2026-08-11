@@ -21,11 +21,6 @@ export const actressKeys = {
   conflictSummary: () => ['actresses', 'conflicts', 'summary'] as const
 }
 
-export const facetKeys = {
-  all: ['facets'] as const,
-  list: (type: string, queryHash: string) => ['facets', 'list', type, queryHash] as const
-}
-
 export const organizationKeys = {
   all: ['organizations'] as const,
   list: (role: OrganizationRole, queryHash: string) =>

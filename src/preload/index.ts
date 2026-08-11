@@ -29,8 +29,8 @@ import type {
 } from '../shared/videoIpcContract'
 import type {
   LastVideoResourceRemovalMode,
-  Video,
   VideoEditInput,
+  VideoFieldUpdateInput,
   VideoLinkResourceImportInput,
   VideoLinkResourceUpdateInput,
   VideoQuery,
@@ -61,7 +61,7 @@ import type {
 } from '../shared/scrapeTypes'
 import type { BatchProgress, BatchScrapeState } from '../shared/batchScrapeTypes'
 import type { AppSettings } from '../shared/settingsTypes'
-import type { LibraryOverviewStats, ScanResult, ScanProgress, PlayResult, FacetType, FacetItem, RenameImportResult, ManualImportResult, AssetCryptoProgress } from '../shared/libraryTypes'
+import type { LibraryOverviewStats, ScanResult, ScanProgress, PlayResult, RenameImportResult, ManualImportResult, AssetCryptoProgress } from '../shared/libraryTypes'
 import type { ActressAvatarSourceInfo, ActressDetail, ActressGalleryAsset, ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../shared/actressTypes'
 import type { IpcResponse } from '../shared/ipcTypes'
 import type { ActressNameConflictGroup, ActressConflictReviewSummary, InspectActressConflictNameInput, InspectActressConflictNameResult, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from '../shared/actressConflictTypes'
@@ -182,7 +182,7 @@ const api = {
   videos: {
     list: (q: VideoQuery) => invokeVideo(IPC.VIDEO_LIST, q),
     get: (id: number) => invokeVideo(IPC.VIDEO_GET, id),
-    update: (id: number, fields: Partial<Video>) => invokeVideo(IPC.VIDEO_UPDATE, id, fields),
+    update: (id: number, fields: VideoFieldUpdateInput) => invokeVideo(IPC.VIDEO_UPDATE, id, fields),
     edit: (id: number, input: VideoEditInput) => invokeVideo(IPC.VIDEO_EDIT, id, input),
     clearMeta: (id: number) => invokeVideo(IPC.VIDEO_CLEAR_META, id),
     markScrapeSuccess: (id: number) => invokeVideo(IPC.VIDEO_MARK_SCRAPE_SUCCESS, id),
@@ -270,10 +270,6 @@ const api = {
       invokeApp(IPC.TAG_LIST),
     listManual: () =>
       invokeApp(IPC.TAG_LIST_MANUAL)
-  },
-  facets: {
-    list: (type: FacetType) => invokeApp(IPC.FACET_LIST, type),
-    remove: (type: FacetType, value: string) => invokeApp(IPC.FACET_DELETE, type, value)
   },
   organizations: {
     list: (query: OrganizationListQuery) => invokeApp(IPC.ORGANIZATION_LIST, query),

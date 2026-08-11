@@ -2,9 +2,9 @@ import fs from 'node:fs'
 import type {
   CorrectImportResult,
   LastVideoResourceRemovalMode,
-  Video,
   VideoAsset,
   VideoEditInput,
+  VideoFieldUpdateInput,
   VideoLinkResourceImportInput,
   VideoLinkResourceUpdateInput,
   VideoResource,
@@ -48,7 +48,7 @@ import { classificationMaintenanceService } from './classificationMaintenanceSer
 import { getDb } from '../db/database'
 
 export interface VideoMaintenanceService {
-  update(id: number, fields: Partial<Video>): boolean
+  update(id: number, fields: VideoFieldUpdateInput): boolean
   edit(id: number, input: VideoEditInput): boolean
   clearMetadata(id: number): boolean
   markScrapeSucceeded(id: number): boolean

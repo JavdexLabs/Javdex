@@ -163,9 +163,9 @@ export function createSeriesMergeService(
         writeSeriesLinks(db, target.id, links)
         const transferredVideoCount = db
           .prepare(
-            'UPDATE videos SET series_id = ?, series = ?, updated_at = ? WHERE series_id = ?'
+            'UPDATE videos SET series_id = ?, updated_at = ? WHERE series_id = ?'
           )
-          .run(target.id, target.main_name, now, source.id).changes
+          .run(target.id, now, source.id).changes
         const transferredChildCount = db
           .prepare(
             `UPDATE series SET parent_series_id = ?, updated_at = ?

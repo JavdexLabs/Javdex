@@ -23,9 +23,13 @@
 - `/playlists/:playlistId`: 清单详情。
 - `/playlists/:playlistId/:id`: 从清单详情打开影片详情。
 - `/facet/:type`: 分类列表。
-- `/facet/:type/v/:valueKey`: 某个分类值的影片列表。
-- `/facet/:type/v/:valueKey/:id`: 从分类值列表打开影片详情。
+- `/facet/:role/o/:organizationId`: 制作商或发行商实体详情。
+- `/facet/director/d/:directorId`: 导演实体详情。
+- `/facet/series/s/:seriesId`: 系列实体详情。
+- `上述实体详情路径/:id`: 从分类实体详情打开影片详情。
 - `.../actress/:actressId`: 从影片详情继续打开演员详情。
+
+分类详情只使用稳定实体 ID。旧的 `/facet/:type/v/:valueKey` 名称路径不提供兼容入口，避免重命名、合并或同名实体导致导航偏移。
 
 不要把所有影片详情强行规约到单一 `/videos/:id`。影片详情需要知道打开来源，才能返回原列表、保留筛选参数和维持用户的扫描位置。
 
@@ -69,7 +73,7 @@
 - `navigateToVideoDetail`: 从当前上下文打开影片详情。
 - `navigateBackFromVideoDetail`: 关闭影片详情并回到原列表面。
 - `navigateToActressFromVideoDetail`: 在影片详情中打开演员详情。
-- `navigateToFacetDetail`: 打开分类值列表。
+- `navigateToOrganizationDetail` / `navigateToDirectorDetail` / `navigateToSeriesDetail`: 打开稳定分类实体详情。
 - `navigateToLibrary` / `navigateToActressList` / `navigateToFacetList` / `navigateToPlaylistList`: 回到一级列表。
 
 新增路由时，按职责分层：
@@ -81,7 +85,7 @@
 
 ## Scroll And Refetch
 
-列表面滚动位置需要绑定到稳定 key。key 应包含列表作用域和影响结果集的筛选 hash，例如 `library:${queryHash}` 或 `facet-detail:${queryHash}`。
+列表面滚动位置需要绑定到稳定 key。key 应包含列表作用域和影响结果集的筛选 hash，例如 `library:${queryHash}` 或 `organization:${role}:${organizationId}:${queryHash}`。
 
 详情关闭或嵌套层关闭后，列表面应静默刷新数据，而不是重新挂载列表。`useListSurfaceRefetch` 用于这个场景。
 

@@ -66,8 +66,8 @@ describe('classificationDeletionService', () => {
 
     assert.deepEqual(result, { id: directorId, unlinkedVideoCount: 2, cleanupFailures: [] })
     assert.deepEqual(
-      getDb().prepare('SELECT title, director_id, director FROM videos WHERE id = ?').get(firstVideoId),
-      { title: 'Keep metadata', director_id: null, director: null }
+      getDb().prepare('SELECT title, director_id FROM videos WHERE id = ?').get(firstVideoId),
+      { title: 'Keep metadata', director_id: null }
     )
     assert.equal(
       (getDb().prepare('SELECT COUNT(*) AS count FROM video_resources WHERE video_id = ?').get(
@@ -105,8 +105,8 @@ describe('classificationDeletionService', () => {
 
     assert.throws(() => service.deleteDirector(id), /forced director delete failure/)
     assert.deepEqual(
-      getDb().prepare('SELECT director_id, director FROM videos WHERE id = ?').get(videoId),
-      { director_id: id, director: 'Rollback Director' }
+      getDb().prepare('SELECT director_id FROM videos WHERE id = ?').get(videoId),
+      { director_id: id }
     )
     assert.ok(getDb().prepare('SELECT 1 FROM directors WHERE id = ?').get(id))
     assert.deepEqual(deletedImages, [])
@@ -139,8 +139,8 @@ describe('classificationDeletionService', () => {
       cleanupFailures: []
     })
     assert.deepEqual(
-      getDb().prepare('SELECT title, series_id, series FROM videos WHERE id = ?').get(firstVideoId),
-      { title: 'Keep metadata', series_id: null, series: null }
+      getDb().prepare('SELECT title, series_id FROM videos WHERE id = ?').get(firstVideoId),
+      { title: 'Keep metadata', series_id: null }
     )
     assert.equal(
       (getDb().prepare('SELECT COUNT(*) AS count FROM video_resources WHERE video_id = ?').get(

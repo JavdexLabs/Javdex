@@ -1,7 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { Ellipsis, Play } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import type { FacetType } from '@shared/libraryTypes'
 import type { ScrapedStatus } from '@shared/commonTypes'
 import type { OrganizationRole } from '@shared/classificationTypes'
 import type {
@@ -13,7 +12,6 @@ import MetaLink from './MetaLink'
 import IconButton from './IconButton'
 import { UI_ICON } from './iconDefaults'
 import {
-  navigateToFacetDetail,
   navigateToDirectorDetail,
   navigateToOrganizationDetail,
   navigateToSeriesDetail
@@ -24,7 +22,6 @@ import { VIDEO_RESOURCE_KIND_LABELS } from './videoResourcePresentation'
 
 export type VideoPrimaryMetaItem =
   | { key: string; label: string; type: 'text'; value: string }
-  | { key: string; label: string; type: 'facet'; facet: FacetType; value: string }
   | {
       key: string
       label: string
@@ -96,77 +93,43 @@ export function buildVideoPrimaryMetaItems(video: VideoDetail): VideoPrimaryMeta
       value: formatDuration(durationSeconds)
     })
   }
-  if (!isBlank(video.maker)) {
-    items.push(
-      video.maker_organization_id == null
-        ? { key: 'maker', label: '制作商', type: 'facet', facet: 'maker', value: video.maker!.trim() }
-        : {
-            key: 'maker',
-            label: '制作商',
-            type: 'organization',
-            role: 'maker',
-            organizationId: video.maker_organization_id,
-            value: video.maker!.trim()
-          }
-    )
+  if (!isBlank(video.maker) && video.maker_organization_id != null) {
+    items.push({
+      key: 'maker',
+      label: '制作商',
+      type: 'organization',
+      role: 'maker',
+      organizationId: video.maker_organization_id,
+      value: video.maker!.trim()
+    })
   }
-  if (!isBlank(video.publisher)) {
-    items.push(
-      video.publisher_organization_id == null
-        ? {
-            key: 'publisher',
-            label: '发行商',
-            type: 'facet',
-            facet: 'publisher',
-            value: video.publisher!.trim()
-          }
-        : {
-            key: 'publisher',
-            label: '发行商',
-            type: 'organization',
-            role: 'publisher',
-            organizationId: video.publisher_organization_id,
-            value: video.publisher!.trim()
-          }
-    )
+  if (!isBlank(video.publisher) && video.publisher_organization_id != null) {
+    items.push({
+      key: 'publisher',
+      label: '发行商',
+      type: 'organization',
+      role: 'publisher',
+      organizationId: video.publisher_organization_id,
+      value: video.publisher!.trim()
+    })
   }
-  if (!isBlank(video.series)) {
-    items.push(
-      video.series_id == null
-        ? {
-            key: 'series',
-            label: '系列',
-            type: 'facet',
-            facet: 'series',
-            value: video.series!.trim()
-          }
-        : {
-            key: 'series',
-            label: '系列',
-            type: 'series',
-            seriesId: video.series_id,
-            value: video.series!.trim()
-          }
-    )
+  if (!isBlank(video.series) && video.series_id != null) {
+    items.push({
+      key: 'series',
+      label: '系列',
+      type: 'series',
+      seriesId: video.series_id,
+      value: video.series!.trim()
+    })
   }
-  if (!isBlank(video.director)) {
-    items.push(
-      video.director_id == null
-        ? {
-            key: 'director',
-            label: '导演',
-            type: 'facet',
-            facet: 'director',
-            value: video.director!.trim()
-          }
-        : {
-            key: 'director',
-            label: '导演',
-            type: 'director',
-            directorId: video.director_id,
-            value: video.director!.trim()
-          }
-    )
+  if (!isBlank(video.director) && video.director_id != null) {
+    items.push({
+      key: 'director',
+      label: '导演',
+      type: 'director',
+      directorId: video.director_id,
+      value: video.director!.trim()
+    })
   }
 
   return items
@@ -529,13 +492,7 @@ export function VideoDetailPrimaryMeta({ video }: { video: VideoDetail }): JSX.E
         <Fragment key={item.key}>
           <span className="meta-key">{item.label}</span>
           <span className="meta-val">
-            {item.type === 'facet' ? (
-              <MetaLink
-                onClick={() => navigateToFacetDetail(navigate, location, item.facet, item.value)}
-              >
-                {item.value}
-              </MetaLink>
-            ) : item.type === 'organization' ? (
+            {item.type === 'organization' ? (
               <MetaLink
                 onClick={() =>
                   navigateToOrganizationDetail(

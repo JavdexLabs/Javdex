@@ -12,13 +12,10 @@ import {
   facetListPath,
   directorDetailPath,
   directorVideoDetailPath,
-  facetVideoDetailPath,
-  facetVideoListPath,
   organizationDetailPath,
   organizationVideoDetailPath,
   parseOrganizationPath,
   parseDirectorPath,
-  parseFacetVideoPath,
   parseSeriesPath,
   seriesDetailPath,
   seriesVideoDetailPath
@@ -30,7 +27,6 @@ import {
   navigateToActressList,
   navigateToActressFromVideoDetail,
   navigateBackFromVideoDetail,
-  navigateToFacetDetail,
   navigateToDirectorDetail,
   navigateToOrganizationDetail,
   navigateToSeriesDetail,
@@ -88,7 +84,7 @@ describe('route builders and parsers', () => {
     })
   })
 
-  it('round-trips playlist and facet detail stacks', () => {
+  it('round-trips playlist and classification entity detail stacks', () => {
     assert.equal(playlistDetailPath(4), '/playlists/4')
     assert.equal(playlistVideoDetailPath(4, 8), '/playlists/4/8')
     assert.deepEqual(parsePlaylistVideoPath('/playlists/4/8/actress/12'), {
@@ -98,14 +94,6 @@ describe('route builders and parsers', () => {
     })
 
     assert.equal(facetListPath('maker'), '/facet/maker')
-    assert.equal(facetVideoListPath('maker', 'A B'), '/facet/maker/v/A%20B')
-    assert.equal(facetVideoDetailPath('maker', 'A B', 5), '/facet/maker/v/A%20B/5')
-    assert.deepEqual(parseFacetVideoPath('/facet/maker/v/A%20B/5/actress/7'), {
-      facetType: 'maker',
-      valueKey: 'A%20B',
-      videoId: 5,
-      actressId: 7
-    })
 
     assert.equal(organizationDetailPath('maker', 12), '/facet/maker/o/12')
     assert.equal(organizationVideoDetailPath('publisher', 12, 5), '/facet/publisher/o/12/5')
@@ -304,7 +292,7 @@ describe('primary navigation memory', () => {
     clearPrimaryNavigationMemory()
     rememberPrimaryListLocation('/detail/42', '?q=hero&status=1')
     rememberPrimaryListLocation('/actresses/8', '?q=sara&gender=female')
-    rememberPrimaryListLocation('/facet/director/v/Test', '?q=miike&sort=rating')
+    rememberPrimaryListLocation('/facet/director/d/21', '?q=miike&sort=rating')
     rememberPrimaryListLocation(
       '/facet/maker/o/12',
       '?q=studio&sort=updated_at&dir=asc&status=1'
@@ -497,45 +485,6 @@ describe('navigation helpers', () => {
     ])
   })
 
-  it('preserves the parent facet query when opening its detail', () => {
-    let destination: unknown
-    const navigate = ((to: unknown) => {
-      destination = to
-    }) as NavigateFunction
-    const location = {
-      pathname: '/facet/director',
-      search: '?q=miike',
-      hash: '',
-      state: null,
-      key: 'test'
-    } as Location
-
-    navigateToFacetDetail(navigate, location, 'director', 'Takashi Miike')
-    assert.deepEqual(destination, {
-      pathname: '/facet/director/v/Takashi%20Miike',
-      search: '?q=miike'
-    })
-  })
-
-  it('clears library search when opening a facet from video detail', () => {
-    let destination: unknown
-    const navigate = ((to: unknown) => {
-      destination = to
-    }) as NavigateFunction
-    const location = {
-      pathname: '/detail/42',
-      search: '?q=hero&tags=1,2&status=1&year=2024&sort=rating&dir=asc',
-      hash: '',
-      state: null,
-      key: 'test'
-    } as Location
-
-    navigateToFacetDetail(navigate, location, 'maker', 'S1')
-    assert.deepEqual(destination, {
-      pathname: '/facet/maker/v/S1',
-      search: ''
-    })
-  })
 })
 
 describe('settings route contract', () => {

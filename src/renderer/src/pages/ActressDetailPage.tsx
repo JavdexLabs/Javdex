@@ -7,10 +7,8 @@ import {
   parseActressVideoPath
 } from '../listView/actressRoutes'
 import {
-  facetVideoDetailPath,
   directorVideoDetailPath,
   organizationVideoDetailPath,
-  parseFacetVideoPath,
   parseOrganizationPath,
   parseDirectorPath,
   parseSeriesPath,
@@ -66,14 +64,6 @@ function parentVideoDetailPath(pathname: string, videoId: number): string {
   if (organization?.videoId != null) {
     return organizationVideoDetailPath(organization.role, organization.organizationId, videoId)
   }
-  const facet = parseFacetVideoPath(pathname)
-  if (facet?.videoId != null) {
-    return facetVideoDetailPath(
-      facet.facetType,
-      decodeURIComponent(facet.valueKey),
-      videoId
-    )
-  }
   const playlist = parsePlaylistVideoPath(pathname)
   if (playlist?.videoId != null) return playlistVideoDetailPath(playlist.playlistId, videoId)
   const actress = parseActressVideoPath(pathname)
@@ -86,7 +76,6 @@ export default function ActressDetailPage(): JSX.Element {
   const navigate = useNavigate()
   const location = useLocation()
   const libraryActressStack = useMatch(ROUTE_MATCH.libraryActressStack)
-  const facetActressStack = useMatch(ROUTE_MATCH.facetActressStack)
   const organizationActressStack = useMatch(ROUTE_MATCH.organizationActressStack)
   const directorActressStack = useMatch(ROUTE_MATCH.directorActressStack)
   const seriesActressStack = useMatch(ROUTE_MATCH.seriesActressStack)
@@ -95,7 +84,6 @@ export default function ActressDetailPage(): JSX.Element {
   const actressVideoStack = useMatch({ path: ROUTE_MATCH.actressVideoStack, end: false })
   const fromVideo =
     libraryActressStack ??
-    facetActressStack ??
     organizationActressStack ??
     directorActressStack ??
     seriesActressStack ??

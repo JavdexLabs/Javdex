@@ -1,24 +1,26 @@
 import { getDb } from './database'
-import type {
-  Video,
-  LocalVideoResource,
-  VideoResource,
-  VideoResourceImportResult,
-  ExternalVideoResourceKind,
-  VideoAsset,
-  StoredVideoDetail,
-  VideoQuery,
-  VideoListResult,
-  VideoEditInput
+import {
+  VIDEO_FIELD_UPDATE_KEYS,
+  type Video,
+  type LocalVideoResource,
+  type VideoResource,
+  type VideoResourceImportResult,
+  type ExternalVideoResourceKind,
+  type VideoAsset,
+  type StoredVideoDetail,
+  type VideoQuery,
+  type VideoListResult,
+  type VideoEditInput,
+  type VideoFieldUpdateInput
 } from '@shared/videoTypes'
 import type { VideoBatchScrapeFilter, VideoBatchScrapeStatus, VideoRematchScope } from '@shared/videoScrapeTypes'
 import { upsertActressFromScrape } from './actressRepo'
 import { actressOwnedNamePatternSearchSql } from './actressSearchSql'
 import { ensureTag, pruneTagIfUnused } from './tagRepo'
-import { ensureFacetEntries } from './facetRepo'
 import { collectVideoLibraryCleanupHints, runLibraryCleanup } from './libraryCleanup'
 import {
   hydrateVideoListRows,
+  videoClassificationSelectExtras,
   videoListSelectExtras,
   type VideoListProjectionRow
 } from './videoListProjection'
@@ -299,13 +301,7 @@ export function purgeResourceLessVideos(): { deleted: number; obsoletePaths: str
 
   try {
     runLibraryCleanup({
-      actressIds: hints.flatMap((hint) => hint.actressIds ?? []),
-      facets: {
-        maker: hints.flatMap((hint) => hint.facets?.maker ?? []),
-        publisher: hints.flatMap((hint) => hint.facets?.publisher ?? []),
-        series: hints.flatMap((hint) => hint.facets?.series ?? []),
-        director: hints.flatMap((hint) => hint.facets?.director ?? [])
-      }
+      actressIds: hints.flatMap((hint) => hint.actressIds ?? [])
     })
   } catch (error) {
     console.error('Post-commit library cleanup failed:', error)
@@ -522,7 +518,11 @@ export function updateVideoLinkResourceRecord(input: {
 
 export function getVideoById(id: number): Video | null {
   const db = getDb()
-  return (db.prepare('SELECT * FROM videos WHERE id = ?').get(id) as Video) ?? null
+  return (
+    (db
+      .prepare(`SELECT v.*${videoClassificationSelectExtras()} FROM videos v WHERE v.id = ?`)
+      .get(id) as Video | undefined) ?? null
+  )
 }
 
 export function getVideoDetail(id: number): StoredVideoDetail | null {
@@ -688,14 +688,6 @@ function buildWhere(q: VideoQuery): { sql: string; params: unknown[]; joins: str
     params.push(...q.tagIds, q.tagIds.length)
   }
 
-  if (q.maker) {
-    conditions.push('v.maker = ?')
-    params.push(q.maker)
-  }
-  if (q.publisher) {
-    conditions.push('v.publisher = ?')
-    params.push(q.publisher)
-  }
   if (q.makerOrganizationId !== undefined) {
     conditions.push('v.maker_organization_id = ?')
     params.push(q.makerOrganizationId)
@@ -704,17 +696,9 @@ function buildWhere(q: VideoQuery): { sql: string; params: unknown[]; joins: str
     conditions.push('v.publisher_organization_id = ?')
     params.push(q.publisherOrganizationId)
   }
-  if (q.series) {
-    conditions.push('v.series = ?')
-    params.push(q.series)
-  }
   if (q.seriesId !== undefined) {
     conditions.push('v.series_id = ?')
     params.push(q.seriesId)
-  }
-  if (q.director) {
-    conditions.push('v.director = ?')
-    params.push(q.director)
   }
   if (q.directorId !== undefined) {
     conditions.push('v.director_id = ?')
@@ -839,23 +823,15 @@ export function deleteVideo(id: number): void {
 /** Allow editing a subset of user-facing fields manually. */
 export function updateVideoFields(
   id: number,
-  fields: Partial<
-    Pick<
-      Video,
-      | 'title'
-      | 'summary'
-      | 'maker'
-      | 'publisher'
-      | 'series'
-      | 'director'
-      | 'release_date'
-      | 'duration_seconds'
-    >
-  >
+  fields: VideoFieldUpdateInput
 ): void {
   const db = getDb()
+  const allowedKeys = new Set<string>(VIDEO_FIELD_UPDATE_KEYS)
   const keys = Object.keys(fields)
   if (!keys.length) return
+  if (keys.some((key) => !allowedKeys.has(key))) {
+    throw new Error('影片字段更新参数无效')
+  }
   const assignments = keys.map((k) => `${k} = @${k}`).join(', ')
   db.prepare(`UPDATE videos SET ${assignments} WHERE id = @id`).run({ ...fields, id })
 }
@@ -990,8 +966,6 @@ export function editVideoRecord(
     'title',
     'summary',
     'release_date',
-    'maker',
-    'publisher',
     'duration_seconds',
     'rating'
   ] as const
@@ -1028,15 +1002,6 @@ export function editVideoRecord(
       db.prepare('UPDATE videos SET scraped_status = 1 WHERE id = ?').run(id)
     }
 
-    const updated = db
-      .prepare('SELECT maker, publisher, series, director FROM videos WHERE id = ?')
-      .get(id) as {
-        maker: string | null
-        publisher: string | null
-        series: string | null
-        director: string | null
-      }
-    ensureFacetEntries(updated)
   })
   txn()
   try {
@@ -1066,7 +1031,6 @@ export function clearVideoMetadataRecord(id: number): { obsoletePaths: string[] 
       `UPDATE videos SET
          title = NULL, summary = NULL, cover_path = NULL, poster_path = NULL,
          original_title = NULL, release_date = NULL,
-         maker = NULL, publisher = NULL, series = NULL, director = NULL,
          maker_organization_id = NULL, publisher_organization_id = NULL,
          series_id = NULL, director_id = NULL,
          duration_seconds = NULL, last_scraped_at = NULL, updated_at = NULL,

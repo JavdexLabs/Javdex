@@ -71,14 +71,16 @@ export default function DetailPage(): JSX.Element {
   const navigate = useNavigate()
   const location = useLocation()
   const libraryActressStack = useMatch(ROUTE_MATCH.libraryActressStack)
-  const facetActressStack = useMatch(ROUTE_MATCH.facetActressStack)
   const organizationActressStack = useMatch(ROUTE_MATCH.organizationActressStack)
+  const directorActressStack = useMatch(ROUTE_MATCH.directorActressStack)
+  const seriesActressStack = useMatch(ROUTE_MATCH.seriesActressStack)
   const playlistActressStack = useMatch(ROUTE_MATCH.playlistActressStack)
   const actressVideoActressStack = useMatch(ROUTE_MATCH.actressActressStack)
   const actressStackOpen = Boolean(
     libraryActressStack ??
-      facetActressStack ??
       organizationActressStack ??
+      directorActressStack ??
+      seriesActressStack ??
       playlistActressStack ??
       actressVideoActressStack
   )

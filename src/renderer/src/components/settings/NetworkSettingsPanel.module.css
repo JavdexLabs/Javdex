@@ -1,0 +1,130 @@
+.card :global([class~='settings-card-head']) {
+  align-items: flex-start;
+}
+
+.proxyList {
+  display: grid;
+  gap: 10px;
+}
+
+.proxyRow {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-control) 44%, transparent);
+  transition:
+    border-color var(--motion-fast),
+    background var(--motion-fast);
+}
+
+.enabled {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-control));
+}
+
+.missing {
+  border-color: color-mix(in srgb, var(--warning) 42%, var(--border-subtle));
+}
+
+.rowHead {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.rowCopy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.titleLine {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.titleLine h4 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--settings-fs-title, 14px);
+  font-weight: var(--settings-fw-title, 700);
+  line-height: var(--settings-lh-tight, 1.35);
+}
+
+.rowCopy p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.proxyRow :global([class~='settings-form-field--inline']) {
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px 10px;
+}
+
+.proxyRow :global([class~='settings-form-label']) {
+  min-height: var(--control-h-sm);
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.proxyRow :global([class~='settings-inline-url-field']) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.proxyRow :global([class~='settings-inline-url-field__footer']) {
+  margin-top: 0;
+}
+
+.proxyRow :global([class~='settings-inline-url-field__footer'] [class~='btn']) {
+  min-width: 92px;
+  height: var(--control-h-sm);
+  white-space: nowrap;
+}
+
+.proxyRow :global([class~='settings-form-hint']) {
+  grid-column: 2;
+  margin-top: -2px;
+  color: var(--warning);
+}
+
+@media (width <= 820px) {
+  .rowHead,
+  .proxyRow :global([class~='settings-inline-url-field']) {
+    grid-template-columns: 1fr;
+  }
+
+  .rowHead :global([class~='settings-header-switch']) {
+    justify-self: start;
+  }
+
+  .proxyRow :global([class~='settings-inline-url-field__footer']) {
+    justify-content: stretch;
+  }
+
+  .proxyRow :global([class~='settings-inline-url-field__footer'] [class~='btn']) {
+    width: 100%;
+  }
+}
+
+@media (width <= 560px) {
+  .proxyRow :global([class~='settings-form-field--inline']) {
+    grid-template-columns: 1fr;
+  }
+
+  .proxyRow :global([class~='settings-form-field--inline'] [class~='settings-form-hint']) {
+    grid-column: 1;
+  }
+}

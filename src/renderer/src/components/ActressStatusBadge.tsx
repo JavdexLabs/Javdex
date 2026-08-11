@@ -1,5 +1,6 @@
 import type { ScrapedStatus } from '@shared/commonTypes'
 import { actressStatusFilterOf, ACTRESS_STATUS_FILTER_LABELS } from '@shared/actressTypes'
+import styles from './ActressStatusBadge.module.css'
 
 /**
  * Corner badge for actresses that still need attention.
@@ -16,7 +17,7 @@ export default function ActressStatusBadge({
   const label = ACTRESS_STATUS_FILTER_LABELS[filter]
   return (
     <span
-      className={`actress-status-badge actress-status-badge--${filter}`}
+      className={`${styles.root} ${styles[filter]} actress-status-badge actress-status-badge--${filter}`}
       role="img"
       aria-label={`刮削状态：${label}`}
     >

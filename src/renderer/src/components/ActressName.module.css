@@ -1,0 +1,27 @@
+.root {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  gap: 4px;
+}
+
+.root > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.genderIcon {
+  flex-shrink: 0;
+  font-size: 0.9em;
+  line-height: 1;
+}
+
+.female {
+  color: var(--gender-female);
+}
+
+.male {
+  color: var(--gender-male);
+}

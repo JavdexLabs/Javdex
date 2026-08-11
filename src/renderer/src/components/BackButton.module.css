@@ -1,0 +1,69 @@
+.root {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--control-h-sm);
+  margin: 0 0 12px;
+  padding: 0 10px 0 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  gap: 2px;
+  background: color-mix(in srgb, var(--surface-control) 38%, transparent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast),
+    border-color var(--motion-fast),
+    color var(--motion-fast),
+    transform var(--motion-fast),
+    box-shadow var(--motion-fast);
+}
+
+.root:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-control);
+  color: var(--text-primary);
+}
+
+.root:active {
+  transform: translateY(1px);
+}
+
+.root:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+.icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+  transition: color var(--motion-fast);
+}
+
+.icon > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.root:hover .icon {
+  color: var(--text-primary);
+}
+
+.label {
+  line-height: 1;
+}
+
+.inline {
+  flex-shrink: 0;
+  margin-bottom: 0;
+}

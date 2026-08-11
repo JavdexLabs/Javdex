@@ -7,6 +7,7 @@ import {
   SettingsStatusPill
 } from './SettingsPrimitives'
 import Button from '../Button'
+import styles from './StorageSettingsPanel.module.css'
 
 export default function StorageSettingsPanel({
   settings,
@@ -28,11 +29,11 @@ export default function StorageSettingsPanel({
 
   return (
     <SettingsCard
-      className="storage-settings-page"
+      className={styles.root}
       title="资源存储"
       hint="管理封面、头像、样张与清单封面的保存位置和磁盘加密方式。"
       actions={
-        <div className="storage-status-row" aria-live="polite">
+        <div className={styles.statusRow} aria-live="polite">
           <SettingsStatusPill status={storageBusy ? 'running' : usingDefault ? 'muted' : 'info'}>
             {storageBusy ? '迁移中' : usingDefault ? '默认目录' : '自定义目录'}
           </SettingsStatusPill>
@@ -42,32 +43,31 @@ export default function StorageSettingsPanel({
         </div>
       }
     >
-      <div className="storage-settings-grid" aria-busy={storageBusy}>
-        <section className="storage-panel storage-panel--path" aria-label="媒体资源目录">
-          <div className="storage-panel-head">
-            <span className="storage-panel-icon" aria-hidden="true">
+      <div className={styles.grid} aria-busy={storageBusy}>
+        <section className={styles.panel} aria-label="媒体资源目录">
+          <div className={styles.panelHead}>
+            <span className={styles.panelIcon} aria-hidden="true">
               <HardDrive {...UI_ICON_SM} />
             </span>
-            <div className="storage-panel-copy">
+            <div className={styles.panelCopy}>
               <h4>媒体资源目录</h4>
               <p>修改目录会自动迁移现有图片资源。</p>
             </div>
           </div>
 
-          <div className="storage-path-box">
-            <span className="storage-path-label">{usingDefault ? '默认路径' : '当前路径'}</span>
-            <div className="storage-path-row">
+          <div className={styles.pathBox}>
+            <span className={styles.pathLabel}>{usingDefault ? '默认路径' : '当前路径'}</span>
+            <div className={styles.pathRow}>
               <FolderOpen {...UI_ICON_SM} aria-hidden />
-              <span className="storage-path-text" title={resolvedPath}>
+              <span className={styles.pathText} title={resolvedPath}>
                 {resolvedPath}
               </span>
             </div>
           </div>
 
-          <div className="storage-action-row">
+          <div className={styles.actionRow}>
             <Button
               type="button"
-
               size="sm"
               disabled={storageBusy}
               onClick={onPickMediaAssetsPath}
@@ -79,7 +79,6 @@ export default function StorageSettingsPanel({
               <Button
                 type="button"
                 variant="ghost"
-
                 size="sm"
                 disabled={storageBusy}
                 onClick={onResetMediaAssetsPath}
@@ -91,12 +90,12 @@ export default function StorageSettingsPanel({
           </div>
         </section>
 
-        <section className="storage-panel storage-panel--crypto" aria-label="图片加密存储">
-          <div className="storage-panel-head">
-            <span className="storage-panel-icon" aria-hidden="true">
+        <section className={`${styles.panel} ${styles.cryptoPanel}`} aria-label="图片加密存储">
+          <div className={styles.panelHead}>
+            <span className={styles.panelIcon} aria-hidden="true">
               {encryptionEnabled ? <ShieldCheck {...UI_ICON_SM} /> : <ShieldOff {...UI_ICON_SM} />}
             </span>
-            <div className="storage-panel-copy">
+            <div className={styles.panelCopy}>
               <h4>图片加密</h4>
               <p>
                 {encryptionEnabled
@@ -112,8 +111,8 @@ export default function StorageSettingsPanel({
             />
           </div>
 
-          <div className="storage-crypto-summary">
-            <div className="storage-crypto-state">
+          <div className={styles.cryptoSummary}>
+            <div className={styles.cryptoState}>
               <span>{encryptionEnabled ? '已保护' : '未加密'}</span>
               <strong>{encryptionEnabled ? '.enc' : '原始图片'}</strong>
             </div>
@@ -124,11 +123,11 @@ export default function StorageSettingsPanel({
         </section>
       </div>
 
-      <div className="storage-footnote">
-        <span className="storage-footnote-label">覆盖资源</span>
-        <div className="storage-kind-list" aria-label="存储覆盖的资源类型">
+      <div className={styles.footnote}>
+        <span className={styles.footnoteLabel}>覆盖资源</span>
+        <div className={styles.kindList} aria-label="存储覆盖的资源类型">
           {assetKinds.map((item) => (
-            <span key={item} className="storage-kind-chip">
+            <span key={item} className={styles.kindChip}>
               {item}
             </span>
           ))}

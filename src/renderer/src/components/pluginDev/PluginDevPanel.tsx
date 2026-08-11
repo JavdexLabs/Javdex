@@ -31,6 +31,7 @@ import {
   parseTestTargetList,
   testTargetsFromDryRun
 } from '@shared/pluginDevKindProfile'
+import styles from './PluginDevPanel.module.css'
 
 let conversationSeq = 0
 function nextConversationId(prefix: string): string {
@@ -797,13 +798,13 @@ export default function PluginDevPanel({
       <WorkbenchToolbar className="plugin-dev-toolbar">
         <div className="plugin-dev-toolbar-start">
           <div
-            className="settings-tab-bar settings-tab-bar--compact plugin-dev-kind-toggle plugin-dev-toolbar-kind-toggle"
+            className={`${styles.kindToggle} plugin-dev-kind-toggle plugin-dev-toolbar-kind-toggle`}
             role="group"
             aria-label="插件类型"
           >
             <button
               type="button"
-              className={`settings-tab-button${kind === 'video' ? ' is-active' : ''}`}
+              className={`${styles.kindButton}${kind === 'video' ? ` ${styles.kindButtonActive}` : ''}`}
               disabled={busy !== null}
               onClick={() => changeKind('video')}
             >
@@ -811,7 +812,7 @@ export default function PluginDevPanel({
             </button>
             <button
               type="button"
-              className={`settings-tab-button${kind === 'actress' ? ' is-active' : ''}`}
+              className={`${styles.kindButton}${kind === 'actress' ? ` ${styles.kindButtonActive}` : ''}`}
               disabled={busy !== null}
               onClick={() => changeKind('actress')}
             >

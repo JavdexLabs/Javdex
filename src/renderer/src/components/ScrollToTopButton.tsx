@@ -1,6 +1,7 @@
 import { ChevronUp } from 'lucide-react'
 import IconButton from './IconButton'
 import { UI_ICON } from './iconDefaults'
+import styles from './ScrollToTopButton.module.css'
 
 /** Pixels scrolled before showing back-to-top on list surfaces. */
 export const SCROLL_TO_TOP_THRESHOLD = 360
@@ -16,7 +17,7 @@ export default function ScrollToTopButton({
 }: ScrollToTopButtonProps): JSX.Element {
   return (
     <IconButton
-      className={`scroll-to-top-btn${visible ? ' scroll-to-top-btn--visible' : ''}`}
+      className={`${styles.root}${visible ? ` ${styles.visible}` : ''}`}
       icon={<ChevronUp {...UI_ICON} />}
       label="回到顶部"
       onClick={onClick}

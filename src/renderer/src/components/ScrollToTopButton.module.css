@@ -1,0 +1,39 @@
+.root {
+  --icon-glyph-size: 18px;
+
+  position: absolute;
+  z-index: 4;
+  right: calc(var(--page-pad-x) + 8px);
+  bottom: 16px;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  opacity: 0;
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-floating-control);
+  color: var(--text-secondary);
+  pointer-events: none;
+  transform: translateY(6px);
+  transition:
+    opacity var(--motion-fast),
+    transform var(--motion-fast),
+    background var(--motion-fast),
+    color var(--motion-fast);
+}
+
+.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.root:hover {
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
+
+.root:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+}

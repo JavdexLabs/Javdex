@@ -27,6 +27,7 @@ import { UI_ICON_SM } from '../iconDefaults'
 import { SettingsCard, SettingsHeaderSwitch } from './SettingsPrimitives'
 import { useDisplayMode } from '../DisplayModeContext'
 import Button from '../Button'
+import Switch from '../Switch'
 
 const AVATAR_COMPOSITION_PREVIEW_SIZE = 172
 
@@ -577,19 +578,15 @@ export default function AppearanceSettingsPanel({
               <span className="avatar-composition-control-label">完整头部</span>
               <label className="avatar-head-protection-control">
                 <span>必要时缩小画面，避免发顶或下巴被裁切</span>
-                <span className="ui-switch">
-                  <input
-                    type="checkbox"
-                    checked={avatarCompositionDraft.avatarPreserveFullHead}
-                    disabled={!isEditingAvatarComposition || isSavingAvatarComposition}
-                    onChange={(event) =>
-                      updateAvatarCompositionDraft({
-                        avatarPreserveFullHead: event.target.checked
-                      })
-                    }
-                  />
-                  <span className="ui-switch-slider" />
-                </span>
+                <Switch
+                  checked={avatarCompositionDraft.avatarPreserveFullHead}
+                  disabled={!isEditingAvatarComposition || isSavingAvatarComposition}
+                  onChange={(event) =>
+                    updateAvatarCompositionDraft({
+                      avatarPreserveFullHead: event.target.checked
+                    })
+                  }
+                />
               </label>
             </div>
           </div>

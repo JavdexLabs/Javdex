@@ -1,4 +1,4 @@
-import type { KeyboardEventHandler, ReactNode, RefObject } from 'react'
+import type { AriaAttributes, KeyboardEventHandler, ReactNode, RefObject } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { Minus, Plus } from 'lucide-react'
 import type { SettingsGroup, SettingsTab, SettingsTabItem } from '../../settings/settingsRoutes'
@@ -6,23 +6,48 @@ import { settingsTabDomId, settingsTabPanelDomId } from '../../settings/settings
 import EmptyState from '../EmptyState'
 import { AppFormField } from '../FormPrimitives'
 import { UI_ICON_SM } from '../iconDefaults'
+import Switch from '../Switch'
+import styles from './SettingsPrimitives.module.css'
 
 type CardProps = {
+  as?: 'div' | 'section'
   title?: ReactNode
   hint?: ReactNode
   actions?: ReactNode
   className?: string
   children: ReactNode
+} & Pick<AriaAttributes, 'aria-label' | 'aria-labelledby'>
+
+const STATUS_CLASSES: Record<string, string> = {
+  running: styles.statusRunning,
+  paused: styles.statusPaused,
+  done: styles.statusDone,
+  cancelled: styles.statusCancelled,
+  success: styles.statusSuccess,
+  warning: styles.statusWarning,
+  info: styles.statusInfo,
+  muted: styles.statusMuted
 }
 
-export function SettingsCard({ title, hint, actions, className = '', children }: CardProps): JSX.Element {
+export function SettingsCard({
+  as: Component = 'div',
+  title,
+  hint,
+  actions,
+  className = '',
+  children,
+  ...ariaProps
+}: CardProps): JSX.Element {
   return (
-    <div className={`settings-card${className ? ` ${className}` : ''}`}>
+    <Component
+      className={`${styles.card} settings-card${className ? ` ${className}` : ''}`}
+      {...ariaProps}
+    >
       {(title || hint || actions) && (
         <SettingsCardHeader title={title} hint={hint} actions={actions} />
       )}
       {children}
-    </div>
+    </Component>
   )
 }
 
@@ -36,12 +61,14 @@ export function SettingsCardHeader({
   actions?: ReactNode
 }): JSX.Element {
   return (
-    <div className="settings-card-head">
-      <div className="settings-card-head-copy">
+    <div className={`${styles.cardHead} settings-card-head`}>
+      <div className={`${styles.cardHeadCopy} settings-card-head-copy`}>
         {title ? <h3>{title}</h3> : null}
-        {hint ? <p className="hint">{hint}</p> : null}
+        {hint ? <p className={styles.cardHint}>{hint}</p> : null}
       </div>
-      {actions ? <div className="settings-card-actions">{actions}</div> : null}
+      {actions ? (
+        <div className={`${styles.cardActions} settings-card-actions`}>{actions}</div>
+      ) : null}
     </div>
   )
 }
@@ -60,20 +87,15 @@ export function SettingsHeaderSwitch({
 }): JSX.Element {
   return (
     <label
-      className={`settings-header-switch${disabled ? ' settings-header-switch--disabled' : ''}`}
+      className={`${styles.headerSwitch}${disabled ? ` ${styles.headerSwitchDisabled}` : ''} settings-header-switch`}
       title={label}
     >
-      <span className="ui-switch">
-        <input
-          type="checkbox"
-          role="switch"
-          aria-label={label}
-          checked={checked}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.checked)}
-        />
-        <span className="ui-switch-slider" aria-hidden="true" />
-      </span>
+      <Switch
+        aria-label={label}
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+      />
     </label>
   )
 }
@@ -96,13 +118,17 @@ export function SettingsSectionBlock({
   blockRef?: RefObject<HTMLDivElement>
 }): JSX.Element {
   return (
-    <div id={id} ref={blockRef} className={`settings-section-block${className ? ` ${className}` : ''}`}>
-      <div className="settings-section-block-head">
-        <div className="settings-section-block-copy">
-          <span className="settings-section-block-title">{title}</span>
-          {hint ? <span className="settings-section-block-hint">{hint}</span> : null}
+    <div
+      id={id}
+      ref={blockRef}
+      className={`${styles.sectionBlock}${className ? ` ${className}` : ''}`}
+    >
+      <div className={styles.sectionBlockHead}>
+        <div className={styles.sectionBlockCopy}>
+          <span className={styles.sectionBlockTitle}>{title}</span>
+          {hint ? <span className={styles.sectionBlockHint}>{hint}</span> : null}
         </div>
-        {actions ? <div className="settings-section-block-actions">{actions}</div> : null}
+        {actions ? <div className={styles.sectionBlockActions}>{actions}</div> : null}
       </div>
       {children}
     </div>
@@ -128,7 +154,7 @@ export function SettingsTabBar({
 }): JSX.Element {
   return (
     <div
-      className={`settings-tab-bar${className ? ` ${className}` : ''}`}
+      className={`${styles.tabBar}${className ? ` ${className}` : ''}`}
       role="tablist"
       aria-label={label}
       aria-orientation="horizontal"
@@ -139,7 +165,7 @@ export function SettingsTabBar({
           key={tab.id}
           type="button"
           id={settingsTabDomId(group, tab.id)}
-          className={`settings-tab-button${activeTab === tab.id ? ' is-active' : ''}`}
+          className={`${styles.tabButton}${activeTab === tab.id ? ` ${styles.tabButtonActive}` : ''}`}
           role="tab"
           aria-selected={activeTab === tab.id}
           aria-controls={settingsTabPanelDomId(group, tab.id)}
@@ -183,8 +209,13 @@ export function SettingsStatusPill({
   children: ReactNode
   className?: string
 }): JSX.Element {
+  const statusClass = STATUS_CLASSES[status ?? '']
+
   return (
-    <span className={`settings-status-pill${status ? ` settings-status-pill--${status}` : ''}${className ? ` ${className}` : ''}`}>
+    <span
+      className={`${styles.statusPill}${statusClass ? ` ${statusClass}` : ''} settings-status-pill${className ? ` ${className}` : ''}`}
+      data-status={status}
+    >
       {children}
     </span>
   )
@@ -267,13 +298,13 @@ export function SettingsNumberStepper({
 
   return (
     <div
-      className={`settings-number-stepper${disabled ? ' settings-number-stepper--disabled' : ''}`}
+      className={`${styles.numberStepper}${disabled ? ` ${styles.numberStepperDisabled}` : ''} settings-number-stepper`}
       role="group"
       aria-label={ariaLabel}
     >
       <button
         type="button"
-        className="settings-number-stepper__btn"
+        className={styles.stepperButton}
         aria-label="减少"
         disabled={disabled || atMin}
         onPointerDown={(e) => {
@@ -288,7 +319,7 @@ export function SettingsNumberStepper({
         <Minus {...UI_ICON_SM} aria-hidden />
       </button>
       <input
-        className="settings-number-stepper__value"
+        className={`${styles.stepperValue} settings-number-stepper__value`}
         type="text"
         inputMode="numeric"
         disabled={disabled}
@@ -322,7 +353,7 @@ export function SettingsNumberStepper({
       />
       <button
         type="button"
-        className="settings-number-stepper__btn"
+        className={styles.stepperButton}
         aria-label="增加"
         disabled={disabled || atMax}
         onPointerDown={(e) => {
@@ -336,7 +367,9 @@ export function SettingsNumberStepper({
       >
         <Plus {...UI_ICON_SM} aria-hidden />
       </button>
-      {unit ? <span className="settings-number-stepper__unit">{unit}</span> : null}
+      {unit ? (
+        <span className={`${styles.stepperUnit} settings-number-stepper__unit`}>{unit}</span>
+      ) : null}
     </div>
   )
 }

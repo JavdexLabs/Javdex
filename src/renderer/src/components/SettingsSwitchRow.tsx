@@ -1,3 +1,6 @@
+import Switch from './Switch'
+import styles from './SettingsSwitchRow.module.css'
+
 interface Props {
   title: string
   description?: string
@@ -15,21 +18,18 @@ export default function SettingsSwitchRow({
   onChange
 }: Props): JSX.Element {
   return (
-    <label className={`settings-toggle-item${disabled ? ' settings-toggle-item--disabled' : ''}`}>
-      <span className="settings-toggle-copy">
-        <span className="settings-toggle-title">{title}</span>
-        {description ? <span className="settings-toggle-desc">{description}</span> : null}
+    <label
+      className={`${styles.root}${disabled ? ` ${styles.disabled}` : ''} settings-toggle-item`}
+    >
+      <span className={styles.copy}>
+        <span className={styles.title}>{title}</span>
+        {description ? <span className={styles.description}>{description}</span> : null}
       </span>
-      <span className="ui-switch">
-        <input
-          type="checkbox"
-          role="switch"
-          checked={checked}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.checked)}
-        />
-        <span className="ui-switch-slider" aria-hidden="true" />
-      </span>
+      <Switch
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+      />
     </label>
   )
 }

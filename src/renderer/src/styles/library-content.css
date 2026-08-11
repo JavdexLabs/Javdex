@@ -1146,24 +1146,6 @@
 }
 
 /* ---- Stars ---- */
-.stars {
-  display: inline-flex;
-  gap: 2px;
-}
-.star {
-  color: #44444f;
-  font-size: 16px;
-  line-height: 1;
-  background: none;
-  border: none;
-  padding: 0;
-}
-.star.filled {
-  color: #f5c518;
-}
-.star.interactive {
-  cursor: pointer;
-}
 
 .detail-ratings {
   display: flex;

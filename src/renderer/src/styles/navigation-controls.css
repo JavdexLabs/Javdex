@@ -490,30 +490,6 @@ textarea.text-input {
   gap: 8px;
   margin-top: 10px;
 }
-.filter-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  min-height: var(--target-min);
-  border: 1px solid var(--border-subtle);
-  background: var(--surface-control);
-  color: var(--text-primary);
-  font-size: 12px;
-  line-height: 1.3;
-}
-.filter-chip:hover {
-  border-color: var(--border-accent);
-  background: var(--surface-selected);
-}
-.filter-chip-x {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-  line-height: 0;
-}
 .filter-chips-clear {
   margin-left: 2px;
 }

@@ -1,0 +1,30 @@
+.root {
+  position: absolute;
+  z-index: 2;
+  right: -8px;
+  bottom: -2px;
+  max-width: calc(100% + 16px);
+  padding: 0 5px;
+  overflow: hidden;
+  border: 2px solid var(--surface-panel);
+  border-radius: var(--radius-pill);
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unscraped {
+  border-color: var(--surface-panel);
+  background: color-mix(in srgb, var(--warning) 16%, var(--surface-panel));
+  color: var(--text-warning);
+}
+
+.failed {
+  border-color: var(--surface-panel);
+  background: color-mix(in srgb, var(--danger) 16%, var(--surface-panel));
+  color: var(--text-danger);
+}

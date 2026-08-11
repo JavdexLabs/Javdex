@@ -1,0 +1,98 @@
+.root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 110px;
+  height: 110px;
+  overflow: hidden;
+  border: 2px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+  background: var(--surface-control);
+  color: var(--text-muted);
+  font-size: 30px;
+  transition: border-color 0.15s;
+}
+
+.defaultAvatar {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 34% 22%, var(--avatar-default-highlight), transparent 24%),
+    linear-gradient(145deg, var(--avatar-default-a), var(--avatar-default-b));
+}
+
+.female {
+  --avatar-default-a: color-mix(in srgb, var(--accent) 20%, var(--surface-elevated));
+  --avatar-default-b: color-mix(in srgb, var(--avatar-female-b) 36%, var(--surface-control));
+  --avatar-default-hair: color-mix(in srgb, var(--avatar-female-hair) 62%, var(--text-secondary));
+  --avatar-default-skin: color-mix(in srgb, var(--avatar-female-skin) 64%, var(--surface-panel));
+  --avatar-default-body: color-mix(in srgb, var(--avatar-female-body) 42%, var(--accent));
+}
+
+.male {
+  --avatar-default-a: color-mix(in srgb, var(--accent) 18%, var(--surface-elevated));
+  --avatar-default-b: color-mix(in srgb, var(--avatar-male-b) 36%, var(--surface-control));
+  --avatar-default-hair: color-mix(in srgb, var(--avatar-male-hair) 70%, var(--text-secondary));
+  --avatar-default-skin: color-mix(in srgb, var(--avatar-male-skin) 62%, var(--surface-panel));
+  --avatar-default-body: color-mix(in srgb, var(--avatar-male-body) 44%, var(--accent));
+}
+
+.unknown {
+  --avatar-default-a: var(--surface-elevated);
+  --avatar-default-b: var(--surface-control);
+  --avatar-default-hair: var(--text-muted);
+  --avatar-default-skin: color-mix(in srgb, var(--text-muted) 16%, var(--surface-panel));
+  --avatar-default-body: color-mix(in srgb, var(--text-muted) 28%, var(--surface-control));
+}
+
+.glow {
+  position: absolute;
+  inset: 9%;
+  border: 1px solid var(--avatar-default-glow);
+  border-radius: var(--radius-pill);
+  opacity: 0.55;
+}
+
+.hair {
+  position: absolute;
+  top: 17%;
+  left: 25%;
+  width: 50%;
+  height: 46%;
+  border-radius: 45% 45% 50% 50%;
+  background: var(--avatar-default-hair);
+  box-shadow: 0 9px 18px var(--avatar-default-shadow);
+}
+
+.head {
+  position: absolute;
+  top: 24%;
+  left: 32%;
+  width: 36%;
+  height: 38%;
+  border-radius: 46% 46% 48% 48%;
+  background: var(--avatar-default-skin);
+}
+
+.body {
+  position: absolute;
+  right: 21%;
+  bottom: 9%;
+  left: 21%;
+  height: 35%;
+  border-radius: 52% 52% 18% 18%;
+  background: var(--avatar-default-body);
+  box-shadow: inset 0 1px var(--avatar-default-body-highlight);
+}
+
+.root img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}

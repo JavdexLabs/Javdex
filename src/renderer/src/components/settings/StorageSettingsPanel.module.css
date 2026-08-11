@@ -1,0 +1,232 @@
+.root {
+  display: grid;
+  gap: 12px;
+}
+
+.root :global([class~='settings-card-head']) {
+  margin-bottom: 2px;
+}
+
+.statusRow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.75fr);
+  gap: 10px;
+}
+
+.panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-control) 42%, transparent);
+}
+
+.cryptoPanel {
+  background: color-mix(in srgb, var(--surface-control) 32%, transparent);
+}
+
+.panelHead {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 9px;
+}
+
+.panelIcon {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface-panel));
+  color: var(--text-accent);
+}
+
+.panelCopy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.panelCopy h4 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--settings-fs-title, 14px);
+  font-weight: var(--settings-fw-title, 700);
+  line-height: var(--settings-lh-tight, 1.35);
+}
+
+.panelCopy p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.pathBox {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.pathLabel,
+.footnoteLabel {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption, 11px);
+  font-weight: var(--settings-fw-label, 600);
+}
+
+.pathRow {
+  min-width: 0;
+  min-height: var(--control-h-sm);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-base) 42%, var(--surface-control));
+  color: var(--text-secondary);
+}
+
+.pathRow svg {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.pathText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-size: var(--settings-fs-secondary, 12px);
+  user-select: text;
+}
+
+.actionRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.actionRow :global(.btn) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cryptoSummary {
+  display: grid;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.cryptoState {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-base) 35%, var(--surface-control));
+}
+
+.cryptoState span {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  font-weight: var(--settings-fw-label, 600);
+}
+
+.cryptoState strong {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: var(--settings-fs-body, 13px);
+  font-weight: var(--settings-fw-title, 700);
+  text-align: right;
+}
+
+.cryptoSummary p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption, 11px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.footnote {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.kindList {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.kindChip {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+@media (width <= 920px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (width <= 620px) {
+  .root :global([class~='settings-card-head']) {
+    flex-direction: column;
+  }
+
+  .statusRow {
+    justify-content: flex-start;
+  }
+
+  .panelHead {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .panelHead :global([class~='settings-header-switch']) {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .footnote {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+}

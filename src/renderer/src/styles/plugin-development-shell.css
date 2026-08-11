@@ -355,37 +355,6 @@
   font-size: 11px;
 }
 
-.settings-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 14px;
-}
-
-.settings-card-head-copy {
-  min-width: 0;
-}
-
-.settings-card-head h3 {
-  margin: 0 0 4px;
-  font-size: var(--settings-fs-title, 14px);
-  font-weight: var(--settings-fw-title, 700);
-  line-height: var(--settings-lh-tight, 1.35);
-}
-
-.settings-card-head p,
-.settings-card-head .hint {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--settings-fs-secondary, 12px);
-  line-height: var(--settings-lh, 1.45);
-}
-
-.settings-card-head--toolbar {
-  flex-wrap: wrap;
-}
-
 .settings-form-row {
   display: flex;
   align-items: flex-end;

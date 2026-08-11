@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ActressGender } from '@shared/actressTypes'
 import { useTheme } from './ThemeProvider'
+import styles from './ActressAvatar.module.css'
 
 interface Props {
   src: string | null | undefined
@@ -11,9 +12,9 @@ interface Props {
 }
 
 function genderClass(gender: ActressGender | null | undefined): string {
-  if (gender === 'female') return 'actress-avatar-default--female'
-  if (gender === 'male') return 'actress-avatar-default--male'
-  return 'actress-avatar-default--unknown'
+  if (gender === 'female') return styles.female
+  if (gender === 'male') return styles.male
+  return styles.unknown
 }
 
 export default function ActressAvatar({
@@ -34,7 +35,7 @@ export default function ActressAvatar({
     setFailed(false)
   }, [resolvedSrc])
 
-  const classes = ['actress-avatar', className].filter(Boolean).join(' ')
+  const classes = [styles.root, 'actress-avatar', className].filter(Boolean).join(' ')
   const showImage = Boolean(resolvedSrc && !failed && !useDefaultAvatar)
 
   return (
@@ -47,11 +48,11 @@ export default function ActressAvatar({
       {showImage ? (
         <img src={resolvedSrc ?? ''} alt={decorative ? '' : name} onError={() => setFailed(true)} />
       ) : (
-        <span className={`actress-avatar-default ${genderClass(gender)}`} aria-hidden="true">
-          <span className="actress-avatar-default-glow" />
-          <span className="actress-avatar-default-hair" />
-          <span className="actress-avatar-default-head" />
-          <span className="actress-avatar-default-body" />
+        <span className={`${styles.defaultAvatar} ${genderClass(gender)}`} aria-hidden="true">
+          <span className={styles.glow} />
+          <span className={styles.hair} />
+          <span className={styles.head} />
+          <span className={styles.body} />
         </span>
       )}
     </span>

@@ -3,6 +3,7 @@ import Modal from '../Modal'
 import { highlightJavaScript } from '../../utils/highlightJavaScript'
 import { getPluginDevKindProfile } from '@shared/pluginDevKindProfile'
 import type { PluginKind } from './types'
+import styles from './PluginDevCodeModal.module.css'
 
 export default function PluginDevCodeModal({
   kind,
@@ -34,7 +35,7 @@ export default function PluginDevCodeModal({
             {code ? (
               <span dangerouslySetInnerHTML={{ __html: highlighted }} />
             ) : (
-              <span className="code-editor-placeholder">{placeholder}</span>
+              <span className={styles.placeholder}>{placeholder}</span>
             )}
           </code>
         </pre>

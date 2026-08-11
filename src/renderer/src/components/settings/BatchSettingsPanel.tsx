@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react'
 import type { BatchProgress } from '@shared/batchScrapeTypes'
 import { batchStatusLabel } from '../../settings/settingsDisplay'
-import { SettingsEmptyPanel, SettingsStatusPill } from './SettingsPrimitives'
+import { SettingsCard, SettingsEmptyPanel, SettingsStatusPill } from './SettingsPrimitives'
 import BatchTaskControls, { type BatchControlHandler } from './BatchTaskControls'
 import Button from '../Button'
 
@@ -67,8 +67,8 @@ export default function BatchSettingsPanel({
   }, [logCount, logRef])
 
   return (
-    <div
-      className={`settings-card settings-card--batch batch-status-${status}${
+    <SettingsCard
+      className={`settings-card--batch batch-status-${status}${
         expandBatchCard ? ' is-expanded' : ''
       }`}
     >
@@ -174,6 +174,6 @@ export default function BatchSettingsPanel({
           </SettingsEmptyPanel>
         )}
       </section>
-    </div>
+    </SettingsCard>
   )
 }

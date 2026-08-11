@@ -3,8 +3,12 @@ import { X } from 'lucide-react'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import IconButton from './IconButton'
 import { UI_ICON_MD } from './iconDefaults'
+import Button from './Button'
+import styles from './Modal.module.css'
 
 export type ModalSize = 'compact' | 'sm' | 'md' | 'lg' | 'xl'
+export type ModalChrome = 'form' | 'shellless'
+export type ModalBodyOverflow = 'auto' | 'hidden'
 
 interface Props {
   title: string
@@ -16,6 +20,8 @@ interface Props {
   className?: string
   bodyClassName?: string
   size?: ModalSize
+  chrome?: ModalChrome
+  bodyOverflow?: ModalBodyOverflow
   danger?: boolean
   confirmDisabled?: boolean
   busy?: boolean
@@ -28,12 +34,8 @@ interface Props {
   actions?: ReactNode
 }
 
-function sizeClassName(size: ModalSize): string {
+function legacySizeClassName(size: ModalSize): string {
   return size === 'compact' ? 'modal--form-compact' : `modal--form-${size}`
-}
-
-function isShelllessModal(className: string): boolean {
-  return className.includes('modal--plugin-dev-code')
 }
 
 const modalStack: string[] = []
@@ -76,6 +78,8 @@ export default function Modal({
   className = '',
   bodyClassName = '',
   size = 'compact',
+  chrome = 'form',
+  bodyOverflow = 'auto',
   danger,
   confirmDisabled,
   busy = false,
@@ -92,7 +96,7 @@ export default function Modal({
   const modalId = `modal-${reactId.replace(/:/g, '')}`
   const titleId = `${modalId}-title`
   const descriptionId = `${modalId}-description`
-  const shellless = isShelllessModal(className)
+  const shellless = chrome === 'shellless'
   const closeBlocked = busy || closeDisabled
 
   const requestClose = useCallback(() => {
@@ -145,9 +149,12 @@ export default function Modal({
   }
 
   const modalClass = [
+    styles.root,
     'modal',
+    shellless ? '' : styles.form,
+    shellless ? '' : styles[size],
     shellless ? '' : 'modal--form',
-    shellless ? '' : sizeClassName(size),
+    shellless ? '' : legacySizeClassName(size),
     className
   ]
     .filter(Boolean)
@@ -158,7 +165,7 @@ export default function Modal({
 
   return (
     <div
-      className="modal-backdrop"
+      className={`${styles.backdrop} modal-backdrop`}
       data-modal-id={modalId}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) requestDismiss()
@@ -176,21 +183,31 @@ export default function Modal({
         onKeyDown={trapFocus}
         onClick={(e) => e.stopPropagation()}
       >
-        <header className={`modal-head${showCloseButton ? ' modal-head--with-close' : ''}`}>
-          <div className="modal-head-main">
+        <header
+          className={[
+            styles.head,
+            shellless ? '' : styles.formHead,
+            showCloseButton ? styles.headWithClose : '',
+            'modal-head',
+            showCloseButton ? 'modal-head--with-close' : ''
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
+          <div className={`${styles.headMain} modal-head-main`}>
             <h3 id={titleId}>
               {title}
-              {subtitle ? <span className="modal-subtitle">{subtitle}</span> : null}
+              {subtitle ? <span className={`${styles.subtitle} modal-subtitle`}>{subtitle}</span> : null}
             </h3>
             {hint ? (
-              <p id={descriptionId} className="modal-lead hint">
+              <p id={descriptionId} className={`${styles.lead} modal-lead hint`}>
                 {hint}
               </p>
             ) : null}
           </div>
           {showCloseButton ? (
             <IconButton
-              className="modal-close-btn"
+              className={`${styles.closeButton} modal-close-btn`}
               label="关闭"
               icon={<X {...UI_ICON_MD} />}
               disabled={closeBlocked}
@@ -198,25 +215,39 @@ export default function Modal({
             />
           ) : null}
         </header>
-        <div className={`modal-body${bodyClassName ? ` ${bodyClassName}` : ''}`}>{children}</div>
+        <div
+          className={[
+            styles.body,
+            shellless ? '' : styles.formBody,
+            bodyOverflow === 'hidden' ? styles.bodyHidden : '',
+            'modal-body',
+            bodyClassName
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
+          {children}
+        </div>
         {!hideActions && (
-          <div className="modal-actions">
+          <div
+            className={`${styles.actions}${shellless ? '' : ` ${styles.formActions}`} modal-actions`}
+          >
             {actions ?? (
               showDefaultActions ? (
                 <>
                   {!hideCancel && (
-                    <button type="button" className="btn" disabled={closeBlocked} onClick={onCancel}>
+                    <Button type="button" disabled={closeBlocked} onClick={onCancel}>
                       {cancelText}
-                    </button>
+                    </Button>
                   )}
-                  <button
+                  <Button
                     type="button"
-                    className={`btn ${danger ? 'btn-danger' : 'btn-primary'}`}
+                    variant={danger ? 'danger' : 'primary'}
                     disabled={confirmDisabled || busy}
                     onClick={onConfirm}
                   >
                     {confirmText}
-                  </button>
+                  </Button>
                 </>
               ) : null
             )}

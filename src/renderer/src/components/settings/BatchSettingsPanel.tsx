@@ -3,6 +3,7 @@ import type { BatchProgress } from '@shared/batchScrapeTypes'
 import { batchStatusLabel } from '../../settings/settingsDisplay'
 import { SettingsEmptyPanel, SettingsStatusPill } from './SettingsPrimitives'
 import BatchTaskControls, { type BatchControlHandler } from './BatchTaskControls'
+import Button from '../Button'
 
 type BatchScope = 'video' | 'actress' | 'avatar'
 
@@ -77,9 +78,9 @@ export default function BatchSettingsPanel({
         </SettingsStatusPill>
         <div className="batch-log-toolbar-actions">
           {scope === 'actress' && pendingGroupCount > 0 && onOpenPending ? (
-            <button type="button" className="btn btn-sm btn-ghost" onClick={onOpenPending}>
+            <Button type="button" variant="ghost" size="sm" onClick={onOpenPending}>
               查看待确认
-            </button>
+            </Button>
           ) : null}
           {customControls !== undefined ? (
             customControls

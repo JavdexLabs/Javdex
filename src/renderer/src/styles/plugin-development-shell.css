@@ -397,24 +397,6 @@
   min-width: 0;
 }
 
-.settings-form-field {
-  min-width: 0;
-  display: grid;
-  gap: 6px;
-}
-
-.settings-form-label {
-  color: var(--text-muted);
-  font-size: var(--settings-fs-secondary, 12px);
-  font-weight: var(--settings-fw-label, 600);
-}
-
-.settings-form-hint {
-  color: var(--text-muted);
-  font-size: var(--settings-fs-caption, 11px);
-  line-height: var(--settings-lh, 1.45);
-}
-
 .settings-form-field--inline {
   grid-template-columns: 96px minmax(0, 1fr);
   align-items: center;

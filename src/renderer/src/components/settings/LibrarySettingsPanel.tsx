@@ -17,6 +17,7 @@ import {
 } from './SettingsPrimitives'
 import UnrecognizedRow from './UnrecognizedRow'
 import ListMaintenanceBanner from '../ListMaintenanceBanner'
+import Button from '../Button'
 
 type ScanMetric = {
   key: string
@@ -198,10 +199,10 @@ export default function LibrarySettingsPanel({
                 <p>递归扫描已添加文件夹中的视频文件。</p>
               </div>
             </div>
-            <button type="button" className="btn btn-sm" onClick={onAddFolders}>
+            <Button type="button" size="sm" onClick={onAddFolders}>
               <FolderPlus {...UI_ICON_SM} aria-hidden />
               添加路径
-            </button>
+            </Button>
           </div>
 
           <div className="media-path-list library-path-list">
@@ -247,9 +248,9 @@ export default function LibrarySettingsPanel({
           </div>
 
           <div className="library-scan-command-row">
-            <button
+            <Button
               type="button"
-              className={`btn ${scanning ? '' : 'btn-primary'}`}
+              variant={scanning ? 'default' : 'primary'}
               disabled={!scanning && !canScanOrCleanup}
               onClick={scanning ? onCancelScan : onRunScan}
             >
@@ -264,7 +265,7 @@ export default function LibrarySettingsPanel({
                   {canScan ? '扫描并导入' : '执行待清理'}
                 </>
               )}
-            </button>
+            </Button>
 
             <div className="library-scan-duration">
               <span className="library-scan-duration-label">

@@ -22,6 +22,7 @@ export default function PluginDevCodeModal({
     <Modal
       title={`插件代码 · ${pluginName || '未命名'}`}
       className="modal--plugin-dev-code"
+      chrome="shellless"
       hideCancel
       confirmText="关闭"
       onConfirm={onClose}

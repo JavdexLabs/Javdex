@@ -3,6 +3,7 @@ import { Ellipsis } from 'lucide-react'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import IconButton from './IconButton'
 import { UI_ICON } from './iconDefaults'
+import Button from './Button'
 
 export type DetailBarAction = {
   key: string
@@ -84,16 +85,17 @@ export default function DetailActionBar({
       aria-label={ariaLabel}
     >
       {primary ? (
-        <button
+        <Button
           type="button"
-          className="btn btn-primary detail-play-btn"
+          variant="primary"
+          className="detail-play-btn"
           disabled={primary.disabled || primary.busy}
           aria-busy={primary.busy || undefined}
           onClick={primary.onClick}
         >
           {primary.icon}
           <span>{primary.label}</span>
-        </button>
+        </Button>
       ) : null}
 
       {actions.length > 0 ? (

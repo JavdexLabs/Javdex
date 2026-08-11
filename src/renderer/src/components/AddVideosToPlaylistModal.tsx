@@ -6,6 +6,7 @@ import { useToast } from './Toast'
 import Modal from './Modal'
 import EmptyState from './EmptyState'
 import { UI_ICON_SM } from './iconDefaults'
+import Button from './Button'
 
 interface Props {
   videoIds: number[]
@@ -112,13 +113,14 @@ export default function AddVideosToPlaylistModal({
     <Modal
       title="批量加入播放清单"
       subtitle={`${videoIds.length} 部`}
+
       size="md"
       className="modal--playlist-picker"
       onCancel={onCancel}
       actions={
-        <button type="button" className="btn" onClick={onCancel} disabled={busyId !== null}>
+        <Button type="button" onClick={onCancel} disabled={busyId !== null}>
           关闭
-        </button>
+        </Button>
       }
     >
       {loading ? (
@@ -140,15 +142,17 @@ export default function AddVideosToPlaylistModal({
               }}
               autoFocus
             />
-            <button
+            <Button
               type="button"
-              className="btn btn-sm btn-primary"
+              variant="primary"
+
+              size="sm"
               disabled={!canCreate || busyId !== null}
               title={hasExactName ? '已有同名清单，请直接加入' : undefined}
               onClick={() => void createAndAddToPlaylist()}
             >
               {busyId === 'create' ? '创建中…' : '创建并加入'}
-            </button>
+            </Button>
           </div>
           {items.length === 0 ? (
             <EmptyState
@@ -183,14 +187,15 @@ export default function AddVideosToPlaylistModal({
                       <div className="playlist-pick-name">{item.name}</div>
                       <div className="playlist-pick-meta">{item.video_count} 部影片</div>
                     </div>
-                    <button
+                    <Button
                       type="button"
-                      className="btn btn-sm"
+
+                      size="sm"
                       disabled={busyId !== null}
                       onClick={() => void addToPlaylist(item.id)}
                     >
                       {busyId === item.id ? '加入中…' : '加入'}
-                    </button>
+                    </Button>
                   </div>
                 )
               })}

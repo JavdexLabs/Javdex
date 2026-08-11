@@ -7,6 +7,7 @@ import {
   actressDeleteModeForAction,
   type ActressDeleteConfirmationAction
 } from './actressDeleteConfirmation'
+import Button from './Button'
 
 interface ActressDeleteModalProps {
   ids: number[]
@@ -80,19 +81,19 @@ export default function ActressDeleteModal({
       onCancel={onCancel}
       actions={
         <>
-          <button type="button" className="btn" disabled={deleting} onClick={onCancel}>
+          <Button type="button" disabled={deleting} onClick={onCancel}>
             取消
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn btn-danger"
+            variant="danger"
             disabled={!impact || deleting}
             onClick={() =>
               void execute(copy?.highRisk ? 'acknowledge-risk' : 'ordinary-confirm')
             }
           >
             {deleting ? '删除中…' : copy?.confirmText ?? '删除'}
-          </button>
+          </Button>
         </>
       }
     >

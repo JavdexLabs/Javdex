@@ -15,6 +15,7 @@ import {
   type VideoResourceKindSelection
 } from './videoResourceImportForm'
 import { VIDEO_RESOURCE_KIND_LABELS } from './videoResourcePresentation'
+import Button from './Button'
 
 export default function VideoResourceImportModal({
   fixedCode,
@@ -116,6 +117,7 @@ export default function VideoResourceImportModal({
     <Modal
       title={resource ? '编辑影片资源' : '导入影片资源'}
       subtitle={resource ? `更新 ${fixedCode ?? code} 的链接资源` : fixedCode ? `追加到 ${fixedCode}` : '通过链接创建影片或追加资源'}
+
       size="md"
       confirmText={saving ? '保存中…' : resource ? '保存' : '导入'}
       confirmDisabled={saving || checking}
@@ -159,14 +161,15 @@ export default function VideoResourceImportModal({
               placeholder="https://…"
             />
             {canCheckLink ? (
-              <button
+              <Button
                 type="button"
-                className="btn btn-sm"
+
+                size="sm"
                 disabled={checking || saving || !url.trim()}
                 onClick={() => void checkLink()}
               >
                 {checking ? '检测中…' : '检测链接'}
-              </button>
+              </Button>
             ) : null}
           </div>
           {checkResult ? (

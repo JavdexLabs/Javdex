@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import type { ReactNode } from 'react'
+import Button from './Button'
 import IconButton from './IconButton'
 import { UI_ICON_SM } from './iconDefaults'
 
@@ -32,17 +33,19 @@ export default function SelectionToolbar({
       <div className="selection-toolbar-count">{countLabel}</div>
       <div className="selection-toolbar-actions">
         {actions.map((action) => (
-          <button
+          <Button
             key={action.key}
             type="button"
-            className={`btn btn-sm${action.primary ? ' btn-primary' : ''}${action.danger ? ' btn-danger' : ''}`}
+
+            size="sm"
+            variant={action.danger ? 'danger' : action.primary ? 'primary' : 'default'}
             disabled={action.disabled}
             title={action.title}
             onClick={action.onClick}
           >
             {action.icon}
             <span>{action.label}</span>
-          </button>
+          </Button>
         ))}
       </div>
       <IconButton

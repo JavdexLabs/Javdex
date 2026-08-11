@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import { UI_ICON_SM } from './iconDefaults'
 import IconButton from './IconButton'
+import Button from './Button'
 
 export default function ListMaintenanceBanner({
   title,
@@ -34,23 +35,26 @@ export default function ListMaintenanceBanner({
         {detail ? <span>{detail}</span> : null}
       </div>
       <div className="list-maintenance-banner-actions">
-        <button
+        <Button
           type="button"
-          className="btn btn-sm"
+
+          size="sm"
           disabled={secondaryDisabled}
           onClick={onSecondary}
         >
           {secondaryLabel}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className="btn btn-sm btn-primary"
+          variant="primary"
+
+          size="sm"
           disabled={primaryDisabled}
           title={primaryDisabled ? primaryDisabledReason : undefined}
           onClick={onPrimary}
         >
           {primaryLabel}
-        </button>
+        </Button>
         {onDismiss ? (
           <IconButton
             className="list-maintenance-banner-dismiss"

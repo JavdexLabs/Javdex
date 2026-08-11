@@ -5,6 +5,7 @@ import PluginCard from '../PluginCard'
 import SelectControl from '../SelectControl'
 import { SettingsCard, SettingsEmptyPanel, SettingsSectionBlock } from './SettingsPrimitives'
 import type { PluginKind } from './PluginConfigModals'
+import Button from '../Button'
 
 export interface PluginDeleteTarget {
   kind: PluginKind
@@ -91,14 +92,14 @@ function PluginEmptyState({
       {(onImport || onDev) && (
         <div className="plugin-empty-state-actions">
           {onImport && (
-            <button type="button" className="btn btn-sm" onClick={onImport}>
+            <Button type="button" size="sm" onClick={onImport}>
               导入插件
-            </button>
+            </Button>
           )}
           {onDev && (
-            <button type="button" className="btn btn-sm" onClick={onDev}>
+            <Button type="button" size="sm" onClick={onDev}>
               开发助手
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -235,17 +236,19 @@ export default function PluginsSettingsPanel({
       hint="管理影片 / 演员刮削来源，默认插件用于自动刮削。"
       actions={
         <>
-          <button type="button" className="btn btn-sm" onClick={onOpenDev}>
+          <Button type="button" size="sm" onClick={onOpenDev}>
             开发助手
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn btn-sm btn-primary"
+            variant="primary"
+
+            size="sm"
             disabled={pluginBusy !== null}
             onClick={onImport}
           >
             导入插件
-          </button>
+          </Button>
         </>
       }
     >
@@ -271,9 +274,9 @@ export default function PluginsSettingsPanel({
           </SelectControl>
         </label>
         {searchQuery && (
-          <button type="button" className="btn btn-sm" onClick={() => setSearchQuery('')}>
+          <Button type="button" size="sm" onClick={() => setSearchQuery('')}>
             清空
-          </button>
+          </Button>
         )}
       </div>
 
@@ -286,14 +289,15 @@ export default function PluginsSettingsPanel({
         }
         hint={`默认 ${defaultVideoPluginName} · ${bestCoverageLabel(videoPlugins, ALL_VIDEO_SCRAPE_FIELDS.length)}`}
         actions={
-          <button
+          <Button
             type="button"
-            className="btn btn-sm"
+
+            size="sm"
             disabled={pluginBusy !== null}
             onClick={() => onCreateComposite('video')}
           >
             新增组合
-          </button>
+          </Button>
         }
       >
         {renderPluginGrid('video', filteredVideoPlugins, ALL_VIDEO_SCRAPE_FIELDS.length, {
@@ -315,14 +319,15 @@ export default function PluginsSettingsPanel({
         }
         hint={`默认 ${defaultActressPluginName} · ${bestCoverageLabel(actressPlugins, ALL_ACTRESS_SCRAPE_FIELDS.length)}`}
         actions={
-          <button
+          <Button
             type="button"
-            className="btn btn-sm"
+
+            size="sm"
             disabled={pluginBusy !== null}
             onClick={() => onCreateComposite('actress')}
           >
             新增组合
-          </button>
+          </Button>
         }
       >
         {renderPluginGrid('actress', filteredActressPlugins, ALL_ACTRESS_SCRAPE_FIELDS.length, {

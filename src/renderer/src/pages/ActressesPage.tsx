@@ -59,6 +59,7 @@ import { useActressFaceScan, previousAvatarAfterFaceScan } from '../actressFaceF
 import { useAvatarAutoCropBatch } from '../contexts/AvatarAutoCropBatchContext'
 import { useInfiniteActressList } from '../query/useInfiniteActressList'
 import VirtualActressGrid from '../components/VirtualActressGrid'
+import Button from '../components/Button'
 
 const ACTRESS_SORT_OPTIONS: SortSwitchOption<ActressListSortBy>[] = [
   { value: 'video_count', label: '影片', title: '本地影片数' },
@@ -452,20 +453,24 @@ export default function ActressesPage(): JSX.Element {
             controls={
               <>
                 {pendingConflictCount > 0 ? (
-                  <button
+                  <Button
                     type="button"
-                    className="btn btn-sm actress-conflict-entry"
+
+                    size="sm"
+                    className="actress-conflict-entry"
                     onClick={() => navigateToActressConflicts(navigate, location)}
                   >
                     <CircleAlert {...UI_ICON_SM} aria-hidden />
                     待确认 {pendingConflictCount}
-                  </button>
+                  </Button>
                 ) : null}
                 <div className="library-filter-anchor">
-                  <button
+                  <Button
                     ref={filterBtnRef}
                     type="button"
-                    className={`btn btn-sm library-filter-btn${filterOpen ? ' library-filter-btn--open' : ''}${hasAppliedFilters ? ' library-filter-btn--active' : ''}`}
+
+                    size="sm"
+                    className={`library-filter-btn${filterOpen ? ' library-filter-btn--open' : ''}${hasAppliedFilters ? ' library-filter-btn--active' : ''}`}
                     onClick={() => setFilterOpen((open) => !open)}
                     aria-expanded={filterOpen}
                     aria-haspopup="dialog"
@@ -476,7 +481,7 @@ export default function ActressesPage(): JSX.Element {
                       className={`library-filter-chevron${filterOpen ? ' is-open' : ''}`}
                       aria-hidden
                     />
-                  </button>
+                  </Button>
                   <ActressFilterPopover
                     open={filterOpen}
                     anchorRef={filterBtnRef}

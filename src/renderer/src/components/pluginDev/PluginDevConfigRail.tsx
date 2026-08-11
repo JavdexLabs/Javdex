@@ -5,6 +5,7 @@ import SelectControl from '../SelectControl'
 import PluginDevFieldTags from './PluginDevFieldTags'
 import PluginDevMediaTargetPicker from './PluginDevMediaTargetPicker'
 import { WorkbenchRail, WorkbenchRailHeader } from '../workbench'
+import Button from '../Button'
 
 function PluginDevFieldLabel({
   children,
@@ -214,14 +215,15 @@ export default function PluginDevConfigRail({
             <PluginDevFieldLabel required={testTargetRequired}>
               {profile.testTargetLabel}
             </PluginDevFieldLabel>
-            <button
+            <Button
               type="button"
-              className="btn btn-ghost plugin-dev-target-picker-button"
+              variant="ghost"
+              className="plugin-dev-target-picker-button"
               disabled={busy}
               onClick={() => setShowTargetPicker(true)}
             >
               从媒体库选择
-            </button>
+            </Button>
           </div>
           <textarea
             className="text-input plugin-dev-textarea plugin-dev-textarea--mini"
@@ -285,23 +287,27 @@ export default function PluginDevConfigRail({
       </div>
 
       <div className="plugin-dev-config-actions">
-        <button
+        <Button
           type="button"
-          className="btn btn-sm btn-primary"
+          variant="primary"
+
+          size="sm"
           disabled={busy || !canUseAgent || agentBusy || Boolean(agentPrimaryDisabledReason)}
           title={agentPrimaryDisabledReason ?? undefined}
           onClick={onStartAgent}
         >
           {agentButtonLabel}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className="btn btn-sm plugin-dev-config-actions-install"
+
+          size="sm"
+          className="plugin-dev-config-actions-install"
           disabled={busy || !hasPackage || !canInstall}
           onClick={onInstall}
         >
           {installBusy ? '安装中…' : loadedInstalledName ? '更新安装' : '安装'}
-        </button>
+        </Button>
       </div>
       {showTargetPicker ? (
         <PluginDevMediaTargetPicker

@@ -4,6 +4,7 @@ import { AppFormField } from './FormPrimitives'
 import ImageImportField from './ImageImportField'
 import Modal from './Modal'
 import { useTheme } from './ThemeProvider'
+import Button from './Button'
 
 interface Props {
   playlist?: PlaylistDetail
@@ -61,6 +62,7 @@ export default function PlaylistCreateModal({
   return (
     <Modal
       title={editing ? '编辑播放清单' : '创建播放清单'}
+
       size="md"
       confirmText={saving ? '保存中…' : editing ? '保存' : '创建'}
       confirmDisabled={!canSave || saving}
@@ -77,13 +79,15 @@ export default function PlaylistCreateModal({
             previewShape="square"
             extraActions={
               editing && playlist?.cover_path ? (
-                <button
+                <Button
                   type="button"
-                  className="btn btn-sm btn-ghost"
+                  variant="ghost"
+
+                  size="sm"
                   onClick={() => setRemoveCover((value) => !value)}
                 >
                   {removeCover ? '撤销移除封面' : '移除当前封面'}
-                </button>
+                </Button>
               ) : undefined
             }
           />

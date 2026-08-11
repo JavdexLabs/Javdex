@@ -1140,14 +1140,6 @@
 .playlist-form-grid {
   grid-template-columns: 86px 1fr;
 }
-.empty-state--compact {
-  min-height: var(--empty-inline-min-h, 140px);
-  height: auto;
-  padding: 22px;
-  border: 1px dashed var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-panel);
-}
 .scroll-body-inner--detail .empty-state--compact {
   background: transparent;
   border-color: color-mix(in srgb, var(--border-subtle) 58%, transparent);

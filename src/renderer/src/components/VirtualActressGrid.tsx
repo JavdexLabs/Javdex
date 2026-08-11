@@ -12,6 +12,8 @@ import {
   actressGridSlotCount,
   computeActressGridLayout
 } from './actressGridLayout'
+import Button from './Button'
+import Spinner from './Spinner'
 
 interface VirtualActressGridProps {
   actresses: ActressListItem[]
@@ -114,11 +116,11 @@ export default function VirtualActressGrid({
       return (
         <div className="virtual-actress-grid-status" style={cellStyle}>
           {loadMoreFailed ? (
-            <button type="button" className="btn btn-sm" onClick={onRetryLoadMore}>
+            <Button type="button" size="sm" onClick={onRetryLoadMore}>
               加载失败，重试
-            </button>
+            </Button>
           ) : loadingMore ? (
-            <div className="spinner" aria-label="正在加载更多演员" />
+            <Spinner aria-label="正在加载更多演员" />
           ) : null}
         </div>
       )

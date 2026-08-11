@@ -6,6 +6,7 @@ import { useToast } from './Toast'
 import Modal from './Modal'
 import EmptyState from './EmptyState'
 import { UI_ICON_SM } from './iconDefaults'
+import Button from './Button'
 
 interface Props {
   videoId: number
@@ -125,13 +126,14 @@ export default function AddToPlaylistModal({
     <Modal
       title="加入播放清单"
       subtitle={videoCode}
+
       size="md"
       className="modal--playlist-picker"
       onCancel={onCancel}
       actions={
-        <button type="button" className="btn" onClick={onCancel}>
+        <Button type="button" onClick={onCancel}>
           关闭
-        </button>
+        </Button>
       }
     >
       {loading ? (
@@ -153,15 +155,17 @@ export default function AddToPlaylistModal({
               }}
               autoFocus
             />
-            <button
+            <Button
               type="button"
-              className="btn btn-sm btn-primary"
+              variant="primary"
+
+              size="sm"
               disabled={!canCreate || busyId !== null}
               title={hasExactName ? '已有同名清单，请直接加入' : undefined}
               onClick={() => void createAndAddToPlaylist()}
             >
               {busyId === 'create' ? '创建中…' : '创建并加入'}
-            </button>
+            </Button>
           </div>
           {items.length === 0 ? (
             <EmptyState
@@ -196,9 +200,11 @@ export default function AddToPlaylistModal({
                       <div className="playlist-pick-name">{item.name}</div>
                       <div className="playlist-pick-meta">{item.video_count} 部影片</div>
                     </div>
-                    <button
+                    <Button
                       type="button"
-                      className={`btn btn-sm${item.contains_video ? ' playlist-pick-remove-btn' : ''}`}
+
+                      size="sm"
+                      className={item.contains_video ? 'playlist-pick-remove-btn' : ''}
                       disabled={busyId !== null}
                       onClick={() =>
                         void (item.contains_video
@@ -207,7 +213,7 @@ export default function AddToPlaylistModal({
                       }
                     >
                       {busyId === item.id ? '处理中…' : item.contains_video ? '移出' : '加入'}
-                    </button>
+                    </Button>
                   </div>
                 )
               })}

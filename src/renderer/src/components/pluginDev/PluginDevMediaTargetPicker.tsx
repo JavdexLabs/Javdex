@@ -104,9 +104,10 @@ export default function PluginDevMediaTargetPicker({
   return (
     <Modal
       title={titleForKind(kind)}
+
       size="lg"
       className="modal--plugin-dev-target-picker"
-      bodyClassName="modal-body--fixed"
+      bodyOverflow="hidden"
       confirmText="完成"
       cancelText="关闭"
       onConfirm={onClose}

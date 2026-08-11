@@ -25,6 +25,7 @@ import {
 import { navigateToSeriesDetail } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { seriesKeys } from '../query/queryKeys'
+import Button from '../components/Button'
 
 const SORT_OPTIONS: SortSwitchOption<ClassificationListSortBy>[] = [
   { value: 'video_count', label: '影片', title: '关联影片数量' },
@@ -119,10 +120,10 @@ export default function SeriesListPage(): JSX.Element {
                 compact
                 onChange={patchSort}
               />
-              <button type="button" className="btn btn-primary btn-sm" onClick={() => setCreating(true)}>
+              <Button type="button" variant="primary" size="sm" onClick={() => setCreating(true)}>
                 <Plus {...UI_ICON_SM} aria-hidden />
                 新增
-              </button>
+              </Button>
             </>
           }
           resultCount={

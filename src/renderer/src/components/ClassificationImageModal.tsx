@@ -28,6 +28,7 @@ import {
   remoteClassificationImageInput,
   videoCoverClassificationImageInput
 } from './classificationImageState'
+import Button from './Button'
 
 type SourceMode = 'file' | 'url' | 'video'
 
@@ -158,6 +159,7 @@ export default function ClassificationImageModal({
   return (
     <Modal
       title={`管理${entityLabel}主图`}
+
       size="lg"
       className="classification-image-modal"
       confirmText={saving ? '保存中…' : '保存主图'}
@@ -190,9 +192,11 @@ export default function ClassificationImageModal({
               <p>正式主图由 Javdex 管理；移除后会自动使用关联影片封面。</p>
             </div>
             {imagePath ? (
-              <button
+              <Button
                 type="button"
-                className="btn btn-ghost btn-sm"
+                variant="ghost"
+
+                size="sm"
                 onClick={() => {
                   remoteRequestRef.current += 1
                   setLoadingRemote(false)
@@ -204,7 +208,7 @@ export default function ClassificationImageModal({
               >
                 <Trash2 {...UI_ICON_SM} aria-hidden />
                 移除正式主图
-              </button>
+              </Button>
             ) : null}
           </div>
 
@@ -241,14 +245,14 @@ export default function ClassificationImageModal({
           {mode === 'file' ? (
             <div className="classification-image-file-source">
               <p>选择一张本地图片。保存后会复制到 Javdex 媒体资源目录。</p>
-              <button
+              <Button
                 type="button"
-                className="btn btn-ghost"
+                variant="ghost"
                 onClick={() => fileInputRef.current?.click()}
               >
                 <Upload {...UI_ICON_SM} aria-hidden />
                 选择图片
-              </button>
+              </Button>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -282,14 +286,14 @@ export default function ClassificationImageModal({
                   resetPending()
                 }}
               />
-              <button
+              <Button
                 type="button"
-                className="btn btn-ghost"
+                variant="ghost"
                 disabled={loadingRemote}
                 onClick={() => void previewRemote()}
               >
                 {loadingRemote ? '加载中…' : '加载并预览'}
-              </button>
+              </Button>
             </div>
           ) : null}
 

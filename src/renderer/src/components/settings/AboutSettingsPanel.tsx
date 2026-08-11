@@ -4,6 +4,7 @@ import { api } from '../../api'
 import { UI_ICON_MD, UI_ICON_SM } from '../iconDefaults'
 import AppUpdatePanel from './AppUpdatePanel'
 import appLogoUrl from '../../../../../resources/icon.png'
+import Button from '../Button'
 
 const PROJECT_FACTS = [
   { label: '运行方式', value: '桌面应用' },
@@ -23,15 +24,16 @@ export default function AboutSettingsPanel(): JSX.Element {
           <h2 id="about-app-title">{APP_DISPLAY_NAME}</h2>
           <p>本地优先、插件驱动、可扩展的媒体库管理工具。</p>
         </div>
-        <button
+        <Button
           type="button"
-          className="btn btn-sm"
+
+          size="sm"
           onClick={() => void api.appUpdate.openProjectPage('project')}
         >
           <GitFork {...UI_ICON_SM} aria-hidden />
           GitHub 项目
           <ExternalLink {...UI_ICON_SM} aria-hidden />
-        </button>
+        </Button>
       </section>
 
       <AppUpdatePanel />

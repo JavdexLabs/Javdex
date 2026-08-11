@@ -6,6 +6,7 @@ import Modal from './Modal'
 import { useToast } from './Toast'
 import { UI_ICON } from './iconDefaults'
 import EmptyState from './EmptyState'
+import Button from './Button'
 
 const IMAGE_ACCEPT =
   'image/jpeg,image/png,image/webp,image/gif,image/avif,.jpg,.jpeg,.png,.webp,.gif,.avif'
@@ -206,6 +207,7 @@ export default function ImageImportModal({
   return (
     <Modal
         title={title}
+
         size="lg"
         className="image-import-modal"
         confirmText={saving ? '导入中...' : `导入${itemLabel}`}
@@ -260,10 +262,10 @@ export default function ImageImportModal({
                   支持单张或多张，重复选择会追加到当前列表。
                 </div>
               </div>
-              <button type="button" className="btn" onClick={() => fileInputRef.current?.click()}>
+              <Button type="button" onClick={() => fileInputRef.current?.click()}>
                 <ImagePlus {...UI_ICON} />
                 选择图片
-              </button>
+              </Button>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -292,15 +294,15 @@ export default function ImageImportModal({
                   }}
                   placeholder="输入一个图片链接"
                 />
-                <button
+                <Button
                   type="button"
-                  className="btn"
+
                   onClick={() => void addRemoteImage()}
                   disabled={!urlInput.trim() || loadingUrl}
                 >
                   <Link {...UI_ICON} />
                   {loadingUrl ? '加载中...' : '加载图片'}
-                </button>
+                </Button>
               </div>
               <div className="image-import-muted">{urlHint}</div>
             </div>

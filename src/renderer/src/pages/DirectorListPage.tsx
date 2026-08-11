@@ -25,6 +25,7 @@ import {
 import { navigateToDirectorDetail } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { directorKeys } from '../query/queryKeys'
+import Button from '../components/Button'
 
 const SORT_OPTIONS: SortSwitchOption<ClassificationListSortBy>[] = [
   { value: 'video_count', label: '影片', title: '关联影片数量' },
@@ -122,14 +123,16 @@ export default function DirectorListPage(): JSX.Element {
                 compact
                 onChange={patchSort}
               />
-              <button
+              <Button
                 type="button"
-                className="btn btn-primary btn-sm"
+                variant="primary"
+
+                size="sm"
                 onClick={() => setCreating(true)}
               >
                 <Plus {...UI_ICON_SM} />
                 新增
-              </button>
+              </Button>
             </>
           }
           resultCount={

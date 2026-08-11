@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react'
+import Spinner from './Spinner'
+import styles from './EmptyState.module.css'
 
 export type EmptyStateVariant = 'page' | 'compact' | 'panel' | 'modal' | 'log' | 'fill'
 
@@ -23,13 +25,19 @@ export default function EmptyState({
 }: EmptyStateProps): JSX.Element {
   return (
     <div
-      className={`empty-state empty-state--${variant}${className ? ` ${className}` : ''}`}
+      className={`${styles.root} ${styles[variant]} empty-state empty-state--${variant}${className ? ` ${className}` : ''}`}
       role={loading ? 'status' : undefined}
       aria-live={loading ? 'polite' : undefined}
     >
-      {loading ? <div className="spinner" /> : icon ? <div className="empty-state-icon">{icon}</div> : null}
-      {title ? <strong className="empty-state-title">{title}</strong> : null}
-      {description ? <div className="empty-state-description">{description}</div> : null}
+      {loading ? (
+        <Spinner />
+      ) : icon ? (
+        <div className={`${styles.icon} empty-state-icon`}>{icon}</div>
+      ) : null}
+      {title ? <strong className={`${styles.title} empty-state-title`}>{title}</strong> : null}
+      {description ? (
+        <div className={`${styles.description} empty-state-description`}>{description}</div>
+      ) : null}
       {children}
     </div>
   )

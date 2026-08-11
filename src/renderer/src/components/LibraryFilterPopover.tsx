@@ -6,6 +6,7 @@ import SelectControl from './SelectControl'
 import TagFilter from './TagFilter'
 import { VIDEO_RESOURCE_FILTER_ORDER } from '../listView/listQueryParams'
 import { VIDEO_RESOURCE_FILTER_LABELS } from './videoResourcePresentation'
+import Button from './Button'
 
 export interface LibraryFilterState {
   status: ScrapedStatus | 'all'
@@ -173,12 +174,12 @@ export default function LibraryFilterPopover({
       </div>
 
       <footer className="library-filter-popover-footer">
-        <button type="button" className="btn btn-sm btn-ghost" onClick={onReset}>
+        <Button type="button" variant="ghost" size="sm" onClick={onReset}>
           重置
-        </button>
-        <button type="button" className="btn btn-sm btn-primary" onClick={onClose}>
+        </Button>
+        <Button type="button" variant="primary" size="sm" onClick={onClose}>
           完成
-        </button>
+        </Button>
       </footer>
     </div>
   )

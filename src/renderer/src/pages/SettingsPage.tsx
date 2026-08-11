@@ -58,6 +58,7 @@ import {
 import { THEME_OPTIONS } from '../theme'
 import type { ThemeId } from '@shared/settingsTypes'
 import type { UpdateCheckState } from '@shared/updateTypes'
+import Button from '../components/Button'
 
 function shouldAutoScrollBatchLog(container: HTMLDivElement): boolean {
   const selection = window.getSelection()
@@ -1161,6 +1162,7 @@ export default function SettingsPage(): JSX.Element {
                 ? '批量智能构图（头像）'
                 : '批量更新（影片）'
           }
+
           size="xl"
           className="modal--batch-detail"
           bodyClassName="modal-body--batch-detail"
@@ -1214,16 +1216,18 @@ export default function SettingsPage(): JSX.Element {
             customControls={
               batchDetailScope === 'avatar' ? (
                 avatarBatchRunning && avatarAutoCropBatch.state.source === 'manual' ? (
-                  <button
+                  <Button
                     type="button"
-                    className="btn btn-sm btn-danger"
+                    variant="danger"
+
+                    size="sm"
                     disabled={avatarAutoCropBatch.state.status === 'cancelling'}
                     onClick={avatarAutoCropBatch.cancel}
                   >
                     {avatarAutoCropBatch.state.status === 'cancelling'
                       ? '正在停止…'
                       : '停止任务'}
-                  </button>
+                  </Button>
                 ) : null
               ) : undefined
             }

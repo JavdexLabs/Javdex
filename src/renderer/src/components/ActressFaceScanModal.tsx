@@ -1,5 +1,6 @@
 import Modal from './Modal'
 import type { ActressFaceScanProgress, ActressFaceScanSummary } from '../actressFaceFilter/scanQueue'
+import Button from './Button'
 
 interface Props {
   progress: ActressFaceScanProgress
@@ -30,23 +31,24 @@ export default function ActressFaceScanModal({
     <Modal
       title={title}
       hint={hint}
+
       size="sm"
       dismissible={false}
       onCancel={onDone}
       actions={
         running ? (
-          <button
+          <Button
             type="button"
-            className="btn btn-ghost"
+            variant="ghost"
             disabled={cancelling}
             onClick={onCancel}
           >
             {cancelling ? '正在取消…' : '取消扫描'}
-          </button>
+          </Button>
         ) : (
-          <button type="button" className="btn btn-primary" onClick={onDone}>
+          <Button type="button" variant="primary" onClick={onDone}>
             完成
-          </button>
+          </Button>
         )
       }
     >

@@ -1,0 +1,96 @@
+.root {
+  --empty-inline-min-h: 140px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 220px;
+  height: auto;
+  padding: 24px;
+  gap: 10px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.page {
+  min-height: 280px;
+}
+
+.fill {
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+  padding: 18px 12px;
+  border: none;
+  align-self: stretch;
+  flex: 1 1 auto;
+  background: transparent;
+}
+
+.panel {
+  min-height: 180px;
+  border: 1px dashed color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-panel) 74%, transparent);
+}
+
+.compact {
+  min-height: var(--empty-inline-min-h);
+  height: auto;
+  max-height: none;
+  padding: 22px;
+  border: 1px dashed color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-panel) 74%, transparent);
+}
+
+.modal {
+  min-height: 0;
+  border: 1px dashed color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  border-radius: var(--radius-md);
+  flex: 1 1 auto;
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+}
+
+.log {
+  min-height: 120px;
+  border: 1px dashed color-mix(in srgb, var(--border-subtle) 58%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-base) 42%, transparent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid color-mix(in srgb, var(--border-accent) 56%, transparent);
+  border-radius: var(--radius-pill);
+  flex: 0 0 auto;
+  background: color-mix(in srgb, var(--surface-selected) 52%, transparent);
+  color: var(--text-accent);
+}
+
+.icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.title {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.description {
+  max-width: 360px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}

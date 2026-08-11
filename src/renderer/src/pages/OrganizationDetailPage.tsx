@@ -38,6 +38,7 @@ import { navigateToFacetList } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { organizationKeys, seriesKeys, videoKeys } from '../query/queryKeys'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
+import Button from '../components/Button'
 
 const STATUS_LABEL = {
   unknown: '状态未知',
@@ -214,42 +215,50 @@ export default function OrganizationDetailPage(): JSX.Element {
             title={organization.mainName}
             controls={
               <>
-                <button
+                <Button
                   type="button"
-                  className="btn btn-ghost btn-sm"
+                  variant="ghost"
+
+                  size="sm"
                   onClick={() => setEditingImage(true)}
                 >
                   <ImagePlus {...UI_ICON_SM} aria-hidden />
                   管理主图
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="btn btn-ghost btn-sm"
+                  variant="ghost"
+
+                  size="sm"
                   onClick={() => setMergingOrganization(true)}
                 >
                   <GitMerge {...UI_ICON_SM} aria-hidden />
                   合并机构
-                </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>
+                </Button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(true)}>
                   <Pencil {...UI_ICON_SM} aria-hidden />
                   编辑资料
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="btn btn-ghost btn-sm"
+                  variant="ghost"
+
+                  size="sm"
                   onClick={() => setDeleteAction('role')}
                 >
                   <BadgeMinus {...UI_ICON_SM} aria-hidden />
                   移除{FACET_LABEL[role]}角色
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="btn btn-ghost btn-sm"
+                  variant="ghost"
+
+                  size="sm"
                   onClick={() => setDeleteAction('organization')}
                 >
                   <Trash2 {...UI_ICON_SM} aria-hidden />
                   完整删除机构
-                </button>
+                </Button>
               </>
             }
             resultCount={
@@ -338,14 +347,17 @@ export default function OrganizationDetailPage(): JSX.Element {
                 ))}
               </div>
               {hasMore ? (
-                <button
+                <Button
                   type="button"
-                  className="btn btn-ghost btn-sm organization-load-more"
+                  variant="ghost"
+
+                  size="sm"
+                  className="organization-load-more"
                   disabled={loadingMore}
                   onClick={loadMore}
                   >
                   {loadingMore ? '加载中…' : '加载更多'}
-                </button>
+                </Button>
               ) : null}
             </>
           )}

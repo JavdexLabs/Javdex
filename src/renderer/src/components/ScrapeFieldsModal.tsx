@@ -8,6 +8,7 @@ import ScraperSiteSelect from './ScraperSiteSelect'
 import SelectControl from './SelectControl'
 import SettingsSwitchRow from './SettingsSwitchRow'
 import Modal from './Modal'
+import Button from './Button'
 
 export interface ScrapeFieldOption<T extends string> {
   id: T
@@ -459,17 +460,18 @@ export default function ScrapeFieldsModal<
     <Modal
       title={title}
       hint={hint}
+
       size="xl"
       className="modal--scrape"
       onCancel={onCancel}
       actions={
         <>
-          <button type="button" className="btn" onClick={onCancel}>
+          <Button type="button" onClick={onCancel}>
             取消
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn btn-primary"
+            variant="primary"
             disabled={!canConfirm}
             onClick={() =>
               onConfirm(
@@ -486,7 +488,7 @@ export default function ScrapeFieldsModal<
             }
           >
             {confirmText}
-          </button>
+          </Button>
         </>
       }
     >

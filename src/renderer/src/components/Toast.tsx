@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import styles from './Toast.module.css'
 
 type ToastKind = 'info' | 'success' | 'error'
 interface ToastItem {
@@ -35,9 +36,9 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
   return (
     <Ctx.Provider value={value}>
       {children}
-      <div className="toast-stack" aria-live="polite" aria-relevant="additions" role="status">
+      <div className={styles.stack} aria-live="polite" aria-relevant="additions" role="status">
         {items.map((t) => (
-          <div key={t.id} className={`toast ${t.kind}`}>
+          <div key={t.id} className={`${styles.toast} ${styles[t.kind]}`}>
             {t.message}
           </div>
         ))}

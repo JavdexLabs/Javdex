@@ -20,6 +20,7 @@ import { moveClassificationLink, useClassificationLinkKeys } from './classificat
 import { UI_ICON_SM } from './iconDefaults'
 import IconButton from './IconButton'
 import { FACET_LABEL } from '../facet'
+import Button from './Button'
 
 interface Props {
   role: OrganizationRole
@@ -69,6 +70,7 @@ export default function OrganizationEditModal({
   return (
     <Modal
       title={isEditing ? '编辑机构资料' : `新增${FACET_LABEL[role]}`}
+
       size="lg"
       className="modal-entity-edit"
       confirmText={saving ? '保存中…' : '保存'}
@@ -261,7 +263,8 @@ export default function OrganizationEditModal({
                     }}
                   />
                   <IconButton
-                    className="organization-link-action icon-btn--danger"
+                    className="organization-link-action"
+                    tone="danger"
                     label={`移除链接 ${index + 1}`}
                     icon={<Trash2 {...UI_ICON_SM} aria-hidden />}
                     onClick={() => {
@@ -275,9 +278,12 @@ export default function OrganizationEditModal({
                 </div>
               </div>
             ))}
-            <button
+            <Button
               type="button"
-              className="btn btn-ghost btn-sm organization-link-add"
+              variant="ghost"
+
+              size="sm"
+              className="organization-link-add"
               onClick={() => {
                 setDraft({ ...draft, links: [...draft.links, { label: '', url: '' }] })
                 appendLinkKey()
@@ -285,7 +291,7 @@ export default function OrganizationEditModal({
             >
               <Plus {...UI_ICON_SM} aria-hidden />
               添加链接
-            </button>
+            </Button>
           </div>
         </EditFormSection>
       </div>

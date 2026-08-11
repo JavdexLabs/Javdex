@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../api'
+import Button from './Button'
 
 interface Props {
   label: string
@@ -71,13 +72,13 @@ export default function ImageImportField({
 
   const actions = (
     <div className="image-import-actions">
-      <button type="button" className="btn btn-sm" onClick={() => inputRef.current?.click()}>
+      <Button type="button" size="sm" onClick={() => inputRef.current?.click()}>
         选择图片
-      </button>
+      </Button>
       {previewUrl && (
-        <button type="button" className="btn btn-sm btn-ghost" onClick={clearPick}>
+        <Button type="button" variant="ghost" size="sm" onClick={clearPick}>
           取消选择
-        </button>
+        </Button>
       )}
       {extraActions}
     </div>

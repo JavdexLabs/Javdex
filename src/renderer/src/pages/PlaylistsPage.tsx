@@ -16,6 +16,7 @@ import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import { UI_ICON_SM } from '../components/iconDefaults'
+import Button from '../components/Button'
 
 function playlistListCover(item: PlaylistListItem): string | null {
   return assetUrl(item.preview_cover_path)
@@ -166,13 +167,15 @@ export default function PlaylistsPage(): JSX.Element {
             onChange: setSearchInput
           }}
           controls={
-            <button
+            <Button
               type="button"
-              className="btn btn-sm btn-primary"
+              variant="primary"
+
+              size="sm"
               onClick={() => setShowCreate(true)}
             >
               创建清单
-            </button>
+            </Button>
           }
           resultCount={
             <span className="count-badge count-badge--stable" aria-live="polite">

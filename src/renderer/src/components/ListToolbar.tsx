@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import styles from './ListToolbar.module.css'
 
 interface ListToolbarProps {
   leading?: ReactNode
@@ -21,11 +22,11 @@ export default function ListToolbar({
   resultCount
 }: ListToolbarProps): JSX.Element {
   return (
-    <div className="topbar-toolbar">
+    <div className={`${styles.root} topbar-toolbar`}>
       {leading}
       {search ? (
         <input
-          className="search-input topbar-toolbar-search"
+          className={`${styles.search} search-input topbar-toolbar-search`}
           type="search"
           placeholder={search.placeholder}
           value={search.value}
@@ -33,11 +34,11 @@ export default function ListToolbar({
           aria-label={search.ariaLabel}
         />
       ) : (
-        <div className="topbar-toolbar-title">{title}</div>
+        <div className={`${styles.title} topbar-toolbar-title`}>{title}</div>
       )}
 
-      <div className="topbar-toolbar-end">
-        {controls && <div className="topbar-toolbar-controls">{controls}</div>}
+      <div className={`${styles.end} topbar-toolbar-end`}>
+        {controls && <div className={`${styles.controls} topbar-toolbar-controls`}>{controls}</div>}
         {resultCount}
       </div>
     </div>

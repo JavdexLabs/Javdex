@@ -57,6 +57,7 @@ import { invalidateVideoLibraryQueries } from '../query/invalidateLibraryQueries
 import { settingsPath } from '../settings/settingsRoutes'
 import VideoResourceImportModal from '../components/VideoResourceImportModal'
 import DirectorScrapeChoiceModal from '../components/DirectorScrapeChoiceModal'
+import Button from '../components/Button'
 
 interface PendingDirectorChoice {
   fields: VideoScrapeField[]
@@ -917,6 +918,7 @@ export default function DetailPage(): JSX.Element {
       {showMaintenanceInfo && (
         <Modal
           title="维护信息"
+
           size="sm"
           confirmText="关闭"
           hideCancel
@@ -975,30 +977,30 @@ export default function DetailPage(): JSX.Element {
           actions={
             video.resources.length === 1 ? (
               <>
-                <button
+                <Button
                   type="button"
-                  className="btn"
+
                   disabled={removingResource}
                   onClick={() => setRemoveResourceTarget(null)}
                 >
                   取消
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="btn"
+
                   disabled={removingResource}
                   onClick={() => void doRemoveResource('retain-video')}
                 >
                   保留影片元数据
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="btn btn-danger"
+                  variant="danger"
                   disabled={removingResource}
                   onClick={() => void doRemoveResource('delete-video')}
                 >
                   删除影片全部数据
-                </button>
+                </Button>
               </>
             ) : undefined
           }

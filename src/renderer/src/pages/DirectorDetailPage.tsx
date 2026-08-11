@@ -27,6 +27,7 @@ import { navigateToFacetList } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
+import Button from '../components/Button'
 
 const STATUS = {
   unknown: '状态未知',
@@ -148,38 +149,46 @@ export default function DirectorDetailPage(): JSX.Element {
             title={director.mainName}
             controls={
               <>
-                <button
+                <Button
                   type="button"
-                  className="btn btn-ghost btn-sm"
+                  variant="ghost"
+
+                  size="sm"
                   onClick={() => setMergingDirector(true)}
                 >
                   <GitMerge {...UI_ICON_SM} aria-hidden />
                   合并导演
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="btn btn-ghost btn-sm"
+                  variant="ghost"
+
+                  size="sm"
                   onClick={() => setEditingImage(true)}
                 >
                   <ImagePlus {...UI_ICON_SM} aria-hidden />
                   管理主图
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="btn btn-ghost btn-sm"
+                  variant="ghost"
+
+                  size="sm"
                   onClick={() => setEditing(true)}
                 >
                   <Pencil {...UI_ICON_SM} />
                   编辑资料
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="btn btn-ghost btn-sm"
+                  variant="ghost"
+
+                  size="sm"
                   onClick={() => setDeletingDirector(true)}
                 >
                   <Trash2 {...UI_ICON_SM} aria-hidden />
                   删除导演
-                </button>
+                </Button>
               </>
             }
             resultCount={
@@ -268,14 +277,17 @@ export default function DirectorDetailPage(): JSX.Element {
                 ))}
               </div>
               {hasMore && (
-                <button
+                <Button
                   type="button"
-                  className="btn btn-ghost btn-sm organization-load-more"
+                  variant="ghost"
+
+                  size="sm"
+                  className="organization-load-more"
                   disabled={loadingMore}
                   onClick={loadMore}
                 >
                   {loadingMore ? '加载中…' : '加载更多'}
-                </button>
+                </Button>
               )}
             </>
           )}

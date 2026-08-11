@@ -1,0 +1,56 @@
+.root {
+  --icon-glyph-size: 14px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  appearance: none;
+  background: transparent;
+  color: inherit;
+  line-height: 0;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast),
+    border-color var(--motion-fast),
+    color var(--motion-fast);
+}
+
+.glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-glyph-size);
+  height: var(--icon-glyph-size);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.glyph > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.danger {
+  color: var(--danger);
+}
+
+.danger:hover:not(:disabled),
+.danger:focus-visible:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger) 56%, var(--border-subtle));
+  background: var(--surface-danger);
+  color: color-mix(in srgb, var(--danger) 82%, var(--text-primary));
+}
+
+.sm {
+  --icon-glyph-size: 12px;
+
+  min-width: 24px;
+  min-height: 24px;
+}

@@ -15,6 +15,7 @@ import {
   type LlmProviderViewModel
 } from '@shared/llmProviders'
 import { SettingsFormField } from './SettingsPrimitives'
+import Button from '../Button'
 
 type ModelRow = LlmModelDefinition & {
   source: 'builtin' | 'custom' | 'remote'
@@ -111,9 +112,10 @@ export default function LlmProviderModelsModal({
   return (
     <Modal
       title={`${provider.name} — 模型管理`}
+
       size="lg"
       className="modal--llm-models"
-      bodyClassName="modal-body--fixed"
+      bodyOverflow="hidden"
       confirmText="关闭"
       cancelText="取消"
       onCancel={onClose}
@@ -128,15 +130,16 @@ export default function LlmProviderModelsModal({
             placeholder="搜索模型…"
             onChange={(e) => setQuery(e.target.value)}
           />
-          <button
+          <Button
             type="button"
-            className="btn btn-sm"
+
+            size="sm"
             disabled={loadingRemoteModels}
             onClick={() => void loadRemoteModels()}
           >
             <RefreshCw {...UI_ICON_COMPACT} />
             {loadingRemoteModels ? '查询中…' : '查询模型'}
-          </button>
+          </Button>
         </div>
 
         <div className="llm-models-list" role="list">
@@ -225,9 +228,11 @@ export default function LlmProviderModelsModal({
             />
           </SettingsFormField>
           <div className="llm-models-add-actions">
-            <button
+            <Button
               type="button"
-              className="btn btn-primary btn-sm"
+              variant="primary"
+
+              size="sm"
               onClick={() => {
                 onAdd(modelId, modelName)
                 setModelId('')
@@ -235,7 +240,7 @@ export default function LlmProviderModelsModal({
               }}
             >
               添加模型
-            </button>
+            </Button>
           </div>
         </div>
       </div>

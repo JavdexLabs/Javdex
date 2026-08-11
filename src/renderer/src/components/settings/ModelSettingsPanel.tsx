@@ -25,6 +25,7 @@ import LlmAddProviderModal from './LlmAddProviderModal'
 import LlmProviderModelsModal from './LlmProviderModelsModal'
 import LlmProviderSettingsModal from './LlmProviderSettingsModal'
 import { SettingsCard, SettingsFormField } from './SettingsPrimitives'
+import Button from '../Button'
 
 function providerStatusLabel(status: LlmProviderViewModel['status']): string {
   if (status === 'ready') return '可用'
@@ -249,14 +250,16 @@ export default function ModelSettingsPanel({
         title="默认 LLM"
         hint="设置应用默认使用的模型；插件开发 Agent 会优先使用该配置。"
         actions={
-          <button
+          <Button
             type="button"
-            className="btn btn-primary btn-sm"
+            variant="primary"
+
+            size="sm"
             disabled={!defaultDirty || defaultSaving}
             onClick={() => void saveDefaultLlm()}
           >
             {defaultSaving ? '保存中…' : defaultDirty ? '保存' : '已保存'}
-          </button>
+          </Button>
         }
       >
         <div className="llm-default-form">
@@ -320,9 +323,9 @@ export default function ModelSettingsPanel({
               placeholder="搜索提供商…"
               onChange={(e) => setProviderQuery(e.target.value)}
             />
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowAddProvider(true)}>
+            <Button type="button" variant="primary" size="sm" onClick={() => setShowAddProvider(true)}>
               添加提供商
-            </button>
+            </Button>
           </div>
         }
       >
@@ -369,12 +372,12 @@ export default function ModelSettingsPanel({
                 </div>
               </dl>
               <footer className="llm-provider-card-actions">
-                <button type="button" className="btn btn-sm" onClick={() => setModelsTarget(provider)}>
+                <Button type="button" size="sm" onClick={() => setModelsTarget(provider)}>
                   模型
-                </button>
-                <button type="button" className="btn btn-sm" onClick={() => setSettingsTarget(provider)}>
+                </Button>
+                <Button type="button" size="sm" onClick={() => setSettingsTarget(provider)}>
                   设置
-                </button>
+                </Button>
               </footer>
             </article>
           ))}

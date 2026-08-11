@@ -26,6 +26,7 @@ import { useToast } from '../Toast'
 import { UI_ICON_SM } from '../iconDefaults'
 import { SettingsCard, SettingsHeaderSwitch } from './SettingsPrimitives'
 import { useDisplayMode } from '../DisplayModeContext'
+import Button from '../Button'
 
 const AVATAR_COMPOSITION_PREVIEW_SIZE = 172
 
@@ -464,31 +465,37 @@ export default function AppearanceSettingsPanel({
         actions={
           isEditingAvatarComposition ? (
             <>
-              <button
+              <Button
                 type="button"
-                className="btn btn-sm btn-ghost"
+                variant="ghost"
+
+                size="sm"
                 disabled={isSavingAvatarComposition}
                 onClick={cancelAvatarCompositionEdit}
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="btn btn-sm btn-primary"
+                variant="primary"
+
+                size="sm"
                 disabled={isSavingAvatarComposition}
                 onClick={() => void saveAvatarComposition()}
               >
                 {isSavingAvatarComposition ? '保存中…' : '保存'}
-              </button>
+              </Button>
             </>
           ) : (
-            <button
+            <Button
               type="button"
-              className="btn btn-sm btn-ghost"
+              variant="ghost"
+
+              size="sm"
               onClick={startAvatarCompositionEdit}
             >
               编辑
-            </button>
+            </Button>
           )
         }
       >
@@ -614,39 +621,46 @@ export default function AppearanceSettingsPanel({
                 {avatarAutoCropBatch.state.current}/{avatarAutoCropBatch.state.total}
               </span>
               <div className="avatar-auto-crop-batch-actions">
-                <button
+                <Button
                   type="button"
-                  className="btn btn-sm btn-ghost"
+                  variant="ghost"
+
+                  size="sm"
                   onClick={onOpenAvatarBatchDetails}
                 >
                   查看日志
-                </button>
+                </Button>
                 {avatarAutoCropBatch.state.source === 'manual' ? (
-                  <button
+                  <Button
                     type="button"
-                    className="btn btn-sm btn-ghost"
+                    variant="ghost"
+
+                    size="sm"
                     disabled={avatarAutoCropBatch.state.status === 'cancelling'}
                     onClick={avatarAutoCropBatch.cancel}
                   >
                     {avatarAutoCropBatch.state.status === 'cancelling' ? '正在停止…' : '停止'}
-                  </button>
+                  </Button>
                 ) : null}
               </div>
             </div>
           ) : (
             <div className="avatar-auto-crop-batch-actions">
               {avatarAutoCropBatch.state.logs.length > 0 ? (
-                <button
+                <Button
                   type="button"
-                  className="btn btn-sm btn-ghost"
+                  variant="ghost"
+
+                  size="sm"
                   onClick={onOpenAvatarBatchDetails}
                 >
                   查看日志
-                </button>
+                </Button>
               ) : null}
-              <button
+              <Button
                 type="button"
-                className="btn btn-sm"
+
+                size="sm"
                 disabled={
                   isEditingAvatarComposition || isCountingBatchAvatars || scrapeBatchActive
                 }
@@ -660,7 +674,7 @@ export default function AppearanceSettingsPanel({
                 onClick={() => void prepareBatchAvatarCrop()}
               >
                 {isCountingBatchAvatars ? '统计中…' : '构图全部头像'}
-              </button>
+              </Button>
             </div>
           )}
         </div>

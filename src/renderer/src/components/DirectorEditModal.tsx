@@ -7,6 +7,7 @@ import { createDirectorFormDraft, directorInputFromDraft } from './directorFormS
 import { UI_ICON_SM } from './iconDefaults'
 import IconButton from './IconButton'
 import { moveClassificationLink, useClassificationLinkKeys } from './classificationLinkForm'
+import Button from './Button'
 
 interface Props {
   director?: DirectorDetail | null
@@ -32,6 +33,7 @@ export default function DirectorEditModal({ director, onCancel, onSave }: Props)
   return (
     <Modal
       title={director ? '编辑导演资料' : '新增导演'}
+
       size="lg"
       className="modal-entity-edit"
       confirmText={saving ? '保存中…' : '保存'}
@@ -219,7 +221,8 @@ export default function DirectorEditModal({ director, onCancel, onSave }: Props)
                     }}
                   />
                   <IconButton
-                    className="organization-link-action icon-btn--danger"
+                    className="organization-link-action"
+                    tone="danger"
                     icon={<Trash2 {...UI_ICON_SM} aria-hidden />}
                     label={`删除链接 ${index + 1}`}
                     onClick={() => {
@@ -233,9 +236,12 @@ export default function DirectorEditModal({ director, onCancel, onSave }: Props)
                 </div>
               </div>
             ))}
-            <button
+            <Button
               type="button"
-              className="btn btn-ghost btn-sm organization-link-add"
+              variant="ghost"
+
+              size="sm"
+              className="organization-link-add"
               onClick={() => {
                 setDraft({
                   ...draft,
@@ -246,7 +252,7 @@ export default function DirectorEditModal({ director, onCancel, onSave }: Props)
             >
               <Plus {...UI_ICON_SM} />
               添加链接
-            </button>
+            </Button>
           </div>
         </EditFormSection>
       </div>

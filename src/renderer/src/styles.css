@@ -128,6 +128,7 @@
   --text-secondary: var(--text-1);
   --text-muted: var(--text-2);
   --text-accent: var(--accent-hover);
+  --text-on-accent: #fff;
   --text-danger: color-mix(in srgb, var(--danger) 82%, var(--text-primary));
   --text-success: color-mix(in srgb, var(--success) 78%, var(--text-primary));
   --text-warning: color-mix(in srgb, var(--warning) 84%, var(--text-primary));
@@ -137,6 +138,7 @@
   --control-pad-x: 14px;
   --modal-picker-h-md: 580px;
   --modal-viewport-inset: 48px;
+  --modal-backdrop: rgba(0, 0, 0, 0.6);
   --target-min: 28px;
   --radius-sm: 6px;
   --radius-md: 8px;

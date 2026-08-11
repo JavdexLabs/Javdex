@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import type { UpdateCheckErrorCode, UpdateCheckState } from '@shared/updateTypes'
 import { api } from '../../api'
 import { UI_ICON_SM } from '../iconDefaults'
+import Button from '../Button'
 
 const ERROR_LABELS: Record<UpdateCheckErrorCode, string> = {
   'network-unavailable': '无法连接更新服务器，请检查网络或代理设置',
@@ -81,10 +82,10 @@ export default function AppUpdatePanel(): JSX.Element {
           <h3 id="app-update-title">版本更新</h3>
           <p>{statusText}</p>
         </div>
-        <button type="button" className="btn btn-sm" disabled={checking} onClick={() => void runCheck()}>
+        <Button type="button" size="sm" disabled={checking} onClick={() => void runCheck()}>
           <RefreshCw {...UI_ICON_SM} className={checking ? 'is-spinning' : undefined} aria-hidden />
           {checking ? '检查中' : '检查更新'}
-        </button>
+        </Button>
       </div>
 
       <div className="app-update-meta">
@@ -100,23 +101,26 @@ export default function AppUpdatePanel(): JSX.Element {
           </div>
           <div className="app-update-actions">
             {!ignored ? (
-              <button
+              <Button
                 type="button"
-                className="btn btn-sm"
+
+                size="sm"
                 onClick={() => void api.appUpdate.ignoreVersion(state.latestRelease!.version)}
               >
                 暂不提醒
-              </button>
+              </Button>
             ) : null}
-            <button
+            <Button
               type="button"
-              className="btn btn-primary btn-sm"
+              variant="primary"
+
+              size="sm"
               title="在浏览器中打开 GitHub Release 下载页面"
               onClick={() => void api.appUpdate.openRelease()}
             >
               前往下载
               <ExternalLink {...UI_ICON_SM} aria-hidden />
-            </button>
+            </Button>
           </div>
           {hasReleaseNotes(state.latestRelease.releaseNotes) ? (
             <details className="app-update-release-notes">

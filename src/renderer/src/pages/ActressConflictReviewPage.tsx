@@ -36,6 +36,7 @@ import {
   partitionConflictFieldImpacts
 } from './actressConflictReviewState'
 import { useConflictReviewController } from './useConflictReviewController'
+import Button from '../components/Button'
 
 const FIELD_LABEL = new Map(
   ACTRESS_SCRAPE_FIELD_OPTIONS.map((option) => [option.id, option.label])
@@ -379,14 +380,14 @@ export default function ActressConflictReviewPage(): JSX.Element {
               description="没有待确认的名称归属或刮削结果。"
               variant="fill"
             />
-            <button
+            <Button
               ref={completeButtonRef}
               type="button"
-              className="btn btn-primary"
+              variant="primary"
               onClick={() => navigateToActressList(navigate, location)}
             >
               <ArrowLeft {...UI_ICON_SM} aria-hidden />返回演员
-            </button>
+            </Button>
           </div>
         ) : (
           <WorkbenchMain className="conflict-workbench-main">
@@ -644,19 +645,19 @@ export default function ActressConflictReviewPage(): JSX.Element {
                   </div>
                   <div>
                     {selectedCandidate ? (
-                      <button type="button" className="btn btn-sm btn-ghost" disabled={resolving} onClick={() => detail.requestDiscard(selectedCandidate)}>
+                      <Button type="button" variant="ghost" size="sm" disabled={resolving} onClick={() => detail.requestDiscard(selectedCandidate)}>
                         <Trash2 {...UI_ICON_SM} aria-hidden />
                         {selectedGroup.status === 'applicable' ? '丢弃这份结果' : '丢弃这份错误匹配'}
-                      </button>
+                      </Button>
                     ) : null}
                     {selectedGroup.status === 'applicable' ? (
-                      <button type="button" className="btn btn-sm btn-primary" disabled={resolving || !selectedCandidate} onClick={detail.applySelectedPending}>
+                      <Button type="button" variant="primary" size="sm" disabled={resolving || !selectedCandidate} onClick={detail.applySelectedPending}>
                         应用待确认资料
-                      </button>
+                      </Button>
                     ) : (
-                      <button type="button" className="btn btn-sm btn-primary" disabled={resolving || !proposedOwner} onClick={detail.confirmOwnership}>
+                      <Button type="button" variant="primary" size="sm" disabled={resolving || !proposedOwner} onClick={detail.confirmOwnership}>
                         {resolving ? '处理中…' : '确认名称归属'}
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </footer>
@@ -664,15 +665,15 @@ export default function ActressConflictReviewPage(): JSX.Element {
                 {selectedGroup.status === 'conflict' ? (
                   <div className="conflict-workbench-secondary-actions" aria-label="其他处理方式">
                     <span>其他处理</span>
-                    <button type="button" className="btn btn-sm btn-ghost" disabled={!editSourceName || resolving} onClick={detail.openEditName}>
+                    <Button type="button" variant="ghost" size="sm" disabled={!editSourceName || resolving} onClick={detail.openEditName}>
                       <Pencil {...UI_ICON_SM} aria-hidden />修改本条返回名称
-                    </button>
-                    <button type="button" className="btn btn-sm btn-ghost" disabled={mergeActors.length < 2 || resolving} onClick={detail.openMerge}>
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" disabled={mergeActors.length < 2 || resolving} onClick={detail.openMerge}>
                       <GitMerge {...UI_ICON_SM} aria-hidden />合并演员档案
-                    </button>
-                    <button type="button" className="btn btn-sm btn-ghost conflict-workbench-illegal" disabled={resolving} onClick={detail.openIllegalName}>
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" className="conflict-workbench-illegal" disabled={resolving} onClick={detail.openIllegalName}>
                       <Ban {...UI_ICON_SM} aria-hidden />这不是演员名称
-                    </button>
+                    </Button>
                   </div>
                 ) : null}
               </section>
@@ -686,6 +687,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
       {otherOwner.open ? (
         <ConfirmModal
           title="选择其他演员"
+
           size="md"
           className="modal--conflict-owner-picker"
           bodyClassName="conflict-workbench-owner-modal-body"
@@ -728,6 +730,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
       {editName.open && selectedGroup && editSourceType ? (
         <ConfirmModal
           title="修改本条返回名称"
+
           size="sm"
           confirmText={resolving ? '处理中…' : '确认修改'}
           confirmDisabled={!editName.canSubmit || editInspectionPending || editInspection.status === 'empty' || editInspection.status === 'unchanged'}
@@ -769,6 +772,7 @@ export default function ActressConflictReviewPage(): JSX.Element {
       {replacement.kind && selectedGroup ? (
         <ConfirmModal
           title={replacement.kind === 'illegal' ? `从本组删除「${selectedGroup.displayName}」` : `确认归属给「${proposedOwner?.mainName ?? ''}」`}
+
           size="sm"
           danger={replacement.kind === 'illegal'}
           confirmText={resolving ? '处理中…' : replacement.kind === 'illegal' ? '确认从本组删除' : '确认名称归属'}

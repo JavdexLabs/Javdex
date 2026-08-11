@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ManualImportResult } from '@shared/libraryTypes'
 import { api } from '../../api'
 import { useToast } from '../Toast'
+import Button from '../Button'
 
 /** One editable row in the "unrecognized files" list: manual import or rename on disk. */
 export default function UnrecognizedRow({
@@ -97,14 +98,16 @@ export default function UnrecognizedRow({
           placeholder="输入番号"
           aria-label={`${fullName} 番号`}
         />
-        <button
+        <Button
           type="button"
-          className="btn btn-sm btn-primary"
+          variant="primary"
+
+          size="sm"
           disabled={busy !== null || !canImport}
           onClick={() => void doManualImport()}
         >
           {busy === 'import' ? '处理中…' : '导入'}
-        </button>
+        </Button>
         </div>
         <details className="scan-unrec-rename">
         <summary>重命名文件（可选）</summary>
@@ -120,14 +123,15 @@ export default function UnrecognizedRow({
             aria-label={`${fullName} 新文件名`}
           />
           {ext && <span className="scan-unrec-ext">{ext}</span>}
-          <button
+          <Button
             type="button"
-            className="btn btn-sm"
+
+            size="sm"
             disabled={busy !== null || !canRename}
             onClick={() => void doRename()}
           >
             {busy === 'rename' ? '处理中…' : '重命名'}
-          </button>
+          </Button>
         </div>
       </details>
       </div>

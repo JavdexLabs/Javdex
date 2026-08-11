@@ -1,0 +1,14 @@
+.root {
+  width: 30px;
+  height: 30px;
+  border: 3px solid color-mix(in srgb, var(--surface-control-hover) 76%, transparent);
+  border-top-color: var(--text-accent);
+  border-radius: var(--radius-pill);
+  animation: rotate 0.8s linear infinite;
+}
+
+@keyframes rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}

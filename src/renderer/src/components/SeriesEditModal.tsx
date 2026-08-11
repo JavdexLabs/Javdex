@@ -15,6 +15,7 @@ import { createSeriesFormDraft, seriesInputFromDraft } from './seriesFormState'
 import { moveClassificationLink, useClassificationLinkKeys } from './classificationLinkForm'
 import { UI_ICON_SM } from './iconDefaults'
 import IconButton from './IconButton'
+import Button from './Button'
 
 interface Props {
   series?: SeriesDetail | null
@@ -70,6 +71,7 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
   return (
     <Modal
       title={series ? '编辑系列资料' : '新增系列'}
+
       size="lg"
       className="modal-entity-edit"
       confirmText={saving ? '保存中…' : '保存'}
@@ -292,7 +294,8 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
                     }}
                   />
                   <IconButton
-                    className="organization-link-action icon-btn--danger"
+                    className="organization-link-action"
+                    tone="danger"
                     label={`移除链接 ${index + 1}`}
                     icon={<Trash2 {...UI_ICON_SM} aria-hidden />}
                     onClick={() => {
@@ -306,9 +309,12 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
                 </div>
               </div>
             ))}
-            <button
+            <Button
               type="button"
-              className="btn btn-ghost btn-sm organization-link-add"
+              variant="ghost"
+
+              size="sm"
+              className="organization-link-add"
               onClick={() => {
                 setDraft({ ...draft, links: [...draft.links, { label: '', url: '' }] })
                 appendLinkKey()
@@ -316,7 +322,7 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
             >
               <Plus {...UI_ICON_SM} aria-hidden />
               添加链接
-            </button>
+            </Button>
           </div>
         </EditFormSection>
       </div>

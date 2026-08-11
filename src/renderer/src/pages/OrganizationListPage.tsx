@@ -31,6 +31,7 @@ import {
 import { navigateToOrganizationDetail } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { organizationKeys } from '../query/queryKeys'
+import Button from '../components/Button'
 
 const SORT_OPTIONS: SortSwitchOption<ClassificationListSortBy>[] = [
   { value: 'video_count', label: '影片', title: '关联影片数量' },
@@ -149,10 +150,10 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
                 compact
                 onChange={patchSort}
               />
-              <button type="button" className="btn btn-primary btn-sm" onClick={() => setCreateOpen(true)}>
+              <Button type="button" variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
                 <Plus {...UI_ICON_SM} aria-hidden />
                 新增
-              </button>
+              </Button>
             </>
           }
           resultCount={

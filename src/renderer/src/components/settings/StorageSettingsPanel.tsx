@@ -6,6 +6,7 @@ import {
   SettingsHeaderSwitch,
   SettingsStatusPill
 } from './SettingsPrimitives'
+import Button from '../Button'
 
 export default function StorageSettingsPanel({
   settings,
@@ -64,25 +65,28 @@ export default function StorageSettingsPanel({
           </div>
 
           <div className="storage-action-row">
-            <button
+            <Button
               type="button"
-              className="btn btn-sm"
+
+              size="sm"
               disabled={storageBusy}
               onClick={onPickMediaAssetsPath}
             >
               <FolderOpen {...UI_ICON_SM} aria-hidden />
               更改目录
-            </button>
+            </Button>
             {!usingDefault ? (
-              <button
+              <Button
                 type="button"
-                className="btn btn-sm btn-ghost"
+                variant="ghost"
+
+                size="sm"
                 disabled={storageBusy}
                 onClick={onResetMediaAssetsPath}
               >
                 <RotateCcw {...UI_ICON_SM} aria-hidden />
                 恢复默认
-              </button>
+              </Button>
             ) : null}
           </div>
         </section>

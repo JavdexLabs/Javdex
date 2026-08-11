@@ -77,6 +77,7 @@ import {
   isMaintenanceHintDismissed,
   MAINTENANCE_HINT_KEYS
 } from '../utils/maintenanceHints'
+import Button from '../components/Button'
 
 const STATUS_LABELS: Record<string, string> = {
   all: '全部',
@@ -604,19 +605,22 @@ export default function LibraryPage(): JSX.Element {
             }}
             controls={
               <>
-                <button
+                <Button
                   type="button"
-                  className="btn btn-sm"
+
+                  size="sm"
                   onClick={() => setShowResourceImport(true)}
                 >
                   <Link2 {...UI_ICON_SM} aria-hidden />
                   <span>导入链接</span>
-                </button>
+                </Button>
                 <div className="library-filter-anchor">
-                  <button
+                  <Button
                     ref={filterBtnRef}
                     type="button"
-                    className={`btn btn-sm library-filter-btn${filterOpen ? ' library-filter-btn--open' : ''}${hasAppliedFilters ? ' library-filter-btn--active' : ''}`}
+
+                    size="sm"
+                    className={`library-filter-btn${filterOpen ? ' library-filter-btn--open' : ''}${hasAppliedFilters ? ' library-filter-btn--active' : ''}`}
                     onClick={() => setFilterOpen((o) => !o)}
                     aria-expanded={filterOpen}
                     aria-haspopup="dialog"
@@ -627,7 +631,7 @@ export default function LibraryPage(): JSX.Element {
                       className={`library-filter-chevron${filterOpen ? ' is-open' : ''}`}
                       aria-hidden
                     />
-                  </button>
+                  </Button>
 
                   <LibraryFilterPopover
                     open={filterOpen}

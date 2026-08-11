@@ -1,4 +1,5 @@
 import FilterChip from './FilterChip'
+import styles from './AppliedFilterBar.module.css'
 
 export interface AppliedFilterItem {
   key: string
@@ -18,14 +19,14 @@ export default function AppliedFilterBar({
   if (items.length === 0) return null
 
   return (
-    <div className="applied-filter-bar" role="status" aria-live="polite">
-      <span className="applied-filter-bar__label">已筛选</span>
-      <div className="applied-filter-bar__chips">
+    <div className={styles.root} role="status" aria-live="polite">
+      <span className={styles.label}>已筛选</span>
+      <div className={styles.chips}>
         {items.map((item) => (
           <FilterChip key={item.key} label={item.label} onRemove={item.onRemove} />
         ))}
       </div>
-      <button type="button" className="applied-filter-bar__clear" onClick={onClear}>
+      <button type="button" className={styles.clear} onClick={onClear}>
         清除全部
       </button>
     </div>

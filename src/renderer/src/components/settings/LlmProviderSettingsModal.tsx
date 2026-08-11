@@ -9,6 +9,7 @@ import {
 } from '@shared/llmProviders'
 import SelectControl from '../SelectControl'
 import { SettingsFormField } from './SettingsPrimitives'
+import Button from '../Button'
 
 export default function LlmProviderSettingsModal({
   provider,
@@ -30,6 +31,7 @@ export default function LlmProviderSettingsModal({
   return (
     <Modal
       title={`${provider.name} — 设置`}
+
       size="sm"
       className="modal--llm-provider"
       confirmText="保存"
@@ -81,9 +83,9 @@ export default function LlmProviderSettingsModal({
         )}
         {onDelete && (
           <div className="llm-provider-form-danger">
-            <button type="button" className="btn btn-sm btn-danger" onClick={onDelete}>
+            <Button type="button" variant="danger" size="sm" onClick={onDelete}>
               删除自定义供应商
-            </button>
+            </Button>
           </div>
         )}
       </div>

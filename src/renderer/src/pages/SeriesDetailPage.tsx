@@ -41,6 +41,7 @@ import { navigateToFacetList, navigateToSeriesDetail } from '../listView/listNav
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
+import Button from '../components/Button'
 
 const STATUS = {
   unknown: '状态未知',
@@ -189,38 +190,46 @@ export default function SeriesDetailPage(): JSX.Element {
                     )
                   }
                 />
-                <button
+                <Button
                   type="button"
-                  className="btn btn-ghost btn-sm"
+                  variant="ghost"
+
+                  size="sm"
                   onClick={() => setMergingSeries(true)}
                 >
                   <GitMerge {...UI_ICON_SM} aria-hidden />
                   合并系列
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="btn btn-ghost btn-sm"
+                  variant="ghost"
+
+                  size="sm"
                   onClick={() => setEditingImage(true)}
                 >
                   <ImagePlus {...UI_ICON_SM} aria-hidden />
                   管理主图
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="btn btn-ghost btn-sm"
+                  variant="ghost"
+
+                  size="sm"
                   onClick={() => setEditing(true)}
                 >
                   <Pencil {...UI_ICON_SM} aria-hidden />
                   编辑资料
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="btn btn-ghost btn-sm"
+                  variant="ghost"
+
+                  size="sm"
                   onClick={() => setDeletingSeries(true)}
                 >
                   <Trash2 {...UI_ICON_SM} aria-hidden />
                   删除系列
-                </button>
+                </Button>
               </>
             }
             resultCount={
@@ -315,14 +324,17 @@ export default function SeriesDetailPage(): JSX.Element {
                 ))}
               </div>
               {hasMore && (
-                <button
+                <Button
                   type="button"
-                  className="btn btn-ghost btn-sm organization-load-more"
+                  variant="ghost"
+
+                  size="sm"
+                  className="organization-load-more"
                   disabled={loadingMore}
                   onClick={loadMore}
                 >
                   {loadingMore ? '加载中…' : '加载更多'}
-                </button>
+                </Button>
               )}
             </>
           )}

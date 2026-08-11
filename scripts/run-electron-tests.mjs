@@ -23,6 +23,8 @@ const args = [
   '--require',
   './scripts/register-test-paths.cjs',
   '--import',
+  './scripts/register-test-styles.mjs',
+  '--import',
   'tsx',
   '--test',
   ...testFiles

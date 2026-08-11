@@ -1,0 +1,11 @@
+{
+  "cssFileCount": 19,
+  "globalClassCount": 1476,
+  "crossFileDuplicateClassCount": 175,
+  "descendantSelectorCount": 816,
+  "importantDeclarationCount": 12,
+  "hardcodedColorDeclarationCount": 167,
+  "globalStateClassCount": 108,
+  "rawButtonClassOccurrenceCount": 134,
+  "classNameBehaviorInferenceCount": 1
+}

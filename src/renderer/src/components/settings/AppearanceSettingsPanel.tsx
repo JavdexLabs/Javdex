@@ -277,12 +277,7 @@ export default function AppearanceSettingsPanel({
     if (!isEditingAvatarComposition) {
       setAvatarCompositionDraft(avatarCompositionDraftFromSettings(settings))
     }
-  }, [
-    isEditingAvatarComposition,
-    settings.avatarCenteringMode,
-    settings.avatarFaceRatio,
-    settings.avatarPreserveFullHead
-  ])
+  }, [isEditingAvatarComposition, settings])
 
   useEffect(() => {
     if (privacyPersistPendingRef.current > 0) return
@@ -291,7 +286,7 @@ export default function AppearanceSettingsPanel({
     if (privacySettingsEqual(privacyDraftRef.current, incoming)) return
     privacyDraftRef.current = incoming
     setPrivacyDraft(incoming)
-  }, [settings.privacyModeEnabled, settings.privacyModeScopes])
+  }, [settings])
 
   useEffect(() => {
     if (!privacyDraft.privacyModeEnabled) setPrivacyScopesExpanded(false)

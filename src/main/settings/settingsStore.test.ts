@@ -4,12 +4,21 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
+import { DEFAULT_SETTINGS } from '@shared/settingsTypes'
 import {
   getSettings,
+  getEffectiveLlmApiKey,
+  getLlmSecretMigrationError,
+  getPublicLlmProviderConfigs,
+  getSettingsRecoveryNotice,
   migrateRetiredVideoScraperSettings,
   resetSettingsCacheForTests,
   updateSettings
 } from './settingsStore'
+import {
+  setLlmSecretCipherForTests,
+  type LlmSecretCipher
+} from './llmSecretStore'
 
 let tempRoot: string | null = null
 let previousUserData: string | undefined
@@ -23,16 +32,32 @@ beforeEach(() => {
   previousUserData = process.env.JAVDEX_TEST_USER_DATA
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-settings-'))
   process.env.JAVDEX_TEST_USER_DATA = tempRoot
+  setLlmSecretCipherForTests(createTestCipher())
   resetSettingsCacheForTests()
 })
 
 afterEach(() => {
   resetSettingsCacheForTests()
+  setLlmSecretCipherForTests(null)
   if (previousUserData === undefined) delete process.env.JAVDEX_TEST_USER_DATA
   else process.env.JAVDEX_TEST_USER_DATA = previousUserData
   if (tempRoot) fs.rmSync(tempRoot, { recursive: true, force: true })
   tempRoot = null
 })
+
+function createTestCipher(options?: { failEncryption?: boolean }): LlmSecretCipher {
+  return {
+    state: () => ({ protection: 'secure', backend: 'test-keychain' }),
+    encrypt(value) {
+      if (options?.failEncryption) throw new Error('test encryption unavailable')
+      return Buffer.from(`encrypted:${Buffer.from(value).toString('base64')}`, 'utf8')
+    },
+    decrypt(value) {
+      const encoded = value.toString('utf8').replace(/^encrypted:/, '')
+      return Buffer.from(encoded, 'base64').toString('utf8')
+    }
+  }
+}
 
 describe('settingsStore avatar composition defaults', () => {
   it('uses the relaxed face-centered composition for settings without legacy values', () => {
@@ -92,6 +117,69 @@ describe('settingsStore persistence', () => {
 
     assert.throws(() => updateSettings({ autoScanEnabled: true }), /保存设置失败/)
     assert.equal(getSettings().autoScanEnabled, false)
+  })
+})
+
+describe('settingsStore recovery', () => {
+  it('backs up malformed JSON, writes defaults, and exposes one recovery notice', () => {
+    fs.writeFileSync(path.join(tempRoot!, 'settings.json'), '{broken json', 'utf8')
+    resetSettingsCacheForTests()
+
+    const settings = getSettings()
+    const notice = getSettingsRecoveryNotice()
+    assert.equal(settings.theme, DEFAULT_SETTINGS.theme)
+    assert.ok(notice?.backupFileName.startsWith('settings.corrupt-'))
+    assert.equal(fs.existsSync(path.join(tempRoot!, notice!.backupFileName)), true)
+    assert.doesNotThrow(() => JSON.parse(fs.readFileSync(path.join(tempRoot!, 'settings.json'), 'utf8')))
+  })
+
+  it('does not replace a settings path that fails with an I/O error', () => {
+    const settingsPath = path.join(tempRoot!, 'settings.json')
+    fs.mkdirSync(settingsPath)
+    resetSettingsCacheForTests()
+
+    assert.throws(() => getSettings(), /读取设置失败/)
+    assert.equal(fs.statSync(settingsPath).isDirectory(), true)
+    assert.equal(getSettingsRecoveryNotice(), null)
+  })
+})
+
+describe('settingsStore LLM secret migration', () => {
+  it('moves legacy API keys out of settings.json without exposing them publicly', () => {
+    writeSettings({
+      llmProviderConfigs: {
+        openai: {
+          apiKey: 'sk-legacy-secret',
+          baseUrl: 'https://example.test/v1',
+          protocol: 'openai-chat'
+        }
+      }
+    })
+
+    const settings = getSettings()
+    const persisted = fs.readFileSync(path.join(tempRoot!, 'settings.json'), 'utf8')
+    const secretFile = fs.readFileSync(path.join(tempRoot!, 'llm-secrets.json'), 'utf8')
+
+    assert.equal(getEffectiveLlmApiKey('openai'), 'sk-legacy-secret')
+    assert.equal(settings.llmProviderConfigs.openai?.baseUrl, 'https://example.test/v1')
+    assert.equal(persisted.includes('sk-legacy-secret'), false)
+    assert.equal(secretFile.includes('sk-legacy-secret'), false)
+    assert.equal(getPublicLlmProviderConfigs(settings).openai?.hasApiKey, true)
+  })
+
+  it('keeps the original plaintext file and blocks later writes when migration fails', () => {
+    setLlmSecretCipherForTests(createTestCipher({ failEncryption: true }))
+    writeSettings({
+      theme: 'light',
+      llmProviderConfigs: { openai: { apiKey: 'sk-preserve-me' } }
+    })
+
+    const settings = getSettings()
+    assert.equal(settings.theme, 'light')
+    assert.equal(getEffectiveLlmApiKey('openai'), 'sk-preserve-me')
+    assert.match(getLlmSecretMigrationError() ?? '', /迁移失败/)
+    assert.match(fs.readFileSync(path.join(tempRoot!, 'settings.json'), 'utf8'), /sk-preserve-me/)
+    assert.throws(() => updateSettings({ theme: 'graphite' }), /无法安全迁移/)
   })
 })
 

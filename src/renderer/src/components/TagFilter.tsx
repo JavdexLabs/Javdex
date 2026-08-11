@@ -127,7 +127,7 @@ export default function TagFilter({
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    let list = q ? tags.filter((t) => t.name.toLowerCase().includes(q)) : [...tags]
+    const list = q ? tags.filter((t) => t.name.toLowerCase().includes(q)) : [...tags]
     if (isCompact) {
       list.sort((a, b) => b.video_count - a.video_count)
     }

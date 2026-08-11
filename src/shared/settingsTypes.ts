@@ -97,8 +97,6 @@ export interface AppSettings {
   assetEncryption: boolean
   /** Custom folder for cover/avatar storage; empty uses default userData/media_assets. */
   mediaAssetsPath: string
-  /** Resolved absolute media assets path; populated by settings:get only. */
-  mediaAssetsResolvedPath?: string
   /** Per scraper random interval ranges used by batch scraping. */
   scraperPluginDelays: ScraperPluginDelaySettings
   /** Field-level virtual scraper definitions. */
@@ -110,7 +108,7 @@ export interface AppSettings {
   defaultLlmProviderId: string
   /** Default model id under {@link defaultLlmProviderId}. */
   defaultLlmModelId: string
-  /** Per-provider API key and optional base URL overrides. */
+  /** Non-secret per-provider protocol and optional base URL overrides. */
   llmProviderConfigs: Record<string, import('./llmProviders').LlmProviderUserConfig>
   /** User-defined LLM providers. */
   customLlmProviders: import('./llmProviders').CustomLlmProviderDefinition[]
@@ -121,6 +119,35 @@ export interface AppSettings {
   /** Max estimated input context tokens for plugin development agent. */
   pluginDevAgentMaxContextTokens: number
 }
+
+export interface SettingsRecoveryNotice {
+  backupFileName: string
+  message: string
+}
+
+export interface LlmSecretStorageState {
+  protection: 'secure' | 'degraded' | 'unavailable'
+  backend: string
+  migrationError?: string
+}
+
+export type SettingsSnapshot = Omit<AppSettings, 'llmProviderConfigs'> & {
+  llmProviderConfigs: Record<string, import('./llmProviders').LlmProviderPublicConfig>
+  mediaAssetsResolvedPath: string
+  recoveryNotice: SettingsRecoveryNotice | null
+  llmSecretStorage: LlmSecretStorageState
+}
+
+export type RendererSettingsPatch = Partial<
+  Omit<
+    AppSettings,
+    | 'assetEncryption'
+    | 'lastLibraryScanSummary'
+    | 'llmProviderConfigs'
+    | 'mediaAssetsPath'
+    | 'pendingLibraryPathCleanups'
+  >
+>
 
 export function normalizeMinScanImportDurationMinutes(value: unknown): number {
   const parsed =

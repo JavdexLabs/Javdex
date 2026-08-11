@@ -16,8 +16,7 @@ import type {
   Video,
   VideoDetail,
   VideoEditInput,
-  VideoQuery,
-  VideoResourceFilter
+  VideoQuery
 } from '@shared/videoTypes'
 import type {
   VideoDirectorChoiceRequired,

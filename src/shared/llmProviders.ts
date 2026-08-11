@@ -37,9 +37,22 @@ export interface LlmCustomModelDefinition {
 }
 
 export interface LlmProviderUserConfig {
-  apiKey?: string
   baseUrl?: string
   protocol?: LlmProviderProtocol
+}
+
+export interface LlmProviderPublicConfig extends LlmProviderUserConfig {
+  hasApiKey: boolean
+}
+
+export type LlmApiKeyAction = 'keep' | 'replace' | 'clear'
+
+export interface LlmProviderConfigSaveInput {
+  providerId: string
+  baseUrl: string
+  protocol: LlmProviderProtocol
+  apiKeyAction: LlmApiKeyAction
+  apiKey?: string
 }
 
 export type LlmProviderStatus = 'ready' | 'unconfigured' | 'unsupported'
@@ -53,7 +66,7 @@ export interface LlmProviderViewModel {
   local: boolean
   agentCompatible: boolean
   status: LlmProviderStatus
-  apiKey: string
+  hasApiKey: boolean
   modelCount: number
   models: LlmModelDefinition[]
 }
@@ -239,13 +252,6 @@ export function isReservedLlmProviderId(id: string): boolean {
   return BUILT_IN_LLM_PROVIDER_BY_ID.has(id)
 }
 
-export function maskLlmApiKey(apiKey: string): string {
-  const trimmed = apiKey.trim()
-  if (!trimmed) return '未设置'
-  if (trimmed.length <= 8) return '••••••••'
-  return `${trimmed.slice(0, 4)}••••${trimmed.slice(-4)}`
-}
-
 export function resolveProviderBaseUrl(
   providerId: string,
   userConfig: LlmProviderUserConfig | undefined,
@@ -284,19 +290,19 @@ export function resolveProviderStatus(input: {
   protocol: LlmProviderProtocol
   agentCompatible: boolean
   local?: boolean
-  apiKey: string
+  hasApiKey: boolean
   modelCount: number
 }): LlmProviderStatus {
   if (!input.agentCompatible) return 'unsupported'
   if (input.local) return input.modelCount > 0 ? 'ready' : 'unconfigured'
-  if (!input.apiKey.trim()) return 'unconfigured'
+  if (!input.hasApiKey) return 'unconfigured'
   return input.modelCount > 0 ? 'ready' : 'unconfigured'
 }
 
 export interface LlmSettingsSlice {
   defaultLlmProviderId: string
   defaultLlmModelId: string
-  llmProviderConfigs: Record<string, LlmProviderUserConfig>
+  llmProviderConfigs: Record<string, LlmProviderPublicConfig>
   customLlmProviders: CustomLlmProviderDefinition[]
   llmCustomModels: LlmCustomModelDefinition[]
 }
@@ -306,7 +312,7 @@ export function buildLlmProviderViewModels(settings: LlmSettingsSlice): LlmProvi
     const userConfig = settings.llmProviderConfigs[provider.id]
     const protocol = userConfig?.protocol ?? provider.protocol
     const models = listModelsForProvider(provider.id, settings.llmCustomModels)
-    const apiKey = userConfig?.apiKey?.trim() ?? ''
+    const hasApiKey = userConfig?.hasApiKey === true
     const baseUrl = resolveProviderBaseUrl(provider.id, userConfig)
     return {
       id: provider.id,
@@ -316,14 +322,14 @@ export function buildLlmProviderViewModels(settings: LlmSettingsSlice): LlmProvi
       source: 'builtin',
       local: provider.local === true,
       agentCompatible: provider.agentCompatible,
-      apiKey,
+      hasApiKey,
       models,
       modelCount: models.length,
       status: resolveProviderStatus({
         protocol,
         agentCompatible: provider.agentCompatible,
         local: provider.local,
-        apiKey,
+        hasApiKey,
         modelCount: models.length
       })
     }
@@ -333,7 +339,7 @@ export function buildLlmProviderViewModels(settings: LlmSettingsSlice): LlmProvi
     const userConfig = settings.llmProviderConfigs[custom.id]
     const protocol = userConfig?.protocol ?? custom.protocol
     const models = listModelsForProvider(custom.id, settings.llmCustomModels)
-    const apiKey = userConfig?.apiKey?.trim() ?? ''
+    const hasApiKey = userConfig?.hasApiKey === true
     const agentCompatible = true
     views.push({
       id: custom.id,
@@ -343,13 +349,13 @@ export function buildLlmProviderViewModels(settings: LlmSettingsSlice): LlmProvi
       source: 'custom',
       local: false,
       agentCompatible,
-      apiKey,
+      hasApiKey,
       models,
       modelCount: models.length,
       status: resolveProviderStatus({
         protocol,
         agentCompatible,
-        apiKey,
+        hasApiKey,
         modelCount: models.length
       })
     })
@@ -389,7 +395,7 @@ export function normalizeDefaultLlmSelection(
   }
 
   const requestedProviderId = settings.defaultLlmProviderId.trim()
-  let provider =
+  const provider =
     readyProviders.find((item) => item.id === requestedProviderId) ??
     readyProviders.find((item) => item.id === 'deepseek') ??
     readyProviders[0]

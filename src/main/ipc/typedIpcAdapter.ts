@@ -1,4 +1,5 @@
-import type { WebContents } from 'electron'
+import type { IpcMainInvokeEvent, WebContents } from 'electron'
+import type { z } from 'zod'
 import type {
   IpcContractArgs,
   IpcContractChannel,
@@ -11,15 +12,16 @@ import { registerHandler } from './shared'
 
 type HandlerRegistrar = (
   channel: IpcChannel,
-  handler: (...args: unknown[]) => unknown | Promise<unknown>
+  handler: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown | Promise<unknown>
 ) => void
 
-const registerWithoutEvent: HandlerRegistrar = (channel, handler) => {
-  registerHandler(channel, (_event, ...args) => handler(...args))
+export type IpcArgsSchemaMap<Contract extends object> = {
+  [Channel in IpcContractChannel<Contract>]: z.ZodType<unknown[]>
 }
 
 export function createTypedIpcAdapter<Contract extends object>(
-  register: HandlerRegistrar = registerWithoutEvent
+  schemas: IpcArgsSchemaMap<Contract>,
+  register: HandlerRegistrar = registerHandler
 ): {
   register<Channel extends IpcContractChannel<Contract> & IpcChannel>(
     channel: Channel,
@@ -32,10 +34,16 @@ export function createTypedIpcAdapter<Contract extends object>(
 } {
   return {
     register(channel, handler): void {
-      register(
-        channel,
-        handler as (...args: unknown[]) => unknown | Promise<unknown>
-      )
+      register(channel, (_event, ...args) => {
+        const parsed = schemas[channel].safeParse(args)
+        if (!parsed.success) {
+          const reason = parsed.error.issues
+            .map((issue) => `${issue.path.join('.') || '参数'}: ${issue.message}`)
+            .join('；')
+          throw new Error(`无效的 IPC 请求参数（${channel}）：${reason}`)
+        }
+        return handler(...(parsed.data as IpcContractArgs<Contract, typeof channel>))
+      })
     }
   }
 }

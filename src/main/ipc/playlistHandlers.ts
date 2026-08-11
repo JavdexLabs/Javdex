@@ -1,6 +1,6 @@
 import { IPC } from '@shared/ipc-channels'
 import type { SortDir } from '@shared/commonTypes'
-import type { PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoMembership } from '@shared/playlistTypes'
+import type { PlaylistDetail, PlaylistListItem, PlaylistVideoSortBy, PlaylistVideoMembership } from '@shared/playlistTypes'
 import {
   addVideoToPlaylist,
   getPlaylistDetail,

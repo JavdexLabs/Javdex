@@ -3,8 +3,9 @@ import type { VideoIpcContract } from '@shared/videoIpcContract'
 import { videoMaintenanceService } from '../services/videoMaintenanceService'
 import { videoQueryService } from '../services/videoQueryService'
 import { createTypedIpcAdapter } from './typedIpcAdapter'
+import { videoIpcSchemas } from './ipcCommandSchemas'
 
-const commandAdapter = createTypedIpcAdapter<VideoIpcContract>()
+const commandAdapter = createTypedIpcAdapter<VideoIpcContract>(videoIpcSchemas)
 
 export function registerVideoHandlers(): void {
   commandAdapter.register(IPC.VIDEO_LIST, (query) => videoQueryService.list(query))

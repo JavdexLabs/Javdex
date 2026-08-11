@@ -1,4 +1,4 @@
-import { getSettings } from '../settings/settingsStore'
+import { getEffectiveLlmApiKey, getPublicLlmProviderConfigs, getSettings } from '../settings/settingsStore'
 import {
   BUILT_IN_LLM_PROVIDER_BY_ID,
   normalizeDefaultLlmSelection,
@@ -64,7 +64,7 @@ export function resolveLlmProviderRequestConfig(providerId: string): ResolvedLlm
   const userConfig = settings.llmProviderConfigs[trimmedProviderId]
   const protocol = userConfig?.protocol ?? custom?.protocol ?? builtIn?.protocol ?? 'openai-chat'
   const providerName = custom?.name ?? builtIn?.name ?? trimmedProviderId
-  const apiKey = userConfig?.apiKey?.trim() ?? ''
+  const apiKey = getEffectiveLlmApiKey(trimmedProviderId)
   const baseUrl = resolveProviderBaseUrl(trimmedProviderId, userConfig, custom)
   const local = builtIn?.local === true
 
@@ -103,6 +103,9 @@ export function resolveLlmRequestConfig(
 
 export function resolveActiveLlmRequestConfig(): ResolvedLlmModelRequestConfig {
   const settings = getSettings()
-  const { providerId, modelId } = normalizeDefaultLlmSelection(settings)
+  const { providerId, modelId } = normalizeDefaultLlmSelection({
+    ...settings,
+    llmProviderConfigs: getPublicLlmProviderConfigs(settings)
+  })
   return resolveLlmRequestConfig(providerId, modelId)
 }

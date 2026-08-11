@@ -1,4 +1,4 @@
-import type { AppSettings } from '@shared/settingsTypes'
+import type { SettingsSnapshot } from '@shared/settingsTypes'
 import { FolderOpen, HardDrive, RotateCcw, ShieldCheck, ShieldOff } from 'lucide-react'
 import { UI_ICON_SM } from '../iconDefaults'
 import {
@@ -16,7 +16,7 @@ export default function StorageSettingsPanel({
   onResetMediaAssetsPath,
   onToggleAssetEncryption
 }: {
-  settings: AppSettings
+  settings: SettingsSnapshot
   storageBusy: boolean
   onPickMediaAssetsPath: () => void
   onResetMediaAssetsPath: () => void

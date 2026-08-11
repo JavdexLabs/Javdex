@@ -320,7 +320,7 @@ async function runToolCalls(
     }
 
     let content = result.content
-    let isError = !result.ok
+    const isError = !result.ok
     if (toolName === 'plugin_dry_run' && result.ok) {
       const verifyResult = await executeToolWithProgress(sessionId, step, 'plugin_verify', '{}', onProgress)
       content = `${content}\n\n自动语义验证：\n${verifyResult.content}`

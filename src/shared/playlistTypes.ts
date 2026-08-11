@@ -1,4 +1,3 @@
-import type { SortDir } from './commonTypes'
 import type { Video } from './videoTypes'
 
 export interface Playlist {

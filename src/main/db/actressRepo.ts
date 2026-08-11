@@ -2,7 +2,6 @@ import type { Database as SqliteDatabase } from 'better-sqlite3'
 import { getDb } from './database'
 import { normalizeActressName } from './actressNameNormalization'
 import type { Actress, ActressDetail, ActressGalleryAsset, ActressEditInput, ActressGender, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressListStatusCounts, ActressListStatusFilter, ActressAvatarFilter, ActressMergeMainNameFrom } from '@shared/actressTypes'
-import type { Video } from '@shared/videoTypes'
 import type { ActressScrapeResult, ActressScrapeFieldImpact, ActressScrapeField, ActressScrapeUpdateMode, ActressBatchScrapeFilter, ActressBatchScrapeStatus } from '@shared/actressScrapeTypes'
 import type { ScrapedStatus, SortDir } from '@shared/commonTypes'
 import type { ActressDeleteImpact, ActressDeleteMode } from '@shared/actressIpcContract'
@@ -1935,18 +1934,6 @@ export function applyActressScrapeResult(
       obsoletePaths: Array.from(new Set(obsoletePaths))
     }
   }
-}
-
-function dedupeUrls(urls: string[]): string[] {
-  const out: string[] = []
-  const seen = new Set<string>()
-  for (const url of urls) {
-    const trimmed = url.trim()
-    if (!trimmed || seen.has(trimmed)) continue
-    seen.add(trimmed)
-    out.push(trimmed)
-  }
-  return out
 }
 
 function isValidActressAlias(name: string): boolean {

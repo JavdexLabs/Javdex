@@ -32,6 +32,7 @@ export function useBatchProgressRefresh(
   actressBatch: BatchProgress | null,
   handlers: BatchProgressRefreshHandlers
 ): void {
+  const { onVideoBatch, onActressBatch } = handlers
   const videoProgressRef = useRef<{ current: number; status: BatchProgress['status'] } | null>(null)
   const actressProgressRef = useRef<{ current: number; status: BatchProgress['status'] } | null>(
     null
@@ -42,16 +43,16 @@ export function useBatchProgressRefresh(
     const prev = videoProgressRef.current
     const phase = detectBatchProgressPhase(videoBatch, prev)
     videoProgressRef.current = { current: videoBatch.current, status: videoBatch.status }
-    if (phase) handlers.onVideoBatch?.(phase)
-  }, [videoBatch?.current, videoBatch?.status, handlers.onVideoBatch])
+    if (phase) onVideoBatch?.(phase)
+  }, [onVideoBatch, videoBatch])
 
   useEffect(() => {
     if (!actressBatch) return
     const prev = actressProgressRef.current
     const phase = detectBatchProgressPhase(actressBatch, prev)
     actressProgressRef.current = { current: actressBatch.current, status: actressBatch.status }
-    if (phase) handlers.onActressBatch?.(phase)
-  }, [actressBatch?.current, actressBatch?.status, handlers.onActressBatch])
+    if (phase) onActressBatch?.(phase)
+  }, [actressBatch, onActressBatch])
 }
 
 /** Refresh overview counters while batch scrape advances or finishes. */

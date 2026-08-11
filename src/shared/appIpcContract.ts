@@ -31,7 +31,8 @@ import type {
   PluginDevVerifyInput
 } from './pluginDevTypes'
 import type { ScraperPluginDescriptor } from './scraperPluginTypes'
-import type { AppSettings } from './settingsTypes'
+import type { RendererSettingsPatch, SettingsSnapshot } from './settingsTypes'
+import type { LlmProviderConfigSaveInput } from './llmProviders'
 import type {
   IpcContractArgs,
   IpcContractChannel,
@@ -87,16 +88,25 @@ export interface RemoteImagePreviewResult {
 }
 
 export interface AppIpcContract {
-  [IPC.SETTINGS_GET]: { args: []; result: AppSettings }
-  [IPC.SETTINGS_UPDATE]: { args: [patch: Partial<AppSettings>]; result: AppSettings }
+  [IPC.SETTINGS_GET]: { args: []; result: SettingsSnapshot }
+  [IPC.SETTINGS_UPDATE]: { args: [patch: RendererSettingsPatch]; result: SettingsSnapshot }
   [IPC.SETTINGS_PICK_FOLDER]: { args: []; result: string[] }
   [IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW]: {
     args: [path: string]
     result: LibraryPathRemovalPreview
   }
-  [IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM]: { args: [path: string]; result: AppSettings }
+  [IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM]: { args: [path: string]; result: SettingsSnapshot }
   [IPC.SETTINGS_LLM_TEST_MODEL]: { args: [providerId: string, modelId: string]; result: string }
   [IPC.SETTINGS_LLM_LIST_MODELS]: { args: [providerId: string]; result: LlmModelDefinition[] }
+  [IPC.SETTINGS_LLM_PROVIDER_CONFIG_SAVE]: {
+    args: [input: LlmProviderConfigSaveInput]
+    result: SettingsSnapshot
+  }
+  [IPC.SETTINGS_LLM_PROVIDER_DELETE]: {
+    args: [providerId: string]
+    result: SettingsSnapshot
+  }
+  [IPC.SETTINGS_RECOVERY_REVEAL_BACKUP]: { args: []; result: boolean }
   [IPC.SETTINGS_PROXY_TEST]: { args: [kind: 'scrape' | 'llm', proxyUrl: string]; result: string }
   [IPC.SETTINGS_OVERVIEW_STATS]: { args: []; result: LibraryOverviewStats }
 
@@ -217,8 +227,8 @@ export interface AppIpcContract {
   [IPC.PLAYER_OPEN_RESOURCE]: { args: [resourceId: number]; result: PlayResult }
   [IPC.PLAYER_REVEAL_RESOURCE]: { args: [resourceId: number]; result: PlayResult }
 
-  [IPC.ASSET_CRYPTO_SET]: { args: [enabled: boolean]; result: AppSettings }
-  [IPC.ASSET_STORAGE_RELOCATE]: { args: [targetPath?: string | null]; result: AppSettings }
+  [IPC.ASSET_CRYPTO_SET]: { args: [enabled: boolean]; result: SettingsSnapshot }
+  [IPC.ASSET_STORAGE_RELOCATE]: { args: [targetPath?: string | null]; result: SettingsSnapshot }
   [IPC.ASSET_FETCH_REMOTE_IMAGE]: { args: [url: string]; result: RemoteImagePreviewResult }
   [IPC.LLM_TRANSLATE_TO_CHINESE]: { args: [text: string]; result: string }
 }

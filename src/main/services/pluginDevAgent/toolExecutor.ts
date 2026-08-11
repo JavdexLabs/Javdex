@@ -20,7 +20,6 @@ import { assertNoDuplicateTopLevelBindings } from '../pluginDevCodeEdit'
 import {
   describeFieldsForKind,
   getPluginDevKindProfile,
-  normalizeTestTargets,
   resolveDryRunTargetsFromArgs,
   userRequestedSupportedFieldRemoval
 } from '@shared/pluginDevKindProfile'

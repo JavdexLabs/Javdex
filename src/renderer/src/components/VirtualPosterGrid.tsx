@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { FixedSizeGrid, type GridChildComponentProps } from 'react-window'
 import type { Video } from '@shared/videoTypes'
 import Spinner from './Spinner'

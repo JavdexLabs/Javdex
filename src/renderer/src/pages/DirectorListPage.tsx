@@ -65,7 +65,7 @@ export default function DirectorListPage(): JSX.Element {
     if (searchInput === urlQ) return
     syncingSearchFromUrl.current = true
     setSearchInput(urlQ)
-  }, [urlQ])
+  }, [searchInput, urlQ])
   useEffect(() => {
     const value = debounced.trim()
     if (syncingSearchFromUrl.current) {

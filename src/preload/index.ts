@@ -1,6 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../shared/ipc-channels'
-import type { LlmModelDefinition } from '../shared/llmProviders'
 import type { UpdateCheckState } from '../shared/updateTypes'
 import type {
   AppIpcArgs,
@@ -42,32 +41,27 @@ import type {
   ActressAvatarAutoCropResponse,
   ActressBatchScrapeFilter,
   ActressBatchScrapeRequest,
-  ActressScrapeDisposition,
   ActressScrapeField,
-  ActressScrapeResult,
   ActressScrapeUpdateMode,
   CompositeScraperInput,
-  ScrapeResult,
-  ScraperPluginDescriptor,
-  ScraperPluginPackage,
   ScraperPluginUpdateInput,
   VideoBatchScrapeFilter,
   VideoBatchScrapeRequest,
   VideoRematchBatchRequest,
   VideoRematchScope,
   VideoScrapeField,
-  VideoScrapeOneResult,
   VideoScrapeUpdateMode
 } from '../shared/scrapeTypes'
-import type { BatchProgress, BatchScrapeState } from '../shared/batchScrapeTypes'
-import type { AppSettings } from '../shared/settingsTypes'
-import type { LibraryOverviewStats, ScanResult, ScanProgress, PlayResult, RenameImportResult, ManualImportResult, AssetCryptoProgress } from '../shared/libraryTypes'
-import type { ActressAvatarSourceInfo, ActressDetail, ActressGalleryAsset, ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../shared/actressTypes'
+import type { BatchProgress } from '../shared/batchScrapeTypes'
+import type { RendererSettingsPatch } from '../shared/settingsTypes'
+import type { LlmProviderConfigSaveInput } from '../shared/llmProviders'
+import type { ScanProgress, AssetCryptoProgress } from '../shared/libraryTypes'
+import type { ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../shared/actressTypes'
 import type { IpcResponse } from '../shared/ipcTypes'
-import type { ActressNameConflictGroup, ActressConflictReviewSummary, InspectActressConflictNameInput, InspectActressConflictNameResult, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from '../shared/actressConflictTypes'
+import type { InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
 import type { SortDir } from '../shared/commonTypes'
-import type { PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoMembership } from '../shared/playlistTypes'
-import type { PluginDevAgentInput, PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentSessionResult, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevDryRunResult, PluginDevInstallInput, PluginDevVerificationReport, PluginDevVerifyInput } from '../shared/pluginDevTypes'
+import type { PlaylistCreateInput, PlaylistUpdateInput, PlaylistVideoSortBy } from '../shared/playlistTypes'
+import type { PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevInstallInput, PluginDevVerifyInput } from '../shared/pluginDevTypes'
 import type {
   ClassificationEntityRef,
   ClassificationImageInput,
@@ -156,7 +150,7 @@ const api = {
   },
   settings: {
     get: () => invokeApp(IPC.SETTINGS_GET),
-    update: (patch: Partial<AppSettings>) => invokeApp(IPC.SETTINGS_UPDATE, patch),
+    update: (patch: RendererSettingsPatch) => invokeApp(IPC.SETTINGS_UPDATE, patch),
     pickFolder: () => invokeApp(IPC.SETTINGS_PICK_FOLDER),
     previewLibraryPathRemoval: (path: string) =>
       invokeApp(IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW, path),
@@ -166,6 +160,11 @@ const api = {
       invokeApp(IPC.SETTINGS_LLM_TEST_MODEL, providerId, modelId),
     listLlmModels: (providerId: string) =>
       invokeApp(IPC.SETTINGS_LLM_LIST_MODELS, providerId),
+    saveLlmProviderConfig: (input: LlmProviderConfigSaveInput) =>
+      invokeApp(IPC.SETTINGS_LLM_PROVIDER_CONFIG_SAVE, input),
+    deleteLlmProvider: (providerId: string) =>
+      invokeApp(IPC.SETTINGS_LLM_PROVIDER_DELETE, providerId),
+    revealRecoveryBackup: () => invokeApp(IPC.SETTINGS_RECOVERY_REVEAL_BACKUP),
     testProxy: (kind: 'scrape' | 'llm', proxyUrl: string) =>
       invokeApp(IPC.SETTINGS_PROXY_TEST, kind, proxyUrl),
     getOverviewStats: () => invokeApp(IPC.SETTINGS_OVERVIEW_STATS)

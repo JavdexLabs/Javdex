@@ -26,13 +26,15 @@ export default function LlmProviderModelsModal({
   customModels,
   onClose,
   onAdd,
-  onRemove
+  onRemove,
+  mutationBusy = false
 }: {
   provider: LlmProviderViewModel
   customModels: LlmCustomModelDefinition[]
   onClose: () => void
   onAdd: (modelId: string, modelName: string) => void
   onRemove: (modelId: string) => void
+  mutationBusy?: boolean
 }): JSX.Element {
   const toast = useToast()
   const [query, setQuery] = useState('')
@@ -184,7 +186,7 @@ export default function LlmProviderModelsModal({
                         icon={<Plus {...UI_ICON_COMPACT} />}
                         label="添加"
                         title={canGenerate ? '添加到本地模型' : '嵌入模型不能作为生成模型添加'}
-                        disabled={!canGenerate}
+                        disabled={!canGenerate || mutationBusy}
                         onClick={() => addDiscoveredModel(model)}
                       />
                     ) : !model.builtin && customIds.has(model.id) ? (
@@ -193,6 +195,7 @@ export default function LlmProviderModelsModal({
                         icon={<Trash2 {...UI_ICON_COMPACT} />}
                         label="删除"
                         title="删除"
+                        disabled={mutationBusy}
                         onClick={() => onRemove(model.id)}
                       />
                     ) : null}
@@ -233,6 +236,7 @@ export default function LlmProviderModelsModal({
               variant="primary"
 
               size="sm"
+              disabled={mutationBusy}
               onClick={() => {
                 onAdd(modelId, modelName)
                 setModelId('')

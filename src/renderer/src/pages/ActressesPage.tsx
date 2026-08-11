@@ -161,7 +161,6 @@ export default function ActressesPage(): JSX.Element {
       debouncedQ,
       faceScan.cache,
       faceScan.manifest,
-      faceScan.running,
       genderFilter,
       sortBy,
       sortDir,
@@ -270,7 +269,6 @@ export default function ActressesPage(): JSX.Element {
       avatarBatchActive,
       faceScan,
       faceScanAutoStartKey,
-      faceScan.manifest,
       patchParams,
       toast
     ]

@@ -132,8 +132,8 @@ async function selectSource(): Promise<void> {
   await act(async () => candidateButtons()[0].props.onClick())
 }
 
-afterEach(() => {
-  renderer?.unmount()
+afterEach(async () => {
+  await act(async () => renderer?.unmount())
   renderer = null
   queryClient?.clear()
   queryClient = null

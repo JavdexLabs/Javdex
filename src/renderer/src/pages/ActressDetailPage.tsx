@@ -195,7 +195,7 @@ export default function ActressDetailPage(): JSX.Element {
     } catch (e) {
       toast.show(`匹配失败：${(e as Error).message}`, 'error')
     } finally {
-      invalidateActressLibraryQueries(queryClient)
+      void invalidateActressLibraryQueries(queryClient)
       await load({ silent: true })
       setScraping(false)
     }
@@ -229,7 +229,7 @@ export default function ActressDetailPage(): JSX.Element {
     try {
       await api.actresses.markScrapeSuccess(actressId)
       toast.show('已标记为刮削成功', 'success')
-      invalidateActressLibraryQueries(queryClient)
+      void invalidateActressLibraryQueries(queryClient)
       await load({ silent: true })
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
@@ -241,7 +241,7 @@ export default function ActressDetailPage(): JSX.Element {
       await api.actresses.clearMeta(actressId)
       setConfirmClear(false)
       toast.show('已清除元数据', 'success')
-      invalidateActressLibraryQueries(queryClient)
+      void invalidateActressLibraryQueries(queryClient)
       void load({ silent: true })
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
@@ -528,7 +528,7 @@ export default function ActressDetailPage(): JSX.Element {
           onMerged={() => {
             setShowMerge(false)
             toast.show('演员已合并', 'success')
-            invalidateActressLibraryQueries(queryClient)
+            void invalidateActressLibraryQueries(queryClient)
             void load({ silent: true })
           }}
         />

@@ -62,7 +62,7 @@ export function useLibraryDataSync(): void {
   }, [queryClient])
 
   const syncActressLibrary = useCallback(() => {
-    invalidateActressLibraryQueries(queryClient)
+    void invalidateActressLibraryQueries(queryClient)
   }, [queryClient])
 
   const handleVideoBatch = useDebouncedLibraryInvalidation(

@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect } from 'react'
+import { useDeferredValue, useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type {
   OrganizationAssignmentInput,
@@ -30,7 +30,7 @@ export default function OrganizationPickerField({
     queryFn: () => api.organizations.options(deferredValue.trim() || undefined),
     placeholderData: (previous) => previous
   })
-  const options = optionsQuery.data ?? []
+  const options = useMemo(() => optionsQuery.data ?? [], [optionsQuery.data])
   const listId = `${id}-options`
 
   useEffect(() => {

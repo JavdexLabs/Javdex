@@ -3,8 +3,6 @@ import path from 'node:path'
 import type { AssetCryptoProgress } from '@shared/libraryTypes'
 import { invalidateAssetCache } from './assetCache'
 import {
-  aliasStoreAbsAt,
-  ASSET_PATH_ALIAS_FILENAME,
   ensureMediaAssetDirsAt,
   mediaAssetsPathForSettings
 } from './assetStoragePaths'

@@ -7,7 +7,6 @@ import {
   describeFieldsForKind,
   getPluginDevKindProfile,
   normalizeTestTargets,
-  pageMatchesActressTarget,
   pageMatchesReferenceTargetForKind
 } from '@shared/pluginDevKindProfile'
 

@@ -1,6 +1,7 @@
 {
   "include": [
     "electron.vite.config.*",
+    "src/mcp/**/*",
     "src/main/**/*",
     "src/preload/**/*",
     "src/shared/**/*"
@@ -14,7 +15,7 @@
     "target": "ES2022",
     "lib": ["ES2022"],
     "strict": true,
-    "noUnusedLocals": false,
+    "noUnusedLocals": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,

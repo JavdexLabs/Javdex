@@ -9,8 +9,9 @@ import type {
 } from '@shared/scrapeIpcContract'
 import type { WebContents } from 'electron'
 import { createTypedEventAdapter, createTypedIpcAdapter } from './typedIpcAdapter'
+import { scrapeIpcSchemas } from './ipcCommandSchemas'
 
-const commandAdapter = createTypedIpcAdapter<ScrapeIpcContract>()
+const commandAdapter = createTypedIpcAdapter<ScrapeIpcContract>(scrapeIpcSchemas)
 const eventAdapter = createTypedEventAdapter<ScrapeIpcEventContract>()
 
 export function registerScrapeHandler<Channel extends ScrapeIpcChannel>(

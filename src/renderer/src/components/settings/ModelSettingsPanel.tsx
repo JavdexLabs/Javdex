@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import type { AppSettings } from '@shared/settingsTypes'
+import type { SettingsSnapshot } from '@shared/settingsTypes'
 import {
   buildLlmProviderViewModels,
   findLlmProviderViewModel,
@@ -10,11 +10,10 @@ import {
   isValidCustomLlmProviderId,
   listAgentCompatibleProviders,
   listModelsForProvider,
-  maskLlmApiKey,
   normalizeCustomLlmProviderId,
   normalizeDefaultLlmSelection,
   type CustomLlmProviderDefinition,
-  type LlmProviderProtocol,
+  type LlmProviderConfigSaveInput,
   type LlmProviderViewModel
 } from '@shared/llmProviders'
 import { api } from '../../api'
@@ -26,6 +25,7 @@ import LlmProviderModelsModal from './LlmProviderModelsModal'
 import LlmProviderSettingsModal from './LlmProviderSettingsModal'
 import { SettingsCard, SettingsFormField } from './SettingsPrimitives'
 import Button from '../Button'
+import useAsyncMutation from '../../hooks/useAsyncMutation'
 
 function providerStatusLabel(status: LlmProviderViewModel['status']): string {
   if (status === 'ready') return '可用'
@@ -37,8 +37,8 @@ export default function ModelSettingsPanel({
   settings,
   onSettingsChange
 }: {
-  settings: AppSettings
-  onSettingsChange: (next: AppSettings) => void
+  settings: SettingsSnapshot
+  onSettingsChange: (next: SettingsSnapshot) => void
 }): JSX.Element {
   const toast = useToast()
   const location = useLocation()
@@ -53,7 +53,10 @@ export default function ModelSettingsPanel({
   const [providerQuery, setProviderQuery] = useState('')
   const [defaultProviderId, setDefaultProviderId] = useState(savedDefault.providerId)
   const [defaultModelId, setDefaultModelId] = useState(savedDefault.modelId)
-  const [defaultSaving, setDefaultSaving] = useState(false)
+  const { isBusy, run: runMutation } = useAsyncMutation((message) =>
+    toast.show(message, 'error')
+  )
+  const settingsMutationBusy = isBusy('llm-settings')
 
   const [settingsTarget, setSettingsTarget] = useState<LlmProviderViewModel | null>(null)
   const [modelsTarget, setModelsTarget] = useState<LlmProviderViewModel | null>(null)
@@ -94,7 +97,7 @@ export default function ModelSettingsPanel({
   }, [providerQuery, providers])
 
   const saveDefaultLlm = async (): Promise<void> => {
-    if (!defaultDirty || defaultSaving) return
+    if (!defaultDirty || settingsMutationBusy) return
     if (!defaultProviderId.trim() || !defaultModelId.trim()) {
       toast.show('请先配置并选择可用的提供商与模型', 'error')
       return
@@ -114,70 +117,42 @@ export default function ModelSettingsPanel({
       toast.show(`请先为「${provider.name}」${hint}`, 'error')
       return
     }
-    setDefaultSaving(true)
-    try {
-      const next = await api.settings.update({
+    const result = await runMutation(
+      'llm-settings',
+      () => api.settings.update({
         defaultLlmProviderId: defaultProviderId,
         defaultLlmModelId: defaultModelId
-      })
-      onSettingsChange(next)
-      toast.show('默认模型已保存', 'success')
-    } catch (err) {
-      toast.show(err instanceof Error ? err.message : '保存失败', 'error')
-    } finally {
-      setDefaultSaving(false)
-    }
+      }),
+      '保存默认模型失败'
+    )
+    if (!result.ok) return
+    onSettingsChange(result.value)
+    toast.show('默认模型已保存', 'success')
   }
 
-  const saveProviderConfig = async (input: {
-    providerId: string
-    apiKey: string
-    baseUrl: string
-    protocol: LlmProviderProtocol
-  }): Promise<void> => {
-    const configs = { ...settings.llmProviderConfigs }
-    const nextConfig = {
-      ...(input.apiKey.trim() ? { apiKey: input.apiKey.trim() } : {}),
-      ...(input.baseUrl.trim() ? { baseUrl: input.baseUrl.trim() } : {}),
-      protocol: input.protocol
-    }
-    if (Object.keys(nextConfig).length === 0) {
-      delete configs[input.providerId]
-    } else {
-      configs[input.providerId] = nextConfig
-    }
-    const next = await api.settings.update({ llmProviderConfigs: configs })
-    onSettingsChange(next)
+  const saveProviderConfig = async (input: LlmProviderConfigSaveInput): Promise<void> => {
+    const result = await runMutation(
+      'llm-settings',
+      () => api.settings.saveLlmProviderConfig(input),
+      '保存供应商设置失败'
+    )
+    if (!result.ok) return
+    onSettingsChange(result.value)
     setSettingsTarget(null)
     toast.show('供应商设置已保存', 'success')
   }
 
   const deleteCustomProvider = async (providerId: string): Promise<void> => {
-    const customLlmProviders = settings.customLlmProviders.filter((item) => item.id !== providerId)
-    const llmProviderConfigs = { ...settings.llmProviderConfigs }
-    delete llmProviderConfigs[providerId]
-    const llmCustomModels = settings.llmCustomModels.filter((item) => item.providerId !== providerId)
-    const draft = {
-      defaultLlmProviderId:
-        settings.defaultLlmProviderId === providerId ? '' : settings.defaultLlmProviderId,
-      defaultLlmModelId:
-        settings.defaultLlmProviderId === providerId ? '' : settings.defaultLlmModelId,
-      llmProviderConfigs,
-      customLlmProviders,
-      llmCustomModels
-    }
-    const { providerId: defaultLlmProviderId, modelId: defaultLlmModelId } =
-      normalizeDefaultLlmSelection(draft)
-    setDefaultProviderId(defaultLlmProviderId)
-    setDefaultModelId(defaultLlmModelId)
-    const next = await api.settings.update({
-      customLlmProviders,
-      llmProviderConfigs,
-      llmCustomModels,
-      defaultLlmProviderId,
-      defaultLlmModelId
-    })
-    onSettingsChange(next)
+    const result = await runMutation(
+      'llm-settings',
+      () => api.settings.deleteLlmProvider(providerId),
+      '删除供应商失败'
+    )
+    if (!result.ok) return
+    const selection = normalizeDefaultLlmSelection(result.value)
+    setDefaultProviderId(selection.providerId)
+    setDefaultModelId(selection.modelId)
+    onSettingsChange(result.value)
     setSettingsTarget(null)
     toast.show('自定义供应商已删除', 'success')
   }
@@ -192,12 +167,17 @@ export default function ModelSettingsPanel({
       toast.show('供应商 ID 已存在', 'error')
       return
     }
-    const next = await api.settings.update({
-      customLlmProviders: [...settings.customLlmProviders, { ...input, id }].sort((a, b) =>
-        a.name.localeCompare(b.name, 'zh-CN')
-      )
-    })
-    onSettingsChange(next)
+    const result = await runMutation(
+      'llm-settings',
+      () => api.settings.update({
+        customLlmProviders: [...settings.customLlmProviders, { ...input, id }].sort((a, b) =>
+          a.name.localeCompare(b.name, 'zh-CN')
+        )
+      }),
+      '创建自定义供应商失败'
+    )
+    if (!result.ok) return
+    onSettingsChange(result.value)
     setShowAddProvider(false)
     toast.show('自定义供应商已创建', 'success')
   }
@@ -218,33 +198,70 @@ export default function ModelSettingsPanel({
       toast.show('模型 ID 已存在', 'error')
       return
     }
-    const next = await api.settings.update({
-      llmCustomModels: [...settings.llmCustomModels, { providerId, id, name }]
-    })
-    onSettingsChange(next)
+    const result = await runMutation(
+      'llm-settings',
+      () => api.settings.update({
+        llmCustomModels: [...settings.llmCustomModels, { providerId, id, name }]
+      }),
+      '添加模型失败'
+    )
+    if (!result.ok) return
+    onSettingsChange(result.value)
     toast.show('模型已添加', 'success')
   }
 
   const removeCustomModel = async (providerId: string, modelId: string): Promise<void> => {
-    const next = await api.settings.update({
-      llmCustomModels: settings.llmCustomModels.filter(
-        (item) => !(item.providerId === providerId && item.id === modelId)
-      )
-    })
-    onSettingsChange(next)
-    if (settings.defaultLlmProviderId === providerId && settings.defaultLlmModelId === modelId) {
-      const models = listModelsForProvider(providerId, next.llmCustomModels)
-      if (models[0]) {
-        const updated = await api.settings.update({ defaultLlmModelId: models[0].id })
-        onSettingsChange(updated)
-        setDefaultModelId(models[0].id)
-      }
-    }
+    const llmCustomModels = settings.llmCustomModels.filter(
+      (item) => !(item.providerId === providerId && item.id === modelId)
+    )
+    const removesDefault =
+      settings.defaultLlmProviderId === providerId && settings.defaultLlmModelId === modelId
+    const nextDefaultModelId = removesDefault
+      ? listModelsForProvider(providerId, llmCustomModels)[0]?.id ?? ''
+      : settings.defaultLlmModelId
+    const result = await runMutation(
+      'llm-settings',
+      () => api.settings.update({
+        llmCustomModels,
+        ...(removesDefault ? { defaultLlmModelId: nextDefaultModelId } : {})
+      }),
+      '删除自定义模型失败'
+    )
+    if (!result.ok) return
+    onSettingsChange(result.value)
+    if (removesDefault) setDefaultModelId(result.value.defaultLlmModelId)
     toast.show('自定义模型已删除', 'success')
   }
 
   return (
     <>
+      {settings.llmSecretStorage.protection !== 'secure' && (
+        <div
+          className="settings-notice settings-notice--warning"
+          role="status"
+        >
+          <div className="settings-notice-copy">
+            <strong>
+              {settings.llmSecretStorage.protection === 'degraded'
+                ? '系统凭证保护较弱'
+                : '系统凭证存储不可用'}
+            </strong>
+            <span>
+              {settings.llmSecretStorage.protection === 'degraded'
+                ? `当前使用 ${settings.llmSecretStorage.backend}，API Key 会与普通设置分离保存，但保护强度低于系统密钥环。`
+                : '当前设备无法持久化新的 API Key，请先启用系统密钥环。'}
+            </span>
+          </div>
+        </div>
+      )}
+      {settings.llmSecretStorage.migrationError && (
+        <div className="settings-notice settings-notice--warning" role="alert">
+          <div className="settings-notice-copy">
+            <strong>旧版密钥尚未迁移</strong>
+            <span>{settings.llmSecretStorage.migrationError}</span>
+          </div>
+        </div>
+      )}
       <SettingsCard
         className="settings-card--llm-default"
         title="默认 LLM"
@@ -255,10 +272,10 @@ export default function ModelSettingsPanel({
             variant="primary"
 
             size="sm"
-            disabled={!defaultDirty || defaultSaving}
+            disabled={!defaultDirty || settingsMutationBusy}
             onClick={() => void saveDefaultLlm()}
           >
-            {defaultSaving ? '保存中…' : defaultDirty ? '保存' : '已保存'}
+            {settingsMutationBusy ? '保存中…' : defaultDirty ? '保存' : '已保存'}
           </Button>
         }
       >
@@ -364,7 +381,7 @@ export default function ModelSettingsPanel({
                 </div>
                 <div>
                   <dt>密钥</dt>
-                  <dd>{provider.local ? '无需' : maskLlmApiKey(provider.apiKey)}</dd>
+                  <dd>{provider.local ? '无需' : provider.hasApiKey ? '已安全保存' : '未设置'}</dd>
                 </div>
                 <div>
                   <dt>Base URL</dt>
@@ -385,7 +402,11 @@ export default function ModelSettingsPanel({
       </SettingsCard>
 
       {showAddProvider && (
-        <LlmAddProviderModal onClose={() => setShowAddProvider(false)} onCreate={(input) => void addCustomProvider(input)} />
+        <LlmAddProviderModal
+          busy={settingsMutationBusy}
+          onClose={() => setShowAddProvider(false)}
+          onCreate={(input) => void addCustomProvider(input)}
+        />
       )}
 
       {settingsTarget && (
@@ -394,6 +415,7 @@ export default function ModelSettingsPanel({
           userConfig={settings.llmProviderConfigs[settingsTarget.id]}
           onClose={() => setSettingsTarget(null)}
           onSave={(input) => void saveProviderConfig(input)}
+          busy={settingsMutationBusy}
           onDelete={
             settingsTarget.source === 'custom'
               ? () => void deleteCustomProvider(settingsTarget.id)
@@ -409,6 +431,7 @@ export default function ModelSettingsPanel({
           onClose={() => setModelsTarget(null)}
           onAdd={(modelId, modelName) => void addCustomModel(modelsTarget.id, modelId, modelName)}
           onRemove={(modelId) => void removeCustomModel(modelsTarget.id, modelId)}
+          mutationBusy={settingsMutationBusy}
         />
       )}
     </>

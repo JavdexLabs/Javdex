@@ -6,6 +6,8 @@ import TestRenderer, { act } from 'react-test-renderer'
 import type { ActressNameConflictGroup, ResolveActressConflictInput } from '@shared/actressConflictTypes'
 import type { ElectronApi } from '../../../preload/index'
 
+Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
+
 const candidate = {
   pendingId: 10,
   revision: 1,
@@ -114,8 +116,8 @@ async function settle(ms = 0): Promise<void> {
   })
 }
 
-afterEach(() => {
-  renderer?.unmount()
+afterEach(async () => {
+  await act(async () => renderer?.unmount())
   renderer = null
   groups = [group()]
   resolvedInputs = []

@@ -853,7 +853,7 @@ describe('actressRepo.mergeActresses', () => {
     insertPending.run('sharedmergename', 1, 'Shared Merge Name')
     insertPending.run('sharedmergename', 2, 'Ｓｈａｒｅｄ　Ｍｅｒｇｅ　Ｎａｍｅ')
 
-    const result = mergeActresses(1, 2, 'keep')
+    mergeActresses(1, 2, 'keep')
 
     assert.equal(findActressByNameOrAlias('shared merge name'), 1)
     assert.deepEqual(
@@ -876,7 +876,7 @@ describe('actressRepo.mergeActresses', () => {
       'INSERT INTO actress_name_ownership (normalized_name, actress_id) VALUES (?, ?)'
     ).run('watchmori', 2)
 
-    const result = mergeActresses(1, 2, 'keep')
+    mergeActresses(1, 2, 'keep')
 
     assert.equal(findActressByNameOrAlias('Watch Mori'), 1)
     assert.ok(getActressDetail(1)?.aliases.includes('Watch Mori'))
@@ -2011,7 +2011,7 @@ describe('actressRepo.applyActressScrapeResult', () => {
         reason: 'replace'
       }
     )
-    const { applied, avatarApplied, fileChanges } = applyActressScrapeResult(
+    const { applied, avatarApplied } = applyActressScrapeResult(
       1,
       { birthDate: '1991-02-03' },
       'avatars/same-source-again.jpg',
@@ -2064,7 +2064,7 @@ describe('actressRepo.applyActressScrapeResult', () => {
       'base64'
     )
     writeTestAsset('avatars/different-source.png', png)
-    const { applied, avatarApplied, fileChanges } = applyActressScrapeResult(
+    const { applied, avatarApplied } = applyActressScrapeResult(
       1,
       {},
       'avatars/different-source.png',

@@ -31,7 +31,7 @@ export function useInfiniteActressList(
   queryHash: string,
   onError: (error: unknown) => void
 ): InfiniteActressListResult {
-  const stableQuery = useMemo(() => ({ ...query }), [queryHash, query])
+  const stableQuery = useMemo(() => ({ ...query }), [query])
   const result = useInfiniteQuery(
     actressInfiniteQueryOptions(stableQuery, queryHash, api.actresses.listPage)
   )

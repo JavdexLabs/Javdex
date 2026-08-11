@@ -1,8 +1,6 @@
 import type {
   PluginDevAgentEvent,
   PluginDevAgentPhase,
-  PluginDevAgentMessageInput,
-  PluginDevAgentSessionResult,
   PluginDevAgentStartInput,
   PluginDevAgentWorkLogEntry,
   PluginDevDryRunResult,

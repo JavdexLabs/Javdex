@@ -12,7 +12,7 @@ import {
   SquareTerminal,
   UserRound
 } from 'lucide-react'
-import type { AppSettings, ThemeId } from '@shared/settingsTypes'
+import type { SettingsSnapshot, ThemeId } from '@shared/settingsTypes'
 import type { BatchProgress } from '@shared/batchScrapeTypes'
 import {
   findLlmProviderViewModel,
@@ -78,7 +78,7 @@ const SETTINGS_OVERVIEW_AGENT_TOOLS: SettingsOverviewAgentTool[] = [
 ]
 
 interface SettingsOverviewPanelProps {
-  settings: AppSettings
+  settings: SettingsSnapshot
   theme: ThemeId
   themeLabel: string
   notices: SettingsOverviewNotice[]
@@ -399,7 +399,6 @@ export default function SettingsOverviewPanel({
   }, [defaultLlmSelection.modelId, defaultLlmSelection.providerId, settings.llmCustomModels])
 
   const videoTotal = stats?.videos.total ?? 0
-  const actressTotal = stats?.actresses.total ?? 0
   const actressFemaleTotal = stats?.actresses.female ?? 0
   const videoScraped = stats?.videos.scraped ?? 0
   const actressScraped = stats?.actresses.scraped ?? 0

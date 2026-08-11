@@ -273,11 +273,24 @@ export default function ScrapeFieldsModal<
     setMissingSelected((prev) => {
       const next = new Set([...prev].filter((field) => supported.has(field)))
       if (missingFilterEnabled && next.size !== prev.size) {
-        notifyMissingFieldsChange([...next])
+        const nextFields = [...next]
+        if (onMissingFieldsChange) {
+          onMissingFieldsChange(nextFields, scope, auxScope, scraperName)
+        } else if (scope !== undefined) {
+          onScopeChange?.(scope, nextFields, auxScope, scraperName)
+        }
       }
       return next
     })
-  }, [scraperName, supported])
+  }, [
+    auxScope,
+    missingFilterEnabled,
+    onMissingFieldsChange,
+    onScopeChange,
+    scope,
+    scraperName,
+    supported
+  ])
 
   const toggle = (id: T): void => {
     if (supported && !supported.has(id)) return

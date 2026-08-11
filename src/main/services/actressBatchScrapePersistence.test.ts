@@ -14,7 +14,6 @@ import { getBatchScrapeState } from './batchScrapeControl'
 import {
   loadBatchScrapeJob,
   resetBatchScrapeJobCache,
-  saveBatchScrapeJob,
   type PersistedBatchScrapeJob
 } from './batchScrapeJobStore'
 

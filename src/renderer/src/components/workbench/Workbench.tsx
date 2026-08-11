@@ -1,4 +1,4 @@
-import React, { type HTMLAttributes, type ReactNode } from 'react'
+import { type HTMLAttributes, type ReactNode } from 'react'
 
 function classNames(base: string, className?: string): string {
   return className ? `${base} ${className}` : base

@@ -4,17 +4,49 @@ import { IPC } from '@shared/ipc-channels'
 import type { VideoIpcContract } from '@shared/videoIpcContract'
 import { createTypedEventAdapter, createTypedIpcAdapter } from './typedIpcAdapter'
 import { executeIpcHandler } from './shared'
+import { videoIpcSchemas } from './ipcCommandSchemas'
+import type { IpcMainInvokeEvent } from 'electron'
 
 describe('typed IPC adapter', () => {
   it('forwards command arguments and returns the application result', async () => {
-    let registered: ((id: number, rating: number) => boolean) | null = null
-    const adapter = createTypedIpcAdapter<VideoIpcContract>((channel, handler) => {
-      assert.equal(channel, IPC.VIDEO_SET_RATING)
-      registered = handler as unknown as (id: number, rating: number) => boolean
-    })
+    let registered: ((id: number, rating: number) => unknown | Promise<unknown>) | null = null
+    const adapter = createTypedIpcAdapter<VideoIpcContract>(
+      videoIpcSchemas,
+      (channel, handler) => {
+        assert.equal(channel, IPC.VIDEO_SET_RATING)
+        registered = (id: number, rating: number) =>
+          handler({} as IpcMainInvokeEvent, id, rating)
+      }
+    )
     adapter.register(IPC.VIDEO_SET_RATING, (id, rating) => id === 7 && rating === 4)
 
-    assert.equal((registered as ((id: number, rating: number) => boolean) | null)?.(7, 4), true)
+    assert.equal(
+      await (registered as ((id: number, rating: number) => unknown | Promise<unknown>) | null)?.(7, 4),
+      true
+    )
+  })
+
+  it('rejects malformed arguments before invoking the application handler', async () => {
+    let registered: ((...args: unknown[]) => unknown | Promise<unknown>) | null = null
+    let invoked = false
+    const adapter = createTypedIpcAdapter<VideoIpcContract>(
+      videoIpcSchemas,
+      (_channel, handler) => {
+        registered = (...args: unknown[]) => handler({} as IpcMainInvokeEvent, ...args)
+      }
+    )
+    adapter.register(IPC.VIDEO_SET_RATING, () => {
+      invoked = true
+      return true
+    })
+
+    assert.throws(
+      () => {
+        void (registered as ((...args: unknown[]) => unknown | Promise<unknown>))(7, 9)
+      },
+      /无效的 IPC 请求参数/
+    )
+    assert.equal(invoked, false)
   })
 
   it('serializes successful results and thrown errors', async () => {

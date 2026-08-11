@@ -11,9 +11,14 @@ import { registerSettingsHandlers } from './settingsHandlers'
 import { registerVideoHandlers } from './videoHandlers'
 import { registerUpdateHandlers } from './updateHandlers'
 import type { IpcContext } from './shared'
+import { configureIpcSecurity } from './ipcSecurity'
 
-export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {
+export function registerIpcHandlers(
+  getWindow: () => BrowserWindow | null,
+  isTrustedUrl: (url: string) => boolean
+): void {
   const ctx: IpcContext = { getWindow }
+  configureIpcSecurity({ getWindow, isTrustedUrl })
 
   registerSettingsHandlers(ctx)
   registerUpdateHandlers(ctx)

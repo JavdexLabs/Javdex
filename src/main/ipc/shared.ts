@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import type { IpcChannel } from '@shared/ipc-channels'
 import type { IpcResponse } from '@shared/ipcTypes'
+import { assertTrustedIpcSender } from './ipcSecurity'
 
 export interface IpcContext {
   getWindow: () => BrowserWindow | null
@@ -30,6 +31,12 @@ export function registerHandler<Args extends unknown[], Result>(
   handler: (event: IpcMainInvokeEvent, ...args: Args) => Result | Promise<Result>
 ): void {
   ipcMain.handle(channel, (event, ...args) =>
-    executeIpcHandler(handler, [event, ...(args as Args)])
+    executeIpcHandler(
+      (trustedEvent: IpcMainInvokeEvent, ...trustedArgs: Args) => {
+        assertTrustedIpcSender(trustedEvent)
+        return handler(trustedEvent, ...trustedArgs)
+      },
+      [event, ...(args as Args)]
+    )
   )
 }

@@ -242,7 +242,7 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode 
       runningRef.current = false
       cancelRequestedRef.current = false
       sourceRef.current = null
-      if (totalsRef.current.success > 0) invalidateActressLibraryQueries(queryClient)
+      if (totalsRef.current.success > 0) void invalidateActressLibraryQueries(queryClient)
       setState((current) => ({
         ...current,
         status: 'done',
@@ -326,7 +326,7 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode 
           return { status: 'skipped', message: '没有可用的头像原图' }
         }
         notifyAvatarAutoCropSaved(request.actressId)
-        invalidateActressLibraryQueries(queryClient)
+        void invalidateActressLibraryQueries(queryClient)
         return { status: 'success' }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)

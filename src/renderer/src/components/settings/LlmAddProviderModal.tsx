@@ -11,10 +11,12 @@ import { SettingsFormField } from './SettingsPrimitives'
 
 export default function LlmAddProviderModal({
   onClose,
-  onCreate
+  onCreate,
+  busy = false
 }: {
   onClose: () => void
   onCreate: (input: CustomLlmProviderDefinition) => void
+  busy?: boolean
 }): JSX.Element {
   const [providerId, setProviderId] = useState('')
   const [name, setName] = useState('')
@@ -24,7 +26,7 @@ export default function LlmAddProviderModal({
   const normalizedId = normalizeCustomLlmProviderId(providerId)
 
   return (
-    <Modal title="添加自定义提供商" size="sm" className="modal--llm-provider" confirmText="创建" cancelText="取消" onCancel={onClose} onConfirm={() =>
+    <Modal title="添加自定义提供商" size="sm" className="modal--llm-provider" confirmText={busy ? '创建中…' : '创建'} cancelText="取消" busy={busy} onCancel={onClose} onConfirm={() =>
         onCreate({
           id: normalizedId || providerId.trim(),
           name: name.trim(),

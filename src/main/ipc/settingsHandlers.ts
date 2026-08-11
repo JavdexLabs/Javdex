@@ -1,9 +1,18 @@
-import { dialog } from 'electron'
+import { dialog, shell } from 'electron'
+import fs from 'node:fs'
 import path from 'node:path'
 import { IPC } from '@shared/ipc-channels'
-import type { AppSettings } from '@shared/settingsTypes'
+import type { AppSettings, SettingsSnapshot } from '@shared/settingsTypes'
 import type { AssetCryptoProgress, LibraryOverviewStats } from '@shared/libraryTypes'
-import { getSettings, updateSettings } from '../settings/settingsStore'
+import {
+  getEffectiveLlmApiKey,
+  getLlmSecretMigrationError,
+  getPublicLlmProviderConfigs,
+  getSettings,
+  getSettingsRecoveryBackupPath,
+  getSettingsRecoveryNotice,
+  updateSettings
+} from '../settings/settingsStore'
 import { getLibraryOverviewStats } from '../db/overviewRepo'
 import { migrateAssetStorage } from '../services/assetMigration'
 import { prepareMediaAssetsLocationMigration } from '../services/assetLocationMigration'
@@ -24,27 +33,42 @@ import { isSameLibraryPath } from '../scanner/libraryPathUtils'
 import type { IpcContext } from './shared'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 import type { LlmModelDefinition } from '@shared/llmProviders'
+import { BUILT_IN_LLM_PROVIDER_BY_ID, normalizeDefaultLlmSelection } from '@shared/llmProviders'
+import {
+  deleteLlmApiKey,
+  getLlmSecretStorageState,
+  saveLlmApiKeys
+} from '../settings/llmSecretStore'
 
-function withResolvedMediaAssetsPath(settings: AppSettings): AppSettings {
+function toSettingsSnapshot(settings: AppSettings): SettingsSnapshot {
   return {
     ...settings,
-    mediaAssetsResolvedPath: resolveMediaAssetsRoot()
+    llmProviderConfigs: getPublicLlmProviderConfigs(settings),
+    mediaAssetsResolvedPath: resolveMediaAssetsRoot(),
+    recoveryNotice: getSettingsRecoveryNotice(),
+    llmSecretStorage: {
+      ...getLlmSecretStorageState(),
+      ...(getLlmSecretMigrationError()
+        ? { migrationError: getLlmSecretMigrationError() }
+        : {})
+    }
   }
 }
 
 export function registerSettingsHandlers(ctx: IpcContext): void {
-  appCommandAdapter.register(IPC.SETTINGS_GET, (): AppSettings => withResolvedMediaAssetsPath(getSettings()))
+  appCommandAdapter.register(IPC.SETTINGS_GET, (): SettingsSnapshot => toSettingsSnapshot(getSettings()))
 
   appCommandAdapter.register(IPC.SETTINGS_OVERVIEW_STATS, (): LibraryOverviewStats => getLibraryOverviewStats())
 
-  appCommandAdapter.register(IPC.SETTINGS_UPDATE, (patch): AppSettings => {
+  appCommandAdapter.register(IPC.SETTINGS_UPDATE, (patch): SettingsSnapshot => {
+    const rawPatch = patch as Partial<AppSettings>
     const {
       assetEncryption: _ignoredCrypto,
       mediaAssetsPath: _ignoredPath,
       pendingLibraryPathCleanups: _ignoredCleanupQueue,
       lastLibraryScanSummary: _ignoredScanSummary,
       ...safePatch
-    } = patch
+    } = rawPatch
     let guardedPatch: Partial<AppSettings> = safePatch
     if (safePatch.libraryPaths !== undefined) {
       if (!Array.isArray(safePatch.libraryPaths) || safePatch.libraryPaths.some((item) => typeof item !== 'string')) {
@@ -68,7 +92,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
         )
       }
     }
-    return withResolvedMediaAssetsPath(updateSettings(guardedPatch))
+    return toSettingsSnapshot(updateSettings(guardedPatch))
   })
 
   appCommandAdapter.register(IPC.SETTINGS_PICK_FOLDER, async (): Promise<string[]> => {
@@ -90,7 +114,98 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
     if (typeof libraryPath !== 'string' || !libraryPath.trim()) {
       throw new Error('无效的媒体库路径')
     }
-    return withResolvedMediaAssetsPath(confirmLibraryPathRemoval(libraryPath))
+    return toSettingsSnapshot(confirmLibraryPathRemoval(libraryPath))
+  })
+
+  appCommandAdapter.register(IPC.SETTINGS_LLM_PROVIDER_CONFIG_SAVE, (input) => {
+    const providerId = input.providerId.trim()
+    const settings = getSettings()
+    const exists = BUILT_IN_LLM_PROVIDER_BY_ID.has(providerId) ||
+      settings.customLlmProviders.some((provider) => provider.id === providerId)
+    if (!exists) throw new Error('未知的模型供应商')
+    if (input.protocol !== 'openai-chat' && input.protocol !== 'anthropic-messages') {
+      throw new Error('无效的接口协议')
+    }
+    const apiKey = input.apiKey?.trim() ?? ''
+    if (input.apiKeyAction === 'replace' && !apiKey) throw new Error('请填写 API Key')
+
+    const oldApiKey = getEffectiveLlmApiKey(providerId)
+    try {
+      if (input.apiKeyAction === 'replace') saveLlmApiKeys({ [providerId]: apiKey })
+      if (input.apiKeyAction === 'clear') deleteLlmApiKey(providerId)
+      const configs = { ...settings.llmProviderConfigs }
+      configs[providerId] = {
+        ...(input.baseUrl.trim() ? { baseUrl: input.baseUrl.trim() } : {}),
+        protocol: input.protocol
+      }
+      return toSettingsSnapshot(updateSettings({ llmProviderConfigs: configs }))
+    } catch (error) {
+      try {
+        if (oldApiKey) saveLlmApiKeys({ [providerId]: oldApiKey })
+        else deleteLlmApiKey(providerId)
+      } catch {
+        // Preserve the original settings failure; the next save can repair the secret entry.
+      }
+      throw error
+    }
+  })
+
+  appCommandAdapter.register(IPC.SETTINGS_LLM_PROVIDER_DELETE, (rawProviderId) => {
+    const providerId = rawProviderId.trim()
+    const settings = getSettings()
+    if (BUILT_IN_LLM_PROVIDER_BY_ID.has(providerId)) throw new Error('内置供应商不能删除')
+    if (!settings.customLlmProviders.some((provider) => provider.id === providerId)) {
+      throw new Error('自定义供应商不存在')
+    }
+    const oldApiKey = getEffectiveLlmApiKey(providerId)
+    try {
+      deleteLlmApiKey(providerId)
+      const customLlmProviders = settings.customLlmProviders.filter(
+        (provider) => provider.id !== providerId
+      )
+      const llmProviderConfigs = { ...settings.llmProviderConfigs }
+      delete llmProviderConfigs[providerId]
+      const llmCustomModels = settings.llmCustomModels.filter(
+        (model) => model.providerId !== providerId
+      )
+      const selection = normalizeDefaultLlmSelection({
+        defaultLlmProviderId:
+          settings.defaultLlmProviderId === providerId ? '' : settings.defaultLlmProviderId,
+        defaultLlmModelId:
+          settings.defaultLlmProviderId === providerId ? '' : settings.defaultLlmModelId,
+        llmProviderConfigs: getPublicLlmProviderConfigs({
+          ...settings,
+          llmProviderConfigs,
+          customLlmProviders,
+          llmCustomModels
+        }),
+        customLlmProviders,
+        llmCustomModels
+      })
+      return toSettingsSnapshot(updateSettings({
+        customLlmProviders,
+        llmProviderConfigs,
+        llmCustomModels,
+        defaultLlmProviderId: selection.providerId,
+        defaultLlmModelId: selection.modelId
+      }))
+    } catch (error) {
+      if (oldApiKey) {
+        try {
+          saveLlmApiKeys({ [providerId]: oldApiKey })
+        } catch {
+          // Preserve the original deletion failure.
+        }
+      }
+      throw error
+    }
+  })
+
+  appCommandAdapter.register(IPC.SETTINGS_RECOVERY_REVEAL_BACKUP, (): boolean => {
+    const backupPath = getSettingsRecoveryBackupPath()
+    if (!backupPath || !fs.existsSync(backupPath)) return false
+    shell.showItemInFolder(backupPath)
+    return true
   })
 
   appCommandAdapter.register(
@@ -121,21 +236,21 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
     return translateTextToChinese(text)
   })
 
-  appCommandAdapter.register(IPC.ASSET_CRYPTO_SET, async (enabled): Promise<AppSettings> => {
+  appCommandAdapter.register(IPC.ASSET_CRYPTO_SET, async (enabled): Promise<SettingsSnapshot> => {
     return mediaAssetStore.runExclusiveRelocation(async () => {
       const latest = getSettings()
-      if (latest.assetEncryption === enabled) return withResolvedMediaAssetsPath(latest)
+      if (latest.assetEncryption === enabled) return toSettingsSnapshot(latest)
       const win = ctx.getWindow()
       await migrateAssetStorage(enabled, (p: AssetCryptoProgress) => {
         appEventAdapter.send(win?.webContents, IPC.ASSET_CRYPTO_PROGRESS, p)
       })
-      return withResolvedMediaAssetsPath(updateSettings({ assetEncryption: enabled }))
+      return toSettingsSnapshot(updateSettings({ assetEncryption: enabled }))
     })
   })
 
   appCommandAdapter.register(
     IPC.ASSET_STORAGE_RELOCATE,
-    async (targetPath): Promise<AppSettings> => {
+    async (targetPath): Promise<SettingsSnapshot> => {
       const current = getSettings()
       let newRoot: string
 
@@ -149,7 +264,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
           properties: ['openDirectory', 'createDirectory']
         })
         if (res.canceled || !res.filePaths[0]) {
-          return withResolvedMediaAssetsPath(current)
+          return toSettingsSnapshot(current)
         }
         newRoot = validateMediaAssetsPath(res.filePaths[0])
       }
@@ -158,7 +273,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
         const latest = getSettings()
         const oldRoot = resolveMediaAssetsRoot()
         if (path.resolve(oldRoot) === path.resolve(newRoot)) {
-          return withResolvedMediaAssetsPath(latest)
+          return toSettingsSnapshot(latest)
         }
         const win = ctx.getWindow()
         const migration = await prepareMediaAssetsLocationMigration(
@@ -188,7 +303,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
           migration.rollback()
           throw error
         }
-        return withResolvedMediaAssetsPath(updated)
+        return toSettingsSnapshot(updated)
       })
     }
   )

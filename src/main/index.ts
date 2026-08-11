@@ -1,5 +1,6 @@
 import { app, BrowserWindow, powerMonitor, protocol } from 'electron'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { APP_DISPLAY_NAME } from '@shared/appIdentity'
 import { applyAppIcons, resolveWindowIcon } from './appIcon'
 import { configureAppIdentity } from './appPaths'
@@ -14,6 +15,7 @@ import { checkForLatestRelease, shouldRunAutomaticCheck } from './services/appRe
 import { cleanupOrphanedActressScrapeStaging } from './services/actressIdentityConflictWorkflow'
 import { automaticScanScheduler } from './services/automaticScanScheduler'
 import { recoverPendingLocalFileDeletions } from './services/pendingLocalFileDeletionService'
+import { isSameRendererLocation } from './ipc/ipcSecurity'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -51,7 +53,14 @@ if (!gotSingleInstanceLock) {
   })
 }
 
-function createWindow(): void {
+function resolveRendererEntryUrl(): string {
+  return (
+    process.env['ELECTRON_RENDERER_URL'] ??
+    pathToFileURL(path.join(__dirname, '../renderer/index.html')).toString()
+  )
+}
+
+function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
   const icon = resolveWindowIcon()
   mainWindow = new BrowserWindow({
     width: 1380,
@@ -72,6 +81,12 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!isSameRendererLocation(url, rendererEntryUrl)) event.preventDefault()
+  })
+  mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
 
   // electron-vite injects this env var in dev for HMR.
   const devUrl = process.env['ELECTRON_RENDERER_URL']
@@ -118,7 +133,7 @@ function registerAssetProtocol(): void {
 }
 
 if (gotSingleInstanceLock) {
-  app.whenReady().then(() => {
+  void app.whenReady().then(() => {
     applyAppIcons()
     const databaseDir = path.join(app.getPath('userData'), 'data')
     fs.mkdirSync(databaseDir, { recursive: true })
@@ -128,8 +143,12 @@ if (gotSingleInstanceLock) {
     cleanupOrphanedActressScrapeStaging()
     migrateUserPluginsAwayFromBuiltInNames()
     registerAssetProtocol()
-    registerIpcHandlers(() => mainWindow)
-    createWindow()
+    const rendererEntryUrl = resolveRendererEntryUrl()
+    createWindow(rendererEntryUrl)
+    registerIpcHandlers(
+      () => mainWindow,
+      (url) => isSameRendererLocation(url, rendererEntryUrl)
+    )
     automaticScanScheduler.start()
     powerMonitor.on('resume', handleSystemResume)
     setTimeout(() => {

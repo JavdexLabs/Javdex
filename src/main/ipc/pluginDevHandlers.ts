@@ -1,6 +1,6 @@
 import { dialog } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import type { PluginDevAgentMessageInput, PluginDevAgentSessionResult, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevDryRunResult, PluginDevInstallInput, PluginDevVerifyInput } from '@shared/pluginDevTypes'
+import type { PluginDevAgentSessionResult, PluginDevDryRunResult } from '@shared/pluginDevTypes'
 import type { ScraperPluginDescriptor } from '@shared/scraperPluginTypes'
 import type { PluginDevVerificationReport } from '@shared/pluginDevTypes'
 import { dryRunPluginPackage, installDevPluginPackage } from '../services/pluginDevService'

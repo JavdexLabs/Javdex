@@ -8,7 +8,6 @@ import {
   onUpdateCheckStateChanged
 } from '../services/appReleaseService'
 import { openExternalLink } from '../services/externalLinkService'
-import type { ProjectPage } from '@shared/updateTypes'
 import type { IpcContext } from './shared'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 

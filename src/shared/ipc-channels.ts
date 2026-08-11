@@ -10,6 +10,9 @@ export const IPC = {
   SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM: 'settings:libraryPathRemoveConfirm',
   SETTINGS_LLM_TEST_MODEL: 'settings:llmTestModel',
   SETTINGS_LLM_LIST_MODELS: 'settings:llmListModels',
+  SETTINGS_LLM_PROVIDER_CONFIG_SAVE: 'settings:llmProviderConfigSave',
+  SETTINGS_LLM_PROVIDER_DELETE: 'settings:llmProviderDelete',
+  SETTINGS_RECOVERY_REVEAL_BACKUP: 'settings:recoveryRevealBackup',
   SETTINGS_PROXY_TEST: 'settings:proxyTest',
   SETTINGS_OVERVIEW_STATS: 'settings:overviewStats',
 

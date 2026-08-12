@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { Ellipsis, Play } from 'lucide-react'
+import { Ellipsis, Link2, Play } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import type { ScrapedStatus } from '@shared/commonTypes'
 import type { OrganizationRole } from '@shared/classificationTypes'
@@ -10,6 +10,7 @@ import type {
 import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS } from '@shared/videoScrapeTypes'
 import MetaLink from './MetaLink'
 import IconButton from './IconButton'
+import EmptyState from './EmptyState'
 import { UI_ICON } from './iconDefaults'
 import {
   navigateToDirectorDetail,
@@ -562,7 +563,8 @@ export function VideoDetailSecondaryMeta({
   onReadResourceLocator,
   onEditResource,
   onSetPrimaryResource,
-  onRemoveResource
+  onRemoveResource,
+  onAddResource
 }: {
   video: VideoDetail
   onOpenResource?: (resourceId: number) => void
@@ -571,44 +573,61 @@ export function VideoDetailSecondaryMeta({
   onEditResource?: (resource: VideoResourceDetail) => void
   onSetPrimaryResource?: (resourceId: number) => void
   onRemoveResource?: (resource: VideoResourceDetail) => void
-}): JSX.Element | null {
+  onAddResource: () => void
+}): JSX.Element {
   const multiResources = video.resources.length > 1
-  if (video.resources.length === 0) return null
 
   return (
     <div className="detail-meta-sections">
       <section className="detail-section detail-meta-section">
-        <div className="detail-section-head">
+        <div className="detail-section-head detail-section-head--with-actions">
           <h2 className="section-title">影片资源</h2>
-          <span className="detail-section-count">{video.resources.length} 个</span>
+          <div className="detail-section-actions">
+            <span className="detail-section-count">{video.resources.length} 个</span>
+            <IconButton
+              className="detail-icon-action"
+              icon={<Link2 {...UI_ICON} />}
+              label="添加资源"
+              onClick={onAddResource}
+            />
+          </div>
         </div>
-        <div className="detail-meta-files">
-          {video.resources.map((resource) =>
-            resource.kind === 'local' ? (
-              <VideoLocalResourceRow
-                key={resource.id}
-                resource={resource}
-                multiResources={multiResources}
-                onOpenResource={onOpenResource}
-                onRevealResource={onRevealResource}
-                onSetPrimaryResource={onSetPrimaryResource}
-                onEditResource={onEditResource}
-                onRemoveResource={onRemoveResource}
-              />
-            ) : (
-              <VideoLinkResourceRow
-                key={resource.id}
-                resource={resource}
-                multiResources={multiResources}
-                onOpenResource={onOpenResource}
-                onReadResourceLocator={onReadResourceLocator}
-                onEditResource={onEditResource}
-                onSetPrimaryResource={onSetPrimaryResource}
-                onRemoveResource={onRemoveResource}
-              />
-            )
-          )}
-        </div>
+        {video.resources.length > 0 ? (
+          <div className="detail-meta-files">
+            {video.resources.map((resource) =>
+              resource.kind === 'local' ? (
+                <VideoLocalResourceRow
+                  key={resource.id}
+                  resource={resource}
+                  multiResources={multiResources}
+                  onOpenResource={onOpenResource}
+                  onRevealResource={onRevealResource}
+                  onSetPrimaryResource={onSetPrimaryResource}
+                  onEditResource={onEditResource}
+                  onRemoveResource={onRemoveResource}
+                />
+              ) : (
+                <VideoLinkResourceRow
+                  key={resource.id}
+                  resource={resource}
+                  multiResources={multiResources}
+                  onOpenResource={onOpenResource}
+                  onReadResourceLocator={onReadResourceLocator}
+                  onEditResource={onEditResource}
+                  onSetPrimaryResource={onSetPrimaryResource}
+                  onRemoveResource={onRemoveResource}
+                />
+              )
+            )}
+          </div>
+        ) : (
+          <EmptyState
+            variant="compact"
+            icon={<Link2 {...UI_ICON} aria-hidden />}
+            title="暂无影片资源"
+            description="添加资源后会在这里展示。"
+          />
+        )}
       </section>
     </div>
   )

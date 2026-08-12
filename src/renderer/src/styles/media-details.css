@@ -798,19 +798,19 @@ button.meta-link:focus-visible {
   -webkit-user-select: text;
   user-select: text;
 }
-.sample-section-head {
+.detail-section-head--with-actions {
   display: flex;
   align-items: center;
   gap: 12px;
 }
-.sample-section-head .section-title {
+.detail-section-head--with-actions .section-title {
   flex: 1;
   margin: 0;
   padding-bottom: 0;
   border-bottom: 0;
 }
 
-.sample-section-head .detail-icon-action.icon-btn,
+.detail-section-head--with-actions .detail-icon-action.icon-btn,
 .actress-gallery-toolbar .detail-icon-action.icon-btn {
   width: 28px;
   height: 28px;
@@ -820,7 +820,7 @@ button.meta-link:focus-visible {
   flex-shrink: 0;
 }
 
-.sample-section-head .detail-icon-action.icon-btn {
+.detail-section-head--with-actions .detail-icon-action.icon-btn {
   margin-bottom: 0;
 }
 

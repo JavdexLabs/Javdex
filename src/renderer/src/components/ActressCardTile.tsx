@@ -63,7 +63,7 @@ export default function ActressCardTile({
         />
         <div className="actress-count">{actress.video_count} 部</div>
       </button>
-      {!selectionMode ? (
+      {!selectionMode && actress.video_count === 0 ? (
         <MediaTileActionButton
           label={`删除演员 ${actress.main_name}`}
           title="删除"

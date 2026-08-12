@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
-import { Link2, ListPlus, Pencil, Play, SearchCheck, SearchX } from 'lucide-react'
+import { ListPlus, Pencil, Play, SearchCheck, SearchX } from 'lucide-react'
 import type {
   LastVideoResourceRemovalMode,
   VideoDetail,
@@ -616,12 +616,6 @@ export default function DetailPage(): JSX.Element {
                 }}
                 actions={[
                   {
-                    key: 'resource',
-                    icon: <Link2 {...UI_ICON} />,
-                    label: '添加资源',
-                    onClick: () => setShowResourceImport(true)
-                  },
-                  {
                     key: 'playlist',
                     icon: <ListPlus {...UI_ICON} />,
                     label: '加入清单',
@@ -758,6 +752,7 @@ export default function DetailPage(): JSX.Element {
           void handleSetPrimaryResource(resourceId)
         }}
         onRemoveResource={setRemoveResourceTarget}
+        onAddResource={() => setShowResourceImport(true)}
       />
 
       <VideoSampleGallery

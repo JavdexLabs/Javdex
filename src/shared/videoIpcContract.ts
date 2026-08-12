@@ -14,7 +14,10 @@ import type {
   VideoResource,
   LastVideoResourceRemovalMode,
   VideoResourceRemovalResult,
-  VideoSampleImportInput
+  VideoSampleImportInput,
+  VideoMergeInput,
+  VideoMergeResult,
+  VideoResourceSplitResult
 } from './videoTypes'
 import type {
   IpcContractArgs,
@@ -32,7 +35,7 @@ export interface VideoIpcContract {
   [IPC.VIDEO_DELETE]: { args: [id: number]; result: boolean }
   [IPC.VIDEO_SET_RATING]: { args: [id: number, rating: number]; result: boolean }
   [IPC.VIDEO_CORRECT_IMPORT]: {
-    args: [id: number, code: string]
+    args: [id: number, code: string, discardPendingScrape?: boolean]
     result: CorrectImportResult
   }
   [IPC.VIDEO_YEARS]: { args: []; result: number[] }
@@ -78,6 +81,14 @@ export interface VideoIpcContract {
       lastResourceMode?: LastVideoResourceRemovalMode
     ]
     result: VideoResourceRemovalResult
+  }
+  [IPC.VIDEO_MERGE]: {
+    args: [input: VideoMergeInput]
+    result: VideoMergeResult
+  }
+  [IPC.VIDEO_RESOURCE_SPLIT]: {
+    args: [videoId: number, resourceId: number]
+    result: VideoResourceSplitResult
   }
 }
 

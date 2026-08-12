@@ -8,6 +8,7 @@ import type {
 import { getDb } from '../db/database'
 import { cleanupClassificationImage } from './classificationImageCleanup'
 import { mediaAssetStore } from './mediaAssetStore'
+import { assertNoPendingVideoMetadataMutation } from '../db/videoPendingMetadataLock'
 
 interface ClassificationDeletionServiceDependencies {
   database: () => Database.Database
@@ -83,6 +84,7 @@ export function createClassificationDeletionService(
       const db = database()
       const committed = db.transaction(() => {
         const impact = readDirectorImpact(db, id)
+        assertNoPendingVideoMetadataMutation(db, 'v.director_id = ?', [id])
         const unlinked = db
           .prepare(
             `UPDATE videos SET director_id = NULL, updated_at = ?
@@ -108,6 +110,7 @@ export function createClassificationDeletionService(
       const db = database()
       const committed = db.transaction(() => {
         const impact = readSeriesImpact(db, id)
+        assertNoPendingVideoMetadataMutation(db, 'v.series_id = ?', [id])
         const now = new Date().toISOString()
         const unlinked = db
           .prepare(

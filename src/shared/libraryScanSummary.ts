@@ -58,6 +58,8 @@ export function normalizeLibraryScanSummary(value: unknown): LibraryScanSummary 
     videosDeleted: count(value.videosDeleted),
     skippedFiles: count(value.skippedFiles),
     failedFiles: count(value.failedFiles),
+    pendingScanGroups: count(value.pendingScanGroups),
+    pendingScanResources: count(value.pendingScanResources),
     offlineFolders: Array.isArray(value.offlineFolders)
       ? value.offlineFolders.filter((item): item is string => typeof item === 'string')
       : [],

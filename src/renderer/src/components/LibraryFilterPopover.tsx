@@ -1,5 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react'
-import type { VideoQuery, VideoResourceFilter } from '@shared/videoTypes'
+import type { VideoPendingScrapeFilter, VideoQuery, VideoResourceFilter } from '@shared/videoTypes'
 import type { ScrapedStatus } from '@shared/commonTypes'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 import SelectControl from './SelectControl'
@@ -10,6 +10,7 @@ import Button from './Button'
 
 export interface LibraryFilterState {
   status: ScrapedStatus | 'all'
+  pendingScrape: VideoPendingScrapeFilter
   year: number | 'all'
   codePrefix: string
   sortBy: NonNullable<VideoQuery['sortBy']>
@@ -97,6 +98,21 @@ export default function LibraryFilterPopover({
             <option value="1">已刮削</option>
             <option value="0">未刮削</option>
             <option value="2">刮削失败</option>
+          </SelectControl>
+        </label>
+
+        <label className="library-filter-field">
+          <span className="library-filter-field-label">待确认刮削</span>
+          <SelectControl
+            className="library-filter-input"
+            value={state.pendingScrape}
+            onChange={(event) =>
+              onChange({ pendingScrape: event.target.value as VideoPendingScrapeFilter })
+            }
+          >
+            <option value="all">全部</option>
+            <option value="pending">仅待确认</option>
+            <option value="none">排除待确认</option>
           </SelectControl>
         </label>
 

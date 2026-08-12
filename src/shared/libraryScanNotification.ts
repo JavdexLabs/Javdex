@@ -26,6 +26,12 @@ export function buildLibraryScanNotification(
       tone: 'warning'
     }
   }
+  if (result.pendingGroups > 0) {
+    return {
+      message: `扫描完成：${result.pendingGroups} 个待确认扫描组，共 ${result.pendingResources} 条资源`,
+      tone: 'warning'
+    }
+  }
 
   const changed =
     result.imported +

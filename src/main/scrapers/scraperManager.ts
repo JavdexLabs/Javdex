@@ -10,15 +10,24 @@ import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import { DEFAULT_SETTINGS, resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import { getVideoById, markScrapeFailed } from '../db/videoRepo'
 import {
+  type PendingVideoScrapeCandidateInput,
+  deletePendingVideoScrape,
+  getPendingVideoScrapeForVideo,
+  replacePendingVideoScrape
+} from '../db/pendingVideoScrapeRepo'
+import {
+  findVideoBusinessIdentityConflictForScrape,
   resolveEffectiveVideoScrapeFields,
   videoScrapeApplyService
 } from '../services/videoScrapeApplyService'
 import { getSettings } from '../settings/settingsStore'
 import { scrapeBrowser } from './scrapeBrowser'
+import { mediaAssetStore } from '../services/mediaAssetStore'
+import { normalizeVideoCode } from '@shared/videoCode'
 
 /** Registry imports — see file bottom for registration. */
 import type { BaseScraper } from './BaseScraper'
-import { buildPluginRegistry, runCompositeFieldGroups } from './compositeScrapeRun'
+import { buildPluginRegistry } from './compositeScrapeRun'
 import {
   findCompositeScraper,
   listMergedPluginDescriptors,
@@ -26,7 +35,7 @@ import {
   loadBundledVideoScrapers,
   loadUserVideoScrapers
 } from './scraperPluginService'
-import { normalizeVideoScrapeResult } from './scraperResultValidation'
+import { normalizeVideoScrapeCandidates } from './scraperResultValidation'
 
 function buildRegistry(): Map<string, BaseScraper> {
   return buildPluginRegistry(loadUserVideoScrapers, loadBundledVideoScrapers)
@@ -58,6 +67,8 @@ export interface ScrapeOutcome {
   warnings?: string[]
   classifications?: VideoClassificationResolutionOutcome[]
   directorChoice?: VideoDirectorChoiceRequired
+  pending?: boolean
+  pendingScrapeId?: number
 }
 
 export interface ScrapeVideoOptions {
@@ -119,30 +130,230 @@ function mergeVideoResults(base: ScrapeResult | null, next: ScrapeResult): Scrap
   }
 }
 
+function normalizeCandidateSourceUrl(sourceUrl: string | undefined): string | null {
+  if (!sourceUrl) return null
+  try {
+    const rawUrl = sourceUrl.trim()
+    const parsed = new URL(rawUrl)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+    const rawAuthority = rawUrl.match(/^https?:\/\/[^/?#]*/i)?.[0]
+    const hasExplicitPath = rawAuthority
+      ? rawUrl.slice(rawAuthority.length).startsWith('/')
+      : true
+    parsed.hash = ''
+    const normalized = parsed.toString()
+    if (!hasExplicitPath && parsed.pathname === '/') {
+      const normalizedAuthority = normalized.match(/^https?:\/\/[^/?#]*/i)?.[0]
+      if (normalizedAuthority) return `${normalizedAuthority}${parsed.search}`
+    }
+    return normalized
+  } catch {
+    return null
+  }
+}
+
+function collectExactVideoCandidates(
+  rawResult: unknown,
+  videoCode: string,
+  supportedFields: Set<VideoScrapeField>
+): { candidates: ScrapeResult[]; warnings: string[] } {
+  const normalizedCode = normalizeVideoCode(videoCode)
+  const warnings: string[] = []
+  const seenUrls = new Set<string>()
+  const candidates: ScrapeResult[] = []
+  const trustedRawResult = pickDeclaredRawVideoFields(rawResult, supportedFields)
+  for (const candidate of normalizeVideoScrapeCandidates(trustedRawResult, videoCode)) {
+    let candidateCode: string
+    try {
+      candidateCode = normalizeVideoCode(candidate.code)
+    } catch {
+      warnings.push('插件返回了无效番号候选，已排除')
+      continue
+    }
+    if (candidateCode !== normalizedCode) {
+      warnings.push(`插件返回的候选番号 ${candidate.code} 与 ${normalizedCode} 不完全匹配，已排除`)
+      continue
+    }
+    const normalizedUrl = normalizeCandidateSourceUrl(candidate.sourceUrl)
+    if (normalizedUrl && seenUrls.has(normalizedUrl)) continue
+    if (normalizedUrl) seenUrls.add(normalizedUrl)
+    candidates.push(pickVideoFields(candidate, supportedFields, normalizedCode))
+  }
+  return { candidates, warnings }
+}
+
+function pickDeclaredRawVideoFields(
+  value: unknown,
+  supportedFields: Set<VideoScrapeField>
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((candidate) => pickDeclaredRawVideoFields(candidate, supportedFields))
+  }
+  if (!value || typeof value !== 'object') return value
+  const source = value as Record<string, unknown>
+  const result: Record<string, unknown> = { code: source.code }
+  const copy = (field: VideoScrapeField, ...keys: string[]): void => {
+    if (!supportedFields.has(field)) return
+    for (const key of keys) result[key] = source[key]
+  }
+  copy('title', 'title')
+  copy('summary', 'summary')
+  copy('cover', 'coverUrl')
+  copy('releaseDate', 'releaseDate')
+  copy('maker', 'maker')
+  copy('publisher', 'publisher')
+  copy('series', 'series')
+  copy('director', 'director')
+  copy('duration', 'durationSeconds')
+  if (supportedFields.has('actressesFemale') || supportedFields.has('actressesMale')) {
+    result.actresses = source.actresses
+  }
+  copy('tags', 'tags')
+  copy('source', 'sourceUrl')
+  copy('rating', 'ratingAverage', 'ratingCount')
+  copy('samples', 'sampleImageUrls')
+  return result
+}
+
+async function fetchUsableImage(url: string): Promise<Buffer | null> {
+  try {
+    const data = await scrapeBrowser.fetchBuffer(url)
+    return mediaAssetStore.isUsableImageBuffer(data) ? data : null
+  } catch {
+    return null
+  }
+}
+
+async function stageVideoCandidates(
+  candidates: ScrapeResult[],
+  supportedFields: Set<VideoScrapeField>
+): Promise<{ candidates: PendingVideoScrapeCandidateInput[]; warnings: string[] }> {
+  const warnings: string[] = []
+  const stagedCandidates: PendingVideoScrapeCandidateInput[] = []
+  for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
+    const result = candidates[candidateIndex]
+    const resources: Parameters<typeof mediaAssetStore.stageVideoScrapeImages>[0] = []
+    if (supportedFields.has('cover') && result.coverUrl) {
+      const data = await fetchUsableImage(result.coverUrl)
+      if (data) {
+        resources.push({ field: 'cover', position: 0, remoteUrl: result.coverUrl, data })
+      } else {
+        warnings.push(`候选 ${candidateIndex + 1} 的封面暂存失败`)
+      }
+    }
+    if (supportedFields.has('samples') && result.sampleImageUrls?.length) {
+      const sampleBuffers = await Promise.all(result.sampleImageUrls.map(fetchUsableImage))
+      if (sampleBuffers.every((data): data is Buffer => data !== null)) {
+        sampleBuffers.forEach((data, position) => {
+          resources.push({
+            field: 'samples',
+            position,
+            remoteUrl: result.sampleImageUrls?.[position] ?? '',
+            data
+          })
+        })
+      } else {
+        warnings.push(`候选 ${candidateIndex + 1} 的样张暂存不完整，已放弃整组样张`)
+      }
+    }
+    const wantsFemale = supportedFields.has('actressesFemale')
+    const wantsMale = supportedFields.has('actressesMale')
+    if (wantsFemale || wantsMale) {
+      for (let position = 0; position < (result.actresses?.length ?? 0); position++) {
+        const actress = result.actresses?.[position]
+        if (!actress?.avatarUrl) continue
+        const gender = actress.gender ?? 'female'
+        if ((gender === 'female' && !wantsFemale) || (gender === 'male' && !wantsMale)) continue
+        const data = await fetchUsableImage(actress.avatarUrl)
+        if (data) {
+          resources.push({
+            field: 'actressAvatar',
+            position,
+            remoteUrl: actress.avatarUrl,
+            data
+          })
+        } else {
+          warnings.push(`候选 ${candidateIndex + 1} 的演员「${actress.name}」头像暂存失败`)
+        }
+      }
+    }
+    const staged = mediaAssetStore.stageVideoScrapeImages(resources)
+    stagedCandidates.push({
+      result,
+      sourceUrl: result.sourceUrl ?? null,
+      normalizedSourceUrl: normalizeCandidateSourceUrl(result.sourceUrl),
+      resources: staged.map((resource) => ({
+        field: resource.field,
+        position: resource.position,
+        remoteUrl: resource.remoteUrl,
+        stagedPath: resource.stagedPath,
+        width: resource.width,
+        height: resource.height,
+        sizeBytes: resource.sizeBytes
+      }))
+    })
+  }
+  return { candidates: stagedCandidates, warnings }
+}
+
+interface CompositeVideoCandidateSource {
+  pluginName: string
+  descriptor: ScraperPluginDescriptor | undefined
+  selectedFields: VideoScrapeField[]
+  supportedFields: Set<VideoScrapeField>
+  candidates: ScrapeResult[]
+}
+
+interface CompositeVideoOutcome {
+  result: ScrapeResult | null
+  matchedFields: VideoScrapeField[]
+  sources: CompositeVideoCandidateSource[]
+  warnings: string[]
+}
+
 async function scrapeCompositeVideo(
   videoCode: string,
   compositeName: string,
   effectiveFields: VideoScrapeField[],
   proxy: string,
   delayController?: ScrapeVideoOptions['delayController']
-): Promise<{ result: ScrapeResult; matchedFields: VideoScrapeField[] } | null> {
+): Promise<CompositeVideoOutcome | null> {
   const composite = findCompositeScraper('video', compositeName)
   if (!composite) return null
-  const outcome = await runCompositeFieldGroups<VideoScrapeField, ScrapeResult>({
-    fieldPluginMap: composite.fieldPluginMap,
-    fields: effectiveFields,
-    onPluginError: 'abort',
-    runPlugin: async (pluginName) => {
-      const scraper = getScraper(pluginName)
-      const rawResult = delayController
-        ? await delayController.run('video', pluginName, () => scraper.parseTask(videoCode, proxy))
-        : await scraper.parseTask(videoCode, proxy)
-      return normalizeVideoScrapeResult(rawResult, videoCode)
-    },
-    pick: (result, fields) => pickVideoFields(result, fieldSet(fields), videoCode),
-    merge: mergeVideoResults
-  })
-  return outcome.result ? { result: outcome.result, matchedFields: outcome.matchedFields } : null
+  const grouped = new Map<string, VideoScrapeField[]>()
+  for (const field of effectiveFields) {
+    const pluginName = composite.fieldPluginMap[field]
+    if (!pluginName) continue
+    grouped.set(pluginName, [...(grouped.get(pluginName) ?? []), field])
+  }
+  const descriptors = listMergedPluginDescriptors('video')
+  const sources: CompositeVideoCandidateSource[] = []
+  const warnings: string[] = []
+  let merged: ScrapeResult | null = null
+  const matchedFields: VideoScrapeField[] = []
+  for (const [pluginName, selectedFields] of grouped) {
+    const scraper = getScraper(pluginName)
+    const descriptor = descriptors.find((item) => item.name === pluginName)
+    const supportedFields = new Set<VideoScrapeField>(
+      (descriptor?.supportedFields ?? ALL_VIDEO_SCRAPE_FIELDS).filter(
+        (field): field is VideoScrapeField =>
+          (ALL_VIDEO_SCRAPE_FIELDS as readonly string[]).includes(field)
+      )
+    )
+    const rawResult = delayController
+      ? await delayController.run('video', pluginName, () => scraper.parseTask(videoCode, proxy))
+      : await scraper.parseTask(videoCode, proxy)
+    const collected = collectExactVideoCandidates(rawResult, videoCode, supportedFields)
+    warnings.push(...collected.warnings.map((warning) => `字段源「${pluginName}」：${warning}`))
+    if (collected.candidates.length === 0) continue
+    sources.push({ pluginName, descriptor, selectedFields, supportedFields, candidates: collected.candidates })
+    matchedFields.push(...selectedFields)
+    merged = mergeVideoResults(
+      merged,
+      pickVideoFields(collected.candidates[0], fieldSet(selectedFields), videoCode)
+    )
+  }
+  return { result: merged, matchedFields, sources, warnings }
 }
 
 function resolveVideoFieldSourceNames(
@@ -192,7 +403,12 @@ export async function scrapeVideo(
   const descriptor = listMergedPluginDescriptors('video').find(
     (plugin) => plugin.name === resolvedScraperName
   )
-  const supportedFields = new Set(descriptor?.supportedFields ?? ALL_VIDEO_SCRAPE_FIELDS)
+  const supportedFields = new Set<VideoScrapeField>(
+    (descriptor?.supportedFields ?? ALL_VIDEO_SCRAPE_FIELDS).filter(
+      (field): field is VideoScrapeField =>
+        (ALL_VIDEO_SCRAPE_FIELDS as readonly string[]).includes(field)
+    )
+  )
   const requested = (options?.fields ?? ALL_VIDEO_SCRAPE_FIELDS).filter((field) =>
     supportedFields.has(field)
   )
@@ -227,22 +443,110 @@ export async function scrapeVideo(
           proxy,
           options?.delayController
         )
-    const result = scraper
-      ? normalizeVideoScrapeResult(
-          options?.delayController
-            ? await options.delayController.run('video', scraper.scraperName, () =>
-                scraper.parseTask(video.code, proxy)
-              )
-            : await scraper.parseTask(video.code, proxy),
-          video.code
-        )
-      : compositeOutcome?.result ?? null
+    const pluginRawResult = scraper
+      ? options?.delayController
+        ? await options.delayController.run('video', scraper.scraperName, () =>
+            scraper.parseTask(video.code, proxy)
+          )
+        : await scraper.parseTask(video.code, proxy)
+      : null
+    const collected = scraper
+      ? collectExactVideoCandidates(pluginRawResult, video.code, supportedFields)
+      : {
+          candidates: compositeOutcome?.result ? [compositeOutcome.result] : [],
+          warnings: compositeOutcome?.warnings ?? []
+        }
+    const result = scraper ? collected.candidates[0] : compositeOutcome?.result
     if (!result) {
       markScrapeFailed(videoId)
-      return { ok: false, error: '未找到匹配的元数据' }
+      return {
+        ok: false,
+        error: '未找到匹配的元数据',
+        warnings: collected.warnings
+      }
     }
 
+    const hasAmbiguousSource = scraper
+      ? collected.candidates.length > 1
+      : compositeOutcome?.sources.some((source) => source.candidates.length > 1) ?? false
     const fieldsToApply = compositeOutcome?.matchedFields ?? requested
+    const identityConflictVideoId =
+      !hasAmbiguousSource
+        ? findVideoBusinessIdentityConflictForScrape(
+            videoId,
+            result,
+            fieldsToApply,
+            mode
+          )
+        : null
+    if (hasAmbiguousSource || identityConflictVideoId != null) {
+      const pendingWarnings = identityConflictVideoId == null
+        ? collected.warnings
+        : [
+            ...collected.warnings,
+            `候选会与影片 ID ${identityConflictVideoId} 的业务身份冲突，请选择合并或放弃`
+          ]
+      const persisted = await mediaAssetStore.coordinateDatabaseChange(async () => {
+        const stagedSources = scraper
+          ? [
+              {
+                pluginName: resolvedScraperName,
+                pluginSource: descriptor?.source ?? ('builtin' as const),
+                pluginVersion: descriptor?.version ?? null,
+                pluginConfig: { supportedFields: [...supportedFields] },
+                sourceName,
+                selectedFields: effective,
+                staged: await stageVideoCandidates(collected.candidates, supportedFields)
+              }
+            ]
+          : await Promise.all(
+              (compositeOutcome?.sources ?? []).map(async (source) => ({
+                pluginName: source.pluginName,
+                pluginSource: source.descriptor?.source ?? ('builtin' as const),
+                pluginVersion: source.descriptor?.version ?? null,
+                pluginConfig: { supportedFields: [...source.supportedFields] },
+                sourceName: source.pluginName,
+                selectedFields: source.selectedFields,
+                staged: await stageVideoCandidates(source.candidates, source.supportedFields)
+              }))
+            )
+        return replacePendingVideoScrape({
+          videoId,
+          selectedFields: requested,
+          applicableFields: fieldsToApply,
+          updateMode: mode,
+          request: {
+            scraperName: resolvedScraperName,
+            fields: requested,
+            mode,
+            fieldPluginMap: findCompositeScraper('video', resolvedScraperName)?.fieldPluginMap
+          },
+          warnings: [
+            ...pendingWarnings,
+            ...stagedSources.flatMap((source) => source.staged.warnings)
+          ],
+          sources: stagedSources.map((source) => ({
+            pluginName: source.pluginName,
+            pluginSource: source.pluginSource,
+            pluginVersion: source.pluginVersion,
+            pluginConfig: source.pluginConfig,
+            sourceName: source.sourceName,
+            selectedFields: source.selectedFields,
+            candidates: source.staged.candidates
+          }))
+        })
+      })
+      mediaAssetStore.cleanupVideoScrapeStagingPaths(persisted.obsoletePaths)
+      return {
+        ok: true,
+        pending: true,
+        pendingScrapeId: persisted.pendingScrapeId,
+        skipped: true,
+        warnings: getPendingVideoScrapeForVideo(videoId)?.warnings ?? collected.warnings,
+        classifications: []
+      }
+    }
+
     const classificationOptions = {
       directorSelectionId: options?.directorSelectionId,
       directorAmbiguity: options?.directorAmbiguity ?? ('preserve' as const)
@@ -264,6 +568,8 @@ export async function scrapeVideo(
         directorChoice: classificationPreflight.directorChoice
       }
     }
+    const previousPending = getPendingVideoScrapeForVideo(videoId)
+    let replacedPendingStagedPaths: string[] = []
     const delivery = await videoScrapeApplyService.deliverParsedResult({
       videoId,
       code: video.code,
@@ -274,14 +580,22 @@ export async function scrapeVideo(
       sourceName,
       ratingSourceName,
       classificationOptions,
-      fetcher: (url) => scrapeBrowser.fetchBuffer(url)
+      fetcher: (url) => scrapeBrowser.fetchBuffer(url),
+      afterSuccessfulApply: previousPending
+        ? () => {
+            const deleted = deletePendingVideoScrape(previousPending.id)
+            if (!deleted) throw new Error('待确认影片刮削结果已发生变化')
+            replacedPendingStagedPaths = deleted.stagedPaths
+          }
+        : undefined
     })
+    mediaAssetStore.cleanupVideoScrapeStagingPaths(replacedPendingStagedPaths)
 
     return {
       ok: true,
       result,
       skipped: !delivery.applied,
-      warnings: delivery.warnings,
+      warnings: [...collected.warnings, ...delivery.warnings],
       classifications: delivery.classifications,
       directorChoice: delivery.directorChoice
     }

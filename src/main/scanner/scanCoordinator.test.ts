@@ -30,6 +30,8 @@ function emptyScanResult(): ScanResult {
     skipped: 0,
     skippedShort: 0,
     failed: 0,
+    pendingGroups: 0,
+    pendingResources: 0,
     relocated: 0,
     refreshed: 0,
     removed: 0,
@@ -411,6 +413,8 @@ describe('ScanCoordinator', () => {
         videosDeleted: 3,
         skippedFiles: 0,
         failedFiles: 0,
+        pendingScanGroups: 0,
+        pendingScanResources: 0,
         offlineFolders: [],
         errorSummary: null
       }

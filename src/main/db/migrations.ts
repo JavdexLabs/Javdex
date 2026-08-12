@@ -1,13 +1,16 @@
 import type Database from 'better-sqlite3'
 import { normalizeActressName } from './actressNameNormalization'
 import { normalizeClassificationName } from '../../shared/classificationNameNormalization'
+import { normalizeVideoCode } from '../../shared/videoCode'
 import {
   CLASSIFICATION_V8_SCHEMA_SQL,
   PENDING_LOCAL_FILE_DELETIONS_SCHEMA_SQL,
-  SCHEMA_SQL
+  PENDING_VIDEO_DECISIONS_SCHEMA_SQL,
+  SCHEMA_SQL,
+  VIDEO_SOURCES_SCHEMA_SQL
 } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 10
+export const CURRENT_SCHEMA_VERSION = 11
 
 type Migration = {
   version: number
@@ -690,6 +693,174 @@ function migrateToV10(database: Database.Database): void {
   database.exec(PENDING_LOCAL_FILE_DELETIONS_SCHEMA_SQL)
 }
 
+type LegacyVideoIdentityRow = {
+  id: number
+  code: string | null
+  publisher_organization_id: number | null
+  release_date: string | null
+}
+
+function normalizedStoredVideoCode(code: string | null): string {
+  if (code == null || !code.trim()) return ''
+  return normalizeVideoCode(code)
+}
+
+function assertNoVideoBusinessIdentityConflicts(database: Database.Database): void {
+  if (!tableExists(database, 'videos')) return
+  const columns = columnNames(database, 'videos')
+  if (
+    !columns.has('code') ||
+    !columns.has('publisher_organization_id') ||
+    !columns.has('release_date')
+  ) {
+    return
+  }
+  const rows = database
+    .prepare(
+      `SELECT id, code, publisher_organization_id, release_date
+       FROM videos
+       WHERE publisher_organization_id IS NOT NULL
+         AND code IS NOT NULL AND length(trim(code)) > 0
+         AND release_date IS NOT NULL AND length(trim(release_date)) > 0
+       ORDER BY id`
+    )
+    .all() as LegacyVideoIdentityRow[]
+  const groups = new Map<string, number[]>()
+  for (const row of rows) {
+    const normalizedCode = normalizedStoredVideoCode(row.code)
+    if (!normalizedCode || row.publisher_organization_id == null || !row.release_date?.trim()) {
+      continue
+    }
+    const key = JSON.stringify([
+      row.publisher_organization_id,
+      normalizedCode,
+      row.release_date.trim()
+    ])
+    const ids = groups.get(key)
+    if (ids) ids.push(row.id)
+    else groups.set(key, [row.id])
+  }
+  const conflicts = [...groups.values()].filter((ids) => ids.length > 1)
+  if (conflicts.length === 0) return
+  const details = conflicts.map((ids) => `影片 ID ${ids.join(', ')}`).join('；')
+  throw new Error(`影片业务身份冲突，升级已取消：${details}`)
+}
+
+function rebuildVideosForBusinessIdentity(database: Database.Database): void {
+  if (!tableExists(database, 'videos')) return
+  const rows = database.prepare('SELECT * FROM videos ORDER BY id').all() as Array<
+    Record<string, unknown> & { code: string | null }
+  >
+  database.exec(`
+    PRAGMA defer_foreign_keys = ON;
+    PRAGMA legacy_alter_table = ON;
+    ALTER TABLE videos RENAME TO videos_v10;
+    CREATE TABLE videos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT NOT NULL DEFAULT '',
+      title TEXT,
+      summary TEXT,
+      cover_path TEXT,
+      poster_path TEXT,
+      original_title TEXT,
+      rating INTEGER DEFAULT 0,
+      release_date TEXT,
+      maker_organization_id INTEGER,
+      publisher_organization_id INTEGER,
+      series_id INTEGER,
+      director_id INTEGER,
+      duration_seconds INTEGER,
+      scraped_status INTEGER DEFAULT 0,
+      last_scraped_at TEXT,
+      updated_at TEXT,
+      add_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (maker_organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+      FOREIGN KEY (publisher_organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+      FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE SET NULL,
+      FOREIGN KEY (director_id) REFERENCES directors(id) ON DELETE SET NULL
+    );
+  `)
+  const insert = database.prepare(`
+    INSERT INTO videos (
+      id, code, title, summary, cover_path, poster_path, original_title, rating,
+      release_date, maker_organization_id, publisher_organization_id, series_id,
+      director_id, duration_seconds, scraped_status, last_scraped_at, updated_at, add_time
+    ) VALUES (
+      @id, @code, @title, @summary, @cover_path, @poster_path, @original_title, @rating,
+      @release_date, @maker_organization_id, @publisher_organization_id, @series_id,
+      @director_id, @duration_seconds, @scraped_status, @last_scraped_at, @updated_at, @add_time
+    )
+  `)
+  for (const row of rows) {
+    insert.run({
+      id: row.id,
+      code: normalizedStoredVideoCode(row.code),
+      title: row.title ?? null,
+      summary: row.summary ?? null,
+      cover_path: row.cover_path ?? null,
+      poster_path: row.poster_path ?? null,
+      original_title: row.original_title ?? null,
+      rating: row.rating ?? 0,
+      release_date: row.release_date ?? null,
+      maker_organization_id: row.maker_organization_id ?? null,
+      publisher_organization_id: row.publisher_organization_id ?? null,
+      series_id: row.series_id ?? null,
+      director_id: row.director_id ?? null,
+      duration_seconds: row.duration_seconds ?? null,
+      scraped_status: row.scraped_status ?? 0,
+      last_scraped_at: row.last_scraped_at ?? null,
+      updated_at: row.updated_at ?? null,
+      add_time: row.add_time ?? new Date(0).toISOString()
+    })
+  }
+  database.exec(`
+    DROP TABLE videos_v10;
+    CREATE INDEX idx_videos_code ON videos(code);
+    CREATE UNIQUE INDEX idx_videos_business_identity
+      ON videos(publisher_organization_id, upper(trim(code)), release_date)
+      WHERE publisher_organization_id IS NOT NULL
+        AND code IS NOT NULL AND length(trim(code)) > 0
+        AND release_date IS NOT NULL AND length(trim(release_date)) > 0;
+    CREATE INDEX idx_videos_add_time ON videos(add_time);
+    CREATE INDEX idx_videos_release_date ON videos(release_date);
+    CREATE INDEX idx_videos_rating ON videos(rating);
+    CREATE INDEX idx_videos_scraped_status ON videos(scraped_status);
+    CREATE INDEX idx_videos_maker_organization_id ON videos(maker_organization_id);
+    CREATE INDEX idx_videos_publisher_organization_id ON videos(publisher_organization_id);
+    CREATE INDEX idx_videos_series_id ON videos(series_id);
+    CREATE INDEX idx_videos_director_id ON videos(director_id);
+    PRAGMA legacy_alter_table = OFF;
+  `)
+}
+
+function migrateVideoSources(database: Database.Database): void {
+  if (tableExists(database, 'video_external_ids')) {
+    database.exec(`
+      DROP INDEX IF EXISTS idx_video_external_source_id;
+      DROP INDEX IF EXISTS idx_video_external_video_id;
+      ALTER TABLE video_external_ids RENAME TO video_sources;
+    `)
+  }
+  if (tableExists(database, 'video_sources')) {
+    const columns = columnNames(database, 'video_sources')
+    if (columns.has('external_id')) {
+      database.exec('ALTER TABLE video_sources DROP COLUMN external_id')
+    }
+  }
+  database.exec(VIDEO_SOURCES_SCHEMA_SQL)
+}
+
+function migrateToV11(database: Database.Database): void {
+  assertNoVideoBusinessIdentityConflicts(database)
+  try {
+    rebuildVideosForBusinessIdentity(database)
+    migrateVideoSources(database)
+    database.exec(PENDING_VIDEO_DECISIONS_SCHEMA_SQL)
+  } finally {
+    database.pragma('legacy_alter_table = OFF')
+  }
+}
+
 const MIGRATIONS: Migration[] = [
   {
     version: 2,
@@ -726,6 +897,10 @@ const MIGRATIONS: Migration[] = [
   {
     version: 10,
     migrate: migrateToV10
+  },
+  {
+    version: 11,
+    migrate: migrateToV11
   }
 ]
 
@@ -748,14 +923,31 @@ export function migrateDatabase(database: Database.Database): void {
     })()
     return
   }
-  database.transaction(() => {
-    for (let next = current + 1; next <= CURRENT_SCHEMA_VERSION; next += 1) {
-      const migration = migrationForVersion(next)
-      if (!migration) {
-        throw new Error(`Missing database migration for schema version ${next}.`)
+  const foreignKeysEnabled = Number(database.pragma('foreign_keys', { simple: true })) === 1
+  if (foreignKeysEnabled) database.pragma('foreign_keys = OFF')
+  try {
+    database.transaction(() => {
+      for (let next = current + 1; next <= CURRENT_SCHEMA_VERSION; next += 1) {
+        const migration = migrationForVersion(next)
+        if (!migration) {
+          throw new Error(`Missing database migration for schema version ${next}.`)
+        }
+        migration.migrate(database)
+        database.pragma(`user_version = ${next}`)
       }
-      migration.migrate(database)
-      database.pragma(`user_version = ${next}`)
-    }
-  })()
+      const foreignKeyViolations = database.pragma('foreign_key_check') as Array<{
+        table: string
+        rowid: number | null
+        parent: string
+      }>
+      if (foreignKeyViolations.length > 0) {
+        const first = foreignKeyViolations[0]
+        throw new Error(
+          `FOREIGN KEY constraint failed during migration: ${first.table} row ${first.rowid ?? '?'} -> ${first.parent}`
+        )
+      }
+    })()
+  } finally {
+    if (foreignKeysEnabled) database.pragma('foreign_keys = ON')
+  }
 }

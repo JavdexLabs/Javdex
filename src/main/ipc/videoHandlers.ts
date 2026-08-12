@@ -20,8 +20,8 @@ export function registerVideoHandlers(): void {
   commandAdapter.register(IPC.VIDEO_MARK_SCRAPE_SUCCESS, (id) =>
     videoMaintenanceService.markScrapeSucceeded(id)
   )
-  commandAdapter.register(IPC.VIDEO_CORRECT_IMPORT, (id, code) =>
-    videoMaintenanceService.correctImport(id, code)
+  commandAdapter.register(IPC.VIDEO_CORRECT_IMPORT, (id, code, discardPendingScrape) =>
+    videoMaintenanceService.correctImport(id, code, discardPendingScrape)
   )
   commandAdapter.register(IPC.VIDEO_DELETE, (id) => videoMaintenanceService.delete(id))
   commandAdapter.register(IPC.VIDEO_SET_RATING, (id, rating) =>
@@ -67,5 +67,11 @@ export function registerVideoHandlers(): void {
     IPC.VIDEO_RESOURCE_REMOVE,
     (videoId, resourceId, lastResourceMode) =>
       videoMaintenanceService.removeResource(videoId, resourceId, lastResourceMode)
+  )
+  commandAdapter.register(IPC.VIDEO_MERGE, (input) =>
+    videoMaintenanceService.mergeVideos(input)
+  )
+  commandAdapter.register(IPC.VIDEO_RESOURCE_SPLIT, (videoId, resourceId) =>
+    videoMaintenanceService.splitResource(videoId, resourceId)
   )
 }

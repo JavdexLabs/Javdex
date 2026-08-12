@@ -58,6 +58,8 @@ export interface AppSettings {
   lastLibraryScanSummary: LibraryScanSummary | null
   /** Minimum local file duration (minutes) required for scan import; 0 disables the filter. */
   minScanImportDurationMinutes: number
+  /** Automatically attach scanned resources when their normalized code has one clear owner. */
+  autoMergeSameCodeResources: boolean
   /** Optional HTTP/HTTPS proxy for scraping, e.g. http://127.0.0.1:7890 */
   proxyUrl: string
   /** When false, scrape requests use a direct connection even if proxyUrl is set. */
@@ -190,6 +192,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoScanIntervalMinutes: 60,
   lastLibraryScanSummary: null,
   minScanImportDurationMinutes: 30,
+  autoMergeSameCodeResources: true,
   proxyUrl: '',
   proxyUrlEnabled: false,
   llmProxyUrl: '',

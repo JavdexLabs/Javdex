@@ -342,6 +342,10 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
     minScanImportDurationMinutes: normalizeMinScanImportDurationMinutes(
       parsed.minScanImportDurationMinutes
     ),
+    autoMergeSameCodeResources: normalizeBooleanSetting(
+      parsed.autoMergeSameCodeResources,
+      DEFAULT_SETTINGS.autoMergeSameCodeResources
+    ),
     proxyUrl: typeof parsed.proxyUrl === 'string' ? parsed.proxyUrl.trim() : '',
     proxyUrlEnabled: normalizeBooleanSetting(
       parsed.proxyUrlEnabled,

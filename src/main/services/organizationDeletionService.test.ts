@@ -137,6 +137,34 @@ describe('organizationDeletionService', () => {
     )
   })
 
+  it('blocks role removal and full deletion when they would rewrite a pending video', () => {
+    setup()
+    const id = classificationMaintenanceService.createOrganization({
+      role: 'maker',
+      mainName: 'Pending Relations'
+    })
+    classificationMaintenanceService.assignVideoOrganization(
+      createVideo('ADD-PUBLISHER-ROLE'),
+      'publisher',
+      { organizationId: id }
+    )
+    const videoId = createVideo('PENDING-RELATION')
+    assignOrganization(videoId, 'maker', id)
+    getDb().prepare(
+      `INSERT INTO pending_video_scrapes (
+         video_id, selected_fields_json, applicable_fields_json, update_mode,
+         request_json, warnings_json, created_at, updated_at
+       ) VALUES (?, '[]', '[]', 'replace', '{}', '[]', '2025-01-01', '2025-01-01')`
+    ).run(videoId)
+
+    assert.throws(() => organizationDeletionService.removeRole(id, 'maker'), /待确认.*刮削/)
+    assert.throws(() => organizationDeletionService.deleteOrganization(id), /待确认.*刮削/)
+    assert.deepEqual(
+      getDb().prepare('SELECT maker_organization_id FROM videos WHERE id = ?').get(videoId),
+      { maker_organization_id: id }
+    )
+  })
+
   it('fully deletes an organization and detaches every supported relation after a fresh preview', () => {
     setup()
     const id = classificationMaintenanceService.createOrganization({

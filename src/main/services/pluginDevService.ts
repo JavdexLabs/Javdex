@@ -9,7 +9,7 @@ import {
 } from '../scrapers/scraperPluginSandbox'
 import {
   normalizeActressScrapeResult,
-  normalizeVideoScrapeResult
+  normalizeVideoScrapeCandidates
 } from '../scrapers/scraperResultValidation'
 import { getSettings } from '../settings/settingsStore'
 import {
@@ -42,12 +42,13 @@ export async function dryRunPluginPackage(
     if (pkg.kind === 'video') {
       if (!testTarget) throw new Error(`请填写${profile.testTargetShortLabel}`)
       const raw = await runUserVideoPluginWithLogs(pkg.name, pkg.code, testTarget, proxyUrl)
-      const result = normalizeVideoScrapeResult(raw.result, testTarget)
+      const candidates = normalizeVideoScrapeCandidates(raw.result, testTarget)
+      const result = Array.isArray(raw.result) ? candidates : candidates[0] ?? null
       return {
-        ok: result !== null,
+        ok: candidates.length > 0,
         result,
         logs: raw.logs,
-        error: result ? undefined : '插件返回为空或结果格式无效'
+        error: candidates.length > 0 ? undefined : '插件返回为空或结果格式无效'
       }
     }
 

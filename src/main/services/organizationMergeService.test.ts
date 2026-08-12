@@ -206,6 +206,68 @@ describe('organizationMergeService', () => {
     assert.deepEqual(deletedImages, [])
   })
 
+  it('preflights publisher transfer business identity collisions before writing', () => {
+    setup()
+    const targetId = classificationMaintenanceService.createOrganization({
+      role: 'publisher',
+      mainName: 'Target Publisher'
+    })
+    const sourceId = classificationMaintenanceService.createOrganization({
+      role: 'publisher',
+      mainName: 'Source Publisher'
+    })
+    const targetVideoId = createVideo('DUP-001')
+    const sourceVideoId = createVideo(' dup-001 ')
+    classificationMaintenanceService.assignVideoOrganization(targetVideoId, 'publisher', {
+      organizationId: targetId
+    })
+    classificationMaintenanceService.assignVideoOrganization(sourceVideoId, 'publisher', {
+      organizationId: sourceId
+    })
+    getDb().prepare("UPDATE videos SET release_date = '2025-01-01' WHERE id IN (?, ?)").run(
+      targetVideoId,
+      sourceVideoId
+    )
+
+    assert.throws(
+      () => organizationMergeService.merge({ targetId, sourceId }),
+      new RegExp(`业务身份冲突.*${targetVideoId}.*${sourceVideoId}`)
+    )
+    assert.ok(getDb().prepare('SELECT 1 FROM organizations WHERE id = ?').get(sourceId))
+    assert.deepEqual(
+      getDb().prepare('SELECT publisher_organization_id FROM videos WHERE id = ?').get(sourceVideoId),
+      { publisher_organization_id: sourceId }
+    )
+  })
+
+  it('blocks a merge that would rewrite a pending video relation', () => {
+    setup()
+    const targetId = classificationMaintenanceService.createOrganization({
+      role: 'maker',
+      mainName: 'Target Pending'
+    })
+    const sourceId = classificationMaintenanceService.createOrganization({
+      role: 'maker',
+      mainName: 'Source Pending'
+    })
+    const videoId = createVideo('PENDING-ORG')
+    classificationMaintenanceService.assignVideoOrganization(videoId, 'maker', {
+      organizationId: sourceId
+    })
+    getDb().prepare(
+      `INSERT INTO pending_video_scrapes (
+         video_id, selected_fields_json, applicable_fields_json, update_mode,
+         request_json, warnings_json, created_at, updated_at
+       ) VALUES (?, '[]', '[]', 'replace', '{}', '[]', '2025-01-01', '2025-01-01')`
+    ).run(videoId)
+
+    assert.throws(
+      () => organizationMergeService.merge({ targetId, sourceId }),
+      new RegExp(`待确认.*ID：${videoId}`)
+    )
+    assert.ok(getDb().prepare('SELECT 1 FROM organizations WHERE id = ?').get(sourceId))
+  })
+
   it('rejects a series name collision in the target scope without changing any relation', () => {
     setup()
     const targetId = classificationMaintenanceService.createOrganization({

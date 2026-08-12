@@ -1,156 +1,114 @@
-async function parseVideo(ctx) {
-  const code = ctx.code.toUpperCase();
-  const searchUrl = `https://javdb.com/search?q=${encodeURIComponent(code)}&f=all`;
+function normalizeCode(value) {
+  return String(value || '').trim().toUpperCase();
+}
 
-  // Step 1: Search for the video
-  const searchHtml = await ctx.fetchPage(searchUrl, { readySelector: '.movie-list' });
-  const $search = ctx.cheerio.load(searchHtml);
-
-  // Find the detail link that matches our code
-  let detailUrl = null;
-  const items = $search('.movie-list .item');
-  items.each((i, item) => {
-    const $item = $search(item);
-    const titleText = $item.find('.video-title').text().trim().toUpperCase();
-    if (titleText.includes(code)) {
-      const link = $item.find('a.box');
-      if (link.length) {
-        detailUrl = 'https://javdb.com' + link.attr('href');
-      }
-    }
-  });
-
-  if (!detailUrl) {
-    // Try direct match by checking all items
-    const firstItem = $search('.movie-list .item').first();
-    const link = firstItem.find('a.box');
-    if (link.length) {
-      detailUrl = 'https://javdb.com' + link.attr('href');
-    }
-  }
-
-  if (!detailUrl) {
+function absoluteJavdbUrl(href) {
+  if (!href) return null;
+  try {
+    return new URL(href, 'https://javdb.com').toString();
+  } catch {
     return null;
   }
+}
 
-  // Step 2: Fetch detail page
-  const detailHtml = await ctx.fetchPage(detailUrl, { readySelector: '.video-detail' });
+function searchItemCode($search, item) {
+  const $item = $search(item);
+  const explicit = $item.find('.video-title strong').first().text().trim();
+  if (explicit) return normalizeCode(explicit);
+  const text = $item.find('.video-title').text().trim();
+  return normalizeCode(text.split(/\s+/)[0]);
+}
+
+async function parseVideo(ctx) {
+  const requestedCode = normalizeCode(ctx.code);
+  const searchUrl = `https://javdb.com/search?q=${encodeURIComponent(requestedCode)}&f=all`;
+  const searchHtml = await ctx.fetchPage(searchUrl, { readySelector: '.movie-list' });
+  const $search = ctx.cheerio.load(searchHtml);
+  const detailUrls = [];
+
+  $search('.movie-list .item').each((i, item) => {
+    if (searchItemCode($search, item) !== requestedCode) return;
+    const detailUrl = absoluteJavdbUrl($search(item).find('a.box[href]').first().attr('href'));
+    if (detailUrl) detailUrls.push(detailUrl);
+  });
+
+  if (detailUrls.length === 0) return [];
+
+  // Promise.all is intentional: one failed exact-match detail invalidates the whole candidate set.
+  return Promise.all(detailUrls.map(async (detailUrl) => {
+    const detailHtml = await ctx.fetchPage(detailUrl, { readySelector: '.video-detail' });
+    return parseDetail(ctx, detailHtml, detailUrl, requestedCode);
+  }));
+}
+
+function parseDetail(ctx, detailHtml, detailUrl, requestedCode) {
   const $detail = ctx.cheerio.load(detailHtml);
-
-  // Parse metadata panels
   const metadata = {};
   $detail('.video-detail .panel-block').each((i, panel) => {
     const $panel = $detail(panel);
-    const label = $panel.find('strong').text().trim().replace(':', '');
+    const label = $panel.find('strong').first().text().trim().replace(/[:：]$/, '');
     const value = $panel.find('.value').text().trim();
     metadata[label] = value;
   });
 
-  // Parse title
-  let title = '';
   const currentTitle = $detail('.video-detail h2.title .current-title').text().trim();
   const originTitle = $detail('.video-detail h2.title .origin-title').text().trim();
-  title = originTitle || currentTitle;
+  const title = originTitle || currentTitle;
+  const detailCode = normalizeCode(metadata['番號'] || metadata['番号'] || requestedCode);
 
-  // Parse cover
   let coverUrl = '';
   const coverImg = $detail('.video-detail .video-cover');
-  if (coverImg.length) {
-    coverUrl = coverImg.attr('src');
-  }
+  if (coverImg.length) coverUrl = coverImg.attr('src');
 
-  // Parse release date
-  let releaseDate = '';
-  if (metadata['日期']) {
-    releaseDate = metadata['日期'].trim();
-  }
-
-  // Parse duration
+  const releaseDate = (metadata['日期'] || '').trim();
   let durationSeconds = 0;
   if (metadata['時長']) {
     const durationMatch = metadata['時長'].match(/(\d+)/);
-    if (durationMatch) {
-      durationSeconds = parseInt(durationMatch[1]) * 60;
-    }
+    if (durationMatch) durationSeconds = parseInt(durationMatch[1]) * 60;
   }
 
-  // Parse maker (片商)
-  let maker = '';
-  if (metadata['片商']) {
-    maker = metadata['片商'].trim();
-  }
+  const maker = (metadata['片商'] || '').trim();
+  const publisher = (metadata['發行'] || '').trim();
+  const series = (metadata['系列'] || '').trim();
+  const director = (metadata['導演'] || '').trim();
 
-  // Parse publisher (發行)
-  let publisher = '';
-  if (metadata['發行']) {
-    publisher = metadata['發行'].trim();
-  }
-
-  // Parse series (系列)
-  let series = '';
-  if (metadata['系列']) {
-    series = metadata['系列'].trim();
-  }
-
-  // Parse director (導演)
-  let director = '';
-  if (metadata['導演']) {
-    director = metadata['導演'].trim();
-  }
-
-  // Parse rating
   let ratingAverage = 0;
   let ratingCount = 0;
   if (metadata['評分']) {
-    const ratingText = metadata['評分'];
-    const avgMatch = ratingText.match(/([\d.]+)分/);
-    if (avgMatch) {
-      ratingAverage = parseFloat(avgMatch[1]);
-    }
-    const countMatch = ratingText.match(/由(\d+)人評價/);
-    if (countMatch) {
-      ratingCount = parseInt(countMatch[1]);
-    }
+    const avgMatch = metadata['評分'].match(/([\d.]+)分/);
+    if (avgMatch) ratingAverage = parseFloat(avgMatch[1]);
+    const countMatch = metadata['評分'].match(/由(\d+)人評價/);
+    if (countMatch) ratingCount = parseInt(countMatch[1]);
   }
 
-  // Parse tags (類別)
   const tags = [];
   if (metadata['類別']) {
-    const tagText = metadata['類別'];
-    tagText.split(',').forEach(t => {
-      const tag = t.trim();
+    metadata['類別'].split(',').forEach((raw) => {
+      const tag = raw.trim();
       if (tag) tags.push(tag);
     });
   }
 
-  // Parse actresses (演員) - use DOM structure for gender symbols
   const actresses = [];
-  const actorPanel = $detail('.panel-block').filter((i, p) => {
-    return $detail(p).find('strong').text().trim().includes('演員');
-  });
+  const actorPanel = $detail('.panel-block').filter((i, panel) =>
+    $detail(panel).find('strong').first().text().trim().includes('演員')
+  );
   if (actorPanel.length) {
-    const valueDiv = actorPanel.find('.value');
-    // Each actor is: <a>name</a><strong class="symbol female">♀</strong> or <strong class="symbol male">♂</strong>
-    valueDiv.contents().each((i, node) => {
-      if (node.type === 'tag' && node.name === 'a') {
-        const $a = $detail(node);
-        const name = $a.text().trim();
-        if (name) {
-          // Check next sibling for gender symbol
-          const next = $detail(node).next();
-          let gender = undefined;
-          if (next.length && next.is('strong.symbol')) {
-            const symbol = next.text().trim();
-            if (symbol === '♀') gender = 'female';
-            else if (symbol === '♂') gender = 'male';
-          }
-          actresses.push({ name, gender });
-        }
+    actorPanel.find('.value').contents().each((i, node) => {
+      if (node.type !== 'tag' || node.name !== 'a') return;
+      const name = $detail(node).text().trim();
+      if (!name) return;
+      const next = $detail(node).next();
+      let gender;
+      if (next.length && next.is('strong.symbol')) {
+        const symbol = next.text().trim();
+        if (symbol === '♀') gender = 'female';
+        else if (symbol === '♂') gender = 'male';
       }
+      actresses.push({ name, gender });
     });
   }
 
-  // Parse sample images
   const sampleImageUrls = [];
   $detail('a[data-fancybox="gallery"]').each((i, link) => {
     const href = $detail(link).attr('href');
@@ -159,13 +117,10 @@ async function parseVideo(ctx) {
     }
   });
 
-  // Parse summary (not available on JavDB, leave empty)
-  const summary = '';
-
   return {
-    code,
+    code: detailCode,
     title,
-    summary,
+    summary: '',
     coverUrl,
     releaseDate,
     maker,

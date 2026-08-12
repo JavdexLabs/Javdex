@@ -23,6 +23,11 @@ import type {
   VideoScrapeUpdateMode
 } from '@shared/scrapeTypes'
 import type { BatchProgress, BatchScrapeState } from '@shared/batchScrapeTypes'
+import type {
+  PendingVideoScrape,
+  PendingVideoScrapeConfirmInput,
+  PendingVideoScrapeResolutionResult
+} from '@shared/videoScrapeTypes'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/scrapeTypes'
 import type { ActressDetail } from '@shared/actressTypes'
 import type { BatchScrapeCheckpointPort } from './batchScrapeCheckpointPort'
@@ -50,6 +55,7 @@ import { resolveVideoScrapeFieldSources, scrapeVideo } from '../scrapers/scraper
 import { getActressDetail } from '../db/actressRepo'
 import { countVideosForRematch } from '../db/videoRepo'
 import { resolveVideoBatchTargets } from './videoScrapeApplyService'
+import { videoPendingScrapeService } from './videoPendingScrapeService'
 import {
   AvatarAutoCropMediator,
   type AvatarAutoCropMediatorDependencies
@@ -86,6 +92,8 @@ interface VideoScrapeOutcome {
   warnings?: string[]
   classifications?: VideoClassificationResolutionOutcome[]
   directorChoice?: VideoDirectorChoiceRequired
+  pending?: boolean
+  pendingScrapeId?: number
   error?: string
 }
 
@@ -126,6 +134,11 @@ export interface ScrapeJobControllerDependencies {
   ): void
   rendererAvailable(): boolean
   checkpoints: BatchScrapeCheckpointPort
+  pendingVideoScrapes: {
+    list(): PendingVideoScrape[]
+    confirm(input: PendingVideoScrapeConfirmInput): PendingVideoScrapeResolutionResult
+    discard(pendingScrapeId: number): boolean
+  }
   avatarAutoCrop?: AvatarAutoCropMediator
   avatarAutoCropOptions?: Partial<
     Pick<AvatarAutoCropMediatorDependencies, 'randomId' | 'autoCropTimeoutMs'>
@@ -193,10 +206,12 @@ export class ScrapeJobController {
         directorAmbiguity: 'choice'
       })
     )
-    if (!outcome.ok || !outcome.result) throw new Error(outcome.error)
+    if (!outcome.ok) throw new Error(outcome.error)
     return {
-      result: outcome.result,
+      result: outcome.result ?? undefined,
       applied: !outcome.skipped,
+      pending: outcome.pending,
+      pendingScrapeId: outcome.pendingScrapeId,
       warnings: outcome.warnings ?? [],
       classifications: outcome.classifications ?? [],
       directorChoice: outcome.directorChoice
@@ -238,6 +253,20 @@ export class ScrapeJobController {
 
   getBatchState(): BatchScrapeState {
     return this.dependencies.getBatchState()
+  }
+
+  listPendingVideoScrapes(): PendingVideoScrape[] {
+    return this.dependencies.pendingVideoScrapes.list()
+  }
+
+  confirmPendingVideoScrape(
+    input: PendingVideoScrapeConfirmInput
+  ): PendingVideoScrapeResolutionResult {
+    return this.dependencies.pendingVideoScrapes.confirm(input)
+  }
+
+  discardPendingVideoScrape(pendingScrapeId: number): boolean {
+    return this.dependencies.pendingVideoScrapes.discard(pendingScrapeId)
   }
 
   countVideoBatch(filter: VideoBatchScrapeFilter): number {
@@ -421,6 +450,7 @@ export function createDefaultScrapeJobController(
     countRematches: countVideosForRematch,
     countActresses: estimateActressBatchScrapeTargetCount,
     resolveVideoFieldSources: resolveVideoScrapeFieldSources,
+    pendingVideoScrapes: videoPendingScrapeService,
     checkpoints: defaultBatchScrapeCheckpoints,
     ...boundary
   })

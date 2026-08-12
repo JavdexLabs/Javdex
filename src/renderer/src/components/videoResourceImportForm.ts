@@ -11,6 +11,11 @@ import { normalizeVideoCode } from '@shared/videoCode'
 
 export type VideoResourceKindSelection = 'auto' | LinkVideoResourceKind
 
+export function normalizeOptionalVideoCode(rawCode: string): string | null {
+  if (!rawCode.trim()) return null
+  return normalizeVideoCode(rawCode)
+}
+
 export function buildVideoResourceImportInput(input: {
   code: string
   url: string
@@ -18,7 +23,7 @@ export function buildVideoResourceImportInput(input: {
   displayName: string
   size: string
   sizeUnit: VideoResourceSizeUnit
-}): VideoLinkResourceImportInput {
+}): Omit<VideoLinkResourceImportInput, 'target'> {
   const code = normalizeVideoCode(input.code)
   const normalized = normalizeExternalVideoResource(
     input.url,

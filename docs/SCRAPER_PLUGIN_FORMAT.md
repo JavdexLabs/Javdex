@@ -116,7 +116,13 @@ const body = await ctx.fetchBuffer(url, {
 
 ### 返回值
 
-返回 `null` 表示未匹配；否则返回对象（字段均为可选，但须与 `supportedFields` 一致）：
+影片插件可返回以下三种值：
+
+- `null` 或空数组：未匹配。
+- 单个对象：兼容旧插件的单结果形式；`code` 建议提供，省略时主进程使用本次查询番号。
+- 对象数组：搜索页存在多个精确匹配结果时返回全部候选。数组中每个对象都必须提供非空 `code`，任一项无效都会拒绝整次插件结果。
+
+候选对象除 `code` 外的字段均为可选，但须与 `supportedFields` 一致：
 
 ```js
 {
@@ -138,6 +144,17 @@ const body = await ctx.fetchBuffer(url, {
   tags: ['...']
 }
 ```
+
+数组示例：
+
+```js
+[
+  { code: 'IPX-535', title: '版本 A', sourceUrl: 'https://example.test/a' },
+  { code: 'IPX-535', title: '版本 B', sourceUrl: 'https://example.test/b' }
+]
+```
+
+主进程会将查询番号与候选 `code` 分别执行去空格、转大写规范化，只保留精确相等的候选；不接受前缀、包含或模糊匹配。被过滤的候选会生成警告。随后按规范化后的 `sourceUrl` 去重；是否显式包含尾部 `/` 会保留为不同来源。多个有效候选不会自动选择，而是进入“待确认”中心。
 
 日期必须为合法 `YYYY-MM-DD`，禁止 `YYYY-MM-00`。
 

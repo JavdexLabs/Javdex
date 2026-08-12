@@ -1,0 +1,442 @@
+/* Unified pending-decision workbench. */
+.pendingCenterPage {
+  --pending-rail-w: 230px;
+}
+
+.pendingCenterTopbar {
+  min-height: 78px;
+  padding: 14px var(--page-pad-x) 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-panel);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.pageTitle {
+  margin: 0 0 3px;
+  font-size: 20px;
+}
+
+.pageSubtitle {
+  margin: 0 0 13px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.pendingTabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.tab {
+  min-height: var(--control-h-lg);
+  padding: 0 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+}
+
+.tab:hover,
+.tab:focus-visible {
+  color: var(--text-primary);
+  background: var(--surface-elevated);
+}
+
+.tab:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
+}
+
+.tab.isActive {
+  color: var(--text-accent);
+  border-bottom-color: var(--border-accent);
+}
+
+.tabCount {
+  min-width: 20px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-control);
+  display: inline-grid;
+  place-items: center;
+  font-size: 10px;
+}
+
+.pendingWorkspace {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--pending-rail-w) minmax(0, 1fr);
+}
+
+.pendingRail {
+  min-height: 0;
+  padding: 10px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--surface-panel);
+}
+
+.pendingRailItem {
+  width: 100%;
+  min-height: 54px;
+  margin-bottom: 5px;
+  padding: 9px 11px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.pendingRailItem:hover,
+.pendingRailItem:focus-visible {
+  border-color: var(--border-subtle);
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+}
+
+.pendingRailItem:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
+}
+
+.pendingRailItem.isActive {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+  color: var(--text-accent);
+}
+
+.railTitle {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.railMeta {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.pendingWorkspaceMain {
+  min-width: 0;
+  min-height: 0;
+}
+
+.pendingDetailPane {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: var(--page-pad-y) var(--page-pad-x) var(--page-pad-bottom);
+}
+
+.pendingDetailHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+
+.detailTitle {
+  margin: 3px 0 4px;
+  font-size: 19px;
+}
+
+.detailDescription {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.pendingEyebrow {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.pendingDetailActions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.pendingSnapshotMeta,
+.pendingWarningList {
+  margin-bottom: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.pendingWarningList {
+  border-color: var(--border-warning);
+  background: var(--surface-warning);
+  color: var(--text-warning);
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pendingScanResources,
+.pendingSourceList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pendingResourceRow {
+  min-height: 82px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  display: grid;
+  grid-template-columns: 22px minmax(180px, 1fr) minmax(230px, 320px);
+  align-items: center;
+  gap: 11px;
+}
+
+.pendingResourceCopy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.resourceTitle,
+.resourcePath {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resourcePath,
+.resourceFacts {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.pendingResourceTarget {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.pendingPrimaryChoice {
+  min-height: 24px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pendingSourceSection {
+  padding: 13px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+}
+
+.sourceHeader {
+  margin-bottom: 11px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.sourceIdentity {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sourceVersion,
+.sourceFields {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.pendingCandidateGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 9px;
+}
+
+.pendingCandidateCard {
+  position: relative;
+  min-width: 0;
+  min-height: 210px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  display: grid;
+  grid-template-columns: 98px minmax(0, 1fr);
+  align-items: start;
+  gap: 11px;
+  cursor: pointer;
+}
+
+.pendingCandidateCard:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-control-hover);
+}
+
+.pendingCandidateCard:focus-within {
+  outline: var(--focus-outline);
+  box-shadow: var(--focus-ring);
+}
+
+.pendingCandidateCard.isSelected {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+}
+
+.candidateInput {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+}
+
+.pendingCandidateCover {
+  width: 98px;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-control);
+  color: var(--text-muted);
+  display: grid;
+  place-items: center;
+}
+
+.candidateImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pendingCandidateCopy {
+  min-width: 0;
+  padding-right: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.candidateTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidateRow {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 7px;
+  font-size: 11px;
+}
+
+.candidateLabel {
+  color: var(--text-muted);
+}
+
+.candidateValue {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 500;
+}
+
+.candidateMedia {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  gap: 6px;
+}
+
+.candidateThumbnail {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+
+.candidateThumbnail[data-avatar='true'] {
+  aspect-ratio: 1;
+}
+
+.pendingDirectorOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.directorOption {
+  min-height: var(--control-h-lg);
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.directorOption:focus-within {
+  outline: var(--focus-outline);
+  box-shadow: var(--focus-ring);
+}
+
+.directorCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.directorDescription {
+  color: var(--text-muted);
+}
+
+@media (width <= 900px) {
+  .pendingCenterPage {
+    --pending-rail-w: 190px;
+  }
+
+  .pendingDetailHead {
+    flex-direction: column;
+  }
+
+  .pendingResourceRow {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+
+  .pendingResourceTarget {
+    grid-column: 2;
+  }
+}

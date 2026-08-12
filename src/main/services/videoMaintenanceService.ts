@@ -12,7 +12,10 @@ import type {
   VideoResourceImportResult,
   VideoResourceLinkCheckResult,
   VideoResourceRemovalResult,
-  VideoSampleImportInput
+  VideoSampleImportInput,
+  VideoMergeInput,
+  VideoMergeResult,
+  VideoResourceSplitResult
 } from '@shared/videoTypes'
 import {
   addManualVideoTag,
@@ -20,15 +23,13 @@ import {
   clearVideoMetadataRecord,
   deleteVideoSampleAsset,
   editVideoRecord,
-  getPrimaryVideoResource,
-  getVideoByCode,
   getVideoById,
   getVideoResourceById,
   importVideoLinkResourceRecord,
   updateVideoLinkResourceRecord,
   listVideoResources,
   markScrapeSucceeded,
-  mergeVideoIntoExistingCode,
+  mergeVideoRecords,
   purgeVideo,
   removeManualVideoTag,
   removeVideoResourceRecord,
@@ -36,8 +37,10 @@ import {
   setPrimaryVideoResource,
   setRating,
   setVideoPosterPath,
+  splitVideoResourceRecord,
   updateLocalVideoResourceLabel,
-  updateVideoFields
+  updateVideoFields,
+  hasPendingVideoScrape
 } from '../db/videoRepo'
 import { normalizeExternalVideoResource } from '@shared/videoResourceLinks'
 import { normalizeVideoCode } from '@shared/videoCode'
@@ -55,6 +58,7 @@ import {
   removePendingLocalFileDeletions
 } from '../db/pendingLocalFileDeletionRepo'
 import { inspectWritableLocalPath } from './localFileAvailability'
+import { deletePendingVideoScrapeForVideo } from '../db/pendingVideoScrapeRepo'
 
 export interface VideoMaintenanceService {
   update(id: number, fields: VideoFieldUpdateInput): boolean
@@ -63,7 +67,7 @@ export interface VideoMaintenanceService {
   markScrapeSucceeded(id: number): boolean
   delete(id: number): boolean
   setRating(id: number, rating: number): boolean
-  correctImport(id: number, code: string): CorrectImportResult
+  correctImport(id: number, code: string, discardPendingScrape?: boolean): CorrectImportResult
   importSample(id: number, input: VideoSampleImportInput): Promise<VideoAsset>
   deleteSample(id: number, assetId: number): boolean
   setPoster(id: number, posterPath: string | null): boolean
@@ -83,19 +87,22 @@ export interface VideoMaintenanceService {
     resourceId: number,
     lastResourceMode?: LastVideoResourceRemovalMode
   ): VideoResourceRemovalResult
+  mergeVideos(input: VideoMergeInput): VideoMergeResult
+  splitResource(videoId: number, resourceId: number): VideoResourceSplitResult
 }
 
 interface VideoMaintenanceServiceDependencies {
   getVideoById: typeof getVideoById
-  getVideoByCode: typeof getVideoByCode
-  getPrimaryVideoResource: typeof getPrimaryVideoResource
   updateVideoFields: typeof updateVideoFields
   editVideoRecord: typeof editVideoRecord
   clearVideoMetadataRecord: typeof clearVideoMetadataRecord
   markScrapeSucceeded: typeof markScrapeSucceeded
   setRating: typeof setRating
   renameVideoCode: typeof renameVideoCode
-  mergeVideoIntoExistingCode: typeof mergeVideoIntoExistingCode
+  mergeVideoRecords: typeof mergeVideoRecords
+  splitVideoResourceRecord: typeof splitVideoResourceRecord
+  hasPendingVideoScrape: typeof hasPendingVideoScrape
+  deletePendingVideoScrapeForVideo: typeof deletePendingVideoScrapeForVideo
   purgeVideo: typeof purgeVideo
   addVideoSampleAsset: typeof addVideoSampleAsset
   deleteVideoSampleAsset: typeof deleteVideoSampleAsset
@@ -116,6 +123,7 @@ interface VideoMaintenanceServiceDependencies {
   importSample: typeof mediaAssetStore.importSample
   downloadSamples: typeof mediaAssetStore.downloadSamples
   deleteBestEffort: typeof mediaAssetStore.deleteBestEffort
+  cleanupVideoScrapeStagingPaths: typeof mediaAssetStore.cleanupVideoScrapeStagingPaths
   fetchRemoteImageBuffer: typeof fetchRemoteImageBuffer
   fileExists: (path: string) => boolean
   unlinkSync: (path: string) => void
@@ -135,16 +143,18 @@ export function createVideoMaintenanceService(
   dependencies: Partial<VideoMaintenanceServiceDependencies> = {}
 ): VideoMaintenanceService {
   const readVideoById = dependencies.getVideoById ?? getVideoById
-  const readVideoByCode = dependencies.getVideoByCode ?? getVideoByCode
-  const readPrimaryVideoResource =
-    dependencies.getPrimaryVideoResource ?? getPrimaryVideoResource
   const writeVideoFields = dependencies.updateVideoFields ?? updateVideoFields
   const writeVideoRecord = dependencies.editVideoRecord ?? editVideoRecord
   const clearMetadataRecord = dependencies.clearVideoMetadataRecord ?? clearVideoMetadataRecord
   const recordScrapeSucceeded = dependencies.markScrapeSucceeded ?? markScrapeSucceeded
   const writeRating = dependencies.setRating ?? setRating
   const renameCode = dependencies.renameVideoCode ?? renameVideoCode
-  const mergeIntoExistingCode = dependencies.mergeVideoIntoExistingCode ?? mergeVideoIntoExistingCode
+  const mergeRecords = dependencies.mergeVideoRecords ?? mergeVideoRecords
+  const splitResourceRecord = dependencies.splitVideoResourceRecord ?? splitVideoResourceRecord
+  const readHasPendingVideoScrape =
+    dependencies.hasPendingVideoScrape ?? hasPendingVideoScrape
+  const deletePendingScrapeForVideo =
+    dependencies.deletePendingVideoScrapeForVideo ?? deletePendingVideoScrapeForVideo
   const purgeVideoRecord = dependencies.purgeVideo ?? purgeVideo
   const addSampleAsset = dependencies.addVideoSampleAsset ?? addVideoSampleAsset
   const deleteSampleAsset = dependencies.deleteVideoSampleAsset ?? deleteVideoSampleAsset
@@ -175,6 +185,9 @@ export function createVideoMaintenanceService(
     dependencies.downloadSamples ?? mediaAssetStore.downloadSamples.bind(mediaAssetStore)
   const deleteBestEffort =
     dependencies.deleteBestEffort ?? mediaAssetStore.deleteBestEffort.bind(mediaAssetStore)
+  const cleanupVideoScrapeStagingPaths =
+    dependencies.cleanupVideoScrapeStagingPaths ??
+    mediaAssetStore.cleanupVideoScrapeStagingPaths.bind(mediaAssetStore)
   const fetchRemoteBuffer = dependencies.fetchRemoteImageBuffer ?? fetchRemoteImageBuffer
   const fileExists = dependencies.fileExists ?? ((path) => fs.existsSync(path))
   const unlinkSync = dependencies.unlinkSync ?? ((path) => fs.unlinkSync(path))
@@ -200,6 +213,12 @@ export function createVideoMaintenanceService(
     dependencies.assignVideoDirector ?? classificationMaintenanceService.assignVideoDirector
   const assignVideoSeries =
     dependencies.assignVideoSeries ?? classificationMaintenanceService.assignVideoSeries
+
+  const assertMetadataUnlocked = (videoId: number): void => {
+    if (readHasPendingVideoScrape(videoId)) {
+      throw new Error('影片存在待确认刮削结果，请先选择或丢弃候选')
+    }
+  }
 
   interface StagedLocalFile {
     originalPath: string
@@ -378,14 +397,20 @@ export function createVideoMaintenanceService(
 
   const deleteWholeVideo = (id: number): boolean => {
     if (!readVideoById(id)) throw new Error('影片不存在')
+    let pendingStagedPaths: string[] = []
     runInCoordinatedChange(() => {
       const resources = readVideoResources(id)
       const result = withStagedLocalFileDeletion(
         resources.filter((resource) => resource.kind === 'local').map((resource) => resource.locator),
-        () => purgeVideoRecord(id)
+        () => {
+          const pending = deletePendingScrapeForVideo(id)
+          pendingStagedPaths = pending?.stagedPaths ?? []
+          return purgeVideoRecord(id)
+        }
       )
       for (const assetPath of result.obsoletePaths) deleteBestEffort(assetPath)
     })
+    cleanupVideoScrapeStagingPaths(pendingStagedPaths)
     return true
   }
 
@@ -429,12 +454,14 @@ export function createVideoMaintenanceService(
 
   return {
     update(id, fields): boolean {
+      assertMetadataUnlocked(id)
       writeVideoFields(id, fields)
       return true
     },
     edit(id, input): boolean {
       const video = readVideoById(id)
       if (!video) throw new Error('Video not found')
+      assertMetadataUnlocked(id)
 
       runInCoordinatedChange(() => {
         const coverRelPath = input.coverSourcePath
@@ -465,6 +492,7 @@ export function createVideoMaintenanceService(
     clearMetadata(id): boolean {
       const video = readVideoById(id)
       if (!video) return true
+      assertMetadataUnlocked(id)
 
       runInCoordinatedChange(() => {
         const result = clearMetadataRecord(id)
@@ -477,6 +505,7 @@ export function createVideoMaintenanceService(
     markScrapeSucceeded(id): boolean {
       const video = readVideoById(id)
       if (!video) throw new Error('Video not found')
+      assertMetadataUnlocked(id)
       recordScrapeSucceeded(id)
       return true
     },
@@ -484,10 +513,11 @@ export function createVideoMaintenanceService(
       return withResourceMaintenance(() => deleteWholeVideo(id))
     },
     setRating(id, ratingValue): boolean {
+      assertMetadataUnlocked(id)
       writeRating(id, ratingValue)
       return true
     },
-    correctImport(id, codeRaw): CorrectImportResult {
+    correctImport(id, codeRaw, discardPendingScrape = false): CorrectImportResult {
       const newCode = normalizeVideoCode(codeRaw)
 
       const video = readVideoById(id)
@@ -497,25 +527,23 @@ export function createVideoMaintenanceService(
         return { code: newCode, previousCode: video.code }
       }
 
-      const existing = readVideoByCode(newCode)
-      if (existing && existing.id !== id) {
-        const primary = readPrimaryVideoResource(existing.id)
-        const canReplacePrimary =
-          !primary || (primary.kind === 'local' && !fileExists(primary.locator))
-        if (canReplacePrimary) {
-          if (primary) removeResourceRecord(primary.id)
-          mergeIntoExistingCode(id, existing.id)
-          return { code: newCode, previousCode: video.code, mergedIntoId: existing.id }
-        }
-        throw new Error(`番号 ${newCode} 已存在且仍有可用主资源`)
+      if (readHasPendingVideoScrape(id) && !discardPendingScrape) {
+        return { code: newCode, previousCode: video.code, pendingDiscardRequired: true }
       }
-
-      renameCode(id, newCode)
+      let stagedPaths: string[] = []
+      runDatabaseTransaction(() => {
+        if (discardPendingScrape) {
+          stagedPaths = deletePendingScrapeForVideo(id)?.stagedPaths ?? []
+        }
+        renameCode(id, newCode)
+      })
+      cleanupVideoScrapeStagingPaths(stagedPaths)
       return { code: newCode, previousCode: video.code }
     },
     async importSample(id, input): Promise<VideoAsset> {
       const video = readVideoById(id)
       if (!video) throw new Error('Video not found')
+      assertMetadataUnlocked(id)
 
       if (input.source === 'file') {
         const sourcePath = input.sourcePath?.trim()
@@ -546,6 +574,7 @@ export function createVideoMaintenanceService(
       })
     },
     deleteSample(id, assetId): boolean {
+      assertMetadataUnlocked(id)
       runInCoordinatedChange(() => {
         const result = deleteSampleAsset(id, assetId)
         for (const localPath of result.obsoletePaths) deleteBestEffort(localPath)
@@ -553,16 +582,19 @@ export function createVideoMaintenanceService(
       return true
     },
     setPoster(id, posterPath): boolean {
+      assertMetadataUnlocked(id)
       writePoster(id, posterPath)
       return true
     },
     addManualTag(id, name): boolean {
       if (!readVideoById(id)) throw new Error('Video not found')
+      assertMetadataUnlocked(id)
       writeManualTag(id, name)
       return true
     },
     removeManualTag(id, tagId): boolean {
       if (!readVideoById(id)) throw new Error('Video not found')
+      assertMetadataUnlocked(id)
       deleteManualTag(id, tagId)
       return true
     },
@@ -577,6 +609,7 @@ export function createVideoMaintenanceService(
         }
         const result = importLinkResourceRecord({
           code,
+          target: input.target,
           kind: normalized.kind,
           locator: normalized.locator,
           resourceKey: normalized.resourceKey,
@@ -632,6 +665,29 @@ export function createVideoMaintenanceService(
       return withResourceMaintenance(() =>
         removeResource(videoId, resourceId, lastResourceMode)
       )
+    },
+    mergeVideos(input): VideoMergeResult {
+      return withResourceMaintenance(() => {
+        const resources = [
+          ...readVideoResources(input.retainedVideoId),
+          ...readVideoResources(input.sourceVideoId)
+        ]
+        const hasPrimary = resources.some((resource) => Boolean(resource.is_primary))
+        const fallbackPrimaryResourceId = hasPrimary
+          ? undefined
+          : selectPrimaryVideoResourceCandidate(resources, fileExists)?.id ?? null
+        const result = mergeRecords(input, {
+          ...(hasPrimary ? {} : { fallbackPrimaryResourceId })
+        })
+        for (const path of result.obsoletePaths) deleteBestEffort(path)
+        return {
+          retainedVideoId: result.retainedVideoId,
+          deletedVideoId: result.deletedVideoId
+        }
+      })
+    },
+    splitResource(videoId, resourceId): VideoResourceSplitResult {
+      return withResourceMaintenance(() => splitResourceRecord(videoId, resourceId))
     }
   }
 }

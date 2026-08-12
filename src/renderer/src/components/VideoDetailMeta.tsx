@@ -179,6 +179,7 @@ function VideoLocalResourceRow({
   onOpenResource,
   onRevealResource,
   onSetPrimaryResource,
+  onSplitResource,
   onEditResource,
   onRemoveResource
 }: {
@@ -187,6 +188,7 @@ function VideoLocalResourceRow({
   onOpenResource?: (resourceId: number) => void
   onRevealResource?: (resourceId: number) => void
   onSetPrimaryResource?: (resourceId: number) => void
+  onSplitResource?: (resource: VideoResourceDetail) => void
   onEditResource?: (resource: VideoResourceDetail) => void
   onRemoveResource?: (resource: VideoResourceDetail) => void
 }): JSX.Element {
@@ -285,17 +287,30 @@ function VideoLocalResourceRow({
                 在文件夹中显示
               </button>
               {!isPrimary ? (
-                <button
-                  type="button"
-                  className="detail-menu-item"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false)
-                    onSetPrimaryResource?.(resource.id)
-                  }}
-                >
-                  设为主资源
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="detail-menu-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      onSetPrimaryResource?.(resource.id)
+                    }}
+                  >
+                    设为主资源
+                  </button>
+                  <button
+                    type="button"
+                    className="detail-menu-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      onSplitResource?.(resource)
+                    }}
+                  >
+                    拆分为独立影片
+                  </button>
+                </>
               ) : null}
               <div className="detail-menu-separator" />
               <button
@@ -324,6 +339,7 @@ function VideoLinkResourceRow({
   onReadResourceLocator,
   onEditResource,
   onSetPrimaryResource,
+  onSplitResource,
   onRemoveResource
 }: {
   resource: VideoResourceDetail
@@ -332,6 +348,7 @@ function VideoLinkResourceRow({
   onReadResourceLocator?: (resourceId: number) => Promise<string | null>
   onEditResource?: (resource: VideoResourceDetail) => void
   onSetPrimaryResource?: (resourceId: number) => void
+  onSplitResource?: (resource: VideoResourceDetail) => void
   onRemoveResource?: (resource: VideoResourceDetail) => void
 }): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -427,17 +444,30 @@ function VideoLinkResourceRow({
                 编辑资源
               </button>
               {!isPrimary ? (
-                <button
-                  type="button"
-                  className="detail-menu-item"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false)
-                    onSetPrimaryResource?.(resource.id)
-                  }}
-                >
-                  设为主资源
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="detail-menu-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      onSetPrimaryResource?.(resource.id)
+                    }}
+                  >
+                    设为主资源
+                  </button>
+                  <button
+                    type="button"
+                    className="detail-menu-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      onSplitResource?.(resource)
+                    }}
+                  >
+                    拆分为独立影片
+                  </button>
+                </>
               ) : null}
               <button
                 type="button"
@@ -563,6 +593,7 @@ export function VideoDetailSecondaryMeta({
   onReadResourceLocator,
   onEditResource,
   onSetPrimaryResource,
+  onSplitResource,
   onRemoveResource,
   onAddResource
 }: {
@@ -572,6 +603,7 @@ export function VideoDetailSecondaryMeta({
   onReadResourceLocator?: (resourceId: number) => Promise<string | null>
   onEditResource?: (resource: VideoResourceDetail) => void
   onSetPrimaryResource?: (resourceId: number) => void
+  onSplitResource?: (resource: VideoResourceDetail) => void
   onRemoveResource?: (resource: VideoResourceDetail) => void
   onAddResource: () => void
 }): JSX.Element {
@@ -603,6 +635,7 @@ export function VideoDetailSecondaryMeta({
                   onOpenResource={onOpenResource}
                   onRevealResource={onRevealResource}
                   onSetPrimaryResource={onSetPrimaryResource}
+                  onSplitResource={onSplitResource}
                   onEditResource={onEditResource}
                   onRemoveResource={onRemoveResource}
                 />
@@ -615,6 +648,7 @@ export function VideoDetailSecondaryMeta({
                   onReadResourceLocator={onReadResourceLocator}
                   onEditResource={onEditResource}
                   onSetPrimaryResource={onSetPrimaryResource}
+                  onSplitResource={onSplitResource}
                   onRemoveResource={onRemoveResource}
                 />
               )

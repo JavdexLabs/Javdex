@@ -15,6 +15,7 @@ import { readImageDimensionsFromRelPath } from './inspection'
 import type { AssetFetcher, DownloadedImageAsset } from './types'
 
 const ACTRESS_SCRAPE_STAGING_DIRNAME = '.actress_scrape_staging'
+const VIDEO_SCRAPE_STAGING_DIRNAME = '.video_scrape_staging'
 const DEFAULT_STAGING_ORPHAN_SAFETY_AGE_MS = 24 * 60 * 60 * 1000
 
 export interface ActressScrapeStagingInput {
@@ -33,6 +34,23 @@ export interface StagedActressScrapeImage {
   stagedPath: string
   width: number | null
   height: number | null
+}
+
+export interface VideoScrapeStagingInput {
+  field: 'cover' | 'samples' | 'actressAvatar'
+  position: number
+  remoteUrl: string
+  data: Buffer
+}
+
+export interface StagedVideoScrapeImage {
+  field: 'cover' | 'samples' | 'actressAvatar'
+  position: number
+  remoteUrl: string
+  stagedPath: string
+  width: number | null
+  height: number | null
+  sizeBytes: number
 }
 
 function extFromUrl(url: string): string {
@@ -248,6 +266,107 @@ export function cleanupOrphanedActressScrapeStaging(
   for (const stagedPath of referencedPaths) {
     try {
       referencedDirectories.add(path.dirname(resolveActressScrapeStagedPath(stagedPath)))
+    } catch {
+      continue
+    }
+  }
+  const now = options?.now ?? Date.now()
+  const olderThanMs = options?.olderThanMs ?? DEFAULT_STAGING_ORPHAN_SAFETY_AGE_MS
+  let removed = 0
+  for (const entry of fs.readdirSync(stagingRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const directory = path.resolve(stagingRoot, entry.name)
+    const relative = path.relative(stagingRoot, directory)
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) continue
+    if (referencedDirectories.has(directory)) continue
+    if (now - fs.statSync(directory).mtimeMs < olderThanMs) continue
+    fs.rmSync(directory, { recursive: true, force: true })
+    removed += 1
+  }
+  return removed
+}
+
+function videoScrapeStagingRoot(): string {
+  return path.resolve(assetsRoot(), VIDEO_SCRAPE_STAGING_DIRNAME)
+}
+
+function resolveVideoScrapeStagedPath(stagedPath: string): string {
+  const stagingRoot = videoScrapeStagingRoot()
+  const absolutePath = path.resolve(assetsRoot(), stagedPath)
+  const relative = path.relative(stagingRoot, absolutePath)
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('影片刮削暂存资源路径无效')
+  }
+  return absolutePath
+}
+
+export function stageVideoScrapeImages(
+  resources: VideoScrapeStagingInput[]
+): StagedVideoScrapeImage[] {
+  if (resources.length === 0) return []
+  const token = randomUUID()
+  const relativeDir = path.posix.join(VIDEO_SCRAPE_STAGING_DIRNAME, token)
+  const absoluteDir = path.join(videoScrapeStagingRoot(), token)
+  fs.mkdirSync(absoluteDir, { recursive: true })
+  const staged: StagedVideoScrapeImage[] = []
+  try {
+    for (const resource of resources) {
+      if (!isUsableImageBuffer(resource.data)) throw new Error('影片刮削暂存资源不是可用图片')
+      const extension = detectImageExtensionFromBuffer(resource.data) ?? extFromUrl(resource.remoteUrl)
+      const filename = `${resource.field}-${resource.position}${extension}`
+      fs.writeFileSync(path.join(absoluteDir, filename), resource.data)
+      const dimensions = readImageDimensionsFromBuffer(resource.data)
+      staged.push({
+        field: resource.field,
+        position: resource.position,
+        remoteUrl: resource.remoteUrl,
+        stagedPath: path.posix.join(relativeDir, filename),
+        width: dimensions?.width ?? null,
+        height: dimensions?.height ?? null,
+        sizeBytes: resource.data.byteLength
+      })
+    }
+    return staged
+  } catch (error) {
+    fs.rmSync(absoluteDir, { recursive: true, force: true })
+    throw error
+  }
+}
+
+export function readVideoScrapeStagedImage(stagedPath: string): Buffer {
+  const data = fs.readFileSync(resolveVideoScrapeStagedPath(stagedPath))
+  if (!isUsableImageBuffer(data)) throw new Error('影片刮削暂存资源不可用')
+  return data
+}
+
+export function cleanupVideoScrapeStagingPaths(stagedPaths: string[]): void {
+  const directories = new Set<string>()
+  for (const stagedPath of stagedPaths) {
+    try {
+      directories.add(path.dirname(resolveVideoScrapeStagedPath(stagedPath)))
+    } catch {
+      continue
+    }
+  }
+  for (const directory of directories) {
+    try {
+      fs.rmSync(directory, { recursive: true, force: true })
+    } catch (error) {
+      console.error('cleanup staged video scrape resources failed:', (error as Error).message)
+    }
+  }
+}
+
+export function cleanupOrphanedVideoScrapeStaging(
+  referencedPaths: string[],
+  options?: { now?: number; olderThanMs?: number }
+): number {
+  const stagingRoot = videoScrapeStagingRoot()
+  if (!fs.existsSync(stagingRoot)) return 0
+  const referencedDirectories = new Set<string>()
+  for (const stagedPath of referencedPaths) {
+    try {
+      referencedDirectories.add(path.dirname(resolveVideoScrapeStagedPath(stagedPath)))
     } catch {
       continue
     }

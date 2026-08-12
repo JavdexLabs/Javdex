@@ -53,6 +53,8 @@ export interface LibraryScanSummary {
   videosDeleted: number
   skippedFiles: number
   failedFiles: number
+  pendingScanGroups: number
+  pendingScanResources: number
   offlineFolders: string[]
   errorSummary: string | null
 }
@@ -66,6 +68,10 @@ export interface ScanResult {
   /** Files skipped because local duration is below the scan import threshold. */
   skippedShort: number
   failed: number
+  /** Same-code resource groups that require an explicit ownership decision. */
+  pendingGroups: number
+  /** Newly discovered resources retained outside the ordinary library for confirmation. */
+  pendingResources: number
   cancelled?: boolean
   /** Videos whose file was moved/renamed but code matched — metadata kept, path updated. */
   relocated: number
@@ -84,13 +90,53 @@ export interface ScanResult {
   unrecognizedFiles: string[]
 }
 
+export interface PendingScanResource {
+  id: number
+  groupId: number
+  filePath: string
+  scanRoot: string
+  sizeBytes: number | null
+  durationSeconds: number | null
+  fileMtimeMs: number | null
+  displayName: string | null
+}
+
+export interface PendingScanGroup {
+  id: number
+  normalizedCode: string
+  createdAt: string
+  updatedAt: string
+  resources: PendingScanResource[]
+}
+
+export type PendingScanResourceTarget =
+  | { kind: 'existing'; videoId: number }
+  | { kind: 'new'; groupKey: string }
+
+export interface PendingScanResourceAssignment {
+  resourceId: number
+  target: PendingScanResourceTarget
+}
+
+export interface PendingScanGroupResolution {
+  assignments: PendingScanResourceAssignment[]
+  /** Optional primary overrides keyed by a `new` target's groupKey. */
+  primaryResourceIds?: Record<string, number>
+}
+
+export interface PendingScanGroupResolutionResult {
+  assignedResources: number
+  existingVideoIds: number[]
+  createdVideoIds: number[]
+}
+
 export interface ScanProgress {
   scanned: number
   imported: number
   currentFile: string
 }
 
-/** Outcome of renaming an unrecognized file on disk and attempting re-import. */
+/** Outcome of renaming an unrecognized file and importing it into an explicit target. */
 export interface RenameImportResult {
   /** New absolute path after rename. */
   newPath: string
@@ -98,8 +144,8 @@ export interface RenameImportResult {
   newName: string
   /** Whether the renamed file parsed into a code and was imported. */
   imported: boolean
-  /** Parsed code, if the new name was recognizable. */
-  code: string | null
+  /** Normalized user-supplied code used for the explicit import. */
+  code: string
 }
 
 /** Outcome of manual import with a user-supplied code (no format validation). */

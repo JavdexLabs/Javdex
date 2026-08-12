@@ -224,6 +224,8 @@ export class ScanCoordinator {
       skipped: 0,
       skippedShort: 0,
       failed: 0,
+      pendingGroups: 0,
+      pendingResources: 0,
       relocated: 0,
       refreshed: 0,
       removed: 0,
@@ -263,6 +265,8 @@ export class ScanCoordinator {
       videosDeleted: result.deletedVideos,
       skippedFiles: result.skipped,
       failedFiles: result.failed,
+      pendingScanGroups: result.pendingGroups,
+      pendingScanResources: result.pendingResources,
       offlineFolders: [...result.offlineFolders],
       errorSummary
     }

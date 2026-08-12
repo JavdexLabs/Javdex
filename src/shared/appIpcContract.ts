@@ -5,6 +5,9 @@ import type {
   LibraryOverviewStats,
   LibraryPathRemovalPreview,
   ManualImportResult,
+  PendingScanGroup,
+  PendingScanGroupResolution,
+  PendingScanGroupResolutionResult,
   PlayResult,
   RenameImportResult,
   ScanProgress,
@@ -32,6 +35,7 @@ import type {
 } from './pluginDevTypes'
 import type { ScraperPluginDescriptor } from './scraperPluginTypes'
 import type { RendererSettingsPatch, SettingsSnapshot } from './settingsTypes'
+import type { VideoResourceImportTarget } from './videoTypes'
 import type { LlmProviderConfigSaveInput } from './llmProviders'
 import type {
   IpcContractArgs,
@@ -119,8 +123,19 @@ export interface AppIpcContract {
 
   [IPC.SCAN_RUN]: { args: [folders?: string[]]; result: ScanResult }
   [IPC.SCAN_CANCEL]: { args: []; result: boolean }
-  [IPC.FILE_RENAME]: { args: [oldPath: string, newName: string]; result: RenameImportResult }
-  [IPC.FILE_IMPORT_MANUAL]: { args: [filePath: string, code: string]; result: ManualImportResult }
+  [IPC.FILE_RENAME]: {
+    args: [oldPath: string, newName: string, code: string, target: VideoResourceImportTarget]
+    result: RenameImportResult
+  }
+  [IPC.FILE_IMPORT_MANUAL]: {
+    args: [filePath: string, code: string, target: VideoResourceImportTarget]
+    result: ManualImportResult
+  }
+  [IPC.PENDING_SCAN_LIST]: { args: []; result: PendingScanGroup[] }
+  [IPC.PENDING_SCAN_RESOLVE]: {
+    args: [groupId: number, resolution: PendingScanGroupResolution]
+    result: PendingScanGroupResolutionResult
+  }
 
   [IPC.PLAYLIST_LIST]: { args: []; result: PlaylistListItem[] }
   [IPC.PLAYLIST_GET]: {

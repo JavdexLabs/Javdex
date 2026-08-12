@@ -43,4 +43,18 @@ describe('videoBatchScrapeQueue feedback', () => {
       }
     )
   })
+
+  it('counts a persisted multi-candidate result as pending instead of success or failure', () => {
+    assert.deepEqual(
+      formatVideoBatchScrapeOutcome(
+        { ok: true, pending: true, pendingScrapeId: 7, skipped: true },
+        'PEND-001'
+      ),
+      {
+        status: 'pending',
+        level: 'info',
+        message: '待确认：已保存全部匹配候选，可稍后在待确认中心处理'
+      }
+    )
+  })
 })

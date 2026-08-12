@@ -65,6 +65,11 @@ function dependencies(
     countRematches: () => 0,
     countActresses: () => 0,
     resolveVideoFieldSources: () => ({}),
+    pendingVideoScrapes: {
+      list: () => [],
+      confirm: () => ({ status: 'applied', applied: true, warnings: [] }),
+      discard: () => true
+    },
     emit: () => undefined,
     rendererAvailable: () => true,
     avatarAutoCropOptions: {

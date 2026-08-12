@@ -42,7 +42,8 @@ function buildSupportedFieldsPolicy(input: PluginDevAgentStartInput): string {
 
 function buildKindSpecificResultRules(kind: ScraperPluginKind): string {
   if (kind !== 'video') return ''
-  return `- 影片评分 ratingAverage 必须返回 5 分制数值，范围 > 0 且 <= 5，最多保留 1 位小数；来源为 10 分制时先除以 2。评分为 0、为空、NaN、超出范围或无法判断时，不要返回 ratingAverage/ratingCount。`
+  return `- 搜索第一页只有一个番号精确匹配详情时可返回对象；存在多个精确匹配时必须抓取全部详情并返回对象数组。每个候选都必须包含非空 code，且 trim + toUpperCase 后与 ctx.code 完全相等；禁止前缀、包含、模糊匹配或第二页补位。任一精确匹配详情抓取失败时整次抛错，不得返回不完整数组。
+- 影片评分 ratingAverage 必须返回 5 分制数值，范围 > 0 且 <= 5，最多保留 1 位小数；来源为 10 分制时先除以 2。评分为 0、为空、NaN、超出范围或无法判断时，不要返回 ratingAverage/ratingCount。`
 }
 
 export function buildAgentSystemPrompt(kind: ScraperPluginKind): string {
@@ -90,7 +91,7 @@ ${profile.buildReturnGlossary()}
 - ctx.helpers.absoluteUrl、normalizeDate、normalizeText、unique 可用于标准化。
 - 动态搜索实现顺序：① GET 搜索 URL + fetchPage；② 反编 AJAX 为 fetchPage；③ 无法反编时用 fetchPage 打开搜索页 + ctx.browser（type/click/press/waitForSelector/wait）+ browser.html() 取交互后 HTML。
 - ctx.browser：snapshot/click/type/press/waitForSelector/wait/inspect/html/url；与 fetchPage 共用验证窗口与会话。
-- 返回 null 表示未匹配；返回对象字段必须使用上方“返回字段中文含义”里的标准 key。
+- 返回 null 表示未匹配；${kind === 'video' ? '返回单对象或候选对象数组' : '返回对象'}时字段必须使用上方“返回字段中文含义”里的标准 key。
 `
 }
 

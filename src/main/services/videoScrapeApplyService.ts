@@ -133,17 +133,17 @@ function countScrapedVideoTags(videoId: number): number {
   ).n
 }
 
-function countVideoExternalIds(videoId: number, sourceName?: string): number {
+function countVideoSources(videoId: number, sourceName?: string): number {
   const db = getDb()
   const row = sourceName
     ? db
         .prepare(
-          "SELECT COUNT(*) AS n FROM video_external_ids WHERE video_id = ? AND source = ? AND url IS NOT NULL AND trim(url) != ''"
+          "SELECT COUNT(*) AS n FROM video_sources WHERE video_id = ? AND source = ? AND url IS NOT NULL AND trim(url) != ''"
         )
         .get(videoId, sourceName)
     : db
         .prepare(
-          "SELECT COUNT(*) AS n FROM video_external_ids WHERE video_id = ? AND url IS NOT NULL AND trim(url) != ''"
+          "SELECT COUNT(*) AS n FROM video_sources WHERE video_id = ? AND url IS NOT NULL AND trim(url) != ''"
         )
         .get(videoId)
   return (row as { n: number }).n
@@ -210,7 +210,7 @@ function isVideoFieldEmptyForFill(
     case 'tags':
       return tagCount === 0
     case 'source':
-      return countVideoExternalIds(video.id, sourceName) === 0
+      return countVideoSources(video.id, sourceName) === 0
     case 'rating':
       return countVideoExternalStats(video.id, ratingSourceName ?? sourceName) === 0
     case 'samples': {
@@ -320,7 +320,7 @@ function replaceVideoAssets(
   return old.map((row) => row.local_path)
 }
 
-function upsertVideoExternalId(
+function upsertVideoSource(
   videoId: number,
   source: string,
   result: ScrapeResult,
@@ -328,11 +328,10 @@ function upsertVideoExternalId(
 ): void {
   const db = getDb()
   db.prepare(
-    `INSERT INTO video_external_ids
-       (video_id, source, external_id, external_code, url, title, fetched_at)
-     VALUES (@videoId, @source, @externalId, @externalCode, @url, @title, @fetchedAt)
+    `INSERT INTO video_sources
+       (video_id, source, external_code, url, title, fetched_at)
+     VALUES (@videoId, @source, @externalCode, @url, @title, @fetchedAt)
      ON CONFLICT(video_id, source) DO UPDATE SET
-       external_id = excluded.external_id,
        external_code = excluded.external_code,
        url = excluded.url,
        title = excluded.title,
@@ -340,7 +339,6 @@ function upsertVideoExternalId(
   ).run({
     videoId,
     source,
-    externalId: null,
     externalCode: result.code || null,
     url: result.sourceUrl ?? null,
     title: result.title ?? null,
@@ -348,9 +346,9 @@ function upsertVideoExternalId(
   })
 }
 
-function deleteVideoExternalId(videoId: number, source: string): void {
+function deleteVideoSource(videoId: number, source: string): void {
   getDb()
-    .prepare('DELETE FROM video_external_ids WHERE video_id = ? AND source = ?')
+    .prepare('DELETE FROM video_sources WHERE video_id = ? AND source = ?')
     .run(videoId, source)
 }
 
@@ -670,7 +668,7 @@ export function planVideoScrapeResult(
     ['actressesFemale', countVideoCastByGender(videoId, 'female')],
     ['actressesMale', countVideoCastByGender(videoId, 'male')],
     ['tags', countScrapedVideoTags(videoId)],
-    ['source', countVideoExternalIds(videoId, sourceName)],
+    ['source', countVideoSources(videoId, sourceName)],
     ['rating', countVideoExternalStats(videoId, ratingSourceName ?? sourceName)],
     ['samples', listVideoAssetPaths(videoId, 'sample')]
   ])
@@ -730,6 +728,47 @@ export function planVideoScrapeResult(
     directorChoice: classificationPlan.directorChoice,
     classificationAssignments: classificationPlan.assignments
   }
+}
+
+/** Return the conflicting video id when applying this result would complete a duplicate identity. */
+export function findVideoBusinessIdentityConflictForScrape(
+  videoId: number,
+  result: ScrapeResult,
+  fields: VideoScrapeField[],
+  mode: VideoScrapeUpdateMode
+): number | null {
+  const video = getVideoById(videoId)
+  if (!video) return null
+  const plan = planVideoScrapeResult(videoId, result, null, [], fields, undefined, mode)
+  let publisherId = video.publisher_organization_id
+  const publisherImpact = plan.impacts.find((impact) => impact.field === 'publisher')
+  if (publisherImpact && publisherImpact.action !== 'preserve') {
+    if (publisherImpact.action === 'clear') {
+      publisherId = null
+    } else {
+      publisherId =
+        plan.classifications.find((outcome) => outcome.field === 'publisher')?.entityId ?? null
+    }
+  }
+  let releaseDate = video.release_date?.trim() || null
+  const releaseImpact = plan.impacts.find((impact) => impact.field === 'releaseDate')
+  if (releaseImpact && releaseImpact.action !== 'preserve') {
+    releaseDate =
+      releaseImpact.action === 'clear' || typeof releaseImpact.nextValue !== 'string'
+        ? null
+        : releaseImpact.nextValue.trim() || null
+  }
+  if (publisherId == null || !video.code?.trim() || !releaseDate) return null
+  const conflict = getDb()
+    .prepare(
+      `SELECT id FROM videos
+       WHERE publisher_organization_id = ?
+         AND upper(trim(code)) = upper(trim(?))
+         AND release_date = ? AND id != ?
+       ORDER BY id LIMIT 1`
+    )
+    .get(publisherId, video.code, releaseDate, video.id) as { id: number } | undefined
+  return conflict?.id ?? null
 }
 
 /**
@@ -946,8 +985,8 @@ export function applyScrapeResult(
     }
 
     if (writeSource && sourceName) {
-      if (sourceUrl) upsertVideoExternalId(videoId, sourceName, result, scrapedAt)
-      else deleteVideoExternalId(videoId, sourceName)
+      if (sourceUrl) upsertVideoSource(videoId, sourceName, result, scrapedAt)
+      else deleteVideoSource(videoId, sourceName)
     }
 
     if (writeRating && statsSource) {
@@ -1047,6 +1086,8 @@ export interface VideoScrapeDeliverInput {
   imageFacts?: VideoImageAvailabilityFacts
   classificationOptions?: VideoClassificationResolutionOptions
   fetcher: (url: string) => Promise<Buffer>
+  /** Runs in the same database transaction after a successful application. */
+  afterSuccessfulApply?: () => void
 }
 
 export interface VideoScrapeDeliverOutcome {
@@ -1196,25 +1237,28 @@ export function createVideoScrapeApplyService(
 
       let application: ApplyVideoScrapeResult
       try {
-        application = coordinateDatabaseChange(() => {
-          const applied = apply(
-            input.videoId,
-            input.result,
-            downloads.coverRel,
-            downloads.avatarMap,
-            downloads.sampleRels,
-            input.fieldsToApply,
-            input.sourceName,
-            input.mode,
-            input.ratingSourceName,
-            imageFacts,
-            input.classificationOptions
-          )
-          for (const assetPath of applied.obsoleteAssetPaths) {
-            deleteBestEffort(assetPath)
-          }
-          return applied
-        })
+        application = coordinateDatabaseChange(() =>
+          getDb().transaction(() => {
+            const applied = apply(
+              input.videoId,
+              input.result,
+              downloads.coverRel,
+              downloads.avatarMap,
+              downloads.sampleRels,
+              input.fieldsToApply,
+              input.sourceName,
+              input.mode,
+              input.ratingSourceName,
+              imageFacts,
+              input.classificationOptions
+            )
+            if (applied.applied) input.afterSuccessfulApply?.()
+            for (const assetPath of applied.obsoleteAssetPaths) {
+              deleteBestEffort(assetPath)
+            }
+            return applied
+          })()
+        )
       } catch (applyError) {
         for (const assetPath of downloadedPaths) deleteBestEffort(assetPath)
         throw applyError

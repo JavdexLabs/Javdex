@@ -200,6 +200,114 @@ CREATE INDEX IF NOT EXISTS idx_pending_local_file_deletions_state
     ON pending_local_file_deletions(state);
 `
 
+export const VIDEO_SOURCES_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS video_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    external_code TEXT,
+    url TEXT,
+    title TEXT,
+    fetched_at TEXT,
+    FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+    UNIQUE (video_id, source)
+);
+CREATE INDEX IF NOT EXISTS idx_video_sources_video_id ON video_sources(video_id);
+`
+
+export const PENDING_VIDEO_DECISIONS_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS pending_scan_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    normalized_code TEXT NOT NULL UNIQUE CHECK(length(normalized_code) > 0),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_pending_scan_groups_updated_at
+    ON pending_scan_groups(updated_at);
+
+CREATE TABLE IF NOT EXISTS pending_scan_resources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL,
+    file_path TEXT NOT NULL,
+    normalized_path TEXT NOT NULL UNIQUE,
+    scan_root TEXT NOT NULL,
+    size_bytes INTEGER,
+    duration_seconds INTEGER,
+    file_mtime_ms INTEGER,
+    display_name TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (group_id) REFERENCES pending_scan_groups(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_pending_scan_resources_group
+    ON pending_scan_resources(group_id);
+CREATE INDEX IF NOT EXISTS idx_pending_scan_resources_root
+    ON pending_scan_resources(scan_root);
+
+CREATE TABLE IF NOT EXISTS pending_video_scrapes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id INTEGER NOT NULL UNIQUE,
+    revision INTEGER NOT NULL DEFAULT 1,
+    selected_fields_json TEXT NOT NULL,
+    applicable_fields_json TEXT NOT NULL,
+    update_mode TEXT NOT NULL CHECK(update_mode IN ('replace', 'fillEmpty', 'replaceIfPresent')),
+    request_json TEXT NOT NULL,
+    warnings_json TEXT NOT NULL,
+    batch_job_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_pending_video_scrapes_created_at
+    ON pending_video_scrapes(created_at);
+
+CREATE TABLE IF NOT EXISTS pending_video_scrape_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pending_scrape_id INTEGER NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    plugin_name TEXT NOT NULL,
+    plugin_source TEXT NOT NULL CHECK(plugin_source IN ('builtin', 'user', 'composite')),
+    plugin_version TEXT,
+    plugin_config_json TEXT NOT NULL,
+    source_name TEXT NOT NULL,
+    selected_fields_json TEXT NOT NULL,
+    selected_candidate_id INTEGER,
+    FOREIGN KEY (pending_scrape_id) REFERENCES pending_video_scrapes(id) ON DELETE CASCADE,
+    UNIQUE (pending_scrape_id, position)
+);
+CREATE INDEX IF NOT EXISTS idx_pending_video_scrape_sources_pending
+    ON pending_video_scrape_sources(pending_scrape_id);
+
+CREATE TABLE IF NOT EXISTS pending_video_scrape_candidates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    result_json TEXT NOT NULL,
+    source_url TEXT,
+    normalized_source_url TEXT,
+    FOREIGN KEY (source_id) REFERENCES pending_video_scrape_sources(id) ON DELETE CASCADE,
+    UNIQUE (source_id, position)
+);
+CREATE INDEX IF NOT EXISTS idx_pending_video_scrape_candidates_source
+    ON pending_video_scrape_candidates(source_id);
+
+CREATE TABLE IF NOT EXISTS pending_video_scrape_resources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    candidate_id INTEGER NOT NULL,
+    field TEXT NOT NULL CHECK(field IN ('cover', 'samples', 'actressAvatar')),
+    position INTEGER NOT NULL DEFAULT 0,
+    remote_url TEXT,
+    staged_path TEXT NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    size_bytes INTEGER,
+    FOREIGN KEY (candidate_id) REFERENCES pending_video_scrape_candidates(id) ON DELETE CASCADE,
+    UNIQUE (candidate_id, field, position)
+);
+CREATE INDEX IF NOT EXISTS idx_pending_video_scrape_resources_candidate
+    ON pending_video_scrape_resources(candidate_id);
+`
+
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
 
@@ -207,7 +315,7 @@ ${CLASSIFICATION_V8_SCHEMA_SQL}
 
 CREATE TABLE IF NOT EXISTS videos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    code TEXT UNIQUE NOT NULL,
+    code TEXT NOT NULL DEFAULT '',
     title TEXT,
     summary TEXT,
     cover_path TEXT,
@@ -230,6 +338,11 @@ CREATE TABLE IF NOT EXISTS videos (
     FOREIGN KEY (director_id) REFERENCES directors(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_videos_code ON videos(code);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_videos_business_identity
+    ON videos(publisher_organization_id, upper(trim(code)), release_date)
+    WHERE publisher_organization_id IS NOT NULL
+      AND code IS NOT NULL AND length(trim(code)) > 0
+      AND release_date IS NOT NULL AND length(trim(release_date)) > 0;
 CREATE INDEX IF NOT EXISTS idx_videos_add_time ON videos(add_time);
 CREATE INDEX IF NOT EXISTS idx_videos_release_date ON videos(release_date);
 CREATE INDEX IF NOT EXISTS idx_videos_rating ON videos(rating);
@@ -319,22 +432,7 @@ CREATE TABLE IF NOT EXISTS video_tag (
 CREATE INDEX IF NOT EXISTS idx_video_tag_tag_id ON video_tag(tag_id);
 CREATE INDEX IF NOT EXISTS idx_video_tag_origin ON video_tag(origin);
 
-CREATE TABLE IF NOT EXISTS video_external_ids (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    video_id INTEGER NOT NULL,
-    source TEXT NOT NULL,
-    external_id TEXT,
-    external_code TEXT,
-    url TEXT,
-    title TEXT,
-    fetched_at TEXT,
-    FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
-    UNIQUE (video_id, source)
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_video_external_source_id
-    ON video_external_ids(source, external_id)
-    WHERE external_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_video_external_video_id ON video_external_ids(video_id);
+${VIDEO_SOURCES_SCHEMA_SQL}
 
 CREATE TABLE IF NOT EXISTS video_external_stats (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -503,4 +601,6 @@ CREATE TABLE IF NOT EXISTS actress_gallery_assets (
 );
 CREATE INDEX IF NOT EXISTS idx_actress_gallery_assets_actress_id
     ON actress_gallery_assets(actress_id);
+
+${PENDING_VIDEO_DECISIONS_SCHEMA_SQL}
 `

@@ -27,6 +27,7 @@ import {
   writeOrganizationNames
 } from './organizationProfilePersistence'
 import { findSeriesOwnershipScopeConflict } from './seriesOwnershipScopeConflict'
+import { assertNoPendingVideoMetadataMutation } from '../db/videoPendingMetadataLock'
 
 type StoredOrganization = {
   id: number
@@ -112,6 +113,31 @@ function validateLifecycle(organization: StoredOrganization): void {
   }
 }
 
+function assertPublisherMergeIdentityAvailable(
+  database: Database.Database,
+  targetOrganizationId: number,
+  sourceOrganizationId: number
+): void {
+  const conflicts = database
+    .prepare(
+      `SELECT group_concat(id, ',') AS video_ids
+       FROM (
+         SELECT id, upper(trim(code)) AS normalized_code, release_date
+         FROM videos
+         WHERE publisher_organization_id IN (?, ?)
+           AND code IS NOT NULL AND trim(code) <> ''
+           AND release_date IS NOT NULL AND trim(release_date) <> ''
+         ORDER BY id
+       )
+       GROUP BY normalized_code, release_date
+       HAVING COUNT(*) > 1`
+    )
+    .all(targetOrganizationId, sourceOrganizationId) as Array<{ video_ids: string }>
+  if (conflicts.length === 0) return
+  const ids = conflicts.flatMap((row) => row.video_ids.split(',')).join('、')
+  throw new Error(`机构合并会造成影片业务身份冲突（影片 ID：${ids}）`)
+}
+
 export function createOrganizationMergeService(
   dependencies: Partial<OrganizationMergeServiceDependencies> = {}
 ): OrganizationMergeService {
@@ -126,6 +152,12 @@ export function createOrganizationMergeService(
       const committed = db.transaction(() => {
         const target = readOrganization(db, input.targetId)
         const source = readOrganization(db, input.sourceId)
+        assertNoPendingVideoMetadataMutation(
+          db,
+          '(v.maker_organization_id = ? OR v.publisher_organization_id = ?)',
+          [source.id, source.id]
+        )
+        assertPublisherMergeIdentityAvailable(db, target.id, source.id)
         const aliases = mergeClassificationAliases(
           target.main_name,
           readAliases(db, target.id),

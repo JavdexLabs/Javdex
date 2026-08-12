@@ -35,6 +35,7 @@ import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
 import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
 import { useAvatarAutoCropBatch } from '../contexts/AvatarAutoCropBatchContext'
 import { actressConflictReviewPath } from '../listView/actressRoutes'
+import { pendingCenterPath } from '../listView/pendingRoutes'
 import useNetworkSettingsController from '../hooks/useNetworkSettingsController'
 import useLatestAsyncLabel from '../hooks/useLatestAsyncLabel'
 import useScraperPluginSettingsController from '../hooks/useScraperPluginSettingsController'
@@ -546,6 +547,11 @@ export default function SettingsPage(): JSX.Element {
     navigate(actressConflictReviewPath())
   }
 
+  const openVideoPending = (): void => {
+    setBatchDetailScope(null)
+    navigate(pendingCenterPath({ tab: 'scrape' }))
+  }
+
   const unrecognizedCount = unrecognized.length
   const videoBatchRunning = videoBatch?.status === 'running'
   const actressBatchRunning = actressBatch?.status === 'running'
@@ -762,6 +768,7 @@ export default function SettingsPage(): JSX.Element {
                   defaultScraper={settings.defaultScraper}
                   onDismissScanScrapePrompt={dismissScanScrapePrompt}
                   onStartScanScrapeBatch={startVideoBatchDefault}
+                  onOpenPending={() => navigate(pendingCenterPath({ tab: 'scan' }))}
                 />
               )}
 
@@ -921,10 +928,18 @@ export default function SettingsPage(): JSX.Element {
               ) : undefined
             }
             pendingGroupCount={
-              batchDetailScope === 'actress' ? actressConflictGroupCount : 0
+              batchDetailScope === 'actress'
+                ? actressConflictGroupCount
+                : batchDetailScope === 'video'
+                  ? videoBatch?.pending ?? 0
+                  : 0
             }
             onOpenPending={
-              batchDetailScope === 'actress' ? openActressConflicts : undefined
+              batchDetailScope === 'actress'
+                ? openActressConflicts
+                : batchDetailScope === 'video'
+                  ? openVideoPending
+                  : undefined
             }
             onPause={() => {
               if (batchDetailScope === 'avatar') {

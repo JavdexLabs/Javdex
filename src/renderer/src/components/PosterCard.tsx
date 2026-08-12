@@ -142,6 +142,15 @@ export default function PosterCard({
           <div className="poster-placeholder">{video.code}</div>
         )}
         {badge && <span className={`poster-badge ${badge.cls}`}>{badge.text}</span>}
+        {video.has_pending_scrape ? (
+          <span
+            className="poster-badge"
+            data-pending="true"
+            data-stacked={badge ? 'true' : undefined}
+          >
+            待确认
+          </span>
+        ) : null}
         {showResourceTypeBadges && resourceBadges.visible.length > 0 ? (
           <span
             className="poster-resource-badges"

@@ -57,6 +57,14 @@ export interface PluginDevKindProfile {
   extractResultIdentity: (result: unknown) => string | undefined
 }
 
+function resultRecords(value: unknown): Record<string, unknown>[] {
+  const values = Array.isArray(value) ? value : [value]
+  return values.filter(
+    (item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === 'object' && !Array.isArray(item)
+  )
+}
+
 /** True when reference page title/body likely belongs to the actress under verification. */
 export function pageMatchesActressTarget(
   page: PluginDevPageInsight,
@@ -143,11 +151,10 @@ module.exports = { parseVideo };
   pageMatchesReferenceTarget(page, target, lastResult) {
     const candidates = new Set<string>()
     if (target.trim()) candidates.add(target.trim().toUpperCase())
-    const code =
-      lastResult && typeof lastResult === 'object'
-        ? (lastResult as { code?: unknown }).code
-        : undefined
-    if (typeof code === 'string' && code.trim()) candidates.add(code.trim().toUpperCase())
+    for (const result of resultRecords(lastResult)) {
+      const code = result.code
+      if (typeof code === 'string' && code.trim()) candidates.add(code.trim().toUpperCase())
+    }
     if (candidates.size === 0) return true
     const blob = `${page.title ?? ''}\n${page.text ?? ''}`.toUpperCase()
     for (const item of candidates) {
@@ -156,8 +163,7 @@ module.exports = { parseVideo };
     return false
   },
   extractResultIdentity(result) {
-    if (!result || typeof result !== 'object') return undefined
-    const code = (result as { code?: unknown }).code
+    const code = resultRecords(result)[0]?.code
     return typeof code === 'string' && code.trim() ? code.trim() : undefined
   }
 }

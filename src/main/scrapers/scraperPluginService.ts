@@ -1,7 +1,8 @@
 import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import { ActressScrapeResult, ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS, expandActressScrapeFields, ScrapeResult, ScraperPluginDescriptor, ScraperPluginKind, ScraperPluginPackage, type ActressScrapeField, type CompositeScraperInput, type ScraperPluginDelay, type ScraperPluginUpdateInput, type VideoScrapeField, type ScraperPluginPackageExport, type ScraperPluginPackageImport } from '@shared/scrapeTypes'
+import { ActressScrapeResult, ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS, expandActressScrapeFields, ScraperPluginDescriptor, ScraperPluginKind, ScraperPluginPackage, type ActressScrapeField, type CompositeScraperInput, type ScraperPluginDelay, type ScraperPluginUpdateInput, type VideoScrapeField, type ScraperPluginPackageExport, type ScraperPluginPackageImport } from '@shared/scrapeTypes'
+import type { VideoPluginScrapeResult } from '@shared/videoScrapeTypes'
 import type { BaseScraper } from './BaseScraper'
 import type { BaseActressScraper } from './BaseActressScraper'
 import {
@@ -52,7 +53,7 @@ class UserVideoScraper implements BaseScraper {
     this.scraperName = manifest.name
   }
 
-  async parseTask(code: string, proxyUrl?: string): Promise<ScrapeResult | null> {
+  async parseTask(code: string, proxyUrl?: string): Promise<VideoPluginScrapeResult> {
     const pluginCode = fs.readFileSync(this.entryPath, 'utf-8')
     return runUserVideoPlugin(this.manifest.name, pluginCode, code, proxyUrl)
   }

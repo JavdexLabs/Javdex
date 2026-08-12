@@ -127,7 +127,217 @@ function createV7ClassificationSchema(db: Database.Database): void {
   db.pragma('user_version = 7')
 }
 
+function createV10VideoIdentitySchema(db: Database.Database): void {
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE organizations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      main_name TEXT NOT NULL
+    );
+    CREATE TABLE directors (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      main_name TEXT NOT NULL
+    );
+    CREATE TABLE series (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      main_name TEXT NOT NULL
+    );
+    CREATE TABLE videos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT UNIQUE NOT NULL,
+      title TEXT,
+      summary TEXT,
+      cover_path TEXT,
+      poster_path TEXT,
+      original_title TEXT,
+      rating INTEGER DEFAULT 0,
+      release_date TEXT,
+      maker_organization_id INTEGER,
+      publisher_organization_id INTEGER,
+      series_id INTEGER,
+      director_id INTEGER,
+      duration_seconds INTEGER,
+      scraped_status INTEGER DEFAULT 0,
+      last_scraped_at TEXT,
+      updated_at TEXT,
+      add_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (publisher_organization_id) REFERENCES organizations(id) ON DELETE SET NULL
+    );
+    CREATE TABLE video_resources (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      video_id INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      locator TEXT NOT NULL,
+      resource_key TEXT NOT NULL UNIQUE,
+      size_bytes INTEGER,
+      duration_seconds INTEGER,
+      file_mtime_ms INTEGER,
+      display_name TEXT,
+      is_primary INTEGER NOT NULL DEFAULT 0,
+      add_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+    );
+    CREATE TABLE video_external_ids (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      video_id INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      external_id TEXT,
+      external_code TEXT,
+      url TEXT,
+      title TEXT,
+      fetched_at TEXT,
+      FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+      UNIQUE (video_id, source)
+    );
+    CREATE UNIQUE INDEX idx_video_external_source_id
+      ON video_external_ids(source, external_id)
+      WHERE external_id IS NOT NULL;
+  `)
+  db.pragma('user_version = 10')
+}
+
 describe('database schema', () => {
+  it('allows duplicate codes while enforcing complete video business identity', () => {
+    const db = new Database(':memory:')
+    try {
+      migrateDatabase(db)
+      db.prepare("INSERT INTO organizations (id, main_name) VALUES (1, 'Publisher')").run()
+
+      db.prepare("INSERT INTO videos (code) VALUES ('DUP-001')").run()
+      db.prepare("INSERT INTO videos (code) VALUES ('DUP-001')").run()
+      const codeColumn = db
+        .prepare('PRAGMA table_info(videos)')
+        .all()
+        .find((column) => (column as { name: string }).name === 'code') as {
+          notnull: number
+          dflt_value: string | null
+        }
+      assert.equal(codeColumn.notnull, 1)
+      assert.equal(codeColumn.dflt_value, "''")
+      const identityPendingId = Number(
+        db.prepare('INSERT INTO videos DEFAULT VALUES').run().lastInsertRowid
+      )
+      assert.deepEqual(
+        db.prepare('SELECT code FROM videos WHERE id = ?').get(identityPendingId),
+        { code: '' }
+      )
+      db.prepare(
+        "INSERT INTO videos (code, publisher_organization_id, release_date) VALUES ('DUP-001', 1, '2025-01-02')"
+      ).run()
+
+      assert.throws(
+        () =>
+          db
+            .prepare(
+              "INSERT INTO videos (code, publisher_organization_id, release_date) VALUES ('DUP-001', 1, '2025-01-02')"
+            )
+            .run(),
+        /UNIQUE constraint failed/
+      )
+      assert.throws(
+        () =>
+          db
+            .prepare(
+              "INSERT INTO videos (code, publisher_organization_id, release_date) VALUES ('  dup-001  ', 1, '2025-01-02')"
+            )
+            .run(),
+        /UNIQUE constraint failed/
+      )
+      assert.equal(tableExistsForTest(db, 'video_sources'), true)
+      assert.equal(tableExistsForTest(db, 'video_external_ids'), false)
+      assert.equal(columnNamesForTest(db, 'video_sources').has('external_id'), false)
+      for (const table of [
+        'pending_scan_groups',
+        'pending_scan_resources',
+        'pending_video_scrapes',
+        'pending_video_scrape_sources',
+        'pending_video_scrape_candidates',
+        'pending_video_scrape_resources'
+      ]) {
+        assert.equal(tableExistsForTest(db, table), true, `${table} should exist`)
+      }
+    } finally {
+      db.close()
+    }
+  })
+
+  it('upgrades video identity without changing ids, resources, or site sources', () => {
+    const db = new Database(':memory:')
+    try {
+      createV10VideoIdentitySchema(db)
+      db.prepare("INSERT INTO organizations (id, main_name) VALUES (7, 'Publisher')").run()
+      db.prepare(
+        `INSERT INTO videos (
+           id, code, title, publisher_organization_id, release_date, scraped_status, add_time
+         ) VALUES (41, '  abc-001  ', 'Keep me', 7, '2024-03-04', 1, '2024-01-01')`
+      ).run()
+      db.prepare(
+        `INSERT INTO video_resources (
+           id, video_id, kind, locator, resource_key, is_primary
+         ) VALUES (51, 41, 'local', '/library/ABC-001.mp4', 'local:/library/ABC-001.mp4', 1)`
+      ).run()
+      db.prepare(
+        `INSERT INTO video_external_ids (
+           id, video_id, source, external_id, external_code, url, title, fetched_at
+         ) VALUES (61, 41, 'Site', NULL, 'ABC-001', 'https://example.test/v/1', 'Source title', '2024-03-05')`
+      ).run()
+
+      migrateDatabase(db)
+
+      assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+      assert.deepEqual(
+        db.prepare('SELECT id, code, title FROM videos').get(),
+        { id: 41, code: 'ABC-001', title: 'Keep me' }
+      )
+      assert.deepEqual(
+        db.prepare('SELECT id, video_id, locator, is_primary FROM video_resources').get(),
+        { id: 51, video_id: 41, locator: '/library/ABC-001.mp4', is_primary: 1 }
+      )
+      assert.deepEqual(
+        db.prepare('SELECT id, video_id, source, external_code, url, title FROM video_sources').get(),
+        {
+          id: 61,
+          video_id: 41,
+          source: 'Site',
+          external_code: 'ABC-001',
+          url: 'https://example.test/v/1',
+          title: 'Source title'
+        }
+      )
+    } finally {
+      db.close()
+    }
+  })
+
+  it('leaves a v10 database untouched when normalized business identities conflict', () => {
+    const db = new Database(':memory:')
+    try {
+      createV10VideoIdentitySchema(db)
+      db.prepare("INSERT INTO organizations (id, main_name) VALUES (7, 'Publisher')").run()
+      db.prepare(
+        "INSERT INTO videos (id, code, publisher_organization_id, release_date) VALUES (41, 'abc-001', 7, '2024-03-04')"
+      ).run()
+      db.prepare(
+        "INSERT INTO videos (id, code, publisher_organization_id, release_date) VALUES (42, ' ABC-001 ', 7, '2024-03-04')"
+      ).run()
+
+      assert.throws(() => migrateDatabase(db), /41.*42|42.*41/)
+
+      assert.equal(db.pragma('user_version', { simple: true }), 10)
+      assert.equal(tableExistsForTest(db, 'video_external_ids'), true)
+      assert.equal(tableExistsForTest(db, 'video_sources'), false)
+      assert.deepEqual(
+        db.prepare('SELECT id, code FROM videos ORDER BY id').all(),
+        [
+          { id: 41, code: 'abc-001' },
+          { id: 42, code: ' ABC-001 ' }
+        ]
+      )
+    } finally {
+      db.close()
+    }
+  })
+
   it('migrates legacy classification text into stable entities and retires legacy storage', () => {
     const db = new Database(':memory:')
     try {
@@ -755,7 +965,7 @@ describe('database schema', () => {
         'video_actress',
         'tags',
         'video_tag',
-        'video_external_ids',
+        'video_sources',
         'video_external_stats',
         'video_assets',
         'playlists',
@@ -768,7 +978,13 @@ describe('database schema', () => {
         'pending_actress_scrape_resources',
         'actress_tags',
         'actress_tag',
-        'actress_gallery_assets'
+        'actress_gallery_assets',
+        'pending_scan_groups',
+        'pending_scan_resources',
+        'pending_video_scrapes',
+        'pending_video_scrape_sources',
+        'pending_video_scrape_candidates',
+        'pending_video_scrape_resources'
       ]
       assert.deepEqual(
         expectedTables.map(

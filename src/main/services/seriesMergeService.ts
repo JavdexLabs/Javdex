@@ -25,6 +25,7 @@ import {
   writeSeriesLinks,
   writeSeriesNames
 } from './seriesProfilePersistence'
+import { assertNoPendingVideoMetadataMutation } from '../db/videoPendingMetadataLock'
 
 type StoredSeries = {
   id: number
@@ -98,6 +99,7 @@ export function createSeriesMergeService(
       const committed = db.transaction(() => {
         const target = readSeries(db, input.targetId)
         const source = readSeries(db, input.sourceId)
+        assertNoPendingVideoMetadataMutation(db, 'v.series_id = ?', [source.id])
         const aliases = mergeClassificationAliases(
           target.main_name,
           readAliases(db, target.id),

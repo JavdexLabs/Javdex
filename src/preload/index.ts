@@ -32,7 +32,9 @@ import type {
   VideoFieldUpdateInput,
   VideoLinkResourceImportInput,
   VideoLinkResourceUpdateInput,
+  VideoMergeInput,
   VideoQuery,
+  VideoResourceImportTarget,
   VideoSampleImportInput
 } from '../shared/videoTypes'
 import type {
@@ -52,6 +54,8 @@ import type {
   VideoScrapeField,
   VideoScrapeUpdateMode
 } from '../shared/scrapeTypes'
+import type { PendingVideoScrapeConfirmInput } from '../shared/videoScrapeTypes'
+import type { PendingScanGroupResolution } from '../shared/libraryTypes'
 import type { BatchProgress } from '../shared/batchScrapeTypes'
 import type { RendererSettingsPatch } from '../shared/settingsTypes'
 import type { LlmProviderConfigSaveInput } from '../shared/llmProviders'
@@ -172,10 +176,17 @@ const api = {
   scan: {
     run: (folders?: string[]) => invokeApp(IPC.SCAN_RUN, folders),
     cancel: () => invokeApp(IPC.SCAN_CANCEL),
-    rename: (oldPath: string, newName: string) =>
-      invokeApp(IPC.FILE_RENAME, oldPath, newName),
-    importManual: (filePath: string, code: string) =>
-      invokeApp(IPC.FILE_IMPORT_MANUAL, filePath, code),
+    rename: (
+      oldPath: string,
+      newName: string,
+      code: string,
+      target: VideoResourceImportTarget
+    ) => invokeApp(IPC.FILE_RENAME, oldPath, newName, code, target),
+    importManual: (filePath: string, code: string, target: VideoResourceImportTarget) =>
+      invokeApp(IPC.FILE_IMPORT_MANUAL, filePath, code, target),
+    listPending: () => invokeApp(IPC.PENDING_SCAN_LIST),
+    resolvePending: (groupId: number, resolution: PendingScanGroupResolution) =>
+      invokeApp(IPC.PENDING_SCAN_RESOLVE, groupId, resolution),
     onProgress: (cb: (p: ScanProgress) => void) => onAppEvent(IPC.SCAN_PROGRESS, cb)
   },
   videos: {
@@ -188,8 +199,8 @@ const api = {
     remove: (id: number) => invokeVideo(IPC.VIDEO_DELETE, id),
     setRating: (id: number, rating: number) =>
       invokeVideo(IPC.VIDEO_SET_RATING, id, rating),
-    correctImport: (id: number, code: string) =>
-      invokeVideo(IPC.VIDEO_CORRECT_IMPORT, id, code),
+    correctImport: (id: number, code: string, discardPendingScrape?: boolean) =>
+      invokeVideo(IPC.VIDEO_CORRECT_IMPORT, id, code, discardPendingScrape),
     years: () => invokeVideo(IPC.VIDEO_YEARS),
     importSample: (id: number, input: VideoSampleImportInput) =>
       invokeVideo(IPC.VIDEO_SAMPLE_IMPORT, id, input),
@@ -219,7 +230,10 @@ const api = {
       videoId: number,
       resourceId: number,
       lastResourceMode?: LastVideoResourceRemovalMode
-    ) => invokeVideo(IPC.VIDEO_RESOURCE_REMOVE, videoId, resourceId, lastResourceMode)
+    ) => invokeVideo(IPC.VIDEO_RESOURCE_REMOVE, videoId, resourceId, lastResourceMode),
+    merge: (input: VideoMergeInput) => invokeVideo(IPC.VIDEO_MERGE, input),
+    splitResource: (videoId: number, resourceId: number) =>
+      invokeVideo(IPC.VIDEO_RESOURCE_SPLIT, videoId, resourceId)
   },
   playlists: {
     list: () => invokeApp(IPC.PLAYLIST_LIST),
@@ -321,6 +335,11 @@ const api = {
       mode?: VideoScrapeUpdateMode,
       directorSelectionId?: number
     ) => invokeScrape(IPC.SCRAPE_ONE, videoId, scraperName, fields, mode, directorSelectionId),
+    listPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_LIST),
+    confirmPending: (input: PendingVideoScrapeConfirmInput) =>
+      invokeScrape(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, input),
+    discardPending: (pendingScrapeId: number) =>
+      invokeScrape(IPC.PENDING_VIDEO_SCRAPE_DISCARD, pendingScrapeId),
     videoBatchCount: (filter: VideoBatchScrapeFilter) =>
       invokeScrape(IPC.SCRAPE_VIDEO_BATCH_COUNT, filter),
     videoBatchStart: (request: VideoBatchScrapeRequest) =>

@@ -16,7 +16,10 @@ export function videoClassificationSelectExtras(videoAlias = 'v'): string {
     (SELECT o.main_name FROM organizations o WHERE o.id = ${videoAlias}.maker_organization_id) AS maker,
     (SELECT o.main_name FROM organizations o WHERE o.id = ${videoAlias}.publisher_organization_id) AS publisher,
     (SELECT s.main_name FROM series s WHERE s.id = ${videoAlias}.series_id) AS series,
-    (SELECT d.main_name FROM directors d WHERE d.id = ${videoAlias}.director_id) AS director`
+    (SELECT d.main_name FROM directors d WHERE d.id = ${videoAlias}.director_id) AS director,
+    EXISTS (
+      SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = ${videoAlias}.id
+    ) AS has_pending_scrape`
 }
 
 /** Shared projection for every surface that renders a video card. */
@@ -49,6 +52,6 @@ export function hydrateVideoListRows(rows: VideoListProjectionRow[]): Video[] {
     const resourceKinds = (resourceKindsCsv?.split(',') ?? []).filter(
       (kind): kind is VideoResourceKind => VIDEO_RESOURCE_KINDS.has(kind as VideoResourceKind)
     )
-    return { ...video, resource_kinds: resourceKinds }
+    return { ...video, has_pending_scrape: Boolean(video.has_pending_scrape), resource_kinds: resourceKinds }
   })
 }

@@ -52,6 +52,65 @@ export interface ScrapeResult {
   tags?: string[]
 }
 
+export type VideoPluginScrapeResult = ScrapeResult | ScrapeResult[] | null
+
+export interface PendingVideoScrapeCandidate {
+  id: number
+  position: number
+  result: ScrapeResult
+  sourceUrl: string | null
+  stagedCoverPath: string | null
+  stagedSamplePaths: Array<string | null>
+  stagedActressAvatarPaths: Array<string | null>
+}
+
+export interface PendingVideoScrapeSource {
+  id: number
+  position: number
+  pluginName: string
+  pluginSource: 'builtin' | 'user' | 'composite'
+  pluginVersion: string | null
+  sourceName: string
+  selectedFields: VideoScrapeField[]
+  selectedCandidateId: number | null
+  candidates: PendingVideoScrapeCandidate[]
+}
+
+export interface PendingVideoScrape {
+  id: number
+  videoId: number
+  revision: number
+  selectedFields: VideoScrapeField[]
+  applicableFields: VideoScrapeField[]
+  updateMode: VideoScrapeUpdateMode
+  warnings: string[]
+  createdAt: string
+  updatedAt: string
+  sources: PendingVideoScrapeSource[]
+  stagedBytes: number
+}
+
+export interface PendingVideoScrapeResolutionResult {
+  status: 'applied' | 'skipped' | 'merge-required'
+  applied: boolean
+  conflictVideoId?: number
+  warnings: string[]
+  directorChoice?: VideoDirectorChoiceRequired
+}
+
+export interface PendingVideoScrapeSelection {
+  sourceId: number
+  candidateId: number
+}
+
+export interface PendingVideoScrapeConfirmInput {
+  pendingScrapeId: number
+  selections: PendingVideoScrapeSelection[]
+  directorSelectionId?: number
+  /** Explicitly retained video for the conflict-only merge-and-apply flow. */
+  mergeRetainedVideoId?: number
+}
+
 export interface ScrapedActress {
   name: string
   avatarUrl?: string
@@ -118,8 +177,10 @@ export interface VideoRematchBatchRequest {
   mode?: VideoScrapeUpdateMode
 }
 export interface VideoScrapeOneResult {
-  result: ScrapeResult
+  result?: ScrapeResult
   applied: boolean
+  pending?: boolean
+  pendingScrapeId?: number
   warnings: string[]
   classifications: VideoClassificationResolutionOutcome[]
   directorChoice?: VideoDirectorChoiceRequired

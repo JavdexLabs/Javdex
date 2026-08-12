@@ -22,10 +22,15 @@ const sortDirection = z.enum(['asc', 'desc'])
 const organizationRole = z.enum(['maker', 'publisher'])
 const pluginKind = z.enum(['video', 'actress'])
 const scrapeFields = z.array(text)
+const videoResourceImportTarget = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('new') }).strict(),
+  z.object({ kind: z.literal('existing'), videoId: id }).strict()
+])
 
 const videoLinkImport = z
   .object({
     code: nonEmptyText,
+    target: videoResourceImportTarget,
     url: nonEmptyText,
     kind: z.enum(['direct', 'web', 'magnet', 'ed2k']).optional(),
     displayName: nullableText.optional(),
@@ -33,7 +38,7 @@ const videoLinkImport = z
   })
   .strict()
 
-const videoLinkUpdate = videoLinkImport.omit({ code: true })
+const videoLinkUpdate = videoLinkImport.omit({ code: true, target: true })
 
 const mediaImageImport = z.discriminatedUnion('source', [
   z.object({ source: z.literal('file'), sourcePath: nonEmptyText, remoteUrl: nullableText.optional() }),
@@ -56,6 +61,7 @@ const settingsPatch = z
   .object({
     libraryPaths: stringArray.optional(),
     autoDeleteResourceLessVideos: z.boolean().optional(),
+    autoMergeSameCodeResources: z.boolean().optional(),
     autoScanEnabled: z.boolean().optional(),
     autoScanIntervalMinutes: z.union([
       z.literal(15),
@@ -145,7 +151,7 @@ export const videoIpcSchemas = {
   [IPC.VIDEO_MARK_SCRAPE_SUCCESS]: z.tuple([id]),
   [IPC.VIDEO_DELETE]: z.tuple([id]),
   [IPC.VIDEO_SET_RATING]: z.tuple([id, finiteNumber.min(0).max(5)]),
-  [IPC.VIDEO_CORRECT_IMPORT]: z.tuple([id, nonEmptyText]),
+  [IPC.VIDEO_CORRECT_IMPORT]: z.tuple([id, nonEmptyText, z.boolean().optional()]),
   [IPC.VIDEO_YEARS]: noArgs,
   [IPC.VIDEO_SAMPLE_IMPORT]: z.tuple([id, mediaImageImport]),
   [IPC.VIDEO_SAMPLE_DELETE]: z.tuple([id, id]),
@@ -162,7 +168,11 @@ export const videoIpcSchemas = {
     id,
     id,
     z.enum(['retain-video', 'delete-video']).optional()
-  ])
+  ]),
+  [IPC.VIDEO_MERGE]: z.tuple([
+    z.object({ retainedVideoId: id, sourceVideoId: id }).strict()
+  ]),
+  [IPC.VIDEO_RESOURCE_SPLIT]: z.tuple([id, id])
 } satisfies IpcArgsSchemaMap<VideoIpcContract>
 
 export const actressIpcSchemas = {
@@ -234,6 +244,16 @@ export const scrapeIpcSchemas = {
     text.optional(),
     id.optional()
   ]),
+  [IPC.PENDING_VIDEO_SCRAPE_LIST]: noArgs,
+  [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: z.tuple([
+    z.object({
+      pendingScrapeId: id,
+      selections: z.array(z.object({ sourceId: id, candidateId: id }).strict()),
+      directorSelectionId: id.optional(),
+      mergeRetainedVideoId: id.optional()
+    }).strict()
+  ]),
+  [IPC.PENDING_VIDEO_SCRAPE_DISCARD]: z.tuple([id]),
   [IPC.SCRAPE_BATCH_START]: z.tuple([optionalText]),
   [IPC.SCRAPE_BATCH_CANCEL]: noArgs,
   [IPC.SCRAPE_VIDEO_BATCH_COUNT]: z.tuple([object]),
@@ -307,8 +327,15 @@ export const appIpcSchemas = {
   [IPC.APP_UPDATE_IGNORE_VERSION]: z.tuple([nonEmptyText]),
   [IPC.SCAN_RUN]: z.tuple([stringArray.optional()]),
   [IPC.SCAN_CANCEL]: noArgs,
-  [IPC.FILE_RENAME]: z.tuple([nonEmptyText, nonEmptyText]),
-  [IPC.FILE_IMPORT_MANUAL]: z.tuple([nonEmptyText, nonEmptyText]),
+  [IPC.FILE_RENAME]: z.tuple([
+    nonEmptyText,
+    nonEmptyText,
+    nonEmptyText,
+    videoResourceImportTarget
+  ]),
+  [IPC.FILE_IMPORT_MANUAL]: z.tuple([nonEmptyText, nonEmptyText, videoResourceImportTarget]),
+  [IPC.PENDING_SCAN_LIST]: noArgs,
+  [IPC.PENDING_SCAN_RESOLVE]: z.tuple([id, object]),
   [IPC.PLAYLIST_LIST]: noArgs,
   [IPC.PLAYLIST_GET]: z.tuple([
     id,

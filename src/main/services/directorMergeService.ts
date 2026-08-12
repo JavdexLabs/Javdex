@@ -19,6 +19,7 @@ import {
 } from './classificationImageCleanup'
 import { writeDirectorLinks, writeDirectorNames } from './directorProfilePersistence'
 import { mediaAssetStore } from './mediaAssetStore'
+import { assertNoPendingVideoMetadataMutation } from '../db/videoPendingMetadataLock'
 
 type StoredDirector = {
   id: number
@@ -97,6 +98,7 @@ export function createDirectorMergeService(
       const committed = db.transaction(() => {
         const target = readDirector(db, input.targetId)
         const source = readDirector(db, input.sourceId)
+        assertNoPendingVideoMetadataMutation(db, 'v.director_id = ?', [source.id])
         const aliases = mergeClassificationAliases(
           target.main_name,
           readNames(db, target.id),

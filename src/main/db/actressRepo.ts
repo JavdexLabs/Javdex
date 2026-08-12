@@ -21,6 +21,7 @@ import {
   validateAndReleaseActressNameOwnershipForMerge,
   synchronizeActressNameOwnership
 } from './actressNameOwnership'
+import { assertNoPendingVideoMetadataMutation } from './videoPendingMetadataLock'
 
 interface ActressGalleryAssetWriteInput {
   remoteUrl?: string | null
@@ -720,6 +721,11 @@ export function mergeActresses(
 
   const db = getDb()
   const cleanup = db.transaction(() => {
+    assertNoPendingVideoMetadataMutation(
+      db,
+      'EXISTS (SELECT 1 FROM video_actress va WHERE va.video_id = v.id AND va.actress_id = ?)',
+      [mergeId]
+    )
     const keep = db.prepare('SELECT * FROM actresses WHERE id = ?').get(keepId) as
       | Actress
       | undefined
@@ -1012,6 +1018,18 @@ export function deleteActressRecords(
 
   const result = db.transaction(() => {
     const impact = inspectActressDeleteImpact(uniqueIds)
+    if (mode === 'unlink-videos-and-delete') {
+      const idsJson = JSON.stringify(uniqueIds)
+      assertNoPendingVideoMetadataMutation(
+        db,
+        `EXISTS (
+           SELECT 1 FROM video_actress va
+           WHERE va.video_id = v.id
+             AND va.actress_id IN (SELECT value FROM json_each(?))
+         )`,
+        [idsJson]
+      )
+    }
     const findActress = db.prepare(
       'SELECT avatar_path, avatar_source_path FROM actresses WHERE id = ?'
     )

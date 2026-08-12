@@ -29,7 +29,8 @@ export const ROUTE_PATH = {
   settings: '/settings',
   settingsTree: '/settings/*',
   settingsGroup: '/settings/:group/:tab',
-  settingsPluginDev: '/settings/plugin-dev'
+  settingsPluginDev: '/settings/plugin-dev',
+  pending: '/pending'
 } as const
 
 export const ROUTE_SEGMENT = {

@@ -4,10 +4,12 @@ import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-rou
 import { ListPlus, Pencil, Play, SearchCheck, SearchX } from 'lucide-react'
 import type {
   LastVideoResourceRemovalMode,
+  Video,
   VideoDetail,
   VideoResource,
   VideoResourceDetail
 } from '@shared/videoTypes'
+import { normalizeVideoCode } from '@shared/videoCode'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
@@ -52,12 +54,14 @@ import {
 } from '../listView/listNavigation'
 import { LIST_PARAM } from '../listView/listQueryParams'
 import { ROUTE_MATCH } from '../listView/routePaths'
+import { pendingCenterPath } from '../listView/pendingRoutes'
 import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import { invalidateVideoLibraryQueries } from '../query/invalidateLibraryQueries'
 import { settingsPath } from '../settings/settingsRoutes'
 import VideoResourceImportModal from '../components/VideoResourceImportModal'
 import DirectorScrapeChoiceModal from '../components/DirectorScrapeChoiceModal'
 import Button from '../components/Button'
+import { isVideoBusinessIdentityConflictError } from './videoBusinessIdentityConflict'
 
 interface PendingDirectorChoice {
   fields: VideoScrapeField[]
@@ -100,6 +104,7 @@ export default function DetailPage(): JSX.Element {
   const [scraping, setScraping] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
+  const [editIdentityConflict, setEditIdentityConflict] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const { scrapers, pluginDetails, defaultScraper } = useScraperPluginCatalog('video')
   const [videoDetailUseFirstSampleBackground, setVideoDetailUseFirstSampleBackground] =
@@ -110,6 +115,7 @@ export default function DetailPage(): JSX.Element {
     useState<PendingDirectorChoice | null>(null)
   const [directorChoiceBusy, setDirectorChoiceBusy] = useState(false)
   const [showCorrectImport, setShowCorrectImport] = useState(false)
+  const [confirmDiscardForCorrect, setConfirmDiscardForCorrect] = useState(false)
   const [showAddToPlaylist, setShowAddToPlaylist] = useState(false)
   const [showMaintenanceInfo, setShowMaintenanceInfo] = useState(false)
   const [showResourceImport, setShowResourceImport] = useState(false)
@@ -126,10 +132,17 @@ export default function DetailPage(): JSX.Element {
   const [removeResourceTarget, setRemoveResourceTarget] = useState<VideoResourceDetail | null>(null)
   const [removingResource, setRemovingResource] = useState(false)
   const [localResourceLabel, setLocalResourceLabel] = useState('')
+  const [mergeCandidates, setMergeCandidates] = useState<Array<Pick<Video, 'id' | 'code' | 'title'>>>([])
+  const [mergeTargetId, setMergeTargetId] = useState<number | null>(null)
+  const [mergeRetainedId, setMergeRetainedId] = useState<number | null>(null)
+  const [mergeBusy, setMergeBusy] = useState(false)
+  const [splitTarget, setSplitTarget] = useState<VideoResourceDetail | null>(null)
+  const [splitBusy, setSplitBusy] = useState(false)
 
   const dismissOverlays = useCallback(() => {
     setConfirmDelete(false)
     setShowEdit(false)
+    setEditIdentityConflict(null)
     setConfirmClear(false)
     setShowScrapeFields(false)
     setPendingDirectorChoice(null)
@@ -353,6 +366,64 @@ export default function DetailPage(): JSX.Element {
     }
   }
 
+  const openMergeVideos = async (): Promise<void> => {
+    if (!video) return
+    try {
+      const normalizedCode = normalizeVideoCode(video.code)
+      const result = await api.videos.list({ search: normalizedCode, limit: 100, offset: 0 })
+      const candidates = result.items.filter(
+        (candidate) =>
+          candidate.id !== video.id && normalizeVideoCode(candidate.code) === normalizedCode
+      )
+      if (candidates.length === 0) {
+        toast.show('没有可合并的同番号影片', 'info')
+        return
+      }
+      setMergeCandidates(candidates)
+      setMergeTargetId(null)
+      setMergeRetainedId(null)
+    } catch (error) {
+      toast.show(String((error as Error).message), 'error')
+    }
+  }
+
+  const doMergeVideos = async (): Promise<void> => {
+    if (!video || mergeTargetId == null || mergeRetainedId == null || mergeBusy) return
+    setMergeBusy(true)
+    try {
+      const sourceVideoId = mergeRetainedId === video.id ? mergeTargetId : video.id
+      const result = await api.videos.merge({
+        retainedVideoId: mergeRetainedId,
+        sourceVideoId
+      })
+      setMergeCandidates([])
+      toast.show(`影片已合并，保留 ID ${result.retainedVideoId}`, 'success')
+      invalidateVideos()
+      if (result.retainedVideoId === video.id) void load({ silent: true })
+      else navigateToVideoDetail(navigate, location, result.retainedVideoId, { replace: true })
+    } catch (error) {
+      toast.show(String((error as Error).message), 'error')
+    } finally {
+      setMergeBusy(false)
+    }
+  }
+
+  const doSplitResource = async (): Promise<void> => {
+    if (!splitTarget || splitBusy) return
+    setSplitBusy(true)
+    try {
+      const result = await api.videos.splitResource(videoId, splitTarget.id)
+      setSplitTarget(null)
+      toast.show(`资源已拆分到新影片 ID ${result.videoId}`, 'success')
+      invalidateVideos()
+      navigateToVideoDetail(navigate, location, result.videoId)
+    } catch (error) {
+      toast.show(String((error as Error).message), 'error')
+    } finally {
+      setSplitBusy(false)
+    }
+  }
+
   const executeRescrape = async (
     fields: VideoScrapeField[],
     site: string,
@@ -372,6 +443,11 @@ export default function DetailPage(): JSX.Element {
       )
       if (res.directorChoice) {
         setPendingDirectorChoice({ fields, site, mode, choice: res.directorChoice })
+        return
+      }
+      if (res.pending) {
+        toast.show('发现多个候选，已保存到待确认中心', 'info')
+        navigate(pendingCenterPath({ tab: 'scrape', videoId }))
         return
       }
       setPendingDirectorChoice(null)
@@ -424,6 +500,10 @@ export default function DetailPage(): JSX.Element {
       invalidateVideos()
       void load({ silent: true })
     } catch (e) {
+      if (isVideoBusinessIdentityConflictError(e)) {
+        setEditIdentityConflict((e as Error).message)
+        return
+      }
       toast.show(String((e as Error).message), 'error')
     }
   }
@@ -467,7 +547,7 @@ export default function DetailPage(): JSX.Element {
     setShowCorrectImport(true)
   }
 
-  const doCorrectImport = async (): Promise<void> => {
+  const doCorrectImport = async (discardPendingScrape = false): Promise<void> => {
     const trimmed = correctCode.trim()
     if (!trimmed) {
       toast.show('番号不能为空', 'error')
@@ -475,8 +555,13 @@ export default function DetailPage(): JSX.Element {
     }
     setCorrecting(true)
     try {
-      const res = await api.videos.correctImport(videoId, trimmed)
+      const res = await api.videos.correctImport(videoId, trimmed, discardPendingScrape)
+      if (res.pendingDiscardRequired) {
+        setConfirmDiscardForCorrect(true)
+        return
+      }
       setShowCorrectImport(false)
+      setConfirmDiscardForCorrect(false)
       if (res.mergedIntoId) {
         toast.show(`番号已修正为 ${res.code}（已合并到已有记录）`, 'success')
         navigateToVideoDetail(navigate, location, res.mergedIntoId, { replace: true })
@@ -547,13 +632,25 @@ export default function DetailPage(): JSX.Element {
               )}
               {video.title ? `  ${video.title}` : ''}
             </h1>
-            {video.scraped_status !== 1 ? (
+            {video.scraped_status !== 1 || video.has_pending_scrape ? (
               <div className="detail-title-badges">
-                <span
-                  className={`detail-meta-status detail-meta-status--${video.scraped_status === 2 ? 'failed' : 'unscraped'}`}
-                >
-                  {getVideoScrapeStatusLabel(video.scraped_status)}
-                </span>
+                {video.scraped_status !== 1 ? (
+                  <span
+                    className={`detail-meta-status detail-meta-status--${video.scraped_status === 2 ? 'failed' : 'unscraped'}`}
+                  >
+                    {getVideoScrapeStatusLabel(video.scraped_status)}
+                  </span>
+                ) : null}
+                {video.has_pending_scrape ? (
+                  <button
+                    type="button"
+                    className="detail-meta-status"
+                    data-pending="true"
+                    onClick={() => navigate(pendingCenterPath({ tab: 'scrape', videoId: video.id }))}
+                  >
+                    查看待确认候选
+                  </button>
+                ) : null}
                 {video.scraped_status === 0 ? (
                   <span className="detail-scrape-hint">
                     可在
@@ -657,6 +754,13 @@ export default function DetailPage(): JSX.Element {
                     onClick: () => setShowMaintenanceInfo(true)
                   },
                   {
+                    key: 'merge-video',
+                    label: '合并同番号影片',
+                    onClick: () => {
+                      void openMergeVideos()
+                    }
+                  },
+                  {
                     key: 'mark-success',
                     label: '标记为刮削成功',
                     hidden: video.scraped_status === 1,
@@ -751,6 +855,7 @@ export default function DetailPage(): JSX.Element {
         onSetPrimaryResource={(resourceId) => {
           void handleSetPrimaryResource(resourceId)
         }}
+        onSplitResource={setSplitTarget}
         onRemoveResource={setRemoveResourceTarget}
         onAddResource={() => setShowResourceImport(true)}
       />
@@ -809,6 +914,22 @@ export default function DetailPage(): JSX.Element {
         </Modal>
       )}
 
+      {confirmDiscardForCorrect && (
+        <Modal
+          title="丢弃待确认结果并修改番号"
+          danger
+          confirmText={correcting ? '处理中…' : '丢弃并修改'}
+          onConfirm={() => {
+            if (!correcting) void doCorrectImport(true)
+          }}
+          onCancel={() => {
+            if (!correcting) setConfirmDiscardForCorrect(false)
+          }}
+        >
+          这部影片有尚未确认的刮削候选。修改番号会原子地丢弃这些候选和暂存图片；关闭此窗口不会产生任何修改。
+        </Modal>
+      )}
+
       {showScrapeFields && (
         <ScrapeFieldsModal
           title="修正匹配"
@@ -847,14 +968,35 @@ export default function DetailPage(): JSX.Element {
       {showEdit && (
         <EditMetadataModal
           video={video}
-          onCancel={() => setShowEdit(false)}
+          onCancel={() => {
+            setEditIdentityConflict(null)
+            setShowEdit(false)
+          }}
           onSave={handleEditSave}
         />
+      )}
+
+      {editIdentityConflict && (
+        <Modal
+          title="影片业务身份冲突"
+          hint="发行商、番号和发行日期与另一部影片完全相同，当前编辑尚未保存。"
+          confirmText="丢弃编辑并进入合并"
+          onCancel={() => setEditIdentityConflict(null)}
+          onConfirm={() => {
+            setEditIdentityConflict(null)
+            setShowEdit(false)
+            void openMergeVideos()
+          }}
+        >
+          <p className="copyable-text">{editIdentityConflict}</p>
+          <p>进入合并后，请选择另一部同番号影片，并明确选择要保留的内部 ID。</p>
+        </Modal>
       )}
 
       {showResourceImport && (
         <VideoResourceImportModal
           fixedCode={video.code}
+          fixedVideoId={video.id}
           onCancel={() => setShowResourceImport(false)}
           onImported={() => {
             setShowResourceImport(false)
@@ -863,6 +1005,81 @@ export default function DetailPage(): JSX.Element {
             void load({ silent: true })
           }}
         />
+      )}
+
+      {mergeCandidates.length > 0 && (
+        <Modal
+          title="合并同番号影片"
+          subtitle="先选择另一部影片，再明确选择要保留的内部 ID。"
+          confirmText={mergeBusy ? '合并中…' : '合并'}
+          confirmDisabled={mergeTargetId == null || mergeRetainedId == null || mergeBusy}
+          busy={mergeBusy}
+          onConfirm={() => void doMergeVideos()}
+          onCancel={() => {
+            if (!mergeBusy) setMergeCandidates([])
+          }}
+        >
+          <div className="entity-edit-fields">
+            <label className="form-field">
+              <span className="form-field-label">合并对象</span>
+              <select
+                className="select form-control-full"
+                value={mergeTargetId ?? ''}
+                disabled={mergeBusy}
+                onChange={(event) => {
+                  setMergeTargetId(event.target.value ? Number(event.target.value) : null)
+                  setMergeRetainedId(null)
+                }}
+              >
+                <option value="">请选择同番号影片</option>
+                {mergeCandidates.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    ID {candidate.id} · {candidate.code}{candidate.title ? ` · ${candidate.title}` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {mergeTargetId != null ? (
+              <fieldset className="form-field">
+                <legend className="form-field-label">保留影片</legend>
+                <label className="choice-row">
+                  <input
+                    type="radio"
+                    name="merge-retained-video"
+                    checked={mergeRetainedId === video.id}
+                    onChange={() => setMergeRetainedId(video.id)}
+                  />
+                  保留当前影片 ID {video.id}
+                </label>
+                <label className="choice-row">
+                  <input
+                    type="radio"
+                    name="merge-retained-video"
+                    checked={mergeRetainedId === mergeTargetId}
+                    onChange={() => setMergeRetainedId(mergeTargetId)}
+                  />
+                  保留另一部影片 ID {mergeTargetId}
+                </label>
+              </fieldset>
+            ) : null}
+          </div>
+          <p className="modal-field-hint">保留影片的单值资料和主资源优先；来源影片会在合并成功后删除。</p>
+        </Modal>
+      )}
+
+      {splitTarget && (
+        <Modal
+          title="拆分影片资源"
+          confirmText={splitBusy ? '拆分中…' : '拆分'}
+          busy={splitBusy}
+          onConfirm={() => void doSplitResource()}
+          onCancel={() => {
+            if (!splitBusy) setSplitTarget(null)
+          }}
+        >
+          这条非主资源将移动到一部新的身份待定影片，并成为新影片的主资源。不会复制元数据，也不会移动或重命名本地文件。
+          <div className="modal-path-text">{splitTarget.display_name || splitTarget.display_locator}</div>
+        </Modal>
       )}
 
       {editResourceTarget && editResourceTarget.kind !== 'local' && (
@@ -950,6 +1167,9 @@ export default function DetailPage(): JSX.Element {
           onCancel={() => setConfirmDelete(false)}
         >
           确定要永久删除「{video.code}」吗？将删除全部本地文件、链接资源、关系、应用自有图片及所有元数据，此操作不可恢复。
+          {video.has_pending_scrape ? (
+            <div className="modal-path-hint">同时会删除这部影片的待确认刮削候选与暂存图片。</div>
+          ) : null}
           {video.resources.some((resource) => resource.kind === 'local') ? (
             video.resources.filter((resource) => resource.kind === 'local').map((resource) => (
               <div key={resource.id} className="modal-path-text">

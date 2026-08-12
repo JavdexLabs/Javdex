@@ -14,6 +14,7 @@ import SeriesDetailPage from './pages/SeriesDetailPage'
 import PlaylistShell from './components/PlaylistShell'
 import PlaylistDetailPage from './pages/PlaylistDetailPage'
 import SettingsPage from './pages/SettingsPage'
+import PendingCenterPage from './pages/PendingCenterPage'
 import { PluginDevLeaveGuardProvider } from './components/pluginDev/PluginDevLeaveGuard'
 import { ToastProvider } from './components/Toast'
 import { DisplayModeProvider } from './components/DisplayModeContext'
@@ -121,6 +122,7 @@ function AppContent(): JSX.Element {
                         element={<Navigate to={settingsPath('overview')} replace />}
                       />
                     </Route>
+                    <Route path={ROUTE_PATH.pending} element={<PendingCenterPage />} />
                     <Route path="*" element={<Navigate to={ROUTE_PATH.library} replace />} />
                   </Routes>
                 </Layout>

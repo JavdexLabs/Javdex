@@ -73,6 +73,15 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
   )
 
   registerScrapeHandler(IPC.SCRAPE_ONE, (...args) => jobs.scrapeOneVideo(...args))
+  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_LIST, () =>
+    jobs.listPendingVideoScrapes()
+  )
+  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, (input) =>
+    jobs.confirmPendingVideoScrape(input)
+  )
+  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_DISCARD, (pendingScrapeId) =>
+    jobs.discardPendingVideoScrape(pendingScrapeId)
+  )
   registerScrapeHandler(IPC.SCRAPE_BATCH_START, (scraperName) =>
     jobs.startLegacyVideoBatch(scraperName)
   )

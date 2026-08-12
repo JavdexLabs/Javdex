@@ -268,14 +268,14 @@ export interface PluginDevDryRunInput {
 export interface PluginDevDryRunCase {
   target: string
   ok: boolean
-  result: ScrapeResult | ActressScrapeResult | null
+  result: ScrapeResult | ScrapeResult[] | ActressScrapeResult | null
   logs: string[]
   error?: string
 }
 
 export interface PluginDevDryRunResult {
   ok: boolean
-  result: ScrapeResult | ActressScrapeResult | null
+  result: ScrapeResult | ScrapeResult[] | ActressScrapeResult | null
   logs: string[]
   error?: string
   /** Present when one Agent dry-run covered multiple test targets. */

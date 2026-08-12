@@ -36,6 +36,12 @@ function buildScanMetrics(result: ScanResult): ScanMetric[] {
     { key: 'deletedVideos', label: '删除影片', value: result.deletedVideos },
     { key: 'skipped', label: '跳过', value: result.skipped }
   ]
+  if (result.pendingGroups > 0) {
+    items.push(
+      { key: 'pendingGroups', label: '待确认组', value: result.pendingGroups, tone: 'warn' },
+      { key: 'pendingResources', label: '待确认资源', value: result.pendingResources, tone: 'warn' }
+    )
+  }
   if (result.skippedShort > 0) {
     items.push({ key: 'skippedShort', label: '过短', value: result.skippedShort })
   }
@@ -63,7 +69,13 @@ function formatScanTime(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
 }
 
-function ScanSummary({ summary }: { summary: LibraryScanSummary }): JSX.Element {
+function ScanSummary({
+  summary,
+  onOpenPending
+}: {
+  summary: LibraryScanSummary
+  onOpenPending: () => void
+}): JSX.Element {
   const metrics = [
     ['新增资源', summary.resourcesAdded],
     ['更新资源', summary.resourcesUpdated],
@@ -72,7 +84,9 @@ function ScanSummary({ summary }: { summary: LibraryScanSummary }): JSX.Element 
     ['删除影片', summary.videosDeleted],
     ['扫描文件', summary.scannedFiles],
     ['跳过文件', summary.skippedFiles],
-    ['异常文件', summary.failedFiles]
+    ['异常文件', summary.failedFiles],
+    ['待确认组', summary.pendingScanGroups],
+    ['待确认资源', summary.pendingScanResources]
   ] as const
   return (
     <div className="library-scan-summary">
@@ -93,6 +107,11 @@ function ScanSummary({ summary }: { summary: LibraryScanSummary }): JSX.Element 
           </div>
         ))}
       </div>
+      {summary.pendingScanGroups > 0 ? (
+        <Button type="button" size="sm" onClick={onOpenPending}>
+          处理待确认扫描资源
+        </Button>
+      ) : null}
       {summary.offlineFolders.length > 0 ? (
         <div className="library-scan-summary-detail is-warning">
           <strong>{summary.offlineFolders.length} 个离线目录</strong>
@@ -128,7 +147,8 @@ export default function LibrarySettingsPanel({
   videoBatchActive = false,
   defaultScraper = '',
   onDismissScanScrapePrompt,
-  onStartScanScrapeBatch
+  onStartScanScrapeBatch,
+  onOpenPending
 }: {
   settings: AppSettings
   scanning: boolean
@@ -146,6 +166,7 @@ export default function LibrarySettingsPanel({
       Pick<
         AppSettings,
         | 'minScanImportDurationMinutes'
+        | 'autoMergeSameCodeResources'
         | 'autoDeleteResourceLessVideos'
         | 'autoScanEnabled'
         | 'autoScanIntervalMinutes'
@@ -157,6 +178,7 @@ export default function LibrarySettingsPanel({
   defaultScraper?: string
   onDismissScanScrapePrompt?: () => void
   onStartScanScrapeBatch?: () => void
+  onOpenPending: () => void
 }): JSX.Element {
   const minDuration = settings.minScanImportDurationMinutes
   const scanMetrics = scanResult ? buildScanMetrics(scanResult) : null
@@ -336,6 +358,22 @@ export default function LibrarySettingsPanel({
       </div>
 
       <SettingsSectionBlock
+        className="library-resource-grouping-block"
+        title="资源归属"
+        hint="只影响之后扫描发现的新资源；不会自动处理已有待确认组。"
+      >
+        <div className="settings-toggle-list settings-toggle-list--compact">
+          <SettingsSwitchRow
+            title="自动归并同番号资源"
+            description="扫描时，若番号只对应一部影片，新资源将自动归入该影片；存在多部同番号影片时进入待确认。"
+            checked={settings.autoMergeSameCodeResources}
+            disabled={scanning}
+            onChange={(checked) => onPatchSettings({ autoMergeSameCodeResources: checked })}
+          />
+        </div>
+      </SettingsSectionBlock>
+
+      <SettingsSectionBlock
         className="library-auto-scan-block"
         title="自动扫描"
         hint="应用启动、系统唤醒及运行期间会检查是否已达到扫描间隔。"
@@ -406,7 +444,7 @@ export default function LibrarySettingsPanel({
         hint="只保留最近一次手动或后台扫描的审计摘要。"
       >
         {settings.lastLibraryScanSummary ? (
-          <ScanSummary summary={settings.lastLibraryScanSummary} />
+          <ScanSummary summary={settings.lastLibraryScanSummary} onOpenPending={onOpenPending} />
         ) : (
           <SettingsEmptyPanel variant="compact">尚无扫描记录</SettingsEmptyPanel>
         )}

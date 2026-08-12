@@ -62,6 +62,7 @@ import {
   playlistVideoDetailPath
 } from './playlistRoutes'
 import { resolveSettingsRoute, settingsPath, settingsPluginDevPath } from '../settings/settingsRoutes'
+import { pendingCenterPath } from './pendingRoutes'
 
 describe('route builders and parsers', () => {
   it('round-trips library detail stacks', () => {
@@ -124,6 +125,16 @@ describe('route builders and parsers', () => {
     assert.equal(parseLibraryVideoPath('/detail/not-a-number'), null)
     assert.equal(parseActressVideoPath('/actresses/x'), null)
     assert.equal(parsePlaylistVideoPath('/playlists/x'), null)
+  })
+
+  it('builds pending-center locations without page-level query concatenation', () => {
+    assert.equal(pendingCenterPath(), '/pending')
+    assert.equal(pendingCenterPath({ tab: 'scan' }), '/pending?tab=scan')
+    assert.equal(
+      pendingCenterPath({ tab: 'scrape', videoId: 42 }),
+      '/pending?tab=scrape&videoId=42'
+    )
+    assert.equal(pendingCenterPath({ tab: 'scrape', id: 7 }), '/pending?tab=scrape&id=7')
   })
 })
 

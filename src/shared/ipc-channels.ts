@@ -33,6 +33,8 @@ export const IPC = {
   SCAN_PROGRESS: 'scan:progress', // main -> renderer event
   FILE_RENAME: 'file:rename',
   FILE_IMPORT_MANUAL: 'file:importManual',
+  PENDING_SCAN_LIST: 'pendingScan:list',
+  PENDING_SCAN_RESOLVE: 'pendingScan:resolve',
 
   // Videos
   VIDEO_LIST: 'video:list',
@@ -57,6 +59,8 @@ export const IPC = {
   VIDEO_RESOURCE_UPDATE_LOCAL_LABEL: 'video:resourceUpdateLocalLabel',
   VIDEO_RESOURCE_SET_PRIMARY: 'video:resourceSetPrimary',
   VIDEO_RESOURCE_REMOVE: 'video:resourceRemove',
+  VIDEO_MERGE: 'video:merge',
+  VIDEO_RESOURCE_SPLIT: 'video:resourceSplit',
 
   // Playlists
   PLAYLIST_LIST: 'playlist:list',
@@ -129,6 +133,9 @@ export const IPC = {
 
   // Scraping
   SCRAPE_ONE: 'scrape:one',
+  PENDING_VIDEO_SCRAPE_LIST: 'pendingVideoScrape:list',
+  PENDING_VIDEO_SCRAPE_CONFIRM: 'pendingVideoScrape:confirm',
+  PENDING_VIDEO_SCRAPE_DISCARD: 'pendingVideoScrape:discard',
   SCRAPE_BATCH_START: 'scrape:batchStart',
   SCRAPE_BATCH_CANCEL: 'scrape:batchCancel',
   SCRAPE_BATCH_PROGRESS: 'scrape:batchProgress', // main -> renderer event

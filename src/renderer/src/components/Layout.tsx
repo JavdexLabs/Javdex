@@ -19,6 +19,7 @@ import { useTheme } from './ThemeProvider'
 import { usePluginDevLeaveGuard } from './pluginDev/PluginDevLeaveGuard'
 import { NavIcon, type NavIconName } from './NavIcons'
 import { ROUTE_PATH } from '../listView/routePaths'
+import { pendingCenterPath } from '../listView/pendingRoutes'
 import { actressKeys } from '../query/queryKeys'
 
 type NavItem = { to: string; label: string; icon: NavIconName; end?: boolean }
@@ -26,7 +27,8 @@ type NavItem = { to: string; label: string; icon: NavIconName; end?: boolean }
 const NAV_MAIN: NavItem[] = [
   { to: ROUTE_PATH.library, label: '媒体库', icon: 'library', end: true },
   { to: ROUTE_PATH.playlists, label: '清单', icon: 'playlist' },
-  { to: ROUTE_PATH.actresses, label: '演员', icon: 'actress' }
+  { to: ROUTE_PATH.actresses, label: '演员', icon: 'actress' },
+  { to: pendingCenterPath(), label: '待确认', icon: 'pending' }
 ]
 
 const NAV_FACETS: NavItem[] = [
@@ -111,8 +113,8 @@ function NavItems({
               <button
                 type="button"
                 className="nav-count-badge nav-count-badge--entry"
-                aria-label={`打开 ${badgeCount} 项待确认名称冲突`}
-                title="打开名称冲突待确认"
+                aria-label={`打开 ${badgeCount} 项待确认`}
+                title="打开待确认项"
                 onClick={() => handleBadgeClick(n.to, badgeTarget)}
               >
                 {badgeCount > 99 ? '99+' : badgeCount}
@@ -143,9 +145,22 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
     queryFn: () => api.actressScrape.conflictSummary(),
     refetchInterval: 3_000
   })
-  const conflictBadges = {
+  const conflictBadges: Record<string, number> = {
     [ROUTE_PATH.actresses]: conflictSummaryQuery.data?.groupCount ?? 0
   }
+  const pendingScanQuery = useQuery({
+    queryKey: ['pending-scan-groups'],
+    queryFn: () => api.scan.listPending(),
+    refetchInterval: 3_000
+  })
+  const pendingVideoQuery = useQuery({
+    queryKey: ['pending-video-scrapes'],
+    queryFn: () => api.scrape.listPending(),
+    refetchInterval: 3_000
+  })
+  const pendingCount =
+    (pendingScanQuery.data?.length ?? 0) + (pendingVideoQuery.data?.length ?? 0)
+  conflictBadges[ROUTE_PATH.pending] = pendingCount
 
   useEffect(() => {
     syncPrimaryNavigationMemory(location.pathname, location.search)
@@ -166,7 +181,10 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
           <NavItems
             items={NAV_MAIN}
             badges={conflictBadges}
-            badgeTargets={{ [ROUTE_PATH.actresses]: ROUTE_PATH.actressConflicts }}
+            badgeTargets={{
+              [ROUTE_PATH.actresses]: ROUTE_PATH.actressConflicts,
+              [ROUTE_PATH.pending]: pendingCenterPath()
+            }}
           />
           <div className={`nav-group${facetActive ? ' nav-group--active' : ''}`}>
             <div className="nav-group-label">分类</div>

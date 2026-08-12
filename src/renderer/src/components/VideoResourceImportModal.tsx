@@ -1,16 +1,20 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type {
+  Video,
   VideoResourceImportResult,
   VideoResourceLinkCheckResult,
   VideoResource,
   VideoResourceSizeUnit
 } from '@shared/videoTypes'
+import type { VideoResourceImportTarget } from '@shared/videoTypes'
+import { normalizeVideoCode } from '@shared/videoCode'
 import { inferVideoResourceKind } from '@shared/videoResourceLinks'
 import { api } from '../api'
 import Modal from './Modal'
 import { EditFormField } from './FormPrimitives'
 import {
   buildVideoResourceImportInput,
+  normalizeOptionalVideoCode,
   resourceBytesToFormSize,
   type VideoResourceKindSelection
 } from './videoResourceImportForm'
@@ -19,12 +23,14 @@ import Button from './Button'
 
 export default function VideoResourceImportModal({
   fixedCode,
+  fixedVideoId,
   resource,
   onCancel,
   onImported,
   onUpdated
 }: {
   fixedCode?: string
+  fixedVideoId?: number
   resource?: VideoResource
   onCancel: () => void
   onImported?: (result: VideoResourceImportResult) => void
@@ -46,11 +52,46 @@ export default function VideoResourceImportModal({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [checkResult, setCheckResult] = useState<VideoResourceLinkCheckResult | null>(null)
+  const [targetValue, setTargetValue] = useState(fixedVideoId ? `existing:${fixedVideoId}` : '')
+  const [matchingVideos, setMatchingVideos] = useState<Array<Pick<Video, 'id' | 'code' | 'title'>>>([])
+  const [loadingTargets, setLoadingTargets] = useState(false)
   const checkRequestRef = useRef(0)
 
   const inferredKind = inferVideoResourceKind(url)
   const inferredKindLabel = VIDEO_RESOURCE_KIND_LABELS[inferredKind]
   const canCheckLink = inferredKind === 'direct' || inferredKind === 'web'
+
+  useEffect(() => {
+    if (resource || fixedVideoId) return
+    const normalized = normalizeOptionalVideoCode(code)
+    setTargetValue('')
+    if (!normalized) {
+      setMatchingVideos([])
+      return
+    }
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      setLoadingTargets(true)
+      void api.videos
+        .list({ search: normalized, limit: 100, offset: 0 })
+        .then((result) => {
+          if (cancelled) return
+          setMatchingVideos(
+            result.items.filter((video) => normalizeVideoCode(video.code) === normalized)
+          )
+        })
+        .catch((reason) => {
+          if (!cancelled) setError(String((reason as Error).message ?? reason))
+        })
+        .finally(() => {
+          if (!cancelled) setLoadingTargets(false)
+        })
+    }, 180)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [code, fixedVideoId, resource])
 
   const invalidateLinkCheck = (): void => {
     checkRequestRef.current += 1
@@ -104,7 +145,15 @@ export default function VideoResourceImportModal({
         })
         onUpdated?.(updated)
       } else {
-        onImported?.(await api.videos.importLinkResource(input))
+        let target: VideoResourceImportTarget
+        if (fixedVideoId) target = { kind: 'existing', videoId: fixedVideoId }
+        else if (targetValue === 'new') target = { kind: 'new' }
+        else if (targetValue.startsWith('existing:')) {
+          target = { kind: 'existing', videoId: Number(targetValue.slice('existing:'.length)) }
+        } else {
+          throw new Error('请选择资源要归入的影片，或明确新建影片')
+        }
+        onImported?.(await api.videos.importLinkResource({ ...input, target }))
       }
     } catch (reason) {
       setError(String((reason as Error).message ?? reason))
@@ -120,7 +169,7 @@ export default function VideoResourceImportModal({
 
       size="md"
       confirmText={saving ? '保存中…' : resource ? '保存' : '导入'}
-      confirmDisabled={saving || checking}
+      confirmDisabled={saving || checking || (!resource && !fixedVideoId && !targetValue)}
       busy={saving}
       onConfirm={() => void save()}
       onCancel={onCancel}
@@ -137,6 +186,30 @@ export default function VideoResourceImportModal({
             placeholder="例如 ABC-123"
           />
         </EditFormField>
+        {!resource && !fixedVideoId ? (
+          <EditFormField
+            label="归入影片"
+            htmlFor="resource-target"
+            span={2}
+            hint="同番号可以对应多部影片，必须明确选择目标。"
+          >
+            <select
+              id="resource-target"
+              className="select form-control-full"
+              value={targetValue}
+              onChange={(event) => setTargetValue(event.target.value)}
+              disabled={saving || loadingTargets || !code.trim()}
+            >
+              <option value="">{loadingTargets ? '正在查找同番号影片…' : '请选择目标'}</option>
+              {matchingVideos.map((video) => (
+                <option key={video.id} value={`existing:${video.id}`}>
+                  归入 ID {video.id} · {video.code}{video.title ? ` · ${video.title}` : ''}
+                </option>
+              ))}
+              <option value="new">新建一部独立影片</option>
+            </select>
+          </EditFormField>
+        ) : null}
         <EditFormField
           label="资源链接"
           htmlFor="resource-url"

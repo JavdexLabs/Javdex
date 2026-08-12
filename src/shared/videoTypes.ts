@@ -8,9 +8,15 @@ import type {
 
 export type VideoResourceKind = 'local' | 'direct' | 'web' | 'magnet' | 'ed2k'
 export type VideoResourceFilter = VideoResourceKind | 'none'
+export type VideoPendingScrapeFilter = 'all' | 'pending' | 'none'
 export type LinkVideoResourceKind = Extract<VideoResourceKind, 'direct' | 'web'>
 export type ExternalVideoResourceKind = Exclude<VideoResourceKind, 'local'>
 export type VideoResourceSizeUnit = 'MB' | 'GB' | 'TB'
+
+/** Every manual resource import must name its destination explicitly. */
+export type VideoResourceImportTarget =
+  | { kind: 'new' }
+  | { kind: 'existing'; videoId: number }
 
 export interface VideoResource {
   id: number
@@ -35,6 +41,7 @@ export interface VideoResourceDetail extends Omit<VideoResource, 'locator' | 're
 
 export interface VideoLinkResourceImportInput {
   code: string
+  target: VideoResourceImportTarget
   url: string
   kind?: ExternalVideoResourceKind
   displayName?: string | null
@@ -52,6 +59,21 @@ export interface VideoResourceImportResult {
   videoId: number
   resource: VideoResource
   createdVideo: boolean
+}
+
+export interface VideoMergeInput {
+  retainedVideoId: number
+  sourceVideoId: number
+}
+
+export interface VideoMergeResult {
+  retainedVideoId: number
+  deletedVideoId: number
+}
+
+export interface VideoResourceSplitResult {
+  videoId: number
+  resourceId: number
 }
 
 export interface VideoResourceLinkCheckResult {
@@ -95,6 +117,8 @@ export interface Video {
   resource_count?: number
   /** Primary kind first, followed by each remaining kind at most once. */
   resource_kinds?: VideoResourceKind[]
+  /** Independent pending-decision dimension; not part of scraped_status. */
+  has_pending_scrape?: boolean
 }
 
 export type TagOrigin = 'manual' | 'scraped'
@@ -160,6 +184,7 @@ export interface VideoQuery {
   codePrefix?: string
   /** OR filter; `none` matches videos with zero resource rows. */
   resourceKinds?: VideoResourceFilter[]
+  pendingScrape?: VideoPendingScrapeFilter
   sortBy?: 'add_time' | 'release_date' | 'rating' | 'code'
   sortDir?: 'asc' | 'desc'
   limit?: number
@@ -202,4 +227,6 @@ export interface CorrectImportResult {
   code: string
   previousCode: string
   mergedIntoId?: number
+  /** The rename was not applied; the caller must warn before retrying with discard enabled. */
+  pendingDiscardRequired?: boolean
 }

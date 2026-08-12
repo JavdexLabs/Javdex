@@ -17,7 +17,8 @@ const SEARCH_KEYS_BY_ROOT: Record<string, readonly string[]> = {
     LIST_PARAM.prefix,
     LIST_PARAM.status,
     LIST_PARAM.year,
-    LIST_PARAM.resources
+    LIST_PARAM.resources,
+    LIST_PARAM.pending
   ],
   '/actresses': [
     LIST_PARAM.q,

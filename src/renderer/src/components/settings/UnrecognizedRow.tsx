@@ -1,6 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ManualImportResult } from '@shared/libraryTypes'
+import type { Video, VideoResourceImportTarget } from '@shared/videoTypes'
+import { normalizeVideoCode } from '@shared/videoCode'
 import { api } from '../../api'
+import { normalizeOptionalVideoCode } from '../videoResourceImportForm'
 import { useToast } from '../Toast'
 import Button from '../Button'
 
@@ -20,11 +23,43 @@ export default function UnrecognizedRow({
   const [code, setCode] = useState('')
   const [renameBase, setRenameBase] = useState(baseName)
   const [busy, setBusy] = useState<'import' | 'rename' | null>(null)
+  const [targetValue, setTargetValue] = useState('')
+  const [matchingVideos, setMatchingVideos] = useState<Array<Pick<Video, 'id' | 'code' | 'title'>>>([])
+  const [loadingTargets, setLoadingTargets] = useState(false)
 
   const codeTrimmed = code.trim()
   const renameTrimmed = renameBase.trim()
-  const canImport = codeTrimmed.length > 0
-  const canRename = renameTrimmed.length > 0 && renameTrimmed !== baseName
+  const canImport = codeTrimmed.length > 0 && targetValue.length > 0
+  const canRename = renameTrimmed.length > 0 && renameTrimmed !== baseName && canImport
+
+  useEffect(() => {
+    const normalized = normalizeOptionalVideoCode(code)
+    setTargetValue('')
+    if (!normalized) {
+      setMatchingVideos([])
+      return
+    }
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      setLoadingTargets(true)
+      void api.videos.list({ search: normalized, limit: 100, offset: 0 })
+        .then((result) => {
+          if (!cancelled) {
+            setMatchingVideos(result.items.filter((video) => normalizeVideoCode(video.code) === normalized))
+          }
+        })
+        .catch((error) => {
+          if (!cancelled) toast.show(String((error as Error).message), 'error')
+        })
+        .finally(() => {
+          if (!cancelled) setLoadingTargets(false)
+        })
+    }, 180)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [code, toast])
 
   const finishImport = (res: ManualImportResult): void => {
     if (res.imported) {
@@ -43,11 +78,16 @@ export default function UnrecognizedRow({
     toast.show(`番号「${res.code}」已存在且原文件仍在，未重复导入`, 'info')
   }
 
+  const selectedTarget = (): VideoResourceImportTarget =>
+    targetValue === 'new'
+      ? { kind: 'new' }
+      : { kind: 'existing', videoId: Number(targetValue.slice('existing:'.length)) }
+
   const doManualImport = async (): Promise<void> => {
     if (busy || !canImport) return
     setBusy('import')
     try {
-      finishImport(await api.scan.importManual(filePath, codeTrimmed))
+      finishImport(await api.scan.importManual(filePath, codeTrimmed, selectedTarget()))
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     } finally {
@@ -59,15 +99,17 @@ export default function UnrecognizedRow({
     if (busy || !canRename) return
     setBusy('rename')
     try {
-      const res = await api.scan.rename(filePath, renameTrimmed)
+      const res = await api.scan.rename(
+        filePath,
+        renameTrimmed,
+        codeTrimmed,
+        selectedTarget()
+      )
       if (res.imported) {
         toast.show(`已重命名并导入：${res.code}`, 'success')
         onResolved(filePath)
-      } else if (res.code) {
-        toast.show(`已重命名（番号 ${res.code} 已存在，未重复导入）`, 'info')
-        onResolved(filePath)
       } else {
-        toast.show('已重命名；若需导入请使用「导入」并手工填写番号', 'info')
+        toast.show(`已重命名，但未能导入番号 ${res.code}`, 'info')
       }
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
@@ -98,6 +140,21 @@ export default function UnrecognizedRow({
           placeholder="输入番号"
           aria-label={`${fullName} 番号`}
         />
+        <select
+          className="select scan-unrec-target-select"
+          value={targetValue}
+          onChange={(event) => setTargetValue(event.target.value)}
+          disabled={busy !== null || loadingTargets || !codeTrimmed}
+          aria-label={`${fullName} 导入目标`}
+        >
+          <option value="">{loadingTargets ? '查找中…' : '选择目标'}</option>
+          {matchingVideos.map((video) => (
+            <option key={video.id} value={`existing:${video.id}`}>
+              ID {video.id} · {video.code}{video.title ? ` · ${video.title}` : ''}
+            </option>
+          ))}
+          <option value="new">新建独立影片</option>
+        </select>
         <Button
           type="button"
           variant="primary"
@@ -119,7 +176,7 @@ export default function UnrecognizedRow({
             onKeyDown={(e) => {
               if (e.key === 'Enter') void doRename()
             }}
-            placeholder="新文件名"
+            placeholder="新文件名（需先选择上方导入目标）"
             aria-label={`${fullName} 新文件名`}
           />
           {ext && <span className="scan-unrec-ext">{ext}</span>}
@@ -130,7 +187,7 @@ export default function UnrecognizedRow({
             disabled={busy !== null || !canRename}
             onClick={() => void doRename()}
           >
-            {busy === 'rename' ? '处理中…' : '重命名'}
+            {busy === 'rename' ? '处理中…' : '重命名并导入'}
           </Button>
         </div>
       </details>

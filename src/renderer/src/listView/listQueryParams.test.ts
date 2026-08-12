@@ -45,4 +45,14 @@ describe('library resource filter URL contract', () => {
     assert.notEqual(libraryQueryHash(unfiltered), libraryQueryHash(filtered))
     assert.deepEqual(libraryVideoQueryFromSearchParams(filtered).resourceKinds, ['web', 'magnet'])
   })
+
+  it('keeps pending scrape as an independent canonical filter dimension', () => {
+    const pending = canonicalizeLibrarySearchParams(new URLSearchParams('pending=pending'))
+    const invalid = canonicalizeLibrarySearchParams(new URLSearchParams('pending=maybe'))
+
+    assert.equal(pending.get(LIST_PARAM.pending), 'pending')
+    assert.equal(libraryVideoQueryFromSearchParams(pending).pendingScrape, 'pending')
+    assert.equal(invalid.has(LIST_PARAM.pending), false)
+    assert.notEqual(libraryQueryHash(pending), libraryQueryHash(new URLSearchParams()))
+  })
 })

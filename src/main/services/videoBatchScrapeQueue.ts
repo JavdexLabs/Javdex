@@ -59,12 +59,19 @@ function buildStatusLabel(request: VideoBatchScrapeRequest): string {
 export function formatVideoBatchScrapeOutcome(
   outcome: ScrapeOutcome,
   fallbackCode: string
-): { status: 'success' | 'failure'; level: 'success' | 'info' | 'error'; message: string } {
+): { status: 'success' | 'pending' | 'failure'; level: 'success' | 'info' | 'error'; message: string } {
   if (!outcome.ok) {
     return {
       status: 'failure',
       level: 'error',
       message: `更新失败：${outcome.error ?? '未知错误'}`
+    }
+  }
+  if (outcome.pending) {
+    return {
+      status: 'pending',
+      level: 'info',
+      message: '待确认：已保存全部匹配候选，可稍后在待确认中心处理'
     }
   }
   const warningText = outcome.warnings?.join('；')
@@ -111,7 +118,7 @@ const videoBatchPolicy: CheckpointedBatchPolicy<VideoTarget, VideoBatchScrapeReq
       pausedMessage: '用户暂停了影片批量更新',
       cancelledMessage: '用户终止了影片批量更新',
       doneMessage: (progress) =>
-        `影片批量更新完成：成功 ${progress.success}，失败 ${progress.failed}`,
+        `影片批量更新完成：成功 ${progress.success}，待确认 ${progress.pending}，失败 ${progress.failed}`,
       getCode: (target) => target.code,
       runTarget: async ({ id, code }) => {
         const itemOutcome = await scrapeVideo(id, request.scraperName, {

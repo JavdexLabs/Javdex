@@ -13,6 +13,7 @@ import { migrateUserPluginsAwayFromBuiltInNames } from './scrapers/scraperPlugin
 import { resolveMediaAssetPath, toStoredAssetPath } from './services/mediaProtocol'
 import { checkForLatestRelease, shouldRunAutomaticCheck } from './services/appReleaseService'
 import { cleanupOrphanedActressScrapeStaging } from './services/actressIdentityConflictWorkflow'
+import { cleanupOrphanedVideoScrapeStaging } from './services/videoPendingScrapeService'
 import { automaticScanScheduler } from './services/automaticScanScheduler'
 import { recoverPendingLocalFileDeletions } from './services/pendingLocalFileDeletionService'
 import { isSameRendererLocation } from './ipc/ipcSecurity'
@@ -141,6 +142,7 @@ if (gotSingleInstanceLock) {
     recoverPendingLocalFileDeletions()
     mediaAssetStore.ensureReady()
     cleanupOrphanedActressScrapeStaging()
+    cleanupOrphanedVideoScrapeStaging()
     migrateUserPluginsAwayFromBuiltInNames()
     registerAssetProtocol()
     const rendererEntryUrl = resolveRendererEntryUrl()

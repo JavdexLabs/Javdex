@@ -63,6 +63,26 @@ describe('resourceLessVideoCleanupService', () => {
       `INSERT INTO video_assets (video_id, type, local_path, position)
        VALUES (?, 'sample', ?, 0)`
     ).run(emptyVideoId, samplePath)
+    const stagedPath = '.video_scrape_staging/empty-candidate.jpg'
+    createOwnedAsset(stagedPath)
+    const pendingId = Number(db.prepare(
+      `INSERT INTO pending_video_scrapes (
+         video_id, selected_fields_json, applicable_fields_json, update_mode,
+         request_json, warnings_json, created_at, updated_at
+       ) VALUES (?, '[]', '[]', 'replace', '{}', '[]', '2025-01-01', '2025-01-01')`
+    ).run(emptyVideoId).lastInsertRowid)
+    const sourceId = Number(db.prepare(
+      `INSERT INTO pending_video_scrape_sources (
+         pending_scrape_id, plugin_name, plugin_source, plugin_config_json,
+         source_name, selected_fields_json
+       ) VALUES (?, 'test', 'builtin', '{}', 'test', '[]')`
+    ).run(pendingId).lastInsertRowid)
+    const candidateId = Number(db.prepare(
+      "INSERT INTO pending_video_scrape_candidates (source_id, result_json) VALUES (?, '{\"code\":\"EMPTY-001\"}')"
+    ).run(sourceId).lastInsertRowid)
+    db.prepare(
+      "INSERT INTO pending_video_scrape_resources (candidate_id, field, staged_path) VALUES (?, 'cover', ?)"
+    ).run(candidateId, stagedPath)
     const unrelatedSourceFile = path.join(tempRoot, 'unrelated-source.mp4')
     fs.writeFileSync(unrelatedSourceFile, 'source')
 
@@ -87,6 +107,7 @@ describe('resourceLessVideoCleanupService', () => {
     )
     assert.equal(fs.existsSync(path.join(tempRoot, 'media_assets', coverPath)), false)
     assert.equal(fs.existsSync(path.join(tempRoot, 'media_assets', samplePath)), false)
+    assert.equal(fs.existsSync(path.join(tempRoot, 'media_assets', stagedPath)), false)
     assert.equal(fs.existsSync(unrelatedSourceFile), true)
   })
 })

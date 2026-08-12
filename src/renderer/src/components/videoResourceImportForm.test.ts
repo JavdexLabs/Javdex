@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildVideoResourceImportInput, resourceBytesToFormSize } from './videoResourceImportForm'
+import {
+  buildVideoResourceImportInput,
+  normalizeOptionalVideoCode,
+  resourceBytesToFormSize
+} from './videoResourceImportForm'
 
 describe('video resource import form', () => {
   it('shares auto detection, normalization, and size conversion across entry points', () => {
@@ -42,5 +46,11 @@ describe('video resource import form', () => {
         sizeBytes: null
       }
     )
+  })
+
+  it('treats blank matching input as absent without invoking strict code validation', () => {
+    assert.equal(normalizeOptionalVideoCode(''), null)
+    assert.equal(normalizeOptionalVideoCode('   '), null)
+    assert.equal(normalizeOptionalVideoCode(' abc-123 '), 'ABC-123')
   })
 })

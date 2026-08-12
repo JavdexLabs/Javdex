@@ -10,6 +10,7 @@ import { getDb } from '../db/database'
 import { cleanupClassificationImage } from './classificationImageCleanup'
 import { mediaAssetStore } from './mediaAssetStore'
 import { findSeriesOwnershipScopeConflict } from './seriesOwnershipScopeConflict'
+import { assertNoPendingVideoMetadataMutation } from '../db/videoPendingMetadataLock'
 
 const ROLE_COLUMNS: Record<
   OrganizationRole,
@@ -149,6 +150,7 @@ export function createOrganizationDeletionService(
           throw new Error('最后一个机构角色不能单独移除；请改用完整删除机构')
         }
         const columns = ROLE_COLUMNS[role]
+        assertNoPendingVideoMetadataMutation(db, `v.${columns.idColumn} = ?`, [id])
         const unlinkedVideoCount = db
           .prepare(
             `UPDATE videos
@@ -174,6 +176,11 @@ export function createOrganizationDeletionService(
       const committed = db.transaction(() => {
         const impact = readDeleteImpact(db, id)
         assertUnownedSeriesScopeAvailable(db, id)
+        assertNoPendingVideoMetadataMutation(
+          db,
+          '(v.maker_organization_id = ? OR v.publisher_organization_id = ?)',
+          [id, id]
+        )
         const now = new Date().toISOString()
         const unlinkedMakerVideoCount = db
           .prepare(

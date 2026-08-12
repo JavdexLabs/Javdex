@@ -38,8 +38,14 @@ import {
   stageActressScrapeImages as stageActressScrapeImagesImpl,
   storeScrapedActressAvatar as storeScrapedActressAvatarImpl,
   storeScrapedActressGalleryImage as storeScrapedActressGalleryImageImpl,
+  cleanupOrphanedVideoScrapeStaging as cleanupOrphanedVideoScrapeStagingImpl,
+  cleanupVideoScrapeStagingPaths as cleanupVideoScrapeStagingPathsImpl,
+  readVideoScrapeStagedImage as readVideoScrapeStagedImageImpl,
+  stageVideoScrapeImages as stageVideoScrapeImagesImpl,
   type ActressScrapeStagingInput,
-  type StagedActressScrapeImage
+  type StagedActressScrapeImage,
+  type StagedVideoScrapeImage,
+  type VideoScrapeStagingInput
 } from './mediaAssetStore/download'
 import {
   clearPathAliases as clearPathAliasesImpl,
@@ -334,6 +340,30 @@ export class MediaAssetStore {
   cleanupActressScrapeStagingPaths(stagedPaths: string[]): void {
     this.assertMutationAllowed()
     cleanupActressScrapeStagingPathsImpl(stagedPaths)
+  }
+
+  stageVideoScrapeImages(resources: VideoScrapeStagingInput[]): StagedVideoScrapeImage[] {
+    this.assertMutationAllowed()
+    const staged = stageVideoScrapeImagesImpl(resources)
+    for (const item of staged) this.registerCreated(item.stagedPath)
+    return staged
+  }
+
+  readVideoScrapeStagedImage(stagedPath: string): Buffer {
+    return readVideoScrapeStagedImageImpl(stagedPath)
+  }
+
+  cleanupVideoScrapeStagingPaths(stagedPaths: string[]): void {
+    this.assertMutationAllowed()
+    cleanupVideoScrapeStagingPathsImpl(stagedPaths)
+  }
+
+  cleanupOrphanedVideoScrapeStaging(
+    referencedPaths: string[],
+    options?: { now?: number; olderThanMs?: number }
+  ): number {
+    this.assertMutationAllowed()
+    return cleanupOrphanedVideoScrapeStagingImpl(referencedPaths, options)
   }
 
   cleanupOrphanedActressScrapeStaging(

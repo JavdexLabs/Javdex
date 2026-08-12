@@ -10,6 +10,8 @@ function result(patch: Partial<ScanResult> = {}): ScanResult {
     skipped: 0,
     skippedShort: 0,
     failed: 0,
+    pendingGroups: 0,
+    pendingResources: 0,
     relocated: 0,
     refreshed: 0,
     removed: 0,
@@ -40,6 +42,18 @@ describe('buildLibraryScanNotification', () => {
       message: '扫描完成：新增 0，更新 2，移除 0，提升主资源 0，删除影片 0',
       tone: 'success'
     })
+  })
+
+  it('reports pending scan groups and their resource count before ordinary changes', () => {
+    assert.deepEqual(
+      buildLibraryScanNotification(
+        result({ pendingGroups: 2, pendingResources: 5, imported: 1 })
+      ),
+      {
+        message: '扫描完成：2 个待确认扫描组，共 5 条资源',
+        tone: 'warning'
+      }
+    )
   })
 
   it('prioritizes offline and error outcomes over ordinary change notices', () => {

@@ -11,7 +11,10 @@ import {
   type VideoQuery,
   type VideoListResult,
   type VideoEditInput,
-  type VideoFieldUpdateInput
+  type VideoFieldUpdateInput,
+  type VideoMergeInput,
+  type VideoMergeResult,
+  type VideoResourceSplitResult
 } from '@shared/videoTypes'
 import type { VideoBatchScrapeFilter, VideoBatchScrapeStatus, VideoRematchScope } from '@shared/videoScrapeTypes'
 import { upsertActressFromScrape } from './actressRepo'
@@ -24,6 +27,7 @@ import {
   videoListSelectExtras,
   type VideoListProjectionRow
 } from './videoListProjection'
+import { normalizeVideoCode } from '@shared/videoCode'
 
 export interface ScannedVideoInput {
   code: string
@@ -85,7 +89,6 @@ export function insertLocalVideoResource(input: {
  * Returns the video id, or null if the path already exists.
  */
 export function insertScannedVideo(v: ScannedVideoInput): number | null {
-  const db = getDb()
   if (localVideoResourceExistsByLocator(v.locator)) return null
 
   const existing = getVideoByCode(v.code)
@@ -100,6 +103,13 @@ export function insertScannedVideo(v: ScannedVideoInput): number | null {
     return resourceId != null ? existing.id : null
   }
 
+  return insertNewScannedVideo(v)
+}
+
+/** Create a distinct video record even when another video has the same normalized code. */
+export function insertNewScannedVideo(v: ScannedVideoInput): number | null {
+  const db = getDb()
+  if (localVideoResourceExistsByLocator(v.locator)) return null
   return db.transaction(() => {
     const info = db.prepare('INSERT INTO videos (code, scraped_status) VALUES (?, 0)').run(v.code)
     const videoId = Number(info.lastInsertRowid)
@@ -143,6 +153,24 @@ export function getVideoByCode(code: string): Pick<Video, 'id' | 'code'> | null 
       .get(code, code) as
       | Pick<Video, 'id' | 'code'>
       | undefined) ?? null
+  )
+}
+
+export function listVideosByCode(code: string): Array<Pick<Video, 'id' | 'code'>> {
+  const normalizedCode = normalizeVideoCode(code)
+  return getDb()
+    .prepare(
+      `SELECT id, code
+       FROM videos
+       WHERE upper(trim(code)) = ?
+       ORDER BY id`
+    )
+    .all(normalizedCode) as Array<Pick<Video, 'id' | 'code'>>
+}
+
+export function hasPendingVideoScrape(videoId: number): boolean {
+  return Boolean(
+    getDb().prepare('SELECT 1 FROM pending_video_scrapes WHERE video_id = ?').get(videoId)
   )
 }
 
@@ -250,6 +278,24 @@ export function relocateLocalVideoResource(
   })
 }
 
+export function relocateLocalVideoResourceById(
+  resourceId: number,
+  filePath: string,
+  fileSize: number | null,
+  fileDurationSeconds: number | null = null,
+  fileMtimeMs: number | null = null
+): void {
+  const changed = getDb()
+    .prepare(
+      `UPDATE video_resources
+       SET locator = ?, resource_key = 'local:' || ?, size_bytes = ?, duration_seconds = ?,
+           file_mtime_ms = ?
+       WHERE id = ? AND kind = 'local'`
+    )
+    .run(filePath, filePath, fileSize, fileDurationSeconds, fileMtimeMs, resourceId)
+  if (changed.changes === 0) throw new Error('待重定位的本地资源不存在')
+}
+
 /** Remove a video record and its cover asset (files on disk are already gone). */
 export function purgeVideo(id: number): { obsoletePaths: string[] } {
   const hints = collectVideoLibraryCleanupHints(id)
@@ -299,6 +345,23 @@ export function purgeResourceLessVideos(): { deleted: number; obsoletePaths: str
   const obsoletePaths = db.transaction(() => {
     const paths: string[] = []
     for (const candidate of candidates) {
+      paths.push(
+        ...(
+          db
+            .prepare(
+              `SELECT resource.staged_path
+               FROM pending_video_scrape_resources resource
+               JOIN pending_video_scrape_candidates scrape_candidate
+                 ON scrape_candidate.id = resource.candidate_id
+               JOIN pending_video_scrape_sources source
+                 ON source.id = scrape_candidate.source_id
+               JOIN pending_video_scrapes pending
+                 ON pending.id = source.pending_scrape_id
+               WHERE pending.video_id = ?`
+            )
+            .all(candidate.id) as Array<{ staged_path: string }>
+        ).map((row) => row.staged_path)
+      )
       paths.push(...deleteVideoAssetRows(candidate.id))
       if (candidate.cover_path) paths.push(candidate.cover_path)
       deleteVideo(candidate.id)
@@ -429,6 +492,7 @@ export function removeLocalVideoResourcesBatch(
 
 export function importVideoLinkResourceRecord(input: {
   code: string
+  target: { kind: 'new' } | { kind: 'existing'; videoId: number }
   kind: ExternalVideoResourceKind
   locator: string
   resourceKey: string
@@ -447,13 +511,18 @@ export function importVideoLinkResourceRecord(input: {
       .get(input.resourceKey) as { code: string } | undefined
     if (duplicate) return { duplicateOwnerCode: duplicate.code }
 
-    let video = getVideoByCode(input.code)
-    const createdVideo = !video
-    if (!video) {
+    let video: Pick<Video, 'id' | 'code'> | null = null
+    let createdVideo = false
+    if (input.target.kind === 'existing') {
+      const targetVideoId = input.target.videoId
+      video = listVideosByCode(input.code).find((item) => item.id === targetVideoId) ?? null
+      if (!video) throw new Error('所选影片不存在或番号已经变化')
+    } else {
       const info = db
         .prepare('INSERT INTO videos (code, scraped_status) VALUES (?, 0)')
         .run(input.code)
       video = { id: Number(info.lastInsertRowid), code: input.code }
+      createdVideo = true
     }
     const resourceCount = (
       db.prepare('SELECT COUNT(*) AS count FROM video_resources WHERE video_id = ?').get(video.id) as {
@@ -526,11 +595,10 @@ export function updateVideoLinkResourceRecord(input: {
 
 export function getVideoById(id: number): Video | null {
   const db = getDb()
-  return (
-    (db
+  const row = db
       .prepare(`SELECT v.*${videoClassificationSelectExtras()} FROM videos v WHERE v.id = ?`)
-      .get(id) as Video | undefined) ?? null
-  )
+      .get(id) as Video | undefined
+  return row ? { ...row, has_pending_scrape: Boolean(row.has_pending_scrape) } : null
 }
 
 export function getVideoDetail(id: number): StoredVideoDetail | null {
@@ -658,6 +726,12 @@ function buildWhere(q: VideoQuery): { sql: string; params: unknown[]; joins: str
   if (q.scrapedStatus !== undefined && q.scrapedStatus !== 'all') {
     conditions.push('v.scraped_status = ?')
     params.push(q.scrapedStatus)
+  }
+
+  if (q.pendingScrape === 'pending') {
+    conditions.push('EXISTS (SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id)')
+  } else if (q.pendingScrape === 'none') {
+    conditions.push('NOT EXISTS (SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id)')
   }
 
   if (q.minRating !== undefined && q.minRating > 0) {
@@ -1047,7 +1121,7 @@ export function clearVideoMetadataRecord(id: number): { obsoletePaths: string[] 
     ).run(id)
     db.prepare('DELETE FROM video_actress WHERE video_id = ?').run(id)
     db.prepare("DELETE FROM video_tag WHERE video_id = ? AND origin = 'scraped'").run(id)
-    db.prepare('DELETE FROM video_external_ids WHERE video_id = ?').run(id)
+    db.prepare('DELETE FROM video_sources WHERE video_id = ?').run(id)
     db.prepare('DELETE FROM video_external_stats WHERE video_id = ?').run(id)
   })
   txn()
@@ -1062,6 +1136,270 @@ export function clearVideoMetadataRecord(id: number): { obsoletePaths: string[] 
 export function renameVideoCode(id: number, code: string): void {
   const db = getDb()
   db.prepare('UPDATE videos SET code = ? WHERE id = ?').run(code, id)
+}
+
+function strongerScrapedStatus(left: number, right: number): number {
+  const strength = (status: number): number => (status === 1 ? 3 : status === 2 ? 2 : 1)
+  return strength(left) >= strength(right) ? left : right
+}
+
+function newerTimestamp(left: string | null, right: string | null): string | null {
+  const normalizedLeft = left?.trim() || null
+  const normalizedRight = right?.trim() || null
+  if (!normalizedLeft) return normalizedRight
+  if (!normalizedRight) return normalizedLeft
+  return normalizedLeft >= normalizedRight ? normalizedLeft : normalizedRight
+}
+
+export function mergeVideoRecords(
+  input: VideoMergeInput,
+  options?: {
+    allowPendingVideoId?: number
+    /** Deterministic fallback chosen with storage-availability knowledge. */
+    fallbackPrimaryResourceId?: number | null
+  }
+): VideoMergeResult & { obsoletePaths: string[] } {
+  const db = getDb()
+  if (input.retainedVideoId === input.sourceVideoId) throw new Error('不能合并同一部影片')
+  const retained = getVideoById(input.retainedVideoId)
+  const source = getVideoById(input.sourceVideoId)
+  if (!retained || !source) throw new Error('影片不存在')
+  const retainedCode = normalizeVideoCode(retained.code)
+  const sourceCode = normalizeVideoCode(source.code)
+  if (retainedCode !== sourceCode) throw new Error('只能合并番号相同的影片')
+  const blockedByPending = [retained.id, source.id].some(
+    (id) => hasPendingVideoScrape(id) && id !== options?.allowPendingVideoId
+  )
+  if (blockedByPending) {
+    throw new Error('影片存在待确认刮削结果，处理后才能合并')
+  }
+
+  const finalPublisherId = retained.publisher_organization_id ?? source.publisher_organization_id
+  const finalReleaseDate = retained.release_date?.trim() || source.release_date?.trim() || null
+  if (finalPublisherId != null && finalReleaseDate) {
+    const conflict = db
+      .prepare(
+        `SELECT id FROM videos
+         WHERE publisher_organization_id = ?
+           AND upper(trim(code)) = ?
+           AND release_date = ?
+           AND id NOT IN (?, ?)
+         ORDER BY id LIMIT 1`
+      )
+      .get(
+        finalPublisherId,
+        retainedCode,
+        finalReleaseDate,
+        retained.id,
+        source.id
+      ) as { id: number } | undefined
+    if (conflict) throw new Error(`影片业务身份与影片 ID ${conflict.id} 冲突`)
+  }
+
+  const cleanupHints = collectVideoLibraryCleanupHints(source.id)
+  const retainedCoverPath = retained.cover_path?.trim() ? retained.cover_path : null
+  const retainedPosterPath = retained.poster_path?.trim() ? retained.poster_path : null
+  const sourceCoverPath = source.cover_path?.trim() ? source.cover_path : null
+  const sourcePosterPath = source.poster_path?.trim() ? source.poster_path : null
+  const finalCoverPath = retainedCoverPath ?? sourceCoverPath
+  const finalPosterPath = retainedPosterPath ?? sourcePosterPath
+  const isRetainedMediaPath = (storedPath: string): boolean =>
+    storedPath === finalCoverPath || storedPath === finalPosterPath
+  const obsoletePaths: string[] = []
+  if (sourceCoverPath && !isRetainedMediaPath(sourceCoverPath)) {
+    obsoletePaths.push(sourceCoverPath)
+  }
+  if (sourcePosterPath && !isRetainedMediaPath(sourcePosterPath)) {
+    obsoletePaths.push(sourcePosterPath)
+  }
+  db.transaction(() => {
+    const retainedPrimary = getPrimaryVideoResource(retained.id)
+    if (retainedPrimary) {
+      db.prepare('UPDATE video_resources SET is_primary = 0 WHERE video_id = ?').run(source.id)
+    }
+
+    db.prepare(
+      `INSERT INTO video_actress (video_id, actress_id)
+       SELECT ?, actress_id FROM video_actress WHERE video_id = ?
+       ON CONFLICT(video_id, actress_id) DO NOTHING`
+    ).run(retained.id, source.id)
+    const retainedHasScrapedTags = Boolean(
+      db
+        .prepare(
+          "SELECT 1 FROM video_tag WHERE video_id = ? AND origin = 'scraped' LIMIT 1"
+        )
+        .get(retained.id)
+    )
+    db.prepare(
+      `INSERT INTO video_tag (video_id, tag_id, origin, source, created_at)
+       SELECT ?, tag_id, 'manual', NULL, created_at
+       FROM video_tag WHERE video_id = ? AND origin = 'manual'
+       ON CONFLICT(video_id, tag_id) DO UPDATE SET origin = 'manual', source = NULL`
+    ).run(retained.id, source.id)
+    if (!retainedHasScrapedTags) {
+      db.prepare(
+        `INSERT INTO video_tag (video_id, tag_id, origin, source, created_at)
+         SELECT ?, tag_id, origin, source, created_at
+         FROM video_tag WHERE video_id = ? AND origin = 'scraped'
+         ON CONFLICT(video_id, tag_id) DO NOTHING`
+      ).run(retained.id, source.id)
+    }
+    db.prepare(
+      `INSERT INTO playlist_video (playlist_id, video_id, position, added_at)
+       SELECT playlist_id, ?, position, added_at
+       FROM playlist_video WHERE video_id = ? AND 1
+       ON CONFLICT(playlist_id, video_id) DO NOTHING`
+    ).run(retained.id, source.id)
+    db.prepare(
+      `INSERT INTO video_sources (video_id, source, external_code, url, title, fetched_at)
+       SELECT ?, source, external_code, url, title, fetched_at
+       FROM video_sources WHERE video_id = ? AND 1
+       ON CONFLICT(video_id, source) DO NOTHING`
+    ).run(retained.id, source.id)
+    db.prepare(
+      `INSERT INTO video_external_stats (
+         video_id, source, rating_average, rating_count, fetched_at
+       )
+       SELECT ?, source, rating_average, rating_count, fetched_at
+       FROM video_external_stats WHERE video_id = ? AND 1
+       ON CONFLICT(video_id, source) DO NOTHING`
+    ).run(retained.id, source.id)
+
+    const sourceAssets = db
+      .prepare(
+        `SELECT id, type, local_path
+         FROM video_assets WHERE video_id = ? ORDER BY type, position, id`
+      )
+      .all(source.id) as Array<{ id: number; type: string; local_path: string | null }>
+    for (const type of new Set(sourceAssets.map((asset) => asset.type))) {
+      const retainedHasType = Boolean(
+        db
+          .prepare('SELECT 1 FROM video_assets WHERE video_id = ? AND type = ? LIMIT 1')
+          .get(retained.id, type)
+      )
+      const assets = sourceAssets.filter((asset) => asset.type === type)
+      if (retainedHasType) {
+        obsoletePaths.push(
+          ...assets.flatMap((asset) =>
+            asset.local_path && !isRetainedMediaPath(asset.local_path)
+              ? [asset.local_path]
+              : []
+          )
+        )
+      } else {
+        db.prepare('UPDATE video_assets SET video_id = ? WHERE video_id = ? AND type = ?').run(
+          retained.id,
+          source.id,
+          type
+        )
+      }
+    }
+
+    db.prepare('UPDATE video_resources SET video_id = ? WHERE video_id = ?').run(
+      retained.id,
+      source.id
+    )
+    if (!retainedPrimary) {
+      const primaryAfterMove = getPrimaryVideoResource(retained.id)
+      if (!primaryAfterMove) {
+        const hasExplicitFallback =
+          options != null && 'fallbackPrimaryResourceId' in options
+        const fallbackId = hasExplicitFallback
+          ? options.fallbackPrimaryResourceId
+          : (
+              db
+                .prepare('SELECT id FROM video_resources WHERE video_id = ? ORDER BY id LIMIT 1')
+                .get(retained.id) as { id: number } | undefined
+            )?.id
+        if (fallbackId != null) {
+          const fallback = db
+            .prepare('SELECT id FROM video_resources WHERE video_id = ? AND id = ?')
+            .get(retained.id, fallbackId) as { id: number } | undefined
+          if (!fallback) throw new Error('合并主资源候选不属于参与影片')
+          db.prepare('UPDATE video_resources SET is_primary = 1 WHERE id = ?').run(fallback.id)
+        }
+      }
+    }
+
+    db.prepare(
+      `UPDATE videos SET
+         publisher_organization_id = NULL,
+         release_date = NULL
+       WHERE id = ?`
+    ).run(source.id)
+    db.prepare(
+      `UPDATE videos SET
+         code = @code,
+         title = COALESCE(NULLIF(trim(title), ''), @sourceTitle),
+         summary = COALESCE(NULLIF(trim(summary), ''), @sourceSummary),
+         cover_path = COALESCE(NULLIF(trim(cover_path), ''), @sourceCoverPath),
+         poster_path = COALESCE(NULLIF(trim(poster_path), ''), @sourcePosterPath),
+         original_title = COALESCE(NULLIF(trim(original_title), ''), @sourceOriginalTitle),
+         rating = CASE WHEN rating = 0 THEN @sourceRating ELSE rating END,
+         release_date = COALESCE(NULLIF(trim(release_date), ''), @sourceReleaseDate),
+         maker_organization_id = COALESCE(maker_organization_id, @sourceMakerId),
+         publisher_organization_id = COALESCE(publisher_organization_id, @sourcePublisherId),
+         series_id = COALESCE(series_id, @sourceSeriesId),
+         director_id = COALESCE(director_id, @sourceDirectorId),
+         duration_seconds = COALESCE(duration_seconds, @sourceDuration),
+         scraped_status = @scrapedStatus,
+         last_scraped_at = @lastScrapedAt,
+         updated_at = @updatedAt
+       WHERE id = @retainedId`
+    ).run({
+      retainedId: retained.id,
+      code: retainedCode,
+      sourceTitle: source.title,
+      sourceSummary: source.summary,
+      sourceCoverPath: source.cover_path,
+      sourcePosterPath: source.poster_path,
+      sourceOriginalTitle: source.original_title,
+      sourceRating: source.rating,
+      sourceReleaseDate: source.release_date,
+      sourceMakerId: source.maker_organization_id,
+      sourcePublisherId: source.publisher_organization_id,
+      sourceSeriesId: source.series_id,
+      sourceDirectorId: source.director_id,
+      sourceDuration: source.duration_seconds,
+      scrapedStatus: strongerScrapedStatus(retained.scraped_status, source.scraped_status),
+      lastScrapedAt: newerTimestamp(retained.last_scraped_at, source.last_scraped_at),
+      updatedAt: newerTimestamp(retained.updated_at, source.updated_at)
+    })
+    db.prepare('DELETE FROM videos WHERE id = ?').run(source.id)
+  })()
+  try {
+    runLibraryCleanup(cleanupHints)
+  } catch (error) {
+    console.error('Post-commit library cleanup failed:', error)
+  }
+  return {
+    retainedVideoId: retained.id,
+    deletedVideoId: source.id,
+    obsoletePaths: Array.from(new Set(obsoletePaths))
+  }
+}
+
+export function splitVideoResourceRecord(
+  videoId: number,
+  resourceId: number
+): VideoResourceSplitResult {
+  const db = getDb()
+  return db.transaction(() => {
+    const video = getVideoById(videoId)
+    if (!video) throw new Error('影片不存在')
+    const resource = getVideoResourceById(resourceId)
+    if (!resource || resource.video_id !== videoId) throw new Error('资源不属于当前影片')
+    if (resource.is_primary) throw new Error('请先将另一条资源设为主资源，再拆分当前主资源')
+    const created = db
+      .prepare('INSERT INTO videos (code, scraped_status) VALUES (?, 0)')
+      .run(normalizeVideoCode(video.code))
+    const createdVideoId = Number(created.lastInsertRowid)
+    db.prepare('UPDATE video_resources SET video_id = ?, is_primary = 1 WHERE id = ?').run(
+      createdVideoId,
+      resourceId
+    )
+    return { videoId: createdVideoId, resourceId }
+  })()
 }
 
 export function mergeVideoIntoExistingCode(sourceId: number, targetId: number): void {
@@ -1100,7 +1438,9 @@ function buildBatchScrapeWhere(filter: VideoBatchScrapeFilter): {
   sql: string
   params: unknown[]
 } {
-  const conditions: string[] = []
+  const conditions: string[] = [
+    'NOT EXISTS (SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id)'
+  ]
   const params: unknown[] = []
 
   if (filter.videoIds) {

@@ -25,6 +25,11 @@ import type {
   VideoScrapeOneResult,
   VideoScrapeUpdateMode
 } from './videoScrapeTypes'
+import type {
+  PendingVideoScrape,
+  PendingVideoScrapeConfirmInput,
+  PendingVideoScrapeResolutionResult
+} from './videoScrapeTypes'
 import type { BatchProgress, BatchScrapeState } from './batchScrapeTypes'
 import type {
   IpcContractArgs,
@@ -44,6 +49,15 @@ export interface ScrapeIpcContract {
       directorSelectionId?: number
     ]
     result: VideoScrapeOneResult
+  }
+  [IPC.PENDING_VIDEO_SCRAPE_LIST]: { args: []; result: PendingVideoScrape[] }
+  [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: {
+    args: [input: PendingVideoScrapeConfirmInput]
+    result: PendingVideoScrapeResolutionResult
+  }
+  [IPC.PENDING_VIDEO_SCRAPE_DISCARD]: {
+    args: [pendingScrapeId: number]
+    result: boolean
   }
   [IPC.SCRAPE_BATCH_START]: { args: [scraperName?: string]; result: boolean }
   [IPC.SCRAPE_BATCH_CANCEL]: { args: []; result: boolean }

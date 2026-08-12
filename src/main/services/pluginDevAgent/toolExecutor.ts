@@ -67,6 +67,24 @@ function describeFields(kind: ScraperPluginKind, fields: string[]): string {
   )
 }
 
+function dryRunResultRecords(value: unknown): Record<string, unknown>[] {
+  const values = Array.isArray(value) ? value : [value]
+  return values.filter(
+    (item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === 'object' && !Array.isArray(item)
+  )
+}
+
+function verificationUrl(value: string): string {
+  try {
+    const url = new URL(value)
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return value.trim()
+  }
+}
+
 function normalizeInsight(label: string, value: unknown): PluginDevPageInsight {
   const input = value && typeof value === 'object' ? (value as Partial<PluginDevPageInsight>) : {}
   return {
@@ -133,10 +151,10 @@ function summarizeDryRun(session: NonNullable<ReturnType<typeof getSession>>): s
       .join(' ')}`
   }
   if (!r.ok) return `失败：${r.error || '未知'}`
-  if (!r.result || typeof r.result !== 'object') return '成功但无结果'
-  return getPluginDevKindProfile(session.kind).summarizeDryRunResult(
-    r.result as Record<string, unknown>
-  )
+  const records = dryRunResultRecords(r.result)
+  if (records.length === 0) return '成功但无结果'
+  const summary = getPluginDevKindProfile(session.kind).summarizeDryRunResult(records[0])
+  return records.length > 1 ? `${records.length} 个候选；首项：${summary}` : summary
 }
 
 function compactDryRunForTool(session: NonNullable<ReturnType<typeof getSession>>): string {
@@ -178,32 +196,51 @@ function rememberDryRun(
   invalidateVerification(session)
 }
 
-function sourceUrlFromDryRun(dryRun: PluginDevDryRunResult): string | undefined {
-  const result = dryRun.result
-  if (!result || typeof result !== 'object') return undefined
-  const sourceUrl = (result as { sourceUrl?: unknown }).sourceUrl
-  return typeof sourceUrl === 'string' && sourceUrl.trim() ? sourceUrl.trim() : undefined
-}
-
-async function refreshVerificationPageForDryRun(
+async function refreshVerificationPagesForDryRun(
   session: NonNullable<ReturnType<typeof getSession>>,
   dryRun: PluginDevDryRunResult,
   label: string
-): Promise<PluginDevPageInsight | undefined> {
-  const sourceUrl = sourceUrlFromDryRun(dryRun)
-  if (sourceUrl) {
+): Promise<PluginDevPageInsight[]> {
+  const results = dryRunResultRecords(dryRun.result)
+  const pages: PluginDevPageInsight[] = []
+  for (const [index, result] of results.entries()) {
+    const sourceUrl =
+      typeof result.sourceUrl === 'string' && result.sourceUrl.trim()
+        ? result.sourceUrl.trim()
+        : undefined
+    if (sourceUrl) {
+      try {
+        const settings = getSettings()
+        await scrapeBrowser.setProxy(resolveScrapeProxyUrl(settings))
+        await scrapeBrowser.fetchPage(sourceUrl, {
+          readySelector: 'body',
+          timeoutMs: 45000
+        })
+      } catch {
+        // Never reuse the previous candidate page when this candidate fetch failed.
+        continue
+      }
+    }
     try {
-      const settings = getSettings()
-      await scrapeBrowser.setProxy(resolveScrapeProxyUrl(settings))
-      await scrapeBrowser.fetchPage(sourceUrl, {
-        readySelector: 'body',
-        timeoutMs: 45000
-      })
+      const page = await refreshVerificationPageFromBrowser(
+        session,
+        results.length > 1 ? `${label} 候选 ${index + 1}` : label
+      )
+      if (
+        page &&
+        (!sourceUrl || verificationUrl(page.url) === verificationUrl(sourceUrl))
+      ) {
+        pages.push(page)
+      }
     } catch {
-      // Fall back to whatever page the validation browser can currently inspect.
+      // A missing inspect result is handled by semantic verification's fallback path.
     }
   }
-  return refreshVerificationPageFromBrowser(session, label)
+  if (results.length === 0) {
+    const page = await refreshVerificationPageFromBrowser(session, label)
+    if (page) pages.push(page)
+  }
+  return pages
 }
 
 function dryRunFromCase(item: PluginDevDryRunCase): PluginDevDryRunResult {
@@ -234,9 +271,9 @@ function supportedFieldsPolicyForTool(session: NonNullable<ReturnType<typeof get
 
 function dryRunResultsForSync(session: NonNullable<ReturnType<typeof getSession>>): unknown[] {
   if (session.lastDryRun?.cases?.length) {
-    return session.lastDryRun.cases.map((item) => item.result)
+    return session.lastDryRun.cases.flatMap((item) => dryRunResultRecords(item.result))
   }
-  return session.lastDryRun?.result !== undefined ? [session.lastDryRun.result] : []
+  return dryRunResultRecords(session.lastDryRun?.result)
 }
 
 function syncSupportedFieldsAfterVerification(
@@ -674,9 +711,9 @@ export async function executeTool(
           const reports = []
           for (const item of session.lastDryRun.cases) {
             const caseDryRun = dryRunFromCase(item)
-            let page: PluginDevPageInsight | undefined
+            let pages: PluginDevPageInsight[] = []
             await withBrowserLock(sessionId, async () => {
-              page = await refreshVerificationPageForDryRun(
+              pages = await refreshVerificationPagesForDryRun(
                 session,
                 caseDryRun,
                 `验证参考页 ${item.target}`
@@ -685,8 +722,8 @@ export async function executeTool(
             const report = await verifyDebugResultAgainstPages({
               kind: session.kind,
               lastResult: item.result,
-              discovery: page
-                ? { pages: [page], notes: session.pageNotes.map((n) => n.text) }
+              discovery: pages.length > 0
+                ? { pages, notes: session.pageNotes.map((n) => n.text) }
                 : buildDiscoveryFromSession(session),
               supportedFields: session.package.supportedFields ?? session.supportedFields,
               userFeedback,
@@ -730,13 +767,20 @@ export async function executeTool(
           events.push(...syncSupportedFieldsAfterVerification(session, step, verification.items))
           return { ok: true, content: JSON.stringify(verification, null, 2), events }
         }
+        let pages: PluginDevPageInsight[] = []
         await withBrowserLock(sessionId, async () => {
-          await refreshVerificationPageFromBrowser(session, '验证参考页')
+          pages = await refreshVerificationPagesForDryRun(
+            session,
+            session.lastDryRun!,
+            '验证参考页'
+          )
         })
         const verification = await verifyDebugResultAgainstPages({
           kind: session.kind,
           lastResult: session.lastDryRun?.result,
-          discovery: buildDiscoveryFromSession(session),
+          discovery: pages.length > 0
+            ? { pages, notes: session.pageNotes.map((note) => note.text) }
+            : buildDiscoveryFromSession(session),
           supportedFields: session.package.supportedFields ?? session.supportedFields,
           userFeedback,
           mode: session.mode,

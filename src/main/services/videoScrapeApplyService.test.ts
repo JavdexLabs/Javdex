@@ -258,10 +258,10 @@ function configureMatrixCurrent(field: VideoScrapeField, videoId: number, presen
     return
   }
   if (field === 'source') {
-    db.prepare("DELETE FROM video_external_ids WHERE video_id = ? AND source = 'Matrix'").run(videoId)
+    db.prepare("DELETE FROM video_sources WHERE video_id = ? AND source = 'Matrix'").run(videoId)
     if (present) {
       db.prepare(
-        "INSERT INTO video_external_ids (video_id, source, url, fetched_at) VALUES (?, 'Matrix', ?, '2024-01-01')"
+        "INSERT INTO video_sources (video_id, source, url, fetched_at) VALUES (?, 'Matrix', ?, '2024-01-01')"
       ).run(videoId, 'https://existing.example')
     }
     return
@@ -481,7 +481,7 @@ describe('videoScrapeApplyService.applyScrapeResult', () => {
     setupDb()
     const db = getDb()
     const insert = db.prepare(
-      `INSERT INTO video_external_ids (video_id, source, url, fetched_at)
+      `INSERT INTO video_sources (video_id, source, url, fetched_at)
        VALUES (1, ?, ?, '2024-01-01')`
     )
     insert.run('JavDB', 'https://javdb.example/old')
@@ -500,7 +500,7 @@ describe('videoScrapeApplyService.applyScrapeResult', () => {
 
     assert.equal(outcome.applied, true)
     assert.deepEqual(
-      db.prepare('SELECT source, url FROM video_external_ids WHERE video_id = 1 ORDER BY source').all(),
+      db.prepare('SELECT source, url FROM video_sources WHERE video_id = 1 ORDER BY source').all(),
       [{ source: 'JavLibrary', url: 'https://javlibrary.example/keep' }]
     )
   })
@@ -1420,6 +1420,21 @@ describe('videoScrapeApplyService classification entity resolution', () => {
 })
 
 describe('videoScrapeApplyService.resolveVideoBatchTargets', () => {
+  it('excludes videos that already have a pending scrape decision', () => {
+    setupDb()
+    getDb().prepare(
+      `INSERT INTO pending_video_scrapes (
+         video_id, revision, selected_fields_json, applicable_fields_json,
+         update_mode, request_json, warnings_json, created_at, updated_at
+       ) VALUES (1, 1, '[]', '[]', 'replace', '{}', '[]', '2026-01-01', '2026-01-01')`
+    ).run()
+
+    assert.deepEqual(
+      resolveVideoBatchTargets({ status: 'all' }).map((video) => video.id),
+      [2]
+    )
+  })
+
   it('filters by videos missing any selected metadata field', () => {
     setupDb()
     if (!tempRoot) throw new Error('test root not initialized')
@@ -1486,7 +1501,7 @@ describe('videoScrapeApplyService.resolveVideoBatchTargets', () => {
     )
     db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (1, ?)').run(femaleId)
     db.prepare(
-      "INSERT INTO video_external_ids (video_id, source, url, fetched_at) VALUES (1, 'JavLibrary', 'https://keep.example', '2024-01-01')"
+      "INSERT INTO video_sources (video_id, source, url, fetched_at) VALUES (1, 'JavLibrary', 'https://keep.example', '2024-01-01')"
     ).run()
 
     assert.deepEqual(

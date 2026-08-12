@@ -1,6 +1,6 @@
 import type { ActressAvatarFilter, ActressGenderFilter, ActressListStatusFilter, ActressListSortBy } from '@shared/actressTypes'
 import type { ScrapedStatus, SortDir } from '@shared/commonTypes'
-import type { VideoQuery, VideoResourceFilter } from '@shared/videoTypes'
+import type { VideoPendingScrapeFilter, VideoQuery, VideoResourceFilter } from '@shared/videoTypes'
 import { ACTRESS_LIST_DEFAULTS } from '@shared/actressTypes'
 import type { ClassificationListSortBy } from '@shared/classificationTypes'
 
@@ -16,6 +16,7 @@ export const LIST_PARAM = {
   year: 'year',
   gender: 'gender',
   resources: 'resources',
+  pending: 'pending',
   releaseDir: 'releaseDir'
 } as const
 
@@ -116,6 +117,10 @@ export function parseScrapedStatus(raw: string | null): ScrapedStatus | 'all' {
   return 'all'
 }
 
+export function parseVideoPendingScrape(raw: string | null): VideoPendingScrapeFilter {
+  return raw === 'pending' || raw === 'none' ? raw : 'all'
+}
+
 export function parseYear(raw: string | null): number | 'all' {
   if (!raw || raw === 'all') return 'all'
   const y = Number(raw)
@@ -141,6 +146,9 @@ export function canonicalizeLibrarySearchParams(params: URLSearchParams): URLSea
   )
   if (canonicalResources) next.set(LIST_PARAM.resources, canonicalResources)
   else next.delete(LIST_PARAM.resources)
+  const pending = parseVideoPendingScrape(params.get(LIST_PARAM.pending))
+  if (pending === 'all') next.delete(LIST_PARAM.pending)
+  else next.set(LIST_PARAM.pending, pending)
   return next
 }
 
@@ -174,6 +182,7 @@ export function libraryVideoQueryFromSearchParams(params: URLSearchParams): Vide
   return {
     search: q || undefined,
     scrapedStatus: parseScrapedStatus(params.get(LIST_PARAM.status)),
+    pendingScrape: parseVideoPendingScrape(params.get(LIST_PARAM.pending)),
     year: parseYear(params.get(LIST_PARAM.year)),
     tagIds: tagIds.length ? tagIds : undefined,
     codePrefix: codePrefix || undefined,
@@ -194,6 +203,7 @@ export function libraryQueryHash(params: URLSearchParams): string {
   return hashListQuery({
     q: q.search ?? '',
     status: q.scrapedStatus ?? 'all',
+    pending: q.pendingScrape ?? 'all',
     year: q.year === 'all' ? 'all' : q.year,
     sort: q.sortBy ?? '',
     dir: q.sortDir ?? '',
@@ -248,6 +258,7 @@ export function isDefaultLibraryParams(params: URLSearchParams): boolean {
   return (
     !(params.get(LIST_PARAM.q) ?? '').trim() &&
     q.scrapedStatus === LIBRARY_DEFAULTS.status &&
+    q.pendingScrape === 'all' &&
     q.year === LIBRARY_DEFAULTS.year &&
     q.sortBy === LIBRARY_DEFAULTS.sortBy &&
     q.sortDir === LIBRARY_DEFAULTS.sortDir &&

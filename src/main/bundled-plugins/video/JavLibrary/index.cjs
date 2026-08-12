@@ -1,94 +1,68 @@
-async function parseVideo(ctx) {
-  const code = ctx.code.toUpperCase();
-  const baseUrl = 'https://www.javlibrary.com/cn';
-  const searchUrl = `${baseUrl}/vl_searchbyid.php?keyword=${encodeURIComponent(code)}`;
+function normalizeCode(value) {
+  return String(value || '').trim().toUpperCase();
+}
 
-  // Step 1: Search
+function absoluteJavlibraryUrl(href, baseUrl) {
+  if (!href) return null;
+  try {
+    return new URL(href, `${baseUrl}/`).toString();
+  } catch {
+    return null;
+  }
+}
+
+function detailPageCode($) {
+  const explicit = $('#video_id .text').first().text().trim();
+  if (explicit) return normalizeCode(explicit);
+  const title = $('#video_title .post-title.text').text().trim();
+  return normalizeCode(title.split(/\s+/)[0]);
+}
+
+function detailPageUrl($, baseUrl, fallbackUrl) {
+  const href = $('#video_title a[href]').first().attr('href');
+  return absoluteJavlibraryUrl(href, baseUrl) || fallbackUrl;
+}
+
+async function parseVideo(ctx) {
+  const requestedCode = normalizeCode(ctx.code);
+  const baseUrl = 'https://www.javlibrary.com/cn';
+  const searchUrl = `${baseUrl}/vl_searchbyid.php?keyword=${encodeURIComponent(requestedCode)}`;
   const searchHtml = await ctx.fetchPage(searchUrl, { timeoutMs: 15000 });
   const $search = ctx.cheerio.load(searchHtml);
 
-  // Check if we're on a detail page or search results page
-  const detailUrl = getDetailUrl($search, searchHtml, baseUrl, code);
-
-  let detailHtml;
-  let finalUrl;
-
-  if (detailUrl) {
-    // We need to fetch the detail page
-    detailHtml = await ctx.fetchPage(detailUrl, { timeoutMs: 15000 });
-    finalUrl = detailUrl;
-  } else {
-    // Already on the detail page (search redirected directly)
-    detailHtml = searchHtml;
-    finalUrl = null;
-  }
-
-  const $ = ctx.cheerio.load(detailHtml);
-
-  // Parse all fields
-  const result = parseDetail($, code, detailHtml, finalUrl);
-  return result;
-}
-
-/**
- * Extract the detail page URL from search results or direct detail page
- */
-function getDetailUrl($search, searchHtml, baseUrl, code) {
-  // Case 1: Already on detail page (has video_info)
   if ($search('#video_info').length > 0) {
-    return null; // Already fetched the detail page
+    const actualCode = detailPageCode($search);
+    if (actualCode !== requestedCode) return [];
+    return [
+      parseDetail(
+        $search,
+        actualCode,
+        detailPageUrl($search, baseUrl, searchUrl)
+      )
+    ];
   }
 
-  // Case 2: Search results page - find the matching video link
-  // Look for video with matching ID in the search results
-  const videoLinks = $search('.video a[href]');
-  let bestMatch = null;
-
-  videoLinks.each((i, el) => {
-    const $el = $search(el);
-    const href = $el.attr('href');
-    const title = $el.attr('title') || '';
-    const idText = $el.find('.id').text().trim().toUpperCase();
-
-    if (idText === code || title.toUpperCase().includes(code)) {
-      bestMatch = href;
-      return false; // break
-    }
+  const detailUrls = [];
+  $search('.video').each((i, item) => {
+    const $item = $search(item);
+    if (normalizeCode($item.find('.id').first().text()) !== requestedCode) return;
+    const href = $item.find('a[href]').first().attr('href');
+    const detailUrl = absoluteJavlibraryUrl(href, baseUrl);
+    if (detailUrl) detailUrls.push(detailUrl);
   });
+  if (detailUrls.length === 0) return [];
 
-  if (bestMatch) {
-    // Handle relative URL
-    if (bestMatch.startsWith('./')) {
-      return `${baseUrl}/${bestMatch.slice(2)}`;
-    }
-    if (bestMatch.startsWith('/')) {
-      return `https://www.javlibrary.com${bestMatch}`;
-    }
-    return bestMatch;
-  }
-
-  // Fallback: try to find any video link
-  const firstLink = $search('.video a[href]').first();
-  if (firstLink.length > 0) {
-    let href = firstLink.attr('href');
-    if (href.startsWith('./')) {
-      return `${baseUrl}/${href.slice(2)}`;
-    }
-    if (href.startsWith('/')) {
-      return `https://www.javlibrary.com${href}`;
-    }
-    return href;
-  }
-
-  throw new Error(`No results found for code: ${code}`);
+  // Fetch every first-page exact match. Any rejection aborts the complete candidate set.
+  return Promise.all(detailUrls.map(async (detailUrl) => {
+    const detailHtml = await ctx.fetchPage(detailUrl, { timeoutMs: 15000 });
+    const $detail = ctx.cheerio.load(detailHtml);
+    return parseDetail($detail, detailPageCode($detail), detailUrl);
+  }));
 }
 
-/**
- * Parse all fields from the detail page
- */
-function parseDetail($, code, html, sourceUrl) {
+function parseDetail($, code, sourceUrl) {
   const result = {
-    code: code,
+    code,
     title: null,
     summary: null,
     coverUrl: null,
@@ -100,131 +74,52 @@ function parseDetail($, code, html, sourceUrl) {
     durationSeconds: null,
     actresses: [],
     tags: [],
-    sourceUrl: sourceUrl || null,
+    sourceUrl,
     ratingAverage: null,
     ratingCount: null,
     sampleImageUrls: []
   };
 
-  // --- Title ---
-  const titleEl = $('#video_title .post-title.text');
-  if (titleEl.length > 0) {
-    const fullTitle = titleEl.text().trim();
-    // Title format: "CODE title" - remove the code prefix
-    const titleMatch = fullTitle.match(/^[A-Z0-9]+-[0-9]+\s+(.+)/);
-    if (titleMatch) {
-      result.title = titleMatch[1].trim();
-    } else {
-      result.title = fullTitle;
-    }
-  }
+  const fullTitle = $('#video_title .post-title.text').text().trim();
+  result.title = normalizeCode(fullTitle.slice(0, code.length)) === code
+    ? fullTitle.slice(code.length).trim()
+    : fullTitle;
 
-  // --- Cover ---
   const coverImg = $('#video_jacket_img');
-  if (coverImg.length > 0) {
-    result.coverUrl = coverImg.attr('src');
-  }
+  if (coverImg.length > 0) result.coverUrl = coverImg.attr('src');
 
-  // --- Release Date ---
   const dateText = $('#video_date .text').text().trim();
-  if (dateText) {
-    result.releaseDate = dateText; // Already in YYYY-MM-DD format
+  if (dateText) result.releaseDate = dateText;
+
+  const durationMatch = $('#video_length .text').text().trim().match(/(\d+)/);
+  if (durationMatch) result.durationSeconds = parseInt(durationMatch[1]) * 60;
+
+  const director = $('#video_director .director a').first().text().trim();
+  if (director) result.director = director;
+  const maker = $('#video_maker .maker a').first().text().trim();
+  if (maker) result.maker = maker;
+  const publisher = $('#video_label .label a').first().text().trim();
+  if (publisher) result.publisher = publisher;
+
+  $('#video_genres .genre a').each((i, element) => {
+    const tag = $(element).text().trim();
+    if (tag) result.tags.push(tag);
+  });
+  $('#video_cast .cast .star a').each((i, element) => {
+    const name = $(element).text().trim();
+    if (name) result.actresses.push({ name, gender: 'female' });
+  });
+
+  const scoreMatch = $('#video_review .score').text().trim().match(/\(?([\d.]+)\)?/);
+  if (scoreMatch) {
+    const fivePointScore = Math.round((parseFloat(scoreMatch[1]) / 2) * 10) / 10;
+    if (fivePointScore > 0 && fivePointScore <= 5) result.ratingAverage = fivePointScore;
   }
 
-  // --- Duration ---
-  const durationText = $('#video_length .text').text().trim();
-  if (durationText) {
-    const durationMatch = durationText.match(/(\d+)/);
-    if (durationMatch) {
-      result.durationSeconds = parseInt(durationMatch[1]) * 60;
-    }
-  }
-
-  // --- Director ---
-  const directorEl = $('#video_director .director a');
-  if (directorEl.length > 0) {
-    result.director = directorEl.text().trim();
-  }
-
-  // --- Maker (制作商) ---
-  const makerEl = $('#video_maker .maker a');
-  if (makerEl.length > 0) {
-    result.maker = makerEl.text().trim();
-  }
-
-  // --- Publisher (发行商) ---
-  const labelEl = $('#video_label .label a');
-  if (labelEl.length > 0) {
-    result.publisher = labelEl.text().trim();
-  }
-
-  // --- Series ---
-  // JavLibrary does not have a series field in its template
-  // result.series remains null
-
-  // --- Tags (类别) ---
-  const genreEls = $('#video_genres .genre a');
-  if (genreEls.length > 0) {
-    genreEls.each((i, el) => {
-      const tag = $(el).text().trim();
-      if (tag) {
-        result.tags.push(tag);
-      }
-    });
-  }
-
-  // --- Actresses ---
-  const castEls = $('#video_cast .cast .star a');
-  if (castEls.length > 0) {
-    castEls.each((i, el) => {
-      const name = $(el).text().trim();
-      if (name) {
-        result.actresses.push({ name: name, gender: 'female' });
-      }
-    });
-  }
-
-  // --- Rating ---
-  const scoreEl = $('#video_review .score');
-  if (scoreEl.length > 0) {
-    const scoreText = scoreEl.text().trim();
-    const scoreMatch = scoreText.match(/\(?([\d.]+)\)?/);
-    if (scoreMatch) {
-      const tenPointScore = parseFloat(scoreMatch[1]);
-      const fivePointScore = Math.round((tenPointScore / 2) * 10) / 10;
-      if (fivePointScore > 0 && fivePointScore <= 5) {
-        result.ratingAverage = fivePointScore;
-      }
-    }
-  }
-
-  // --- Sample Images ---
-  const sampleLinks = $('.previewthumbs a');
-  if (sampleLinks.length > 0) {
-    sampleLinks.each((i, el) => {
-      const href = $(el).attr('href');
-      if (href) {
-        result.sampleImageUrls.push(href);
-      }
-    });
-  }
-
-  // --- Source URL ---
-  if (!result.sourceUrl) {
-    // Try to get current page URL from the title link
-    const pageLink = $('#video_title a[href]');
-    if (pageLink.length > 0) {
-      let href = pageLink.attr('href');
-      if (href && !href.startsWith('http')) {
-        if (href.startsWith('/')) {
-          href = `https://www.javlibrary.com${href}`;
-        } else {
-          href = `https://www.javlibrary.com/cn/${href.replace(/^\.\//, '')}`;
-        }
-      }
-      result.sourceUrl = href;
-    }
-  }
+  $('.previewthumbs a').each((i, element) => {
+    const href = $(element).attr('href');
+    if (href) result.sampleImageUrls.push(href);
+  });
 
   return result;
 }

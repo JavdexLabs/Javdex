@@ -49,6 +49,27 @@ describe('typed IPC adapter', () => {
     assert.equal(invoked, false)
   })
 
+  it('accepts link-resource updates without an import-only target', () => {
+    const schema = videoIpcSchemas[IPC.VIDEO_RESOURCE_UPDATE]
+
+    assert.equal(
+      schema.safeParse([7, 11, { url: 'https://example.test/movie', kind: 'web' }]).success,
+      true
+    )
+    assert.equal(
+      schema.safeParse([
+        7,
+        11,
+        {
+          url: 'https://example.test/movie',
+          kind: 'web',
+          target: { kind: 'existing', videoId: 7 }
+        }
+      ]).success,
+      false
+    )
+  })
+
   it('serializes successful results and thrown errors', async () => {
     assert.deepEqual(await executeIpcHandler((value: number) => value * 2, [3]), {
       ok: true,

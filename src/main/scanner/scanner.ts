@@ -6,14 +6,19 @@ import {
   getVideoByCode,
   getLocalVideoResourceByLocator,
   getPreferredLocalVideoResource,
+  insertLocalVideoResource,
+  insertNewScannedVideo,
   insertScannedVideo,
+  listVideosByCode,
+  listVideoResources,
   localVideoResourceExistsByLocator,
   relocateLocalVideoResource,
+  relocateLocalVideoResourceById,
   updateLocalVideoResourceAfterProbe
 } from '../db/videoRepo'
 import type { ManualImportResult, ScanProgress, ScanResult, RenameImportResult } from '@shared/libraryTypes'
 import type { ScannedVideoInput } from '../db/videoRepo'
-import type { LocalVideoResource } from '@shared/videoTypes'
+import type { LocalVideoResource, VideoResourceImportTarget } from '@shared/videoTypes'
 import {
   isBelowMinImportDuration,
   readLocalVideoDurationSeconds,
@@ -25,6 +30,11 @@ import {
 import { getSettings } from '../settings/settingsStore'
 import { isPathUnderRoot } from './libraryPathUtils'
 import { normalizeVideoCode } from '@shared/videoCode'
+import {
+  pendingScanResourceExists,
+  reconcilePendingScanResources,
+  upsertPendingScanResources
+} from '../db/pendingScanRepo'
 
 export type ScanProgressFn = (progress: ScanProgress) => void
 
@@ -41,6 +51,8 @@ export interface ScanOptions {
   readDirectory?: (dir: string) => Promise<fs.Dirent[]>
   /** Override local resource inspection (tests). */
   inspectPath?: (filePath: string) => 'present' | 'missing' | 'unknown'
+  /** Override same-code resource auto-assignment (tests). */
+  autoMergeSameCodeResources?: boolean
 }
 
 const DEFAULT_YIELD_EVERY = 50
@@ -136,6 +148,38 @@ function buildScannedVideoImport(
   }
 }
 
+function scanRootForFile(file: string, folders: string[]): string {
+  return (
+    [...folders]
+      .filter((folder) => isPathUnderRoot(file, folder))
+      .sort((left, right) => right.length - left.length)[0] ?? path.dirname(file)
+  )
+}
+
+function findRelocationCandidate(
+  videos: Array<{ id: number }>,
+  file: string,
+  sizeBytes: number | null,
+  unavailableRoots: string[],
+  inspectPath: (filePath: string) => 'present' | 'missing' | 'unknown'
+): LocalVideoResource | null {
+  if (sizeBytes == null) return null
+  const newName = path.basename(file)
+  const localResources = videos.flatMap((video) =>
+    listVideoResources(video.id)
+      .filter((resource): resource is LocalVideoResource => resource.kind === 'local')
+  )
+  const auditable = localResources.filter(
+    (resource) => !unavailableRoots.some((root) => isPathUnderRoot(resource.locator, root))
+  )
+  const missing = auditable.filter((resource) => inspectPath(resource.locator) === 'missing')
+  const matches = missing.filter((resource) => {
+    if (resource.size_bytes !== sizeBytes) return false
+    return videos.length === 1 || path.basename(resource.locator) === newName
+  })
+  return matches.length === 1 ? matches[0] : null
+}
+
 function resolveRefreshTarget(file: string): LocalVideoResource | null {
   const existingResource = getLocalVideoResourceByLocator(file)
   if (existingResource) return existingResource
@@ -205,6 +249,8 @@ export async function scanFolders(
     skipped: 0,
     skippedShort: 0,
     failed: 0,
+    pendingGroups: 0,
+    pendingResources: 0,
     relocated: 0,
     refreshed: 0,
     removed: 0,
@@ -234,6 +280,16 @@ export async function scanFolders(
     options.minImportDurationSeconds !== undefined
       ? options.minImportDurationSeconds
       : resolveMinScanImportDurationSeconds(getSettings().minScanImportDurationMinutes)
+  const autoMergeSameCodeResources =
+    options.autoMergeSameCodeResources ?? getSettings().autoMergeSameCodeResources
+  const newFileCounts = new Map<string, number>()
+  for (const file of files) {
+    if (localVideoResourceExistsByLocator(file) || pendingScanResourceExists(file)) continue
+    const code = parseCode(path.basename(file, path.extname(file)))
+    if (!code) continue
+    newFileCounts.set(code, (newFileCounts.get(code) ?? 0) + 1)
+  }
+  const pendingGroupIds = new Set<number>()
 
   for (const file of files) {
     if (options.signal?.aborted) {
@@ -248,6 +304,28 @@ export async function scanFolders(
           result.refreshed += 1
         }
         result.skipped += 1
+        onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+        await maybeYield(result.scannedFiles, yieldEvery)
+        continue
+      }
+
+      if (pendingScanResourceExists(file)) {
+        const code = parseCode(path.basename(file, path.extname(file)))
+        if (code) {
+          const fingerprint = statFileFingerprint(file)
+          const fileDurationSeconds = await readDurationSeconds(file)
+          const pending = upsertPendingScanResources(code, [
+            {
+              filePath: file,
+              scanRoot: scanRootForFile(file, folders),
+              sizeBytes: fingerprint?.file_size ?? null,
+              durationSeconds: fileDurationSeconds,
+              fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
+              displayName: path.basename(file)
+            }
+          ])
+          pendingGroupIds.add(pending.groupId)
+        }
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
@@ -276,55 +354,64 @@ export async function scanFolders(
       }
 
       const fingerprint = statFileFingerprint(file)
-      const existing = getVideoByCode(code)
+      const existingVideos = listVideosByCode(code)
       const fileDurationSeconds = await resolveImportDurationSeconds(
         file,
         readDurationSeconds,
         probedDuration
       )
-      if (existing) {
-        const localResource = getPreferredLocalVideoResource(existing.id)
-        const localResourceUnavailable = Boolean(
-          localResource &&
-            options.unavailableRoots?.some((root) => isPathUnderRoot(localResource.locator, root))
+      const relocation = findRelocationCandidate(
+        existingVideos,
+        file,
+        fingerprint?.file_size ?? null,
+        options.unavailableRoots ?? [],
+        inspectPath
+      )
+      if (relocation) {
+        relocateLocalVideoResourceById(
+          relocation.id,
+          file,
+          fingerprint?.file_size ?? null,
+          fileDurationSeconds,
+          fingerprint?.file_mtime_ms ?? null
         )
-        const localResourceState =
-          localResource && !samePath(localResource.locator, file) && !localResourceUnavailable
-            ? inspectPath(localResource.locator)
-            : 'present'
-        if (localResource && samePath(localResource.locator, file)) {
-          if (await refreshScannedFileDuration(file, readDurationSeconds)) {
-            result.refreshed += 1
+        result.relocated += 1
+        onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+        await maybeYield(result.scannedFiles, yieldEvery)
+        continue
+      }
+
+      const mustConfirm = autoMergeSameCodeResources
+        ? existingVideos.length > 1
+        : existingVideos.length > 0 || (newFileCounts.get(code) ?? 0) > 1
+      if (mustConfirm) {
+        const pending = upsertPendingScanResources(code, [
+          {
+            filePath: file,
+            scanRoot: scanRootForFile(file, folders),
+            sizeBytes: fingerprint?.file_size ?? null,
+            durationSeconds: fileDurationSeconds,
+            fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
+            displayName: path.basename(file)
           }
-          result.skipped += 1
-        } else if (localResource && localResourceState === 'unknown') {
-          throw new Error(`无法确认已有本地资源是否存在：${localResource.locator}`)
-        } else if (
-          localResource &&
-          !localResourceUnavailable &&
-          localResourceState === 'missing'
-        ) {
-          relocateLocalVideoResource(
-            existing.id,
-            file,
-            fingerprint?.file_size ?? null,
-            fileDurationSeconds,
-            fingerprint?.file_mtime_ms ?? null
-          )
-          result.relocated += 1
-        } else {
-          const id = insertScannedVideo(
-            buildScannedVideoImport(code, file, fileDurationSeconds, fingerprint)
-          )
-          if (id !== null) {
-            result.imported += 1
-          } else {
-            if (await refreshScannedFileDuration(file, readDurationSeconds)) {
-              result.refreshed += 1
-            }
-            result.skipped += 1
-          }
-        }
+        ])
+        pendingGroupIds.add(pending.groupId)
+        result.pendingResources += pending.addedResources
+        onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+        await maybeYield(result.scannedFiles, yieldEvery)
+        continue
+      }
+
+      if (existingVideos.length === 1) {
+        const resourceId = insertLocalVideoResource({
+          videoId: existingVideos[0].id,
+          locator: file,
+          sizeBytes: fingerprint?.file_size ?? null,
+          durationSeconds: fileDurationSeconds,
+          fileMtimeMs: fingerprint?.file_mtime_ms ?? null
+        })
+        if (resourceId != null) result.imported += 1
+        else result.skipped += 1
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
@@ -336,12 +423,7 @@ export async function scanFolders(
       if (id !== null) {
         result.imported += 1
         result.newCodes.push(code)
-      } else {
-        if (await refreshScannedFileDuration(file, readDurationSeconds)) {
-          result.refreshed += 1
-        }
-        result.skipped += 1
-      }
+      } else result.skipped += 1
     } catch (err) {
       console.error('Scan error for', file, err)
       result.failed += 1
@@ -351,6 +433,9 @@ export async function scanFolders(
     await maybeYield(result.scannedFiles, yieldEvery)
   }
 
+  result.pendingGroups = pendingGroupIds.size
+  reconcilePendingScanResources(folders, inspectPath)
+
   return result
 }
 
@@ -358,16 +443,28 @@ const ILLEGAL_NAME_CHARS = /[\\/:*?"<>|]/
 
 /**
  * Rename a file on disk (keeping its original extension unless the new name
- * already carries one), then attempt to parse a code from the new name and
- * import it. Used to fix up files the scanner couldn't recognize.
+ * already carries one), then import it using the user's explicit code and target.
+ * Used to fix up files the scanner couldn't recognize.
  */
-export async function renameAndImport(oldPath: string, newNameRaw: string): Promise<RenameImportResult> {
+export async function renameAndImport(
+  oldPath: string,
+  newNameRaw: string,
+  codeRaw: string,
+  target: VideoResourceImportTarget
+): Promise<RenameImportResult> {
   if (!fs.existsSync(oldPath)) throw new Error('原文件不存在或已被移动')
 
   const newName = newNameRaw.trim()
   if (!newName) throw new Error('文件名不能为空')
   if (ILLEGAL_NAME_CHARS.test(newName)) {
     throw new Error('文件名包含非法字符： \\ / : * ? " < > |')
+  }
+  const code = normalizeVideoCode(codeRaw)
+  if (
+    target.kind === 'existing' &&
+    !listVideosByCode(code).some((video) => video.id === target.videoId)
+  ) {
+    throw new Error('所选影片不存在或番号已经变化')
   }
 
   const dir = path.dirname(oldPath)
@@ -385,46 +482,30 @@ export async function renameAndImport(oldPath: string, newNameRaw: string): Prom
     fs.renameSync(oldPath, newPath)
   }
 
-  const base = path.basename(newPath, path.extname(newPath))
-  const code = parseCode(base)
-  const fingerprint = statFileFingerprint(newPath)
-  const fileDurationSeconds = await readLocalVideoDurationSeconds(newPath)
-  let imported = false
-  if (code && !localVideoResourceExistsByLocator(newPath)) {
-    const existing = getVideoByCode(code)
-    if (existing) {
-      const localResource = getPreferredLocalVideoResource(existing.id)
-      if (localResource && !fs.existsSync(localResource.locator)) {
-        relocateLocalVideoResource(
-          existing.id,
-          newPath,
-          fingerprint?.file_size ?? null,
-          fileDurationSeconds,
-          fingerprint?.file_mtime_ms ?? null
-        )
-        imported = true
-      } else if (!localResource) {
-        const id = insertScannedVideo(
-          buildScannedVideoImport(code, newPath, fileDurationSeconds, fingerprint)
-        )
-        imported = id !== null
+  try {
+    const result = await importManual(newPath, code, target)
+    return { newPath, newName: path.basename(newPath), imported: result.imported, code }
+  } catch (error) {
+    if (!sameFile && fs.existsSync(newPath) && !fs.existsSync(oldPath)) {
+      try {
+        fs.renameSync(newPath, oldPath)
+      } catch {
+        throw new Error(`导入失败且无法恢复原文件名：${error instanceof Error ? error.message : String(error)}`)
       }
-    } else {
-      const id = insertScannedVideo(
-        buildScannedVideoImport(code, newPath, fileDurationSeconds, fingerprint)
-      )
-      imported = id !== null
     }
+    throw error
   }
-
-  return { newPath, newName: path.basename(newPath), imported, code }
 }
 
 /**
  * Import a file with a user-supplied code. Does not rename the file and does not
  * validate code format beyond the shared trim-and-uppercase identity rule.
  */
-export async function importManual(filePath: string, codeRaw: string): Promise<ManualImportResult> {
+export async function importManual(
+  filePath: string,
+  codeRaw: string,
+  target: VideoResourceImportTarget
+): Promise<ManualImportResult> {
   if (!fs.existsSync(filePath)) throw new Error('原文件不存在或已被移动')
 
   const code = normalizeVideoCode(codeRaw)
@@ -435,8 +516,9 @@ export async function importManual(filePath: string, codeRaw: string): Promise<M
 
   const fingerprint = statFileFingerprint(filePath)
   const fileDurationSeconds = await readLocalVideoDurationSeconds(filePath)
-  const existing = getVideoByCode(code)
-  if (existing) {
+  if (target.kind === 'existing') {
+    const existing = listVideosByCode(code).find((video) => video.id === target.videoId)
+    if (!existing) throw new Error('所选影片不存在或番号已经变化')
     const localResource = getPreferredLocalVideoResource(existing.id)
     if (localResource && !fs.existsSync(localResource.locator)) {
       relocateLocalVideoResource(
@@ -449,15 +531,19 @@ export async function importManual(filePath: string, codeRaw: string): Promise<M
       return { code, imported: true, relocated: true }
     }
     if (!localVideoResourceExistsByLocator(filePath)) {
-      const id = insertScannedVideo(
-        buildScannedVideoImport(code, filePath, fileDurationSeconds, fingerprint)
-      )
-      return { code, imported: id !== null, relocated: false }
+      const resourceId = insertLocalVideoResource({
+        videoId: existing.id,
+        locator: filePath,
+        sizeBytes: fingerprint?.file_size ?? null,
+        durationSeconds: fileDurationSeconds,
+        fileMtimeMs: fingerprint?.file_mtime_ms ?? null
+      })
+      return { code, imported: resourceId !== null, relocated: false }
     }
     return { code, imported: false, skippedPath: false }
   }
 
-  const id = insertScannedVideo(
+  const id = insertNewScannedVideo(
     buildScannedVideoImport(code, filePath, fileDurationSeconds, fingerprint)
   )
   return { code, imported: id !== null }

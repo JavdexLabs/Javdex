@@ -1,4 +1,4 @@
-import type { ScrapeResult } from '@shared/videoScrapeTypes'
+import type { VideoPluginScrapeResult } from '@shared/videoScrapeTypes'
 
 /**
  * Plugin contract for a metadata scraper. Implementations parse a remote
@@ -11,5 +11,5 @@ export interface BaseScraper {
    * Resolve metadata for a code. Network requests should honour proxyUrl
    * when provided. Returns null when the title cannot be found.
    */
-  parseTask(code: string, proxyUrl?: string): Promise<ScrapeResult | null>
+  parseTask(code: string, proxyUrl?: string): Promise<VideoPluginScrapeResult>
 }

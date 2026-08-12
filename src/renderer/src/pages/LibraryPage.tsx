@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useMatch, useLocation, useSearchParams } from 'react-router-dom'
+import { useMatch, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ChevronDown,
   Film,
@@ -49,12 +49,14 @@ import {
   parseScrapedStatus,
   parseSort,
   parseTagIds,
+  parseVideoPendingScrape,
   parseVideoResourceFilters,
   parseYear,
   patchSearchParams,
   videoResourceFiltersParam
 } from '../listView/listQueryParams'
 import { ROUTE_MATCH, ROUTE_PATH } from '../listView/routePaths'
+import { pendingCenterPath } from '../listView/pendingRoutes'
 import { forgetPrimaryListLocation } from '../listView/primaryNavigationMemory'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
@@ -116,6 +118,7 @@ export default function LibraryPage(): JSX.Element {
   const { mode, setMode } = useDisplayMode()
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
+  const navigate = useNavigate()
   const filterBtnRef = useRef<HTMLButtonElement>(null)
   const [filterOpen, setFilterOpen] = useState(false)
   const detailOpen = Boolean(useMatch({ path: ROUTE_MATCH.libraryDetailOpen, end: false }))
@@ -188,6 +191,7 @@ export default function LibraryPage(): JSX.Element {
     searchParams.get(LIST_PARAM.dir)
   )
   const status = parseScrapedStatus(searchParams.get(LIST_PARAM.status))
+  const pendingScrape = parseVideoPendingScrape(searchParams.get(LIST_PARAM.pending))
   const year = parseYear(searchParams.get(LIST_PARAM.year))
   const tagIds = useMemo(
     () => parseTagIds(searchParams.get(LIST_PARAM.tags)),
@@ -251,6 +255,7 @@ export default function LibraryPage(): JSX.Element {
 
   const filterState: LibraryFilterState = {
     status,
+    pendingScrape,
     year,
     codePrefix,
     sortBy,
@@ -263,6 +268,9 @@ export default function LibraryPage(): JSX.Element {
     const updates: Record<string, string | null | undefined> = {}
     if (patch.status !== undefined) {
       updates[LIST_PARAM.status] = patch.status === 'all' ? null : String(patch.status)
+    }
+    if (patch.pendingScrape !== undefined) {
+      updates[LIST_PARAM.pending] = patch.pendingScrape === 'all' ? null : patch.pendingScrape
     }
     if (patch.year !== undefined) {
       updates[LIST_PARAM.year] = patch.year === 'all' ? null : String(patch.year)
@@ -287,6 +295,7 @@ export default function LibraryPage(): JSX.Element {
       (prev) =>
         patchSearchParams(prev, {
           [LIST_PARAM.status]: null,
+          [LIST_PARAM.pending]: null,
           [LIST_PARAM.year]: null,
           [LIST_PARAM.prefix]: null,
           [LIST_PARAM.tags]: null,
@@ -302,6 +311,7 @@ export default function LibraryPage(): JSX.Element {
     sortBy !== LIBRARY_DEFAULTS.sortBy || sortDir !== LIBRARY_DEFAULTS.sortDir
   const hasAppliedFilters =
     status !== 'all' ||
+    pendingScrape !== 'all' ||
     year !== 'all' ||
     !!codePrefix ||
     tagIds.length > 0 ||
@@ -409,6 +419,12 @@ export default function LibraryPage(): JSX.Element {
       )
       if (res.directorChoice) {
         setPendingDirectorChoice({ ...request, choice: res.directorChoice })
+        return
+      }
+      if (res.pending) {
+        setScrapeTarget(null)
+        toast.show('发现多个候选，已保存到待确认中心', 'info')
+        navigate(pendingCenterPath({ tab: 'scrape', videoId: request.target.id }))
         return
       }
       setPendingDirectorChoice(null)
@@ -521,6 +537,13 @@ export default function LibraryPage(): JSX.Element {
       key: 'status',
       label: STATUS_LABELS[String(status)],
       onRemove: () => patchFilters({ status: 'all' })
+    })
+  }
+  if (pendingScrape !== 'all') {
+    appliedFilters.push({
+      key: 'pending',
+      label: pendingScrape === 'pending' ? '仅待确认刮削' : '排除待确认刮削',
+      onRemove: () => patchFilters({ pendingScrape: 'all' })
     })
   }
   if (year !== 'all') {
@@ -866,6 +889,9 @@ export default function LibraryPage(): JSX.Element {
           }}
         >
           确定要永久删除「{deleteTarget.code}」吗？将删除全部影片资源、应用自有图片及所有元数据；其中本地资源会同时删除磁盘文件，此操作不可恢复。
+          {deleteTarget.has_pending_scrape ? (
+            <div className="modal-path-hint">同时会删除待确认刮削候选与暂存图片。</div>
+          ) : null}
           {(deleteTarget.resource_count ?? 0) > 0 ? (
             <div className="modal-path-hint">共关联 {deleteTarget.resource_count} 个影片资源</div>
           ) : null}
@@ -885,6 +911,9 @@ export default function LibraryPage(): JSX.Element {
           }}
         >
           确定要永久删除已选择的 {selectedCount} 部影片吗？将删除全部影片资源、应用自有图片及所有元数据；其中本地资源会同时删除磁盘文件，此操作不可恢复。
+          {selectedVideos.some((video) => video.has_pending_scrape) ? (
+            <div className="modal-path-hint">其中含待确认刮削影片；对应候选与暂存图片也会删除。</div>
+          ) : null}
         </Modal>
       )}
     </div>

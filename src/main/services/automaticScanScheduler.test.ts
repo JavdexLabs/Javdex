@@ -40,6 +40,8 @@ function scanResult(): ScanResult {
     skipped: 0,
     skippedShort: 0,
     failed: 0,
+    pendingGroups: 0,
+    pendingResources: 0,
     relocated: 0,
     refreshed: 0,
     removed: 0,
@@ -65,6 +67,8 @@ function summary(finishedAt: string): LibraryScanSummary {
     videosDeleted: 0,
     skippedFiles: 0,
     failedFiles: 0,
+    pendingScanGroups: 0,
+    pendingScanResources: 0,
     offlineFolders: [],
     errorSummary: null
   }

@@ -77,7 +77,7 @@ export default function BatchSettingsPanel({
           {batch ? (!canResume && paused ? '不可恢复' : batchStatusLabel(status)) : '空闲'}
         </SettingsStatusPill>
         <div className="batch-log-toolbar-actions">
-          {scope === 'actress' && pendingGroupCount > 0 && onOpenPending ? (
+          {scope !== 'avatar' && pendingGroupCount > 0 && onOpenPending ? (
             <Button type="button" variant="ghost" size="sm" onClick={onOpenPending}>
               查看待确认
             </Button>
@@ -109,7 +109,7 @@ export default function BatchSettingsPanel({
       <div className="batch-log-stats" aria-label="运行统计">
         <div
           className={`batch-log-stats-row${
-            scope === 'actress' ? ' batch-log-stats-row--with-pending' : ''
+            scope !== 'avatar' ? ' batch-log-stats-row--with-pending' : ''
           }`}
         >
           <span className="batch-log-stat">
@@ -120,7 +120,7 @@ export default function BatchSettingsPanel({
             <span className="batch-log-stat-label">成功</span>
             <strong className="text-success">{batch?.success ?? 0}</strong>
           </span>
-          {scope === 'actress' ? (
+          {scope !== 'avatar' ? (
             <span className="batch-log-stat batch-log-stat--pending">
               <span className="batch-log-stat-label">待确认</span>
               <strong>{pendingGroupCount}</strong>

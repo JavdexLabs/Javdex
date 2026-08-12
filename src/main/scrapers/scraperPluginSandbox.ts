@@ -1,7 +1,8 @@
 import { app } from 'electron'
 import { Worker } from 'node:worker_threads'
 import path from 'node:path'
-import type { ActressScrapeResult, ScrapeResult, ScraperPluginKind } from '@shared/scrapeTypes'
+import type { ActressScrapeResult, ScraperPluginKind } from '@shared/scrapeTypes'
+import type { VideoPluginScrapeResult } from '@shared/videoScrapeTypes'
 import { readTestUserDataPath } from '@shared/appIdentity'
 import { scrapeBrowser } from './scrapeBrowser'
 import {
@@ -82,12 +83,23 @@ type SandboxBufferFetcher = (
   headers: Readonly<Record<string, string>>
 ) => Promise<ScraperResourceResponse>
 
+type SandboxPageFetcher = (
+  url: string,
+  proxyUrl: string | undefined,
+  options: FetchPageOptions | undefined
+) => Promise<string>
+
 let resourceCache: ScraperResourceCache | null = null
 let sandboxBufferFetcher: SandboxBufferFetcher = defaultSandboxBufferFetcher
+let sandboxPageFetcher: SandboxPageFetcher = defaultSandboxPageFetcher
 
 export function setSandboxBufferFetcherForTests(fetcher?: SandboxBufferFetcher): void {
   sandboxBufferFetcher = fetcher ?? defaultSandboxBufferFetcher
   resourceCache = null
+}
+
+export function setSandboxPageFetcherForTests(fetcher?: SandboxPageFetcher): void {
+  sandboxPageFetcher = fetcher ?? defaultSandboxPageFetcher
 }
 
 export async function validateUserPluginCode(
@@ -108,8 +120,8 @@ export function runUserVideoPlugin(
   code: string,
   videoCode: string,
   proxyUrl?: string
-): Promise<ScrapeResult | null> {
-  return runSandboxWorker<ScrapeResult | null>({
+): Promise<VideoPluginScrapeResult> {
+  return runSandboxWorker<VideoPluginScrapeResult>({
     mode: 'parse',
     kind: 'video',
     pluginName,
@@ -124,8 +136,8 @@ export function runUserVideoPluginWithLogs(
   code: string,
   videoCode: string,
   proxyUrl?: string
-): Promise<SandboxRunResult<ScrapeResult | null>> {
-  return runSandboxWorkerCollect<ScrapeResult | null>({
+): Promise<SandboxRunResult<VideoPluginScrapeResult>> {
+  return runSandboxWorkerCollect<VideoPluginScrapeResult>({
     mode: 'parse',
     kind: 'video',
     pluginName,
@@ -277,10 +289,9 @@ async function handleWorkerRpc(
 
   try {
     if (message.type === 'fetchPage') {
-      await scrapeBrowser.setProxy(workerData.proxyUrl)
       const url = parseHttpUrl(message.url)
       const options = parseFetchPageOptions(message.options)
-      const html = await scrapeBrowser.fetchPage(url, options)
+      const html = await sandboxPageFetcher(url, workerData.proxyUrl, options)
       reply({ ok: true, value: html })
     } else if (message.type === 'fetchBuffer') {
       const url = parseHttpUrl(message.url)
@@ -330,6 +341,15 @@ async function defaultSandboxBufferFetcher(
     headers,
     referer: 'omit'
   })
+}
+
+async function defaultSandboxPageFetcher(
+  url: string,
+  proxyUrl: string | undefined,
+  options: FetchPageOptions | undefined
+): Promise<string> {
+  await scrapeBrowser.setProxy(proxyUrl)
+  return scrapeBrowser.fetchPage(url, options)
 }
 
 function getResourceCache(): ScraperResourceCache {
@@ -477,10 +497,10 @@ function absoluteUrl(href, baseUrl) {
 
 function normalizeDate(input) {
   const text = String(input || '').trim();
-  const full = text.match(/(\d{4})\D{0,3}(\d{1,2})\D{0,3}(\d{1,2})/);
-  if (full) return formatDate(full[1], full[2], full[3]);
-  const monthOnly = text.match(/(\d{4})\D{0,3}(\d{1,2})(?:\s*月|\s*$)/);
+  const monthOnly = text.match(/^(\d{4})\D{1,3}(\d{1,2})(?:\s*月)?$/);
   if (monthOnly) return formatDate(monthOnly[1], monthOnly[2], '1');
+  const full = text.match(/(\d{4})\D{1,3}(\d{1,2})\D{1,3}(\d{1,2})(?!\d)/);
+  if (full) return formatDate(full[1], full[2], full[3]);
   return undefined;
 }
 

@@ -544,6 +544,7 @@ textarea,
 .app-shell--with-background .content {
   background: transparent;
 }
+
 .app-shell--with-background .list-page {
   background: color-mix(in srgb, var(--surface-base) 34%, transparent);
 }

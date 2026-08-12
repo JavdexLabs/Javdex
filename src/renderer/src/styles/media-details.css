@@ -334,6 +334,21 @@
   background: var(--surface-danger);
   border: 1px solid var(--border-danger);
 }
+.detail-meta-status[data-pending='true'] {
+  color: var(--text-warning);
+  background: var(--surface-warning);
+  border: 1px solid var(--border-warning);
+  cursor: pointer;
+}
+.detail-meta-status[data-pending='true']:hover,
+.detail-meta-status[data-pending='true']:focus-visible {
+  color: var(--text-accent);
+  border-color: var(--border-accent);
+}
+.detail-meta-status[data-pending='true']:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+}
 .detail-maintenance-grid {
   display: grid;
   gap: 0;

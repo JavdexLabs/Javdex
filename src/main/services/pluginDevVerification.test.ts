@@ -6,6 +6,7 @@ import {
   collectSiteUnsupportedSupportedFields,
   collectSupportedFieldsToAdd,
   collectStructuralVerificationIssues,
+  pickCandidateVerificationPage,
   filterVerificationItemsBySupportedFields,
   formatVerificationForPrompt,
   getResultValueForField,
@@ -47,6 +48,87 @@ describe('pluginDevVerification', () => {
     })
 
     assert.equal(items.find((item) => item.field === 'releasedDate')?.status, 'invalid_key')
+  })
+
+  it('checks candidate arrays as result objects instead of treating indexes as fields', () => {
+    const items = collectStructuralVerificationIssues('video', [
+      { code: 'ABC-123', title: 'First' },
+      { code: 'ABC-123', title: 'Second', unexpected: true }
+    ])
+
+    assert.deepEqual(items, [
+      {
+        field: 'candidate[1].unexpected',
+        status: 'invalid_key',
+        actual: undefined,
+        note: '字段名不在 parse 返回规范中'
+      }
+    ])
+  })
+
+  it('selects each candidate verification page by its own source URL', () => {
+    const pages = [
+      { label: 'second', url: 'https://example.test/detail/2', title: '', text: '', forms: [], links: [] },
+      { label: 'first', url: 'https://example.test/detail/1#section', title: '', text: '', forms: [], links: [] }
+    ]
+
+    assert.equal(
+      pickCandidateVerificationPage(
+        { sourceUrl: 'https://example.test/detail/1' },
+        pages,
+        0
+      )?.label,
+      'first'
+    )
+    assert.equal(
+      pickCandidateVerificationPage(
+        { sourceUrl: 'https://example.test/detail/2' },
+        pages,
+        1
+      )?.label,
+      'second'
+    )
+    assert.equal(
+      pickCandidateVerificationPage(
+        { sourceUrl: 'https://example.test/detail/missing' },
+        pages,
+        0
+      ),
+      undefined
+    )
+  })
+
+  it('blocks a candidate when its source URL has no exact reference page', async () => {
+    const report = await verifyDebugResultAgainstPages({
+      kind: 'video',
+      lastResult: [
+        { code: 'ABC-123', title: 'First', sourceUrl: 'https://example.test/detail/1' },
+        { code: 'ABC-123', title: 'Second', sourceUrl: 'https://example.test/detail/2' }
+      ],
+      discovery: {
+        pages: [
+          {
+            label: 'first',
+            url: 'https://example.test/detail/1',
+            title: 'ABC-123 First',
+            text: 'ABC-123 First',
+            forms: [],
+            links: []
+          }
+        ],
+        notes: []
+      },
+      supportedFields: ['title'],
+      testTarget: 'ABC-123'
+    })
+
+    assert.equal(
+      report.items.some(
+        (item) =>
+          item.field === 'candidate[1].reference_page' && item.status === 'suspicious'
+      ),
+      true
+    )
   })
 
   it('builds semantic prompt with user feedback and field glossary', () => {

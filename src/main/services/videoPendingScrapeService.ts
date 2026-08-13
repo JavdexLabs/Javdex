@@ -27,54 +27,10 @@ import {
   videoScrapeApplyService
 } from './videoScrapeApplyService'
 import { selectPrimaryVideoResourceCandidate } from './videoResourcePromotion'
-
-function selectSourceFields(
-  result: ScrapeResult,
-  fields: Set<VideoScrapeField>
-): ScrapeResult {
-  const selected: ScrapeResult = { code: result.code }
-  if (fields.has('title')) selected.title = result.title
-  if (fields.has('summary')) selected.summary = result.summary
-  if (fields.has('cover')) selected.coverUrl = result.coverUrl
-  if (fields.has('releaseDate')) selected.releaseDate = result.releaseDate
-  if (fields.has('maker')) selected.maker = result.maker
-  if (fields.has('publisher')) selected.publisher = result.publisher
-  if (fields.has('series')) selected.series = result.series
-  if (fields.has('director')) selected.director = result.director
-  if (fields.has('duration')) selected.durationSeconds = result.durationSeconds
-  if (fields.has('tags')) selected.tags = result.tags
-  if (fields.has('source')) selected.sourceUrl = result.sourceUrl
-  if (fields.has('rating')) {
-    selected.ratingAverage = result.ratingAverage
-    selected.ratingCount = result.ratingCount
-  }
-  if (fields.has('samples')) selected.sampleImageUrls = result.sampleImageUrls
-  if (fields.has('actressesFemale') || fields.has('actressesMale')) {
-    selected.actresses = (result.actresses ?? []).filter((actress) => {
-      const gender = actress.gender ?? 'female'
-      return (
-        (gender === 'female' && fields.has('actressesFemale')) ||
-        (gender === 'male' && fields.has('actressesMale'))
-      )
-    })
-  }
-  return selected
-}
-
-function mergeSelectedResult(
-  base: ScrapeResult | null,
-  next: ScrapeResult,
-  fields: Set<VideoScrapeField>
-): ScrapeResult {
-  const selected = selectSourceFields(next, fields)
-  return {
-    ...(base ?? { code: selected.code }),
-    ...selected,
-    actresses: [...(base?.actresses ?? []), ...(selected.actresses ?? [])],
-    tags: selected.tags ?? base?.tags,
-    sampleImageUrls: selected.sampleImageUrls ?? base?.sampleImageUrls
-  }
-}
+import {
+  mergeVideoScrapeResults,
+  projectVideoScrapeResult
+} from '../scrapers/videoScrapeFieldProjection'
 
 function allStagedPaths(snapshot: NonNullable<ReturnType<typeof getPendingVideoScrapeResolutionSnapshot>>): string[] {
   return snapshot.sources.flatMap((source) =>
@@ -194,10 +150,9 @@ export const videoPendingScrapeService = {
     }))
     let merged: ScrapeResult | null = null
     for (const item of chosen) {
-      merged = mergeSelectedResult(
+      merged = mergeVideoScrapeResults(
         merged,
-        item.candidate.result,
-        new Set(item.source.selectedFields)
+        projectVideoScrapeResult(item.candidate.result, new Set(item.source.selectedFields))
       )
     }
     if (!merged) throw new Error('待确认结果不包含候选')

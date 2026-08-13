@@ -27,6 +27,7 @@ import {
 import { isPathUnderRoot, isSameLibraryPath } from './libraryPathUtils'
 import { scanFolders, type ScanOptions, type ScanProgressFn } from './scanner'
 import { deleteResourceLessVideos } from '../services/resourceLessVideoCleanupService'
+import { reconcilePendingScanResources } from '../db/pendingScanRepo'
 
 export type ScanTrigger = LibraryScanTrigger
 
@@ -59,6 +60,7 @@ interface ScanCoordinatorDependencies {
   removeResourceRecord: (resourceId: number) => void
   setPrimaryResource: (videoId: number, resourceId: number) => void
   inspectPath: (filePath: string) => LocalPathState
+  reconcilePendingScanResources: typeof reconcilePendingScanResources
   getPendingPathCleanupRoots: () => string[]
   applyPendingPathCleanups: (roots: string[]) => PendingLibraryPathCleanupResult
   clearPendingPathCleanups: (roots: string[]) => void
@@ -187,6 +189,10 @@ export class ScanCoordinator {
         offlineFolders.length === 0 &&
         this.dependencies.shouldAutoDeleteResourceLessVideos()
       const cleanup = this.dependencies.runCleanupTransaction(() => {
+        this.dependencies.reconcilePendingScanResources(
+          accessibleFolders,
+          this.dependencies.inspectPath
+        )
         const missingResources = this.removeMissingAccessibleResources(
           accessibleFolders,
           offlineFolders
@@ -328,6 +334,8 @@ export function createScanCoordinator(
     removeResourceRecord: dependencies.removeResourceRecord ?? removeVideoResourceRecord,
     setPrimaryResource: dependencies.setPrimaryResource ?? setPrimaryVideoResource,
     inspectPath: dependencies.inspectPath ?? inspectLocalPath,
+    reconcilePendingScanResources:
+      dependencies.reconcilePendingScanResources ?? reconcilePendingScanResources,
     getPendingPathCleanupRoots:
       dependencies.getPendingPathCleanupRoots ?? listPendingLibraryPathCleanupRoots,
     applyPendingPathCleanups:

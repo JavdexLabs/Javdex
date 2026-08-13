@@ -17,7 +17,10 @@ export const LIST_PARAM = {
   gender: 'gender',
   resources: 'resources',
   pending: 'pending',
-  releaseDir: 'releaseDir'
+  releaseDir: 'releaseDir',
+  pendingTab: 'tab',
+  pendingItemId: 'id',
+  pendingVideoId: 'videoId'
 } as const
 
 export const VIDEO_RESOURCE_FILTER_ORDER: VideoResourceFilter[] = [

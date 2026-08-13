@@ -28,7 +28,8 @@ const SEARCH_KEYS_BY_ROOT: Record<string, readonly string[]> = {
     LIST_PARAM.sort,
     LIST_PARAM.dir
   ],
-  '/playlists': [LIST_PARAM.q]
+  '/playlists': [LIST_PARAM.q],
+  '/pending': [LIST_PARAM.pendingTab, LIST_PARAM.pendingItemId, LIST_PARAM.pendingVideoId]
 }
 
 function facetRoot(pathname: string): string | null {
@@ -51,6 +52,9 @@ export function primaryListRoot(pathname: string): string | null {
   }
   if (matchPath({ path: ROUTE_PATH.playlistTree, end: false }, pathname)) {
     return ROUTE_PATH.playlists
+  }
+  if (matchPath({ path: ROUTE_PATH.pendingTree, end: false }, pathname)) {
+    return ROUTE_PATH.pending
   }
   return facetRoot(pathname)
 }

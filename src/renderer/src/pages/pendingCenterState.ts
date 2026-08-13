@@ -1,4 +1,5 @@
 import type { PendingScanResource, PendingScanResourceTarget } from '@shared/libraryTypes'
+import { selectDefaultPendingScanPrimary } from '@shared/pendingScanPrimary'
 
 function pendingPathOrderKey(filePath: string): string {
   const slashNormalized = filePath.replaceAll('\\', '/')
@@ -47,20 +48,10 @@ export function pendingScanTargetFromValue(value: string): PendingScanResourceTa
   return undefined
 }
 
-/** Mirror the persisted resolution rule so the UI can show the effective default before submit. */
 export function defaultPendingScanPrimaryResourceId(
   resources: readonly PendingScanResource[]
 ): number | null {
-  const sorted = [...resources].sort((left, right) => {
-    const duration = (right.durationSeconds ?? -1) - (left.durationSeconds ?? -1)
-    if (duration) return duration
-    const size = (right.sizeBytes ?? -1) - (left.sizeBytes ?? -1)
-    if (size) return size
-    const leftPath = pendingPathOrderKey(left.filePath)
-    const rightPath = pendingPathOrderKey(right.filePath)
-    return leftPath < rightPath ? -1 : leftPath > rightPath ? 1 : 0
-  })
-  return sorted[0]?.id ?? null
+  return selectDefaultPendingScanPrimary(resources, pendingPathOrderKey)?.id ?? null
 }
 
 export function arePendingScrapeSelectionsComplete(

@@ -36,6 +36,10 @@ import {
   loadUserVideoScrapers
 } from './scraperPluginService'
 import { normalizeVideoScrapeCandidates } from './scraperResultValidation'
+import {
+  mergeVideoScrapeResults,
+  projectVideoScrapeResult
+} from './videoScrapeFieldProjection'
 
 function buildRegistry(): Map<string, BaseScraper> {
   return buildPluginRegistry(loadUserVideoScrapers, loadBundledVideoScrapers)
@@ -79,54 +83,6 @@ export interface ScrapeVideoOptions {
   directorAmbiguity?: 'choice' | 'preserve'
   delayController?: {
     run<T>(kind: 'video', pluginName: string, task: () => Promise<T>): Promise<T>
-  }
-}
-
-function fieldSet(fields: VideoScrapeField[]): Set<VideoScrapeField> {
-  return new Set(fields)
-}
-
-function pickVideoFields(
-  result: ScrapeResult,
-  fields: Set<VideoScrapeField>,
-  fallbackCode: string
-): ScrapeResult {
-  const out: ScrapeResult = { code: result.code || fallbackCode }
-  if (fields.has('title')) out.title = result.title
-  if (fields.has('summary')) out.summary = result.summary
-  if (fields.has('cover')) out.coverUrl = result.coverUrl
-  if (fields.has('releaseDate')) out.releaseDate = result.releaseDate
-  if (fields.has('maker')) out.maker = result.maker
-  if (fields.has('publisher')) out.publisher = result.publisher
-  if (fields.has('series')) out.series = result.series
-  if (fields.has('director')) out.director = result.director
-  if (fields.has('duration')) out.durationSeconds = result.durationSeconds
-  if (fields.has('tags')) out.tags = result.tags
-  if (fields.has('source')) out.sourceUrl = result.sourceUrl
-  if (fields.has('rating')) {
-    out.ratingAverage = result.ratingAverage
-    out.ratingCount = result.ratingCount
-  }
-  if (fields.has('samples')) out.sampleImageUrls = result.sampleImageUrls
-  if (fields.has('actressesFemale') || fields.has('actressesMale')) {
-    out.actresses = (result.actresses ?? []).filter((actress) => {
-      const gender = actress.gender ?? 'female'
-      return (
-        (gender === 'female' && fields.has('actressesFemale')) ||
-        (gender === 'male' && fields.has('actressesMale'))
-      )
-    })
-  }
-  return out
-}
-
-function mergeVideoResults(base: ScrapeResult | null, next: ScrapeResult): ScrapeResult {
-  return {
-    ...(base ?? { code: next.code }),
-    ...next,
-    actresses: [...(base?.actresses ?? []), ...(next.actresses ?? [])],
-    tags: next.tags ?? base?.tags,
-    sampleImageUrls: next.sampleImageUrls ?? base?.sampleImageUrls
   }
 }
 
@@ -177,7 +133,7 @@ function collectExactVideoCandidates(
     const normalizedUrl = normalizeCandidateSourceUrl(candidate.sourceUrl)
     if (normalizedUrl && seenUrls.has(normalizedUrl)) continue
     if (normalizedUrl) seenUrls.add(normalizedUrl)
-    candidates.push(pickVideoFields(candidate, supportedFields, normalizedCode))
+    candidates.push(projectVideoScrapeResult(candidate, supportedFields, normalizedCode))
   }
   return { candidates, warnings }
 }
@@ -348,9 +304,9 @@ async function scrapeCompositeVideo(
     if (collected.candidates.length === 0) continue
     sources.push({ pluginName, descriptor, selectedFields, supportedFields, candidates: collected.candidates })
     matchedFields.push(...selectedFields)
-    merged = mergeVideoResults(
+    merged = mergeVideoScrapeResults(
       merged,
-      pickVideoFields(collected.candidates[0], fieldSet(selectedFields), videoCode)
+      projectVideoScrapeResult(collected.candidates[0], new Set(selectedFields), videoCode)
     )
   }
   return { result: merged, matchedFields, sources, warnings }

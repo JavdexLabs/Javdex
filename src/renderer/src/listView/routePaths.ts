@@ -30,7 +30,10 @@ export const ROUTE_PATH = {
   settingsTree: '/settings/*',
   settingsGroup: '/settings/:group/:tab',
   settingsPluginDev: '/settings/plugin-dev',
-  pending: '/pending'
+  pending: '/pending',
+  pendingTree: '/pending/*',
+  pendingVideoStack: '/pending/video/:videoId',
+  pendingActressStack: '/pending/video/:videoId/actress/:actressId'
 } as const
 
 export const ROUTE_SEGMENT = {
@@ -46,7 +49,8 @@ export const ROUTE_SEGMENT = {
   directorDetail: 'd/:directorId',
   directorVideo: ':id',
   seriesDetail: 's/:seriesId',
-  seriesVideo: ':id'
+  seriesVideo: ':id',
+  pendingVideo: 'video/:videoId'
 } as const
 
 export const ROUTE_MATCH = {
@@ -67,5 +71,7 @@ export const ROUTE_MATCH = {
   directorActressStack: ROUTE_PATH.directorActressStack,
   seriesDetailOpen: ROUTE_PATH.seriesDetail,
   seriesVideoStack: ROUTE_PATH.seriesVideoStack,
-  seriesActressStack: ROUTE_PATH.seriesActressStack
+  seriesActressStack: ROUTE_PATH.seriesActressStack,
+  pendingVideoStack: ROUTE_PATH.pendingVideoStack,
+  pendingActressStack: ROUTE_PATH.pendingActressStack
 } as const

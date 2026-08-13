@@ -5,10 +5,15 @@ import {
   parseSeriesPath
 } from './facetRoutes'
 import { parseLibraryVideoPath } from './libraryRoutes'
+import { parsePendingVideoPath } from './pendingRoutes'
 import { parsePlaylistVideoPath } from './playlistRoutes'
 
 /** Scope key for detail poster backgrounds (actress:id / video:id). */
 export function getDetailPosterScope(pathname: string): string | null {
+  const pending = parsePendingVideoPath(pathname)
+  if (pending?.actressId != null) return `actress:${pending.actressId}`
+  if (pending?.videoId != null) return `video:${pending.videoId}`
+
   const library = parseLibraryVideoPath(pathname)
   if (library?.actressId != null) return `actress:${library.actressId}`
   if (library?.videoId != null) return `video:${library.videoId}`

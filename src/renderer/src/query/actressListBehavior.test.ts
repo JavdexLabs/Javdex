@@ -3,6 +3,8 @@ import { afterEach, describe, it } from 'node:test'
 import { addSelectedRange, toggleSelectedId } from '../hooks/rangeSelectionState'
 import {
   clearAllListViewMemory,
+  clearListScrollForPrimaryNav,
+  getListScroll,
   resolveScrollTopForKey,
   setListScroll
 } from '../listView/listViewMemory'
@@ -130,5 +132,17 @@ describe('actress list renderer behavior', () => {
 
     assert.equal(resolveScrollTopForKey(undefined, 'actresses:all'), 640)
     assert.equal(resolveScrollTopForKey('actresses:all', 'actresses:failed'), 0)
+  })
+
+  it('clears every pending rail scroll scope on same-section primary navigation', () => {
+    setListScroll('pending:scan', { scrollTop: 320 })
+    setListScroll('pending:scrape', { scrollTop: 640 })
+    setListScroll('library:all', { scrollTop: 960 })
+
+    clearListScrollForPrimaryNav('/pending')
+
+    assert.equal(getListScroll('pending:scan'), undefined)
+    assert.equal(getListScroll('pending:scrape'), undefined)
+    assert.equal(getListScroll('library:all')?.scrollTop, 960)
   })
 })

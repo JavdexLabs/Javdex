@@ -51,6 +51,7 @@ export default function ActressDetailPage(): JSX.Element {
   const seriesActressStack = useMatch(ROUTE_MATCH.seriesActressStack)
   const playlistActressStack = useMatch(ROUTE_MATCH.playlistActressStack)
   const actressActressStack = useMatch(ROUTE_MATCH.actressActressStack)
+  const pendingActressStack = useMatch(ROUTE_MATCH.pendingActressStack)
   const actressVideoStack = useMatch({ path: ROUTE_MATCH.actressVideoStack, end: false })
   const fromVideo =
     libraryActressStack ??
@@ -58,7 +59,8 @@ export default function ActressDetailPage(): JSX.Element {
     directorActressStack ??
     seriesActressStack ??
     playlistActressStack ??
-    actressActressStack
+    actressActressStack ??
+    pendingActressStack
   const videoStackOpen = !fromVideo && Boolean(actressVideoStack)
   const actressId = Number(actressIdParam ?? id)
 

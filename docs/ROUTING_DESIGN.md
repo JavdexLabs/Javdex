@@ -22,6 +22,9 @@
 - `/playlists`: 清单列表。
 - `/playlists/:playlistId`: 清单详情。
 - `/playlists/:playlistId/:id`: 从清单详情打开影片详情。
+- `/pending`: 待确认扫描与刮削工作台。
+- `/pending/video/:videoId`: 从待确认工作台打开影片详情。
+- `/pending/video/:videoId/actress/:actressId`: 从待确认影片详情继续打开演员详情。
 - `/facet/:type`: 分类列表。
 - `/facet/:role/o/:organizationId`: 制作商或发行商实体详情。
 - `/facet/director/d/:directorId`: 导演实体详情。

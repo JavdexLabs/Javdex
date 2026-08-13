@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CircleAlert, FileVideo, ScanSearch, Trash2 } from 'lucide-react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useMatch, useNavigate, useSearchParams } from 'react-router-dom'
 import type { PendingScanGroup, PendingScanResourceTarget } from '@shared/libraryTypes'
 import type {
   PendingVideoScrape,
@@ -14,16 +14,20 @@ import { normalizeVideoCode } from '@shared/videoCode'
 import { api, resolveMediaSrc } from '../api'
 import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
+import ListToolbar from '../components/ListToolbar'
 import Modal from '../components/Modal'
 import { useToast } from '../components/Toast'
 import { UI_ICON_SM } from '../components/iconDefaults'
-import { libraryVideoDetailPath } from '../listView/libraryRoutes'
 import {
-  PENDING_PARAM,
+  parsePendingCenterSearch,
   pendingCenterPath,
   type PendingTab
 } from '../listView/pendingRoutes'
+import { navigateToVideoDetail } from '../listView/listNavigation'
+import { ROUTE_MATCH } from '../listView/routePaths'
 import { invalidateVideoLibraryQueries } from '../query/invalidateLibraryQueries'
+import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
+import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import {
   arePendingScanAssignmentsComplete,
   arePendingScrapeSelectionsComplete,
@@ -93,8 +97,13 @@ function PendingRail({
   onSelect: (id: number) => void
 }): JSX.Element {
   const items = tab === 'scan' ? scanGroups : scrapeItems
+  const { ref: scrollRef } = useScrollContainerMemory(`pending:${tab}`)
   return (
-    <aside className={styles.pendingRail} aria-label={tab === 'scan' ? '待确认扫描组' : '待确认影片刮削'}>
+    <aside
+      ref={scrollRef}
+      className={styles.pendingRail}
+      aria-label={tab === 'scan' ? '待确认扫描组' : '待确认影片刮削'}
+    >
       {items.length === 0 ? (
         <EmptyState variant="fill" title="暂无待确认项" />
       ) : (
@@ -282,6 +291,7 @@ function ScrapeResolutionPane({
 }): JSX.Element {
   const toast = useToast()
   const navigate = useNavigate()
+  const location = useLocation()
   const [selections, setSelections] = useState<Record<number, number>>({})
   const [busy, setBusy] = useState(false)
   const [discardOpen, setDiscardOpen] = useState(false)
@@ -312,13 +322,20 @@ function ScrapeResolutionPane({
     if (!complete || busy) return
     setBusy(true)
     try {
-      const result = await api.scrape.confirmPending({ ...confirmInput(), ...extra })
+      const result = await api.scrape.confirmPending({
+        ...confirmInput(),
+        ...(directorId == null ? {} : { directorSelectionId: directorId }),
+        ...extra
+      })
       if (result.status === 'merge-required' && result.conflictVideoId) {
+        setDirectorChoice(null)
         setMergeConflictId(result.conflictVideoId)
         return
       }
       if (result.directorChoice) {
+        setMergeConflictId(null)
         setDirectorChoice(result.directorChoice)
+        setDirectorId(null)
         return
       }
       toast.show(result.applied ? '候选已应用' : '没有可写入字段，已跳过', result.applied ? 'success' : 'info')
@@ -353,7 +370,12 @@ function ScrapeResolutionPane({
           <p className={styles.detailDescription}>选择会按原字段和更新模式应用；关闭页面不会丢弃候选。</p>
         </div>
         <div className={styles.pendingDetailActions}>
-          <Button variant="ghost" onClick={() => navigate(libraryVideoDetailPath(pending.videoId))}>查看影片</Button>
+          <Button
+            variant="ghost"
+            onClick={() => navigateToVideoDetail(navigate, location, pending.videoId)}
+          >
+            查看影片
+          </Button>
           <Button variant="danger" onClick={() => setDiscardOpen(true)}><Trash2 {...UI_ICON_SM} aria-hidden />丢弃</Button>
           <Button variant="primary" disabled={!complete || busy} onClick={() => void confirm()}>
             {busy ? '处理中…' : '应用所选候选'}
@@ -394,7 +416,12 @@ function ScrapeResolutionPane({
                       type="radio"
                       name={`source-${source.id}`}
                       checked={selected}
-                      onChange={() => setSelections((current) => ({ ...current, [source.id]: candidate.id }))}
+                      onChange={() => {
+                        setSelections((current) => ({ ...current, [source.id]: candidate.id }))
+                        setMergeConflictId(null)
+                        setDirectorChoice(null)
+                        setDirectorId(null)
+                      }}
                     />
                     <div className={styles.pendingCandidateCover}>
                       {cover ? <img className={styles.candidateImage} src={cover} alt="" draggable={false} /> : <CircleAlert aria-hidden />}
@@ -458,8 +485,8 @@ function ScrapeResolutionPane({
           actions={
             <>
               <Button onClick={() => setMergeConflictId(null)}>取消</Button>
-              <Button variant="primary" onClick={() => void confirm({ mergeRetainedVideoId: mergeConflictId })}>保留 #{mergeConflictId}</Button>
-              <Button variant="primary" onClick={() => void confirm({ mergeRetainedVideoId: pending.videoId })}>保留 #{pending.videoId}</Button>
+              <Button variant="danger" onClick={() => void confirm({ mergeRetainedVideoId: mergeConflictId })}>保留 #{mergeConflictId}</Button>
+              <Button variant="danger" onClick={() => void confirm({ mergeRetainedVideoId: pending.videoId })}>保留 #{pending.videoId}</Button>
             </>
           }
         ><p>两部影片的资源和关系将原子收敛，随后应用当前候选；任一步失败都不会部分提交。</p></Modal>
@@ -491,18 +518,22 @@ function ScrapeResolutionPane({
 export default function PendingCenterPage(): JSX.Element {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const detailOpen = Boolean(
+    useMatch({ path: ROUTE_MATCH.pendingVideoStack, end: false })
+  )
   const [params] = useSearchParams()
-  const tab: PendingTab = params.get(PENDING_PARAM.tab) === 'scrape' ? 'scrape' : 'scan'
-  const selectedFromUrl = Number(params.get(PENDING_PARAM.id))
-  const videoFromUrl = Number(params.get(PENDING_PARAM.videoId))
+  const pendingLocation = parsePendingCenterSearch(params)
+  const tab: PendingTab = pendingLocation.tab
+  const selectedFromUrl = pendingLocation.itemId
+  const videoFromUrl = pendingLocation.videoId
   const scanQuery = useQuery({ queryKey: ['pending-scan-groups'], queryFn: () => api.scan.listPending() })
   const scrapeQuery = useQuery({ queryKey: ['pending-video-scrapes'], queryFn: () => api.scrape.listPending() })
   const items = tab === 'scan' ? scanQuery.data ?? [] : scrapeQuery.data ?? []
-  const scrapeByVideo = tab === 'scrape' && Number.isInteger(videoFromUrl)
+  const scrapeByVideo = tab === 'scrape' && videoFromUrl != null
     ? (scrapeQuery.data ?? []).find((item) => item.videoId === videoFromUrl)?.id
     : undefined
   const selectedId = scrapeByVideo ?? (
-    Number.isInteger(selectedFromUrl) && items.some((item) => item.id === selectedFromUrl)
+    selectedFromUrl != null && items.some((item) => item.id === selectedFromUrl)
       ? selectedFromUrl
       : items[0]?.id ?? null
   )
@@ -515,30 +546,38 @@ export default function PendingCenterPage(): JSX.Element {
   const scanCount = scanQuery.data?.length ?? 0
   const scrapeCount = scrapeQuery.data?.length ?? 0
   const loading = scanQuery.isLoading || scrapeQuery.isLoading
+  const refetchPendingSurface = useCallback((): void => {
+    void Promise.all([
+      queryClient.refetchQueries({ queryKey: ['pending-scan-groups'], exact: true }),
+      queryClient.refetchQueries({ queryKey: ['pending-video-scrapes'], exact: true })
+    ])
+  }, [queryClient])
+
+  useListSurfaceRefetch(detailOpen, refetchPendingSurface)
 
   const navigateTab = (next: PendingTab): void => navigate(pendingCenterPath({ tab: next }))
   const selectItem = (id: number): void => navigate(pendingCenterPath({ tab, id }))
   const refresh = (): void => {
     invalidateVideoLibraryQueries(queryClient)
-    void scanQuery.refetch()
-    void scrapeQuery.refetch()
+    refetchPendingSurface()
   }
 
   return (
     <div className={`list-page ${styles.pendingCenterPage}`}>
       <header className={`topbar ${styles.pendingCenterTopbar}`}>
-        <div>
-          <h1 className={styles.pageTitle}>待确认</h1>
-          <p className={styles.pageSubtitle}>处理扫描资源归属和影片刮削候选。</p>
-        </div>
-        <div className={styles.pendingTabs} role="tablist" aria-label="待确认类型">
-          <button type="button" role="tab" aria-selected={tab === 'scan'} className={`${styles.tab}${tab === 'scan' ? ` ${styles.isActive}` : ''}`} onClick={() => navigateTab('scan')}>
-            <ScanSearch {...UI_ICON_SM} aria-hidden />扫描资源 <span className={styles.tabCount}>{scanCount}</span>
-          </button>
-          <button type="button" role="tab" aria-selected={tab === 'scrape'} className={`${styles.tab}${tab === 'scrape' ? ` ${styles.isActive}` : ''}`} onClick={() => navigateTab('scrape')}>
-            <CircleAlert {...UI_ICON_SM} aria-hidden />影片刮削 <span className={styles.tabCount}>{scrapeCount}</span>
-          </button>
-        </div>
+        <ListToolbar
+          title="待确认"
+          controls={
+            <div className={styles.pendingTabs} role="tablist" aria-label="待确认类型">
+              <button type="button" role="tab" aria-selected={tab === 'scan'} className={`${styles.tab}${tab === 'scan' ? ` ${styles.isActive}` : ''}`} onClick={() => navigateTab('scan')}>
+                <ScanSearch {...UI_ICON_SM} aria-hidden />扫描资源 <span className={styles.tabCount}>{scanCount}</span>
+              </button>
+              <button type="button" role="tab" aria-selected={tab === 'scrape'} className={`${styles.tab}${tab === 'scrape' ? ` ${styles.isActive}` : ''}`} onClick={() => navigateTab('scrape')}>
+                <CircleAlert {...UI_ICON_SM} aria-hidden />影片刮削 <span className={styles.tabCount}>{scrapeCount}</span>
+              </button>
+            </div>
+          }
+        />
       </header>
       <div className="scroll-body scroll-body--fill">
         <div className={styles.pendingWorkspace}>

@@ -32,7 +32,6 @@ import { isPathUnderRoot } from './libraryPathUtils'
 import { normalizeVideoCode } from '@shared/videoCode'
 import {
   pendingScanResourceExists,
-  reconcilePendingScanResources,
   upsertPendingScanResources
 } from '../db/pendingScanRepo'
 
@@ -434,7 +433,6 @@ export async function scanFolders(
   }
 
   result.pendingGroups = pendingGroupIds.size
-  reconcilePendingScanResources(folders, inspectPath)
 
   return result
 }

@@ -62,7 +62,13 @@ import {
   playlistVideoDetailPath
 } from './playlistRoutes'
 import { resolveSettingsRoute, settingsPath, settingsPluginDevPath } from '../settings/settingsRoutes'
-import { pendingCenterPath } from './pendingRoutes'
+import {
+  parsePendingCenterSearch,
+  parsePendingVideoPath,
+  pendingCenterPath,
+  pendingVideoActressPath,
+  pendingVideoDetailPath
+} from './pendingRoutes'
 
 describe('route builders and parsers', () => {
   it('round-trips library detail stacks', () => {
@@ -135,6 +141,17 @@ describe('route builders and parsers', () => {
       '/pending?tab=scrape&videoId=42'
     )
     assert.equal(pendingCenterPath({ tab: 'scrape', id: 7 }), '/pending?tab=scrape&id=7')
+    assert.deepEqual(parsePendingCenterSearch(new URLSearchParams('tab=scrape&id=7')), {
+      tab: 'scrape',
+      itemId: 7,
+      videoId: null
+    })
+    assert.equal(pendingVideoDetailPath(42), '/pending/video/42')
+    assert.equal(pendingVideoActressPath(42, 7), '/pending/video/42/actress/7')
+    assert.deepEqual(parsePendingVideoPath('/pending/video/42/actress/7'), {
+      videoId: 42,
+      actressId: 7
+    })
   })
 })
 
@@ -305,6 +322,7 @@ describe('primary navigation memory', () => {
     rememberPrimaryListLocation('/detail/42', '?q=hero&status=1&resources=local,web')
     rememberPrimaryListLocation('/actresses/8', '?q=sara&gender=female')
     rememberPrimaryListLocation('/facet/director/d/21', '?q=miike&sort=rating')
+    rememberPrimaryListLocation('/pending/video/42', '?tab=scrape&id=7&videoId=42&q=drop')
     rememberPrimaryListLocation(
       '/facet/maker/o/12',
       '?q=studio&sort=updated_at&dir=asc&status=1'
@@ -325,6 +343,10 @@ describe('primary navigation memory', () => {
     assert.deepEqual(primaryNavigationTarget('/facet/maker'), {
       pathname: '/facet/maker',
       search: '?q=studio&sort=updated_at&dir=asc'
+    })
+    assert.deepEqual(primaryNavigationTarget('/pending'), {
+      pathname: '/pending',
+      search: '?tab=scrape&id=7&videoId=42'
     })
     assert.equal(primaryListRoot('/settings/overview/status'), null)
   })
@@ -368,6 +390,14 @@ describe('primary navigation memory', () => {
     assert.deepEqual(resolvePrimaryNavTarget('/actresses', '/', '?status=1'), {
       pathname: '/actresses'
     })
+    assert.equal(
+      resolvePrimaryNavTarget('/pending', '/pending', '?tab=scrape&id=7'),
+      null
+    )
+    assert.deepEqual(
+      resolvePrimaryNavTarget('/pending', '/pending/video/42', '?tab=scrape&id=7'),
+      { pathname: '/pending', search: '?tab=scrape&id=7' }
+    )
   })
 
   it('builds nav link href from current search when active', () => {
@@ -552,6 +582,32 @@ describe('navigation helpers', () => {
         pathname: '/facet/publisher/o/12',
         search: 'q=studio&sort=updated_at&dir=asc'
       }
+    ])
+  })
+
+  it('keeps video and actress navigation inside the pending workbench stack', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const pending = {
+      pathname: '/pending',
+      search: '?tab=scrape&id=7&videoId=42',
+      hash: '',
+      state: null,
+      key: 'pending'
+    } as Location
+
+    navigateToVideoDetail(navigate, pending, 42)
+    const video = { ...pending, pathname: '/pending/video/42' } as Location
+    navigateToActressFromVideoDetail(navigate, video, 42, 9)
+    const actress = { ...pending, pathname: '/pending/video/42/actress/9' } as Location
+    navigateBackFromActressDetail(navigate, actress)
+    navigateBackFromVideoDetail(navigate, video)
+
+    assert.deepEqual(destinations, [
+      { pathname: '/pending/video/42', search: pending.search },
+      { pathname: '/pending/video/42/actress/9', search: pending.search },
+      { pathname: '/pending/video/42', search: pending.search },
+      { pathname: '/pending', search: 'tab=scrape&id=7&videoId=42' }
     ])
   })
 

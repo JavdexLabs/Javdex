@@ -81,13 +81,15 @@ export default function DetailPage(): JSX.Element {
   const seriesActressStack = useMatch(ROUTE_MATCH.seriesActressStack)
   const playlistActressStack = useMatch(ROUTE_MATCH.playlistActressStack)
   const actressVideoActressStack = useMatch(ROUTE_MATCH.actressActressStack)
+  const pendingActressStack = useMatch(ROUTE_MATCH.pendingActressStack)
   const actressStackOpen = Boolean(
     libraryActressStack ??
       organizationActressStack ??
       directorActressStack ??
       seriesActressStack ??
       playlistActressStack ??
-      actressVideoActressStack
+      actressVideoActressStack ??
+      pendingActressStack
   )
   const queryClient = useQueryClient()
   const toast = useToast()
@@ -1010,6 +1012,7 @@ export default function DetailPage(): JSX.Element {
       {mergeCandidates.length > 0 && (
         <Modal
           title="合并同番号影片"
+          danger
           subtitle="先选择另一部影片，再明确选择要保留的内部 ID。"
           confirmText={mergeBusy ? '合并中…' : '合并'}
           confirmDisabled={mergeTargetId == null || mergeRetainedId == null || mergeBusy}
@@ -1225,6 +1228,11 @@ export default function DetailPage(): JSX.Element {
             : removeResourceTarget.kind === 'local'
               ? '将删除磁盘上的本地文件及资源记录；影片与其它资源会保留。'
               : '将只移除这条链接资源记录，不会访问或删除远程内容。'}
+          {video.resources.length === 1 && video.has_pending_scrape ? (
+            <div className="modal-path-hint">
+              选择“删除影片全部数据”还会删除待确认刮削候选与暂存图片。
+            </div>
+          ) : null}
           <div className="modal-path-text">
             {removeResourceTarget.kind === 'local'
               ? removeResourceTarget.display_locator

@@ -173,6 +173,45 @@ function buildRecordItems(video: VideoDetail): SecondaryItem[] {
   return recordItems
 }
 
+function ResourceReassignmentMenuItems({
+  resource,
+  onClose,
+  onSetPrimaryResource,
+  onSplitResource
+}: {
+  resource: VideoResourceDetail
+  onClose: () => void
+  onSetPrimaryResource?: (resourceId: number) => void
+  onSplitResource?: (resource: VideoResourceDetail) => void
+}): JSX.Element {
+  return (
+    <>
+      <button
+        type="button"
+        className="detail-menu-item"
+        role="menuitem"
+        onClick={() => {
+          onClose()
+          onSetPrimaryResource?.(resource.id)
+        }}
+      >
+        设为主资源
+      </button>
+      <button
+        type="button"
+        className="detail-menu-item"
+        role="menuitem"
+        onClick={() => {
+          onClose()
+          onSplitResource?.(resource)
+        }}
+      >
+        拆分为独立影片
+      </button>
+    </>
+  )
+}
+
 function VideoLocalResourceRow({
   resource,
   multiResources,
@@ -287,30 +326,12 @@ function VideoLocalResourceRow({
                 在文件夹中显示
               </button>
               {!isPrimary ? (
-                <>
-                  <button
-                    type="button"
-                    className="detail-menu-item"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false)
-                      onSetPrimaryResource?.(resource.id)
-                    }}
-                  >
-                    设为主资源
-                  </button>
-                  <button
-                    type="button"
-                    className="detail-menu-item"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false)
-                      onSplitResource?.(resource)
-                    }}
-                  >
-                    拆分为独立影片
-                  </button>
-                </>
+                <ResourceReassignmentMenuItems
+                  resource={resource}
+                  onClose={() => setMenuOpen(false)}
+                  onSetPrimaryResource={onSetPrimaryResource}
+                  onSplitResource={onSplitResource}
+                />
               ) : null}
               <div className="detail-menu-separator" />
               <button
@@ -444,30 +465,12 @@ function VideoLinkResourceRow({
                 编辑资源
               </button>
               {!isPrimary ? (
-                <>
-                  <button
-                    type="button"
-                    className="detail-menu-item"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false)
-                      onSetPrimaryResource?.(resource.id)
-                    }}
-                  >
-                    设为主资源
-                  </button>
-                  <button
-                    type="button"
-                    className="detail-menu-item"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false)
-                      onSplitResource?.(resource)
-                    }}
-                  >
-                    拆分为独立影片
-                  </button>
-                </>
+                <ResourceReassignmentMenuItems
+                  resource={resource}
+                  onClose={() => setMenuOpen(false)}
+                  onSetPrimaryResource={onSetPrimaryResource}
+                  onSplitResource={onSplitResource}
+                />
               ) : null}
               <button
                 type="button"

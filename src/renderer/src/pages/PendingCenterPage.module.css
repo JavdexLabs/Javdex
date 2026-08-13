@@ -4,35 +4,17 @@
 }
 
 .pendingCenterTopbar {
-  min-height: 78px;
-  padding: 14px var(--page-pad-x) 0;
-  border-bottom: 1px solid var(--border-subtle);
   background: var(--surface-panel);
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 20px;
-}
-
-.pageTitle {
-  margin: 0 0 3px;
-  font-size: 20px;
-}
-
-.pageSubtitle {
-  margin: 0 0 13px;
-  color: var(--text-muted);
-  font-size: 12px;
 }
 
 .pendingTabs {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 2px;
 }
 
 .tab {
-  min-height: var(--control-h-lg);
+  min-height: var(--toolbar-control-h);
   padding: 0 14px;
   border: 0;
   border-bottom: 2px solid transparent;

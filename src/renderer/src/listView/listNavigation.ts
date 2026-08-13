@@ -26,6 +26,11 @@ import {
   parseLibraryVideoPath
 } from './libraryRoutes'
 import {
+  parsePendingVideoPath,
+  pendingVideoActressPath,
+  pendingVideoDetailPath
+} from './pendingRoutes'
+import {
   parsePlaylistVideoPath,
   playlistDetailPath,
   playlistVideoDetailPath
@@ -40,6 +45,17 @@ export function navigateToVideoDetail(
   videoId: number,
   options?: { replace?: boolean }
 ): void {
+  const pending = parsePendingVideoPath(location.pathname)
+  if (pending || location.pathname === ROUTE_PATH.pending) {
+    navigate(
+      {
+        pathname: pendingVideoDetailPath(videoId),
+        search: location.search
+      },
+      { replace: options?.replace }
+    )
+    return
+  }
   const series = parseSeriesPath(location.pathname)
   if (series) {
     navigate(
@@ -114,6 +130,17 @@ export function navigateBackFromVideoDetail(
   location: Location,
   patch?: Record<string, string | null | undefined>
 ): void {
+  const pending = parsePendingVideoPath(location.pathname)
+  if (pending?.videoId != null) {
+    const nextSearch = patch
+      ? patchSearchParams(new URLSearchParams(location.search), patch)
+      : new URLSearchParams(location.search)
+    navigate({
+      pathname: ROUTE_PATH.pending,
+      search: nextSearch.toString()
+    })
+    return
+  }
   const series = parseSeriesPath(location.pathname)
   if (series?.videoId != null) {
     const nextSearch = patch
@@ -209,6 +236,14 @@ export function navigateToActressFromVideoDetail(
   videoId: number,
   actressId: number
 ): void {
+  const pending = parsePendingVideoPath(location.pathname)
+  if (pending?.videoId != null) {
+    navigate({
+      pathname: pendingVideoActressPath(videoId, actressId),
+      search: location.search
+    })
+    return
+  }
   const series = parseSeriesPath(location.pathname)
   if (series?.videoId != null) {
     navigate({
@@ -264,6 +299,14 @@ export function navigateBackFromActressDetail(
   navigate: NavigateFunction,
   location: Location
 ): void {
+  const pending = parsePendingVideoPath(location.pathname)
+  if (pending?.videoId != null && pending.actressId != null) {
+    navigate({
+      pathname: pendingVideoDetailPath(pending.videoId),
+      search: location.search
+    })
+    return
+  }
   const series = parseSeriesPath(location.pathname)
   if (series?.videoId != null && series.actressId != null) {
     navigate({

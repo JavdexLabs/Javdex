@@ -15,6 +15,7 @@ function createTestScanCoordinator(
     applyPendingPathCleanups: (roots) => ({ removed: 0, promoted: 0, consumedRoots: roots }),
     clearPendingPathCleanups: () => undefined,
     runCleanupTransaction: (operation) => operation(),
+    reconcilePendingScanResources: () => ({ removedResources: 0, removedGroups: 0 }),
     shouldAutoDeleteResourceLessVideos: () => false,
     deleteResourceLessVideos: () => 0,
     recordScanSummary: () => undefined,
@@ -162,6 +163,7 @@ describe('ScanCoordinator', () => {
     let inspections = 0
     let cleanupReads = 0
     let autoDeleteRuns = 0
+    const reconciledRoots: string[][] = []
     const coordinator = createTestScanCoordinator({
       gate: new MaintenanceTaskGate(),
       getConfiguredFolders: () => ['/online'],
@@ -170,6 +172,10 @@ describe('ScanCoordinator', () => {
         return inspections === 1
       },
       scanFolders: async () => emptyScanResult(),
+      reconcilePendingScanResources: (roots) => {
+        reconciledRoots.push([...roots])
+        return { removedResources: 0, removedGroups: 0 }
+      },
       listLocalResources: () => {
         cleanupReads += 1
         return [{ video_id: 1, resource_id: 1, locator: '/online/A-001.mp4' }]
@@ -187,6 +193,7 @@ describe('ScanCoordinator', () => {
     assert.equal(cleanupReads, 1)
     assert.equal(result.removed, 0)
     assert.equal(autoDeleteRuns, 0)
+    assert.deepEqual(reconciledRoots, [[]])
   })
 
   it('does not run cleanup after cancellation and releases the mutual-exclusion lease', async () => {

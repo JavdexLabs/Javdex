@@ -5,6 +5,7 @@ import type {
   PendingScanResource
 } from '@shared/libraryTypes'
 import { normalizeLocalPathIdentity } from '@shared/localPathIdentity'
+import { selectDefaultPendingScanPrimary } from '@shared/pendingScanPrimary'
 import { normalizeVideoCode } from '@shared/videoCode'
 import { getDb } from './database'
 
@@ -166,16 +167,6 @@ export function reconcilePendingScanResources(
   })()
 }
 
-function comparePendingPrimary(left: PendingScanResource, right: PendingScanResource): number {
-  const duration = (right.durationSeconds ?? -1) - (left.durationSeconds ?? -1)
-  if (duration) return duration
-  const size = (right.sizeBytes ?? -1) - (left.sizeBytes ?? -1)
-  if (size) return size
-  const leftPath = normalizeLocalPathIdentity(left.filePath)
-  const rightPath = normalizeLocalPathIdentity(right.filePath)
-  return leftPath < rightPath ? -1 : leftPath > rightPath ? 1 : 0
-}
-
 export function resolvePendingScanGroup(
   groupId: number,
   resolution: PendingScanGroupResolution,
@@ -259,7 +250,10 @@ export function resolvePendingScanGroup(
         if (overrideId != null && !assignedResources.some((resource) => resource.id === overrideId)) {
           throw new Error(`主资源不属于新影片分组 ${target.groupKey}`)
         }
-        primaryResourceId = overrideId ?? [...assignedResources].sort(comparePendingPrimary)[0]?.id ?? null
+        primaryResourceId =
+          overrideId ??
+          selectDefaultPendingScanPrimary(assignedResources, normalizeLocalPathIdentity)?.id ??
+          null
       }
 
       for (const assignment of assignments) {

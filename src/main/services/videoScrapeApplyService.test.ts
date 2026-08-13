@@ -1189,7 +1189,6 @@ describe('videoScrapeApplyService classification entity resolution', () => {
       undefined,
       'replaceIfPresent',
       undefined,
-      {},
       { directorAmbiguity: 'choice' }
     )
 
@@ -1238,7 +1237,6 @@ describe('videoScrapeApplyService classification entity resolution', () => {
       undefined,
       'replaceIfPresent',
       undefined,
-      {},
       { directorAmbiguity: 'choice' }
     )
 
@@ -1262,7 +1260,6 @@ describe('videoScrapeApplyService classification entity resolution', () => {
       undefined,
       'replaceIfPresent',
       undefined,
-      {},
       { directorAmbiguity: 'choice', directorSelectionId: secondId }
     )
 
@@ -1290,7 +1287,6 @@ describe('videoScrapeApplyService classification entity resolution', () => {
       undefined,
       'replaceIfPresent',
       undefined,
-      {},
       { directorAmbiguity: 'preserve' }
     )
 
@@ -1487,13 +1483,9 @@ describe('videoScrapeApplyService.resolveVideoBatchTargets', () => {
     )
   })
 
-  it('uses image health, cast gender, and the selected site when filtering missing fields', () => {
+  it('treats a stored cover path as present even when the file is unreadable', () => {
     setupDb()
-    if (!tempRoot) throw new Error('test root not initialized')
     const db = getDb()
-    const covers = path.join(tempRoot, 'media_assets', 'covers')
-    fs.mkdirSync(covers, { recursive: true })
-    fs.writeFileSync(path.join(covers, 'broken.jpg'), Buffer.from('<html>not an image</html>'))
     db.prepare('UPDATE videos SET cover_path = ? WHERE id = 1').run('covers/broken.jpg')
     db.prepare('INSERT INTO actresses (main_name, gender) VALUES (?, ?)').run('Only Female', 'female')
     const femaleId = Number(
@@ -1513,12 +1505,7 @@ describe('videoScrapeApplyService.resolveVideoBatchTargets', () => {
       ['IPX-535']
     )
     assert.deepEqual(
-      resolveEffectiveScrapeFields(
-        1,
-        ['actressesFemale', 'actressesMale', 'source'],
-        'fillEmpty',
-        'JavLibrary'
-      ),
+      resolveEffectiveScrapeFields(1, ['cover', 'actressesFemale', 'actressesMale'], 'fillEmpty'),
       ['actressesMale']
     )
   })

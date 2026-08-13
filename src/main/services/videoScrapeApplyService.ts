@@ -15,11 +15,7 @@ import { findActressByNameOrAlias, upsertActressFromScrape } from '../db/actress
 import { getDb } from '../db/database'
 import { collectVideoLibraryCleanupHints, runLibraryCleanup } from '../db/libraryCleanup'
 import { ensureTag } from '../db/tagRepo'
-import {
-  getVideoById,
-  getVideoImageCandidatePaths,
-  listVideosForBatchScrape
-} from '../db/videoRepo'
+import { getVideoById, listVideosForBatchScrape } from '../db/videoRepo'
 import { adoptDownloadedAvatarIfMissing } from './actressAssetService'
 import {
   classificationFieldLabel,
@@ -30,12 +26,6 @@ import {
 } from './classificationIdentityResolver'
 import { classificationMaintenanceService } from './classificationMaintenanceService'
 import { mediaAssetStore } from './mediaAssetStore'
-
-export interface VideoImageAvailabilityFacts {
-  coverAvailable?: boolean
-  samplePathsAvailable?: boolean
-}
-
 
 function replaceScrapedTags(
   videoId: number,
@@ -174,6 +164,22 @@ function listVideoAssetPaths(videoId: number, type: string): Array<string | null
     .map((row) => (row as { local_path: string | null }).local_path)
 }
 
+function hasVideoSampleLink(videoId: number): boolean {
+  return Boolean(
+    getDb()
+      .prepare(
+        `SELECT 1 AS n FROM video_assets
+         WHERE video_id = ? AND type = 'sample'
+           AND (
+             (local_path IS NOT NULL AND trim(local_path) != '')
+             OR (remote_url IS NOT NULL AND trim(remote_url) != '')
+           )
+         LIMIT 1`
+      )
+      .get(videoId)
+  )
+}
+
 function isVideoFieldEmptyForFill(
   video: Video,
   field: VideoScrapeField,
@@ -181,8 +187,7 @@ function isVideoFieldEmptyForFill(
   maleCastCount: number,
   tagCount: number,
   sourceName?: string,
-  ratingSourceName?: string,
-  imageFacts: VideoImageAvailabilityFacts = {}
+  ratingSourceName?: string
 ): boolean {
   switch (field) {
     case 'title':
@@ -190,7 +195,7 @@ function isVideoFieldEmptyForFill(
     case 'summary':
       return isBlankText(video.summary)
     case 'cover':
-      return !(imageFacts.coverAvailable ?? Boolean(video.cover_path?.trim()))
+      return isBlankText(video.cover_path)
     case 'releaseDate':
       return isBlankText(video.release_date)
     case 'maker':
@@ -213,10 +218,8 @@ function isVideoFieldEmptyForFill(
       return countVideoSources(video.id, sourceName) === 0
     case 'rating':
       return countVideoExternalStats(video.id, ratingSourceName ?? sourceName) === 0
-    case 'samples': {
-      const paths = listVideoAssetPaths(video.id, 'sample')
-      return paths.length === 0 || !(imageFacts.samplePathsAvailable ?? paths.every(Boolean))
-    }
+    case 'samples':
+      return !hasVideoSampleLink(video.id)
     default:
       return false
   }
@@ -231,8 +234,7 @@ export function resolveEffectiveScrapeFields(
   fields: VideoScrapeField[],
   mode: VideoScrapeUpdateMode = 'replace',
   sourceName?: string,
-  ratingSourceName?: string,
-  imageFacts: VideoImageAvailabilityFacts = {}
+  ratingSourceName?: string
 ): VideoScrapeField[] {
   if (mode !== 'fillEmpty') return fields
   const video = getVideoById(videoId)
@@ -253,8 +255,7 @@ export function resolveEffectiveScrapeFields(
       maleCastCount,
       tagCount,
       sourceName,
-      ratingSourceName,
-      imageFacts
+      ratingSourceName
     )
   )
 }
@@ -599,7 +600,6 @@ export function planVideoScrapeResult(
   sourceName?: string,
   mode: VideoScrapeUpdateMode = 'replace',
   ratingSourceName?: string,
-  imageFacts: VideoImageAvailabilityFacts = {},
   classificationOptions: VideoClassificationResolutionOptions = {}
 ): VideoScrapeApplicationPlan {
   const requested = fields ?? ALL_VIDEO_SCRAPE_FIELDS
@@ -608,8 +608,7 @@ export function planVideoScrapeResult(
     requested,
     mode,
     sourceName,
-    ratingSourceName,
-    imageFacts
+    ratingSourceName
   )
   const effective = new Set(effectiveFields)
   const video = getVideoById(videoId)
@@ -793,7 +792,6 @@ export function applyScrapeResult(
   sourceName?: string,
   mode: VideoScrapeUpdateMode = 'replace',
   ratingSourceName?: string,
-  imageFacts: VideoImageAvailabilityFacts = {},
   classificationOptions: VideoClassificationResolutionOptions = {}
 ): ApplyVideoScrapeResult {
   const db = getDb()
@@ -807,7 +805,6 @@ export function applyScrapeResult(
     sourceName,
     mode,
     ratingSourceName,
-    imageFacts,
     classificationOptions
   )
   if (!plan.shouldApply) {
@@ -1022,16 +1019,6 @@ export function applyScrapeResult(
   }
 }
 
-export function inspectVideoImageAvailability(videoId: number): VideoImageAvailabilityFacts {
-  const paths = getVideoImageCandidatePaths(videoId)
-  return {
-    coverAvailable: mediaAssetStore.inspectImage(paths.coverPath).usable,
-    samplePathsAvailable:
-      paths.samplePaths.length > 0 &&
-      paths.samplePaths.every((storedPath) => mediaAssetStore.inspectImage(storedPath).usable)
-  }
-}
-
 export function resolveEffectiveVideoScrapeFields(
   videoId: number,
   fields: VideoScrapeField[],
@@ -1039,34 +1026,19 @@ export function resolveEffectiveVideoScrapeFields(
   sourceName?: string,
   ratingSourceName?: string
 ): VideoScrapeField[] {
-  return resolveEffectiveScrapeFields(
-    videoId,
-    fields,
-    mode,
-    sourceName,
-    ratingSourceName,
-    inspectVideoImageAvailability(videoId)
-  )
+  return resolveEffectiveScrapeFields(videoId, fields, mode, sourceName, ratingSourceName)
 }
 
 export function resolveVideoBatchTargets(
   filter: VideoBatchScrapeFilter
 ): Array<{ id: number; code: string }> {
-  const base = listVideosForBatchScrape({ ...filter, missingFields: [] })
-  // Intentional: explicit videoIds (library multi-select) are the scope — do not
-  // further filter by missingFields. Settings full-library batches pass status +
-  // missingFields without videoIds; only that path applies the fillEmpty filter.
-  if (filter.videoIds || !(filter.missingFields ?? []).length) return base
-  return base.filter(
-    (video) =>
-      resolveEffectiveVideoScrapeFields(
-        video.id,
-        filter.missingFields ?? [],
-        'fillEmpty',
-        filter.sourceName,
-        filter.ratingSourceName
-      ).length > 0
-  )
+  // Explicit videoIds (library multi-select) are the scope — do not further
+  // filter by missingFields. Settings full-library batches pass status +
+  // missingFields without videoIds.
+  if (filter.videoIds) {
+    return listVideosForBatchScrape({ ...filter, missingFields: [] })
+  }
+  return listVideosForBatchScrape(filter)
 }
 
 /** Apply entry used by deliver; tests may replace this to force apply-phase failures. */
@@ -1083,7 +1055,6 @@ export interface VideoScrapeDeliverInput {
   mode: VideoScrapeUpdateMode
   sourceName?: string
   ratingSourceName?: string
-  imageFacts?: VideoImageAvailabilityFacts
   classificationOptions?: VideoClassificationResolutionOptions
   fetcher: (url: string) => Promise<Buffer>
   /** Runs in the same database transaction after a successful application. */
@@ -1098,7 +1069,6 @@ export interface VideoScrapeDeliverOutcome {
 }
 
 export interface VideoScrapeApplyService {
-  inspectImageAvailability(videoId: number): VideoImageAvailabilityFacts
   resolveEffectiveFields(
     videoId: number,
     fields: VideoScrapeField[],
@@ -1120,7 +1090,6 @@ export interface VideoScrapeApplyService {
 }
 
 interface VideoScrapeApplyServiceDependencies {
-  inspectImageAvailability: typeof inspectVideoImageAvailability
   resolveEffectiveFields: typeof resolveEffectiveVideoScrapeFields
   resolveBatchTargets: typeof resolveVideoBatchTargets
   plan: typeof planVideoScrapeResult
@@ -1137,8 +1106,6 @@ interface VideoScrapeApplyServiceDependencies {
 export function createVideoScrapeApplyService(
   dependencies: Partial<VideoScrapeApplyServiceDependencies> = {}
 ): VideoScrapeApplyService {
-  const inspectImageAvailability =
-    dependencies.inspectImageAvailability ?? inspectVideoImageAvailability
   const resolveEffectiveFields =
     dependencies.resolveEffectiveFields ?? resolveEffectiveVideoScrapeFields
   const resolveBatchTargets = dependencies.resolveBatchTargets ?? resolveVideoBatchTargets
@@ -1163,7 +1130,6 @@ export function createVideoScrapeApplyService(
     dependencies.adoptDownloadedAvatarIfMissing ?? adoptDownloadedAvatarIfMissing
 
   return {
-    inspectImageAvailability,
     resolveEffectiveFields,
     resolveBatchTargets,
     preflightClassifications(videoId, result, fields, mode, options) {
@@ -1178,7 +1144,6 @@ export function createVideoScrapeApplyService(
         undefined,
         mode,
         undefined,
-        {},
         options
       )
     },
@@ -1186,7 +1151,6 @@ export function createVideoScrapeApplyService(
     apply: (...args) => apply(...args),
     async deliverParsedResult(input): Promise<VideoScrapeDeliverOutcome> {
       const selected = new Set(input.selectedFields)
-      const imageFacts = input.imageFacts ?? inspectImageAvailability(input.videoId)
       const downloads = await coordinateDatabaseChange(async () => {
         let coverRel: string | null = null
         let sampleRels: Array<string | null> = []
@@ -1249,7 +1213,6 @@ export function createVideoScrapeApplyService(
               input.sourceName,
               input.mode,
               input.ratingSourceName,
-              imageFacts,
               input.classificationOptions
             )
             if (applied.applied) input.afterSuccessfulApply?.()

@@ -16,7 +16,12 @@ import {
   type VideoMergeResult,
   type VideoResourceSplitResult
 } from '@shared/videoTypes'
-import type { VideoBatchScrapeFilter, VideoBatchScrapeStatus, VideoRematchScope } from '@shared/videoScrapeTypes'
+import type {
+  VideoBatchScrapeFilter,
+  VideoBatchScrapeStatus,
+  VideoRematchScope,
+  VideoScrapeField
+} from '@shared/videoScrapeTypes'
 import { upsertActressFromScrape } from './actressRepo'
 import { actressOwnedNamePatternSearchSql } from './actressSearchSql'
 import { ensureTag, pruneTagIfUnused } from './tagRepo'
@@ -1434,6 +1439,86 @@ function rematchScopeToBatchStatus(scope: VideoRematchScope): VideoBatchScrapeSt
   return 'all'
 }
 
+function videoMissingFieldCondition(
+  field: VideoScrapeField,
+  params: unknown[],
+  sourceName?: string,
+  ratingSourceName?: string
+): string {
+  switch (field) {
+    case 'title':
+      return "(v.title IS NULL OR trim(v.title) = '')"
+    case 'summary':
+      return "(v.summary IS NULL OR trim(v.summary) = '')"
+    case 'cover':
+      return "(v.cover_path IS NULL OR trim(v.cover_path) = '')"
+    case 'releaseDate':
+      return "(v.release_date IS NULL OR trim(v.release_date) = '')"
+    case 'maker':
+      return 'v.maker_organization_id IS NULL'
+    case 'publisher':
+      return 'v.publisher_organization_id IS NULL'
+    case 'series':
+      return 'v.series_id IS NULL'
+    case 'director':
+      return 'v.director_id IS NULL'
+    case 'duration':
+      return 'v.duration_seconds IS NULL'
+    case 'actressesFemale':
+      return `NOT EXISTS (
+        SELECT 1 FROM video_actress va
+        JOIN actresses a ON a.id = va.actress_id
+        WHERE va.video_id = v.id AND (a.gender = 'female' OR a.gender IS NULL)
+      )`
+    case 'actressesMale':
+      return `NOT EXISTS (
+        SELECT 1 FROM video_actress va
+        JOIN actresses a ON a.id = va.actress_id
+        WHERE va.video_id = v.id AND a.gender = 'male'
+      )`
+    case 'tags':
+      return `NOT EXISTS (
+        SELECT 1 FROM video_tag vt WHERE vt.video_id = v.id AND vt.origin = 'scraped'
+      )`
+    case 'source':
+      if (sourceName) {
+        params.push(sourceName)
+        return `NOT EXISTS (
+          SELECT 1 FROM video_sources vs
+          WHERE vs.video_id = v.id AND vs.source = ?
+            AND vs.url IS NOT NULL AND trim(vs.url) != ''
+        )`
+      }
+      return `NOT EXISTS (
+        SELECT 1 FROM video_sources vs
+        WHERE vs.video_id = v.id AND vs.url IS NOT NULL AND trim(vs.url) != ''
+      )`
+    case 'rating':
+      if (ratingSourceName) {
+        params.push(ratingSourceName)
+        return `NOT EXISTS (
+          SELECT 1 FROM video_external_stats ves
+          WHERE ves.video_id = v.id AND ves.source = ? AND ves.rating_average IS NOT NULL
+        )`
+      }
+      return `NOT EXISTS (
+        SELECT 1 FROM video_external_stats ves
+        WHERE ves.video_id = v.id AND ves.rating_average IS NOT NULL
+      )`
+    case 'samples':
+      return `NOT EXISTS (
+        SELECT 1 FROM video_assets va
+        WHERE va.video_id = v.id AND va.type = 'sample'
+          AND (
+            (va.local_path IS NOT NULL AND trim(va.local_path) != '')
+            OR (va.remote_url IS NOT NULL AND trim(va.remote_url) != '')
+          )
+      )`
+    default:
+      return '0'
+  }
+}
+
 function buildBatchScrapeWhere(filter: VideoBatchScrapeFilter): {
   sql: string
   params: unknown[]
@@ -1458,6 +1543,17 @@ function buildBatchScrapeWhere(filter: VideoBatchScrapeFilter): {
   if (filter.status !== 'all') {
     conditions.push('v.scraped_status = ?')
     params.push(filter.status)
+  }
+
+  const missingFields = Array.from(new Set(filter.missingFields ?? []))
+  if (missingFields.length > 0) {
+    conditions.push(
+      `(${missingFields
+        .map((field) =>
+          videoMissingFieldCondition(field, params, filter.sourceName, filter.ratingSourceName)
+        )
+        .join(' OR ')})`
+    )
   }
 
   return {

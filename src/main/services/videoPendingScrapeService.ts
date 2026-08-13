@@ -276,7 +276,6 @@ export const videoPendingScrapeService = {
           sourceName,
           snapshot.pending.updateMode,
           ratingSourceName,
-          videoScrapeApplyService.inspectImageAvailability(applyVideo.id),
           { directorSelectionId: input.directorSelectionId, directorAmbiguity: 'choice' }
         )
         if (applied.directorChoice) throw new Error('导演选择仍未完成')

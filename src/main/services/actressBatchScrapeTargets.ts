@@ -1,14 +1,9 @@
 import type { ActressBatchScrapeFilter, ActressBatchScrapeRequest, ActressBatchScrapeStatus, LegacyActressBatchScrapeStatus } from '@shared/actressScrapeTypes'
 import {
-  listActressBatchAvatarCandidates,
   listActressesForBatchScrape,
   type ActressBatchTarget
 } from '../db/actressRepo'
 import type { PersistedBatchScrapeJob } from './batchScrapeJobStore'
-import { mediaAssetStore } from './mediaAssetStore'
-
-const isActressImageAvailable = (assetPath: string | null | undefined): boolean =>
-  mediaAssetStore.inspectImage(assetPath).usable
 
 /** Batch filter as received over IPC or read back from a persisted job snapshot. */
 export type ActressBatchScrapeFilterInput = Omit<ActressBatchScrapeFilter, 'scrapeStatus'> & {
@@ -108,18 +103,7 @@ export function resolveActressBatchScrapeTargets(
         missingFields: []
       })
   }
-  const targets = listActressesForBatchScrape(filter)
-  if (!(filter.missingFields ?? []).includes('avatar')) return targets
-  const seen = new Set(targets.map((target) => target.id))
-  for (const candidate of listActressBatchAvatarCandidates(filter)) {
-    if (
-      seen.has(candidate.id) || !candidate.avatar_path ||
-      isActressImageAvailable(candidate.avatar_path)
-    ) continue
-    targets.push({ id: candidate.id, main_name: candidate.main_name })
-    seen.add(candidate.id)
-  }
-  return targets.sort((a, b) => a.main_name.localeCompare(b.main_name, 'zh-Hans-CN'))
+  return listActressesForBatchScrape(filter)
 }
 
 /**

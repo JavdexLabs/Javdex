@@ -432,6 +432,30 @@ describe('videoRepo.listVideosForBatchScrape', () => {
     assert.equal(countVideosForBatchScrape({ status: 'all', videoIds: [] }), 0)
   })
 
+  it('filters missing fields by stored path or link, not file health', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare('UPDATE videos SET summary = ? WHERE code = ?').run('Has summary', 'IPX-535')
+    db.prepare('UPDATE videos SET cover_path = ? WHERE code = ?').run(
+      'covers/missing.jpg',
+      'IPX-535'
+    )
+
+    assert.deepEqual(
+      listVideosForBatchScrape({ status: 'all', missingFields: ['summary'] }).map(
+        (target) => target.code
+      ),
+      ['MUKD-501']
+    )
+    assert.deepEqual(
+      listVideosForBatchScrape({ status: 'all', missingFields: ['cover'] }).map(
+        (target) => target.code
+      ),
+      ['MUKD-501']
+    )
+    assert.equal(countVideosForBatchScrape({ status: 'all', missingFields: ['title'] }), 0)
+  })
+
 })
 
 describe('videoRepo tags by origin', () => {

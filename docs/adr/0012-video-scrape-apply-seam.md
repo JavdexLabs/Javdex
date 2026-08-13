@@ -11,12 +11,13 @@
 3. 吸收并删除浅层 `videoImageAvailability`；batch targets 的 `missingFields` 过滤只经 `resolveVideoBatchTargets`。
 4. `scrapeVideo` 仅作 parse/runner，调用 `deliverParsedResult`。
 
-[`videoRepo`](../../src/main/db/videoRepo.ts) 保留路径候选、`markScrape*`、batch SQL where；**不再**内含 fillEmpty 矩阵或 `listVideosForBatchScrape` 的 missingFields 政策过滤。
+[`videoRepo`](../../src/main/db/videoRepo.ts) 保留路径候选、`markScrape*`、batch SQL where，以及缺失字段的**引用/链接谓词**（ADR-0018）。fillEmpty 写入矩阵仍在 apply service；**不再**按文件健康过滤批量目标。
 
 ## 必须保持的 invariants
 
 - 下载与写库分两次编排（ADR-0006）：committed video 行不得与 media-ledger rollback 配对；apply 失败清理下载集。
 - 数据库 module 不触碰 `MediaAssetStore` / 文件系统。
+- 图片探活只发生在写入新资源时（ADR-0018）；空字段与缺失筛选只看媒体资源引用或远程链接。
 - 不把单项 scrape 再拆成 `SingleScrapeService`（ADR-0007）。
 - 不把 scrape apply 绑入 `videoMaintenanceService` IPC seams（ADR-0011）。
 - 不恢复 `videoRepo` 内的 plan/apply 矩阵。

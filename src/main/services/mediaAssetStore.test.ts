@@ -154,6 +154,36 @@ describe('MediaAssetStore', () => {
     assert.equal(fs.existsSync(mediaAssetStore.resolve(createdPath)), false)
   })
 
+  it('rejects unusable local image imports instead of storing them', () => {
+    const testRoot = setup()
+    const brokenPath = path.join(testRoot, 'broken.jpg')
+    fs.writeFileSync(brokenPath, Buffer.from('<html>not an image</html>'))
+
+    assert.throws(() => mediaAssetStore.importCover('BAD-001', brokenPath), /不是可用图片/)
+    assert.throws(() => mediaAssetStore.importSample('BAD-001', brokenPath), /不是可用图片/)
+    assert.throws(
+      () => mediaAssetStore.importPlaylistCover('Broken List', brokenPath),
+      /不是可用图片/
+    )
+    assert.throws(
+      () => mediaAssetStore.importActressGallery('Broken Gallery', brokenPath, 1),
+      /不是可用图片/
+    )
+    assert.throws(
+      () => mediaAssetStore.importAvatarDisplay('Broken Avatar', 1, Buffer.from('{not:image}')),
+      /不是可用图片/
+    )
+    assert.throws(
+      () => mediaAssetStore.importAvatarSource('Broken Avatar', 1, Buffer.from('')),
+      /不是可用图片/
+    )
+
+    for (const kind of ['covers', 'samples', 'playlist_covers', 'actress_gallery', 'avatars'] as const) {
+      const dir = mediaAssetStore.subdirPath(kind)
+      assert.equal(fs.existsSync(dir) ? fs.readdirSync(dir).length : 0, 0)
+    }
+  })
+
   it('rejects unusable avatar downloads instead of storing them', async () => {
     setup()
     const storedPath = await mediaAssetStore.downloadAvatar(

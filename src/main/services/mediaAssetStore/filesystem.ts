@@ -131,10 +131,15 @@ function extFromPath(filePath: string): string {
   throw new Error('不支持的图片格式')
 }
 
+function assertUsableImageBuffer(data: Buffer, message: string): void {
+  if (!isUsableImageBuffer(data)) throw new Error(message)
+}
+
 function importImageFromFile(subdir: ImageAssetSubdir, seed: string, sourcePath: string): string {
   if (!fs.existsSync(sourcePath)) throw new Error('图片文件不存在')
   const ext = extFromPath(sourcePath)
   const buf = fs.readFileSync(sourcePath)
+  assertUsableImageBuffer(buf, '导入的图片不是可用图片')
   const urlKey = `${sourcePath}:${randomUUID()}`
   const rel = writeImageAsset(subdir, seed, urlKey, ext, buf)
   invalidateAssetCache(rel)
@@ -157,7 +162,7 @@ export function importClassificationImageFromBuffer(
   name: string,
   data: Buffer
 ): string {
-  if (!isUsableImageBuffer(data)) throw new Error('分类主图不是可用图片')
+  assertUsableImageBuffer(data, '分类主图不是可用图片')
   const extension = detectImageExtensionFromBuffer(data) ?? '.jpg'
   return writeImageAsset(
     classificationImageSubdir(kind),
@@ -208,6 +213,7 @@ export function importAvatarSourceFromBuffer(
   data: Buffer,
   ext = '.jpg'
 ): { relPath: string; fingerprint: string } {
+  assertUsableImageBuffer(data, '头像不是可用图片')
   const fingerprint = avatarSourceFingerprint(data)
   const detectedExt = detectImageExtensionFromBuffer(data)
   const normalizedExt =
@@ -229,6 +235,7 @@ export function importAvatarDisplayFromBuffer(
   actressId: number,
   data: Buffer
 ): string {
+  assertUsableImageBuffer(data, '头像不是可用图片')
   const urlKey = `avatar-display:${actressId}:${randomUUID()}`
   const rel = writeImageAsset(
     'avatars',

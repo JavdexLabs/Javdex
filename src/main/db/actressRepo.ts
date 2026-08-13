@@ -243,31 +243,6 @@ function buildBatchActressWhere(filter: ActressBatchScrapeFilter): {
   }
 }
 
-function actressBatchScopeSql(
-  filter: Pick<ActressBatchScrapeFilter, 'actressIds' | 'scope' | 'scrapeStatus'>
-): {
-  sql: string
-  params: unknown[]
-} {
-  const { conditions, params } = buildActressBatchConditions(filter)
-  return {
-    sql: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '',
-    params
-  }
-}
-
-export function listActressBatchAvatarCandidates(
-  filter: Pick<ActressBatchScrapeFilter, 'actressIds' | 'scope' | 'scrapeStatus'>
-): Array<ActressBatchTarget & { avatar_path: string | null }> {
-  const db = getDb()
-  const { sql: scopeSql, params } = actressBatchScopeSql(filter)
-  const rows = db
-    .prepare(`SELECT a.id, a.main_name, a.avatar_path FROM actresses a ${scopeSql}`)
-    .all(...params) as Array<{ id: number; main_name: string; avatar_path: string | null }>
-
-  return rows
-}
-
 /** Clear selected stored avatar references and return the paths the application may remove. */
 export function clearActressAvatarRecord(
   actressId: number,

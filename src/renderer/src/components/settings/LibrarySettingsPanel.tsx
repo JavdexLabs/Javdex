@@ -19,38 +19,6 @@ import UnrecognizedRow from './UnrecognizedRow'
 import ListMaintenanceBanner from '../ListMaintenanceBanner'
 import Button from '../Button'
 
-type ScanMetric = {
-  key: string
-  label: string
-  value: number
-  tone?: 'default' | 'accent' | 'warn'
-}
-
-function buildScanMetrics(result: ScanResult): ScanMetric[] {
-  const items: ScanMetric[] = [
-    { key: 'scanned', label: '扫描', value: result.scannedFiles },
-    { key: 'imported', label: '新导入', value: result.imported, tone: 'accent' },
-    { key: 'updated', label: '更新资源', value: result.relocated + result.refreshed },
-    { key: 'removed', label: '移除', value: result.removed },
-    { key: 'promoted', label: '提升主资源', value: result.promoted },
-    { key: 'deletedVideos', label: '删除影片', value: result.deletedVideos },
-    { key: 'skipped', label: '跳过', value: result.skipped }
-  ]
-  if (result.pendingGroups > 0) {
-    items.push(
-      { key: 'pendingGroups', label: '待确认组', value: result.pendingGroups, tone: 'warn' },
-      { key: 'pendingResources', label: '待确认资源', value: result.pendingResources, tone: 'warn' }
-    )
-  }
-  if (result.skippedShort > 0) {
-    items.push({ key: 'skippedShort', label: '过短', value: result.skippedShort })
-  }
-  if (result.failed > 0) {
-    items.push({ key: 'failed', label: '无法识别', value: result.failed, tone: 'warn' })
-  }
-  return items
-}
-
 const SCAN_TRIGGER_LABEL: Record<LibraryScanSummary['trigger'], string> = {
   manual: '手动',
   startup: '启动后',
@@ -181,7 +149,6 @@ export default function LibrarySettingsPanel({
   onOpenPending: () => void
 }): JSX.Element {
   const minDuration = settings.minScanImportDurationMinutes
-  const scanMetrics = scanResult ? buildScanMetrics(scanResult) : null
   const canScan = settings.libraryPaths.length > 0
   const pathCount = settings.libraryPaths.length
   const pendingCleanupCount = settings.pendingLibraryPathCleanups.length
@@ -266,7 +233,6 @@ export default function LibrarySettingsPanel({
                 <p>导入新影片、同步路径变动并清理失效记录。</p>
               </div>
             </div>
-            <SettingsStatusPill status={scanStateTone}>{scanStateLabel}</SettingsStatusPill>
           </div>
 
           <div className="library-scan-command-row">
@@ -316,23 +282,17 @@ export default function LibrarySettingsPanel({
             {scanStatus ? <span className="library-scan-status">{scanStatus}</span> : null}
           </div>
 
-          {scanMetrics ? (
-            <div className="library-scan-metrics" aria-live="polite">
-              {scanMetrics.map((item) => (
-                <div
-                  key={item.key}
-                  className={`library-scan-metric${item.tone ? ` library-scan-metric--${item.tone}` : ''}`}
-                >
-                  <span className="library-scan-metric-value">{item.value}</span>
-                  <span className="library-scan-metric-label">{item.label}</span>
-                </div>
-              ))}
+          <section className="library-scan-history" aria-labelledby="library-last-scan-title">
+            <div className="library-scan-history-head">
+              <h5 id="library-last-scan-title">最近一次扫描</h5>
+              <span>只保留最近一次手动或后台扫描的审计摘要。</span>
             </div>
-          ) : (
-            <div className="library-scan-placeholder">
-              <span>扫描完成后显示导入、跳过和无法识别统计。</span>
-            </div>
-          )}
+            {settings.lastLibraryScanSummary ? (
+              <ScanSummary summary={settings.lastLibraryScanSummary} onOpenPending={onOpenPending} />
+            ) : (
+              <SettingsEmptyPanel variant="compact">尚无扫描记录</SettingsEmptyPanel>
+            )}
+          </section>
 
           {scanScrapePrompt && !scanning ? (
             <ListMaintenanceBanner
@@ -436,18 +396,6 @@ export default function LibrarySettingsPanel({
             </span>
           </div>
         </div>
-      </SettingsSectionBlock>
-
-      <SettingsSectionBlock
-        className="library-summary-block"
-        title="最近一次扫描"
-        hint="只保留最近一次手动或后台扫描的审计摘要。"
-      >
-        {settings.lastLibraryScanSummary ? (
-          <ScanSummary summary={settings.lastLibraryScanSummary} onOpenPending={onOpenPending} />
-        ) : (
-          <SettingsEmptyPanel variant="compact">尚无扫描记录</SettingsEmptyPanel>
-        )}
       </SettingsSectionBlock>
 
       {unrecognized.length > 0 ? (

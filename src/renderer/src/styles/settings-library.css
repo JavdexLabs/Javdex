@@ -28,9 +28,8 @@
 }
 
 .library-settings-grid {
-  --library-import-panel-height: 288px;
   display: grid;
-  grid-template-columns: minmax(300px, 0.86fr) minmax(0, 1.14fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 10px;
 }
@@ -41,7 +40,6 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  height: var(--library-import-panel-height);
   padding: 12px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -127,8 +125,12 @@
 }
 
 .library-path-list {
-  flex: 1 1 0;
+  flex: 0 1 auto;
   min-height: 0;
+  max-height: 220px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
   overflow-y: auto;
   padding-inline-end: var(--scrollbar-safe-pad);
   scrollbar-gutter: stable;
@@ -144,6 +146,7 @@
 }
 
 .library-path-empty {
+  grid-column: 1 / -1;
   justify-content: center;
   min-height: 86px;
   color: var(--text-muted);
@@ -247,65 +250,6 @@
   line-height: 1.4;
 }
 
-.library-scan-metrics {
-  flex: 1 1 0;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
-  align-content: start;
-  gap: 8px;
-  overflow-y: auto;
-  padding-inline-end: var(--scrollbar-safe-pad);
-  scrollbar-gutter: stable;
-}
-
-.library-scan-metric {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--surface-base) 36%, var(--surface-control));
-}
-
-.library-scan-metric-value {
-  font-size: var(--settings-fs-metric, 18px);
-  font-weight: var(--settings-fw-strong, 700);
-  line-height: 1.1;
-  color: var(--text-primary);
-}
-
-.library-scan-metric-label {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.library-scan-metric--accent .library-scan-metric-value {
-  color: var(--text-accent);
-}
-
-.library-scan-metric--warn .library-scan-metric-value {
-  color: var(--warning);
-}
-
-.library-scan-placeholder {
-  flex: 1 1 0;
-  min-height: 0;
-  min-height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12px;
-  border: 1px dashed var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--surface-base) 24%, transparent);
-  color: var(--text-muted);
-  font-size: var(--settings-fs-secondary, 12px);
-  text-align: center;
-}
-
 .library-unrec-block .scan-unrec-list {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -319,8 +263,7 @@
 }
 
 .library-auto-scan-block,
-.library-safety-block,
-.library-summary-block {
+.library-safety-block {
   padding-top: 12px;
   border-top: 1px solid var(--border-subtle);
 }
@@ -373,6 +316,38 @@
 .library-destructive-warning > svg {
   flex: 0 0 auto;
   color: var(--warning);
+}
+
+.library-scan-history {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.library-scan-history-head {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.library-scan-history-head h5 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--settings-fs-body, 13px);
+  font-weight: var(--settings-fw-label, 600);
+}
+
+.library-scan-history-head > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption, 11px);
+  line-height: var(--settings-lh, 1.45);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .library-scan-summary {
@@ -466,29 +441,15 @@
 }
 
 @media (max-width: 980px) {
-  .library-settings-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .library-path-panel,
-  .library-scan-console {
-    height: auto;
-  }
-
   .library-path-list {
-    flex: 0 1 auto;
-    max-height: 188px;
-  }
-
-  .library-scan-metrics {
-    flex: 0 1 auto;
-    max-height: 188px;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
 @media (max-width: 640px) {
   .library-page .settings-card-head,
   .library-panel-head,
+  .library-scan-history-head,
   .library-scan-message-row {
     align-items: stretch;
     flex-direction: column;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { CircleAlert, FileVideo, ScanSearch, Trash2 } from 'lucide-react'
+import { CircleAlert, FileText, FileVideo, ScanSearch, Trash2 } from 'lucide-react'
 import { useLocation, useMatch, useNavigate, useSearchParams } from 'react-router-dom'
 import type { PendingScanGroup, PendingScanResourceTarget } from '@shared/libraryTypes'
 import type {
@@ -18,6 +18,7 @@ import ListToolbar from '../components/ListToolbar'
 import Modal from '../components/Modal'
 import { useToast } from '../components/Toast'
 import { UI_ICON_SM } from '../components/iconDefaults'
+import { VIDEO_RESOURCE_KIND_LABELS } from '../components/videoResourcePresentation'
 import {
   parsePendingCenterSearch,
   pendingCenterPath,
@@ -203,6 +204,10 @@ function ScanResolutionPane({
       </header>
       <div className={styles.pendingScanResources}>
         {group.resources.map((resource) => {
+          const isStrm = resource.sourceKind === 'strm'
+          const targetKindLabel = resource.targetKind
+            ? VIDEO_RESOURCE_KIND_LABELS[resource.targetKind]
+            : null
           const target = assignments[resource.id]
           const newGroupKey = target?.kind === 'new' ? target.groupKey : null
           const defaultPrimaryId = newGroupKey
@@ -221,11 +226,23 @@ function ScanResolutionPane({
             : null
           return (
             <article className={styles.pendingResourceRow} key={resource.id}>
-              <FileVideo {...UI_ICON_SM} aria-hidden />
+              {isStrm ? <FileText {...UI_ICON_SM} aria-hidden /> : <FileVideo {...UI_ICON_SM} aria-hidden />}
               <div className={styles.pendingResourceCopy}>
-                <strong className={`copyable-text ${styles.resourceTitle}`}>{resource.displayName || resource.filePath.split(/[\\/]/).at(-1)}</strong>
+                <div className={styles.resourceTitleRow}>
+                  <strong className={`copyable-text ${styles.resourceTitle}`}>{resource.displayName || resource.filePath.split(/[\\/]/).at(-1)}</strong>
+                  {isStrm ? (
+                    <span className={styles.resourceKind}>
+                      {targetKindLabel ? `STRM · ${targetKindLabel}` : 'STRM'}
+                    </span>
+                  ) : null}
+                </div>
                 <span className={`copyable-text ${styles.resourcePath}`}>{resource.filePath}</span>
-                <small className={styles.resourceFacts}>{formatDuration(resource.durationSeconds)} · {resource.sizeBytes == null ? '大小未知' : formatBytes(resource.sizeBytes)}</small>
+                {isStrm && resource.targetDisplay ? (
+                  <span className={`copyable-text ${styles.resourceTargetDisplay}`}>{resource.targetDisplay}</span>
+                ) : null}
+                <small className={styles.resourceFacts}>
+                  {isStrm ? '链接资源' : formatDuration(resource.durationSeconds)} · {resource.sizeBytes == null ? '大小未知' : formatBytes(resource.sizeBytes)}
+                </small>
               </div>
               <div className={styles.pendingResourceTarget}>
                 <select

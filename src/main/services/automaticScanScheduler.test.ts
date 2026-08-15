@@ -49,16 +49,21 @@ function scanResult(): ScanResult {
     deletedVideos: 0,
     offlineFolders: [],
     newCodes: [],
-    unrecognizedFiles: []
+    unrecognizedFiles: [],
+    strmFailures: [],
+    omittedStrmFailures: 0
   }
 }
 
-function summary(finishedAt: string): LibraryScanSummary {
+function summary(
+  finishedAt: string,
+  status: LibraryScanSummary['status'] = 'success'
+): LibraryScanSummary {
   return {
     trigger: 'manual',
     startedAt: finishedAt,
     finishedAt,
-    status: 'success',
+    status,
     scannedFiles: 0,
     resourcesAdded: 0,
     resourcesUpdated: 0,
@@ -145,6 +150,37 @@ describe('AutomaticScanScheduler', () => {
     now += 2 * 60_000
     await timers.runNext()
     assert.deepEqual(triggers, ['interval'])
+    scheduler.stop()
+  })
+
+  it('uses a completed-with-errors scan as the start of the next interval', async () => {
+    const timers = new FakeTimers()
+    const now = Date.parse('2026-08-10T02:00:00.000Z')
+    const current = settings({
+      autoScanEnabled: true,
+      autoScanIntervalMinutes: 60,
+      lastLibraryScanSummary: summary(
+        '2026-08-10T01:30:00.000Z',
+        'completed_with_errors'
+      )
+    })
+    const triggers: LibraryScanTrigger[] = []
+    const scheduler = new AutomaticScanScheduler({
+      getSettings: () => current,
+      now: () => now,
+      setTimer: timers.set,
+      clearTimer: timers.clear,
+      isMaintenanceBusy: () => false,
+      runScan: async (trigger) => {
+        triggers.push(trigger)
+        return scanResult()
+      }
+    })
+
+    scheduler.start()
+    await timers.runNext(30_000)
+
+    assert.deepEqual(triggers, [])
     scheduler.stop()
   })
 

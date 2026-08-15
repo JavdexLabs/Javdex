@@ -10,7 +10,7 @@ import {
   VIDEO_SOURCES_SCHEMA_SQL
 } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 11
+export const CURRENT_SCHEMA_VERSION = 12
 
 type Migration = {
   version: number
@@ -861,6 +861,39 @@ function migrateToV11(database: Database.Database): void {
   }
 }
 
+function migrateToV12(database: Database.Database): void {
+  if (tableExists(database, 'video_resources')) {
+    const resourceColumns = columnNames(database, 'video_resources')
+    if (!resourceColumns.has('strm_source_path')) {
+      database.exec('ALTER TABLE video_resources ADD COLUMN strm_source_path TEXT')
+    }
+    database.exec(`
+      CREATE INDEX IF NOT EXISTS idx_video_resources_strm_source_path
+        ON video_resources(strm_source_path);
+    `)
+  }
+
+  if (tableExists(database, 'pending_scan_resources')) {
+    const pendingColumns = columnNames(database, 'pending_scan_resources')
+    if (!pendingColumns.has('source_kind')) {
+      database.exec(
+        "ALTER TABLE pending_scan_resources ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'local' CHECK(source_kind IN ('local', 'strm'))"
+      )
+    }
+    if (!pendingColumns.has('target_kind')) {
+      database.exec(
+        "ALTER TABLE pending_scan_resources ADD COLUMN target_kind TEXT CHECK(target_kind IN ('direct', 'web', 'magnet', 'ed2k'))"
+      )
+    }
+    if (!pendingColumns.has('target_locator')) {
+      database.exec('ALTER TABLE pending_scan_resources ADD COLUMN target_locator TEXT')
+    }
+    if (!pendingColumns.has('target_key')) {
+      database.exec('ALTER TABLE pending_scan_resources ADD COLUMN target_key TEXT')
+    }
+  }
+}
+
 const MIGRATIONS: Migration[] = [
   {
     version: 2,
@@ -901,6 +934,10 @@ const MIGRATIONS: Migration[] = [
   {
     version: 11,
     migrate: migrateToV11
+  },
+  {
+    version: 12,
+    migrate: migrateToV12
   }
 ]
 

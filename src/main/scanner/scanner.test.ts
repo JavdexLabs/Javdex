@@ -14,6 +14,7 @@ import {
   upsertPendingScanResources
 } from '../db/pendingScanRepo'
 import { selectPrimaryVideoResourceCandidate } from '../services/videoResourcePromotion'
+import { createVideoMaintenanceService } from '../services/videoMaintenanceService'
 
 let tempRoot: string | null = null
 
@@ -34,6 +35,351 @@ afterEach(() => {
 })
 
 describe('scanFolders', () => {
+  it('imports mixed local and STRM resources into one video and keeps the local file primary', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const localPath = path.join(library, 'MIX-001.mp4')
+    const strmPath = path.join(library, 'MIX-001.strm')
+    fs.writeFileSync(localPath, 'local video')
+    fs.writeFileSync(strmPath, 'https://example.test/MIX-001.mp4?token=secret')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const probed: string[] = []
+
+    const result = await scanFolders([library], undefined, {
+      readDurationSeconds: async (file) => {
+        probed.push(file)
+        return 3600
+      },
+      minImportDurationSeconds: 3000
+    })
+
+    assert.equal(result.imported, 2)
+    assert.equal(result.failed, 0)
+    assert.deepEqual(probed, [localPath])
+    const videos = listVideos({}).items
+    assert.equal(videos.length, 1)
+    const resources = listVideoResources(videos[0].id)
+    assert.equal(resources.length, 2)
+    assert.equal(resources.find((resource) => resource.is_primary === 1)?.kind, 'local')
+    assert.deepEqual(
+      resources
+        .filter((resource) => resource.strm_source_path)
+        .map((resource) => ({
+          kind: resource.kind,
+          locator: resource.locator,
+          sourcePath: resource.strm_source_path,
+          displayName: resource.display_name,
+          sizeBytes: resource.size_bytes,
+          durationSeconds: resource.duration_seconds
+        })),
+      [
+        {
+          kind: 'direct',
+          locator: 'https://example.test/MIX-001.mp4?token=secret',
+          sourcePath: strmPath,
+          displayName: 'MIX-001.strm',
+          sizeBytes: null,
+          durationSeconds: null
+        }
+      ]
+    )
+  })
+
+  it('chooses the scan primary independently of directory entry order', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const strmPath = path.join(library, 'ORDER-001-a.strm')
+    const localPath = path.join(library, 'ORDER-001-z.mp4')
+    fs.writeFileSync(strmPath, 'https://example.test/ORDER-001.mp4')
+    fs.writeFileSync(localPath, 'local')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+
+    await scanFolders([library], undefined, {
+      readDurationSeconds: async () => 3600,
+      minImportDurationSeconds: null
+    })
+
+    const video = listVideos({}).items[0]
+    assert.equal(listVideoResources(video.id).find((resource) => resource.is_primary)?.kind, 'local')
+  })
+
+  it('reselects the primary when scanning into an existing resource-less video', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const strmPath = path.join(library, 'EMPTY-001-a.strm')
+    const localPath = path.join(library, 'EMPTY-001-z.mp4')
+    fs.writeFileSync(strmPath, 'https://example.test/EMPTY-001.mp4')
+    fs.writeFileSync(localPath, 'local')
+    const db = initDatabaseAtPath(path.join(root, 'library.db'))
+    const videoId = Number(
+      db.prepare("INSERT INTO videos (code, scraped_status) VALUES ('EMPTY-001', 0)").run()
+        .lastInsertRowid
+    )
+
+    await scanFolders([library], undefined, {
+      readDirectory: async (directory) =>
+        (await fs.promises.readdir(directory, { withFileTypes: true })).sort((left, right) =>
+          left.name.endsWith('.strm') ? -1 : right.name.endsWith('.strm') ? 1 : 0
+        ),
+      readDurationSeconds: async () => 3600,
+      minImportDurationSeconds: null
+    })
+
+    const resources = listVideoResources(videoId)
+    assert.equal(resources.length, 2)
+    assert.equal(resources.find((resource) => resource.is_primary === 1)?.kind, 'local')
+  })
+
+  it('keeps mixed local and STRM resources in one masked pending group', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const localPath = path.join(library, 'WAIT-001.mp4')
+    const strmPath = path.join(library, 'WAIT-001.strm')
+    fs.writeFileSync(localPath, 'local')
+    fs.writeFileSync(strmPath, 'https://example.test/watch?id=1&token=secret')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+
+    const result = await scanFolders([library], undefined, {
+      readDurationSeconds: async () => 3600,
+      minImportDurationSeconds: null,
+      autoMergeSameCodeResources: false
+    })
+    const [group] = listPendingScanGroups()
+
+    assert.equal(result.pendingGroups, 1)
+    assert.equal(result.pendingResources, 2)
+    assert.deepEqual(
+      group.resources.map((resource) => ({
+        path: resource.filePath,
+        sourceKind: resource.sourceKind,
+        targetKind: resource.targetKind,
+        targetDisplay: resource.targetDisplay
+      })),
+      [
+        { path: localPath, sourceKind: 'local', targetKind: null, targetDisplay: null },
+        {
+          path: strmPath,
+          sourceKind: 'strm',
+          targetKind: 'web',
+          targetDisplay: 'example.test / watch'
+        }
+      ]
+    )
+    assert.doesNotMatch(JSON.stringify(group), /token|secret/)
+
+    const resolved = resolvePendingScanGroup(group.id, {
+      assignments: group.resources.map((resource) => ({
+        resourceId: resource.id,
+        target: { kind: 'new' as const, groupKey: 'mixed' }
+      }))
+    })
+    const resources = listVideoResources(resolved.createdVideoIds[0])
+    assert.equal(resources.length, 2)
+    assert.equal(resources.find((resource) => resource.is_primary === 1)?.kind, 'local')
+    assert.equal(resources.find((resource) => resource.strm_source_path)?.locator,
+      'https://example.test/watch?id=1&token=secret')
+  })
+
+  it('rejects a stale pending STRM assignment, refreshes its snapshot, then accepts it', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const existingPath = path.join(root, 'existing.mp4')
+    const strmPath = path.join(library, 'STALE-001.strm')
+    fs.writeFileSync(existingPath, 'existing')
+    const infoHash = '1234567890abcdef1234567890abcdef12345678'
+    fs.writeFileSync(strmPath, `magnet:?xt=urn:btih:${infoHash}&dn=Old`)
+    const db = initDatabaseAtPath(path.join(root, 'library.db'))
+    const { videoId } = insertTestVideoWithFile(db, {
+      code: 'STALE-001',
+      filePath: existingPath
+    })
+    await scanFolders([library], undefined, {
+      minImportDurationSeconds: null,
+      autoMergeSameCodeResources: false
+    })
+    const [group] = listPendingScanGroups()
+    const resolution = {
+      assignments: [
+        { resourceId: group.resources[0].id, target: { kind: 'existing' as const, videoId } }
+      ]
+    }
+    fs.writeFileSync(strmPath, `magnet:?xt=urn:btih:${infoHash}&dn=New`)
+
+    assert.throws(() => resolvePendingScanGroup(group.id, resolution), /已变化.*已刷新/)
+    assert.equal(listVideoResources(videoId).length, 1)
+    const refreshed = listPendingScanGroups()[0]
+    assert.equal(refreshed.resources[0].targetDisplay, 'Magnet · New')
+    assert.doesNotMatch(JSON.stringify(refreshed), /btih|1234567890abcdef/i)
+
+    const resolved = resolvePendingScanGroup(refreshed.id, resolution)
+    assert.equal(resolved.assignedResources, 1)
+    assert.equal(listVideoResources(videoId).length, 2)
+    assert.equal(
+      listVideoResources(videoId).find((resource) => resource.strm_source_path)?.locator,
+      `magnet:?xt=urn:btih:${infoHash}&dn=New`
+    )
+  })
+
+  it('removes an invalidated STRM snapshot from the pending group on a later scan', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const existingPath = path.join(root, 'existing.mp4')
+    const strmPath = path.join(library, 'INVA-001.strm')
+    fs.writeFileSync(existingPath, 'existing')
+    fs.writeFileSync(strmPath, 'https://example.test/valid.mp4')
+    const db = initDatabaseAtPath(path.join(root, 'library.db'))
+    insertTestVideoWithFile(db, { code: 'INVA-001', filePath: existingPath })
+    await scanFolders([library], undefined, {
+      minImportDurationSeconds: null,
+      autoMergeSameCodeResources: false
+    })
+    assert.equal(listPendingScanGroups().length, 1)
+    fs.writeFileSync(strmPath, 'plugin://invalid/target')
+
+    const result = await scanFolders([library], undefined, {
+      minImportDurationSeconds: null,
+      autoMergeSameCodeResources: false
+    })
+
+    assert.equal(result.failed, 1)
+    assert.equal(listPendingScanGroups().length, 0)
+  })
+
+  it('syncs a changed STRM target in place while preserving primary and user-maintained fields', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const sourcePath = path.join(library, 'SYNC-001.strm')
+    fs.writeFileSync(sourcePath, 'https://example.test/first.mp4')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+
+    await scanFolders([library], undefined, { minImportDurationSeconds: null })
+    const videoId = listVideos({}).items[0].id
+    const original = listVideoResources(videoId)[0]
+    getDb()
+      .prepare('UPDATE video_resources SET display_name = ?, size_bytes = ? WHERE id = ?')
+      .run('用户名称', 987654321, original.id)
+    fs.writeFileSync(
+      sourcePath,
+      'magnet:?xt=urn:btih:ABCDEF0123456789ABCDEF0123456789&dn=Changed'
+    )
+
+    const result = await scanFolders([library], undefined, { minImportDurationSeconds: null })
+    const updated = listVideoResources(videoId)[0]
+
+    assert.equal(result.refreshed, 1)
+    assert.equal(updated.id, original.id)
+    assert.equal(updated.video_id, original.video_id)
+    assert.equal(updated.is_primary, 1)
+    assert.equal(updated.kind, 'magnet')
+    assert.match(updated.locator, /^magnet:/)
+    assert.equal(updated.strm_source_path, sourcePath)
+    assert.equal(updated.display_name, '用户名称')
+    assert.equal(updated.size_bytes, 987654321)
+  })
+
+  it('isolates invalid STRM files and retries them without replacing a bound target', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const boundPath = path.join(library, 'KEEP-001.strm')
+    const newInvalidPath = path.join(library, 'BAD-001.strm')
+    fs.writeFileSync(boundPath, 'https://example.test/keep.mp4')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    await scanFolders([library], undefined, { minImportDurationSeconds: null })
+    const videoId = listVideos({}).items[0].id
+    const original = listVideoResources(videoId)[0]
+    fs.writeFileSync(boundPath, 'https://example.test/one\nhttps://example.test/two')
+    fs.writeFileSync(newInvalidPath, 'plugin://unsafe/target')
+
+    const failed = await scanFolders([library], undefined, { minImportDurationSeconds: null })
+
+    assert.equal(failed.failed, 2)
+    assert.deepEqual(
+      failed.strmFailures.map((failure) => [failure.sourcePath, failure.code]).sort(),
+      [
+        [boundPath, 'multiple_targets'],
+        [newInvalidPath, 'unsupported_target']
+      ].sort()
+    )
+    assert.equal(listVideos({}).total, 1)
+    assert.equal(listVideoResources(videoId)[0].locator, original.locator)
+
+    fs.writeFileSync(boundPath, 'https://example.test/recovered.mp4')
+    fs.writeFileSync(newInvalidPath, 'https://example.test/new.mp4')
+    const recovered = await scanFolders([library], undefined, { minImportDurationSeconds: null })
+    assert.equal(recovered.failed, 0)
+    assert.equal(recovered.refreshed, 1)
+    assert.equal(recovered.imported, 1)
+  })
+
+  it('relocates STRM only when the complete filename and target identify one missing source', async () => {
+    const root = makeTempRoot()
+    const firstRoot = path.join(root, 'first')
+    const secondRoot = path.join(root, 'second')
+    fs.mkdirSync(firstRoot, { recursive: true })
+    fs.mkdirSync(secondRoot, { recursive: true })
+    const originalPath = path.join(firstRoot, 'MOVE-001.strm')
+    const relocatedPath = path.join(secondRoot, 'MOVE-001.strm')
+    const renamedPath = path.join(firstRoot, 'MOVE-001-copy.strm')
+    const target = 'https://example.test/move.mp4?source=one'
+    fs.writeFileSync(originalPath, target)
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    await scanFolders([firstRoot, secondRoot], undefined, { minImportDurationSeconds: null })
+    const videoId = listVideos({}).items[0].id
+    const originalId = listVideoResources(videoId)[0].id
+
+    fs.renameSync(originalPath, relocatedPath)
+    const relocated = await scanFolders([firstRoot, secondRoot], undefined, {
+      minImportDurationSeconds: null
+    })
+    assert.equal(relocated.relocated, 1)
+    assert.equal(listVideoResources(videoId)[0].id, originalId)
+    assert.equal(listVideoResources(videoId)[0].strm_source_path, relocatedPath)
+
+    fs.renameSync(relocatedPath, renamedPath)
+    const renamed = await scanFolders([firstRoot, secondRoot], undefined, {
+      minImportDurationSeconds: null
+    })
+    assert.equal(renamed.relocated, 0)
+    assert.equal(renamed.imported, 1)
+    assert.equal(listVideoResources(videoId).length, 2)
+  })
+
+  it('relocates a bound STRM after its video code has been corrected', async () => {
+    const root = makeTempRoot()
+    const firstRoot = path.join(root, 'first')
+    const secondRoot = path.join(root, 'second')
+    fs.mkdirSync(firstRoot, { recursive: true })
+    fs.mkdirSync(secondRoot, { recursive: true })
+    const originalPath = path.join(firstRoot, 'OLD-001.strm')
+    const relocatedPath = path.join(secondRoot, 'OLD-001.strm')
+    fs.writeFileSync(originalPath, 'https://example.test/corrected.mp4')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    await scanFolders([firstRoot, secondRoot], undefined, { minImportDurationSeconds: null })
+    const videoId = listVideos({}).items[0].id
+    const resourceId = listVideoResources(videoId)[0].id
+    createVideoMaintenanceService().correctImport(videoId, 'NEW-001')
+    fs.renameSync(originalPath, relocatedPath)
+
+    const result = await scanFolders([firstRoot, secondRoot], undefined, {
+      minImportDurationSeconds: null
+    })
+
+    assert.equal(result.relocated, 1)
+    assert.equal(listVideos({ search: 'NEW-001' }).items[0].id, videoId)
+    assert.deepEqual(
+      listVideoResources(videoId).map((resource) => [resource.id, resource.strm_source_path]),
+      [[resourceId, relocatedPath]]
+    )
+  })
+
   it('holds new resources for confirmation when several videos already use the code', async () => {
     const root = makeTempRoot()
     const library = path.join(root, 'library')
@@ -133,6 +479,33 @@ describe('scanFolders', () => {
       listPendingScanGroups()[0]?.resources.map((resource) => resource.filePath).sort(),
       [first, second].sort()
     )
+  })
+
+  it('does not let an invalid STRM force a valid same-code video into confirmation', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const localPath = path.join(library, 'VALID-001.mp4')
+    const invalidStrmPath = path.join(library, 'VALID-001.strm')
+    fs.writeFileSync(localPath, 'local')
+    fs.writeFileSync(invalidStrmPath, 'plugin://unsupported/target')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+
+    const result = await scanFolders([library], undefined, {
+      readDirectory: async (directory) =>
+        (await fs.promises.readdir(directory, { withFileTypes: true })).sort((left, right) =>
+          left.name.endsWith('.mp4') ? -1 : right.name.endsWith('.mp4') ? 1 : 0
+        ),
+      readDurationSeconds: async () => 3600,
+      minImportDurationSeconds: null,
+      autoMergeSameCodeResources: false
+    })
+
+    assert.equal(result.imported, 1)
+    assert.equal(result.failed, 1)
+    assert.equal(result.pendingGroups, 0)
+    assert.equal(listPendingScanGroups().length, 0)
+    assert.equal(listVideos({}).total, 1)
   })
 
   it('persists a pending scan group across database reopen and assigns it atomically', async () => {
@@ -674,6 +1047,36 @@ describe('scanFolders', () => {
       listLocalVideoResources(existing.videoId).some((resource) => resource.locator === renamedPath),
       true
     )
+  })
+
+  it('renames and imports an unrecognized STRM as a source-managed link', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const sourcePath = path.join(library, 'unknown.strm')
+    fs.writeFileSync(sourcePath, 'https://example.test/manual.mp4?token=secret')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+
+    const scan = await scanFolders([library], undefined, { minImportDurationSeconds: null })
+    assert.deepEqual(scan.unrecognizedFiles, [sourcePath])
+
+    const imported = await renameAndImport(
+      sourcePath,
+      'MANUAL-001.strm',
+      'manual-001',
+      { kind: 'new' }
+    )
+    const newPath = path.join(library, 'MANUAL-001.strm')
+    const video = listVideos({}).items[0]
+    const resource = listVideoResources(video.id)[0]
+
+    assert.equal(imported.newPath, newPath)
+    assert.equal(imported.imported, true)
+    assert.equal(resource.kind, 'direct')
+    assert.equal(resource.strm_source_path, newPath)
+    assert.equal(resource.locator, 'https://example.test/manual.mp4?token=secret')
+    assert.equal(resource.display_name, 'MANUAL-001.strm')
+    assert.equal(resource.size_bytes, null)
   })
 
   it('imports recognized videos and reports unrecognized files', async () => {

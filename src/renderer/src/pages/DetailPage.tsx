@@ -282,7 +282,9 @@ export default function DetailPage(): JSX.Element {
       const res = await api.player.revealResource(resourceId)
       if (res.fileMissing) {
         const resource = video?.resources.find((item) => item.id === resourceId)
-        if (resource?.kind === 'local') setRemoveResourceTarget(resource)
+        if (resource?.kind === 'local' || resource?.strm_source_path) {
+          setRemoveResourceTarget(resource)
+        }
         return
       }
       if (!res.ok) toast.show(res.error ?? '打开文件夹失败', 'error')
@@ -313,14 +315,23 @@ export default function DetailPage(): JSX.Element {
         removeResourceTarget.id,
         lastResourceMode
       )
-      const removedLocal = removeResourceTarget.kind === 'local'
+      const removedSourceFile =
+        removeResourceTarget.kind === 'local' || Boolean(removeResourceTarget.strm_source_path)
+      const removedStrm = Boolean(removeResourceTarget.strm_source_path)
       setRemoveResourceTarget(null)
       invalidateVideos()
       if (result.videoDeleted) {
         toast.show('影片及全部数据已删除', 'success')
         navigateBackFromVideoDetail(navigate, location)
       } else {
-        toast.show(removedLocal ? '本地文件已删除' : '链接资源已移除', 'success')
+        toast.show(
+          removedSourceFile
+            ? removedStrm
+              ? 'STRM 源文件已删除'
+              : '本地文件已删除'
+            : '链接资源已移除',
+          'success'
+        )
         void load({ silent: true })
       }
     } catch (e) {
@@ -608,6 +619,9 @@ export default function DetailPage(): JSX.Element {
 
   const codeParts = splitVideoCode(video.code)
   const hasPrimaryResource = video.resources.some((resource) => Boolean(resource.is_primary))
+  const removeResourceIsStrm = Boolean(removeResourceTarget?.strm_source_path)
+  const removeResourceDeletesSource =
+    removeResourceTarget?.kind === 'local' || removeResourceIsStrm
   return (
     <div className={`detail-pane${actressStackOpen ? ' detail-pane--stacked' : ''}`}>
       <DetailScrollBody onBack={() => navigateBackFromVideoDetail(navigate, location)}>
@@ -1169,14 +1183,18 @@ export default function DetailPage(): JSX.Element {
           }}
           onCancel={() => setConfirmDelete(false)}
         >
-          确定要永久删除「{video.code}」吗？将删除全部本地文件、链接资源、关系、应用自有图片及所有元数据，此操作不可恢复。
+          确定要永久删除「{video.code}」吗？将删除全部本地视频文件、STRM 源文件、资源记录、关系、应用自有图片及所有元数据；不会访问或删除远程内容。此操作不可恢复。
           {video.has_pending_scrape ? (
             <div className="modal-path-hint">同时会删除这部影片的待确认刮削候选与暂存图片。</div>
           ) : null}
-          {video.resources.some((resource) => resource.kind === 'local') ? (
-            video.resources.filter((resource) => resource.kind === 'local').map((resource) => (
+          {video.resources.some(
+            (resource) => resource.kind === 'local' || Boolean(resource.strm_source_path)
+          ) ? (
+            video.resources.filter(
+              (resource) => resource.kind === 'local' || Boolean(resource.strm_source_path)
+            ).map((resource) => (
               <div key={resource.id} className="modal-path-text">
-                {resource.display_locator}
+                {resource.strm_source_path ?? resource.display_locator}
               </div>
             ))
           ) : null}
@@ -1185,9 +1203,23 @@ export default function DetailPage(): JSX.Element {
 
       {removeResourceTarget && (
         <Modal
-          title={removeResourceTarget.kind === 'local' ? '删除本地文件' : '移除链接资源'}
+          title={
+            removeResourceIsStrm
+              ? '删除 STRM 源文件'
+              : removeResourceTarget.kind === 'local'
+                ? '删除本地文件'
+                : '移除链接资源'
+          }
           danger
-          confirmText={removingResource ? '处理中…' : removeResourceTarget.kind === 'local' ? '删除文件' : '移除资源'}
+          confirmText={
+            removingResource
+              ? '处理中…'
+              : removeResourceIsStrm
+                ? '删除源文件'
+                : removeResourceTarget.kind === 'local'
+                  ? '删除文件'
+                  : '移除资源'
+          }
           onConfirm={() => void doRemoveResource()}
           onCancel={() => {
             if (!removingResource) setRemoveResourceTarget(null)
@@ -1225,17 +1257,26 @@ export default function DetailPage(): JSX.Element {
         >
           {video.resources.length === 1
             ? '这是影片的最后一个资源。请选择仅移除资源并保留影片元数据，或删除整部影片的全部数据。'
-            : removeResourceTarget.kind === 'local'
-              ? '将删除磁盘上的本地文件及资源记录；影片与其它资源会保留。'
+            : removeResourceDeletesSource
+              ? removeResourceIsStrm
+                ? '将删除磁盘上的 STRM 源文件及资源记录；不会访问或删除远程内容，影片与其它资源会保留。'
+                : '将删除磁盘上的本地文件及资源记录；影片与其它资源会保留。'
               : '将只移除这条链接资源记录，不会访问或删除远程内容。'}
+          {video.resources.length === 1 && removeResourceDeletesSource ? (
+            <div className="modal-path-hint">
+              {removeResourceIsStrm
+                ? '无论选择保留影片元数据还是删除整部影片，STRM 源文件都会从磁盘删除；远程内容不会被访问或删除。'
+                : '无论选择保留影片元数据还是删除整部影片，本地视频文件都会从磁盘删除。'}
+            </div>
+          ) : null}
           {video.resources.length === 1 && video.has_pending_scrape ? (
             <div className="modal-path-hint">
               选择“删除影片全部数据”还会删除待确认刮削候选与暂存图片。
             </div>
           ) : null}
           <div className="modal-path-text">
-            {removeResourceTarget.kind === 'local'
-              ? removeResourceTarget.display_locator
+            {removeResourceDeletesSource
+              ? removeResourceTarget.strm_source_path ?? removeResourceTarget.display_locator
               : removeResourceTarget.display_name || '链接资源'}
           </div>
         </Modal>

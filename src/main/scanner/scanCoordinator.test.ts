@@ -40,13 +40,16 @@ function emptyScanResult(): ScanResult {
     deletedVideos: 0,
     offlineFolders: [],
     newCodes: [],
-    unrecognizedFiles: []
+    unrecognizedFiles: [],
+    strmFailures: [],
+    omittedStrmFailures: 0
   }
 }
 
 function resource(input: Partial<VideoResource> & Pick<VideoResource, 'id' | 'video_id' | 'kind' | 'locator'>): VideoResource {
   return {
     resource_key: `${input.kind}:${input.locator}`,
+    strm_source_path: null,
     size_bytes: null,
     duration_seconds: null,
     file_mtime_ms: null,
@@ -297,6 +300,53 @@ describe('ScanCoordinator', () => {
     assert.equal(deferredCleanupRuns, 0)
     assert.equal(autoDeleteRuns, 0)
     assert.equal(summaries[0].status, 'failed')
+  })
+
+  it('completes safe cleanup with errors when failures are isolated to STRM files', async () => {
+    const sourcePath = '/online/BAD-001.strm'
+    const managed = resource({
+      id: 9,
+      video_id: 4,
+      kind: 'direct',
+      locator: 'https://example.test/last-good.mp4',
+      strm_source_path: sourcePath,
+      is_primary: 1
+    })
+    const removed: number[] = []
+    const summaries: LibraryScanSummary[] = []
+    const coordinator = createTestScanCoordinator({
+      gate: new MaintenanceTaskGate(),
+      getConfiguredFolders: () => ['/online'],
+      inspectFolder: async () => true,
+      scanFolders: async () => ({
+        ...emptyScanResult(),
+        failed: 1,
+        strmFailures: [
+          {
+            sourcePath: '/online/INVALID-001.strm',
+            code: 'multiple_targets',
+            message: 'STRM 文件包含多个目标'
+          }
+        ]
+      }),
+      listLocalResources: () => [
+        { video_id: 4, resource_id: managed.id, locator: sourcePath }
+      ],
+      getResourceById: () => managed,
+      listResources: () => [managed],
+      inspectPath: () => 'missing',
+      removeResourceRecord: (id) => removed.push(id),
+      recordScanSummary: (summary) => summaries.push(summary)
+    })
+
+    const result = await coordinator.run()
+
+    assert.deepEqual(removed, [managed.id])
+    assert.equal(result.removed, 1)
+    assert.equal(summaries[0].status, 'completed_with_errors')
+    assert.deepEqual(summaries[0].strmFailures, result.strmFailures)
+    assert.equal(summaries[0].omittedStrmFailures, 0)
+    assert.equal(summaries[0].errorSummary, null)
   })
 
   it('consumes deferred path cleanup only after a successful uncancelled scan', async () => {

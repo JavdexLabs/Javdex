@@ -54,13 +54,14 @@ export function createPlayerService(
   }
 
   function revealResource(resource: VideoResource | null): PlayResult {
-    if (!resource || resource.kind !== 'local') {
+    if (!resource || (resource.kind !== 'local' && !resource.strm_source_path)) {
       return { ok: false, error: '该资源不是本地文件' }
     }
-    if (!fileExists(resource.locator)) {
+    const sourcePath = resource.kind === 'local' ? resource.locator : resource.strm_source_path
+    if (!sourcePath || !fileExists(sourcePath)) {
       return { ok: false, fileMissing: true, error: '文件不存在' }
     }
-    showItemInFolder(resource.locator)
+    showItemInFolder(sourcePath)
     return { ok: true }
   }
 

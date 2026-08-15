@@ -8,6 +8,7 @@ import { findActressIdByOwnedName } from './actressNameOwnership'
 import { closeDatabase, initDatabaseAtPath } from './database'
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
 import { ActressIdentityConflictWorkflow } from '../services/actressIdentityConflictWorkflow'
+import { normalizeLocalPathIdentity } from '@shared/localPathIdentity'
 
 function indexNames(db: Database.Database): string[] {
   return (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as {
@@ -196,7 +197,155 @@ function createV10VideoIdentitySchema(db: Database.Database): void {
   db.pragma('user_version = 10')
 }
 
+function createV11StrmMigrationSchema(db: Database.Database): void {
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE videos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT NOT NULL
+    );
+    CREATE TABLE video_resources (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      video_id INTEGER NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('local', 'direct', 'web', 'magnet', 'ed2k')),
+      locator TEXT NOT NULL,
+      resource_key TEXT NOT NULL UNIQUE,
+      size_bytes INTEGER,
+      duration_seconds INTEGER,
+      file_mtime_ms INTEGER,
+      display_name TEXT,
+      is_primary INTEGER NOT NULL DEFAULT 0,
+      add_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+    );
+    CREATE TABLE pending_scan_groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      normalized_code TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE pending_scan_resources (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id INTEGER NOT NULL,
+      file_path TEXT NOT NULL,
+      normalized_path TEXT NOT NULL UNIQUE,
+      scan_root TEXT NOT NULL,
+      size_bytes INTEGER,
+      duration_seconds INTEGER,
+      file_mtime_ms INTEGER,
+      display_name TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (group_id) REFERENCES pending_scan_groups(id) ON DELETE CASCADE
+    );
+  `)
+  db.pragma('user_version = 11')
+}
+
 describe('database schema', () => {
+  it('adds STRM source identity without changing existing resource identity or link deduplication', () => {
+    const db = new Database(':memory:')
+    try {
+      createV11StrmMigrationSchema(db)
+      db.prepare("INSERT INTO videos (id, code) VALUES (41, 'ABC-001')").run()
+      db.prepare(
+        `INSERT INTO video_resources (
+           id, video_id, kind, locator, resource_key, display_name, is_primary
+         ) VALUES
+           (51, 41, 'local', '/library/ABC-001.mp4', 'local:/library/ABC-001.mp4', 'Local', 1),
+           (52, 41, 'direct', 'https://example.test/video.mp4',
+            'http:https://example.test/video.mp4', 'Manual', 0)`
+      ).run()
+      db.prepare(
+        "INSERT INTO pending_scan_groups (id, normalized_code) VALUES (61, 'WAIT-001')"
+      ).run()
+      db.prepare(
+        `INSERT INTO pending_scan_resources (
+           id, group_id, file_path, normalized_path, scan_root, display_name
+         ) VALUES (71, 61, '/library/WAIT-001.mp4', '/library/WAIT-001.mp4',
+                   '/library', 'WAIT-001.mp4')`
+      ).run()
+
+      migrateDatabase(db)
+
+      assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+      assert.equal(columnNamesForTest(db, 'video_resources').has('strm_source_path'), true)
+      assert.deepEqual(
+        db.prepare(
+          `SELECT id, source_kind, target_kind, target_locator, target_key
+           FROM pending_scan_resources WHERE id = 71`
+        ).get(),
+        {
+          id: 71,
+          source_kind: 'local',
+          target_kind: null,
+          target_locator: null,
+          target_key: null
+        }
+      )
+      assert.deepEqual(
+        db.prepare(
+          `SELECT id, resource_key, strm_source_path, is_primary
+           FROM video_resources ORDER BY id`
+        ).all(),
+        [
+          {
+            id: 51,
+            resource_key: 'local:/library/ABC-001.mp4',
+            strm_source_path: null,
+            is_primary: 1
+          },
+          {
+            id: 52,
+            resource_key: 'http:https://example.test/video.mp4',
+            strm_source_path: null,
+            is_primary: 0
+          }
+        ]
+      )
+
+      for (const [id, sourcePath] of [
+        [53, '/library/one/ABC-001.strm'],
+        [54, '/library/two/ABC-001.strm']
+      ] as const) {
+        db.prepare(
+          `INSERT INTO video_resources (
+             id, video_id, kind, locator, resource_key, strm_source_path, display_name
+           ) VALUES (?, 41, 'direct', 'https://example.test/video.mp4', ?, ?, ?)`
+        ).run(
+          id,
+          `strm:${normalizeLocalPathIdentity(sourcePath)}`,
+          sourcePath,
+          path.basename(sourcePath)
+        )
+      }
+      assert.equal(rowCount(db, 'video_resources'), 4)
+      assert.throws(
+        () =>
+          db.prepare(
+            `INSERT INTO video_resources (
+               video_id, kind, locator, resource_key, strm_source_path
+             ) VALUES (41, 'web', 'https://example.test/other', ?, ?)`
+          ).run(
+            `strm:${normalizeLocalPathIdentity('/library/one/ABC-001.strm')}`,
+            '/library/one/ABC-001.strm'
+          ),
+        /UNIQUE constraint failed/
+      )
+      assert.throws(
+        () =>
+          db.prepare(
+            `INSERT INTO video_resources (video_id, kind, locator, resource_key)
+             VALUES (41, 'direct', 'https://example.test/video.mp4',
+                     'http:https://example.test/video.mp4')`
+          ).run(),
+        /UNIQUE constraint failed/
+      )
+    } finally {
+      db.close()
+    }
+  })
+
   it('allows duplicate codes while enforcing complete video business identity', () => {
     const db = new Database(':memory:')
     try {

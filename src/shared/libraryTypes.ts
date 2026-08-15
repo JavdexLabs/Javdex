@@ -34,11 +34,26 @@ export interface LibraryOverviewStats {
 export interface LibraryPathRemovalPreview {
   path: string
   localResourceCount: number
+  strmResourceCount: number
   videosBecomingResourceLess: number
 }
 
 export type LibraryScanTrigger = 'manual' | 'startup' | 'interval' | 'resume'
-export type LibraryScanStatus = 'success' | 'cancelled' | 'failed'
+export type LibraryScanStatus = 'success' | 'completed_with_errors' | 'cancelled' | 'failed'
+
+export type StrmScanFailureCode =
+  | 'too_large'
+  | 'invalid_utf8'
+  | 'missing_target'
+  | 'multiple_targets'
+  | 'unsupported_target'
+  | 'read_failed'
+
+export interface StrmScanFailure {
+  sourcePath: string
+  code: StrmScanFailureCode
+  message: string
+}
 
 export interface LibraryScanSummary {
   trigger: LibraryScanTrigger
@@ -56,6 +71,8 @@ export interface LibraryScanSummary {
   pendingScanGroups: number
   pendingScanResources: number
   offlineFolders: string[]
+  strmFailures?: StrmScanFailure[]
+  omittedStrmFailures?: number
   errorSummary: string | null
 }
 
@@ -88,6 +105,10 @@ export interface ScanResult {
   newCodes: string[]
   /** Absolute paths of files whose 番号 could not be parsed from the filename. */
   unrecognizedFiles: string[]
+  /** Safe, bounded STRM failures from this scan. Never contains target content. */
+  strmFailures: StrmScanFailure[]
+  /** STRM failures omitted after the persisted/display limit. */
+  omittedStrmFailures: number
 }
 
 export interface PendingScanResource {
@@ -95,6 +116,10 @@ export interface PendingScanResource {
   groupId: number
   filePath: string
   scanRoot: string
+  sourceKind: 'local' | 'strm'
+  targetKind: import('./videoTypes').ExternalVideoResourceKind | null
+  /** Masked target display. The complete snapshot remains main-process only. */
+  targetDisplay: string | null
   sizeBytes: number | null
   durationSeconds: number | null
   fileMtimeMs: number | null

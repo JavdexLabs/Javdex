@@ -33,6 +33,7 @@ import {
   type VideoListProjectionRow
 } from './videoListProjection'
 import { normalizeVideoCode } from '@shared/videoCode'
+import { buildStrmResourceKey } from '@shared/strmResource'
 
 export interface ScannedVideoInput {
   code: string
@@ -86,6 +87,77 @@ export function insertLocalVideoResource(input: {
       ).run(resourceId, input.videoId)
     }
     return resourceId
+  })()
+}
+
+export function insertStrmVideoResource(input: {
+  videoId: number
+  sourcePath: string
+  kind: ExternalVideoResourceKind
+  locator: string
+  displayName?: string | null
+  isPrimary?: boolean
+  addTime?: string
+}): number | null {
+  const db = getDb()
+  const hasResources = Boolean(
+    db.prepare('SELECT 1 FROM video_resources WHERE video_id = ? LIMIT 1').get(input.videoId)
+  )
+  const isPrimary = input.isPrimary || !hasResources ? 1 : 0
+  return db.transaction(() => {
+    const info = db
+      .prepare(
+        `INSERT OR IGNORE INTO video_resources (
+           video_id, kind, locator, resource_key, strm_source_path, size_bytes,
+           duration_seconds, file_mtime_ms, display_name, is_primary, add_time
+         ) VALUES (
+           @videoId, @kind, @locator, @resourceKey, @sourcePath, NULL,
+           NULL, NULL, @displayName, 0, @addTime
+         )`
+      )
+      .run({
+        videoId: input.videoId,
+        kind: input.kind,
+        locator: input.locator,
+        resourceKey: buildStrmResourceKey(input.sourcePath),
+        sourcePath: input.sourcePath,
+        displayName: input.displayName ?? null,
+        addTime: input.addTime ?? nowIso()
+      })
+    if (info.changes === 0) return null
+    const resourceId = Number(info.lastInsertRowid)
+    if (isPrimary) {
+      db.prepare(
+        'UPDATE video_resources SET is_primary = CASE WHEN id = ? THEN 1 ELSE 0 END WHERE video_id = ?'
+      ).run(resourceId, input.videoId)
+    }
+    return resourceId
+  })()
+}
+
+export function insertNewScannedStrmVideo(input: {
+  code: string
+  sourcePath: string
+  kind: ExternalVideoResourceKind
+  locator: string
+  displayName: string
+}): number | null {
+  const db = getDb()
+  if (getStrmVideoResourceBySourcePath(input.sourcePath)) return null
+  return db.transaction(() => {
+    const videoId = Number(
+      db.prepare('INSERT INTO videos (code, scraped_status) VALUES (?, 0)').run(input.code)
+        .lastInsertRowid
+    )
+    const resourceId = insertStrmVideoResource({
+      videoId,
+      sourcePath: input.sourcePath,
+      kind: input.kind,
+      locator: input.locator,
+      displayName: input.displayName,
+      isPrimary: true
+    })
+    return resourceId == null ? null : videoId
   })()
 }
 
@@ -228,6 +300,52 @@ export function getLocalVideoResourceByLocator(locator: string): LocalVideoResou
       )
       .get(locator) as LocalVideoResource | undefined) ?? null
   )
+}
+
+export function getStrmVideoResourceBySourcePath(sourcePath: string): VideoResource | null {
+  return (
+    (getDb()
+      .prepare('SELECT * FROM video_resources WHERE resource_key = ? AND strm_source_path IS NOT NULL')
+      .get(buildStrmResourceKey(sourcePath)) as VideoResource | undefined) ?? null
+  )
+}
+
+export function updateStrmVideoResourceTarget(
+  resourceId: number,
+  input: { kind: ExternalVideoResourceKind; locator: string }
+): boolean {
+  const current = getVideoResourceById(resourceId)
+  if (!current || !current.strm_source_path) throw new Error('STRM 影片资源不存在')
+  if (current.kind === input.kind && current.locator === input.locator) return false
+  const changed = getDb()
+    .prepare(
+      `UPDATE video_resources
+       SET kind = ?, locator = ?
+       WHERE id = ? AND strm_source_path IS NOT NULL`
+    )
+    .run(input.kind, input.locator, resourceId)
+  if (changed.changes === 0) throw new Error('STRM 影片资源更新失败')
+  return true
+}
+
+export function relocateStrmVideoResource(
+  resourceId: number,
+  input: { sourcePath: string; kind: ExternalVideoResourceKind; locator: string }
+): void {
+  const changed = getDb()
+    .prepare(
+      `UPDATE video_resources
+       SET kind = ?, locator = ?, resource_key = ?, strm_source_path = ?
+       WHERE id = ? AND strm_source_path IS NOT NULL`
+    )
+    .run(
+      input.kind,
+      input.locator,
+      buildStrmResourceKey(input.sourcePath),
+      input.sourcePath,
+      resourceId
+    )
+  if (changed.changes === 0) throw new Error('待重定位的 STRM 资源不存在')
 }
 
 export function getPreferredLocalVideoResource(videoId: number): LocalVideoResource | null {
@@ -391,6 +509,14 @@ export interface LocalVideoResourceRef {
   locator: string
 }
 
+export interface StrmVideoResourceRef {
+  video_id: number
+  resource_id: number
+  source_path: string
+  kind: ExternalVideoResourceKind
+  locator: string
+}
+
 export function listLocalVideoResourceRefs(): LocalVideoResourceRef[] {
   const db = getDb()
   return db
@@ -398,6 +524,30 @@ export function listLocalVideoResourceRefs(): LocalVideoResourceRef[] {
       "SELECT id AS resource_id, video_id, locator FROM video_resources WHERE kind = 'local'"
     )
     .all() as LocalVideoResourceRef[]
+}
+
+/** Resources whose lifecycle is managed by a configured local source path. */
+export function listSourceManagedVideoResourceRefs(): LocalVideoResourceRef[] {
+  return getDb()
+    .prepare(
+      `SELECT id AS resource_id, video_id,
+              CASE WHEN kind = 'local' THEN locator ELSE strm_source_path END AS locator
+       FROM video_resources
+       WHERE kind = 'local' OR strm_source_path IS NOT NULL
+       ORDER BY id`
+    )
+    .all() as LocalVideoResourceRef[]
+}
+
+export function listStrmVideoResourceRefs(): StrmVideoResourceRef[] {
+  return getDb()
+    .prepare(
+      `SELECT id AS resource_id, video_id, strm_source_path AS source_path, kind, locator
+       FROM video_resources
+       WHERE strm_source_path IS NOT NULL
+       ORDER BY id`
+    )
+    .all() as StrmVideoResourceRef[]
 }
 
 export function getVideoResourceById(resourceId: number): VideoResource | null {
@@ -483,6 +633,34 @@ export function removeLocalVideoResourcesBatch(
     let removed = 0
     let promoted = 0
 
+    for (const plan of plans) {
+      for (const resourceId of plan.resourceIds) {
+        removed += remove.run(resourceId, plan.videoId).changes
+      }
+      if (plan.promotedResourceId === null) continue
+      clearPrimary.run(plan.videoId)
+      if (setPrimary.run(plan.promotedResourceId, plan.videoId).changes > 0) promoted += 1
+    }
+    return { removed, promoted }
+  })()
+}
+
+export function removeSourceManagedVideoResourcesBatch(
+  plans: VideoResourceBatchRemovalPlan[]
+): { removed: number; promoted: number } {
+  const db = getDb()
+  return db.transaction(() => {
+    const remove = db.prepare(
+      `DELETE FROM video_resources
+       WHERE id = ? AND video_id = ?
+         AND (kind = 'local' OR strm_source_path IS NOT NULL)`
+    )
+    const clearPrimary = db.prepare('UPDATE video_resources SET is_primary = 0 WHERE video_id = ?')
+    const setPrimary = db.prepare(
+      'UPDATE video_resources SET is_primary = 1 WHERE id = ? AND video_id = ?'
+    )
+    let removed = 0
+    let promoted = 0
     for (const plan of plans) {
       for (const resourceId of plan.resourceIds) {
         removed += remove.run(resourceId, plan.videoId).changes
@@ -596,6 +774,25 @@ export function updateVideoLinkResourceRecord(input: {
     if (!resource) throw new Error('影片资源更新失败')
     return resource
   })()
+}
+
+export function updateStrmVideoResourceMetadata(input: {
+  resourceId: number
+  videoId: number
+  displayName: string | null
+  sizeBytes: number | null
+}): VideoResource {
+  const info = getDb()
+    .prepare(
+      `UPDATE video_resources
+       SET display_name = ?, size_bytes = ?
+       WHERE id = ? AND video_id = ? AND strm_source_path IS NOT NULL`
+    )
+    .run(input.displayName, input.sizeBytes, input.resourceId, input.videoId)
+  if (info.changes === 0) throw new Error('STRM 影片资源不存在')
+  const resource = getVideoResourceById(input.resourceId)
+  if (!resource) throw new Error('STRM 影片资源更新失败')
+  return resource
 }
 
 export function getVideoById(id: number): Video | null {

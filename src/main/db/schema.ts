@@ -231,6 +231,10 @@ CREATE TABLE IF NOT EXISTS pending_scan_resources (
     file_path TEXT NOT NULL,
     normalized_path TEXT NOT NULL UNIQUE,
     scan_root TEXT NOT NULL,
+    source_kind TEXT NOT NULL DEFAULT 'local' CHECK(source_kind IN ('local', 'strm')),
+    target_kind TEXT CHECK(target_kind IN ('direct', 'web', 'magnet', 'ed2k')),
+    target_locator TEXT,
+    target_key TEXT,
     size_bytes INTEGER,
     duration_seconds INTEGER,
     file_mtime_ms INTEGER,
@@ -358,6 +362,7 @@ CREATE TABLE IF NOT EXISTS video_resources (
     kind TEXT NOT NULL CHECK(kind IN ('local', 'direct', 'web', 'magnet', 'ed2k')),
     locator TEXT NOT NULL,
     resource_key TEXT NOT NULL UNIQUE,
+    strm_source_path TEXT,
     size_bytes INTEGER,
     duration_seconds INTEGER,
     file_mtime_ms INTEGER,
@@ -370,6 +375,8 @@ CREATE INDEX IF NOT EXISTS idx_video_resources_video_id ON video_resources(video
 CREATE UNIQUE INDEX IF NOT EXISTS idx_video_resources_key ON video_resources(resource_key);
 CREATE INDEX IF NOT EXISTS idx_video_resources_primary ON video_resources(video_id, is_primary);
 CREATE INDEX IF NOT EXISTS idx_video_resources_kind ON video_resources(kind);
+CREATE INDEX IF NOT EXISTS idx_video_resources_strm_source_path
+    ON video_resources(strm_source_path);
 
 ${PENDING_LOCAL_FILE_DELETIONS_SCHEMA_SQL}
 

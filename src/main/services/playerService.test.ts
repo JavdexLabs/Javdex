@@ -10,6 +10,7 @@ function resource(overrides: Partial<VideoResource> = {}): VideoResource {
     kind: 'direct',
     locator: 'https://cdn.example/movie.mp4?token=secret',
     resource_key: 'http:https://cdn.example/movie.mp4?token=secret',
+    strm_source_path: null,
     size_bytes: null,
     duration_seconds: null,
     file_mtime_ms: null,
@@ -39,6 +40,29 @@ describe('PlayerService', () => {
     assert.deepEqual(service.revealResource(local.id), { ok: true })
     assert.deepEqual(opened, [local.locator])
     assert.deepEqual(revealed, [local.locator])
+  })
+
+  it('opens a STRM target externally but reveals its local source file', async () => {
+    const opened: string[] = []
+    const revealed: string[] = []
+    const strm = resource({
+      kind: 'direct',
+      locator: 'https://cdn.example/movie.mp4?token=secret',
+      strm_source_path: '/library/ABC-001.strm'
+    })
+    const service = createPlayerService({
+      getVideoResourceById: () => strm,
+      fileExists: (filePath) => filePath === strm.strm_source_path,
+      openExternal: async (target) => {
+        opened.push(target)
+      },
+      showItemInFolder: (filePath) => revealed.push(filePath)
+    })
+
+    assert.deepEqual(await service.openResource(strm.id), { ok: true })
+    assert.deepEqual(service.revealResource(strm.id), { ok: true })
+    assert.deepEqual(opened, [strm.locator])
+    assert.deepEqual(revealed, [strm.strm_source_path])
   })
 
   it('opens the primary direct resource with the system URL handler', async () => {

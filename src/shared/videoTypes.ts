@@ -24,6 +24,7 @@ export interface VideoResource {
   kind: VideoResourceKind
   locator: string
   resource_key: string
+  strm_source_path: string | null
   size_bytes: number | null
   duration_seconds: number | null
   file_mtime_ms: number | null

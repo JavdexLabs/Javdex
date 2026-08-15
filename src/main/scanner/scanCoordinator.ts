@@ -9,7 +9,7 @@ import { sanitizeLibraryScanError } from '@shared/libraryScanSummary'
 import type { VideoResource } from '@shared/videoTypes'
 import {
   getVideoResourceById,
-  listLocalVideoResourceRefs,
+  listSourceManagedVideoResourceRefs,
   listVideoResources,
   removeVideoResourceRecord,
   setPrimaryVideoResource
@@ -168,7 +168,10 @@ export class ScanCoordinator {
       }
       const processingFailures = Math.max(
         0,
-        result.failed - result.unrecognizedFiles.length
+        result.failed -
+          result.unrecognizedFiles.length -
+          result.strmFailures.length -
+          result.omittedStrmFailures
       )
       if (processingFailures > 0) {
         this.recordSummary(
@@ -210,7 +213,14 @@ export class ScanCoordinator {
       result.removed += cleanup.missingResources.removed + cleanup.deferredCleanup.removed
       result.promoted += cleanup.missingResources.promoted + cleanup.deferredCleanup.promoted
       result.deletedVideos = cleanup.deletedVideos
-      this.recordSummary(trigger, startedAt, 'success', result)
+      this.recordSummary(
+        trigger,
+        startedAt,
+        result.strmFailures.length + result.omittedStrmFailures > 0
+          ? 'completed_with_errors'
+          : 'success',
+        result
+      )
       return result
     } catch (error) {
       const errorSummary = sanitizeLibraryScanError(error)
@@ -239,7 +249,9 @@ export class ScanCoordinator {
       deletedVideos: 0,
       offlineFolders: [],
       newCodes: [],
-      unrecognizedFiles: []
+      unrecognizedFiles: [],
+      strmFailures: [],
+      omittedStrmFailures: 0
     }
   }
 
@@ -274,6 +286,10 @@ export class ScanCoordinator {
       pendingScanGroups: result.pendingGroups,
       pendingScanResources: result.pendingResources,
       offlineFolders: [...result.offlineFolders],
+      ...(result.strmFailures.length > 0 ? { strmFailures: [...result.strmFailures] } : {}),
+      ...(result.strmFailures.length > 0 || result.omittedStrmFailures > 0
+        ? { omittedStrmFailures: result.omittedStrmFailures }
+        : {}),
       errorSummary
     }
     try {
@@ -299,7 +315,7 @@ export class ScanCoordinator {
       }
 
       const resource = this.dependencies.getResourceById(ref.resource_id)
-      if (!resource || resource.kind !== 'local') continue
+      if (!resource || (resource.kind !== 'local' && !resource.strm_source_path)) continue
       const remaining = this.dependencies
         .listResources(ref.video_id)
         .filter((item) => item.id !== resource.id)
@@ -328,7 +344,8 @@ export function createScanCoordinator(
       (() => getSettings().pendingLibraryPathCleanups.length > 0),
     inspectFolder: dependencies.inspectFolder ?? inspectReadableDirectory,
     scanFolders: dependencies.scanFolders ?? scanFolders,
-    listLocalResources: dependencies.listLocalResources ?? listLocalVideoResourceRefs,
+    listLocalResources:
+      dependencies.listLocalResources ?? listSourceManagedVideoResourceRefs,
     getResourceById: dependencies.getResourceById ?? getVideoResourceById,
     listResources: dependencies.listResources ?? listVideoResources,
     removeResourceRecord: dependencies.removeResourceRecord ?? removeVideoResourceRecord,

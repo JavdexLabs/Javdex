@@ -20,6 +20,8 @@ function result(patch: Partial<ScanResult> = {}): ScanResult {
     offlineFolders: [],
     newCodes: [],
     unrecognizedFiles: [],
+    strmFailures: [],
+    omittedStrmFailures: 0,
     ...patch
   }
 }
@@ -62,5 +64,44 @@ describe('buildLibraryScanNotification', () => {
       'warning'
     )
     assert.equal(buildLibraryScanNotification(result({ failed: 1 }))?.tone, 'warning')
+  })
+
+  it('reports isolated STRM failures without exposing target content', () => {
+    const notification = buildLibraryScanNotification(
+      result({
+        failed: 3,
+        unrecognizedFiles: ['/library/UNKNOWN.mp4'],
+        strmFailures: [
+          { sourcePath: '/library/A.strm', code: 'missing_target', message: 'STRM 中没有可用目标' }
+        ],
+        omittedStrmFailures: 1
+      })
+    )
+
+    assert.equal(notification?.tone, 'warning')
+    assert.match(notification?.message ?? '', /2 个 STRM 文件处理失败.*另有 1 个文件无法识别/)
+    assert.doesNotMatch(notification?.message ?? '', /https?:\/\//)
+  })
+
+  it('reports a blocking processing failure before isolated STRM failures', () => {
+    const notification = buildLibraryScanNotification(
+      result({
+        failed: 2,
+        strmFailures: [
+          { sourcePath: '/library/A.strm', code: 'read_failed', message: '无法读取 STRM 文件' }
+        ]
+      })
+    )
+
+    assert.deepEqual(notification, {
+      message: '扫描失败：1 个文件处理失败，已跳过资源清理',
+      tone: 'warning'
+    })
+    assert.match(
+      buildLibraryScanNotification(
+        result({ failed: 1, offlineFolders: ['/offline'] })
+      )?.message ?? '',
+      /扫描失败/
+    )
   })
 })

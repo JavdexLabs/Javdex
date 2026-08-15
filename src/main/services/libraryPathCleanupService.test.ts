@@ -42,6 +42,18 @@ function insertWebResource(videoId: number, locator: string): void {
     .run(videoId, locator, `web:${locator}`, '2026-08-10T00:00:00.000Z')
 }
 
+function insertStrmResource(videoId: number, sourcePath: string, locator: string): void {
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true })
+  fs.writeFileSync(sourcePath, locator)
+  getDb()
+    .prepare(
+      `INSERT INTO video_resources
+         (video_id, kind, locator, resource_key, strm_source_path, is_primary, add_time)
+       VALUES (?, 'direct', ?, ?, ?, 0, ?)`
+    )
+    .run(videoId, locator, `strm:${sourcePath}`, sourcePath, '2026-08-10T00:00:00.000Z')
+}
+
 beforeEach(() => {
   previousUserData = process.env.JAVDEX_TEST_USER_DATA
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-path-cleanup-'))
@@ -66,6 +78,11 @@ describe('libraryPathCleanupService', () => {
     createLocalVideo('ONLY-001', path.join(libraryRoot, 'only.mp4'))
     const linkedVideoId = createLocalVideo('LINK-001', path.join(libraryRoot, 'linked.mp4'))
     insertWebResource(linkedVideoId, 'https://example.test/watch/link-001')
+    insertStrmResource(
+      linkedVideoId,
+      path.join(libraryRoot, 'LINK-001.strm'),
+      'https://example.test/LINK-001.mp4'
+    )
     const multiLocalVideoId = createLocalVideo('MULTI-001', path.join(libraryRoot, 'multi.mp4'))
     getDb()
       .prepare(
@@ -83,6 +100,7 @@ describe('libraryPathCleanupService', () => {
     assert.deepEqual(previewLibraryPathRemoval(libraryRoot), {
       path: libraryRoot,
       localResourceCount: 3,
+      strmResourceCount: 1,
       videosBecomingResourceLess: 1
     })
   })
@@ -120,6 +138,12 @@ describe('libraryPathCleanupService', () => {
     const linkedPath = path.join(libraryRoot, 'linked.mp4')
     const linkedVideoId = createLocalVideo('LINK-002', linkedPath)
     insertWebResource(linkedVideoId, 'https://example.test/watch/link-002')
+    const linkedStrmPath = path.join(libraryRoot, 'LINK-002.strm')
+    insertStrmResource(
+      linkedVideoId,
+      linkedStrmPath,
+      'https://example.test/LINK-002.mp4'
+    )
     const outsidePath = path.join(otherRoot, 'multi-copy.mp4')
     fs.mkdirSync(path.dirname(outsidePath), { recursive: true })
     fs.writeFileSync(outsidePath, 'copy')
@@ -143,7 +167,7 @@ describe('libraryPathCleanupService', () => {
 
     const result = consumePendingLibraryPathCleanups()
 
-    assert.deepEqual(result, { removed: 3, promoted: 2, consumedRoots: [libraryRoot] })
+    assert.deepEqual(result, { removed: 4, promoted: 2, consumedRoots: [libraryRoot] })
     assert.equal(
       (getDb().prepare('SELECT COUNT(*) AS n FROM videos').get() as { n: number }).n,
       3
@@ -191,6 +215,7 @@ describe('libraryPathCleanupService', () => {
     assert.deepEqual(getSettings().pendingLibraryPathCleanups, [])
     assert.equal(fs.existsSync(onlyPath), true)
     assert.equal(fs.existsSync(linkedPath), true)
+    assert.equal(fs.existsSync(linkedStrmPath), true)
   })
 
   it('rolls back applied resource removals when a later cleanup step fails', () => {

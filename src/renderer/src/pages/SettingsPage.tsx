@@ -1101,6 +1101,10 @@ export default function SettingsPage(): JSX.Element {
                 <span>条本地资源记录</span>
               </div>
               <div>
+                <strong>{pathRemoval.preview.strmResourceCount}</strong>
+                <span>条 STRM 资源记录</span>
+              </div>
+              <div>
                 <strong>{pathRemoval.preview.videosBecomingResourceLess}</strong>
                 <span>部影片可能变为无资源</span>
               </div>
@@ -1110,7 +1114,7 @@ export default function SettingsPage(): JSX.Element {
           )}
           <p className="modal-field-hint library-path-removal-note">
             确认后会立即停止扫描该路径。下一次成功完成的扫描将移除上述资源记录，
-            但不会删除目录中的影片文件；此操作不提供保留资源记录选项。
+            但不会删除目录中的视频文件或 STRM 源文件；此操作不提供保留资源记录选项。
           </p>
         </ConfirmModal>
       )}

@@ -357,6 +357,7 @@ function VideoLinkResourceRow({
   resource,
   multiResources,
   onOpenResource,
+  onRevealResource,
   onReadResourceLocator,
   onEditResource,
   onSetPrimaryResource,
@@ -366,6 +367,7 @@ function VideoLinkResourceRow({
   resource: VideoResourceDetail
   multiResources: boolean
   onOpenResource?: (resourceId: number) => void
+  onRevealResource?: (resourceId: number) => void
   onReadResourceLocator?: (resourceId: number) => Promise<string | null>
   onEditResource?: (resource: VideoResourceDetail) => void
   onSetPrimaryResource?: (resourceId: number) => void
@@ -380,6 +382,7 @@ function VideoLinkResourceRow({
   const masked = resource.display_locator
   const title = resource.display_name?.trim() || masked
   const isPrimary = Boolean(resource.is_primary)
+  const isStrm = Boolean(resource.strm_source_path)
 
   const copyFullLink = async (): Promise<void> => {
     const locator = fullLink ?? (await onReadResourceLocator?.(resource.id))
@@ -417,6 +420,7 @@ function VideoLinkResourceRow({
         <div className="detail-meta-file-label-row">
           <span className="detail-meta-file-label">{title}</span>
           <span className="detail-meta-file-badge">{kind}</span>
+          {isStrm ? <span className="detail-meta-file-badge">STRM 托管</span> : null}
           {isPrimary ? (
             <span className="detail-meta-file-badge" title="顶部播放将打开此资源">
               主资源
@@ -424,6 +428,9 @@ function VideoLinkResourceRow({
           ) : null}
         </div>
         {resource.display_name?.trim() ? <div className="detail-meta-path">{masked}</div> : null}
+        {resource.strm_source_path ? (
+          <div className="detail-meta-path copyable-text">源文件 · {resource.strm_source_path}</div>
+        ) : null}
         {resource.size_bytes != null && resource.size_bytes > 0 ? (
           <div className="detail-meta-file-facts">
             <span className="detail-meta-file-fact">
@@ -468,8 +475,21 @@ function VideoLinkResourceRow({
                   onEditResource?.(resource)
                 }}
               >
-                编辑资源
+                编辑资源信息
               </button>
+              {isStrm ? (
+                <button
+                  type="button"
+                  className="detail-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onRevealResource?.(resource.id)
+                  }}
+                >
+                  在文件夹中显示
+                </button>
+              ) : null}
               {!isPrimary ? (
                 <ResourceReassignmentMenuItems
                   resource={resource}
@@ -499,7 +519,7 @@ function VideoLinkResourceRow({
                   onRemoveResource?.(resource)
                 }}
               >
-                移除链接资源
+                {isStrm ? '删除 STRM 源文件' : '移除链接资源'}
               </button>
             </div>
           ) : null}
@@ -643,6 +663,7 @@ export function VideoDetailSecondaryMeta({
                   resource={resource}
                   multiResources={multiResources}
                   onOpenResource={onOpenResource}
+                  onRevealResource={onRevealResource}
                   onReadResourceLocator={onReadResourceLocator}
                   onEditResource={onEditResource}
                   onSetPrimaryResource={onSetPrimaryResource}

@@ -5,20 +5,36 @@ import {
   backfillLocalVideoResourceFingerprint,
   getVideoByCode,
   getLocalVideoResourceByLocator,
+  getStrmVideoResourceBySourcePath,
   getPreferredLocalVideoResource,
   insertLocalVideoResource,
+  insertNewScannedStrmVideo,
   insertNewScannedVideo,
   insertScannedVideo,
+  listStrmVideoResourceRefs,
   listVideosByCode,
   listVideoResources,
   localVideoResourceExistsByLocator,
   relocateLocalVideoResource,
   relocateLocalVideoResourceById,
+  relocateStrmVideoResource,
+  setPrimaryVideoResource,
+  updateStrmVideoResourceTarget,
+  insertStrmVideoResource,
   updateLocalVideoResourceAfterProbe
 } from '../db/videoRepo'
-import type { ManualImportResult, ScanProgress, ScanResult, RenameImportResult } from '@shared/libraryTypes'
-import type { ScannedVideoInput } from '../db/videoRepo'
-import type { LocalVideoResource, VideoResourceImportTarget } from '@shared/videoTypes'
+import type {
+  ManualImportResult,
+  RenameImportResult,
+  ScanProgress,
+  ScanResult,
+  StrmScanFailure
+} from '@shared/libraryTypes'
+import type { ScannedVideoInput, StrmVideoResourceRef } from '../db/videoRepo'
+import type {
+  LocalVideoResource,
+  VideoResourceImportTarget
+} from '@shared/videoTypes'
 import {
   isBelowMinImportDuration,
   readLocalVideoDurationSeconds,
@@ -32,8 +48,18 @@ import { isPathUnderRoot } from './libraryPathUtils'
 import { normalizeVideoCode } from '@shared/videoCode'
 import {
   pendingScanResourceExists,
+  removePendingScanResource,
   upsertPendingScanResources
 } from '../db/pendingScanRepo'
+import {
+  StrmParseError,
+  isStrmFile,
+  readStrmFile,
+  type ParsedStrmTarget
+} from './strmParser'
+import { normalizeExternalVideoResource } from '@shared/videoResourceLinks'
+import { normalizeLocalPathIdentity } from '@shared/localPathIdentity'
+import { selectDefaultPendingScanPrimary } from '@shared/pendingScanPrimary'
 
 export type ScanProgressFn = (progress: ScanProgress) => void
 
@@ -76,8 +102,8 @@ async function maybeYield(count: number, yieldEvery: number): Promise<void> {
   }
 }
 
-/** Recursively collect video file paths under a directory. */
-async function collectVideoFiles(
+/** Recursively collect local video and STRM source paths under a directory. */
+async function collectScannableFiles(
   dir: string,
   acc: string[],
   signal: AbortSignal | undefined,
@@ -94,10 +120,10 @@ async function collectVideoFiles(
     if (signal?.aborted) return
     const full = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      await collectVideoFiles(full, acc, signal, readDirectory)
-    } else if (entry.isFile() && isVideoFile(full)) {
+      await collectScannableFiles(full, acc, signal, readDirectory)
+    } else if (entry.isFile() && (isVideoFile(full) || isStrmFile(full))) {
       acc.push(full)
-    } else if (entry.isSymbolicLink() && isVideoFile(full)) {
+    } else if (entry.isSymbolicLink() && (isVideoFile(full) || isStrmFile(full))) {
       try {
         const target = await fs.promises.stat(full)
         if (target.isFile()) acc.push(full)
@@ -106,6 +132,53 @@ async function collectVideoFiles(
       }
     }
   }
+}
+
+type PreparedStrm =
+  | { ok: true; target: ParsedStrmTarget }
+  | { ok: false; failure: StrmScanFailure }
+
+function readStrmTarget(sourcePath: string): PreparedStrm {
+  try {
+    return { ok: true, target: readStrmFile(sourcePath) }
+  } catch (error) {
+    if (error instanceof StrmParseError) {
+      return {
+        ok: false,
+        failure: { sourcePath, code: error.code, message: error.message }
+      }
+    }
+    return {
+      ok: false,
+      failure: { sourcePath, code: 'read_failed', message: '无法读取 STRM 文件' }
+    }
+  }
+}
+
+function targetKeyForStrmResource(resource: StrmVideoResourceRef): string | null {
+  try {
+    return normalizeExternalVideoResource(resource.locator, resource.kind).resourceKey
+  } catch {
+    return null
+  }
+}
+
+function findStrmRelocationCandidate(
+  sourcePath: string,
+  targetKey: string,
+  unavailableRoots: string[],
+  inspectPath: (filePath: string) => 'present' | 'missing' | 'unknown'
+): StrmVideoResourceRef | null {
+  const sourceName = path.basename(sourcePath)
+  const candidates = listStrmVideoResourceRefs()
+    .filter((resource) => {
+      const oldSourcePath = resource.source_path
+      if (path.basename(oldSourcePath) !== sourceName) return false
+      if (unavailableRoots.some((root) => isPathUnderRoot(oldSourcePath, root))) return false
+      if (inspectPath(oldSourcePath) !== 'missing') return false
+      return targetKeyForStrmResource(resource) === targetKey
+    })
+  return candidates.length === 1 ? candidates[0] : null
 }
 
 function samePath(a: string, b: string): boolean {
@@ -257,10 +330,12 @@ export async function scanFolders(
     deletedVideos: 0,
     offlineFolders: [],
     newCodes: [],
-    unrecognizedFiles: []
+    unrecognizedFiles: [],
+    strmFailures: [],
+    omittedStrmFailures: 0
   }
 
-  const files: string[] = []
+  const filePaths: string[] = []
   const readDirectory =
     options.readDirectory ??
     ((dir: string) => fs.promises.readdir(dir, { withFileTypes: true }))
@@ -270,9 +345,8 @@ export async function scanFolders(
       result.cancelled = true
       return result
     }
-    await collectVideoFiles(folder, files, options.signal, readDirectory)
+    await collectScannableFiles(folder, filePaths, options.signal, readDirectory)
   }
-
   const yieldEvery = Math.max(1, options.yieldEvery ?? DEFAULT_YIELD_EVERY)
   const readDurationSeconds = options.readDurationSeconds ?? readLocalVideoDurationSeconds
   const minImportDurationSeconds =
@@ -282,15 +356,53 @@ export async function scanFolders(
   const autoMergeSameCodeResources =
     options.autoMergeSameCodeResources ?? getSettings().autoMergeSameCodeResources
   const newFileCounts = new Map<string, number>()
-  for (const file of files) {
-    if (localVideoResourceExistsByLocator(file) || pendingScanResourceExists(file)) continue
+  for (const file of filePaths) {
+    if (
+      localVideoResourceExistsByLocator(file) ||
+      getStrmVideoResourceBySourcePath(file) ||
+      pendingScanResourceExists(file)
+    ) {
+      continue
+    }
     const code = parseCode(path.basename(file, path.extname(file)))
     if (!code) continue
     newFileCounts.set(code, (newFileCounts.get(code) ?? 0) + 1)
   }
+  if (!autoMergeSameCodeResources) {
+    let checkedStrmFiles = 0
+    for (const file of filePaths) {
+      if (options.signal?.aborted) {
+        result.cancelled = true
+        return result
+      }
+      if (!isStrmFile(file)) continue
+      const code = parseCode(path.basename(file, path.extname(file)))
+      if (!code || (newFileCounts.get(code) ?? 0) <= 1) continue
+      if (
+        localVideoResourceExistsByLocator(file) ||
+        getStrmVideoResourceBySourcePath(file) ||
+        pendingScanResourceExists(file) ||
+        listVideosByCode(code).length > 0
+      ) {
+        continue
+      }
+      checkedStrmFiles += 1
+      if (!readStrmTarget(file).ok) {
+        newFileCounts.set(code, Math.max(0, (newFileCounts.get(code) ?? 0) - 1))
+      }
+      await maybeYield(checkedStrmFiles, Math.min(yieldEvery, 10))
+    }
+  }
   const pendingGroupIds = new Set<number>()
+  const primarySelectionVideoIds = new Set<number>()
 
-  for (const file of files) {
+  const recordStrmFailure = (failure: StrmScanFailure): void => {
+    result.failed += 1
+    if (result.strmFailures.length < 50) result.strmFailures.push(failure)
+    else result.omittedStrmFailures += 1
+  }
+
+  for (const file of filePaths) {
     if (options.signal?.aborted) {
       result.cancelled = true
       break
@@ -298,6 +410,149 @@ export async function scanFolders(
     result.scannedFiles += 1
 
     try {
+      if (isStrmFile(file)) {
+        const prepared = readStrmTarget(file)
+        if (options.signal?.aborted) {
+          result.cancelled = true
+          break
+        }
+        if (!prepared.ok) {
+          removePendingScanResource(file)
+          recordStrmFailure(prepared.failure)
+          onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+          await maybeYield(result.scannedFiles, yieldEvery)
+          continue
+        }
+
+        const target = prepared.target
+        const existingResource = getStrmVideoResourceBySourcePath(file)
+        if (existingResource) {
+          if (
+            updateStrmVideoResourceTarget(existingResource.id, {
+              kind: target.kind,
+              locator: target.locator
+            })
+          ) {
+            result.refreshed += 1
+          } else {
+            result.skipped += 1
+          }
+          onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+          await maybeYield(result.scannedFiles, yieldEvery)
+          continue
+        }
+
+        const code = parseCode(path.basename(file, path.extname(file)))
+        if (pendingScanResourceExists(file)) {
+          if (code) {
+            const pending = upsertPendingScanResources(code, [
+              {
+                filePath: file,
+                scanRoot: scanRootForFile(file, folders),
+                sourceKind: 'strm',
+                targetKind: target.kind,
+                targetLocator: target.locator,
+                targetKey: target.targetKey,
+                sizeBytes: null,
+                durationSeconds: null,
+                fileMtimeMs: null,
+                displayName: path.basename(file)
+              }
+            ])
+            pendingGroupIds.add(pending.groupId)
+          }
+          onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+          await maybeYield(result.scannedFiles, yieldEvery)
+          continue
+        }
+
+        const relocation = findStrmRelocationCandidate(
+          file,
+          target.targetKey,
+          options.unavailableRoots ?? [],
+          inspectPath
+        )
+        if (relocation) {
+          relocateStrmVideoResource(relocation.resource_id, {
+            sourcePath: file,
+            kind: target.kind,
+            locator: target.locator
+          })
+          result.relocated += 1
+          onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+          await maybeYield(result.scannedFiles, yieldEvery)
+          continue
+        }
+
+        if (!code) {
+          result.failed += 1
+          result.unrecognizedFiles.push(file)
+          onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+          await maybeYield(result.scannedFiles, yieldEvery)
+          continue
+        }
+
+        const existingVideos = listVideosByCode(code)
+
+        const mustConfirm = autoMergeSameCodeResources
+          ? existingVideos.length > 1
+          : existingVideos.length > 0 || (newFileCounts.get(code) ?? 0) > 1
+        if (mustConfirm) {
+          const pending = upsertPendingScanResources(code, [
+            {
+              filePath: file,
+              scanRoot: scanRootForFile(file, folders),
+              sourceKind: 'strm',
+              targetKind: target.kind,
+              targetLocator: target.locator,
+              targetKey: target.targetKey,
+              sizeBytes: null,
+              durationSeconds: null,
+              fileMtimeMs: null,
+              displayName: path.basename(file)
+            }
+          ])
+          pendingGroupIds.add(pending.groupId)
+          result.pendingResources += pending.addedResources
+          onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+          await maybeYield(result.scannedFiles, yieldEvery)
+          continue
+        }
+
+        if (existingVideos.length === 1) {
+          const needsPrimarySelection = listVideoResources(existingVideos[0].id).length === 0
+          const resourceId = insertStrmVideoResource({
+            videoId: existingVideos[0].id,
+            sourcePath: file,
+            kind: target.kind,
+            locator: target.locator,
+            displayName: path.basename(file)
+          })
+          if (resourceId == null) result.skipped += 1
+          else {
+            result.imported += 1
+            if (needsPrimarySelection) primarySelectionVideoIds.add(existingVideos[0].id)
+          }
+        } else {
+          const videoId = insertNewScannedStrmVideo({
+            code,
+            sourcePath: file,
+            kind: target.kind,
+            locator: target.locator,
+            displayName: path.basename(file)
+          })
+          if (videoId == null) result.skipped += 1
+          else {
+            result.imported += 1
+            result.newCodes.push(code)
+            primarySelectionVideoIds.add(videoId)
+          }
+        }
+        onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+        await maybeYield(result.scannedFiles, yieldEvery)
+        continue
+      }
+
       if (localVideoResourceExistsByLocator(file)) {
         if (await refreshScannedFileDuration(file, readDurationSeconds)) {
           result.refreshed += 1
@@ -402,6 +657,7 @@ export async function scanFolders(
       }
 
       if (existingVideos.length === 1) {
+        const needsPrimarySelection = listVideoResources(existingVideos[0].id).length === 0
         const resourceId = insertLocalVideoResource({
           videoId: existingVideos[0].id,
           locator: file,
@@ -409,8 +665,10 @@ export async function scanFolders(
           durationSeconds: fileDurationSeconds,
           fileMtimeMs: fingerprint?.file_mtime_ms ?? null
         })
-        if (resourceId != null) result.imported += 1
-        else result.skipped += 1
+        if (resourceId != null) {
+          result.imported += 1
+          if (needsPrimarySelection) primarySelectionVideoIds.add(existingVideos[0].id)
+        } else result.skipped += 1
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
@@ -422,6 +680,7 @@ export async function scanFolders(
       if (id !== null) {
         result.imported += 1
         result.newCodes.push(code)
+        primarySelectionVideoIds.add(id)
       } else result.skipped += 1
     } catch (err) {
       console.error('Scan error for', file, err)
@@ -433,6 +692,19 @@ export async function scanFolders(
   }
 
   result.pendingGroups = pendingGroupIds.size
+
+  for (const videoId of primarySelectionVideoIds) {
+    const candidates = listVideoResources(videoId).map((resource) => ({
+      resource,
+      filePath: resource.strm_source_path ?? resource.locator,
+      sourceKind: resource.strm_source_path ? ('strm' as const) : ('local' as const),
+      targetKind: resource.kind === 'local' ? null : resource.kind,
+      durationSeconds: resource.duration_seconds,
+      sizeBytes: resource.size_bytes
+    }))
+    const primary = selectDefaultPendingScanPrimary(candidates, normalizeLocalPathIdentity)
+    if (primary) setPrimaryVideoResource(videoId, primary.resource.id)
+  }
 
   return result
 }
@@ -507,6 +779,33 @@ export async function importManual(
   if (!fs.existsSync(filePath)) throw new Error('原文件不存在或已被移动')
 
   const code = normalizeVideoCode(codeRaw)
+
+  if (isStrmFile(filePath)) {
+    const parsed = readStrmFile(filePath)
+    if (getStrmVideoResourceBySourcePath(filePath)) {
+      return { code, imported: false, skippedPath: true }
+    }
+    if (target.kind === 'existing') {
+      const existing = listVideosByCode(code).find((video) => video.id === target.videoId)
+      if (!existing) throw new Error('所选影片不存在或番号已经变化')
+      const resourceId = insertStrmVideoResource({
+        videoId: existing.id,
+        sourcePath: filePath,
+        kind: parsed.kind,
+        locator: parsed.locator,
+        displayName: path.basename(filePath)
+      })
+      return { code, imported: resourceId !== null }
+    }
+    const videoId = insertNewScannedStrmVideo({
+      code,
+      sourcePath: filePath,
+      kind: parsed.kind,
+      locator: parsed.locator,
+      displayName: path.basename(filePath)
+    })
+    return { code, imported: videoId !== null }
+  }
 
   if (localVideoResourceExistsByLocator(filePath)) {
     return { code, imported: false, skippedPath: true }

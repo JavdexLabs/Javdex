@@ -261,6 +261,98 @@ describe('VideoMaintenanceService', () => {
     assert.equal(cleared.size_bytes, null)
   })
 
+  it('keeps STRM targets read-only while editing metadata and safely deletes the source file', () => {
+    setupDb()
+    const sourcePath = path.join(tempRoot!, 'APP-001.strm')
+    const locator = 'https://cdn.example/APP-001.mp4?token=secret'
+    fs.writeFileSync(sourcePath, locator)
+    const resourceId = Number(
+      getDb()
+        .prepare(
+          `INSERT INTO video_resources (
+             video_id, kind, locator, resource_key, strm_source_path, display_name, is_primary
+           ) VALUES (1, 'direct', ?, ?, ?, 'APP-001.strm', 0)`
+        )
+        .run(locator, `strm:${sourcePath}`, sourcePath).lastInsertRowid
+    )
+    const videos = createVideoMaintenanceService()
+
+    const updated = videos.updateLinkResource(1, resourceId, {
+      url: locator,
+      kind: 'direct',
+      displayName: '远端高清版',
+      sizeBytes: 123456789
+    })
+    assert.equal(updated.display_name, '远端高清版')
+    assert.equal(updated.size_bytes, 123456789)
+    assert.equal(updated.resource_key, `strm:${sourcePath}`)
+    assert.throws(
+      () =>
+        videos.updateLinkResource(1, resourceId, {
+          url: 'https://cdn.example/changed.mp4',
+          kind: 'direct',
+          displayName: '不应保存'
+        }),
+      /STRM.*目标.*只读/
+    )
+    assert.equal(fs.readFileSync(sourcePath, 'utf8'), locator)
+
+    videos.removeResource(1, resourceId)
+    assert.equal(fs.existsSync(sourcePath), false)
+    assert.equal(createVideoQueryService().get(1)?.resources.length, 1)
+  })
+
+  it('restores a staged STRM source and rolls back removal when primary promotion fails', () => {
+    setupDb()
+    const sourcePath = path.join(tempRoot!, 'ROLLBACK-001.strm')
+    fs.writeFileSync(sourcePath, 'https://example.test/rollback.mp4')
+    const resourceId = Number(
+      getDb()
+        .prepare(
+          `INSERT INTO video_resources (
+             video_id, kind, locator, resource_key, strm_source_path, is_primary
+           ) VALUES (1, 'direct', 'https://example.test/rollback.mp4', ?, ?, 1)`
+        )
+        .run(`strm:${sourcePath}`, sourcePath).lastInsertRowid
+    )
+    getDb().prepare('UPDATE video_resources SET is_primary = 0 WHERE id = 1').run()
+    getDb().exec(`
+      CREATE TRIGGER reject_strm_primary_promotion
+      BEFORE UPDATE OF is_primary ON video_resources
+      WHEN NEW.is_primary = 1
+      BEGIN
+        SELECT RAISE(ABORT, 'forced STRM promotion failure');
+      END;
+    `)
+
+    assert.throws(
+      () => createVideoMaintenanceService().removeResource(1, resourceId),
+      /forced STRM promotion failure/
+    )
+    assert.equal(fs.existsSync(sourcePath), true)
+    assert.ok(getDb().prepare('SELECT 1 FROM video_resources WHERE id = ?').get(resourceId))
+  })
+
+  it('deletes local videos and STRM source files when deleting the whole video', () => {
+    const { videoPath } = setupDb()
+    const sourcePath = path.join(tempRoot!, 'APP-001.strm')
+    const locator = 'https://example.test/APP-001.mp4'
+    fs.writeFileSync(sourcePath, locator)
+    getDb()
+      .prepare(
+        `INSERT INTO video_resources (
+           video_id, kind, locator, resource_key, strm_source_path, is_primary
+         ) VALUES (1, 'direct', ?, ?, ?, 0)`
+      )
+      .run(locator, `strm:${sourcePath}`, sourcePath)
+
+    createVideoMaintenanceService().delete(1)
+
+    assert.equal(fs.existsSync(videoPath), false)
+    assert.equal(fs.existsSync(sourcePath), false)
+    assert.equal(getDb().prepare('SELECT 1 FROM videos WHERE id = 1').get(), undefined)
+  })
+
   it('edits metadata, status, rating, poster, and manual tags', () => {
     setupDb()
     const videos = createVideoMaintenanceService()

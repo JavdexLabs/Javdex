@@ -888,7 +888,7 @@ export default function LibraryPage(): JSX.Element {
             if (!deleting) setDeleteTarget(null)
           }}
         >
-          确定要永久删除「{deleteTarget.code}」吗？将删除全部影片资源、应用自有图片及所有元数据；其中本地资源会同时删除磁盘文件，此操作不可恢复。
+          确定要永久删除「{deleteTarget.code}」吗？将删除全部影片资源、应用自有图片及所有元数据；本地视频文件与 STRM 源文件会同时从磁盘删除，但不会访问或删除远程内容。此操作不可恢复。
           {deleteTarget.has_pending_scrape ? (
             <div className="modal-path-hint">同时会删除待确认刮削候选与暂存图片。</div>
           ) : null}
@@ -910,7 +910,7 @@ export default function LibraryPage(): JSX.Element {
             if (!deleting) setConfirmBulkDelete(false)
           }}
         >
-          确定要永久删除已选择的 {selectedCount} 部影片吗？将删除全部影片资源、应用自有图片及所有元数据；其中本地资源会同时删除磁盘文件，此操作不可恢复。
+          确定要永久删除已选择的 {selectedCount} 部影片吗？将删除全部影片资源、应用自有图片及所有元数据；本地视频文件与 STRM 源文件会同时从磁盘删除，但不会访问或删除远程内容。此操作不可恢复。
           {selectedVideos.some((video) => video.has_pending_scrape) ? (
             <div className="modal-path-hint">其中含待确认刮削影片；对应候选与暂存图片也会删除。</div>
           ) : null}

@@ -56,6 +56,7 @@ export default function VideoResourceImportModal({
   const [matchingVideos, setMatchingVideos] = useState<Array<Pick<Video, 'id' | 'code' | 'title'>>>([])
   const [loadingTargets, setLoadingTargets] = useState(false)
   const checkRequestRef = useRef(0)
+  const isStrmManaged = Boolean(resource?.strm_source_path)
 
   const inferredKind = inferVideoResourceKind(url)
   const inferredKindLabel = VIDEO_RESOURCE_KIND_LABELS[inferredKind]
@@ -214,7 +215,11 @@ export default function VideoResourceImportModal({
           label="资源链接"
           htmlFor="resource-url"
           span={2}
-          hint="支持 HTTP/HTTPS、Magnet 与 ED2K；仅 HTTP/HTTPS 可检测可访问性。"
+          hint={
+            isStrmManaged
+              ? '链接由 STRM 源文件管理；请修改源文件内容并重新扫描。HTTP/HTTPS 链接仍可检测可访问性。'
+              : '支持 HTTP/HTTPS、Magnet 与 ED2K；仅 HTTP/HTTPS 可检测可访问性。'
+          }
         >
           <div className="video-resource-url-control">
             <input
@@ -229,7 +234,7 @@ export default function VideoResourceImportModal({
                 }
                 invalidateLinkCheck()
               }}
-              disabled={saving}
+              disabled={saving || isStrmManaged}
               autoFocus={Boolean(fixedCode)}
               placeholder="https://…"
             />
@@ -253,13 +258,17 @@ export default function VideoResourceImportModal({
             </span>
           ) : null}
         </EditFormField>
-        <EditFormField label="资源类型" htmlFor="resource-kind">
+        <EditFormField
+          label="资源类型"
+          htmlFor="resource-kind"
+          hint={isStrmManaged ? '资源类型随 STRM 目标自动同步。' : undefined}
+        >
           <select
             id="resource-kind"
             className="select form-control-full"
             value={kind}
             onChange={(event) => setKind(event.target.value as VideoResourceKindSelection)}
-            disabled={saving}
+            disabled={saving || isStrmManaged}
           >
             <option value="auto">自动识别（{inferredKindLabel}）</option>
             <option value="direct">{VIDEO_RESOURCE_KIND_LABELS.direct}</option>

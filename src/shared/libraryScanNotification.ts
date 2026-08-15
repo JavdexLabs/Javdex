@@ -14,9 +14,30 @@ export function buildLibraryScanNotification(
       tone: 'info'
     }
   }
+  const strmFailureCount = result.strmFailures.length + result.omittedStrmFailures
+  const processingFailures = Math.max(
+    0,
+    result.failed - result.unrecognizedFiles.length - strmFailureCount
+  )
+  if (processingFailures > 0) {
+    return {
+      message: `扫描失败：${processingFailures} 个文件处理失败，已跳过资源清理`,
+      tone: 'warning'
+    }
+  }
   if (result.offlineFolders.length > 0) {
     return {
       message: `扫描完成，但有 ${result.offlineFolders.length} 个媒体库目录离线，已跳过危险清理`,
+      tone: 'warning'
+    }
+  }
+  if (strmFailureCount > 0) {
+    const unrecognizedSuffix =
+      result.unrecognizedFiles.length > 0
+        ? `，另有 ${result.unrecognizedFiles.length} 个文件无法识别`
+        : ''
+    return {
+      message: `扫描完成但有失败项：${strmFailureCount} 个 STRM 文件处理失败${unrecognizedSuffix}，请查看最近一次扫描`,
       tone: 'warning'
     }
   }

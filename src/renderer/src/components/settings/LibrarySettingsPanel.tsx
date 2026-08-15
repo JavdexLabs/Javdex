@@ -28,6 +28,7 @@ const SCAN_TRIGGER_LABEL: Record<LibraryScanSummary['trigger'], string> = {
 
 const SCAN_STATUS_LABEL: Record<LibraryScanSummary['status'], string> = {
   success: '成功',
+  completed_with_errors: '完成但有失败项',
   cancelled: '已取消',
   failed: '失败'
 }
@@ -63,7 +64,13 @@ function ScanSummary({
           <strong>{SCAN_TRIGGER_LABEL[summary.trigger]}扫描</strong>
           <span>{formatScanTime(summary.startedAt)} 至 {formatScanTime(summary.finishedAt)}</span>
         </div>
-        <SettingsStatusPill status={summary.status === 'failed' ? 'warning' : summary.status}>
+        <SettingsStatusPill
+          status={
+            summary.status === 'failed' || summary.status === 'completed_with_errors'
+              ? 'warning'
+              : summary.status
+          }
+        >
           {SCAN_STATUS_LABEL[summary.status]}
         </SettingsStatusPill>
       </div>
@@ -86,6 +93,19 @@ function ScanSummary({
           {summary.offlineFolders.map((folder) => (
             <span className="copyable-text" key={folder}>{folder}</span>
           ))}
+        </div>
+      ) : null}
+      {(summary.strmFailures?.length ?? 0) > 0 || (summary.omittedStrmFailures ?? 0) > 0 ? (
+        <div className="library-scan-summary-detail is-warning">
+          <strong>STRM 失败项</strong>
+          {summary.strmFailures?.map((failure) => (
+            <span className="copyable-text" key={`${failure.sourcePath}:${failure.code}`}>
+              {failure.sourcePath} · {failure.message}
+            </span>
+          ))}
+          {(summary.omittedStrmFailures ?? 0) > 0 ? (
+            <span>另有 {summary.omittedStrmFailures} 项未显示</span>
+          ) : null}
         </div>
       ) : null}
       {summary.errorSummary ? (
@@ -153,8 +173,30 @@ export default function LibrarySettingsPanel({
   const pathCount = settings.libraryPaths.length
   const pendingCleanupCount = settings.pendingLibraryPathCleanups.length
   const canScanOrCleanup = canScan || pendingCleanupCount > 0
-  const scanStateLabel = scanning ? '扫描中' : scanResult ? '已完成' : '待扫描'
-  const scanStateTone = scanning ? 'running' : scanResult ? 'success' : 'muted'
+  const scanStrmFailureCount = scanResult
+    ? scanResult.strmFailures.length + scanResult.omittedStrmFailures
+    : 0
+  const scanHasBlockingFailures = Boolean(
+    scanResult &&
+      scanResult.failed - scanResult.unrecognizedFiles.length - scanStrmFailureCount > 0
+  )
+  const scanHasIsolatedFailures = scanStrmFailureCount > 0
+  const scanStateLabel = scanning
+    ? '扫描中'
+    : scanResult
+      ? scanHasBlockingFailures
+        ? '失败'
+        : scanHasIsolatedFailures
+          ? '完成但有失败项'
+          : '已完成'
+      : '待扫描'
+  const scanStateTone = scanning
+    ? 'running'
+    : scanResult
+      ? scanHasBlockingFailures || scanHasIsolatedFailures
+        ? 'warning'
+        : 'success'
+      : 'muted'
 
   return (
     <SettingsCard
@@ -185,7 +227,7 @@ export default function LibrarySettingsPanel({
               </span>
               <div>
                 <h4>扫描路径</h4>
-                <p>递归扫描已添加文件夹中的视频文件。</p>
+                <p>递归扫描已添加文件夹中的视频文件与 STRM 链接资源。</p>
               </div>
             </div>
             <Button type="button" size="sm" onClick={onAddFolders}>
@@ -276,8 +318,8 @@ export default function LibrarySettingsPanel({
           <div className="library-scan-message-row">
             <span className="library-scan-note">
               {minDuration > 0
-                ? `自动跳过不足 ${minDuration} 分钟的文件`
-                : '未启用时长过滤'}
+                ? `自动跳过不足 ${minDuration} 分钟的本地视频；STRM 不受时长过滤影响`
+                : '未启用本地视频时长过滤；STRM 始终参与扫描'}
             </span>
             {scanStatus ? <span className="library-scan-status">{scanStatus}</span> : null}
           </div>

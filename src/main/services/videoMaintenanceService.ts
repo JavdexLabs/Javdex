@@ -27,6 +27,7 @@ import {
   getVideoResourceById,
   importVideoLinkResourceRecord,
   updateVideoLinkResourceRecord,
+  updateStrmVideoResourceMetadata,
   listVideoResources,
   markScrapeSucceeded,
   mergeVideoRecords,
@@ -112,6 +113,7 @@ interface VideoMaintenanceServiceDependencies {
   importVideoLinkResourceRecord: typeof importVideoLinkResourceRecord
   checkLinkResource: typeof videoResourceLinkService.check
   updateVideoLinkResourceRecord: typeof updateVideoLinkResourceRecord
+  updateStrmVideoResourceMetadata: typeof updateStrmVideoResourceMetadata
   getVideoResourceById: typeof getVideoResourceById
   listVideoResources: typeof listVideoResources
   setPrimaryVideoResource: typeof setPrimaryVideoResource
@@ -166,6 +168,8 @@ export function createVideoMaintenanceService(
   const checkLinkResource = dependencies.checkLinkResource ?? videoResourceLinkService.check
   const updateLinkResourceRecord =
     dependencies.updateVideoLinkResourceRecord ?? updateVideoLinkResourceRecord
+  const updateStrmResourceMetadata =
+    dependencies.updateStrmVideoResourceMetadata ?? updateStrmVideoResourceMetadata
   const readVideoResourceById = dependencies.getVideoResourceById ?? getVideoResourceById
   const readVideoResources = dependencies.listVideoResources ?? listVideoResources
   const writePrimaryResource = dependencies.setPrimaryVideoResource ?? setPrimaryVideoResource
@@ -401,7 +405,10 @@ export function createVideoMaintenanceService(
     runInCoordinatedChange(() => {
       const resources = readVideoResources(id)
       const result = withStagedLocalFileDeletion(
-        resources.filter((resource) => resource.kind === 'local').map((resource) => resource.locator),
+        resources.flatMap((resource) => {
+          if (resource.kind === 'local') return [resource.locator]
+          return resource.strm_source_path ? [resource.strm_source_path] : []
+        }),
         () => {
           const pending = deletePendingScrapeForVideo(id)
           pendingStagedPaths = pending?.stagedPaths ?? []
@@ -435,7 +442,13 @@ export function createVideoMaintenanceService(
 
     let promotedResourceId: number | null = null
     runInCoordinatedChange(() => {
-      withStagedLocalFileDeletion(resource.kind === 'local' ? [resource.locator] : [], () => {
+      const sourcePaths =
+        resource.kind === 'local'
+          ? [resource.locator]
+          : resource.strm_source_path
+            ? [resource.strm_source_path]
+            : []
+      withStagedLocalFileDeletion(sourcePaths, () => {
         removeResourceRecord(resourceId)
         if (resource.is_primary) {
           const candidate = selectPrimaryVideoResourceCandidate(
@@ -632,6 +645,21 @@ export function createVideoMaintenanceService(
         const sizeBytes = input.sizeBytes ?? null
         if (sizeBytes != null && (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0)) {
           throw new Error('文件大小必须是大于 0 的整数字节数')
+        }
+        const existing = readVideoResourceById(resourceId)
+        if (!existing || existing.video_id !== videoId || existing.kind === 'local') {
+          throw new Error('影片链接资源不存在')
+        }
+        if (existing.strm_source_path) {
+          if (existing.kind !== normalized.kind || existing.locator !== normalized.locator) {
+            throw new Error('STRM 资源目标与类型由源文件管理，只读不可修改')
+          }
+          return updateStrmResourceMetadata({
+            resourceId,
+            videoId,
+            displayName: input.displayName?.trim() || null,
+            sizeBytes
+          })
         }
         const result = updateLinkResourceRecord({
           resourceId,

@@ -3,8 +3,10 @@ import type { LibraryPathRemovalPreview } from '@shared/libraryTypes'
 import type { AppSettings } from '@shared/settingsTypes'
 import {
   listLocalVideoResourceRefs,
+  listSourceManagedVideoResourceRefs,
+  listStrmVideoResourceRefs,
   listVideoResources,
-  removeLocalVideoResourcesBatch,
+  removeSourceManagedVideoResourcesBatch,
   type VideoResourceBatchRemovalPlan
 } from '../db/videoRepo'
 import { getDb } from '../db/database'
@@ -44,8 +46,15 @@ export function previewLibraryPathRemoval(root: string): LibraryPathRemovalPrevi
   const affectedRefs = listLocalVideoResourceRefs().filter((ref) =>
     isPathUnderRoot(ref.locator, configuredRoot)
   )
-  const affectedIds = new Set(affectedRefs.map((ref) => ref.resource_id))
-  const affectedVideoIds = new Set(affectedRefs.map((ref) => ref.video_id))
+  const affectedStrmRefs = listStrmVideoResourceRefs().filter((ref) =>
+    isPathUnderRoot(ref.source_path, configuredRoot)
+  )
+  const affectedIds = new Set(
+    [...affectedRefs, ...affectedStrmRefs].map((ref) => ref.resource_id)
+  )
+  const affectedVideoIds = new Set(
+    [...affectedRefs, ...affectedStrmRefs].map((ref) => ref.video_id)
+  )
   let videosBecomingResourceLess = 0
 
   for (const videoId of affectedVideoIds) {
@@ -57,6 +66,7 @@ export function previewLibraryPathRemoval(root: string): LibraryPathRemovalPrevi
   return {
     path: configuredRoot,
     localResourceCount: affectedRefs.length,
+    strmResourceCount: affectedStrmRefs.length,
     videosBecomingResourceLess
   }
 }
@@ -83,7 +93,7 @@ export function applyPendingLibraryPathCleanups(
 ): PendingLibraryPathCleanupResult {
   if (roots.length === 0) return { removed: 0, promoted: 0, consumedRoots: [] }
 
-  const affectedRefs = listLocalVideoResourceRefs().filter((ref) =>
+  const affectedRefs = listSourceManagedVideoResourceRefs().filter((ref) =>
     roots.some((root) => isPathUnderRoot(ref.locator, root))
   )
   const affectedIds = new Set(affectedRefs.map((ref) => ref.resource_id))
@@ -111,7 +121,7 @@ export function applyPendingLibraryPathCleanups(
     })
   }
 
-  const result = removeLocalVideoResourcesBatch(plans)
+  const result = removeSourceManagedVideoResourcesBatch(plans)
   return { ...result, consumedRoots: roots }
 }
 

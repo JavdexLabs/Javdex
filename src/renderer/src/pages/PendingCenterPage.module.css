@@ -209,8 +209,27 @@
   gap: 3px;
 }
 
+.resourceTitleRow {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.resourceKind {
+  flex: none;
+  padding: 2px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 650;
+}
+
 .resourceTitle,
 .resourcePath {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -220,6 +239,14 @@
 .resourceFacts {
   color: var(--text-muted);
   font-size: 11px;
+}
+
+.resourceTargetDisplay {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pendingResourceTarget {

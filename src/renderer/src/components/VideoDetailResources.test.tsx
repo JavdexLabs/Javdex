@@ -6,6 +6,22 @@ import type { VideoDetail, VideoResourceDetail } from '@shared/videoTypes'
 import { VideoDetailSecondaryMeta } from './VideoDetailMeta'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
+Object.defineProperty(globalThis, 'window', {
+  configurable: true,
+  value: {
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    setTimeout,
+    clearTimeout
+  }
+})
+Object.defineProperty(globalThis, 'document', {
+  configurable: true,
+  value: {
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined
+  }
+})
 
 let renderer: TestRenderer.ReactTestRenderer | null = null
 
@@ -23,6 +39,7 @@ function resource(overrides: Partial<VideoResourceDetail> = {}): VideoResourceDe
     duration_seconds: null,
     file_mtime_ms: null,
     display_name: null,
+    strm_source_path: null,
     is_primary: 1,
     add_time: '2026-01-01T00:00:00.000Z',
     display_locator: 'example.com / resource',
@@ -105,5 +122,30 @@ describe('video detail resource actions', () => {
     ])
 
     assert.ok(actionLabels().includes('播放此文件'))
+  })
+
+  it('shows actual link kind, STRM hosting, masked target, and source path together', () => {
+    renderResources([
+      resource({
+        kind: 'direct',
+        display_name: 'CDN 版本',
+        display_locator: 'cdn.example / TEST-001.mp4',
+        strm_source_path: '/library/TEST-001.strm'
+      })
+    ])
+
+    const output = JSON.stringify(renderer?.toJSON())
+    assert.match(output, /视频直链/)
+    assert.match(output, /STRM 托管/)
+    assert.match(output, /cdn\.example \/ TEST-001\.mp4/)
+    assert.match(output, /\/library\/TEST-001\.strm/)
+
+    act(() => {
+      renderer?.root.findByProps({ 'aria-label': '更多' }).props.onClick()
+    })
+    const menu = JSON.stringify(renderer?.toJSON())
+    assert.match(menu, /在文件夹中显示/)
+    assert.match(menu, /删除 STRM 源文件/)
+    assert.doesNotMatch(menu, /编辑 STRM 文本|打开 STRM 文本/)
   })
 })

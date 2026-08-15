@@ -594,22 +594,28 @@ button.meta-link:focus-visible {
 }
 .video-resource-url-control,
 .video-resource-size-control {
-  display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
-.video-resource-url-control .text-input,
-.video-resource-size-control .text-input {
+.video-resource-url-control {
+  display: flex;
+}
+.video-resource-size-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 88px;
+}
+.video-resource-url-control .text-input {
   flex: 1 1 auto;
   min-width: 0;
 }
-.video-resource-url-control .btn,
-.video-resource-size-control .select {
+.video-resource-url-control .btn {
   flex: 0 0 auto;
 }
+.video-resource-size-control .text-input,
 .video-resource-size-control .select {
-  width: 88px;
+  width: 100%;
+  min-width: 0;
 }
 .video-resource-check {
   display: block;

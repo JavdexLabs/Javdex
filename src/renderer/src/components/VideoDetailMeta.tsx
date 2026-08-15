@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { Ellipsis, Link2, Play } from 'lucide-react'
+import { Check, Copy, Ellipsis, ExternalLink, Link2, Play } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import type { ScrapedStatus } from '@shared/commonTypes'
 import type { OrganizationRole } from '@shared/classificationTypes'
@@ -437,7 +437,13 @@ function VideoLinkResourceRow({
       <div className="detail-meta-file-actions">
         <IconButton
           className="detail-icon-action"
-          icon={<Play {...UI_ICON} />}
+          icon={copied ? <Check {...UI_ICON} /> : <Copy {...UI_ICON} />}
+          label={copied ? '已复制链接' : '复制链接'}
+          onClick={() => void copyFullLink()}
+        />
+        <IconButton
+          className="detail-icon-action"
+          icon={<ExternalLink {...UI_ICON} />}
           label={`打开${kind}`}
           onClick={() => onOpenResource?.(resource.id)}
         />
@@ -482,17 +488,6 @@ function VideoLinkResourceRow({
                 }}
               >
                 {fullLink ? '隐藏完整链接' : '查看完整链接'}
-              </button>
-              <button
-                type="button"
-                className="detail-menu-item"
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false)
-                  void copyFullLink()
-                }}
-              >
-                {copied ? '已复制完整链接' : '复制完整链接'}
               </button>
               <div className="detail-menu-separator" />
               <button

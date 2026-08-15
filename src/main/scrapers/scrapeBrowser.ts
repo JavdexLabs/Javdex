@@ -276,6 +276,7 @@ class ScrapeBrowser {
     })
 
     win.on('closed', () => {
+      if (this.win !== win) return
       this.teardownNetworkBodyCapture()
       this.clearNetworkImageCache()
       this.win = null
@@ -1191,15 +1192,17 @@ class ScrapeBrowser {
   }
 
   close(): void {
+    // Keep the persistent Session so cookies and Cloudflare clearance survive window recycling.
     this.clearNetworkImageCache()
-    if (this.win && !this.win.isDestroyed()) {
-      this.detachDebugger(this.win.webContents)
-      this.win.close()
+    const win = this.win
+    this.win = null
+    this.stealthApplied = false
+    if (win && !win.isDestroyed()) {
+      this.detachDebugger(win.webContents)
+      win.close()
     } else {
       this.teardownNetworkBodyCapture()
     }
-    this.win = null
-    this.stealthApplied = false
   }
 }
 

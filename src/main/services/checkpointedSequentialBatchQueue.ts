@@ -17,6 +17,8 @@ export interface CheckpointedBatchRunPlan<TTarget extends { id: number }> {
   cancelledMessage: string
   doneMessage: (progress: BatchProgress) => string
   getCode: (target: TTarget) => string
+  /** Close the scraper window after this many attempted targets while preserving its session. */
+  browserRecycleInterval?: number
   runTarget: (target: TTarget) => Promise<QueueItemOutcome>
   exceptionMessage: (target: TTarget, err: Error) => string
 }
@@ -52,7 +54,10 @@ export class CheckpointedSequentialBatchQueue<TTarget extends { id: number }, TR
   private activeJob: PersistedBatchScrapeJob | null = null
   private checkpoints: BatchScrapeCheckpointPort | null = null
 
-  constructor(private readonly policy: CheckpointedBatchPolicy<TTarget, TRequest>) {}
+  constructor(
+    private readonly policy: CheckpointedBatchPolicy<TTarget, TRequest>,
+    private readonly closeBrowser: () => void = () => scrapeBrowser.close()
+  ) {}
 
   setCheckpointPort(port: BatchScrapeCheckpointPort): void {
     this.checkpoints = port
@@ -138,6 +143,12 @@ export class CheckpointedSequentialBatchQueue<TTarget extends { id: number }, TR
     if (!plan) return
 
     this.activeJob = job
+    const browserRecycleInterval =
+      plan.browserRecycleInterval && plan.browserRecycleInterval > 0
+        ? Math.floor(plan.browserRecycleInterval)
+        : null
+    let targetsSinceBrowserRecycle = 0
+    let browserClosedAfterLastTarget = false
 
     try {
       const outcome = await this.queue.start({
@@ -159,7 +170,21 @@ export class CheckpointedSequentialBatchQueue<TTarget extends { id: number }, TR
           if (!this.activeJob) return
           this.checkpointPort().persist(this.activeJob, progress, nextIndex, 'running')
         },
-        runTarget: plan.runTarget,
+        runTarget: async (target) => {
+          browserClosedAfterLastTarget = false
+          try {
+            return await plan.runTarget(target)
+          } finally {
+            if (browserRecycleInterval) {
+              targetsSinceBrowserRecycle += 1
+              if (targetsSinceBrowserRecycle >= browserRecycleInterval) {
+                this.closeBrowser()
+                targetsSinceBrowserRecycle = 0
+                browserClosedAfterLastTarget = true
+              }
+            }
+          }
+        },
         exceptionMessage: plan.exceptionMessage,
         delayAfterTarget: false
       })
@@ -175,7 +200,7 @@ export class CheckpointedSequentialBatchQueue<TTarget extends { id: number }, TR
         this.queue.resetToIdle()
       }
     } finally {
-      scrapeBrowser.close()
+      if (!browserClosedAfterLastTarget) this.closeBrowser()
     }
   }
 

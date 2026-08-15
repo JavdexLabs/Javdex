@@ -201,4 +201,41 @@ describe('CheckpointedSequentialBatchQueue', () => {
     assert.equal(checkpoints.load(), null)
     assert.equal(queue.getProgress().status, 'idle')
   })
+
+  it('recycles the scrape browser after each configured target interval', async () => {
+    const checkpoints = createMemoryCheckpoints()
+    const processed: number[] = []
+    const browserClosedAt: number[] = []
+    const labels = Array.from({ length: 101 }, (_, index) => `V-${index + 1}`)
+    const queue = new CheckpointedSequentialBatchQueue<Target, Request>(
+      {
+        kind: 'video',
+        missingResumeError: '没有可继续的影片批量任务',
+        resolveTargets: (request) =>
+          request.labels.map((code, index) => ({ id: index + 1, code })),
+        labelOf: (target) => target.code,
+        restoreTarget: (item) => ({ id: item.id, code: item.label }),
+        planRun: () => ({
+          resumeMessage: 'resume',
+          startMessage: () => 'start',
+          pausedMessage: 'paused',
+          cancelledMessage: 'cancelled',
+          doneMessage: () => 'done',
+          getCode: (target) => target.code,
+          browserRecycleInterval: 50,
+          runTarget: async (target) => {
+            processed.push(target.id)
+            return { status: 'success', level: 'success', message: 'ok' }
+          },
+          exceptionMessage: () => 'error'
+        })
+      },
+      () => browserClosedAt.push(processed.length)
+    )
+    queue.setCheckpointPort(checkpoints)
+
+    await queue.start({ fields: ['title'], labels })
+
+    assert.deepEqual(browserClosedAt, [50, 100, 101])
+  })
 })

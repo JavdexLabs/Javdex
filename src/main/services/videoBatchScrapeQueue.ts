@@ -120,6 +120,7 @@ const videoBatchPolicy: CheckpointedBatchPolicy<VideoTarget, VideoBatchScrapeReq
       doneMessage: (progress) =>
         `影片批量更新完成：成功 ${progress.success}，待确认 ${progress.pending}，失败 ${progress.failed}`,
       getCode: (target) => target.code,
+      browserRecycleInterval: 50,
       runTarget: async ({ id, code }) => {
         const itemOutcome = await scrapeVideo(id, request.scraperName, {
           closeBrowser: false,

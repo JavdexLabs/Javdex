@@ -7,7 +7,7 @@ import type {
 
 export interface DirectorFormDraft {
   mainName: string
-  aliases: string
+  aliases: string[]
   keepPreviousMainName: boolean
   summary: string
   countryRegion: string
@@ -23,7 +23,7 @@ export interface DirectorFormDraft {
 export function createDirectorFormDraft(director?: DirectorDetail | null): DirectorFormDraft {
   return {
     mainName: director?.mainName ?? '',
-    aliases: director?.aliases.join('\n') ?? '',
+    aliases: director?.aliases ? [...director.aliases] : [],
     keepPreviousMainName: true,
     summary: director?.summary ?? '',
     countryRegion: director?.countryRegion ?? '',
@@ -38,10 +38,7 @@ export function createDirectorFormDraft(director?: DirectorDetail | null): Direc
 }
 
 export function directorInputFromDraft(draft: DirectorFormDraft): DirectorUpdateInput {
-  const names = draft.aliases
-    .split(/[\n,，]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
+  const names = draft.aliases.map((item) => item.trim()).filter(Boolean)
   const year = (value: string): number | null => (value.trim() ? Number(value) : null)
   return {
     mainName: draft.mainName.trim(),

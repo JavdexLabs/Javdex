@@ -10,7 +10,7 @@ describe('director form state', () => {
       directorInputFromDraft({
         ...draft,
         mainName: ' Director ',
-        aliases: 'Alias A\nAlias B',
+        aliases: ['Alias A', 'Alias B'],
         careerStartYear: '1999',
         birthDate: '1970-01-01',
         links: [{ label: 'Site', url: 'https://example.com' }],

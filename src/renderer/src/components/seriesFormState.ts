@@ -7,7 +7,7 @@ import type {
 
 export interface SeriesFormDraft {
   mainName: string
-  aliasesText: string
+  aliases: string[]
   keepPreviousMainName: boolean
   summary: string
   ownerOrganizationId: string
@@ -21,7 +21,7 @@ export interface SeriesFormDraft {
 export function createSeriesFormDraft(series?: SeriesDetail | null): SeriesFormDraft {
   return {
     mainName: series?.mainName ?? '',
-    aliasesText: series?.aliases.join('\n') ?? '',
+    aliases: series?.aliases ? [...series.aliases] : [],
     keepPreviousMainName: true,
     summary: series?.summary ?? '',
     ownerOrganizationId: series?.ownerOrganization?.id.toString() ?? '',
@@ -37,10 +37,7 @@ export function seriesInputFromDraft(draft: SeriesFormDraft): SeriesUpdateInput 
   const optionalId = (value: string): number | null => (value.trim() ? Number(value) : null)
   return {
     mainName: draft.mainName.trim(),
-    aliases: draft.aliasesText
-      .split(/[\n,，]/)
-      .map((item) => item.trim())
-      .filter(Boolean),
+    aliases: draft.aliases.map((item) => item.trim()).filter(Boolean),
     keepPreviousMainName: draft.keepPreviousMainName,
     summary: draft.summary.trim() || null,
     ownerOrganizationId: optionalId(draft.ownerOrganizationId),

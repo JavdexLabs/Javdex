@@ -11,8 +11,11 @@ import { api } from '../api'
 import { organizationKeys, seriesKeys } from '../query/queryKeys'
 import Modal from './Modal'
 import SelectControl from './SelectControl'
+import AliasTagEditor from './AliasTagEditor'
+import EditFieldAiTranslate from './EditFieldAiTranslate'
 import { EditFormField, EditFormSection } from './FormPrimitives'
 import { createSeriesFormDraft, seriesInputFromDraft } from './seriesFormState'
+import { promoteAliasToMain } from './aliasEditorState'
 import { moveClassificationLink, useClassificationLinkKeys } from './classificationLinkForm'
 import { UI_ICON_SM } from './iconDefaults'
 import IconButton from './IconButton'
@@ -92,13 +95,27 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
                 onChange={(event) => setDraft({ ...draft, mainName: event.target.value })}
               />
             </EditFormField>
-            <EditFormField label="别名" htmlFor="series-aliases" span={2} hint="每行一个，也可用逗号分隔">
-              <textarea
+            <EditFormField
+              label="别名"
+              htmlFor="series-aliases"
+              span={2}
+              labelExtra={
+                draft.aliases.length > 0 ? (
+                  <span id="series-aliases-hint" className="entity-edit-label-note">
+                    点击设为主名
+                  </span>
+                ) : undefined
+              }
+            >
+              <AliasTagEditor
                 id="series-aliases"
-                className="text-input"
-                rows={3}
-                value={draft.aliasesText}
-                onChange={(event) => setDraft({ ...draft, aliasesText: event.target.value })}
+                aliases={draft.aliases}
+                onChange={(aliases) => setDraft({ ...draft, aliases })}
+                onPromoteToMain={(alias) =>
+                  setDraft({ ...draft, ...promoteAliasToMain(draft.mainName, draft.aliases, alias) })
+                }
+                disabled={saving}
+                aria-describedby={draft.aliases.length > 0 ? 'series-aliases-hint' : undefined}
               />
             </EditFormField>
             {series && draft.mainName.trim() !== series.mainName ? (
@@ -113,7 +130,18 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
                 <span>将旧主名保留为别名</span>
               </label>
             ) : null}
-            <EditFormField label="简介" htmlFor="series-summary" span={2}>
+            <EditFormField
+              label="简介"
+              htmlFor="series-summary"
+              span={2}
+              labelExtra={
+                <EditFieldAiTranslate
+                  text={draft.summary}
+                  disabled={saving}
+                  onTranslated={(summary) => setDraft({ ...draft, summary })}
+                />
+              }
+            >
               <textarea
                 id="series-summary"
                 className="text-input"

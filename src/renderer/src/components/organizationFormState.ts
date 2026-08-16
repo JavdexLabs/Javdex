@@ -9,7 +9,7 @@ import type {
 
 export interface OrganizationFormDraft {
   mainName: string
-  aliases: string
+  aliases: string[]
   summary: string
   countryRegion: string
   foundedYear: string
@@ -41,7 +41,7 @@ export function createOrganizationFormDraft(
 ): OrganizationFormDraft {
   return {
     mainName: organization?.mainName ?? '',
-    aliases: organization?.aliases.join('\n') ?? '',
+    aliases: organization?.aliases ? [...organization.aliases] : [],
     summary: organization?.summary ?? '',
     countryRegion: organization?.countryRegion ?? '',
     foundedYear: organization?.foundedYear?.toString() ?? '',
@@ -65,10 +65,7 @@ export function organizationUpdateInputFromDraft(
   return {
     mainName: draft.mainName.trim(),
     keepPreviousMainName: draft.keepPreviousMainName,
-    aliases: draft.aliases
-      .split(/[\n,，、]/)
-      .map((name) => name.trim())
-      .filter(Boolean),
+    aliases: draft.aliases.map((name) => name.trim()).filter(Boolean),
     summary: draft.summary.trim() || null,
     countryRegion: draft.countryRegion.trim() || null,
     foundedYear: optionalYear(draft.foundedYear),

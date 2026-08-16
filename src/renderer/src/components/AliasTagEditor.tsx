@@ -23,7 +23,7 @@ function aliasKey(name: string): string {
   return name.toLowerCase().replace(/\s+/g, '')
 }
 
-/** Removable tag chips for editing actress aliases. */
+/** Removable tag chips for editing entity aliases. */
 export default function AliasTagEditor({
   id,
   aliases,

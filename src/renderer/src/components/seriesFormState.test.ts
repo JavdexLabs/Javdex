@@ -31,7 +31,7 @@ describe('series form state', () => {
     assert.deepEqual(
       seriesInputFromDraft({
         mainName: ' Series ',
-        aliasesText: ' First\nSecond ',
+        aliases: [' First ', 'Second'],
         summary: ' Summary ',
         ownerOrganizationId: '',
         parentSeriesId: '12',

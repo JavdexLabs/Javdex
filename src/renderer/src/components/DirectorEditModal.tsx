@@ -3,8 +3,11 @@ import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
 import type { DirectorDetail, DirectorUpdateInput } from '@shared/classificationTypes'
 import Modal from './Modal'
 import SelectControl from './SelectControl'
+import AliasTagEditor from './AliasTagEditor'
+import EditFieldAiTranslate from './EditFieldAiTranslate'
 import { EditFormField, EditFormSection } from './FormPrimitives'
 import { createDirectorFormDraft, directorInputFromDraft } from './directorFormState'
+import { promoteAliasToMain } from './aliasEditorState'
 import { UI_ICON_SM } from './iconDefaults'
 import IconButton from './IconButton'
 import { moveClassificationLink, useClassificationLinkKeys } from './classificationLinkForm'
@@ -54,13 +57,25 @@ export default function DirectorEditModal({ director, onCancel, onSave }: Props)
                 onChange={(e) => field('mainName', e.target.value)}
               />
             </EditFormField>
-            <EditFormField label="别名" htmlFor="director-aliases" span={2} hint="每行一个，也可用逗号分隔">
-              <textarea
+            <EditFormField
+              label="别名"
+              htmlFor="director-aliases"
+              span={2}
+              labelExtra={
+                draft.aliases.length > 0 ? (
+                  <span id="director-aliases-hint" className="entity-edit-label-note">
+                    点击设为主名
+                  </span>
+                ) : undefined
+              }
+            >
+              <AliasTagEditor
                 id="director-aliases"
-                className="text-input"
-                rows={3}
-                value={draft.aliases}
-                onChange={(e) => field('aliases', e.target.value)}
+                aliases={draft.aliases}
+                onChange={(aliases) => setDraft({ ...draft, aliases })}
+                onPromoteToMain={(alias) => setDraft({ ...draft, ...promoteAliasToMain(draft.mainName, draft.aliases, alias) })}
+                disabled={saving}
+                aria-describedby={draft.aliases.length > 0 ? 'director-aliases-hint' : undefined}
               />
             </EditFormField>
             {director && draft.mainName.trim() !== director.mainName ? (
@@ -78,7 +93,18 @@ export default function DirectorEditModal({ director, onCancel, onSave }: Props)
                 将旧主名保留为别名
               </label>
             ) : null}
-            <EditFormField label="简介" htmlFor="director-summary" span={2}>
+            <EditFormField
+              label="简介"
+              htmlFor="director-summary"
+              span={2}
+              labelExtra={
+                <EditFieldAiTranslate
+                  text={draft.summary}
+                  disabled={saving}
+                  onTranslated={(summary) => setDraft({ ...draft, summary })}
+                />
+              }
+            >
               <textarea
                 id="director-summary"
                 className="text-input"

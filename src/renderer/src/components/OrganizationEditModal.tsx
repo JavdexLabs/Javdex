@@ -11,12 +11,15 @@ import { api } from '../api'
 import { organizationKeys } from '../query/queryKeys'
 import Modal from './Modal'
 import SelectControl from './SelectControl'
+import AliasTagEditor from './AliasTagEditor'
+import EditFieldAiTranslate from './EditFieldAiTranslate'
 import { EditFormField, EditFormSection } from './FormPrimitives'
 import {
   createOrganizationFormDraft,
   organizationUpdateInputFromDraft,
   retainSelectedParentOption
 } from './organizationFormState'
+import { promoteAliasToMain } from './aliasEditorState'
 import { moveClassificationLink, useClassificationLinkKeys } from './classificationLinkForm'
 import { UI_ICON_SM } from './iconDefaults'
 import IconButton from './IconButton'
@@ -91,13 +94,27 @@ export default function OrganizationEditModal({
                 onChange={(event) => setDraft({ ...draft, mainName: event.target.value })}
               />
             </EditFormField>
-            <EditFormField label="别名" htmlFor="organization-aliases" span={2} hint="每行一个，也可用逗号分隔">
-              <textarea
+            <EditFormField
+              label="别名"
+              htmlFor="organization-aliases"
+              span={2}
+              labelExtra={
+                draft.aliases.length > 0 ? (
+                  <span id="organization-aliases-hint" className="entity-edit-label-note">
+                    点击设为主名
+                  </span>
+                ) : undefined
+              }
+            >
+              <AliasTagEditor
                 id="organization-aliases"
-                className="text-input"
-                rows={3}
-                value={draft.aliases}
-                onChange={(event) => setDraft({ ...draft, aliases: event.target.value })}
+                aliases={draft.aliases}
+                onChange={(aliases) => setDraft({ ...draft, aliases })}
+                onPromoteToMain={(alias) =>
+                  setDraft({ ...draft, ...promoteAliasToMain(draft.mainName, draft.aliases, alias) })
+                }
+                disabled={saving}
+                aria-describedby={draft.aliases.length > 0 ? 'organization-aliases-hint' : undefined}
               />
             </EditFormField>
             {isEditing && draft.mainName.trim() !== organization?.mainName ? (
@@ -112,7 +129,18 @@ export default function OrganizationEditModal({
                 <span>将旧主名保留为别名</span>
               </label>
             ) : null}
-            <EditFormField label="简介" htmlFor="organization-summary" span={2}>
+            <EditFormField
+              label="简介"
+              htmlFor="organization-summary"
+              span={2}
+              labelExtra={
+                <EditFieldAiTranslate
+                  text={draft.summary}
+                  disabled={saving}
+                  onTranslated={(summary) => setDraft({ ...draft, summary })}
+                />
+              }
+            >
               <textarea
                 id="organization-summary"
                 className="text-input"

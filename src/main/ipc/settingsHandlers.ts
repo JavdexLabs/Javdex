@@ -39,6 +39,7 @@ import {
   getLlmSecretStorageState,
   saveLlmApiKeys
 } from '../settings/llmSecretStore'
+import { isScraperPluginRunnable } from '../scrapers/scraperPluginService'
 
 function toSettingsSnapshot(settings: AppSettings): SettingsSnapshot {
   return {
@@ -69,6 +70,18 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
       lastLibraryScanSummary: _ignoredScanSummary,
       ...safePatch
     } = rawPatch
+    if (
+      safePatch.defaultScraper !== undefined &&
+      !isScraperPluginRunnable('video', safePatch.defaultScraper)
+    ) {
+      throw new Error(`影片刮削插件「${safePatch.defaultScraper}」不可用`)
+    }
+    if (
+      safePatch.defaultActressScraper !== undefined &&
+      !isScraperPluginRunnable('actress', safePatch.defaultActressScraper)
+    ) {
+      throw new Error(`演员刮削插件「${safePatch.defaultActressScraper}」不可用`)
+    }
     let guardedPatch: Partial<AppSettings> = safePatch
     if (safePatch.libraryPaths !== undefined) {
       if (!Array.isArray(safePatch.libraryPaths) || safePatch.libraryPaths.some((item) => typeof item !== 'string')) {

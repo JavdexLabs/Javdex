@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { CircleAlert, Trash2 } from 'lucide-react'
+import { CircleAlert, FolderOpen, Play, Trash2 } from 'lucide-react'
 import type {
   PendingVideoScrape,
   PendingVideoScrapeConfirmInput,
@@ -17,7 +18,9 @@ import Button from '../components/Button'
 import Modal from '../components/Modal'
 import { useToast } from '../components/Toast'
 import { UI_ICON_SM } from '../components/iconDefaults'
+import { VIDEO_RESOURCE_KIND_LABELS } from '../components/videoResourcePresentation'
 import { navigateToVideoDetail } from '../listView/listNavigation'
+import { videoKeys } from '../query/queryKeys'
 import {
   PendingAlert,
   PendingConfirmBar,
@@ -33,7 +36,7 @@ import {
   PendingWorkspacePanel
 } from './PendingDecisionParts'
 import { arePendingScrapeSelectionsComplete } from './pendingCenterState'
-import { formatBytes } from './pendingFormat'
+import { formatBytes, formatMinutes } from './pendingFormat'
 import styles from './PendingScrapePane.module.css'
 
 const FIELD_LABEL = new Map(VIDEO_SCRAPE_FIELD_OPTIONS.map((option) => [option.id, option.label]))
@@ -65,7 +68,7 @@ function scrapeFieldPreview(field: VideoScrapeField, result: ScrapeResult): stri
     case 'director':
       return result.director?.trim() || null
     case 'duration':
-      return result.durationSeconds == null ? null : `${Math.round(result.durationSeconds / 60)} 分钟`
+      return formatMinutes(result.durationSeconds)
     case 'actressesFemale':
     case 'actressesMale': {
       const wanted = field === 'actressesMale' ? 'male' : 'female'
@@ -98,7 +101,7 @@ function candidateDetailRows(
     ['制作商', result.maker],
     ['系列', result.series],
     ['导演', result.director],
-    ['时长', result.durationSeconds == null ? null : `${Math.round(result.durationSeconds / 60)} 分钟`],
+    ['时长', formatMinutes(result.durationSeconds)],
     ['演员', result.actresses?.map((actress) => actress.name).join('、')],
     ['标签', result.tags?.join('、')],
     [
@@ -132,6 +135,16 @@ export default function PendingScrapePane({
     candidates: Array<{ id: number; mainName: string; description: string | null }>
   } | null>(null)
   const [directorId, setDirectorId] = useState<number | null>(null)
+  const videoQuery = useQuery({
+    queryKey: videoKeys.detail(pending.videoId),
+    queryFn: () => api.videos.get(pending.videoId)
+  })
+  const video = videoQuery.data ?? null
+  const code = video?.code?.trim()
+  /** Falls back to the internal id only while the video record is still loading. */
+  const videoLabel = code ? `「${code}」` : `影片 #${pending.videoId}`
+  const primaryResource =
+    video?.resources.find((resource) => resource.is_primary === 1) ?? video?.resources[0] ?? null
 
   useEffect(() => {
     setSelections({})
@@ -196,6 +209,20 @@ export default function PendingScrapePane({
       toast.show((error as Error).message, 'error')
     } finally {
       setBusy(false)
+    }
+  }
+
+  const openPrimaryResource = async (mode: 'play' | 'reveal'): Promise<void> => {
+    try {
+      const result =
+        mode === 'play'
+          ? await api.player.play(pending.videoId)
+          : await api.player.reveal(pending.videoId)
+      if (!result.ok) {
+        toast.show(result.error ?? (mode === 'play' ? '播放失败' : '打开文件夹失败'), 'error')
+      }
+    } catch (error) {
+      toast.show((error as Error).message, 'error')
     }
   }
 
@@ -298,8 +325,8 @@ export default function PendingScrapePane({
       eyebrow="影片刮削"
       title={
         pending.sources.length > 1
-          ? `影片 #${pending.videoId} 的 ${pending.sources.length} 个来源各应采用哪个候选？`
-          : `影片 #${pending.videoId} 应采用哪个候选？`
+          ? `${videoLabel} 的 ${pending.sources.length} 个来源各应采用哪个候选？`
+          : `${videoLabel} 应采用哪个候选？`
       }
       description="插件返回了多个精确匹配，或候选与其他影片的业务身份重合。关闭页面不会丢弃候选。"
       status={complete ? '可应用' : '待确认'}
@@ -317,7 +344,7 @@ export default function PendingScrapePane({
         <PendingConfirmBar
           summary={
             complete
-              ? `将向影片 #${pending.videoId} 写入 ${impactRowCount} 个字段`
+              ? `将向 ${videoLabel} 写入 ${impactRowCount} 个字段`
               : `还有 ${pending.sources.length - chosenCount} 个来源未选择候选`
           }
           scope={`按原选字段与「${mode?.label ?? pending.updateMode}」写入本影片`}
@@ -345,6 +372,64 @@ export default function PendingScrapePane({
       overlays={overlays}
     >
       <PendingWorkspacePanel>
+        <section className={styles.subject} aria-label="本地影片">
+          <div className={styles.subjectCover}>
+            {resolveMediaSrc(video?.cover_path) ? (
+              <img src={resolveMediaSrc(video?.cover_path) ?? ''} alt="" draggable={false} />
+            ) : (
+              <CircleAlert aria-hidden />
+            )}
+          </div>
+          <div className={styles.subjectCopy}>
+            <strong className="copyable-text">{code || `影片 #${pending.videoId}`}</strong>
+            <span className={styles.subjectTitle}>
+              {video?.title?.trim() || '尚未写入标题'}
+            </span>
+            {primaryResource ? (
+              <>
+                <span className={styles.subjectFile} title={primaryResource.display_locator}>
+                  {primaryResource.display_name || primaryResource.display_locator}
+                </span>
+                {/*
+                  Only the probed file duration works as a comparison anchor here.
+                  `resolved_duration_seconds` prefers the scraped metadata, which on an
+                  already-scraped video just echoes one of the candidates back.
+                */}
+                <span className={styles.subjectFacts}>
+                  {[
+                    VIDEO_RESOURCE_KIND_LABELS[primaryResource.kind],
+                    formatMinutes(primaryResource.duration_seconds) ?? '时长未知',
+                    primaryResource.size_bytes == null
+                      ? null
+                      : formatBytes(primaryResource.size_bytes)
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+              </>
+            ) : (
+              <span className={styles.subjectFacts}>本影片暂无资源</span>
+            )}
+          </div>
+          <div className={styles.subjectActions}>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!primaryResource}
+              onClick={() => void openPrimaryResource('play')}
+            >
+              <Play {...UI_ICON_SM} aria-hidden />
+              播放
+            </Button>
+            {primaryResource?.kind === 'local' || primaryResource?.strm_source_path ? (
+              <Button variant="ghost" size="sm" onClick={() => void openPrimaryResource('reveal')}>
+                <FolderOpen {...UI_ICON_SM} aria-hidden />
+                所在文件夹
+              </Button>
+            ) : null}
+          </div>
+        </section>
+
         <PendingStep
           step={1}
           title="为每个来源选择候选"

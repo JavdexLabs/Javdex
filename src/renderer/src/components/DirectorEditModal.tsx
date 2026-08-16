@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
 import type { DirectorDetail, DirectorUpdateInput } from '@shared/classificationTypes'
 import Modal from './Modal'
-import SelectControl from './SelectControl'
 import AliasTagEditor from './AliasTagEditor'
 import EditFieldAiTranslate from './EditFieldAiTranslate'
 import { EditFormField, EditFormSection } from './FormPrimitives'
@@ -112,84 +111,6 @@ export default function DirectorEditModal({ director, onCancel, onSave }: Props)
                 value={draft.summary}
                 onChange={(e) => field('summary', e.target.value)}
               />
-            </EditFormField>
-          </div>
-        </EditFormSection>
-        <EditFormSection title="履历">
-          <div className="entity-edit-fields">
-            <EditFormField label="国家或地区" htmlFor="director-country">
-              <input
-                id="director-country"
-                className="text-input"
-                value={draft.countryRegion}
-                onChange={(e) => field('countryRegion', e.target.value)}
-              />
-            </EditFormField>
-            <EditFormField label="出生地" htmlFor="director-birth-place">
-              <input
-                id="director-birth-place"
-                className="text-input"
-                value={draft.birthPlace}
-                onChange={(e) => field('birthPlace', e.target.value)}
-              />
-            </EditFormField>
-            <EditFormField label="出生日期" htmlFor="director-birth-date">
-              <input
-                id="director-birth-date"
-                className="text-input"
-                type="date"
-                value={draft.birthDate}
-                onChange={(e) => field('birthDate', e.target.value)}
-              />
-            </EditFormField>
-            <EditFormField label="去世日期" htmlFor="director-death-date">
-              <input
-                id="director-death-date"
-                className="text-input"
-                type="date"
-                value={draft.deathDate}
-                onChange={(e) => field('deathDate', e.target.value)}
-              />
-            </EditFormField>
-            <EditFormField label="从业开始" htmlFor="director-career-start">
-              <input
-                id="director-career-start"
-                className="text-input"
-                type="number"
-                min="1"
-                max="9999"
-                value={draft.careerStartYear}
-                onChange={(e) => field('careerStartYear', e.target.value)}
-              />
-            </EditFormField>
-            <EditFormField label="从业结束" htmlFor="director-career-end">
-              <input
-                id="director-career-end"
-                className="text-input"
-                type="number"
-                min="1"
-                max="9999"
-                value={draft.careerEndYear}
-                onChange={(e) => field('careerEndYear', e.target.value)}
-              />
-            </EditFormField>
-            <EditFormField label="状态" htmlFor="director-status">
-              <SelectControl
-                id="director-status"
-                value={draft.status}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    status: e.target.value as typeof draft.status,
-                  })
-                }
-              >
-                <option value="unknown">未知</option>
-                <option value="active">活跃</option>
-                <option value="paused">暂停</option>
-                <option value="retired">已退休</option>
-                <option value="deceased">已故</option>
-              </SelectControl>
             </EditFormField>
           </div>
         </EditFormSection>

@@ -15,6 +15,8 @@ describe('ActressDeleteModal confirmation model', () => {
     assert.equal(copy.highRisk, false)
     assert.equal(copy.confirmText, '删除')
     assert.match(copy.description, /均未关联影片/)
+    assert.equal(copy.warningTitle, undefined)
+    assert.equal(copy.warningBody, undefined)
   })
 
   it('requires the dedicated acknowledgement action and explains resource preservation', () => {
@@ -28,6 +30,9 @@ describe('ActressDeleteModal confirmation model', () => {
     assert.equal(copy.confirmText, '我已了解，仍要删除')
     assert.match(copy.description, /解除这些关联/)
     assert.match(copy.description, /不会删除影片资源/)
+    assert.equal(copy.warningTitle, '建议保留这些演员')
+    assert.match(copy.warningBody ?? '', /名称别名/)
+    assert.match(copy.warningBody ?? '', /新档案/)
     assert.equal(actressDeleteModeForAction(impact, 'cancel'), null)
     assert.equal(actressDeleteModeForAction(impact, 'ordinary-confirm'), null)
     assert.equal(

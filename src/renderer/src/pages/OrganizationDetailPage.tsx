@@ -287,7 +287,6 @@ export default function OrganizationDetailPage(): JSX.Element {
                 <span>{STATUS_LABEL[organization.status]}</span>
                 {organization.countryRegion ? <span>{organization.countryRegion}</span> : null}
                 {years ? <span>{years}</span> : null}
-                {organization.parent ? <span>上级：{organization.parent.mainName}</span> : null}
                 {organization.releaseYearStart ? (
                   <span>
                     本地发行：{organization.releaseYearStart}

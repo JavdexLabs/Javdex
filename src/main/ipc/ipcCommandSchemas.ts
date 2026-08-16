@@ -97,6 +97,7 @@ const settingsPatch = z
     videoDetailUseFirstSampleBackground: z.boolean().optional(),
     actressDetailUseFirstGalleryBackground: z.boolean().optional(),
     showVideoResourceTypeBadges: z.boolean().optional(),
+    coverDisplayMode: z.enum(['portrait', 'landscape']).optional(),
     scraperPluginDelays: object.optional(),
     compositeScrapers: object.optional(),
     defaultLlmProviderId: text.optional(),
@@ -236,6 +237,21 @@ const compositeScraper = z
   .object({ name: nonEmptyText, description: text.optional(), fieldPluginMap: record })
   .strict()
 
+const scraperServiceId = z.literal('metatube')
+const scraperServiceTokenUpdate = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('keep') }).strict(),
+  z.object({ mode: z.literal('set'), value: nonEmptyText }).strict(),
+  z.object({ mode: z.literal('clear') }).strict()
+])
+const scraperServiceConfig = z
+  .object({
+    serverUrl: text,
+    useScrapeProxy: z.boolean(),
+    tokenUpdate: scraperServiceTokenUpdate,
+    acknowledgeInsecureHttp: z.boolean().optional()
+  })
+  .strict()
+
 export const scrapeIpcSchemas = {
   [IPC.SCRAPE_ONE]: z.tuple([
     id,
@@ -275,6 +291,10 @@ export const scrapeIpcSchemas = {
   [IPC.SCRAPER_PLUGIN_PACKAGE]: z.tuple([nonEmptyText]),
   [IPC.SCRAPER_PLUGIN_UPDATE]: z.tuple([nonEmptyText, pluginUpdate]),
   [IPC.SCRAPER_PLUGIN_DELETE]: z.tuple([nonEmptyText]),
+  [IPC.SCRAPER_SERVICE_CONFIG_GET]: z.tuple([scraperServiceId]),
+  [IPC.SCRAPER_SERVICE_CONFIG_SAVE]: z.tuple([scraperServiceId, scraperServiceConfig]),
+  [IPC.SCRAPER_SERVICE_CONFIG_TEST]: z.tuple([scraperServiceId, scraperServiceConfig]),
+  [IPC.SCRAPER_SERVICE_CONFIG_CLEAR]: z.tuple([scraperServiceId]),
   [IPC.SCRAPER_COMPOSITE_CREATE]: z.tuple([compositeScraper]),
   [IPC.SCRAPER_COMPOSITE_UPDATE]: z.tuple([nonEmptyText, compositeScraper]),
   [IPC.SCRAPER_COMPOSITE_DELETE]: z.tuple([nonEmptyText]),

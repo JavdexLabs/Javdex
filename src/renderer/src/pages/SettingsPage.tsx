@@ -100,6 +100,7 @@ export default function SettingsPage(): JSX.Element {
     pluginBusy,
     editingPlugin,
     setEditingPlugin,
+    openPluginEditor,
     editingComposite,
     setEditingComposite,
     pluginDeleteTarget,
@@ -111,6 +112,8 @@ export default function SettingsPage(): JSX.Element {
     loadPluginForAiDebug,
     confirmPluginDelete,
     savePluginConfig,
+    testPluginServiceConfig,
+    clearPluginServiceConfig,
     saveCompositePlugin,
     changeDefaultPlugin,
     handleInstalled
@@ -362,6 +365,7 @@ export default function SettingsPage(): JSX.Element {
         | 'videoDetailUseFirstSampleBackground'
         | 'actressDetailUseFirstGalleryBackground'
         | 'showVideoResourceTypeBadges'
+        | 'coverDisplayMode'
         | 'privacyModeEnabled'
         | 'privacyModeScopes'
         | 'avatarFaceRatio'
@@ -787,7 +791,7 @@ export default function SettingsPage(): JSX.Element {
                       setEditingComposite({ kind, plugin })
                       return
                     }
-                    setEditingPlugin({ kind, plugin })
+                    void openPluginEditor(kind, plugin)
                   }}
                   onExport={(kind, name) => void exportPlugin(kind, name)}
                   onAiDebug={(kind, name) => void loadPluginForAiDebug(kind, name)}
@@ -1059,8 +1063,15 @@ export default function SettingsPage(): JSX.Element {
       {editingPlugin && (
         <PluginConfigModal
           state={editingPlugin}
-          saving={pluginBusy === `${editingPlugin.kind}-update:${editingPlugin.plugin.name}`}
-          onSave={(kind, name, input) => void savePluginConfig(kind, name, input)}
+          saving={
+            pluginBusy === `${editingPlugin.kind}-update:${editingPlugin.plugin.name}` ||
+            pluginBusy === 'video-service-clear:MetaTube'
+          }
+          onSave={(kind, name, input, serviceInput) =>
+            void savePluginConfig(kind, name, input, serviceInput)
+          }
+          onTestService={testPluginServiceConfig}
+          onClearService={clearPluginServiceConfig}
           onCancel={() => setEditingPlugin(null)}
         />
       )}

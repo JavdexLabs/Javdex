@@ -1,0 +1,87 @@
+.servicePanel {
+  display: grid;
+  gap: 12px;
+}
+
+.serviceStatus {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.serviceStatus[data-configured='true'] {
+  color: var(--text-accent);
+}
+
+.serviceGrid {
+  display: grid;
+  gap: 8px;
+}
+
+.fullField {
+  display: grid;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.fieldHint {
+  margin: -2px 0 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.tokenRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.tokenMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--control-h-sm);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.checkboxField {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  min-height: var(--control-h-sm);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.warning,
+.error,
+.success {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.warning {
+  color: var(--text-warning);
+}
+
+.error {
+  color: var(--text-danger);
+}
+
+.success {
+  color: var(--text-accent);
+}
+
+.serviceActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

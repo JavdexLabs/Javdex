@@ -8,6 +8,7 @@ import { insertTestVideoWithFile } from './testVideoFixtures'
 import { addAlias, upsertActressFromScrape } from './actressRepo'
 import {
   addManualVideoTag,
+  clearVideoMetadataRecord,
   countVideosForBatchScrape,
   deleteVideoSampleAsset,
   editVideoRecord,
@@ -487,6 +488,38 @@ describe('videoRepo tags by origin', () => {
     assert.ok(detail.tags.some((tag) => tag.name === 'KeepMe' && tag.origin === 'manual'))
     assert.ok(detail.tags.some((tag) => tag.name === 'NewScraped' && tag.origin === 'scraped'))
     assert.equal(detail.tags.filter((tag) => tag.origin === 'scraped').length, 1)
+    assert.equal(db.prepare('SELECT id FROM tags WHERE name = ?').get('HD'), undefined)
+    assert.ok(db.prepare('SELECT id FROM tags WHERE name = ?').get('Drama'))
+  })
+
+  it('editVideoRecord drops unused scraped tags while keeping tags still used elsewhere', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare("UPDATE video_tag SET origin = 'scraped' WHERE video_id = 1").run()
+
+    editVideoRecord(1, { tags: ['Solo'] })
+
+    assert.equal(db.prepare('SELECT id FROM tags WHERE name = ?').get('HD'), undefined)
+    assert.ok(db.prepare('SELECT id FROM tags WHERE name = ?').get('Drama'))
+    assert.ok(db.prepare('SELECT id FROM tags WHERE name = ?').get('Solo'))
+  })
+
+  it('clearVideoMetadataRecord deletes unused scraped tags and keeps manual tags', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare("UPDATE video_tag SET origin = 'scraped' WHERE video_id = 1").run()
+    addManualVideoTag(1, 'KeepMe')
+
+    clearVideoMetadataRecord(1)
+
+    const detail = getVideoDetail(1)!
+    assert.deepEqual(
+      detail.tags.map((tag) => [tag.name, tag.origin]),
+      [['KeepMe', 'manual']]
+    )
+    assert.equal(db.prepare('SELECT id FROM tags WHERE name = ?').get('HD'), undefined)
+    assert.ok(db.prepare('SELECT id FROM tags WHERE name = ?').get('Drama'))
+    assert.ok(db.prepare('SELECT id FROM tags WHERE name = ?').get('KeepMe'))
   })
 
   it('editVideoRecord replaces female and male cast separately', () => {

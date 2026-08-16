@@ -881,28 +881,12 @@ button.alias-tag-chip-name:disabled {
   align-items: center;
 }
 
-.playlist-form-grid .settings-form-field {
-  grid-template-columns: 86px minmax(0, 1fr);
-}
-
-.playlist-form-grid .entity-edit-section {
-  grid-column: 1 / -1;
-}
-
 .form-grid .settings-form-field .settings-form-label {
   text-align: right;
 }
 
 .form-grid .settings-form-field .settings-form-hint {
   grid-column: 2;
-}
-
-.form-grid .settings-form-field.playlist-form-description {
-  align-items: start;
-}
-
-.form-grid .settings-form-field.playlist-form-description .settings-form-label {
-  padding-top: 8px;
 }
 
 .scrape-modal-body {

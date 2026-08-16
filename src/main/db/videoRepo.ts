@@ -461,17 +461,6 @@ export function purgeResourceLessVideos(): { deleted: number; obsoletePaths: str
   if (candidates.length === 0) return { deleted: 0, obsoletePaths: [] }
 
   const hints = candidates.map((candidate) => collectVideoLibraryCleanupHints(candidate.id))
-  const tagIds = (
-    db
-      .prepare(
-        `SELECT DISTINCT vt.tag_id
-         FROM video_tag vt
-         WHERE NOT EXISTS (
-           SELECT 1 FROM video_resources vr WHERE vr.video_id = vt.video_id
-         )`
-      )
-      .all() as Array<{ tag_id: number }>
-  ).map((row) => row.tag_id)
   const obsoletePaths = db.transaction(() => {
     const paths: string[] = []
     for (const candidate of candidates) {
@@ -496,7 +485,6 @@ export function purgeResourceLessVideos(): { deleted: number; obsoletePaths: str
       if (candidate.cover_path) paths.push(candidate.cover_path)
       deleteVideo(candidate.id)
     }
-    for (const tagId of tagIds) pruneTagIfUnused(tagId)
     return Array.from(new Set(paths))
   })()
 
@@ -1128,8 +1116,8 @@ export function updateVideoFields(
   db.prepare(`UPDATE videos SET ${assignments} WHERE id = @id`).run({ ...fields, id })
 }
 
-/** Replace tag relations for one origin only. */
-function replaceTagsByOrigin(
+/** Replace tag relations for one origin only; callers run post-commit library cleanup. */
+export function replaceVideoTagsByOrigin(
   videoId: number,
   names: string[],
   origin: 'manual' | 'scraped',
@@ -1275,7 +1263,7 @@ export function editVideoRecord(
       db.prepare(`UPDATE videos SET ${assignments.join(', ')} WHERE id = @id`).run(bind)
     }
 
-    if ('tags' in input) replaceTagsByOrigin(id, input.tags ?? [], 'scraped', null)
+    if ('tags' in input) replaceVideoTagsByOrigin(id, input.tags ?? [], 'scraped', null)
     if ('actressesFemale' in input || 'actressesMale' in input) {
       replaceVideoCast(id, input.actressesFemale ?? [], input.actressesMale ?? [])
     }

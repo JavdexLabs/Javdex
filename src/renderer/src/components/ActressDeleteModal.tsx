@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { AlertTriangle } from 'lucide-react'
 import type { ActressDeleteImpact, ActressDeleteResult } from '@shared/actressIpcContract'
 import { api } from '../api'
 import Modal from './Modal'
@@ -8,6 +9,7 @@ import {
   type ActressDeleteConfirmationAction
 } from './actressDeleteConfirmation'
 import Button from './Button'
+import { UI_ICON_SM } from './iconDefaults'
 
 interface ActressDeleteModalProps {
   ids: number[]
@@ -100,10 +102,14 @@ export default function ActressDeleteModal({
       <div className="actress-delete-confirmation selectable-text">
         {!impact && !error ? <p>正在检查影片关联…</p> : null}
         {copy ? <p>{copy.description}</p> : null}
-        {copy?.highRisk ? (
-          <p className="actress-delete-confirmation__warning">
-            不建议删除有关联演员：保留演员档案与名称别名，可以让后续刮削继续关联到正确演员。
-          </p>
+        {copy?.warningTitle && copy.warningBody ? (
+          <div className="settings-notice settings-notice--warning actress-delete-confirmation__notice" role="status">
+            <AlertTriangle {...UI_ICON_SM} aria-hidden />
+            <div className="settings-notice-copy">
+              <strong>{copy.warningTitle}</strong>
+              <span>{copy.warningBody}</span>
+            </div>
+          </div>
         ) : null}
         {error ? <p className="actress-delete-confirmation__error">{error}</p> : null}
       </div>

@@ -184,7 +184,8 @@ for (const specifier of importsOf(scrapeHandler)) {
     (/\.\.\/services\//.test(specifier) &&
       ![
         '../services/scrapeJobController',
-        '../services/scraperPluginCatalog'
+        '../services/scraperPluginCatalog',
+        '../services/scraperServiceConfiguration'
       ].includes(specifier))
   ) {
     violations.push(`${scrapeHandler}: scrape IPC must delegate through its application modules`)

@@ -2,4 +2,5 @@
 export * from './videoScrapeTypes'
 export * from './actressScrapeTypes'
 export * from './scraperPluginTypes'
+export * from './scraperServiceTypes'
 export * from './actressAvatarCropTypes'

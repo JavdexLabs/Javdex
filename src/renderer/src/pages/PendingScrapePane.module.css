@@ -1,3 +1,69 @@
+/* Identity of the library video being scraped, so candidates have something to be compared against. */
+.subject {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+}
+
+.subjectCover {
+  width: 46px;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-control);
+  color: var(--text-muted);
+  display: grid;
+  place-items: center;
+}
+
+.subjectCover > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: right center;
+}
+
+.subjectCopy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.subjectTitle {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.subjectFile {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.subjectFacts {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.subjectTitle,
+.subjectFile {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subjectActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .sourceList {
   display: flex;
   flex-direction: column;
@@ -33,7 +99,7 @@
 
 .candidateGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
   gap: 9px;
 }
 
@@ -88,6 +154,7 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: right center;
 }
 
 .candidateCopy {

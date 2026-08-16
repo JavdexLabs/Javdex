@@ -32,6 +32,12 @@ import type {
 } from './videoScrapeTypes'
 import type { BatchProgress, BatchScrapeState } from './batchScrapeTypes'
 import type {
+  ScraperServiceConfigInput,
+  ScraperServiceConnectionResult,
+  ScraperServiceId,
+  ScraperServicePublicConfig
+} from './scraperServiceTypes'
+import type {
   IpcContractArgs,
   IpcContractChannel,
   IpcContractResult,
@@ -86,6 +92,22 @@ export interface ScrapeIpcContract {
     result: ScraperPluginDescriptor
   }
   [IPC.SCRAPER_PLUGIN_DELETE]: { args: [name: string]; result: boolean }
+  [IPC.SCRAPER_SERVICE_CONFIG_GET]: {
+    args: [serviceId: ScraperServiceId]
+    result: ScraperServicePublicConfig
+  }
+  [IPC.SCRAPER_SERVICE_CONFIG_SAVE]: {
+    args: [serviceId: ScraperServiceId, input: ScraperServiceConfigInput]
+    result: ScraperServicePublicConfig
+  }
+  [IPC.SCRAPER_SERVICE_CONFIG_TEST]: {
+    args: [serviceId: ScraperServiceId, input: ScraperServiceConfigInput]
+    result: ScraperServiceConnectionResult
+  }
+  [IPC.SCRAPER_SERVICE_CONFIG_CLEAR]: {
+    args: [serviceId: ScraperServiceId]
+    result: boolean
+  }
   [IPC.SCRAPER_COMPOSITE_CREATE]: {
     args: [input: CompositeScraperInput]
     result: ScraperPluginDescriptor

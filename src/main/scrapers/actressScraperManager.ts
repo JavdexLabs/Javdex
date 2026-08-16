@@ -35,19 +35,39 @@ function buildRegistry(): Map<string, BaseActressScraper> {
 }
 
 export function listActressScraperNames(): string[] {
-  return [...buildRegistry().keys(), ...listCompositePluginDescriptors('actress').map((p) => p.name)]
+  const runnable = new Set(
+    listMergedPluginDescriptors('actress')
+      .filter((plugin) => plugin.configured !== false)
+      .map((plugin) => plugin.name)
+  )
+  return [
+    ...[...buildRegistry().keys()].filter((name) => runnable.has(name)),
+    ...listCompositePluginDescriptors('actress')
+      .filter((plugin) => plugin.configured !== false)
+      .map((plugin) => plugin.name)
+  ]
 }
 
 export function listActressScraperPlugins(): ScraperPluginDescriptor[] {
   return listMergedPluginDescriptors('actress')
 }
 
+function assertActressScraperRunnable(name: string): ScraperPluginDescriptor {
+  const descriptor = listMergedPluginDescriptors('actress').find((plugin) => plugin.name === name)
+  if (!descriptor) throw new Error(`演员刮削插件「${name}」不存在`)
+  if (descriptor.configured === false) {
+    throw new Error(descriptor.disabledReason ?? `刮削插件「${name}」尚未配置`)
+  }
+  return descriptor
+}
+
 export function getActressScraper(name?: string): BaseActressScraper {
   const settings = getSettings()
   const key = name || settings.defaultActressScraper
+  assertActressScraperRunnable(key)
   const registry = buildRegistry()
-  const scraper = registry.get(key) ?? registry.get('Xslist')
-  if (!scraper) throw new Error('No actress scraper plugin available')
+  const scraper = registry.get(key)
+  if (!scraper) throw new Error(`演员刮削插件「${key}」不存在`)
   return scraper
 }
 
@@ -199,6 +219,7 @@ export async function scrapeActress(
     const settings = getSettings()
     const proxyUrl = resolveScrapeProxyUrl(settings)
     const selectedScraperName = scraperName || settings.defaultActressScraper
+    assertActressScraperRunnable(selectedScraperName)
     const composite = findCompositeScraper('actress', selectedScraperName)
     const scraper = composite ? null : getActressScraper(scraperName)
     const gfriendsSelected =

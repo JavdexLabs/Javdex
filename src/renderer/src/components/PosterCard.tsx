@@ -143,11 +143,7 @@ export default function PosterCard({
         )}
         {badge && <span className={`poster-badge ${badge.cls}`}>{badge.text}</span>}
         {video.has_pending_scrape ? (
-          <span
-            className="poster-badge"
-            data-pending="true"
-            data-stacked={badge ? 'true' : undefined}
-          >
+          <span className="poster-badge" data-pending="true">
             待确认
           </span>
         ) : null}

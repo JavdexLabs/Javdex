@@ -262,13 +262,13 @@
 .poster-badge.failed {
   background: rgba(231, 76, 94, 0.85);
 }
+/* Opposite corner from the scrape-state badge so the two never stack. */
 .poster-badge[data-pending='true'] {
+  left: auto;
+  right: 6px;
   background: var(--surface-warning);
   color: var(--text-warning);
   border: 1px solid var(--border-warning);
-}
-.poster-badge[data-stacked='true'] {
-  top: 30px;
 }
 
 .poster-resource-badges {
@@ -1141,12 +1141,6 @@
   .merge-name-options {
     grid-template-columns: 1fr;
   }
-}
-.playlist-form-modal .modal-body {
-  padding-top: 2px;
-}
-.playlist-form-grid {
-  grid-template-columns: 86px 1fr;
 }
 .scroll-body-inner--detail .empty-state--compact {
   background: transparent;

@@ -37,7 +37,7 @@ import {
   patchSearchParams,
   seriesReleaseDirParam
 } from '../listView/listQueryParams'
-import { navigateToFacetList, navigateToSeriesDetail } from '../listView/listNavigation'
+import { navigateToFacetList } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
@@ -257,15 +257,6 @@ export default function SeriesDetailPage(): JSX.Element {
                 <span>{STATUS[series.status]}</span>
                 <span>所属：{series.ownerOrganization?.mainName ?? '未归属'}</span>
                 {lifetime && <span>生命周期：{lifetime}</span>}
-                {series.parentSeries && (
-                  <button
-                    type="button"
-                    className="meta-inline-link"
-                    onClick={() => navigateToSeriesDetail(navigate, location, series.parentSeries!.id)}
-                  >
-                    上级：{series.parentSeries.mainName}
-                  </button>
-                )}
                 {series.releaseYearStart && (
                   <span>
                     本地发行：{series.releaseYearStart}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown } from 'lucide-react'
-import { PRIVACY_MODE_SCOPES, type AppSettings, type PrivacyModeScope, type ThemeId } from '@shared/settingsTypes'
+import { ChevronDown, RectangleHorizontal, RectangleVertical } from 'lucide-react'
+import { PRIVACY_MODE_SCOPES, type AppSettings, type CoverDisplayMode, type PrivacyModeScope, type ThemeId } from '@shared/settingsTypes'
 import {
   MAX_AVATAR_FACE_RATIO,
   MIN_AVATAR_FACE_RATIO,
@@ -255,7 +255,7 @@ export default function AppearanceSettingsPanel({
 }): JSX.Element {
   const toast = useToast()
   const { syncPrivacyMode } = useTheme()
-  const { syncResourceTypeBadges } = useDisplayMode()
+  const { mode, setMode, syncResourceTypeBadges } = useDisplayMode()
   const avatarAutoCropBatch = useAvatarAutoCropBatch()
   const [isEditingAvatarComposition, setIsEditingAvatarComposition] = useState(false)
   const [isSavingAvatarComposition, setIsSavingAvatarComposition] = useState(false)
@@ -421,6 +421,14 @@ export default function AppearanceSettingsPanel({
     if (saved !== false) syncResourceTypeBadges(checked)
   }
 
+  const changeCoverDisplayMode = async (next: CoverDisplayMode): Promise<void> => {
+    if (next === mode) return
+    const previous = mode
+    setMode(next)
+    const saved = await onPatchSettings({ coverDisplayMode: next })
+    if (saved === false) setMode(previous)
+  }
+
   return (
     <>
       <SettingsCard title="主题" hint="界面配色，立即生效。">
@@ -448,6 +456,34 @@ export default function AppearanceSettingsPanel({
             checked={settings.showVideoResourceTypeBadges}
             onChange={(checked) => void toggleResourceTypeBadges(checked)}
           />
+          <div className="settings-cover-mode-row">
+            <span className="settings-cover-mode-copy">
+              <span className="settings-cover-mode-title">封面比例</span>
+              <span className="settings-cover-mode-description">
+                媒体库影片卡片使用竖版海报或横板封面
+              </span>
+            </span>
+            <div className="mode-toggle" title="封面显示方式" role="group" aria-label="封面显示方式">
+              <button
+                type="button"
+                className={mode === 'portrait' ? 'active' : undefined}
+                aria-pressed={mode === 'portrait'}
+                onClick={() => void changeCoverDisplayMode('portrait')}
+              >
+                <RectangleVertical {...UI_ICON_SM} aria-hidden />
+                <span>竖版</span>
+              </button>
+              <button
+                type="button"
+                className={mode === 'landscape' ? 'active' : undefined}
+                aria-pressed={mode === 'landscape'}
+                onClick={() => void changeCoverDisplayMode('landscape')}
+              >
+                <RectangleHorizontal {...UI_ICON_SM} aria-hidden />
+                <span>横板</span>
+              </button>
+            </div>
+          </div>
         </div>
       </SettingsCard>
 

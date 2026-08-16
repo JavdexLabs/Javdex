@@ -29,14 +29,6 @@ import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import Button from '../components/Button'
 
-const STATUS = {
-  unknown: '状态未知',
-  active: '活跃',
-  paused: '暂停',
-  retired: '已退休',
-  deceased: '已故',
-} as const
-
 export default function DirectorDetailPage(): JSX.Element {
   const id = Number(useParams().directorId)
   const valid = Number.isInteger(id) && id > 0
@@ -131,10 +123,6 @@ export default function DirectorDetailPage(): JSX.Element {
     )
   if (!director) return state(<EmptyState icon={<SearchX {...UI_ICON_SM} />} title="导演不存在" />)
   const image = assetUrl(director.imagePath ?? director.fallbackCoverPath)
-  const career =
-    director.careerStartYear || director.careerEndYear
-      ? `${director.careerStartYear ?? '未知'} - ${director.careerEndYear ?? '至今'}`
-      : null
   return (
     <div className={`detail-pane${stacked ? ' detail-pane--stacked' : ''}`}>
       <div className="list-page organization-detail-page">
@@ -212,22 +200,16 @@ export default function DirectorDetailPage(): JSX.Element {
             <div className="organization-profile-main">
               <div className="organization-profile-kicker">导演</div>
               <h1 className="selectable-text">{director.mainName}</h1>
-              <div className="organization-profile-meta selectable-text">
-                <span>{STATUS[director.status]}</span>
-                {director.countryRegion && <span>{director.countryRegion}</span>}
-                {director.birthDate && <span>出生：{director.birthDate}</span>}
-                {director.deathDate && <span>去世：{director.deathDate}</span>}
-                {director.birthPlace && <span>出生地：{director.birthPlace}</span>}
-                {career && <span>从业：{career}</span>}
-                {director.releaseYearStart && (
+              {director.releaseYearStart ? (
+                <div className="organization-profile-meta selectable-text">
                   <span>
                     本地作品：{director.releaseYearStart}
                     {director.releaseYearEnd !== director.releaseYearStart
                       ? ` - ${director.releaseYearEnd}`
                       : ''}
                   </span>
-                )}
-              </div>
+                </div>
+              ) : null}
               {director.aliases.length > 0 && (
                 <div className="organization-aliases selectable-text">
                   {director.aliases.map((alias) => (

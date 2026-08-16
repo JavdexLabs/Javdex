@@ -32,7 +32,12 @@ export interface ScraperPluginDescriptor {
   removable: boolean
   exportable: boolean
   editable?: boolean
+  debuggable?: boolean
   overridesBuiltIn?: boolean
+  requiresConfiguration?: boolean
+  configured?: boolean
+  configurationLabel?: string
+  disabledReason?: string
   supportedFields: Array<VideoScrapeField | ActressScrapeField>
   delay?: ScraperPluginDelay
   fieldPluginMap?: Partial<Record<VideoScrapeField | ActressScrapeField, string>>

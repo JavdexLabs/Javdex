@@ -47,6 +47,8 @@ import type {
   ActressScrapeUpdateMode,
   CompositeScraperInput,
   ScraperPluginUpdateInput,
+  ScraperServiceConfigInput,
+  ScraperServiceId,
   VideoBatchScrapeFilter,
   VideoBatchScrapeRequest,
   VideoRematchBatchRequest,
@@ -359,6 +361,14 @@ const api = {
     updatePlugin: (name: string, input: ScraperPluginUpdateInput) =>
       invokeScrape(IPC.SCRAPER_PLUGIN_UPDATE, name, input),
     deletePlugin: (name: string) => invokeScrape(IPC.SCRAPER_PLUGIN_DELETE, name),
+    getServiceConfig: (serviceId: ScraperServiceId) =>
+      invokeScrape(IPC.SCRAPER_SERVICE_CONFIG_GET, serviceId),
+    saveServiceConfig: (serviceId: ScraperServiceId, input: ScraperServiceConfigInput) =>
+      invokeScrape(IPC.SCRAPER_SERVICE_CONFIG_SAVE, serviceId, input),
+    testServiceConfig: (serviceId: ScraperServiceId, input: ScraperServiceConfigInput) =>
+      invokeScrape(IPC.SCRAPER_SERVICE_CONFIG_TEST, serviceId, input),
+    clearServiceConfig: (serviceId: ScraperServiceId) =>
+      invokeScrape(IPC.SCRAPER_SERVICE_CONFIG_CLEAR, serviceId),
     createComposite: (input: CompositeScraperInput) =>
       invokeScrape(IPC.SCRAPER_COMPOSITE_CREATE, input),
     updateComposite: (name: string, input: CompositeScraperInput) =>

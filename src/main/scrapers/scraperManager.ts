@@ -7,7 +7,7 @@ import type {
   VideoScrapeUpdateMode
 } from '@shared/videoScrapeTypes'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
-import { DEFAULT_SETTINGS, resolveScrapeProxyUrl } from '@shared/settingsTypes'
+import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import { getVideoById, markScrapeFailed } from '../db/videoRepo'
 import {
   type PendingVideoScrapeCandidateInput,
@@ -46,19 +46,39 @@ function buildRegistry(): Map<string, BaseScraper> {
 }
 
 export function listScraperNames(): string[] {
-  return [...buildRegistry().keys(), ...listCompositePluginDescriptors('video').map((p) => p.name)]
+  const runnable = new Set(
+    listMergedPluginDescriptors('video')
+      .filter((plugin) => plugin.configured !== false)
+      .map((plugin) => plugin.name)
+  )
+  return [
+    ...[...buildRegistry().keys()].filter((name) => runnable.has(name)),
+    ...listCompositePluginDescriptors('video')
+      .filter((plugin) => plugin.configured !== false)
+      .map((plugin) => plugin.name)
+  ]
 }
 
 export function listScraperPlugins(): ScraperPluginDescriptor[] {
   return listMergedPluginDescriptors('video')
 }
 
+function assertVideoScraperRunnable(name: string): ScraperPluginDescriptor {
+  const descriptor = listMergedPluginDescriptors('video').find((plugin) => plugin.name === name)
+  if (!descriptor) throw new Error(`影片刮削插件「${name}」不存在`)
+  if (descriptor.configured === false) {
+    throw new Error(descriptor.disabledReason ?? `刮削插件「${name}」尚未配置`)
+  }
+  return descriptor
+}
+
 export function getScraper(name?: string): BaseScraper {
   const settings = getSettings()
   const key = name || settings.defaultScraper
+  assertVideoScraperRunnable(key)
   const registry = buildRegistry()
-  const scraper = registry.get(key) ?? registry.get(DEFAULT_SETTINGS.defaultScraper)
-  if (!scraper) throw new Error('No scraper plugin available')
+  const scraper = registry.get(key)
+  if (!scraper) throw new Error(`影片刮削插件「${key}」不存在`)
   return scraper
 }
 
@@ -333,7 +353,9 @@ export function resolveVideoScrapeFieldSources(scraperName?: string): {
   ratingSourceName: string
 } {
   const settings = getSettings()
-  const composite = findCompositeScraper('video', scraperName || settings.defaultScraper)
+  const resolvedName = scraperName || settings.defaultScraper
+  assertVideoScraperRunnable(resolvedName)
+  const composite = findCompositeScraper('video', resolvedName)
   const scraper = composite ? null : getScraper(scraperName)
   return resolveVideoFieldSourceNames(scraper, scraperName, settings.defaultScraper)
 }
@@ -356,9 +378,7 @@ export async function scrapeVideo(
   const mode = options?.mode ?? 'replace'
   const settings = getSettings()
   const resolvedScraperName = scraperName || settings.defaultScraper
-  const descriptor = listMergedPluginDescriptors('video').find(
-    (plugin) => plugin.name === resolvedScraperName
-  )
+  const descriptor = assertVideoScraperRunnable(resolvedScraperName)
   const supportedFields = new Set<VideoScrapeField>(
     (descriptor?.supportedFields ?? ALL_VIDEO_SCRAPE_FIELDS).filter(
       (field): field is VideoScrapeField =>

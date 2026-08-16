@@ -3,12 +3,18 @@ import { Worker } from 'node:worker_threads'
 import path from 'node:path'
 import type { ActressScrapeResult, ScraperPluginKind } from '@shared/scrapeTypes'
 import type { VideoPluginScrapeResult } from '@shared/videoScrapeTypes'
+import type { ScraperServiceId, ScraperServiceQuery } from '@shared/scrapeTypes'
 import { readTestUserDataPath } from '@shared/appIdentity'
 import { scrapeBrowser } from './scrapeBrowser'
 import {
   ScraperResourceCache,
   type ScraperResourceResponse
 } from './scraperResourceCache'
+import {
+  createConfiguredScraperServiceClient,
+  ScraperServiceError,
+  type ConfiguredScraperServiceClient
+} from './configuredScraperService'
 
 const PLUGIN_VALIDATE_TIMEOUT_MS = 10_000
 const PLUGIN_PARSE_TIMEOUT_MS = 5 * 60_000
@@ -34,6 +40,11 @@ interface SandboxWorkerData {
   code: string
   appRoot: string
   proxyUrl?: string
+  serviceBinding?: ScraperServiceId
+  service?: {
+    id: ScraperServiceId
+    baseUrl: string
+  }
   task?: {
     code?: string
     mainName?: string
@@ -52,7 +63,9 @@ function sandboxAppRoot(): string {
   return process.cwd()
 }
 
-function withSandboxAppRoot(workerData: Omit<SandboxWorkerData, 'appRoot'>): SandboxWorkerData {
+type SandboxWorkerInput = Omit<SandboxWorkerData, 'appRoot' | 'service'>
+
+function withSandboxAppRoot(workerData: SandboxWorkerInput): SandboxWorkerData {
   return { ...workerData, appRoot: sandboxAppRoot() }
 }
 
@@ -61,6 +74,7 @@ type SandboxMessage =
   | { type: 'error'; error: string }
   | { type: 'fetchPage'; id: number; url: unknown; options?: unknown }
   | { type: 'fetchBuffer'; id: number; url: unknown; options?: unknown }
+  | { type: 'serviceGetJson'; id: number; path: unknown; options?: unknown }
   | { type: 'browserAction'; id: number; action: unknown; params?: unknown }
   | { type: 'log'; level: string; message: string }
 
@@ -69,7 +83,11 @@ interface RpcReply {
   id: number
   ok: boolean
   value?: unknown
-  error?: string
+  error?: {
+    message: string
+    code?: string
+    status?: number
+  }
 }
 
 interface SandboxRunResult<T> {
@@ -119,7 +137,8 @@ export function runUserVideoPlugin(
   pluginName: string,
   code: string,
   videoCode: string,
-  proxyUrl?: string
+  proxyUrl?: string,
+  serviceBinding?: ScraperServiceId
 ): Promise<VideoPluginScrapeResult> {
   return runSandboxWorker<VideoPluginScrapeResult>({
     mode: 'parse',
@@ -127,6 +146,7 @@ export function runUserVideoPlugin(
     pluginName,
     code,
     proxyUrl,
+    serviceBinding,
     task: { code: videoCode }
   }, PLUGIN_PARSE_TIMEOUT_MS)
 }
@@ -182,25 +202,34 @@ export function runUserActressPluginWithLogs(
 }
 
 function runSandboxWorker<T = void>(
-  workerData: Omit<SandboxWorkerData, 'appRoot'>,
+  workerData: SandboxWorkerInput,
   timeoutMs: number
 ): Promise<T> {
   return runSandboxWorkerInternal<T>(workerData, timeoutMs, false) as Promise<T>
 }
 
 function runSandboxWorkerCollect<T = void>(
-  workerData: Omit<SandboxWorkerData, 'appRoot'>,
+  workerData: SandboxWorkerInput,
   timeoutMs: number
 ): Promise<SandboxRunResult<T>> {
   return runSandboxWorkerInternal<T>(workerData, timeoutMs, true) as Promise<SandboxRunResult<T>>
 }
 
 function runSandboxWorkerInternal<T = void>(
-  workerData: Omit<SandboxWorkerData, 'appRoot'>,
+  workerData: SandboxWorkerInput,
   timeoutMs: number,
   collectLogs: boolean
 ): Promise<T | SandboxRunResult<T>> {
-  const payload = withSandboxAppRoot(workerData)
+  const initialPayload = withSandboxAppRoot(workerData)
+  const serviceClient = initialPayload.serviceBinding
+    ? createConfiguredScraperServiceClient(initialPayload.serviceBinding)
+    : null
+  const payload: SandboxWorkerData = serviceClient
+    ? {
+        ...initialPayload,
+        service: { id: serviceClient.serviceId, baseUrl: serviceClient.baseUrl }
+      }
+    : initialPayload
 
   return new Promise<T | SandboxRunResult<T>>((resolve, reject) => {
     const worker = new Worker(SANDBOX_WORKER_SOURCE, {
@@ -247,9 +276,10 @@ function runSandboxWorkerInternal<T = void>(
       } else if (
         message.type === 'fetchPage' ||
         message.type === 'fetchBuffer' ||
+        message.type === 'serviceGetJson' ||
         message.type === 'browserAction'
       ) {
-        void handleWorkerRpc(worker, payload, message)
+        void handleWorkerRpc(worker, payload, serviceClient, message)
       } else if (message.type === 'log') {
         if (collectLogs) logs.push(`[${message.level}] ${message.message}`)
         console.log(`[scraper:${payload.pluginName}] ${message.message}`)
@@ -281,7 +311,11 @@ function runSandboxWorkerInternal<T = void>(
 async function handleWorkerRpc(
   worker: Worker,
   workerData: SandboxWorkerData,
-  message: Extract<SandboxMessage, { type: 'fetchPage' | 'fetchBuffer' | 'browserAction' }>
+  serviceClient: ConfiguredScraperServiceClient | null,
+  message: Extract<
+    SandboxMessage,
+    { type: 'fetchPage' | 'fetchBuffer' | 'serviceGetJson' | 'browserAction' }
+  >
 ): Promise<void> {
   const reply = (payload: Omit<RpcReply, 'type' | 'id'>): void => {
     worker.postMessage({ type: 'rpcResult', id: message.id, ...payload } satisfies RpcReply)
@@ -310,6 +344,14 @@ async function handleWorkerRpc(
           )
         : await fetchUncachedSandboxBuffer(url, workerData.proxyUrl)
       reply({ ok: true, value: buf.toString('base64') })
+    } else if (message.type === 'serviceGetJson') {
+      if (!serviceClient || !workerData.serviceBinding) {
+        throw new Error('Trusted scraper service is unavailable')
+      }
+      const path = parseServiceRelativePath(message.path)
+      const options = parseServiceRequestOptions(message.options)
+      const value = await serviceClient.getJson(path, options)
+      reply({ ok: true, value })
     } else {
       await scrapeBrowser.setProxy(workerData.proxyUrl)
       const value = await scrapeBrowser.performAction(
@@ -319,8 +361,47 @@ async function handleWorkerRpc(
       reply({ ok: true, value })
     }
   } catch (err) {
-    reply({ ok: false, error: (err as Error).message })
+    const error = err as Error & { code?: string; status?: number }
+    reply({
+      ok: false,
+      error: {
+        message: error.message,
+        code: err instanceof ScraperServiceError ? err.code : error.code,
+        status: err instanceof ScraperServiceError ? err.status : error.status
+      }
+    })
   }
+}
+
+function parseServiceRelativePath(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error('Service path must be a non-empty string')
+  }
+  return value.trim()
+}
+
+function parseServiceRequestOptions(
+  value: unknown
+): { query?: ScraperServiceQuery } | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const rawQuery = (value as { query?: unknown }).query
+  if (rawQuery === undefined) return undefined
+  if (!rawQuery || typeof rawQuery !== 'object' || Array.isArray(rawQuery)) {
+    throw new Error('Service query must be an object')
+  }
+  const query: ScraperServiceQuery = {}
+  for (const [name, item] of Object.entries(rawQuery)) {
+    if (
+      item !== undefined &&
+      typeof item !== 'string' &&
+      typeof item !== 'number' &&
+      typeof item !== 'boolean'
+    ) {
+      throw new Error('Service query values must be strings, numbers, or booleans')
+    }
+    query[name] = item
+  }
+  return { query }
 }
 
 async function fetchUncachedSandboxBuffer(
@@ -442,7 +523,15 @@ parentPort.on('message', (message) => {
   if (!entry) return;
   pending.delete(message.id);
   if (message.ok) entry.resolve(message.value);
-  else entry.reject(new Error(message.error || 'Plugin fetch failed'));
+  else {
+    const detail = message.error && typeof message.error === 'object'
+      ? message.error
+      : { message: String(message.error || 'Plugin fetch failed') };
+    const error = new Error(detail.message || 'Plugin fetch failed');
+    if (detail.code) error.code = detail.code;
+    if (Number.isFinite(detail.status)) error.status = detail.status;
+    entry.reject(error);
+  }
 });
 
 function postError(err) {
@@ -462,6 +551,33 @@ function rpc(type, payload) {
 
 function fetchPage(url, options) {
   return rpc('fetchPage', { url, options });
+}
+
+function serviceGetJson(path, options) {
+  return rpc('serviceGetJson', { path, options });
+}
+
+function servicePublicUrl(relativePath, query) {
+  if (!workerData.service) throw new Error('Trusted scraper service is unavailable');
+  const path = String(relativePath || '').trim();
+  if (!path || /^[a-z][a-z\d+.-]*:/i.test(path) || path.startsWith('//') || path.includes('\\')) {
+    throw new Error('Service URL must use a relative path');
+  }
+  const base = new URL(workerData.service.baseUrl);
+  const prefix = base.pathname === '/' ? '' : base.pathname.replace(/\/+$/, '');
+  const target = new URL(prefix + '/' + path.replace(/^\/+/, ''), base.origin);
+  if (target.origin !== base.origin || (prefix && target.pathname !== prefix && !target.pathname.startsWith(prefix + '/'))) {
+    throw new Error('Service URL escaped the configured base path');
+  }
+  for (const [name, value] of Object.entries(query || {})) {
+    if (value === undefined) continue;
+    if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') {
+      throw new Error('Service query values must be strings, numbers, or booleans');
+    }
+    target.searchParams.set(name, String(value));
+  }
+  if (target.toString().length > 16384) throw new Error('Service URL is too long');
+  return target.toString();
 }
 
 async function fetchBuffer(url, options) {
@@ -586,6 +702,10 @@ async function main() {
   }
 
   const helpers = { absoluteUrl, normalizeDate, normalizeText, unique };
+  const service = workerData.service ? {
+    getJson: serviceGetJson,
+    publicUrl: servicePublicUrl
+  } : undefined;
   let result;
   if (workerData.kind === 'video') {
     const ctx = {
@@ -595,7 +715,8 @@ async function main() {
       fetchPage,
       fetchBuffer,
       browser,
-      helpers
+      helpers,
+      ...(service ? { service } : {})
     };
     result = loaded.parseVideo ? await loaded.parseVideo(ctx) : await loaded.parseTask(ctx, workerData.proxyUrl);
   } else {

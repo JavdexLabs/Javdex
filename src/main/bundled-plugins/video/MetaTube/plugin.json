@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "kind": "video",
+  "name": "MetaTube",
+  "version": "1.0.0",
+  "description": "连接用户自建 MetaTube Server 的影片刮削插件；演员默认按女性导入，label 近似映射为发行方",
+  "author": "Javdex",
+  "homepage": "https://github.com/metatube-community/metatube-sdk-go",
+  "supportedFields": [
+    "title",
+    "summary",
+    "cover",
+    "releaseDate",
+    "maker",
+    "publisher",
+    "series",
+    "director",
+    "duration",
+    "actressesFemale",
+    "tags",
+    "source",
+    "rating",
+    "samples"
+  ],
+  "entry": "index.cjs",
+  "serviceBinding": "metatube"
+}

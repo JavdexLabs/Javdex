@@ -1,5 +1,6 @@
 import { deleteActress } from './actressRepo'
 import { getDb } from './database'
+import { pruneUnusedTags } from './tagRepo'
 
 export interface LibraryCleanupHints {
   actressIds?: number[]
@@ -7,6 +8,7 @@ export interface LibraryCleanupHints {
 
 export interface LibraryCleanupResult {
   stubActressesRemoved: number
+  unusedTagsRemoved: number
 }
 
 export function collectVideoLibraryCleanupHints(videoId: number): LibraryCleanupHints {
@@ -74,5 +76,5 @@ export function runLibraryCleanup(hints: LibraryCleanupHints = {}): LibraryClean
     }
   }
 
-  return { stubActressesRemoved }
+  return { stubActressesRemoved, unusedTagsRemoved: pruneUnusedTags() }
 }

@@ -26,6 +26,7 @@
 - `/actresses/conflicts`: 旧的演员冲突入口，重定向到 `/pending?type=actress`。
 - `/pending/video/:videoId`: 从待确认工作台打开影片详情。
 - `/pending/video/:videoId/actress/:actressId`: 从待确认影片详情继续打开演员详情。
+- `/pending/actress/:actressId`: 从待确认工作台直接打开演员详情，返回仍落在待确认收件箱。
 - `/facet/:type`: 分类列表。
 - `/facet/:role/o/:organizationId`: 制作商或发行商实体详情。
 - `/facet/director/d/:directorId`: 导演实体详情。

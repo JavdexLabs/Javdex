@@ -1,0 +1,24 @@
+.availability {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.availability[data-configured='true'] {
+  border-color: var(--border-accent);
+  color: var(--text-accent);
+}
+
+.configurationLabel {
+  overflow: hidden;
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

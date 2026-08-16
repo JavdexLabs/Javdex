@@ -127,6 +127,7 @@ function AppContent(): JSX.Element {
                     </Route>
                     <Route path={ROUTE_PATH.pending} element={<PendingCenterShell />}>
                       <Route index element={null} />
+                      <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
                       <Route path={ROUTE_SEGMENT.pendingVideo} element={<DetailPage />}>
                         <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
                       </Route>

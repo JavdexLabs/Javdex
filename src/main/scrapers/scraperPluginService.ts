@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { ActressScrapeResult, ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS, expandActressScrapeFields, ScraperPluginDescriptor, ScraperPluginKind, ScraperPluginPackage, type ActressScrapeField, type CompositeScraperInput, type ScraperPluginDelay, type ScraperPluginUpdateInput, type VideoScrapeField, type ScraperPluginPackageExport, type ScraperPluginPackageImport } from '@shared/scrapeTypes'
 import type { VideoPluginScrapeResult } from '@shared/videoScrapeTypes'
+import type { ScraperServiceId } from '@shared/scraperServiceTypes'
 import type { BaseScraper } from './BaseScraper'
 import type { BaseActressScraper } from './BaseActressScraper'
 import {
@@ -18,6 +19,10 @@ import {
   updateSettings
 } from '../settings/settingsStore'
 import { readTestUserDataPath } from '@shared/appIdentity'
+import {
+  getScraperServicePublicConfig,
+  isScraperServiceConfigured
+} from './configuredScraperService'
 
 const PLUGIN_SCHEMA_VERSION = 1
 const RETIRED_PLUGIN_NAMES: Partial<Record<ScraperPluginKind, readonly string[]>> = {
@@ -41,6 +46,7 @@ interface StoredPluginManifest {
   homepage?: string
   supportedFields: string[]
   entry: string
+  serviceBinding?: ScraperServiceId
 }
 
 class UserVideoScraper implements BaseScraper {
@@ -55,7 +61,13 @@ class UserVideoScraper implements BaseScraper {
 
   async parseTask(code: string, proxyUrl?: string): Promise<VideoPluginScrapeResult> {
     const pluginCode = fs.readFileSync(this.entryPath, 'utf-8')
-    return runUserVideoPlugin(this.manifest.name, pluginCode, code, proxyUrl)
+    return runUserVideoPlugin(
+      this.manifest.name,
+      pluginCode,
+      code,
+      proxyUrl,
+      this.manifest.serviceBinding
+    )
   }
 }
 
@@ -95,6 +107,7 @@ export function builtInDescriptor(
     removable: false,
     exportable: true,
     editable: true,
+    debuggable: true,
     supportedFields: [...defaultSupportedFields(kind)],
     delay: delayForPlugin(kind, name)
   }
@@ -222,6 +235,9 @@ export function readScraperPluginPackage(
 ): ScraperPluginPackage {
   const stored = findInstalledPlugin(kind, name)
   if (!stored) throw new Error('插件不存在')
+  if (stored.manifest.serviceBinding) {
+    throw new Error('受信服务内置插件不可导出、读取代码或进行 AI 调试')
+  }
   const code = fs.readFileSync(stored.entryPath, 'utf-8')
   const manifest = stored.manifest
   return {
@@ -300,6 +316,7 @@ export function createCompositeScraper(
     description: input.description?.trim() || undefined,
     fieldPluginMap: normalizeCompositeFieldMap(kind, input.fieldPluginMap)
   }
+  assertCompositeSourcesRunnable(kind, normalized.fieldPluginMap)
   updateSettings({
     compositeScrapers: {
       ...settings.compositeScrapers,
@@ -334,6 +351,7 @@ export function updateCompositeScraper(
     description: input.description?.trim() || undefined,
     fieldPluginMap: normalizeCompositeFieldMap(kind, input.fieldPluginMap)
   }
+  assertCompositeSourcesRunnable(kind, normalized.fieldPluginMap)
   const updated = [...current]
   updated[index] = normalized
   updateSettings({
@@ -537,6 +555,18 @@ function findBundledPlugin(
 }
 
 function toBundledDescriptor(manifest: StoredPluginManifest): ScraperPluginDescriptor {
+  const requiresConfiguration = Boolean(manifest.serviceBinding)
+  const configured = manifest.serviceBinding
+    ? isScraperServiceConfigured(manifest.serviceBinding)
+    : true
+  const publicConfig = manifest.serviceBinding
+    ? getScraperServicePublicConfig(manifest.serviceBinding)
+    : null
+  const configurationLabel = publicConfig?.serverUrl
+    ? `${new URL(publicConfig.serverUrl).host} · Token ${publicConfig.hasToken ? '已设置' : '未设置'}`
+    : requiresConfiguration
+      ? '待配置'
+      : undefined
   return {
     kind: manifest.kind,
     name: manifest.name,
@@ -546,8 +576,13 @@ function toBundledDescriptor(manifest: StoredPluginManifest): ScraperPluginDescr
     homepage: manifest.homepage,
     source: 'builtin',
     removable: false,
-    exportable: true,
-    editable: true,
+    exportable: !requiresConfiguration,
+    editable: !requiresConfiguration,
+    debuggable: !requiresConfiguration,
+    requiresConfiguration,
+    configured,
+    configurationLabel,
+    disabledReason: configured ? undefined : '请先配置 MetaTube 服务端地址',
     supportedFields: [...normalizeSupportedFields(manifest.kind, manifest.supportedFields)],
     delay: delayForPlugin(manifest.kind, manifest.name)
   }
@@ -566,6 +601,9 @@ function readManifest(filePath: string): StoredPluginManifest {
   if (parsed.kind !== 'video' && parsed.kind !== 'actress') throw new Error('Invalid plugin kind')
   if (!parsed.name?.trim()) throw new Error('Plugin name is required')
   if (!parsed.entry?.trim()) throw new Error('Plugin entry is required')
+  if (parsed.serviceBinding !== undefined) {
+    throw new Error('User plugins cannot declare a trusted service binding')
+  }
   return {
     schemaVersion: PLUGIN_SCHEMA_VERSION,
     kind: parsed.kind,
@@ -573,13 +611,16 @@ function readManifest(filePath: string): StoredPluginManifest {
     version: parsed.version?.trim() || '1.0.0',
     description: parsed.description?.trim() || '',
     author: parsed.author?.trim() || undefined,
-      homepage: parsed.homepage?.trim() || undefined,
-      supportedFields: normalizeSupportedFields(parsed.kind, parsed.supportedFields),
-      entry: parsed.entry.trim()
+    homepage: parsed.homepage?.trim() || undefined,
+    supportedFields: normalizeSupportedFields(parsed.kind, parsed.supportedFields),
+    entry: parsed.entry.trim()
   }
 }
 
 function normalizePackage(pkg: ScraperPluginPackageImport): ScraperPluginPackage {
+  if ((pkg as ScraperPluginPackageImport & { serviceBinding?: unknown }).serviceBinding !== undefined) {
+    throw new Error('用户导入包不能声明受信服务绑定')
+  }
   if (pkg.schemaVersion !== PLUGIN_SCHEMA_VERSION) {
     throw new Error('插件包 schemaVersion 必须为 1')
   }
@@ -645,6 +686,7 @@ function toDescriptor(manifest: StoredPluginManifest): ScraperPluginDescriptor {
     removable: true,
     exportable: true,
     editable: true,
+    debuggable: true,
     overridesBuiltIn: isBuiltInScraperName(manifest.kind, manifest.name),
     supportedFields: normalizeSupportedFields(manifest.kind, manifest.supportedFields),
     delay: delayForPlugin(manifest.kind, manifest.name)
@@ -657,6 +699,14 @@ function compositeDescriptor(definition: {
   description?: string
   fieldPluginMap: Partial<Record<VideoScrapeField | ActressScrapeField, string>>
 }): ScraperPluginDescriptor {
+  const standalone = standalonePluginDescriptors(definition.kind)
+  const unavailable = Array.from(new Set(Object.values(definition.fieldPluginMap)))
+    .filter((name): name is string => Boolean(name))
+    .find((name) => standalone.find((plugin) => plugin.name === name)?.configured === false)
+  const missing = Array.from(new Set(Object.values(definition.fieldPluginMap)))
+    .filter((name): name is string => Boolean(name))
+    .find((name) => !standalone.some((plugin) => plugin.name === name))
+  const configured = !unavailable && !missing
   return {
     kind: definition.kind,
     name: definition.name,
@@ -666,10 +716,36 @@ function compositeDescriptor(definition: {
     removable: true,
     exportable: false,
     editable: true,
+    debuggable: false,
+    configured,
+    disabledReason: unavailable
+      ? `字段源「${unavailable}」尚未配置`
+      : missing
+        ? `字段源「${missing}」不存在`
+        : undefined,
     supportedFields: Object.keys(definition.fieldPluginMap) as Array<
       VideoScrapeField | ActressScrapeField
     >,
     fieldPluginMap: definition.fieldPluginMap
+  }
+}
+
+function standalonePluginDescriptors(kind: ScraperPluginKind): ScraperPluginDescriptor[] {
+  return [...listBundledPluginDescriptors(kind), ...listUserPluginDescriptors(kind)]
+}
+
+function assertCompositeSourcesRunnable(
+  kind: ScraperPluginKind,
+  fieldPluginMap: CompositeScraperInput['fieldPluginMap']
+): void {
+  const standalone = standalonePluginDescriptors(kind)
+  for (const pluginName of new Set(Object.values(fieldPluginMap))) {
+    if (!pluginName) continue
+    const descriptor = standalone.find((plugin) => plugin.name === pluginName)
+    if (!descriptor) throw new Error(`组合字段源「${pluginName}」不存在`)
+    if (descriptor.configured === false) {
+      throw new Error(descriptor.disabledReason ?? `组合字段源「${pluginName}」尚未配置`)
+    }
   }
 }
 
@@ -686,6 +762,11 @@ export function listMergedPluginDescriptors(kind: ScraperPluginKind): ScraperPlu
   )
   const visibleBundled = bundled.filter((plugin) => !overriddenNames.has(plugin.name))
   return [...visibleBundled, ...user, ...listCompositePluginDescriptors(kind)]
+}
+
+export function isScraperPluginRunnable(kind: ScraperPluginKind, name: string): boolean {
+  const descriptor = listMergedPluginDescriptors(kind).find((plugin) => plugin.name === name)
+  return Boolean(descriptor && descriptor.configured !== false)
 }
 
 export function findCompositeScraper(

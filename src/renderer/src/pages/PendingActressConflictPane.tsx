@@ -1,4 +1,6 @@
-import { Ban, CircleAlert, GitMerge, Pencil, Trash2, UserRoundSearch } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { Ban, CircleAlert, GitMerge, Pencil, SquareArrowOutUpRight, Trash2, UserRoundSearch } from 'lucide-react'
 import type {
   ActressPendingNameType,
   PendingActressNameClaim,
@@ -15,8 +17,10 @@ import ActressAvatar from '../components/ActressAvatar'
 import Button from '../components/Button'
 import ConfirmModal from '../components/ConfirmModal'
 import EmptyState from '../components/EmptyState'
+import IconButton from '../components/IconButton'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { WorkbenchTabs } from '../components/workbench'
+import { navigateToActressDetail } from '../listView/listNavigation'
 import ConflictMergeActressesModal from './ConflictMergeActressesModal'
 import {
   CONFLICT_ACTION_SCOPE_LABEL,
@@ -39,6 +43,7 @@ import {
   PendingWorkspacePanel
 } from './PendingDecisionParts'
 import type { ConflictReviewViewModel } from './useConflictReviewController'
+import styles from './PendingActressConflictPane.module.css'
 
 const FIELD_LABEL = new Map(ACTRESS_SCRAPE_FIELD_OPTIONS.map((option) => [option.id, option.label]))
 
@@ -115,6 +120,65 @@ function formatImpactValue(value: ActressScrapeFieldImpact['currentValue']): str
 
 function candidateFieldLabel(fields: ActressScrapeField[]): string {
   return fields.map((field) => FIELD_LABEL.get(field) ?? field).join('、') || '仅名称'
+}
+
+function OwnerChoiceCard({
+  selected,
+  name,
+  hint,
+  avatarSrc,
+  gender = null,
+  actressId,
+  className,
+  extraAction,
+  onSelect
+}: {
+  selected: boolean
+  name: string
+  hint: string
+  avatarSrc: string | null | undefined
+  gender?: 'female' | 'male' | null
+  actressId: number
+  className?: string
+  extraAction?: ReactNode
+  onSelect: () => void
+}): JSX.Element {
+  const navigate = useNavigate()
+  const location = useLocation()
+  return (
+    <div
+      className={`conflict-workbench-owner${selected ? ' is-selected' : ''}${className ? ` ${className}` : ''}`}
+    >
+      <label className={styles.ownerSelect}>
+        <input
+          className={styles.ownerRadio}
+          type="radio"
+          name="pending-actress-owner"
+          checked={selected}
+          onChange={onSelect}
+        />
+        <ActressAvatar
+          src={resolveMediaSrc(avatarSrc)}
+          name={name}
+          gender={gender}
+          decorative
+        />
+        <span className={styles.ownerCopy}>
+          <strong>{name}</strong>
+          <small>{hint}</small>
+        </span>
+      </label>
+      <div className={styles.ownerActions}>
+        {extraAction}
+        <IconButton
+          size="sm"
+          icon={<SquareArrowOutUpRight {...UI_ICON_SM} aria-hidden />}
+          label={`查看「${name}」的详情`}
+          onClick={() => navigateToActressDetail(navigate, location, actressId)}
+        />
+      </div>
+    </div>
+  )
 }
 
 function impactFieldLabel(impact: ActressScrapeFieldImpact): string {
@@ -596,61 +660,61 @@ export default function PendingActressConflictPane({
         hidden={selection.tab !== 'process'}
       >
         {isConflict ? (
-          <PendingStep step={1} title="选择名称归属" hint="选择只会生成预览，不会立即写入">
-            <div className="conflict-workbench-owner-grid" role="group" aria-label="名称归属">
+          <PendingStep
+            step={1}
+            title="选择名称归属"
+            hint="点选拟定归属；详情可打开演员页核对"
+          >
+            <div className="conflict-workbench-owner-grid" role="radiogroup" aria-label="名称归属">
               {ownerOptions.map((owner) => (
-                <button
+                <OwnerChoiceCard
                   key={owner.actressId}
-                  type="button"
-                  aria-pressed={proposedOwner?.actressId === owner.actressId}
-                  className={`conflict-workbench-owner${
-                    proposedOwner?.actressId === owner.actressId ? ' is-selected' : ''
-                  }`}
-                  onClick={() =>
+                  selected={proposedOwner?.actressId === owner.actressId}
+                  name={owner.mainName}
+                  hint={owner.roles.join(' · ')}
+                  avatarSrc={owner.avatarPath}
+                  actressId={owner.actressId}
+                  onSelect={() =>
                     detail.selectOwner({
                       actressId: owner.actressId,
                       revision: owner.revision,
                       mainName: owner.mainName
                     })
                   }
-                >
-                  <ActressAvatar
-                    src={resolveMediaSrc(owner.avatarPath)}
-                    name={owner.mainName}
-                    gender={null}
-                    decorative
-                  />
-                  <span><strong>{owner.mainName}</strong><small>{owner.roles.join(' · ')}</small></span>
-                </button>
+                />
               ))}
-              <button
-                type="button"
-                aria-pressed={otherOwner.selected != null}
-                className={`conflict-workbench-owner conflict-workbench-owner--other${
-                  otherOwner.selected ? ' is-selected' : ''
-                }`}
-                onClick={detail.openOtherOwner}
-              >
-                {otherOwner.selected ? (
-                  <>
-                    <ActressAvatar
-                      src={resolveMediaSrc(otherOwner.selected.avatar_path)}
-                      name={otherOwner.selected.main_name}
-                      gender={otherOwner.selected.gender}
-                      decorative
+              {otherOwner.selected ? (
+                <OwnerChoiceCard
+                  selected={proposedOwner?.actressId === otherOwner.selected.id}
+                  className="conflict-workbench-owner--other"
+                  name={otherOwner.selected.main_name}
+                  hint="已从演员库选择"
+                  avatarSrc={otherOwner.selected.avatar_path}
+                  gender={otherOwner.selected.gender}
+                  actressId={otherOwner.selected.id}
+                  extraAction={
+                    <IconButton
+                      size="sm"
+                      icon={<UserRoundSearch {...UI_ICON_SM} />}
+                      label="重新选择演员"
+                      onClick={detail.openOtherOwner}
                     />
-                    <span>
-                      <strong>{otherOwner.selected.main_name}</strong>
-                      <small>已从演员库选择 · 点击重新选择</small>
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <UserRoundSearch {...UI_ICON_SM} aria-hidden />
-                    <span><strong>选择其他演员…</strong><small>从演员库搜索组外演员</small></span>
-                  </>
-                )}
-              </button>
+                  }
+                  onSelect={() => otherOwner.choose(otherOwner.selected!)}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="conflict-workbench-owner conflict-workbench-owner--other"
+                  onClick={detail.openOtherOwner}
+                >
+                  <UserRoundSearch {...UI_ICON_SM} aria-hidden />
+                  <span>
+                    <strong>选择其他演员…</strong>
+                    <small>从演员库搜索组外演员</small>
+                  </span>
+                </button>
+              )}
             </div>
           </PendingStep>
         ) : null}

@@ -25,7 +25,9 @@ import {
   parseLibraryVideoPath
 } from './libraryRoutes'
 import {
+  parsePendingActressDetailPath,
   parsePendingVideoPath,
+  pendingActressDetailPath,
   pendingVideoActressPath,
   pendingVideoDetailPath
 } from './pendingRoutes'
@@ -306,6 +308,13 @@ export function navigateBackFromActressDetail(
     })
     return
   }
+  if (parsePendingActressDetailPath(location.pathname)) {
+    navigate({
+      pathname: ROUTE_PATH.pending,
+      search: location.search
+    })
+    return
+  }
   const series = parseSeriesPath(location.pathname)
   if (series?.videoId != null && series.actressId != null) {
     navigate({
@@ -358,12 +367,30 @@ export function navigateBackFromActressDetail(
   navigateToActressList(navigate, location)
 }
 
-/** Actress detail from the actress list (separate route tree). */
+/** Actress detail from the current list context. */
 export function navigateToActressDetail(
   navigate: NavigateFunction,
   location: Location,
   actressId: number
 ): void {
+  const pendingVideo = parsePendingVideoPath(location.pathname)
+  if (pendingVideo?.videoId != null) {
+    navigate({
+      pathname: pendingVideoActressPath(pendingVideo.videoId, actressId),
+      search: location.search
+    })
+    return
+  }
+  if (
+    location.pathname === ROUTE_PATH.pending ||
+    parsePendingActressDetailPath(location.pathname)
+  ) {
+    navigate({
+      pathname: pendingActressDetailPath(actressId),
+      search: location.search
+    })
+    return
+  }
   navigate({
     pathname: actressDetailPath(actressId),
     search: location.search

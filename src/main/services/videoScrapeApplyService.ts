@@ -14,8 +14,7 @@ import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import { findActressByNameOrAlias, upsertActressFromScrape } from '../db/actressRepo'
 import { getDb } from '../db/database'
 import { collectVideoLibraryCleanupHints, runLibraryCleanup } from '../db/libraryCleanup'
-import { ensureTag } from '../db/tagRepo'
-import { getVideoById, listVideosForBatchScrape } from '../db/videoRepo'
+import { getVideoById, listVideosForBatchScrape, replaceVideoTagsByOrigin } from '../db/videoRepo'
 import { adoptDownloadedAvatarIfMissing } from './actressAssetService'
 import {
   classificationFieldLabel,
@@ -26,27 +25,6 @@ import {
 } from './classificationIdentityResolver'
 import { classificationMaintenanceService } from './classificationMaintenanceService'
 import { mediaAssetStore } from './mediaAssetStore'
-
-function replaceScrapedTags(
-  videoId: number,
-  names: string[],
-  source: string | null,
-  createdAt?: string
-): void {
-  const db = getDb()
-  db.prepare('DELETE FROM video_tag WHERE video_id = ? AND origin = ?').run(videoId, 'scraped')
-  const stampedAt = createdAt ?? nowIso()
-  for (const raw of names) {
-    const name = raw.trim()
-    if (!name) continue
-    const tagId = ensureTag(name)
-    db.prepare(
-      `INSERT OR IGNORE INTO video_tag
-         (video_id, tag_id, origin, source, created_at)
-       VALUES (?, ?, ?, ?, ?)`
-    ).run(videoId, tagId, 'scraped', source, stampedAt)
-  }
-}
 
 function scrapedCastGender(a: ScrapedActress): ActressGender {
   return a.gender ?? 'female'
@@ -961,7 +939,7 @@ export function applyScrapeResult(
     }
 
     if (writeTags) {
-      replaceScrapedTags(videoId, result.tags ?? [], sourceName ?? null, scrapedAt)
+      replaceVideoTagsByOrigin(videoId, result.tags ?? [], 'scraped', sourceName ?? null, scrapedAt)
     }
 
     if (writeSamples) {

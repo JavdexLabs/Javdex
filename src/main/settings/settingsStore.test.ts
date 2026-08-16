@@ -94,6 +94,14 @@ describe('settingsStore video card preferences', () => {
     writeSettings({ showVideoResourceTypeBadges: true })
     assert.equal(getSettings().showVideoResourceTypeBadges, true)
   })
+
+  it('defaults video cards to portrait and preserves an explicit landscape preference', () => {
+    writeSettings({})
+    assert.equal(getSettings().coverDisplayMode, 'portrait')
+    writeSettings({ coverDisplayMode: 'landscape' })
+    resetSettingsCacheForTests()
+    assert.equal(getSettings().coverDisplayMode, 'landscape')
+  })
 })
 
 describe('settingsStore deferred library path cleanup', () => {

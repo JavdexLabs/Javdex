@@ -2,7 +2,7 @@ import { app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import process from 'node:process'
-import { DEFAULT_SETTINGS, normalizeAutoScanIntervalMinutes, normalizePluginDevAgentMaxContextTokens, normalizePluginDevAgentMaxSteps, normalizePrivacyModeScopes, normalizeTheme, normalizeMinScanImportDurationMinutes, type AppSettings, type SettingsRecoveryNotice } from '@shared/settingsTypes'
+import { DEFAULT_SETTINGS, normalizeAutoScanIntervalMinutes, normalizeCoverDisplayMode, normalizePluginDevAgentMaxContextTokens, normalizePluginDevAgentMaxSteps, normalizePrivacyModeScopes, normalizeTheme, normalizeMinScanImportDurationMinutes, type AppSettings, type SettingsRecoveryNotice } from '@shared/settingsTypes'
 import { expandActressScrapeFields, type CompositeScraperDefinition, type ScraperPluginDelaySettings } from '@shared/scrapeTypes'
 import {
   BUILT_IN_LLM_PROVIDER_BY_ID,
@@ -24,12 +24,14 @@ import {
 } from '@shared/avatarFaceScale'
 import { normalizeAvatarCenteringMode } from '@shared/avatarCentering'
 import { normalizeLibraryScanSummary } from '@shared/libraryScanSummary'
+import { normalizeScraperServiceConfigs } from '@shared/scraperServiceTypes'
 import {
   getLlmApiKey,
   hasLlmApiKey,
   resetLlmSecretStoreForTests,
   saveLlmApiKeys
 } from './llmSecretStore'
+import { resetScraperServiceSecretStoreForTests } from './scraperServiceSecretStore'
 
 let cache: AppSettings | null = null
 let recoveryNotice: SettingsRecoveryNotice | null = null
@@ -51,6 +53,7 @@ export function resetSettingsCacheForTests(): void {
   llmSecretMigrationError = undefined
   legacyLlmApiKeys = {}
   resetLlmSecretStoreForTests()
+  resetScraperServiceSecretStoreForTests()
 }
 
 export function getSettings(): AppSettings {
@@ -269,10 +272,15 @@ export function migrateRetiredVideoScraperSettings(): void {
 type ParsedSettings = Partial<AppSettings>
 
 function normalizeSettings(parsed: ParsedSettings): AppSettings {
-  const defaultScraper =
+  const scraperServiceConfigs = normalizeScraperServiceConfigs(parsed.scraperServiceConfigs)
+  const requestedDefaultScraper =
     typeof parsed.defaultScraper === 'string' && parsed.defaultScraper.trim()
       ? parsed.defaultScraper.trim()
       : DEFAULT_SETTINGS.defaultScraper
+  const defaultScraper =
+    requestedDefaultScraper === 'MetaTube' && !scraperServiceConfigs.metatube.serverUrl
+      ? DEFAULT_SETTINGS.defaultScraper
+      : requestedDefaultScraper
   const rawDefaultActressScraper =
     typeof parsed.defaultActressScraper === 'string' && parsed.defaultActressScraper.trim()
       ? parsed.defaultActressScraper.trim()
@@ -324,6 +332,7 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
       parsed.showVideoResourceTypeBadges,
       DEFAULT_SETTINGS.showVideoResourceTypeBadges
     ),
+    coverDisplayMode: normalizeCoverDisplayMode(parsed.coverDisplayMode),
     pendingLibraryPathCleanups: normalizeStringList(parsed.pendingLibraryPathCleanups),
     autoDeleteResourceLessVideos: normalizeBooleanSetting(
       parsed.autoDeleteResourceLessVideos,
@@ -366,6 +375,7 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
       parsed.pluginDevAgentMaxContextTokens
     ),
     scraperPluginDelays: normalizeDelaySettings(parsed.scraperPluginDelays),
+    scraperServiceConfigs,
     compositeScrapers: {
       video: normalizeCompositeScrapers(parsed.compositeScrapers?.video, 'video'),
       actress: normalizeCompositeScrapers(parsed.compositeScrapers?.actress, 'actress')

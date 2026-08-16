@@ -172,14 +172,11 @@
   --organization-link-label-min: 110px;
   --classification-image-preview-w: 148px;
   --classification-image-preview-w-compact: 96px;
-  --classification-image-candidate-w: 112px;
+  --classification-image-source-h: 164px;
   --classification-image-pad: 16px;
   --classification-image-gap: 18px;
   --classification-image-section-gap: 14px;
   --classification-image-control-gap: 6px;
-  --classification-image-caption-gap: 4px;
-  --classification-image-candidate-pad: 7px;
-  --classification-image-meta-gap: 12px;
   --classification-picker-max-h: 220px;
   --classification-merge-modal-w: 640px;
   --classification-merge-gap: 14px;
@@ -389,9 +386,12 @@ textarea,
   flex: 1;
   min-height: 0;
 }
+/** Separates library browsing from the bottom maintenance zone. */
 .sidebar-nav-spacer {
   flex: 1;
   min-height: 12px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border-subtle);
 }
 .nav-group {
   margin: 8px 0 4px;
@@ -466,7 +466,7 @@ textarea,
   width: 100%;
 }
 .nav-item-row--with-badge > .nav-item {
-  padding-right: 50px;
+  padding-right: 44px;
 }
 .nav-item:hover {
   background: var(--surface-elevated);
@@ -494,32 +494,50 @@ textarea,
 }
 
 .nav-count-badge {
-  min-width: 20px;
-  height: 18px;
-  padding: 0 6px;
-  display: inline-grid;
-  place-items: center;
-  border: 1px solid var(--border-warning);
-  border-radius: var(--radius-overlay);
-  background: var(--surface-warning);
-  color: var(--text-warning);
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
-}
-.nav-count-badge--entry {
   position: absolute;
-  top: calc((var(--control-h-lg) - 24px) / 2);
-  right: 11px;
-  min-width: 24px;
-  height: 24px;
-  cursor: pointer;
+  top: 50%;
+  right: 4px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform: translateY(-50%);
 }
 
-.nav-count-badge--entry:hover,
-.nav-count-badge--entry:focus-visible {
-  border-color: var(--border-accent);
-  color: var(--text-accent);
+.nav-count-badge__value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--warning) 22%, var(--surface-elevated));
+  color: var(--text-warning);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.nav-count-badge:hover .nav-count-badge__value {
+  background: color-mix(in srgb, var(--warning) 32%, var(--surface-elevated));
+}
+
+.nav-count-badge:focus-visible {
+  outline: none;
+}
+
+.nav-count-badge:focus-visible .nav-count-badge__value {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
 }
 
 .main-area {

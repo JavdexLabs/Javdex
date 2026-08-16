@@ -16,15 +16,7 @@ interface Props {
 }
 
 function directorMeta(director: DirectorOption): string {
-  const details = [
-    director.countryRegion,
-    director.birthDate ? `出生 ${director.birthDate}` : null,
-    director.careerStartYear || director.careerEndYear
-      ? `从业 ${director.careerStartYear ?? '未知'} - ${director.careerEndYear ?? '至今'}`
-      : null
-  ].filter(Boolean)
-  details.push(`档案 #${director.id}`)
-  return details.join(' · ')
+  return `档案 #${director.id} · ${director.videoCount} 部影片`
 }
 
 export default function DirectorMergeModal({ target, onCancel, onMerged }: Props): JSX.Element {

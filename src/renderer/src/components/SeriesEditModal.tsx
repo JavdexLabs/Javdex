@@ -4,11 +4,10 @@ import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
 import type {
   OrganizationSummary,
   SeriesDetail,
-  SeriesSummary,
   SeriesUpdateInput
 } from '@shared/classificationTypes'
 import { api } from '../api'
-import { organizationKeys, seriesKeys } from '../query/queryKeys'
+import { organizationKeys } from '../query/queryKeys'
 import Modal from './Modal'
 import SelectControl from './SelectControl'
 import AliasTagEditor from './AliasTagEditor'
@@ -17,7 +16,6 @@ import { EditFormField, EditFormSection } from './FormPrimitives'
 import { createSeriesFormDraft, seriesInputFromDraft } from './seriesFormState'
 import ClassificationPicker from './ClassificationPicker'
 import { organizationOptionDescription } from './organizationPickerState'
-import { seriesOptionDescription } from './seriesPickerState'
 import { promoteAliasToMain } from './aliasEditorState'
 import { moveClassificationLink, useClassificationLinkKeys } from './classificationLinkForm'
 import { UI_ICON_SM } from './iconDefaults'
@@ -35,24 +33,14 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
   const { linkKeys, moveLinkKey, removeLinkKey, appendLinkKey } =
     useClassificationLinkKeys(draft.links.length)
   const [ownerSearch, setOwnerSearch] = useState(series?.ownerOrganization?.mainName ?? '')
-  const [parentSearch, setParentSearch] = useState(series?.parentSeries?.mainName ?? '')
   const [selectedOwner, setSelectedOwner] = useState<OrganizationSummary | null>(
     series?.ownerOrganization ?? null
   )
-  const [selectedParent, setSelectedParent] = useState<SeriesSummary | null>(
-    series?.parentSeries ?? null
-  )
   const [saving, setSaving] = useState(false)
   const deferredOwnerSearch = useDeferredValue(ownerSearch.trim())
-  const deferredParentSearch = useDeferredValue(parentSearch.trim())
   const ownerQuery = useQuery({
     queryKey: organizationKeys.options(deferredOwnerSearch),
     queryFn: () => api.organizations.options(deferredOwnerSearch || undefined),
-    placeholderData: (previous) => previous
-  })
-  const parentQuery = useQuery({
-    queryKey: seriesKeys.options(deferredParentSearch),
-    queryFn: () => api.series.options(deferredParentSearch || undefined),
     placeholderData: (previous) => previous
   })
   const ownerOptions = useMemo(() => {
@@ -60,11 +48,6 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
     if (!selectedOwner || options.some((item) => item.id === selectedOwner.id)) return options
     return [{ ...selectedOwner, aliases: [], roles: [] }, ...options]
   }, [ownerQuery.data, selectedOwner])
-  const parentOptions = useMemo(() => {
-    const options = (parentQuery.data ?? []).filter((item) => item.id !== series?.id)
-    if (!selectedParent || options.some((item) => item.id === selectedParent.id)) return options
-    return [{ ...selectedParent, aliases: [], videoCount: 0 }, ...options]
-  }, [parentQuery.data, selectedParent, series?.id])
 
   const save = async (): Promise<void> => {
     setSaving(true)
@@ -229,45 +212,6 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
               {ownerQuery.isError ? (
                 <span className="classification-picker-error" role="alert">
                   所属机构候选加载失败，请稍后重试。
-                </span>
-              ) : null}
-            </EditFormField>
-            <EditFormField
-              label="上级系列"
-              htmlFor="series-parent"
-              span={2}
-              hint="搜索并选择；留空表示无上级。层级循环会在保存时拒绝。"
-            >
-              <ClassificationPicker
-                id="series-parent"
-                value={parentSearch}
-                options={parentOptions.map((option) => ({
-                  id: option.id,
-                  mainName: option.mainName,
-                  description: seriesOptionDescription(option)
-                }))}
-                selectedId={selectedParent?.id ?? null}
-                listLabel="上级系列候选"
-                placeholder="搜索系列主名或别名…"
-                onValueChange={(next) => {
-                  setParentSearch(next)
-                  if (next.trim()) return
-                  setSelectedParent(null)
-                  setDraft({ ...draft, parentSeriesId: '' })
-                }}
-                onSelect={(option) => {
-                  const next = parentOptions.find((item) => item.id === option.id) ?? null
-                  setParentSearch(option.mainName)
-                  setSelectedParent(next)
-                  setDraft({ ...draft, parentSeriesId: String(option.id) })
-                }}
-                onDismiss={() => {
-                  setParentSearch(selectedParent?.mainName ?? '')
-                }}
-              />
-              {parentQuery.isError ? (
-                <span className="classification-picker-error" role="alert">
-                  上级系列候选加载失败，请稍后重试。
                 </span>
               ) : null}
             </EditFormField>

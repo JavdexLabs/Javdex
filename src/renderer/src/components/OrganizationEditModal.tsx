@@ -1,14 +1,10 @@
-import { useDeferredValue, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
 import type {
   OrganizationDetail,
-  OrganizationSummary,
   OrganizationRole,
   OrganizationUpdateInput
 } from '@shared/classificationTypes'
-import { api } from '../api'
-import { organizationKeys } from '../query/queryKeys'
 import Modal from './Modal'
 import SelectControl from './SelectControl'
 import AliasTagEditor from './AliasTagEditor'
@@ -16,11 +12,8 @@ import EditFieldAiTranslate from './EditFieldAiTranslate'
 import { EditFormField, EditFormSection } from './FormPrimitives'
 import {
   createOrganizationFormDraft,
-  organizationUpdateInputFromDraft,
-  retainSelectedParentOption
+  organizationUpdateInputFromDraft
 } from './organizationFormState'
-import ClassificationPicker from './ClassificationPicker'
-import { organizationOptionDescription } from './organizationPickerState'
 import { promoteAliasToMain } from './aliasEditorState'
 import { moveClassificationLink, useClassificationLinkKeys } from './classificationLinkForm'
 import { UI_ICON_SM } from './iconDefaults'
@@ -44,25 +37,8 @@ export default function OrganizationEditModal({
   const [draft, setDraft] = useState(() => createOrganizationFormDraft(organization))
   const { linkKeys, moveLinkKey, removeLinkKey, appendLinkKey } =
     useClassificationLinkKeys(draft.links.length)
-  const [parentSearch, setParentSearch] = useState(organization?.parent?.mainName ?? '')
-  const [selectedParent, setSelectedParent] = useState<OrganizationSummary | null>(
-    organization?.parent ?? null
-  )
   const [saving, setSaving] = useState(false)
   const isEditing = Boolean(organization)
-  const deferredParentSearch = useDeferredValue(parentSearch.trim())
-  const parentOptionsQuery = useQuery({
-    queryKey: organizationKeys.options(deferredParentSearch),
-    queryFn: () => api.organizations.options(deferredParentSearch || undefined),
-    placeholderData: (previous) => previous
-  })
-  const parentOptions = useMemo(() => {
-    return retainSelectedParentOption(
-      parentOptionsQuery.data ?? [],
-      selectedParent,
-      organization?.id
-    )
-  }, [organization?.id, parentOptionsQuery.data, selectedParent])
 
   const save = async (): Promise<void> => {
     setSaving(true)
@@ -197,44 +173,6 @@ export default function OrganizationEditModal({
                 value={draft.endedYear}
                 onChange={(event) => setDraft({ ...draft, endedYear: event.target.value })}
               />
-            </EditFormField>
-            <EditFormField
-              label="上级机构"
-              htmlFor="organization-parent"
-              span={2}
-              hint="搜索并选择；留空表示无上级。层级循环会在保存时拒绝。"
-            >
-              <ClassificationPicker
-                id="organization-parent"
-                value={parentSearch}
-                options={parentOptions.map((option) => ({
-                  id: option.id,
-                  mainName: option.mainName,
-                  description: organizationOptionDescription(option)
-                }))}
-                selectedId={selectedParent?.id ?? null}
-                listLabel="上级机构候选"
-                placeholder="搜索机构主名或别名…"
-                onValueChange={(next) => {
-                  setParentSearch(next)
-                  if (next.trim()) return
-                  setSelectedParent(null)
-                  setDraft({ ...draft, parentOrganizationId: '' })
-                }}
-                onSelect={(option) => {
-                  setParentSearch(option.mainName)
-                  setSelectedParent({ id: option.id, mainName: option.mainName })
-                  setDraft({ ...draft, parentOrganizationId: String(option.id) })
-                }}
-                onDismiss={() => {
-                  setParentSearch(selectedParent?.mainName ?? '')
-                }}
-              />
-              {parentOptionsQuery.isError ? (
-                <span className="classification-picker-error" role="alert">
-                  上级机构候选加载失败，请稍后重试。
-                </span>
-              ) : null}
             </EditFormField>
           </div>
         </EditFormSection>

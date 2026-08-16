@@ -639,6 +639,40 @@
   background: color-mix(in srgb, var(--surface-control) 35%, transparent);
 }
 
+.settings-cover-mode-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: var(--target-min);
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.settings-cover-mode-row .mode-toggle {
+  flex-shrink: 0;
+}
+
+.settings-cover-mode-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.settings-cover-mode-title {
+  color: var(--text-primary);
+  font-size: var(--settings-fs-body, 13px);
+  line-height: var(--settings-lh-tight, 1.35);
+}
+
+.settings-cover-mode-description {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+}
+
 .settings-toggle-list--compact {
   margin-top: 10px;
 }

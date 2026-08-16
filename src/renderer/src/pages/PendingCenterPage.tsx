@@ -49,7 +49,9 @@ const FILTER_ORDER: PendingTypeFilter[] = ['all', 'scan', 'scrape', 'actress']
 export default function PendingCenterPage(): JSX.Element {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const detailOpen = Boolean(useMatch({ path: ROUTE_MATCH.pendingVideoStack, end: false }))
+  const videoDetailOpen = Boolean(useMatch({ path: ROUTE_MATCH.pendingVideoStack, end: false }))
+  const actressDetailOpen = Boolean(useMatch({ path: ROUTE_MATCH.pendingActressDetail, end: true }))
+  const detailOpen = videoDetailOpen || actressDetailOpen
   const [params] = useSearchParams()
   const { type, item: urlItem, videoId: videoFromUrl } = parsePendingCenterSearch(params)
 

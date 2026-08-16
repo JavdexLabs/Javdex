@@ -34,7 +34,9 @@ export const ROUTE_PATH = {
   pending: '/pending',
   pendingTree: '/pending/*',
   pendingVideoStack: '/pending/video/:videoId',
-  pendingActressStack: '/pending/video/:videoId/actress/:actressId'
+  pendingActressStack: '/pending/video/:videoId/actress/:actressId',
+  /** Actress overlay opened from the pending inbox, not from a video. */
+  pendingActressDetail: '/pending/actress/:actressId'
 } as const
 
 export const ROUTE_SEGMENT = {
@@ -73,5 +75,6 @@ export const ROUTE_MATCH = {
   seriesVideoStack: ROUTE_PATH.seriesVideoStack,
   seriesActressStack: ROUTE_PATH.seriesActressStack,
   pendingVideoStack: ROUTE_PATH.pendingVideoStack,
-  pendingActressStack: ROUTE_PATH.pendingActressStack
+  pendingActressStack: ROUTE_PATH.pendingActressStack,
+  pendingActressDetail: ROUTE_PATH.pendingActressDetail
 } as const

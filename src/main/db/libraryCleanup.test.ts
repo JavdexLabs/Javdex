@@ -54,6 +54,7 @@ describe('libraryCleanup', () => {
 
     const result = runLibraryCleanup(hints)
     assert.equal(result.stubActressesRemoved, 1)
+    assert.equal(result.unusedTagsRemoved, 0)
 
     assert.equal(db.prepare('SELECT id FROM actresses WHERE main_name = ?').get('Stub Actress'), undefined)
     assert.ok(db.prepare('SELECT id FROM actresses WHERE main_name = ?').get('Rich Actress'))
@@ -62,5 +63,17 @@ describe('libraryCleanup', () => {
   it('does not prune an actress with meaningful profile data', () => {
     setupDb()
     assert.equal(isStubActress(2), false)
+  })
+
+  it('deletes tags that are no longer linked to any video', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare("INSERT INTO tags (id, name) VALUES (11, 'Keep'), (12, 'Drop')").run()
+    db.prepare('INSERT INTO video_tag (video_id, tag_id) VALUES (1, 11)').run()
+
+    const result = runLibraryCleanup()
+    assert.equal(result.unusedTagsRemoved, 1)
+    assert.ok(db.prepare('SELECT id FROM tags WHERE id = 11').get())
+    assert.equal(db.prepare('SELECT id FROM tags WHERE id = 12').get(), undefined)
   })
 })

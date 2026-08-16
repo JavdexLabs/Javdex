@@ -52,3 +52,13 @@ export function pruneTagIfUnused(tagId: number): void {
     db.prepare('DELETE FROM tags WHERE id = ?').run(tagId)
   }
 }
+
+/** Remove every tag that is no longer linked to any video. */
+export function pruneUnusedTags(): number {
+  return getDb()
+    .prepare(
+      `DELETE FROM tags
+       WHERE NOT EXISTS (SELECT 1 FROM video_tag WHERE video_tag.tag_id = tags.id)`
+    )
+    .run().changes
+}

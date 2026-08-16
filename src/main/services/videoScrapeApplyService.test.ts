@@ -603,6 +603,8 @@ describe('videoScrapeApplyService.applyScrapeResult', () => {
       detail.tags.filter((tag) => tag.origin === 'scraped').map((tag) => tag.name),
       ['New Scraped']
     )
+    assert.equal(db.prepare('SELECT id FROM tags WHERE name = ?').get('HD'), undefined)
+    assert.ok(db.prepare('SELECT id FROM tags WHERE name = ?').get('Drama'))
   })
 
   it('keeps a committed scrape successful when post-commit library cleanup fails', () => {
@@ -647,6 +649,44 @@ describe('videoScrapeApplyService.applyScrapeResult', () => {
       getVideoDetail(1)!.actresses.map((actress) => actress.main_name),
       ['New Actress']
     )
+  })
+
+  it('does not roll back scraped tags when orphan-tag cleanup fails after commit', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare("UPDATE video_tag SET origin = 'scraped' WHERE video_id = 1").run()
+    db.exec(`
+      CREATE TRIGGER fail_orphan_tag_cleanup
+      BEFORE DELETE ON tags
+      WHEN OLD.name = 'HD'
+      BEGIN
+        SELECT RAISE(ABORT, 'tag cleanup failed');
+      END
+    `)
+
+    const previousConsoleError = console.error
+    console.error = () => undefined
+    try {
+      const outcome = applyScrapeResult(
+        1,
+        { code: 'IPX-535', tags: ['Committed Tag'] },
+        null,
+        new Map(),
+        [],
+        ['tags'],
+        'Example',
+        'replace'
+      )
+      assert.equal(outcome.applied, true)
+    } finally {
+      console.error = previousConsoleError
+    }
+
+    assert.deepEqual(
+      getVideoDetail(1)!.tags.map((tag) => [tag.name, tag.origin]),
+      [['Committed Tag', 'scraped']]
+    )
+    assert.ok(db.prepare('SELECT id FROM tags WHERE name = ?').get('HD'))
   })
 
   it('reuses the unique name owner for canonically equivalent scraped cast names', () => {

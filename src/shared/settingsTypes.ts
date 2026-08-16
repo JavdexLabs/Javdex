@@ -2,6 +2,10 @@ import { DEFAULT_AVATAR_FACE_RATIO, DEFAULT_AVATAR_FACE_SCALE_PRESET, type Avata
 import { DEFAULT_AVATAR_CENTERING_MODE, type AvatarCenteringMode } from './avatarCentering'
 import type { CompositeScraperDefinition, ScraperPluginDelaySettings } from './scraperPluginTypes'
 import type { LibraryScanSummary } from './libraryTypes'
+import {
+  DEFAULT_SCRAPER_SERVICE_CONFIGS,
+  type ScraperServiceConfigs
+} from './scraperServiceTypes'
 
 /** UI color theme id (maps to CSS variables on html[data-theme]). */
 export type ThemeId = 'graphite' | 'warm' | 'slate' | 'light'
@@ -10,6 +14,14 @@ const VALID_THEMES: ThemeId[] = ['graphite', 'warm', 'slate', 'light']
 
 export function normalizeTheme(value: unknown): ThemeId {
   return VALID_THEMES.includes(value as ThemeId) ? (value as ThemeId) : 'graphite'
+}
+
+export const COVER_DISPLAY_MODES = ['portrait', 'landscape'] as const
+
+export type CoverDisplayMode = (typeof COVER_DISPLAY_MODES)[number]
+
+export function normalizeCoverDisplayMode(value: unknown): CoverDisplayMode {
+  return value === 'landscape' ? 'landscape' : 'portrait'
 }
 
 export const PRIVACY_MODE_SCOPES = [
@@ -95,12 +107,16 @@ export interface AppSettings {
   actressDetailUseFirstGalleryBackground: boolean
   /** Display compact resource-kind badges on every video card. */
   showVideoResourceTypeBadges: boolean
+  /** Media-library video cards use portrait posters or landscape covers. */
+  coverDisplayMode: CoverDisplayMode
   /** Encrypt cover/avatar files on disk as .enc blobs. */
   assetEncryption: boolean
   /** Custom folder for cover/avatar storage; empty uses default userData/media_assets. */
   mediaAssetsPath: string
   /** Per scraper random interval ranges used by batch scraping. */
   scraperPluginDelays: ScraperPluginDelaySettings
+  /** Non-secret configuration for trusted scraper services. */
+  scraperServiceConfigs: ScraperServiceConfigs
   /** Field-level virtual scraper definitions. */
   compositeScrapers: {
     video: CompositeScraperDefinition[]
@@ -148,6 +164,7 @@ export type RendererSettingsPatch = Partial<
     | 'llmProviderConfigs'
     | 'mediaAssetsPath'
     | 'pendingLibraryPathCleanups'
+    | 'scraperServiceConfigs'
   >
 >
 
@@ -211,11 +228,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
   videoDetailUseFirstSampleBackground: false,
   actressDetailUseFirstGalleryBackground: true,
   showVideoResourceTypeBadges: false,
+  coverDisplayMode: 'portrait',
   assetEncryption: false,
   mediaAssetsPath: '',
   scraperPluginDelays: {
     video: {},
     actress: {}
+  },
+  scraperServiceConfigs: {
+    metatube: { ...DEFAULT_SCRAPER_SERVICE_CONFIGS.metatube }
   },
   compositeScrapers: {
     video: [],

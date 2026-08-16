@@ -970,6 +970,8 @@ describe('VideoMaintenanceService', () => {
       name: string
     }
     assert.equal(kept.name, '收藏')
+    assert.equal(db.prepare('SELECT id FROM tags WHERE name = ?').get('Drama'), undefined)
+    assert.ok(db.prepare('SELECT id FROM tags WHERE name = ?').get('收藏'))
     assert.equal(
       (db.prepare('SELECT COUNT(*) AS c FROM video_external_stats WHERE video_id = 1').get() as { c: number })
         .c,
@@ -1116,6 +1118,7 @@ describe('VideoMaintenanceService', () => {
         { name: 'Source manual', origin: 'manual', source: null }
       ]
     )
+    assert.equal(db.prepare('SELECT id FROM tags WHERE name = ?').get('Source scraped'), undefined)
   })
 
   it('unions cast, playlists, sources, and ratings while preserving retained conflicts and scrape history', () => {

@@ -138,6 +138,12 @@ class ScrapeBrowser {
   private currentMainFrameCfMitigated = false
   /** Origin of the most recently loaded page, used as the image Referer. */
   private lastOrigin = 'https://javdb.com'
+  /**
+   * All page loads share the single scraper window, so a second navigation
+   * cancels the first and both callers would read back the same DOM. Page
+   * fetches therefore run one at a time.
+   */
+  private pageQueue: Promise<void> = Promise.resolve()
 
   /** Image bodies captured from the scraper window via CDP Network. */
   private readonly imageBodyCache = new ImageBodyLruCache()
@@ -617,6 +623,9 @@ class ScrapeBrowser {
    * Load a URL in the verification window and return its HTML once the page is
    * ready — either auto-detected real content, or after the user clicks
    * 「验证通过」. Throws on timeout or if the window is closed.
+   *
+   * Concurrent calls are queued rather than run in parallel, so a plugin may
+   * safely fan out over several URLs without them clobbering each other.
    */
   async fetchPage(
     url: string,
@@ -627,6 +636,27 @@ class ScrapeBrowser {
       /** Body/title matches this → page is treated as loaded (e.g. xslist "No results found"). */
       settleWhenText?: RegExp
     } = {}
+  ): Promise<string> {
+    // The timeout budget starts inside loadPageExclusively, so queueing never
+    // eats into a caller's timeoutMs.
+    const run = this.pageQueue.then(
+      () => this.loadPageExclusively(url, options),
+      () => this.loadPageExclusively(url, options)
+    )
+    this.pageQueue = run.then(
+      () => undefined,
+      () => undefined
+    )
+    return run
+  }
+
+  private async loadPageExclusively(
+    url: string,
+    options: {
+      readySelector?: string
+      timeoutMs?: number
+      settleWhenText?: RegExp
+    }
   ): Promise<string> {
     const { readySelector = DEFAULT_CONTENT_SELECTOR, timeoutMs = 180000, settleWhenText } =
       options

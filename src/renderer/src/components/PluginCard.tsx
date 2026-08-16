@@ -6,6 +6,8 @@ import { Ellipsis, Pencil } from 'lucide-react'
 import { UI_ICON_MD } from './iconDefaults'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { defaultPluginDelay, pluginSourceLabel } from '../settings/settingsDisplay'
+import Button from './Button'
+import styles from './PluginCard.module.css'
 
 function formatPluginVersion(plugin: ScraperPluginDescriptor): string | null {
   if (plugin.source === 'composite' || plugin.version === '组合') return null
@@ -40,8 +42,9 @@ export default function PluginCard({
     setMenuOpen(false)
   }, menuOpen)
 
-  const showMoreMenu =
-    plugin.exportable || plugin.removable || plugin.source === 'builtin' || plugin.source === 'user'
+  const canDebug =
+    plugin.debuggable !== false && (plugin.source === 'builtin' || plugin.source === 'user')
+  const showMoreMenu = plugin.exportable || plugin.removable || canDebug
   const fieldMapCount = plugin.fieldPluginMap ? Object.keys(plugin.fieldPluginMap).length : 0
   const delayLabel =
     plugin.source === 'composite'
@@ -66,7 +69,7 @@ export default function PluginCard({
           menuOpen ? ' plugin-card--menu-open' : ''
         }`}
         role="listitem"
-        aria-label={`${plugin.name}${isDefault ? '，默认插件' : ''}`}
+        aria-label={`${plugin.name}${isDefault ? '，默认插件' : ''}${plugin.configured === false ? '，待配置' : ''}`}
       >
         <div className="plugin-card-body">
           <div className="plugin-card-title-row">
@@ -79,7 +82,8 @@ export default function PluginCard({
               <button
                 type="button"
                 className="plugin-card-set-default-btn"
-                disabled={actionsDisabled}
+                disabled={actionsDisabled || plugin.configured === false}
+                title={plugin.configured === false ? plugin.disabledReason : undefined}
                 onClick={(e) => {
                   e.stopPropagation()
                   onSetDefault()
@@ -96,7 +100,23 @@ export default function PluginCard({
               </span>
             )}
             {versionLabel && <span className="plugin-version">{versionLabel}</span>}
+            {plugin.requiresConfiguration && (
+              <span
+                className={styles.availability}
+                data-configured={plugin.configured !== false}
+              >
+                {plugin.configured === false ? '待配置' : '可用'}
+              </span>
+            )}
           </div>
+          {plugin.requiresConfiguration && (
+            <div
+              className={styles.configurationLabel}
+              title={plugin.configurationLabel || plugin.disabledReason}
+            >
+              {plugin.configurationLabel || plugin.disabledReason || '待配置'}
+            </div>
+          )}
           <div className="plugin-card-meta">
             <span>{delayLabel}</span>
             <span className="plugin-card-field-count">
@@ -121,16 +141,31 @@ export default function PluginCard({
           </div>
         </div>
         <div className="plugin-card-actions">
-          <IconButton
-            className="plugin-card-icon-action"
-            icon={<Pencil {...UI_ICON_MD} />}
-            label="编辑"
-            disabled={actionsDisabled}
-            onClick={(e) => {
-              e.stopPropagation()
-              activateEdit()
-            }}
-          />
+          {plugin.requiresConfiguration && plugin.configured === false ? (
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              disabled={actionsDisabled}
+              onClick={(event) => {
+                event.stopPropagation()
+                activateEdit()
+              }}
+            >
+              配置服务端
+            </Button>
+          ) : (
+            <IconButton
+              className="plugin-card-icon-action"
+              icon={<Pencil {...UI_ICON_MD} />}
+              label="编辑"
+              disabled={actionsDisabled}
+              onClick={(e) => {
+                e.stopPropagation()
+                activateEdit()
+              }}
+            />
+          )}
           {showMoreMenu && (
             <span ref={menuBtnRef} className="plugin-card-menu-anchor">
               <IconButton
@@ -175,7 +210,7 @@ export default function PluginCard({
           <button
             type="button"
             role="menuitem"
-            disabled={!(plugin.source === 'user' || plugin.source === 'builtin') || actionsDisabled}
+            disabled={!canDebug || actionsDisabled}
             onClick={() => {
               setMenuOpen(false)
               onAiDebug()

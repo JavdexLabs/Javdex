@@ -6,8 +6,6 @@ import {
   Film,
   Link2,
   ListPlus,
-  RectangleHorizontal,
-  RectangleVertical,
   SearchCheck,
   SearchX,
   Trash2
@@ -30,7 +28,6 @@ import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useRangeSelection } from '../hooks/useRangeSelection'
 import { useToast } from '../components/Toast'
 import VirtualPosterGrid from '../components/VirtualPosterGrid'
-import { useDisplayMode } from '../components/DisplayModeContext'
 import AppliedFilterBar, { type AppliedFilterItem } from '../components/AppliedFilterBar'
 import LibraryFilterPopover, { type LibraryFilterState } from '../components/LibraryFilterPopover'
 import ListToolbar from '../components/ListToolbar'
@@ -115,7 +112,6 @@ interface PendingDirectorChoice extends SingleScrapeRequest {
 export default function LibraryPage(): JSX.Element {
   const queryClient = useQueryClient()
   const toast = useToast()
-  const { mode, setMode } = useDisplayMode()
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
   const navigate = useNavigate()
@@ -627,15 +623,6 @@ export default function LibraryPage(): JSX.Element {
             }}
             controls={
               <>
-                <Button
-                  type="button"
-
-                  size="sm"
-                  onClick={() => setShowResourceImport(true)}
-                >
-                  <Link2 {...UI_ICON_SM} aria-hidden />
-                  <span>导入链接</span>
-                </Button>
                 <div className="library-filter-anchor">
                   <Button
                     ref={filterBtnRef}
@@ -679,24 +666,15 @@ export default function LibraryPage(): JSX.Element {
                   }
                 />
 
-                <div className="mode-toggle" title="封面显示方式" role="group" aria-label="封面显示方式">
-                  <button
-                    type="button"
-                    className={mode === 'portrait' ? 'active' : ''}
-                    onClick={() => setMode('portrait')}
-                  >
-                    <RectangleVertical {...UI_ICON_SM} aria-hidden />
-                    <span>竖版</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={mode === 'landscape' ? 'active' : ''}
-                    onClick={() => setMode('landscape')}
-                  >
-                    <RectangleHorizontal {...UI_ICON_SM} aria-hidden />
-                    <span>横板</span>
-                  </button>
-                </div>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setShowResourceImport(true)}
+                >
+                  <Link2 {...UI_ICON_SM} aria-hidden />
+                  导入链接
+                </Button>
               </>
             }
             resultCount={

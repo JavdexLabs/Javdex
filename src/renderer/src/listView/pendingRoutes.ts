@@ -86,6 +86,18 @@ export function pendingVideoActressPath(videoId: number, actressId: number): str
   return `${pendingVideoDetailPath(videoId)}/actress/${actressId}`
 }
 
+export function pendingActressDetailPath(actressId: number): string {
+  return generatePath(ROUTE_PATH.pendingActressDetail, { actressId: String(actressId) })
+}
+
+export function parsePendingActressDetailPath(pathname: string): { actressId: number } | null {
+  const match = matchPath({ path: ROUTE_PATH.pendingActressDetail, end: true }, pathname)
+  if (!match) return null
+  const actressId = Number(match.params.actressId)
+  if (!Number.isInteger(actressId) || actressId <= 0) return null
+  return { actressId }
+}
+
 export function parsePendingVideoPath(pathname: string): {
   videoId: number
   actressId?: number

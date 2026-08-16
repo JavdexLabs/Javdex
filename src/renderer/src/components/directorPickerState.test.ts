@@ -28,7 +28,7 @@ describe('director picker state', () => {
     const second = { ...first, id: 10 }
     assert.equal(
       directorOptionDescription(first),
-      '#9 · US · 出生 1970-01-02 · 从业 1990-至今 · 别名 A. Lee · 12 部'
+      '#9 · 别名 A. Lee · 12 部'
     )
     assert.notEqual(directorOptionDescription(first), directorOptionDescription(second))
     assert.deepEqual(selectedDirectorAssignment(first), { directorId: 9 })

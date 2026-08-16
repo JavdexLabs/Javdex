@@ -946,6 +946,25 @@ function promotePendingResources(pendingId: number): PreparedPendingFormalResour
   })
 }
 
+/** True when the plugin returned at least one apply-able profile field (not just sourceUrl/mainName). */
+function actressScrapeResultHasUsableValue(result: ActressScrapeResult): boolean {
+  if (result.birthDate?.trim()) return true
+  if (result.nameZh?.trim()) return true
+  if (result.nameEn?.trim()) return true
+  if (result.debutDate?.trim()) return true
+  if (result.heightCm != null) return true
+  if (result.bustCm != null || result.waistCm != null || result.hipCm != null) return true
+  if (result.cupSize?.trim()) return true
+  if (result.bloodType?.trim()) return true
+  if (result.zodiac?.trim()) return true
+  if (result.nationality?.trim()) return true
+  if (result.profileSummary?.trim()) return true
+  if (result.avatarUrl?.trim()) return true
+  if (result.galleryImageUrls?.some((url) => url.trim())) return true
+  if (result.aliases?.some((name) => name.trim())) return true
+  return false
+}
+
 export class ActressIdentityConflictWorkflow {
   processPreparedScrape(input: PreparedActressScrape): ActressScrapeDisposition {
     const db = getDb()
@@ -1022,15 +1041,22 @@ export class ActressIdentityConflictWorkflow {
           return result
         })
         if (!applied.applied) {
+          const warnings = [...input.warnings, ...applied.warnings]
+          if (input.mode === 'fillEmpty' && actressScrapeResultHasUsableValue(input.result)) {
+            return {
+              status: 'success',
+              ok: true,
+              result: input.result,
+              skipped: true,
+              warnings: warnings.length > 0 ? warnings : undefined
+            }
+          }
           recordActressScrapeFailure(input.actressId)
           return {
             status: 'failure',
             ok: false,
             error: '未找到有效的演员资料',
-            warnings:
-              [...input.warnings, ...applied.warnings].length > 0
-                ? [...input.warnings, ...applied.warnings]
-                : undefined
+            warnings: warnings.length > 0 ? warnings : undefined
           }
         }
         cleanupStagedResourcePaths(obsoleteStagedPaths)

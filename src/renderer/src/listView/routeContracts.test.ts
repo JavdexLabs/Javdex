@@ -62,9 +62,11 @@ import {
 import { resolveSettingsRoute, settingsPath, settingsPluginDevPath } from '../settings/settingsRoutes'
 import {
   parsePendingCenterSearch,
+  pendingCenterPath,
+  parsePendingActressDetailPath,
   parsePendingItemKey,
   parsePendingVideoPath,
-  pendingCenterPath,
+  pendingActressDetailPath,
   pendingItemKey,
   pendingVideoActressPath,
   pendingVideoDetailPath
@@ -163,6 +165,9 @@ describe('route builders and parsers', () => {
     })
     assert.equal(pendingVideoDetailPath(42), '/pending/video/42')
     assert.equal(pendingVideoActressPath(42, 7), '/pending/video/42/actress/7')
+    assert.equal(pendingActressDetailPath(8), '/pending/actress/8')
+    assert.deepEqual(parsePendingActressDetailPath('/pending/actress/8'), { actressId: 8 })
+    assert.equal(parsePendingActressDetailPath('/pending/video/42/actress/7'), null)
     assert.deepEqual(parsePendingVideoPath('/pending/video/42/actress/7'), {
       videoId: 42,
       actressId: 7
@@ -621,6 +626,27 @@ describe('navigation helpers', () => {
       { pathname: '/pending/video/42/actress/9', search: pending.search },
       { pathname: '/pending/video/42', search: pending.search },
       { pathname: '/pending', search: 'tab=scrape&id=7&videoId=42' }
+    ])
+  })
+
+  it('opens actress detail from the pending inbox and returns to it', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const pending = {
+      pathname: '/pending',
+      search: '?type=actress&item=actress%3Aname',
+      hash: '',
+      state: null,
+      key: 'pending-actress'
+    } as Location
+
+    navigateToActressDetail(navigate, pending, 8)
+    const overlay = { ...pending, pathname: '/pending/actress/8' } as Location
+    navigateBackFromActressDetail(navigate, overlay)
+
+    assert.deepEqual(destinations, [
+      { pathname: '/pending/actress/8', search: pending.search },
+      { pathname: '/pending', search: pending.search }
     ])
   })
 

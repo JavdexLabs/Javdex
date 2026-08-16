@@ -3,11 +3,13 @@ import { IPC } from '@shared/ipc-channels'
 import type { ScraperPluginKind } from '@shared/scraperPluginTypes'
 import { createDefaultScrapeJobController } from '../services/scrapeJobController'
 import { createDefaultScraperPluginCatalog } from '../services/scraperPluginCatalog'
+import { createDefaultScraperServiceConfiguration } from '../services/scraperServiceConfiguration'
 import type { IpcContext } from './shared'
 import { registerScrapeHandler, sendScrapeEvent } from './scrapeContractAdapter'
 
 export function registerScrapeHandlers(ctx: IpcContext): void {
   const plugins = createDefaultScraperPluginCatalog()
+  const serviceConfiguration = createDefaultScraperServiceConfiguration()
   const jobs = createDefaultScrapeJobController({
     rendererAvailable: () => {
       const window = ctx.getWindow()
@@ -38,6 +40,18 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
     plugins.updatePlugin('video', name, input)
   )
   registerScrapeHandler(IPC.SCRAPER_PLUGIN_DELETE, (name) => plugins.deletePlugin('video', name))
+  registerScrapeHandler(IPC.SCRAPER_SERVICE_CONFIG_GET, (serviceId) =>
+    serviceConfiguration.get(serviceId)
+  )
+  registerScrapeHandler(IPC.SCRAPER_SERVICE_CONFIG_SAVE, (serviceId, input) =>
+    serviceConfiguration.save(serviceId, input)
+  )
+  registerScrapeHandler(IPC.SCRAPER_SERVICE_CONFIG_TEST, (serviceId, input) =>
+    serviceConfiguration.test(serviceId, input)
+  )
+  registerScrapeHandler(IPC.SCRAPER_SERVICE_CONFIG_CLEAR, (serviceId) =>
+    serviceConfiguration.clear(serviceId)
+  )
   registerScrapeHandler(IPC.SCRAPER_COMPOSITE_CREATE, (input) =>
     plugins.createComposite('video', input)
   )

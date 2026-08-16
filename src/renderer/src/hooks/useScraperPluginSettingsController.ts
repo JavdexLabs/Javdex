@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
 import type { SettingsSnapshot } from '@shared/settingsTypes'
-import type { ScraperPluginPackage } from '@shared/scraperPluginTypes'
+import type { ScraperPluginDescriptor, ScraperPluginPackage } from '@shared/scraperPluginTypes'
 import type { PluginDeleteTarget } from '../components/settings/PluginsSettingsPanel'
 import type {
   CompositeEditState,
   PluginEditState,
   PluginKind
 } from '../components/settings/PluginConfigModals'
-import type { CompositeScraperInput, ScraperPluginUpdateInput } from '@shared/scrapeTypes'
+import type {
+  CompositeScraperInput,
+  ScraperPluginUpdateInput,
+  ScraperServiceConfigInput,
+  ScraperServiceConnectionResult
+} from '@shared/scrapeTypes'
 import { api } from '../api'
 import { useToast } from '../components/Toast'
 
@@ -55,6 +60,26 @@ export default function useScraperPluginSettingsController({
     if (kind === 'video') await refreshVideoPlugins()
     else await refreshActressPlugins()
   }, [refreshActressPlugins, refreshVideoPlugins])
+
+  const openPluginEditor = async (
+    kind: PluginKind,
+    plugin: ScraperPluginDescriptor
+  ): Promise<void> => {
+    if (!plugin.requiresConfiguration) {
+      setEditingPlugin({ kind, plugin })
+      return
+    }
+    if (kind !== 'video' || plugin.name !== 'MetaTube' || pluginBusy) return
+    setPluginBusy('video-service-load:MetaTube')
+    try {
+      const serviceConfig = await api.scrape.getServiceConfig('metatube')
+      setEditingPlugin({ kind, plugin, serviceConfig })
+    } catch (error) {
+      toast.show(String((error as Error).message ?? error), 'error')
+    } finally {
+      setPluginBusy(null)
+    }
+  }
 
   useEffect(() => {
     if (!shouldLoad) return
@@ -143,16 +168,41 @@ export default function useScraperPluginSettingsController({
   const savePluginConfig = async (
     kind: PluginKind,
     name: string,
-    input: ScraperPluginUpdateInput
+    input: ScraperPluginUpdateInput,
+    serviceInput?: ScraperServiceConfigInput
   ): Promise<void> => {
     if (pluginBusy) return
     setPluginBusy(`${kind}-update:${name}`)
     try {
+      if (serviceInput) await api.scrape.saveServiceConfig('metatube', serviceInput)
       if (kind === 'video') await api.scrape.updatePlugin(name, input)
       else await api.actressScrape.updatePlugin(name, input)
       await refreshPluginsForKind(kind)
+      if (serviceInput) setSettings(await api.settings.get())
       setEditingPlugin(null)
       toast.show('插件配置已保存', 'success')
+    } catch (error) {
+      toast.show(String((error as Error).message ?? error), 'error')
+    } finally {
+      setPluginBusy(null)
+    }
+  }
+
+  const testPluginServiceConfig = (
+    input: ScraperServiceConfigInput
+  ): Promise<ScraperServiceConnectionResult> => {
+    return api.scrape.testServiceConfig('metatube', input)
+  }
+
+  const clearPluginServiceConfig = async (): Promise<void> => {
+    if (pluginBusy) return
+    setPluginBusy('video-service-clear:MetaTube')
+    try {
+      await api.scrape.clearServiceConfig('metatube')
+      await refreshVideoPlugins()
+      setSettings(await api.settings.get())
+      setEditingPlugin(null)
+      toast.show('MetaTube 服务配置已清除', 'success')
     } catch (error) {
       toast.show(String((error as Error).message ?? error), 'error')
     } finally {
@@ -222,6 +272,7 @@ export default function useScraperPluginSettingsController({
     pluginBusy,
     editingPlugin,
     setEditingPlugin,
+    openPluginEditor,
     editingComposite,
     setEditingComposite,
     pluginDeleteTarget,
@@ -233,6 +284,8 @@ export default function useScraperPluginSettingsController({
     loadPluginForAiDebug,
     confirmPluginDelete,
     savePluginConfig,
+    testPluginServiceConfig,
+    clearPluginServiceConfig,
     saveCompositePlugin,
     changeDefaultPlugin,
     handleInstalled,

@@ -31,6 +31,7 @@ export const IPC = {
   SCAN_RUN: 'scan:run',
   SCAN_CANCEL: 'scan:cancel',
   SCAN_PROGRESS: 'scan:progress', // main -> renderer event
+  SCAN_STATE_CHANGED: 'scan:stateChanged', // main -> renderer event
   FILE_RENAME: 'file:rename',
   FILE_IMPORT_MANUAL: 'file:importManual',
   PENDING_SCAN_LIST: 'pendingScan:list',

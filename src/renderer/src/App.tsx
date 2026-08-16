@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import ResetListStateOnReload from './listView/ResetListStateOnReload'
 import Layout from './components/Layout'
 import LibraryShell from './components/LibraryShell'
@@ -23,12 +23,26 @@ import { ImagePreviewOverlayProvider } from './components/ImagePreviewOverlayCon
 import { AvatarAutoCropBatchProvider } from './contexts/AvatarAutoCropBatchContext'
 import { installDisableInputSpellcheck } from './installDisableInputSpellcheck'
 import { ROUTE_PATH, ROUTE_SEGMENT } from './listView/routePaths'
+import { facetListPath } from './listView/facetRoutes'
+import { isFacetType, supportsFacetDetail, type FacetDetailKind } from './facet'
 import { pendingCenterPath } from './listView/pendingRoutes'
 import { SETTINGS_GROUPS, settingsPath } from './settings/settingsRoutes'
 import {
   SettingsPluginDevOutlet,
   SettingsSectionOutlet
 } from './settings/SettingsRouteOutlet'
+
+function FacetDetailRoute({
+  kind,
+  children
+}: {
+  kind: FacetDetailKind
+  children: JSX.Element
+}): JSX.Element {
+  const { type } = useParams()
+  if (supportsFacetDetail(type, kind)) return children
+  return <Navigate to={isFacetType(type) ? facetListPath(type) : ROUTE_PATH.library} replace />
+}
 
 function AppContent(): JSX.Element {
   const { privacyMode } = useTheme()
@@ -82,7 +96,11 @@ function AppContent(): JSX.Element {
                       <Route index element={null} />
                       <Route
                         path={ROUTE_SEGMENT.organizationDetail}
-                        element={<OrganizationDetailPage />}
+                        element={
+                          <FacetDetailRoute kind="organization">
+                            <OrganizationDetailPage />
+                          </FacetDetailRoute>
+                        }
                       >
                         <Route path={ROUTE_SEGMENT.organizationVideo} element={<DetailPage />}>
                           <Route
@@ -91,7 +109,14 @@ function AppContent(): JSX.Element {
                           />
                         </Route>
                       </Route>
-                      <Route path={ROUTE_SEGMENT.directorDetail} element={<DirectorDetailPage />}>
+                      <Route
+                        path={ROUTE_SEGMENT.directorDetail}
+                        element={
+                          <FacetDetailRoute kind="director">
+                            <DirectorDetailPage />
+                          </FacetDetailRoute>
+                        }
+                      >
                         <Route path={ROUTE_SEGMENT.directorVideo} element={<DetailPage />}>
                           <Route
                             path={ROUTE_SEGMENT.detailActress}
@@ -99,7 +124,14 @@ function AppContent(): JSX.Element {
                           />
                         </Route>
                       </Route>
-                      <Route path={ROUTE_SEGMENT.seriesDetail} element={<SeriesDetailPage />}>
+                      <Route
+                        path={ROUTE_SEGMENT.seriesDetail}
+                        element={
+                          <FacetDetailRoute kind="series">
+                            <SeriesDetailPage />
+                          </FacetDetailRoute>
+                        }
+                      >
                         <Route path={ROUTE_SEGMENT.seriesVideo} element={<DetailPage />}>
                           <Route
                             path={ROUTE_SEGMENT.detailActress}

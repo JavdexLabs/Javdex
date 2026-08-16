@@ -4,6 +4,7 @@ import type {
   AssetCryptoProgress,
   LibraryOverviewStats,
   LibraryPathRemovalPreview,
+  LibraryScanEvent,
   ManualImportResult,
   PendingScanGroup,
   PendingScanGroupResolution,
@@ -251,6 +252,7 @@ export interface AppIpcContract {
 export interface AppIpcEventContract {
   [IPC.APP_UPDATE_STATE_CHANGED]: UpdateCheckState
   [IPC.SCAN_PROGRESS]: ScanProgress
+  [IPC.SCAN_STATE_CHANGED]: LibraryScanEvent
   [IPC.PLUGIN_DEV_AGENT_EVENT]: PluginDevAgentEvent
   [IPC.ASSET_CRYPTO_PROGRESS]: AssetCryptoProgress
 }

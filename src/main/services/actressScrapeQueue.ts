@@ -87,6 +87,7 @@ class ActressScrapeQueue {
     return {
       kind: 'actress',
       missingResumeError: '没有可继续的演员批量任务',
+      invalidRunPlanError: '请至少选择一个演员更新字段',
       resolveTargets: (request) => resolveActressBatchScrapeTargets(request),
       labelOf: (target) => target.main_name,
       restoreTarget: (item) => ({ id: item.id, main_name: item.label }),

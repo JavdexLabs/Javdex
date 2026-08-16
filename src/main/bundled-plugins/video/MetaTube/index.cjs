@@ -48,10 +48,8 @@ function stringArray(value, field) {
 
 function normalizedComparableCode(value) {
   return String(value || '')
-    .normalize('NFKC')
     .trim()
     .toUpperCase()
-    .replace(/[ _-]+/g, '')
 }
 
 function normalizedResultCode(value) {

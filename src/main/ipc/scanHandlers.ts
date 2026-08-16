@@ -13,13 +13,18 @@ import { getSettings } from '../settings/settingsStore'
 import { assertConfiguredLibraryFile, assertFileNameOnly } from './ipcPathGuards'
 
 export function registerScanHandlers(ctx: IpcContext): void {
+  scanCoordinator.subscribe((event) => {
+    const webContents = ctx.getWindow()?.webContents
+    appEventAdapter.send(webContents, IPC.SCAN_STATE_CHANGED, event)
+    if (event.phase === 'progress') {
+      appEventAdapter.send(webContents, IPC.SCAN_PROGRESS, event.progress)
+    }
+  })
+
   appCommandAdapter.register(IPC.SCAN_RUN, async (folders): Promise<ScanResult> => {
-    const win = ctx.getWindow()
     return scanCoordinator.run({
       folders,
-      trigger: 'manual',
-      onProgress: (progress) =>
-        appEventAdapter.send(win?.webContents, IPC.SCAN_PROGRESS, progress)
+      trigger: 'manual'
     })
   })
 

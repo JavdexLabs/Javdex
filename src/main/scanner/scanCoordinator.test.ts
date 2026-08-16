@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import type { LibraryScanSummary, ScanResult } from '@shared/libraryTypes'
+import type { LibraryScanEvent, LibraryScanSummary, ScanResult } from '@shared/libraryTypes'
 import type { VideoResource } from '@shared/videoTypes'
 import { MaintenanceTaskGate } from '../services/maintenanceTaskGate'
 import { createScanCoordinator } from './scanCoordinator'
@@ -61,6 +61,31 @@ function resource(input: Partial<VideoResource> & Pick<VideoResource, 'id' | 'vi
 }
 
 describe('ScanCoordinator', () => {
+  it('publishes scan lifecycle events for every trigger', async () => {
+    const events: LibraryScanEvent[] = []
+    const progress = { scanned: 1, imported: 1, currentFile: '/online/A-001.mp4' }
+    const coordinator = createTestScanCoordinator({
+      gate: new MaintenanceTaskGate(),
+      getConfiguredFolders: () => ['/online'],
+      inspectFolder: async () => true,
+      scanFolders: async (_folders, onProgress) => {
+        onProgress?.(progress)
+        return { ...emptyScanResult(), scannedFiles: 1, imported: 1 }
+      },
+      listLocalResources: () => []
+    })
+    const unsubscribe = coordinator.subscribe((event) => events.push(event))
+
+    const result = await coordinator.run({ trigger: 'startup' })
+    unsubscribe()
+
+    assert.deepEqual(events.slice(0, 2), [
+      { phase: 'started', trigger: 'startup' },
+      { phase: 'progress', trigger: 'startup', progress }
+    ])
+    assert.deepEqual(events[2], { phase: 'completed', trigger: 'startup', result })
+  })
+
   it('preserves offline roots and removes only missing local resources under accessible roots', async () => {
     const offlineLocal = resource({
       id: 1,
@@ -241,6 +266,7 @@ describe('ScanCoordinator', () => {
   it('keeps resources after a coordinator-level failure', async () => {
     let cleanupReads = 0
     let deferredCleanupRuns = 0
+    const events: LibraryScanEvent[] = []
     const coordinator = createTestScanCoordinator({
       gate: new MaintenanceTaskGate(),
       getConfiguredFolders: () => ['/online'],
@@ -258,10 +284,15 @@ describe('ScanCoordinator', () => {
         return { removed: 0, promoted: 0, consumedRoots: [] }
       }
     })
+    coordinator.subscribe((event) => events.push(event))
 
     await assert.rejects(() => coordinator.run(), /adapter failed/)
     assert.equal(cleanupReads, 0)
     assert.equal(deferredCleanupRuns, 0)
+    assert.deepEqual(events, [
+      { phase: 'started', trigger: 'manual' },
+      { phase: 'failed', trigger: 'manual', error: 'adapter failed' }
+    ])
   })
 
   it('skips every destructive cleanup after a file processing failure', async () => {

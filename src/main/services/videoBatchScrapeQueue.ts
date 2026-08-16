@@ -96,6 +96,7 @@ export function formatVideoBatchScrapeOutcome(
 const videoBatchPolicy: CheckpointedBatchPolicy<VideoTarget, VideoBatchScrapeRequest> = {
   kind: 'video',
   missingResumeError: '没有可继续的影片批量任务',
+  invalidRunPlanError: '请至少选择一个影片更新字段',
   resolveTargets: resolveVideoTargets,
   labelOf: (target) => target.code,
   restoreTarget: (item) => ({ id: item.id, code: item.label }),

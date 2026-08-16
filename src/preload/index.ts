@@ -57,7 +57,7 @@ import type {
   VideoScrapeUpdateMode
 } from '../shared/scrapeTypes'
 import type { PendingVideoScrapeConfirmInput } from '../shared/videoScrapeTypes'
-import type { PendingScanGroupResolution } from '../shared/libraryTypes'
+import type { LibraryScanEvent, PendingScanGroupResolution } from '../shared/libraryTypes'
 import type { BatchProgress } from '../shared/batchScrapeTypes'
 import type { RendererSettingsPatch } from '../shared/settingsTypes'
 import type { LlmProviderConfigSaveInput } from '../shared/llmProviders'
@@ -189,7 +189,9 @@ const api = {
     listPending: () => invokeApp(IPC.PENDING_SCAN_LIST),
     resolvePending: (groupId: number, resolution: PendingScanGroupResolution) =>
       invokeApp(IPC.PENDING_SCAN_RESOLVE, groupId, resolution),
-    onProgress: (cb: (p: ScanProgress) => void) => onAppEvent(IPC.SCAN_PROGRESS, cb)
+    onProgress: (cb: (p: ScanProgress) => void) => onAppEvent(IPC.SCAN_PROGRESS, cb),
+    onStateChanged: (cb: (event: LibraryScanEvent) => void) =>
+      onAppEvent(IPC.SCAN_STATE_CHANGED, cb)
   },
   videos: {
     list: (q: VideoQuery) => invokeVideo(IPC.VIDEO_LIST, q),

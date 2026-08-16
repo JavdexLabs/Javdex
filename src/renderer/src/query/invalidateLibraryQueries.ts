@@ -30,6 +30,7 @@ export async function invalidateActressLibraryQueries(queryClient: QueryClient):
 /** Full library resync after scan or mixed batch operations. */
 export function invalidateAllLibraryQueries(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: videoKeys.all })
+  void queryClient.invalidateQueries({ queryKey: ['pending-scan-groups'] })
   void queryClient.resetQueries({ queryKey: actressKeys.faceScanManifest(), exact: true })
   void queryClient.invalidateQueries({ queryKey: actressKeys.all })
   void queryClient.invalidateQueries({ queryKey: organizationKeys.all })

@@ -31,6 +31,7 @@ export interface CheckpointedBatchPolicyHelpers {
 export interface CheckpointedBatchPolicy<TTarget extends { id: number }, TRequest> {
   kind: BatchScrapeJobKind
   missingResumeError: string
+  invalidRunPlanError: string
   resolveTargets(request: TRequest): TTarget[]
   labelOf(target: TTarget): string
   restoreTarget(item: { id: number; label: string }): TTarget
@@ -139,8 +140,19 @@ export class CheckpointedSequentialBatchQueue<TTarget extends { id: number }, TR
     const targets = this.checkpointPort().restoreTargets(job, (item) =>
       this.policy.restoreTarget(item)
     )
-    const plan = this.policy.planRun(job, targets, helpers)
-    if (!plan) return
+    let plan: CheckpointedBatchRunPlan<TTarget> | null
+    try {
+      plan = this.policy.planRun(job, targets, helpers)
+    } catch (error) {
+      this.checkpointPort().discard()
+      this.activeJob = null
+      throw error
+    }
+    if (!plan) {
+      this.checkpointPort().discard()
+      this.activeJob = null
+      throw new Error(this.policy.invalidRunPlanError)
+    }
 
     this.activeJob = job
     const browserRecycleInterval =

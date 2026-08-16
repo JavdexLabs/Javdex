@@ -91,6 +91,7 @@ describe('CheckpointedSequentialBatchQueue', () => {
     const queue = new CheckpointedSequentialBatchQueue<Target, Request>({
       kind: 'video',
       missingResumeError: '没有可继续的影片批量任务',
+      invalidRunPlanError: '请选择更新字段',
       resolveTargets: (request) =>
         request.labels.map((code, index) => ({ id: index + 1, code })),
       labelOf: (target) => target.code,
@@ -134,6 +135,7 @@ describe('CheckpointedSequentialBatchQueue', () => {
     const queue = new CheckpointedSequentialBatchQueue<Target, Request>({
       kind: 'video',
       missingResumeError: '没有可继续的影片批量任务',
+      invalidRunPlanError: '请选择更新字段',
       resolveTargets: (request) =>
         request.labels.map((code, index) => ({ id: index + 1, code })),
       labelOf: (target) => target.code,
@@ -171,6 +173,7 @@ describe('CheckpointedSequentialBatchQueue', () => {
     const queue = new CheckpointedSequentialBatchQueue<Target, Request>({
       kind: 'video',
       missingResumeError: '没有可继续的影片批量任务',
+      invalidRunPlanError: '请选择更新字段',
       resolveTargets: (request) =>
         request.labels.map((code, index) => ({ id: index + 1, code })),
       labelOf: (target) => target.code,
@@ -211,6 +214,7 @@ describe('CheckpointedSequentialBatchQueue', () => {
       {
         kind: 'video',
         missingResumeError: '没有可继续的影片批量任务',
+        invalidRunPlanError: '请选择更新字段',
         resolveTargets: (request) =>
           request.labels.map((code, index) => ({ id: index + 1, code })),
         labelOf: (target) => target.code,
@@ -237,5 +241,52 @@ describe('CheckpointedSequentialBatchQueue', () => {
     await queue.start({ fields: ['title'], labels })
 
     assert.deepEqual(browserClosedAt, [50, 100, 101])
+  })
+
+  it('rejects an invalid run plan without leaving a resumable checkpoint', async () => {
+    const checkpoints = createMemoryCheckpoints()
+    const queue = new CheckpointedSequentialBatchQueue<Target, Request>({
+      kind: 'video',
+      missingResumeError: '没有可继续的影片批量任务',
+      invalidRunPlanError: '请选择更新字段',
+      resolveTargets: (request) =>
+        request.labels.map((code, index) => ({ id: index + 1, code })),
+      labelOf: (target) => target.code,
+      restoreTarget: (item) => ({ id: item.id, code: item.label }),
+      planRun: () => null
+    })
+    queue.setCheckpointPort(checkpoints)
+
+    await assert.rejects(
+      queue.start({ fields: [], labels: ['A'] }),
+      /请选择更新字段/
+    )
+    assert.equal(checkpoints.load(), null)
+    assert.equal(queue.isRunning(), false)
+    assert.equal(queue.isPaused(), false)
+  })
+
+  it('discards a corrupt checkpoint when run planning throws', async () => {
+    const checkpoints = createMemoryCheckpoints()
+    const queue = new CheckpointedSequentialBatchQueue<Target, Request>({
+      kind: 'video',
+      missingResumeError: '没有可继续的影片批量任务',
+      invalidRunPlanError: '请选择更新字段',
+      resolveTargets: (request) =>
+        request.labels.map((code, index) => ({ id: index + 1, code })),
+      labelOf: (target) => target.code,
+      restoreTarget: (item) => ({ id: item.id, code: item.label }),
+      planRun: () => {
+        throw new Error('任务请求已损坏')
+      }
+    })
+    queue.setCheckpointPort(checkpoints)
+
+    await assert.rejects(
+      queue.start({ fields: ['title'], labels: ['A'] }),
+      /任务请求已损坏/
+    )
+    assert.equal(checkpoints.load(), null)
+    assert.equal(queue.isPaused(), false)
   })
 })

@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import type {
+  LibraryScanEvent,
   LibraryScanSummary,
   LibraryScanTrigger,
   ScanProgress,
@@ -96,11 +97,17 @@ function inspectLocalPath(filePath: string): LocalPathState {
 
 export class ScanCoordinator {
   private activeController: AbortController | null = null
+  private readonly listeners = new Set<(event: LibraryScanEvent) => void>()
 
   constructor(private readonly dependencies: ScanCoordinatorDependencies) {}
 
   get running(): boolean {
     return this.activeController !== null
+  }
+
+  subscribe(listener: (event: LibraryScanEvent) => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
   }
 
   cancel(): boolean {
@@ -117,8 +124,10 @@ export class ScanCoordinator {
     const startedAt = this.dependencies.now()
     const controller = new AbortController()
     this.activeController = controller
+    this.emit({ phase: 'started', trigger })
     let result = this.emptyResult()
     let offlineFolders: string[] = []
+    let failure: string | null = null
     try {
       const configuredFolders = Array.from(new Set(this.dependencies.getConfiguredFolders()))
       const folders = request.folders?.length
@@ -147,7 +156,10 @@ export class ScanCoordinator {
 
       result = await this.dependencies.scanFolders(
         accessibleFolders,
-        request.onProgress,
+        (progress) => {
+          request.onProgress?.(progress)
+          this.emit({ phase: 'progress', trigger, progress })
+        },
         {
           signal: controller.signal,
           unavailableRoots: offlineFolders
@@ -224,12 +236,28 @@ export class ScanCoordinator {
       return result
     } catch (error) {
       const errorSummary = sanitizeLibraryScanError(error)
+      failure = errorSummary
       result.offlineFolders = offlineFolders
       this.recordSummary(trigger, startedAt, 'failed', result, errorSummary)
       throw new Error(errorSummary)
     } finally {
       if (this.activeController === controller) this.activeController = null
       lease.release()
+      this.emit(
+        failure
+          ? { phase: 'failed', trigger, error: failure }
+          : { phase: 'completed', trigger, result }
+      )
+    }
+  }
+
+  private emit(event: LibraryScanEvent): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(event)
+      } catch (error) {
+        console.error('Failed to publish scan state:', sanitizeLibraryScanError(error))
+      }
     }
   }
 

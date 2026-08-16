@@ -1,7 +1,9 @@
 # CSS 可维护性架构方案
 
-> 状态：已接受  
-> 调研日期：2026-08-11  
+> 状态：已接受
+>
+> 调研日期：2026-08-11
+>
 > 适用范围：Javdex Electron renderer（React + electron-vite/Vite）
 
 ## 决策摘要

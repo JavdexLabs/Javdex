@@ -35,9 +35,38 @@ export default function useLibrarySettingsController({ settings, setSettings }: 
     unscraped: number
   } | null>(null)
 
-  useEffect(() => api.scan.onProgress((progress) => {
-    setScanStatus(`已扫描 ${progress.scanned} 个文件，新导入 ${progress.imported} 部`)
-  }), [])
+  useEffect(
+    () =>
+      api.scan.onProgress((progress) => {
+        setScanning(true)
+        setScanStatus(`已扫描 ${progress.scanned} 个文件，新导入 ${progress.imported} 部`)
+      }),
+    []
+  )
+
+  useEffect(
+    () =>
+      api.scan.onStateChanged((event) => {
+        if (event.trigger === 'manual') return
+        if (event.phase === 'started') {
+          setScanning(true)
+          setScanResult(null)
+          setScanStatus('自动扫描中…')
+          return
+        }
+        if (event.phase === 'progress') return
+
+        setScanning(false)
+        setScanStatus(event.phase === 'failed' ? `自动扫描失败：${event.error}` : '')
+        if (event.phase === 'completed') {
+          setScanResult(event.result)
+          setUnrecognized(event.result.unrecognizedFiles)
+        }
+        void api.settings.get().then(setSettings).catch(() => undefined)
+        setOverviewStatsRefreshKey((key) => key + 1)
+      }),
+    [setSettings]
+  )
 
   const addFolders = async (): Promise<void> => {
     if (!settings) return

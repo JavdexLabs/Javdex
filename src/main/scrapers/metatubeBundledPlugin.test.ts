@@ -85,10 +85,10 @@ describe('MetaTube bundled video plugin', () => {
         assert.equal(url.searchParams.get('fallback'), 'true')
         return json(200, {
           data: [
-            { provider: 'P/1', id: 'id/1', number: 'ＡＢＣ_１２３' },
+            { provider: 'P/1', id: 'id/1', number: ' ABC-123 ' },
             { provider: 'Ignored', id: 'fuzzy', number: 'ABC-123-extra' },
-            { provider: 'P/1', id: 'id/1', number: 'ABC123' },
-            { provider: 'Second', id: 'two', number: 'abc 123' }
+            { provider: 'P/1', id: 'id/1', number: 'abc-123' },
+            { provider: 'Second', id: 'two', number: 'abc-123' }
           ]
         })
       }
@@ -150,8 +150,26 @@ describe('MetaTube bundled video plugin', () => {
   it('returns no candidates for search 404 or fuzzy-only search results', async () => {
     assert.deepEqual(await runMetaTube(async () => json(404, { error: { message: 'none' } })), [])
     assert.deepEqual(await runMetaTube(async () => json(200, {
-      data: [{ provider: 'Test', id: '1', number: 'prefix-ABC-123-suffix' }]
+      data: [
+        { provider: 'Prefix', id: '1', number: 'prefix-ABC-123-suffix' },
+        { provider: 'No separator', id: '2', number: 'ABC123' },
+        { provider: 'Underscore', id: '3', number: 'ABC_123' },
+        { provider: 'Internal space', id: '4', number: 'ABC 123' },
+        { provider: 'Full width', id: '5', number: 'ＡＢＣ-１２３' }
+      ]
     })), [])
+  })
+
+  it('rejects a detail whose exact code differs from its search item', async () => {
+    await assert.rejects(
+      () => runMetaTube(async (request) => {
+        const url = new URL(request.url)
+        return url.pathname.endsWith('/search')
+          ? json(200, { data: [{ provider: 'Changed', id: '1', number: 'ABC-123' }] })
+          : json(200, detail('Changed', '1', { number: 'ABC123' }))
+      }),
+      /详情番号与查询番号不一致/
+    )
   })
 
   it('rejects too many exact providers before requesting details', async () => {

@@ -161,6 +161,12 @@ export interface ScanProgress {
   currentFile: string
 }
 
+export type LibraryScanEvent =
+  | { phase: 'started'; trigger: LibraryScanTrigger }
+  | { phase: 'progress'; trigger: LibraryScanTrigger; progress: ScanProgress }
+  | { phase: 'completed'; trigger: LibraryScanTrigger; result: ScanResult }
+  | { phase: 'failed'; trigger: LibraryScanTrigger; error: string }
+
 /** Outcome of renaming an unrecognized file and importing it into an explicit target. */
 export interface RenameImportResult {
   /** New absolute path after rename. */

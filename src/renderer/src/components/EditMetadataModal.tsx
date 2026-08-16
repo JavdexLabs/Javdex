@@ -11,6 +11,8 @@ import { useTheme } from './ThemeProvider'
 import OrganizationPickerField from './OrganizationPickerField'
 import DirectorPickerField from './DirectorPickerField'
 import SeriesPickerField from './SeriesPickerField'
+import RelatedLinksEditor, { relatedLinksFromDraft } from './RelatedLinksEditor'
+import type { RelatedLinkInput } from '@shared/relatedLinkTypes'
 import type {
   DirectorAssignmentInput,
   OrganizationAssignmentInput,
@@ -72,7 +74,11 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
   const [actressesFemale, setActressesFemale] = useState(initialActressesFemale)
   const [actressesMale, setActressesMale] = useState(initialActressesMale)
   const [coverSourcePath, setCoverSourcePath] = useState<string | null>(null)
+  const [links, setLinks] = useState<RelatedLinkInput[]>(
+    (video.links ?? []).map(({ label, url }) => ({ label, url }))
+  )
   const [saving, setSaving] = useState(false)
+  const metadataLocked = Boolean(video.has_pending_scrape)
   const mediaEditorsHidden =
     privacyMode.privacyModeEnabled &&
     privacyMode.privacyModeScopes.includes('mediaEditors')
@@ -86,6 +92,11 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
   const handleSave = async (): Promise<void> => {
     setSaving(true)
     try {
+      const nextLinks = relatedLinksFromDraft(links)
+      if (metadataLocked) {
+        await onSave({ links: nextLinks })
+        return
+      }
       await onSave({
         title: title.trim() || null,
         release_date: releaseDate.trim() || null,
@@ -97,6 +108,7 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
         tags: splitList(tags),
         actressesFemale: splitList(actressesFemale),
         actressesMale: splitList(actressesMale),
+        links: nextLinks,
         ...(coverSourcePath && !mediaEditorsHidden ? { coverSourcePath } : {})
       })
     } finally {
@@ -119,6 +131,12 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
       onConfirm={() => void handleSave()}
     >
       <div className="entity-edit-form">
+        {metadataLocked ? (
+          <p className="entity-edit-field-hint">
+            这部影片有待确认刮削结果，目前只能编辑相关链接。
+          </p>
+        ) : (
+          <>
         {!mediaEditorsHidden ? (
           <EditFormSection title="封面" className="entity-edit-section--media">
             <ImageImportField
@@ -284,6 +302,9 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
             </EditFormField>
           </div>
         </EditFormSection>
+          </>
+        )}
+        <RelatedLinksEditor disabled={saving} links={links} onChange={setLinks} />
       </div>
     </Modal>
   )

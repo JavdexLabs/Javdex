@@ -34,6 +34,13 @@ import {
 } from './videoListProjection'
 import { normalizeVideoCode } from '@shared/videoCode'
 import { buildStrmResourceKey } from '@shared/strmResource'
+import {
+  mergeRelatedLinks,
+  readRelatedLinks,
+  readRelatedMergeLinks,
+  replaceRelatedLinks,
+  writeRelatedLinks
+} from './relatedLinkStore'
 
 export interface ScannedVideoInput {
   code: string
@@ -852,6 +859,7 @@ export function getVideoDetail(id: number): StoredVideoDetail | null {
     tags,
     assets,
     external_stats,
+    links: readRelatedLinks(db, 'video_links', 'video_id', id),
     resources
   }
 }
@@ -1276,6 +1284,10 @@ export function editVideoRecord(
       db.prepare('UPDATE videos SET cover_path = ? WHERE id = ?').run(coverRelPath, id)
     }
 
+    if ('links' in input && input.links !== undefined) {
+      replaceRelatedLinks(db, 'video_links', 'video_id', id, input.links)
+    }
+
     db.prepare('UPDATE videos SET updated_at = ? WHERE id = ?').run(nowIso(), id)
 
     // Promote to "scraped" once it has a title.
@@ -1466,6 +1478,17 @@ export function mergeVideoRecords(
        FROM video_external_stats WHERE video_id = ? AND 1
        ON CONFLICT(video_id, source) DO NOTHING`
     ).run(retained.id, source.id)
+
+    writeRelatedLinks(
+      db,
+      'video_links',
+      'video_id',
+      retained.id,
+      mergeRelatedLinks(
+        readRelatedMergeLinks(db, 'video_links', 'video_id', retained.id),
+        readRelatedMergeLinks(db, 'video_links', 'video_id', source.id)
+      )
+    )
 
     const sourceAssets = db
       .prepare(

@@ -5,6 +5,8 @@ import ImageImportField from './ImageImportField'
 import Modal from './Modal'
 import { useTheme } from './ThemeProvider'
 import Button from './Button'
+import RelatedLinksEditor, { relatedLinksFromDraft } from './RelatedLinksEditor'
+import type { RelatedLinkInput } from '@shared/relatedLinkTypes'
 
 interface Props {
   playlist?: PlaylistDetail
@@ -27,6 +29,9 @@ export default function PlaylistCreateModal({
   const [description, setDescription] = useState(playlist?.description ?? '')
   const [coverSourcePath, setCoverSourcePath] = useState<string | null>(null)
   const [removeCover, setRemoveCover] = useState(false)
+  const [links, setLinks] = useState<RelatedLinkInput[]>(
+    playlist?.links.map(({ label, url }) => ({ label, url })) ?? []
+  )
   const [saving, setSaving] = useState(false)
   const mediaEditorsHidden =
     privacyMode.privacyModeEnabled &&
@@ -41,6 +46,7 @@ export default function PlaylistCreateModal({
       const input = {
         name: name.trim(),
         description: description.trim() || null,
+        links: relatedLinksFromDraft(links),
         ...(coverSourcePath && !mediaEditorsHidden ? { coverSourcePath } : {})
       }
 
@@ -63,7 +69,7 @@ export default function PlaylistCreateModal({
     <Modal
       title={editing ? '编辑播放清单' : '创建播放清单'}
 
-      size="md"
+      size="lg"
       confirmText={saving ? '保存中…' : editing ? '保存' : '创建'}
       confirmDisabled={!canSave || saving}
       onCancel={onCancel}
@@ -111,6 +117,7 @@ export default function PlaylistCreateModal({
             onChange={(e) => setDescription(e.target.value)}
           />
         </AppFormField>
+        <RelatedLinksEditor disabled={saving} links={links} onChange={setLinks} />
       </div>
     </Modal>
   )

@@ -312,6 +312,47 @@ CREATE INDEX IF NOT EXISTS idx_pending_video_scrape_resources_candidate
     ON pending_video_scrape_resources(candidate_id);
 `
 
+export const RELATED_LINKS_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS video_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    url TEXT NOT NULL,
+    normalized_url TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+    UNIQUE (video_id, normalized_url)
+);
+CREATE INDEX IF NOT EXISTS idx_video_links_video
+    ON video_links(video_id, position);
+
+CREATE TABLE IF NOT EXISTS actress_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actress_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    url TEXT NOT NULL,
+    normalized_url TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (actress_id) REFERENCES actresses(id) ON DELETE CASCADE,
+    UNIQUE (actress_id, normalized_url)
+);
+CREATE INDEX IF NOT EXISTS idx_actress_links_actress
+    ON actress_links(actress_id, position);
+
+CREATE TABLE IF NOT EXISTS playlist_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    playlist_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    url TEXT NOT NULL,
+    normalized_url TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+    UNIQUE (playlist_id, normalized_url)
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_links_playlist
+    ON playlist_links(playlist_id, position);
+`
+
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
 
@@ -610,4 +651,6 @@ CREATE INDEX IF NOT EXISTS idx_actress_gallery_assets_actress_id
     ON actress_gallery_assets(actress_id);
 
 ${PENDING_VIDEO_DECISIONS_SCHEMA_SQL}
+
+${RELATED_LINKS_SCHEMA_SQL}
 `

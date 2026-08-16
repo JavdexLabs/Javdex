@@ -1,4 +1,5 @@
 import type { SortDir } from './commonTypes'
+import type { RelatedLink, RelatedLinkInput } from './relatedLinkTypes'
 
 export type OrganizationRole = 'maker' | 'publisher'
 export type OrganizationStatus = 'unknown' | 'active' | 'inactive'
@@ -34,14 +35,8 @@ export interface ClassificationImageCandidate {
   coverPath: string
 }
 
-export interface ClassificationLinkInput {
-  label: string
-  url: string
-}
-
-export interface ClassificationLink extends ClassificationLinkInput {
-  position: number
-}
+export type ClassificationLinkInput = RelatedLinkInput
+export type ClassificationLink = RelatedLink
 
 export type OrganizationLinkInput = ClassificationLinkInput
 export type OrganizationLink = ClassificationLink

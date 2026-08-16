@@ -642,6 +642,64 @@ describe('actressRepo.clearActressMetadataRecord', () => {
       assert.equal(detail?.last_scraped_at, null)
     }
   })
+
+  it('keeps related links when clearing actress metadata', () => {
+    setupDb()
+    editActress(1, { links: [{ label: 'Wiki', url: 'https://example.com/actress' }] })
+
+    clearActressMetadataRecord(1)
+
+    assert.equal(getActressDetail(1)?.profile_summary, null)
+    assert.deepEqual(getActressDetail(1)?.links.map((link) => link.label), ['Wiki'])
+  })
+})
+
+describe('actress related links', () => {
+  it('stores related links on an actress and returns them on detail', () => {
+    setupDb()
+    editActress(1, {
+      links: [
+        { label: '', url: 'https://example.com/wiki' },
+        { label: 'Forum', url: 'https://forum.example/thread' },
+        { label: 'Dup', url: 'https://example.com/wiki#section' }
+      ]
+    })
+
+    assert.deepEqual(
+      getActressDetail(1)?.links.map((link) => [link.label, link.url, link.position]),
+      [
+        ['example.com', 'https://example.com/wiki', 0],
+        ['Forum', 'https://forum.example/thread', 1]
+      ]
+    )
+  })
+
+  it('unions related links on merge with the keeper first', () => {
+    setupDb()
+    editActress(1, {
+      links: [
+        { label: '百科', url: 'https://example.com/wiki' },
+        { label: 'Keep', url: 'https://example.com/keep' }
+      ]
+    })
+    editActress(2, {
+      links: [
+        { label: 'Wiki', url: 'https://example.com/wiki#source' },
+        { label: 'Forum', url: 'https://forum.example/thread' }
+      ]
+    })
+
+    mergeActresses(1, 2, 'keep')
+
+    assert.deepEqual(
+      getActressDetail(1)?.links.map((link) => [link.label, link.url]),
+      [
+        ['百科', 'https://example.com/wiki'],
+        ['Keep', 'https://example.com/keep'],
+        ['Forum', 'https://forum.example/thread']
+      ]
+    )
+  })
 })
 
 describe('actressRepo.deleteUnlinkedActresses', () => {

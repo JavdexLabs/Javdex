@@ -33,6 +33,7 @@ function video(overrides: Partial<VideoDetail>): VideoDetail {
     resources: [],
     assets: [],
     external_stats: [],
+    links: [],
     ...overrides
   }
 }

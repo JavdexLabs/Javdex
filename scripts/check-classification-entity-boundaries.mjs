@@ -24,7 +24,8 @@ if (existsSync('src/main/db/facetRepo.ts')) {
 }
 
 for (const file of sourceFiles('src/main')) {
-  if (file === 'src/main/db/migrations.ts' || /\.test\.[cm]?[jt]sx?$/.test(file)) continue
+  const normalizedFile = file.replaceAll('\\', '/')
+  if (normalizedFile === 'src/main/db/migrations.ts' || /\.test\.[cm]?[jt]sx?$/.test(normalizedFile)) continue
   const source = readFileSync(file, 'utf8')
   if (/\bfacet_entries\b/.test(source)) {
     violations.push(`${file}: runtime code must not access facet_entries`)

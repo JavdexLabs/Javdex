@@ -5,6 +5,7 @@ import type {
 } from '@shared/classificationTypes'
 import type Database from 'better-sqlite3'
 import { normalizeClassificationName } from '@shared/classificationNameNormalization'
+import { mergeRelatedLinks } from '../db/relatedLinkStore'
 
 export interface ClassificationMergeName {
   name: string
@@ -127,14 +128,7 @@ export function mergeClassificationLinks(
   targetLinks: readonly ClassificationMergeLink[],
   sourceLinks: readonly ClassificationMergeLink[]
 ): ClassificationMergeLink[] {
-  const seen = new Set<string>()
-  const links: ClassificationMergeLink[] = []
-  for (const link of [...targetLinks, ...sourceLinks]) {
-    if (seen.has(link.normalized_url)) continue
-    seen.add(link.normalized_url)
-    links.push({ ...link, position: links.length })
-  }
-  return links
+  return mergeRelatedLinks(targetLinks, sourceLinks)
 }
 
 export function targetFirstMeaningfulText(

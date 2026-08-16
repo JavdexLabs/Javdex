@@ -1,4 +1,5 @@
 import type { Video } from './videoTypes'
+import type { RelatedLink, RelatedLinkInput } from './relatedLinkTypes'
 
 export interface Playlist {
   id: number
@@ -16,6 +17,7 @@ export interface PlaylistListItem extends Playlist {
 
 export interface PlaylistDetail extends Playlist {
   videos: Video[]
+  links: RelatedLink[]
 }
 
 export type PlaylistVideoSortBy = 'added_at' | 'release_date'
@@ -29,6 +31,7 @@ export interface PlaylistCreateInput {
   description?: string | null
   /** Absolute path to a local image file to import as playlist cover. */
   coverSourcePath?: string | null
+  links?: RelatedLinkInput[]
 }
 
 export interface PlaylistUpdateInput extends PlaylistCreateInput {

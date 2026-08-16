@@ -546,7 +546,7 @@ export default function ActressDetailPage(): JSX.Element {
           }}
           onCancel={() => setConfirmClear(false)}
         >
-          确定要清除「{actress.main_name}」的所有刮削元数据吗？将清空头像、写真、简介、三围、别名等资料（不影响主名、性别与影片关联）。
+          确定要清除「{actress.main_name}」的所有刮削元数据吗？将清空头像、写真、简介、三围、别名等资料（不影响主名、性别、影片关联与相关链接）。
         </Modal>
       )}
 

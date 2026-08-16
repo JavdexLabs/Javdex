@@ -224,6 +224,9 @@ export function createVideoMaintenanceService(
     }
   }
 
+  const videoEditMutatesLockedMetadata = (input: VideoEditInput): boolean =>
+    Object.keys(input).some((key) => key !== 'links')
+
   interface StagedLocalFile {
     originalPath: string
     stagedPath: string
@@ -474,7 +477,9 @@ export function createVideoMaintenanceService(
     edit(id, input): boolean {
       const video = readVideoById(id)
       if (!video) throw new Error('Video not found')
-      assertMetadataUnlocked(id)
+      if (videoEditMutatesLockedMetadata(input)) {
+        assertMetadataUnlocked(id)
+      }
 
       runInCoordinatedChange(() => {
         const coverRelPath = input.coverSourcePath

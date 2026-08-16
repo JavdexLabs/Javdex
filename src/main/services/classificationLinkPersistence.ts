@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { ClassificationEntityKind, ClassificationLink } from '@shared/classificationTypes'
+import { writeRelatedLinks } from '../db/relatedLinkStore'
 
 const LINK_TABLE: Record<
   ClassificationEntityKind,
@@ -17,15 +18,5 @@ export function writeClassificationLinks(
   links: readonly ClassificationLink[]
 ): void {
   const config = LINK_TABLE[kind]
-  database.prepare(`DELETE FROM ${config.table} WHERE ${config.entityIdColumn} = ?`).run(entityId)
-  const insert = database.prepare(
-    `INSERT INTO ${config.table} (
-       ${config.entityIdColumn}, label, url, normalized_url, position
-     ) VALUES (?, ?, ?, ?, ?)`
-  )
-  for (const link of links) {
-    const normalizedUrl = new URL(link.url)
-    normalizedUrl.hash = ''
-    insert.run(entityId, link.label, link.url, normalizedUrl.toString(), link.position)
-  }
+  writeRelatedLinks(database, config.table, config.entityIdColumn, entityId, links)
 }

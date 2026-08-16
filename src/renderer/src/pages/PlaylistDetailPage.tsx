@@ -17,6 +17,7 @@ import DetailActionBar from '../components/DetailActionBar'
 import EmptyState from '../components/EmptyState'
 import { UI_ICON } from '../components/iconDefaults'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
+import RelatedLinksList from '../components/RelatedLinksList'
 
 const PLAYLIST_VIDEO_SORT_OPTIONS: SortSwitchOption<PlaylistVideoSortBy>[] = [
   { value: 'added_at', label: '加入', title: '加入时间' },
@@ -166,6 +167,7 @@ export default function PlaylistDetailPage(): JSX.Element {
                 ) : (
                   <p className="playlist-detail-empty-desc">暂无简介</p>
                 )}
+                <RelatedLinksList links={detail.links ?? []} />
               </div>
               <div className="playlist-detail-actions">
                 <DetailActionBar

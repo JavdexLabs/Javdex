@@ -884,6 +884,10 @@ button.alias-tag-chip-name:disabled {
   grid-template-columns: 86px minmax(0, 1fr);
 }
 
+.playlist-form-grid .entity-edit-section {
+  grid-column: 1 / -1;
+}
+
 .form-grid .settings-form-field .settings-form-label {
   text-align: right;
 }

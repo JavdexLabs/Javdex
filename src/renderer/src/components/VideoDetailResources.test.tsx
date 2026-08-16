@@ -76,7 +76,8 @@ function video(resources: VideoResourceDetail[]): VideoDetail {
     tags: [],
     resources,
     assets: [],
-    external_stats: []
+    external_stats: [],
+    links: []
   }
 }
 

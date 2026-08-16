@@ -22,6 +22,13 @@ import {
   synchronizeActressNameOwnership
 } from './actressNameOwnership'
 import { assertNoPendingVideoMetadataMutation } from './videoPendingMetadataLock'
+import {
+  mergeRelatedLinks,
+  readRelatedLinks,
+  readRelatedMergeLinks,
+  replaceRelatedLinks,
+  writeRelatedLinks
+} from './relatedLinkStore'
 
 interface ActressGalleryAssetWriteInput {
   remoteUrl?: string | null
@@ -555,7 +562,8 @@ export function getActressDetail(id: number): ActressDetail | null {
     aliases: listActressAliasNames(id, names),
     names,
     gallery,
-    videos: hydrateVideoListRows(videos)
+    videos: hydrateVideoListRows(videos),
+    links: readRelatedLinks(db, 'actress_links', 'actress_id', id)
   }
 }
 
@@ -782,6 +790,17 @@ export function mergeActresses(
       `INSERT OR IGNORE INTO actress_tag (actress_id, tag_id)
        SELECT ?, tag_id FROM actress_tag WHERE actress_id = ?`
     ).run(keepId, mergeId)
+
+    writeRelatedLinks(
+      db,
+      'actress_links',
+      'actress_id',
+      keepId,
+      mergeRelatedLinks(
+        readRelatedMergeLinks(db, 'actress_links', 'actress_id', keepId),
+        readRelatedMergeLinks(db, 'actress_links', 'actress_id', mergeId)
+      )
+    )
 
     db.prepare('DELETE FROM actress_names WHERE actress_id = ?').run(keepId)
     removeMergedActressRecord(mergeId)
@@ -1180,6 +1199,10 @@ export function editActress(id: number, input: ActressEditInput): void {
       setActressTypedName(id, 'en', en)
     }
     if (input.aliases) replaceActressAliases(id, input.aliases, mainName)
+
+    if ('links' in input && input.links !== undefined) {
+      replaceRelatedLinks(db, 'actress_links', 'actress_id', id, input.links)
+    }
 
     if (
       'main_name' in input ||

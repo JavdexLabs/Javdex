@@ -5,6 +5,7 @@ import type {
   OrganizationAssignmentInput,
   SeriesAssignmentInput
 } from './classificationTypes'
+import type { RelatedLink, RelatedLinkInput } from './relatedLinkTypes'
 
 export type VideoResourceKind = 'local' | 'direct' | 'web' | 'magnet' | 'ed2k'
 export type VideoResourceFilter = VideoResourceKind | 'none'
@@ -163,6 +164,7 @@ export interface VideoDetail extends Video {
   tags: VideoTag[]
   assets: VideoAsset[]
   external_stats: VideoExternalStats[]
+  links: RelatedLink[]
   resolved_duration_seconds?: number | null
 }
 
@@ -217,6 +219,7 @@ export interface VideoEditInput {
   actressesFemale?: string[]
   actressesMale?: string[]
   coverSourcePath?: string
+  links?: RelatedLinkInput[]
 }
 
 export interface VideoListResult {

@@ -6,6 +6,7 @@ import {
   videoListSelectExtras,
   type VideoListProjectionRow
 } from './videoListProjection'
+import { readRelatedLinks, replaceRelatedLinks } from './relatedLinkStore'
 
 type PlaylistVideoTarget = { playlistId: number; videoId: number }
 type PlaylistVideoSort = { sortBy?: PlaylistVideoSortBy; sortDir?: SortDir }
@@ -57,18 +58,24 @@ export function createPlaylistRecord(
   const db = getDb()
   const normalized = normalizePlaylistInput(input)
   const createdAt = nowIso()
-  const info = db
-    .prepare(
-      `INSERT INTO playlists (name, description, cover_path, created_at, updated_at)
-       VALUES (@name, @description, @coverPath, @createdAt, @updatedAt)`
-    )
-    .run({
-      ...normalized,
-      coverPath: coverRelPath ?? null,
-      createdAt,
-      updatedAt: createdAt
-    })
-  return Number(info.lastInsertRowid)
+  return db.transaction(() => {
+    const info = db
+      .prepare(
+        `INSERT INTO playlists (name, description, cover_path, created_at, updated_at)
+         VALUES (@name, @description, @coverPath, @createdAt, @updatedAt)`
+      )
+      .run({
+        ...normalized,
+        coverPath: coverRelPath ?? null,
+        createdAt,
+        updatedAt: createdAt
+      })
+    const id = Number(info.lastInsertRowid)
+    if (input.links) {
+      replaceRelatedLinks(db, 'playlist_links', 'playlist_id', id, input.links)
+    }
+    return id
+  })()
 }
 
 export function updatePlaylistRecord(
@@ -84,20 +91,26 @@ export function updatePlaylistRecord(
   const shouldUpdateCover = input.removeCover === true || coverRelPath !== undefined
   const nextCoverPath = input.removeCover ? null : coverRelPath
 
-  db.prepare(
-    `UPDATE playlists
-     SET name = @name,
-         description = @description,
-         cover_path = CASE WHEN @shouldUpdateCover THEN @coverPath ELSE cover_path END,
-         updated_at = @updatedAt
-     WHERE id = @id`
-  ).run({
-    id,
-    ...normalized,
-    shouldUpdateCover: shouldUpdateCover ? 1 : 0,
-    coverPath: nextCoverPath ?? null,
-    updatedAt: nowIso()
-  })
+  db.transaction(() => {
+    db.prepare(
+      `UPDATE playlists
+       SET name = @name,
+           description = @description,
+           cover_path = CASE WHEN @shouldUpdateCover THEN @coverPath ELSE cover_path END,
+           updated_at = @updatedAt
+       WHERE id = @id`
+    ).run({
+      id,
+      ...normalized,
+      shouldUpdateCover: shouldUpdateCover ? 1 : 0,
+      coverPath: nextCoverPath ?? null,
+      updatedAt: nowIso()
+    })
+
+    if ('links' in input && input.links !== undefined) {
+      replaceRelatedLinks(db, 'playlist_links', 'playlist_id', id, input.links)
+    }
+  })()
 
   return shouldUpdateCover ? current.cover_path : null
 }
@@ -153,7 +166,11 @@ export function getPlaylistDetail(id: number, sort: PlaylistVideoSort = {}): Pla
        ORDER BY ${orderBy}`
     )
     .all(id) as VideoListProjectionRow[]
-  return { ...playlist, videos: hydrateVideoListRows(videos) }
+  return {
+    ...playlist,
+    videos: hydrateVideoListRows(videos),
+    links: readRelatedLinks(db, 'playlist_links', 'playlist_id', id)
+  }
 }
 
 export function listPlaylistsForVideo(videoId: number): PlaylistVideoMembership[] {

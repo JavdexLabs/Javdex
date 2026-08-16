@@ -9,7 +9,6 @@ import type {
   OrganizationAssignmentResult,
   OrganizationCreateInput,
   OrganizationLink,
-  OrganizationLinkInput,
   OrganizationProfileInput,
   OrganizationRole,
   OrganizationStatus,
@@ -34,6 +33,7 @@ import {
   writeSeriesLinks,
   writeSeriesNames
 } from './seriesProfilePersistence'
+import { prepareRelatedLinks } from '../db/relatedLinkStore'
 
 const VIDEO_ROLE_FIELDS: Record<
   OrganizationRole,
@@ -98,43 +98,6 @@ function validateYear(value: number | null | undefined, label: string): number |
   return value
 }
 
-function normalizeHttpLink(input: OrganizationLinkInput, position: number): OrganizationLink {
-  const rawUrl = input.url.trim()
-  let parsed: URL
-  try {
-    parsed = new URL(rawUrl)
-  } catch {
-    throw new Error('相关链接必须是有效的 HTTP/HTTPS 地址')
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error('相关链接必须是有效的 HTTP/HTTPS 地址')
-  }
-  parsed.hash = ''
-  return {
-    label: input.label.trim() || parsed.hostname,
-    url: rawUrl,
-    position
-  }
-}
-
-function normalizedUrl(url: string): string {
-  const parsed = new URL(url)
-  parsed.hash = ''
-  return parsed.toString()
-}
-
-function prepareLinks(inputs: OrganizationLinkInput[]): OrganizationLink[] {
-  const seen = new Set<string>()
-  const links: OrganizationLink[] = []
-  for (const input of inputs) {
-    const link = normalizeHttpLink(input, links.length)
-    const key = normalizedUrl(link.url)
-    if (seen.has(key)) continue
-    seen.add(key)
-    links.push(link)
-  }
-  return links
-}
 
 function assertParentIsValid(
   database: Database.Database,
@@ -232,7 +195,7 @@ function prepareProfile(
       input.parentOrganizationId === undefined
         ? current?.parent_organization_id ?? null
         : input.parentOrganizationId,
-    links: prepareLinks(input.links ?? currentLinks)
+    links: prepareRelatedLinks(input.links ?? currentLinks)
   }
 }
 
@@ -377,7 +340,7 @@ function prepareDirectorProfile(
     careerStartYear,
     careerEndYear,
     status,
-    links: prepareLinks(input.links ?? links)
+    links: prepareRelatedLinks(input.links ?? links)
   }
 }
 
@@ -534,7 +497,7 @@ function prepareSeriesProfile(
     startYear,
     endYear,
     status,
-    links: prepareLinks(input.links ?? links)
+    links: prepareRelatedLinks(input.links ?? links)
   }
 }
 

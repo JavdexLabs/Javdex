@@ -1,5 +1,6 @@
 import type { ScrapedStatus, SortDir } from './commonTypes'
 import type { Video } from './videoTypes'
+import type { RelatedLink, RelatedLinkInput } from './relatedLinkTypes'
 export type { ActressAvatarCommit, AvatarCropV1 } from './avatarCrop'
 
 // 0-未刮削, 1-刮削成功, 2-刮削失败
@@ -84,6 +85,7 @@ export interface ActressDetail extends Actress {
   names: ActressName[]
   gallery: ActressGalleryAsset[]
   videos: Video[]
+  links: RelatedLink[]
 }
 
 /** Minimal renderer-session input for local avatar face detection. */
@@ -214,4 +216,5 @@ export interface ActressEditInput {
   avatar?: import('./avatarCrop').ActressAvatarCommit
   /** Clear display/source/crop together. */
   clearAvatar?: boolean
+  links?: RelatedLinkInput[]
 }

@@ -6,11 +6,12 @@ import {
   CLASSIFICATION_V8_SCHEMA_SQL,
   PENDING_LOCAL_FILE_DELETIONS_SCHEMA_SQL,
   PENDING_VIDEO_DECISIONS_SCHEMA_SQL,
+  RELATED_LINKS_SCHEMA_SQL,
   SCHEMA_SQL,
   VIDEO_SOURCES_SCHEMA_SQL
 } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 12
+export const CURRENT_SCHEMA_VERSION = 13
 
 type Migration = {
   version: number
@@ -894,6 +895,10 @@ function migrateToV12(database: Database.Database): void {
   }
 }
 
+function migrateToV13(database: Database.Database): void {
+  database.exec(RELATED_LINKS_SCHEMA_SQL)
+}
+
 const MIGRATIONS: Migration[] = [
   {
     version: 2,
@@ -938,6 +943,10 @@ const MIGRATIONS: Migration[] = [
   {
     version: 12,
     migrate: migrateToV12
+  },
+  {
+    version: 13,
+    migrate: migrateToV13
   }
 ]
 

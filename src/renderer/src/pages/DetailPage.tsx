@@ -18,6 +18,7 @@ import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
 import ActressName from '../components/ActressName'
 import VideoSampleGallery from '../components/VideoSampleGallery'
 import VideoTagPanel from '../components/VideoTagPanel'
+import RelatedLinksList from '../components/RelatedLinksList'
 import AddToPlaylistModal from '../components/AddToPlaylistModal'
 import DetailScrollBody from '../components/DetailScrollBody'
 import MetaLink from '../components/MetaLink'
@@ -830,12 +831,21 @@ export default function DetailPage(): JSX.Element {
         </section>
       )}
 
-      {video.summary && (
+      {(video.summary || (video.links?.length ?? 0) > 0) && (
         <section className="detail-section detail-section--summary">
-          <div className="detail-section-head">
-            <h2 className="section-title">剧情简介</h2>
-          </div>
-          <div className="summary-text">{video.summary}</div>
+          {video.summary ? (
+            <>
+              <div className="detail-section-head">
+                <h2 className="section-title">剧情简介</h2>
+              </div>
+              <div className="summary-text">{video.summary}</div>
+            </>
+          ) : (
+            <div className="detail-section-head">
+              <h2 className="section-title">相关链接</h2>
+            </div>
+          )}
+          <RelatedLinksList links={video.links ?? []} />
         </section>
       )}
 
@@ -1168,7 +1178,7 @@ export default function DetailPage(): JSX.Element {
           }}
           onCancel={() => setConfirmClear(false)}
         >
-          确定要清除「{video.code}」的所有刮削元数据吗？将清空标题、简介、封面、演员、标签、外部评分等并恢复为「未刮削」状态（不影响影片资源与自定义评分）。
+          确定要清除「{video.code}」的所有刮削元数据吗？将清空标题、简介、封面、演员、标签、外部评分等并恢复为「未刮削」状态（不影响影片资源、自定义评分与相关链接）。
         </Modal>
       )}
 

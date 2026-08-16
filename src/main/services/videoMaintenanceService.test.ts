@@ -1604,6 +1604,136 @@ describe('VideoMaintenanceService', () => {
       { title: 'Original second title', publisher_organization_id: null }
     )
   })
+
+  it('stores related links on a video and returns them on detail', () => {
+    setupDb()
+    const videos = createVideoMaintenanceService()
+    const query = createVideoQueryService()
+
+    videos.edit(1, {
+      links: [
+        { label: '', url: 'https://example.com/wiki' },
+        { label: 'Forum', url: 'https://forum.example/thread' },
+        { label: 'Dup', url: 'https://example.com/wiki#section' }
+      ]
+    })
+
+    assert.deepEqual(
+      query.get(1)?.links.map((link) => [link.label, link.url, link.position]),
+      [
+        ['example.com', 'https://example.com/wiki', 0],
+        ['Forum', 'https://forum.example/thread', 1]
+      ]
+    )
+  })
+
+  it('rejects invalid related links and keeps the previous list', () => {
+    setupDb()
+    const videos = createVideoMaintenanceService()
+    const query = createVideoQueryService()
+    videos.edit(1, { links: [{ label: 'Wiki', url: 'https://example.com/wiki' }] })
+
+    assert.throws(
+      () => videos.edit(1, { links: [{ label: 'Bad', url: 'javascript:alert(1)' }] }),
+      /相关链接必须是有效的 HTTP\/HTTPS 地址/
+    )
+    assert.deepEqual(query.get(1)?.links.map((link) => link.url), ['https://example.com/wiki'])
+  })
+
+  it('keeps related links when clearing scraped metadata', () => {
+    setupPolicyDb()
+    const videos = createVideoMaintenanceService()
+    const query = createVideoQueryService()
+    videos.edit(1, { links: [{ label: 'Wiki', url: 'https://example.com/wiki' }] })
+
+    videos.clearMetadata(1)
+
+    assert.equal(query.get(1)?.title, null)
+    assert.deepEqual(query.get(1)?.links.map((link) => link.label), ['Wiki'])
+  })
+
+  it('allows related-link edits while a video scrape result is pending', () => {
+    setupPolicyDb()
+    const db = getDb()
+    db.prepare(
+      `INSERT INTO pending_video_scrapes (
+         video_id, selected_fields_json, applicable_fields_json, update_mode,
+         request_json, warnings_json, created_at, updated_at
+       ) VALUES (1, '[]', '[]', 'replace', '{}', '[]', '2025-01-01', '2025-01-01')`
+    ).run()
+    const videos = createVideoMaintenanceService()
+    const query = createVideoQueryService()
+
+    assert.throws(() => videos.edit(1, { title: 'Must not persist' }), /待确认.*刮削/)
+    assert.doesNotThrow(() =>
+      videos.edit(1, { links: [{ label: 'Wiki', url: 'https://example.com/wiki' }] })
+    )
+    assert.equal(query.get(1)?.title, 'Title')
+    assert.deepEqual(query.get(1)?.links.map((link) => link.label), ['Wiki'])
+    assert.throws(
+      () =>
+        videos.edit(1, {
+          title: 'Still locked',
+          links: [{ label: 'Other', url: 'https://example.com/other' }]
+        }),
+      /待确认.*刮削/
+    )
+    assert.deepEqual(query.get(1)?.links.map((link) => link.label), ['Wiki'])
+  })
+
+  it('unions related links on merge with the retained video first', () => {
+    setupPolicyDb()
+    const db = getDb()
+    const videos = createVideoMaintenanceService()
+    const query = createVideoQueryService()
+    const sourcePath = path.join(tempRoot!, 'link-source.mp4')
+    fs.writeFileSync(sourcePath, 'source')
+    const source = insertTestVideoWithFile(db, {
+      code: 'IPX-535',
+      filePath: sourcePath
+    })
+    videos.edit(1, {
+      links: [
+        { label: '百科', url: 'https://example.com/wiki' },
+        { label: 'Keep', url: 'https://example.com/keep' }
+      ]
+    })
+    videos.edit(source.videoId, {
+      links: [
+        { label: 'Wiki', url: 'https://example.com/wiki#source' },
+        { label: 'Forum', url: 'https://forum.example/thread' }
+      ]
+    })
+
+    videos.mergeVideos({ retainedVideoId: 1, sourceVideoId: source.videoId })
+
+    assert.deepEqual(
+      query.get(1)?.links.map((link) => [link.label, link.url]),
+      [
+        ['百科', 'https://example.com/wiki'],
+        ['Keep', 'https://example.com/keep'],
+        ['Forum', 'https://forum.example/thread']
+      ]
+    )
+  })
+
+  it('leaves related links on the original video when splitting a resource', () => {
+    setupPolicyDb()
+    const videos = createVideoMaintenanceService()
+    const query = createVideoQueryService()
+    videos.edit(1, { links: [{ label: 'Wiki', url: 'https://example.com/wiki' }] })
+    const secondary = videos.importLinkResource({
+      code: 'IPX-535',
+      target: { kind: 'existing', videoId: 1 },
+      url: 'https://example.com/watch/split-links',
+      kind: 'web'
+    }).resource
+
+    const result = videos.splitResource(1, secondary.id)
+
+    assert.deepEqual(query.get(1)?.links.map((link) => link.label), ['Wiki'])
+    assert.deepEqual(query.get(result.videoId)?.links, [])
+  })
 })
 
 function queryResourceCount(): number {

@@ -1133,7 +1133,10 @@ describe('database schema', () => {
         'pending_video_scrapes',
         'pending_video_scrape_sources',
         'pending_video_scrape_candidates',
-        'pending_video_scrape_resources'
+        'pending_video_scrape_resources',
+        'video_links',
+        'actress_links',
+        'playlist_links'
       ]
       assert.deepEqual(
         expectedTables.map(

@@ -424,7 +424,7 @@ export default function LibraryPage(): JSX.Element {
       if (res.pending) {
         setScrapeTarget(null)
         toast.show('发现多个候选，已保存到待确认中心', 'info')
-        navigate(pendingCenterPath({ tab: 'scrape', videoId: request.target.id }))
+        navigate(pendingCenterPath({ type: 'scrape', videoId: request.target.id }))
         return
       }
       setPendingDirectorChoice(null)

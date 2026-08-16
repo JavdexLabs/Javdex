@@ -13,6 +13,7 @@
 @import './feedback-overlays.css';
 @import './entity-editors.css';
 @import './settings-tools.css';
+@import './workbench.css';
 @import './conflict-review.css';
 @import './shell.css';
 @import './detail-surfaces.css';

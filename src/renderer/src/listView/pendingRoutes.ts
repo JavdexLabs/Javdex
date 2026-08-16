@@ -2,30 +2,77 @@ import { generatePath, matchPath } from 'react-router-dom'
 import { LIST_PARAM } from './listQueryParams'
 import { ROUTE_PATH } from './routePaths'
 
-export type PendingTab = 'scan' | 'scrape'
+/** Decision domains sharing the pending inbox; order drives rail section order. */
+export const PENDING_DOMAINS = ['scan', 'scrape', 'actress'] as const
+
+export type PendingDomain = (typeof PENDING_DOMAINS)[number]
+
+/** `all` keeps every domain in one queue and is never written to the URL. */
+export type PendingTypeFilter = PendingDomain | 'all'
+
+/**
+ * Queue items are only unique per domain: scan groups and scrape snapshots use
+ * numeric ids while actress conflicts are keyed by normalized name.
+ */
+export interface PendingItemKey {
+  domain: PendingDomain
+  id: string
+}
+
+function isPendingDomain(raw: string | null): raw is PendingDomain {
+  return PENDING_DOMAINS.includes(raw as PendingDomain)
+}
+
+export function pendingItemKey(domain: PendingDomain, id: string | number): PendingItemKey {
+  return { domain, id: String(id) }
+}
+
+export function formatPendingItemKey(key: PendingItemKey): string {
+  return `${key.domain}:${key.id}`
+}
+
+export function parsePendingItemKey(raw: string | null): PendingItemKey | null {
+  if (!raw) return null
+  const separator = raw.indexOf(':')
+  if (separator <= 0) return null
+  const domain = raw.slice(0, separator)
+  const id = raw.slice(separator + 1)
+  if (!id || !isPendingDomain(domain)) return null
+  return { domain, id }
+}
+
+export function samePendingItemKey(
+  left: PendingItemKey | null,
+  right: PendingItemKey | null
+): boolean {
+  if (!left || !right) return left === right
+  return left.domain === right.domain && left.id === right.id
+}
 
 export function parsePendingCenterSearch(params: URLSearchParams): {
-  tab: PendingTab
-  itemId: number | null
+  type: PendingTypeFilter
+  item: PendingItemKey | null
   videoId: number | null
 } {
-  const itemId = Number(params.get(LIST_PARAM.pendingItemId))
+  const rawType = params.get(LIST_PARAM.pendingType)
   const videoId = Number(params.get(LIST_PARAM.pendingVideoId))
   return {
-    tab: params.get(LIST_PARAM.pendingTab) === 'scrape' ? 'scrape' : 'scan',
-    itemId: Number.isInteger(itemId) && itemId > 0 ? itemId : null,
+    type: isPendingDomain(rawType) ? rawType : 'all',
+    item: parsePendingItemKey(params.get(LIST_PARAM.pendingItem)),
     videoId: Number.isInteger(videoId) && videoId > 0 ? videoId : null
   }
 }
 
-export function pendingCenterPath(options: {
-  tab?: PendingTab
-  id?: number
-  videoId?: number
-} = {}): string {
+export function pendingCenterPath(
+  options: {
+    type?: PendingTypeFilter
+    item?: PendingItemKey | null
+    videoId?: number
+  } = {}
+): string {
   const params = new URLSearchParams()
-  if (options.tab) params.set(LIST_PARAM.pendingTab, options.tab)
-  if (options.id != null) params.set(LIST_PARAM.pendingItemId, String(options.id))
+  if (options.type && options.type !== 'all') params.set(LIST_PARAM.pendingType, options.type)
+  if (options.item) params.set(LIST_PARAM.pendingItem, formatPendingItemKey(options.item))
   if (options.videoId != null) params.set(LIST_PARAM.pendingVideoId, String(options.videoId))
   const query = params.toString()
   return query ? `${ROUTE_PATH.pending}?${query}` : ROUTE_PATH.pending

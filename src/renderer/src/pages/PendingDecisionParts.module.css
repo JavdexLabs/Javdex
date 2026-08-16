@@ -1,0 +1,338 @@
+/* Decision workspace skeleton shared by every pending domain. */
+.workspace {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  overflow: hidden;
+}
+
+.question {
+  flex-shrink: 0;
+  min-height: 76px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.question > div {
+  min-width: 0;
+}
+
+.question > div > span,
+.stepTitle > div > span {
+  color: var(--text-accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.question h2,
+.stepTitle h3 {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.question h2 {
+  margin-top: 2px;
+  font-size: 18px;
+}
+
+.question p {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.alert {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 6px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-warning);
+  background: var(--surface-warning);
+  color: var(--text-warning);
+  font-size: 11px;
+}
+
+.alertInline {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+}
+
+.tabs {
+  flex-shrink: 0;
+  margin: 8px 12px 0;
+  width: fit-content;
+}
+
+.panels {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.panel {
+  height: 100%;
+  padding: 12px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.panel[hidden] {
+  display: none;
+}
+
+.step + .step {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.stepTitle {
+  margin-bottom: 9px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stepTitle h3 {
+  margin-top: 1px;
+  font-size: 13px;
+}
+
+.stepTitle small {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-align: right;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+/* Impact preview shared by scan, scrape and actress conflicts. */
+.impactList {
+  padding: 0 8px 8px;
+}
+
+.impactRow {
+  min-height: 34px;
+  padding: 6px 8px;
+  display: grid;
+  grid-template-columns: minmax(68px, 0.55fr) minmax(80px, 1fr) auto minmax(80px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.impactRow > span:nth-child(2),
+.impactRow > span:nth-child(4) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Two-column variant for domains whose impact is a target, not a value diff. */
+.impactRow.impactPair {
+  grid-template-columns: minmax(120px, 0.6fr) minmax(0, 1fr);
+}
+
+.impactPair > span:first-child {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.impactRow strong {
+  color: var(--text-accent);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.impactRow[data-clearing='true'] strong {
+  color: var(--text-danger);
+}
+
+.impactNote {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.impactCard,
+.impactPanel {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  overflow: hidden;
+}
+
+.impactCard > summary {
+  min-height: 34px;
+  padding: 7px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.impactCard > summary em {
+  color: var(--text-muted);
+  font-style: normal;
+}
+
+.impactCardGroup {
+  margin-top: 8px;
+  display: grid;
+  gap: 7px;
+}
+
+.unchanged {
+  margin-top: 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+  overflow: hidden;
+}
+
+.unchanged > summary {
+  min-height: 34px;
+  padding: 7px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.unchangedRow {
+  min-height: 30px;
+  padding: 5px 9px;
+  display: grid;
+  grid-template-columns: minmax(80px, 0.6fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.unchangedReason {
+  font-style: normal;
+}
+
+.confirm {
+  flex-shrink: 0;
+  min-height: 58px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--border-strong);
+  background: var(--surface-elevated);
+}
+
+.confirm > div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.confirmSummary {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.confirmHeadline {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.confirmScope {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.secondary {
+  flex-shrink: 0;
+  min-height: 38px;
+  padding: 5px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-panel);
+}
+
+.secondaryLabel {
+  margin-right: auto;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+@media (width <= 1100px) {
+  .impactRow {
+    grid-template-columns: 68px minmax(0, 1fr) auto;
+  }
+
+  .impactRow.impactPair {
+    grid-template-columns: minmax(96px, 0.6fr) minmax(0, 1fr);
+  }
+
+  .impactRow > span:nth-child(3) {
+    display: none;
+  }
+
+  .impactRow > span:nth-child(4),
+  .impactRow > strong {
+    grid-column: 2 / -1;
+  }
+
+  .impactPair > span:nth-child(2) {
+    grid-column: auto;
+  }
+
+  .confirm,
+  .secondary {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}

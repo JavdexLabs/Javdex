@@ -41,9 +41,18 @@ export function WorkbenchRailHeader({
 
 export function WorkbenchStatusPill({
   className,
+  tone,
   ...props
-}: HTMLAttributes<HTMLSpanElement>): JSX.Element {
-  return <span className={classNames('workbench-status-pill', className)} {...props} />
+}: HTMLAttributes<HTMLSpanElement> & {
+  tone?: 'waiting' | 'ok'
+}): JSX.Element {
+  return (
+    <span
+      className={classNames('workbench-status-pill', className)}
+      data-tone={tone}
+      {...props}
+    />
+  )
 }
 
 export interface WorkbenchTabItem<T extends string> {

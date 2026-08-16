@@ -7,7 +7,6 @@ import ActressShell from './components/ActressShell'
 import FacetShell from './components/FacetShell'
 import DetailPage from './pages/DetailPage'
 import ActressDetailPage from './pages/ActressDetailPage'
-import ActressConflictReviewPage from './pages/ActressConflictReviewPage'
 import OrganizationDetailPage from './pages/OrganizationDetailPage'
 import DirectorDetailPage from './pages/DirectorDetailPage'
 import SeriesDetailPage from './pages/SeriesDetailPage'
@@ -24,6 +23,7 @@ import { ImagePreviewOverlayProvider } from './components/ImagePreviewOverlayCon
 import { AvatarAutoCropBatchProvider } from './contexts/AvatarAutoCropBatchContext'
 import { installDisableInputSpellcheck } from './installDisableInputSpellcheck'
 import { ROUTE_PATH, ROUTE_SEGMENT } from './listView/routePaths'
+import { pendingCenterPath } from './listView/pendingRoutes'
 import { SETTINGS_GROUPS, settingsPath } from './settings/settingsRoutes'
 import {
   SettingsPluginDevOutlet,
@@ -54,7 +54,10 @@ function AppContent(): JSX.Element {
                     </Route>
                     <Route path={ROUTE_PATH.actresses} element={<ActressShell />}>
                       <Route index element={null} />
-                      <Route path={ROUTE_SEGMENT.actressConflicts} element={<ActressConflictReviewPage />} />
+                      <Route
+                        path={ROUTE_SEGMENT.actressConflicts}
+                        element={<Navigate to={pendingCenterPath({ type: 'actress' })} replace />}
+                      />
                       <Route path={ROUTE_SEGMENT.actressDetail} element={<ActressDetailPage />}>
                         <Route path={ROUTE_SEGMENT.actressVideo} element={<DetailPage />}>
                           <Route

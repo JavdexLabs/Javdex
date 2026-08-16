@@ -29,7 +29,7 @@ const SEARCH_KEYS_BY_ROOT: Record<string, readonly string[]> = {
     LIST_PARAM.dir
   ],
   '/playlists': [LIST_PARAM.q],
-  '/pending': [LIST_PARAM.pendingTab, LIST_PARAM.pendingItemId, LIST_PARAM.pendingVideoId]
+  '/pending': [LIST_PARAM.pendingType, LIST_PARAM.pendingItem, LIST_PARAM.pendingVideoId]
 }
 
 function facetRoot(pathname: string): string | null {

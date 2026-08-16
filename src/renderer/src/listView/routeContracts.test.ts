@@ -2,7 +2,6 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Location, NavigateFunction } from 'react-router-dom'
 import {
-  actressConflictReviewPath,
   actressDetailPath,
   actressVideoActressPath,
   actressVideoDetailPath,
@@ -22,7 +21,6 @@ import {
 } from './facetRoutes'
 import { libraryVideoActressPath, libraryVideoDetailPath, parseLibraryVideoPath } from './libraryRoutes'
 import {
-  navigateToActressConflicts,
   navigateToActressDetail,
   navigateToActressList,
   navigateToActressFromVideoDetail,
@@ -64,8 +62,10 @@ import {
 import { resolveSettingsRoute, settingsPath, settingsPluginDevPath } from '../settings/settingsRoutes'
 import {
   parsePendingCenterSearch,
+  parsePendingItemKey,
   parsePendingVideoPath,
   pendingCenterPath,
+  pendingItemKey,
   pendingVideoActressPath,
   pendingVideoDetailPath
 } from './pendingRoutes'
@@ -81,7 +81,6 @@ describe('route builders and parsers', () => {
   })
 
   it('round-trips actress detail stacks', () => {
-    assert.equal(actressConflictReviewPath(), '/actresses/conflicts')
     assert.equal(actressDetailPath(3), '/actresses/3')
     assert.equal(actressVideoDetailPath(3, 9), '/actresses/3/9')
     assert.equal(actressVideoActressPath(3, 9, 11), '/actresses/3/9/actress/11')
@@ -135,15 +134,31 @@ describe('route builders and parsers', () => {
 
   it('builds pending-center locations without page-level query concatenation', () => {
     assert.equal(pendingCenterPath(), '/pending')
-    assert.equal(pendingCenterPath({ tab: 'scan' }), '/pending?tab=scan')
+    assert.equal(pendingCenterPath({ type: 'all' }), '/pending')
+    assert.equal(pendingCenterPath({ type: 'scan' }), '/pending?type=scan')
     assert.equal(
-      pendingCenterPath({ tab: 'scrape', videoId: 42 }),
-      '/pending?tab=scrape&videoId=42'
+      pendingCenterPath({ type: 'scrape', videoId: 42 }),
+      '/pending?type=scrape&videoId=42'
     )
-    assert.equal(pendingCenterPath({ tab: 'scrape', id: 7 }), '/pending?tab=scrape&id=7')
-    assert.deepEqual(parsePendingCenterSearch(new URLSearchParams('tab=scrape&id=7')), {
-      tab: 'scrape',
-      itemId: 7,
+    assert.equal(
+      pendingCenterPath({ type: 'scrape', item: pendingItemKey('scrape', 7) }),
+      '/pending?type=scrape&item=scrape%3A7'
+    )
+    assert.equal(
+      pendingCenterPath({ type: 'actress', item: pendingItemKey('actress', 'a:b') }),
+      '/pending?type=actress&item=actress%3Aa%3Ab'
+    )
+    assert.deepEqual(parsePendingCenterSearch(new URLSearchParams('type=scrape&item=scrape:7')), {
+      type: 'scrape',
+      item: { domain: 'scrape', id: '7' },
+      videoId: null
+    })
+    // Actress ids are normalized names, so only the first separator splits the key.
+    assert.deepEqual(parsePendingItemKey('actress:a:b'), { domain: 'actress', id: 'a:b' })
+    assert.equal(parsePendingItemKey('unknown:1'), null)
+    assert.deepEqual(parsePendingCenterSearch(new URLSearchParams('')), {
+      type: 'all',
+      item: null,
       videoId: null
     })
     assert.equal(pendingVideoDetailPath(42), '/pending/video/42')
@@ -200,22 +215,20 @@ describe('actress avatar filter query contract', () => {
     assert.equal(actressAvatarParam('all'), null)
   })
 
-  it('opens and closes conflict review without losing actress list query state', () => {
+  it('returns to the actress list without losing its query state', () => {
     const destinations: unknown[] = []
     const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
     const location = {
-      pathname: '/actresses',
+      pathname: '/actresses/12',
       search: '?q=sara&status=failed',
       hash: '',
       state: null,
       key: 'test'
     } as Location
 
-    navigateToActressConflicts(navigate, location)
-    navigateToActressList(navigate, { ...location, pathname: '/actresses/conflicts' } as Location)
+    navigateToActressList(navigate, location)
 
     assert.deepEqual(destinations, [
-      { pathname: '/actresses/conflicts', search: '?q=sara&status=failed' },
       { pathname: '/actresses', search: 'q=sara&status=failed' }
     ])
   })
@@ -322,7 +335,7 @@ describe('primary navigation memory', () => {
     rememberPrimaryListLocation('/detail/42', '?q=hero&status=1&resources=local,web')
     rememberPrimaryListLocation('/actresses/8', '?q=sara&gender=female')
     rememberPrimaryListLocation('/facet/director/d/21', '?q=miike&sort=rating')
-    rememberPrimaryListLocation('/pending/video/42', '?tab=scrape&id=7&videoId=42&q=drop')
+    rememberPrimaryListLocation('/pending/video/42', '?type=scrape&item=scrape:7&videoId=42&q=drop')
     rememberPrimaryListLocation(
       '/facet/maker/o/12',
       '?q=studio&sort=updated_at&dir=asc&status=1'
@@ -346,7 +359,7 @@ describe('primary navigation memory', () => {
     })
     assert.deepEqual(primaryNavigationTarget('/pending'), {
       pathname: '/pending',
-      search: '?tab=scrape&id=7&videoId=42'
+      search: '?type=scrape&item=scrape%3A7&videoId=42'
     })
     assert.equal(primaryListRoot('/settings/overview/status'), null)
   })

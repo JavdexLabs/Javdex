@@ -101,12 +101,28 @@
 3. **不要把「铺满」规则套到所有 `.empty-state`。** 仅 `page`（整页）或 `fill`（固定面板）可以占满父级；`compact` 永远是内容带，不是视口填充。
 4. **新增空状态先问父容器。** 若父级是固定高度工作区，选 `fill`；若父级在长页面里只是一块内容，选 `compact`。
 
+## Workbench And Decision Panes
+
+需要“左侧队列 + 右侧工作区”的页面（插件管理、待确认收件箱）使用 `components/workbench` 的 `WorkbenchShell`、`WorkbenchMain`、`WorkbenchRail`、`WorkbenchRailHeader`、`WorkbenchTabs`、`WorkbenchStatusPill`，不要另建一套壳层。
+
+待确认收件箱在此之上再收敛决定流程。三类领域（扫描资源、影片刮削、演员名称冲突）共用 `PendingDecisionParts` 的原语：
+
+- `PendingWorkspace`：提出问题（eyebrow + 标题 + 说明 + 状态），并按 `alert` / `tabs` / `confirm` / `secondary` / `overlays` 插槽组织外框。modal 走 `overlays`，避免被工作区的 `overflow: hidden` 裁掉。
+- `PendingStep`：分步引导。每个领域的顺序都是“先选择，再预览影响”。
+- `PendingImpact*`：影响预览。值变化用 `PendingImpactRow`（旧值 → 新值 + 动作），只有归属或写入目标时用 `PendingImpactPair`。
+- `PendingConfirmBar`：底部常驻确认条，必须同时说明本次改动的摘要与作用范围。
+
+新增待确认领域时扩展这些原语，不要在单个 pane 内复制工作区骨架或影响预览布局。
+
 ## Styling Rules
 
 - 组件样式优先使用 `--surface-*`、`--text-*`、`--border-*`、`--control-*`、`--focus-*`、`--motion-*`。
 - 页面中避免 hardcoded 颜色、阴影、圆角和间距。
 - inline style 仅用于真实动态值，例如虚拟列表定位、进度条宽度、图片缩放变换。
 - 可复用视觉模式应沉淀为 class，而不是散落在 JSX 中。
+- 新增或重构的组件样式写在同名 `ComponentName.module.css`，由组件自己导入；全局 CSS 只保留 token、reset、应用壳层和迁移期 legacy 样式。`npm run check:css-architecture` 以基线方式拦截全局 class 增长，详见 `CSS_MAINTAINABILITY_PROPOSAL.md`。
+- 跨组件共享的视觉规则提升为 React 原语（props seam），不要靠调用方拼接全局 class。
+- 选中、就绪这类状态优先用 `aria-*` 或 `data-*` 属性选择器表达，不新增全局 `.is-*`。
 
 ## Migration Checklist
 
@@ -120,7 +136,8 @@
 - 可滚动详情使用 `scroll-body--scroll`。
 - 虚拟列表或固定填充列表使用 `scroll-body--fill`。
 - 破坏性操作进入确认 modal。
-- 静态视觉值进入 CSS class 和语义 token。
+- 静态视觉值进入 CSS class 和语义 token，并写在组件同名 `.module.css` 中。
+- 主从工作台复用 `components/workbench`；待确认类决定复用 `PendingDecisionParts`。
 - 动态尺寸、位置、进度、变换才允许 inline style。
 - 新增可复制内容时添加可选中语义；新增交互卡片/图片时保持不可选中。
 - 空状态按父容器选型：固定高度面板用 `fill`，滚动详情区块用 `compact`（约 140px），整页无数据用 `page`。

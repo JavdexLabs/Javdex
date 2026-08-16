@@ -460,7 +460,7 @@ export default function DetailPage(): JSX.Element {
       }
       if (res.pending) {
         toast.show('发现多个候选，已保存到待确认中心', 'info')
-        navigate(pendingCenterPath({ tab: 'scrape', videoId }))
+        navigate(pendingCenterPath({ type: 'scrape', videoId }))
         return
       }
       setPendingDirectorChoice(null)
@@ -662,7 +662,7 @@ export default function DetailPage(): JSX.Element {
                     type="button"
                     className="detail-meta-status"
                     data-pending="true"
-                    onClick={() => navigate(pendingCenterPath({ tab: 'scrape', videoId: video.id }))}
+                    onClick={() => navigate(pendingCenterPath({ type: 'scrape', videoId: video.id }))}
                   >
                     查看待确认候选
                   </button>

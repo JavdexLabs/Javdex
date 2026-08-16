@@ -145,9 +145,6 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
     queryFn: () => api.actressScrape.conflictSummary(),
     refetchInterval: 3_000
   })
-  const conflictBadges: Record<string, number> = {
-    [ROUTE_PATH.actresses]: conflictSummaryQuery.data?.groupCount ?? 0
-  }
   const pendingScanQuery = useQuery({
     queryKey: ['pending-scan-groups'],
     queryFn: () => api.scan.listPending(),
@@ -158,9 +155,13 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
     queryFn: () => api.scrape.listPending(),
     refetchInterval: 3_000
   })
-  const pendingCount =
-    (pendingScanQuery.data?.length ?? 0) + (pendingVideoQuery.data?.length ?? 0)
-  conflictBadges[ROUTE_PATH.pending] = pendingCount
+  /** One inbox, one badge: scan groups, scrape snapshots and actress name conflicts. */
+  const pendingBadges: Record<string, number> = {
+    [ROUTE_PATH.pending]:
+      (pendingScanQuery.data?.length ?? 0) +
+      (pendingVideoQuery.data?.length ?? 0) +
+      (conflictSummaryQuery.data?.groupCount ?? 0)
+  }
 
   useEffect(() => {
     syncPrimaryNavigationMemory(location.pathname, location.search)
@@ -180,11 +181,8 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
         <nav className="sidebar-nav">
           <NavItems
             items={NAV_MAIN}
-            badges={conflictBadges}
-            badgeTargets={{
-              [ROUTE_PATH.actresses]: ROUTE_PATH.actressConflicts,
-              [ROUTE_PATH.pending]: pendingCenterPath()
-            }}
+            badges={pendingBadges}
+            badgeTargets={{ [ROUTE_PATH.pending]: pendingCenterPath() }}
           />
           <div className={`nav-group${facetActive ? ' nav-group--active' : ''}`}>
             <div className="nav-group-label">分类</div>

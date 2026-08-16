@@ -18,8 +18,8 @@ export const LIST_PARAM = {
   resources: 'resources',
   pending: 'pending',
   releaseDir: 'releaseDir',
-  pendingTab: 'tab',
-  pendingItemId: 'id',
+  pendingType: 'type',
+  pendingItem: 'item',
   pendingVideoId: 'videoId'
 } as const
 

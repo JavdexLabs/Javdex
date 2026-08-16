@@ -31,7 +31,8 @@ import {
   parseGender,
   patchSearchParams
 } from '../listView/listQueryParams'
-import { navigateToActressConflicts, navigateToActressDetail } from '../listView/listNavigation'
+import { navigateToActressDetail } from '../listView/listNavigation'
+import { pendingCenterPath } from '../listView/pendingRoutes'
 import { forgetPrimaryListLocation } from '../listView/primaryNavigationMemory'
 import { ROUTE_MATCH, ROUTE_PATH } from '../listView/routePaths'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -87,9 +88,7 @@ export default function ActressesPage(): JSX.Element {
   const location = useLocation()
   const toast = useToast()
   const [searchParams, setSearchParams] = useSearchParams()
-  const actressDetailOpen = useMatch({ path: ROUTE_MATCH.actressDetailOpen, end: false })
-  const conflictReviewOpen = useMatch({ path: ROUTE_MATCH.actressConflicts, end: false })
-  const detailOpen = Boolean(actressDetailOpen || conflictReviewOpen)
+  const detailOpen = Boolean(useMatch({ path: ROUTE_MATCH.actressDetailOpen, end: false }))
 
   const urlQ = searchParams.get(LIST_PARAM.q) ?? ''
   const [searchInput, setSearchInput] = useState(urlQ)
@@ -456,7 +455,7 @@ export default function ActressesPage(): JSX.Element {
 
                     size="sm"
                     className="actress-conflict-entry"
-                    onClick={() => navigateToActressConflicts(navigate, location)}
+                    onClick={() => navigate(pendingCenterPath({ type: 'actress' }))}
                   >
                     <CircleAlert {...UI_ICON_SM} aria-hidden />
                     待确认 {pendingConflictCount}

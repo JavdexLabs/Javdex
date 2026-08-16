@@ -7,6 +7,7 @@ export const ROUTE_PATH = {
   actresses: '/actresses',
   actressTree: '/actresses/*',
   actressDetail: '/actresses/:id',
+  /** Legacy entry; the route only redirects into the unified pending inbox. */
   actressConflicts: '/actresses/conflicts',
   actressVideoStack: '/actresses/:id/:videoId',
   actressActressStack: '/actresses/:id/:videoId/actress/:actressId',
@@ -60,7 +61,6 @@ export const ROUTE_MATCH = {
   playlistVideoStack: ROUTE_PATH.playlistVideoStack,
   playlistActressStack: ROUTE_PATH.playlistActressStack,
   actressDetailOpen: ROUTE_PATH.actressDetail,
-  actressConflicts: ROUTE_PATH.actressConflicts,
   actressVideoStack: ROUTE_PATH.actressVideoStack,
   actressActressStack: ROUTE_PATH.actressActressStack,
   organizationDetailOpen: ROUTE_PATH.organizationDetail,

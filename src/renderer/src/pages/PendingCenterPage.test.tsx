@@ -85,6 +85,10 @@ const fakeApi = {
   scan: {
     listPending: async () => []
   },
+  actressScrape: {
+    listConflicts: async () => [],
+    conflictSummary: async () => ({ groupCount: 0, conflictGroupCount: 0, applicableGroupCount: 0 })
+  },
   scrape: {
     listPending: async () => (resolved ? [] : [pending]),
     discardPending: async () => true,
@@ -132,7 +136,9 @@ function button(label: string): TestRenderer.ReactTestInstance {
 
 function modalTitles(): string[] {
   assert.ok(renderer)
-  return renderer.root.findAllByType('h3').map(nodeText)
+  return renderer.root
+    .findAllByProps({ role: 'dialog' })
+    .flatMap((dialog) => dialog.findAllByType('h3').map(nodeText))
 }
 
 async function waitFor(predicate: () => boolean): Promise<void> {
@@ -162,7 +168,7 @@ describe('PendingCenterPage scrape resolution', () => {
       renderer = TestRenderer.create(
         <QueryClientProvider client={queryClient!}>
           <MemoryRouter
-            initialEntries={['/pending?tab=scrape']}
+            initialEntries={['/pending?type=scrape']}
             future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
           >
             <PendingCenterPage />

@@ -22,7 +22,8 @@
 - `/playlists`: 清单列表。
 - `/playlists/:playlistId`: 清单详情。
 - `/playlists/:playlistId/:id`: 从清单详情打开影片详情。
-- `/pending`: 待确认扫描与刮削工作台。
+- `/pending`: 待确认收件箱，收拢扫描资源归属、影片刮削候选与演员名称冲突三类决定。
+- `/actresses/conflicts`: 旧的演员冲突入口，重定向到 `/pending?type=actress`。
 - `/pending/video/:videoId`: 从待确认工作台打开影片详情。
 - `/pending/video/:videoId/actress/:actressId`: 从待确认影片详情继续打开演员详情。
 - `/facet/:type`: 分类列表。
@@ -46,6 +47,8 @@
 - 可复用：列表导航 helpers 应传递当前 `location.search`，除非业务明确需要清空。
 
 新增列表参数时，应先扩展 `listQueryParams.ts`，再由页面消费。不要在页面里手写分散的 query key 字符串。
+
+待确认收件箱把队列筛选和当前选中项也放在 URL：`type` 是领域筛选（`all`/`scan`/`scrape`/`actress`），`item` 是 `domain:id` 形式的选中项。两者由 `pendingRoutes.ts` 统一构造与解析，页面不拼接 key。
 
 ### Query Scope
 

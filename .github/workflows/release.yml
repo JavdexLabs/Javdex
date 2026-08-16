@@ -144,6 +144,7 @@ jobs:
         with:
           tag_name: ${{ steps.release.outputs.tag }}
           name: Javdex ${{ steps.release.outputs.tag }}
+          body_path: .github/release-notes/${{ steps.release.outputs.tag }}.md
           prerelease: ${{ inputs.prerelease || false }}
           fail_on_unmatched_files: false
           files: |

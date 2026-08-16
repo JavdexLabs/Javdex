@@ -1127,11 +1127,6 @@
   gap: var(--organization-inline-gap);
 }
 
-.organization-parent-picker {
-  display: grid;
-  gap: var(--organization-inline-gap);
-}
-
 .organization-link-editor-row {
   display: grid;
   grid-template-columns: minmax(var(--organization-link-label-min), 0.35fr) minmax(0, 1fr) auto;

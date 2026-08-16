@@ -15,6 +15,9 @@ import AliasTagEditor from './AliasTagEditor'
 import EditFieldAiTranslate from './EditFieldAiTranslate'
 import { EditFormField, EditFormSection } from './FormPrimitives'
 import { createSeriesFormDraft, seriesInputFromDraft } from './seriesFormState'
+import ClassificationPicker from './ClassificationPicker'
+import { organizationOptionDescription } from './organizationPickerState'
+import { seriesOptionDescription } from './seriesPickerState'
 import { promoteAliasToMain } from './aliasEditorState'
 import { moveClassificationLink, useClassificationLinkKeys } from './classificationLinkForm'
 import { UI_ICON_SM } from './iconDefaults'
@@ -191,77 +194,82 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
                 onChange={(event) => setDraft({ ...draft, endYear: event.target.value })}
               />
             </EditFormField>
-            <EditFormField label="所属机构" htmlFor="series-owner" span={2}>
-              <div className="organization-parent-picker">
-                <input
-                  className="text-input"
-                  value={ownerSearch}
-                  aria-label="搜索所属机构"
-                  placeholder="搜索机构主名或别名…"
-                  onChange={(event) => setOwnerSearch(event.target.value)}
-                />
-                <SelectControl
-                  id="series-owner"
-                  value={draft.ownerOrganizationId}
-                  onChange={(event) => {
-                    const ownerOrganizationId = event.target.value
-                    const option = ownerOptions.find(
-                      (item) => String(item.id) === ownerOrganizationId
-                    )
-                    setSelectedOwner(option ? { id: option.id, mainName: option.mainName } : null)
-                    setDraft({ ...draft, ownerOrganizationId })
-                  }}
-                >
-                  <option value="">未归属</option>
-                  {ownerOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.mainName}
-                    </option>
-                  ))}
-                </SelectControl>
-                <span className="entity-edit-field-hint">
-                  所属机构只由手动选择设置，不会从影片制作商或发行商推断。
+            <EditFormField
+              label="所属机构"
+              htmlFor="series-owner"
+              span={2}
+              hint="搜索并选择；留空表示未归属。不会从影片制作商或发行商推断。"
+            >
+              <ClassificationPicker
+                id="series-owner"
+                value={ownerSearch}
+                options={ownerOptions.map((option) => ({
+                  id: option.id,
+                  mainName: option.mainName,
+                  description: organizationOptionDescription(option)
+                }))}
+                selectedId={selectedOwner?.id ?? null}
+                listLabel="所属机构候选"
+                placeholder="搜索机构主名或别名…"
+                onValueChange={(next) => {
+                  setOwnerSearch(next)
+                  if (next.trim()) return
+                  setSelectedOwner(null)
+                  setDraft({ ...draft, ownerOrganizationId: '' })
+                }}
+                onSelect={(option) => {
+                  setOwnerSearch(option.mainName)
+                  setSelectedOwner({ id: option.id, mainName: option.mainName })
+                  setDraft({ ...draft, ownerOrganizationId: String(option.id) })
+                }}
+                onDismiss={() => {
+                  setOwnerSearch(selectedOwner?.mainName ?? '')
+                }}
+              />
+              {ownerQuery.isError ? (
+                <span className="classification-picker-error" role="alert">
+                  所属机构候选加载失败，请稍后重试。
                 </span>
-                {ownerQuery.isError ? (
-                  <span className="classification-picker-error" role="alert">
-                    所属机构候选加载失败，请稍后重试。
-                  </span>
-                ) : null}
-              </div>
+              ) : null}
             </EditFormField>
-            <EditFormField label="上级系列" htmlFor="series-parent" span={2}>
-              <div className="organization-parent-picker">
-                <input
-                  className="text-input"
-                  value={parentSearch}
-                  aria-label="搜索上级系列"
-                  placeholder="搜索系列主名或别名…"
-                  onChange={(event) => setParentSearch(event.target.value)}
-                />
-                <SelectControl
-                  id="series-parent"
-                  value={draft.parentSeriesId}
-                  onChange={(event) => {
-                    const parentSeriesId = event.target.value
-                    const option = parentOptions.find((item) => String(item.id) === parentSeriesId)
-                    setSelectedParent(option ?? null)
-                    setDraft({ ...draft, parentSeriesId })
-                  }}
-                >
-                  <option value="">无</option>
-                  {parentOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.mainName} · {option.ownerOrganization?.mainName ?? '未归属'}
-                    </option>
-                  ))}
-                </SelectControl>
-                <span className="entity-edit-field-hint">层级循环会在保存时拒绝。</span>
-                {parentQuery.isError ? (
-                  <span className="classification-picker-error" role="alert">
-                    上级系列候选加载失败，请稍后重试。
-                  </span>
-                ) : null}
-              </div>
+            <EditFormField
+              label="上级系列"
+              htmlFor="series-parent"
+              span={2}
+              hint="搜索并选择；留空表示无上级。层级循环会在保存时拒绝。"
+            >
+              <ClassificationPicker
+                id="series-parent"
+                value={parentSearch}
+                options={parentOptions.map((option) => ({
+                  id: option.id,
+                  mainName: option.mainName,
+                  description: seriesOptionDescription(option)
+                }))}
+                selectedId={selectedParent?.id ?? null}
+                listLabel="上级系列候选"
+                placeholder="搜索系列主名或别名…"
+                onValueChange={(next) => {
+                  setParentSearch(next)
+                  if (next.trim()) return
+                  setSelectedParent(null)
+                  setDraft({ ...draft, parentSeriesId: '' })
+                }}
+                onSelect={(option) => {
+                  const next = parentOptions.find((item) => item.id === option.id) ?? null
+                  setParentSearch(option.mainName)
+                  setSelectedParent(next)
+                  setDraft({ ...draft, parentSeriesId: String(option.id) })
+                }}
+                onDismiss={() => {
+                  setParentSearch(selectedParent?.mainName ?? '')
+                }}
+              />
+              {parentQuery.isError ? (
+                <span className="classification-picker-error" role="alert">
+                  上级系列候选加载失败，请稍后重试。
+                </span>
+              ) : null}
             </EditFormField>
           </div>
         </EditFormSection>

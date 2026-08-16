@@ -21,9 +21,11 @@ interface Props {
   options: readonly ClassificationPickerOption[]
   selectedId: number | null
   listLabel: string
-  createHint: string
+  createHint?: string
+  placeholder?: string
   onValueChange: (value: string) => void
   onSelect: (option: ClassificationPickerOption) => void
+  onDismiss?: () => void
 }
 
 function canPortal(): boolean {
@@ -37,8 +39,10 @@ export default function ClassificationPicker({
   selectedId,
   listLabel,
   createHint,
+  placeholder,
   onValueChange,
-  onSelect
+  onSelect,
+  onDismiss
 }: Props): JSX.Element {
   const [state, setState] = useState(CLOSED_CLASSIFICATION_PICKER)
   const [listWidth, setListWidth] = useState<number>()
@@ -65,7 +69,8 @@ export default function ClassificationPicker({
 
   const dismiss = useCallback(() => {
     setState(CLOSED_CLASSIFICATION_PICKER)
-  }, [])
+    onDismiss?.()
+  }, [onDismiss])
 
   const select = (option: ClassificationPickerOption): void => {
     setState(CLOSED_CLASSIFICATION_PICKER)
@@ -92,7 +97,7 @@ export default function ClassificationPicker({
     if (event.key === 'Escape' && view.open) {
       event.preventDefault()
       event.nativeEvent.stopPropagation()
-      setState(CLOSED_CLASSIFICATION_PICKER)
+      dismiss()
     }
   }
 
@@ -121,7 +126,7 @@ export default function ClassificationPicker({
           <small className={styles.optionMeta}>{option.description}</small>
         </button>
       ))}
-      {classificationPickerCreateHintVisible(value, options) ? (
+      {createHint && classificationPickerCreateHintVisible(value, options) ? (
         <div className={styles.create}>{createHint}</div>
       ) : null}
     </div>
@@ -141,6 +146,7 @@ export default function ClassificationPicker({
           view.activeIndex >= 0 ? optionId(options[view.activeIndex]) : undefined
         }
         autoComplete="off"
+        placeholder={placeholder}
         value={value}
         onChange={(event) => {
           onValueChange(event.target.value)
@@ -154,6 +160,7 @@ export default function ClassificationPicker({
             return
           }
           dispatch({ type: 'dismiss' })
+          onDismiss?.()
         }}
       />
       {canPortal() ? (

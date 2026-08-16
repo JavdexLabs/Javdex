@@ -19,6 +19,8 @@ import {
   organizationUpdateInputFromDraft,
   retainSelectedParentOption
 } from './organizationFormState'
+import ClassificationPicker from './ClassificationPicker'
+import { organizationOptionDescription } from './organizationPickerState'
 import { promoteAliasToMain } from './aliasEditorState'
 import { moveClassificationLink, useClassificationLinkKeys } from './classificationLinkForm'
 import { UI_ICON_SM } from './iconDefaults'
@@ -196,42 +198,43 @@ export default function OrganizationEditModal({
                 onChange={(event) => setDraft({ ...draft, endedYear: event.target.value })}
               />
             </EditFormField>
-            <EditFormField label="上级机构" htmlFor="organization-parent" span={2}>
-              <div className="organization-parent-picker">
-                <input
-                  className="text-input"
-                  value={parentSearch}
-                  aria-label="搜索上级机构"
-                  placeholder="搜索机构主名或别名…"
-                  onChange={(event) => setParentSearch(event.target.value)}
-                />
-                <SelectControl
-                  id="organization-parent"
-                  value={draft.parentOrganizationId}
-                  onChange={(event) => {
-                    const parentOrganizationId = event.target.value
-                    const option = parentOptions.find(
-                      (item) => String(item.id) === parentOrganizationId
-                    )
-                    setSelectedParent(
-                      option ? { id: option.id, mainName: option.mainName } : null
-                    )
-                    setDraft({ ...draft, parentOrganizationId })
-                  }}
-                >
-                  <option value="">无</option>
-                  {parentOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.mainName}
-                    </option>
-                  ))}
-                </SelectControl>
-                <span className="entity-edit-field-hint">
-                  {parentOptionsQuery.isError
-                    ? '上级机构搜索失败，请重试。'
-                    : '先搜索，再从结果中选择；层级循环会在保存时拒绝。'}
+            <EditFormField
+              label="上级机构"
+              htmlFor="organization-parent"
+              span={2}
+              hint="搜索并选择；留空表示无上级。层级循环会在保存时拒绝。"
+            >
+              <ClassificationPicker
+                id="organization-parent"
+                value={parentSearch}
+                options={parentOptions.map((option) => ({
+                  id: option.id,
+                  mainName: option.mainName,
+                  description: organizationOptionDescription(option)
+                }))}
+                selectedId={selectedParent?.id ?? null}
+                listLabel="上级机构候选"
+                placeholder="搜索机构主名或别名…"
+                onValueChange={(next) => {
+                  setParentSearch(next)
+                  if (next.trim()) return
+                  setSelectedParent(null)
+                  setDraft({ ...draft, parentOrganizationId: '' })
+                }}
+                onSelect={(option) => {
+                  setParentSearch(option.mainName)
+                  setSelectedParent({ id: option.id, mainName: option.mainName })
+                  setDraft({ ...draft, parentOrganizationId: String(option.id) })
+                }}
+                onDismiss={() => {
+                  setParentSearch(selectedParent?.mainName ?? '')
+                }}
+              />
+              {parentOptionsQuery.isError ? (
+                <span className="classification-picker-error" role="alert">
+                  上级机构候选加载失败，请稍后重试。
                 </span>
-              </div>
+              ) : null}
             </EditFormField>
           </div>
         </EditFormSection>

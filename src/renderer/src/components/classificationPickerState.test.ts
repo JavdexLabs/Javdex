@@ -20,10 +20,13 @@ describe('classification picker state', () => {
     })
   })
 
-  it('hides candidates when the query or the result set is empty', () => {
+  it('hides candidates when the result set is empty', () => {
     const typed = reduceClassificationPicker(CLOSED_CLASSIFICATION_PICKER, { type: 'query' }, 0)
-    assert.equal(visibleClassificationPicker(typed, '   ', 3).open, false)
     assert.equal(visibleClassificationPicker(typed, 'Collection', 0).open, false)
+    assert.deepEqual(visibleClassificationPicker(typed, '', 3), {
+      open: true,
+      activeIndex: -1
+    })
   })
 
   it('opens on arrow navigation and wraps around the candidate list', () => {

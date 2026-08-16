@@ -44,10 +44,10 @@ export function reduceClassificationPicker(
 // being stored: the query and the result set can change after the last user event.
 export function visibleClassificationPicker(
   state: ClassificationPickerState,
-  query: string,
+  _query: string,
   optionCount: number
 ): ClassificationPickerState {
-  const open = state.open && query.trim() !== '' && optionCount > 0
+  const open = state.open && optionCount > 0
   return {
     open,
     activeIndex: open && state.activeIndex < optionCount ? state.activeIndex : -1

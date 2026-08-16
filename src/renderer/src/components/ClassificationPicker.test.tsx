@@ -117,6 +117,16 @@ describe('classification picker', () => {
     assert.equal(input().props['aria-expanded'], true)
   })
 
+  it('shows candidates on focus even when the field is empty', () => {
+    renderPicker('')
+
+    act(() => {
+      input().props.onFocus()
+    })
+
+    assert.ok(listbox())
+  })
+
   it('does not commit a candidate with Enter until one is active', () => {
     renderPicker()
 

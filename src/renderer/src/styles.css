@@ -180,6 +180,7 @@
   --classification-image-caption-gap: 4px;
   --classification-image-candidate-pad: 7px;
   --classification-image-meta-gap: 12px;
+  --classification-picker-max-h: 220px;
   --classification-merge-modal-w: 640px;
   --classification-merge-gap: 14px;
   --classification-merge-control-gap: 8px;

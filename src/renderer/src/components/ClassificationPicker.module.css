@@ -1,0 +1,63 @@
+.picker {
+  min-width: 0;
+}
+
+.layer {
+  min-width: 0;
+}
+
+.options {
+  display: grid;
+  width: 100%;
+  max-height: var(--classification-picker-max-h);
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-floating-control);
+  scrollbar-gutter: stable;
+}
+
+.option {
+  display: grid;
+  min-height: var(--target-min);
+  padding: 8px var(--control-pad-x);
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  gap: 2px;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  transition: background var(--motion-fast);
+}
+
+.option[aria-selected='true'] {
+  background: var(--surface-selected);
+}
+
+.option:hover,
+.option[data-active] {
+  background: var(--surface-control-hover);
+}
+
+.optionName {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.optionMeta {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.create {
+  padding: 7px var(--control-pad-x);
+  color: var(--text-muted);
+  font-size: 11px;
+}

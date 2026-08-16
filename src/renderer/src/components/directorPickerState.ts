@@ -5,7 +5,9 @@ export function typedDirectorAssignment(value: string): DirectorAssignmentInput 
   return name ? { createName: name } : null
 }
 
-export function selectedDirectorAssignment(option: DirectorOption): DirectorAssignmentInput {
+export function selectedDirectorAssignment(
+  option: Pick<DirectorOption, 'id'>
+): DirectorAssignmentInput {
   return { directorId: option.id }
 }
 

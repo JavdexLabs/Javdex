@@ -1,8 +1,9 @@
-import { useDeferredValue } from 'react'
+import { useDeferredValue, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { SeriesAssignmentInput } from '@shared/classificationTypes'
 import { api } from '../api'
 import { seriesKeys } from '../query/queryKeys'
+import ClassificationPicker from './ClassificationPicker'
 import {
   selectedSeriesAssignment,
   seriesOptionDescription,
@@ -23,38 +24,32 @@ export default function SeriesPickerField({ id, value, selectedId, onChange }: P
     queryFn: () => api.series.options(search || undefined),
     placeholderData: (previous) => previous
   })
+  const options = useMemo(
+    () =>
+      (query.data ?? []).map((option) => ({
+        id: option.id,
+        mainName: option.mainName,
+        description: seriesOptionDescription(option)
+      })),
+    [query.data]
+  )
   return (
-    <div className="classification-picker">
-      <input
+    <>
+      <ClassificationPicker
         id={id}
-        className="text-input"
         value={value}
-        autoComplete="off"
-        onChange={(event) => onChange(event.target.value, typedSeriesAssignment(event.target.value))}
+        options={options}
+        selectedId={selectedId}
+        listLabel="系列候选"
+        createHint="保留当前输入可新建未归属系列"
+        onValueChange={(next) => onChange(next, typedSeriesAssignment(next))}
+        onSelect={(option) => onChange(option.mainName, selectedSeriesAssignment(option))}
       />
-      {value.trim() && (query.data?.length ?? 0) > 0 ? (
-        <div className="classification-picker-options" role="listbox" aria-label="系列候选">
-          {query.data!.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              role="option"
-              aria-selected={selectedId === option.id}
-              className="classification-picker-option"
-              onClick={() => onChange(option.mainName, selectedSeriesAssignment(option))}
-            >
-              <span>{option.mainName}</span>
-              <small>{seriesOptionDescription(option)}</small>
-            </button>
-          ))}
-          <div className="classification-picker-create">保留当前输入可新建未归属系列</div>
-        </div>
-      ) : null}
       {query.isError ? (
         <span className="classification-picker-error" role="alert">
           系列候选加载失败，请稍后重试。
         </span>
       ) : null}
-    </div>
+    </>
   )
 }

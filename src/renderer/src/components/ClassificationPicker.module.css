@@ -10,12 +10,11 @@
   display: grid;
   width: 100%;
   max-height: var(--classification-picker-max-h);
-  overflow-y: auto;
+  overflow: hidden auto;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   background: var(--surface-elevated);
   box-shadow: var(--shadow-floating-control);
-  scrollbar-gutter: stable;
 }
 
 .option {
@@ -29,6 +28,10 @@
   color: var(--text-primary);
   text-align: left;
   transition: background var(--motion-fast);
+}
+
+.option:last-child {
+  border-bottom: 0;
 }
 
 .option[aria-selected='true'] {

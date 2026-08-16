@@ -22,7 +22,7 @@ afterEach(() => {
 
 function renderPicker(value = 'Collection'): void {
   act(() => {
-    renderer = TestRenderer.create(
+    const tree = (
       <ClassificationPicker
         id="video-edit-series"
         value={value}
@@ -36,6 +36,8 @@ function renderPicker(value = 'Collection'): void {
         }}
       />
     )
+    if (renderer) renderer.update(tree)
+    else renderer = TestRenderer.create(tree)
   })
 }
 
@@ -173,5 +175,19 @@ describe('classification picker', () => {
 
     assert.deepEqual(selected, options[1])
     assert.equal(listbox(), null)
+  })
+
+  it('hides the create hint when the typed name already exists', () => {
+    renderPicker()
+    act(() => {
+      input().props.onFocus()
+    })
+    assert.equal(renderer?.root.findAllByProps({ className: 'create' }).length, 0)
+
+    renderPicker('Coll')
+    act(() => {
+      input().props.onFocus()
+    })
+    assert.equal(renderer?.root.findAllByProps({ className: 'create' }).length, 1)
   })
 })

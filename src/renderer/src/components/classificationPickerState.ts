@@ -8,6 +8,14 @@ export type ClassificationPickerEvent =
   | { type: 'move'; delta: number }
   | { type: 'dismiss' }
 
+export function classificationPickerCreateHintVisible(
+  query: string,
+  options: readonly { mainName: string }[]
+): boolean {
+  const name = query.trim()
+  return name !== '' && options.every((option) => option.mainName !== name)
+}
+
 export const CLOSED_CLASSIFICATION_PICKER: ClassificationPickerState = {
   open: false,
   activeIndex: -1

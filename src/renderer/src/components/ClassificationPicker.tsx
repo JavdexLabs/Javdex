@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import {
   CLOSED_CLASSIFICATION_PICKER,
+  classificationPickerCreateHintVisible,
   reduceClassificationPicker,
   visibleClassificationPicker,
   type ClassificationPickerEvent
@@ -120,7 +121,9 @@ export default function ClassificationPicker({
           <small className={styles.optionMeta}>{option.description}</small>
         </button>
       ))}
-      <div className={styles.create}>{createHint}</div>
+      {classificationPickerCreateHintVisible(value, options) ? (
+        <div className={styles.create}>{createHint}</div>
+      ) : null}
     </div>
   ) : null
 

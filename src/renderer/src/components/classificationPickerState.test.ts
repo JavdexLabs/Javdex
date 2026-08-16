@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   CLOSED_CLASSIFICATION_PICKER,
+  classificationPickerCreateHintVisible,
   reduceClassificationPicker,
   visibleClassificationPicker
 } from './classificationPickerState'
@@ -62,5 +63,13 @@ describe('classification picker state', () => {
       reduceClassificationPicker({ open: true, activeIndex: 1 }, { type: 'dismiss' }, 3),
       CLOSED_CLASSIFICATION_PICKER
     )
+  })
+
+  it('hides the create hint when the query already names an existing option', () => {
+    const names = [{ mainName: 'Collection' }, { mainName: 'Collection Deluxe' }]
+    assert.equal(classificationPickerCreateHintVisible('Collection', names), false)
+    assert.equal(classificationPickerCreateHintVisible(' Collection ', names), false)
+    assert.equal(classificationPickerCreateHintVisible('Coll', names), true)
+    assert.equal(classificationPickerCreateHintVisible('  ', names), false)
   })
 })

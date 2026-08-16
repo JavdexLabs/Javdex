@@ -82,7 +82,7 @@ export default function OrganizationEditModal({
       <div className="entity-edit-form">
         <EditFormSection title="名称与简介">
           <div className="entity-edit-fields">
-            <EditFormField label="主名" htmlFor="organization-main-name">
+            <EditFormField label="主名" htmlFor="organization-main-name" span={2}>
               <input
                 id="organization-main-name"
                 className="text-input"
@@ -91,7 +91,7 @@ export default function OrganizationEditModal({
                 onChange={(event) => setDraft({ ...draft, mainName: event.target.value })}
               />
             </EditFormField>
-            <EditFormField label="别名" htmlFor="organization-aliases" hint="每行一个，也可用逗号分隔">
+            <EditFormField label="别名" htmlFor="organization-aliases" span={2} hint="每行一个，也可用逗号分隔">
               <textarea
                 id="organization-aliases"
                 className="text-input"

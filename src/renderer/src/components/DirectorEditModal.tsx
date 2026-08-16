@@ -45,7 +45,7 @@ export default function DirectorEditModal({ director, onCancel, onSave }: Props)
       <div className="entity-edit-form">
         <EditFormSection title="名称与简介">
           <div className="entity-edit-fields">
-            <EditFormField label="主名" htmlFor="director-main-name">
+            <EditFormField label="主名" htmlFor="director-main-name" span={2}>
               <input
                 id="director-main-name"
                 className="text-input"
@@ -54,7 +54,7 @@ export default function DirectorEditModal({ director, onCancel, onSave }: Props)
                 onChange={(e) => field('mainName', e.target.value)}
               />
             </EditFormField>
-            <EditFormField label="别名" htmlFor="director-aliases" hint="每行一个，也可用逗号分隔">
+            <EditFormField label="别名" htmlFor="director-aliases" span={2} hint="每行一个，也可用逗号分隔">
               <textarea
                 id="director-aliases"
                 className="text-input"

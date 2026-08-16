@@ -83,7 +83,7 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
       <div className="entity-edit-form">
         <EditFormSection title="名称与简介">
           <div className="entity-edit-fields">
-            <EditFormField label="主名" htmlFor="series-main-name">
+            <EditFormField label="主名" htmlFor="series-main-name" span={2}>
               <input
                 id="series-main-name"
                 className="text-input"
@@ -92,7 +92,7 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
                 onChange={(event) => setDraft({ ...draft, mainName: event.target.value })}
               />
             </EditFormField>
-            <EditFormField label="别名" htmlFor="series-aliases" hint="每行一个，也可用逗号分隔">
+            <EditFormField label="别名" htmlFor="series-aliases" span={2} hint="每行一个，也可用逗号分隔">
               <textarea
                 id="series-aliases"
                 className="text-input"

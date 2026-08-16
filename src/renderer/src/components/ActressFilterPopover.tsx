@@ -1,7 +1,8 @@
 import { useEffect, useRef, type RefObject } from 'react'
-import type { ActressAvatarFilter, ActressListStatusFilter } from '@shared/types'
+import type { ActressAvatarFilter, ActressListStatusFilter } from '@shared/actressTypes'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 import SelectControl from './SelectControl'
+import Button from './Button'
 
 export interface ActressFilterState {
   status: ActressListStatusFilter
@@ -111,12 +112,12 @@ export default function ActressFilterPopover({
       </div>
 
       <footer className="library-filter-popover-footer">
-        <button type="button" className="btn btn-sm btn-ghost" onClick={onReset}>
+        <Button type="button" variant="ghost" size="sm" onClick={onReset}>
           重置
-        </button>
-        <button type="button" className="btn btn-sm btn-primary" onClick={onClose}>
+        </Button>
+        <Button type="button" variant="primary" size="sm" onClick={onClose}>
           完成
-        </button>
+        </Button>
       </footer>
     </div>
   )

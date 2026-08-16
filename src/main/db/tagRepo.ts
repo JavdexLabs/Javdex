@@ -1,5 +1,5 @@
 import { getDb } from './database'
-import type { Tag } from '@shared/types'
+import type { TagListItem } from '@shared/commonTypes'
 
 /** Find or create a tag, returning its id. */
 export function ensureTag(name: string): number {
@@ -13,9 +13,7 @@ export function ensureTag(name: string): number {
   return Number(info.lastInsertRowid)
 }
 
-export interface TagListItem extends Tag {
-  video_count: number
-}
+export type { TagListItem }
 
 export function listTags(): TagListItem[] {
   const db = getDb()
@@ -53,4 +51,14 @@ export function pruneTagIfUnused(tagId: number): void {
   if (row.n === 0) {
     db.prepare('DELETE FROM tags WHERE id = ?').run(tagId)
   }
+}
+
+/** Remove every tag that is no longer linked to any video. */
+export function pruneUnusedTags(): number {
+  return getDb()
+    .prepare(
+      `DELETE FROM tags
+       WHERE NOT EXISTS (SELECT 1 FROM video_tag WHERE video_tag.tag_id = tags.id)`
+    )
+    .run().changes
 }

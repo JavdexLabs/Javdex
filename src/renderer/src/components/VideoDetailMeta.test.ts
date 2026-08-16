@@ -1,0 +1,89 @@
+import { describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import type { VideoDetail } from '@shared/videoTypes'
+import { buildVideoPrimaryMetaItems } from './VideoDetailMeta'
+
+function video(overrides: Partial<VideoDetail>): VideoDetail {
+  return {
+    id: 1,
+    code: 'TEST-001',
+    title: null,
+    original_title: null,
+    summary: null,
+    cover_path: null,
+    poster_path: null,
+    release_date: null,
+    maker: null,
+    publisher: null,
+    maker_organization_id: null,
+    publisher_organization_id: null,
+    series: null,
+    director: null,
+    series_id: null,
+    director_id: null,
+    duration_seconds: null,
+    resolved_duration_seconds: null,
+    scraped_status: 0,
+    last_scraped_at: null,
+    updated_at: null,
+    add_time: '2026-01-01T00:00:00.000Z',
+    rating: 0,
+    actresses: [],
+    tags: [],
+    resources: [],
+    assets: [],
+    external_stats: [],
+    links: [],
+    ...overrides
+  }
+}
+
+describe('video primary metadata classification navigation', () => {
+  it('dispatches entity-backed organizations by stable id', () => {
+    const items = buildVideoPrimaryMetaItems(
+      video({
+        maker: 'Renamed Maker',
+        maker_organization_id: 12,
+        publisher: 'Publisher',
+        publisher_organization_id: 18
+      })
+    )
+
+    assert.deepEqual(items, [
+      {
+        key: 'maker',
+        label: '制作商',
+        type: 'organization',
+        role: 'maker',
+        organizationId: 12,
+        value: 'Renamed Maker'
+      },
+      {
+        key: 'publisher',
+        label: '发行商',
+        type: 'organization',
+        role: 'publisher',
+        organizationId: 18,
+        value: 'Publisher'
+      }
+    ])
+  })
+
+  it('does not expose a name-only organization route', () => {
+    assert.deepEqual(buildVideoPrimaryMetaItems(video({ maker: 'Unlinked Maker' })), [])
+  })
+
+  it('uses only the stable director id', () => {
+    assert.deepEqual(buildVideoPrimaryMetaItems(video({ director: 'Alex Lee', director_id: 21 })), [
+      { key: 'director', label: '导演', type: 'director', directorId: 21, value: 'Alex Lee' }
+    ])
+    assert.deepEqual(buildVideoPrimaryMetaItems(video({ director: 'Unlinked' })), [])
+  })
+
+  it('uses only the stable series id', () => {
+    assert.deepEqual(buildVideoPrimaryMetaItems(video({ series: 'Collection', series_id: 17 })), [
+      { key: 'series', label: '系列', type: 'series', seriesId: 17, value: 'Collection' }
+    ])
+    assert.deepEqual(buildVideoPrimaryMetaItems(video({ series: 'Unlinked' })), [])
+  })
+})

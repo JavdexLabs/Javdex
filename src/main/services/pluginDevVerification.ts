@@ -1,25 +1,12 @@
-import type {
-  ActressScrapeField,
-  PluginDevAgentMode,
-  PluginDevDiscovery,
-  PluginDevFieldVerification,
-  PluginDevPageInsight,
-  PluginDevVerificationReport,
-  PluginDevVerificationStatus,
-  PluginDevVerifyInput,
-  ScraperPluginKind,
-  VideoScrapeField
-} from '@shared/types'
-import {
-  expandActressScrapeFields
-} from '@shared/types'
+import type { ActressScrapeField, ScraperPluginKind, VideoScrapeField } from '@shared/scrapeTypes'
+import type { PluginDevAgentMode, PluginDevDiscovery, PluginDevFieldVerification, PluginDevPageInsight, PluginDevVerificationReport, PluginDevVerificationStatus, PluginDevVerifyInput } from '@shared/pluginDevTypes'
+import { expandActressScrapeFields } from '@shared/scrapeTypes'
 import { requestAgentJson } from './agentJsonClient'
 import { formatPageInsightForPrompt } from './pluginDevPageFormat'
 import {
   describeFieldsForKind,
   getPluginDevKindProfile,
   normalizeTestTargets,
-  pageMatchesActressTarget,
   pageMatchesReferenceTargetForKind
 } from '@shared/pluginDevKindProfile'
 
@@ -83,6 +70,14 @@ const ACTRESS_RESULT_KEYS = new Set([
   'aliases',
   'sourceUrl'
 ])
+
+function resultRecords(value: unknown): Record<string, unknown>[] {
+  const values = Array.isArray(value) ? value : [value]
+  return values.filter(
+    (item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === 'object' && !Array.isArray(item)
+  )
+}
 
 /** Maps verification item / parse-result keys to selectable supported field ids. */
 const VIDEO_VERIFICATION_TO_SUPPORTED_ID: Record<string, VideoScrapeField> = {
@@ -290,9 +285,7 @@ function isKnownSupportedFieldId(
 }
 
 function dryRunResultsFromInput(lastResults?: unknown[]): Record<string, unknown>[] {
-  return (lastResults ?? []).filter(
-    (value): value is Record<string, unknown> => Boolean(value) && typeof value === 'object'
-  )
+  return (lastResults ?? []).flatMap(resultRecords)
 }
 
 /** Fields to add when verify confirms site/plugin supports them but supportedFields omits them. */
@@ -519,13 +512,36 @@ function buildReferencePageMismatchReport(
   }
 }
 
+function comparablePageUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined
+  try {
+    const url = new URL(value.trim())
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return value.trim()
+  }
+}
+
+export function pickCandidateVerificationPage(
+  candidate: Record<string, unknown>,
+  pages: readonly PluginDevPageInsight[],
+  index: number
+): PluginDevPageInsight | undefined {
+  const sourceUrl = comparablePageUrl(candidate.sourceUrl)
+  if (sourceUrl) {
+    return pages.find((page) => comparablePageUrl(page.url) === sourceUrl)
+  }
+  return pages[index] ?? pages.at(-1)
+}
+
 export function normalizeAbsentFieldVerifications(
   items: PluginDevFieldVerification[],
   options: Pick<PluginDevVerificationOptions, 'kind' | 'supportedFields' | 'lastResult'>,
   referencePage?: PluginDevPageInsight
 ): PluginDevFieldVerification[] {
-  if (!referencePage || !options.lastResult || typeof options.lastResult !== 'object') return items
-  const result = options.lastResult as Record<string, unknown>
+  const results = resultRecords(options.lastResult)
+  if (!referencePage || results.length === 0) return items
 
   return items.map((item) => {
     if (item.status !== 'missing_in_result' && item.status !== 'not_on_page') return item
@@ -538,12 +554,17 @@ export function normalizeAbsentFieldVerifications(
       return item
     }
 
-    const resultValue = getResultValueForVerificationItem(
-      options.kind,
-      item.field,
-      fieldId as VideoScrapeField & ActressScrapeField,
-      result
-    )
+    const concreteField = normalizeVerificationItemField(item.field)
+    const resultValue = results
+      .map((result) =>
+        getResultValueForVerificationItem(
+          options.kind,
+          concreteField,
+          fieldId as VideoScrapeField & ActressScrapeField,
+          result
+        )
+      )
+      .find((value) => !isEmptyFieldValue(value))
     if (!isEmptyFieldValue(resultValue)) {
       return {
         ...item,
@@ -610,6 +631,53 @@ function scopeVerificationReport(
 export async function verifyDebugResultAgainstPages(
   options: PluginDevVerificationOptions
 ): Promise<PluginDevVerificationReport> {
+  if (Array.isArray(options.lastResult) && options.lastResult.length > 0) {
+    const candidates = resultRecords(options.lastResult)
+    const pages = options.discovery?.pages ?? []
+    const reports: PluginDevVerificationReport[] = []
+    for (const [index, candidate] of candidates.entries()) {
+      const referencePage = pickCandidateVerificationPage(candidate, pages, index)
+      const sourceUrl = comparablePageUrl(candidate.sourceUrl)
+      if (sourceUrl && !referencePage) {
+        reports.push({
+          items: [
+            {
+              field: 'reference_page',
+              status: 'suspicious',
+              note: `候选 sourceUrl「${sourceUrl}」未取得精确匹配的参考页，已跳过字段语义对照。`
+            }
+          ],
+          summary: `候选 ${index + 1} 缺少精确匹配的参考页，未做字段语义对照。`
+        })
+        continue
+      }
+      reports.push(
+        await verifyDebugResultAgainstPages({
+          ...options,
+          lastResult: candidate,
+          discovery: referencePage
+            ? { pages: [referencePage], notes: options.discovery?.notes ?? [] }
+            : { pages: [], notes: options.discovery?.notes ?? [] }
+        })
+      )
+    }
+    const items = reports.flatMap((report, index) =>
+      report.items.map((item) => ({
+        ...item,
+        field: `candidate[${index}].${item.field}`,
+        note: `[候选 ${index + 1}] ${item.note}`
+      }))
+    )
+    const badCount = items.filter(isBlockingVerificationFailure).length
+    return {
+      referencePage: reports.at(-1)?.referencePage,
+      items,
+      summary:
+        badCount === 0
+          ? `候选语义验证通过：${reports.length}/${reports.length} 个候选通过。`
+          : `候选语义验证发现 ${badCount} 项问题，覆盖 ${reports.length} 个候选。`
+    }
+  }
   const referencePage = pickVerificationPage(options.discovery)
   const verifyTarget = resolveVerifyTestTarget(options)
   const structural = collectStructuralVerificationIssues(options.kind, options.lastResult)
@@ -680,19 +748,21 @@ export function collectStructuralVerificationIssues(
   kind: ScraperPluginKind,
   lastResult: unknown
 ): PluginDevFieldVerification[] {
-  if (!lastResult || typeof lastResult !== 'object') return []
-  const result = lastResult as Record<string, unknown>
+  const results = resultRecords(lastResult)
+  if (results.length === 0) return []
   const allowed = kind === 'video' ? VIDEO_RESULT_KEYS : ACTRESS_RESULT_KEYS
   const items: PluginDevFieldVerification[] = []
 
-  for (const key of Object.keys(result)) {
-    if (allowed.has(key)) continue
-    items.push({
-      field: key,
-      status: 'invalid_key',
-      actual: stringifyValue(result[key]),
-      note: '字段名不在 parse 返回规范中'
-    })
+  for (const [index, result] of results.entries()) {
+    for (const key of Object.keys(result)) {
+      if (allowed.has(key)) continue
+      items.push({
+        field: results.length > 1 ? `candidate[${index}].${key}` : key,
+        status: 'invalid_key',
+        actual: stringifyValue(result[key]),
+        note: '字段名不在 parse 返回规范中'
+      })
+    }
   }
 
   return items
@@ -702,8 +772,9 @@ export function collectMakerPublisherLinkTrapIssues(
   lastResult: unknown,
   referencePage?: PluginDevPageInsight
 ): PluginDevFieldVerification[] {
-  if (!referencePage || !lastResult || typeof lastResult !== 'object') return []
-  const result = lastResult as Record<string, unknown>
+  if (!referencePage) return []
+  const result = resultRecords(lastResult)[0]
+  if (!result) return []
   const maker = readText(result.maker)
   const publisher = readText(result.publisher)
   if (!maker && !publisher) return []

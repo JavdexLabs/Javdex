@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { isBelowMinImportDuration, resolveMinScanImportDurationSeconds, resolveVideoDisplayDurationSeconds, shouldProbeVideoFileDuration, shouldRefreshVideoFileDuration } from './videoDuration'
+import { isBelowMinImportDuration, resolveMinScanImportDurationSeconds, resolveVideoDisplayDurationSeconds, shouldProbeLocalVideoResourceDuration, shouldRefreshLocalVideoResourceDuration } from './videoDuration'
 
 describe('videoDuration', () => {
   it('resolves configured minutes to seconds', () => {
@@ -19,21 +19,21 @@ describe('videoDuration', () => {
     assert.equal(isBelowMinImportDuration(31 * 60, 30 * 60), false)
   })
 
-  it('prefers scraped duration over primary file duration', () => {
+  it('prefers scraped duration over primary resource duration', () => {
     assert.equal(
       resolveVideoDisplayDurationSeconds({
         duration_seconds: 3661,
-        file_duration_seconds: 900
+        primary_resource_duration_seconds: 900
       }),
       3661
     )
   })
 
-  it('uses primary file duration when scraped duration is missing', () => {
+  it('uses primary resource duration when scraped duration is missing', () => {
     assert.equal(
       resolveVideoDisplayDurationSeconds({
         duration_seconds: null,
-        file_duration_seconds: 900
+        primary_resource_duration_seconds: 900
       }),
       900
     )
@@ -43,52 +43,52 @@ describe('videoDuration', () => {
     assert.equal(
       resolveVideoDisplayDurationSeconds({
         duration_seconds: null,
-        file_duration_seconds: null
+        primary_resource_duration_seconds: null
       }),
       null
     )
   })
 
-  it('only refreshes stored file duration when probe value changed', () => {
-    assert.equal(shouldRefreshVideoFileDuration(3600, 3600), false)
-    assert.equal(shouldRefreshVideoFileDuration(3600, 3700), true)
-    assert.equal(shouldRefreshVideoFileDuration(null, 3600), true)
-    assert.equal(shouldRefreshVideoFileDuration(3600, null), false)
-    assert.equal(shouldRefreshVideoFileDuration(3600, 0), false)
+  it('only refreshes stored local resource duration when probe value changed', () => {
+    assert.equal(shouldRefreshLocalVideoResourceDuration(3600, 3600), false)
+    assert.equal(shouldRefreshLocalVideoResourceDuration(3600, 3700), true)
+    assert.equal(shouldRefreshLocalVideoResourceDuration(null, 3600), true)
+    assert.equal(shouldRefreshLocalVideoResourceDuration(3600, null), false)
+    assert.equal(shouldRefreshLocalVideoResourceDuration(3600, 0), false)
   })
 
   it('only probes when duration is missing or file fingerprint changed', () => {
     const stored = {
-      file_duration_seconds: 3600,
-      file_size: 1000,
+      duration_seconds: 3600,
+      size_bytes: 1000,
       file_mtime_ms: 123
     }
     const fingerprint = { file_size: 1000, file_mtime_ms: 123 }
-    assert.equal(shouldProbeVideoFileDuration(stored, fingerprint), false)
+    assert.equal(shouldProbeLocalVideoResourceDuration(stored, fingerprint), false)
     assert.equal(
-      shouldProbeVideoFileDuration(
-        { ...stored, file_duration_seconds: null },
+      shouldProbeLocalVideoResourceDuration(
+        { ...stored, duration_seconds: null },
         fingerprint
       ),
       true
     )
     assert.equal(
-      shouldProbeVideoFileDuration(stored, { file_size: 1001, file_mtime_ms: 123 }),
+      shouldProbeLocalVideoResourceDuration(stored, { file_size: 1001, file_mtime_ms: 123 }),
       true
     )
     assert.equal(
-      shouldProbeVideoFileDuration(stored, { file_size: 1000, file_mtime_ms: 456 }),
+      shouldProbeLocalVideoResourceDuration(stored, { file_size: 1000, file_mtime_ms: 456 }),
       true
     )
     assert.equal(
-      shouldProbeVideoFileDuration(
+      shouldProbeLocalVideoResourceDuration(
         { ...stored, file_mtime_ms: null },
         fingerprint
       ),
       false
     )
     assert.equal(
-      shouldProbeVideoFileDuration(
+      shouldProbeLocalVideoResourceDuration(
         { ...stored, file_mtime_ms: null },
         { file_size: 2000, file_mtime_ms: 123 }
       ),

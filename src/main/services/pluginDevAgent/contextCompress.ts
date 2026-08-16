@@ -7,7 +7,7 @@ import {
   turnWithCompactedText,
   userTurn
 } from './agentMessages'
-import type { PluginDevAgentContextStats } from '@shared/types'
+import type { PluginDevAgentContextStats } from '@shared/pluginDevTypes'
 
 const HTML_TOOL_NAMES = new Set(['browser_html', 'browser_inspect'])
 

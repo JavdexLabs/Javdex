@@ -39,6 +39,12 @@ export function clearListScrollForPrimaryNav(pathname: string): void {
     }
     return
   }
+  if (pathname === '/pending') {
+    for (const key of keys) {
+      if (key.startsWith('pending:')) scrollByKey.delete(key)
+    }
+    return
+  }
   if (pathname.startsWith('/facet/') && !pathname.includes('/v/')) {
     for (const key of keys) {
       if (key.startsWith('facet:') && !key.startsWith('facet-detail:')) {

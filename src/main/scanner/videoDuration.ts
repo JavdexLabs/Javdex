@@ -127,7 +127,7 @@ export function isBelowMinImportDuration(
 
 export interface ResolveVideoDisplayDurationInput {
   duration_seconds: number | null
-  file_duration_seconds?: number | null
+  primary_resource_duration_seconds?: number | null
 }
 
 export interface VideoFileFingerprint {
@@ -135,31 +135,31 @@ export interface VideoFileFingerprint {
   file_mtime_ms: number | null
 }
 
-export interface StoredVideoFileProbeState {
-  file_duration_seconds: number | null
-  file_size: number | null
+export interface StoredLocalVideoResourceProbeState {
+  duration_seconds: number | null
+  size_bytes: number | null
   file_mtime_ms: number | null
 }
 
-/** Whether scan should read container duration for this file row. */
-export function shouldProbeVideoFileDuration(
-  stored: StoredVideoFileProbeState,
+/** Whether scan should read container duration for this local resource. */
+export function shouldProbeLocalVideoResourceDuration(
+  stored: StoredLocalVideoResourceProbeState,
   fingerprint: VideoFileFingerprint
 ): boolean {
-  if (stored.file_duration_seconds == null || stored.file_duration_seconds <= 0) {
+  if (stored.duration_seconds == null || stored.duration_seconds <= 0) {
     return true
   }
   if (fingerprint.file_mtime_ms == null) return true
   if (stored.file_mtime_ms == null) {
-    return stored.file_size !== fingerprint.file_size
+    return stored.size_bytes !== fingerprint.file_size
   }
   return (
-    stored.file_size !== fingerprint.file_size || stored.file_mtime_ms !== fingerprint.file_mtime_ms
+    stored.size_bytes !== fingerprint.file_size || stored.file_mtime_ms !== fingerprint.file_mtime_ms
   )
 }
 
-/** Whether a scan should persist a newly probed file duration. */
-export function shouldRefreshVideoFileDuration(
+/** Whether a scan should persist a newly probed local-resource duration. */
+export function shouldRefreshLocalVideoResourceDuration(
   stored: number | null | undefined,
   probed: number | null
 ): boolean {
@@ -168,7 +168,7 @@ export function shouldRefreshVideoFileDuration(
   return stored !== probed
 }
 
-/** Prefer scraped duration; otherwise use the primary file duration from DB. */
+/** Prefer scraped duration; otherwise use the primary resource duration from DB. */
 export function resolveVideoDisplayDurationSeconds(
   input: ResolveVideoDisplayDurationInput
 ): number | null {
@@ -176,8 +176,11 @@ export function resolveVideoDisplayDurationSeconds(
     return input.duration_seconds
   }
 
-  if (input.file_duration_seconds != null && input.file_duration_seconds > 0) {
-    return input.file_duration_seconds
+  if (
+    input.primary_resource_duration_seconds != null &&
+    input.primary_resource_duration_seconds > 0
+  ) {
+    return input.primary_resource_duration_seconds
   }
 
   return null

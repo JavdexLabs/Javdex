@@ -1,0 +1,212 @@
+/* Unified pending inbox: one queue for scan, scrape and actress-name decisions. */
+.page {
+  --pending-rail-w: 268px;
+}
+
+.topbar {
+  background: var(--surface-panel);
+}
+
+.typeFilter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.typeFilter > button {
+  min-height: var(--control-h-sm);
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition:
+    background var(--motion-fast),
+    border-color var(--motion-fast),
+    color var(--motion-fast);
+}
+
+.typeFilter > button:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
+
+.typeFilter > button:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
+  box-shadow: var(--focus-ring);
+}
+
+.typeFilter > button[aria-pressed='true'] {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+  color: var(--text-primary);
+}
+
+.typeFilter em {
+  padding: 0 5px;
+  min-width: 18px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-control);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.count {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.shell {
+  flex: 1;
+  gap: 10px;
+  padding: 10px;
+  background: var(--surface-base);
+}
+
+.main {
+  grid-template-columns: var(--pending-rail-w) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.complete {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.railList {
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.railSection + .railSection {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.railSection > h2 {
+  margin: 0 4px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.railCount {
+  font-variant-numeric: tabular-nums;
+}
+
+.railItem {
+  width: 100%;
+  min-height: 54px;
+  padding: 7px 9px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  transition:
+    background var(--motion-fast),
+    border-color var(--motion-fast);
+}
+
+.railItem[data-thumb='true'] {
+  grid-template-columns: 32px minmax(0, 1fr);
+  column-gap: 9px;
+}
+
+.railItem:hover {
+  background: var(--surface-control-hover);
+}
+
+.railItem[aria-current='true'] {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+}
+
+.railItem:focus-visible {
+  outline: var(--focus-outline);
+  box-shadow: var(--focus-ring);
+}
+
+.railThumb {
+  grid-row: span 2;
+  width: 32px;
+  aspect-ratio: 2 / 3;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  object-fit: cover;
+  object-position: right center;
+}
+
+.railThumb[data-avatar='true'] {
+  aspect-ratio: 1;
+  border-radius: 50%;
+}
+
+.railTitle,
+.railMeta {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.railTitle {
+  font-size: 12px;
+}
+
+.railMeta {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+/* A quiet dot marks queue entries that already have everything they need. */
+.railTitle[data-ready='true']::after {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--text-success);
+  vertical-align: middle;
+}
+
+@media (width <= 1100px) {
+  .page {
+    --pending-rail-w: 220px;
+  }
+}

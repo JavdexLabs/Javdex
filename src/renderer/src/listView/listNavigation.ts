@@ -1,14 +1,36 @@
 import type { NavigateFunction, Location } from 'react-router-dom'
 import { matchPath } from 'react-router-dom'
 import {
-  actressConflictReviewPath,
   actressDetailPath,
   actressVideoActressPath,
   actressVideoDetailPath,
   parseActressVideoPath
 } from './actressRoutes'
-import { facetListPath, facetVideoDetailPath, facetVideoListPath, parseFacetVideoPath } from './facetRoutes'
-import { libraryVideoActressPath, libraryVideoDetailPath } from './libraryRoutes'
+import {
+  facetListPath,
+  directorDetailPath,
+  directorVideoDetailPath,
+  organizationDetailPath,
+  organizationVideoDetailPath,
+  parseOrganizationPath,
+  parseDirectorPath,
+  parseSeriesPath,
+  seriesDetailPath,
+  seriesVideoDetailPath
+} from './facetRoutes'
+import type { OrganizationRole } from '@shared/classificationTypes'
+import {
+  libraryVideoActressPath,
+  libraryVideoDetailPath,
+  parseLibraryVideoPath
+} from './libraryRoutes'
+import {
+  parsePendingActressDetailPath,
+  parsePendingVideoPath,
+  pendingActressDetailPath,
+  pendingVideoActressPath,
+  pendingVideoDetailPath
+} from './pendingRoutes'
 import {
   parsePlaylistVideoPath,
   playlistDetailPath,
@@ -24,12 +46,48 @@ export function navigateToVideoDetail(
   videoId: number,
   options?: { replace?: boolean }
 ): void {
-  const facet = parseFacetVideoPath(location.pathname)
-  if (facet) {
-    const value = decodeURIComponent(facet.valueKey)
+  const pending = parsePendingVideoPath(location.pathname)
+  if (pending || location.pathname === ROUTE_PATH.pending) {
     navigate(
       {
-        pathname: facetVideoDetailPath(facet.facetType, value, videoId),
+        pathname: pendingVideoDetailPath(videoId),
+        search: location.search
+      },
+      { replace: options?.replace }
+    )
+    return
+  }
+  const series = parseSeriesPath(location.pathname)
+  if (series) {
+    navigate(
+      {
+        pathname: seriesVideoDetailPath(series.seriesId, videoId),
+        search: location.search
+      },
+      { replace: options?.replace }
+    )
+    return
+  }
+  const director = parseDirectorPath(location.pathname)
+  if (director) {
+    navigate(
+      {
+        pathname: directorVideoDetailPath(director.directorId, videoId),
+        search: location.search
+      },
+      { replace: options?.replace }
+    )
+    return
+  }
+  const organization = parseOrganizationPath(location.pathname)
+  if (organization) {
+    navigate(
+      {
+        pathname: organizationVideoDetailPath(
+          organization.role,
+          organization.organizationId,
+          videoId
+        ),
         search: location.search
       },
       { replace: options?.replace }
@@ -73,16 +131,46 @@ export function navigateBackFromVideoDetail(
   location: Location,
   patch?: Record<string, string | null | undefined>
 ): void {
-  const facet = parseFacetVideoPath(location.pathname)
-  if (facet?.videoId != null) {
+  const pending = parsePendingVideoPath(location.pathname)
+  if (pending?.videoId != null) {
     const nextSearch = patch
       ? patchSearchParams(new URLSearchParams(location.search), patch)
       : new URLSearchParams(location.search)
     navigate({
-      pathname: facetVideoListPath(
-        facet.facetType,
-        decodeURIComponent(facet.valueKey)
-      ),
+      pathname: ROUTE_PATH.pending,
+      search: nextSearch.toString()
+    })
+    return
+  }
+  const series = parseSeriesPath(location.pathname)
+  if (series?.videoId != null) {
+    const nextSearch = patch
+      ? patchSearchParams(new URLSearchParams(location.search), patch)
+      : new URLSearchParams(location.search)
+    navigate({
+      pathname: seriesDetailPath(series.seriesId),
+      search: nextSearch.toString()
+    })
+    return
+  }
+  const director = parseDirectorPath(location.pathname)
+  if (director?.videoId != null) {
+    const nextSearch = patch
+      ? patchSearchParams(new URLSearchParams(location.search), patch)
+      : new URLSearchParams(location.search)
+    navigate({
+      pathname: directorDetailPath(director.directorId),
+      search: nextSearch.toString()
+    })
+    return
+  }
+  const organization = parseOrganizationPath(location.pathname)
+  if (organization?.videoId != null) {
+    const nextSearch = patch
+      ? patchSearchParams(new URLSearchParams(location.search), patch)
+      : new URLSearchParams(location.search)
+    navigate({
+      pathname: organizationDetailPath(organization.role, organization.organizationId),
       search: nextSearch.toString()
     })
     return
@@ -149,11 +237,38 @@ export function navigateToActressFromVideoDetail(
   videoId: number,
   actressId: number
 ): void {
-  const facet = parseFacetVideoPath(location.pathname)
-  if (facet?.videoId != null) {
-    const value = decodeURIComponent(facet.valueKey)
+  const pending = parsePendingVideoPath(location.pathname)
+  if (pending?.videoId != null) {
     navigate({
-      pathname: `${facetVideoDetailPath(facet.facetType, value, videoId)}/actress/${actressId}`,
+      pathname: pendingVideoActressPath(videoId, actressId),
+      search: location.search
+    })
+    return
+  }
+  const series = parseSeriesPath(location.pathname)
+  if (series?.videoId != null) {
+    navigate({
+      pathname: `${seriesVideoDetailPath(series.seriesId, videoId)}/actress/${actressId}`,
+      search: location.search
+    })
+    return
+  }
+  const director = parseDirectorPath(location.pathname)
+  if (director?.videoId != null) {
+    navigate({
+      pathname: `${directorVideoDetailPath(director.directorId, videoId)}/actress/${actressId}`,
+      search: location.search
+    })
+    return
+  }
+  const organization = parseOrganizationPath(location.pathname)
+  if (organization?.videoId != null) {
+    navigate({
+      pathname: `${organizationVideoDetailPath(
+        organization.role,
+        organization.organizationId,
+        videoId
+      )}/actress/${actressId}`,
       search: location.search
     })
     return
@@ -180,24 +295,104 @@ export function navigateToActressFromVideoDetail(
   })
 }
 
-/** Actress detail from the actress list (separate route tree). */
+/** Close an actress detail nested under video detail and restore its parent video. */
+export function navigateBackFromActressDetail(
+  navigate: NavigateFunction,
+  location: Location
+): void {
+  const pending = parsePendingVideoPath(location.pathname)
+  if (pending?.videoId != null && pending.actressId != null) {
+    navigate({
+      pathname: pendingVideoDetailPath(pending.videoId),
+      search: location.search
+    })
+    return
+  }
+  if (parsePendingActressDetailPath(location.pathname)) {
+    navigate({
+      pathname: ROUTE_PATH.pending,
+      search: location.search
+    })
+    return
+  }
+  const series = parseSeriesPath(location.pathname)
+  if (series?.videoId != null && series.actressId != null) {
+    navigate({
+      pathname: seriesVideoDetailPath(series.seriesId, series.videoId),
+      search: location.search
+    })
+    return
+  }
+  const director = parseDirectorPath(location.pathname)
+  if (director?.videoId != null && director.actressId != null) {
+    navigate({
+      pathname: directorVideoDetailPath(director.directorId, director.videoId),
+      search: location.search
+    })
+    return
+  }
+  const organization = parseOrganizationPath(location.pathname)
+  if (organization?.videoId != null && organization.actressId != null) {
+    navigate({
+      pathname: organizationVideoDetailPath(
+        organization.role,
+        organization.organizationId,
+        organization.videoId
+      ),
+      search: location.search
+    })
+    return
+  }
+  const playlist = parsePlaylistVideoPath(location.pathname)
+  if (playlist?.videoId != null && playlist.actressId != null) {
+    navigate({
+      pathname: playlistVideoDetailPath(playlist.playlistId, playlist.videoId),
+      search: location.search
+    })
+    return
+  }
+  const actress = parseActressVideoPath(location.pathname)
+  if (actress?.videoId != null && actress.stackedActressId != null) {
+    navigate({
+      pathname: actressVideoDetailPath(actress.actressId, actress.videoId),
+      search: location.search
+    })
+    return
+  }
+  const library = parseLibraryVideoPath(location.pathname)
+  if (library?.actressId != null) {
+    navigate({ pathname: libraryVideoDetailPath(library.videoId), search: location.search })
+    return
+  }
+  navigateToActressList(navigate, location)
+}
+
+/** Actress detail from the current list context. */
 export function navigateToActressDetail(
   navigate: NavigateFunction,
   location: Location,
   actressId: number
 ): void {
+  const pendingVideo = parsePendingVideoPath(location.pathname)
+  if (pendingVideo?.videoId != null) {
+    navigate({
+      pathname: pendingVideoActressPath(pendingVideo.videoId, actressId),
+      search: location.search
+    })
+    return
+  }
+  if (
+    location.pathname === ROUTE_PATH.pending ||
+    parsePendingActressDetailPath(location.pathname)
+  ) {
+    navigate({
+      pathname: pendingActressDetailPath(actressId),
+      search: location.search
+    })
+    return
+  }
   navigate({
     pathname: actressDetailPath(actressId),
-    search: location.search
-  })
-}
-
-export function navigateToActressConflicts(
-  navigate: NavigateFunction,
-  location: Location
-): void {
-  navigate({
-    pathname: actressConflictReviewPath(),
     search: location.search
   })
 }
@@ -216,24 +411,46 @@ export function navigateToActressList(
   })
 }
 
-/**
- * Facet video list for one maker/publisher/series/director.
- * From the facet list, keep search (e.g. q) so returning to the list stays coherent.
- * From anywhere else (library/actress/playlist/facet video detail), start clean —
- * do not carry library filters or sort into the facet video list.
- */
-export function navigateToFacetDetail(
+export function navigateToOrganizationDetail(
   navigate: NavigateFunction,
   location: Location,
-  facetType: string,
-  value: string
+  role: OrganizationRole,
+  organizationId: number
 ): void {
-  const fromFacetList = Boolean(
-    matchPath({ path: ROUTE_PATH.facetList, end: true }, location.pathname)
-  )
+  const facetList = matchPath({ path: ROUTE_PATH.facetList, end: true }, location.pathname)
+  const fromRoleList = facetList?.params.type === role
+  const fromRoleStack = parseOrganizationPath(location.pathname)?.role === role
   navigate({
-    pathname: facetVideoListPath(facetType, value),
-    search: fromFacetList ? location.search : ''
+    pathname: organizationDetailPath(role, organizationId),
+    search: fromRoleList || fromRoleStack ? location.search : ''
+  })
+}
+
+export function navigateToDirectorDetail(
+  navigate: NavigateFunction,
+  location: Location,
+  directorId: number
+): void {
+  const facetList = matchPath({ path: ROUTE_PATH.facetList, end: true }, location.pathname)
+  const fromDirectorList = facetList?.params.type === 'director'
+  const fromDirectorStack = parseDirectorPath(location.pathname) != null
+  navigate({
+    pathname: directorDetailPath(directorId),
+    search: fromDirectorList || fromDirectorStack ? location.search : ''
+  })
+}
+
+export function navigateToSeriesDetail(
+  navigate: NavigateFunction,
+  location: Location,
+  seriesId: number
+): void {
+  const facetList = matchPath({ path: ROUTE_PATH.facetList, end: true }, location.pathname)
+  const fromSeriesList = facetList?.params.type === 'series'
+  const fromSeriesStack = parseSeriesPath(location.pathname) != null
+  navigate({
+    pathname: seriesDetailPath(seriesId),
+    search: fromSeriesList || fromSeriesStack ? location.search : ''
   })
 }
 

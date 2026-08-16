@@ -19,6 +19,7 @@ import { useTheme } from './ThemeProvider'
 import { usePluginDevLeaveGuard } from './pluginDev/PluginDevLeaveGuard'
 import { NavIcon, type NavIconName } from './NavIcons'
 import { ROUTE_PATH } from '../listView/routePaths'
+import { pendingCenterPath } from '../listView/pendingRoutes'
 import { actressKeys } from '../query/queryKeys'
 
 type NavItem = { to: string; label: string; icon: NavIconName; end?: boolean }
@@ -36,7 +37,11 @@ const NAV_FACETS: NavItem[] = [
   { to: '/facet/series', label: '系列', icon: 'series' }
 ]
 
-const NAV_BOTTOM: NavItem[] = [{ to: ROUTE_PATH.settings, label: '设置', icon: 'settings' }]
+/** Maintenance zone: pinned to the sidebar bottom so the pending badge never shifts. */
+const NAV_BOTTOM: NavItem[] = [
+  { to: pendingCenterPath(), label: '待确认', icon: 'pending' },
+  { to: ROUTE_PATH.settings, label: '设置', icon: 'settings' }
+]
 
 function isPluginDevPath(pathname: string): boolean {
   return pathname === ROUTE_PATH.settingsPluginDev
@@ -110,12 +115,14 @@ function NavItems({
             {badgeCount > 0 && badgeTarget ? (
               <button
                 type="button"
-                className="nav-count-badge nav-count-badge--entry"
-                aria-label={`打开 ${badgeCount} 项待确认名称冲突`}
-                title="打开名称冲突待确认"
+                className="nav-count-badge"
+                aria-label={`打开 ${badgeCount} 项待确认`}
+                title="打开待确认项"
                 onClick={() => handleBadgeClick(n.to, badgeTarget)}
               >
-                {badgeCount > 99 ? '99+' : badgeCount}
+                <span className="nav-count-badge__value">
+                  {badgeCount > 99 ? '99+' : badgeCount}
+                </span>
               </button>
             ) : null}
           </div>
@@ -143,8 +150,22 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
     queryFn: () => api.actressScrape.conflictSummary(),
     refetchInterval: 3_000
   })
-  const conflictBadges = {
-    [ROUTE_PATH.actresses]: conflictSummaryQuery.data?.groupCount ?? 0
+  const pendingScanQuery = useQuery({
+    queryKey: ['pending-scan-groups'],
+    queryFn: () => api.scan.listPending(),
+    refetchInterval: 3_000
+  })
+  const pendingVideoQuery = useQuery({
+    queryKey: ['pending-video-scrapes'],
+    queryFn: () => api.scrape.listPending(),
+    refetchInterval: 3_000
+  })
+  /** One inbox, one badge: scan groups, scrape snapshots and actress name conflicts. */
+  const pendingBadges: Record<string, number> = {
+    [ROUTE_PATH.pending]:
+      (pendingScanQuery.data?.length ?? 0) +
+      (pendingVideoQuery.data?.length ?? 0) +
+      (conflictSummaryQuery.data?.groupCount ?? 0)
   }
 
   useEffect(() => {
@@ -163,17 +184,17 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
       <aside className="sidebar">
         <AppBrand />
         <nav className="sidebar-nav">
-          <NavItems
-            items={NAV_MAIN}
-            badges={conflictBadges}
-            badgeTargets={{ [ROUTE_PATH.actresses]: ROUTE_PATH.actressConflicts }}
-          />
+          <NavItems items={NAV_MAIN} />
           <div className={`nav-group${facetActive ? ' nav-group--active' : ''}`}>
             <div className="nav-group-label">分类</div>
             <NavItems items={NAV_FACETS} />
           </div>
           <div className="sidebar-nav-spacer" />
-          <NavItems items={NAV_BOTTOM} />
+          <NavItems
+            items={NAV_BOTTOM}
+            badges={pendingBadges}
+            badgeTargets={{ [ROUTE_PATH.pending]: pendingCenterPath() }}
+          />
         </nav>
       </aside>
       <div className="main-area">

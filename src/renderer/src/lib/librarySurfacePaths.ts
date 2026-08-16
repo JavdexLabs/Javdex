@@ -17,8 +17,7 @@
  * /playlists/:pid/:id        + DetailPage stack
  *
  * /facet/:type               FacetListPage
- * /facet/:type/v/:key        + FacetDetailPage
- * /facet/:type/v/:key/:id    + DetailPage stack
+ * /facet/:type/{o,d,s}/:id   Entity detail and nested video stack
  *
  * /settings/*                Settings (all library shells unmount)
  */

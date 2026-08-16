@@ -1,13 +1,8 @@
-import type {
-  ActressAvatarFilter,
-  ActressGenderFilter,
-  ActressListStatusFilter,
-  ScrapedStatus,
-  VideoQuery,
-  ActressListSortBy,
-  ListSortDir
-} from '@shared/types'
-import { ACTRESS_LIST_DEFAULTS } from '@shared/types'
+import type { ActressAvatarFilter, ActressGenderFilter, ActressListStatusFilter, ActressListSortBy } from '@shared/actressTypes'
+import type { ScrapedStatus, SortDir } from '@shared/commonTypes'
+import type { VideoPendingScrapeFilter, VideoQuery, VideoResourceFilter } from '@shared/videoTypes'
+import { ACTRESS_LIST_DEFAULTS } from '@shared/actressTypes'
+import type { ClassificationListSortBy } from '@shared/classificationTypes'
 
 /** Shared list URL keys (library, actresses, facet list). */
 export const LIST_PARAM = {
@@ -19,8 +14,23 @@ export const LIST_PARAM = {
   status: 'status',
   avatar: 'avatar',
   year: 'year',
-  gender: 'gender'
+  gender: 'gender',
+  resources: 'resources',
+  pending: 'pending',
+  releaseDir: 'releaseDir',
+  pendingType: 'type',
+  pendingItem: 'item',
+  pendingVideoId: 'videoId'
 } as const
+
+export const VIDEO_RESOURCE_FILTER_ORDER: VideoResourceFilter[] = [
+  'local',
+  'direct',
+  'web',
+  'magnet',
+  'ed2k',
+  'none'
+]
 
 export const LIBRARY_DEFAULTS = {
   status: 'all' as ScrapedStatus | 'all',
@@ -36,6 +46,31 @@ export const ACTRESS_DEFAULT_STATUS: ActressListStatusFilter = 'all'
 
 /** All avatar states are the default and are never written to the URL. */
 export const ACTRESS_DEFAULT_AVATAR: ActressAvatarFilter = 'all'
+
+export const CLASSIFICATION_LIST_DEFAULTS = {
+  sortBy: 'video_count' as ClassificationListSortBy,
+  sortDir: 'desc' as SortDir
+}
+
+export function parseClassificationSort(
+  rawSort: string | null,
+  rawDir: string | null
+): { sortBy: ClassificationListSortBy; sortDir: SortDir } {
+  const sortBy =
+    rawSort === 'video_count' || rawSort === 'updated_at'
+      ? rawSort
+      : CLASSIFICATION_LIST_DEFAULTS.sortBy
+  const sortDir = rawDir === 'asc' || rawDir === 'desc' ? rawDir : CLASSIFICATION_LIST_DEFAULTS.sortDir
+  return { sortBy, sortDir }
+}
+
+export function parseSeriesReleaseDir(raw: string | null): SortDir {
+  return raw === 'asc' ? 'asc' : 'desc'
+}
+
+export function seriesReleaseDirParam(direction: SortDir): string | null {
+  return direction === 'asc' ? 'asc' : null
+}
 
 export function parseActressStatus(raw: string | null): ActressListStatusFilter {
   if (raw === 'success' || raw === 'unscraped' || raw === 'failed') return raw
@@ -60,7 +95,7 @@ export function actressAvatarParam(avatar: ActressAvatarFilter): string | null {
 export function parseActressSort(
   rawSort: string | null,
   rawDir: string | null
-): { sortBy: ActressListSortBy; sortDir: ListSortDir } {
+): { sortBy: ActressListSortBy; sortDir: SortDir } {
   const sortBy =
     rawSort === 'video_count' ||
     rawSort === 'gallery' ||
@@ -85,10 +120,39 @@ export function parseScrapedStatus(raw: string | null): ScrapedStatus | 'all' {
   return 'all'
 }
 
+export function parseVideoPendingScrape(raw: string | null): VideoPendingScrapeFilter {
+  return raw === 'pending' || raw === 'none' ? raw : 'all'
+}
+
 export function parseYear(raw: string | null): number | 'all' {
   if (!raw || raw === 'all') return 'all'
   const y = Number(raw)
   return Number.isInteger(y) && y > 1900 ? y : 'all'
+}
+
+export function parseVideoResourceFilters(raw: string | null): VideoResourceFilter[] {
+  if (!raw) return []
+  const selected = new Set(raw.split(','))
+  return VIDEO_RESOURCE_FILTER_ORDER.filter((kind) => selected.has(kind))
+}
+
+export function videoResourceFiltersParam(filters: VideoResourceFilter[]): string | null {
+  const selected = new Set(filters)
+  const canonical = VIDEO_RESOURCE_FILTER_ORDER.filter((kind) => selected.has(kind))
+  return canonical.length > 0 ? canonical.join(',') : null
+}
+
+export function canonicalizeLibrarySearchParams(params: URLSearchParams): URLSearchParams {
+  const next = new URLSearchParams(params)
+  const canonicalResources = videoResourceFiltersParam(
+    parseVideoResourceFilters(params.get(LIST_PARAM.resources))
+  )
+  if (canonicalResources) next.set(LIST_PARAM.resources, canonicalResources)
+  else next.delete(LIST_PARAM.resources)
+  const pending = parseVideoPendingScrape(params.get(LIST_PARAM.pending))
+  if (pending === 'all') next.delete(LIST_PARAM.pending)
+  else next.set(LIST_PARAM.pending, pending)
+  return next
 }
 
 export function parseSort(
@@ -116,13 +180,16 @@ export function libraryVideoQueryFromSearchParams(params: URLSearchParams): Vide
   const tagIds = parseTagIds(params.get(LIST_PARAM.tags))
   const codePrefix = (params.get(LIST_PARAM.prefix) ?? '').trim().toUpperCase()
   const q = (params.get(LIST_PARAM.q) ?? '').trim()
+  const resourceKinds = parseVideoResourceFilters(params.get(LIST_PARAM.resources))
 
   return {
     search: q || undefined,
     scrapedStatus: parseScrapedStatus(params.get(LIST_PARAM.status)),
+    pendingScrape: parseVideoPendingScrape(params.get(LIST_PARAM.pending)),
     year: parseYear(params.get(LIST_PARAM.year)),
     tagIds: tagIds.length ? tagIds : undefined,
     codePrefix: codePrefix || undefined,
+    resourceKinds: resourceKinds.length ? resourceKinds : undefined,
     sortBy,
     sortDir
   }
@@ -139,11 +206,13 @@ export function libraryQueryHash(params: URLSearchParams): string {
   return hashListQuery({
     q: q.search ?? '',
     status: q.scrapedStatus ?? 'all',
+    pending: q.pendingScrape ?? 'all',
     year: q.year === 'all' ? 'all' : q.year,
     sort: q.sortBy ?? '',
     dir: q.sortDir ?? '',
     tags: q.tagIds?.join(',') ?? '',
-    prefix: q.codePrefix ?? ''
+    prefix: q.codePrefix ?? '',
+    resources: q.resourceKinds?.join(',') ?? ''
   })
 }
 
@@ -162,23 +231,14 @@ export function actressQueryHash(params: URLSearchParams): string {
   })
 }
 
-export function facetListQueryHash(type: string, params: URLSearchParams): string {
+export function classificationListQueryHash(type: string, params: URLSearchParams): string {
+  const { sortBy, sortDir } = parseClassificationSort(
+    params.get(LIST_PARAM.sort),
+    params.get(LIST_PARAM.dir)
+  )
   return hashListQuery({
     type,
-    q: (params.get(LIST_PARAM.q) ?? '').trim()
-  })
-}
-
-export function facetDetailQueryHash(
-  type: string,
-  value: string,
-  params: URLSearchParams
-): string {
-  const { sortBy, sortDir } = parseSort(params.get(LIST_PARAM.sort), params.get(LIST_PARAM.dir))
-  return hashListQuery({
-    scope: 'facet-detail',
-    type,
-    value,
+    q: (params.get(LIST_PARAM.q) ?? '').trim(),
     sort: sortBy,
     dir: sortDir
   })
@@ -201,10 +261,12 @@ export function isDefaultLibraryParams(params: URLSearchParams): boolean {
   return (
     !(params.get(LIST_PARAM.q) ?? '').trim() &&
     q.scrapedStatus === LIBRARY_DEFAULTS.status &&
+    q.pendingScrape === 'all' &&
     q.year === LIBRARY_DEFAULTS.year &&
     q.sortBy === LIBRARY_DEFAULTS.sortBy &&
     q.sortDir === LIBRARY_DEFAULTS.sortDir &&
     !q.tagIds?.length &&
-    !q.codePrefix
+    !q.codePrefix &&
+    !q.resourceKinds?.length
   )
 }

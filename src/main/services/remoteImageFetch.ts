@@ -1,47 +1,23 @@
 import path from 'node:path'
-import { resolveScrapeProxyUrl } from '@shared/types'
-import { scrapeBrowser } from '../scrapers/scrapeBrowser'
+import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import { getSettings } from '../settings/settingsStore'
-import { readImageDimensionsFromBuffer } from './assetService'
+import { mediaAssetStore } from './mediaAssetStore'
+import { fetchPublicHttpBuffer } from './publicHttpFetch'
 
 function isValidImageBuffer(buf: Buffer): boolean {
-  return buf.length > 0 && readImageDimensionsFromBuffer(buf) != null
-}
-
-async function tryFetch(
-  label: string,
-  fetcher: () => Promise<Buffer>
-): Promise<Buffer | null> {
-  try {
-    const buf = await fetcher()
-    if (isValidImageBuffer(buf)) return buf
-    console.warn(`${label}: response is not a valid image`)
-  } catch (err) {
-    console.warn(`${label} failed:`, (err as Error).message)
-  }
-  return null
+  return buf.length > 0 && mediaAssetStore.readImageDimensions(buf) != null
 }
 
 /**
- * Fetch a remote image for manual import/preview.
- * Mimics opening the URL in a browser tab (top-level navigation, no hotlink Referer),
- * then falls back to generic network fetch without Referer and scraper-session context.
+ * Fetch a renderer-supplied image URL without allowing private-network access,
+ * unbounded redirects, or unbounded response bodies.
  */
 export async function fetchRemoteImageBuffer(url: string): Promise<Buffer> {
-  await scrapeBrowser.setProxy(resolveScrapeProxyUrl(getSettings()))
-
-  const attempts: Array<[string, () => Promise<Buffer>]> = [
-    ['direct navigation', () => scrapeBrowser.fetchBufferViaNavigation(url)],
-    ['network without referer', () => scrapeBrowser.fetchBuffer(url, { referer: 'omit' })],
-    ['scraper session', () => scrapeBrowser.fetchBuffer(url, { referer: 'session' })]
-  ]
-
-  for (const [label, fetcher] of attempts) {
-    const buf = await tryFetch(label, fetcher)
-    if (buf) return buf
-  }
-
-  throw new Error('图片链接无法加载')
+  const buf = await fetchPublicHttpBuffer(url, {
+    proxyUrl: resolveScrapeProxyUrl(getSettings())
+  })
+  if (!isValidImageBuffer(buf)) throw new Error('图片链接返回的内容不是有效图片')
+  return buf
 }
 
 export const EXT_TO_MIME: Record<string, string> = {

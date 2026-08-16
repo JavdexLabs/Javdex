@@ -2,34 +2,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMatch, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, CircleAlert, SearchCheck, SearchX, Trash2, Users } from 'lucide-react'
-import {
-  ACTRESS_LIST_DEFAULTS,
-  ACTRESS_SCRAPE_FIELD_OPTIONS,
-  ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS,
-  ALL_ACTRESS_SCRAPE_FIELDS,
-  type ActressAvatarFilter,
-  type ActressListItem,
-  type ActressListSortBy,
-  type ActressScrapeField,
-  type ActressScrapeUpdateMode
-} from '@shared/types'
-import { api, assetUrl } from '../api'
+import { ACTRESS_LIST_DEFAULTS, type ActressAvatarFilter, type ActressListItem, type ActressListSortBy } from '@shared/actressTypes'
+import { ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS, type ActressScrapeField, type ActressScrapeUpdateMode } from '@shared/actressScrapeTypes'
+import { api } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useRangeSelection } from '../hooks/useRangeSelection'
-import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useToast } from '../components/Toast'
-import ConfirmModal from '../components/ConfirmModal'
-import ActressName from '../components/ActressName'
+import ActressDeleteModal from '../components/ActressDeleteModal'
 import AppliedFilterBar, { type AppliedFilterItem } from '../components/AppliedFilterBar'
 import ListToolbar from '../components/ListToolbar'
 import SelectionToolbar from '../components/SelectionToolbar'
 import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
-import ActressStatusBadge from '../components/ActressStatusBadge'
 import ActressFilterPopover, { type ActressFilterState } from '../components/ActressFilterPopover'
 import ActressFaceScanModal from '../components/ActressFaceScanModal'
-import { ACTRESS_STATUS_FILTER_LABELS } from '@shared/types'
+import { ACTRESS_STATUS_FILTER_LABELS } from '@shared/actressTypes'
 import {
   actressQueryHash,
   actressAvatarParam,
@@ -43,15 +31,14 @@ import {
   parseGender,
   patchSearchParams
 } from '../listView/listQueryParams'
-import { navigateToActressConflicts, navigateToActressDetail } from '../listView/listNavigation'
+import { navigateToActressDetail } from '../listView/listNavigation'
+import { pendingCenterPath } from '../listView/pendingRoutes'
 import { forgetPrimaryListLocation } from '../listView/primaryNavigationMemory'
 import { ROUTE_MATCH, ROUTE_PATH } from '../listView/routePaths'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { invalidateActressLibraryQueries } from '../query/invalidateLibraryQueries'
 import { actressKeys, overviewStatsKeys } from '../query/queryKeys'
-import ActressAvatar from '../components/ActressAvatar'
-import MediaTileActionButton from '../components/MediaTileActionButton'
 import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
 import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
@@ -66,11 +53,14 @@ import {
   MAINTENANCE_HINT_KEYS
 } from '../utils/maintenanceHints'
 import {
-  actressesWithoutFace,
+  actressIdsWithoutFace,
   uncachedActressFaceScanIdentity
 } from '../actressFaceFilter/cache'
 import { useActressFaceScan, previousAvatarAfterFaceScan } from '../actressFaceFilter/useActressFaceScan'
 import { useAvatarAutoCropBatch } from '../contexts/AvatarAutoCropBatchContext'
+import { useInfiniteActressList } from '../query/useInfiniteActressList'
+import VirtualActressGrid from '../components/VirtualActressGrid'
+import Button from '../components/Button'
 
 const ACTRESS_SORT_OPTIONS: SortSwitchOption<ActressListSortBy>[] = [
   { value: 'video_count', label: '影片', title: '本地影片数' },
@@ -98,9 +88,7 @@ export default function ActressesPage(): JSX.Element {
   const location = useLocation()
   const toast = useToast()
   const [searchParams, setSearchParams] = useSearchParams()
-  const actressDetailOpen = useMatch({ path: ROUTE_MATCH.actressDetailOpen, end: false })
-  const conflictReviewOpen = useMatch({ path: ROUTE_MATCH.actressConflicts, end: false })
-  const detailOpen = Boolean(actressDetailOpen || conflictReviewOpen)
+  const detailOpen = Boolean(useMatch({ path: ROUTE_MATCH.actressDetailOpen, end: false }))
 
   const urlQ = searchParams.get(LIST_PARAM.q) ?? ''
   const [searchInput, setSearchInput] = useState(urlQ)
@@ -127,7 +115,6 @@ export default function ActressesPage(): JSX.Element {
   )
   const queryHash = useMemo(() => actressQueryHash(searchParams), [searchParams])
   const scrollMemoryKey = `actresses:${queryHash}`
-  const { ref: scrollRef, showScrollToTop, scrollToTop } = useScrollContainerMemory(scrollMemoryKey)
 
   const patchParams = useCallback(
     (patch: Record<string, string | null | undefined>): void => {
@@ -139,7 +126,6 @@ export default function ActressesPage(): JSX.Element {
   const [pendingDelete, setPendingDelete] = useState<ActressListItem | null>(null)
   const [showBulkScrape, setShowBulkScrape] = useState(false)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
-  const [deleting, setDeleting] = useState(false)
   const filterBtnRef = useRef<HTMLButtonElement>(null)
   const [filterOpen, setFilterOpen] = useState(false)
   const faceScan = useActressFaceScan()
@@ -154,19 +140,37 @@ export default function ActressesPage(): JSX.Element {
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
 
-  const listQuery = useQuery({
-    queryKey: actressKeys.list(queryHash, debouncedQ.trim(), genderFilter, sortBy, sortDir),
-    queryFn: () =>
-      api.actresses.listPage({
+  const actressListQuery = useMemo(
+    () => {
+      const faceResultIds = avatarFilter === 'without-face'
+        ? actressIdsWithoutFace(faceScan.manifest, faceScan.cache)
+        : undefined
+      return {
         search: debouncedQ.trim(),
         gender: genderFilter,
         status: statusFilter,
-        avatar: avatarFilter === 'without-face' ? 'with' : avatarFilter,
+        avatar: avatarFilter === 'without-face' ? 'all' as const : avatarFilter,
         sortBy,
-        sortDir
-      }),
-    placeholderData: (prev) => prev
-  })
+        sortDir,
+        actressIds: faceResultIds
+      }
+    },
+    [
+      avatarFilter,
+      debouncedQ,
+      faceScan.cache,
+      faceScan.manifest,
+      genderFilter,
+      sortBy,
+      sortDir,
+      statusFilter
+    ]
+  )
+  const handleListError = useCallback(
+    (error: unknown) => toast.show(String((error as Error).message ?? error), 'error'),
+    [toast]
+  )
+  const listQuery = useInfiniteActressList(actressListQuery, queryHash, handleListError)
   const conflictSummaryQuery = useQuery({
     queryKey: actressKeys.conflictSummary(),
     queryFn: () => api.actressScrape.conflictSummary(),
@@ -174,27 +178,20 @@ export default function ActressesPage(): JSX.Element {
   })
   const pendingConflictCount = conflictSummaryQuery.data?.groupCount ?? 0
 
-  useEffect(() => {
-    if (listQuery.isError && listQuery.error) {
-      toast.show(String((listQuery.error as Error).message ?? listQuery.error), 'error')
-    }
-  }, [listQuery.isError, listQuery.error, toast])
-
   const { stats: overviewStats } = useLibraryOverviewStats()
   const refetchActressSurface = useCallback(() => {
-    void listQuery.refetch()
+    listQuery.refetchSilent()
     void queryClient.refetchQueries({ queryKey: overviewStatsKeys.all, type: 'all', stale: true })
   }, [listQuery, queryClient])
 
   useListSurfaceRefetch(detailOpen, refetchActressSurface)
 
-  const fetchedItems = listQuery.data?.items ?? []
-  const items =
-    avatarFilter === 'without-face'
-      ? actressesWithoutFace(fetchedItems, faceScan.cache)
-      : fetchedItems
-  const faceScanMissingIdentity = uncachedActressFaceScanIdentity(fetchedItems, faceScan.cache)
-  const loading = listQuery.isLoading && items.length === 0
+  const items = listQuery.items
+  const faceScanMissingIdentity = uncachedActressFaceScanIdentity(
+    faceScan.manifest,
+    faceScan.cache
+  )
+  const loading = listQuery.loading
   const isFetching = listQuery.isFetching
 
   const { scrapers, pluginDetails, defaultScraper } = useScraperPluginCatalog('actress')
@@ -210,18 +207,6 @@ export default function ActressesPage(): JSX.Element {
     toggleSelection: toggleActressSelection,
     clearSelection
   } = useRangeSelection(items, queryHash)
-
-  const selectedItems = useMemo(
-    () => items.filter((item) => selectedIds.has(item.id)),
-    [items, selectedIds]
-  )
-  const unavailableDeleteCount =
-    selectedItems.filter((item) => item.video_count > 0).length +
-    Math.max(0, selectedCount - selectedItems.length)
-  const canDeleteSelection =
-    selectedCount > 0 &&
-    selectedItems.length === selectedCount &&
-    selectedItems.every((item) => item.video_count === 0)
 
   const [unscrapedBannerHidden, setUnscrapedBannerHidden] = useState(() =>
     isMaintenanceHintDismissed(MAINTENANCE_HINT_KEYS.actressBanner)
@@ -254,10 +239,7 @@ export default function ActressesPage(): JSX.Element {
       // Record only the identities that remain unresolved after this attempt.
       // Search/sort changes keep the same key and therefore only recombine the
       // cache; a changed or newly added avatar produces a new key and rescans.
-      faceScanAutoStartedKeyRef.current = uncachedActressFaceScanIdentity(
-        fetchedItems,
-        faceScan.cache
-      )
+      faceScanAutoStartedKeyRef.current = faceScan.uncachedIdentity()
 
       if (summary.cancelled) {
         patchParams({
@@ -286,7 +268,6 @@ export default function ActressesPage(): JSX.Element {
       avatarBatchActive,
       faceScan,
       faceScanAutoStartKey,
-      fetchedItems,
       patchParams,
       toast
     ]
@@ -297,7 +278,7 @@ export default function ActressesPage(): JSX.Element {
       faceScanAutoStartedKeyRef.current = null
       return
     }
-    if (!faceScan.needsScan && !faceScanMissingIdentity) return
+    if (faceScan.manifestReady && !faceScan.needsScan && !faceScanMissingIdentity) return
     if (faceScan.running) return
     if (faceScanAutoStartedKeyRef.current === faceScanAutoStartKey) return
     if (actressBatchActive || avatarBatchActive) return
@@ -310,6 +291,7 @@ export default function ActressesPage(): JSX.Element {
     faceScanAutoStartKey,
     faceScanMissingIdentity,
     faceScan.needsScan,
+    faceScan.manifestReady,
     faceScan.running,
     startFaceScan
   ])
@@ -334,19 +316,6 @@ export default function ActressesPage(): JSX.Element {
     try {
       await startDefaultUnscrapedActressBatch(defaultScraper)
       toast.show('已开始演员批量刮削', 'success')
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    }
-  }
-
-  const doDelete = async (): Promise<void> => {
-    if (!pendingDelete) return
-    try {
-      await api.actresses.remove(pendingDelete.id)
-      setPendingDelete(null)
-      toast.show(`已删除「${pendingDelete.main_name}」`, 'success')
-      invalidateActressLibraryQueries(queryClient)
-      void listQuery.refetch()
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     }
@@ -378,24 +347,6 @@ export default function ActressesPage(): JSX.Element {
       clearSelection()
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
-    }
-  }
-
-  const deleteSelectedActresses = async (): Promise<void> => {
-    if (deleting || selectedIds.size === 0) return
-    setDeleting(true)
-    try {
-      const deleted = await api.actresses.removeBatch([...selectedIds])
-      setConfirmBulkDelete(false)
-      clearSelection()
-      toast.show(`已删除 ${deleted} 位无关联演员`, 'success')
-      invalidateActressLibraryQueries(queryClient)
-      refetchActressSurface()
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-      void listQuery.refetch()
-    } finally {
-      setDeleting(false)
     }
   }
 
@@ -483,10 +434,7 @@ export default function ActressesPage(): JSX.Element {
                 label: '删除演员',
                 icon: <Trash2 {...UI_ICON_SM} aria-hidden />,
                 danger: true,
-                disabled: !canDeleteSelection,
-                title: canDeleteSelection
-                  ? undefined
-                  : `只能批量删除无关联演员；当前有 ${unavailableDeleteCount} 位仍关联影片`,
+                disabled: selectedCount === 0,
                 onClick: () => setConfirmBulkDelete(true)
               }
             ]}
@@ -502,20 +450,24 @@ export default function ActressesPage(): JSX.Element {
             controls={
               <>
                 {pendingConflictCount > 0 ? (
-                  <button
+                  <Button
                     type="button"
-                    className="btn btn-sm actress-conflict-entry"
-                    onClick={() => navigateToActressConflicts(navigate, location)}
+
+                    size="sm"
+                    className="actress-conflict-entry"
+                    onClick={() => navigate(pendingCenterPath({ type: 'actress' }))}
                   >
                     <CircleAlert {...UI_ICON_SM} aria-hidden />
                     待确认 {pendingConflictCount}
-                  </button>
+                  </Button>
                 ) : null}
                 <div className="library-filter-anchor">
-                  <button
+                  <Button
                     ref={filterBtnRef}
                     type="button"
-                    className={`btn btn-sm library-filter-btn${filterOpen ? ' library-filter-btn--open' : ''}${hasAppliedFilters ? ' library-filter-btn--active' : ''}`}
+
+                    size="sm"
+                    className={`library-filter-btn${filterOpen ? ' library-filter-btn--open' : ''}${hasAppliedFilters ? ' library-filter-btn--active' : ''}`}
                     onClick={() => setFilterOpen((open) => !open)}
                     aria-expanded={filterOpen}
                     aria-haspopup="dialog"
@@ -526,7 +478,7 @@ export default function ActressesPage(): JSX.Element {
                       className={`library-filter-chevron${filterOpen ? ' is-open' : ''}`}
                       aria-hidden
                     />
-                  </button>
+                  </Button>
                   <ActressFilterPopover
                     open={filterOpen}
                     anchorRef={filterBtnRef}
@@ -592,7 +544,7 @@ export default function ActressesPage(): JSX.Element {
                 className="count-badge count-badge--stable count-badge--people"
                 aria-live="polite"
               >
-                共 {items.length} 位
+                共 {listQuery.total} 位
                 {isFetching && !loading && items.length > 0 ? (
                   <span className="library-fetch-hint" aria-hidden>
                     {' '}
@@ -633,12 +585,7 @@ export default function ActressesPage(): JSX.Element {
         ) : null}
       </div>
 
-      <ListSurface
-        variant="scroll"
-        scrollRef={scrollRef}
-        showScrollToTop={showScrollToTop}
-        onScrollToTop={scrollToTop}
-      >
+      <ListSurface variant="fill" withInner={false}>
           {loading ? (
             <EmptyState loading variant="page" />
           ) : items.length === 0 ? (
@@ -658,70 +605,43 @@ export default function ActressesPage(): JSX.Element {
               }
             />
           ) : (
-            <div className="actress-grid">
-              {items.map((a, index) => {
-                const avatar = assetUrl(a.avatar_path)
-                const selected = selectedIds.has(a.id)
-                return (
-                  <div
-                    key={a.id}
-                    className={`actress-card-wrap${selected ? ' is-selected' : ''}${selectionMode ? ' is-selection-mode' : ''}`}
-                  >
-                    <button
-                      type="button"
-                      className={`poster-select-toggle poster-hover-control${selected || selectionMode ? ' is-visible' : ''}${selected ? ' is-checked' : ''}`}
-                      aria-label={selected ? `取消选择 ${a.main_name}` : `选择 ${a.main_name}`}
-                      aria-pressed={selected}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        toggleActressSelection(a, index, event)
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="actress-card card-interactive"
-                      aria-pressed={selectionMode ? selected : undefined}
-                      onClick={(event) => {
-                        if (selectionMode) {
-                          toggleActressSelection(a, index, event)
-                          return
-                        }
-                        navigateToActressDetail(navigate, location, a.id)
-                      }}
-                    >
-                      <span className="actress-card-avatar">
-                        <ActressAvatar src={avatar} name={a.main_name} gender={a.gender} />
-                        <ActressStatusBadge status={a.scraped_status} />
-                      </span>
-                      <ActressName name={a.main_name} gender={a.gender} className="actress-name" />
-                      <div className="actress-count">{a.video_count} 部</div>
-                    </button>
-                    {!selectionMode && a.video_count === 0 && (
-                      <MediaTileActionButton
-                        label={`删除演员 ${a.main_name}`}
-                        title="删除"
-                        onClick={() => setPendingDelete(a)}
-                      />
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+            <VirtualActressGrid
+              actresses={items}
+              selectedIds={selectedIds}
+              selectionMode={selectionMode}
+              hasMore={listQuery.hasMore}
+              loadingMore={listQuery.loadingMore}
+              loadMoreFailed={listQuery.nextPageError}
+              onLoadMore={listQuery.loadMore}
+              onRetryLoadMore={listQuery.retryLoadMore}
+              onToggleSelect={toggleActressSelection}
+              onOpen={(actress) => navigateToActressDetail(navigate, location, actress.id)}
+              onDelete={setPendingDelete}
+              scrollMemoryKey={scrollMemoryKey}
+            />
           )}
       </ListSurface>
 
       {pendingDelete && (
-        <ConfirmModal
-          title="删除演员"
-          danger
-          confirmText="删除"
-          onConfirm={() => void doDelete()}
+        <ActressDeleteModal
+          ids={[pendingDelete.id]}
+          subjectLabel={`演员「${pendingDelete.main_name}」`}
           onCancel={() => setPendingDelete(null)}
-        >
-          <p>
-            确定删除「{pendingDelete.main_name}」？仅删除演员档案，不影响已关联影片文件。
-          </p>
-        </ConfirmModal>
+          onDeleted={(result) => {
+            const name = pendingDelete.main_name
+            setPendingDelete(null)
+            toast.show(`已删除「${name}」`, 'success')
+            if (result.cleanupFailures.length > 0) {
+              const first = result.cleanupFailures[0]
+              toast.show(
+                `${result.cleanupFailures.length} 个演员资源清理失败：${first.path}（${first.error}）`,
+                'info'
+              )
+            }
+            void invalidateActressLibraryQueries(queryClient)
+            listQuery.refetchSilent()
+          }}
+        />
       )}
 
       {showBulkScrape && (
@@ -765,23 +685,32 @@ export default function ActressesPage(): JSX.Element {
       )}
 
       {confirmBulkDelete && (
-        <ConfirmModal
-          title="批量删除演员"
-          danger
-          confirmText={deleting ? '删除中…' : '删除'}
-          busy={deleting}
-          closeDisabled={deleting}
-          onConfirm={() => {
-            if (!deleting) void deleteSelectedActresses()
+        <ActressDeleteModal
+          ids={[...selectedIds]}
+          subjectLabel={`已选择的 ${selectedCount} 位演员`}
+          onCancel={() => setConfirmBulkDelete(false)}
+          onDeleted={(result) => {
+            setConfirmBulkDelete(false)
+            clearSelection()
+            toast.show(
+              `已删除 ${result.deletedCount} 位演员${
+                result.unlinkedVideoCount > 0
+                  ? `，并解除 ${result.unlinkedVideoCount} 部影片的演员关联`
+                  : ''
+              }`,
+              'success'
+            )
+            if (result.cleanupFailures.length > 0) {
+              const first = result.cleanupFailures[0]
+              toast.show(
+                `${result.cleanupFailures.length} 个演员资源清理失败：${first.path}（${first.error}）`,
+                'info'
+              )
+            }
+            void invalidateActressLibraryQueries(queryClient)
+            refetchActressSurface()
           }}
-          onCancel={() => {
-            if (!deleting) setConfirmBulkDelete(false)
-          }}
-        >
-          <p>
-            确定删除已选择的 {selectedCount} 位无关联演员吗？将删除演员档案、头像与写真，不会删除任何影片文件。
-          </p>
-        </ConfirmModal>
+        />
       )}
 
       {faceScan.state && (

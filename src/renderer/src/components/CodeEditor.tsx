@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef } from 'react'
 import { highlightJavaScript } from '../utils/highlightJavaScript'
+import styles from './CodeEditor.module.css'
 
 interface CodeEditorProps {
   value: string
@@ -31,19 +32,22 @@ export default function CodeEditor({
   }, [])
 
   return (
-    <div className={`code-editor${className ? ` ${className}` : ''}${disabled ? ' is-disabled' : ''}`}>
-      <pre ref={preRef} className="code-editor-highlight" aria-hidden="true">
+    <div
+      className={`${styles.root}${disabled ? ` ${styles.disabled}` : ''} code-editor${className ? ` ${className}` : ''}`}
+      data-disabled={disabled || undefined}
+    >
+      <pre ref={preRef} className={styles.highlight} aria-hidden="true">
         <code>
           {value ? (
             <span dangerouslySetInnerHTML={{ __html: highlighted }} />
           ) : (
-            <span className="code-editor-placeholder">{placeholder}</span>
+            <span className={styles.placeholder}>{placeholder}</span>
           )}
         </code>
       </pre>
       <textarea
         ref={textareaRef}
-        className="code-editor-input"
+        className={styles.input}
         value={value}
         placeholder={placeholder}
         spellCheck={false}

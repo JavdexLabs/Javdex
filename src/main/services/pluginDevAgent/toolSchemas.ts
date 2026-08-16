@@ -3,11 +3,21 @@ export interface PluginDevToolDefinition {
   function: {
     name: string
     description: string
-    parameters: Record<string, unknown>
+    parameters: PluginDevToolInputSchema
   }
 }
 
-const obj = (properties: Record<string, unknown>, required?: string[]) => ({
+export interface PluginDevToolInputSchema extends Record<string, unknown> {
+  type: 'object'
+  properties: Record<string, object>
+  required: string[]
+  additionalProperties: false
+}
+
+const obj = (
+  properties: Record<string, object>,
+  required?: string[]
+): PluginDevToolInputSchema => ({
   type: 'object',
   properties,
   required: required ?? [],

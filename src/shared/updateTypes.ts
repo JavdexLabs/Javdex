@@ -1,5 +1,7 @@
 export type UpdateCheckStatus = 'idle' | 'checking' | 'up-to-date' | 'available' | 'error'
 
+export type ProjectPage = 'project' | 'releases' | 'license'
+
 export type UpdateCheckErrorCode =
   | 'network-unavailable'
   | 'rate-limited'

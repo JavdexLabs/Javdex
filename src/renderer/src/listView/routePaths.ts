@@ -7,6 +7,7 @@ export const ROUTE_PATH = {
   actresses: '/actresses',
   actressTree: '/actresses/*',
   actressDetail: '/actresses/:id',
+  /** Legacy entry; the route only redirects into the unified pending inbox. */
   actressConflicts: '/actresses/conflicts',
   actressVideoStack: '/actresses/:id/:videoId',
   actressActressStack: '/actresses/:id/:videoId/actress/:actressId',
@@ -17,13 +18,25 @@ export const ROUTE_PATH = {
   playlistActressStack: '/playlists/:playlistId/:id/actress/:actressId',
   facetTree: '/facet/:type/*',
   facetList: '/facet/:type',
-  facetDetail: '/facet/:type/v/:valueKey',
-  facetVideoStack: '/facet/:type/v/:valueKey/:id',
-  facetActressStack: '/facet/:type/v/:valueKey/:id/actress/:actressId',
+  organizationDetail: '/facet/:type/o/:organizationId',
+  organizationVideoStack: '/facet/:type/o/:organizationId/:id',
+  organizationActressStack: '/facet/:type/o/:organizationId/:id/actress/:actressId',
+  directorDetail: '/facet/director/d/:directorId',
+  directorVideoStack: '/facet/director/d/:directorId/:id',
+  directorActressStack: '/facet/director/d/:directorId/:id/actress/:actressId',
+  seriesDetail: '/facet/series/s/:seriesId',
+  seriesVideoStack: '/facet/series/s/:seriesId/:id',
+  seriesActressStack: '/facet/series/s/:seriesId/:id/actress/:actressId',
   settings: '/settings',
   settingsTree: '/settings/*',
   settingsGroup: '/settings/:group/:tab',
-  settingsPluginDev: '/settings/plugin-dev'
+  settingsPluginDev: '/settings/plugin-dev',
+  pending: '/pending',
+  pendingTree: '/pending/*',
+  pendingVideoStack: '/pending/video/:videoId',
+  pendingActressStack: '/pending/video/:videoId/actress/:actressId',
+  /** Actress overlay opened from the pending inbox, not from a video. */
+  pendingActressDetail: '/pending/actress/:actressId'
 } as const
 
 export const ROUTE_SEGMENT = {
@@ -34,8 +47,13 @@ export const ROUTE_SEGMENT = {
   actressVideo: ':videoId',
   playlistDetail: ':playlistId',
   playlistVideo: ':id',
-  facetDetail: 'v/:valueKey',
-  facetVideo: ':id'
+  organizationDetail: 'o/:organizationId',
+  organizationVideo: ':id',
+  directorDetail: 'd/:directorId',
+  directorVideo: ':id',
+  seriesDetail: 's/:seriesId',
+  seriesVideo: ':id',
+  pendingVideo: 'video/:videoId'
 } as const
 
 export const ROUTE_MATCH = {
@@ -45,10 +63,18 @@ export const ROUTE_MATCH = {
   playlistVideoStack: ROUTE_PATH.playlistVideoStack,
   playlistActressStack: ROUTE_PATH.playlistActressStack,
   actressDetailOpen: ROUTE_PATH.actressDetail,
-  actressConflicts: ROUTE_PATH.actressConflicts,
   actressVideoStack: ROUTE_PATH.actressVideoStack,
   actressActressStack: ROUTE_PATH.actressActressStack,
-  facetDetailOpen: ROUTE_PATH.facetDetail,
-  facetVideoStack: ROUTE_PATH.facetVideoStack,
-  facetActressStack: ROUTE_PATH.facetActressStack
+  organizationDetailOpen: ROUTE_PATH.organizationDetail,
+  organizationVideoStack: ROUTE_PATH.organizationVideoStack,
+  organizationActressStack: ROUTE_PATH.organizationActressStack,
+  directorDetailOpen: ROUTE_PATH.directorDetail,
+  directorVideoStack: ROUTE_PATH.directorVideoStack,
+  directorActressStack: ROUTE_PATH.directorActressStack,
+  seriesDetailOpen: ROUTE_PATH.seriesDetail,
+  seriesVideoStack: ROUTE_PATH.seriesVideoStack,
+  seriesActressStack: ROUTE_PATH.seriesActressStack,
+  pendingVideoStack: ROUTE_PATH.pendingVideoStack,
+  pendingActressStack: ROUTE_PATH.pendingActressStack,
+  pendingActressDetail: ROUTE_PATH.pendingActressDetail
 } as const

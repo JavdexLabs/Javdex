@@ -1,4 +1,4 @@
-import type { BatchProgress, BatchScrapeState } from '@shared/types'
+import type { BatchProgress, BatchScrapeState } from '@shared/batchScrapeTypes'
 import { randomUUID } from 'node:crypto'
 import { reconcilePersistedActressBatchJob } from './actressBatchScrapeTargets'
 import {

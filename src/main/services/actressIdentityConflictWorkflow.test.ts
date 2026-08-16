@@ -3,14 +3,14 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { ActressNameConflictGroup } from '@shared/types'
+import type { ActressNameConflictGroup } from '@shared/actressConflictTypes'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import {
-  deleteActress,
   editActress,
   findActressByNameOrAlias,
   getActressDetail
 } from '../db/actressRepo'
+import { createActressMaintenanceService } from './actressMaintenanceService'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import {
   ActressIdentityConflictWorkflow,
@@ -2507,7 +2507,10 @@ describe('ActressIdentityConflictWorkflow', () => {
       workflow.listConflictGroups()[0].candidates[0].resources[0].stagedPath
     )
 
-    deleteActress(targetId)
+    createActressMaintenanceService().deleteActresses({
+      ids: [targetId],
+      mode: 'only-unlinked'
+    })
 
     assert.equal(fs.existsSync(stagedPath), false)
     assert.equal(workflow.countPendingScrapes(), 0)

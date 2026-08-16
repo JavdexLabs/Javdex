@@ -1,5 +1,6 @@
 import { SettingsCard, SettingsHeaderSwitch, SettingsStatusPill } from './SettingsPrimitives'
 import SettingsInlineUrlField from './SettingsInlineUrlField'
+import styles from './NetworkSettingsPanel.module.css'
 
 type ProxyConfigRowProps = {
   title: string
@@ -35,13 +36,13 @@ function ProxyConfigRow({
 
   return (
     <section
-      className={`network-proxy-row${enabled ? ' network-proxy-row--enabled' : ''}${
-        missing ? ' network-proxy-row--missing' : ''
-      }`}
+      className={[styles.proxyRow, enabled ? styles.enabled : '', missing ? styles.missing : '']
+        .filter(Boolean)
+        .join(' ')}
     >
-      <div className="network-proxy-row-head">
-        <div className="network-proxy-row-copy">
-          <div className="network-proxy-title-line">
+      <div className={styles.rowHead}>
+        <div className={styles.rowCopy}>
+          <div className={styles.titleLine}>
             <h4>{title}</h4>
             <SettingsStatusPill status={enabled ? (missing ? 'warning' : 'success') : 'muted'}>
               {enabled ? (missing ? '待配置' : '已启用') : '停用'}
@@ -119,9 +120,9 @@ export default function NetworkSettingsPanel({
     <SettingsCard
       title="代理设置"
       hint="按用途分别配置代理。开关立即生效；地址需要保存后生效，测试连接会使用对应请求链路。"
-      className="network-settings-card"
+      className={styles.card}
     >
-      <div className="network-proxy-list">
+      <div className={styles.proxyList}>
         <ProxyConfigRow
           title="刮削代理"
           description="用于影片、演员刮削插件和浏览器验证窗口。"

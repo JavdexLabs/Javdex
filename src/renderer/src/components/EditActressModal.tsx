@@ -15,7 +15,8 @@ import {
 } from '@shared/actressProfileOptions'
 import { parseAvatarCrop, type ActressAvatarCommit } from '@shared/avatarCrop'
 import { normalizeCupSize } from '@shared/cupSizeUtils'
-import type { ActressDetail, ActressEditInput, ActressGender } from '@shared/types'
+import type { ActressEditInput, ActressGender } from '@shared/actressTypes'
+import type { ActressDetail } from '@shared/actressTypes'
 import { assetUrl } from '../api'
 import ActressAvatarEditor from './ActressAvatarEditor'
 import AliasTagEditor from './AliasTagEditor'
@@ -24,6 +25,8 @@ import { EditFormField, EditFormSection } from './FormPrimitives'
 import Modal from './Modal'
 import SelectControl from './SelectControl'
 import { useTheme } from './ThemeProvider'
+import RelatedLinksEditor, { relatedLinksFromDraft } from './RelatedLinksEditor'
+import type { RelatedLinkInput } from '@shared/relatedLinkTypes'
 
 interface Props {
   actress: ActressDetail
@@ -52,6 +55,9 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
   const [nationality, setNationality] = useState(actress.nationality?.trim() ?? '')
   const [profileSummary, setProfileSummary] = useState(actress.profile_summary ?? '')
   const [aliases, setAliases] = useState<string[]>([...actress.aliases])
+  const [links, setLinks] = useState<RelatedLinkInput[]>(
+    (actress.links ?? []).map(({ label, url }) => ({ label, url }))
+  )
   const [avatarCommit, setAvatarCommit] = useState<ActressAvatarCommit | null>(null)
   const [saving, setSaving] = useState(false)
   const mediaEditorsHidden =
@@ -141,6 +147,7 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
         nationality: nationality.trim() || null,
         profile_summary: profileSummary.trim() || null,
         aliases,
+        links: relatedLinksFromDraft(links),
         ...(avatarCommit && !mediaEditorsHidden ? { avatar: avatarCommit } : {})
       })
     } finally {
@@ -429,6 +436,7 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
                 ) : null}
               </div>
             </EditFormSection>
+            <RelatedLinksEditor disabled={saving} links={links} onChange={setLinks} />
           </div>
     </Modal>
   )

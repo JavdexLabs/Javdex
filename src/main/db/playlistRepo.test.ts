@@ -164,4 +164,33 @@ describe('playlistRepo', () => {
     setupDb()
     assert.throws(() => createPlaylistRecord({ name: '   ' }), /清单名称不能为空/)
   })
+
+  it('stores related links on create and update', () => {
+    setupDb()
+    const id = createPlaylistRecord({
+      name: 'Queue',
+      links: [
+        { label: '', url: 'https://example.com/list' },
+        { label: 'Dup', url: 'https://example.com/list#x' },
+        { label: 'Forum', url: 'https://forum.example/thread' }
+      ]
+    })
+
+    assert.deepEqual(
+      getPlaylistDetail(id)?.links.map((link) => [link.label, link.url, link.position]),
+      [
+        ['example.com', 'https://example.com/list', 0],
+        ['Forum', 'https://forum.example/thread', 1]
+      ]
+    )
+
+    updatePlaylistRecord(id, {
+      name: 'Queue',
+      links: [{ label: 'Wiki', url: 'https://example.com/wiki' }]
+    })
+    assert.deepEqual(getPlaylistDetail(id)?.links.map((link) => link.label), ['Wiki'])
+
+    updatePlaylistRecord(id, { name: 'Renamed' })
+    assert.deepEqual(getPlaylistDetail(id)?.links.map((link) => link.label), ['Wiki'])
+  })
 })

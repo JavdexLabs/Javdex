@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AssetCryptoProgress } from '@shared/types'
+import type { AssetCryptoProgress } from '@shared/libraryTypes'
 import { api } from '../api'
 
 /** Full-screen blocker while the main process migrates all cover/avatar files. */

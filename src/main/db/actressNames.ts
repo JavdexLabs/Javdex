@@ -1,4 +1,4 @@
-import type { ActressName } from '@shared/types'
+import type { ActressName } from '@shared/actressTypes'
 import { getDb } from './database'
 
 export const ACTRESS_NAME_TYPE = {

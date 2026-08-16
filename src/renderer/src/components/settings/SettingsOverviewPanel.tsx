@@ -12,11 +12,8 @@ import {
   SquareTerminal,
   UserRound
 } from 'lucide-react'
-import type {
-  AppSettings,
-  BatchProgress,
-  ThemeId
-} from '@shared/types'
+import type { SettingsSnapshot, ThemeId } from '@shared/settingsTypes'
+import type { BatchProgress } from '@shared/batchScrapeTypes'
 import {
   findLlmProviderViewModel,
   listModelsForProvider,
@@ -29,6 +26,7 @@ import type { SettingsGroup, SettingsTab } from '../../settings/settingsRoutes'
 import { batchStatusLabel, formatCompactPath } from '../../settings/settingsDisplay'
 import IconButton from '../IconButton'
 import BatchTaskControls, { type BatchControlHandler } from './BatchTaskControls'
+import Button from '../Button'
 
 export type SettingsOverviewNotice = {
   tone: 'warning' | 'info'
@@ -80,7 +78,7 @@ const SETTINGS_OVERVIEW_AGENT_TOOLS: SettingsOverviewAgentTool[] = [
 ]
 
 interface SettingsOverviewPanelProps {
-  settings: AppSettings
+  settings: SettingsSnapshot
   theme: ThemeId
   themeLabel: string
   notices: SettingsOverviewNotice[]
@@ -336,9 +334,9 @@ function BatchOverviewStatus({
         {activeBatch || (showPending && pendingGroupCount > 0 && onOpenPending) ? (
           <span className="settings-overview-batch-meta-actions">
             {showPending && pendingGroupCount > 0 && onOpenPending ? (
-              <button type="button" className="btn btn-sm btn-ghost" onClick={onOpenPending}>
+              <Button type="button" variant="ghost" size="sm" onClick={onOpenPending}>
                 查看待确认
-              </button>
+              </Button>
             ) : null}
             {activeBatch ? (
               <span className="settings-overview-batch-inline-count">{batchCount}</span>
@@ -401,7 +399,6 @@ export default function SettingsOverviewPanel({
   }, [defaultLlmSelection.modelId, defaultLlmSelection.providerId, settings.llmCustomModels])
 
   const videoTotal = stats?.videos.total ?? 0
-  const actressTotal = stats?.actresses.total ?? 0
   const actressFemaleTotal = stats?.actresses.female ?? 0
   const videoScraped = stats?.videos.scraped ?? 0
   const actressScraped = stats?.actresses.scraped ?? 0
@@ -476,22 +473,26 @@ export default function SettingsOverviewPanel({
               (notice.action && notice.actionLabel) ? (
                 <div className="settings-notice-actions">
                   {notice.secondaryAction && notice.secondaryActionLabel ? (
-                    <button
+                    <Button
                       type="button"
-                      className="btn btn-sm btn-ghost"
+                      variant="ghost"
+
+                      size="sm"
                       onClick={notice.secondaryAction}
                     >
                       {notice.secondaryActionLabel}
-                    </button>
+                    </Button>
                   ) : null}
                   {notice.action && notice.actionLabel ? (
-                    <button
+                    <Button
                       type="button"
-                      className={`btn btn-sm${notice.actionPrimary ? ' btn-primary' : ''}`}
+
+                      size="sm"
+                      variant={notice.actionPrimary ? 'primary' : 'default'}
                       onClick={notice.action}
                     >
                       {notice.actionLabel}
-                    </button>
+                    </Button>
                   ) : null}
                 </div>
               ) : null}
@@ -614,26 +615,29 @@ export default function SettingsOverviewPanel({
 
           <div className="settings-overview-media-action">
             <div className="settings-overview-action-row">
-              <button
+              <Button
                 type="button"
-                className="btn btn-primary btn-sm"
+                variant="primary"
+
+                size="sm"
                 aria-disabled={videoDefaultBlockReason ? true : undefined}
                 title={videoDefaultBlockReason ?? undefined}
                 onClick={() => runOrExplain(videoDefaultBlockReason, onStartVideoBatchDefault)}
               >
                 <Play {...UI_ICON_SM} aria-hidden />
                 刮削未刮削项
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="btn btn-sm"
+
+                size="sm"
                 aria-disabled={videoAdvancedBlockReason ? true : undefined}
                 title={videoAdvancedBlockReason ?? undefined}
                 onClick={() => runOrExplain(videoAdvancedBlockReason, onOpenVideoBatchAdvanced)}
               >
                 <SlidersHorizontal {...UI_ICON_SM} aria-hidden />
                 高级刮削
-              </button>
+              </Button>
             </div>
             <small>
               {settings.defaultScraper || '未设置插件'} · 未刮削项 · 空字段补齐 · 全字段
@@ -670,26 +674,29 @@ export default function SettingsOverviewPanel({
 
           <div className="settings-overview-media-action">
             <div className="settings-overview-action-row">
-              <button
+              <Button
                 type="button"
-                className="btn btn-primary btn-sm"
+                variant="primary"
+
+                size="sm"
                 aria-disabled={actressDefaultBlockReason ? true : undefined}
                 title={actressDefaultBlockReason ?? undefined}
                 onClick={() => runOrExplain(actressDefaultBlockReason, onStartActressBatchDefault)}
               >
                 <Play {...UI_ICON_SM} aria-hidden />
                 刮削未刮削项
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="btn btn-sm"
+
+                size="sm"
                 aria-disabled={actressAdvancedBlockReason ? true : undefined}
                 title={actressAdvancedBlockReason ?? undefined}
                 onClick={() => runOrExplain(actressAdvancedBlockReason, onOpenActressBatchAdvanced)}
               >
                 <SlidersHorizontal {...UI_ICON_SM} aria-hidden />
                 高级刮削
-              </button>
+              </Button>
             </div>
             <small>
               {settings.defaultActressScraper || '未设置插件'} · 女优未刮削项 · 空字段补齐 · 全字段

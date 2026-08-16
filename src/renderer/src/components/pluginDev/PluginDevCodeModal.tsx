@@ -3,6 +3,7 @@ import Modal from '../Modal'
 import { highlightJavaScript } from '../../utils/highlightJavaScript'
 import { getPluginDevKindProfile } from '@shared/pluginDevKindProfile'
 import type { PluginKind } from './types'
+import styles from './PluginDevCodeModal.module.css'
 
 export default function PluginDevCodeModal({
   kind,
@@ -22,6 +23,7 @@ export default function PluginDevCodeModal({
     <Modal
       title={`插件代码 · ${pluginName || '未命名'}`}
       className="modal--plugin-dev-code"
+      chrome="shellless"
       hideCancel
       confirmText="关闭"
       onConfirm={onClose}
@@ -33,7 +35,7 @@ export default function PluginDevCodeModal({
             {code ? (
               <span dangerouslySetInnerHTML={{ __html: highlighted }} />
             ) : (
-              <span className="code-editor-placeholder">{placeholder}</span>
+              <span className={styles.placeholder}>{placeholder}</span>
             )}
           </code>
         </pre>

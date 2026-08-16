@@ -1,4 +1,4 @@
-import type { ActressGender } from './types'
+import type { ActressGender } from './actressTypes'
 
 export type SelectOption = { value: string; label: string }
 

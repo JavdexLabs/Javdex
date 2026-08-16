@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { navigateToVideoDetail } from '../listView/listNavigation'
-import type { Video } from '@shared/types'
+import type { Video } from '@shared/videoTypes'
 import { assetUrl } from '../api'
 import { useDisplayMode } from './DisplayModeContext'
 import { useEscapeKey } from '../hooks/useEscapeKey'
@@ -10,6 +10,7 @@ import { Ellipsis, ListMinus, Pencil } from 'lucide-react'
 import IconButton from './IconButton'
 import MediaTileActionButton from './MediaTileActionButton'
 import { UI_ICON, UI_ICON_SM } from './iconDefaults'
+import { getVideoResourceBadgeSummary } from './videoResourceBadges'
 
 const STATUS_BADGE: Record<number, { text: string; cls: string } | null> = {
   0: { text: '未刮削', cls: 'unscraped' },
@@ -49,13 +50,14 @@ export default function PosterCard({
 }: PosterCardProps): JSX.Element {
   const navigate = useNavigate()
   const location = useLocation()
-  const { mode } = useDisplayMode()
+  const { mode, showResourceTypeBadges } = useDisplayMode()
   const cover = assetUrl(video.cover_path)
   const badge = STATUS_BADGE[video.scraped_status]
   const [tallCover, setTallCover] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const hasQuickActions = Boolean(onAddToPlaylist || onScrape || onMarkScrapeSuccess || onDelete)
+  const resourceBadges = getVideoResourceBadgeSummary(video.resource_kinds ?? [])
 
   const dismissMenu = useCallback(() => {
     setMenuOpen(false)
@@ -140,6 +142,27 @@ export default function PosterCard({
           <div className="poster-placeholder">{video.code}</div>
         )}
         {badge && <span className={`poster-badge ${badge.cls}`}>{badge.text}</span>}
+        {video.has_pending_scrape ? (
+          <span className="poster-badge" data-pending="true">
+            待确认
+          </span>
+        ) : null}
+        {showResourceTypeBadges && resourceBadges.visible.length > 0 ? (
+          <span
+            className="poster-resource-badges"
+            title={resourceBadges.title}
+            aria-label={`资源类型：${resourceBadges.title}`}
+          >
+            {resourceBadges.visible.map((item) => (
+              <span key={item.kind} className="poster-resource-badge">
+                {item.label}
+              </span>
+            ))}
+            {resourceBadges.overflow > 0 ? (
+              <span className="poster-resource-badge">+{resourceBadges.overflow}</span>
+            ) : null}
+          </span>
+        ) : null}
         {onToggleSelect && (
           <button
             type="button"
@@ -151,7 +174,7 @@ export default function PosterCard({
         )}
         {!selectionMode && onRemove && (
           <MediaTileActionButton
-            action="remove"
+            action="delete"
             className="poster-hover-control"
             icon={<ListMinus {...UI_ICON_SM} />}
             label={`从清单移出 ${video.code}`}

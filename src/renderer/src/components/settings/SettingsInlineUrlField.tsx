@@ -3,6 +3,7 @@ import { Check, Pencil, X } from 'lucide-react'
 import IconButton from '../IconButton'
 import { UI_ICON_MD } from '../iconDefaults'
 import { SettingsFormField } from './SettingsPrimitives'
+import Button from '../Button'
 
 export default function SettingsInlineUrlField({
   label,
@@ -137,15 +138,16 @@ export default function SettingsInlineUrlField({
         </div>
         {onTest && (
           <div className="settings-inline-url-field__footer">
-            <button
+            <Button
               type="button"
-              className="btn btn-sm"
+
+              size="sm"
               disabled={probeDisabled}
               aria-busy={probeBusy}
               onClick={() => void runTest()}
             >
               {probeBusy ? '测试中…' : '测试连接'}
-            </button>
+            </Button>
           </div>
         )}
       </div>

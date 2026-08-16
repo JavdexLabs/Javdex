@@ -4,10 +4,7 @@ import { HashRouter } from 'react-router-dom'
 import App from './App'
 import QueryProvider from './query/QueryProvider'
 import { restoreCachedPrivacyMode } from './privacyMode'
-import './styles.css'
-import './styles/shell.css'
-import './styles/detail-surfaces.css'
-import './styles/workspaces.css'
+import './styles/global.css'
 
 restoreCachedPrivacyMode()
 

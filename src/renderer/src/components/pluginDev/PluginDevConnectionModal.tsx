@@ -1,5 +1,6 @@
 import Modal from '../Modal'
 import { SettingsNumberStepper } from '../settings/SettingsPrimitives'
+import Button from '../Button'
 
 export default function PluginDevConnectionModal({
   providerLabel,
@@ -27,6 +28,7 @@ export default function PluginDevConnectionModal({
   return (
     <Modal
       title="Agent 连接配置"
+
       size="sm"
       className="modal--plugin-dev-connection"
       confirmText={busy ? '保存中…' : '保存'}
@@ -41,9 +43,9 @@ export default function PluginDevConnectionModal({
             <strong>{providerLabel}</strong>
             <small>{modelLabel}</small>
           </div>
-          <button type="button" className="btn btn-sm" disabled={busy} onClick={onOpenModelSettings}>
+          <Button type="button" size="sm" disabled={busy} onClick={onOpenModelSettings}>
             模型设置
-          </button>
+          </Button>
         </div>
         <label className="plugin-edit-control">
           <span>最大步数</span>

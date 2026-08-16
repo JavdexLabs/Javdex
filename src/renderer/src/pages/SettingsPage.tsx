@@ -1,33 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import type {
-  ActressBatchScrapeScope,
-  ActressBatchScrapeStatus,
-  AppSettings,
-  ActressScrapeField,
-  ActressScrapeUpdateMode,
-  BatchProgress,
-  CompositeScraperInput,
-  ScanResult,
-  ScraperPluginDescriptor,
-  ScraperPluginPackage,
-  ScraperPluginUpdateInput,
-  VideoBatchScrapeStatus,
-  VideoScrapeField,
-  VideoScrapeUpdateMode
-} from '@shared/types'
-import {
-  ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS,
-  ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS,
-  ACTRESS_SCRAPE_FIELD_OPTIONS,
-  ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS,
-  ALL_ACTRESS_SCRAPE_FIELDS,
-  ALL_VIDEO_SCRAPE_FIELDS,
-  VIDEO_BATCH_SCRAPE_STATUS_OPTIONS,
-  VIDEO_SCRAPE_FIELD_OPTIONS,
-  VIDEO_SCRAPE_UPDATE_MODE_OPTIONS
-} from '@shared/types'
+import type { ActressBatchScrapeScope, ActressBatchScrapeStatus, ActressScrapeField, ActressScrapeUpdateMode, VideoBatchScrapeStatus, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/scrapeTypes'
+import type { AppSettings, SettingsSnapshot } from '@shared/settingsTypes'
+import type { BatchProgress } from '@shared/batchScrapeTypes'
+import { ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS, ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS, ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS, VIDEO_BATCH_SCRAPE_STATUS_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_UPDATE_MODE_OPTIONS } from '@shared/scrapeTypes'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { api } from '../api'
 import { actressKeys, overviewStatsKeys } from '../query/queryKeys'
@@ -41,7 +18,7 @@ import BatchSettingsPanel from '../components/settings/BatchSettingsPanel'
 import LibrarySettingsPanel from '../components/settings/LibrarySettingsPanel'
 import ModelSettingsPanel from '../components/settings/ModelSettingsPanel'
 import NetworkSettingsPanel from '../components/settings/NetworkSettingsPanel'
-import PluginsSettingsPanel, { type PluginDeleteTarget } from '../components/settings/PluginsSettingsPanel'
+import PluginsSettingsPanel from '../components/settings/PluginsSettingsPanel'
 import StorageSettingsPanel from '../components/settings/StorageSettingsPanel'
 import SettingsOverviewPanel from '../components/settings/SettingsOverviewPanel'
 import SettingsWorkspaceShell, {
@@ -49,10 +26,7 @@ import SettingsWorkspaceShell, {
 } from '../components/settings/SettingsWorkspaceShell'
 import {
   CompositeConfigModal,
-  PluginConfigModal,
-  type CompositeEditState,
-  type PluginEditState,
-  type PluginKind
+  PluginConfigModal
 } from '../components/settings/PluginConfigModals'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
 import { useToast } from '../components/Toast'
@@ -60,15 +34,11 @@ import { useTheme } from '../components/ThemeProvider'
 import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
 import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
 import { useAvatarAutoCropBatch } from '../contexts/AvatarAutoCropBatchContext'
-import { actressConflictReviewPath } from '../listView/actressRoutes'
+import { pendingCenterPath } from '../listView/pendingRoutes'
 import useNetworkSettingsController from '../hooks/useNetworkSettingsController'
-import {
-  invalidateAllLibraryQueries
-} from '../query/invalidateLibraryQueries'
-import {
-  dismissMaintenanceHint,
-  MAINTENANCE_HINT_KEYS
-} from '../utils/maintenanceHints'
+import useLatestAsyncLabel from '../hooks/useLatestAsyncLabel'
+import useScraperPluginSettingsController from '../hooks/useScraperPluginSettingsController'
+import useLibrarySettingsController from '../hooks/useLibrarySettingsController'
 import {
   resolveSettingsRoute,
   settingsPath,
@@ -77,8 +47,9 @@ import {
   type SettingsTab
 } from '../settings/settingsRoutes'
 import { THEME_OPTIONS } from '../theme'
-import type { ThemeId } from '@shared/types'
+import type { ThemeId } from '@shared/settingsTypes'
 import type { UpdateCheckState } from '@shared/updateTypes'
+import Button from '../components/Button'
 
 function shouldAutoScrollBatchLog(container: HTMLDivElement): boolean {
   const selection = window.getSelection()
@@ -111,11 +82,50 @@ export default function SettingsPage(): JSX.Element {
   const location = useLocation()
   const { theme, setTheme, syncPrivacyMode } = useTheme()
   const { group: activeGroup, tab: activeTab } = resolveSettingsRoute(location.pathname)
-  const [settings, setSettings] = useState<AppSettings | null>(null)
+  const [settings, setSettings] = useState<SettingsSnapshot | null>(null)
+  const [settingsLoadError, setSettingsLoadError] = useState<string | null>(null)
+  const [settingsLoadAttempt, setSettingsLoadAttempt] = useState(0)
   const [updateCheckState, setUpdateCheckState] = useState<UpdateCheckState | null>(null)
+  const [dismissedRecoveryBackup, setDismissedRecoveryBackup] = useState<string | null>(null)
+  const openPluginDev = useCallback(() => navigate(settingsPluginDevPath()), [navigate])
   const {
-    scrapeProxyDraft,
-    llmProxyDraft,
+    scrapers,
+    actressScrapers,
+    videoPluginDetails,
+    actressPluginDetails,
+    videoUserPlugins,
+    actressUserPlugins,
+    videoCompositePlugins,
+    actressCompositePlugins,
+    pluginBusy,
+    editingPlugin,
+    setEditingPlugin,
+    openPluginEditor,
+    editingComposite,
+    setEditingComposite,
+    pluginDeleteTarget,
+    setPluginDeleteTarget,
+    devLoadPackage,
+    clearDevLoadPackage,
+    importPlugin,
+    exportPlugin,
+    loadPluginForAiDebug,
+    confirmPluginDelete,
+    savePluginConfig,
+    testPluginServiceConfig,
+    clearPluginServiceConfig,
+    saveCompositePlugin,
+    changeDefaultPlugin,
+    handleInstalled
+  } = useScraperPluginSettingsController({
+    shouldLoad:
+      activeGroup.id === 'overview' ||
+      activeGroup.id === 'plugins' ||
+      location.pathname === settingsPluginDevPath(),
+    openPluginDev,
+    setSettings
+  })
+  const {
     proxySaving,
     proxyTesting,
     proxyToggleBusy,
@@ -128,20 +138,25 @@ export default function SettingsPage(): JSX.Element {
     testScrapeProxy,
     testLlmProxy
   } = useNetworkSettingsController(settings, setSettings)
-  const [scrapers, setScrapers] = useState<string[]>([])
-  const [actressScrapers, setActressScrapers] = useState<string[]>([])
-  const [videoPluginDetails, setVideoPluginDetails] = useState<ScraperPluginDescriptor[]>([])
-  const [actressPluginDetails, setActressPluginDetails] = useState<ScraperPluginDescriptor[]>([])
-  const [pluginBusy, setPluginBusy] = useState<string | null>(null)
-  const [editingPlugin, setEditingPlugin] = useState<PluginEditState | null>(null)
-  const [editingComposite, setEditingComposite] = useState<CompositeEditState | null>(null)
-  const [pluginDeleteTarget, setPluginDeleteTarget] = useState<PluginDeleteTarget | null>(null)
-  const [pathRemoveTarget, setPathRemoveTarget] = useState<string | null>(null)
-  const [devLoadPackage, setDevLoadPackage] = useState<ScraperPluginPackage | null>(null)
-  const [scanning, setScanning] = useState(false)
-  const [scanStatus, setScanStatus] = useState('')
-  const [scanResult, setScanResult] = useState<ScanResult | null>(null)
-  const [unrecognized, setUnrecognized] = useState<string[]>([])
+  const {
+    pathRemoval,
+    pathRemoveBusy,
+    closePathRemoval,
+    requestRemovePath,
+    confirmRemovePath,
+    scanning,
+    scanStatus,
+    scanResult,
+    unrecognized,
+    overviewStatsRefreshKey,
+    scanScrapePrompt,
+    addFolders,
+    patchLibrarySettings,
+    runScan,
+    cancelScan,
+    handleResolved,
+    dismissScanScrapePrompt
+  } = useLibrarySettingsController({ settings, setSettings })
   const {
     videoBatch,
     actressBatch,
@@ -154,14 +169,17 @@ export default function SettingsPage(): JSX.Element {
   const [batchDetailScope, setBatchDetailScope] = useState<
     'video' | 'actress' | 'avatar' | null
   >(null)
-  const [videoBatchScopeCountLabel, setVideoBatchScopeCountLabel] = useState('- 部影片')
-  const [actressBatchScopeCountLabel, setActressBatchScopeCountLabel] = useState('- 位演员')
+  const {
+    label: videoBatchScopeCountLabel,
+    refresh: refreshVideoBatchScopeCount,
+    reset: resetVideoBatchScopeCount
+  } = useLatestAsyncLabel('- 部影片')
+  const {
+    label: actressBatchScopeCountLabel,
+    refresh: refreshActressBatchScopeCount,
+    reset: resetActressBatchScopeCount
+  } = useLatestAsyncLabel('- 位演员')
   const [storageBusy, setStorageBusy] = useState(false)
-  const [overviewStatsRefreshKey, setOverviewStatsRefreshKey] = useState(0)
-  const [scanScrapePrompt, setScanScrapePrompt] = useState<{
-    imported: number
-    unscraped: number
-  } | null>(null)
   const { stats: overviewStats } = useLibraryOverviewStats(
     overviewStatsRefreshKey,
     activeGroup.id === 'overview' && location.pathname !== settingsPluginDevPath()
@@ -185,11 +203,11 @@ export default function SettingsPage(): JSX.Element {
     setEditingPlugin(null)
     setEditingComposite(null)
     setPluginDeleteTarget(null)
-    setPathRemoveTarget(null)
+    closePathRemoval()
     setShowVideoBatchModal(false)
     setShowActressBatchModal(false)
     setBatchDetailScope(null)
-  }, [])
+  }, [closePathRemoval, setEditingComposite, setEditingPlugin, setPluginDeleteTarget])
 
   useDismissOverlaysOnNavigate(dismissSettingsOverlays, location.pathname)
 
@@ -204,59 +222,45 @@ export default function SettingsPage(): JSX.Element {
     return () => window.clearTimeout(timer)
   }, [activeGroup.id, libraryFocus, location.pathname, navigate])
 
-  const refreshVideoPlugins = async (): Promise<void> => {
-    const [names, details] = await Promise.all([
-      api.scrape.listPlugins(),
-      api.scrape.listPluginDetails()
-    ])
-    setScrapers(names)
-    setVideoPluginDetails(details)
-  }
-
-  const refreshActressPlugins = async (): Promise<void> => {
-    const [names, details] = await Promise.all([
-      api.actressScrape.listPlugins(),
-      api.actressScrape.listPluginDetails()
-    ])
-    setActressScrapers(names)
-    setActressPluginDetails(details)
-  }
-
   useEffect(() => {
-    api.settings
+    let active = true
+    setSettingsLoadError(null)
+    void api.settings
       .get()
-      .then(setSettings)
-      .catch((e) => toast.show(String(e.message ?? e), 'error'))
-  }, [toast])
+      .then((next) => {
+        if (active) {
+          setSettings(next)
+          setSettingsLoadError(null)
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          const message = String((error as Error).message ?? error)
+          setSettingsLoadError(message)
+          toast.show(message, 'error')
+        }
+      })
+    return () => {
+      active = false
+    }
+  }, [settingsLoadAttempt, toast])
 
   useEffect(() => {
     let active = true
-    void api.appUpdate.getState().then((state) => {
-      if (active) setUpdateCheckState(state)
-    })
+    void api.appUpdate
+      .getState()
+      .then((state) => {
+        if (active) setUpdateCheckState(state)
+      })
+      .catch((error) => {
+        if (active) toast.show(String((error as Error).message ?? error), 'error')
+      })
     const unsubscribe = api.appUpdate.onStateChanged(setUpdateCheckState)
     return () => {
       active = false
       unsubscribe()
     }
-  }, [])
-
-  useEffect(() => {
-    const needsPlugins =
-      activeGroup.id === 'overview' ||
-      activeGroup.id === 'plugins' ||
-      location.pathname === settingsPluginDevPath()
-    if (!needsPlugins) return
-    refreshVideoPlugins().catch(() => {})
-    refreshActressPlugins().catch(() => {})
-  }, [activeGroup.id, location.pathname])
-
-  useEffect(() => {
-    const off = api.scan.onProgress((p) => {
-      setScanStatus(`已扫描 ${p.scanned} 个文件，新导入 ${p.imported} 部`)
-    })
-    return off
-  }, [])
+  }, [toast])
 
   useEffect(() => {
     scrollBatchLogToBottom(videoBatchLogRef)
@@ -270,41 +274,43 @@ export default function SettingsPage(): JSX.Element {
     scrollBatchLogToBottom(avatarBatchLogRef)
   }, [avatarAutoCropBatch.state.logs.length])
 
-  const refreshVideoBatchScopeHint = async (
+  const refreshVideoBatchScopeHint = useCallback(async (
     status: VideoBatchScrapeStatus,
     missingFields: VideoScrapeField[] = [],
     scraperName?: string
   ): Promise<void> => {
-    try {
-      const n = await api.scrape.videoBatchCount({ status, missingFields, scraperName })
-      setVideoBatchScopeCountLabel(`${n} 部影片`)
-    } catch {
-      setVideoBatchScopeCountLabel('- 部影片')
-    }
-  }
+    await refreshVideoBatchScopeCount(
+      () => api.scrape.videoBatchCount({ status, missingFields, scraperName }),
+      (count) => `${count} 部影片`
+    )
+  }, [refreshVideoBatchScopeCount])
 
   useEffect(() => {
-    if (!showVideoBatchModal) return
+    if (!showVideoBatchModal) {
+      resetVideoBatchScopeCount()
+      return
+    }
     void refreshVideoBatchScopeHint(0)
-  }, [showVideoBatchModal])
+  }, [refreshVideoBatchScopeHint, resetVideoBatchScopeCount, showVideoBatchModal])
 
-  const refreshActressBatchScopeHint = async (
+  const refreshActressBatchScopeHint = useCallback(async (
     scope: ActressBatchScrapeScope,
     missingFields: ActressScrapeField[] = [],
     scrapeStatus: ActressBatchScrapeStatus = 'unscraped'
   ): Promise<void> => {
-    try {
-      const n = await api.actressScrape.batchCount({ scope, scrapeStatus, missingFields })
-      setActressBatchScopeCountLabel(`${n} 位演员`)
-    } catch {
-      setActressBatchScopeCountLabel('- 位演员')
-    }
-  }
+    await refreshActressBatchScopeCount(
+      () => api.actressScrape.batchCount({ scope, scrapeStatus, missingFields }),
+      (count) => `${count} 位演员`
+    )
+  }, [refreshActressBatchScopeCount])
 
   useEffect(() => {
-    if (!showActressBatchModal) return
+    if (!showActressBatchModal) {
+      resetActressBatchScopeCount()
+      return
+    }
     void refreshActressBatchScopeHint('female', [], 'unscraped')
-  }, [showActressBatchModal])
+  }, [refreshActressBatchScopeHint, resetActressBatchScopeCount, showActressBatchModal])
 
   const onSettingsTabKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>): void => {
@@ -330,263 +336,26 @@ export default function SettingsPage(): JSX.Element {
   )
 
   if (!settings) {
+    if (settingsLoadError) {
+      return (
+        <EmptyState
+          title="设置加载失败"
+          description={settingsLoadError}
+        >
+          <Button type="button" variant="primary" onClick={() => setSettingsLoadAttempt((value) => value + 1)}>
+            重试
+          </Button>
+        </EmptyState>
+      )
+    }
     return (
       <EmptyState loading title={<span className="settings-loading-label">加载设置…</span>} />
     )
   }
 
-  const addFolders = async (): Promise<void> => {
-    try {
-      const picked = await api.settings.pickFolder()
-      if (!picked.length) return
-      const merged = Array.from(new Set([...settings.libraryPaths, ...picked]))
-      const next = await api.settings.update({ libraryPaths: merged })
-      setSettings(next)
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    }
-  }
-
-  const removeFolder = async (path: string): Promise<void> => {
-    if (!settings) return
-    try {
-      const merged = settings.libraryPaths.filter((p) => p !== path)
-      const next = await api.settings.update({ libraryPaths: merged })
-      setSettings(next)
-      toast.show('已移除媒体库路径', 'success')
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    }
-  }
-
-  const confirmRemovePath = async (): Promise<void> => {
-    if (!pathRemoveTarget) return
-    const target = pathRemoveTarget
-    setPathRemoveTarget(null)
-    await removeFolder(target)
-  }
-
-  const changeScraper = async (name: string): Promise<void> => {
-    const next = await api.settings.update({ defaultScraper: name })
-    setSettings(next)
-    toast.show(`默认影片刮削站点已设为 ${name}`, 'success')
-  }
-
-  const changeActressScraper = async (name: string): Promise<void> => {
-    const next = await api.settings.update({ defaultActressScraper: name })
-    setSettings(next)
-    toast.show(`默认演员刮削站点已设为 ${name}`, 'success')
-  }
-
-  const importPlugin = async (): Promise<void> => {
-    if (pluginBusy) return
-    setPluginBusy('import')
-    try {
-      const plugin = await api.plugins.importPlugin()
-      if (!plugin) return
-      if (plugin.kind === 'video') await refreshVideoPlugins()
-      else await refreshActressPlugins()
-      const kindLabel = plugin.kind === 'video' ? '影片' : '演员'
-      toast.show(`已导入${kindLabel}刮削插件：${plugin.name}`, 'success')
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setPluginBusy(null)
-    }
-  }
-
-  const exportVideoPlugin = async (name: string): Promise<void> => {
-    if (pluginBusy) return
-    setPluginBusy(`video-export:${name}`)
-    try {
-      const target = await api.scrape.exportPlugin(name)
-      if (target) toast.show('影片刮削插件已导出', 'success')
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setPluginBusy(null)
-    }
-  }
-
-  const loadVideoPluginForAiDebug = async (name: string): Promise<void> => {
-    if (pluginBusy) return
-    setPluginBusy(`load-video:${name}`)
-    try {
-      setDevLoadPackage(await api.scrape.getPluginPackage(name))
-      navigate(settingsPluginDevPath())
-      toast.show(`已载入影片插件：${name}`, 'success')
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setPluginBusy(null)
-    }
-  }
-
-  const exportActressPlugin = async (name: string): Promise<void> => {
-    if (pluginBusy) return
-    setPluginBusy(`actress-export:${name}`)
-    try {
-      const target = await api.actressScrape.exportPlugin(name)
-      if (target) toast.show('演员刮削插件已导出', 'success')
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setPluginBusy(null)
-    }
-  }
-
-  const loadActressPluginForAiDebug = async (name: string): Promise<void> => {
-    if (pluginBusy) return
-    setPluginBusy(`load-actress:${name}`)
-    try {
-      setDevLoadPackage(await api.actressScrape.getPluginPackage(name))
-      navigate(settingsPluginDevPath())
-      toast.show(`已载入演员插件：${name}`, 'success')
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setPluginBusy(null)
-    }
-  }
-
-  const deleteVideoPlugin = async (name: string): Promise<void> => {
-    if (pluginBusy) return
-    setPluginBusy(`video-delete:${name}`)
-    try {
-      await api.scrape.deletePlugin(name)
-      await refreshVideoPlugins()
-      setSettings(await api.settings.get())
-      toast.show('影片刮削插件已删除', 'success')
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setPluginBusy(null)
-    }
-  }
-
-  const deleteVideoComposite = async (name: string): Promise<void> => {
-    if (pluginBusy) return
-    setPluginBusy(`video-composite-delete:${name}`)
-    try {
-      await api.scrape.deleteComposite(name)
-      await refreshVideoPlugins()
-      setSettings(await api.settings.get())
-      toast.show('影片组合插件已删除', 'success')
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setPluginBusy(null)
-    }
-  }
-
-  const deleteActressPlugin = async (name: string): Promise<void> => {
-    if (pluginBusy) return
-    setPluginBusy(`actress-delete:${name}`)
-    try {
-      await api.actressScrape.deletePlugin(name)
-      await refreshActressPlugins()
-      setSettings(await api.settings.get())
-      toast.show('演员刮削插件已删除', 'success')
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setPluginBusy(null)
-    }
-  }
-
-  const deleteActressComposite = async (name: string): Promise<void> => {
-    if (pluginBusy) return
-    setPluginBusy(`actress-composite-delete:${name}`)
-    try {
-      await api.actressScrape.deleteComposite(name)
-      await refreshActressPlugins()
-      setSettings(await api.settings.get())
-      toast.show('演员组合插件已删除', 'success')
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setPluginBusy(null)
-    }
-  }
-
-  const confirmPluginDelete = async (): Promise<void> => {
-    if (!pluginDeleteTarget || pluginBusy) return
-    const { kind, name, composite } = pluginDeleteTarget
-    setPluginDeleteTarget(null)
-    if (composite) {
-      if (kind === 'video') await deleteVideoComposite(name)
-      else await deleteActressComposite(name)
-      return
-    }
-    if (kind === 'video') await deleteVideoPlugin(name)
-    else await deleteActressPlugin(name)
-  }
-
-  const refreshPluginsForKind = async (kind: PluginKind): Promise<void> => {
-    if (kind === 'video') await refreshVideoPlugins()
-    else await refreshActressPlugins()
-  }
-
-  const savePluginConfig = async (
-    kind: PluginKind,
-    name: string,
-    input: ScraperPluginUpdateInput
-  ): Promise<void> => {
-    if (pluginBusy) return
-    setPluginBusy(`${kind}-update:${name}`)
-    try {
-      if (kind === 'video') await api.scrape.updatePlugin(name, input)
-      else await api.actressScrape.updatePlugin(name, input)
-      await refreshPluginsForKind(kind)
-      setEditingPlugin(null)
-      toast.show('插件配置已保存', 'success')
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setPluginBusy(null)
-    }
-  }
-
-  const saveCompositePlugin = async (
-    kind: PluginKind,
-    originalName: string | null,
-    input: CompositeScraperInput
-  ): Promise<void> => {
-    if (pluginBusy) return
-    setPluginBusy(`${kind}-composite:${originalName ?? input.name}`)
-    try {
-      if (kind === 'video') {
-        if (originalName) await api.scrape.updateComposite(originalName, input)
-        else await api.scrape.createComposite(input)
-      } else {
-        if (originalName) await api.actressScrape.updateComposite(originalName, input)
-        else await api.actressScrape.createComposite(input)
-      }
-      await refreshPluginsForKind(kind)
-      setEditingComposite(null)
-      toast.show(originalName ? '组合插件已更新' : '组合插件已创建', 'success')
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setPluginBusy(null)
-    }
-  }
-
   const changeTheme = async (id: ThemeId): Promise<void> => {
     await setTheme(id)
     setSettings((s) => (s ? { ...s, theme: id } : s))
-  }
-
-  const patchLibrarySettings = async (
-    patch: Partial<Pick<AppSettings, 'minScanImportDurationMinutes'>>
-  ): Promise<void> => {
-    if (!settings) return
-    try {
-      const next = await api.settings.update(patch)
-      setSettings(next)
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    }
   }
 
   const patchAppearanceSettings = async (
@@ -595,6 +364,8 @@ export default function SettingsPage(): JSX.Element {
         AppSettings,
         | 'videoDetailUseFirstSampleBackground'
         | 'actressDetailUseFirstGalleryBackground'
+        | 'showVideoResourceTypeBadges'
+        | 'coverDisplayMode'
         | 'privacyModeEnabled'
         | 'privacyModeScopes'
         | 'avatarFaceRatio'
@@ -652,77 +423,6 @@ export default function SettingsPage(): JSX.Element {
     } finally {
       setStorageBusy(false)
     }
-  }
-
-  const runScan = async (): Promise<void> => {
-    if (!settings.libraryPaths.length) {
-      toast.show('请先添加媒体库路径', 'error')
-      return
-    }
-    setScanning(true)
-    setScanResult(null)
-    setScanStatus('扫描中…')
-    try {
-      const res = await api.scan.run()
-      setScanResult(res)
-      setUnrecognized(res.unrecognizedFiles)
-      setScanStatus('')
-      if (res.cancelled) {
-        toast.show(
-          `扫描已取消：已扫描 ${res.scannedFiles} 个文件，新增 ${res.imported} 部`,
-          'info'
-        )
-      } else {
-        toast.show(
-          `扫描完成：新增 ${res.imported} 部，路径更新 ${res.relocated} 部，移除 ${res.removed} 部，跳过 ${res.skipped} 部`,
-          'success'
-        )
-      }
-      invalidateAllLibraryQueries(queryClient)
-      setOverviewStatsRefreshKey((key) => key + 1)
-      if (!res.cancelled && res.imported > 0) {
-        try {
-          const stats = await api.settings.getOverviewStats()
-          if (
-            stats.videos.unscraped > 0 &&
-            !sessionStorage.getItem(MAINTENANCE_HINT_KEYS.scanScrapePrompt)
-          ) {
-            setScanScrapePrompt({ imported: res.imported, unscraped: stats.videos.unscraped })
-          } else {
-            setScanScrapePrompt(null)
-          }
-        } catch {
-          /* ignore stats fetch errors */
-        }
-      } else {
-        setScanScrapePrompt(null)
-      }
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-      setScanStatus('')
-    } finally {
-      setScanning(false)
-    }
-  }
-
-  const cancelScan = async (): Promise<void> => {
-    try {
-      const cancelled = await api.scan.cancel()
-      if (cancelled) {
-        setScanStatus('正在取消扫描…')
-      }
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    }
-  }
-
-  const handleResolved = (oldPath: string): void => {
-    setUnrecognized((prev) => prev.filter((p) => p !== oldPath))
-  }
-
-  const dismissScanScrapePrompt = (): void => {
-    dismissMaintenanceHint(MAINTENANCE_HINT_KEYS.scanScrapePrompt)
-    setScanScrapePrompt(null)
   }
 
   const startVideoBatchDefault = (): void => {
@@ -847,18 +547,14 @@ export default function SettingsPage(): JSX.Element {
 
   const openActressConflicts = (): void => {
     setBatchDetailScope(null)
-    navigate(actressConflictReviewPath())
+    navigate(pendingCenterPath({ type: 'actress' }))
   }
 
-  const videoUserPlugins = videoPluginDetails.filter((plugin) => plugin.source !== 'composite')
-  const actressUserPlugins = actressPluginDetails.filter((plugin) => plugin.source !== 'composite')
-  const videoCompositePlugins = videoPluginDetails.filter((plugin) => plugin.source === 'composite')
-  const actressCompositePlugins = actressPluginDetails.filter((plugin) => plugin.source === 'composite')
-  const defaultVideoPlugin = videoPluginDetails.find((plugin) => plugin.name === settings.defaultScraper)
-  const defaultActressPlugin = actressPluginDetails.find(
-    (plugin) => plugin.name === settings.defaultActressScraper
-  )
-  const pluginTotal = videoPluginDetails.length + actressPluginDetails.length
+  const openVideoPending = (): void => {
+    setBatchDetailScope(null)
+    navigate(pendingCenterPath({ type: 'scrape' }))
+  }
+
   const unrecognizedCount = unrecognized.length
   const videoBatchRunning = videoBatch?.status === 'running'
   const actressBatchRunning = actressBatch?.status === 'running'
@@ -910,6 +606,30 @@ export default function SettingsPage(): JSX.Element {
     Boolean(updateRelease) &&
     updateRelease?.version !== updateCheckState.ignoredVersion
   const overviewNotices = [
+    ...(settings.recoveryNotice &&
+    settings.recoveryNotice.backupFileName !== dismissedRecoveryBackup
+      ? [
+          {
+            tone: 'warning' as const,
+            title: '设置已从损坏文件恢复',
+            body: `${settings.recoveryNotice.message}；备份文件：${settings.recoveryNotice.backupFileName}`,
+            secondaryAction: () =>
+              setDismissedRecoveryBackup(settings.recoveryNotice?.backupFileName ?? null),
+            secondaryActionLabel: '知道了',
+            action: () => {
+              void api.settings
+                .revealRecoveryBackup()
+                .then((opened) => {
+                  if (!opened) toast.show('设置备份文件已不存在', 'info')
+                })
+                .catch((error) =>
+                  toast.show(String((error as Error).message ?? error), 'error')
+                )
+            },
+            actionLabel: '打开备份位置'
+          }
+        ]
+      : []),
     ...(shouldShowUpdateNotice && updateRelease
       ? [
           {
@@ -978,11 +698,8 @@ export default function SettingsPage(): JSX.Element {
         settings={settings}
         setSettings={setSettings}
         loadPackage={devLoadPackage}
-        onLoadConsumed={() => setDevLoadPackage(null)}
-        onInstalled={async (kind) => {
-          await refreshPluginsForKind(kind)
-          setSettings(await api.settings.get())
-        }}
+        onLoadConsumed={clearDevLoadPackage}
+        onInstalled={handleInstalled}
       />
     </SettingsPluginDevShell>
   )
@@ -1046,7 +763,7 @@ export default function SettingsPage(): JSX.Element {
                   onAddFolders={() => void addFolders()}
                   onRunScan={() => void runScan()}
                   onCancelScan={() => void cancelScan()}
-                  onRequestRemovePath={setPathRemoveTarget}
+                  onRequestRemovePath={(path) => void requestRemovePath(path)}
                   onResolvedUnrecognized={handleResolved}
                   onPatchSettings={(patch) => void patchLibrarySettings(patch)}
                   scanScrapePrompt={scanScrapePrompt}
@@ -1054,6 +771,7 @@ export default function SettingsPage(): JSX.Element {
                   defaultScraper={settings.defaultScraper}
                   onDismissScanScrapePrompt={dismissScanScrapePrompt}
                   onStartScanScrapeBatch={startVideoBatchDefault}
+                  onOpenPending={() => navigate(pendingCenterPath({ type: 'scan' }))}
                 />
               )}
 
@@ -1073,20 +791,12 @@ export default function SettingsPage(): JSX.Element {
                       setEditingComposite({ kind, plugin })
                       return
                     }
-                    setEditingPlugin({ kind, plugin })
+                    void openPluginEditor(kind, plugin)
                   }}
-                  onExport={(kind, name) =>
-                    kind === 'video' ? void exportVideoPlugin(name) : void exportActressPlugin(name)
-                  }
-                  onAiDebug={(kind, name) =>
-                    kind === 'video'
-                      ? void loadVideoPluginForAiDebug(name)
-                      : void loadActressPluginForAiDebug(name)
-                  }
+                  onExport={(kind, name) => void exportPlugin(kind, name)}
+                  onAiDebug={(kind, name) => void loadPluginForAiDebug(kind, name)}
                   onRequestDelete={setPluginDeleteTarget}
-                  onSetDefault={(kind, name) =>
-                    kind === 'video' ? void changeScraper(name) : void changeActressScraper(name)
-                  }
+                  onSetDefault={(kind, name) => void changeDefaultPlugin(kind, name)}
                   onCreateComposite={(kind) => setEditingComposite({ kind })}
                 />
               )}
@@ -1151,6 +861,7 @@ export default function SettingsPage(): JSX.Element {
                 ? '批量智能构图（头像）'
                 : '批量更新（影片）'
           }
+
           size="xl"
           className="modal--batch-detail"
           bodyClassName="modal-body--batch-detail"
@@ -1204,24 +915,34 @@ export default function SettingsPage(): JSX.Element {
             customControls={
               batchDetailScope === 'avatar' ? (
                 avatarBatchRunning && avatarAutoCropBatch.state.source === 'manual' ? (
-                  <button
+                  <Button
                     type="button"
-                    className="btn btn-sm btn-danger"
+                    variant="danger"
+
+                    size="sm"
                     disabled={avatarAutoCropBatch.state.status === 'cancelling'}
                     onClick={avatarAutoCropBatch.cancel}
                   >
                     {avatarAutoCropBatch.state.status === 'cancelling'
                       ? '正在停止…'
                       : '停止任务'}
-                  </button>
+                  </Button>
                 ) : null
               ) : undefined
             }
             pendingGroupCount={
-              batchDetailScope === 'actress' ? actressConflictGroupCount : 0
+              batchDetailScope === 'actress'
+                ? actressConflictGroupCount
+                : batchDetailScope === 'video'
+                  ? videoBatch?.pending ?? 0
+                  : 0
             }
             onOpenPending={
-              batchDetailScope === 'actress' ? openActressConflicts : undefined
+              batchDetailScope === 'actress'
+                ? openActressConflicts
+                : batchDetailScope === 'video'
+                  ? openVideoPending
+                  : undefined
             }
             onPause={() => {
               if (batchDetailScope === 'avatar') {
@@ -1342,8 +1063,15 @@ export default function SettingsPage(): JSX.Element {
       {editingPlugin && (
         <PluginConfigModal
           state={editingPlugin}
-          saving={pluginBusy === `${editingPlugin.kind}-update:${editingPlugin.plugin.name}`}
-          onSave={(kind, name, input) => void savePluginConfig(kind, name, input)}
+          saving={
+            pluginBusy === `${editingPlugin.kind}-update:${editingPlugin.plugin.name}` ||
+            pluginBusy === 'video-service-clear:MetaTube'
+          }
+          onSave={(kind, name, input, serviceInput) =>
+            void savePluginConfig(kind, name, input, serviceInput)
+          }
+          onTestService={testPluginServiceConfig}
+          onClearService={clearPluginServiceConfig}
           onCancel={() => setEditingPlugin(null)}
         />
       )}
@@ -1358,17 +1086,46 @@ export default function SettingsPage(): JSX.Element {
           onCancel={() => setEditingComposite(null)}
         />
       )}
-      {pathRemoveTarget && (
+      {pathRemoval && (
         <ConfirmModal
           title="移除媒体库路径"
-          confirmText="移除"
+          confirmText={
+            pathRemoveBusy === 'preview'
+              ? '正在统计…'
+              : pathRemoveBusy === 'confirm'
+                ? '移除中…'
+                : '确认移除'
+          }
           danger
-          onCancel={() => setPathRemoveTarget(null)}
+          busy={Boolean(pathRemoveBusy)}
+          confirmDisabled={!pathRemoval.preview}
+          onCancel={closePathRemoval}
           onConfirm={() => void confirmRemovePath()}
         >
           <p>确定从媒体库中移除以下路径？</p>
-          <div className="modal-path-text">{pathRemoveTarget}</div>
-          <p className="modal-field-hint">不会删除磁盘上的文件，仅停止扫描该路径。</p>
+          <div className="modal-path-text">{pathRemoval.path}</div>
+          {pathRemoval.preview ? (
+            <div className="library-path-removal-impact" aria-label="目录移除影响">
+              <div>
+                <strong>{pathRemoval.preview.localResourceCount}</strong>
+                <span>条本地资源记录</span>
+              </div>
+              <div>
+                <strong>{pathRemoval.preview.strmResourceCount}</strong>
+                <span>条 STRM 资源记录</span>
+              </div>
+              <div>
+                <strong>{pathRemoval.preview.videosBecomingResourceLess}</strong>
+                <span>部影片可能变为无资源</span>
+              </div>
+            </div>
+          ) : (
+            <p className="modal-field-hint" aria-live="polite">正在统计目录影响…</p>
+          )}
+          <p className="modal-field-hint library-path-removal-note">
+            确认后会立即停止扫描该路径。下一次成功完成的扫描将移除上述资源记录，
+            但不会删除目录中的视频文件或 STRM 源文件；此操作不提供保留资源记录选项。
+          </p>
         </ConfirmModal>
       )}
       {pluginDeleteTarget && (

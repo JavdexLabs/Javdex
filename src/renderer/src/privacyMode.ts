@@ -1,4 +1,4 @@
-import { normalizePrivacyModeScopes, type AppSettings } from '@shared/types'
+import { normalizePrivacyModeScopes, type AppSettings } from '@shared/settingsTypes'
 
 export type PrivacyModeSettings = Pick<
   AppSettings,

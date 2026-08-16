@@ -16,7 +16,9 @@ const SEARCH_KEYS_BY_ROOT: Record<string, readonly string[]> = {
     LIST_PARAM.tags,
     LIST_PARAM.prefix,
     LIST_PARAM.status,
-    LIST_PARAM.year
+    LIST_PARAM.year,
+    LIST_PARAM.resources,
+    LIST_PARAM.pending
   ],
   '/actresses': [
     LIST_PARAM.q,
@@ -26,7 +28,8 @@ const SEARCH_KEYS_BY_ROOT: Record<string, readonly string[]> = {
     LIST_PARAM.sort,
     LIST_PARAM.dir
   ],
-  '/playlists': [LIST_PARAM.q]
+  '/playlists': [LIST_PARAM.q],
+  '/pending': [LIST_PARAM.pendingType, LIST_PARAM.pendingItem, LIST_PARAM.pendingVideoId]
 }
 
 function facetRoot(pathname: string): string | null {
@@ -50,17 +53,34 @@ export function primaryListRoot(pathname: string): string | null {
   if (matchPath({ path: ROUTE_PATH.playlistTree, end: false }, pathname)) {
     return ROUTE_PATH.playlists
   }
+  if (matchPath({ path: ROUTE_PATH.pendingTree, end: false }, pathname)) {
+    return ROUTE_PATH.pending
+  }
   return facetRoot(pathname)
 }
 
 function scopedSearch(root: string, search: string): string {
-  const allowedKeys = root.startsWith('/facet/') ? [LIST_PARAM.q] : SEARCH_KEYS_BY_ROOT[root]
+  const allowedKeys = root.startsWith('/facet/')
+    ? /^\/facet\/(maker|publisher|director|series)$/.test(root)
+      ? [LIST_PARAM.q, LIST_PARAM.sort, LIST_PARAM.dir]
+      : [LIST_PARAM.q]
+    : SEARCH_KEYS_BY_ROOT[root]
   if (!allowedKeys) return ''
   const source = new URLSearchParams(search)
   const next = new URLSearchParams()
   for (const key of allowedKeys) {
     const value = source.get(key)
     if (value != null && value !== '') next.set(key, value)
+  }
+  if (/^\/facet\/(maker|publisher|director|series)$/.test(root)) {
+    const sort = next.get(LIST_PARAM.sort)
+    const dir = next.get(LIST_PARAM.dir)
+    if (sort !== 'video_count' && sort !== 'updated_at') {
+      next.delete(LIST_PARAM.sort)
+      next.delete(LIST_PARAM.dir)
+    } else if (dir !== 'asc' && dir !== 'desc') {
+      next.delete(LIST_PARAM.dir)
+    }
   }
   const value = next.toString()
   return value ? `?${value}` : ''

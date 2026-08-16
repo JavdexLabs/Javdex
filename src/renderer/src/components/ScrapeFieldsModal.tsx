@@ -2,12 +2,13 @@ import {
   formatActressScrapeMatchNameLabel,
   type ActressScrapeMatchNameOption
 } from '@shared/actressProfileOptions'
-import type { ScraperPluginDescriptor } from '@shared/types'
+import type { ScraperPluginDescriptor } from '@shared/scraperPluginTypes'
 import { useEffect, useMemo, useState } from 'react'
 import ScraperSiteSelect from './ScraperSiteSelect'
 import SelectControl from './SelectControl'
 import SettingsSwitchRow from './SettingsSwitchRow'
 import Modal from './Modal'
+import Button from './Button'
 
 export interface ScrapeFieldOption<T extends string> {
   id: T
@@ -272,11 +273,24 @@ export default function ScrapeFieldsModal<
     setMissingSelected((prev) => {
       const next = new Set([...prev].filter((field) => supported.has(field)))
       if (missingFilterEnabled && next.size !== prev.size) {
-        notifyMissingFieldsChange([...next])
+        const nextFields = [...next]
+        if (onMissingFieldsChange) {
+          onMissingFieldsChange(nextFields, scope, auxScope, scraperName)
+        } else if (scope !== undefined) {
+          onScopeChange?.(scope, nextFields, auxScope, scraperName)
+        }
       }
       return next
     })
-  }, [scraperName, supported])
+  }, [
+    auxScope,
+    missingFilterEnabled,
+    onMissingFieldsChange,
+    onScopeChange,
+    scope,
+    scraperName,
+    supported
+  ])
 
   const toggle = (id: T): void => {
     if (supported && !supported.has(id)) return
@@ -459,17 +473,18 @@ export default function ScrapeFieldsModal<
     <Modal
       title={title}
       hint={hint}
+
       size="xl"
       className="modal--scrape"
       onCancel={onCancel}
       actions={
         <>
-          <button type="button" className="btn" onClick={onCancel}>
+          <Button type="button" onClick={onCancel}>
             取消
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn btn-primary"
+            variant="primary"
             disabled={!canConfirm}
             onClick={() =>
               onConfirm(
@@ -486,7 +501,7 @@ export default function ScrapeFieldsModal<
             }
           >
             {confirmText}
-          </button>
+          </Button>
         </>
       }
     >

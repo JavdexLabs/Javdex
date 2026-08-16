@@ -1,9 +1,5 @@
 import { fetchRemoteImageBuffer, mimeTypeFromImageUrl } from './remoteImageFetch'
-
-export interface RemoteImagePreviewResult {
-  mimeType: string
-  dataBase64: string
-}
+import type { RemoteImagePreviewResult } from '@shared/appIpcContract'
 
 /** Download a remote image for preview in the import modal. */
 export async function fetchRemoteImagePreview(url: string): Promise<RemoteImagePreviewResult> {

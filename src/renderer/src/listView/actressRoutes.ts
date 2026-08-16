@@ -1,10 +1,6 @@
 import { generatePath, matchPath } from 'react-router-dom'
 import { ROUTE_PATH } from './routePaths'
 
-export function actressConflictReviewPath(): string {
-  return ROUTE_PATH.actressConflicts
-}
-
 export function actressDetailPath(actressId: number): string {
   return generatePath(ROUTE_PATH.actressDetail, { id: String(actressId) })
 }

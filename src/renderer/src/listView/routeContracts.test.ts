@@ -2,7 +2,6 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Location, NavigateFunction } from 'react-router-dom'
 import {
-  actressConflictReviewPath,
   actressDetailPath,
   actressVideoActressPath,
   actressVideoDetailPath,
@@ -10,16 +9,27 @@ import {
 } from './actressRoutes'
 import {
   facetListPath,
-  facetVideoDetailPath,
-  facetVideoListPath,
-  parseFacetVideoPath
+  directorDetailPath,
+  directorVideoDetailPath,
+  organizationDetailPath,
+  organizationVideoDetailPath,
+  parseOrganizationPath,
+  parseDirectorPath,
+  parseSeriesPath,
+  seriesDetailPath,
+  seriesVideoDetailPath
 } from './facetRoutes'
 import { libraryVideoActressPath, libraryVideoDetailPath, parseLibraryVideoPath } from './libraryRoutes'
 import {
-  navigateToActressConflicts,
   navigateToActressDetail,
   navigateToActressList,
-  navigateToFacetDetail
+  navigateToActressFromVideoDetail,
+  navigateBackFromActressDetail,
+  navigateBackFromVideoDetail,
+  navigateToDirectorDetail,
+  navigateToOrganizationDetail,
+  navigateToSeriesDetail,
+  navigateToVideoDetail
 } from './listNavigation'
 import {
   actressQueryHash,
@@ -28,6 +38,10 @@ import {
   LIST_PARAM,
   parseActressAvatar,
   parseActressStatus,
+  classificationListQueryHash,
+  parseClassificationSort,
+  parseSeriesReleaseDir,
+  seriesReleaseDirParam,
   patchSearchParams
 } from './listQueryParams'
 import {
@@ -46,6 +60,17 @@ import {
   playlistVideoDetailPath
 } from './playlistRoutes'
 import { resolveSettingsRoute, settingsPath, settingsPluginDevPath } from '../settings/settingsRoutes'
+import {
+  parsePendingCenterSearch,
+  pendingCenterPath,
+  parsePendingActressDetailPath,
+  parsePendingItemKey,
+  parsePendingVideoPath,
+  pendingActressDetailPath,
+  pendingItemKey,
+  pendingVideoActressPath,
+  pendingVideoDetailPath
+} from './pendingRoutes'
 
 describe('route builders and parsers', () => {
   it('round-trips library detail stacks', () => {
@@ -58,7 +83,6 @@ describe('route builders and parsers', () => {
   })
 
   it('round-trips actress detail stacks', () => {
-    assert.equal(actressConflictReviewPath(), '/actresses/conflicts')
     assert.equal(actressDetailPath(3), '/actresses/3')
     assert.equal(actressVideoDetailPath(3, 9), '/actresses/3/9')
     assert.equal(actressVideoActressPath(3, 9, 11), '/actresses/3/9/actress/11')
@@ -69,7 +93,7 @@ describe('route builders and parsers', () => {
     })
   })
 
-  it('round-trips playlist and facet detail stacks', () => {
+  it('round-trips playlist and classification entity detail stacks', () => {
     assert.equal(playlistDetailPath(4), '/playlists/4')
     assert.equal(playlistVideoDetailPath(4, 8), '/playlists/4/8')
     assert.deepEqual(parsePlaylistVideoPath('/playlists/4/8/actress/12'), {
@@ -79,11 +103,26 @@ describe('route builders and parsers', () => {
     })
 
     assert.equal(facetListPath('maker'), '/facet/maker')
-    assert.equal(facetVideoListPath('maker', 'A B'), '/facet/maker/v/A%20B')
-    assert.equal(facetVideoDetailPath('maker', 'A B', 5), '/facet/maker/v/A%20B/5')
-    assert.deepEqual(parseFacetVideoPath('/facet/maker/v/A%20B/5/actress/7'), {
-      facetType: 'maker',
-      valueKey: 'A%20B',
+
+    assert.equal(organizationDetailPath('maker', 12), '/facet/maker/o/12')
+    assert.equal(organizationVideoDetailPath('publisher', 12, 5), '/facet/publisher/o/12/5')
+    assert.deepEqual(parseOrganizationPath('/facet/publisher/o/12/5/actress/7'), {
+      role: 'publisher',
+      organizationId: 12,
+      videoId: 5,
+      actressId: 7
+    })
+    assert.equal(directorDetailPath(21), '/facet/director/d/21')
+    assert.equal(directorVideoDetailPath(21, 5), '/facet/director/d/21/5')
+    assert.deepEqual(parseDirectorPath('/facet/director/d/21/5/actress/7'), {
+      directorId: 21,
+      videoId: 5,
+      actressId: 7
+    })
+    assert.equal(seriesDetailPath(31), '/facet/series/s/31')
+    assert.equal(seriesVideoDetailPath(31, 5), '/facet/series/s/31/5')
+    assert.deepEqual(parseSeriesPath('/facet/series/s/31/5/actress/7'), {
+      seriesId: 31,
       videoId: 5,
       actressId: 7
     })
@@ -93,6 +132,78 @@ describe('route builders and parsers', () => {
     assert.equal(parseLibraryVideoPath('/detail/not-a-number'), null)
     assert.equal(parseActressVideoPath('/actresses/x'), null)
     assert.equal(parsePlaylistVideoPath('/playlists/x'), null)
+  })
+
+  it('builds pending-center locations without page-level query concatenation', () => {
+    assert.equal(pendingCenterPath(), '/pending')
+    assert.equal(pendingCenterPath({ type: 'all' }), '/pending')
+    assert.equal(pendingCenterPath({ type: 'scan' }), '/pending?type=scan')
+    assert.equal(
+      pendingCenterPath({ type: 'scrape', videoId: 42 }),
+      '/pending?type=scrape&videoId=42'
+    )
+    assert.equal(
+      pendingCenterPath({ type: 'scrape', item: pendingItemKey('scrape', 7) }),
+      '/pending?type=scrape&item=scrape%3A7'
+    )
+    assert.equal(
+      pendingCenterPath({ type: 'actress', item: pendingItemKey('actress', 'a:b') }),
+      '/pending?type=actress&item=actress%3Aa%3Ab'
+    )
+    assert.deepEqual(parsePendingCenterSearch(new URLSearchParams('type=scrape&item=scrape:7')), {
+      type: 'scrape',
+      item: { domain: 'scrape', id: '7' },
+      videoId: null
+    })
+    // Actress ids are normalized names, so only the first separator splits the key.
+    assert.deepEqual(parsePendingItemKey('actress:a:b'), { domain: 'actress', id: 'a:b' })
+    assert.equal(parsePendingItemKey('unknown:1'), null)
+    assert.deepEqual(parsePendingCenterSearch(new URLSearchParams('')), {
+      type: 'all',
+      item: null,
+      videoId: null
+    })
+    assert.equal(pendingVideoDetailPath(42), '/pending/video/42')
+    assert.equal(pendingVideoActressPath(42, 7), '/pending/video/42/actress/7')
+    assert.equal(pendingActressDetailPath(8), '/pending/actress/8')
+    assert.deepEqual(parsePendingActressDetailPath('/pending/actress/8'), { actressId: 8 })
+    assert.equal(parsePendingActressDetailPath('/pending/video/42/actress/7'), null)
+    assert.deepEqual(parsePendingVideoPath('/pending/video/42/actress/7'), {
+      videoId: 42,
+      actressId: 7
+    })
+  })
+})
+
+describe('classification list query contract', () => {
+  it('accepts only video count and update time sorting with video count descending by default', () => {
+    assert.deepEqual(parseClassificationSort(null, null), {
+      sortBy: 'video_count',
+      sortDir: 'desc'
+    })
+    assert.deepEqual(parseClassificationSort('updated_at', 'asc'), {
+      sortBy: 'updated_at',
+      sortDir: 'asc'
+    })
+    assert.deepEqual(parseClassificationSort('name', 'asc'), {
+      sortBy: 'video_count',
+      sortDir: 'asc'
+    })
+  })
+
+  it('includes organization search and sorting in the shareable query identity', () => {
+    assert.equal(
+      classificationListQueryHash('maker', new URLSearchParams('q=studio&sort=updated_at&dir=asc')),
+      'dir=asc&q=studio&sort=updated_at&type=maker'
+    )
+  })
+
+  it('keeps series release sorting separate from classification-list sorting', () => {
+    assert.equal(parseSeriesReleaseDir(null), 'desc')
+    assert.equal(parseSeriesReleaseDir('asc'), 'asc')
+    assert.equal(parseSeriesReleaseDir('invalid'), 'desc')
+    assert.equal(seriesReleaseDirParam('desc'), null)
+    assert.equal(seriesReleaseDirParam('asc'), 'asc')
   })
 })
 
@@ -109,22 +220,20 @@ describe('actress avatar filter query contract', () => {
     assert.equal(actressAvatarParam('all'), null)
   })
 
-  it('opens and closes conflict review without losing actress list query state', () => {
+  it('returns to the actress list without losing its query state', () => {
     const destinations: unknown[] = []
     const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
     const location = {
-      pathname: '/actresses',
+      pathname: '/actresses/12',
       search: '?q=sara&status=failed',
       hash: '',
       state: null,
       key: 'test'
     } as Location
 
-    navigateToActressConflicts(navigate, location)
-    navigateToActressList(navigate, { ...location, pathname: '/actresses/conflicts' } as Location)
+    navigateToActressList(navigate, location)
 
     assert.deepEqual(destinations, [
-      { pathname: '/actresses/conflicts', search: '?q=sara&status=failed' },
       { pathname: '/actresses', search: 'q=sara&status=failed' }
     ])
   })
@@ -228,13 +337,18 @@ describe('actress status filter query contract', () => {
 describe('primary navigation memory', () => {
   it('restores query state per list and removes unrelated nested query keys', () => {
     clearPrimaryNavigationMemory()
-    rememberPrimaryListLocation('/detail/42', '?q=hero&status=1')
+    rememberPrimaryListLocation('/detail/42', '?q=hero&status=1&resources=local,web')
     rememberPrimaryListLocation('/actresses/8', '?q=sara&gender=female')
-    rememberPrimaryListLocation('/facet/director/v/Test', '?q=miike&sort=rating')
+    rememberPrimaryListLocation('/facet/director/d/21', '?q=miike&sort=rating')
+    rememberPrimaryListLocation('/pending/video/42', '?type=scrape&item=scrape:7&videoId=42&q=drop')
+    rememberPrimaryListLocation(
+      '/facet/maker/o/12',
+      '?q=studio&sort=updated_at&dir=asc&status=1'
+    )
 
     assert.deepEqual(primaryNavigationTarget('/'), {
       pathname: '/',
-      search: '?q=hero&status=1'
+      search: '?q=hero&status=1&resources=local%2Cweb'
     })
     assert.deepEqual(primaryNavigationTarget('/actresses'), {
       pathname: '/actresses',
@@ -243,6 +357,14 @@ describe('primary navigation memory', () => {
     assert.deepEqual(primaryNavigationTarget('/facet/director'), {
       pathname: '/facet/director',
       search: '?q=miike'
+    })
+    assert.deepEqual(primaryNavigationTarget('/facet/maker'), {
+      pathname: '/facet/maker',
+      search: '?q=studio&sort=updated_at&dir=asc'
+    })
+    assert.deepEqual(primaryNavigationTarget('/pending'), {
+      pathname: '/pending',
+      search: '?type=scrape&item=scrape%3A7&videoId=42'
     })
     assert.equal(primaryListRoot('/settings/overview/status'), null)
   })
@@ -286,6 +408,14 @@ describe('primary navigation memory', () => {
     assert.deepEqual(resolvePrimaryNavTarget('/actresses', '/', '?status=1'), {
       pathname: '/actresses'
     })
+    assert.equal(
+      resolvePrimaryNavTarget('/pending', '/pending', '?tab=scrape&id=7'),
+      null
+    )
+    assert.deepEqual(
+      resolvePrimaryNavTarget('/pending', '/pending/video/42', '?tab=scrape&id=7'),
+      { pathname: '/pending', search: '?tab=scrape&id=7' }
+    )
   })
 
   it('builds nav link href from current search when active', () => {
@@ -304,45 +434,222 @@ describe('primary navigation memory', () => {
 })
 
 describe('navigation helpers', () => {
-  it('preserves the parent facet query when opening its detail', () => {
-    let destination: unknown
-    const navigate = ((to: unknown) => {
-      destination = to
-    }) as NavigateFunction
-    const location = {
+  it('closes nested actress details back to their parent video context', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const paths = [
+      ['/detail/8/actress/7', '/detail/8'],
+      ['/actresses/3/8/actress/7', '/actresses/3/8'],
+      ['/playlists/4/8/actress/7', '/playlists/4/8'],
+      ['/facet/maker/o/5/8/actress/7', '/facet/maker/o/5/8'],
+      ['/facet/director/d/6/8/actress/7', '/facet/director/d/6/8'],
+      ['/facet/series/s/9/8/actress/7', '/facet/series/s/9/8']
+    ] as const
+
+    for (const [pathname] of paths) {
+      navigateBackFromActressDetail(navigate, {
+        pathname,
+        search: '?q=kept',
+        hash: '',
+        state: null,
+        key: pathname
+      })
+    }
+
+    assert.deepEqual(
+      destinations,
+      paths.map(([, pathname]) => ({ pathname, search: '?q=kept' }))
+    )
+  })
+
+  it('keeps stable series identity and release direction through its detail stack', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const list = {
+      pathname: '/facet/series',
+      search: '?q=collection&sort=updated_at&dir=asc',
+      hash: '',
+      state: null,
+      key: 's'
+    } as Location
+    navigateToSeriesDetail(navigate, list, 31)
+    const detail = {
+      ...list,
+      pathname: '/facet/series/s/31',
+      search: '?q=collection&sort=updated_at&dir=asc&releaseDir=asc'
+    } as Location
+    navigateToVideoDetail(navigate, detail, 8)
+    const video = { ...detail, pathname: '/facet/series/s/31/8' } as Location
+    navigateBackFromVideoDetail(navigate, video)
+    assert.deepEqual(destinations, [
+      { pathname: '/facet/series/s/31', search: '?q=collection&sort=updated_at&dir=asc' },
+      {
+        pathname: '/facet/series/s/31/8',
+        search: '?q=collection&sort=updated_at&dir=asc&releaseDir=asc'
+      },
+      {
+        pathname: '/facet/series/s/31',
+        search: 'q=collection&sort=updated_at&dir=asc&releaseDir=asc'
+      }
+    ])
+  })
+
+  it('keeps director identity and query state through its stable detail stack', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const list = {
       pathname: '/facet/director',
-      search: '?q=miike',
+      search: '?q=lee',
       hash: '',
       state: null,
-      key: 'test'
+      key: 'd'
     } as Location
-
-    navigateToFacetDetail(navigate, location, 'director', 'Takashi Miike')
-    assert.deepEqual(destination, {
-      pathname: '/facet/director/v/Takashi%20Miike',
-      search: '?q=miike'
-    })
+    navigateToDirectorDetail(navigate, list, 21)
+    const detail = { ...list, pathname: '/facet/director/d/21' } as Location
+    navigateToVideoDetail(navigate, detail, 8)
+    const video = { ...list, pathname: '/facet/director/d/21/8' } as Location
+    navigateBackFromVideoDetail(navigate, video)
+    assert.deepEqual(destinations, [
+      { pathname: '/facet/director/d/21', search: '?q=lee' },
+      { pathname: '/facet/director/d/21/8', search: '?q=lee' },
+      { pathname: '/facet/director/d/21', search: 'q=lee' }
+    ])
   })
 
-  it('clears library search when opening a facet from video detail', () => {
+  it('opens an organization by stable id while preserving its role-list query', () => {
     let destination: unknown
     const navigate = ((to: unknown) => {
       destination = to
     }) as NavigateFunction
     const location = {
-      pathname: '/detail/42',
-      search: '?q=hero&tags=1,2&status=1&year=2024&sort=rating&dir=asc',
+      pathname: '/facet/maker',
+      search: '?q=studio&sort=updated_at&dir=asc',
       hash: '',
       state: null,
       key: 'test'
     } as Location
 
-    navigateToFacetDetail(navigate, location, 'maker', 'S1')
+    navigateToOrganizationDetail(navigate, location, 'maker', 12)
     assert.deepEqual(destination, {
-      pathname: '/facet/maker/v/S1',
-      search: ''
+      pathname: '/facet/maker/o/12',
+      search: '?q=studio&sort=updated_at&dir=asc'
     })
   })
+
+  it('keeps classification query only inside the same classification stack', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const search = '?q=kept&sort=updated_at&dir=asc'
+
+    navigateToOrganizationDetail(
+      navigate,
+      { pathname: '/facet/maker/o/1/8', search, hash: '', state: null, key: 'maker' },
+      'maker',
+      2
+    )
+    navigateToDirectorDetail(
+      navigate,
+      { pathname: '/facet/director/d/1/8', search, hash: '', state: null, key: 'director' },
+      2
+    )
+    navigateToOrganizationDetail(
+      navigate,
+      { pathname: '/facet/publisher/o/1/8', search, hash: '', state: null, key: 'cross' },
+      'maker',
+      2
+    )
+
+    assert.deepEqual(destinations, [
+      { pathname: '/facet/maker/o/2', search },
+      { pathname: '/facet/director/d/2', search },
+      { pathname: '/facet/maker/o/2', search: '' }
+    ])
+  })
+
+  it('keeps video and actress navigation inside the stable organization stack', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
+    const detailLocation = {
+      pathname: '/facet/publisher/o/12',
+      search: '?q=studio&sort=updated_at&dir=asc',
+      hash: '',
+      state: null,
+      key: 'organization'
+    } as Location
+
+    navigateToVideoDetail(navigate, detailLocation, 42)
+    const videoLocation = {
+      ...detailLocation,
+      pathname: '/facet/publisher/o/12/42'
+    } as Location
+    navigateToActressFromVideoDetail(navigate, videoLocation, 42, 7)
+    navigateBackFromVideoDetail(navigate, videoLocation)
+
+    assert.deepEqual(destinations, [
+      {
+        pathname: '/facet/publisher/o/12/42',
+        search: '?q=studio&sort=updated_at&dir=asc'
+      },
+      {
+        pathname: '/facet/publisher/o/12/42/actress/7',
+        search: '?q=studio&sort=updated_at&dir=asc'
+      },
+      {
+        pathname: '/facet/publisher/o/12',
+        search: 'q=studio&sort=updated_at&dir=asc'
+      }
+    ])
+  })
+
+  it('keeps video and actress navigation inside the pending workbench stack', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const pending = {
+      pathname: '/pending',
+      search: '?tab=scrape&id=7&videoId=42',
+      hash: '',
+      state: null,
+      key: 'pending'
+    } as Location
+
+    navigateToVideoDetail(navigate, pending, 42)
+    const video = { ...pending, pathname: '/pending/video/42' } as Location
+    navigateToActressFromVideoDetail(navigate, video, 42, 9)
+    const actress = { ...pending, pathname: '/pending/video/42/actress/9' } as Location
+    navigateBackFromActressDetail(navigate, actress)
+    navigateBackFromVideoDetail(navigate, video)
+
+    assert.deepEqual(destinations, [
+      { pathname: '/pending/video/42', search: pending.search },
+      { pathname: '/pending/video/42/actress/9', search: pending.search },
+      { pathname: '/pending/video/42', search: pending.search },
+      { pathname: '/pending', search: 'tab=scrape&id=7&videoId=42' }
+    ])
+  })
+
+  it('opens actress detail from the pending inbox and returns to it', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const pending = {
+      pathname: '/pending',
+      search: '?type=actress&item=actress%3Aname',
+      hash: '',
+      state: null,
+      key: 'pending-actress'
+    } as Location
+
+    navigateToActressDetail(navigate, pending, 8)
+    const overlay = { ...pending, pathname: '/pending/actress/8' } as Location
+    navigateBackFromActressDetail(navigate, overlay)
+
+    assert.deepEqual(destinations, [
+      { pathname: '/pending/actress/8', search: pending.search },
+      { pathname: '/pending', search: pending.search }
+    ])
+  })
+
 })
 
 describe('settings route contract', () => {

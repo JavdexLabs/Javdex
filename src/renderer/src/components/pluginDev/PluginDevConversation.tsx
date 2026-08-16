@@ -1,14 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, type CSSProperties } from 'react'
 import { Bot, Download } from 'lucide-react'
-import type {
-  PluginDevAgentContextStats,
-  PluginDevAgentPhase,
-  PluginDevSessionStatus
-} from '@shared/types'
+import type { PluginDevAgentContextStats, PluginDevAgentPhase, PluginDevSessionStatus } from '@shared/pluginDevTypes'
 import { formatToolLabel, toolCategory } from './pluginDevFormat'
 import EmptyState from '../EmptyState'
 import { UI_ICON_SM } from '../iconDefaults'
 import { agentPhaseLabel, type PluginDevConversationItem } from './types'
+import Button from '../Button'
 
 function tokenK(value: number): string {
   const compact = value / 1000
@@ -183,14 +180,17 @@ export default function PluginDevConversation({
               <span className="plugin-dev-user-prompt-kicker">需要你的操作</span>
               <p>{waitingUserReason}</p>
             </div>
-            <button
+            <Button
               type="button"
-              className="btn btn-sm btn-primary plugin-dev-user-prompt-action"
+              variant="primary"
+
+              size="sm"
+              className="plugin-dev-user-prompt-action"
               disabled={busy}
               onClick={onContinueChallenge}
             >
               验证完成，继续
-            </button>
+            </Button>
           </div>
         ) : null}
 
@@ -246,34 +246,40 @@ export default function PluginDevConversation({
                   ) : null}
                 </div>
               </div>
-              <button
+              <Button
                 type="button"
-                className="btn btn-sm btn-ghost"
+                variant="ghost"
+
+                size="sm"
                 disabled={!canExportWorkLog || exportWorkLogBusy}
                 title="导出完整 Agent 工作日志（JSON）"
                 onClick={onExportWorkLog}
               >
                 <Download {...UI_ICON_SM} aria-hidden />
                 {exportWorkLogBusy ? '导出中…' : '导出日志'}
-              </button>
+              </Button>
               {agentRunning ? (
-                <button
+                <Button
                   type="button"
-                  className="btn btn-sm btn-danger"
+                  variant="danger"
+
+                  size="sm"
                   disabled={!canCancelAgent}
                   onClick={onCancelAgent}
                 >
                   终止
-                </button>
+                </Button>
               ) : (
-                <button
+                <Button
                   type="button"
-                  className="btn btn-sm btn-primary"
+                  variant="primary"
+
+                  size="sm"
                   disabled={busy || !canSend || feedbackText.trim().length === 0}
                   onClick={onSend}
                 >
                   {sendLabel}
-                </button>
+                </Button>
               )}
             </div>
           </div>

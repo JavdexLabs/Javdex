@@ -1,16 +1,22 @@
-import { app, BrowserWindow, protocol } from 'electron'
+import { app, BrowserWindow, powerMonitor, protocol } from 'electron'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { APP_DISPLAY_NAME } from '@shared/appIdentity'
 import { applyAppIcons, resolveWindowIcon } from './appIcon'
 import { configureAppIdentity } from './appPaths'
-import { initDatabase, closeDatabase } from './db/database'
-import { ensureAssetDirs, assetsRoot, readAssetForServe } from './services/assetService'
+import fs from 'node:fs'
+import { initDatabaseAtPath, closeDatabase } from './db/database'
+import { mediaAssetStore } from './services/mediaAssetStore'
 import { registerIpcHandlers } from './ipc'
 import { scrapeBrowser } from './scrapers/scrapeBrowser'
 import { migrateUserPluginsAwayFromBuiltInNames } from './scrapers/scraperPluginService'
 import { resolveMediaAssetPath, toStoredAssetPath } from './services/mediaProtocol'
 import { checkForLatestRelease, shouldRunAutomaticCheck } from './services/appReleaseService'
 import { cleanupOrphanedActressScrapeStaging } from './services/actressIdentityConflictWorkflow'
+import { cleanupOrphanedVideoScrapeStaging } from './services/videoPendingScrapeService'
+import { automaticScanScheduler } from './services/automaticScanScheduler'
+import { recoverPendingLocalFileDeletions } from './services/pendingLocalFileDeletionService'
+import { isSameRendererLocation } from './ipc/ipcSecurity'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -48,7 +54,14 @@ if (!gotSingleInstanceLock) {
   })
 }
 
-function createWindow(): void {
+function resolveRendererEntryUrl(): string {
+  return (
+    process.env['ELECTRON_RENDERER_URL'] ??
+    pathToFileURL(path.join(__dirname, '../renderer/index.html')).toString()
+  )
+}
+
+function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
   const icon = resolveWindowIcon()
   mainWindow = new BrowserWindow({
     width: 1380,
@@ -70,6 +83,12 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
 
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!isSameRendererLocation(url, rendererEntryUrl)) event.preventDefault()
+  })
+  mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+
   // electron-vite injects this env var in dev for HMR.
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (devUrl) {
@@ -88,7 +107,7 @@ function createWindow(): void {
 /** Serve files from the media_assets directory through the media:// scheme. */
 function registerAssetProtocol(): void {
   protocol.handle('media', (request) => {
-    const root = assetsRoot()
+    const root = mediaAssetStore.rootPath()
     const abs = resolveMediaAssetPath(request.url, root)
 
     const corsHeaders = {
@@ -104,7 +123,7 @@ function registerAssetProtocol(): void {
     }
     try {
       const relPosix = toStoredAssetPath(abs, root)
-      const { body, mime } = readAssetForServe(relPosix)
+      const { body, mime } = mediaAssetStore.readForServe(relPosix)
       return new Response(body, {
         headers: { 'Content-Type': mime, ...corsHeaders }
       })
@@ -115,15 +134,25 @@ function registerAssetProtocol(): void {
 }
 
 if (gotSingleInstanceLock) {
-  app.whenReady().then(() => {
+  void app.whenReady().then(() => {
     applyAppIcons()
-    initDatabase()
-    ensureAssetDirs()
+    const databaseDir = path.join(app.getPath('userData'), 'data')
+    fs.mkdirSync(databaseDir, { recursive: true })
+    initDatabaseAtPath(path.join(databaseDir, 'library.db'))
+    recoverPendingLocalFileDeletions()
+    mediaAssetStore.ensureReady()
     cleanupOrphanedActressScrapeStaging()
+    cleanupOrphanedVideoScrapeStaging()
     migrateUserPluginsAwayFromBuiltInNames()
     registerAssetProtocol()
-    registerIpcHandlers(() => mainWindow)
-    createWindow()
+    const rendererEntryUrl = resolveRendererEntryUrl()
+    createWindow(rendererEntryUrl)
+    registerIpcHandlers(
+      () => mainWindow,
+      (url) => isSameRendererLocation(url, rendererEntryUrl)
+    )
+    automaticScanScheduler.start()
+    powerMonitor.on('resume', handleSystemResume)
     setTimeout(() => {
       if (shouldRunAutomaticCheck()) void checkForLatestRelease()
     }, 15_000)
@@ -142,7 +171,13 @@ if (gotSingleInstanceLock) {
   })
 
   app.on('before-quit', () => {
+    automaticScanScheduler.stop()
+    powerMonitor.off('resume', handleSystemResume)
     scrapeBrowser.close()
     closeDatabase()
   })
+}
+
+function handleSystemResume(): void {
+  automaticScanScheduler.handleResume()
 }

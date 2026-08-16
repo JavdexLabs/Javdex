@@ -1,10 +1,8 @@
-import type {
-  ActressBatchScrapeFilter,
-  ActressBatchScrapeRequest,
-  ActressBatchScrapeStatus,
-  LegacyActressBatchScrapeStatus
-} from '@shared/types'
-import { listActressesForBatchScrape, type ActressBatchTarget } from '../db/actressRepo'
+import type { ActressBatchScrapeFilter, ActressBatchScrapeRequest, ActressBatchScrapeStatus, LegacyActressBatchScrapeStatus } from '@shared/actressScrapeTypes'
+import {
+  listActressesForBatchScrape,
+  type ActressBatchTarget
+} from '../db/actressRepo'
 import type { PersistedBatchScrapeJob } from './batchScrapeJobStore'
 
 /** Batch filter as received over IPC or read back from a persisted job snapshot. */
@@ -99,11 +97,11 @@ export function resolveActressBatchScrapeTargets(
 ): ActressBatchTarget[] {
   if (filter.actressIds) {
     return listActressesForBatchScrape({
-      actressIds: filter.actressIds,
-      scope: 'all',
-      scrapeStatus: 'all',
-      missingFields: []
-    })
+        actressIds: filter.actressIds,
+        scope: 'all',
+        scrapeStatus: 'all',
+        missingFields: []
+      })
   }
   return listActressesForBatchScrape(filter)
 }

@@ -1,13 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
 import { Inbox, Pencil, SearchX } from 'lucide-react'
-import type {
-  PlaylistDetail,
-  PlaylistUpdateInput,
-  PlaylistVideoSortBy,
-  PlaylistVideoSortDir,
-  Video
-} from '@shared/types'
+import type { SortDir } from '@shared/commonTypes'
+import type { PlaylistDetail, PlaylistUpdateInput, PlaylistVideoSortBy } from '@shared/playlistTypes'
+import type { Video } from '@shared/videoTypes'
 import { api, assetUrl } from '../api'
 import { navigateToPlaylistList } from '../listView/listNavigation'
 import { ROUTE_MATCH } from '../listView/routePaths'
@@ -21,6 +17,7 @@ import DetailActionBar from '../components/DetailActionBar'
 import EmptyState from '../components/EmptyState'
 import { UI_ICON } from '../components/iconDefaults'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
+import RelatedLinksList from '../components/RelatedLinksList'
 
 const PLAYLIST_VIDEO_SORT_OPTIONS: SortSwitchOption<PlaylistVideoSortBy>[] = [
   { value: 'added_at', label: '加入', title: '加入时间' },
@@ -47,7 +44,7 @@ export default function PlaylistDetailPage(): JSX.Element {
   const [videoRemoveTarget, setVideoRemoveTarget] = useState<Video | null>(null)
   const [removingVideoId, setRemovingVideoId] = useState<number | null>(null)
   const [videoSortBy, setVideoSortBy] = useState<PlaylistVideoSortBy>('added_at')
-  const [videoSortDir, setVideoSortDir] = useState<PlaylistVideoSortDir>('desc')
+  const [videoSortDir, setVideoSortDir] = useState<SortDir>('desc')
 
   const dismissOverlays = useCallback(() => {
     setShowEdit(false)
@@ -170,6 +167,7 @@ export default function PlaylistDetailPage(): JSX.Element {
                 ) : (
                   <p className="playlist-detail-empty-desc">暂无简介</p>
                 )}
+                <RelatedLinksList links={detail.links ?? []} />
               </div>
               <div className="playlist-detail-actions">
                 <DetailActionBar
@@ -252,7 +250,7 @@ export default function PlaylistDetailPage(): JSX.Element {
           onConfirm={() => void deletePlaylist()}
           onCancel={() => setConfirmDelete(false)}
         >
-          确定删除「{detail.name}」？不会删除清单中的影片文件。
+          确定删除「{detail.name}」？不会删除清单中的影片资源。
         </Modal>
       )}
 
@@ -265,7 +263,7 @@ export default function PlaylistDetailPage(): JSX.Element {
           onConfirm={() => void removeVideo(videoRemoveTarget)}
           onCancel={() => setVideoRemoveTarget(null)}
         >
-          确定将「{videoRemoveTarget.code}」从清单「{detail.name}」中移出？不会删除本地影片文件。
+          确定将「{videoRemoveTarget.code}」从清单「{detail.name}」中移出？不会删除影片资源。
         </Modal>
       )}
 

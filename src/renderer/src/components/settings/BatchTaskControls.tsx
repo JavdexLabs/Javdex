@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { LoaderCircle, Pause, Play, Square } from 'lucide-react'
 import IconButton from '../IconButton'
 import { UI_ICON_SM } from '../iconDefaults'
+import Button from '../Button'
 
 export type BatchControlAction = 'pause' | 'resume' | 'discard'
 export type BatchControlHandler = () => boolean | void | Promise<boolean | void>
@@ -135,19 +136,21 @@ export default function BatchTaskControls({
       role="group"
       aria-label={`${scopeLabel}${batchTaskText}${controlText}`}
     >
-      <button
+      <Button
         type="button"
-        className="btn btn-sm"
+
+        size="sm"
         aria-busy={pendingAction === 'pause' || undefined}
         disabled={!running || controlsBusy}
         onClick={() => void runControl('pause', onPause)}
       >
         {pauseIcon}
         {pauseText}
-      </button>
-      <button
+      </Button>
+      <Button
         type="button"
-        className="btn btn-sm"
+
+        size="sm"
         aria-busy={pendingAction === 'resume' || undefined}
         disabled={!resumeAllowed || controlsBusy}
         title={resumeTitle}
@@ -155,17 +158,19 @@ export default function BatchTaskControls({
       >
         {resumeIcon}
         {resumeText}
-      </button>
-      <button
+      </Button>
+      <Button
         type="button"
-        className="btn btn-sm btn-danger"
+        variant="danger"
+
+        size="sm"
         aria-busy={pendingAction === 'discard' || undefined}
         disabled={!controllable || controlsBusy}
         onClick={() => void runControl('discard', onDiscard)}
       >
         {discardIcon}
         {discardText}
-      </button>
+      </Button>
     </div>
   )
 }

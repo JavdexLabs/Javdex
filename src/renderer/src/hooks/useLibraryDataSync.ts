@@ -2,9 +2,11 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useBatchScrapeActivity } from '../contexts/BatchScrapeContext'
+import { api } from '../api'
 import { useBatchProgressRefresh } from './useOverviewStatsBatchRefresh'
 import { shouldRefetchLibraryOnRouteChange } from '../lib/librarySurfacePaths'
 import {
+  invalidateAllLibraryQueries,
   invalidateActressLibraryQueries,
   invalidateVideoLibraryQueries,
   refetchStaleLibraryQueries
@@ -62,7 +64,7 @@ export function useLibraryDataSync(): void {
   }, [queryClient])
 
   const syncActressLibrary = useCallback(() => {
-    invalidateActressLibraryQueries(queryClient)
+    void invalidateActressLibraryQueries(queryClient)
   }, [queryClient])
 
   const handleVideoBatch = useDebouncedLibraryInvalidation(
@@ -78,6 +80,16 @@ export function useLibraryDataSync(): void {
     onVideoBatch: handleVideoBatch,
     onActressBatch: handleActressBatch
   })
+
+  useEffect(
+    () =>
+      api.scan.onStateChanged((event) => {
+        if (event.phase === 'completed' || event.phase === 'failed') {
+          invalidateAllLibraryQueries(queryClient)
+        }
+      }),
+    [queryClient]
+  )
 
   useEffect(() => {
     const previousPathname = previousPathnameRef.current

@@ -1,16 +1,10 @@
-import type { ActressGalleryAsset, ActressGalleryImportInput } from '@shared/types'
+import type { ActressGalleryAsset, ActressGalleryImportInput } from '@shared/actressTypes'
 import {
   addActressGalleryAsset,
   deleteActressGalleryAsset,
   getActressDetail
 } from '../db/actressRepo'
-import {
-  deleteAsset,
-  downloadActressGalleryImage,
-  importActressGalleryFromFile,
-  readImageDimensionsFromPath,
-  readImageDimensionsFromRelPath
-} from './assetService'
+import { mediaAssetStore } from './mediaAssetStore'
 import { fetchRemoteImageBuffer } from './remoteImageFetch'
 
 export async function importActressGalleryImage(
@@ -23,13 +17,20 @@ export async function importActressGalleryImage(
   if (input.source === 'file') {
     const sourcePath = input.sourcePath?.trim()
     if (!sourcePath) throw new Error('请选择本地图片文件')
-    const localPath = importActressGalleryFromFile(actress.main_name, sourcePath, actressId)
-    const dims =
-      readImageDimensionsFromRelPath(localPath) ?? readImageDimensionsFromPath(sourcePath)
-    return addActressGalleryAsset(actressId, {
-      localPath,
-      width: dims?.width ?? null,
-      height: dims?.height ?? null
+    return mediaAssetStore.coordinateDatabaseChange(() => {
+      const localPath = mediaAssetStore.importActressGallery(
+        actress.main_name,
+        sourcePath,
+        actressId
+      )
+      const dims =
+        mediaAssetStore.readStoredImageDimensions(localPath) ??
+        mediaAssetStore.readImageDimensionsAtPath(sourcePath)
+      return addActressGalleryAsset(actressId, {
+        localPath,
+        width: dims?.width ?? null,
+        height: dims?.height ?? null
+      })
     })
   }
 
@@ -46,23 +47,27 @@ export async function importActressGalleryImage(
   }
 
   const remoteUrl = parsed.toString()
-  const buf = await fetchRemoteImageBuffer(remoteUrl)
-  const downloaded = await downloadActressGalleryImage(
-    actress.main_name,
-    remoteUrl,
-    async () => buf,
-    actressId
-  )
-  if (!downloaded) throw new Error('写真链接下载失败')
-  return addActressGalleryAsset(actressId, {
-    remoteUrl,
-    localPath: downloaded.localPath,
-    width: downloaded.width,
-    height: downloaded.height
+  return mediaAssetStore.coordinateDatabaseChange(async () => {
+    const buf = await fetchRemoteImageBuffer(remoteUrl)
+    const downloaded = await mediaAssetStore.downloadActressGalleryImage(
+      actress.main_name,
+      remoteUrl,
+      async () => buf,
+      actressId
+    )
+    if (!downloaded) throw new Error('写真链接下载失败')
+    return addActressGalleryAsset(actressId, {
+      remoteUrl,
+      localPath: downloaded.localPath,
+      width: downloaded.width,
+      height: downloaded.height
+    })
   })
 }
 
 export function deleteActressGalleryImage(actressId: number, assetId: number): void {
-  const localPath = deleteActressGalleryAsset(actressId, assetId)
-  deleteAsset(localPath)
+  mediaAssetStore.coordinateDatabaseChange(() => {
+    const localPath = deleteActressGalleryAsset(actressId, assetId)
+    mediaAssetStore.deleteBestEffort(localPath)
+  })
 }

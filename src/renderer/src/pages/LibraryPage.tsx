@@ -1,12 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useMatch, useLocation, useSearchParams } from 'react-router-dom'
+import { useMatch, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ChevronDown,
   Film,
+  Link2,
   ListPlus,
-  RectangleHorizontal,
-  RectangleVertical,
   SearchCheck,
   SearchX,
   Trash2
@@ -15,22 +14,20 @@ import type {
   Video,
   VideoDetail,
   VideoEditInput,
-  VideoQuery,
+  VideoQuery
+} from '@shared/videoTypes'
+import type {
+  VideoDirectorChoiceRequired,
   VideoScrapeField,
   VideoScrapeUpdateMode
-} from '@shared/types'
-import {
-  ALL_VIDEO_SCRAPE_FIELDS,
-  VIDEO_SCRAPE_FIELD_OPTIONS,
-  VIDEO_SCRAPE_UPDATE_MODE_OPTIONS
-} from '@shared/types'
+} from '@shared/videoScrapeTypes'
+import { ALL_VIDEO_SCRAPE_FIELDS, VIDEO_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_UPDATE_MODE_OPTIONS } from '@shared/videoScrapeTypes'
 import { api } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useRangeSelection } from '../hooks/useRangeSelection'
 import { useToast } from '../components/Toast'
 import VirtualPosterGrid from '../components/VirtualPosterGrid'
-import { useDisplayMode } from '../components/DisplayModeContext'
 import AppliedFilterBar, { type AppliedFilterItem } from '../components/AppliedFilterBar'
 import LibraryFilterPopover, { type LibraryFilterState } from '../components/LibraryFilterPopover'
 import ListToolbar from '../components/ListToolbar'
@@ -43,15 +40,20 @@ import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
 import {
   LIBRARY_DEFAULTS,
   LIST_PARAM,
+  canonicalizeLibrarySearchParams,
   libraryQueryHash,
   libraryVideoQueryFromSearchParams,
   parseScrapedStatus,
   parseSort,
   parseTagIds,
+  parseVideoPendingScrape,
+  parseVideoResourceFilters,
   parseYear,
-  patchSearchParams
+  patchSearchParams,
+  videoResourceFiltersParam
 } from '../listView/listQueryParams'
 import { ROUTE_MATCH, ROUTE_PATH } from '../listView/routePaths'
+import { pendingCenterPath } from '../listView/pendingRoutes'
 import { forgetPrimaryListLocation } from '../listView/primaryNavigationMemory'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
@@ -63,13 +65,17 @@ import ListMaintenanceBanner from '../components/ListMaintenanceBanner'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import SelectionToolbar from '../components/SelectionToolbar'
+import { VIDEO_RESOURCE_FILTER_LABELS } from '../components/videoResourcePresentation'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { startDefaultUnscrapedVideoBatch } from '../utils/defaultBatchScrape'
+import VideoResourceImportModal from '../components/VideoResourceImportModal'
+import DirectorScrapeChoiceModal from '../components/DirectorScrapeChoiceModal'
 import {
   dismissMaintenanceHint,
   isMaintenanceHintDismissed,
   MAINTENANCE_HINT_KEYS
 } from '../utils/maintenanceHints'
+import Button from '../components/Button'
 
 const STATUS_LABELS: Record<string, string> = {
   all: '全部',
@@ -92,12 +98,23 @@ const SORT_SWITCH_OPTIONS: SortSwitchOption<NonNullable<VideoQuery['sortBy']>>[]
   { value: 'code', label: '番号' }
 ]
 
+interface SingleScrapeRequest {
+  target: Pick<Video, 'id' | 'code'>
+  fields: VideoScrapeField[]
+  site: string
+  mode?: VideoScrapeUpdateMode
+}
+
+interface PendingDirectorChoice extends SingleScrapeRequest {
+  choice: VideoDirectorChoiceRequired
+}
+
 export default function LibraryPage(): JSX.Element {
   const queryClient = useQueryClient()
   const toast = useToast()
-  const { mode, setMode } = useDisplayMode()
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
+  const navigate = useNavigate()
   const filterBtnRef = useRef<HTMLButtonElement>(null)
   const [filterOpen, setFilterOpen] = useState(false)
   const detailOpen = Boolean(useMatch({ path: ROUTE_MATCH.libraryDetailOpen, end: false }))
@@ -106,10 +123,14 @@ export default function LibraryPage(): JSX.Element {
   const [editingVideo, setEditingVideo] = useState<VideoDetail | null>(null)
   const [editLoadingId, setEditLoadingId] = useState<number | null>(null)
   const [scrapeTarget, setScrapeTarget] = useState<Video | null>(null)
+  const [pendingDirectorChoice, setPendingDirectorChoice] =
+    useState<PendingDirectorChoice | null>(null)
+  const [directorChoiceBusy, setDirectorChoiceBusy] = useState(false)
   const [showBulkScrape, setShowBulkScrape] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Video | null>(null)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [showResourceImport, setShowResourceImport] = useState(false)
   const { scrapers, pluginDetails, defaultScraper } = useScraperPluginCatalog('video')
   const [scraperName, setScraperName] = useState('')
 
@@ -120,12 +141,22 @@ export default function LibraryPage(): JSX.Element {
     setEditingVideo(null)
     setEditLoadingId(null)
     setScrapeTarget(null)
+    setPendingDirectorChoice(null)
+    setDirectorChoiceBusy(false)
     setShowBulkScrape(false)
     setDeleteTarget(null)
     setConfirmBulkDelete(false)
+    setShowResourceImport(false)
   }, [])
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
+
+  useEffect(() => {
+    const canonical = canonicalizeLibrarySearchParams(searchParams)
+    if (canonical.toString() !== searchParams.toString()) {
+      setSearchParams(canonical, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
 
   const urlQ = searchParams.get(LIST_PARAM.q) ?? ''
   const [searchInput, setSearchInput] = useState(urlQ)
@@ -156,12 +187,17 @@ export default function LibraryPage(): JSX.Element {
     searchParams.get(LIST_PARAM.dir)
   )
   const status = parseScrapedStatus(searchParams.get(LIST_PARAM.status))
+  const pendingScrape = parseVideoPendingScrape(searchParams.get(LIST_PARAM.pending))
   const year = parseYear(searchParams.get(LIST_PARAM.year))
   const tagIds = useMemo(
     () => parseTagIds(searchParams.get(LIST_PARAM.tags)),
     [searchParams]
   )
   const codePrefix = (searchParams.get(LIST_PARAM.prefix) ?? '').trim().toUpperCase()
+  const resourceKinds = useMemo(
+    () => parseVideoResourceFilters(searchParams.get(LIST_PARAM.resources)),
+    [searchParams]
+  )
 
   const patchParams = useCallback(
     (patch: Record<string, string | null | undefined>): void => {
@@ -215,17 +251,22 @@ export default function LibraryPage(): JSX.Element {
 
   const filterState: LibraryFilterState = {
     status,
+    pendingScrape,
     year,
     codePrefix,
     sortBy,
     sortDir,
-    tagIds
+    tagIds,
+    resourceKinds
   }
 
   const patchFilters = (patch: Partial<LibraryFilterState>): void => {
     const updates: Record<string, string | null | undefined> = {}
     if (patch.status !== undefined) {
       updates[LIST_PARAM.status] = patch.status === 'all' ? null : String(patch.status)
+    }
+    if (patch.pendingScrape !== undefined) {
+      updates[LIST_PARAM.pending] = patch.pendingScrape === 'all' ? null : patch.pendingScrape
     }
     if (patch.year !== undefined) {
       updates[LIST_PARAM.year] = patch.year === 'all' ? null : String(patch.year)
@@ -238,6 +279,9 @@ export default function LibraryPage(): JSX.Element {
     if (patch.tagIds !== undefined) {
       updates[LIST_PARAM.tags] = patch.tagIds.length ? patch.tagIds.join(',') : null
     }
+    if (patch.resourceKinds !== undefined) {
+      updates[LIST_PARAM.resources] = videoResourceFiltersParam(patch.resourceKinds)
+    }
     patchParams(updates)
   }
 
@@ -247,9 +291,11 @@ export default function LibraryPage(): JSX.Element {
       (prev) =>
         patchSearchParams(prev, {
           [LIST_PARAM.status]: null,
+          [LIST_PARAM.pending]: null,
           [LIST_PARAM.year]: null,
           [LIST_PARAM.prefix]: null,
           [LIST_PARAM.tags]: null,
+          [LIST_PARAM.resources]: null,
           [LIST_PARAM.sort]: null,
           [LIST_PARAM.dir]: null
         }),
@@ -261,9 +307,11 @@ export default function LibraryPage(): JSX.Element {
     sortBy !== LIBRARY_DEFAULTS.sortBy || sortDir !== LIBRARY_DEFAULTS.sortDir
   const hasAppliedFilters =
     status !== 'all' ||
+    pendingScrape !== 'all' ||
     year !== 'all' ||
     !!codePrefix ||
     tagIds.length > 0 ||
+    resourceKinds.length > 0 ||
     hasNonDefaultSort
 
   const handlePageError = useCallback(
@@ -351,25 +399,39 @@ export default function LibraryPage(): JSX.Element {
     }
   }
 
-  const runSingleScrape = async (
-    fields: VideoScrapeField[],
-    site: string,
-    mode?: VideoScrapeUpdateMode
+  const executeSingleScrape = async (
+    request: SingleScrapeRequest,
+    directorSelectionId?: number
   ): Promise<void> => {
-    if (!scrapeTarget) return
-    const target = scrapeTarget
-    setScrapeTarget(null)
-    setScraperName(site)
+    setScraperName(request.site)
+    if (directorSelectionId != null) setDirectorChoiceBusy(true)
     try {
-      const res = await api.scrape.one(target.id, site || undefined, fields, mode)
+      const res = await api.scrape.one(
+        request.target.id,
+        request.site || undefined,
+        request.fields,
+        request.mode,
+        directorSelectionId
+      )
+      if (res.directorChoice) {
+        setPendingDirectorChoice({ ...request, choice: res.directorChoice })
+        return
+      }
+      if (res.pending) {
+        setScrapeTarget(null)
+        toast.show('发现多个候选，已保存到待确认中心', 'info')
+        navigate(pendingCenterPath({ type: 'scrape', videoId: request.target.id }))
+        return
+      }
+      setPendingDirectorChoice(null)
       const hasWarnings = res.warnings.length > 0
       toast.show(
         res.applied
           ? hasWarnings
-            ? `已更新 ${target.code}，部分图片未应用：${res.warnings.join('；')}`
-            : `已更新 ${target.code}`
+            ? `已更新 ${request.target.code}，部分字段未应用：${res.warnings.join('；')}`
+            : `已更新 ${request.target.code}`
           : hasWarnings
-            ? `资源不可用，已保留原数据：${res.warnings.join('；')}`
+            ? `所选字段未应用：${res.warnings.join('；')}`
             : '所选字段无可写入内容',
         res.applied && !hasWarnings ? 'success' : 'info'
       )
@@ -379,7 +441,25 @@ export default function LibraryPage(): JSX.Element {
       }
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
+    } finally {
+      setDirectorChoiceBusy(false)
     }
+  }
+
+  const runSingleScrape = (
+    fields: VideoScrapeField[],
+    site: string,
+    mode?: VideoScrapeUpdateMode
+  ): void => {
+    if (!scrapeTarget) return
+    const request: SingleScrapeRequest = {
+      target: { id: scrapeTarget.id, code: scrapeTarget.code },
+      fields,
+      site,
+      mode
+    }
+    setScrapeTarget(null)
+    void executeSingleScrape(request)
   }
 
   const markScrapeSuccess = async (video: Video): Promise<void> => {
@@ -455,6 +535,13 @@ export default function LibraryPage(): JSX.Element {
       onRemove: () => patchFilters({ status: 'all' })
     })
   }
+  if (pendingScrape !== 'all') {
+    appliedFilters.push({
+      key: 'pending',
+      label: pendingScrape === 'pending' ? '仅待确认刮削' : '排除待确认刮削',
+      onRemove: () => patchFilters({ pendingScrape: 'all' })
+    })
+  }
   if (year !== 'all') {
     appliedFilters.push({
       key: 'year',
@@ -485,6 +572,14 @@ export default function LibraryPage(): JSX.Element {
       key: `tag:${id}`,
       label: tagNames.get(id) ?? String(id),
       onRemove: () => patchFilters({ tagIds: tagIds.filter((x) => x !== id) })
+    })
+  }
+  for (const kind of resourceKinds) {
+    appliedFilters.push({
+      key: `resource:${kind}`,
+      label: VIDEO_RESOURCE_FILTER_LABELS[kind],
+      onRemove: () =>
+        patchFilters({ resourceKinds: resourceKinds.filter((item) => item !== kind) })
     })
   }
   const emptyDueToFilter = Boolean(debouncedQ.trim()) || hasAppliedFilters
@@ -529,10 +624,12 @@ export default function LibraryPage(): JSX.Element {
             controls={
               <>
                 <div className="library-filter-anchor">
-                  <button
+                  <Button
                     ref={filterBtnRef}
                     type="button"
-                    className={`btn btn-sm library-filter-btn${filterOpen ? ' library-filter-btn--open' : ''}${hasAppliedFilters ? ' library-filter-btn--active' : ''}`}
+
+                    size="sm"
+                    className={`library-filter-btn${filterOpen ? ' library-filter-btn--open' : ''}${hasAppliedFilters ? ' library-filter-btn--active' : ''}`}
                     onClick={() => setFilterOpen((o) => !o)}
                     aria-expanded={filterOpen}
                     aria-haspopup="dialog"
@@ -543,7 +640,7 @@ export default function LibraryPage(): JSX.Element {
                       className={`library-filter-chevron${filterOpen ? ' is-open' : ''}`}
                       aria-hidden
                     />
-                  </button>
+                  </Button>
 
                   <LibraryFilterPopover
                     open={filterOpen}
@@ -569,24 +666,15 @@ export default function LibraryPage(): JSX.Element {
                   }
                 />
 
-                <div className="mode-toggle" title="封面显示方式" role="group" aria-label="封面显示方式">
-                  <button
-                    type="button"
-                    className={mode === 'portrait' ? 'active' : ''}
-                    onClick={() => setMode('portrait')}
-                  >
-                    <RectangleVertical {...UI_ICON_SM} aria-hidden />
-                    <span>竖版</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={mode === 'landscape' ? 'active' : ''}
-                    onClick={() => setMode('landscape')}
-                  >
-                    <RectangleHorizontal {...UI_ICON_SM} aria-hidden />
-                    <span>横板</span>
-                  </button>
-                </div>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setShowResourceImport(true)}
+                >
+                  <Link2 {...UI_ICON_SM} aria-hidden />
+                  导入链接
+                </Button>
               </>
             }
             resultCount={
@@ -686,6 +774,17 @@ export default function LibraryPage(): JSX.Element {
         />
       )}
 
+      {showResourceImport && (
+        <VideoResourceImportModal
+          onCancel={() => setShowResourceImport(false)}
+          onImported={(result) => {
+            setShowResourceImport(false)
+            toast.show(result.createdVideo ? '影片已导入' : '资源已添加', 'success')
+            invalidateVideoLibraryQueries(queryClient)
+          }}
+        />
+      )}
+
       {showBulkPlaylist && (
         <AddVideosToPlaylistModal
           videoIds={[...selectedIds]}
@@ -720,7 +819,18 @@ export default function LibraryPage(): JSX.Element {
           confirmText="开始刮削"
           onCancel={() => setScrapeTarget(null)}
           onConfirm={(fields, site, _scope, mode) => {
-            void runSingleScrape(fields, site, mode as VideoScrapeUpdateMode | undefined)
+            runSingleScrape(fields, site, mode as VideoScrapeUpdateMode | undefined)
+          }}
+        />
+      )}
+
+      {pendingDirectorChoice && (
+        <DirectorScrapeChoiceModal
+          choice={pendingDirectorChoice.choice}
+          busy={directorChoiceBusy}
+          onCancel={() => setPendingDirectorChoice(null)}
+          onChoose={(directorId) => {
+            void executeSingleScrape(pendingDirectorChoice, directorId)
           }}
         />
       )}
@@ -756,12 +866,12 @@ export default function LibraryPage(): JSX.Element {
             if (!deleting) setDeleteTarget(null)
           }}
         >
-          确定要永久删除「{deleteTarget.code}」吗？将同时删除磁盘上的视频文件、封面及所有元数据，此操作不可恢复。
-          {deleteTarget.primary_file_path ? (
-            <div className="modal-path-text">{deleteTarget.primary_file_path}</div>
+          确定要永久删除「{deleteTarget.code}」吗？将删除全部影片资源、应用自有图片及所有元数据；本地视频文件与 STRM 源文件会同时从磁盘删除，但不会访问或删除远程内容。此操作不可恢复。
+          {deleteTarget.has_pending_scrape ? (
+            <div className="modal-path-hint">同时会删除待确认刮削候选与暂存图片。</div>
           ) : null}
-          {(deleteTarget.file_count ?? 0) > 1 ? (
-            <div className="modal-path-hint">另有 {(deleteTarget.file_count ?? 0) - 1} 个关联文件将一并删除</div>
+          {(deleteTarget.resource_count ?? 0) > 0 ? (
+            <div className="modal-path-hint">共关联 {deleteTarget.resource_count} 个影片资源</div>
           ) : null}
         </Modal>
       )}
@@ -778,7 +888,10 @@ export default function LibraryPage(): JSX.Element {
             if (!deleting) setConfirmBulkDelete(false)
           }}
         >
-          确定要永久删除已选择的 {selectedCount} 部影片吗？将同时删除磁盘上的视频文件、封面及所有元数据，此操作不可恢复。
+          确定要永久删除已选择的 {selectedCount} 部影片吗？将删除全部影片资源、应用自有图片及所有元数据；本地视频文件与 STRM 源文件会同时从磁盘删除，但不会访问或删除远程内容。此操作不可恢复。
+          {selectedVideos.some((video) => video.has_pending_scrape) ? (
+            <div className="modal-path-hint">其中含待确认刮削影片；对应候选与暂存图片也会删除。</div>
+          ) : null}
         </Modal>
       )}
     </div>

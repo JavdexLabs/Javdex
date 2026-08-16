@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import styles from './FormPrimitives.module.css'
 
 /** Shared form field layout (same tokens as settings forms). */
 export function AppFormField({
@@ -13,10 +14,10 @@ export function AppFormField({
   className?: string
 }): JSX.Element {
   return (
-    <label className={`settings-form-field${className ? ` ${className}` : ''}`}>
-      <span className="settings-form-label">{label}</span>
+    <label className={`${styles.formField} settings-form-field${className ? ` ${className}` : ''}`}>
+      <span className={`${styles.formLabel} settings-form-label`}>{label}</span>
       {children}
-      {hint ? <small className="settings-form-hint">{hint}</small> : null}
+      {hint ? <small className={`${styles.formHint} settings-form-hint`}>{hint}</small> : null}
     </label>
   )
 }
@@ -36,13 +37,15 @@ export function AppFormSection({
   children: ReactNode
 }): JSX.Element {
   return (
-    <section className={`app-form-section${className ? ` ${className}` : ''}`}>
-      <div className="app-form-section-head">
+    <section className={`${styles.formSection} app-form-section${className ? ` ${className}` : ''}`}>
+      <div className={`${styles.sectionHead} app-form-section-head`}>
         <div className="app-form-section-copy">
-          <h4 className="app-form-section-title">{title}</h4>
-          {hint ? <p className="app-form-section-hint">{hint}</p> : null}
+          <h4 className={`${styles.sectionTitle} app-form-section-title`}>{title}</h4>
+          {hint ? <p className={`${styles.sectionHint} app-form-section-hint`}>{hint}</p> : null}
         </div>
-        {actions ? <div className="app-form-section-actions">{actions}</div> : null}
+        {actions ? (
+          <div className={`${styles.sectionActions} app-form-section-actions`}>{actions}</div>
+        ) : null}
       </div>
       {children}
     </section>
@@ -60,8 +63,8 @@ export function EditFormSection({
   children: ReactNode
 }): JSX.Element {
   return (
-    <section className={`entity-edit-section${className ? ` ${className}` : ''}`}>
-      <h4 className="entity-edit-section-title">{title}</h4>
+    <section className={`${styles.editSection} entity-edit-section${className ? ` ${className}` : ''}`}>
+      <h4 className={`${styles.editSectionTitle} entity-edit-section-title`}>{title}</h4>
       {children}
     </section>
   )
@@ -84,13 +87,15 @@ export function EditFormField({
   children: ReactNode
 }): JSX.Element {
   return (
-    <div className={`entity-edit-field${span === 2 ? ' entity-edit-field--full' : ''}`}>
-      <label htmlFor={htmlFor} className="entity-edit-label">
+    <div
+      className={`${styles.editField}${span === 2 ? ` ${styles.editFieldFull}` : ''} entity-edit-field${span === 2 ? ' entity-edit-field--full' : ''}`}
+    >
+      <label htmlFor={htmlFor} className={`${styles.editLabel} entity-edit-label`}>
         <span>{label}</span>
         {labelExtra}
       </label>
       {children}
-      {hint ? <span className="entity-edit-field-hint">{hint}</span> : null}
+      {hint ? <span className={`${styles.editHint} entity-edit-field-hint`}>{hint}</span> : null}
     </div>
   )
 }

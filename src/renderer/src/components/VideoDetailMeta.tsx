@@ -1,18 +1,38 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { Ellipsis, Play } from 'lucide-react'
+import { Check, Copy, Ellipsis, ExternalLink, Link2, Play } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import type { FacetType, ScrapedStatus, VideoDetail, VideoFile } from '@shared/types'
-import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS } from '@shared/types'
+import type { ScrapedStatus } from '@shared/commonTypes'
+import type { OrganizationRole } from '@shared/classificationTypes'
+import type {
+  VideoDetail,
+  VideoResourceDetail
+} from '@shared/videoTypes'
+import { VIDEO_BATCH_SCRAPE_STATUS_OPTIONS } from '@shared/videoScrapeTypes'
 import MetaLink from './MetaLink'
 import IconButton from './IconButton'
+import EmptyState from './EmptyState'
 import { UI_ICON } from './iconDefaults'
-import { navigateToFacetDetail } from '../listView/listNavigation'
+import {
+  navigateToDirectorDetail,
+  navigateToOrganizationDetail,
+  navigateToSeriesDetail
+} from '../listView/listNavigation'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
+import { VIDEO_RESOURCE_KIND_LABELS } from './videoResourcePresentation'
 
-type PrimaryItem =
+export type VideoPrimaryMetaItem =
   | { key: string; label: string; type: 'text'; value: string }
-  | { key: string; label: string; type: 'facet'; facet: FacetType; value: string }
+  | {
+      key: string
+      label: string
+      type: 'organization'
+      role: OrganizationRole
+      organizationId: number
+      value: string
+    }
+  | { key: string; label: string; type: 'director'; directorId: number; value: string }
+  | { key: string; label: string; type: 'series'; seriesId: number; value: string }
 
 type SecondaryItem =
   | { key: string; label: string; type: 'text'; value: string }
@@ -59,8 +79,8 @@ export function getVideoScrapeStatusLabel(status: ScrapedStatus): string {
   return VIDEO_BATCH_SCRAPE_STATUS_OPTIONS.find((option) => option.id === status)?.label ?? '未知'
 }
 
-function buildPrimaryItems(video: VideoDetail): PrimaryItem[] {
-  const items: PrimaryItem[] = []
+export function buildVideoPrimaryMetaItems(video: VideoDetail): VideoPrimaryMetaItem[] {
+  const items: VideoPrimaryMetaItem[] = []
 
   if (!isBlank(video.release_date)) {
     items.push({ key: 'release_date', label: '发行日期', type: 'text', value: video.release_date!.trim() })
@@ -74,27 +94,41 @@ function buildPrimaryItems(video: VideoDetail): PrimaryItem[] {
       value: formatDuration(durationSeconds)
     })
   }
-  if (!isBlank(video.maker)) {
-    items.push({ key: 'maker', label: '制作商', type: 'facet', facet: 'maker', value: video.maker!.trim() })
+  if (!isBlank(video.maker) && video.maker_organization_id != null) {
+    items.push({
+      key: 'maker',
+      label: '制作商',
+      type: 'organization',
+      role: 'maker',
+      organizationId: video.maker_organization_id,
+      value: video.maker!.trim()
+    })
   }
-  if (!isBlank(video.publisher)) {
+  if (!isBlank(video.publisher) && video.publisher_organization_id != null) {
     items.push({
       key: 'publisher',
       label: '发行商',
-      type: 'facet',
-      facet: 'publisher',
+      type: 'organization',
+      role: 'publisher',
+      organizationId: video.publisher_organization_id,
       value: video.publisher!.trim()
     })
   }
-  if (!isBlank(video.series)) {
-    items.push({ key: 'series', label: '系列', type: 'facet', facet: 'series', value: video.series!.trim() })
+  if (!isBlank(video.series) && video.series_id != null) {
+    items.push({
+      key: 'series',
+      label: '系列',
+      type: 'series',
+      seriesId: video.series_id,
+      value: video.series!.trim()
+    })
   }
-  if (!isBlank(video.director)) {
+  if (!isBlank(video.director) && video.director_id != null) {
     items.push({
       key: 'director',
       label: '导演',
-      type: 'facet',
-      facet: 'director',
+      type: 'director',
+      directorId: video.director_id,
       value: video.director!.trim()
     })
   }
@@ -107,11 +141,11 @@ function fileBaseName(filePath: string): string {
   return normalized.slice(normalized.lastIndexOf('/') + 1) || filePath
 }
 
-function fileDisplayName(file: VideoFile, multi: boolean): string | null {
-  if (!multi) return null
-  const label = file.label?.trim()
+function localResourceDisplayName(resource: VideoResourceDetail, multi: boolean): string | null {
+  const label = resource.display_name?.trim()
   if (label) return label
-  return fileBaseName(file.file_path)
+  if (!multi) return null
+  return fileBaseName(resource.display_locator)
 }
 
 function buildRecordItems(video: VideoDetail): SecondaryItem[] {
@@ -139,32 +173,75 @@ function buildRecordItems(video: VideoDetail): SecondaryItem[] {
   return recordItems
 }
 
-function VideoFileRow({
-  file,
-  multiFiles,
-  onPlayFile,
-  onRevealFile,
-  onSetPrimaryFile,
-  onDeleteFile
+function ResourceReassignmentMenuItems({
+  resource,
+  onClose,
+  onSetPrimaryResource,
+  onSplitResource
 }: {
-  file: VideoFile
-  multiFiles: boolean
-  onPlayFile?: (fileId: number) => void
-  onRevealFile?: (fileId: number) => void
-  onSetPrimaryFile?: (fileId: number) => void
-  onDeleteFile?: (file: VideoFile) => void
+  resource: VideoResourceDetail
+  onClose: () => void
+  onSetPrimaryResource?: (resourceId: number) => void
+  onSplitResource?: (resource: VideoResourceDetail) => void
+}): JSX.Element {
+  return (
+    <>
+      <button
+        type="button"
+        className="detail-menu-item"
+        role="menuitem"
+        onClick={() => {
+          onClose()
+          onSetPrimaryResource?.(resource.id)
+        }}
+      >
+        设为主资源
+      </button>
+      <button
+        type="button"
+        className="detail-menu-item"
+        role="menuitem"
+        onClick={() => {
+          onClose()
+          onSplitResource?.(resource)
+        }}
+      >
+        拆分为独立影片
+      </button>
+    </>
+  )
+}
+
+function VideoLocalResourceRow({
+  resource,
+  multiResources,
+  onOpenResource,
+  onRevealResource,
+  onSetPrimaryResource,
+  onSplitResource,
+  onEditResource,
+  onRemoveResource
+}: {
+  resource: VideoResourceDetail
+  multiResources: boolean
+  onOpenResource?: (resourceId: number) => void
+  onRevealResource?: (resourceId: number) => void
+  onSetPrimaryResource?: (resourceId: number) => void
+  onSplitResource?: (resource: VideoResourceDetail) => void
+  onEditResource?: (resource: VideoResourceDetail) => void
+  onRemoveResource?: (resource: VideoResourceDetail) => void
 }): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  const path = file.file_path.trim()
-  const title = fileDisplayName(file, multiFiles) ?? fileBaseName(path)
-  const isPrimary = Boolean(file.is_primary)
+  const path = resource.display_locator.trim()
+  const title = localResourceDisplayName(resource, multiResources) ?? fileBaseName(path)
+  const isPrimary = Boolean(resource.is_primary)
   const facts = [
-    file.file_size != null && file.file_size > 0
-      ? { key: 'size', label: '大小', value: formatFileSize(file.file_size) }
+    resource.size_bytes != null && resource.size_bytes > 0
+      ? { key: 'size', label: '大小', value: formatFileSize(resource.size_bytes) }
       : null,
-    file.file_duration_seconds != null && file.file_duration_seconds > 0
-      ? { key: 'duration', label: '时长', value: formatDuration(file.file_duration_seconds) }
+    resource.duration_seconds != null && resource.duration_seconds > 0
+      ? { key: 'duration', label: '时长', value: formatDuration(resource.duration_seconds) }
       : null
   ].filter(Boolean) as Array<{ key: string; label: string; value: string }>
 
@@ -184,14 +261,15 @@ function VideoFileRow({
 
   return (
     <div
-      className={`detail-meta-file${isPrimary && multiFiles ? ' detail-meta-file--primary' : ''}`}
+      className={`detail-meta-file${isPrimary && multiResources ? ' detail-meta-file--primary' : ''}`}
     >
       <div className="detail-meta-file-main">
         <div className="detail-meta-file-label-row">
           <span className="detail-meta-file-label">{title}</span>
+          <span className="detail-meta-file-badge">{VIDEO_RESOURCE_KIND_LABELS.local}</span>
           {isPrimary ? (
-            <span className="detail-meta-file-badge" title="顶部播放将使用此文件">
-              主文件
+            <span className="detail-meta-file-badge" title="顶部播放将使用此资源">
+              主资源
             </span>
           ) : null}
         </div>
@@ -212,7 +290,7 @@ function VideoFileRow({
           className="detail-icon-action"
           icon={<Play {...UI_ICON} />}
           label="播放此文件"
-          onClick={() => onPlayFile?.(file.id)}
+          onClick={() => onOpenResource?.(resource.id)}
         />
         <div className="detail-more-actions" ref={menuRef}>
           <IconButton
@@ -231,38 +309,218 @@ function VideoFileRow({
                 role="menuitem"
                 onClick={() => {
                   setMenuOpen(false)
-                  onRevealFile?.(file.id)
+                  onEditResource?.(resource)
+                }}
+              >
+                编辑标签
+              </button>
+              <button
+                type="button"
+                className="detail-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false)
+                  onRevealResource?.(resource.id)
                 }}
               >
                 在文件夹中显示
               </button>
               {!isPrimary ? (
-                <>
-                  <button
-                    type="button"
-                    className="detail-menu-item"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false)
-                      onSetPrimaryFile?.(file.id)
-                    }}
-                  >
-                    设为主文件
-                  </button>
-                  <div className="detail-menu-separator" />
-                  <button
-                    type="button"
-                    className="detail-menu-item detail-menu-item--danger"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false)
-                      onDeleteFile?.(file)
-                    }}
-                  >
-                    删除此文件
-                  </button>
-                </>
+                <ResourceReassignmentMenuItems
+                  resource={resource}
+                  onClose={() => setMenuOpen(false)}
+                  onSetPrimaryResource={onSetPrimaryResource}
+                  onSplitResource={onSplitResource}
+                />
               ) : null}
+              <div className="detail-menu-separator" />
+              <button
+                type="button"
+                className="detail-menu-item detail-menu-item--danger"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false)
+                  onRemoveResource?.(resource)
+                }}
+              >
+                删除本地文件
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function VideoLinkResourceRow({
+  resource,
+  multiResources,
+  onOpenResource,
+  onRevealResource,
+  onReadResourceLocator,
+  onEditResource,
+  onSetPrimaryResource,
+  onSplitResource,
+  onRemoveResource
+}: {
+  resource: VideoResourceDetail
+  multiResources: boolean
+  onOpenResource?: (resourceId: number) => void
+  onRevealResource?: (resourceId: number) => void
+  onReadResourceLocator?: (resourceId: number) => Promise<string | null>
+  onEditResource?: (resource: VideoResourceDetail) => void
+  onSetPrimaryResource?: (resourceId: number) => void
+  onSplitResource?: (resource: VideoResourceDetail) => void
+  onRemoveResource?: (resource: VideoResourceDetail) => void
+}): JSX.Element {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [fullLink, setFullLink] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const kind = VIDEO_RESOURCE_KIND_LABELS[resource.kind]
+  const masked = resource.display_locator
+  const title = resource.display_name?.trim() || masked
+  const isPrimary = Boolean(resource.is_primary)
+  const isStrm = Boolean(resource.strm_source_path)
+
+  const copyFullLink = async (): Promise<void> => {
+    const locator = fullLink ?? (await onReadResourceLocator?.(resource.id))
+    if (!locator) return
+    await navigator.clipboard.writeText(locator)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1600)
+  }
+
+  const toggleFullLink = async (): Promise<void> => {
+    if (fullLink !== null) {
+      setFullLink(null)
+      return
+    }
+    const locator = await onReadResourceLocator?.(resource.id)
+    if (locator) setFullLink(locator)
+  }
+
+  useEscapeKey(() => setMenuOpen(false), menuOpen)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDocClick = (event: MouseEvent): void => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [menuOpen])
+
+  return (
+    <div
+      className={`detail-meta-file${isPrimary && multiResources ? ' detail-meta-file--primary' : ''}`}
+    >
+      <div className="detail-meta-file-main">
+        <div className="detail-meta-file-label-row">
+          <span className="detail-meta-file-label">{title}</span>
+          <span className="detail-meta-file-badge">{kind}</span>
+          {isStrm ? <span className="detail-meta-file-badge">STRM 托管</span> : null}
+          {isPrimary ? (
+            <span className="detail-meta-file-badge" title="顶部播放将打开此资源">
+              主资源
+            </span>
+          ) : null}
+        </div>
+        {resource.display_name?.trim() ? <div className="detail-meta-path">{masked}</div> : null}
+        {resource.strm_source_path ? (
+          <div className="detail-meta-path copyable-text">源文件 · {resource.strm_source_path}</div>
+        ) : null}
+        {resource.size_bytes != null && resource.size_bytes > 0 ? (
+          <div className="detail-meta-file-facts">
+            <span className="detail-meta-file-fact">
+              <span>大小</span>
+              <strong>{formatFileSize(resource.size_bytes)}</strong>
+            </span>
+          </div>
+        ) : null}
+        {fullLink ? <div className="detail-meta-path detail-meta-path--full">{fullLink}</div> : null}
+      </div>
+      <div className="detail-meta-file-actions">
+        <IconButton
+          className="detail-icon-action"
+          icon={copied ? <Check {...UI_ICON} /> : <Copy {...UI_ICON} />}
+          label={copied ? '已复制链接' : '复制链接'}
+          onClick={() => void copyFullLink()}
+        />
+        <IconButton
+          className="detail-icon-action"
+          icon={<ExternalLink {...UI_ICON} />}
+          label={`打开${kind}`}
+          onClick={() => onOpenResource?.(resource.id)}
+        />
+        <div className="detail-more-actions" ref={menuRef}>
+          <IconButton
+            className="detail-icon-action"
+            icon={<Ellipsis {...UI_ICON} />}
+            label="更多"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((open) => !open)}
+          />
+          {menuOpen ? (
+            <div className="detail-more-menu" role="menu">
+              <button
+                type="button"
+                className="detail-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false)
+                  setFullLink(null)
+                  onEditResource?.(resource)
+                }}
+              >
+                编辑资源信息
+              </button>
+              {isStrm ? (
+                <button
+                  type="button"
+                  className="detail-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onRevealResource?.(resource.id)
+                  }}
+                >
+                  在文件夹中显示
+                </button>
+              ) : null}
+              {!isPrimary ? (
+                <ResourceReassignmentMenuItems
+                  resource={resource}
+                  onClose={() => setMenuOpen(false)}
+                  onSetPrimaryResource={onSetPrimaryResource}
+                  onSplitResource={onSplitResource}
+                />
+              ) : null}
+              <button
+                type="button"
+                className="detail-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false)
+                  void toggleFullLink()
+                }}
+              >
+                {fullLink ? '隐藏完整链接' : '查看完整链接'}
+              </button>
+              <div className="detail-menu-separator" />
+              <button
+                type="button"
+                className="detail-menu-item detail-menu-item--danger"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false)
+                  onRemoveResource?.(resource)
+                }}
+              >
+                {isStrm ? '删除 STRM 源文件' : '移除链接资源'}
+              </button>
             </div>
           ) : null}
         </div>
@@ -274,7 +532,7 @@ function VideoFileRow({
 export function VideoDetailPrimaryMeta({ video }: { video: VideoDetail }): JSX.Element | null {
   const navigate = useNavigate()
   const location = useLocation()
-  const items = buildPrimaryItems(video)
+  const items = buildVideoPrimaryMetaItems(video)
   if (items.length === 0) return null
 
   return (
@@ -283,10 +541,27 @@ export function VideoDetailPrimaryMeta({ video }: { video: VideoDetail }): JSX.E
         <Fragment key={item.key}>
           <span className="meta-key">{item.label}</span>
           <span className="meta-val">
-            {item.type === 'facet' ? (
+            {item.type === 'organization' ? (
               <MetaLink
-                onClick={() => navigateToFacetDetail(navigate, location, item.facet, item.value)}
+                onClick={() =>
+                  navigateToOrganizationDetail(
+                    navigate,
+                    location,
+                    item.role,
+                    item.organizationId
+                  )
+                }
               >
+                {item.value}
+              </MetaLink>
+            ) : item.type === 'director' ? (
+              <MetaLink
+                onClick={() => navigateToDirectorDetail(navigate, location, item.directorId)}
+              >
+                {item.value}
+              </MetaLink>
+            ) : item.type === 'series' ? (
+              <MetaLink onClick={() => navigateToSeriesDetail(navigate, location, item.seriesId)}>
                 {item.value}
               </MetaLink>
             ) : (
@@ -331,41 +606,81 @@ export function VideoMaintenanceInfo({ video }: { video: VideoDetail }): JSX.Ele
 
 export function VideoDetailSecondaryMeta({
   video,
-  onPlayFile,
-  onRevealFile,
-  onSetPrimaryFile,
-  onDeleteFile
+  onOpenResource,
+  onRevealResource,
+  onReadResourceLocator,
+  onEditResource,
+  onSetPrimaryResource,
+  onSplitResource,
+  onRemoveResource,
+  onAddResource
 }: {
   video: VideoDetail
-  onPlayFile?: (fileId: number) => void
-  onRevealFile?: (fileId: number) => void
-  onSetPrimaryFile?: (fileId: number) => void
-  onDeleteFile?: (file: VideoFile) => void
-}): JSX.Element | null {
-  const multiFiles = video.files.length > 1
-  const hasFiles = video.files.length > 0
-  if (!hasFiles) return null
+  onOpenResource?: (resourceId: number) => void
+  onRevealResource?: (resourceId: number) => void
+  onReadResourceLocator?: (resourceId: number) => Promise<string | null>
+  onEditResource?: (resource: VideoResourceDetail) => void
+  onSetPrimaryResource?: (resourceId: number) => void
+  onSplitResource?: (resource: VideoResourceDetail) => void
+  onRemoveResource?: (resource: VideoResourceDetail) => void
+  onAddResource: () => void
+}): JSX.Element {
+  const multiResources = video.resources.length > 1
 
   return (
     <div className="detail-meta-sections">
       <section className="detail-section detail-meta-section">
-        <div className="detail-section-head">
-          <h2 className="section-title">文件</h2>
-          <span className="detail-section-count">{video.files.length} 个</span>
-        </div>
-        <div className="detail-meta-files">
-          {video.files.map((file) => (
-            <VideoFileRow
-              key={file.id}
-              file={file}
-              multiFiles={multiFiles}
-              onPlayFile={onPlayFile}
-              onRevealFile={onRevealFile}
-              onSetPrimaryFile={onSetPrimaryFile}
-              onDeleteFile={onDeleteFile}
+        <div className="detail-section-head detail-section-head--with-actions">
+          <h2 className="section-title">影片资源</h2>
+          <div className="detail-section-actions">
+            <span className="detail-section-count">{video.resources.length} 个</span>
+            <IconButton
+              className="detail-icon-action"
+              icon={<Link2 {...UI_ICON} />}
+              label="添加资源"
+              onClick={onAddResource}
             />
-          ))}
+          </div>
         </div>
+        {video.resources.length > 0 ? (
+          <div className="detail-meta-files">
+            {video.resources.map((resource) =>
+              resource.kind === 'local' ? (
+                <VideoLocalResourceRow
+                  key={resource.id}
+                  resource={resource}
+                  multiResources={multiResources}
+                  onOpenResource={onOpenResource}
+                  onRevealResource={onRevealResource}
+                  onSetPrimaryResource={onSetPrimaryResource}
+                  onSplitResource={onSplitResource}
+                  onEditResource={onEditResource}
+                  onRemoveResource={onRemoveResource}
+                />
+              ) : (
+                <VideoLinkResourceRow
+                  key={resource.id}
+                  resource={resource}
+                  multiResources={multiResources}
+                  onOpenResource={onOpenResource}
+                  onRevealResource={onRevealResource}
+                  onReadResourceLocator={onReadResourceLocator}
+                  onEditResource={onEditResource}
+                  onSetPrimaryResource={onSetPrimaryResource}
+                  onSplitResource={onSplitResource}
+                  onRemoveResource={onRemoveResource}
+                />
+              )
+            )}
+          </div>
+        ) : (
+          <EmptyState
+            variant="compact"
+            icon={<Link2 {...UI_ICON} aria-hidden />}
+            title="暂无影片资源"
+            description="添加资源后会在这里展示。"
+          />
+        )}
       </section>
     </div>
   )

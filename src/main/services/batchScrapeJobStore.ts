@@ -2,13 +2,8 @@ import { app } from 'electron'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import process from 'node:process'
-import type {
-  ActressBatchScrapeRequest,
-  BatchLogEntry,
-  BatchProgress,
-  VideoBatchScrapeRequest
-} from '@shared/types'
+import type { ActressBatchScrapeRequest, VideoBatchScrapeRequest } from '@shared/scrapeTypes'
+import type { BatchLogEntry, BatchProgress } from '@shared/batchScrapeTypes'
 import { readTestUserDataPath } from '@shared/appIdentity'
 
 export type BatchScrapeJobKind = 'video' | 'actress'

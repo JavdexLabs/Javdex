@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
+import Button from './Button'
 
 interface TagItem {
   id: number
@@ -126,7 +127,7 @@ export default function TagFilter({
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    let list = q ? tags.filter((t) => t.name.toLowerCase().includes(q)) : [...tags]
+    const list = q ? tags.filter((t) => t.name.toLowerCase().includes(q)) : [...tags]
     if (isCompact) {
       list.sort((a, b) => b.video_count - a.video_count)
     }
@@ -169,9 +170,9 @@ export default function TagFilter({
     <div className="tag-filter">
       <div className="tag-filter-row">
         <div className="tag-filter-add" ref={addRef}>
-          <button type="button" className="btn btn-sm tag-filter-add-btn" onClick={() => setOpen((o) => !o)}>
+          <Button type="button" size="sm" className="tag-filter-add-btn" onClick={() => setOpen((o) => !o)}>
             添加标签{selected.length ? ` (${selected.length})` : ''}
-          </button>
+          </Button>
 
           {open ? (
             <div className="tag-popover">

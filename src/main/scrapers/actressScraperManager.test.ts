@@ -358,6 +358,83 @@ module.exports = {
     assert.equal(detail?.last_scraped_at, null)
   })
 
+  it('skips fillEmpty when a matched profile has no new values for remaining empty fields', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'Repeat Profile Source',
+      version: '1.0.0',
+      description: 'Returns fields the actress already has, but not remaining empty ones',
+      supportedFields: ['birthDate', 'nameZh', 'nameEn'],
+      code: `
+module.exports = {
+  async parseActress() {
+    return { birthDate: '1990-12-31', nameEn: 'An Koshi' };
+  }
+};
+`
+    })
+    const inserted = getDb()
+      .prepare(
+        `INSERT INTO actresses
+          (main_name, gender, birth_date, scraped_status, last_scraped_at)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      .run('Repeat Fill Actress', 'female', '1990-12-31', 1, '2026-01-01T00:00:00.000Z')
+    const actressId = Number(inserted.lastInsertRowid)
+    editActress(actressId, { name_en: 'An Koshi' })
+
+    const outcome = await scrapeActress(actressId, 'Repeat Profile Source', {
+      fields: ['birthDate', 'nameZh', 'nameEn'],
+      mode: 'fillEmpty',
+      closeBrowser: false
+    })
+
+    const detail = getActressDetail(actressId)
+    assert.equal(outcome.ok, true)
+    assert.equal(outcome.skipped, true)
+    assert.equal(outcome.status, 'success')
+    assert.equal(detail?.birth_date, '1990-12-31')
+    assert.equal(detail?.name_en, 'An Koshi')
+    assert.equal(detail?.name_zh, null)
+    assert.equal(detail?.scraped_status, 1)
+    assert.equal(detail?.last_scraped_at, '2026-01-01T00:00:00.000Z')
+  })
+
+  it('still fails fillEmpty when a matched profile has no usable field values', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'actress',
+      name: 'Empty Fill Profile Source',
+      version: '1.0.0',
+      description: 'Returns a match object without any apply-able fields',
+      supportedFields: ['birthDate', 'nameZh'],
+      code: `
+module.exports = {
+  async parseActress() {
+    return { sourceUrl: 'https://example.test/model/1' };
+  }
+};
+`
+    })
+    const inserted = getDb()
+      .prepare('INSERT INTO actresses (main_name, gender) VALUES (?, ?)')
+      .run('Empty Fill Actress', 'female')
+    const actressId = Number(inserted.lastInsertRowid)
+
+    const outcome = await scrapeActress(actressId, 'Empty Fill Profile Source', {
+      fields: ['birthDate', 'nameZh'],
+      mode: 'fillEmpty',
+      closeBrowser: false
+    })
+
+    const detail = getActressDetail(actressId)
+    assert.equal(outcome.ok, false)
+    assert.match(outcome.error ?? '', /有效/)
+    assert.equal(detail?.scraped_status, 2)
+    assert.equal(detail?.last_scraped_at, null)
+  })
+
   it('keeps cumulative success and its timestamp when a later scrape fails', async () => {
     await installScraperPluginPackage({
       schemaVersion: 1,

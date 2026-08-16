@@ -1,6 +1,6 @@
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { useEffect, useMemo } from 'react'
-import type { Video, VideoQuery } from '@shared/types'
+import type { Video, VideoQuery } from '@shared/videoTypes'
 import { api } from '../api'
 import { videoKeys } from './queryKeys'
 
@@ -23,7 +23,7 @@ export function useInfiniteVideoList(
   onError: (error: unknown) => void,
   enabled = true
 ): InfiniteVideoListResult {
-  const stableQuery = useMemo(() => ({ ...query }), [queryHash, query])
+  const stableQuery = useMemo(() => ({ ...query }), [query])
 
   const result = useInfiniteQuery({
     queryKey: videoKeys.list(stableQuery, queryHash),

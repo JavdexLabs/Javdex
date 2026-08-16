@@ -39,6 +39,15 @@ import type {
   PluginDevAgentStartInput
 } from './types'
 
+/**
+ * TODO(deepseek-harness): Re-evaluate replacing this built-in loop after the upstream
+ * runtime reaches a stable release. Planned boundary: existing renderer/IPC ->
+ * Harness SDK -> bundled Node 22.19+/24 sidecar -> authenticated loopback MCP ->
+ * executeTool(). Adoption also requires per-session cancellation (or an equivalent
+ * safe fallback), reproducible offline Windows packaging, and create/debug regression
+ * evidence that the benefit justifies the integration cost. Keep this runner as a
+ * fallback during migration. See docs/DEEPSEEK_HARNESS_INTEGRATION_RESEARCH.md.
+ */
 export interface AgentRunnerDeps {
   requestChat: (
     transcript: AgentTranscript,
@@ -320,7 +329,7 @@ async function runToolCalls(
     }
 
     let content = result.content
-    let isError = !result.ok
+    const isError = !result.ok
     if (toolName === 'plugin_dry_run' && result.ok) {
       const verifyResult = await executeToolWithProgress(sessionId, step, 'plugin_verify', '{}', onProgress)
       content = `${content}\n\n自动语义验证：\n${verifyResult.content}`

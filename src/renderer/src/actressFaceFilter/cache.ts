@@ -1,4 +1,9 @@
-import type { ActressListItem } from '@shared/types'
+import type { ActressListItem } from '@shared/actressTypes'
+
+interface ActressFaceCacheIdentity {
+  id: number
+  avatar_fingerprint?: string | null
+}
 
 export type ActressFaceScanStatus = 'has-face' | 'without-face'
 
@@ -41,7 +46,7 @@ export function actressesWithoutFace(
 
 /** Stable identity for current rows whose face result is missing or stale. */
 export function uncachedActressFaceScanIdentity(
-  items: ActressListItem[],
+  items: ActressFaceCacheIdentity[],
   cache: ActressFaceScanCache
 ): string {
   return items
@@ -51,4 +56,18 @@ export function uncachedActressFaceScanIdentity(
     })
     .map((item) => `${item.id}:${item.avatar_fingerprint}`)
     .join('|')
+}
+
+export function actressIdsWithoutFace(
+  items: ActressFaceCacheIdentity[],
+  cache: ActressFaceScanCache
+): number[] {
+  return items
+    .filter((item) => {
+      const fingerprint = item.avatar_fingerprint?.trim()
+      return Boolean(
+        fingerprint && getCachedActressFaceStatus(cache, item.id, fingerprint) === 'without-face'
+      )
+    })
+    .map((item) => item.id)
 }

@@ -1,0 +1,239 @@
+/* Identity of the library video being scraped, so candidates have something to be compared against. */
+.subject {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+}
+
+.subjectCover {
+  width: 46px;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-control);
+  color: var(--text-muted);
+  display: grid;
+  place-items: center;
+}
+
+.subjectCover > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: right center;
+}
+
+.subjectCopy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.subjectTitle {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.subjectFile {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.subjectFacts {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.subjectTitle,
+.subjectFile {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subjectActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sourceList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.source {
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+}
+
+.sourceHeader {
+  margin-bottom: 11px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.sourceIdentity {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sourceIdentity > span,
+.sourceHeader small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.candidateGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+  gap: 9px;
+}
+
+.candidate {
+  position: relative;
+  min-width: 0;
+  min-height: 210px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  display: grid;
+  grid-template-columns: 98px minmax(0, 1fr);
+  align-items: start;
+  gap: 11px;
+  cursor: pointer;
+}
+
+.candidate:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-control-hover);
+}
+
+.candidate:focus-within {
+  outline: var(--focus-outline);
+  box-shadow: var(--focus-ring);
+}
+
+.candidate:has(> input:checked) {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+}
+
+.candidate > input {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+}
+
+.candidateCover {
+  width: 98px;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-control);
+  color: var(--text-muted);
+  display: grid;
+  place-items: center;
+}
+
+.candidateCover > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: right center;
+}
+
+.candidateCopy {
+  min-width: 0;
+  padding-right: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.candidateCopy > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidateRow {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 7px;
+  font-size: 11px;
+}
+
+.candidateRow > span {
+  color: var(--text-muted);
+}
+
+.candidateRow > b {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 500;
+}
+
+.candidateMedia {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  gap: 6px;
+}
+
+.candidateMedia img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+
+.candidateMedia img[data-avatar='true'] {
+  aspect-ratio: 1;
+}
+
+.directorOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.directorOption {
+  min-height: var(--control-h-lg);
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.directorOption:focus-within {
+  outline: var(--focus-outline);
+  box-shadow: var(--focus-ring);
+}
+
+.directorOption > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.directorOption small {
+  color: var(--text-muted);
+}

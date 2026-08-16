@@ -13,7 +13,12 @@ function setupDb(): void {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-overview-'))
   initDatabaseAtPath(path.join(tempRoot, 'library.db'))
   const db = getDb()
-  insertTestVideoWithFile(db, { code: 'A-1', filePath: 'a.mp4', scrapedStatus: 1 })
+  insertTestVideoWithFile(db, {
+    code: 'A-1',
+    filePath: 'a.mp4',
+    scrapedStatus: 1,
+    director: 'Director A'
+  })
   insertTestVideoWithFile(db, { code: 'B-1', filePath: 'b.mp4', scrapedStatus: 0 })
   insertTestVideoWithFile(db, { code: 'C-1', filePath: 'c.mp4', scrapedStatus: 2 })
 
@@ -43,9 +48,6 @@ function setupDb(): void {
 
   db.prepare(`INSERT INTO tags (name) VALUES ('Drama')`).run()
   db.prepare(`INSERT INTO playlists (name) VALUES ('Favorites')`).run()
-  db.prepare(
-    `INSERT INTO facet_entries (type, value) VALUES ('director', 'Director A')`
-  ).run()
 }
 
 afterEach(() => {

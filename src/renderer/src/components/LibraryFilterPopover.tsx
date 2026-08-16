@@ -1,17 +1,29 @@
 import { useEffect, useRef, type RefObject } from 'react'
-import type { VideoQuery, ScrapedStatus } from '@shared/types'
+import type { VideoPendingScrapeFilter, VideoQuery, VideoResourceFilter } from '@shared/videoTypes'
+import type { ScrapedStatus } from '@shared/commonTypes'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 import SelectControl from './SelectControl'
 import TagFilter from './TagFilter'
+import { VIDEO_RESOURCE_FILTER_ORDER } from '../listView/listQueryParams'
+import { VIDEO_RESOURCE_FILTER_LABELS } from './videoResourcePresentation'
+import Button from './Button'
 
 export interface LibraryFilterState {
   status: ScrapedStatus | 'all'
+  pendingScrape: VideoPendingScrapeFilter
   year: number | 'all'
   codePrefix: string
   sortBy: NonNullable<VideoQuery['sortBy']>
   sortDir: NonNullable<VideoQuery['sortDir']>
   tagIds: number[]
+  resourceKinds: VideoResourceFilter[]
 }
+
+const RESOURCE_FILTER_OPTIONS: Array<{ value: VideoResourceFilter; label: string }> =
+  VIDEO_RESOURCE_FILTER_ORDER.map((value) => ({
+    value,
+    label: VIDEO_RESOURCE_FILTER_LABELS[value]
+  }))
 
 interface Props {
   open: boolean
@@ -90,6 +102,21 @@ export default function LibraryFilterPopover({
         </label>
 
         <label className="library-filter-field">
+          <span className="library-filter-field-label">待确认刮削</span>
+          <SelectControl
+            className="library-filter-input"
+            value={state.pendingScrape}
+            onChange={(event) =>
+              onChange({ pendingScrape: event.target.value as VideoPendingScrapeFilter })
+            }
+          >
+            <option value="all">全部</option>
+            <option value="pending">仅待确认</option>
+            <option value="none">排除待确认</option>
+          </SelectControl>
+        </label>
+
+        <label className="library-filter-field">
           <span className="library-filter-field-label">年份</span>
           <SelectControl
             className="library-filter-input"
@@ -120,6 +147,32 @@ export default function LibraryFilterPopover({
         </label>
       </div>
 
+      <fieldset className="library-resource-filter">
+        <legend className="library-filter-field-label">资源类型</legend>
+        <div className="library-resource-filter-grid">
+          {RESOURCE_FILTER_OPTIONS.map((option) => {
+            const checked = state.resourceKinds.includes(option.value)
+            return (
+              <label key={option.value} className="library-resource-filter-option">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(event) =>
+                    onChange({
+                      resourceKinds: event.target.checked
+                        ? [...state.resourceKinds, option.value]
+                        : state.resourceKinds.filter((kind) => kind !== option.value)
+                    })
+                  }
+                />
+                <span>{option.label}</span>
+              </label>
+            )
+          })}
+        </div>
+        <span className="library-resource-filter-hint">多选条件满足任一即可</span>
+      </fieldset>
+
       <div className="library-filter-popover-tags">
         <div className="library-filter-tags-head">
           <span className="library-filter-field-label">标签</span>
@@ -137,12 +190,12 @@ export default function LibraryFilterPopover({
       </div>
 
       <footer className="library-filter-popover-footer">
-        <button type="button" className="btn btn-sm btn-ghost" onClick={onReset}>
+        <Button type="button" variant="ghost" size="sm" onClick={onReset}>
           重置
-        </button>
-        <button type="button" className="btn btn-sm btn-primary" onClick={onClose}>
+        </Button>
+        <Button type="button" variant="primary" size="sm" onClick={onClose}>
           完成
-        </button>
+        </Button>
       </footer>
     </div>
   )

@@ -5,8 +5,10 @@ import {
   ZODIAC_OPTIONS
 } from '@shared/actressProfileOptions'
 import { formatCupSizeDisplay, normalizeCupSize } from '@shared/cupSizeUtils'
-import type { ActressDetail, ScrapedStatus } from '@shared/types'
-import { ACTRESS_SCRAPE_STATUS_LABELS, actressStatusFilterOf } from '@shared/types'
+import type { ActressDetail } from '@shared/actressTypes'
+import type { ScrapedStatus } from '@shared/commonTypes'
+import { ACTRESS_SCRAPE_STATUS_LABELS, actressStatusFilterOf } from '@shared/actressTypes'
+import RelatedLinksList from './RelatedLinksList'
 
 type MetaItem = { key: string; label: string; value: string; status?: ScrapedStatus }
 
@@ -218,7 +220,9 @@ export default function ActressProfileMeta({
   const sections = useMemo(() => buildActressMetaSections(actress), [actress])
   const aliases = actress.aliases.filter((alias) => alias.trim().length > 0)
   const summary = actress.profile_summary?.trim()
-  const hasContent = sections.length > 0 || aliases.length > 0 || Boolean(summary)
+  const links = actress.links ?? []
+  const hasContent =
+    sections.length > 0 || aliases.length > 0 || Boolean(summary) || links.length > 0
 
   if (!hasContent) return null
 
@@ -271,6 +275,12 @@ export default function ActressProfileMeta({
           <p>{summary}</p>
         </section>
       )}
+      {links.length > 0 ? (
+        <section className="actress-profile-summary" aria-label="相关链接">
+          <h2 className="actress-profile-meta-section-title">相关链接</h2>
+          <RelatedLinksList links={links} />
+        </section>
+      ) : null}
     </div>
   )
 }

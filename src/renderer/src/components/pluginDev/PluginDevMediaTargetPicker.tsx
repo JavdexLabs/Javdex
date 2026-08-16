@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { SearchX } from 'lucide-react'
-import type { ActressListItem, Video } from '@shared/types'
+import type { ActressListItem } from '@shared/actressTypes'
+import type { Video } from '@shared/videoTypes'
 import { api, resolveMediaSrc } from '../../api'
 import { useDebounce } from '../../hooks/useDebounce'
 import Modal from '../Modal'
@@ -103,9 +104,10 @@ export default function PluginDevMediaTargetPicker({
   return (
     <Modal
       title={titleForKind(kind)}
+
       size="lg"
       className="modal--plugin-dev-target-picker"
-      bodyClassName="modal-body--fixed"
+      bodyOverflow="hidden"
       confirmText="完成"
       cancelText="关闭"
       onConfirm={onClose}

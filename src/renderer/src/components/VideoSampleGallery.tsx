@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useImagePreviewById } from '../hooks/useImagePreviewById'
-import type { VideoAsset } from '@shared/types'
+import type { VideoAsset } from '@shared/videoTypes'
 import { prepareVideoSamplesForDisplay, SAMPLE_FALLBACK_RATIO } from '@shared/mediaGalleryDisplay'
 import { api, assetUrl } from '../api'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
@@ -182,7 +182,7 @@ export default function VideoSampleGallery({
   return (
     <>
       <section className="detail-section detail-section--samples">
-        <div className="detail-section-head sample-section-head">
+        <div className="detail-section-head detail-section-head--with-actions">
           <h2 className="section-title">样张</h2>
           <div className="detail-section-actions">
             <span className="detail-section-count">{samples.length} 张</span>

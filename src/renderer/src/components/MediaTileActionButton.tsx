@@ -36,11 +36,11 @@ export default function MediaTileActionButton({
       className={[
         'media-tile-action',
         `media-tile-action--${action}`,
-        action === 'delete' ? 'icon-btn--danger' : '',
         className
       ]
         .filter(Boolean)
         .join(' ')}
+      tone={action === 'delete' ? 'danger' : 'default'}
       icon={icon ?? (action === 'delete' ? <Trash2 {...UI_ICON_SM} /> : <X {...UI_ICON_SM} />)}
       label={label}
       title={title ?? label}

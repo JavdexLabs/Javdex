@@ -72,6 +72,42 @@ app.getPath('userData')/scraper_plugins/{video|actress}/{plugin-name}/
 | `ctx.helpers.normalizeText(text)` | 折叠空白 |
 | `ctx.helpers.unique(values)` | 去重字符串数组 |
 
+### 受信内置服务绑定
+
+应用打包目录中的特定内置插件可由 Javdex 声明 `serviceBinding`。目前唯一绑定为影片插件 MetaTube：
+
+```json
+{
+  "kind": "video",
+  "name": "MetaTube",
+  "serviceBinding": "metatube"
+}
+```
+
+这不是用户插件 API。`.avscraper.json` 或用户插件安装目录中出现 `serviceBinding` 会被主进程拒绝；绑定插件也不可导出、读取代码或交给插件开发 Agent 调试。普通插件的 `ctx.service` 为 `undefined`。
+
+受信绑定插件额外获得：
+
+```js
+const payload = await ctx.service.getJson('/v1/movies/search', {
+  query: { q: ctx.code, fallback: true }
+})
+const imageUrl = ctx.service.publicUrl('/v1/images/primary/provider/id', {
+  quality: 90
+})
+```
+
+- `getJson(relativePath, { query })` 仅接受配置 origin 和反向代理 base path 内的相对路径。主进程负责可选 Bearer Token、代理、同源重定向、超时、2 MiB 响应上限和错误分类；Token 不进入 Worker。
+- `publicUrl(relativePath, query)` 只生成同一服务范围内的公开 URL，不添加 Token，适合 MetaTube 的公开图片路由。
+- 用户每次开始刮削时，主进程快照地址、代理和 Token；任务运行中修改配置不会改变该任务的连接参数。
+- 服务地址必须由用户配置。未配置的绑定插件不会进入可执行插件列表，也不能成为默认源或组合字段源。
+
+### 共享浏览器窗口
+
+`ctx.fetchPage` 与 `ctx.browser.*` 共用主进程里唯一一个刮削窗口。`fetchPage` 已在主进程内部排队，并发调用会退化为顺序执行，因此 `Promise.all(urls.map(ctx.fetchPage))` 是安全的，只是不会真正并行、总耗时等于各页之和。
+
+`ctx.browser.*` 不提供这个保证：一串 `click` / `type` / `snapshot` 依赖页面在调用之间保持不动，所以浏览器动作序列必须顺序 `await`，且不可与 `fetchPage` 交叉。
+
 ### `ctx.fetchBuffer` 持久缓存
 
 设计决定见 [ADR-0001](./adr/0001-integrate-gfriends-as-actress-avatar-source.md)。
@@ -110,13 +146,19 @@ const body = await ctx.fetchBuffer(url, {
 
 ### `supportedFields`（video）
 
-字段 id 与 `src/shared/types.ts` 中 `VideoScrapeField` 一致：
+字段 id 与 `src/shared/scrapeTypes.ts` 中 `VideoScrapeField` 一致：
 
 `title`、`summary`、`cover`、`releaseDate`、`maker`、`publisher`、`series`、`director`、`duration`、`actressesFemale`、`actressesMale`、`tags`、`source`、`rating`、`samples`
 
 ### 返回值
 
-返回 `null` 表示未匹配；否则返回对象（字段均为可选，但须与 `supportedFields` 一致）：
+影片插件可返回以下三种值：
+
+- `null` 或空数组：未匹配。
+- 单个对象：兼容旧插件的单结果形式；`code` 建议提供，省略时主进程使用本次查询番号。
+- 对象数组：搜索页存在多个精确匹配结果时返回全部候选。数组中每个对象都必须提供非空 `code`，任一项无效都会拒绝整次插件结果。
+
+候选对象除 `code` 外的字段均为可选，但须与 `supportedFields` 一致：
 
 ```js
 {
@@ -138,6 +180,17 @@ const body = await ctx.fetchBuffer(url, {
   tags: ['...']
 }
 ```
+
+数组示例：
+
+```js
+[
+  { code: 'IPX-535', title: '版本 A', sourceUrl: 'https://example.test/a' },
+  { code: 'IPX-535', title: '版本 B', sourceUrl: 'https://example.test/b' }
+]
+```
+
+主进程会将查询番号与候选 `code` 分别执行去空格、转大写规范化，只保留精确相等的候选；不接受前缀、包含或模糊匹配。被过滤的候选会生成警告。随后按规范化后的 `sourceUrl` 去重；是否显式包含尾部 `/` 会保留为不同来源。多个有效候选不会自动选择，而是进入“待确认”中心。
 
 日期必须为合法 `YYYY-MM-DD`，禁止 `YYYY-MM-00`。
 

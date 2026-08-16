@@ -2,8 +2,9 @@ import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
-import type { ScraperPluginKind } from '@shared/types'
-import { BUNDLED_PLUGINS_ROOT_ENV } from '@shared/appIdentity'
+import type { ScraperPluginKind } from '@shared/scraperPluginTypes'
+import type { ScraperServiceId } from '@shared/scraperServiceTypes'
+import { BUNDLED_PLUGINS_ROOT_ENV, readTestUserDataPath } from '@shared/appIdentity'
 
 export interface BundledPluginRecord {
   dir: string
@@ -18,12 +19,13 @@ export interface BundledPluginRecord {
     homepage?: string
     supportedFields: string[]
     entry: string
+    serviceBinding?: ScraperServiceId
   }
 }
 
 /** Root directory containing bundled plugin packages shipped with the app. */
 export function bundledPluginsRoot(): string {
-  if (process.env[BUNDLED_PLUGINS_ROOT_ENV]) {
+  if (readTestUserDataPath() && process.env[BUNDLED_PLUGINS_ROOT_ENV]) {
     return process.env[BUNDLED_PLUGINS_ROOT_ENV]
   }
   let appPath = process.cwd()
@@ -57,6 +59,11 @@ export function readBundledPluginRecords(kind: ScraperPluginKind): BundledPlugin
     try {
       const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as BundledPluginRecord['manifest']
       if (parsed.kind !== kind || !parsed.name?.trim() || !parsed.entry?.trim()) continue
+      if (parsed.serviceBinding !== undefined && parsed.serviceBinding !== 'metatube') continue
+      if (
+        parsed.serviceBinding === 'metatube' &&
+        (parsed.kind !== 'video' || parsed.name.trim() !== 'MetaTube')
+      ) continue
       const entryPath = path.join(dir, parsed.entry.trim())
       if (!fs.existsSync(entryPath)) continue
       plugins.push({
@@ -71,7 +78,8 @@ export function readBundledPluginRecords(kind: ScraperPluginKind): BundledPlugin
           author: parsed.author?.trim() || undefined,
           homepage: parsed.homepage?.trim() || undefined,
           supportedFields: Array.isArray(parsed.supportedFields) ? parsed.supportedFields : [],
-          entry: parsed.entry.trim()
+          entry: parsed.entry.trim(),
+          serviceBinding: parsed.serviceBinding
         }
       })
     } catch {

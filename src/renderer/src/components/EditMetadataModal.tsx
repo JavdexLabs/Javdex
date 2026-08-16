@@ -1,12 +1,23 @@
 import { useMemo, useState } from 'react'
 import { isIsoDate, toDateInputValue, actressMergeGenderGroup } from '@shared/actressProfileOptions'
-import type { Actress, VideoDetail, VideoEditInput } from '@shared/types'
+import type { Actress } from '@shared/actressTypes'
+import type { VideoDetail, VideoEditInput } from '@shared/videoTypes'
 import { assetUrl } from '../api'
 import EditFieldAiTranslate from './EditFieldAiTranslate'
 import { EditFormField, EditFormSection } from './FormPrimitives'
 import ImageImportField from './ImageImportField'
 import Modal from './Modal'
 import { useTheme } from './ThemeProvider'
+import OrganizationPickerField from './OrganizationPickerField'
+import DirectorPickerField from './DirectorPickerField'
+import SeriesPickerField from './SeriesPickerField'
+import RelatedLinksEditor, { relatedLinksFromDraft } from './RelatedLinksEditor'
+import type { RelatedLinkInput } from '@shared/relatedLinkTypes'
+import type {
+  DirectorAssignmentInput,
+  OrganizationAssignmentInput,
+  SeriesAssignmentInput
+} from '@shared/classificationTypes'
 
 interface Props {
   video: VideoDetail
@@ -27,9 +38,24 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
   const [title, setTitle] = useState(video.title ?? '')
   const [releaseDate, setReleaseDate] = useState(toDateInputValue(video.release_date))
   const [director, setDirector] = useState(video.director ?? '')
+  const [directorAssignment, setDirectorAssignment] = useState<DirectorAssignmentInput | null>(
+    video.director_id ? { directorId: video.director_id } : null
+  )
   const [maker, setMaker] = useState(video.maker ?? '')
   const [publisher, setPublisher] = useState(video.publisher ?? '')
+  const [makerOrganization, setMakerOrganization] = useState<OrganizationAssignmentInput | null>(
+    video.maker_organization_id ? { organizationId: video.maker_organization_id } : null
+  )
+  const [publisherOrganization, setPublisherOrganization] =
+    useState<OrganizationAssignmentInput | null>(
+      video.publisher_organization_id
+        ? { organizationId: video.publisher_organization_id }
+        : null
+    )
   const [series, setSeries] = useState(video.series ?? '')
+  const [seriesAssignment, setSeriesAssignment] = useState<SeriesAssignmentInput | null>(
+    video.series_id ? { seriesId: video.series_id } : null
+  )
   const [summary, setSummary] = useState(video.summary ?? '')
   const [tags, setTags] = useState(
     video.tags
@@ -48,7 +74,11 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
   const [actressesFemale, setActressesFemale] = useState(initialActressesFemale)
   const [actressesMale, setActressesMale] = useState(initialActressesMale)
   const [coverSourcePath, setCoverSourcePath] = useState<string | null>(null)
+  const [links, setLinks] = useState<RelatedLinkInput[]>(
+    (video.links ?? []).map(({ label, url }) => ({ label, url }))
+  )
   const [saving, setSaving] = useState(false)
+  const metadataLocked = Boolean(video.has_pending_scrape)
   const mediaEditorsHidden =
     privacyMode.privacyModeEnabled &&
     privacyMode.privacyModeScopes.includes('mediaEditors')
@@ -62,17 +92,23 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
   const handleSave = async (): Promise<void> => {
     setSaving(true)
     try {
+      const nextLinks = relatedLinksFromDraft(links)
+      if (metadataLocked) {
+        await onSave({ links: nextLinks })
+        return
+      }
       await onSave({
         title: title.trim() || null,
         release_date: releaseDate.trim() || null,
-        maker: maker.trim() || null,
-        publisher: publisher.trim() || null,
-        series: series.trim() || null,
-        director: director.trim() || null,
+        makerOrganization,
+        publisherOrganization,
+        seriesAssignment,
+        directorAssignment,
         summary: summary.trim() || null,
         tags: splitList(tags),
         actressesFemale: splitList(actressesFemale),
         actressesMale: splitList(actressesMale),
+        links: nextLinks,
         ...(coverSourcePath && !mediaEditorsHidden ? { coverSourcePath } : {})
       })
     } finally {
@@ -95,6 +131,12 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
       onConfirm={() => void handleSave()}
     >
       <div className="entity-edit-form">
+        {metadataLocked ? (
+          <p className="entity-edit-field-hint">
+            这部影片有待确认刮削结果，目前只能编辑相关链接。
+          </p>
+        ) : (
+          <>
         {!mediaEditorsHidden ? (
           <EditFormSection title="封面" className="entity-edit-section--media">
             <ImageImportField
@@ -138,11 +180,18 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
             </EditFormField>
 
             <EditFormField label="导演" htmlFor="video-edit-director">
-              <input
+              <DirectorPickerField
                 id="video-edit-director"
-                className="text-input"
                 value={director}
-                onChange={(e) => setDirector(e.target.value)}
+                selectedId={
+                  directorAssignment && 'directorId' in directorAssignment
+                    ? directorAssignment.directorId
+                    : null
+                }
+                onChange={(value, assignment) => {
+                  setDirector(value)
+                  setDirectorAssignment(assignment)
+                }}
               />
             </EditFormField>
 
@@ -168,29 +217,43 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
         <EditFormSection title="出品信息">
           <div className="entity-edit-fields">
             <EditFormField label="制作商" htmlFor="video-edit-maker">
-              <input
+              <OrganizationPickerField
                 id="video-edit-maker"
-                className="text-input"
+                role="maker"
                 value={maker}
-                onChange={(e) => setMaker(e.target.value)}
+                onChange={setMaker}
+                onAssignmentChange={setMakerOrganization}
               />
             </EditFormField>
 
             <EditFormField label="发行商" htmlFor="video-edit-publisher">
-              <input
+              <OrganizationPickerField
                 id="video-edit-publisher"
-                className="text-input"
+                role="publisher"
                 value={publisher}
-                onChange={(e) => setPublisher(e.target.value)}
+                onChange={setPublisher}
+                onAssignmentChange={setPublisherOrganization}
               />
             </EditFormField>
 
-            <EditFormField label="系列" htmlFor="video-edit-series" span={2}>
-              <input
+            <EditFormField
+              label="系列"
+              htmlFor="video-edit-series"
+              hint="搜索已有系列；保留未选择的输入会新建未归属系列"
+              span={2}
+            >
+              <SeriesPickerField
                 id="video-edit-series"
-                className="text-input"
                 value={series}
-                onChange={(e) => setSeries(e.target.value)}
+                selectedId={
+                  seriesAssignment && 'seriesId' in seriesAssignment
+                    ? seriesAssignment.seriesId
+                    : null
+                }
+                onChange={(value, assignment) => {
+                  setSeries(value)
+                  setSeriesAssignment(assignment)
+                }}
               />
             </EditFormField>
           </div>
@@ -239,6 +302,9 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
             </EditFormField>
           </div>
         </EditFormSection>
+          </>
+        )}
+        <RelatedLinksEditor disabled={saving} links={links} onChange={setLinks} />
       </div>
     </Modal>
   )

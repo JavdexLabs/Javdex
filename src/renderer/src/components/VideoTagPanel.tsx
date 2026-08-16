@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Tag, VideoTag } from '@shared/types'
+import type { Tag } from '@shared/commonTypes'
+import type { VideoTag } from '@shared/videoTypes'
 import { api } from '../api'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import Modal from './Modal'

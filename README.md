@@ -58,15 +58,15 @@
 ## 为什么选择 Javdex
 
 - **本地优先**：SQLite 数据库、设置与图片资产默认保存在设备中。
-- **快速建库**：递归扫描目录，识别常见视频格式并从复杂文件名解析编号。
+- **快速建库**：递归扫描本地目录，或按番号手动导入直链、网页、Magnet 与 ED2K 资源。
 - **插件化元数据**：按字段组合影片与人物插件，获取结构化资料和图片资产。
-- **高效维护**：支持搜索、筛选、分类、清单、批量任务和多文件关联。
+- **高效维护**：支持搜索、资源类型筛选、分类、清单、批量任务和多资源关联。
 - **人物资料**：维护头像、写真、别名与关联作品，并可在本地完成头像构图。
 - **开放扩展**：内置插件开发助手，并提供可选 MCP 服务接入外部开发工具。
 
 ## 本地意味着什么
 
-Javdex 围绕你已有的本地文件建立索引。数据库、下载的图片和应用设置由你掌控；播放时调用系统默认播放器，本地人脸检测也不需要上传图片。
+Javdex 围绕本地文件和你手动添加的资源链接建立索引。数据库、下载的图片和应用设置由你掌控；打开影片资源时交给系统默认应用，本地人脸检测也不需要上传图片。
 
 Javdex 不提供、不托管、不分发任何媒体内容，也不内置在线播放服务。
 
@@ -75,6 +75,7 @@ Javdex 不提供、不托管、不分发任何媒体内容，也不内置在线�
 ```text
 userData/
   data/library.db
+  scraper-service-secrets.json
   media_assets/
     covers/
     avatars/
@@ -89,8 +90,9 @@ userData/
 
 ### 媒体库
 
-- 扫描本地目录并识别常见视频格式
-- 解析编号、关联多个本地文件、迁移变化后的路径
+- 扫描本地目录并识别常见视频格式，支持定时自动扫描
+- 解析编号，并统一管理本地文件、HTTP 直链、网页、Magnet 与 ED2K 资源
+- 按资源类型筛选，支持多资源关联、主资源切换与本地路径迁移
 - 按人物、标签、制作方、发行方、系列与导演浏览
 - 支持搜索、组合筛选、排序、清单与批量选择
 
@@ -109,6 +111,18 @@ userData/
 - 可选 MCP 服务连接 IDE 或其它开发工具
 
 插件格式和运行时 API 见 [刮削插件规范](docs/SCRAPER_PLUGIN_FORMAT.md)，开发助手工作流见 [插件开发 Agent 文档](docs/PLUGIN_DEV_AGENT.md)。
+
+### MetaTube 内置影片插件
+
+MetaTube 用于连接你自行部署的 `metatube-server`，Javdex 不提供公共服务端，也不随安装包分发 Go 服务端、数据库或服务进程。首次安装时该插件会显示为“待配置”；在 **设置 → 刮削插件 → MetaTube** 保存 HTTP(S) 服务地址后才可设为默认源或加入组合。
+
+- 可选 Bearer Token 由主进程通过系统凭证保护能力保存，不会传入插件 Worker、普通设置、URL、日志或插件导出包。
+- 远程 HTTP 会显示隐私风险；HTTP 与 Token 同时使用时必须明确确认，建议非本机服务使用 HTTPS。
+- 查询番号和服务返回的数据会发送给你配置的服务端；是否进一步访问上游站点由该 MetaTube Server 的配置和 Provider 决定。
+- MetaTube 返回的 `actors` 全部按女性演员导入；`label` 近似映射为 Javdex 的发行方。
+- 封面和样张使用 MetaTube 原生公开 `/v1/images` 路由，图片 URL 不携带 Token；首版不支持在额外反向代理层为这些图片单独加鉴权。
+
+验收基线为 MetaTube Server v1.4.0，但运行时按 `/v1` 接口契约判断兼容性，不按版本号硬性拦截。MetaTube 项目及许可说明见 [第三方说明](docs/THIRD_PARTY_NOTICES.md)。
 
 ## 开发
 
@@ -178,6 +192,7 @@ Javdex 基于 Electron、React、TypeScript、Vite 和 `better-sqlite3` 构建�
 | [版本与发布](docs/VERSIONING_AND_RELEASE.md) | 版本号、标签与 Release 流程 |
 | [刮削插件规范](docs/SCRAPER_PLUGIN_FORMAT.md) | 插件包格式与沙箱 API |
 | [插件开发 Agent](docs/PLUGIN_DEV_AGENT.md) | 开发助手与 MCP 工作流 |
+| [第三方说明](docs/THIRD_PARTY_NOTICES.md) | 第三方项目、许可与集成边界 |
 | [UI 设计规范](docs/UI_DESIGN_GUIDELINES.md) | 视觉原则与语义 token |
 | [路由设计](docs/ROUTING_DESIGN.md) | 页面路由、查询状态与返回栈 |
 | [更新日志](CHANGELOG.md) | 版本变更记录 |

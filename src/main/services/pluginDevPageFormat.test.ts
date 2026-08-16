@@ -5,7 +5,7 @@ import {
   formatPageInsightForPrompt,
   formatPageLinksForPrompt
 } from './pluginDevPageFormat'
-import type { PluginDevPageInsight } from '@shared/types'
+import type { PluginDevPageInsight } from '@shared/pluginDevTypes'
 
 const tokyolibPage: PluginDevPageInsight = {
   label: '调试详情页',

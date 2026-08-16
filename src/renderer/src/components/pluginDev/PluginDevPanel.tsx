@@ -1,19 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Code2, Settings } from 'lucide-react'
 import { findLlmProviderViewModel, listModelsForProvider } from '@shared/llmProviders'
-import type {
-  AppSettings,
-  ActressScrapeField,
-  PluginDevAgentContextStats,
-  PluginDevAgentEvent,
-  PluginDevAgentPhase,
-  PluginDevDryRunResult,
-  PluginDevSessionStatus,
-  PluginDevVerificationReport,
-  ScraperPluginPackage,
-  VideoScrapeField
-} from '@shared/types'
+import type { SettingsSnapshot } from '@shared/settingsTypes'
+import type { ActressScrapeField, ScraperPluginPackage, VideoScrapeField } from '@shared/scrapeTypes'
+import type { PluginDevAgentContextStats, PluginDevAgentEvent, PluginDevAgentPhase, PluginDevDryRunResult, PluginDevSessionStatus, PluginDevVerificationReport } from '@shared/pluginDevTypes'
 import { api } from '../../api'
 import { settingsPath } from '../../settings/settingsRoutes'
 import IconButton from '../IconButton'
@@ -40,6 +31,7 @@ import {
   parseTestTargetList,
   testTargetsFromDryRun
 } from '@shared/pluginDevKindProfile'
+import styles from './PluginDevPanel.module.css'
 
 let conversationSeq = 0
 function nextConversationId(prefix: string): string {
@@ -102,8 +94,8 @@ export default function PluginDevPanel({
   loadPackage,
   onLoadConsumed
 }: {
-  settings: AppSettings
-  setSettings: (settings: AppSettings) => void
+  settings: SettingsSnapshot
+  setSettings: (settings: SettingsSnapshot) => void
   onInstalled: (kind: PluginKind) => Promise<void>
   loadPackage: ScraperPluginPackage | null
   onLoadConsumed: () => void
@@ -152,6 +144,8 @@ export default function PluginDevPanel({
   const agentStatusRef = useRef<PluginDevSessionStatus | null>(null)
   const isAgentRunningRef = useRef(false)
   const packageFingerprintRef = useRef<string | null>(null)
+  const onInstalledRef = useRef(onInstalled)
+  const onLoadConsumedRef = useRef(onLoadConsumed)
 
   const allFields = allFieldsForKind(kind)
   const kindProfile = useMemo(() => getPluginDevKindProfile(kind), [kind])
@@ -202,6 +196,49 @@ export default function PluginDevPanel({
   useEffect(() => {
     agentStatusRef.current = agentStatus
   }, [agentStatus])
+
+  useEffect(() => {
+    onInstalledRef.current = onInstalled
+  }, [onInstalled])
+
+  useEffect(() => {
+    onLoadConsumedRef.current = onLoadConsumed
+  }, [onLoadConsumed])
+
+  const applyGeneratedPackage = useCallback((pkg: ScraperPluginPackage): void => {
+    setKind(pkg.kind)
+    setSiteName(pkg.name)
+    setVersion(pkg.version ?? '1.0.0')
+    setDescription(pkg.description ?? '')
+    setAuthor(pkg.author ?? 'Plugin Dev Agent')
+    setSiteUrl((current) => pkg.homepage ?? current)
+    setSupportedFieldIds(pkg.supportedFields ?? [])
+    setCode(pkg.code)
+  }, [])
+
+  const refreshUserPlugins = useCallback(async (pluginKind: PluginKind): Promise<void> => {
+    setPluginsLoading(true)
+    try {
+      const details =
+        pluginKind === 'video'
+          ? await api.scrape.listPluginDetails()
+          : await api.actressScrape.listPluginDetails()
+      setSelectablePlugins(
+        details
+          .filter(
+            (plugin): plugin is typeof plugin & { source: 'user' | 'builtin' } =>
+              plugin.source === 'user' || plugin.source === 'builtin'
+          )
+          .map((plugin) => ({ name: plugin.name, source: plugin.source }))
+          .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+      )
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+      setSelectablePlugins([])
+    } finally {
+      setPluginsLoading(false)
+    }
+  }, [toast])
 
   useEffect(() => {
     return () => {
@@ -272,7 +309,7 @@ export default function PluginDevPanel({
         setForkedFromBuiltIn(null)
         setSelectedPluginName(event.descriptor.name)
         setInstalledBaseline(fingerprintPluginPackage(event.package))
-        void onInstalled(event.package.kind)
+        void onInstalledRef.current(event.package.kind)
         void refreshUserPlugins(event.package.kind)
         toast.show(`已安装自定义插件：${event.descriptor.name}`, 'success')
       }
@@ -308,9 +345,9 @@ export default function PluginDevPanel({
       }
     })
     return off
-  }, [toast])
+  }, [applyGeneratedPackage, refreshUserPlugins, toast])
 
-  const resetAgentUi = (): void => {
+  const resetAgentUi = useCallback((): void => {
     setAgentSessionId(null)
     setAgentStatus(null)
     setAgentPhase('idle')
@@ -321,9 +358,9 @@ export default function PluginDevPanel({
     setVerification(null)
     setConversationItems([])
     setAgentTab('conversation')
-  }
+  }, [])
 
-  const applyLoadedPackage = (pkg: ScraperPluginPackage): void => {
+  const applyLoadedPackage = useCallback((pkg: ScraperPluginPackage): void => {
     setKind(pkg.kind)
     setSiteName(pkg.name)
     setVersion(pkg.version ?? '1.0.0')
@@ -341,7 +378,7 @@ export default function PluginDevPanel({
     setVerification(null)
     resetAgentUi()
     setFeedbackText('')
-  }
+  }, [resetAgentUi])
 
   const resetToNewPlugin = (nextKind: PluginKind): void => {
     setKind(nextKind)
@@ -364,33 +401,9 @@ export default function PluginDevPanel({
     setFeedbackText('')
   }
 
-  const refreshUserPlugins = async (pluginKind: PluginKind): Promise<void> => {
-    setPluginsLoading(true)
-    try {
-      const details =
-        pluginKind === 'video'
-          ? await api.scrape.listPluginDetails()
-          : await api.actressScrape.listPluginDetails()
-      setSelectablePlugins(
-        details
-          .filter(
-            (plugin): plugin is typeof plugin & { source: 'user' | 'builtin' } =>
-              plugin.source === 'user' || plugin.source === 'builtin'
-          )
-          .map((plugin) => ({ name: plugin.name, source: plugin.source }))
-          .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
-      )
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-      setSelectablePlugins([])
-    } finally {
-      setPluginsLoading(false)
-    }
-  }
-
   useEffect(() => {
     void refreshUserPlugins(kind)
-  }, [kind])
+  }, [kind, refreshUserPlugins])
 
   const loadInstalledPlugin = async (name: string): Promise<void> => {
     if (pluginsLoading || busy !== null) return
@@ -424,7 +437,7 @@ export default function PluginDevPanel({
     }
   }
 
-  const buildPackage = (): ScraperPluginPackage => ({
+  const buildPackage = useCallback((): ScraperPluginPackage => ({
     schemaVersion: 1,
     kind,
     name: siteName.trim() || derivePluginNameFromUrl(siteUrl, kind),
@@ -434,26 +447,14 @@ export default function PluginDevPanel({
     homepage: siteUrl.trim() || undefined,
     supportedFields: supportedFieldIds.length > 0 ? (supportedFieldIds as Array<VideoScrapeField | ActressScrapeField>) : allFields,
     code
-  })
+  }), [allFields, author, code, description, kind, siteName, siteUrl, supportedFieldIds, version])
 
   const hasUninstalledChanges = useMemo(() => {
     if (!hasPackage) return false
     const current = fingerprintPluginPackage(buildPackage())
     if (installedBaseline) return current !== installedBaseline
     return true
-  }, [
-    hasPackage,
-    installedBaseline,
-    kind,
-    siteName,
-    siteUrl,
-    testTarget,
-    description,
-    version,
-    author,
-    supportedFieldIds,
-    code
-  ])
+  }, [buildPackage, hasPackage, installedBaseline])
 
   const currentPackageFingerprint = hasPackage ? fingerprintPluginPackage(buildPackage()) : null
   const resultStale =
@@ -489,8 +490,8 @@ export default function PluginDevPanel({
   useEffect(() => {
     if (!loadPackage) return
     applyLoadedPackage(loadPackage)
-    onLoadConsumed()
-  }, [loadPackage])
+    onLoadConsumedRef.current()
+  }, [applyLoadedPackage, loadPackage])
 
   const runGuardedAction = (action: () => void): void => {
     if (hasUninstalledChanges) {
@@ -527,17 +528,6 @@ export default function PluginDevPanel({
       supportedFields: pkg.supportedFields ?? allFields,
       testTargets: targets.length > 0 ? targets : undefined
     }
-  }
-
-  const applyGeneratedPackage = (pkg: ScraperPluginPackage): void => {
-    setKind(pkg.kind)
-    setSiteName(pkg.name)
-    setVersion(pkg.version ?? '1.0.0')
-    setDescription(pkg.description ?? '')
-    setAuthor(pkg.author ?? 'Plugin Dev Agent')
-    setSiteUrl(pkg.homepage ?? siteUrl)
-    setSupportedFieldIds(pkg.supportedFields ?? [])
-    setCode(pkg.code)
   }
 
   const saveAgentSettings = async (): Promise<void> => {
@@ -699,7 +689,7 @@ export default function PluginDevPanel({
     }
     if (
       await startAgent(
-        Boolean(loadedInstalledName || forkedFromBuiltIn) ? 'debug' : 'feedback',
+        loadedInstalledName || forkedFromBuiltIn ? 'debug' : 'feedback',
         feedback
       )
     ) {
@@ -806,13 +796,13 @@ export default function PluginDevPanel({
       <WorkbenchToolbar className="plugin-dev-toolbar">
         <div className="plugin-dev-toolbar-start">
           <div
-            className="settings-tab-bar settings-tab-bar--compact plugin-dev-kind-toggle plugin-dev-toolbar-kind-toggle"
+            className={`${styles.kindToggle} plugin-dev-kind-toggle plugin-dev-toolbar-kind-toggle`}
             role="group"
             aria-label="插件类型"
           >
             <button
               type="button"
-              className={`settings-tab-button${kind === 'video' ? ' is-active' : ''}`}
+              className={`${styles.kindButton}${kind === 'video' ? ` ${styles.kindButtonActive}` : ''}`}
               disabled={busy !== null}
               onClick={() => changeKind('video')}
             >
@@ -820,7 +810,7 @@ export default function PluginDevPanel({
             </button>
             <button
               type="button"
-              className={`settings-tab-button${kind === 'actress' ? ' is-active' : ''}`}
+              className={`${styles.kindButton}${kind === 'actress' ? ` ${styles.kindButtonActive}` : ''}`}
               disabled={busy !== null}
               onClick={() => changeKind('actress')}
             >

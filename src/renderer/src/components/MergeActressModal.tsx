@@ -4,7 +4,8 @@ import {
   actressGenderMergeLabel,
   canMergeActressGenders
 } from '@shared/actressProfileOptions'
-import type { ActressDetail, ActressGender, ActressListItem, ActressMergeMainNameFrom } from '@shared/types'
+import type { ActressGender, ActressListItem, ActressMergeMainNameFrom } from '@shared/actressTypes'
+import type { ActressDetail } from '@shared/actressTypes'
 import { api, assetUrl } from '../api'
 import { useDebounce } from '../hooks/useDebounce'
 import ActressName from './ActressName'
@@ -12,6 +13,7 @@ import ActressAvatar from './ActressAvatar'
 import Modal from './Modal'
 import EmptyState from './EmptyState'
 import { UI_ICON_SM } from './iconDefaults'
+import Button from './Button'
 
 interface Props {
   keepActress: ActressDetail
@@ -187,23 +189,24 @@ export default function MergeActressModal({
     <Modal
       title="合并演员"
       hint={`将另一名${actressGenderMergeLabel(keepActress.gender)}资料并入当前条目。列表只显示可合并候选；影片与写真会保留，对方记录将被删除。`}
+
       size="md"
       className="merge-actress-modal"
-      bodyClassName="modal-body--fixed"
+      bodyOverflow="hidden"
       onCancel={onCancel}
       actions={
         <>
-          <button type="button" className="btn" onClick={onCancel} disabled={merging}>
+          <Button type="button" onClick={onCancel} disabled={merging}>
             取消
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn btn-danger"
+            variant="danger"
             disabled={!selected || merging}
             onClick={() => void doMerge()}
           >
             {merging ? '合并中…' : '确认合并'}
-          </button>
+          </Button>
         </>
       }
     >

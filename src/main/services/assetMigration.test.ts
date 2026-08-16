@@ -8,7 +8,7 @@ import { insertTestVideoWithFile } from '../db/testVideoFixtures'
 import { resetAssetKeyCacheForTests } from './assetCrypto'
 import { migrateAssetStorage } from './assetMigration'
 import { getPathAlias } from './assetPathAliases'
-import { coversDir, ensureAssetDirs } from './assetService'
+import { mediaAssetStore } from './mediaAssetStore'
 import { isOpaqueEncFilename } from './assetPathNaming'
 
 let tempRoot: string | null = null
@@ -22,7 +22,7 @@ beforeEach(() => {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-asset-mig-'))
   process.env.JAVDEX_TEST_USER_DATA = tempRoot
   initDatabaseAtPath(path.join(tempRoot, 'library.db'))
-  ensureAssetDirs()
+  mediaAssetStore.ensureReady()
 })
 
 afterEach(() => {
@@ -39,7 +39,7 @@ describe('assetMigration opaque paths', () => {
   it('encrypts to opaque paths and restores readable paths on decrypt', async () => {
     const plainName = 'IPX-535_ab12cd34.jpg'
     const plainRel = `covers/${plainName}`
-    const plainAbs = path.join(coversDir(), plainName)
+    const plainAbs = path.join(mediaAssetStore.subdirPath('covers'), plainName)
     fs.writeFileSync(plainAbs, MIN_JPEG)
 
     const db = getDb()
@@ -55,7 +55,7 @@ describe('assetMigration opaque paths', () => {
     await migrateAssetStorage(true, () => {})
 
     assert.equal(fs.existsSync(plainAbs), false)
-    const encFiles = fs.readdirSync(coversDir()).filter((name) => name.endsWith('.enc'))
+    const encFiles = fs.readdirSync(mediaAssetStore.subdirPath('covers')).filter((name) => name.endsWith('.enc'))
     assert.equal(encFiles.length, 1)
     assert.equal(isOpaqueEncFilename(encFiles[0]), true)
     assert.equal(encFiles[0].includes('IPX'), false)
@@ -70,7 +70,7 @@ describe('assetMigration opaque paths', () => {
     await migrateAssetStorage(false, () => {})
 
     assert.equal(fs.existsSync(plainAbs), true)
-    assert.equal(fs.readdirSync(coversDir()).some((name) => name.endsWith('.enc')), false)
+    assert.equal(fs.readdirSync(mediaAssetStore.subdirPath('covers')).some((name) => name.endsWith('.enc')), false)
     const restored = db.prepare('SELECT cover_path FROM videos WHERE code = ?').get('IPX-535') as {
       cover_path: string
     }

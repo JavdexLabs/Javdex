@@ -1,10 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type {
-  PluginDevAgentEvent,
-  PluginDevAgentWorkLogEntry,
-  PluginDevAgentWorkLogExport
-} from '@shared/types'
+import type { PluginDevAgentEvent, PluginDevAgentWorkLogEntry, PluginDevAgentWorkLogExport } from '@shared/pluginDevTypes'
 import { getSession } from './sessionStore'
 import type { PluginDevSession } from './types'
 

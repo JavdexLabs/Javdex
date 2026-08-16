@@ -4,36 +4,40 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createAvatarCropV1, parseAvatarCrop } from '@shared/avatarCrop'
-import type { ScrapedStatus } from '@shared/types'
+import type { ScrapedStatus } from '@shared/commonTypes'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
 import { insertTestVideoWithFile } from './testVideoFixtures'
 import {
   addActressGalleryAsset,
-  applyActressScrapeResult,
   clearActressMetadataRecord,
-  clearBrokenActressAvatarIfNeeded,
   countActressesForBatchScrape,
   deleteActressGalleryAsset,
+  deleteUnlinkedActressRecords,
   deleteUnlinkedActresses,
   backfillActressGalleryAssetDimensions,
-  editActress,
   findActressByNameOrAlias,
   listActresses,
   listActressesForBatchScrape,
+  listActressAvatarCandidates,
   listActressPage,
   markActressScrapeSucceeded,
-  mergeActresses,
-  getActressAvatarSourceInfo,
   getActressDetail,
-  planActressScrapeResult,
   replaceActressGalleryAssets,
   recordActressScrapeFailure,
   resolveEffectiveActressScrapeFields,
-  setActressAvatarBundle,
   setActressPosterPath,
-  upsertActressFromScrape
 } from './actressRepo'
-import { avatarSourceFingerprint } from '../services/assetService'
+import {
+  applyActressScrapeResult,
+  clearBrokenActressAvatarIfNeeded,
+  editActressWithAssets as editActress,
+  getActressAvatarSourceInfo,
+  mergeActressesWithAssets as mergeActresses,
+  planActressScrapeResult,
+  setActressAvatarBundle,
+  upsertActressFromScrapeWithAssets as upsertActressFromScrape
+} from '../services/actressAssetService'
+import { mediaAssetStore } from '../services/mediaAssetStore'
 import { findActressIdByOwnedName } from './actressNameOwnership'
 
 let tempRoot: string | null = null
@@ -231,6 +235,35 @@ describe('actressRepo actress name ownership', () => {
     assert.equal(findActressIdByOwnedName('Complete'), 1)
     assert.equal(findActressIdByOwnedName('Changed Before Conflict'), null)
   })
+
+  it('rolls back profile changes and compensates new avatar files when the database write fails', () => {
+    setupDb()
+    const db = getDb()
+    db.exec(`
+      CREATE TRIGGER fail_avatar_update
+      BEFORE UPDATE OF avatar_path ON actresses
+      BEGIN
+        SELECT RAISE(ABORT, 'forced avatar failure');
+      END
+    `)
+
+    assert.throws(
+      () => editActress(1, {
+        birth_date: '1999-01-01',
+        avatarImageBase64: MINIMAL_JPEG.toString('base64')
+      }),
+      /forced avatar failure/
+    )
+
+    const row = db.prepare(
+      'SELECT birth_date, avatar_path, avatar_source_path FROM actresses WHERE id = 1'
+    ).get() as { birth_date: string | null; avatar_path: string | null; avatar_source_path: string | null }
+    assert.equal(row.birth_date, '1990-01-01')
+    assert.equal(row.avatar_path, 'avatars/complete.jpg')
+    assert.equal(row.avatar_source_path, null)
+    const sourceDir = path.join(tempRoot!, 'media_assets', 'avatar_sources')
+    assert.deepEqual(fs.existsSync(sourceDir) ? fs.readdirSync(sourceDir) : [], [])
+  })
 })
 
 describe('actressRepo.listActresses', () => {
@@ -362,6 +395,36 @@ describe('actressRepo.listActressPage', () => {
     update.run(1, 3)
   }
 
+  it('returns a stable slice with the total number of matching actresses', () => {
+    setupDb()
+
+    const first = listActressPage({ gender: 'all', limit: 2, offset: 0 })
+    const second = listActressPage({ gender: 'all', limit: 2, offset: 2 })
+
+    assert.equal(first.total, 4)
+    assert.equal(second.total, 4)
+    assert.deepEqual(
+      [...first.items, ...second.items].map((item) => item.main_name),
+      ['Complete', 'Missing Female', 'Missing Male', 'Unknown Gender']
+    )
+  })
+
+  it('pages an explicit renderer-session actress subset with complete totals', () => {
+    setupStatuses()
+
+    const page = listActressPage({
+      gender: 'all',
+      actressIds: [4, 2],
+      limit: 1,
+      offset: 0
+    })
+
+    assert.equal(page.total, 2)
+    assert.deepEqual(page.items.map((item) => item.main_name), ['Missing Female'])
+    assert.deepEqual(page.statusCounts, { all: 2, success: 0, unscraped: 1, failed: 1 })
+    assert.equal(listActressPage({ gender: 'all', actressIds: [] }).total, 0)
+  })
+
   it('returns the cumulative status of every actress with per-status counts', () => {
     setupStatuses()
 
@@ -445,7 +508,7 @@ describe('actressRepo.listActressPage', () => {
     )
   })
 
-  it('filters by actual readable avatar files and treats broken paths as no avatar', () => {
+  it('keeps avatar file health outside the pure database query', () => {
     setupStatuses()
     const db = getDb()
     db.prepare('UPDATE actresses SET avatar_path = ? WHERE id = ?').run(
@@ -453,38 +516,56 @@ describe('actressRepo.listActressPage', () => {
       2
     )
 
-    assert.deepEqual(
-      listActressPage({ gender: 'all', avatar: 'with' }).items.map((item) => item.main_name),
-      ['Complete']
+    const allNames = listActressPage({ gender: 'all', avatar: 'with' }).items.map(
+      (item) => item.main_name
     )
     assert.deepEqual(
-      listActressPage({ gender: 'all', avatar: 'without' }).items.map((item) => item.main_name),
-      ['Missing Female', 'Missing Male', 'Unknown Gender']
+      allNames,
+      listActressPage({ gender: 'all', avatar: 'without' }).items.map(
+        (item) => item.main_name
+      )
     )
     assert.deepEqual(
-      listActressPage({ gender: 'all', avatar: 'without-face' }).items.map(
+      listActressPage({ gender: 'all', avatar: 'without-face', actressIds: [1] }).items.map(
         (item) => item.main_name
       ),
       ['Complete']
     )
-    assert.deepEqual(
-      listActressPage({ gender: 'all', status: 'success', avatar: 'without' }).items.map(
-        (item) => item.main_name
-      ),
-      ['Missing Male']
-    )
+    assert.equal(listActressPage({ gender: 'all', avatar: 'without-face' }).total, 0)
+    assert.equal(allNames.length, 4)
   })
 
-  it('refreshes the avatar fingerprint as soon as the avatar file changes', () => {
+  it('does not derive avatar fingerprints during a database list query', () => {
     setupStatuses()
+    assert.equal(listActressPage({ gender: 'all' }).items[0]?.avatar_fingerprint, undefined)
+  })
 
-    const first = listActressPage({ gender: 'all', avatar: 'with' }).items[0]
-    assert.equal(first?.avatar_fingerprint, avatarSourceFingerprint(MINIMAL_JPEG))
+  it('returns minimal avatar path candidates without inspecting files', () => {
+    setupStatuses()
+    getDb().prepare('UPDATE actresses SET avatar_path = ? WHERE id = ?').run(
+      'avatars/missing.jpg',
+      2
+    )
 
-    writeTestAsset('avatars/complete.jpg', WEBP_CONTAINER)
+    const manifest = listActressAvatarCandidates()
 
-    const refreshed = listActressPage({ gender: 'all', avatar: 'with' }).items[0]
-    assert.equal(refreshed?.avatar_fingerprint, avatarSourceFingerprint(WEBP_CONTAINER))
+    assert.deepEqual(manifest, [
+      {
+        id: 1,
+        main_name: 'Complete',
+        avatar_path: 'avatars/complete.jpg'
+      },
+      {
+        id: 2,
+        main_name: 'Missing Female',
+        avatar_path: 'avatars/missing.jpg'
+      }
+    ])
+    assert.deepEqual(Object.keys(manifest[0] ?? {}).sort(), [
+      'avatar_path',
+      'id',
+      'main_name'
+    ])
   })
 })
 
@@ -561,18 +642,78 @@ describe('actressRepo.clearActressMetadataRecord', () => {
       assert.equal(detail?.last_scraped_at, null)
     }
   })
+
+  it('keeps related links when clearing actress metadata', () => {
+    setupDb()
+    editActress(1, { links: [{ label: 'Wiki', url: 'https://example.com/actress' }] })
+
+    clearActressMetadataRecord(1)
+
+    assert.equal(getActressDetail(1)?.profile_summary, null)
+    assert.deepEqual(getActressDetail(1)?.links.map((link) => link.label), ['Wiki'])
+  })
+})
+
+describe('actress related links', () => {
+  it('stores related links on an actress and returns them on detail', () => {
+    setupDb()
+    editActress(1, {
+      links: [
+        { label: '', url: 'https://example.com/wiki' },
+        { label: 'Forum', url: 'https://forum.example/thread' },
+        { label: 'Dup', url: 'https://example.com/wiki#section' }
+      ]
+    })
+
+    assert.deepEqual(
+      getActressDetail(1)?.links.map((link) => [link.label, link.url, link.position]),
+      [
+        ['example.com', 'https://example.com/wiki', 0],
+        ['Forum', 'https://forum.example/thread', 1]
+      ]
+    )
+  })
+
+  it('unions related links on merge with the keeper first', () => {
+    setupDb()
+    editActress(1, {
+      links: [
+        { label: '百科', url: 'https://example.com/wiki' },
+        { label: 'Keep', url: 'https://example.com/keep' }
+      ]
+    })
+    editActress(2, {
+      links: [
+        { label: 'Wiki', url: 'https://example.com/wiki#source' },
+        { label: 'Forum', url: 'https://forum.example/thread' }
+      ]
+    })
+
+    mergeActresses(1, 2, 'keep')
+
+    assert.deepEqual(
+      getActressDetail(1)?.links.map((link) => [link.label, link.url]),
+      [
+        ['百科', 'https://example.com/wiki'],
+        ['Keep', 'https://example.com/keep'],
+        ['Forum', 'https://forum.example/thread']
+      ]
+    )
+  })
 })
 
 describe('actressRepo.deleteUnlinkedActresses', () => {
-  it('deletes every selected unlinked actress and cleans their stored assets', () => {
+  it('deletes every selected unlinked actress and returns its stored assets for cleanup', () => {
     setupDb()
     writeTestAsset('actress_gallery/complete.jpg', MINIMAL_JPEG)
 
-    assert.equal(deleteUnlinkedActresses([1, 2, 2]), 2)
+    const result = deleteUnlinkedActressRecords([1, 2, 2])
+    assert.equal(result.deletedCount, 2)
     assert.equal(getActressDetail(1), null)
     assert.equal(getActressDetail(2), null)
-    assert.equal(assetExists('avatars/complete.jpg'), false)
-    assert.equal(assetExists('actress_gallery/complete.jpg'), false)
+    assert.ok(result.assetPaths.includes('avatars/complete.jpg'))
+    assert.ok(result.assetPaths.includes('actress_gallery/complete.jpg'))
+    assert.equal(assetExists('avatars/complete.jpg'), true)
   })
 
   it('rejects the whole batch when any selected actress still has a linked video', () => {
@@ -813,11 +954,12 @@ describe('actressRepo.mergeActresses', () => {
       2
     )
 
-    mergeActresses(1, 2, 'keep')
+    const result = mergeActresses(1, 2, 'keep')
 
     assert.equal(getActressDetail(1)?.avatar_path, 'avatars/merged-valid.jpg')
+    assert.ok(result.fileChanges.obsoletePaths.includes('avatars/broken-keeper.jpg'))
+    assert.ok(result.fileChanges.obsoletePaths.includes('avatar_sources/broken-keeper.jpg'))
     assert.equal(assetExists('avatars/broken-keeper.jpg'), false)
-    assert.equal(assetExists('avatar_sources/broken-keeper.jpg'), false)
     assert.equal(assetExists('avatars/merged-valid.jpg'), true)
   })
 
@@ -963,7 +1105,8 @@ describe('actressRepo.resolveEffectiveActressScrapeFields', () => {
           'profileSummary',
           'aliases'
         ],
-        'fillEmpty'
+        'fillEmpty',
+        true
       ),
       []
     )
@@ -1024,7 +1167,7 @@ describe('actressRepo.clearBrokenActressAvatarIfNeeded', () => {
   it('clears broken avatar source and crop while keeping a usable display avatar', () => {
     setupDb()
     const db = getDb()
-    const fingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+    const fingerprint = mediaAssetStore.fingerprint(MINIMAL_JPEG)
     db.prepare(
       `UPDATE actresses
        SET avatar_source_path = ?, avatar_crop_json = ?
@@ -1064,14 +1207,14 @@ describe('actressRepo.getActressAvatarSourceInfo', () => {
 
     assert.deepEqual(getActressAvatarSourceInfo(1), {
       assetPath: 'avatars/complete.jpg',
-      sourceFingerprint: avatarSourceFingerprint(MINIMAL_JPEG),
+      sourceFingerprint: mediaAssetStore.fingerprint(MINIMAL_JPEG),
       requiresSourceAdoption: true
     })
   })
 
   it('prefers the saved original source after an avatar bundle is created', () => {
     setupDb()
-    const fingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+    const fingerprint = mediaAssetStore.fingerprint(MINIMAL_JPEG)
     setActressAvatarBundle(2, 'Missing Female', {
       displayImageBase64: MINIMAL_JPEG.toString('base64'),
       sourceImageBase64: MINIMAL_JPEG.toString('base64'),
@@ -1097,7 +1240,7 @@ describe('actressRepo.setActressAvatarBundle', () => {
     const db = getDb()
     const displayImageBase64 = MINIMAL_JPEG.toString('base64')
     const sourceImageBase64 = MINIMAL_JPEG.toString('base64')
-    const sourceFingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+    const sourceFingerprint = mediaAssetStore.fingerprint(MINIMAL_JPEG)
 
     setActressAvatarBundle(1, 'Complete', {
       displayImageBase64,
@@ -1182,7 +1325,7 @@ describe('actressRepo.setActressAvatarBundle', () => {
   it('repairs an existing source whose stored extension does not match its bytes', () => {
     setupDb()
     const db = getDb()
-    const sourceFingerprint = avatarSourceFingerprint(WEBP_CONTAINER)
+    const sourceFingerprint = mediaAssetStore.fingerprint(WEBP_CONTAINER)
     writeTestAsset('avatars/mislabeled.jpg', WEBP_CONTAINER)
     db.prepare(
       `UPDATE actresses
@@ -1221,7 +1364,7 @@ describe('actressRepo.setActressAvatarBundle', () => {
 
   it('rejects invalid display bytes before writing the avatar bundle', () => {
     setupDb()
-    const sourceFingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+    const sourceFingerprint = mediaAssetStore.fingerprint(MINIMAL_JPEG)
 
     assert.throws(
       () =>
@@ -1248,7 +1391,7 @@ describe('actressRepo.setActressAvatarBundle', () => {
       displayImageBase64: MINIMAL_JPEG.toString('base64'),
       sourceImageBase64: MINIMAL_JPEG.toString('base64'),
       crop: createAvatarCropV1({
-        sourceFingerprint: avatarSourceFingerprint(MINIMAL_JPEG),
+        sourceFingerprint: mediaAssetStore.fingerprint(MINIMAL_JPEG),
         zoom: 1,
         offsetX: 0,
         offsetY: 0
@@ -1308,7 +1451,7 @@ describe('actressRepo cumulative scrape status maintenance invariants', () => {
         displayImageBase64: MINIMAL_JPEG.toString('base64'),
         sourceImageBase64: MINIMAL_JPEG.toString('base64'),
         crop: createAvatarCropV1({
-          sourceFingerprint: avatarSourceFingerprint(MINIMAL_JPEG),
+          sourceFingerprint: mediaAssetStore.fingerprint(MINIMAL_JPEG),
           zoom: 1.4,
           offsetX: 2,
           offsetY: -2
@@ -1397,13 +1540,60 @@ describe('actressRepo.backfillActressGalleryAssetDimensions', () => {
        VALUES (1, 'gallery', 1, ?, ?, NULL, NULL, ?)`
     ).run('https://example.test/landscape.jpg', 'actress_gallery/landscape.jpg', 'now')
 
-    assert.equal(backfillActressGalleryAssetDimensions(db, 1), 1)
+    assert.equal(
+      backfillActressGalleryAssetDimensions(
+        db,
+        1,
+        (assetPath) => mediaAssetStore.readStoredImageDimensions(assetPath)
+      ),
+      1
+    )
 
     const row = db
       .prepare('SELECT width, height FROM actress_gallery_assets WHERE local_path = ?')
       .get('actress_gallery/landscape.jpg') as { width: number; height: number }
     assert.ok(row.width > 0)
     assert.ok(row.height > 0)
+  })
+})
+
+describe('actressRepo query purity', () => {
+  it('does not change database rows or stored resources when listing and reading details', () => {
+    setupDb()
+    const db = getDb()
+    const relPath = 'actress_gallery/complete.jpg'
+    writeTestAsset(relPath, MINIMAL_JPEG)
+    const absolutePath = path.join(tempRoot!, 'media_assets', relPath)
+    const rowsBefore = db
+      .prepare('SELECT * FROM actress_gallery_assets ORDER BY id')
+      .all()
+    const actressesBefore = db.prepare('SELECT * FROM actresses ORDER BY id').all()
+    const namesBefore = db.prepare('SELECT * FROM actress_names ORDER BY id').all()
+    const changesBefore = (db.prepare('SELECT total_changes() AS n').get() as { n: number }).n
+    const bytesBefore = fs.readFileSync(absolutePath)
+    const modifiedBefore = fs.statSync(absolutePath).mtimeMs
+
+    const page = listActressPage({ gender: 'all', avatar: 'all', limit: 2, offset: 0 })
+    const detail = getActressDetail(1)
+
+    assert.equal(page.items.length, 2)
+    assert.equal(detail?.gallery.length, 1)
+    assert.deepEqual(
+      db.prepare('SELECT * FROM actress_gallery_assets ORDER BY id').all(),
+      rowsBefore
+    )
+    assert.deepEqual(db.prepare('SELECT * FROM actresses ORDER BY id').all(), actressesBefore)
+    assert.deepEqual(db.prepare('SELECT * FROM actress_names ORDER BY id').all(), namesBefore)
+    assert.equal(
+      (db.prepare('SELECT total_changes() AS n').get() as { n: number }).n,
+      changesBefore
+    )
+    assert.deepEqual(fs.readFileSync(absolutePath), bytesBefore)
+    assert.equal(fs.statSync(absolutePath).mtimeMs, modifiedBefore)
+    assert.deepEqual(
+      db.prepare('SELECT width, height FROM actress_gallery_assets WHERE actress_id = 1').get(),
+      { width: null, height: null }
+    )
   })
 })
 
@@ -1839,7 +2029,7 @@ describe('actressRepo.applyActressScrapeResult', () => {
   it('replace keeps manual crop when scraped avatar bytes match existing source', () => {
     setupDb()
     const db = getDb()
-    const sourceFingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+    const sourceFingerprint = mediaAssetStore.fingerprint(MINIMAL_JPEG)
     setActressAvatarBundle(1, 'Complete', {
       displayImageBase64: MINIMAL_JPEG.toString('base64'),
       sourceImageBase64: MINIMAL_JPEG.toString('base64'),
@@ -1911,7 +2101,7 @@ describe('actressRepo.applyActressScrapeResult', () => {
   it('replace adopts a new avatar when scraped bytes differ from existing source', () => {
     setupDb()
     const db = getDb()
-    const sourceFingerprint = avatarSourceFingerprint(MINIMAL_JPEG)
+    const sourceFingerprint = mediaAssetStore.fingerprint(MINIMAL_JPEG)
     setActressAvatarBundle(1, 'Complete', {
       displayImageBase64: MINIMAL_JPEG.toString('base64'),
       sourceImageBase64: MINIMAL_JPEG.toString('base64'),
@@ -1954,7 +2144,7 @@ describe('actressRepo.applyActressScrapeResult', () => {
   it('replace clears an existing avatar when the source returns no avatar', () => {
     setupDb()
 
-    const { applied, avatarApplied } = applyActressScrapeResult(
+    const { applied, avatarApplied, fileChanges } = applyActressScrapeResult(
       1,
       {},
       null,
@@ -1975,6 +2165,7 @@ describe('actressRepo.applyActressScrapeResult', () => {
     assert.equal(row.avatar_path, null)
     assert.equal(row.avatar_source_path, null)
     assert.equal(row.avatar_crop_json, null)
+    assert.ok(fileChanges?.obsoletePaths.includes('avatars/complete.jpg'))
     assert.equal(assetExists('avatars/complete.jpg'), false)
   })
 

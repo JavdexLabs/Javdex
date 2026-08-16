@@ -1,11 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown } from 'lucide-react'
-import {
-  PRIVACY_MODE_SCOPES,
-  type AppSettings,
-  type PrivacyModeScope,
-  type ThemeId
-} from '@shared/types'
+import { ChevronDown, RectangleHorizontal, RectangleVertical } from 'lucide-react'
+import { PRIVACY_MODE_SCOPES, type AppSettings, type CoverDisplayMode, type PrivacyModeScope, type ThemeId } from '@shared/settingsTypes'
 import {
   MAX_AVATAR_FACE_RATIO,
   MIN_AVATAR_FACE_RATIO,
@@ -30,6 +25,9 @@ import { useTheme } from '../ThemeProvider'
 import { useToast } from '../Toast'
 import { UI_ICON_SM } from '../iconDefaults'
 import { SettingsCard, SettingsHeaderSwitch } from './SettingsPrimitives'
+import { useDisplayMode } from '../DisplayModeContext'
+import Button from '../Button'
+import Switch from '../Switch'
 
 const AVATAR_COMPOSITION_PREVIEW_SIZE = 172
 
@@ -257,6 +255,7 @@ export default function AppearanceSettingsPanel({
 }): JSX.Element {
   const toast = useToast()
   const { syncPrivacyMode } = useTheme()
+  const { mode, setMode, syncResourceTypeBadges } = useDisplayMode()
   const avatarAutoCropBatch = useAvatarAutoCropBatch()
   const [isEditingAvatarComposition, setIsEditingAvatarComposition] = useState(false)
   const [isSavingAvatarComposition, setIsSavingAvatarComposition] = useState(false)
@@ -278,12 +277,7 @@ export default function AppearanceSettingsPanel({
     if (!isEditingAvatarComposition) {
       setAvatarCompositionDraft(avatarCompositionDraftFromSettings(settings))
     }
-  }, [
-    isEditingAvatarComposition,
-    settings.avatarCenteringMode,
-    settings.avatarFaceRatio,
-    settings.avatarPreserveFullHead
-  ])
+  }, [isEditingAvatarComposition, settings])
 
   useEffect(() => {
     if (privacyPersistPendingRef.current > 0) return
@@ -292,7 +286,7 @@ export default function AppearanceSettingsPanel({
     if (privacySettingsEqual(privacyDraftRef.current, incoming)) return
     privacyDraftRef.current = incoming
     setPrivacyDraft(incoming)
-  }, [settings.privacyModeEnabled, settings.privacyModeScopes])
+  }, [settings])
 
   useEffect(() => {
     if (!privacyDraft.privacyModeEnabled) setPrivacyScopesExpanded(false)
@@ -422,6 +416,19 @@ export default function AppearanceSettingsPanel({
     }
   }
 
+  const toggleResourceTypeBadges = async (checked: boolean): Promise<void> => {
+    const saved = await onPatchSettings({ showVideoResourceTypeBadges: checked })
+    if (saved !== false) syncResourceTypeBadges(checked)
+  }
+
+  const changeCoverDisplayMode = async (next: CoverDisplayMode): Promise<void> => {
+    if (next === mode) return
+    const previous = mode
+    setMode(next)
+    const saved = await onPatchSettings({ coverDisplayMode: next })
+    if (saved === false) setMode(previous)
+  }
+
   return (
     <>
       <SettingsCard title="主题" hint="界面配色，立即生效。">
@@ -441,6 +448,45 @@ export default function AppearanceSettingsPanel({
         </div>
       </SettingsCard>
 
+      <SettingsCard title="影片卡片" hint="控制媒体库及其它影片列表中的辅助信息。">
+        <div className="settings-toggle-list">
+          <SettingsSwitchRow
+            title="显示资源类型标签"
+            description="最多显示两个类型，其余以 +N 收起"
+            checked={settings.showVideoResourceTypeBadges}
+            onChange={(checked) => void toggleResourceTypeBadges(checked)}
+          />
+          <div className="settings-cover-mode-row">
+            <span className="settings-cover-mode-copy">
+              <span className="settings-cover-mode-title">封面比例</span>
+              <span className="settings-cover-mode-description">
+                媒体库影片卡片使用竖版海报或横板封面
+              </span>
+            </span>
+            <div className="mode-toggle" title="封面显示方式" role="group" aria-label="封面显示方式">
+              <button
+                type="button"
+                className={mode === 'portrait' ? 'active' : undefined}
+                aria-pressed={mode === 'portrait'}
+                onClick={() => void changeCoverDisplayMode('portrait')}
+              >
+                <RectangleVertical {...UI_ICON_SM} aria-hidden />
+                <span>竖版</span>
+              </button>
+              <button
+                type="button"
+                className={mode === 'landscape' ? 'active' : undefined}
+                aria-pressed={mode === 'landscape'}
+                onClick={() => void changeCoverDisplayMode('landscape')}
+              >
+                <RectangleHorizontal {...UI_ICON_SM} aria-hidden />
+                <span>横板</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </SettingsCard>
+
       <SettingsCard
         title="智能头像构图"
         hint={
@@ -451,31 +497,37 @@ export default function AppearanceSettingsPanel({
         actions={
           isEditingAvatarComposition ? (
             <>
-              <button
+              <Button
                 type="button"
-                className="btn btn-sm btn-ghost"
+                variant="ghost"
+
+                size="sm"
                 disabled={isSavingAvatarComposition}
                 onClick={cancelAvatarCompositionEdit}
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="btn btn-sm btn-primary"
+                variant="primary"
+
+                size="sm"
                 disabled={isSavingAvatarComposition}
                 onClick={() => void saveAvatarComposition()}
               >
                 {isSavingAvatarComposition ? '保存中…' : '保存'}
-              </button>
+              </Button>
             </>
           ) : (
-            <button
+            <Button
               type="button"
-              className="btn btn-sm btn-ghost"
+              variant="ghost"
+
+              size="sm"
               onClick={startAvatarCompositionEdit}
             >
               编辑
-            </button>
+            </Button>
           )
         }
       >
@@ -557,19 +609,15 @@ export default function AppearanceSettingsPanel({
               <span className="avatar-composition-control-label">完整头部</span>
               <label className="avatar-head-protection-control">
                 <span>必要时缩小画面，避免发顶或下巴被裁切</span>
-                <span className="ui-switch">
-                  <input
-                    type="checkbox"
-                    checked={avatarCompositionDraft.avatarPreserveFullHead}
-                    disabled={!isEditingAvatarComposition || isSavingAvatarComposition}
-                    onChange={(event) =>
-                      updateAvatarCompositionDraft({
-                        avatarPreserveFullHead: event.target.checked
-                      })
-                    }
-                  />
-                  <span className="ui-switch-slider" />
-                </span>
+                <Switch
+                  checked={avatarCompositionDraft.avatarPreserveFullHead}
+                  disabled={!isEditingAvatarComposition || isSavingAvatarComposition}
+                  onChange={(event) =>
+                    updateAvatarCompositionDraft({
+                      avatarPreserveFullHead: event.target.checked
+                    })
+                  }
+                />
               </label>
             </div>
           </div>
@@ -601,39 +649,46 @@ export default function AppearanceSettingsPanel({
                 {avatarAutoCropBatch.state.current}/{avatarAutoCropBatch.state.total}
               </span>
               <div className="avatar-auto-crop-batch-actions">
-                <button
+                <Button
                   type="button"
-                  className="btn btn-sm btn-ghost"
+                  variant="ghost"
+
+                  size="sm"
                   onClick={onOpenAvatarBatchDetails}
                 >
                   查看日志
-                </button>
+                </Button>
                 {avatarAutoCropBatch.state.source === 'manual' ? (
-                  <button
+                  <Button
                     type="button"
-                    className="btn btn-sm btn-ghost"
+                    variant="ghost"
+
+                    size="sm"
                     disabled={avatarAutoCropBatch.state.status === 'cancelling'}
                     onClick={avatarAutoCropBatch.cancel}
                   >
                     {avatarAutoCropBatch.state.status === 'cancelling' ? '正在停止…' : '停止'}
-                  </button>
+                  </Button>
                 ) : null}
               </div>
             </div>
           ) : (
             <div className="avatar-auto-crop-batch-actions">
               {avatarAutoCropBatch.state.logs.length > 0 ? (
-                <button
+                <Button
                   type="button"
-                  className="btn btn-sm btn-ghost"
+                  variant="ghost"
+
+                  size="sm"
                   onClick={onOpenAvatarBatchDetails}
                 >
                   查看日志
-                </button>
+                </Button>
               ) : null}
-              <button
+              <Button
                 type="button"
-                className="btn btn-sm"
+
+                size="sm"
                 disabled={
                   isEditingAvatarComposition || isCountingBatchAvatars || scrapeBatchActive
                 }
@@ -647,7 +702,7 @@ export default function AppearanceSettingsPanel({
                 onClick={() => void prepareBatchAvatarCrop()}
               >
                 {isCountingBatchAvatars ? '统计中…' : '构图全部头像'}
-              </button>
+              </Button>
             </div>
           )}
         </div>

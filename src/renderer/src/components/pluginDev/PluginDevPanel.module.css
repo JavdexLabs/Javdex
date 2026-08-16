@@ -1,0 +1,53 @@
+.kindToggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px;
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+}
+
+.kindButton {
+  flex: 0 0 auto;
+  min-width: 52px;
+  min-height: var(--control-h-sm);
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-secondary, 12px);
+  font-weight: var(--settings-fw-title, 700);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast),
+    border-color var(--motion-fast),
+    color var(--motion-fast);
+}
+
+.kindButton:focus-visible {
+  border-color: var(--border-strong);
+  outline: none;
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
+
+.kindButton:disabled {
+  cursor: not-allowed;
+}
+
+.kindButton:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
+
+.kindButtonActive {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+  color: var(--text-primary);
+}

@@ -10,6 +10,8 @@ import {
   WorkbenchToolbar
 } from './Workbench'
 
+Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
+
 describe('shared workbench primitives', () => {
   it('composes feature classes without replacing the neutral structure', () => {
     const markup = renderToStaticMarkup(

@@ -4,11 +4,21 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
+import { DEFAULT_SETTINGS } from '@shared/settingsTypes'
 import {
   getSettings,
+  getEffectiveLlmApiKey,
+  getLlmSecretMigrationError,
+  getPublicLlmProviderConfigs,
+  getSettingsRecoveryNotice,
   migrateRetiredVideoScraperSettings,
-  resetSettingsCacheForTests
+  resetSettingsCacheForTests,
+  updateSettings
 } from './settingsStore'
+import {
+  setLlmSecretCipherForTests,
+  type LlmSecretCipher
+} from './llmSecretStore'
 
 let tempRoot: string | null = null
 let previousUserData: string | undefined
@@ -22,16 +32,32 @@ beforeEach(() => {
   previousUserData = process.env.JAVDEX_TEST_USER_DATA
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-settings-'))
   process.env.JAVDEX_TEST_USER_DATA = tempRoot
+  setLlmSecretCipherForTests(createTestCipher())
   resetSettingsCacheForTests()
 })
 
 afterEach(() => {
   resetSettingsCacheForTests()
+  setLlmSecretCipherForTests(null)
   if (previousUserData === undefined) delete process.env.JAVDEX_TEST_USER_DATA
   else process.env.JAVDEX_TEST_USER_DATA = previousUserData
   if (tempRoot) fs.rmSync(tempRoot, { recursive: true, force: true })
   tempRoot = null
 })
+
+function createTestCipher(options?: { failEncryption?: boolean }): LlmSecretCipher {
+  return {
+    state: () => ({ protection: 'secure', backend: 'test-keychain' }),
+    encrypt(value) {
+      if (options?.failEncryption) throw new Error('test encryption unavailable')
+      return Buffer.from(`encrypted:${Buffer.from(value).toString('base64')}`, 'utf8')
+    },
+    decrypt(value) {
+      const encoded = value.toString('utf8').replace(/^encrypted:/, '')
+      return Buffer.from(encoded, 'base64').toString('utf8')
+    }
+  }
+}
 
 describe('settingsStore avatar composition defaults', () => {
   it('uses the relaxed face-centered composition for settings without legacy values', () => {
@@ -55,6 +81,169 @@ describe('settingsStore avatar composition defaults', () => {
     assert.equal(settings.avatarFaceRatio, 0.64)
     assert.equal(settings.avatarCenteringMode, 'head')
     assert.equal(settings.avatarPreserveFullHead, true)
+  })
+})
+
+describe('settingsStore video card preferences', () => {
+  it('keeps resource type badges disabled for new and existing users by default', () => {
+    writeSettings({})
+    assert.equal(getSettings().showVideoResourceTypeBadges, false)
+  })
+
+  it('preserves an explicit resource type badge preference', () => {
+    writeSettings({ showVideoResourceTypeBadges: true })
+    assert.equal(getSettings().showVideoResourceTypeBadges, true)
+  })
+
+  it('defaults video cards to portrait and preserves an explicit landscape preference', () => {
+    writeSettings({})
+    assert.equal(getSettings().coverDisplayMode, 'portrait')
+    writeSettings({ coverDisplayMode: 'landscape' })
+    resetSettingsCacheForTests()
+    assert.equal(getSettings().coverDisplayMode, 'landscape')
+  })
+})
+
+describe('settingsStore deferred library path cleanup', () => {
+  it('normalizes unique non-empty roots and preserves them across cache resets', () => {
+    writeSettings({
+      pendingLibraryPathCleanups: ['/library/a', ' /library/b ', '/library/a', '', 42]
+    })
+
+    assert.deepEqual(getSettings().pendingLibraryPathCleanups, ['/library/a', '/library/b'])
+    resetSettingsCacheForTests()
+    assert.deepEqual(getSettings().pendingLibraryPathCleanups, ['/library/a', '/library/b'])
+  })
+})
+
+describe('settingsStore persistence', () => {
+  it('does not update the cache when the settings file cannot be replaced', () => {
+    updateSettings({ autoScanEnabled: false })
+    const settingsFile = path.join(tempRoot!, 'settings.json')
+    fs.rmSync(settingsFile)
+    fs.mkdirSync(settingsFile)
+
+    assert.throws(() => updateSettings({ autoScanEnabled: true }), /保存设置失败/)
+    assert.equal(getSettings().autoScanEnabled, false)
+  })
+})
+
+describe('settingsStore recovery', () => {
+  it('backs up malformed JSON, writes defaults, and exposes one recovery notice', () => {
+    fs.writeFileSync(path.join(tempRoot!, 'settings.json'), '{broken json', 'utf8')
+    resetSettingsCacheForTests()
+
+    const settings = getSettings()
+    const notice = getSettingsRecoveryNotice()
+    assert.equal(settings.theme, DEFAULT_SETTINGS.theme)
+    assert.ok(notice?.backupFileName.startsWith('settings.corrupt-'))
+    assert.equal(fs.existsSync(path.join(tempRoot!, notice!.backupFileName)), true)
+    assert.doesNotThrow(() => JSON.parse(fs.readFileSync(path.join(tempRoot!, 'settings.json'), 'utf8')))
+  })
+
+  it('does not replace a settings path that fails with an I/O error', () => {
+    const settingsPath = path.join(tempRoot!, 'settings.json')
+    fs.mkdirSync(settingsPath)
+    resetSettingsCacheForTests()
+
+    assert.throws(() => getSettings(), /读取设置失败/)
+    assert.equal(fs.statSync(settingsPath).isDirectory(), true)
+    assert.equal(getSettingsRecoveryNotice(), null)
+  })
+})
+
+describe('settingsStore LLM secret migration', () => {
+  it('moves legacy API keys out of settings.json without exposing them publicly', () => {
+    writeSettings({
+      llmProviderConfigs: {
+        openai: {
+          apiKey: 'sk-legacy-secret',
+          baseUrl: 'https://example.test/v1',
+          protocol: 'openai-chat'
+        }
+      }
+    })
+
+    const settings = getSettings()
+    const persisted = fs.readFileSync(path.join(tempRoot!, 'settings.json'), 'utf8')
+    const secretFile = fs.readFileSync(path.join(tempRoot!, 'llm-secrets.json'), 'utf8')
+
+    assert.equal(getEffectiveLlmApiKey('openai'), 'sk-legacy-secret')
+    assert.equal(settings.llmProviderConfigs.openai?.baseUrl, 'https://example.test/v1')
+    assert.equal(persisted.includes('sk-legacy-secret'), false)
+    assert.equal(secretFile.includes('sk-legacy-secret'), false)
+    assert.equal(getPublicLlmProviderConfigs(settings).openai?.hasApiKey, true)
+  })
+
+  it('keeps the original plaintext file and blocks later writes when migration fails', () => {
+    setLlmSecretCipherForTests(createTestCipher({ failEncryption: true }))
+    writeSettings({
+      theme: 'light',
+      llmProviderConfigs: { openai: { apiKey: 'sk-preserve-me' } }
+    })
+
+    const settings = getSettings()
+    assert.equal(settings.theme, 'light')
+    assert.equal(getEffectiveLlmApiKey('openai'), 'sk-preserve-me')
+    assert.match(getLlmSecretMigrationError() ?? '', /迁移失败/)
+    assert.match(fs.readFileSync(path.join(tempRoot!, 'settings.json'), 'utf8'), /sk-preserve-me/)
+    assert.throws(() => updateSettings({ theme: 'graphite' }), /无法安全迁移/)
+  })
+})
+
+describe('settingsStore scan cleanup defaults', () => {
+  it('keeps automatic deletion disabled and has no summary for new and existing users', () => {
+    writeSettings({})
+    assert.equal(getSettings().autoDeleteResourceLessVideos, false)
+    assert.equal(getSettings().lastLibraryScanSummary, null)
+  })
+
+  it('preserves an explicit automatic deletion preference', () => {
+    writeSettings({ autoDeleteResourceLessVideos: true })
+    assert.equal(getSettings().autoDeleteResourceLessVideos, true)
+  })
+
+  it('normalizes and sanitizes the persisted latest scan summary', () => {
+    writeSettings({
+      lastLibraryScanSummary: {
+        trigger: 'interval',
+        startedAt: '2026-08-10T01:00:00.000Z',
+        finishedAt: '2026-08-10T01:00:02.000Z',
+        status: 'failed',
+        scannedFiles: 2,
+        resourcesAdded: 1,
+        resourcesUpdated: 0,
+        resourcesRemoved: 0,
+        primaryResourcesPromoted: 0,
+        videosDeleted: 0,
+        skippedFiles: 1,
+        failedFiles: 1,
+        offlineFolders: ['/offline'],
+        errorSummary: 'failed https://example.test/watch?token=secret'
+      }
+    })
+
+    const summary = getSettings().lastLibraryScanSummary
+    assert.equal(summary?.trigger, 'interval')
+    assert.equal(summary?.offlineFolders[0], '/offline')
+    assert.equal(summary?.errorSummary?.includes('secret'), false)
+  })
+})
+
+describe('settingsStore automatic scan defaults', () => {
+  it('keeps automatic scans disabled and defaults to one hour', () => {
+    writeSettings({})
+    assert.equal(getSettings().autoScanEnabled, false)
+    assert.equal(getSettings().autoScanIntervalMinutes, 60)
+  })
+
+  it('accepts only supported automatic scan intervals', () => {
+    for (const interval of [15, 30, 60, 180, 360]) {
+      writeSettings({ autoScanIntervalMinutes: interval })
+      assert.equal(getSettings().autoScanIntervalMinutes, interval)
+    }
+    writeSettings({ autoScanIntervalMinutes: 45 })
+    assert.equal(getSettings().autoScanIntervalMinutes, 60)
   })
 })
 

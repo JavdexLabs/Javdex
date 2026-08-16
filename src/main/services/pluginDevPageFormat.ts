@@ -1,4 +1,4 @@
-import type { PluginDevPageInsight } from '@shared/types'
+import type { PluginDevPageInsight } from '@shared/pluginDevTypes'
 
 export function formatPageDomForPrompt(page: PluginDevPageInsight): string {
   const sections: string[] = []

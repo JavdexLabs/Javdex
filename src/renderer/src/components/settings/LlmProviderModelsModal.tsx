@@ -15,6 +15,7 @@ import {
   type LlmProviderViewModel
 } from '@shared/llmProviders'
 import { SettingsFormField } from './SettingsPrimitives'
+import Button from '../Button'
 
 type ModelRow = LlmModelDefinition & {
   source: 'builtin' | 'custom' | 'remote'
@@ -25,13 +26,15 @@ export default function LlmProviderModelsModal({
   customModels,
   onClose,
   onAdd,
-  onRemove
+  onRemove,
+  mutationBusy = false
 }: {
   provider: LlmProviderViewModel
   customModels: LlmCustomModelDefinition[]
   onClose: () => void
   onAdd: (modelId: string, modelName: string) => void
   onRemove: (modelId: string) => void
+  mutationBusy?: boolean
 }): JSX.Element {
   const toast = useToast()
   const [query, setQuery] = useState('')
@@ -111,9 +114,10 @@ export default function LlmProviderModelsModal({
   return (
     <Modal
       title={`${provider.name} — 模型管理`}
+
       size="lg"
       className="modal--llm-models"
-      bodyClassName="modal-body--fixed"
+      bodyOverflow="hidden"
       confirmText="关闭"
       cancelText="取消"
       onCancel={onClose}
@@ -128,15 +132,16 @@ export default function LlmProviderModelsModal({
             placeholder="搜索模型…"
             onChange={(e) => setQuery(e.target.value)}
           />
-          <button
+          <Button
             type="button"
-            className="btn btn-sm"
+
+            size="sm"
             disabled={loadingRemoteModels}
             onClick={() => void loadRemoteModels()}
           >
             <RefreshCw {...UI_ICON_COMPACT} />
             {loadingRemoteModels ? '查询中…' : '查询模型'}
-          </button>
+          </Button>
         </div>
 
         <div className="llm-models-list" role="list">
@@ -181,7 +186,7 @@ export default function LlmProviderModelsModal({
                         icon={<Plus {...UI_ICON_COMPACT} />}
                         label="添加"
                         title={canGenerate ? '添加到本地模型' : '嵌入模型不能作为生成模型添加'}
-                        disabled={!canGenerate}
+                        disabled={!canGenerate || mutationBusy}
                         onClick={() => addDiscoveredModel(model)}
                       />
                     ) : !model.builtin && customIds.has(model.id) ? (
@@ -190,6 +195,7 @@ export default function LlmProviderModelsModal({
                         icon={<Trash2 {...UI_ICON_COMPACT} />}
                         label="删除"
                         title="删除"
+                        disabled={mutationBusy}
                         onClick={() => onRemove(model.id)}
                       />
                     ) : null}
@@ -225,9 +231,12 @@ export default function LlmProviderModelsModal({
             />
           </SettingsFormField>
           <div className="llm-models-add-actions">
-            <button
+            <Button
               type="button"
-              className="btn btn-primary btn-sm"
+              variant="primary"
+
+              size="sm"
+              disabled={mutationBusy}
               onClick={() => {
                 onAdd(modelId, modelName)
                 setModelId('')
@@ -235,7 +244,7 @@ export default function LlmProviderModelsModal({
               }}
             >
               添加模型
-            </button>
+            </Button>
           </div>
         </div>
       </div>

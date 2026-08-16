@@ -1,8 +1,9 @@
 import { useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react'
-import type { BatchProgress } from '@shared/types'
+import type { BatchProgress } from '@shared/batchScrapeTypes'
 import { batchStatusLabel } from '../../settings/settingsDisplay'
-import { SettingsEmptyPanel, SettingsStatusPill } from './SettingsPrimitives'
+import { SettingsCard, SettingsEmptyPanel, SettingsStatusPill } from './SettingsPrimitives'
 import BatchTaskControls, { type BatchControlHandler } from './BatchTaskControls'
+import Button from '../Button'
 
 type BatchScope = 'video' | 'actress' | 'avatar'
 
@@ -66,8 +67,8 @@ export default function BatchSettingsPanel({
   }, [logCount, logRef])
 
   return (
-    <div
-      className={`settings-card settings-card--batch batch-status-${status}${
+    <SettingsCard
+      className={`settings-card--batch batch-status-${status}${
         expandBatchCard ? ' is-expanded' : ''
       }`}
     >
@@ -76,10 +77,10 @@ export default function BatchSettingsPanel({
           {batch ? (!canResume && paused ? '不可恢复' : batchStatusLabel(status)) : '空闲'}
         </SettingsStatusPill>
         <div className="batch-log-toolbar-actions">
-          {scope === 'actress' && pendingGroupCount > 0 && onOpenPending ? (
-            <button type="button" className="btn btn-sm btn-ghost" onClick={onOpenPending}>
+          {scope !== 'avatar' && pendingGroupCount > 0 && onOpenPending ? (
+            <Button type="button" variant="ghost" size="sm" onClick={onOpenPending}>
               查看待确认
-            </button>
+            </Button>
           ) : null}
           {customControls !== undefined ? (
             customControls
@@ -108,7 +109,7 @@ export default function BatchSettingsPanel({
       <div className="batch-log-stats" aria-label="运行统计">
         <div
           className={`batch-log-stats-row${
-            scope === 'actress' ? ' batch-log-stats-row--with-pending' : ''
+            scope !== 'avatar' ? ' batch-log-stats-row--with-pending' : ''
           }`}
         >
           <span className="batch-log-stat">
@@ -119,7 +120,7 @@ export default function BatchSettingsPanel({
             <span className="batch-log-stat-label">成功</span>
             <strong className="text-success">{batch?.success ?? 0}</strong>
           </span>
-          {scope === 'actress' ? (
+          {scope !== 'avatar' ? (
             <span className="batch-log-stat batch-log-stat--pending">
               <span className="batch-log-stat-label">待确认</span>
               <strong>{pendingGroupCount}</strong>
@@ -173,6 +174,6 @@ export default function BatchSettingsPanel({
           </SettingsEmptyPanel>
         )}
       </section>
-    </div>
+    </SettingsCard>
   )
 }

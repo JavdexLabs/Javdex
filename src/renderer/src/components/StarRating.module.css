@@ -1,0 +1,21 @@
+.root {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.star {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--rating-empty);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.filled {
+  color: var(--rating-filled);
+}
+
+.interactive {
+  cursor: pointer;
+}

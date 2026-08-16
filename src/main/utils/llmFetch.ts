@@ -1,6 +1,6 @@
 import { fetch as undiciFetch, ProxyAgent, type RequestInit as UndiciRequestInit } from 'undici'
 import { getSettings } from '../settings/settingsStore'
-import { resolveLlmProxyUrl } from '@shared/types'
+import { resolveLlmProxyUrl } from '@shared/settingsTypes'
 
 let cachedProxyUrl = ''
 let cachedDispatcher: ProxyAgent | undefined

@@ -1,11 +1,11 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
-import type { AppSettings } from '@shared/types'
+import type { RendererSettingsPatch, SettingsSnapshot } from '@shared/settingsTypes'
 import { api } from '../api'
 import { useToast } from '../components/Toast'
 
 export default function useNetworkSettingsController(
-  settings: AppSettings | null,
-  setSettings: Dispatch<SetStateAction<AppSettings | null>>
+  settings: SettingsSnapshot | null,
+  setSettings: Dispatch<SetStateAction<SettingsSnapshot | null>>
 ): {
   scrapeProxyDraft: string
   llmProxyDraft: string
@@ -27,16 +27,18 @@ export default function useNetworkSettingsController(
   const [proxySaving, setProxySaving] = useState<'scrape' | 'llm' | null>(null)
   const [proxyTesting, setProxyTesting] = useState<'scrape' | 'llm' | null>(null)
   const [proxyToggleBusy, setProxyToggleBusy] = useState<'scrape' | 'llm' | null>(null)
+  const scrapeProxyUrl = settings?.proxyUrl
+  const llmProxyUrl = settings?.llmProxyUrl
 
   useEffect(() => {
-    if (!settings) return
-    setScrapeProxyDraft(settings.proxyUrl)
-  }, [settings?.proxyUrl])
+    if (scrapeProxyUrl === undefined) return
+    setScrapeProxyDraft(scrapeProxyUrl)
+  }, [scrapeProxyUrl])
 
   useEffect(() => {
-    if (!settings) return
-    setLlmProxyDraft(settings.llmProxyUrl)
-  }, [settings?.llmProxyUrl])
+    if (llmProxyUrl === undefined) return
+    setLlmProxyDraft(llmProxyUrl)
+  }, [llmProxyUrl])
 
   const toggleProxyEnabled = async (kind: 'scrape' | 'llm', enabled: boolean): Promise<void> => {
     if (!settings || proxyToggleBusy) return
@@ -49,7 +51,7 @@ export default function useNetworkSettingsController(
 
     setProxyToggleBusy(kind)
     try {
-      const patch: Partial<AppSettings> =
+      const patch: RendererSettingsPatch =
         kind === 'scrape' ? { proxyUrlEnabled: enabled } : { llmProxyUrlEnabled: enabled }
       if (enabled && kind === 'scrape' && draft !== settings.proxyUrl) patch.proxyUrl = draft
       if (enabled && kind === 'llm' && draft !== settings.llmProxyUrl) patch.llmProxyUrl = draft

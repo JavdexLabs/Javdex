@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useImagePreviewById } from '../hooks/useImagePreviewById'
-import type { ActressGalleryAsset } from '@shared/types'
+import type { ActressGalleryAsset } from '@shared/actressTypes'
 import {
   actressGalleryRatio,
   prepareActressGalleryForDisplay

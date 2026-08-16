@@ -1,10 +1,5 @@
-import type {
-  ActressConflictCurrentOwner,
-  ActressConflictDecisionSnapshot,
-  ActressNameConflictGroup,
-  ActressScrapeFieldImpact,
-  PendingActressScrapeCandidate
-} from '@shared/types'
+import type { ActressConflictCurrentOwner, ActressConflictDecisionSnapshot, ActressNameConflictGroup, PendingActressScrapeCandidate } from '@shared/actressConflictTypes'
+import type { ActressScrapeFieldImpact } from '@shared/actressScrapeTypes'
 import { normalizeActressName } from '@shared/actressNameNormalization'
 
 export type ActressOwnershipDecision =

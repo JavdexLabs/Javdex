@@ -1,5 +1,6 @@
 import {
   Clapperboard,
+  CircleAlert,
   LayoutGrid,
   List,
   ListVideo,
@@ -19,7 +20,8 @@ const ICONS = {
   publisher: Send,
   series: List,
   playlist: ListVideo,
-  settings: Settings
+  settings: Settings,
+  pending: CircleAlert
 } satisfies Record<string, LucideIcon>
 
 export type NavIconName = keyof typeof ICONS

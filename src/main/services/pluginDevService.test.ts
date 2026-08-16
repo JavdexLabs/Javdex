@@ -46,6 +46,32 @@ describe('pluginDevService', () => {
     assert.deepEqual(result.result, { code: 'PRED-877', title: 'OK' })
   })
 
+  it('preserves every normalized video candidate during dry-run', async () => {
+    const result = await dryRunPluginPackage({
+      testTarget: 'PRED-877',
+      package: {
+        schemaVersion: 1,
+        kind: 'video',
+        name: 'candidate-video',
+        version: '1.0.0',
+        supportedFields: ['title', 'releaseDate'],
+        code: `async function parseVideo(ctx) {
+  return [
+    { code: ctx.code, title: 'First', releaseDate: '2026-05' },
+    { code: ctx.code, title: 'Second', releaseDate: '2026-06-07' }
+  ]
+}
+module.exports = { parseVideo }`
+      }
+    })
+
+    assert.equal(result.ok, true)
+    assert.deepEqual(result.result, [
+      { code: 'PRED-877', title: 'First', releaseDate: '2026-05-01' },
+      { code: 'PRED-877', title: 'Second', releaseDate: '2026-06-07' }
+    ])
+  })
+
   it('wraps generated bare parseActress functions before dry-run', async () => {
     const result = await dryRunPluginPackage({
       testTarget: 'Alice',

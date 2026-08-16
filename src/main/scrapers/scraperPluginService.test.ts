@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
-import type { ScraperPluginKind, ScraperPluginPackage } from '@shared/types'
+import type { ScraperPluginKind, ScraperPluginPackage } from '@shared/scraperPluginTypes'
 import {
   builtInDescriptor,
   createCompositeScraper,
@@ -148,7 +148,7 @@ describe('scraperPluginService', () => {
   it('lists bundled plugins shipped with the app', () => {
     assert.deepEqual(
       listBundledPluginDescriptors('video').map((item) => item.name).sort(),
-      ['JavDB', 'JavLibrary']
+      ['JavDB', 'JavLibrary', 'MetaTube']
     )
     assert.deepEqual(
       listBundledPluginDescriptors('actress').map((item) => item.name).sort(),
@@ -165,6 +165,32 @@ describe('scraperPluginService', () => {
     const exported = JSON.parse(fs.readFileSync(exportPath, 'utf-8')) as Record<string, unknown>
     assert.equal(exported.kind, 'video')
     assert.equal(exported.name, 'JavDB')
+  })
+
+  it('keeps MetaTube visible but unavailable until configured', () => {
+    const metaTube = builtInDescriptor('video', 'MetaTube')
+    assert.equal(metaTube.requiresConfiguration, true)
+    assert.equal(metaTube.configured, false)
+    assert.equal(metaTube.configurationLabel, '待配置')
+    assert.equal(metaTube.exportable, false)
+    assert.equal(metaTube.editable, false)
+    assert.equal(metaTube.debuggable, false)
+    assert.throws(
+      () => readScraperPluginPackage('video', 'MetaTube'),
+      /不可导出、读取代码或进行 AI 调试/
+    )
+  })
+
+  it('rejects a user package that tries to declare a trusted service binding', async () => {
+    await assert.rejects(
+      importScraperPluginPackage(
+        writePackage({
+          ...pluginPackage('video', 'Forged Binding'),
+          serviceBinding: 'metatube'
+        } as ScraperPluginPackage)
+      ),
+      /不能声明受信服务绑定/
+    )
   })
 
   it('does not assign a standalone delay to composite scrapers', () => {

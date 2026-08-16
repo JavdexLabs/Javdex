@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import type { LibraryOverviewStats } from '@shared/types'
+import type { LibraryOverviewStats } from '@shared/libraryTypes'
 import { api } from '../api'
 import { overviewStatsKeys } from '../query/queryKeys'
 

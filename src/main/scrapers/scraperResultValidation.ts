@@ -1,10 +1,6 @@
 import { normalizeCupSize } from '@shared/cupSizeUtils'
-import type {
-  ActressGender,
-  ActressScrapeResult,
-  ScrapeResult,
-  ScrapedActress
-} from '@shared/types'
+import type { ActressGender } from '@shared/actressTypes'
+import type { ActressScrapeResult, ScrapeResult, ScrapedActress } from '@shared/scrapeTypes'
 
 type UnknownRecord = Record<string, unknown>
 
@@ -20,16 +16,6 @@ function readString(obj: UnknownRecord, key: string): string | undefined {
   return text || undefined
 }
 
-function readDate(obj: UnknownRecord, key: string): string | undefined {
-  const value = readString(obj, key)
-  if (!value) return undefined
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  if (!match) {
-    throw new Error(`Invalid scraper result: ${key} must use YYYY-MM-DD`)
-  }
-  return formatValidDate(match[1], match[2], match[3], key)
-}
-
 function readFlexibleDate(obj: UnknownRecord, key: string): string | undefined {
   const raw = obj[key]
   if (raw === undefined || raw === null) return undefined
@@ -41,11 +27,11 @@ function readFlexibleDate(obj: UnknownRecord, key: string): string | undefined {
   const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
   if (iso) return formatValidDate(iso[1], iso[2], iso[3], key)
 
-  const full = text.match(/(\d{4})\D{0,3}(\d{1,2})\D{0,3}(\d{1,2})/)
-  if (full) return formatValidDate(full[1], full[2], full[3], key)
-
-  const monthOnly = text.match(/(\d{4})\D{0,3}(\d{1,2})(?:\s*月|\s*$)/)
+  const monthOnly = text.match(/^(\d{4})\D{1,3}(\d{1,2})(?:\s*月)?$/)
   if (monthOnly) return formatValidDate(monthOnly[1], monthOnly[2], '1', key)
+
+  const full = text.match(/(\d{4})\D{1,3}(\d{1,2})\D{1,3}(\d{1,2})(?!\d)/)
+  if (full) return formatValidDate(full[1], full[2], full[3], key)
 
   throw new Error(`Invalid scraper result: ${key} must use YYYY-MM-DD`)
 }
@@ -198,18 +184,6 @@ function assignString(
   }
 }
 
-function assignDate(
-  result: object,
-  obj: UnknownRecord,
-  key: string,
-  targetKey = key
-): void {
-  const value = readDate(obj, key)
-  if (value !== undefined) {
-    ;(result as Record<string, unknown>)[targetKey] = value
-  }
-}
-
 function assignNumber(
   result: object,
   obj: UnknownRecord,
@@ -261,7 +235,7 @@ export function normalizeVideoScrapeResult(
   assignString(result, value, 'title')
   assignString(result, value, 'summary')
   assignString(result, value, 'coverUrl')
-  assignDate(result, value, 'releaseDate')
+  assignFlexibleDate(result, value, 'releaseDate')
   assignString(result, value, 'maker')
   assignString(result, value, 'publisher')
   assignString(result, value, 'series')
@@ -280,6 +254,32 @@ export function normalizeVideoScrapeResult(
   if (tags) result.tags = tags
 
   return result
+}
+
+export function normalizeVideoScrapeCandidates(
+  value: unknown,
+  fallbackCode: string
+): ScrapeResult[] {
+  if (value === null || value === undefined) return []
+  if (!Array.isArray(value)) {
+    const single = normalizeVideoScrapeResult(value, fallbackCode)
+    return single ? [single] : []
+  }
+  const candidates: ScrapeResult[] = []
+  for (const item of value) {
+    if (!isRecord(item)) {
+      throw new Error('Invalid scraper result: candidate entries must be objects')
+    }
+    if (!readString(item, 'code')) {
+      throw new Error('Invalid scraper result: candidate code is required')
+    }
+    const candidate = normalizeVideoScrapeResult(item, fallbackCode)
+    if (!candidate) {
+      throw new Error('Invalid scraper result: candidate entries must be objects')
+    }
+    candidates.push(candidate)
+  }
+  return candidates
 }
 
 export function normalizeActressScrapeResult(value: unknown): ActressScrapeResult | null {

@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { ActressAvatarFilter, ActressListPage } from '@shared/types'
+import { useQuery } from '@tanstack/react-query'
+import type { ActressAvatarFilter, ActressFaceScanManifestItem } from '@shared/actressTypes'
 import { api, assetUrl } from '../api'
 import { cancelPendingAvatarAutoCrop } from '../avatarAutoCrop/service'
 import { detectActressAvatarFace } from './detect'
-import { type ActressFaceScanCache, type ActressFaceScanStatus } from './cache'
+import {
+  type ActressFaceScanCache,
+  type ActressFaceScanStatus,
+  uncachedActressFaceScanIdentity
+} from './cache'
 import {
   getActressFaceScanSession,
   getActressFaceScanSessionRevision,
@@ -16,6 +21,7 @@ import {
   type ActressFaceScanSummary,
   type ActressFaceScanTarget
 } from './scanQueue'
+import { actressFaceScanManifestQueryOptions } from './manifestQueryOptions'
 
 export interface ActressFaceScanState {
   progress: ActressFaceScanProgress
@@ -24,20 +30,23 @@ export interface ActressFaceScanState {
 
 export interface UseActressFaceScanResult {
   cache: ActressFaceScanCache
+  manifest: ActressFaceScanManifestItem[]
+  manifestReady: boolean
   needsScan: boolean
   running: boolean
   state: ActressFaceScanState | null
   start: () => Promise<ActressFaceScanSummary | null>
   cancel: () => void
   close: () => void
+  uncachedIdentity: () => string
 }
 
-function targetsFromPage(page: ActressListPage): ActressFaceScanTarget[] {
-  return page.items.map((item) => ({
+function targetsFromManifest(manifest: ActressFaceScanManifestItem[]): ActressFaceScanTarget[] {
+  return manifest.map((item) => ({
     actressId: item.id,
     mainName: item.main_name,
     avatarUrl: assetUrl(item.avatar_path) ?? '',
-    fingerprint: item.avatar_fingerprint?.trim() ?? ''
+    fingerprint: item.avatar_fingerprint
   }))
 }
 
@@ -49,6 +58,13 @@ export function useActressFaceScan(): UseActressFaceScanResult {
   )
   const session = getActressFaceScanSession()
   const cache = session.cache
+  const manifestQuery = useQuery(
+    actressFaceScanManifestQueryOptions(() => api.actresses.faceScanManifest())
+  )
+  const manifest = manifestQuery.data ?? []
+  const refetchManifest = manifestQuery.refetch
+  const manifestRef = useRef(manifest)
+  manifestRef.current = manifest
   const mountedRef = useRef(true)
   const [state, setState] = useState<ActressFaceScanState | null>(null)
 
@@ -92,16 +108,12 @@ export function useActressFaceScan(): UseActressFaceScanResult {
     })
 
     try {
-      const page = await api.actresses.listPage({
-        gender: 'all',
-        status: 'all',
-        avatar: 'with',
-        sortBy: 'video_count',
-        sortDir: 'desc'
-      })
+      const refreshedManifest = await refetchManifest()
+      if (refreshedManifest.error) throw refreshedManifest.error
+      manifestRef.current = refreshedManifest.data ?? []
       if (runId !== getActressFaceScanSession().runSequence) return null
 
-      const targets = targetsFromPage(page)
+      const targets = targetsFromManifest(refreshedManifest.data ?? [])
       const summary = await scanActressFaceTargets(
         targets,
         cache,
@@ -157,7 +169,7 @@ export function useActressFaceScan(): UseActressFaceScanResult {
         updateActressFaceScanSession({ running: false, cancelRequested: false })
       }
     }
-  }, [cache, setNeedsScan])
+  }, [cache, refetchManifest, setNeedsScan])
 
   const cancel = useCallback((): void => {
     if (!getActressFaceScanSession().running) return
@@ -179,12 +191,15 @@ export function useActressFaceScan(): UseActressFaceScanResult {
 
   return {
     cache,
+    manifest,
+    manifestReady: manifestQuery.data !== undefined,
     needsScan: session.needsScan,
     running: session.running,
     state,
     start,
     cancel,
-    close
+    close,
+    uncachedIdentity: () => uncachedActressFaceScanIdentity(manifestRef.current, cache)
   }
 }
 

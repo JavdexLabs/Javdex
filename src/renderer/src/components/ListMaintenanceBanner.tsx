@@ -1,6 +1,8 @@
 import { X } from 'lucide-react'
 import { UI_ICON_SM } from './iconDefaults'
 import IconButton from './IconButton'
+import Button from './Button'
+import styles from './ListMaintenanceBanner.module.css'
 
 export default function ListMaintenanceBanner({
   title,
@@ -28,32 +30,33 @@ export default function ListMaintenanceBanner({
   className?: string
 }): JSX.Element {
   return (
-    <div className={`list-maintenance-banner${className ? ` ${className}` : ''}`} role="status">
-      <div className="list-maintenance-banner-copy">
+    <div className={`${styles.root}${className ? ` ${className}` : ''}`} role="status">
+      <div className={styles.copy}>
         <strong>{title}</strong>
         {detail ? <span>{detail}</span> : null}
       </div>
-      <div className="list-maintenance-banner-actions">
-        <button
+      <div className={styles.actions}>
+        <Button
           type="button"
-          className="btn btn-sm"
+          size="sm"
           disabled={secondaryDisabled}
           onClick={onSecondary}
         >
           {secondaryLabel}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className="btn btn-sm btn-primary"
+          variant="primary"
+          size="sm"
           disabled={primaryDisabled}
           title={primaryDisabled ? primaryDisabledReason : undefined}
           onClick={onPrimary}
         >
           {primaryLabel}
-        </button>
+        </Button>
         {onDismiss ? (
           <IconButton
-            className="list-maintenance-banner-dismiss"
+            className={styles.dismiss}
             icon={<X {...UI_ICON_SM} />}
             label="关闭提示"
             onClick={onDismiss}

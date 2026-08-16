@@ -2,20 +2,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
 import { Inbox, Pencil, SearchCheck, SearchX } from 'lucide-react'
-import {
-  actressVideoDetailPath,
-  parseActressVideoPath
-} from '../listView/actressRoutes'
-import { facetVideoDetailPath, parseFacetVideoPath } from '../listView/facetRoutes'
-import { libraryVideoDetailPath } from '../listView/libraryRoutes'
-import { playlistVideoDetailPath, parsePlaylistVideoPath } from '../listView/playlistRoutes'
-import { navigateToActressList } from '../listView/listNavigation'
+import { navigateBackFromActressDetail } from '../listView/listNavigation'
 import { invalidateActressLibraryQueries } from '../query/invalidateLibraryQueries'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { buildActressScrapeMatchNameOptions } from '@shared/actressProfileOptions'
-import type { ActressDetail } from '@shared/types'
+import type { ActressDetail } from '@shared/actressTypes'
+import type { ActressDeleteResult } from '@shared/actressIpcContract'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
@@ -25,6 +19,7 @@ import MergeActressModal from '../components/MergeActressModal'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
 import ActressName from '../components/ActressName'
 import ActressAvatar from '../components/ActressAvatar'
+import ActressDeleteModal from '../components/ActressDeleteModal'
 import ActressGalleryPanel from '../components/ActressGalleryPanel'
 import ActressProfileMeta, {
   buildActressProfileStats,
@@ -41,33 +36,31 @@ import { useAppBackground } from '../components/AppBackgroundContext'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import { onAvatarAutoCropSaved } from '../avatarAutoCrop/events'
-import type {
-  ActressEditInput,
-  ActressScrapeField,
-  ActressScrapeUpdateMode
-} from '@shared/types'
+import type { ActressEditInput } from '@shared/actressTypes'
+import type { ActressScrapeField, ActressScrapeUpdateMode } from '@shared/actressScrapeTypes'
 import { resolveActressDetailDisplayBackgroundPath } from '@shared/detailDisplayBackground'
-import {
-  ACTRESS_SCRAPE_FIELD_OPTIONS,
-  ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS,
-  ALL_ACTRESS_SCRAPE_FIELDS
-} from '@shared/types'
+import { ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/actressScrapeTypes'
 
 export default function ActressDetailPage(): JSX.Element {
   const { id, actressId: actressIdParam } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
   const libraryActressStack = useMatch(ROUTE_MATCH.libraryActressStack)
-  const facetActressStack = useMatch(ROUTE_MATCH.facetActressStack)
+  const organizationActressStack = useMatch(ROUTE_MATCH.organizationActressStack)
+  const directorActressStack = useMatch(ROUTE_MATCH.directorActressStack)
+  const seriesActressStack = useMatch(ROUTE_MATCH.seriesActressStack)
   const playlistActressStack = useMatch(ROUTE_MATCH.playlistActressStack)
   const actressActressStack = useMatch(ROUTE_MATCH.actressActressStack)
+  const pendingActressStack = useMatch(ROUTE_MATCH.pendingActressStack)
   const actressVideoStack = useMatch({ path: ROUTE_MATCH.actressVideoStack, end: false })
   const fromVideo =
-    libraryActressStack ?? facetActressStack ?? playlistActressStack ?? actressActressStack
-  const actressVideoPath = parseActressVideoPath(location.pathname)
-  const fromVideoId = fromVideo
-    ? Number(actressVideoPath?.videoId ?? fromVideo.params.id)
-    : undefined
+    libraryActressStack ??
+    organizationActressStack ??
+    directorActressStack ??
+    seriesActressStack ??
+    playlistActressStack ??
+    actressActressStack ??
+    pendingActressStack
   const videoStackOpen = !fromVideo && Boolean(actressVideoStack)
   const actressId = Number(actressIdParam ?? id)
 
@@ -198,45 +191,31 @@ export default function ActressDetailPage(): JSX.Element {
         toast.show('发现名称冲突，结果已保存到待确认', 'info')
       } else if (outcome.status === 'failure') {
         toast.show(`匹配失败：${outcome.error}`, 'error')
+      } else if (outcome.skipped) {
+        toast.show('没有可补齐的字段', 'info')
       } else {
         toast.show('匹配完成', 'success')
       }
     } catch (e) {
       toast.show(`匹配失败：${(e as Error).message}`, 'error')
     } finally {
-      invalidateActressLibraryQueries(queryClient)
+      void invalidateActressLibraryQueries(queryClient)
       await load({ silent: true })
       setScraping(false)
     }
   }
 
-  const doDelete = async (): Promise<void> => {
-    try {
-      await api.actresses.remove(actressId)
-      toast.show('已删除该演员', 'success')
-      if (fromVideoId != null && !Number.isNaN(fromVideoId)) {
-        const facet = parseFacetVideoPath(location.pathname)
-        const playlist = parsePlaylistVideoPath(location.pathname)
-        const actress = parseActressVideoPath(location.pathname)
-        const pathname =
-          facet?.videoId != null
-            ? facetVideoDetailPath(
-                facet.facetType,
-                decodeURIComponent(facet.valueKey),
-                fromVideoId
-              )
-            : playlist?.videoId != null
-              ? playlistVideoDetailPath(playlist.playlistId, fromVideoId)
-              : actress?.videoId != null
-                ? actressVideoDetailPath(actress.actressId, fromVideoId)
-              : libraryVideoDetailPath(fromVideoId)
-        navigate({ pathname, search: location.search })
-      } else {
-        navigateToActressList(navigate, location)
-      }
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
+  const handleDeleted = (result: ActressDeleteResult): void => {
+    toast.show('已删除该演员', 'success')
+    if (result.cleanupFailures.length > 0) {
+      const first = result.cleanupFailures[0]
+      toast.show(
+        `${result.cleanupFailures.length} 个演员资源清理失败：${first.path}（${first.error}）`,
+        'info'
+      )
     }
+    void invalidateActressLibraryQueries(queryClient)
+    navigateBackFromActressDetail(navigate, location)
   }
 
   const handleEditSave = async (input: ActressEditInput): Promise<void> => {
@@ -254,7 +233,7 @@ export default function ActressDetailPage(): JSX.Element {
     try {
       await api.actresses.markScrapeSuccess(actressId)
       toast.show('已标记为刮削成功', 'success')
-      invalidateActressLibraryQueries(queryClient)
+      void invalidateActressLibraryQueries(queryClient)
       await load({ silent: true })
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
@@ -266,7 +245,7 @@ export default function ActressDetailPage(): JSX.Element {
       await api.actresses.clearMeta(actressId)
       setConfirmClear(false)
       toast.show('已清除元数据', 'success')
-      invalidateActressLibraryQueries(queryClient)
+      void invalidateActressLibraryQueries(queryClient)
       void load({ silent: true })
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
@@ -279,27 +258,8 @@ export default function ActressDetailPage(): JSX.Element {
   )
 
   const handleBack = useCallback((): void => {
-    if (fromVideoId != null && !Number.isNaN(fromVideoId)) {
-      const facet = parseFacetVideoPath(location.pathname)
-      const playlist = parsePlaylistVideoPath(location.pathname)
-      const actressRoute = parseActressVideoPath(location.pathname)
-      const pathname =
-        facet?.videoId != null
-          ? facetVideoDetailPath(
-              facet.facetType,
-              decodeURIComponent(facet.valueKey),
-              fromVideoId
-            )
-          : playlist?.videoId != null
-            ? playlistVideoDetailPath(playlist.playlistId, fromVideoId)
-            : actressRoute?.videoId != null
-              ? actressVideoDetailPath(actressRoute.actressId, fromVideoId)
-              : libraryVideoDetailPath(fromVideoId)
-      navigate({ pathname, search: location.search })
-      return
-    }
-    navigateToActressList(navigate, location)
-  }, [fromVideoId, location, navigate])
+    navigateBackFromActressDetail(navigate, location)
+  }, [location, navigate])
 
   const videoOverlay = videoStackOpen ? (
     <div className="detail-pane-overlay">
@@ -334,7 +294,6 @@ export default function ActressDetailPage(): JSX.Element {
 
   const avatar = assetUrl(actress.avatar_path)
   const avatarPreview = assetUrl(actress.avatar_source_path) ?? avatar
-  const canDelete = actress.videos.length === 0
   const profileSubtitle = buildActressProfileSubtitle(actress)
   const profileStats = buildActressProfileStats(actress)
 
@@ -392,7 +351,6 @@ export default function ActressDetailPage(): JSX.Element {
           key: 'delete',
           label: '删除演员',
           danger: true,
-          hidden: !canDelete,
           onClick: () => setConfirmDelete(true)
         }
       ]}
@@ -574,7 +532,7 @@ export default function ActressDetailPage(): JSX.Element {
           onMerged={() => {
             setShowMerge(false)
             toast.show('演员已合并', 'success')
-            invalidateActressLibraryQueries(queryClient)
+            void invalidateActressLibraryQueries(queryClient)
             void load({ silent: true })
           }}
         />
@@ -590,23 +548,20 @@ export default function ActressDetailPage(): JSX.Element {
           }}
           onCancel={() => setConfirmClear(false)}
         >
-          确定要清除「{actress.main_name}」的所有刮削元数据吗？将清空头像、写真、简介、三围、别名等资料（不影响主名、性别与影片关联）。
+          确定要清除「{actress.main_name}」的所有刮削元数据吗？将清空头像、写真、简介、三围、别名等资料（不影响主名、性别、影片关联与相关链接）。
         </Modal>
       )}
 
       {confirmDelete && (
-        <Modal
-          title="删除演员"
-          danger
-          confirmText="删除"
-          onConfirm={() => {
-            setConfirmDelete(false)
-            void doDelete()
-          }}
+        <ActressDeleteModal
+          ids={[actress.id]}
+          subjectLabel={`演员「${actress.main_name}」`}
           onCancel={() => setConfirmDelete(false)}
-        >
-          确定要删除「{actress.main_name}」吗？该演员没有关联影片，删除后不可恢复。
-        </Modal>
+          onDeleted={(result) => {
+            setConfirmDelete(false)
+            handleDeleted(result)
+          }}
+        />
       )}
     </div>
   )

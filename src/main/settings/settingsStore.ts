@@ -2,18 +2,8 @@ import { app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import process from 'node:process'
-import {
-  DEFAULT_SETTINGS,
-  type AppSettings,
-  type CompositeScraperDefinition,
-  type ScraperPluginDelaySettings,
-  expandActressScrapeFields,
-  normalizePluginDevAgentMaxContextTokens,
-  normalizePluginDevAgentMaxSteps,
-  normalizePrivacyModeScopes,
-  normalizeTheme,
-  normalizeMinScanImportDurationMinutes
-} from '@shared/types'
+import { DEFAULT_SETTINGS, normalizeAutoScanIntervalMinutes, normalizeCoverDisplayMode, normalizePluginDevAgentMaxContextTokens, normalizePluginDevAgentMaxSteps, normalizePrivacyModeScopes, normalizeTheme, normalizeMinScanImportDurationMinutes, type AppSettings, type SettingsRecoveryNotice } from '@shared/settingsTypes'
+import { expandActressScrapeFields, type CompositeScraperDefinition, type ScraperPluginDelaySettings } from '@shared/scrapeTypes'
 import {
   BUILT_IN_LLM_PROVIDER_BY_ID,
   isReservedLlmProviderId,
@@ -21,6 +11,7 @@ import {
   normalizeDefaultLlmSelection,
   type CustomLlmProviderDefinition,
   type LlmCustomModelDefinition,
+  type LlmProviderPublicConfig,
   type LlmProviderProtocol,
   type LlmProviderUserConfig
 } from '@shared/llmProviders'
@@ -32,8 +23,21 @@ import {
   normalizeAvatarFaceScalePreset
 } from '@shared/avatarFaceScale'
 import { normalizeAvatarCenteringMode } from '@shared/avatarCentering'
+import { normalizeLibraryScanSummary } from '@shared/libraryScanSummary'
+import { normalizeScraperServiceConfigs } from '@shared/scraperServiceTypes'
+import {
+  getLlmApiKey,
+  hasLlmApiKey,
+  resetLlmSecretStoreForTests,
+  saveLlmApiKeys
+} from './llmSecretStore'
+import { resetScraperServiceSecretStoreForTests } from './scraperServiceSecretStore'
 
 let cache: AppSettings | null = null
+let recoveryNotice: SettingsRecoveryNotice | null = null
+let recoveryBackupPath: string | null = null
+let llmSecretMigrationError: string | undefined
+let legacyLlmApiKeys: Record<string, string> = {}
 
 function settingsFilePath(): string {
   const userData = app?.getPath ? app.getPath('userData') : readTestUserDataPath()
@@ -44,21 +48,53 @@ function settingsFilePath(): string {
 /** Test-only: clear in-memory settings cache between isolated runs. */
 export function resetSettingsCacheForTests(): void {
   cache = null
+  recoveryNotice = null
+  recoveryBackupPath = null
+  llmSecretMigrationError = undefined
+  legacyLlmApiKeys = {}
+  resetLlmSecretStoreForTests()
+  resetScraperServiceSecretStoreForTests()
 }
 
 export function getSettings(): AppSettings {
   if (cache) return cache
   const file = settingsFilePath()
+  let raw: string
   try {
-    if (fs.existsSync(file)) {
-      const raw = fs.readFileSync(file, 'utf-8')
-      const parsed = JSON.parse(raw) as Partial<AppSettings>
-      cache = normalizeSettings(parsed)
-    } else {
-      cache = { ...DEFAULT_SETTINGS }
+    raw = fs.readFileSync(file, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      cache = normalizeSettings({})
+      return cache
     }
-  } catch {
-    cache = { ...DEFAULT_SETTINGS }
+    throw new Error(`读取设置失败：${(error as Error).message}`)
+  }
+
+  let parsed: ParsedSettings
+  try {
+    const value: unknown = JSON.parse(raw)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('设置文件根节点必须是对象')
+    }
+    parsed = value as ParsedSettings
+  } catch (error) {
+    cache = recoverCorruptSettings(file, error)
+    return cache
+  }
+
+  legacyLlmApiKeys = extractLegacyLlmApiKeys(parsed.llmProviderConfigs)
+  if (Object.keys(legacyLlmApiKeys).length > 0) {
+    try {
+      saveLlmApiKeys(legacyLlmApiKeys)
+      cache = normalizeSettings(parsed)
+      writeSettingsFile(cache)
+      legacyLlmApiKeys = {}
+    } catch (error) {
+      llmSecretMigrationError = `旧版 API Key 迁移失败：${(error as Error).message}`
+      cache = normalizeSettings(parsed)
+    }
+  } else {
+    cache = normalizeSettings(parsed)
   }
   return cache
 }
@@ -70,13 +106,121 @@ export function updateSettings(patch: Partial<AppSettings>): AppSettings {
     ...patch,
     ...(patch.theme !== undefined ? { theme: normalizeTheme(patch.theme) } : {})
   })
+  ensureLegacyLlmSecretsMigrated()
+  writeSettingsFile(next)
   cache = next
-  try {
-    fs.writeFileSync(settingsFilePath(), JSON.stringify(next, null, 2), 'utf-8')
-  } catch (err) {
-    console.error('Failed to persist settings:', err)
-  }
   return next
+}
+
+function writeSettingsFile(settings: AppSettings): void {
+  const file = settingsFilePath()
+  const temporaryFile = `${file}.tmp-${process.pid}`
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(temporaryFile, JSON.stringify(settings, null, 2), {
+      encoding: 'utf8',
+      mode: 0o600
+    })
+    fs.renameSync(temporaryFile, file)
+    if (process.platform !== 'win32') fs.chmodSync(file, 0o600)
+  } catch (err) {
+    try {
+      fs.rmSync(temporaryFile, { force: true })
+    } catch {
+      // Preserve the original persistence error.
+    }
+    throw new Error(`保存设置失败：${(err as Error).message}`)
+  }
+}
+
+function recoverCorruptSettings(file: string, cause: unknown): AppSettings {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const backup = path.join(path.dirname(file), `settings.corrupt-${stamp}.json`)
+  try {
+    fs.renameSync(file, backup)
+    const defaults = normalizeSettings({})
+    writeSettingsFile(defaults)
+    recoveryBackupPath = backup
+    recoveryNotice = {
+      backupFileName: path.basename(backup),
+      message: `设置文件损坏，已恢复默认设置：${(cause as Error).message}`
+    }
+    return defaults
+  } catch (error) {
+    throw new Error(`恢复损坏设置失败：${(error as Error).message}`)
+  }
+}
+
+function extractLegacyLlmApiKeys(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object') return {}
+  const entries: Record<string, string> = {}
+  for (const [rawProviderId, rawConfig] of Object.entries(value as Record<string, unknown>)) {
+    if (!rawConfig || typeof rawConfig !== 'object') continue
+    const apiKey = (rawConfig as { apiKey?: unknown }).apiKey
+    if (typeof apiKey !== 'string' || !apiKey.trim()) continue
+    const providerId = rawProviderId.trim()
+    if (providerId) entries[providerId] = apiKey.trim()
+  }
+  return entries
+}
+
+function ensureLegacyLlmSecretsMigrated(): void {
+  if (Object.keys(legacyLlmApiKeys).length === 0) return
+  try {
+    saveLlmApiKeys(legacyLlmApiKeys)
+    legacyLlmApiKeys = {}
+    llmSecretMigrationError = undefined
+  } catch (error) {
+    throw new Error(`无法安全迁移旧版 API Key：${(error as Error).message}`)
+  }
+}
+
+export function getEffectiveLlmApiKey(providerId: string): string {
+  const stored = getLlmApiKey(providerId)
+  return stored || legacyLlmApiKeys[providerId.trim()] || ''
+}
+
+function hasEffectiveLlmApiKey(providerId: string): boolean {
+  return hasLlmApiKey(providerId) || Boolean(legacyLlmApiKeys[providerId.trim()])
+}
+
+export function getPublicLlmProviderConfigs(
+  settings: AppSettings
+): Record<string, LlmProviderPublicConfig> {
+  return publicLlmProviderConfigs(settings.llmProviderConfigs, settings.customLlmProviders)
+}
+
+function publicLlmProviderConfigs(
+  configs: Record<string, LlmProviderUserConfig>,
+  customProviders: CustomLlmProviderDefinition[]
+): Record<string, LlmProviderPublicConfig> {
+  const providerIds = new Set([
+    ...BUILT_IN_LLM_PROVIDER_BY_ID.keys(),
+    ...Object.keys(configs),
+    ...customProviders.map((provider) => provider.id),
+    ...Object.keys(legacyLlmApiKeys)
+  ])
+  return Object.fromEntries(
+    [...providerIds].map((providerId) => [
+      providerId,
+      {
+        ...configs[providerId],
+        hasApiKey: hasEffectiveLlmApiKey(providerId)
+      }
+    ])
+  )
+}
+
+export function getSettingsRecoveryNotice(): SettingsRecoveryNotice | null {
+  return recoveryNotice
+}
+
+export function getSettingsRecoveryBackupPath(): string | null {
+  return recoveryBackupPath
+}
+
+export function getLlmSecretMigrationError(): string | undefined {
+  return llmSecretMigrationError
 }
 
 /**
@@ -128,10 +272,15 @@ export function migrateRetiredVideoScraperSettings(): void {
 type ParsedSettings = Partial<AppSettings>
 
 function normalizeSettings(parsed: ParsedSettings): AppSettings {
-  const defaultScraper =
+  const scraperServiceConfigs = normalizeScraperServiceConfigs(parsed.scraperServiceConfigs)
+  const requestedDefaultScraper =
     typeof parsed.defaultScraper === 'string' && parsed.defaultScraper.trim()
       ? parsed.defaultScraper.trim()
       : DEFAULT_SETTINGS.defaultScraper
+  const defaultScraper =
+    requestedDefaultScraper === 'MetaTube' && !scraperServiceConfigs.metatube.serverUrl
+      ? DEFAULT_SETTINGS.defaultScraper
+      : requestedDefaultScraper
   const rawDefaultActressScraper =
     typeof parsed.defaultActressScraper === 'string' && parsed.defaultActressScraper.trim()
       ? parsed.defaultActressScraper.trim()
@@ -179,10 +328,32 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
       parsed.actressDetailUseFirstGalleryBackground,
       DEFAULT_SETTINGS.actressDetailUseFirstGalleryBackground
     ),
+    showVideoResourceTypeBadges: normalizeBooleanSetting(
+      parsed.showVideoResourceTypeBadges,
+      DEFAULT_SETTINGS.showVideoResourceTypeBadges
+    ),
+    coverDisplayMode: normalizeCoverDisplayMode(parsed.coverDisplayMode),
+    pendingLibraryPathCleanups: normalizeStringList(parsed.pendingLibraryPathCleanups),
+    autoDeleteResourceLessVideos: normalizeBooleanSetting(
+      parsed.autoDeleteResourceLessVideos,
+      DEFAULT_SETTINGS.autoDeleteResourceLessVideos
+    ),
+    autoScanEnabled: normalizeBooleanSetting(
+      parsed.autoScanEnabled,
+      DEFAULT_SETTINGS.autoScanEnabled
+    ),
+    autoScanIntervalMinutes: normalizeAutoScanIntervalMinutes(
+      parsed.autoScanIntervalMinutes
+    ),
+    lastLibraryScanSummary: normalizeLibraryScanSummary(parsed.lastLibraryScanSummary),
     mediaAssetsPath:
       typeof parsed.mediaAssetsPath === 'string' ? parsed.mediaAssetsPath.trim() : '',
     minScanImportDurationMinutes: normalizeMinScanImportDurationMinutes(
       parsed.minScanImportDurationMinutes
+    ),
+    autoMergeSameCodeResources: normalizeBooleanSetting(
+      parsed.autoMergeSameCodeResources,
+      DEFAULT_SETTINGS.autoMergeSameCodeResources
     ),
     proxyUrl: typeof parsed.proxyUrl === 'string' ? parsed.proxyUrl.trim() : '',
     proxyUrlEnabled: normalizeBooleanSetting(
@@ -204,6 +375,7 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
       parsed.pluginDevAgentMaxContextTokens
     ),
     scraperPluginDelays: normalizeDelaySettings(parsed.scraperPluginDelays),
+    scraperServiceConfigs,
     compositeScrapers: {
       video: normalizeCompositeScrapers(parsed.compositeScrapers?.video, 'video'),
       actress: normalizeCompositeScrapers(parsed.compositeScrapers?.actress, 'actress')
@@ -213,6 +385,18 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
 
 function normalizeBooleanSetting(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return Array.from(
+    new Set(
+      value
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  )
 }
 
 function normalizeLlmSettings(parsed: ParsedSettings): Pick<
@@ -239,7 +423,7 @@ function normalizeLlmSettings(parsed: ParsedSettings): Pick<
   const normalized = normalizeDefaultLlmSelection({
     defaultLlmProviderId,
     defaultLlmModelId,
-    llmProviderConfigs,
+    llmProviderConfigs: publicLlmProviderConfigs(llmProviderConfigs, customLlmProviders),
     customLlmProviders,
     llmCustomModels
   })
@@ -262,13 +446,11 @@ function normalizeLlmProviderConfigs(
   const out: Record<string, LlmProviderUserConfig> = {}
   for (const [providerId, config] of Object.entries(value as Record<string, unknown>)) {
     if (!providerId.trim() || !config || typeof config !== 'object') continue
-    const item = config as { apiKey?: unknown; baseUrl?: unknown; protocol?: unknown }
-    const apiKey = typeof item.apiKey === 'string' ? item.apiKey.trim() : undefined
+    const item = config as { baseUrl?: unknown; protocol?: unknown }
     const baseUrl = typeof item.baseUrl === 'string' ? item.baseUrl.trim() : undefined
     const protocol = normalizeLlmProviderProtocol(item.protocol)
-    if (!apiKey && !baseUrl && !protocol) continue
+    if (!baseUrl && !protocol) continue
     out[providerId.trim()] = {
-      ...(apiKey ? { apiKey } : {}),
       ...(baseUrl ? { baseUrl } : {}),
       ...(protocol ? { protocol } : {})
     }

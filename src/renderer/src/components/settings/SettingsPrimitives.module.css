@@ -1,0 +1,292 @@
+.card {
+  margin-bottom: 0;
+  padding: var(--settings-card-pad-y, 16px) var(--settings-card-pad-x, 18px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.cardHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.cardHeadCopy {
+  min-width: 0;
+}
+
+.cardHead h3 {
+  margin: 0 0 4px;
+  font-size: var(--settings-fs-title, 14px);
+  font-weight: var(--settings-fw-title, 700);
+  line-height: var(--settings-lh-tight, 1.35);
+}
+
+.cardHint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.cardActions {
+  display: flex;
+  flex-shrink: 0;
+  align-self: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.headerSwitch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  cursor: pointer;
+  user-select: none;
+}
+
+.headerSwitchDisabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.statusPill {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.statusRunning {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-panel));
+  color: var(--text-accent);
+}
+
+.statusPaused {
+  border-color: var(--border-strong);
+  background: var(--surface-selected);
+  color: var(--text-primary);
+}
+
+.statusDone {
+  border-color: color-mix(in srgb, var(--success) 46%, var(--border-subtle));
+  color: var(--success);
+}
+
+.statusCancelled {
+  border-color: color-mix(in srgb, var(--danger) 46%, var(--border-subtle));
+  color: var(--danger);
+}
+
+.statusSuccess {
+  border-color: color-mix(in srgb, var(--success) 46%, var(--border-subtle));
+  background: color-mix(in srgb, var(--success) 9%, var(--surface-panel));
+  color: var(--success);
+}
+
+.statusWarning {
+  border-color: color-mix(in srgb, var(--warning) 46%, var(--border-subtle));
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface-panel));
+  color: var(--warning);
+}
+
+.statusInfo {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface-panel));
+  color: var(--text-accent);
+}
+
+.statusMuted {
+  color: var(--text-muted);
+}
+
+.sectionBlock {
+  min-width: 0;
+}
+
+.sectionBlockHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.sectionBlockCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.sectionBlockActions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.sectionBlockTitle {
+  color: var(--text-primary);
+  font-size: var(--settings-fs-body, 13px);
+  font-weight: var(--settings-fw-label, 600);
+  line-height: var(--settings-lh-tight, 1.35);
+}
+
+.sectionBlockTitle em {
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  font-style: normal;
+  font-weight: 500;
+}
+
+.sectionBlockHint {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption, 11px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.tabBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px;
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.tabButton {
+  flex: 0 0 auto;
+  min-height: var(--control-h-sm);
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-secondary, 12px);
+  font-weight: var(--settings-fw-title, 700);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast),
+    border-color var(--motion-fast),
+    color var(--motion-fast);
+}
+
+.tabButton:hover,
+.tabButton:focus-visible {
+  border-color: var(--border-strong);
+  outline: none;
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
+
+.tabButtonActive {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+  color: var(--text-primary);
+}
+
+.numberStepper {
+  display: inline-flex;
+  align-items: stretch;
+  height: var(--control-h-sm);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-elevated);
+}
+
+.stepperButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--motion-fast),
+    color var(--motion-fast);
+}
+
+.stepperButton:focus-visible {
+  z-index: 1;
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
+}
+
+.stepperButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.stepperButton:hover:not(:disabled) {
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
+
+.stepperButton:active:not(:disabled) {
+  background: color-mix(in srgb, var(--surface-selected) 70%, var(--surface-control-hover));
+}
+
+.stepperValue {
+  width: 44px;
+  min-width: 44px;
+  margin: 0;
+  padding: 0 4px;
+  border: none;
+  border-right: 1px solid var(--border-subtle);
+  border-left: 1px solid var(--border-subtle);
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.stepperValue:focus {
+  background: color-mix(in srgb, var(--surface-control) 55%, transparent);
+}
+
+.stepperValue:disabled {
+  color: var(--text-muted);
+}
+
+.stepperUnit {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px 0 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.numberStepperDisabled {
+  opacity: 0.72;
+}

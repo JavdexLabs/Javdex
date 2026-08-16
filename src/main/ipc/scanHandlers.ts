@@ -1,51 +1,61 @@
 import { IPC } from '@shared/ipc-channels'
-import type { ManualImportResult, RenameImportResult, ScanResult } from '@shared/types'
+import fs from 'node:fs'
+import type { ManualImportResult, RenameImportResult, ScanResult } from '@shared/libraryTypes'
+import { importManual, renameAndImport } from '../scanner/scanner'
+import { scanCoordinator } from '../scanner/scanCoordinator'
+import { listPendingScanGroups, resolvePendingScanGroup } from '../db/pendingScanRepo'
+import { listVideoResources } from '../db/videoRepo'
+import { maintenanceTaskGate } from '../services/maintenanceTaskGate'
+import { selectPrimaryVideoResourceCandidate } from '../services/videoResourcePromotion'
+import type { IpcContext } from './shared'
+import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 import { getSettings } from '../settings/settingsStore'
-import { importManual, renameAndImport, scanFolders } from '../scanner/scanner'
-import { registerHandler, type IpcContext } from './shared'
-
-let activeScan: AbortController | null = null
+import { assertConfiguredLibraryFile, assertFileNameOnly } from './ipcPathGuards'
 
 export function registerScanHandlers(ctx: IpcContext): void {
-  registerHandler(IPC.SCAN_RUN, async (_e, folders?: string[]): Promise<ScanResult> => {
-    if (activeScan) throw new Error('Scan is already running')
-
-    const settings = getSettings()
-    const target = folders && folders.length ? folders : settings.libraryPaths
-    if (!target.length) throw new Error('No media library paths configured')
-
-    const controller = new AbortController()
-    activeScan = controller
-    const win = ctx.getWindow()
-
-    try {
-      return await scanFolders(
-        target,
-        (p) => {
-          win?.webContents.send(IPC.SCAN_PROGRESS, p)
-        },
-        { signal: controller.signal }
-      )
-    } finally {
-      if (activeScan === controller) activeScan = null
+  scanCoordinator.subscribe((event) => {
+    const webContents = ctx.getWindow()?.webContents
+    appEventAdapter.send(webContents, IPC.SCAN_STATE_CHANGED, event)
+    if (event.phase === 'progress') {
+      appEventAdapter.send(webContents, IPC.SCAN_PROGRESS, event.progress)
     }
   })
 
-  registerHandler(IPC.SCAN_CANCEL, (): boolean => {
-    if (!activeScan) return false
-    activeScan.abort()
-    return true
+  appCommandAdapter.register(IPC.SCAN_RUN, async (folders): Promise<ScanResult> => {
+    return scanCoordinator.run({
+      folders,
+      trigger: 'manual'
+    })
   })
 
-  registerHandler(
-    IPC.FILE_RENAME,
-    (_e, oldPath: string, newName: string): Promise<RenameImportResult> =>
-      renameAndImport(oldPath, newName)
+  appCommandAdapter.register(IPC.SCAN_CANCEL, (): boolean => scanCoordinator.cancel())
+  appCommandAdapter.register(IPC.PENDING_SCAN_LIST, () => listPendingScanGroups())
+  appCommandAdapter.register(IPC.PENDING_SCAN_RESOLVE, (groupId, resolution) =>
+    maintenanceTaskGate.runSync('resource-maintenance', () =>
+      resolvePendingScanGroup(groupId, resolution, {
+        selectFallbackPrimaryResourceId: (videoId) =>
+          selectPrimaryVideoResourceCandidate(listVideoResources(videoId), fs.existsSync)?.id ??
+          null
+      })
+    )
   )
 
-  registerHandler(
+  appCommandAdapter.register(
+    IPC.FILE_RENAME,
+    (oldPath, newName, code, target): Promise<RenameImportResult> => {
+      assertConfiguredLibraryFile(oldPath, getSettings().libraryPaths)
+      assertFileNameOnly(newName)
+      return maintenanceTaskGate.run('resource-maintenance', () =>
+        renameAndImport(oldPath, newName, code, target)
+      )
+    }
+  )
+
+  appCommandAdapter.register(
     IPC.FILE_IMPORT_MANUAL,
-    (_e, filePath: string, code: string): Promise<ManualImportResult> =>
-      importManual(filePath, code)
+    (filePath, code, target): Promise<ManualImportResult> => {
+      assertConfiguredLibraryFile(filePath, getSettings().libraryPaths)
+      return maintenanceTaskGate.run('resource-maintenance', () => importManual(filePath, code, target))
+    }
   )
 }

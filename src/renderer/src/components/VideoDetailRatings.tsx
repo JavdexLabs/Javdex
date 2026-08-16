@@ -1,4 +1,4 @@
-import type { VideoDetail, VideoExternalStats } from '@shared/types'
+import type { VideoDetail, VideoExternalStats } from '@shared/videoTypes'
 import StarRating from './StarRating'
 
 function formatExternalScore(value: number): string {

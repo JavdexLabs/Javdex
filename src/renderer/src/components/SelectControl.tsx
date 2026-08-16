@@ -84,7 +84,8 @@ export default function SelectControl({
   name,
   onChange,
   title,
-  value
+  value,
+  'aria-label': ariaLabel
 }: SelectControlProps): JSX.Element {
   const buttonRef = useRef<HTMLButtonElement | null>(null)
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -229,6 +230,7 @@ export default function SelectControl({
         autoFocus={autoFocus}
         disabled={disabled}
         title={title}
+        aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listboxId : undefined}

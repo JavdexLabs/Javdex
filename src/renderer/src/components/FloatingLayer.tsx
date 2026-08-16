@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode, type RefObject } from 'react'
+import { useEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useFloatingLayer } from '../hooks/useFloatingLayer'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
@@ -14,6 +14,7 @@ interface FloatingLayerProps {
   role?: string
   ariaLabel?: string
   id?: string
+  style?: CSSProperties
   onClose?: () => void
   ignoreCloseRefs?: Array<RefObject<HTMLElement | null>>
   children: ReactNode
@@ -29,6 +30,7 @@ export default function FloatingLayer({
   role,
   ariaLabel,
   id,
+  style,
   onClose,
   ignoreCloseRefs = [],
   children
@@ -70,6 +72,7 @@ export default function FloatingLayer({
       role={role}
       aria-label={ariaLabel}
       style={{
+        ...style,
         position: 'fixed',
         top: coords?.top ?? -10000,
         left: coords?.left ?? -10000,

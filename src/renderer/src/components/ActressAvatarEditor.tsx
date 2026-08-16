@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ActressGalleryAsset, Video } from '@shared/types'
+import type { ActressGalleryAsset } from '@shared/actressTypes'
+import type { Video } from '@shared/videoTypes'
 import { DEFAULT_AVATAR_FACE_RATIO } from '@shared/avatarFaceScale'
 import {
   DEFAULT_AVATAR_CENTERING_MODE,
@@ -33,6 +34,7 @@ import {
   getSmartAvatarCropTransform,
   isDefaultCropTransform
 } from '../utils/avatarCrop'
+import Button from './Button'
 
 type SourceTab = 'current' | 'local' | 'cover' | 'gallery'
 
@@ -842,14 +844,16 @@ export default function ActressAvatarEditor({
                 {editableSourceUrl ? (
                   <div className="avatar-source-static">
                     <p className="avatar-source-note">{currentSourceNote}</p>
-                    <button
+                    <Button
                       type="button"
-                      className={`btn btn-sm${editingCurrent ? ' btn-primary' : ''}`}
+
+                      size="sm"
+                      variant={editingCurrent ? 'primary' : 'default'}
                       disabled={editingCurrent || openingCurrent}
                       onClick={loadCurrentAvatar}
                     >
                       {openingCurrent ? '打开中' : editingCurrent ? '编辑中' : '编辑裁剪'}
-                    </button>
+                    </Button>
                   </div>
                 ) : (
                   <p className="avatar-source-empty">暂无头像，请从其他来源选择</p>
@@ -862,13 +866,15 @@ export default function ActressAvatarEditor({
                 hidden={activeTab !== 'local'}
               >
                 <div className="avatar-source-static">
-                  <button
+                  <Button
                     type="button"
-                    className={`btn btn-sm${activeSourceKey === 'local' ? ' btn-primary' : ''}`}
+
+                    size="sm"
+                    variant={activeSourceKey === 'local' ? 'primary' : 'default'}
                     onClick={() => fileRef.current?.click()}
                   >
                     选择本地图片…
-                  </button>
+                  </Button>
                   <p className="avatar-source-note">JPG · PNG · WebP</p>
                 </div>
               </div>
@@ -1007,9 +1013,12 @@ export default function ActressAvatarEditor({
                 </div>
               ) : null}
               <div className="avatar-editor-actions">
-                <button
+                <Button
                   type="button"
-                  className="btn btn-primary btn-sm avatar-smart-crop-button"
+                  variant="primary"
+
+                  size="sm"
+                  className="avatar-smart-crop-button"
                   tabIndex={editing ? 0 : -1}
                   disabled={!editing || smartCropping}
                   aria-busy={smartCropping || undefined}
@@ -1017,23 +1026,25 @@ export default function ActressAvatarEditor({
                 >
                   {smartCropping ? <span className="avatar-smart-crop-spinner" aria-hidden /> : null}
                   <span>{smartCropping ? '构图中' : '智能构图'}</span>
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="btn btn-sm"
+
+                  size="sm"
                   tabIndex={editing ? 0 : -1}
                   onClick={resetTransform}
                 >
                   重置
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="btn btn-sm"
+
+                  size="sm"
                   tabIndex={editing ? 0 : -1}
                   onClick={clearSource}
                 >
                   取消
-                </button>
+                </Button>
               </div>
             </div>
           </div>

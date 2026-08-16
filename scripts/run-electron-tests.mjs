@@ -1,23 +1,53 @@
 import { spawnSync } from 'node:child_process'
+import { readdirSync } from 'node:fs'
+import path from 'node:path'
 import electronPath from 'electron'
 
-const testFiles = process.argv.slice(2)
-const args = [
-  '--require',
-  './scripts/register-test-paths.cjs',
-  '--import',
-  'tsx',
-  '--test',
-  ...testFiles
-]
+function discoverTests(root) {
+  return readdirSync(root, { withFileTypes: true })
+    .flatMap((entry) => {
+      const fullPath = path.join(root, entry.name)
+      if (entry.isDirectory()) return discoverTests(fullPath)
+      return /\.test\.tsx?$/.test(entry.name) ? [fullPath.replaceAll('\\', '/')] : []
+    })
+    .sort()
+}
 
-const result = spawnSync(electronPath, args, {
-  stdio: 'inherit',
-  env: {
-    ...process.env,
-    ELECTRON_RUN_AS_NODE: '1'
-  },
-  shell: false
-})
+const requestedFiles = process.argv.slice(2)
+const testFiles = requestedFiles.length > 0 ? requestedFiles : discoverTests('src')
+if (testFiles.length === 0) {
+  console.error('No test files found under src/**/*.test.ts(x)')
+  process.exitCode = 1
+} else {
+  const args = [
+    '--require',
+    './scripts/register-test-paths.cjs',
+    '--import',
+    './scripts/register-test-styles.mjs',
+    '--import',
+    'tsx',
+    '--test',
+    ...testFiles
+  ]
+  const timeoutMs = Number(process.env.JAVDEX_TEST_TIMEOUT_MS ?? 180_000)
 
-process.exit(result.status ?? 1)
+  const result = spawnSync(electronPath, args, {
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1'
+    },
+    shell: false,
+    timeout: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 180_000,
+    killSignal: 'SIGTERM'
+  })
+
+  if (result.error) {
+    const timeoutHint = result.error.code === 'ETIMEDOUT'
+      ? ` after ${timeoutMs} ms; inspect leaked handles or increase JAVDEX_TEST_TIMEOUT_MS`
+      : ''
+    console.error(`Electron test runner failed${timeoutHint}: ${result.error.message}`)
+  }
+  if (result.signal) console.error(`Electron test process exited via signal ${result.signal}`)
+  process.exitCode = result.status ?? 1
+}

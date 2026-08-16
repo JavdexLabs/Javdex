@@ -6,17 +6,24 @@ export const IPC = {
   SETTINGS_GET: 'settings:get',
   SETTINGS_UPDATE: 'settings:update',
   SETTINGS_PICK_FOLDER: 'settings:pickFolder',
+  SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW: 'settings:libraryPathRemovePreview',
+  SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM: 'settings:libraryPathRemoveConfirm',
   SETTINGS_LLM_TEST_MODEL: 'settings:llmTestModel',
   SETTINGS_LLM_LIST_MODELS: 'settings:llmListModels',
+  SETTINGS_LLM_PROVIDER_CONFIG_SAVE: 'settings:llmProviderConfigSave',
+  SETTINGS_LLM_PROVIDER_DELETE: 'settings:llmProviderDelete',
+  SETTINGS_RECOVERY_REVEAL_BACKUP: 'settings:recoveryRevealBackup',
   SETTINGS_PROXY_TEST: 'settings:proxyTest',
   SETTINGS_OVERVIEW_STATS: 'settings:overviewStats',
+
+  // External links
+  EXTERNAL_LINK_OPEN: 'externalLink:open',
 
   // Application release checks
   APP_UPDATE_GET_STATE: 'appUpdate:getState',
   APP_UPDATE_CHECK: 'appUpdate:check',
   APP_UPDATE_OPEN_RELEASE: 'appUpdate:openRelease',
   APP_UPDATE_OPEN_PROJECT_PAGE: 'appUpdate:openProjectPage',
-  APP_UPDATE_OPEN_EXTERNAL_LINK: 'appUpdate:openExternalLink',
   APP_UPDATE_IGNORE_VERSION: 'appUpdate:ignoreVersion',
   APP_UPDATE_STATE_CHANGED: 'appUpdate:stateChanged', // main -> renderer event
 
@@ -24,8 +31,11 @@ export const IPC = {
   SCAN_RUN: 'scan:run',
   SCAN_CANCEL: 'scan:cancel',
   SCAN_PROGRESS: 'scan:progress', // main -> renderer event
+  SCAN_STATE_CHANGED: 'scan:stateChanged', // main -> renderer event
   FILE_RENAME: 'file:rename',
   FILE_IMPORT_MANUAL: 'file:importManual',
+  PENDING_SCAN_LIST: 'pendingScan:list',
+  PENDING_SCAN_RESOLVE: 'pendingScan:resolve',
 
   // Videos
   VIDEO_LIST: 'video:list',
@@ -36,8 +46,6 @@ export const IPC = {
   VIDEO_MARK_SCRAPE_SUCCESS: 'video:markScrapeSuccess',
   VIDEO_DELETE: 'video:delete',
   VIDEO_SET_RATING: 'video:setRating',
-  VIDEO_SET_PRIMARY_FILE: 'video:setPrimaryFile',
-  VIDEO_DELETE_FILE: 'video:deleteFile',
   VIDEO_CORRECT_IMPORT: 'video:correctImport',
   VIDEO_YEARS: 'video:years',
   VIDEO_SAMPLE_IMPORT: 'video:sampleImport',
@@ -45,6 +53,15 @@ export const IPC = {
   VIDEO_POSTER_SET: 'video:posterSet',
   VIDEO_MANUAL_TAG_ADD: 'video:manualTagAdd',
   VIDEO_MANUAL_TAG_REMOVE: 'video:manualTagRemove',
+  VIDEO_RESOURCE_IMPORT: 'video:resourceImport',
+  VIDEO_RESOURCE_GET: 'video:resourceGet',
+  VIDEO_RESOURCE_CHECK: 'video:resourceCheck',
+  VIDEO_RESOURCE_UPDATE: 'video:resourceUpdate',
+  VIDEO_RESOURCE_UPDATE_LOCAL_LABEL: 'video:resourceUpdateLocalLabel',
+  VIDEO_RESOURCE_SET_PRIMARY: 'video:resourceSetPrimary',
+  VIDEO_RESOURCE_REMOVE: 'video:resourceRemove',
+  VIDEO_MERGE: 'video:merge',
+  VIDEO_RESOURCE_SPLIT: 'video:resourceSplit',
 
   // Playlists
   PLAYLIST_LIST: 'playlist:list',
@@ -59,11 +76,13 @@ export const IPC = {
   // Actresses
   ACTRESS_LIST: 'actress:list',
   ACTRESS_LIST_PAGE: 'actress:listPage',
+  ACTRESS_FACE_SCAN_MANIFEST: 'actress:faceScanManifest',
   ACTRESS_GET: 'actress:get',
   ACTRESS_AVATAR_SOURCE_INFO: 'actress:avatarSourceInfo',
   ACTRESS_EDIT: 'actress:edit',
   ACTRESS_DELETE: 'actress:delete',
   ACTRESS_DELETE_BATCH: 'actress:deleteBatch',
+  ACTRESS_DELETE_PREVIEW: 'actress:deletePreview',
   ACTRESS_CLEAR_META: 'actress:clearMeta',
   ACTRESS_GALLERY_IMPORT: 'actress:galleryImport',
   ACTRESS_GALLERY_DELETE: 'actress:galleryDelete',
@@ -82,12 +101,42 @@ export const IPC = {
   TAG_LIST: 'tag:list',
   TAG_LIST_MANUAL: 'tag:listManual',
 
-  // Facets (studio / series / director)
-  FACET_LIST: 'facet:list',
-  FACET_DELETE: 'facet:delete',
+  // Classification entities
+  ORGANIZATION_LIST: 'organization:list',
+  ORGANIZATION_GET: 'organization:get',
+  ORGANIZATION_OPTIONS: 'organization:options',
+  ORGANIZATION_MERGE_OPTIONS: 'organization:mergeOptions',
+  ORGANIZATION_CREATE: 'organization:create',
+  ORGANIZATION_UPDATE: 'organization:update',
+  ORGANIZATION_MERGE: 'organization:merge',
+  ORGANIZATION_ROLE_REMOVE_PREVIEW: 'organization:roleRemovePreview',
+  ORGANIZATION_ROLE_REMOVE: 'organization:roleRemove',
+  ORGANIZATION_DELETE_PREVIEW: 'organization:deletePreview',
+  ORGANIZATION_DELETE: 'organization:delete',
+  DIRECTOR_LIST: 'director:list',
+  DIRECTOR_GET: 'director:get',
+  DIRECTOR_OPTIONS: 'director:options',
+  DIRECTOR_CREATE: 'director:create',
+  DIRECTOR_UPDATE: 'director:update',
+  DIRECTOR_MERGE: 'director:merge',
+  DIRECTOR_DELETE_PREVIEW: 'director:deletePreview',
+  DIRECTOR_DELETE: 'director:delete',
+  SERIES_LIST: 'series:list',
+  SERIES_GET: 'series:get',
+  SERIES_OPTIONS: 'series:options',
+  SERIES_CREATE: 'series:create',
+  SERIES_UPDATE: 'series:update',
+  SERIES_MERGE: 'series:merge',
+  SERIES_DELETE_PREVIEW: 'series:deletePreview',
+  SERIES_DELETE: 'series:delete',
+  CLASSIFICATION_IMAGE_CANDIDATES: 'classificationImage:candidates',
+  CLASSIFICATION_IMAGE_SET: 'classificationImage:set',
 
   // Scraping
   SCRAPE_ONE: 'scrape:one',
+  PENDING_VIDEO_SCRAPE_LIST: 'pendingVideoScrape:list',
+  PENDING_VIDEO_SCRAPE_CONFIRM: 'pendingVideoScrape:confirm',
+  PENDING_VIDEO_SCRAPE_DISCARD: 'pendingVideoScrape:discard',
   SCRAPE_BATCH_START: 'scrape:batchStart',
   SCRAPE_BATCH_CANCEL: 'scrape:batchCancel',
   SCRAPE_BATCH_PROGRESS: 'scrape:batchProgress', // main -> renderer event
@@ -112,6 +161,10 @@ export const IPC = {
   SCRAPER_PLUGIN_PACKAGE: 'scrape:pluginPackage',
   SCRAPER_PLUGIN_UPDATE: 'scrape:pluginUpdate',
   SCRAPER_PLUGIN_DELETE: 'scrape:pluginDelete',
+  SCRAPER_SERVICE_CONFIG_GET: 'scrape:serviceConfigGet',
+  SCRAPER_SERVICE_CONFIG_SAVE: 'scrape:serviceConfigSave',
+  SCRAPER_SERVICE_CONFIG_TEST: 'scrape:serviceConfigTest',
+  SCRAPER_SERVICE_CONFIG_CLEAR: 'scrape:serviceConfigClear',
   SCRAPER_COMPOSITE_CREATE: 'scrape:compositeCreate',
   SCRAPER_COMPOSITE_UPDATE: 'scrape:compositeUpdate',
   SCRAPER_COMPOSITE_DELETE: 'scrape:compositeDelete',
@@ -147,8 +200,8 @@ export const IPC = {
   // Player
   PLAYER_PLAY: 'player:play',
   PLAYER_REVEAL: 'player:reveal',
-  PLAYER_PLAY_FILE: 'player:playFile',
-  PLAYER_REVEAL_FILE: 'player:revealFile',
+  PLAYER_OPEN_RESOURCE: 'player:openResource',
+  PLAYER_REVEAL_RESOURCE: 'player:revealResource',
 
   // Asset encryption
   ASSET_CRYPTO_SET: 'assetCrypto:set',

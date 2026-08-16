@@ -1,10 +1,4 @@
-import type {
-  PluginDevAgentContextStats,
-  PluginDevAgentPhase,
-  PluginDevDryRunResult,
-  PluginDevSessionStatus,
-  PluginDevVerificationReport
-} from '@shared/types'
+import type { PluginDevAgentContextStats, PluginDevAgentPhase, PluginDevDryRunResult, PluginDevSessionStatus, PluginDevVerificationReport } from '@shared/pluginDevTypes'
 import PluginDevConversation from './PluginDevConversation'
 import PluginDevResultPanel from './PluginDevResultPanel'
 import { agentPhaseLabel, type PluginDevAgentTab, type PluginDevConversationItem, type PluginKind } from './types'

@@ -1,0 +1,26 @@
+.root {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  gap: 6px;
+  background: var(--surface-control);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.root:hover {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  line-height: 0;
+}

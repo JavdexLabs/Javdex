@@ -10,7 +10,7 @@ import { PLUGIN_DEV_TOOL_SCHEMAS } from '../main/services/pluginDevAgent/toolSch
 import { createSession } from '../main/services/pluginDevAgent/sessionStore'
 import { executeTool } from '../main/services/pluginDevAgent/toolExecutor'
 import type { PluginDevAgentStartInput } from '../main/services/pluginDevAgent/types'
-import type { ScraperPluginKind, VideoScrapeField } from '@shared/types'
+import type { ScraperPluginKind, VideoScrapeField } from '@shared/scrapeTypes'
 import { normalizeTestTargets, parseTestTargetList } from '@shared/pluginDevKindProfile'
 
 const MCP_SERVER_NAME = `${APP_PACKAGE_NAME}-plugin-dev`
@@ -19,11 +19,14 @@ function readEnvSessionInput(): PluginDevAgentStartInput {
   const kind = (process.env.AV_PLUGIN_DEV_KIND === 'actress' ? 'actress' : 'video') as ScraperPluginKind
   const siteName = process.env.AV_PLUGIN_DEV_SITE_NAME?.trim() || 'mcp-plugin-dev'
   const supportedFieldsRaw = process.env.AV_PLUGIN_DEV_SUPPORTED_FIELDS?.trim()
-  const supportedFields = supportedFieldsRaw
-    ? supportedFieldsRaw.split(',').map((field) => field.trim()).filter(Boolean)
+  const supportedFields: PluginDevAgentStartInput['supportedFields'] = supportedFieldsRaw
+    ? (supportedFieldsRaw
+        .split(',')
+        .map((field) => field.trim())
+        .filter(Boolean) as PluginDevAgentStartInput['supportedFields'])
     : kind === 'video'
       ? (['title', 'maker', 'publisher'] as VideoScrapeField[])
-      : ['mainName']
+      : ['avatar']
 
   const testTargets = normalizeTestTargets({
     testTargets: process.env.AV_PLUGIN_DEV_TEST_TARGETS?.trim()

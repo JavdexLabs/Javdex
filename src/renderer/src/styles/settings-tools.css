@@ -113,6 +113,11 @@
   flex: 1;
   min-width: 0;
 }
+.scan-unrec-edit .app-select {
+  flex: 1 1 160px;
+  min-width: 140px;
+  width: auto;
+}
 .scan-unrec-edit .text-input {
   min-height: var(--control-h-sm);
   padding: 0 10px;

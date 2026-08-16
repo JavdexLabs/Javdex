@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveOrganizationAssignment } from './organizationPickerState'
+import { resolveOrganizationAssignment, organizationOptionDescription } from './organizationPickerState'
 
 const options = [
   { id: 1, mainName: 'Studio One', aliases: ['Ｓ １'], roles: ['maker'] as const },
@@ -25,5 +25,10 @@ describe('organization picker state', () => {
 
   it('uses an empty value to remove the organization relation', () => {
     assert.equal(resolveOrganizationAssignment('  ', options), null)
+  })
+
+  it('describes candidates by stable id, roles, and aliases', () => {
+    assert.equal(organizationOptionDescription(options[0]), '#1 · 制作商 · 别名 Ｓ １')
+    assert.equal(organizationOptionDescription(options[1]), '#2 · 发行商')
   })
 })

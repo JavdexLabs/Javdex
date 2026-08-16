@@ -5,9 +5,13 @@ import type {
   OrganizationRole
 } from '@shared/classificationTypes'
 import { api } from '../api'
-import { resolveOrganizationAssignment } from './organizationPickerState'
+import {
+  organizationOptionDescription,
+  resolveOrganizationAssignment
+} from './organizationPickerState'
 import { organizationKeys } from '../query/queryKeys'
 import { FACET_LABEL } from '../facet'
+import ClassificationPicker from './ClassificationPicker'
 
 interface Props {
   id: string
@@ -31,7 +35,17 @@ export default function OrganizationPickerField({
     placeholderData: (previous) => previous
   })
   const options = useMemo(() => optionsQuery.data ?? [], [optionsQuery.data])
-  const listId = `${id}-options`
+  const pickerOptions = useMemo(
+    () =>
+      options.map((option) => ({
+        id: option.id,
+        mainName: option.mainName,
+        description: organizationOptionDescription(option)
+      })),
+    [options]
+  )
+  const assignment = resolveOrganizationAssignment(value, options)
+  const selectedId = assignment && 'organizationId' in assignment ? assignment.organizationId : null
 
   useEffect(() => {
     onAssignmentChange(resolveOrganizationAssignment(value, options))
@@ -39,29 +53,30 @@ export default function OrganizationPickerField({
 
   return (
     <>
-      <input
+      <ClassificationPicker
         id={id}
-        className="text-input"
         value={value}
-        list={listId}
-        autoComplete="off"
-        aria-describedby={`${id}-hint`}
-        onChange={(event) => {
-          const nextValue = event.target.value
-          onChange(nextValue)
-          onAssignmentChange(resolveOrganizationAssignment(nextValue, options))
+        options={pickerOptions}
+        selectedId={selectedId}
+        listLabel={`${FACET_LABEL[role]}候选`}
+        createHint={`输入新名称会在保存时创建${FACET_LABEL[role]}`}
+        onValueChange={(next) => {
+          onChange(next)
+          onAssignmentChange(resolveOrganizationAssignment(next, options))
+        }}
+        onSelect={(option) => {
+          onChange(option.mainName)
+          onAssignmentChange({ organizationId: option.id })
         }}
       />
-      <datalist id={listId}>
-        {options.map((option) => (
-          <option key={option.id} value={option.mainName}>
-            {option.aliases.length > 0 ? option.aliases.join(' / ') : undefined}
-          </option>
-        ))}
-      </datalist>
       <span id={`${id}-hint`} className="entity-edit-field-hint">
         搜索已有{FACET_LABEL[role]}；输入新名称会在保存时创建。
       </span>
+      {optionsQuery.isError ? (
+        <span className="classification-picker-error" role="alert">
+          {FACET_LABEL[role]}候选加载失败，请稍后重试。
+        </span>
+      ) : null}
     </>
   )
 }

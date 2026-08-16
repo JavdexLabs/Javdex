@@ -11,6 +11,7 @@ import { normalizeVideoCode } from '@shared/videoCode'
 import { inferVideoResourceKind } from '@shared/videoResourceLinks'
 import { api } from '../api'
 import Modal from './Modal'
+import SelectControl from './SelectControl'
 import { EditFormField } from './FormPrimitives'
 import {
   buildVideoResourceImportInput,
@@ -194,9 +195,9 @@ export default function VideoResourceImportModal({
             span={2}
             hint="同番号可以对应多部影片，必须明确选择目标。"
           >
-            <select
+            <SelectControl
               id="resource-target"
-              className="select form-control-full"
+              className="form-control-full"
               value={targetValue}
               onChange={(event) => setTargetValue(event.target.value)}
               disabled={saving || loadingTargets || !code.trim()}
@@ -208,7 +209,7 @@ export default function VideoResourceImportModal({
                 </option>
               ))}
               <option value="new">新建一部独立影片</option>
-            </select>
+            </SelectControl>
           </EditFormField>
         ) : null}
         <EditFormField
@@ -263,9 +264,9 @@ export default function VideoResourceImportModal({
           htmlFor="resource-kind"
           hint={isStrmManaged ? '资源类型随 STRM 目标自动同步。' : undefined}
         >
-          <select
+          <SelectControl
             id="resource-kind"
-            className="select form-control-full"
+            className="form-control-full"
             value={kind}
             onChange={(event) => setKind(event.target.value as VideoResourceKindSelection)}
             disabled={saving || isStrmManaged}
@@ -273,7 +274,7 @@ export default function VideoResourceImportModal({
             <option value="auto">自动识别（{inferredKindLabel}）</option>
             <option value="direct">{VIDEO_RESOURCE_KIND_LABELS.direct}</option>
             <option value="web">{VIDEO_RESOURCE_KIND_LABELS.web}</option>
-          </select>
+          </SelectControl>
         </EditFormField>
         <EditFormField label="展示名称" htmlFor="resource-name" hint="可选，不填写时显示脱敏域名或路径。">
           <input
@@ -302,8 +303,7 @@ export default function VideoResourceImportModal({
               disabled={saving}
               placeholder="未设置"
             />
-            <select
-              className="select"
+            <SelectControl
               value={sizeUnit}
               onChange={(event) => {
                 setSizeUnit(event.target.value as VideoResourceSizeUnit)
@@ -316,7 +316,7 @@ export default function VideoResourceImportModal({
               <option value="MB">MB</option>
               <option value="GB">GB</option>
               <option value="TB">TB</option>
-            </select>
+            </SelectControl>
           </div>
         </EditFormField>
       </div>

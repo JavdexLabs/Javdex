@@ -18,6 +18,7 @@ import {
 import UnrecognizedRow from './UnrecognizedRow'
 import ListMaintenanceBanner from '../ListMaintenanceBanner'
 import Button from '../Button'
+import SelectControl from '../SelectControl'
 
 const SCAN_TRIGGER_LABEL: Record<LibraryScanSummary['trigger'], string> = {
   manual: '手动',
@@ -394,8 +395,7 @@ export default function LibrarySettingsPanel({
             <strong>扫描间隔</strong>
             <small>以上一次扫描完成时间为起点</small>
           </span>
-          <select
-            className="select"
+          <SelectControl
             aria-label="自动扫描间隔"
             value={settings.autoScanIntervalMinutes}
             disabled={!settings.autoScanEnabled || scanning}
@@ -410,7 +410,7 @@ export default function LibrarySettingsPanel({
                 {minutes < 60 ? `${minutes} 分钟` : `${minutes / 60} 小时`}
               </option>
             ))}
-          </select>
+          </SelectControl>
         </label>
       </SettingsSectionBlock>
 

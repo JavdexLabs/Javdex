@@ -613,7 +613,8 @@ button.meta-link:focus-visible {
   flex: 0 0 auto;
 }
 .video-resource-size-control .text-input,
-.video-resource-size-control .select {
+.video-resource-size-control .select,
+.video-resource-size-control .app-select {
   width: 100%;
   min-width: 0;
 }

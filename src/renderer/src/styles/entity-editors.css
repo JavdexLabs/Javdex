@@ -67,6 +67,7 @@
 
 .entity-edit-field .text-input,
 .entity-edit-field .select,
+.entity-edit-field .app-select,
 .entity-edit-field .alias-tag-editor,
 .entity-edit-field textarea.text-input {
   width: 100%;

@@ -6,6 +6,7 @@ import { api } from '../../api'
 import { normalizeOptionalVideoCode } from '../videoResourceImportForm'
 import { useToast } from '../Toast'
 import Button from '../Button'
+import SelectControl from '../SelectControl'
 
 /** One editable row in the "unrecognized files" list: manual import or rename on disk. */
 export default function UnrecognizedRow({
@@ -140,8 +141,8 @@ export default function UnrecognizedRow({
           placeholder="输入番号"
           aria-label={`${fullName} 番号`}
         />
-        <select
-          className="select scan-unrec-target-select"
+        <SelectControl
+          className="scan-unrec-target-select"
           value={targetValue}
           onChange={(event) => setTargetValue(event.target.value)}
           disabled={busy !== null || loadingTargets || !codeTrimmed}
@@ -154,7 +155,7 @@ export default function UnrecognizedRow({
             </option>
           ))}
           <option value="new">新建独立影片</option>
-        </select>
+        </SelectControl>
         <Button
           type="button"
           variant="primary"

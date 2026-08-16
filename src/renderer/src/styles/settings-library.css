@@ -299,7 +299,7 @@
   line-height: var(--settings-lh, 1.45);
 }
 
-.library-auto-scan-interval .select {
+.library-auto-scan-interval .app-select {
   width: 132px;
   flex: 0 0 auto;
 }

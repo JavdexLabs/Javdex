@@ -1,8 +1,10 @@
 import type {
   OrganizationAssignmentInput,
-  OrganizationOption
+  OrganizationOption,
+  OrganizationRole
 } from '@shared/classificationTypes'
 import { normalizeClassificationName } from '@shared/classificationNameNormalization'
+import { FACET_LABEL } from '../facet'
 
 type OrganizationIdentityOption = Pick<OrganizationOption, 'id' | 'mainName' | 'aliases'>
 
@@ -19,4 +21,14 @@ export function resolveOrganizationAssignment(
     )
   )
   return existing ? { organizationId: existing.id } : { createName: value }
+}
+
+export function organizationOptionDescription(option: {
+  id: number
+  aliases: readonly string[]
+  roles: readonly OrganizationRole[]
+}): string {
+  const roles = option.roles.map((role) => FACET_LABEL[role]).join(' / ')
+  const aliases = option.aliases.length > 0 ? `别名 ${option.aliases.join(' / ')}` : null
+  return [`#${option.id}`, roles || null, aliases].filter(Boolean).join(' · ')
 }

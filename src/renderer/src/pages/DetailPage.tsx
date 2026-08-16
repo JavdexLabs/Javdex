@@ -13,6 +13,7 @@ import { normalizeVideoCode } from '@shared/videoCode'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
+import SelectControl from '../components/SelectControl'
 import EditMetadataModal from '../components/EditMetadataModal'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
 import ActressName from '../components/ActressName'
@@ -1049,8 +1050,8 @@ export default function DetailPage(): JSX.Element {
           <div className="entity-edit-fields">
             <label className="form-field">
               <span className="form-field-label">合并对象</span>
-              <select
-                className="select form-control-full"
+              <SelectControl
+                className="form-control-full"
                 value={mergeTargetId ?? ''}
                 disabled={mergeBusy}
                 onChange={(event) => {
@@ -1064,7 +1065,7 @@ export default function DetailPage(): JSX.Element {
                     ID {candidate.id} · {candidate.code}{candidate.title ? ` · ${candidate.title}` : ''}
                   </option>
                 ))}
-              </select>
+              </SelectControl>
             </label>
             {mergeTargetId != null ? (
               <fieldset className="form-field">

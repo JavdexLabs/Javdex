@@ -10,6 +10,7 @@ import type {
 import { api } from '../api'
 import { organizationKeys } from '../query/queryKeys'
 import Modal from './Modal'
+import SelectControl from './SelectControl'
 import { EditFormField, EditFormSection } from './FormPrimitives'
 import {
   createOrganizationFormDraft,
@@ -134,9 +135,8 @@ export default function OrganizationEditModal({
               />
             </EditFormField>
             <EditFormField label="状态" htmlFor="organization-status">
-              <select
+              <SelectControl
                 id="organization-status"
-                className="select"
                 value={draft.status}
                 onChange={(event) =>
                   setDraft({
@@ -148,7 +148,7 @@ export default function OrganizationEditModal({
                 <option value="unknown">未知</option>
                 <option value="active">运营中</option>
                 <option value="inactive">已停止</option>
-              </select>
+              </SelectControl>
             </EditFormField>
             <EditFormField label="成立年份" htmlFor="organization-founded-year">
               <input
@@ -177,9 +177,8 @@ export default function OrganizationEditModal({
                   placeholder="搜索机构主名或别名…"
                   onChange={(event) => setParentSearch(event.target.value)}
                 />
-                <select
+                <SelectControl
                   id="organization-parent"
-                  className="select"
                   value={draft.parentOrganizationId}
                   onChange={(event) => {
                     const parentOrganizationId = event.target.value
@@ -198,7 +197,7 @@ export default function OrganizationEditModal({
                       {option.mainName}
                     </option>
                   ))}
-                </select>
+                </SelectControl>
                 <span className="entity-edit-field-hint">
                   {parentOptionsQuery.isError
                     ? '上级机构搜索失败，请重试。'

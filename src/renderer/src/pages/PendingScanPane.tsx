@@ -5,6 +5,7 @@ import type { PendingScanGroup, PendingScanResourceTarget } from '@shared/librar
 import { normalizeVideoCode } from '@shared/videoCode'
 import { api } from '../api'
 import Button from '../components/Button'
+import SelectControl from '../components/SelectControl'
 import { useToast } from '../components/Toast'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { VIDEO_RESOURCE_KIND_LABELS } from '../components/videoResourcePresentation'
@@ -167,8 +168,7 @@ export default function PendingScanPane({
                     </small>
                   </div>
                   <div className={styles.target}>
-                    <select
-                      className="select"
+                    <SelectControl
                       aria-label={`分配 ${pendingResourceDisplayName(resource)}`}
                       value={pendingScanTargetValue(target)}
                       onChange={(event) => {
@@ -198,7 +198,7 @@ export default function PendingScanPane({
                           新影片分组 {key}
                         </option>
                       ))}
-                    </select>
+                    </SelectControl>
                     {newGroupKey ? (
                       <label className={styles.primaryChoice}>
                         <input

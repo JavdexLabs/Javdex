@@ -10,6 +10,7 @@ import type {
 import { api } from '../api'
 import { organizationKeys, seriesKeys } from '../query/queryKeys'
 import Modal from './Modal'
+import SelectControl from './SelectControl'
 import { EditFormField, EditFormSection } from './FormPrimitives'
 import { createSeriesFormDraft, seriesInputFromDraft } from './seriesFormState'
 import { moveClassificationLink, useClassificationLinkKeys } from './classificationLinkForm'
@@ -127,9 +128,8 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
         <EditFormSection title="系列信息">
           <div className="entity-edit-fields">
             <EditFormField label="状态" htmlFor="series-status" span={2}>
-              <select
+              <SelectControl
                 id="series-status"
-                className="select"
                 value={draft.status}
                 onChange={(event) =>
                   setDraft({ ...draft, status: event.target.value as typeof draft.status })
@@ -139,7 +139,7 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
                 <option value="ongoing">连载中</option>
                 <option value="completed">已完结</option>
                 <option value="discontinued">已中止</option>
-              </select>
+              </SelectControl>
             </EditFormField>
             <EditFormField label="开始年份" htmlFor="series-start-year">
               <input
@@ -172,9 +172,8 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
                   placeholder="搜索机构主名或别名…"
                   onChange={(event) => setOwnerSearch(event.target.value)}
                 />
-                <select
+                <SelectControl
                   id="series-owner"
-                  className="select"
                   value={draft.ownerOrganizationId}
                   onChange={(event) => {
                     const ownerOrganizationId = event.target.value
@@ -191,7 +190,7 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
                       {option.mainName}
                     </option>
                   ))}
-                </select>
+                </SelectControl>
                 <span className="entity-edit-field-hint">
                   所属机构只由手动选择设置，不会从影片制作商或发行商推断。
                 </span>
@@ -211,9 +210,8 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
                   placeholder="搜索系列主名或别名…"
                   onChange={(event) => setParentSearch(event.target.value)}
                 />
-                <select
+                <SelectControl
                   id="series-parent"
-                  className="select"
                   value={draft.parentSeriesId}
                   onChange={(event) => {
                     const parentSeriesId = event.target.value
@@ -228,7 +226,7 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
                       {option.mainName} · {option.ownerOrganization?.mainName ?? '未归属'}
                     </option>
                   ))}
-                </select>
+                </SelectControl>
                 <span className="entity-edit-field-hint">层级循环会在保存时拒绝。</span>
                 {parentQuery.isError ? (
                   <span className="classification-picker-error" role="alert">

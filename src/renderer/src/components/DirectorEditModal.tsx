@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
 import type { DirectorDetail, DirectorUpdateInput } from '@shared/classificationTypes'
 import Modal from './Modal'
+import SelectControl from './SelectControl'
 import { EditFormField, EditFormSection } from './FormPrimitives'
 import { createDirectorFormDraft, directorInputFromDraft } from './directorFormState'
 import { UI_ICON_SM } from './iconDefaults'
@@ -147,9 +148,8 @@ export default function DirectorEditModal({ director, onCancel, onSave }: Props)
               />
             </EditFormField>
             <EditFormField label="状态" htmlFor="director-status">
-              <select
+              <SelectControl
                 id="director-status"
-                className="text-input"
                 value={draft.status}
                 onChange={(e) =>
                   setDraft({
@@ -163,7 +163,7 @@ export default function DirectorEditModal({ director, onCancel, onSave }: Props)
                 <option value="paused">暂停</option>
                 <option value="retired">已退休</option>
                 <option value="deceased">已故</option>
-              </select>
+              </SelectControl>
             </EditFormField>
           </div>
         </EditFormSection>

@@ -3,6 +3,8 @@
 Javdex 内置的 **ReAct 插件开发助手**：自主调用浏览器探测、修改插件代码、dry-run 与语义验证，直到 `plugin_finish` 满足结束条件。
 
 > **插件代码规范**（包结构、`parseVideo`/`parseActress` 返回值、沙箱 `ctx` API）见 [`SCRAPER_PLUGIN_FORMAT.md`](./SCRAPER_PLUGIN_FORMAT.md)。Agent 产出与安装的代码必须符合该文档。
+>
+> **迁移状态**：本文描述当前 legacy 实现。已批准的目标架构是“Javdex 产品控制面 + Pi Agent 数据面”，详见 [`AGENT_PLATFORM_EXECUTION_PLAN.md`](./AGENT_PLATFORM_EXECUTION_PLAN.md) 与 [`ADR-0020`](./adr/0020-establish-agent-platform-seams-before-pi.md)；迁移完成前，本文仍是现行行为规范。
 
 ## 与格式文档的分工
 

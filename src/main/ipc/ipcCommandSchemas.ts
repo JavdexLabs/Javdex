@@ -119,6 +119,13 @@ const llmProviderConfig = z
   })
   .strict()
 
+const aiConfigurationUpdate = z
+  .object({
+    expectedRevision: nonEmptyText,
+    document: object
+  })
+  .strict()
+
 const classificationEntity = z
   .object({ kind: z.enum(['organization', 'director', 'series']), id })
   .strict()
@@ -336,6 +343,8 @@ export const appIpcSchemas = {
   [IPC.SETTINGS_LLM_LIST_MODELS]: z.tuple([nonEmptyText]),
   [IPC.SETTINGS_LLM_PROVIDER_CONFIG_SAVE]: z.tuple([llmProviderConfig]),
   [IPC.SETTINGS_LLM_PROVIDER_DELETE]: z.tuple([nonEmptyText]),
+  [IPC.SETTINGS_AI_CONFIGURATION_GET]: noArgs,
+  [IPC.SETTINGS_AI_CONFIGURATION_UPDATE]: z.tuple([aiConfigurationUpdate]),
   [IPC.SETTINGS_RECOVERY_REVEAL_BACKUP]: noArgs,
   [IPC.SETTINGS_PROXY_TEST]: z.tuple([z.enum(['scrape', 'llm']), text]),
   [IPC.SETTINGS_OVERVIEW_STATS]: noArgs,
@@ -407,6 +416,7 @@ export const appIpcSchemas = {
     z.object({ sessionId: nonEmptyText, text, lastDryRun: object.optional() }).strict()
   ]),
   [IPC.PLUGIN_DEV_AGENT_CANCEL]: z.tuple([nonEmptyText]),
+  [IPC.PLUGIN_DEV_AGENT_SNAPSHOT]: z.tuple([nonEmptyText.optional()]),
   [IPC.PLUGIN_DEV_AGENT_EXPORT_WORK_LOG]: z.tuple([nonEmptyText]),
   [IPC.PLUGIN_DEV_DRY_RUN]: z.tuple([
     z.object({
@@ -419,6 +429,14 @@ export const appIpcSchemas = {
   [IPC.PLUGIN_DEV_INSTALL]: z.tuple([
     z.object({ package: pluginPackage, overwriteUser: z.boolean().optional() }).strict()
   ]),
+  [IPC.LIBRARY_CURATOR_START]: z.tuple([
+    z.object({ prompt: text.optional() }).strict().optional()
+  ]),
+  [IPC.LIBRARY_CURATOR_MESSAGE]: z.tuple([
+    z.object({ runId: nonEmptyText, text: nonEmptyText }).strict()
+  ]),
+  [IPC.LIBRARY_CURATOR_CANCEL]: z.tuple([nonEmptyText]),
+  [IPC.LIBRARY_CURATOR_SNAPSHOT]: z.tuple([nonEmptyText.optional()]),
   [IPC.PLAYER_PLAY]: z.tuple([id]),
   [IPC.PLAYER_REVEAL]: z.tuple([id]),
   [IPC.PLAYER_OPEN_RESOURCE]: z.tuple([id]),

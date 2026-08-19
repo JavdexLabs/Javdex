@@ -4,11 +4,8 @@ import type { PluginDevAgentSessionResult, PluginDevDryRunResult } from '@shared
 import type { ScraperPluginDescriptor } from '@shared/scraperPluginTypes'
 import type { PluginDevVerificationReport } from '@shared/pluginDevTypes'
 import { dryRunPluginPackage, installDevPluginPackage } from '../services/pluginDevService'
-import {
-  cancelPluginDevAgent,
-  continuePluginDevAgent,
-  startPluginDevAgent
-} from '../services/pluginDevAgent/runner'
+import { pluginDeveloper } from '../services/pluginDevAgent/pluginDeveloper'
+import { initializeAgentPlatform } from '../agent-platform/composition'
 import { getSession } from '../services/pluginDevAgent/sessionStore'
 import {
   sanitizeWorkLogPath,
@@ -21,10 +18,11 @@ import type { IpcContext } from './shared'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 
 export function registerPluginDevHandlers(ctx: IpcContext): void {
+  initializeAgentPlatform()
   appCommandAdapter.register(
     IPC.PLUGIN_DEV_AGENT_START,
     (input): Promise<PluginDevAgentSessionResult> =>
-      startPluginDevAgent(
+      pluginDeveloper.start(
         {
           ...input,
           maxSteps: getSettings().pluginDevAgentMaxSteps,
@@ -39,14 +37,19 @@ export function registerPluginDevHandlers(ctx: IpcContext): void {
   appCommandAdapter.register(
     IPC.PLUGIN_DEV_AGENT_MESSAGE,
     (input): Promise<PluginDevAgentSessionResult> =>
-      continuePluginDevAgent(input, (event) => {
+      pluginDeveloper.message(input, (event) => {
         appEventAdapter.send(ctx.getWindow()?.webContents, IPC.PLUGIN_DEV_AGENT_EVENT, event)
       })
   )
 
-  appCommandAdapter.register(IPC.PLUGIN_DEV_AGENT_CANCEL, (sessionId): void => {
-    cancelPluginDevAgent(sessionId)
+  appCommandAdapter.register(IPC.PLUGIN_DEV_AGENT_CANCEL, async (sessionId): Promise<void> => {
+    await pluginDeveloper.cancel(sessionId)
   })
+
+  appCommandAdapter.register(
+    IPC.PLUGIN_DEV_AGENT_SNAPSHOT,
+    (sessionId) => pluginDeveloper.getSnapshot(sessionId)
+  )
 
   appCommandAdapter.register(
     IPC.PLUGIN_DEV_AGENT_EXPORT_WORK_LOG,

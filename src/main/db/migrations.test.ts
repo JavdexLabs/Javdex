@@ -1136,7 +1136,14 @@ describe('database schema', () => {
         'pending_video_scrape_resources',
         'video_links',
         'actress_links',
-        'playlist_links'
+        'playlist_links',
+        'agent_runs',
+        'agent_operations',
+        'agent_product_journal',
+        'agent_execution_history',
+        'agent_tool_ledger',
+        'agent_approvals',
+        'agent_artifacts'
       ]
       assert.deepEqual(
         expectedTables.map(
@@ -1157,6 +1164,7 @@ describe('database schema', () => {
       assert.equal(indexNames(db).includes('idx_actresses_scraped_status'), true)
       assert.equal(indexNames(db).includes('idx_videos_studio'), false)
       assert.equal(indexNames(db).includes('idx_videos_file_path'), false)
+      assert.equal(columnNamesForTest(db, 'agent_runs').has('recovery_attempted_generation'), true)
 
       db.prepare("INSERT INTO actresses (main_name) VALUES ('Default status')").run()
       const defaultStatusId = Number(

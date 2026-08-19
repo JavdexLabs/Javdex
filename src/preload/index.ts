@@ -61,6 +61,7 @@ import type { LibraryScanEvent, PendingScanGroupResolution } from '../shared/lib
 import type { BatchProgress } from '../shared/batchScrapeTypes'
 import type { RendererSettingsPatch } from '../shared/settingsTypes'
 import type { LlmProviderConfigSaveInput } from '../shared/llmProviders'
+import type { AIConfigurationUpdateInput } from '../shared/aiConfigurationTypes'
 import type { ScanProgress, AssetCryptoProgress } from '../shared/libraryTypes'
 import type { ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../shared/actressTypes'
 import type { IpcResponse } from '../shared/ipcTypes'
@@ -170,6 +171,9 @@ const api = {
       invokeApp(IPC.SETTINGS_LLM_PROVIDER_CONFIG_SAVE, input),
     deleteLlmProvider: (providerId: string) =>
       invokeApp(IPC.SETTINGS_LLM_PROVIDER_DELETE, providerId),
+    getAIConfiguration: () => invokeApp(IPC.SETTINGS_AI_CONFIGURATION_GET),
+    updateAIConfiguration: (input: AIConfigurationUpdateInput) =>
+      invokeApp(IPC.SETTINGS_AI_CONFIGURATION_UPDATE, input),
     revealRecoveryBackup: () => invokeApp(IPC.SETTINGS_RECOVERY_REVEAL_BACKUP),
     testProxy: (kind: 'scrape' | 'llm', proxyUrl: string) =>
       invokeApp(IPC.SETTINGS_PROXY_TEST, kind, proxyUrl),
@@ -475,6 +479,7 @@ const api = {
     message: (input: PluginDevAgentMessageInput) =>
       invokeApp(IPC.PLUGIN_DEV_AGENT_MESSAGE, input),
     cancel: (sessionId: string) => invokeApp(IPC.PLUGIN_DEV_AGENT_CANCEL, sessionId),
+    snapshot: (sessionId?: string) => invokeApp(IPC.PLUGIN_DEV_AGENT_SNAPSHOT, sessionId),
     exportWorkLog: (sessionId: string) =>
       invokeApp(IPC.PLUGIN_DEV_AGENT_EXPORT_WORK_LOG, sessionId),
     dryRun: (input: PluginDevDryRunInput) =>
@@ -485,6 +490,14 @@ const api = {
       invokeApp(IPC.PLUGIN_DEV_INSTALL, input),
     onAgentEvent: (cb: (e: PluginDevAgentEvent) => void) =>
       onAppEvent(IPC.PLUGIN_DEV_AGENT_EVENT, cb)
+  },
+  libraryCurator: {
+    start: (input?: import('../shared/libraryCuratorTypes').LibraryCuratorStartInput) =>
+      invokeApp(IPC.LIBRARY_CURATOR_START, input),
+    message: (input: import('../shared/libraryCuratorTypes').LibraryCuratorMessageInput) =>
+      invokeApp(IPC.LIBRARY_CURATOR_MESSAGE, input),
+    cancel: (runId: string) => invokeApp(IPC.LIBRARY_CURATOR_CANCEL, runId),
+    snapshot: (runId?: string) => invokeApp(IPC.LIBRARY_CURATOR_SNAPSHOT, runId)
   },
   batchScrape: {
     getState: () => invokeScrape(IPC.BATCH_SCRAPE_STATE),

@@ -40,6 +40,11 @@ import {
   saveLlmApiKeys
 } from '../settings/llmSecretStore'
 import { isScraperPluginRunnable } from '../scrapers/scraperPluginService'
+import {
+  getAIConfigurationSnapshot,
+  saveAIConfiguration,
+  synchronizeAIConfigurationFromLegacySettings
+} from '../agent-platform/aiConfigurationRepository'
 
 function toSettingsSnapshot(settings: AppSettings): SettingsSnapshot {
   return {
@@ -105,7 +110,16 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
         )
       }
     }
-    return toSettingsSnapshot(updateSettings(guardedPatch))
+    const updated = updateSettings(guardedPatch)
+    if (
+      safePatch.defaultLlmProviderId !== undefined ||
+      safePatch.defaultLlmModelId !== undefined ||
+      safePatch.customLlmProviders !== undefined ||
+      safePatch.llmCustomModels !== undefined
+    ) {
+      synchronizeAIConfigurationFromLegacySettings(updated)
+    }
+    return toSettingsSnapshot(updated)
   })
 
   appCommandAdapter.register(IPC.SETTINGS_PICK_FOLDER, async (): Promise<string[]> => {
@@ -151,7 +165,9 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
         ...(input.baseUrl.trim() ? { baseUrl: input.baseUrl.trim() } : {}),
         protocol: input.protocol
       }
-      return toSettingsSnapshot(updateSettings({ llmProviderConfigs: configs }))
+      const updated = updateSettings({ llmProviderConfigs: configs })
+      synchronizeAIConfigurationFromLegacySettings(updated)
+      return toSettingsSnapshot(updated)
     } catch (error) {
       try {
         if (oldApiKey) saveLlmApiKeys({ [providerId]: oldApiKey })
@@ -195,13 +211,15 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
         customLlmProviders,
         llmCustomModels
       })
-      return toSettingsSnapshot(updateSettings({
+      const updated = updateSettings({
         customLlmProviders,
         llmProviderConfigs,
         llmCustomModels,
         defaultLlmProviderId: selection.providerId,
         defaultLlmModelId: selection.modelId
-      }))
+      })
+      synchronizeAIConfigurationFromLegacySettings(updated)
+      return toSettingsSnapshot(updated)
     } catch (error) {
       if (oldApiKey) {
         try {
@@ -213,6 +231,16 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
       throw error
     }
   })
+
+  appCommandAdapter.register(
+    IPC.SETTINGS_AI_CONFIGURATION_GET,
+    () => getAIConfigurationSnapshot()
+  )
+
+  appCommandAdapter.register(
+    IPC.SETTINGS_AI_CONFIGURATION_UPDATE,
+    (input) => saveAIConfiguration(input.expectedRevision, input.document)
+  )
 
   appCommandAdapter.register(IPC.SETTINGS_RECOVERY_REVEAL_BACKUP, (): boolean => {
     const backupPath = getSettingsRecoveryBackupPath()

@@ -176,6 +176,17 @@ export interface PluginDevAgentSessionResult {
   summary: string
 }
 
+export interface PluginDevAgentSnapshot {
+  cursor: number
+  input: PluginDevAgentStartInput
+  result: PluginDevAgentSessionResult
+  phase: PluginDevAgentPhase
+  step: number
+  totalTokens: number
+  events: PluginDevAgentEvent[]
+  workLog: PluginDevAgentWorkLogEntry[]
+}
+
 export interface PluginDevPageInsight {
   label: string
   url: string

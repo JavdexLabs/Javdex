@@ -22,6 +22,10 @@ export interface ResolvedLlmRequestConfig {
 
 export interface ResolvedLlmModelRequestConfig extends ResolvedLlmRequestConfig {
   modelId: string
+  promptCacheKey?: string
+  sessionAffinityId?: string
+  useAnthropicPromptCache?: boolean
+  cacheRetention?: 'none' | 'short' | 'long'
 }
 
 function findCustomProvider(id: string): CustomLlmProviderDefinition | undefined {

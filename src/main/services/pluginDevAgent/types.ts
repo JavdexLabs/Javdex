@@ -44,6 +44,7 @@ export interface PluginDevSession extends PluginDevAgentStartInput {
   cancelRequested: boolean
   phase: PluginDevAgentPhase
   totalTokens: number
+  verifierAffinityId?: string
   /** When true, agent should prefer replace_function over replace_all. */
   incrementalEditOnly: boolean
   /** Terminal sessions are eligible for in-memory cleanup after this timestamp is set. */
@@ -53,8 +54,6 @@ export interface PluginDevSession extends PluginDevAgentStartInput {
   lastVerificationPromptHash?: string
   /** Latest user instruction (start message or continue text). */
   lastUserInstruction?: string
-  /** Protocol-neutral conversation persisted across continue/resume. */
-  transcript?: import('./agentMessages').AgentTranscript
   /** Full agent work log for export / workflow analysis (tool details untruncated). */
   workLog?: PluginDevAgentWorkLogEntry[]
 }

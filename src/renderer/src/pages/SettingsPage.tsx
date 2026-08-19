@@ -696,7 +696,6 @@ export default function SettingsPage(): JSX.Element {
     <SettingsPluginDevShell>
       <PluginDevPanel
         settings={settings}
-        setSettings={setSettings}
         loadPackage={devLoadPackage}
         onLoadConsumed={clearDevLoadPackage}
         onInstalled={handleInstalled}

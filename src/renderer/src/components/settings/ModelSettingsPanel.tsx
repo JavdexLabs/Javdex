@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import type { SettingsSnapshot } from '@shared/settingsTypes'
+import type {
+  AIConfigurationDocument,
+  AIConfigurationSnapshot,
+  ModelCacheRetention
+} from '@shared/aiConfigurationTypes'
 import {
   buildLlmProviderViewModels,
   findLlmProviderViewModel,
@@ -43,6 +48,7 @@ export default function ModelSettingsPanel({
   const toast = useToast()
   const location = useLocation()
   const providers = useMemo(() => buildLlmProviderViewModels(settings), [settings])
+  const [aiConfiguration, setAIConfiguration] = useState<AIConfigurationSnapshot | null>(null)
   const readyAgentProviders = useMemo(
     () => listAgentCompatibleProviders(settings).filter((provider) => provider.status === 'ready'),
     [settings]
@@ -74,6 +80,36 @@ export default function ModelSettingsPanel({
     setDefaultProviderId(savedDefault.providerId)
     setDefaultModelId(savedDefault.modelId)
   }, [savedDefault.modelId, savedDefault.providerId])
+
+  useEffect(() => {
+    let cancelled = false
+    void api.settings.getAIConfiguration()
+      .then((configuration) => { if (!cancelled) setAIConfiguration(configuration) })
+      .catch((error: unknown) => { if (!cancelled) toast.show((error as Error).message, 'error') })
+    return () => { cancelled = true }
+  }, [savedDefault.modelId, savedDefault.providerId, settings.customLlmProviders, settings.llmCustomModels, toast])
+
+  const saveAIConfiguration = async (
+    mutate: (document: AIConfigurationDocument) => void
+  ): Promise<void> => {
+    if (!aiConfiguration) return
+    const next = structuredClone(aiConfiguration)
+    mutate(next)
+    const {
+      revision,
+      updatedAt: _updatedAt,
+      validationErrors: _validationErrors,
+      ...document
+    } = next
+    const result = await runMutation(
+      'ai-configuration',
+      () => api.settings.updateAIConfiguration({ expectedRevision: revision, document }),
+      '保存 Agent 模型配置失败'
+    )
+    if (!result.ok) return
+    setAIConfiguration(result.value)
+    toast.show('Agent 模型配置已保存', 'success')
+  }
 
   const defaultDirty =
     defaultProviderId !== savedDefault.providerId || defaultModelId !== savedDefault.modelId
@@ -325,6 +361,182 @@ export default function ModelSettingsPanel({
             </SelectControl>
           </SettingsFormField>
         </div>
+      </SettingsCard>
+
+      <SettingsCard
+        className="settings-card--llm-default"
+        title="Agent 路由与预设"
+        hint="Connection → Model → Preset → Route → Agent Profile 使用同一配置 revision；运行开始后冻结。"
+      >
+        {!aiConfiguration ? (
+          <div className="settings-empty">正在读取 Agent 配置…</div>
+        ) : (
+          <div className="llm-default-form">
+            {aiConfiguration.validationErrors.length > 0 && (
+              <div className="settings-notice settings-notice--warning" role="alert">
+                {aiConfiguration.validationErrors.join('；')}
+              </div>
+            )}
+            {aiConfiguration.routes.map((route) => (
+              <SettingsFormField key={route.id} label={`${route.role} · ${route.name}`}>
+                <SelectControl
+                  value={route.modelRecordId}
+                  disabled={isBusy('ai-configuration')}
+                  onChange={(event) => void saveAIConfiguration((document) => {
+                    const target = document.routes.find((item) => item.id === route.id)
+                    if (target) target.modelRecordId = event.target.value
+                  })}
+                >
+                  {aiConfiguration.modelRecords.map((model) => {
+                    const connection = aiConfiguration.modelConnections.find(
+                      (item) => item.id === model.connectionId
+                    )
+                    return (
+                      <option key={model.id} value={model.id} disabled={!connection?.enabled}>
+                        {connection?.name ?? '缺少 Connection'} · {model.name}
+                      </option>
+                    )
+                  })}
+                </SelectControl>
+              </SettingsFormField>
+            ))}
+            {aiConfiguration.modelRecords.map((model) => {
+              const connection = aiConfiguration.modelConnections.find(
+                (item) => item.id === model.connectionId
+              )
+              const updateEvidence = (
+                document: AIConfigurationDocument,
+                mutate: (target: typeof model) => void
+              ): void => {
+                const target = document.modelRecords.find((item) => item.id === model.id)
+                if (!target) return
+                mutate(target)
+                target.cache.evidence = {
+                  source: 'manual',
+                  checkedAt: new Date().toISOString(),
+                  note: '由设置页人工确认'
+                }
+              }
+              return (
+                <div className="settings-notice" key={model.id}>
+                  <strong>Model · {connection?.name ?? '缺少 Connection'} · {model.name}</strong>
+                  <SettingsFormField label="工具调用">
+                    <SelectControl
+                      value={String(model.capabilities.tools)}
+                      disabled={isBusy('ai-configuration')}
+                      onChange={(event) => void saveAIConfiguration((document) => {
+                        const value = event.target.value
+                        updateEvidence(document, (target) => {
+                          target.capabilities.tools = value === 'unknown'
+                            ? 'unknown'
+                            : value === 'true'
+                        })
+                      })}
+                    >
+                      <option value="true">明确支持</option>
+                      <option value="false">明确不支持</option>
+                      <option value="unknown">未知</option>
+                    </SelectControl>
+                  </SettingsFormField>
+                  <SettingsFormField label="Prompt cache">
+                    <SelectControl
+                      value={String(model.cache.supportsPromptCache)}
+                      disabled={isBusy('ai-configuration')}
+                      onChange={(event) => void saveAIConfiguration((document) => {
+                        const value = event.target.value
+                        updateEvidence(document, (target) => {
+                          target.cache.supportsPromptCache = value === 'unknown'
+                            ? 'unknown'
+                            : value === 'true'
+                        })
+                      })}
+                    >
+                      <option value="true">明确支持</option>
+                      <option value="false">明确不支持</option>
+                      <option value="unknown">未知</option>
+                    </SelectControl>
+                  </SettingsFormField>
+                  <SettingsFormField label="Long cache">
+                    <SelectControl
+                      value={model.cache.supportsLongCacheRetention ? 'true' : 'false'}
+                      disabled={isBusy('ai-configuration')}
+                      onChange={(event) => void saveAIConfiguration((document) => {
+                        updateEvidence(document, (target) => {
+                          target.cache.supportsLongCacheRetention = event.target.value === 'true'
+                        })
+                      })}
+                    >
+                      <option value="true">明确支持</option>
+                      <option value="false">不支持 / 未确认</option>
+                    </SelectControl>
+                  </SettingsFormField>
+                  <span>
+                    {model.api} · context {model.contextWindow.toLocaleString()} · max {model.maxTokens.toLocaleString()} ·
+                    evidence {model.cache.evidence.source} @ {model.cache.evidence.checkedAt}
+                  </span>
+                </div>
+              )
+            })}
+            {aiConfiguration.modelPresets.map((preset) => (
+              <div className="settings-notice" key={preset.id}>
+                <strong>Preset · {preset.name}</strong>
+                <SettingsFormField label="推理强度">
+                  <SelectControl
+                    value={preset.thinkingLevel}
+                    disabled={isBusy('ai-configuration')}
+                    onChange={(event) => void saveAIConfiguration((document) => {
+                      const target = document.modelPresets.find((item) => item.id === preset.id)
+                      if (target) target.thinkingLevel = event.target.value as typeof preset.thinkingLevel
+                    })}
+                  >
+                    <option value="minimal">minimal</option>
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                  </SelectControl>
+                </SettingsFormField>
+                <SettingsFormField label="缓存保留">
+                  <SelectControl
+                    value={preset.cacheRetention}
+                    disabled={isBusy('ai-configuration')}
+                    onChange={(event) => void saveAIConfiguration((document) => {
+                      const target = document.modelPresets.find((item) => item.id === preset.id)
+                      if (target) target.cacheRetention = event.target.value as ModelCacheRetention
+                    })}
+                  >
+                    <option value="none">不使用 prompt cache</option>
+                    <option value="short">短期缓存</option>
+                    <option value="long">长期缓存（仅明确兼容模型）</option>
+                  </SelectControl>
+                </SettingsFormField>
+                <span>max tokens {preset.maxTokens.toLocaleString()} · timeout {preset.timeoutMs.toLocaleString()} ms</span>
+              </div>
+            ))}
+            <div className="settings-notice" role="status">
+              {aiConfiguration.agentProfiles.map((profile) => (
+                <div key={profile.id}>
+                  <strong>Profile · {profile.name}</strong>
+                  <span>
+                    {profile.toolPackRefs.join(', ')} · grants {profile.capabilityGrants.join(', ')} · approvals {profile.approvalRequiredEffects.join(', ') || 'none'}
+                  </span>
+                  <SettingsFormField label="Compaction">
+                    <SelectControl
+                      value={profile.compaction.enabled ? 'on' : 'off'}
+                      disabled={isBusy('ai-configuration')}
+                      onChange={(event) => void saveAIConfiguration((document) => {
+                        const target = document.agentProfiles.find((item) => item.id === profile.id)
+                        if (target) target.compaction.enabled = event.target.value === 'on'
+                      })}
+                    >
+                      <option value="on">启用</option>
+                      <option value="off">关闭</option>
+                    </SelectControl>
+                  </SettingsFormField>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </SettingsCard>
 
       <SettingsCard

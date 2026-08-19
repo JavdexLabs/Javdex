@@ -17,8 +17,13 @@ import { cleanupOrphanedVideoScrapeStaging } from './services/videoPendingScrape
 import { automaticScanScheduler } from './services/automaticScanScheduler'
 import { recoverPendingLocalFileDeletions } from './services/pendingLocalFileDeletionService'
 import { isSameRendererLocation } from './ipc/ipcSecurity'
+import { pluginDeveloper } from './services/pluginDevAgent/pluginDeveloper'
+import { initializeAgentPlatform } from './agent-platform/composition'
+import { libraryCurator } from './services/libraryCuratorAgent/libraryCurator'
 
 let mainWindow: BrowserWindow | null = null
+let shutdownInProgress = false
+let shutdownReady = false
 
 // Register the custom asset scheme as privileged BEFORE app is ready so the
 // renderer can load downloaded covers/avatars via media://covers/xxx.jpg
@@ -134,11 +139,19 @@ function registerAssetProtocol(): void {
 }
 
 if (gotSingleInstanceLock) {
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     applyAppIcons()
     const databaseDir = path.join(app.getPath('userData'), 'data')
     fs.mkdirSync(databaseDir, { recursive: true })
     initDatabaseAtPath(path.join(databaseDir, 'library.db'))
+    initializeAgentPlatform()
+    const recoveryFailures = [
+      ...await pluginDeveloper.restoreRecoverableRuns(),
+      ...await libraryCurator.restoreRecoverableRuns()
+    ]
+    for (const failure of recoveryFailures) {
+      console.error(`[agent-recovery:${failure.runId}] ${failure.error}`)
+    }
     recoverPendingLocalFileDeletions()
     mediaAssetStore.ensureReady()
     cleanupOrphanedActressScrapeStaging()
@@ -165,16 +178,23 @@ if (gotSingleInstanceLock) {
 
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
-      closeDatabase()
       app.quit()
     }
   })
 
-  app.on('before-quit', () => {
+  app.on('before-quit', (event) => {
+    if (shutdownReady) return
+    event.preventDefault()
+    if (shutdownInProgress) return
+    shutdownInProgress = true
     automaticScanScheduler.stop()
     powerMonitor.off('resume', handleSystemResume)
     scrapeBrowser.close()
-    closeDatabase()
+    void Promise.allSettled([pluginDeveloper.dispose(), libraryCurator.dispose()]).finally(() => {
+      closeDatabase()
+      shutdownReady = true
+      app.quit()
+    })
   })
 }
 

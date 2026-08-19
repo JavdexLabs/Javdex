@@ -85,12 +85,12 @@ export function createEmptyPackage(input: PluginDevAgentStartInput): ScraperPlug
   }
 }
 
-export function createSession(input: PluginDevAgentStartInput): PluginDevSession {
+export function createSession(input: PluginDevAgentStartInput, sessionId: string = randomUUID()): PluginDevSession {
   cleanupSessions()
   const siteName = derivePluginName(input)
   const testTargets = normalizeTestTargets(input)
   const session: PluginDevSession = {
-    id: randomUUID(),
+    id: sessionId,
     status: 'running',
     mode: input.mode,
     kind: input.kind,

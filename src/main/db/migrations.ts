@@ -4,6 +4,7 @@ import { normalizeClassificationName } from '../../shared/classificationNameNorm
 import { normalizeVideoCode } from '../../shared/videoCode'
 import {
   CLASSIFICATION_V8_SCHEMA_SQL,
+  AGENT_PLATFORM_SCHEMA_SQL,
   PENDING_LOCAL_FILE_DELETIONS_SCHEMA_SQL,
   PENDING_VIDEO_DECISIONS_SCHEMA_SQL,
   RELATED_LINKS_SCHEMA_SQL,
@@ -11,7 +12,7 @@ import {
   VIDEO_SOURCES_SCHEMA_SQL
 } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 13
+export const CURRENT_SCHEMA_VERSION = 14
 
 type Migration = {
   version: number
@@ -899,6 +900,10 @@ function migrateToV13(database: Database.Database): void {
   database.exec(RELATED_LINKS_SCHEMA_SQL)
 }
 
+function migrateToV14(database: Database.Database): void {
+  database.exec(AGENT_PLATFORM_SCHEMA_SQL)
+}
+
 const MIGRATIONS: Migration[] = [
   {
     version: 2,
@@ -947,6 +952,10 @@ const MIGRATIONS: Migration[] = [
   {
     version: 13,
     migrate: migrateToV13
+  },
+  {
+    version: 14,
+    migrate: migrateToV14
   }
 ]
 

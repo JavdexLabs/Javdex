@@ -80,6 +80,9 @@ jobs:
       - name: Package
         run: npm run dist -- --platform ${{ matrix.platform }}
 
+      - name: Verify packaged Agent runtime
+        run: npm run packaging:verify-agent-runtime
+
       - name: Verify macOS application signatures
         if: matrix.platform == 'mac'
         shell: bash

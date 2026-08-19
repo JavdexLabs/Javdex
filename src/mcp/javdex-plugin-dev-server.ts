@@ -8,10 +8,16 @@ import {
 import { APP_PACKAGE_NAME } from '@shared/appIdentity'
 import { PLUGIN_DEV_TOOL_SCHEMAS } from '../main/services/pluginDevAgent/toolSchemas'
 import { createSession } from '../main/services/pluginDevAgent/sessionStore'
-import { executeTool } from '../main/services/pluginDevAgent/toolExecutor'
 import type { PluginDevAgentStartInput } from '../main/services/pluginDevAgent/types'
 import type { ScraperPluginKind, VideoScrapeField } from '@shared/scrapeTypes'
 import { normalizeTestTargets, parseTestTargetList } from '@shared/pluginDevKindProfile'
+import { createHash, randomUUID } from 'node:crypto'
+import Database from 'better-sqlite3'
+import { AGENT_PLATFORM_SCHEMA_SQL } from '../main/db/schema'
+import { AgentRunStore } from '../main/agent-platform/agentRunStore'
+import { ToolHost } from '../main/agent-platform/toolHost'
+import type { ResolvedRunConfiguration } from '../main/agent-platform/types'
+import { PLUGIN_DEVELOPER_TOOL_PACK, createPluginDeveloperToolHandlers } from '../main/services/pluginDevAgent/toolPack'
 
 const MCP_SERVER_NAME = `${APP_PACKAGE_NAME}-plugin-dev`
 
@@ -60,6 +66,71 @@ function toMcpTools(): Tool[] {
 async function main(): Promise<void> {
   const session = createSession(readEnvSessionInput())
   const sessionId = session.id
+  const database = new Database(':memory:')
+  database.pragma('foreign_keys = ON')
+  database.exec(AGENT_PLATFORM_SCHEMA_SQL)
+  const runStore = new AgentRunStore(() => database)
+  const host = new ToolHost(runStore)
+  host.registerToolPack(PLUGIN_DEVELOPER_TOOL_PACK)
+  const profile = {
+    id: 'profile:mcp-plugin-developer',
+    name: 'MCP Plugin Developer',
+    definitionId: 'plugin-developer',
+    routes: { primary: 'mcp:primary', verifier: 'mcp:verifier', summarizer: 'mcp:summarizer' },
+    toolPackRefs: [PLUGIN_DEVELOPER_TOOL_PACK.ref],
+    capabilityGrants: ['plugin.read', 'plugin.write', 'plugin.test', 'browser.read', 'browser.interact', 'plugin.install'],
+    approvalRequiredEffects: process.env.AV_PLUGIN_DEV_ALLOW_INSTALL === '1' ? [] : ['install' as const],
+    compaction: { enabled: false, reserveTokens: 0, keepRecentTokens: 0 }
+  }
+  const prompt = 'MCP PluginDeveloper ToolHost session'
+  const resolved: ResolvedRunConfiguration = {
+    revision: 'mcp-v1',
+    definitionId: 'plugin-developer',
+    profile,
+    model: {
+      credentialRef: 'llm-provider:mcp-unused',
+      model: {
+        providerId: 'mcp-unused', modelId: 'mcp-unused', name: 'MCP unused', api: 'openai-completions',
+        baseUrl: 'http://127.0.0.1', contextWindow: 1, maxTokens: 1, reasoning: false
+      },
+      routeRevision: 'mcp-v1',
+      preset: { thinkingLevel: 'minimal', maxTokens: 1, timeoutMs: 1, cacheRetention: 'none' },
+      cacheCompatibility: {
+        supportsPromptCache: false, supportsLongCacheRetention: false,
+        sendSessionAffinityHeaders: false,
+        evidence: { source: 'manual', checkedAt: new Date(0).toISOString(), note: 'MCP ToolHost does not invoke a model' }
+      },
+      getCredentialLease: async () => { throw new Error('MCP ToolHost does not invoke a model') }
+    },
+    cache: {
+      primaryAffinityId: 'mcp-primary', verifierAffinityId: 'mcp-verifier',
+      summarizerAffinityId: 'mcp-summarizer',
+      retention: { primary: 'none', verifier: 'none', summarizer: 'none' }
+    },
+    systemPrompt: { text: prompt, sha256: createHash('sha256').update(prompt).digest('hex') },
+    tools: [],
+    settings: {
+      compaction: profile.compaction,
+      retry: { enabled: false, maxRetries: 0, baseDelayMs: 0 }
+    },
+    sessionDirectory: process.cwd()
+  }
+  runStore.createRun({ runId: sessionId, useCase: 'mcp-plugin-developer', resolved, productState: {} })
+  const bindings = host.registerRun({
+    runId: sessionId,
+    profile,
+    status: () => runStore.getRun(sessionId)?.status ?? 'closed',
+    operationId: () => undefined,
+    handlers: createPluginDeveloperToolHandlers({
+      domainSessionId: sessionId,
+      step: () => session.step,
+      emit: (event) => {
+        if (event.type === 'waiting_user') runStore.updateProductState(sessionId, 'waiting_user', {})
+        if (event.type === 'done') runStore.updateProductState(sessionId, event.success ? 'settled' : 'failed', {})
+      }
+    })
+  })
+  const bindingByName = new Map(bindings.map((binding) => [binding.name, binding]))
 
   const server = new Server(
     {
@@ -79,9 +150,16 @@ async function main(): Promise<void> {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const toolName = request.params.name
-    const args = JSON.stringify(request.params.arguments ?? {})
-    const result = await executeTool(sessionId, toolName, args, session.step + 1)
+    const binding = bindingByName.get(toolName)
+    if (!binding) throw new Error(`ToolHost 未暴露工具：${toolName}`)
     session.step += 1
+    const result = await binding.invoke({
+      runId: sessionId,
+      callId: `mcp:${randomUUID()}`,
+      args: request.params.arguments ?? {},
+      signal: new AbortController().signal,
+      progress: () => undefined
+    })
 
     return {
       content: [

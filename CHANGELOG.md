@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Agent 平台
+
+- 插件开发助手切换为“Javdex 产品控制面 + Pi `0.84.2` 数据面”，同一 run 长期复用一个 Pi AgentSession，并删除手写 loop、transcript 压缩与 provider tool-chat runtime
+- 新增统一 Model/Route/Profile 配置、稳定 cache affinity、CredentialLease、ToolHost 权限/审批/锁/ledger，以及 schema 14 的 ProductJournal、ExecutionHistory 与恢复记录
+- PluginDevPanel 支持 renderer reload 与应用重启恢复，18 个工具统一经过 ToolHost；增加只读 LibraryCurator 作为第二个 Agent 复用证明
+- Electron 升级到 `43.4.1`（内置 Node 满足 Pi 要求），`better-sqlite3` 升级到 `13.0.3`
+
 ## 0.5.0 — 2026-08-17
 
 ### 影片资源与扫描

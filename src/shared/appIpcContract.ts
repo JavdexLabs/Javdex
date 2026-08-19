@@ -26,6 +26,7 @@ import type {
 import type {
   PluginDevAgentEvent,
   PluginDevAgentMessageInput,
+  PluginDevAgentSnapshot,
   PluginDevAgentSessionResult,
   PluginDevAgentStartInput,
   PluginDevDryRunInput,
@@ -38,6 +39,13 @@ import type { ScraperPluginDescriptor } from './scraperPluginTypes'
 import type { RendererSettingsPatch, SettingsSnapshot } from './settingsTypes'
 import type { VideoResourceImportTarget } from './videoTypes'
 import type { LlmProviderConfigSaveInput } from './llmProviders'
+import type { AIConfigurationSnapshot, AIConfigurationUpdateInput } from './aiConfigurationTypes'
+import type {
+  LibraryCuratorMessageInput,
+  LibraryCuratorResult,
+  LibraryCuratorSnapshot,
+  LibraryCuratorStartInput
+} from './libraryCuratorTypes'
 import type {
   IpcContractArgs,
   IpcContractChannel,
@@ -110,6 +118,11 @@ export interface AppIpcContract {
   [IPC.SETTINGS_LLM_PROVIDER_DELETE]: {
     args: [providerId: string]
     result: SettingsSnapshot
+  }
+  [IPC.SETTINGS_AI_CONFIGURATION_GET]: { args: []; result: AIConfigurationSnapshot }
+  [IPC.SETTINGS_AI_CONFIGURATION_UPDATE]: {
+    args: [input: AIConfigurationUpdateInput]
+    result: AIConfigurationSnapshot
   }
   [IPC.SETTINGS_RECOVERY_REVEAL_BACKUP]: { args: []; result: boolean }
   [IPC.SETTINGS_PROXY_TEST]: { args: [kind: 'scrape' | 'llm', proxyUrl: string]; result: string }
@@ -227,6 +240,10 @@ export interface AppIpcContract {
     result: PluginDevAgentSessionResult
   }
   [IPC.PLUGIN_DEV_AGENT_CANCEL]: { args: [sessionId: string]; result: void }
+  [IPC.PLUGIN_DEV_AGENT_SNAPSHOT]: {
+    args: [sessionId?: string]
+    result: PluginDevAgentSnapshot | null
+  }
   [IPC.PLUGIN_DEV_AGENT_EXPORT_WORK_LOG]: { args: [sessionId: string]; result: string | null }
   [IPC.PLUGIN_DEV_DRY_RUN]: { args: [input: PluginDevDryRunInput]; result: PluginDevDryRunResult }
   [IPC.PLUGIN_DEV_VERIFY]: {
@@ -236,6 +253,19 @@ export interface AppIpcContract {
   [IPC.PLUGIN_DEV_INSTALL]: {
     args: [input: PluginDevInstallInput]
     result: ScraperPluginDescriptor
+  }
+  [IPC.LIBRARY_CURATOR_START]: {
+    args: [input?: LibraryCuratorStartInput]
+    result: LibraryCuratorResult
+  }
+  [IPC.LIBRARY_CURATOR_MESSAGE]: {
+    args: [input: LibraryCuratorMessageInput]
+    result: LibraryCuratorResult
+  }
+  [IPC.LIBRARY_CURATOR_CANCEL]: { args: [runId: string]; result: void }
+  [IPC.LIBRARY_CURATOR_SNAPSHOT]: {
+    args: [runId?: string]
+    result: LibraryCuratorSnapshot | null
   }
 
   [IPC.PLAYER_PLAY]: { args: [videoId: number]; result: PlayResult }

@@ -34,7 +34,14 @@ const base = {
     buildResources: 'build',
     output: 'dist'
   },
-  files: ['out/**/*', '!node_modules/@mediapipe/tasks-vision/**/*'],
+  files: [
+    'out/**/*',
+    '!node_modules/@mediapipe/tasks-vision/**/*',
+    '!node_modules/**/*.d.ts',
+    '!node_modules/**/*.d.ts.map',
+    '!node_modules/**/*.js.map',
+    '!node_modules/@earendil-works/pi-coding-agent/{docs,examples,tests}/**/*'
+  ],
   asar: true,
   npmRebuild: true,
   nodeGypRebuild: false,

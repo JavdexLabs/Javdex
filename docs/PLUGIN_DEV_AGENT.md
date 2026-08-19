@@ -1,10 +1,10 @@
 # 插件开发 Agent
 
-Javdex 内置的 **ReAct 插件开发助手**：自主调用浏览器探测、修改插件代码、dry-run 与语义验证，直到 `plugin_finish` 满足结束条件。
+Javdex 内置的 **Pi 驱动插件开发助手**：自主调用浏览器探测、修改插件代码、dry-run 与语义验证，直到 `plugin_finish` 满足结束条件。
 
 > **插件代码规范**（包结构、`parseVideo`/`parseActress` 返回值、沙箱 `ctx` API）见 [`SCRAPER_PLUGIN_FORMAT.md`](./SCRAPER_PLUGIN_FORMAT.md)。Agent 产出与安装的代码必须符合该文档。
 >
-> **迁移状态**：本文描述当前 legacy 实现。已批准的目标架构是“Javdex 产品控制面 + Pi Agent 数据面”，详见 [`AGENT_PLATFORM_EXECUTION_PLAN.md`](./AGENT_PLATFORM_EXECUTION_PLAN.md) 与 [`ADR-0020`](./adr/0020-establish-agent-platform-seams-before-pi.md)；迁移完成前，本文仍是现行行为规范。
+> **当前架构**：Javdex 是产品控制面，Pi `0.84.2` 是 Agent 数据面。边界与恢复契约见 [`AGENT_PLATFORM_EXECUTION_PLAN.md`](./AGENT_PLATFORM_EXECUTION_PLAN.md) 与 [`ADR-0020`](./adr/0020-establish-agent-platform-seams-before-pi.md)。
 
 ## 与格式文档的分工
 
@@ -17,10 +17,12 @@ Javdex 内置的 **ReAct 插件开发助手**：自主调用浏览器探测、�
 
 ```
 设置 → PluginDevPanel（/settings/plugin-dev）
-  → IPC pluginDev:agentStart / agentMessage / agentCancel
-  → pluginDevAgent/runner.ts（ReAct 主循环）
-  → llm/agentToolChatClient.ts（当前 LLM 供应商 + tool calling）
-  → pluginDevAgent/toolExecutor.ts（18 个工具）
+  → IPC pluginDev:agentStart / agentMessage / agentCancel / agentSnapshot
+  → PluginDeveloper（产品用例与状态投影）
+  → AgentExecution（run/operation 幂等委托）
+  → PiRuntimeAdapter → 长期 Pi AgentSession
+  → ToolHost（权限 / 审批 / 锁 / ledger / 脱敏）
+  → pluginDevAgent/toolExecutor.ts（18 个领域工具）
   → scrapeBrowser / pluginDevService / pluginDevVerification
   ← pluginDev:agentEvent（进度流）
 ```
@@ -29,8 +31,9 @@ Javdex 内置的 **ReAct 插件开发助手**：自主调用浏览器探测、�
 |------|------|
 | `src/shared/pluginDevKindProfile.ts` | video/actress 共享配置、测试目标、prompt 字段说明 |
 | `src/shared/scrapeFieldPromptDocs.ts` | 字段 id 与返回键映射（注入 Agent prompt） |
-| `src/main/services/pluginDevAgent/` | 会话、工具执行、上下文压缩 |
-| `src/main/services/llm/agentToolChatClient.ts` | OpenAI Chat / Anthropic Messages 适配 |
+| `src/main/services/pluginDevAgent/` | PluginDeveloper 用例、领域会话、ToolPack 与工具规则 |
+| `src/main/agent-platform/` | 配置控制面、AgentExecution、ToolHost、持久化与 cache affinity |
+| `src/main/agent-runtime/pi/` | 唯一允许引用 Pi 类型的 runtime adapter |
 
 LLM 须在 **设置 → 模型** 中配置为支持 **工具调用**（`agentCompatible`）的供应商；API Key 与默认模型也在该处管理，而非插件工作台内单独填写。
 
@@ -68,9 +71,9 @@ LLM 须在 **设置 → 模型** 中配置为支持 **工具调用**（`agentCom
 3. **AI开发**（无代码）或 **AI调试**（已有包）启动；也可在对话区输入指示
 4. 右侧工具时间线展示每步调用；`package_updated` 同步左侧编辑器
 5. Cloudflare 拦截时完成验证后点击 **验证完成，继续**
-6. 对话区 **导出日志** 可保存完整 Agent 工作日志（JSON：时间线、未截断工具输出、包快照、dry-run/verify），用于分析工作流是否合理。会话结束后约 1 小时内仍可导出。
+6. 对话区 **导出日志** 可保存完整 Agent 工作日志（JSON：时间线、未截断工具输出、包快照、dry-run/verify），用于分析工作流是否合理。renderer reload 与应用重启后会从产品快照和 journal 恢复。
 
-Agent 配置（最大步数、上下文 token 上限）可在工作台内保存至 `settings.json`（`pluginDevAgentMaxSteps`、`pluginDevAgentMaxContextTokens`）。
+Agent 的 Connection、Model、Preset、Route 与 Profile 在 **设置 → 模型** 中使用同一个配置 revision；compaction、retry 和 cache retention 在 run 开始时冻结。工作台只展示已解析的 Profile/Route，不自行猜默认 provider。
 
 ## MCP（可选）
 
@@ -90,6 +93,7 @@ npm run mcp:plugin-dev
 | `AV_PLUGIN_DEV_TEST_TARGETS` | 测试目标，空格/逗号分隔 |
 | `AV_PLUGIN_DEV_TEST_CODE` | （兼容）单个番号 |
 | `AV_PLUGIN_DEV_TEST_ACTRESS` | （兼容）单个演员名 |
+| `AV_PLUGIN_DEV_ALLOW_INSTALL` | 设为 `1` 时，独立 MCP ToolHost 允许 install 无交互执行；默认仍要求审批并 fail closed |
 
 ```json
 {
@@ -120,4 +124,4 @@ npm run mcp:plugin-dev
 npm test
 ```
 
-相关用例：`pluginDevKindProfile.test.ts`、`pluginDevAgent/runner.test.ts`、`pluginDevAgent/toolExecutor.test.ts`。
+相关用例：`pluginDevKindProfile.test.ts`、`pluginDevAgent/toolPack.test.ts`、`pluginDevAgent/toolExecutor.test.ts`、`agent-platform/*.test.ts` 与 `agent-runtime/pi/piRuntime.test.ts`。

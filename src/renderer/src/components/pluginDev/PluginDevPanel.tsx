@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Code2, Settings } from 'lucide-react'
-import { findLlmProviderViewModel, listModelsForProvider } from '@shared/llmProviders'
 import type { SettingsSnapshot } from '@shared/settingsTypes'
+import type { AIConfigurationSnapshot } from '@shared/aiConfigurationTypes'
 import type { ActressScrapeField, ScraperPluginPackage, VideoScrapeField } from '@shared/scrapeTypes'
-import type { PluginDevAgentContextStats, PluginDevAgentEvent, PluginDevAgentPhase, PluginDevDryRunResult, PluginDevSessionStatus, PluginDevVerificationReport } from '@shared/pluginDevTypes'
+import type { PluginDevAgentContextStats, PluginDevAgentEvent, PluginDevAgentPhase, PluginDevAgentWorkLogEntry, PluginDevDryRunResult, PluginDevSessionStatus, PluginDevVerificationReport } from '@shared/pluginDevTypes'
 import { api } from '../../api'
 import { settingsPath } from '../../settings/settingsRoutes'
 import IconButton from '../IconButton'
@@ -63,17 +63,6 @@ function isActiveAgentSessionStatus(status: PluginDevSessionStatus | null): bool
   return status === 'running' || status === 'waiting_user'
 }
 
-function llmUnavailableReason(
-  provider: ReturnType<typeof findLlmProviderViewModel> | undefined,
-  modelLabel: string
-): string | null {
-  if (!provider) return '未配置默认模型，先到模型设置选择一个 Agent 可用供应商。'
-  if (provider.agentCompatible !== true) return `${provider.name} 暂不支持工具调用，不能用于插件开发 Agent。`
-  if (provider.status !== 'ready') return `${provider.name} 尚未就绪，请检查 API Key 与模型配置。`
-  if (!modelLabel) return '未选择默认模型。'
-  return null
-}
-
 function derivePluginNameFromUrl(url: string, kind: PluginKind): string {
   const fallback = getPluginDevKindProfile(kind).defaultPluginNameSuffix
   const text = url.trim()
@@ -89,13 +78,11 @@ function derivePluginNameFromUrl(url: string, kind: PluginKind): string {
 
 export default function PluginDevPanel({
   settings,
-  setSettings,
   onInstalled,
   loadPackage,
   onLoadConsumed
 }: {
   settings: SettingsSnapshot
-  setSettings: (settings: SettingsSnapshot) => void
   onInstalled: (kind: PluginKind) => Promise<void>
   loadPackage: ScraperPluginPackage | null
   onLoadConsumed: () => void
@@ -103,8 +90,8 @@ export default function PluginDevPanel({
   const toast = useToast()
   const navigate = useNavigate()
   const leaveGuard = usePluginDevLeaveGuard()
-  const [maxAgentSteps, setMaxAgentSteps] = useState(settings.pluginDevAgentMaxSteps)
-  const [maxContextTokens, setMaxContextTokens] = useState(settings.pluginDevAgentMaxContextTokens)
+  const [aiConfiguration, setAIConfiguration] = useState<AIConfigurationSnapshot | null>(null)
+  const [aiConfigurationError, setAIConfigurationError] = useState<string | null>(null)
   const [showConnectionModal, setShowConnectionModal] = useState(false)
   const [showCodeModal, setShowCodeModal] = useState(false)
   const [agentTab, setAgentTab] = useState<PluginDevAgentTab>('conversation')
@@ -156,16 +143,24 @@ export default function PluginDevPanel({
   }, [kind, testTargets, dryRun])
   const canResumeAgent = canResumeAgentSession(agentSessionId, agentStatus)
   const hasPackage = (siteName.trim().length > 0 || siteUrl.trim().length > 0) && code.trim().length > 0
-  const activeLlmProvider = useMemo(
-    () => findLlmProviderViewModel(settings, settings.defaultLlmProviderId),
-    [settings]
+  const resolvedProfile = useMemo(() => {
+    if (!aiConfiguration || aiConfiguration.validationErrors.length > 0) return null
+    const profile = aiConfiguration.agentProfiles.find(
+      (item) => item.id === 'profile:plugin-developer:default'
+    )
+    const route = aiConfiguration.routes.find((item) => item.id === profile?.routes.primary)
+    const model = aiConfiguration.modelRecords.find((item) => item.id === route?.modelRecordId)
+    const connection = aiConfiguration.modelConnections.find((item) => item.id === model?.connectionId)
+    if (!profile || !route || !model || !connection || !connection.enabled) return null
+    return { profile, route, model, connection }
+  }, [aiConfiguration])
+  const activeLlmModelLabel = resolvedProfile?.model.name ?? ''
+  const llmReady = resolvedProfile !== null
+  const llmReason = aiConfigurationError ?? (
+    aiConfiguration?.validationErrors.length
+      ? aiConfiguration.validationErrors[0]
+      : '插件开发 Agent Profile 尚未解析到可用模型。'
   )
-  const activeLlmModelLabel = useMemo(() => {
-    const models = listModelsForProvider(settings.defaultLlmProviderId, settings.llmCustomModels)
-    return models.find((model) => model.id === settings.defaultLlmModelId)?.name ?? settings.defaultLlmModelId
-  }, [settings.defaultLlmModelId, settings.defaultLlmProviderId, settings.llmCustomModels])
-  const llmReady = activeLlmProvider?.agentCompatible === true && activeLlmProvider.status === 'ready'
-  const llmReason = llmUnavailableReason(activeLlmProvider, activeLlmModelLabel)
   const canUseAgent =
     llmReady &&
     (loadedInstalledName ? siteName.trim().length > 0 : siteUrl.trim().length > 0)
@@ -185,9 +180,19 @@ export default function PluginDevPanel({
       : null
 
   useEffect(() => {
-    setMaxAgentSteps(settings.pluginDevAgentMaxSteps)
-    setMaxContextTokens(settings.pluginDevAgentMaxContextTokens)
-  }, [settings.pluginDevAgentMaxSteps, settings.pluginDevAgentMaxContextTokens])
+    let cancelled = false
+    void api.settings.getAIConfiguration()
+      .then((configuration) => {
+        if (!cancelled) {
+          setAIConfiguration(configuration)
+          setAIConfigurationError(null)
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setAIConfigurationError((error as Error).message)
+      })
+    return () => { cancelled = true }
+  }, [settings.defaultLlmModelId, settings.defaultLlmProviderId, settings.llmCustomModels])
 
   useEffect(() => {
     agentSessionIdRef.current = agentSessionId
@@ -241,18 +246,6 @@ export default function PluginDevPanel({
   }, [toast])
 
   useEffect(() => {
-    return () => {
-      const sessionId = agentSessionIdRef.current
-      if (!sessionId) return
-      const active =
-        isAgentRunningRef.current || isActiveAgentSessionStatus(agentStatusRef.current)
-      if (!active) return
-      void api.pluginDev.cancel(sessionId)
-      isAgentRunningRef.current = false
-    }
-  }, [])
-
-  useEffect(() => {
     const off = api.pluginDev.onAgentEvent((event: PluginDevAgentEvent) => {
       if (isAgentRunningRef.current) {
         agentSessionIdRef.current = event.sessionId
@@ -262,6 +255,7 @@ export default function PluginDevPanel({
       }
 
       if (event.type === 'step_start') {
+        setAgentStatus('running')
         setAgentStep(event.step)
         setActiveTool(null)
       }
@@ -323,11 +317,16 @@ export default function PluginDevPanel({
         setAgentTab('result')
       }
       if (event.type === 'waiting_user') {
+        isAgentRunningRef.current = false
+        setBusy(null)
         setAgentStatus('waiting_user')
         setWaitingUserReason(event.reason)
         setAgentTab('conversation')
       }
       if (event.type === 'done') {
+        isAgentRunningRef.current = false
+        setBusy(null)
+        setAgentStatus(event.success ? 'completed' : 'failed')
         setActiveTool(null)
         if (event.dryRun) setDryRun(event.dryRun)
         if (event.dryRun) setDryRunPackageFingerprint(fingerprintPluginPackage(event.package))
@@ -335,6 +334,8 @@ export default function PluginDevPanel({
         if (event.success && event.dryRun?.ok) setAgentTab('result')
       }
       if (event.type === 'error') {
+        isAgentRunningRef.current = false
+        setBusy(null)
         setActiveTool(null)
         setAgentStatus('failed')
         setConversationItems((prev) => [
@@ -346,6 +347,70 @@ export default function PluginDevPanel({
     })
     return off
   }, [applyGeneratedPackage, refreshUserPlugins, toast])
+
+  useEffect(() => {
+    let cancelled = false
+    const conversationFromWorkLog = (entries: PluginDevAgentWorkLogEntry[]): PluginDevConversationItem[] =>
+      entries.flatMap((entry): PluginDevConversationItem[] => {
+        if (entry.kind === 'user_message') {
+          return [{ id: nextConversationId('user:restore'), type: 'user', text: entry.text }]
+        }
+        const event = entry.event
+        if (event.type === 'assistant_text') {
+          return [{ id: nextConversationId('agent:restore'), type: 'agent', text: event.text }]
+        }
+        if (event.type === 'tool_result') {
+          return [{
+            id: nextConversationId(`tool:restore:${event.step}:${event.tool}`),
+            type: 'tool',
+            step: event.step,
+            tool: event.tool,
+            summary: event.summary,
+            detail: event.detail,
+            ok: event.ok
+          }]
+        }
+        if (event.type === 'error') {
+          return [{ id: nextConversationId('agent:error:restore'), type: 'agent', text: event.message }]
+        }
+        return []
+      }).slice(-120)
+
+    void api.pluginDev.snapshot()
+      .then((snapshot) => {
+        if (cancelled || !snapshot) return
+        const { input, result } = snapshot
+        agentSessionIdRef.current = result.sessionId
+        agentStatusRef.current = result.status
+        isAgentRunningRef.current = result.status === 'running'
+        setAgentSessionId(result.sessionId)
+        setAgentStatus(result.status)
+        setAgentPhase(snapshot.phase)
+        setAgentStep(snapshot.step)
+        setBusy(result.status === 'running' ? 'agent' : null)
+        setKind(input.kind)
+        setSiteName(input.siteName)
+        setSiteUrl(input.siteUrl ?? '')
+        setDescription(input.description ?? '')
+        setSupportedFieldIds(input.supportedFields)
+        setTestTarget((input.testTargets ?? []).join('\n'))
+        applyGeneratedPackage(result.package)
+        setDryRun(result.dryRun ?? null)
+        setDryRunPackageFingerprint(result.dryRun ? fingerprintPluginPackage(result.package) : null)
+        setVerification(result.verification ?? null)
+        setConversationItems(conversationFromWorkLog(snapshot.workLog))
+        const waiting = [...snapshot.events].reverse().find(
+          (event): event is Extract<PluginDevAgentEvent, { type: 'waiting_user' }> => event.type === 'waiting_user'
+        )
+        setWaitingUserReason(result.status === 'waiting_user' ? waiting?.reason ?? result.summary : null)
+        const context = [...snapshot.events].reverse().find(
+          (event): event is Extract<PluginDevAgentEvent, { type: 'context_updated' }> => event.type === 'context_updated'
+        )
+        setContextStats(context?.stats ?? null)
+      })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [applyGeneratedPackage])
 
   const resetAgentUi = useCallback((): void => {
     setAgentSessionId(null)
@@ -476,8 +541,8 @@ export default function PluginDevPanel({
   const needsLeaveConfirm = hasUninstalledChanges || activeAgent
   const leaveConfirmMessage = activeAgent
     ? hasUninstalledChanges
-      ? 'Agent 仍在运行或等待操作，离开会终止当前会话；插件也有未安装更改。'
-      : 'Agent 仍在运行或等待操作，离开会终止当前会话。'
+      ? 'Agent 仍在运行或等待操作；离开后可回来恢复，但插件还有未安装更改。'
+      : 'Agent 仍在运行或等待操作；离开页面不会终止会话，可稍后回来恢复。'
     : installedBaseline
       ? '插件代码已变更但尚未重新安装，离开后将无法在刮削中使用新版本。'
       : '插件尚未安装，离开后将无法在刮削中使用。'
@@ -530,27 +595,7 @@ export default function PluginDevPanel({
     }
   }
 
-  const saveAgentSettings = async (): Promise<void> => {
-    if (busy) return
-    setBusy('save-key')
-    try {
-      const next = await api.settings.update({
-        pluginDevAgentMaxSteps: maxAgentSteps,
-        pluginDevAgentMaxContextTokens: maxContextTokens
-      })
-      setSettings(next)
-      setShowConnectionModal(false)
-      toast.show('Agent 配置已保存', 'success')
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setBusy(null)
-    }
-  }
-
   const openConnectionModal = (): void => {
-    setMaxAgentSteps(settings.pluginDevAgentMaxSteps)
-    setMaxContextTokens(settings.pluginDevAgentMaxContextTokens)
     setShowConnectionModal(true)
   }
 
@@ -921,18 +966,16 @@ export default function PluginDevPanel({
 
       {showConnectionModal && (
         <PluginDevConnectionModal
-          providerLabel={activeLlmProvider?.name ?? '未配置'}
+          profileLabel={resolvedProfile?.profile.name ?? '未配置'}
+          providerLabel={resolvedProfile?.connection.name ?? '未配置'}
           modelLabel={activeLlmModelLabel}
-          maxSteps={maxAgentSteps}
-          maxContextTokens={maxContextTokens}
-          busy={busy === 'save-key'}
-          onMaxStepsChange={setMaxAgentSteps}
-          onMaxContextTokensChange={setMaxContextTokens}
+          routeLabel={resolvedProfile?.route.name ?? '未解析'}
+          revision={aiConfiguration?.revision ?? '—'}
+          error={llmReady ? null : llmReason}
           onOpenModelSettings={() => {
             setShowConnectionModal(false)
             leaveGuard.requestLeave(() => navigate('/settings/models/providers'))
           }}
-          onSave={() => void saveAgentSettings()}
           onClose={() => setShowConnectionModal(false)}
         />
       )}

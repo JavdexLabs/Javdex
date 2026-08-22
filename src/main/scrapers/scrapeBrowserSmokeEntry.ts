@@ -92,6 +92,30 @@ export async function runScrapeBrowserSmoke(): Promise<void> {
     if (stealthValue.webdriver !== false || /Electron/i.test(String(stealthValue.userAgent))) {
       throw new Error('stealth profile is inconsistent')
     }
+    const beforeEvaluate = await lease.agentAction({ action: 'status' })
+    const sanitized = await lease.agentAction({
+      action: 'evaluate',
+      expression: `() => {
+        document.title = 'Detached mutation';
+        return { title: document.title, hasInput: document.querySelector('input') !== null };
+      }`
+    })
+    const sanitizedValue = sanitized.value as { title?: unknown; hasInput?: unknown }
+    if (sanitizedValue.title !== 'Detached mutation' || sanitizedValue.hasInput !== false) {
+      throw new Error('evaluate did not run against the sanitized detached document')
+    }
+    await lease.agentAction({ action: 'status' }).then((current) => {
+      if (current.title !== beforeEvaluate.title) {
+        throw new Error('evaluate mutated the live page')
+      }
+    })
+    await lease.agentAction({
+      action: 'evaluate',
+      expression: `() => document['coo' + 'kie']`
+    }).then(
+      () => { throw new Error('evaluate allowed computed cookie access') },
+      () => undefined
+    )
     await lease.agentAction({ action: 'wait', timeoutMs: 1_000 })
     const status = await lease.agentAction({ action: 'status' })
     if (status.imageCacheEntries !== 1) {
@@ -112,6 +136,7 @@ export async function runScrapeBrowserSmoke(): Promise<void> {
       refs: true,
       pageFacts: true,
       stealth: true,
+      evaluateIsolation: true,
       debuggerImageCache: true,
       cookie: true
     })}\n`)

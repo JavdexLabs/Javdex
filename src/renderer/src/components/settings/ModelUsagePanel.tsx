@@ -8,11 +8,8 @@ import type {
 import Button from '../Button'
 import SelectControl from '../SelectControl'
 import type { ApplyModelManagementCommand } from './ModelSettingsPanel'
-import styles from './ModelSettingsPanel.module.css'
-
-function connectionName(snapshot: ModelManagementSnapshot, connectionId: string): string {
-  return snapshot.connections.find((item) => item.id === connectionId)?.name ?? '未知提供商'
-}
+import styles from './ModelUsagePanel.module.css'
+import { modelConnectionName } from './modelSettingsView'
 
 function ModelSelect({
   snapshot,
@@ -38,7 +35,7 @@ function ModelSelect({
     <SelectControl value={value} onChange={(event) => onChange(event.target.value)}>
       {models.map((model) => (
         <option key={model.id} value={model.id}>
-          {connectionName(snapshot, model.connectionId)} · {model.name}
+          {modelConnectionName(snapshot, model.connectionId)} · {model.name}
         </option>
       ))}
     </SelectControl>

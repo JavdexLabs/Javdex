@@ -156,7 +156,7 @@ description: Inspect and interact with the Javdex controlled browser while devel
 - \`snapshot\` 产生可复用的 ARIA ref；主框架导航、页面替换或 helper 重启后旧 ref 失效，应重新 snapshot。
 - 只有一个明确缺失事实时才追加最直接的操作：内容仍加载用 \`wait\`，已有控件用 \`click\`，找具体文本用 \`find\`，需要局部结构时用 \`html\` 或 \`evaluate\`。得到答案后立即返回编码；没有新增事实就停止浏览。
 - \`find\` 返回至多 20 个上下文块；\`html\` 只读取目标局部；\`evaluate\` 直接返回 JSON 兼容值，不要调用 \`JSON.stringify\`。
-- \`evaluate\` 仅用于公开页面结构，不得读取 cookie、storage、凭据、密码、验证码或表单控件值；遇到登录、人机验证或其他账户操作必须使用 \`handoff\` 交给用户。
+- \`evaluate\` 仅用于公开页面结构，并运行在脱离实时页面的净化文档上；不要使用计算属性、修改 DOM 或调用网络/页面动作。它不能读取 cookie、storage、凭据、密码、验证码或表单控件值；遇到登录、人机验证或其他账户操作必须使用 \`handoff\` 交给用户。
 - 完整 observation artifact 保存在 \`.javdex/browser/\`，只供 Pi 针对性阅读和日志导出；超长字符串会在索引中显示为 \`$artifactTextRef\`，对应 part 文件可继续用 read 的 offset/limit 分段读取。宿主验收不消费它。
 `
 }

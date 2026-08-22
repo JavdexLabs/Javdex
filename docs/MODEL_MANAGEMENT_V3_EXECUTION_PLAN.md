@@ -136,3 +136,11 @@ connection not ready, model lacks tools, unsupported long cache and validation f
   Fresh x64 and arm64 DMGs were built and verified. The packaging launcher now selects a compatible macOS
   Python for Electron's node-gyp when a newer Homebrew Python omits `distutils`; its packaging suite passes
   5/5. Current artifacts are 137 MiB (x64) and 132 MiB (arm64), each with a verified 79.2 MiB app.asar.
+- 2026-08-23: The PR-to-dev audit closed its remaining findings. The v2 configuration backup now reconstructs
+  a strict typed document and sanitizes connection/proxy URLs instead of persisting the raw legacy object.
+  Browser `evaluate` uses an AST policy to reject dynamic property access, exfiltration and state actions,
+  while executing allowed reads against a sanitized document detached from the live page; the real helper
+  smoke verifies that form controls are absent and mutations cannot reach the page. Each model settings
+  subpanel now owns its same-name CSS Module, obsolete global selectors and a test-only production method
+  were removed, and the duplicated
+  provider-name view helper was consolidated. Full verification passed with 1320/1320 Electron/Renderer tests.

@@ -532,6 +532,90 @@ export function buildLegacyLlmSettingsBackup(settings: AppSettings): Record<stri
   }
 }
 
+export function buildLegacyAiConfigurationBackup(
+  document: unknown
+): AIConfigurationDocument | null {
+  if (!isV2Document(document)) return null
+  return {
+    schemaVersion: 2,
+    revision: document.revision,
+    updatedAt: document.updatedAt,
+    modelConnections: document.modelConnections.map((connection) => ({
+      id: connection.id,
+      name: connection.name,
+      providerId: connection.providerId,
+      protocol: connection.protocol,
+      baseUrl: rendererSafeBaseUrl(connection.baseUrl),
+      ...(connection.proxyUrl ? { proxyUrl: rendererSafeBaseUrl(connection.proxyUrl) } : {}),
+      credentialRef: connection.credentialRef,
+      enabled: connection.enabled
+    })),
+    modelRecords: document.modelRecords.map((model) => ({
+      id: model.id,
+      connectionId: model.connectionId,
+      modelId: model.modelId,
+      name: model.name,
+      api: model.api,
+      contextWindow: model.contextWindow,
+      maxTokens: model.maxTokens,
+      capabilities: {
+        tools: model.capabilities.tools,
+        vision: model.capabilities.vision,
+        reasoning: model.capabilities.reasoning
+      },
+      cache: {
+        supportsPromptCache: model.cache.supportsPromptCache,
+        supportsLongCacheRetention: model.cache.supportsLongCacheRetention,
+        ...(model.cache.cacheControlFormat
+          ? { cacheControlFormat: model.cache.cacheControlFormat }
+          : {}),
+        ...(model.cache.sessionAffinityFormat
+          ? { sessionAffinityFormat: model.cache.sessionAffinityFormat }
+          : {}),
+        sendSessionAffinityHeaders: model.cache.sendSessionAffinityHeaders,
+        evidence: {
+          source: model.cache.evidence.source,
+          checkedAt: model.cache.evidence.checkedAt,
+          ...(model.cache.evidence.note ? { note: model.cache.evidence.note } : {})
+        }
+      }
+    })),
+    modelPresets: document.modelPresets.map((preset) => ({
+      id: preset.id,
+      name: preset.name,
+      thinkingLevel: preset.thinkingLevel,
+      maxTokens: preset.maxTokens,
+      timeoutMs: preset.timeoutMs,
+      cacheRetention: preset.cacheRetention
+    })),
+    routes: document.routes.map((route) => ({
+      id: route.id,
+      name: route.name,
+      role: route.role,
+      modelRecordId: route.modelRecordId,
+      presetId: route.presetId
+    })),
+    agentProfiles: document.agentProfiles.map((profile) => ({
+      id: profile.id,
+      name: profile.name,
+      definitionId: profile.definitionId,
+      routes: {
+        primary: profile.routes.primary,
+        verifier: profile.routes.verifier,
+        summarizer: profile.routes.summarizer
+      },
+      toolPackRefs: [...profile.toolPackRefs],
+      capabilityGrants: [...profile.capabilityGrants],
+      approvalRequiredEffects: [...profile.approvalRequiredEffects],
+      compaction: {
+        enabled: profile.compaction.enabled,
+        reserveTokens: profile.compaction.reserveTokens,
+        keepRecentTokens: profile.compaction.keepRecentTokens
+      }
+    }))
+  }
+}
+
 export function validateModelManagementDocument(document: ModelManagementDocument): string[] {
   const structural = modelManagementDocumentSchema.safeParse(document)
   if (!structural.success) return formatSchemaIssues(structural.error)
@@ -766,10 +850,6 @@ export class ModelManagementModule {
       getCredentialLease: async () => this.issueCredentialLease(connection),
       fetch: llmFetch
     }
-  }
-
-  resetCacheForTests(): void {
-    this.cache = null
   }
 
   private document(): ModelManagementDocument {
@@ -1202,7 +1282,8 @@ const productionStore: ModelConfigurationStore = {
   backupLegacy(document, settings) {
     const root = userDataPath()
     const configBackup = path.join(root, CONFIG_BACKUP_FILE)
-    if (document !== null && !fs.existsSync(configBackup)) writePrivateJson(configBackup, document)
+    const safeDocument = buildLegacyAiConfigurationBackup(document)
+    if (safeDocument && !fs.existsSync(configBackup)) writePrivateJson(configBackup, safeDocument)
     const settingsBackup = path.join(root, SETTINGS_BACKUP_FILE)
     if (!fs.existsSync(settingsBackup)) {
       writePrivateJson(settingsBackup, buildLegacyLlmSettingsBackup(settings))

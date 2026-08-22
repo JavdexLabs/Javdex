@@ -26,7 +26,6 @@
   .library-scan-note,
   .library-scan-duration-label,
   .settings-number-stepper__unit,
-  .plugin-dev-connection-meta dt,
   .scan-unrec-rename > summary,
   .scan-unrec-dir
 ) {
@@ -49,7 +48,6 @@
   .media-path-empty,
   .library-scan-status,
   .field-row--stacked label,
-  .plugin-dev-connection-meta dd,
   .plugin-empty-state,
   .scan-unrec-name,
   .scan-unrec-rename

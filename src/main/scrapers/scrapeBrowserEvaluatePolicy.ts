@@ -1,3 +1,5 @@
+import { parse, type Node } from 'acorn'
+
 const FORBIDDEN_EVALUATE_IDENTIFIERS = new Set([
   'fetch',
   'import',
@@ -12,7 +14,32 @@ const FORBIDDEN_EVALUATE_IDENTIFIERS = new Set([
   'indexedDB',
   'cookieStore',
   'ClipboardItem',
-  'FileReader'
+  'FileReader',
+  'Reflect',
+  'window',
+  'globalThis',
+  'self',
+  'top',
+  'parent',
+  'opener',
+  'frames',
+  'history',
+  'open',
+  'EventSource',
+  'Worker',
+  'SharedWorker',
+  'BroadcastChannel',
+  'WebTransport',
+  'RTCPeerConnection',
+  'Image',
+  'Audio',
+  'this',
+  'setTimeout',
+  'setInterval',
+  'requestAnimationFrame',
+  'requestIdleCallback',
+  'MessageChannel',
+  'postMessage'
 ])
 
 const FORBIDDEN_EVALUATE_MEMBERS = new Set([
@@ -29,214 +56,127 @@ const FORBIDDEN_EVALUATE_MEMBERS = new Set([
   'constructor',
   '__proto__',
   'prototype',
-  'getOwnPropertyDescriptor'
+  'getOwnPropertyDescriptor',
+  'sendBeacon',
+  'getAttribute',
+  'getAttributeNames',
+  'defaultValue',
+  'checked',
+  'selected',
+  'selectedIndex',
+  'contentWindow',
+  'contentDocument',
+  'defaultView',
+  'remove',
+  'removeChild',
+  'append',
+  'appendChild',
+  'prepend',
+  'replaceChildren',
+  'replaceWith',
+  'before',
+  'after',
+  'insertAdjacentElement',
+  'insertAdjacentHTML',
+  'insertAdjacentText',
+  'setAttribute',
+  'removeAttribute',
+  'toggleAttribute',
+  'click',
+  'focus',
+  'blur',
+  'submit',
+  'requestSubmit',
+  'reset',
+  'dispatchEvent',
+  'write',
+  'writeln',
+  'postMessage',
+  'getPrototypeOf',
+  'setPrototypeOf',
+  'defineProperty',
+  'defineProperties',
+  'getOwnPropertyDescriptors',
+  'getOwnPropertyNames',
+  'getOwnPropertySymbols',
+  '__lookupGetter__',
+  '__lookupSetter__',
+  'caller',
+  'callee'
 ])
 
 const SENSITIVE_LITERAL = /(?:password|passwd|passcode|credential|captcha|hcaptcha|g-recaptcha|cf-turnstile|api[-_ ]?key|access[-_ ]?token|auth[-_ ]?token|secret)/iu
 
-const REGEX_PREFIX_KEYWORDS = new Set([
-  'await', 'case', 'delete', 'do', 'else', 'in', 'instanceof', 'new', 'return',
-  'throw', 'typeof', 'void', 'yield'
-])
-
-interface ScanResult {
-  forbidden: boolean
-  index: number
+function isNode(value: unknown): value is Node {
+  return Boolean(value && typeof value === 'object' && typeof (value as Node).type === 'string')
 }
 
-function isIdentifierStart(char: string | undefined): boolean {
-  return Boolean(char && /[A-Za-z_$]/u.test(char))
-}
+function nodeContainsForbiddenEvaluateApi(
+  node: Node,
+  visited: WeakSet<object>,
+  parent?: Node,
+  grandparent?: Node
+): boolean {
+  if (visited.has(node)) return false
+  visited.add(node)
 
-function isIdentifierPart(char: string | undefined): boolean {
-  return Boolean(char && /[A-Za-z0-9_$]/u.test(char))
-}
-
-function skipQuotedString(source: string, start: number, quote: "'" | '"'): {
-  index: number
-  value: string
-} {
-  let index = start + 1
-  let value = ''
-  while (index < source.length) {
-    const char = source[index]
-    if (char === '\\') {
-      value += source.slice(index, Math.min(source.length, index + 2))
-      index += 2
-      continue
-    }
-    if (char === quote) return { index: index + 1, value }
-    value += char
-    index += 1
+  const record = node as Node & Record<string, unknown>
+  if (node.type === 'ThisExpression' || node.type === 'ImportExpression' || record.computed === true) {
+    return true
   }
-  return { index, value }
-}
-
-function skipRegexLiteral(source: string, start: number): number {
-  let index = start + 1
-  let inCharacterClass = false
-  while (index < source.length) {
-    const char = source[index]
-    if (char === '\\') {
-      index += 2
-      continue
+  if (node.type === 'Identifier') {
+    const name = record.name
+    const parentRecord = parent as (Node & Record<string, unknown>) | undefined
+    const isMemberName = parent?.type === 'MemberExpression' && parentRecord?.property === node
+    const isPatternKey = parent?.type === 'Property' &&
+      parentRecord?.key === node &&
+      grandparent?.type === 'ObjectPattern'
+    if (
+      typeof name === 'string' &&
+      (FORBIDDEN_EVALUATE_IDENTIFIERS.has(name) ||
+        ((isMemberName || isPatternKey) && FORBIDDEN_EVALUATE_MEMBERS.has(name)))
+    ) {
+      return true
     }
-    if (char === '[') inCharacterClass = true
-    else if (char === ']') inCharacterClass = false
-    else if (char === '/' && !inCharacterClass) {
-      index += 1
-      while (/[A-Za-z]/u.test(source[index] ?? '')) index += 1
-      return index
-    }
-    index += 1
   }
-  return index
-}
-
-function scanTemplate(source: string, start: number): ScanResult {
-  let index = start + 1
-  while (index < source.length) {
-    const char = source[index]
-    if (char === '\\') {
-      index += 2
-      continue
+  if (node.type === 'Literal' && typeof record.value === 'string') {
+    const parentRecord = parent as (Node & Record<string, unknown>) | undefined
+    const isPatternKey = parent?.type === 'Property' &&
+      parentRecord?.key === node &&
+      grandparent?.type === 'ObjectPattern'
+    if (
+      SENSITIVE_LITERAL.test(record.value) ||
+      (isPatternKey && FORBIDDEN_EVALUATE_MEMBERS.has(record.value))
+    ) {
+      return true
     }
-    if (char === '`') return { forbidden: false, index: index + 1 }
-    if (char === '$' && source[index + 1] === '{') {
-      const expression = scanCode(source, index + 2, true)
-      if (expression.forbidden) return expression
-      index = expression.index
-      continue
-    }
-    index += 1
   }
-  return { forbidden: false, index }
-}
 
-function scanCode(source: string, start = 0, stopAtTemplateBrace = false): ScanResult {
-  let index = start
-  let braceDepth = 0
-  let canStartRegex = true
-  const computedMemberBrackets: boolean[] = []
-
-  while (index < source.length) {
-    const char = source[index]
-    const next = source[index + 1]
-    if (/\s/u.test(char)) {
-      index += 1
-      continue
-    }
-    if (char === '/' && next === '/') {
-      index += 2
-      while (index < source.length && source[index] !== '\n') index += 1
-      continue
-    }
-    if (char === '/' && next === '*') {
-      index += 2
-      while (index < source.length && !(source[index] === '*' && source[index + 1] === '/')) {
-        index += 1
+  for (const value of Object.values(record)) {
+    if (Array.isArray(value)) {
+      if (value.some((item) => isNode(item) &&
+        nodeContainsForbiddenEvaluateApi(item, visited, node, parent))) {
+        return true
       }
-      index = Math.min(source.length, index + 2)
       continue
     }
-    if (char === '/' && canStartRegex) {
-      index = skipRegexLiteral(source, index)
-      canStartRegex = false
-      continue
-    }
-    if (char === "'" || char === '"') {
-      const literal = skipQuotedString(source, index, char)
-      if (
-        computedMemberBrackets.at(-1) === true &&
-        (FORBIDDEN_EVALUATE_IDENTIFIERS.has(literal.value) ||
-          FORBIDDEN_EVALUATE_MEMBERS.has(literal.value))
-      ) {
-        return { forbidden: true, index: literal.index }
-      }
-      if (SENSITIVE_LITERAL.test(literal.value)) return { forbidden: true, index: literal.index }
-      index = literal.index
-      canStartRegex = false
-      continue
-    }
-    if (char === '`') {
-      const template = scanTemplate(source, index)
-      if (template.forbidden) return template
-      index = template.index
-      canStartRegex = false
-      continue
-    }
-    if (isIdentifierStart(char)) {
-      const tokenStart = index
-      index += 1
-      while (isIdentifierPart(source[index])) index += 1
-      const token = source.slice(tokenStart, index)
-      let previous = tokenStart - 1
-      while (previous >= 0 && /\s/u.test(source[previous])) previous -= 1
-      const isMember = source[previous] === '.'
-      if (
-        FORBIDDEN_EVALUATE_IDENTIFIERS.has(token) ||
-        (isMember && FORBIDDEN_EVALUATE_MEMBERS.has(token))
-      ) {
-        return { forbidden: true, index }
-      }
-      canStartRegex = REGEX_PREFIX_KEYWORDS.has(token)
-      continue
-    }
-    if (/[0-9]/u.test(char)) {
-      index += 1
-      while (/[A-Za-z0-9_.]/u.test(source[index] ?? '')) index += 1
-      canStartRegex = false
-      continue
-    }
-    if (char === '[') {
-      computedMemberBrackets.push(!canStartRegex)
-      canStartRegex = true
-      index += 1
-      continue
-    }
-    if (char === ']') {
-      computedMemberBrackets.pop()
-      canStartRegex = false
-      index += 1
-      continue
-    }
-    if (char === '{') {
-      braceDepth += 1
-      canStartRegex = true
-      index += 1
-      continue
-    }
-    if (char === '}') {
-      if (stopAtTemplateBrace && braceDepth === 0) {
-        return { forbidden: false, index: index + 1 }
-      }
-      braceDepth = Math.max(0, braceDepth - 1)
-      canStartRegex = false
-      index += 1
-      continue
-    }
-    if (char === ')' || char === '.') {
-      canStartRegex = false
-    } else if (char === '+' && next === '+') {
-      canStartRegex = false
-      index += 1
-    } else if (char === '-' && next === '-') {
-      canStartRegex = false
-      index += 1
-    } else {
-      canStartRegex = true
-    }
-    index += 1
+    if (isNode(value) && nodeContainsForbiddenEvaluateApi(value, visited, node, parent)) return true
   }
-  return { forbidden: false, index }
+  return false
 }
 
 /**
  * Reject executable access to browser/network escape hatches without treating diagnostic text,
- * comments or regular-expression patterns as executable API references.
+ * comments or regular-expression patterns as executable API references. Forbidden property names
+ * are rejected everywhere in executable code so destructuring cannot bypass member-access checks.
  */
 export function containsForbiddenBrowserEvaluateApi(expression: string): boolean {
-  return scanCode(expression).forbidden
+  try {
+    const program = parse(`(${expression}\n)`, { ecmaVersion: 'latest' })
+    return nodeContainsForbiddenEvaluateApi(program, new WeakSet())
+  } catch {
+    return true
+  }
 }
 
 export function prepareBrowserEvaluate(
@@ -253,9 +193,61 @@ export function prepareBrowserEvaluate(
     : 3_000
   return {
     source: `(async () => {
-      const candidate = ${normalized};
-      const result = typeof candidate === 'function' ? await candidate() : candidate;
-      return JSON.parse(JSON.stringify(result));
+      const clone = document.documentElement.cloneNode(true);
+      clone.querySelectorAll('script, style, noscript, template, iframe, object, embed, input, textarea, select, option, button').forEach((element) => element.remove());
+      const sensitive = /(?:password|passwd|passcode|credential|captcha|hcaptcha|g-recaptcha|cf-turnstile|csrf|api[-_ ]?key|access[-_ ]?token|auth[-_ ]?token|secret)/iu;
+      const urlAttributes = new Set(['href', 'src', 'action', 'formaction', 'poster', 'cite']);
+      for (const element of clone.querySelectorAll('*')) {
+        let removeElement = false;
+        for (const attribute of Array.from(element.attributes)) {
+          if (sensitive.test(attribute.name) || sensitive.test(attribute.value)) {
+            removeElement = true;
+            break;
+          }
+          if (!urlAttributes.has(attribute.name.toLowerCase())) continue;
+          try {
+            const url = new URL(attribute.value, location.href);
+            url.username = '';
+            url.password = '';
+            url.search = '';
+            url.hash = '';
+            element.setAttribute(attribute.name, url.href);
+          } catch {
+            element.removeAttribute(attribute.name);
+          }
+        }
+        if (removeElement) element.remove();
+      }
+      const safeDocument = document.implementation.createHTMLDocument('');
+      safeDocument.replaceChild(safeDocument.importNode(clone, true), safeDocument.documentElement);
+      const safeLocation = Object.freeze({
+        href: location.origin + location.pathname,
+        origin: location.origin,
+        protocol: location.protocol,
+        host: location.host,
+        hostname: location.hostname,
+        port: location.port,
+        pathname: location.pathname,
+        search: '',
+        hash: ''
+      });
+      const safeNavigator = Object.freeze({
+        webdriver: navigator.webdriver,
+        userAgent: navigator.userAgent,
+        language: navigator.language,
+        languages: Array.from(navigator.languages),
+        platform: navigator.platform
+      });
+      return (async function (
+        document, location, navigator, window, globalThis, self, top, parent, opener,
+        frames, history, localStorage, sessionStorage, indexedDB, cookieStore
+      ) {
+        'use strict';
+        const candidate = ${normalized};
+        const result = typeof candidate === 'function' ? await candidate() : candidate;
+        return JSON.parse(JSON.stringify(result));
+      }).call(undefined, safeDocument, safeLocation, safeNavigator, undefined, undefined, undefined, undefined,
+        undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined);
     })()`,
     timeoutMs
   }

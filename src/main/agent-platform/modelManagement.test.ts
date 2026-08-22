@@ -8,6 +8,7 @@ import type {
 } from '@shared/modelManagementTypes'
 import type { AIConfigurationDocument } from '@shared/aiConfigurationTypes'
 import {
+  buildLegacyAiConfigurationBackup,
   buildLegacyLlmSettingsBackup,
   migrateModelManagementDocument,
   ModelManagementError,
@@ -182,6 +183,29 @@ function legacyV2Fixture(): AIConfigurationDocument {
 }
 
 describe('ModelManagementModule', () => {
+  it('sanitizes v2 connection URLs and drops unknown secret-bearing properties from backup', () => {
+    const legacy = legacyV2Fixture() as AIConfigurationDocument & {
+      apiKey?: string
+    }
+    legacy.apiKey = 'sk-root-secret'
+    legacy.modelConnections[0] = {
+      ...legacy.modelConnections[0]!,
+      baseUrl: 'https://user:password@api.example.test/v1?api_key=query-secret#fragment',
+      proxyUrl: 'https://proxy-user:proxy-pass@proxy.example.test/path?token=proxy-secret',
+      apiKey: 'sk-connection-secret'
+    } as AIConfigurationDocument['modelConnections'][number] & { apiKey: string }
+
+    const serialized = JSON.stringify(buildLegacyAiConfigurationBackup(legacy))
+
+    assert.equal(serialized.includes('sk-root-secret'), false)
+    assert.equal(serialized.includes('sk-connection-secret'), false)
+    assert.equal(serialized.includes('query-secret'), false)
+    assert.equal(serialized.includes('proxy-secret'), false)
+    assert.equal(serialized.includes('password'), false)
+    assert.match(serialized, /api\.example\.test/)
+    assert.match(serialized, /proxy\.example\.test/)
+  })
+
   it('builds the migration backup from a strict non-secret provider whitelist', () => {
     const settings = structuredClone(DEFAULT_SETTINGS) as AppSettings & {
       llmProviderConfigs: Record<string, { baseUrl?: string; protocol?: string; apiKey?: string }>

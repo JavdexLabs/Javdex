@@ -9,7 +9,7 @@ import Modal from '../Modal'
 import SelectControl from '../SelectControl'
 import { useToast } from '../Toast'
 import type { ApplyModelManagementCommand } from './ModelSettingsPanel'
-import styles from './ModelSettingsPanel.module.css'
+import styles from './ProviderDetailModal.module.css'
 
 export default function ProviderDetailModal({
   providerId,

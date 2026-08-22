@@ -3,7 +3,7 @@ import type { ModelManagementSnapshot } from '@shared/modelManagementTypes'
 import Button from '../Button'
 import type { ApplyModelManagementCommand } from './ModelSettingsPanel'
 import ProviderDetailModal from './ProviderDetailModal'
-import styles from './ModelSettingsPanel.module.css'
+import styles from './ModelProvidersPanel.module.css'
 
 function protocolLabel(value: string): string {
   return value === 'anthropic-messages' ? 'Anthropic Messages' : 'OpenAI Chat Completions'

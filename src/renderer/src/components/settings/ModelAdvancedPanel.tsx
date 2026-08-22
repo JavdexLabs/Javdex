@@ -8,11 +8,8 @@ import type {
 import Button from '../Button'
 import SelectControl from '../SelectControl'
 import type { ApplyModelManagementCommand } from './ModelSettingsPanel'
-import styles from './ModelSettingsPanel.module.css'
-
-function connectionName(snapshot: ModelManagementSnapshot, connectionId: string): string {
-  return snapshot.connections.find((item) => item.id === connectionId)?.name ?? '未知提供商'
-}
+import styles from './ModelAdvancedPanel.module.css'
+import { modelConnectionName } from './modelSettingsView'
 
 function capabilityLabel(value: ModelCapabilityState): string {
   if (value === true) return '支持'
@@ -89,7 +86,7 @@ function ModelOverrideCard({
       <header className={styles.cardHeader}>
         <div className={styles.modelTitle}>
           <h3 className={`${styles.sectionTitle} ${styles.truncate}`} title={model.name}>{model.name}</h3>
-          <p className={`${styles.sectionHint} ${styles.truncate}`} title={model.modelId}>{connectionName(snapshot, model.connectionId)} · {model.modelId}</p>
+          <p className={`${styles.sectionHint} ${styles.truncate}`} title={model.modelId}>{modelConnectionName(snapshot, model.connectionId)} · {model.modelId}</p>
         </div>
         <div className={styles.cardActions}>
           {model.hasManualOverrides ? (

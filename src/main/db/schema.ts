@@ -353,6 +353,114 @@ CREATE INDEX IF NOT EXISTS idx_playlist_links_playlist
     ON playlist_links(playlist_id, position);
 `
 
+export const AGENT_PLATFORM_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS agent_runs (
+    id TEXT PRIMARY KEY,
+    use_case TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('created', 'running', 'waiting_user', 'settled', 'failed', 'cancelled', 'recovering', 'closed')),
+    active_operation_id TEXT,
+    config_revision TEXT NOT NULL,
+    config_snapshot_json TEXT NOT NULL,
+    runtime_id TEXT NOT NULL CHECK(runtime_id = 'pi'),
+    runtime_session_ref_json TEXT,
+    recovery_generation INTEGER NOT NULL DEFAULT 0,
+    recovery_attempted_generation INTEGER NOT NULL DEFAULT -1,
+    product_state_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    closed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_status_updated
+    ON agent_runs(status, updated_at);
+
+CREATE TABLE IF NOT EXISTS agent_operations (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    command_kind TEXT NOT NULL CHECK(command_kind IN ('prompt', 'steer', 'follow-up', 'compact', 'abort')),
+    idempotency_key TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('accepted', 'settled', 'rejected', 'failed')),
+    created_at TEXT NOT NULL,
+    settled_at TEXT,
+    error TEXT,
+    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+    UNIQUE (run_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_operations_run_status
+    ON agent_operations(run_id, status, created_at);
+
+CREATE TABLE IF NOT EXISTS agent_product_journal (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    operation_id TEXT,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_agent_product_journal_run_seq
+    ON agent_product_journal(run_id, seq);
+
+CREATE TABLE IF NOT EXISTS agent_execution_history (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    runtime_id TEXT NOT NULL CHECK(runtime_id = 'pi'),
+    codec_version INTEGER NOT NULL,
+    audit_json TEXT NOT NULL,
+    recovery_ciphertext BLOB NOT NULL,
+    content_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    retain_until TEXT,
+    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_agent_execution_history_run_seq
+    ON agent_execution_history(run_id, seq);
+
+CREATE TABLE IF NOT EXISTS agent_tool_ledger (
+    call_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    operation_id TEXT,
+    tool_name TEXT NOT NULL,
+    args_digest TEXT NOT NULL,
+    effect TEXT NOT NULL CHECK(effect IN ('read', 'write', 'network', 'install', 'credential-sensitive')),
+    status TEXT NOT NULL CHECK(status IN ('running', 'completed', 'failed', 'interrupted', 'uncertain', 'denied')),
+    result_json TEXT,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    reconciliation_json TEXT,
+    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_agent_tool_ledger_run_status
+    ON agent_tool_ledger(run_id, status, started_at);
+
+CREATE TABLE IF NOT EXISTS agent_approvals (
+    request_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    call_id TEXT NOT NULL,
+    args_digest TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'denied', 'consumed')),
+    permit_ciphertext BLOB,
+    created_at TEXT NOT NULL,
+    decided_at TEXT,
+    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_agent_approvals_run_status
+    ON agent_approvals(run_id, status, created_at);
+
+CREATE TABLE IF NOT EXISTS agent_artifacts (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    label TEXT NOT NULL,
+    ref_json TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_agent_artifacts_run_created
+    ON agent_artifacts(run_id, created_at);
+`
+
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
 
@@ -653,4 +761,6 @@ CREATE INDEX IF NOT EXISTS idx_actress_gallery_assets_actress_id
 ${PENDING_VIDEO_DECISIONS_SCHEMA_SQL}
 
 ${RELATED_LINKS_SCHEMA_SQL}
+
+${AGENT_PLATFORM_SCHEMA_SQL}
 `

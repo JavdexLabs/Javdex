@@ -1,5 +1,10 @@
 import { signAsync } from '@electron/osx-sign'
 import { resolve } from 'node:path'
+import {
+  MAC_ELECTRON_LANGUAGES,
+  PORTABLE_ELECTRON_LANGUAGES,
+  prunePackagedRuntime
+} from './scripts/packaging-runtime.mjs'
 
 const adHocEntitlements = resolve('build/entitlements.mac.adhoc.plist')
 
@@ -34,7 +39,16 @@ const base = {
     buildResources: 'build',
     output: 'dist'
   },
-  files: ['out/**/*', '!node_modules/@mediapipe/tasks-vision/**/*'],
+  files: [
+    'out/**/*',
+    '!node_modules/@mediapipe/tasks-vision/**/*',
+    '!node_modules/**/*.d.ts',
+    '!node_modules/**/*.d.mts',
+    '!node_modules/**/*.d.cts',
+    '!node_modules/**/*.d.ts.map',
+    '!node_modules/**/*.map',
+    '!node_modules/@earendil-works/pi-coding-agent/{docs,examples,tests}/**/*'
+  ],
   asar: true,
   npmRebuild: true,
   nodeGypRebuild: false,
@@ -44,6 +58,7 @@ const base = {
   ],
   win: {
     icon: 'build/icon.ico',
+    electronLanguages: PORTABLE_ELECTRON_LANGUAGES,
     artifactName: '${productName}-Setup-${version}-${arch}.${ext}',
     legalTrademarks: 'Javdex',
     target: []
@@ -64,6 +79,7 @@ const base = {
   },
   mac: {
     icon: 'build/icon.icns',
+    electronLanguages: MAC_ELECTRON_LANGUAGES,
     category: 'public.app-category.entertainment',
     artifactName: '${productName}-${version}-${arch}.${ext}',
     hardenedRuntime: true,
@@ -76,6 +92,7 @@ const base = {
   },
   linux: {
     icon: 'build/icon.png',
+    electronLanguages: PORTABLE_ELECTRON_LANGUAGES,
     category: 'Video',
     maintainer: 'Javdex',
     artifactName: '${productName}-${version}-${arch}.${ext}',
@@ -97,6 +114,7 @@ export default function buildConfig() {
   const selected = readSelectedTargets()
   const config = structuredClone(base)
 
+  config.afterPack = prunePackagedRuntime
   config.mac.sign = signMacApp
 
   if (selected?.win) config.win.target = selected.win

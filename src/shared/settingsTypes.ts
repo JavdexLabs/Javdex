@@ -132,8 +132,8 @@ export interface AppSettings {
   customLlmProviders: import('./llmProviders').CustomLlmProviderDefinition[]
   /** User-added models keyed by provider id. */
   llmCustomModels: import('./llmProviders').LlmCustomModelDefinition[]
-  /** Max agent ReAct steps; 0 means unlimited. */
-  pluginDevAgentMaxSteps: number
+  /** Max Pi model turns per plugin-development operation; 0 means unlimited. */
+  pluginDevAgentMaxTurns: number
   /** Max estimated input context tokens for plugin development agent. */
   pluginDevAgentMaxContextTokens: number
 }
@@ -149,8 +149,16 @@ export interface LlmSecretStorageState {
   migrationError?: string
 }
 
-export type SettingsSnapshot = Omit<AppSettings, 'llmProviderConfigs'> & {
-  llmProviderConfigs: Record<string, import('./llmProviders').LlmProviderPublicConfig>
+type LegacyLlmSettingsKey =
+  | 'defaultLlmProviderId'
+  | 'defaultLlmModelId'
+  | 'llmProviderConfigs'
+  | 'customLlmProviders'
+  | 'llmCustomModels'
+  | 'pluginDevAgentMaxTurns'
+  | 'pluginDevAgentMaxContextTokens'
+
+export type SettingsSnapshot = Omit<AppSettings, LegacyLlmSettingsKey> & {
   mediaAssetsResolvedPath: string
   recoveryNotice: SettingsRecoveryNotice | null
   llmSecretStorage: LlmSecretStorageState
@@ -162,6 +170,12 @@ export type RendererSettingsPatch = Partial<
     | 'assetEncryption'
     | 'lastLibraryScanSummary'
     | 'llmProviderConfigs'
+    | 'defaultLlmProviderId'
+    | 'defaultLlmModelId'
+    | 'customLlmProviders'
+    | 'llmCustomModels'
+    | 'pluginDevAgentMaxTurns'
+    | 'pluginDevAgentMaxContextTokens'
     | 'mediaAssetsPath'
     | 'pendingLibraryPathCleanups'
     | 'scraperServiceConfigs'
@@ -179,7 +193,7 @@ export function normalizeMinScanImportDurationMinutes(value: unknown): number {
   return Math.min(600, Math.round(parsed))
 }
 
-export function normalizePluginDevAgentMaxSteps(value: unknown): number {
+export function normalizePluginDevAgentMaxTurns(value: unknown): number {
   const parsed =
     typeof value === 'number'
       ? value
@@ -247,7 +261,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   llmProviderConfigs: {},
   customLlmProviders: [],
   llmCustomModels: [],
-  pluginDevAgentMaxSteps: 0,
+  pluginDevAgentMaxTurns: 0,
   pluginDevAgentMaxContextTokens: 128000
 }
 

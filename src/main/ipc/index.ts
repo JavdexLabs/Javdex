@@ -12,6 +12,7 @@ import { registerVideoHandlers } from './videoHandlers'
 import { registerUpdateHandlers } from './updateHandlers'
 import type { IpcContext } from './shared'
 import { configureIpcSecurity } from './ipcSecurity'
+import { registerLibraryCuratorHandlers } from './libraryCuratorHandlers'
 
 export function registerIpcHandlers(
   getWindow: () => BrowserWindow | null,
@@ -30,5 +31,6 @@ export function registerIpcHandlers(
   registerFacetHandlers()
   registerScrapeHandlers(ctx)
   registerPluginDevHandlers(ctx)
+  registerLibraryCuratorHandlers()
   registerPlayerHandlers()
 }

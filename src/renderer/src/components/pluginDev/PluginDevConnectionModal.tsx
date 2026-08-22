@@ -1,81 +1,53 @@
 import Modal from '../Modal'
-import { SettingsNumberStepper } from '../settings/SettingsPrimitives'
 import Button from '../Button'
+import styles from './PluginDevConnectionModal.module.css'
 
 export default function PluginDevConnectionModal({
+  workloadLabel,
   providerLabel,
   modelLabel,
-  maxSteps,
-  maxContextTokens,
-  busy,
-  onMaxStepsChange,
-  onMaxContextTokensChange,
+  revision,
+  frozen,
+  error,
   onOpenModelSettings,
-  onSave,
   onClose
 }: {
+  workloadLabel: string
   providerLabel: string
   modelLabel: string
-  maxSteps: number
-  maxContextTokens: number
-  busy: boolean
-  onMaxStepsChange: (value: number) => void
-  onMaxContextTokensChange: (value: number) => void
+  revision: string
+  frozen: boolean
+  error: string | null
   onOpenModelSettings: () => void
   onClose: () => void
-  onSave: () => void
 }): JSX.Element {
   return (
     <Modal
       title="Agent 连接配置"
 
       size="sm"
-      className="modal--plugin-dev-connection"
-      confirmText={busy ? '保存中…' : '保存'}
-      cancelText="取消"
-      onConfirm={onSave}
+      className={styles.modal}
+      confirmText="关闭"
+      cancelText="关闭"
+      onConfirm={onClose}
       onCancel={onClose}
     >
-      <div className="plugin-dev-connection-form">
-        <div className="plugin-dev-connection-default-llm">
-          <div className="plugin-dev-connection-default-copy">
-            <span>默认模型</span>
+      <div className={styles.form}>
+        <div className={styles.defaultModel}>
+          <div className={styles.defaultCopy}>
+            <span>{workloadLabel}</span>
             <strong>{providerLabel}</strong>
             <small>{modelLabel}</small>
           </div>
-          <Button type="button" size="sm" disabled={busy} onClick={onOpenModelSettings}>
+          <Button type="button" size="sm" onClick={onOpenModelSettings}>
             模型设置
           </Button>
         </div>
-        <label className="plugin-edit-control">
-          <span>最大步数</span>
-          <SettingsNumberStepper
-            aria-label="最大步数"
-            value={maxSteps}
-            min={0}
-            max={500}
-            step={1}
-            disabled={busy}
-            onChange={onMaxStepsChange}
-          />
-          <span className="plugin-dev-connection-hint">0 表示无限制；建议调试时设为 25–50。</span>
-        </label>
-        <label className="plugin-edit-control">
-          <span>最大上下文长度</span>
-          <SettingsNumberStepper
-            aria-label="最大上下文长度（token）"
-            value={maxContextTokens}
-            min={8000}
-            max={512000}
-            step={1000}
-            unit="tok"
-            disabled={busy}
-            onChange={onMaxContextTokensChange}
-          />
-          <span className="plugin-dev-connection-hint">
-            按估算 token 控制发送给模型的输入上下文；默认 128000，超出后会自动裁剪旧消息。
-          </span>
-        </label>
+        <dl className={styles.meta}>
+          <div><dt>配置来源</dt><dd>{frozen ? '当前会话已冻结' : '插件开发用途'}</dd></div>
+          <div><dt>配置版本</dt><dd title={revision}>{revision.slice(0, 12)}</dd></div>
+        </dl>
+        {error && <div className="settings-notice settings-notice--warning" role="alert">{error}</div>}
       </div>
     </Modal>
   )

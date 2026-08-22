@@ -1,5 +1,6 @@
 import type { ActressScrapeField, ActressScrapeResult } from './actressScrapeTypes'
-import type { ScraperPluginDescriptor, ScraperPluginKind, ScraperPluginPackage } from './scraperPluginTypes'
+import type { PluginManifestCoverage } from './pluginResultContract'
+import type { ScraperPluginKind, ScraperPluginPackage } from './scraperPluginTypes'
 import type { ScrapeResult, VideoScrapeField } from './videoScrapeTypes'
 
 export interface PluginDevAgentInput {
@@ -12,6 +13,18 @@ export interface PluginDevAgentInput {
   testTargets?: string[]
 }
 
+/** Exact runtime input used by the plugin sandbox. Browser URLs are never run targets. */
+export type PluginDevRunTarget =
+  | {
+      kind: 'video'
+      code: string
+    }
+  | {
+      kind: 'actress'
+      mainName: string
+      aliases: string[]
+    }
+
 export type PluginDevAgentMode = 'create' | 'debug' | 'feedback'
 
 export type PluginDevSessionStatus =
@@ -23,11 +36,9 @@ export type PluginDevSessionStatus =
 
 export type PluginDevAgentPhase =
   | 'idle'
-  | 'discover'
-  | 'implement'
-  | 'dry_run'
-  | 'verify'
-  | 'finish'
+  | 'working'
+  | 'checking'
+  | 'ready'
   | 'waiting_user'
 
 export interface PluginDevAgentContextStats {
@@ -39,26 +50,90 @@ export interface PluginDevAgentContextStats {
   totalTokens: number
   maxTokens: number
   overBudget: boolean
+  inputTokens?: number
+  outputTokens?: number
+  reasoningTokens?: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+  usageByRole?: Partial<Record<'primary' | 'verifier' | 'summarizer', {
+    uncachedInput: number
+    cacheRead: number
+    cacheWrite: number
+    output: number
+    reasoning: number
+    totalTokens: number
+  }>>
 }
 
 export interface PluginDevAgentStartInput extends PluginDevAgentInput {
   mode: PluginDevAgentMode
   userMessage?: string
   package?: ScraperPluginPackage
-  /** Prior manual or UI dry-run to seed the session context. */
-  lastDryRun?: PluginDevDryRunResult
-  /** Test override; production uses settings.pluginDevAgentMaxSteps. */
+  /** Test override; production uses the plugin-developer workload assignment. */
   maxSteps?: number
-  /** Test override; production uses settings.pluginDevAgentMaxContextTokens. */
+  /** Test override; production uses the plugin-developer workload assignment. */
   maxContextTokens?: number
 }
 
 export interface PluginDevAgentMessageInput {
   sessionId: string
   text: string
-  /** Latest dry-run from UI to refresh session context when continuing. */
-  lastDryRun?: PluginDevDryRunResult
+  /** Distinguishes a button-driven resume from new defect or requirement feedback. */
+  continuationKind?: 'resume' | 'user_feedback'
+  /** Exact one-use decision. Plain chat text never grants a tool permit. */
+  approvalDecision?: {
+    requestId: string
+    decision: 'approve' | 'deny'
+  }
+  /** Exact response to a pending product-domain question. */
+  userResponse?: PluginDevUserResponse
 }
+
+export interface PluginDevPendingApproval {
+  requestId: string
+  tool: string
+  args: Record<string, unknown>
+  reason: string
+}
+
+export type PluginDevBrowserInteractionReason =
+  | 'human_verification'
+  | 'login'
+  | 'required_user_action'
+
+export type PluginDevPendingUserRequest =
+  | {
+      requestId: string
+      type: 'browser_interaction'
+      reason: PluginDevBrowserInteractionReason
+      prompt: string
+      url?: string
+    }
+  /** Legacy read compatibility for PluginDeveloper runs created before ToolPack v11. */
+  | {
+      requestId: string
+      type: 'browser_challenge'
+      prompt: string
+      url?: string
+    }
+  | {
+      requestId: string
+      type: 'freeform'
+      prompt: string
+    }
+  | {
+      requestId: string
+      type: 'choice'
+      prompt: string
+      options: Array<{ id: string; label: string; description?: string }>
+      evidenceRefs: string[]
+    }
+
+export type PluginDevUserResponse =
+  | { requestId: string; type: 'browser_interaction'; action: 'completed' }
+  | { requestId: string; type: 'browser_challenge'; action: 'completed' }
+  | { requestId: string; type: 'freeform'; text: string }
+  | { requestId: string; type: 'choice'; optionId: string }
 
 export type PluginDevAgentEvent =
   | { type: 'step_start'; sessionId: string; step: number }
@@ -69,7 +144,47 @@ export type PluginDevAgentEvent =
       step: number
       stats: PluginDevAgentContextStats
     }
-  | { type: 'assistant_text'; sessionId: string; step: number; text: string }
+  | {
+      type: 'assistant_text_delta'
+      sessionId: string
+      step: number
+      turn: number
+      delta: string
+    }
+  | {
+      type: 'assistant_reasoning_delta'
+      sessionId: string
+      step: number
+      turn: number
+      delta: string
+    }
+  | { type: 'assistant_text'; sessionId: string; step: number; turn?: number; text: string }
+  | {
+      type: 'assistant_reasoning'
+      sessionId: string
+      step: number
+      turn: number
+      text: string
+      charCount: number
+      truncated: boolean
+    }
+  | {
+      type: 'model_turn_completed'
+      sessionId: string
+      step: number
+      stopReason?: string
+      rawStopReason?: string
+      textChars: number
+      reasoningChars: number
+      toolCallCount: number
+    }
+  | {
+      type: 'workspace_status'
+      sessionId: string
+      step: number
+      valid: boolean
+      message: string
+    }
   | {
       type: 'tool_start'
       sessionId: string
@@ -93,23 +208,29 @@ export type PluginDevAgentEvent =
       package: ScraperPluginPackage
     }
   | {
-      type: 'plugin_installed'
+      type: 'run_targets_updated'
       sessionId: string
       step: number
-      package: ScraperPluginPackage
-      descriptor: ScraperPluginDescriptor
+      runTargets: PluginDevRunTarget[]
     }
   | {
-      type: 'dry_run_updated'
+      type: 'execution_updated'
       sessionId: string
       step: number
-      dryRun: PluginDevDryRunResult
+      execution: PluginExecutionArtifact
     }
   | {
-      type: 'verification_updated'
+      type: 'acceptance_updated'
       sessionId: string
       step: number
-      verification: PluginDevVerificationReport
+      outcome: PluginRunAcceptanceOutcome
+    }
+  | ({ type: 'approval_required'; sessionId: string; step: number } & PluginDevPendingApproval)
+  | {
+      type: 'user_input_required'
+      sessionId: string
+      step: number
+      request: PluginDevPendingUserRequest
     }
   | { type: 'waiting_user'; sessionId: string; step: number; reason: string }
   | {
@@ -119,8 +240,8 @@ export type PluginDevAgentEvent =
       success: boolean
       summary: string
       package: ScraperPluginPackage
-      dryRun?: PluginDevDryRunResult
-      verification?: PluginDevVerificationReport
+      execution?: PluginExecutionArtifact
+      acceptance?: PluginRunAcceptanceOutcome
     }
   | { type: 'error'; sessionId: string; step: number; message: string }
 
@@ -140,7 +261,7 @@ export type PluginDevAgentWorkLogEntry =
     }
 
 export interface PluginDevAgentWorkLogExport {
-  schemaVersion: 1
+  schemaVersion: 7
   kind: 'pluginDevAgentWorkLog'
   exportedAt: string
   sessionId: string
@@ -153,9 +274,11 @@ export interface PluginDevAgentWorkLogExport {
     phase: PluginDevAgentPhase
     step: number
     totalTokens: number
+    modelTurnCount: number
+    discoveryToolCalls: number
     maxSteps: number
     maxContextTokens: number
-    testTargets: string[]
+    runTargets: PluginDevRunTarget[]
     supportedFields: string[]
     endedAt?: string
   }
@@ -163,17 +286,42 @@ export interface PluginDevAgentWorkLogExport {
   timeline: string[]
   entries: PluginDevAgentWorkLogEntry[]
   package: ScraperPluginPackage
-  lastDryRun?: PluginDevDryRunResult
-  lastVerification?: PluginDevVerificationReport
+  lastExecution?: PluginExecutionArtifact
+  acceptance?: PluginRunAcceptanceOutcome
 }
 
 export interface PluginDevAgentSessionResult {
   sessionId: string
   status: PluginDevSessionStatus
+  /** Model configuration frozen when this run started; settings changes affect only later runs. */
+  frozenModel?: PluginDevFrozenModelSummary
   package: ScraperPluginPackage
-  dryRun?: PluginDevDryRunResult
-  verification?: PluginDevVerificationReport
+  runTargets: PluginDevRunTarget[]
+  execution?: PluginExecutionArtifact
+  acceptance?: PluginRunAcceptanceOutcome
+  /** Schema-v5/v6 history may be inspected but cannot resume or satisfy runtime-v2 installation. */
+  historicalReadOnly?: boolean
   summary: string
+}
+
+export interface PluginDevFrozenModelSummary {
+  providerId: string
+  modelId: string
+  modelName: string
+  revision: string
+}
+
+export interface PluginDevAgentSnapshot {
+  cursor: number
+  input: PluginDevAgentStartInput
+  result: PluginDevAgentSessionResult
+  phase: PluginDevAgentPhase
+  step: number
+  totalTokens: number
+  events: PluginDevAgentEvent[]
+  workLog: PluginDevAgentWorkLogEntry[]
+  pendingApprovals?: PluginDevPendingApproval[]
+  pendingUserRequest?: PluginDevPendingUserRequest
 }
 
 export interface PluginDevPageInsight {
@@ -217,6 +365,21 @@ export interface PluginDevPageInsight {
       valueHtml?: string
     }>
   }>
+  metadataTags?: Array<{
+    key: string
+    content: string
+  }>
+  structuredData?: Array<{
+    selector: string
+    key: string
+    value: string
+  }>
+  labeledRows?: Array<{
+    selector: string
+    label: string
+    value: string
+    links: string[]
+  }>
 }
 
 export interface PluginDevDiscovery {
@@ -224,42 +387,46 @@ export interface PluginDevDiscovery {
   notes: string[]
 }
 
-export type PluginDevVerificationStatus =
-  | 'ok'
-  | 'missing_in_result'
-  | 'not_on_page'
-  | 'suspicious'
-  | 'invalid_key'
-
-export interface PluginDevFieldVerification {
-  field: string
-  status: PluginDevVerificationStatus
-  actual?: string
-  pageHint?: string
-  note: string
+export interface PluginExecutionCase {
+  target: PluginDevRunTarget
+  pluginResult: ScrapeResult | ScrapeResult[] | ActressScrapeResult | null
+  effectiveResult: ScrapeResult | ScrapeResult[] | ActressScrapeResult | null
+  manifestCoverage: PluginManifestCoverage
+  /** Raw plugin result keys that are not part of the current kind contract. */
+  unrecognizedResultKeys?: string[]
+  /** Read-only compatibility label produced when rendering schema-v5 history. */
+  legacyProjectionKeys?: string[]
+  logs: string[]
+  error?: string
+  runtimeAccepted: boolean
 }
 
-export interface PluginDevVerificationReport {
-  referencePage?: PluginDevPageInsight
-  items: PluginDevFieldVerification[]
-  summary: string
+export interface PluginExecutionArtifact {
+  runtimeVersion: string
+  artifactHash: string
+  targetFingerprint: string
+  scope: 'targeted' | 'all'
+  targets: PluginDevRunTarget[]
+  cases: PluginExecutionCase[]
+  executionPassed: boolean
+  reportPath: string
+  cached?: boolean
 }
 
-export interface PluginDevVerifyInput {
-  kind: ScraperPluginKind
-  lastResult?: unknown
-  discovery?: PluginDevDiscovery
-  supportedFields: Array<VideoScrapeField | ActressScrapeField>
-  userFeedback?: string
-  /** Agent mode; affects verify prompt and post-verify supportedFields sync behavior. */
-  mode?: PluginDevAgentMode
-  /** Target under verification (single case). */
-  testTarget?: string
-  testTargets?: string[]
+export interface PluginRunAcceptanceOutcome {
+  runtimeVersion: string
+  artifactHash: string
+  targetFingerprint: string
+  scope: 'targeted' | 'all'
+  executionPassed: boolean
+  ready: boolean
+  reportPath: string
 }
 
 export interface PluginDevDryRunInput {
   package: ScraperPluginPackage
+  /** Preferred typed runtime input for PluginDeveloper v11. */
+  runTarget?: PluginDevRunTarget
   /** Primary target for this dry-run invocation. */
   testTarget?: string
   testTargets?: string[]
@@ -269,6 +436,11 @@ export interface PluginDevDryRunCase {
   target: string
   ok: boolean
   result: ScrapeResult | ScrapeResult[] | ActressScrapeResult | null
+  pluginResult?: ScrapeResult | ScrapeResult[] | ActressScrapeResult | null
+  effectiveResult?: ScrapeResult | ScrapeResult[] | ActressScrapeResult | null
+  manifestCoverage?: PluginManifestCoverage
+  /** Collected from the raw plugin result before normalization. */
+  unrecognizedResultKeys?: string[]
   logs: string[]
   error?: string
 }
@@ -276,13 +448,28 @@ export interface PluginDevDryRunCase {
 export interface PluginDevDryRunResult {
   ok: boolean
   result: ScrapeResult | ScrapeResult[] | ActressScrapeResult | null
+  /** Normalized value returned by the plugin before supportedFields projection. */
+  pluginResult?: ScrapeResult | ScrapeResult[] | ActressScrapeResult | null
+  /** Value that the production runtime actually exposes after projection. */
+  effectiveResult?: ScrapeResult | ScrapeResult[] | ActressScrapeResult | null
+  /** Mechanical field-level relationship between plugin output and the manifest. */
+  manifestCoverage?: PluginManifestCoverage
+  /** Raw result keys not recognized by the current kind contract; contains no suggestions. */
+  unrecognizedResultKeys?: string[]
   logs: string[]
   error?: string
   /** Present when one Agent dry-run covered multiple test targets. */
   cases?: PluginDevDryRunCase[]
+  /** Exact configured targets covered by this execution, including a single-target run. */
+  targets?: string[]
+  /** SHA-256 of the code/package that produced this result. */
+  codeFingerprint?: string
+  packageFingerprint?: string
 }
 
 export interface PluginDevInstallInput {
   package: ScraperPluginPackage
   overwriteUser?: boolean
+  /** When installation follows an Agent run, binds it to that run's current ready artifact. */
+  sessionId?: string
 }

@@ -1,694 +1,411 @@
-import { afterEach, beforeEach, describe, it } from 'node:test'
-import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
-import { cleanupSessions, createSession, deleteSession, getSession, hashCode, markSessionEnded } from './sessionStore'
-import { executeTool } from './toolExecutor'
+import { afterEach, describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import type { PluginExecutionArtifact } from '@shared/pluginDevTypes'
+import { executeTool, releasePluginDeveloperBrowser } from './toolExecutor'
+import { createSession, deleteSession } from './sessionStore'
+import { pluginWorkspace } from './pluginWorkspace'
+import { pluginExecution, pluginRunTargetFingerprint, PLUGIN_RUNTIME_VERSION } from './pluginExecution'
+import { pluginArtifactHash } from './pluginArtifact'
+import {
+  ScrapeBrowserBusyError,
+  scrapeBrowser,
+  type ScrapeBrowserLease
+} from '../../scrapers/scrapeBrowser'
+import { resetSettingsCacheForTests } from '../../settings/settingsStore'
 
-import type { VideoScrapeField } from '@shared/videoScrapeTypes'
-
-const baseInput = {
-  mode: 'create' as const,
-  kind: 'video' as const,
-  siteName: 'test-site',
-  supportedFields: ['title', 'maker'] as VideoScrapeField[],
-  testTargets: ['ABC-123']
-}
-
-let tempRoot: string | null = null
-let oldUserData: string | null = null
-
-beforeEach(() => {
-  oldUserData = process.env.JAVDEX_TEST_USER_DATA ?? null
-  tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-plugin-dev-agent-'))
-  process.env.JAVDEX_TEST_USER_DATA = tempRoot
-})
+const directories: string[] = []
 
 afterEach(() => {
-  if (oldUserData) {
-    process.env.JAVDEX_TEST_USER_DATA = oldUserData
-    oldUserData = null
-  } else {
-    delete process.env.JAVDEX_TEST_USER_DATA
-  }
-  if (tempRoot) {
-    fs.rmSync(tempRoot, { recursive: true, force: true })
-    tempRoot = null
-  }
+  for (const directory of directories.splice(0)) fs.rmSync(directory, { recursive: true, force: true })
 })
 
-describe('pluginDevAgent toolExecutor', () => {
-  it('derives a usable plugin name from URL when site name is empty', () => {
-    const session = createSession({
-      ...baseInput,
-      siteName: '',
-      siteUrl: 'https://www.tokyolib.com/'
+function createWorkspaceSession(
+  id: string,
+  kind: 'video' | 'actress' = 'video',
+  testTargets: string[] = kind === 'video' ? ['ABC-1', 'ABC-2'] : ['Alice']
+) {
+  const input = {
+    mode: 'create' as const,
+    kind,
+    siteName: 'Executor Test',
+    siteUrl: 'https://example.test',
+    supportedFields: ['title' as const],
+    testTargets
+  }
+  const session = createSession(input, id)
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-tool-executor-'))
+  directories.push(directory)
+  session.workspaceDirectory = directory
+  pluginWorkspace.open({ directory, task: input, package: session.package })
+  return session
+}
+
+function installFakeBrowserLease(): () => void {
+  const original = scrapeBrowser.acquire
+  const previousUserData = process.env.JAVDEX_TEST_USER_DATA
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-tool-settings-'))
+  directories.push(userData)
+  process.env.JAVDEX_TEST_USER_DATA = userData
+  resetSettingsCacheForTests()
+  const lease: ScrapeBrowserLease = {
+    ownerId: 'test',
+    purpose: 'agent-browser',
+    fetchPage: async () => '',
+    fetchBuffer: async () => Buffer.alloc(0),
+    fetchBufferResponse: async () => ({ statusCode: 200, body: Buffer.alloc(0) }),
+    pluginAction: async () => ({}),
+    agentAction: async (command) => ({ action: command.action }),
+    presentToUser: async () => ({ url: 'https://example.test', title: 'Example' }),
+    recycle: async () => undefined,
+    release: async () => undefined
+  }
+  scrapeBrowser.acquire = async () => lease
+  return () => {
+    scrapeBrowser.acquire = original
+    if (previousUserData === undefined) delete process.env.JAVDEX_TEST_USER_DATA
+    else process.env.JAVDEX_TEST_USER_DATA = previousUserData
+    resetSettingsCacheForTests()
+  }
+}
+
+function fakeArtifact(input: Parameters<typeof pluginExecution.run>[0]): PluginExecutionArtifact {
+  return {
+    runtimeVersion: PLUGIN_RUNTIME_VERSION,
+    artifactHash: pluginArtifactHash(input.package),
+    targetFingerprint: pluginRunTargetFingerprint(input.targets),
+    scope: input.scope,
+    targets: structuredClone(input.targets),
+    cases: input.targets.map((target) => ({
+      target,
+      pluginResult: target.kind === 'video'
+        ? { code: target.code, title: 'Title', coverUrl: 'https://example.test/cover.jpg' }
+        : { mainName: target.mainName, aliases: target.aliases, sourceUrl: 'https://example.test/profile' },
+      effectiveResult: target.kind === 'video'
+        ? { code: target.code, title: 'Title' }
+        : { mainName: target.mainName },
+      manifestCoverage: target.kind === 'video'
+        ? {
+            returnedFieldIds: ['title', 'cover'],
+            undeclaredReturnedFieldIds: ['cover'],
+            runtimeOnlyKeys: []
+          }
+        : {
+            returnedFieldIds: ['aliases'],
+            undeclaredReturnedFieldIds: ['aliases'],
+            runtimeOnlyKeys: [
+              { key: 'mainName', role: 'identity' },
+              { key: 'sourceUrl', role: 'diagnostic' }
+            ]
+          },
+      unrecognizedResultKeys: target.kind === 'video' ? ['legacyCover'] : [],
+      logs: ['runtime complete'],
+      runtimeAccepted: true
+    })),
+    executionPassed: true,
+    reportPath: path.join(input.reportsDirectory, 'runtime.json')
+  }
+}
+
+describe('PluginDeveloper v11 tool executor', { concurrency: false }, () => {
+  it('rejects removed domain tools', async () => {
+    const session = createWorkspaceSession('executor-removed-tools')
+    try {
+      for (const tool of ['plugin_check', 'plugin_test', 'plugin_finish', 'plugin_install']) {
+        const result = await executeTool(session.id, tool, '{}', 1)
+        assert.equal(result.ok, false)
+        assert.match(result.content, /UNKNOWN_TOOL/)
+      }
+    } finally {
+      deleteSession(session.id)
+    }
+  })
+
+  it('rejects URL-shaped targets without replacing the initial dry-run state', async () => {
+    const session = createWorkspaceSession('executor-invalid-target', 'actress', [])
+    const originalRun = pluginExecution.run
+    let calls = 0
+    pluginExecution.run = async (input) => {
+      calls += 1
+      return fakeArtifact(input)
+    }
+    try {
+      const result = await executeTool(session.id, 'plugin_dry_run', JSON.stringify({
+        actresses: [{ mainName: 'https://xslist.org/zh/model/7.html' }]
+      }), 1)
+      assert.equal(result.ok, false)
+      assert.match(result.content, /RUN_TARGET_INVALID/)
+      assert.equal(calls, 0)
+      assert.deepEqual(session.runTargets, [])
+      assert.deepEqual(
+        JSON.parse(fs.readFileSync(
+          path.join(session.workspaceDirectory!, '.javdex', 'latest-dry-run.json'),
+          'utf8'
+        )),
+        { schemaVersion: 1, status: 'not_run' }
+      )
+    } finally {
+      pluginExecution.run = originalRun
+      deleteSession(session.id)
+    }
+  })
+
+  it('preserves the prior latest facts while the workspace is temporarily invalid', async () => {
+    const session = createWorkspaceSession('executor-invalid-workspace', 'video', ['ABC-1'])
+    const latestPath = path.join(session.workspaceDirectory!, '.javdex', 'latest-dry-run.json')
+    pluginWorkspace.recordLatestDryRun(session.workspaceDirectory!, {
+      schemaVersion: 1,
+      status: 'completed',
+      artifactHash: 'previous-artifact',
+      reportPath: '/previous/report.json',
+      scope: 'all',
+      runtimeVersion: PLUGIN_RUNTIME_VERSION,
+      targetFingerprint: 'previous-targets',
+      executionPassed: true,
+      cases: []
     })
+    fs.writeFileSync(path.join(session.workspaceDirectory!, 'plugin.json'), '{ broken', 'utf8')
     try {
-      assert.equal(session.package.name, 'tokyolib')
-      assert.equal(session.siteName, 'tokyolib')
-    } finally {
-      deleteSession(session.id)
-    }
-  })
-
-  it('plugin_get_state returns package summary', async () => {
-    const session = createSession(baseInput)
-    try {
-      const result = await executeTool(session.id, 'plugin_get_state', '{}', 1)
-      assert.equal(result.ok, true, result.content)
-      assert.match(result.content, /test-site/)
-      assert.match(result.content, /ABC-123/)
-      assert.match(result.content, /首次开发（create）：plugin_verify 后会自动新增/)
-      assert.match(result.content, /codeOmitted/)
-    } finally {
-      deleteSession(session.id)
-    }
-  })
-
-  it('plugin_update_code rejects empty code', async () => {
-    const session = createSession(baseInput)
-    try {
-      const result = await executeTool(
-        session.id,
-        'plugin_update_code',
-        JSON.stringify({ mode: 'replace_all', code: '   ' }),
-        1
-      )
+      const result = await executeTool(session.id, 'plugin_dry_run', '{}', 2)
       assert.equal(result.ok, false)
-      assert.match(result.content, /不能为空/)
+      assert.match(result.content, /WORKSPACE_INVALID/)
+      const latest = JSON.parse(fs.readFileSync(latestPath, 'utf8')) as { artifactHash?: string }
+      assert.equal(latest.artifactHash, 'previous-artifact')
     } finally {
       deleteSession(session.id)
     }
   })
 
-  it('plugin_get_state returns package code for incremental edits', async () => {
-    const session = createSession(baseInput)
+  it('adopts the first legal explicit targets immediately and exposes runtime facts', async () => {
+    const session = createWorkspaceSession('executor-adopt-targets', 'video', [])
+    const originalRun = pluginExecution.run
+    const restoreBrowser = installFakeBrowserLease()
+    pluginExecution.run = async (input) => fakeArtifact(input)
     try {
-      const code = `async function parseVideo(ctx) {
-  const html = await ctx.fetchPage('https://example.test');
-  return { code: ctx.code, title: 'OK' };
-}
-module.exports = { parseVideo };`
-      session.package = { ...session.package, code }
-      const result = await executeTool(
-        session.id,
-        'plugin_get_state',
-        JSON.stringify({ includeCode: true }),
-        1
-      )
-      assert.equal(result.ok, true, result.content)
-      assert.match(result.content, /fetchPage/)
-      assert.match(result.content, /incrementalEditOnly/)
+      const result = await executeTool(session.id, 'plugin_dry_run', JSON.stringify({
+        videoCodes: ['YST-222']
+      }), 2)
+      const payload = JSON.parse(result.content) as {
+        scope?: string
+        cases?: Array<{ unrecognizedResultKeys?: string[] }>
+      }
+      assert.equal(result.structured?.adoptedTargets, true)
+      assert.deepEqual(session.runTargets, [{ kind: 'video', code: 'YST-222' }])
+      assert.equal(result.events?.some((event) => event.type === 'run_targets_updated'), true)
+      assert.match(result.content, /pluginResult/)
+      assert.match(result.content, /effectiveResult/)
+      assert.match(result.content, /manifestCoverage/)
+      assert.match(result.content, /undeclaredReturnedFieldIds/)
+      assert.deepEqual(payload.cases?.[0]?.unrecognizedResultKeys, ['legacyCover'])
+      assert.equal(payload.scope, 'all')
+      assert.equal(result.structured?.mechanicalAcceptance instanceof Object, true)
+      assert.equal(Object.hasOwn(result.structured ?? {}, 'ready'), false)
+      assert.equal(Object.hasOwn(result.structured ?? {}, 'attempt'), false)
+      const task = JSON.parse(fs.readFileSync(path.join(session.workspaceDirectory!, 'task.json'), 'utf8'))
+      assert.deepEqual(task.runTargets, [{ kind: 'video', code: 'YST-222' }])
+      const latest = JSON.parse(fs.readFileSync(
+        path.join(session.workspaceDirectory!, '.javdex', 'latest-dry-run.json'),
+        'utf8'
+      )) as Record<string, unknown>
+      assert.equal(latest.status, 'completed')
+      assert.equal(latest.artifactHash, session.lastExecution?.artifactHash)
+      assert.equal(latest.scope, 'all')
     } finally {
+      await releasePluginDeveloperBrowser(session.id)
+      restoreBrowser()
+      pluginExecution.run = originalRun
       deleteSession(session.id)
     }
   })
 
-  it('plugin_update_code rejects replace_all when substantial code exists without force', async () => {
-    const session = createSession(baseInput)
-    try {
-      const code = `async function parseVideo(ctx) {
-  const html = await ctx.fetchPage('https://example.test');
-  return { code: ctx.code, title: 'OK' };
-}
-module.exports = { parseVideo };`
-      session.package = { ...session.package, code }
-      const replacement = `async function parseVideo(ctx) {
-  return { code: ctx.code, title: 'REPLACED' };
-}
-module.exports = { parseVideo };`
-      const result = await executeTool(
-        session.id,
-        'plugin_update_code',
-        JSON.stringify({ mode: 'replace_all', code: replacement }),
-        2
-      )
-      assert.equal(result.ok, false)
-      assert.match(result.content, /INCREMENTAL_EDIT_REQUIRED/)
-      assert.match(session.package.code, /fetchPage/)
-      assert.doesNotMatch(session.package.code, /title: 'REPLACED'/)
-    } finally {
-      deleteSession(session.id)
+  it('emits adopted targets before the production runner settles', async () => {
+    const session = createWorkspaceSession('executor-adopt-targets-live', 'video', [])
+    const originalRun = pluginExecution.run
+    const restoreBrowser = installFakeBrowserLease()
+    const emitted: string[] = []
+    pluginExecution.run = async (input) => {
+      assert.deepEqual(emitted, ['run_targets_updated'])
+      return fakeArtifact(input)
     }
-  })
-
-  it('plugin_update_code allows forced replace_all with a reason', async () => {
-    const session = createSession(baseInput)
     try {
-      const code = `async function parseVideo(ctx) {
-  const html = await ctx.fetchPage('https://example.test');
-  return { code: ctx.code, title: 'OK' };
-}
-module.exports = { parseVideo };`
-      session.package = { ...session.package, code }
-      const replacement = `async function parseVideo(ctx) {
-  return { code: ctx.code, title: 'REPLACED' };
-}
-module.exports = { parseVideo };`
-      const result = await executeTool(
-        session.id,
-        'plugin_update_code',
-        JSON.stringify({
-          mode: 'replace_all',
-          code: replacement,
-          forceWholeRewrite: true,
-          forceReason: '需要清理旧 helper 并重组整体结构'
-        }),
-        2
-      )
-      assert.equal(result.ok, true, result.content)
-      assert.match(result.content, /整包替换/)
-      assert.match(session.package.code, /title: 'REPLACED'/)
-      assert.doesNotMatch(session.package.code, /fetchPage/)
-    } finally {
-      deleteSession(session.id)
-    }
-  })
-
-  it('plugin_update_code rejects unknown mode instead of treating it as replace_all', async () => {
-    const session = createSession(baseInput)
-    try {
-      const before = session.package.code
-      const result = await executeTool(
-        session.id,
-        'plugin_update_code',
-        JSON.stringify({
-          mode: 'replace_everything',
-          code: `async function parseVideo(ctx) { return { title: 'BAD' } }`
-        }),
-        2
-      )
-      assert.equal(result.ok, false)
-      assert.match(result.content, /INVALID_UPDATE_MODE/)
-      assert.equal(session.package.code, before)
-    } finally {
-      deleteSession(session.id)
-    }
-  })
-
-  it('plugin_update_code does not persist invalid replace_all code after validation fails', async () => {
-    const session = createSession(baseInput)
-    try {
-      const code = `async function parseVideo(ctx) {
-  const html = await ctx.fetchPage('https://example.test');
-  return { code: ctx.code, title: 'OK' };
-}
-module.exports = { parseVideo };`
-      session.package = { ...session.package, code }
-      const result = await executeTool(
-        session.id,
-        'plugin_update_code',
-        JSON.stringify({
-          mode: 'replace_all',
-          code: `function dup() { return 1 }
-function dup() { return 2 }
-async function parseVideo(ctx) { return { code: ctx.code } }
-module.exports = { parseVideo };`,
-          forceWholeRewrite: true,
-          forceReason: '需要整体重写但这段代码有重复符号'
-        }),
-        2
-      )
-      assert.equal(result.ok, false)
-      assert.match(result.content, /重复顶层符号/)
-      assert.equal(session.package.code, code)
-    } finally {
-      deleteSession(session.id)
-    }
-  })
-
-  it('plugin_update_code allows replace_function on substantial code', async () => {
-    const session = createSession(baseInput)
-    try {
-      const code = `async function parseVideo(ctx) {
-  const html = await ctx.fetchPage('https://example.test');
-  return { code: ctx.code, title: 'OLD' };
-}
-module.exports = { parseVideo };`
-      session.package = { ...session.package, code }
-      const result = await executeTool(
-        session.id,
-        'plugin_update_code',
-        JSON.stringify({
-          mode: 'replace_function',
-          functionName: 'parseVideo',
-          code: `async function parseVideo(ctx) {
-  const html = await ctx.fetchPage('https://example.test');
-  return { code: ctx.code, title: 'NEW' };
-}`
-        }),
-        2
-      )
-      assert.equal(result.ok, true, result.content)
-      assert.match(session.package.code, /title: 'NEW'/)
-      assert.match(session.package.code, /fetchPage/)
-    } finally {
-      deleteSession(session.id)
-    }
-  })
-
-  it('plugin_update_code rejects replace_function append when substantial code exists', async () => {
-    const session = createSession(baseInput)
-    try {
-      const code = `function existingHelper() { return 'OK' }
-async function parseVideo(ctx) {
-  const html = await ctx.fetchPage('https://example.test');
-  return { code: ctx.code, title: existingHelper() };
-}
-module.exports = { parseVideo };`
-      session.package = { ...session.package, code }
-      const result = await executeTool(
-        session.id,
-        'plugin_update_code',
-        JSON.stringify({
-          mode: 'replace_function',
-          functionName: 'missingHelper',
-          code: `function missingHelper() { return 'NEW' }`
-        }),
-        2
-      )
-      assert.equal(result.ok, false)
-      assert.match(result.content, /FUNCTION_NOT_FOUND/)
-      assert.doesNotMatch(session.package.code, /missingHelper/)
-    } finally {
-      deleteSession(session.id)
-    }
-  })
-
-  it('plugin_update_code updates package and emits package_updated', async () => {
-    const session = createSession(baseInput)
-    try {
-      const code = `async function parseVideo(ctx) {
-  return { code: ctx.code, title: 'OK' };
-}
-module.exports = { parseVideo };`
-      const result = await executeTool(
-        session.id,
-        'plugin_update_code',
-        JSON.stringify({ mode: 'replace_all', code }),
-        2
-      )
-      assert.equal(result.ok, true, result.content)
-      assert.match(session.package.code, /title: 'OK'/)
-      assert.equal(result.events?.some((event) => event.type === 'package_updated'), true)
-    } finally {
-      deleteSession(session.id)
-    }
-  })
-
-  it('plugin_dry_run can override the video test target for the current run', async () => {
-    const session = createSession({
-      ...baseInput,
-      testTargets: undefined
-    })
-    try {
-      const code = `async function parseVideo(ctx) {
-  return { code: ctx.code, title: 'OK' };
-}
-module.exports = { parseVideo };`
-      session.package = { ...session.package, code }
       const result = await executeTool(
         session.id,
         'plugin_dry_run',
-        JSON.stringify({ testTarget: 'ABC-999' }),
-        2
-      )
-      assert.equal(result.ok, true, result.content)
-      assert.deepEqual(session.testTargets, ['ABC-999'])
-      assert.equal(session.lastDryRun?.ok, true)
-    } finally {
-      deleteSession(session.id)
-    }
-  })
-
-  it('session_note appends page notes', async () => {
-    const session = createSession(baseInput)
-    try {
-      const result = await executeTool(
-        session.id,
-        'session_note',
-        JSON.stringify({ text: '面包屑链接在 metadata 之前' }),
-        1
+        JSON.stringify({ videoCodes: ['YST-222'] }),
+        2,
+        { emit: (event) => emitted.push(event.type) }
       )
       assert.equal(result.ok, true)
-      assert.equal(session.pageNotes.length, 1)
-      assert.match(session.pageNotes[0]?.text ?? '', /面包屑/)
+      assert.equal(result.events?.some((event) => event.type === 'run_targets_updated'), false)
+      assert.deepEqual(emitted, ['run_targets_updated'])
     } finally {
+      await releasePluginDeveloperBrowser(session.id)
+      restoreBrowser()
+      pluginExecution.run = originalRun
       deleteSession(session.id)
     }
   })
 
-  it('session_request_user marks session waiting_user', async () => {
-    const session = createSession(baseInput)
+  it('uses later explicit targets only for targeted diagnostics', async () => {
+    const session = createWorkspaceSession('executor-targeted-scope', 'video', ['ABC-1', 'ABC-2'])
+    const originalRun = pluginExecution.run
+    const restoreBrowser = installFakeBrowserLease()
+    const scopes: string[] = []
+    pluginExecution.run = async (input) => {
+      scopes.push(input.scope)
+      return fakeArtifact(input)
+    }
     try {
-      const result = await executeTool(
-        session.id,
-        'session_request_user',
-        JSON.stringify({ reason: '请完成 Cloudflare 验证' }),
-        3
-      )
-      assert.equal(result.ok, true)
-      assert.equal(session.status, 'waiting_user')
-      assert.equal(result.waitForUser, '请完成 Cloudflare 验证')
-      assert.equal(result.events?.[0]?.type, 'waiting_user')
+      const targeted = await executeTool(session.id, 'plugin_dry_run', JSON.stringify({
+        videoCodes: ['ABC-1']
+      }), 2)
+      assert.deepEqual(targeted.structured?.mechanicalAcceptance, { installReady: false })
+      assert.deepEqual(session.runTargets, [
+        { kind: 'video', code: 'ABC-1' },
+        { kind: 'video', code: 'ABC-2' }
+      ])
+      const full = await executeTool(session.id, 'plugin_dry_run', '{}', 3)
+      assert.deepEqual(full.structured?.mechanicalAcceptance, { installReady: true })
+      assert.deepEqual(scopes, ['targeted', 'all'])
     } finally {
+      await releasePluginDeveloperBrowser(session.id)
+      restoreBrowser()
+      pluginExecution.run = originalRun
       deleteSession(session.id)
     }
   })
 
-  it('plugin_update_package allows supportedFields in create mode', async () => {
-    const session = createSession({
-      ...baseInput,
-      mode: 'create',
-      supportedFields: ['title', 'duration', 'rating', 'samples'] as VideoScrapeField[]
-    })
-    try {
-      const result = await executeTool(
-        session.id,
-        'plugin_update_package',
-        JSON.stringify({ supportedFields: ['title', 'maker'] }),
-        1
-      )
-      assert.equal(result.ok, true)
-      assert.deepEqual(session.package.supportedFields, ['title', 'maker'])
-      assert.deepEqual(session.supportedFields, ['title', 'maker'])
-      assert.equal(session.lastVerification, undefined)
-    } finally {
-      deleteSession(session.id)
+  it('allows the fourth and tenth real executions without an attempt limit', async () => {
+    const session = createWorkspaceSession('executor-run-limit', 'video', ['ABC-1'])
+    const originalRun = pluginExecution.run
+    const restoreBrowser = installFakeBrowserLease()
+    let calls = 0
+    pluginExecution.run = async (input) => {
+      calls += 1
+      return fakeArtifact(input)
     }
-  })
-
-  it('plugin_update_package preserves verification for supportedFields-only removal proven unsupported', async () => {
-    const session = createSession({
-      ...baseInput,
-      mode: 'create',
-      supportedFields: ['title', 'summary'] as VideoScrapeField[]
-    })
     try {
-      session.lastDryRun = {
-        ok: true,
-        result: { code: 'ABC-123', title: 'OK' },
-        logs: []
+      let result
+      for (let index = 1; index <= 10; index += 1) {
+        result = await executeTool(session.id, 'plugin_dry_run', '{}', index)
+        assert.equal(result.ok, true)
+        assert.doesNotMatch(result.content, /DRY_RUN_LIMIT_REACHED|remainingAttempts|maxAttempts/)
       }
-      session.lastDryRunCodeHash = hashCode(session.package.code)
-      session.lastVerification = {
-        summary: '验证通过',
-        items: [
-          { field: 'title', status: 'ok', note: '标题正确' },
-          { field: 'summary', status: 'ok', note: '站点无此字段' }
-        ]
-      }
-
-      const verification = session.lastVerification
-      const result = await executeTool(
-        session.id,
-        'plugin_update_package',
-        JSON.stringify({ supportedFields: ['title'] }),
-        1
-      )
-
-      assert.equal(result.ok, true)
-      assert.match(result.content, /上次语义验证仍有效/)
-      assert.deepEqual(session.package.supportedFields, ['title'])
-      assert.equal(session.lastVerification, verification)
+      assert.equal(result?.structured?.mechanicalAcceptance instanceof Object, true)
+      assert.equal(calls, 10)
     } finally {
+      await releasePluginDeveloperBrowser(session.id)
+      restoreBrowser()
+      pluginExecution.run = originalRun
       deleteSession(session.id)
     }
   })
 
-  it('plugin_update_package invalidates verification when supportedFields add unverified fields', async () => {
-    const session = createSession({
-      ...baseInput,
-      mode: 'create',
-      supportedFields: ['title'] as VideoScrapeField[]
-    })
-    try {
-      session.lastDryRun = {
-        ok: true,
-        result: { code: 'ABC-123', title: 'OK' },
-        logs: []
-      }
-      session.lastDryRunCodeHash = hashCode(session.package.code)
-      session.lastVerification = {
-        summary: '验证通过',
-        items: [{ field: 'title', status: 'ok', note: '标题正确' }]
-      }
-
-      const result = await executeTool(
-        session.id,
-        'plugin_update_package',
-        JSON.stringify({ supportedFields: ['title', 'maker'] }),
-        1
-      )
-
-      assert.equal(result.ok, true)
-      assert.deepEqual(session.package.supportedFields, ['title', 'maker'])
-      assert.equal(session.lastVerification, undefined)
-    } finally {
-      deleteSession(session.id)
+  it('terminates on browser busy without replacing the initial dry-run state', async () => {
+    const session = createWorkspaceSession('executor-browser-busy')
+    const restoreBrowser = installFakeBrowserLease()
+    scrapeBrowser.acquire = async () => {
+      throw new ScrapeBrowserBusyError({ ownerId: 'scrape-run', purpose: 'scrape' })
     }
-  })
-
-  it('plugin_update_package rejects supportedFields removal in debug mode without user request', async () => {
-    const session = createSession({
-      ...baseInput,
-      mode: 'debug'
-    })
     try {
-      const result = await executeTool(
-        session.id,
-        'plugin_update_package',
-        JSON.stringify({ supportedFields: ['title'] }),
-        1
-      )
+      const result = await executeTool(session.id, 'plugin_dry_run', '{}', 2)
       assert.equal(result.ok, false)
-      assert.match(result.content, /DEBUG_SUPPORTED_FIELDS_REMOVE_LOCKED/)
-    } finally {
-      deleteSession(session.id)
-    }
-  })
-
-  it('plugin_update_package allows supportedFields removal in debug mode when user requested', async () => {
-    const session = createSession({
-      ...baseInput,
-      mode: 'debug',
-      supportedFields: ['title', 'maker'] as VideoScrapeField[]
-    })
-    session.lastUserInstruction = '请从支持字段移除 maker'
-    try {
-      const result = await executeTool(
-        session.id,
-        'plugin_update_package',
-        JSON.stringify({ supportedFields: ['title'], confirmUserRemoval: true }),
-        1
+      assert.match(result.content, /SCRAPE_BROWSER_BUSY/)
+      assert.equal(result.waitForUser?.includes('用户继续'), true)
+      assert.deepEqual(
+        JSON.parse(fs.readFileSync(
+          path.join(session.workspaceDirectory!, '.javdex', 'latest-dry-run.json'),
+          'utf8'
+        )),
+        { schemaVersion: 1, status: 'not_run' }
       )
-      assert.equal(result.ok, true)
-      assert.deepEqual(session.package.supportedFields, ['title'])
     } finally {
+      restoreBrowser()
       deleteSession(session.id)
     }
   })
 
-  it('plugin_update_package allows adding supportedFields in debug mode', async () => {
-    const session = createSession({
-      ...baseInput,
-      mode: 'debug',
-      supportedFields: ['title'] as VideoScrapeField[]
-    })
-    try {
-      const result = await executeTool(
-        session.id,
-        'plugin_update_package',
-        JSON.stringify({ supportedFields: ['title', 'maker', 'publisher'] }),
-        1
-      )
-      assert.equal(result.ok, true)
-      assert.deepEqual(session.package.supportedFields, ['title', 'maker', 'publisher'])
-    } finally {
-      deleteSession(session.id)
-    }
-  })
-
-  it('plugin_update_code replace_snippet updates a small fragment', async () => {
-    const session = createSession(baseInput)
-    try {
-      const code = `async function parseVideo(ctx) {
-  return { code: ctx.code, title: 'OLD' };
-}
-module.exports = { parseVideo };`
-      session.package = { ...session.package, code }
-      const result = await executeTool(
-        session.id,
-        'plugin_update_code',
-        JSON.stringify({
-          mode: 'replace_snippet',
-          oldText: "title: 'OLD'",
-          newText: "title: 'SNIPPET'"
-        }),
-        2
-      )
-      assert.equal(result.ok, true, result.content)
-      assert.match(result.content, /replace_snippet/)
-      assert.match(session.package.code, /title: 'SNIPPET'/)
-    } finally {
-      deleteSession(session.id)
-    }
-  })
-
-  it('plugin_get_state includes topLevelFunctions', async () => {
-    const session = createSession(baseInput)
-    try {
-      session.package = {
-        ...session.package,
-        code: `function buildUrl(code) { return 'https://x/' + code }
-async function parseVideo(ctx) { return { code: ctx.code, title: 'OK' } }
-module.exports = { parseVideo }`
-      }
-      const result = await executeTool(session.id, 'plugin_get_state', '{}', 1)
-      assert.equal(result.ok, true, result.content)
-      assert.match(result.content, /topLevelFunctions/)
-      assert.match(result.content, /buildUrl/)
-    } finally {
-      deleteSession(session.id)
-    }
-  })
-
-  it('plugin_update_code replace_function can replace a helper by name', async () => {
-    const session = createSession({
-      ...baseInput,
-      kind: 'actress',
-      supportedFields: ['profileSummary']
+  it('does not replace the initial dry-run state when Cloudflare interrupts the run', async () => {
+    const session = createWorkspaceSession('executor-cloudflare', 'video', ['ABC-1'])
+    const originalRun = pluginExecution.run
+    const restoreBrowser = installFakeBrowserLease()
+    pluginExecution.run = async (input) => ({
+      ...fakeArtifact(input),
+      cases: input.targets.map((target) => ({
+        target,
+        pluginResult: null,
+        effectiveResult: null,
+        manifestCoverage: {
+          returnedFieldIds: [],
+          undeclaredReturnedFieldIds: [],
+          runtimeOnlyKeys: []
+        },
+        logs: [],
+        error: '验证超时：请完成 Cloudflare 验证',
+        runtimeAccepted: false
+      })),
+      executionPassed: false
     })
     try {
-      session.package = {
-        ...session.package,
-        kind: 'actress',
-        code: `function summarize(text) { return text.slice(0, 3) }
-async function parseActress(ctx) {
-  return { mainName: ctx.mainName, profileSummary: summarize('hello') }
-}
-module.exports = { parseActress }`
-      }
-      const result = await executeTool(
-        session.id,
-        'plugin_update_code',
-        JSON.stringify({
-          mode: 'replace_function',
-          functionName: 'summarize',
-          code: `function summarize(text) { return text.slice(0, 5) }`
-        }),
-        2
+      const result = await executeTool(session.id, 'plugin_dry_run', '{}', 2)
+      assert.equal(result.structured?.code, 'BROWSER_CHALLENGE_INTERRUPTED')
+      assert.equal(result.waitForUser?.includes('继续 Agent'), true)
+      assert.equal(session.lastExecution, undefined)
+      assert.deepEqual(
+        JSON.parse(fs.readFileSync(
+          path.join(session.workspaceDirectory!, '.javdex', 'latest-dry-run.json'),
+          'utf8'
+        )),
+        { schemaVersion: 1, status: 'not_run' }
       )
-      assert.equal(result.ok, true, result.content)
-      assert.match(session.package.code, /slice\(0, 5\)/)
     } finally {
+      await releasePluginDeveloperBrowser(session.id)
+      restoreBrowser()
+      pluginExecution.run = originalRun
       deleteSession(session.id)
     }
   })
 
-  it('plugin_verify rejects stale dry-run after code change', async () => {
-    const session = createSession(baseInput)
+  it('preserves the prior latest facts when a real execution is cancelled', async () => {
+    const session = createWorkspaceSession('executor-cancelled', 'video', ['ABC-1'])
+    const originalRun = pluginExecution.run
+    const restoreBrowser = installFakeBrowserLease()
+    const controller = new AbortController()
+    const latestPath = path.join(session.workspaceDirectory!, '.javdex', 'latest-dry-run.json')
+    pluginWorkspace.recordLatestDryRun(session.workspaceDirectory!, {
+      schemaVersion: 1,
+      status: 'completed',
+      artifactHash: 'previous-artifact',
+      reportPath: '/previous/report.json',
+      scope: 'all',
+      runtimeVersion: PLUGIN_RUNTIME_VERSION,
+      targetFingerprint: 'previous-targets',
+      executionPassed: true,
+      cases: []
+    })
+    let calls = 0
+    pluginExecution.run = async (input) => {
+      calls += 1
+      controller.abort(new Error('用户取消 dry-run'))
+      input.signal.throwIfAborted()
+      return fakeArtifact(input)
+    }
     try {
-      session.lastDryRun = {
-        ok: true,
-        result: { code: 'ABC-123', title: '示例', maker: 'Muku' },
-        logs: []
-      }
-      session.lastDryRunCodeHash = hashCode(session.package.code)
-      session.lastVerification = {
-        summary: '旧验证',
-        items: [{ field: 'maker', status: 'suspicious', note: '制作商错误' }]
-      }
-
-      const codeResult = await executeTool(
-        session.id,
-        'plugin_update_code',
-        JSON.stringify({
-          mode: 'replace_all',
-          code: `async function parseVideo(ctx) {
-  return { title: '新标题', maker: 'Muku' };
-}
-module.exports = { parseVideo };`
-        }),
-        1
+      await assert.rejects(
+        executeTool(session.id, 'plugin_dry_run', '{}', 2, { signal: controller.signal }),
+        /用户取消 dry-run/
       )
-      assert.equal(codeResult.ok, true)
-      assert.equal(session.lastVerification, undefined)
-
-      const verifyResult = await executeTool(session.id, 'plugin_verify', '{}', 2)
-      assert.equal(verifyResult.ok, false)
-      assert.match(verifyResult.content, /STALE_DRY_RUN/)
+      assert.equal(calls, 1)
+      const latest = JSON.parse(fs.readFileSync(latestPath, 'utf8')) as { artifactHash?: string }
+      assert.equal(latest.artifactHash, 'previous-artifact')
     } finally {
+      await releasePluginDeveloperBrowser(session.id)
+      restoreBrowser()
+      pluginExecution.run = originalRun
       deleteSession(session.id)
     }
-  })
-
-  it('plugin_verify rejects failed dry-run before semantic verification', async () => {
-    const session = createSession(baseInput)
-    try {
-      session.lastDryRun = {
-        ok: false,
-        result: { code: 'ABC-123' },
-        error: 'selector failed',
-        logs: []
-      }
-      session.lastDryRunCodeHash = hashCode(session.package.code)
-
-      const verifyResult = await executeTool(session.id, 'plugin_verify', '{}', 2)
-      assert.equal(verifyResult.ok, false)
-      assert.match(verifyResult.content, /DRY_RUN_FAILED/)
-    } finally {
-      deleteSession(session.id)
-    }
-  })
-
-  it('plugin_install is blocked until dry-run and verification pass', async () => {
-    const session = createSession(baseInput)
-    try {
-      session.package = {
-        ...session.package,
-        name: 'install-gate-test',
-        code: `async function parseVideo(ctx) {
-  return { code: ctx.code, title: 'OK' };
-}
-module.exports = { parseVideo };`
-      }
-
-      const blocked = await executeTool(session.id, 'plugin_install', '{}', 1)
-      assert.equal(blocked.ok, false)
-      assert.match(blocked.content, /INSTALL_BLOCKED/)
-
-      session.lastDryRun = {
-        ok: true,
-        result: { code: 'ABC-123', title: 'OK' },
-        logs: []
-      }
-      session.lastDryRunCodeHash = hashCode(session.package.code)
-      session.lastVerification = {
-        summary: '验证通过',
-        items: [{ field: 'title', status: 'ok', note: '标题正确' }]
-      }
-
-      const installed = await executeTool(session.id, 'plugin_install', '{}', 2)
-      assert.equal(installed.ok, true, installed.content)
-      assert.match(installed.content, /install-gate-test/)
-    } finally {
-      deleteSession(session.id)
-    }
-  })
-
-  it('cleanupSessions removes terminal sessions after ttl', () => {
-    const session = createSession(baseInput)
-    markSessionEnded(session.id, 1000)
-    const removedEarly = cleanupSessions(1000 + 30 * 60 * 1000)
-    assert.equal(removedEarly, 0)
-    assert.ok(getSession(session.id))
-
-    const removedLate = cleanupSessions(1000 + 61 * 60 * 1000)
-    assert.equal(removedLate, 1)
-    assert.equal(getSession(session.id), undefined)
   })
 })

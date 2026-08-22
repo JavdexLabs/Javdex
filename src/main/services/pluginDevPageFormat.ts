@@ -1,7 +1,35 @@
 import type { PluginDevPageInsight } from '@shared/pluginDevTypes'
+import { truncateUnicode } from '@shared/unicodeText'
 
 export function formatPageDomForPrompt(page: PluginDevPageInsight): string {
   const sections: string[] = []
+
+  if (page.structuredData?.length) {
+    sections.push(
+      `STRUCTURED_DATA（JSON-LD）：\n${page.structuredData
+        .map((item) => `- ${item.key} => ${item.value} selector=${item.selector}`)
+        .join('\n')}`
+    )
+  }
+
+  if (page.metadataTags?.length) {
+    sections.push(
+      `METADATA_TAGS（OpenGraph/Twitter/itemprop）：\n${page.metadataTags
+        .map((item) => `- ${item.key} => ${item.content}`)
+        .join('\n')}`
+    )
+  }
+
+  if (page.labeledRows?.length) {
+    sections.push(
+      `LABELED_ROWS（页面标签行，含稳定 selector 与链接）：\n${page.labeledRows
+        .map((row) => {
+          const links = row.links.length ? ` links=${row.links.join(', ')}` : ''
+          return `- ${row.label} => ${row.value} selector=${row.selector}${links}`
+        })
+        .join('\n')}`
+    )
+  }
 
   if (page.definitionLists?.length) {
     const lines = page.definitionLists.map((list) => {
@@ -72,15 +100,26 @@ export function formatPageInsightForPrompt(
       }
     )
     .join('\n')
-  const dom = formatPageDomForPrompt(page)
+  const structuredDom = formatPageDomForPrompt({ ...page, domRegions: undefined })
+  const regionDom = page.domRegions?.length
+    ? formatPageDomForPrompt({
+        ...page,
+        metadataTags: undefined,
+        structuredData: undefined,
+        labeledRows: undefined,
+        definitionLists: undefined
+      })
+    : ''
   const links = formatPageLinksForPrompt(page, options?.linkLimit ?? 30)
 
-  return `【${page.label}】
+  return truncateUnicode(`【${page.label}】
 URL: ${page.url}
 TITLE: ${page.title}
 TEXT: ${page.text.slice(0, textLimit)}
-${dom ? `${dom}\n` : ''}FORMS_AND_INTERACTIVE_INPUTS:
-${forms || '无'}
+FORMS_AND_INTERACTIVE_INPUTS:
+${truncateUnicode(forms || '无', 2400, '…')}
 LINKS（含 region=breadcrumb|metadata|other，metadata 区链接优先用于字段解析）:
-${links || '无'}`
+${truncateUnicode(links || '无', 3200, '…')}
+${structuredDom ? `${truncateUnicode(structuredDom, 3600, '…')}\n` : ''}
+${regionDom ? truncateUnicode(regionDom, 2400, '…') : ''}`, 12_000, '…')
 }

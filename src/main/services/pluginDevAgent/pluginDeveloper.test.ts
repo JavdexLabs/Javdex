@@ -1,0 +1,1427 @@
+import { afterEach, beforeEach, describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import type { AgentProfile } from '@shared/aiConfigurationTypes'
+import type {
+  PluginDevAgentEvent,
+  PluginDevAgentStartInput,
+  PluginDevUserResponse
+} from '@shared/pluginDevTypes'
+import type { ScraperPluginPackage } from '@shared/scraperPluginTypes'
+import { agentExecution } from '../../agent-platform/agentExecution'
+import type { AgentRunRecord } from '../../agent-platform/agentRunStore'
+import { agentRunStore } from '../../agent-platform/agentRunStore'
+import { setCacheAffinityDeviceKeyForTests } from '../../agent-platform/cacheAffinity'
+import { toolHost } from '../../agent-platform/toolHost'
+import { closeDatabase, initDatabaseAtPath } from '../../db/database'
+import type {
+  HostedToolBinding,
+  PersistedRunConfigurationSnapshot,
+  ResolvedModelAccess,
+  ResolvedRunConfiguration,
+  RuntimeDurableObservation,
+  RuntimeObservation
+} from '../../agent-platform/types'
+import { PluginDeveloper } from './pluginDeveloper'
+import {
+  createSession,
+  deleteSession
+} from './sessionStore'
+import type { PluginDevSession } from './types'
+import { pluginWorkspace } from './pluginWorkspace'
+import { pluginArtifactHash } from './pluginArtifact'
+import { PLUGIN_RUNTIME_VERSION, pluginRunTargetFingerprint } from './pluginExecution'
+import { pluginRunAcceptance } from './pluginRunAcceptance'
+
+const input: PluginDevAgentStartInput = {
+  mode: 'create',
+  kind: 'video',
+  siteName: 'Lifecycle Test',
+  siteUrl: 'https://example.test',
+  supportedFields: ['title'],
+  testTargets: ['ABC-123'],
+  userMessage: '创建插件',
+  maxSteps: 4,
+  maxContextTokens: 8_000
+}
+
+const packageValue: ScraperPluginPackage = {
+  schemaVersion: 1,
+  kind: 'video',
+  name: 'Lifecycle Test',
+  version: '1.0.0',
+  description: '',
+  author: 'Test',
+  homepage: 'https://example.test',
+  supportedFields: ['title'],
+  code: 'async function scrape(ctx) { return { title: "Example" }; }'
+}
+
+function profile(): AgentProfile {
+  return {
+    id: 'profile:plugin-developer:test',
+    name: 'Plugin Developer Test',
+    definitionId: 'plugin-developer',
+    routes: { primary: 'primary', verifier: 'verifier', summarizer: 'summarizer' },
+    toolPackRefs: [],
+    capabilityGrants: [],
+    approvalRequiredEffects: ['install'],
+    compaction: { enabled: true, reserveTokens: 100, keepRecentTokens: 100 }
+  }
+}
+
+function access(role: string, routeRevision = `route:${role}`): ResolvedModelAccess {
+  return {
+    credentialRef: `credential:${role}`,
+    model: {
+      providerId: 'test',
+      modelId: role,
+      name: role,
+      api: 'openai-completions',
+      baseUrl: 'https://example.invalid/v1',
+      contextWindow: 16_000,
+      maxTokens: 2_000,
+      reasoning: false
+    },
+    routeRevision,
+    preset: {
+      thinkingLevel: 'minimal',
+      maxTokens: 2_000,
+      timeoutMs: 1_000,
+      cacheRetention: role === 'verifier' ? 'short' : 'none'
+    },
+    cacheCompatibility: {
+      supportsPromptCache: false,
+      supportsLongCacheRetention: false,
+      sendSessionAffinityHeaders: false,
+      evidence: { source: 'manual', checkedAt: '2026-08-20T00:00:00.000Z' }
+    },
+    getCredentialLease: async () => { throw new Error('not used') }
+  }
+}
+
+function frozenSnapshot(inputProfile = profile()): PersistedRunConfigurationSnapshot {
+  const primary = access('primary')
+  const prompt = 'stable plugin developer prompt'
+  return {
+    revision: 'configuration:legacy',
+    definitionId: 'plugin-developer',
+    profile: inputProfile,
+    model: {
+      credentialRef: primary.credentialRef,
+      descriptor: primary.model,
+      routeRevision: primary.routeRevision,
+      preset: primary.preset,
+      cacheCompatibility: primary.cacheCompatibility
+    },
+    cache: {
+      primaryAffinityId: 'primary-affinity',
+      verifierAffinityId: 'legacy-verifier-affinity',
+      summarizerAffinityId: 'summarizer-affinity',
+      retention: { primary: 'none', verifier: 'none', summarizer: 'none' }
+    },
+    systemPrompt: {
+      text: prompt,
+      sha256: createHash('sha256').update(prompt).digest('hex')
+    },
+    tools: [],
+    settings: {
+      compaction: inputProfile.compaction,
+      retry: { enabled: true, maxRetries: 1, baseDelayMs: 10 },
+      maxTurns: 4
+    }
+  }
+}
+
+interface TestActiveRun {
+  input: PluginDevAgentStartInput
+  session: PluginDevSession
+  tools: readonly HostedToolBinding[]
+  emit?: (event: PluginDevAgentEvent) => void
+  assistantText: string
+  reasoningText: string
+  reasoningTruncated: boolean
+  pendingAssistantDelta: string
+  pendingReasoningDelta: string
+  streamFlushTimer?: ReturnType<typeof setTimeout>
+  summary: string
+  lastAssistantStopReason?: string
+  waiter?: { resolve: (result: unknown) => void }
+}
+
+interface TestablePluginDeveloper {
+  active: Map<string, TestActiveRun>
+  materializeWorkspace(session: PluginDevSession, input: PluginDevAgentStartInput): void
+  runtimeNotify(active: TestActiveRun, event: RuntimeObservation): void
+  runtimeProject(
+    active: TestActiveRun,
+    event: RuntimeDurableObservation
+  ): { state: Record<string, unknown>; status?: string }
+  restoredConfiguration(
+    runId: string,
+    snapshot: PersistedRunConfigurationSnapshot,
+    session: PluginDevSession,
+    emit: () => void
+  ): ResolvedRunConfiguration
+  activatePersistedRun(runId: string): Promise<TestActiveRun>
+  applyUserResponse(
+    session: PluginDevSession,
+    response: PluginDevUserResponse
+  ): { prompt: string; transcriptText: string; updatesInstruction: boolean }
+}
+
+function testable(developer: PluginDeveloper): TestablePluginDeveloper {
+  return developer as unknown as TestablePluginDeveloper
+}
+
+function replaceMethod<T extends object, K extends keyof T>(
+  target: T,
+  key: K,
+  replacement: T[K]
+): () => void {
+  const mutable = target as unknown as Record<PropertyKey, unknown>
+  const original = mutable[key]
+  mutable[key] = replacement
+  return () => { mutable[key] = original }
+}
+
+function activeRun(session: PluginDevSession): TestActiveRun {
+  return {
+    input: structuredClone(input),
+    session,
+    tools: [],
+    assistantText: '',
+    reasoningText: '',
+    reasoningTruncated: false,
+    pendingAssistantDelta: '',
+    pendingReasoningDelta: '',
+    summary: 'waiting'
+  }
+}
+
+function markMechanicallyReady(session: PluginDevSession, directory: string): void {
+  session.status = 'waiting_user'
+  session.phase = 'ready'
+  session.lastExecution = {
+    runtimeVersion: PLUGIN_RUNTIME_VERSION,
+    artifactHash: pluginArtifactHash(session.package),
+    targetFingerprint: pluginRunTargetFingerprint(session.runTargets),
+    scope: 'all',
+    targets: structuredClone(session.runTargets),
+    cases: session.runTargets.map((target) => ({
+      target,
+      pluginResult: { code: 'ABC-123', title: 'Example' },
+      effectiveResult: { code: 'ABC-123', title: 'Example' },
+      manifestCoverage: {
+        returnedFieldIds: ['title'],
+        undeclaredReturnedFieldIds: [],
+        runtimeOnlyKeys: []
+      },
+      logs: [],
+      runtimeAccepted: true
+    })),
+    executionPassed: true,
+    reportPath: path.join(directory, '.javdex/reports/pass.json')
+  }
+  session.acceptance = pluginRunAcceptance.evaluate({
+    package: session.package,
+    targets: session.runTargets,
+    execution: session.lastExecution
+  }).outcome
+}
+
+let previousUserData: string | undefined
+
+beforeEach(() => {
+  previousUserData = process.env.JAVDEX_TEST_USER_DATA
+  process.env.JAVDEX_TEST_USER_DATA = '/tmp/javdex-plugin-developer-lifecycle-test'
+})
+
+afterEach(() => {
+  setCacheAffinityDeviceKeyForTests(null)
+  if (previousUserData === undefined) delete process.env.JAVDEX_TEST_USER_DATA
+  else process.env.JAVDEX_TEST_USER_DATA = previousUserData
+})
+
+describe('PluginDeveloper approval and lifecycle stability', { concurrency: false }, () => {
+  it('restores a legacy run with newly-invalid field ids as a repairable workspace', () => {
+    const developer = new PluginDeveloper()
+    const runId = 'legacy-invalid-supported-fields'
+    const session = createSession(
+      { ...input, package: structuredClone(packageValue) },
+      runId
+    )
+    const directory = path.join(
+      process.env.JAVDEX_TEST_USER_DATA!,
+      'agent-sessions',
+      runId
+    )
+    const workspace = pluginWorkspace.open({
+      directory,
+      task: input,
+      package: packageValue
+    })
+    const manifest = JSON.parse(fs.readFileSync(workspace.files.manifest, 'utf8'))
+    manifest.supportedFields = ['title', 'coverUrl', 'durationSeconds', 'sourceUrl']
+    fs.writeFileSync(workspace.files.manifest, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+
+    try {
+      assert.doesNotThrow(() => testable(developer).materializeWorkspace(session, input))
+      assert.match(session.workspaceDraftError ?? '', /coverUrl.*cover/)
+      assert.deepEqual(
+        JSON.parse(fs.readFileSync(workspace.files.manifest, 'utf8')).supportedFields,
+        ['title', 'coverUrl', 'durationSeconds', 'sourceUrl']
+      )
+      assert.deepEqual(session.package.supportedFields, ['title'])
+    } finally {
+      deleteSession(runId)
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('clears every durable plugin-development history without touching other Agent use cases', async () => {
+    const developer = new PluginDeveloper()
+    const records = [
+      { id: 'plugin-history-new', useCase: 'plugin-developer' },
+      { id: 'plugin-history-old', useCase: 'plugin-developer' },
+      { id: 'library-history', useCase: 'library-curator' }
+    ].map((item) => ({
+      ...item,
+      status: 'settled' as const,
+      configRevision: 'test',
+      configSnapshot: frozenSnapshot(),
+      recoveryGeneration: 0,
+      productState: {},
+      createdAt: '2026-08-20T00:00:00.000Z',
+      updatedAt: '2026-08-20T00:00:00.000Z'
+    })) satisfies AgentRunRecord[]
+    const closed: string[] = []
+    const discarded: string[] = []
+    const historyRoot = path.join(process.env.JAVDEX_TEST_USER_DATA!, 'agent-sessions')
+    for (const id of ['plugin-history-new', 'plugin-history-old', 'library-history']) {
+      fs.mkdirSync(path.join(historyRoot, id), { recursive: true })
+      fs.writeFileSync(path.join(historyRoot, id, 'history.txt'), id, 'utf8')
+    }
+    const restoreList = replaceMethod(
+      agentRunStore,
+      'listRecoverableRuns',
+      (() => records) as typeof agentRunStore.listRecoverableRuns
+    )
+    const restoreClose = replaceMethod(agentExecution, 'closeRun', (async (runId) => {
+      closed.push(runId)
+    }) as typeof agentExecution.closeRun)
+    const restoreDiscard = replaceMethod(toolHost, 'discardApprovals', ((runId) => {
+      discarded.push(runId)
+    }) as typeof toolHost.discardApprovals)
+    const restoreDispose = replaceMethod(
+      toolHost,
+      'disposeRun',
+      (() => undefined) as typeof toolHost.disposeRun
+    )
+    try {
+      const clearHistory = (developer as unknown as {
+        clearHistory(): Promise<number>
+      }).clearHistory
+      const count = await clearHistory.call(developer)
+
+      assert.equal(count, 2)
+      assert.deepEqual(closed.sort(), ['plugin-history-new', 'plugin-history-old'])
+      assert.deepEqual(discarded.sort(), ['plugin-history-new', 'plugin-history-old'])
+      assert.equal(fs.existsSync(path.join(historyRoot, 'plugin-history-new')), false)
+      assert.equal(fs.existsSync(path.join(historyRoot, 'plugin-history-old')), false)
+      assert.equal(fs.existsSync(path.join(historyRoot, 'library-history')), true)
+    } finally {
+      restoreDispose()
+      restoreDiscard()
+      restoreClose()
+      restoreList()
+      fs.rmSync(process.env.JAVDEX_TEST_USER_DATA!, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses to clear history while a plugin-development operation is running', async () => {
+    const developer = new PluginDeveloper()
+    const session = createSession(
+      { ...input, package: structuredClone(packageValue) },
+      'plugin-history-running'
+    )
+    testable(developer).active.set(session.id, activeRun(session))
+    let closeCalls = 0
+    const restoreList = replaceMethod(
+      agentRunStore,
+      'listRecoverableRuns',
+      (() => []) as typeof agentRunStore.listRecoverableRuns
+    )
+    const restoreClose = replaceMethod(agentExecution, 'closeRun', (async () => {
+      closeCalls += 1
+    }) as typeof agentExecution.closeRun)
+    try {
+      await assert.rejects(() => developer.clearHistory(), /正在运行或收尾/)
+      assert.equal(closeCalls, 0)
+      assert.equal(testable(developer).active.has(session.id), true)
+    } finally {
+      restoreClose()
+      restoreList()
+      testable(developer).active.delete(session.id)
+      deleteSession(session.id)
+    }
+  })
+
+  it('waits for a slow terminal release before an immediate continuation reopens the run', async () => {
+    const developer = new PluginDeveloper()
+    const runId = 'plugin-slow-terminal-release'
+    const terminalSession = createSession(
+      { ...input, package: structuredClone(packageValue) },
+      runId
+    )
+    terminalSession.status = 'completed'
+    terminalSession.phase = 'ready'
+    const terminalActive = activeRun(terminalSession)
+    testable(developer).active.set(runId, terminalActive)
+
+    let finishRelease: (() => void) | undefined
+    const slowRelease = new Promise<void>((resolve) => { finishRelease = resolve })
+    let releaseCalls = 0
+    let discardCalls = 0
+    let activationCalls = 0
+    let resumedActive: TestActiveRun | undefined
+    const restoreRelease = replaceMethod(agentExecution, 'releaseRun', (async () => {
+      releaseCalls += 1
+      await slowRelease
+    }) as typeof agentExecution.releaseRun)
+    const restoreDiscard = replaceMethod(toolHost, 'discardApprovals', (() => {
+      discardCalls += 1
+    }) as typeof toolHost.discardApprovals)
+    const restoreDispose = replaceMethod(toolHost, 'disposeRun', (() => undefined) as typeof toolHost.disposeRun)
+    const restoreActivate = replaceMethod(testable(developer), 'activatePersistedRun', (async () => {
+      activationCalls += 1
+      const resumedSession = createSession(
+        { ...input, package: structuredClone(packageValue) },
+        runId
+      )
+      resumedSession.status = 'waiting_user'
+      resumedSession.phase = 'waiting_user'
+      resumedActive = activeRun(resumedSession)
+      testable(developer).active.set(runId, resumedActive)
+      return resumedActive
+    }) as TestablePluginDeveloper['activatePersistedRun'])
+    const restoreGetRun = replaceMethod(agentRunStore, 'getRun', (() => null) as typeof agentRunStore.getRun)
+    const restoreUpdate = replaceMethod(
+      agentRunStore,
+      'updateProductState',
+      (() => undefined) as typeof agentRunStore.updateProductState
+    )
+    const restoreDispatch = replaceMethod(agentExecution, 'dispatch', (async () => {
+      assert.ok(resumedActive)
+      resumedActive.session.status = 'waiting_user'
+      resumedActive.session.phase = 'waiting_user'
+      testable(developer).runtimeProject(resumedActive, {
+        type: 'agent.settled',
+        acceptedCommandIds: ['operation-after-release']
+      })
+      return { operationId: 'operation-after-release', accepted: true, duplicate: false }
+    }) as typeof agentExecution.dispatch)
+    try {
+      testable(developer).runtimeProject(terminalActive, {
+        type: 'agent.settled',
+        acceptedCommandIds: ['terminal-operation']
+      })
+      testable(developer).runtimeProject(terminalActive, {
+        type: 'agent.settled',
+        acceptedCommandIds: ['duplicate-terminal-operation']
+      })
+      assert.equal(releaseCalls, 1)
+      assert.equal(discardCalls, 1, 'approval capabilities are cleared before slow disposal')
+
+      const continuation = developer.message({ sessionId: runId, text: '继续完善插件' })
+      await Promise.resolve()
+      assert.equal(activationCalls, 0, 'lazy reopen must not overlap the old runtime disposal')
+
+      finishRelease?.()
+      const result = await continuation
+      assert.equal(activationCalls, 1)
+      assert.equal(result.status, 'waiting_user')
+      assert.equal(releaseCalls, 1)
+    } finally {
+      finishRelease?.()
+      restoreDispatch()
+      restoreUpdate()
+      restoreGetRun()
+      restoreActivate()
+      restoreDispose()
+      restoreDiscard()
+      restoreRelease()
+      testable(developer).active.delete(runId)
+      deleteSession(runId)
+    }
+  })
+
+  it('materializes a terminal workspace before lazy continuation projects native file tools', async () => {
+    const developer = new PluginDeveloper()
+    const runId = 'plugin-terminal-workspace-resume'
+    const debugInput: PluginDevAgentStartInput = {
+      ...input,
+      mode: 'debug',
+      package: structuredClone(packageValue)
+    }
+    const productState = {
+      schemaVersion: 7,
+      input: debugInput,
+      status: 'completed',
+      phase: 'ready',
+      step: 1,
+      totalTokens: 0,
+      modelTurnCount: 0,
+      discoveryToolCalls: 0,
+      runTargets: [{ kind: 'video' as const, code: 'ABC-123' }],
+      package: structuredClone(packageValue),
+      summary: 'ready',
+      workLog: []
+    }
+    const record = {
+      id: runId,
+      useCase: 'plugin-developer',
+      status: 'settled',
+      configRevision: 'test',
+      configSnapshot: frozenSnapshot(),
+      recoveryGeneration: 0,
+      productState,
+      createdAt: '2026-08-21T00:00:00.000Z',
+      updatedAt: '2026-08-21T00:00:00.000Z'
+    } satisfies AgentRunRecord<typeof productState>
+    const restoreGetRun = replaceMethod(
+      agentRunStore,
+      'getRun',
+      (() => record) as typeof agentRunStore.getRun
+    )
+    const restoreUpdate = replaceMethod(
+      agentRunStore,
+      'updateProductState',
+      (() => undefined) as typeof agentRunStore.updateProductState
+    )
+    const restoreAppend = replaceMethod(
+      agentRunStore,
+      'appendProductEvent',
+      (() => 0) as typeof agentRunStore.appendProductEvent
+    )
+    const restoreOpen = replaceMethod(
+      agentExecution,
+      'openRun',
+      (async () => ({ runId, source: 'restored' })) as typeof agentExecution.openRun
+    )
+    const restoreConfiguration = replaceMethod(
+      testable(developer),
+      'restoredConfiguration',
+      (() => ({}) as ResolvedRunConfiguration) as TestablePluginDeveloper['restoredConfiguration']
+    )
+    try {
+      const active = await testable(developer).activatePersistedRun(runId)
+      assert.ok(active.session.workspaceDirectory, 'lazy activation must bind the durable workspace')
+
+      const editedCode = 'async function scrape() { return { title: "Edited" }; }\n'
+      fs.writeFileSync(path.join(active.session.workspaceDirectory, 'index.js'), editedCode, 'utf8')
+
+      testable(developer).runtimeProject(active, {
+        type: 'tool.completed',
+        result: { callId: 'native-read', toolName: 'read', ok: true, summary: 'read index.js' },
+        recovery: { codecVersion: 1, payload: '{}', contentHash: 'read-hash' }
+      })
+      assert.doesNotMatch(active.session.package.code, /Edited/, 'read must not rescan the draft')
+
+      const projection = testable(developer).runtimeProject(active, {
+        type: 'tool.completed',
+        result: { callId: 'native-edit', toolName: 'edit', ok: true, summary: 'updated index.js' },
+        recovery: { codecVersion: 1, payload: '{}', contentHash: 'edit-hash' }
+      })
+      assert.notEqual(projection.state.status, 'failed')
+      assert.match(active.session.package.code, /Edited/)
+    } finally {
+      restoreConfiguration()
+      restoreOpen()
+      restoreAppend()
+      restoreUpdate()
+      restoreGetRun()
+      testable(developer).active.delete(runId)
+      deleteSession(runId)
+      fs.rmSync(process.env.JAVDEX_TEST_USER_DATA!, { recursive: true, force: true })
+    }
+  })
+
+  it('renders schema-v5 execution history through a read-only projection adapter', () => {
+    const developer = new PluginDeveloper()
+    const runId = 'plugin-legacy-v5-history'
+    const productState = {
+      schemaVersion: 5,
+      input,
+      status: 'completed',
+      phase: 'ready',
+      step: 2,
+      totalTokens: 10,
+      modelTurnCount: 1,
+      discoveryToolCalls: 1,
+      runTargets: [{ kind: 'video' as const, code: 'ABC-123' }],
+      package: structuredClone(packageValue),
+      summary: 'legacy ready',
+      workLog: [],
+      lastExecution: {
+        runtimeVersion: 'runtime-v1',
+        artifactHash: 'legacy-artifact',
+        targetFingerprint: 'legacy-targets',
+        scope: 'all',
+        targets: [{ kind: 'video', code: 'ABC-123' }],
+        cases: [{
+          target: { kind: 'video', code: 'ABC-123' },
+          pluginResult: { code: 'ABC-123', title: 'Legacy' },
+          effectiveResult: { code: 'ABC-123' },
+          droppedResultKeys: ['title'],
+          logs: [],
+          runtimeAccepted: true
+        }],
+        executionPassed: true,
+        reportPath: '/tmp/legacy.json'
+      }
+    }
+    const record = {
+      id: runId,
+      useCase: 'plugin-developer',
+      status: 'settled',
+      configRevision: 'legacy',
+      configSnapshot: frozenSnapshot(),
+      recoveryGeneration: 0,
+      productState,
+      createdAt: '2026-08-21T00:00:00.000Z',
+      updatedAt: '2026-08-21T00:00:00.000Z'
+    } satisfies AgentRunRecord<typeof productState>
+    const restoreGetRun = replaceMethod(
+      agentRunStore,
+      'getRun',
+      (() => record) as typeof agentRunStore.getRun
+    )
+    const restoreJournal = replaceMethod(
+      agentRunStore,
+      'readProductJournal',
+      (() => []) as typeof agentRunStore.readProductJournal
+    )
+    const restoreApprovals = replaceMethod(
+      toolHost,
+      'pendingApprovals',
+      (() => []) as typeof toolHost.pendingApprovals
+    )
+    try {
+      const snapshot = developer.getSnapshot(runId)
+      assert.equal(Object.hasOwn(snapshot?.result ?? {}, 'installCurrentAllowed'), false)
+      assert.equal(snapshot?.result.historicalReadOnly, true)
+      assert.equal(snapshot?.result.acceptance, undefined)
+      assert.equal(snapshot?.result.execution?.runtimeVersion, 'runtime-v1')
+      assert.deepEqual(snapshot?.result.execution?.cases[0]?.legacyProjectionKeys, ['title'])
+      assert.deepEqual(snapshot?.result.execution?.cases[0]?.manifestCoverage, {
+        returnedFieldIds: [],
+        undeclaredReturnedFieldIds: [],
+        runtimeOnlyKeys: []
+      })
+    } finally {
+      restoreApprovals()
+      restoreJournal()
+      restoreGetRun()
+    }
+  })
+
+  it('projects Pi native file tools into the durable product timeline', () => {
+    const developer = new PluginDeveloper()
+    const session = createSession({ ...input, package: structuredClone(packageValue) }, 'native-tool-timeline')
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-native-tool-timeline-'))
+    session.workspaceDirectory = directory
+    pluginWorkspace.open({ directory, task: input, package: packageValue })
+    const events: PluginDevAgentEvent[] = []
+    const active = { ...activeRun(session), emit: (event: PluginDevAgentEvent) => events.push(event) }
+    const restoreGetRun = replaceMethod(
+      agentRunStore,
+      'getRun',
+      (() => null) as typeof agentRunStore.getRun
+    )
+    try {
+      testable(developer).runtimeProject(active, {
+        type: 'tool.started',
+        call: { callId: 'native-1', toolName: 'edit', argsDigest: 'digest-1' }
+      })
+      testable(developer).runtimeProject(active, {
+        type: 'tool.completed',
+        result: { callId: 'native-1', toolName: 'edit', ok: true, summary: 'updated index.js' },
+        recovery: { codecVersion: 1, payload: '{}', contentHash: 'hash' }
+      })
+      assert.deepEqual(events.map((event) => event.type), ['tool_start', 'tool_result'])
+      assert.equal(events[0]?.type === 'tool_start' ? events[0].tool : '', 'edit')
+    } finally {
+      restoreGetRun()
+      deleteSession(session.id)
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('records exactly one domain error when a runtime fault transitions the run to failed', () => {
+    const developer = new PluginDeveloper()
+    const session = createSession(
+      { ...input, package: structuredClone(packageValue) },
+      'runtime-fault-audit'
+    )
+    const events: PluginDevAgentEvent[] = []
+    const active = { ...activeRun(session), emit: (event: PluginDevAgentEvent) => events.push(event) }
+    const restoreGetRun = replaceMethod(
+      agentRunStore,
+      'getRun',
+      (() => null) as typeof agentRunStore.getRun
+    )
+    try {
+      testable(developer).runtimeProject(active, {
+        type: 'runtime.fault',
+        category: 'runtime-failed',
+        message: 'provider stream disconnected'
+      })
+      testable(developer).runtimeProject(active, {
+        type: 'runtime.fault',
+        category: 'runtime-failed',
+        message: 'provider stream disconnected'
+      })
+
+      assert.equal(session.status, 'failed')
+      assert.equal(session.failureMessage, 'provider stream disconnected')
+      assert.equal(events.filter((event) => event.type === 'error').length, 1)
+    } finally {
+      restoreGetRun()
+      deleteSession(session.id)
+    }
+  })
+
+  it('publishes the reduced active context immediately after Pi compaction', () => {
+    const developer = new PluginDeveloper()
+    const session = createSession(
+      { ...input, package: structuredClone(packageValue) },
+      'compaction-context-sync'
+    )
+    session.contextInputTokens = 7_200
+    const events: PluginDevAgentEvent[] = []
+    const active = { ...activeRun(session), emit: (event: PluginDevAgentEvent) => events.push(event) }
+    const restoreGetRun = replaceMethod(
+      agentRunStore,
+      'getRun',
+      (() => null) as typeof agentRunStore.getRun
+    )
+    try {
+      testable(developer).runtimeProject(active, {
+        type: 'compaction.changed',
+        phase: 'end',
+        result: {
+          reason: 'threshold',
+          tokensBefore: 7_200,
+          tokensAfter: 1_600
+        }
+      } as RuntimeDurableObservation)
+
+      assert.equal(session.contextInputTokens, 1_600)
+      const context = events.find(
+        (event): event is Extract<PluginDevAgentEvent, { type: 'context_updated' }> =>
+          event.type === 'context_updated'
+      )
+      assert.ok(context)
+      assert.equal(context.stats.estimatedTokens, 1_600)
+    } finally {
+      restoreGetRun()
+      deleteSession(session.id)
+    }
+  })
+
+  it('keeps a transient invalid workspace recoverable and resyncs after a valid rewrite', () => {
+    const developer = new PluginDeveloper()
+    const session = createSession(
+      { ...input, package: structuredClone(packageValue) },
+      'recover-invalid-workspace'
+    )
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-recover-invalid-workspace-'))
+    session.workspaceDirectory = directory
+    const workspace = pluginWorkspace.open({ directory, task: input, package: packageValue })
+    session.package = workspace.package
+    const lastValidPackage = structuredClone(session.package)
+    const validManifest = fs.readFileSync(workspace.files.manifest, 'utf8')
+    const events: PluginDevAgentEvent[] = []
+    const active = { ...activeRun(session), emit: (event: PluginDevAgentEvent) => events.push(event) }
+    const restoreGetRun = replaceMethod(
+      agentRunStore,
+      'getRun',
+      (() => null) as typeof agentRunStore.getRun
+    )
+    try {
+      fs.writeFileSync(workspace.files.manifest, '{ broken', 'utf8')
+      const invalidProjection = testable(developer).runtimeProject(active, {
+        type: 'tool.completed',
+        result: { callId: 'invalid-edit', toolName: 'edit', ok: true, summary: 'edited plugin.json' },
+        recovery: { codecVersion: 1, payload: '{}', contentHash: 'invalid-edit' }
+      })
+
+      assert.equal(session.status, 'running')
+      assert.equal(invalidProjection.status, 'running')
+      assert.deepEqual(session.package, lastValidPackage)
+      assert.match(session.workspaceDraftError ?? '', /plugin\.json/)
+
+      fs.writeFileSync(workspace.files.manifest, validManifest, 'utf8')
+      const repairedProjection = testable(developer).runtimeProject(active, {
+        type: 'tool.completed',
+        result: { callId: 'repair-write', toolName: 'write', ok: true, summary: 'rewrote plugin.json' },
+        recovery: { codecVersion: 1, payload: '{}', contentHash: 'repair-write' }
+      })
+
+      assert.equal(session.status, 'running')
+      assert.equal(repairedProjection.status, 'running')
+      assert.equal(session.workspaceDraftError, undefined)
+      assert.equal(
+        events.filter((event) => event.type === 'workspace_status').length,
+        2
+      )
+    } finally {
+      restoreGetRun()
+      deleteSession(session.id)
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('streams provider reasoning and answer while persisting each only once per completed turn', async () => {
+    const developer = new PluginDeveloper()
+    const session = createSession({ ...input, package: structuredClone(packageValue) }, 'reasoning-timeline')
+    const events: PluginDevAgentEvent[] = []
+    const active = { ...activeRun(session), emit: (event: PluginDevAgentEvent) => events.push(event) }
+    const restoreGetRun = replaceMethod(
+      agentRunStore,
+      'getRun',
+      (() => null) as typeof agentRunStore.getRun
+    )
+    try {
+      testable(developer).runtimeNotify(active, {
+        type: 'reasoning.delta',
+        text: '先确认目标页，'
+      })
+      testable(developer).runtimeNotify(active, {
+        type: 'reasoning.delta',
+        text: '然后直接编写插件。'
+      })
+      testable(developer).runtimeNotify(active, {
+        type: 'assistant.delta',
+        text: '我会直接实现。'
+      })
+      await new Promise((resolve) => setTimeout(resolve, 70))
+
+      assert.deepEqual(events.map((event) => event.type), [
+        'assistant_reasoning_delta',
+        'assistant_text_delta'
+      ])
+      assert.equal(session.workLog?.length, 0, 'ephemeral stream deltas must not enter the work log')
+
+      testable(developer).runtimeProject(active, {
+        type: 'message.completed',
+        audit: {
+          role: 'assistant',
+          textPreview: '我会直接实现。',
+          contentHash: 'reasoning-message',
+          stopReason: 'stop',
+          textChars: 7,
+          reasoningChars: 17,
+          toolCallCount: 0,
+          contentTypes: ['thinking']
+        },
+        recovery: { codecVersion: 1, payload: '{}', contentHash: 'reasoning-recovery' }
+      })
+
+      assert.deepEqual(events.map((event) => event.type), [
+        'assistant_reasoning_delta',
+        'assistant_text_delta',
+        'assistant_reasoning',
+        'model_turn_completed',
+        'assistant_text'
+      ])
+      const reasoning = events[2]
+      assert.equal(reasoning?.type, 'assistant_reasoning')
+      if (reasoning?.type === 'assistant_reasoning') {
+        assert.equal(reasoning.turn, 1)
+        assert.equal(reasoning.text, '先确认目标页，然后直接编写插件。')
+        assert.equal(reasoning.charCount, 17)
+        assert.equal(reasoning.truncated, false)
+      }
+      assert.equal(
+        session.workLog?.filter(
+          (entry) => entry.kind === 'event' && entry.event.type === 'assistant_reasoning'
+        ).length,
+        1
+      )
+      assert.equal(
+        session.workLog?.filter(
+          (entry) => entry.kind === 'event' && entry.event.type === 'assistant_text'
+        ).length,
+        1
+      )
+      assert.equal(
+        session.workLog?.some(
+          (entry) => entry.kind === 'event' && (
+            entry.event.type === 'assistant_reasoning_delta' ||
+            entry.event.type === 'assistant_text_delta'
+          )
+        ),
+        false
+      )
+    } finally {
+      restoreGetRun()
+      deleteSession(session.id)
+    }
+  })
+
+  it('bounds one displayed reasoning block and reports the original character count', () => {
+    const developer = new PluginDeveloper()
+    const session = createSession({ ...input, package: structuredClone(packageValue) }, 'reasoning-limit')
+    const events: PluginDevAgentEvent[] = []
+    const active = { ...activeRun(session), emit: (event: PluginDevAgentEvent) => events.push(event) }
+    const restoreGetRun = replaceMethod(
+      agentRunStore,
+      'getRun',
+      (() => null) as typeof agentRunStore.getRun
+    )
+    try {
+      testable(developer).runtimeNotify(active, {
+        type: 'reasoning.delta',
+        text: 'r'.repeat(64_010)
+      })
+      testable(developer).runtimeProject(active, {
+        type: 'message.completed',
+        audit: {
+          role: 'assistant',
+          textPreview: '',
+          contentHash: 'reasoning-limit-message',
+          stopReason: 'length',
+          textChars: 0,
+          reasoningChars: 64_010,
+          toolCallCount: 0,
+          contentTypes: ['thinking']
+        },
+        recovery: { codecVersion: 1, payload: '{}', contentHash: 'reasoning-limit-recovery' }
+      })
+
+      const reasoning = events.find(
+        (event): event is Extract<PluginDevAgentEvent, { type: 'assistant_reasoning' }> =>
+          event.type === 'assistant_reasoning'
+      )
+      assert.ok(reasoning)
+      assert.equal(reasoning.text.length, 64_000)
+      assert.equal(reasoning.charCount, 64_010)
+      assert.equal(reasoning.truncated, true)
+    } finally {
+      restoreGetRun()
+      deleteSession(session.id)
+    }
+  })
+
+  it('revokes an approved permit when Pi rejects the approval continuation', async () => {
+    const developer = new PluginDeveloper()
+    const session = createSession(
+      { ...input, package: structuredClone(packageValue) },
+      'plugin-approval-dispatch-rejected'
+    )
+    session.status = 'waiting_user'
+    const active = activeRun(session)
+    testable(developer).active.set(session.id, active)
+    let approved = 0
+    let revoked = 0
+    let discarded = 0
+    const restorePending = replaceMethod(toolHost, 'pendingApprovals', (() => [{
+      requestId: 'approval-dispatch-rejected',
+      callId: 'install-call',
+      toolName: 'plugin_install',
+      argsDigest: 'digest'
+    }]) as typeof toolHost.pendingApprovals)
+    const restoreApprove = replaceMethod(toolHost, 'approve', (() => { approved += 1 }) as typeof toolHost.approve)
+    const restoreRevoke = replaceMethod(toolHost, 'revokeApproval', (() => {
+      revoked += 1
+      return true
+    }) as typeof toolHost.revokeApproval)
+    const restoreDiscard = replaceMethod(toolHost, 'discardApprovals', (() => {
+      discarded += 1
+    }) as typeof toolHost.discardApprovals)
+    const restoreDispose = replaceMethod(toolHost, 'disposeRun', (() => undefined) as typeof toolHost.disposeRun)
+    const restoreGetRun = replaceMethod(agentRunStore, 'getRun', (() => null) as typeof agentRunStore.getRun)
+    const restoreUpdate = replaceMethod(
+      agentRunStore,
+      'updateProductState',
+      (() => undefined) as typeof agentRunStore.updateProductState
+    )
+    const restoreDispatch = replaceMethod(agentExecution, 'dispatch', (async () => ({
+      operationId: 'rejected-operation', accepted: false, duplicate: false
+    })) as typeof agentExecution.dispatch)
+    const restoreRelease = replaceMethod(agentExecution, 'releaseRun', (async () => undefined) as typeof agentExecution.releaseRun)
+    try {
+      await assert.rejects(() => developer.message({
+        sessionId: session.id,
+        text: '批准安装',
+        approvalDecision: { requestId: 'approval-dispatch-rejected', decision: 'approve' }
+      }), /拒绝了 prompt/)
+      assert.equal(approved, 1)
+      assert.equal(revoked, 1)
+      assert.equal(discarded, 1)
+      assert.equal(testable(developer).active.has(session.id), false)
+    } finally {
+      restoreRelease()
+      restoreDispatch()
+      restoreUpdate()
+      restoreGetRun()
+      restoreDispose()
+      restoreDiscard()
+      restoreRevoke()
+      restoreApprove()
+      restorePending()
+      testable(developer).active.delete(session.id)
+      deleteSession(session.id)
+    }
+  })
+
+  it('does not consume an approval while the operation that emitted waiting_user is still settling', async () => {
+    const developer = new PluginDeveloper()
+    const session = createSession({ ...input, package: structuredClone(packageValue) }, 'plugin-waiter-guard')
+    session.status = 'waiting_user'
+    const active = activeRun(session)
+    active.waiter = { resolve: () => undefined }
+    testable(developer).active.set(session.id, active)
+    let pendingReads = 0
+    let approvals = 0
+    const restorePending = replaceMethod(toolHost, 'pendingApprovals', (() => {
+      pendingReads += 1
+      return [{ requestId: 'approval-1', callId: 'call-1', toolName: 'plugin_install', argsDigest: 'digest' }]
+    }) as typeof toolHost.pendingApprovals)
+    const restoreApprove = replaceMethod(toolHost, 'approve', (() => { approvals += 1 }) as typeof toolHost.approve)
+    try {
+      await assert.rejects(
+        () => developer.message({
+          sessionId: session.id,
+          text: '批准安装',
+          approvalDecision: { requestId: 'approval-1', decision: 'approve' }
+        }),
+        /当前操作仍在收尾/
+      )
+      assert.equal(pendingReads, 0)
+      assert.equal(approvals, 0)
+    } finally {
+      restoreApprove()
+      restorePending()
+      testable(developer).active.delete(session.id)
+      deleteSession(session.id)
+    }
+  })
+
+  it('binds a typed choice to the exact request without treating it as user feedback', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-user-response-'))
+    initDatabaseAtPath(path.join(directory, 'test.sqlite'))
+    const developer = new PluginDeveloper()
+    const session = createSession({ ...input, package: structuredClone(packageValue) }, 'typed-field-response')
+    session.workspaceDirectory = path.join(directory, 'workspace')
+    pluginWorkspace.open({
+      directory: session.workspaceDirectory,
+      task: input,
+      package: packageValue
+    })
+    session.lastUserInstruction = '原始缺陷反馈'
+    session.pendingUserRequest = {
+      requestId: 'choice-1',
+      type: 'choice',
+      prompt: '请选择字段',
+      evidenceRefs: ['.javdex/browser/page.json'],
+      options: [
+        { id: '1', label: '发行商', description: '用户确认' },
+        { id: '2', label: '制作商', description: '用户确认' }
+      ]
+    }
+    try {
+      assert.throws(() => testable(developer).applyUserResponse(session, {
+        requestId: 'choice-other',
+        type: 'choice',
+        optionId: '1'
+      }), /已过期|属于其他会话/)
+      const result = testable(developer).applyUserResponse(session, {
+        requestId: 'choice-1',
+        type: 'choice',
+        optionId: '1'
+      })
+      assert.equal(result.updatesInstruction, false)
+      assert.match(result.prompt, /发行商/)
+      assert.match(result.prompt, /当前歧义已经解决，探索阶段结束/)
+      assert.match(result.prompt, /直接更新受该决定影响的 dev-notes 和所需的 index\.js\/plugin\.json/)
+      assert.match(result.prompt, /相关文件一致后调用 plugin_dry_run/)
+      assert.match(result.prompt, /不要求为该决定拆出额外开发批次/)
+      assert.match(result.prompt, /不要重新读取文档或重新浏览/)
+      assert.equal(session.lastUserInstruction, '原始缺陷反馈')
+      assert.equal(session.pendingUserRequest, undefined)
+      assert.throws(() => testable(developer).applyUserResponse(session, {
+        requestId: 'choice-1', type: 'choice', optionId: '1'
+      }), /没有待处理/)
+    } finally {
+      deleteSession(session.id)
+      closeDatabase()
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('resumes a typed browser interaction without turning completion into defect feedback', () => {
+    const developer = new PluginDeveloper()
+    const session = createSession(
+      { ...input, package: structuredClone(packageValue) },
+      'typed-browser-interaction'
+    )
+    session.lastUserInstruction = '保留的原始开发要求'
+    session.pendingUserRequest = {
+      requestId: 'login-1',
+      type: 'browser_interaction',
+      reason: 'login',
+      prompt: '请在浏览器中登录',
+      url: 'https://example.test/login'
+    }
+    try {
+      const result = testable(developer).applyUserResponse(session, {
+        requestId: 'login-1',
+        type: 'browser_interaction',
+        action: 'completed'
+      })
+      assert.equal(result.updatesInstruction, false)
+      assert.match(result.prompt, /reason=login/)
+      assert.match(result.prompt, /只检查 browser\(action="status"\)/)
+      assert.match(result.prompt, /不要重新开始探索/)
+      assert.equal(session.lastUserInstruction, '保留的原始开发要求')
+      assert.equal(session.pendingUserRequest, undefined)
+    } finally {
+      deleteSession(session.id)
+    }
+  })
+
+  it('keeps a mechanically ready artifact waiting for user after Pi settles', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-natural-ready-'))
+    const developer = new PluginDeveloper()
+    const session = createSession({ ...input, package: structuredClone(packageValue) }, 'natural-ready')
+    session.workspaceDirectory = directory
+    pluginWorkspace.open({ directory, task: input, package: packageValue })
+    session.lastExecution = {
+      runtimeVersion: PLUGIN_RUNTIME_VERSION,
+      artifactHash: pluginArtifactHash(session.package),
+      targetFingerprint: pluginRunTargetFingerprint(session.runTargets),
+      scope: 'all',
+      targets: structuredClone(session.runTargets),
+      cases: session.runTargets.map((target) => ({
+        target,
+        pluginResult: { code: 'ABC-123', title: 'Semantically unchecked' },
+        effectiveResult: { code: 'ABC-123', title: 'Semantically unchecked' },
+        manifestCoverage: {
+          returnedFieldIds: ['title'],
+          undeclaredReturnedFieldIds: [],
+          runtimeOnlyKeys: []
+        },
+        logs: [],
+        runtimeAccepted: true
+      })),
+      executionPassed: true,
+      reportPath: path.join(directory, '.javdex/reports/pass.json')
+    }
+    const active = activeRun(session)
+    let resolvedStatus = ''
+    active.waiter = { resolve: (result) => { resolvedStatus = (result as { status: string }).status } }
+    testable(developer).active.set(session.id, active)
+    const restoreGetRun = replaceMethod(agentRunStore, 'getRun', (() => null) as typeof agentRunStore.getRun)
+    try {
+      const projection = testable(developer).runtimeProject(active, {
+        type: 'agent.settled',
+        acceptedCommandIds: ['natural-ready-operation']
+      })
+      assert.equal(session.status, 'waiting_user')
+      assert.equal(session.phase, 'ready')
+      assert.equal(session.acceptance?.ready, true)
+      assert.equal(resolvedStatus, 'waiting_user')
+      assert.equal(projection.status, 'waiting_user')
+      assert.match(active.summary, /可以安装.*输入具体反馈/)
+    } finally {
+      restoreGetRun()
+      testable(developer).active.delete(session.id)
+      deleteSession(session.id)
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('requires real feedback before continuing a mechanically ready artifact', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-ready-resume-'))
+    const developer = new PluginDeveloper()
+    const session = createSession(
+      { ...input, package: structuredClone(packageValue) },
+      'ready-resume'
+    )
+    session.workspaceDirectory = directory
+    pluginWorkspace.open({ directory, task: input, package: packageValue })
+    markMechanicallyReady(session, directory)
+    const originalExecution = structuredClone(session.lastExecution)
+    const active = activeRun(session)
+    testable(developer).active.set(session.id, active)
+    const restoreGetRun = replaceMethod(
+      agentRunStore,
+      'getRun',
+      (() => null) as typeof agentRunStore.getRun
+    )
+    const restoreUpdate = replaceMethod(
+      agentRunStore,
+      'updateProductState',
+      (() => undefined) as typeof agentRunStore.updateProductState
+    )
+    let dispatchCalls = 0
+    const restoreDispatch = replaceMethod(agentExecution, 'dispatch', (async () => {
+      dispatchCalls += 1
+      testable(developer).runtimeProject(active, {
+        type: 'agent.settled',
+        acceptedCommandIds: ['ready-resume-operation']
+      })
+      return { operationId: 'ready-resume-operation', accepted: true, duplicate: false }
+    }) as typeof agentExecution.dispatch)
+    try {
+      await assert.rejects(
+        developer.message({
+          sessionId: session.id,
+          text: '请继续当前插件开发/调试任务。',
+          continuationKind: 'resume'
+        }),
+        /请先输入具体反馈/
+      )
+      assert.equal(dispatchCalls, 0)
+
+      const feedbackResult = await developer.message({
+        sessionId: session.id,
+        text: '标题仍然不正确',
+        continuationKind: 'user_feedback'
+      })
+
+      assert.equal(session.lastUserInstruction, '标题仍然不正确')
+      assert.deepEqual(session.lastExecution, originalExecution)
+      assert.equal(feedbackResult.acceptance?.ready, true)
+      assert.equal(dispatchCalls, 1)
+    } finally {
+      restoreDispatch()
+      restoreUpdate()
+      restoreGetRun()
+      testable(developer).active.delete(session.id)
+      deleteSession(session.id)
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps readiness for dev-notes edits but invalidates it for package edits', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-ready-file-edits-'))
+    const developer = new PluginDeveloper()
+    const session = createSession(
+      { ...input, package: structuredClone(packageValue) },
+      'ready-file-edits'
+    )
+    session.workspaceDirectory = directory
+    const workspace = pluginWorkspace.open({ directory, task: input, package: packageValue })
+    markMechanicallyReady(session, directory)
+    const originalExecution = structuredClone(session.lastExecution)
+    const active = activeRun(session)
+    const restoreGetRun = replaceMethod(
+      agentRunStore,
+      'getRun',
+      (() => null) as typeof agentRunStore.getRun
+    )
+    try {
+      fs.writeFileSync(workspace.files.devNotes, '# 开发笔记\n\n- 已整理\n', 'utf8')
+      testable(developer).runtimeProject(active, {
+        type: 'tool.completed',
+        result: { callId: 'notes-edit', toolName: 'edit', ok: true, summary: 'updated dev notes' },
+        recovery: { codecVersion: 1, payload: '{}', contentHash: 'notes-edit' }
+      })
+
+      assert.deepEqual(session.lastExecution, originalExecution)
+      assert.equal(session.acceptance?.ready, true)
+
+      fs.writeFileSync(
+        workspace.files.code,
+        'async function scrape(ctx) { return { title: `Edited ${ctx.code}` }; }\n',
+        'utf8'
+      )
+      testable(developer).runtimeProject(active, {
+        type: 'tool.completed',
+        result: { callId: 'code-edit', toolName: 'edit', ok: true, summary: 'updated index.js' },
+        recovery: { codecVersion: 1, payload: '{}', contentHash: 'code-edit' }
+      })
+
+      assert.equal(session.lastExecution, undefined)
+      assert.equal(session.acceptance, undefined)
+    } finally {
+      restoreGetRun()
+      deleteSession(session.id)
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('does not run hidden production execution when Pi settles without a current artifact', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-natural-failed-'))
+    const developer = new PluginDeveloper()
+    const session = createSession({ ...input, package: structuredClone(packageValue) }, 'natural-failed')
+    session.workspaceDirectory = directory
+    pluginWorkspace.open({ directory, task: input, package: packageValue })
+    const events: PluginDevAgentEvent[] = []
+    const active = { ...activeRun(session), emit: (event: PluginDevAgentEvent) => events.push(event) }
+    testable(developer).active.set(session.id, active)
+    const restoreGetRun = replaceMethod(agentRunStore, 'getRun', (() => null) as typeof agentRunStore.getRun)
+    try {
+      testable(developer).runtimeProject(active, {
+        type: 'agent.settled',
+        acceptedCommandIds: ['natural-working-operation']
+      })
+      assert.equal(session.status, 'waiting_user')
+      assert.equal(session.phase, 'working')
+      assert.equal(session.lastExecution, undefined)
+      assert.equal(events.some((event) => event.type === 'execution_updated'), false)
+      assert.match(active.summary, /显式调用完整 plugin_dry_run/)
+    } finally {
+      restoreGetRun()
+      testable(developer).active.delete(session.id)
+      deleteSession(session.id)
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('projects a model-turn limit into waiting_user/working without running a hidden check', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-turn-limit-working-'))
+    const developer = new PluginDeveloper()
+    const session = createSession({ ...input, package: structuredClone(packageValue) }, 'turn-limit-working')
+    session.workspaceDirectory = directory
+    pluginWorkspace.open({ directory, task: input, package: packageValue })
+    const events: PluginDevAgentEvent[] = []
+    const active = { ...activeRun(session), emit: (event: PluginDevAgentEvent) => events.push(event) }
+    testable(developer).active.set(session.id, active)
+    const restoreGetRun = replaceMethod(agentRunStore, 'getRun', (() => null) as typeof agentRunStore.getRun)
+    try {
+      const projection = testable(developer).runtimeProject(active, {
+        type: 'limit.reached',
+        resource: 'model-turns',
+        current: 4,
+        limit: 4
+      })
+      assert.equal(session.status, 'waiting_user')
+      assert.equal(session.phase, 'working')
+      assert.equal(session.lastExecution, undefined)
+      assert.equal(events.some((event) => event.type === 'execution_updated'), false)
+      assert.match(active.summary, /模型轮次上限/)
+      assert.equal(projection.status, 'waiting_user')
+    } finally {
+      restoreGetRun()
+      testable(developer).active.delete(session.id)
+      deleteSession(session.id)
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('allows installation only for the exact full production execution artifact', () => {
+    const developer = new PluginDeveloper()
+    const session = createSession({ ...input, package: structuredClone(packageValue) }, 'ready-install-gate')
+    session.lastExecution = {
+      runtimeVersion: PLUGIN_RUNTIME_VERSION,
+      artifactHash: pluginArtifactHash(session.package),
+      targetFingerprint: pluginRunTargetFingerprint(session.runTargets),
+      scope: 'all',
+      targets: structuredClone(session.runTargets),
+      cases: session.runTargets.map((target) => ({
+        target,
+        pluginResult: { code: 'ABC-123', title: 'unchecked' },
+        effectiveResult: { code: 'ABC-123', title: 'unchecked' },
+        manifestCoverage: {
+          returnedFieldIds: ['title'],
+          undeclaredReturnedFieldIds: [],
+          runtimeOnlyKeys: []
+        },
+        logs: [],
+        runtimeAccepted: true
+      })),
+      reportPath: '/tmp/report.json',
+      executionPassed: true
+    }
+    testable(developer).active.set(session.id, activeRun(session))
+    try {
+      assert.doesNotThrow(() => developer.assertReadyArtifact(session.id, session.package))
+      assert.throws(() => developer.assertReadyArtifact(session.id, {
+        ...session.package,
+        code: `${session.package.code}\n// changed`
+      }), /不能安装/)
+      session.lastExecution.targetFingerprint = pluginRunTargetFingerprint([{ kind: 'video', code: 'OTHER' }])
+      assert.throws(() => developer.assertReadyArtifact(session.id, session.package), /不能安装/)
+      session.workspaceDraftError = 'plugin.json 暂时无效'
+      assert.throws(
+        () => developer.assertReadyArtifact(session.id, session.package),
+        /工作区当前无效/
+      )
+      session.workspaceDraftError = undefined
+      assert.throws(() => developer.assertReadyArtifact(session.id, {
+        ...session.package,
+        code: `${session.package.code}\n// changed after stop`
+      }), /不能安装/)
+    } finally {
+      testable(developer).active.delete(session.id)
+      deleteSession(session.id)
+    }
+  })
+
+  it('marks the session completed only after the accepted artifact is installed', async () => {
+    const developer = new PluginDeveloper()
+    const session = createSession(
+      { ...input, package: structuredClone(packageValue) },
+      'installed-lifecycle'
+    )
+    session.status = 'waiting_user'
+    session.phase = 'ready'
+    session.lastExecution = {
+      runtimeVersion: PLUGIN_RUNTIME_VERSION,
+      artifactHash: pluginArtifactHash(session.package),
+      targetFingerprint: pluginRunTargetFingerprint(session.runTargets),
+      scope: 'all',
+      targets: structuredClone(session.runTargets),
+      cases: session.runTargets.map((target) => ({
+        target,
+        pluginResult: { code: 'ABC-123', title: 'unchecked' },
+        effectiveResult: { code: 'ABC-123', title: 'unchecked' },
+        manifestCoverage: {
+          returnedFieldIds: ['title'],
+          undeclaredReturnedFieldIds: [],
+          runtimeOnlyKeys: []
+        },
+        logs: [],
+        runtimeAccepted: true
+      })),
+      reportPath: '/tmp/report.json',
+      executionPassed: true
+    }
+    const gate = pluginRunAcceptance.evaluate({
+      package: session.package,
+      targets: session.runTargets,
+      execution: session.lastExecution
+    })
+    session.acceptance = gate.outcome
+    const events: PluginDevAgentEvent[] = []
+    const active = { ...activeRun(session), emit: (event: PluginDevAgentEvent) => events.push(event) }
+    testable(developer).active.set(session.id, active)
+    const restoreGetRun = replaceMethod(agentRunStore, 'getRun', (() => null) as typeof agentRunStore.getRun)
+    const restoreDiscard = replaceMethod(toolHost, 'discardApprovals', (() => undefined) as typeof toolHost.discardApprovals)
+    const restoreDispose = replaceMethod(toolHost, 'disposeRun', (() => undefined) as typeof toolHost.disposeRun)
+    const restoreRelease = replaceMethod(agentExecution, 'releaseRun', (async () => undefined) as typeof agentExecution.releaseRun)
+    try {
+      developer.markInstalled(session.id, session.package)
+
+      assert.equal(session.status, 'completed')
+      assert.equal(session.phase, 'ready')
+      assert.ok(session.endedAt)
+      assert.equal(events.some((event) => event.type === 'done' && event.success), true)
+    } finally {
+      restoreRelease()
+      restoreDispose()
+      restoreDiscard()
+      restoreGetRun()
+      testable(developer).active.delete(session.id)
+      deleteSession(session.id)
+    }
+  })
+})

@@ -8,10 +8,10 @@ export const IPC = {
   SETTINGS_PICK_FOLDER: 'settings:pickFolder',
   SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW: 'settings:libraryPathRemovePreview',
   SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM: 'settings:libraryPathRemoveConfirm',
-  SETTINGS_LLM_TEST_MODEL: 'settings:llmTestModel',
-  SETTINGS_LLM_LIST_MODELS: 'settings:llmListModels',
-  SETTINGS_LLM_PROVIDER_CONFIG_SAVE: 'settings:llmProviderConfigSave',
-  SETTINGS_LLM_PROVIDER_DELETE: 'settings:llmProviderDelete',
+  SETTINGS_MODEL_MANAGEMENT_GET: 'settings:modelManagementGet',
+  SETTINGS_MODEL_MANAGEMENT_APPLY: 'settings:modelManagementApply',
+  SETTINGS_MODEL_MANAGEMENT_DISCOVER_MODELS: 'settings:modelManagementDiscoverModels',
+  SETTINGS_MODEL_MANAGEMENT_TEST_MODEL: 'settings:modelManagementTestModel',
   SETTINGS_RECOVERY_REVEAL_BACKUP: 'settings:recoveryRevealBackup',
   SETTINGS_PROXY_TEST: 'settings:proxyTest',
   SETTINGS_OVERVIEW_STATS: 'settings:overviewStats',
@@ -191,11 +191,18 @@ export const IPC = {
   PLUGIN_DEV_AGENT_START: 'pluginDev:agentStart',
   PLUGIN_DEV_AGENT_MESSAGE: 'pluginDev:agentMessage',
   PLUGIN_DEV_AGENT_CANCEL: 'pluginDev:agentCancel',
+  PLUGIN_DEV_AGENT_SNAPSHOT: 'pluginDev:agentSnapshot',
+  PLUGIN_DEV_AGENT_CLEAR_HISTORY: 'pluginDev:agentClearHistory',
   PLUGIN_DEV_AGENT_EVENT: 'pluginDev:agentEvent', // main -> renderer event
   PLUGIN_DEV_AGENT_EXPORT_WORK_LOG: 'pluginDev:agentExportWorkLog',
   PLUGIN_DEV_DRY_RUN: 'pluginDev:dryRun',
-  PLUGIN_DEV_VERIFY: 'pluginDev:verify',
   PLUGIN_DEV_INSTALL: 'pluginDev:install',
+
+  // Read-only library curator Agent
+  LIBRARY_CURATOR_START: 'libraryCurator:start',
+  LIBRARY_CURATOR_MESSAGE: 'libraryCurator:message',
+  LIBRARY_CURATOR_CANCEL: 'libraryCurator:cancel',
+  LIBRARY_CURATOR_SNAPSHOT: 'libraryCurator:snapshot',
 
   // Player
   PLAYER_PLAY: 'player:play',

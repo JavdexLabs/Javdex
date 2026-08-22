@@ -1,0 +1,163 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden auto;
+  padding-right: var(--scrollbar-safe-pad);
+  scrollbar-gutter: stable;
+}
+
+.banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.banner span:last-child {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.success {
+  border: 1px solid color-mix(in srgb, var(--success) 40%, var(--border-subtle));
+  background: color-mix(in srgb, var(--success) 10%, var(--surface-panel));
+  color: var(--success);
+}
+
+.failure {
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border-subtle));
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface-panel));
+  color: var(--danger);
+}
+
+.warning {
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border-subtle));
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface-panel));
+  color: var(--warning);
+}
+
+.info {
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-control);
+  color: var(--text-secondary);
+}
+
+.installState {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dirty,
+.notInstalled {
+  border-color: color-mix(in srgb, var(--warning) 34%, var(--border-subtle));
+  color: var(--warning);
+}
+
+.synced {
+  border-color: color-mix(in srgb, var(--success) 34%, var(--border-subtle));
+  color: var(--success);
+}
+
+.resultKv {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden auto;
+  padding-inline-end: var(--scrollbar-safe-pad);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  scrollbar-gutter: stable;
+}
+
+.resultKvRow {
+  display: grid;
+  grid-template-columns: minmax(96px, 118px) minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-height: 30px;
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 12px;
+}
+
+.resultKvRow:first-child {
+  border-top: 0;
+}
+
+.resultKvRow > span:first-child {
+  min-width: 0;
+  padding-top: 1px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.resultKvRow > span:last-child {
+  min-width: 0;
+  max-height: 9rem;
+  overflow: hidden auto;
+  overflow-wrap: anywhere;
+  padding-inline-end: var(--scrollbar-safe-pad);
+  color: var(--text-primary);
+  line-height: 1.45;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  white-space: pre-wrap;
+}
+
+.resultSection {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel);
+}
+
+.resultSection h4 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.resultCase {
+  flex-shrink: 0;
+}
+
+.resultCase > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.statusOk {
+  color: var(--success);
+}
+
+.statusFail,
+.caseError {
+  color: var(--danger);
+}
+
+.caseError {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}

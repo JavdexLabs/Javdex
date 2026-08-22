@@ -53,6 +53,7 @@ export default function PluginDevConfigRail({
   hasPackage,
   canResumeAgent,
   agentCompleted,
+  agentReady,
   feedbackPending,
   agentDisabledReason,
   agentPrimaryDisabledReason,
@@ -90,6 +91,7 @@ export default function PluginDevConfigRail({
   hasPackage: boolean
   canResumeAgent: boolean
   agentCompleted: boolean
+  agentReady: boolean
   feedbackPending: boolean
   agentDisabledReason: string | null
   agentPrimaryDisabledReason: string | null
@@ -122,14 +124,16 @@ export default function PluginDevConfigRail({
     : canResumeAgent
       ? feedbackPending
         ? '继续修复'
-        : agentCompleted
-          ? '已完成'
-          : '继续 Agent'
-    : isDebugMode
-      ? 'AI调试'
-      : hasPackage
-        ? '继续开发'
-      : 'AI开发'
+        : agentReady
+          ? '输入反馈后继续'
+          : agentCompleted
+            ? '已完成'
+            : '继续 Agent'
+      : isDebugMode
+        ? 'AI调试'
+        : hasPackage
+          ? '继续开发'
+          : 'AI开发'
   const appendTestTarget = (value: string): void => {
     const nextValue = value.trim()
     if (!nextValue) return
@@ -230,8 +234,8 @@ export default function PluginDevConfigRail({
             value={testTarget}
             placeholder={
               isDebugMode
-                ? `填写一个${profile.testTargetShortLabel}`
-                : `可选；多个${profile.testTargetShortLabel}可用换行、空格或逗号分隔`
+                ? `填写一个或多个${profile.testTargetShortLabel}；多个用换行或逗号分隔`
+                : `可选；多个${profile.testTargetShortLabel}可用换行或逗号分隔`
             }
             disabled={busy}
             aria-required={testTargetRequired}
@@ -277,20 +281,28 @@ export default function PluginDevConfigRail({
           </label>
         </div>
 
-        <PluginDevFieldTags
-          kind={kind}
-          supportedFieldIds={supportedFields}
-          fieldLabel={fieldLabel}
-          busy={busy}
-          onChange={onSupportedFieldsChange}
-        />
+        {!hasPackage && !isDebugMode ? (
+          <div className="plugin-edit-control plugin-dev-field-discovery">
+            <span>支持字段</span>
+            <small className="plugin-edit-control-hint">
+              Create 模式不预设字段；Agent 将根据详情页自行探索并填写最终支持字段。
+            </small>
+          </div>
+        ) : (
+          <PluginDevFieldTags
+            kind={kind}
+            supportedFieldIds={supportedFields}
+            fieldLabel={fieldLabel}
+            busy={busy}
+            onChange={onSupportedFieldsChange}
+          />
+        )}
       </div>
 
       <div className="plugin-dev-config-actions">
         <Button
           type="button"
-          variant="primary"
-
+          variant={canInstall ? 'default' : 'primary'}
           size="sm"
           disabled={busy || !canUseAgent || agentBusy || Boolean(agentPrimaryDisabledReason)}
           title={agentPrimaryDisabledReason ?? undefined}
@@ -300,7 +312,7 @@ export default function PluginDevConfigRail({
         </Button>
         <Button
           type="button"
-
+          variant={canInstall ? 'primary' : 'default'}
           size="sm"
           className="plugin-dev-config-actions-install"
           disabled={busy || !hasPackage || !canInstall}

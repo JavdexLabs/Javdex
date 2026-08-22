@@ -695,8 +695,6 @@ export default function SettingsPage(): JSX.Element {
   const pluginDevPage = (
     <SettingsPluginDevShell>
       <PluginDevPanel
-        settings={settings}
-        setSettings={setSettings}
         loadPackage={devLoadPackage}
         onLoadConsumed={clearDevLoadPackage}
         onInstalled={handleInstalled}
@@ -823,7 +821,7 @@ export default function SettingsPage(): JSX.Element {
               )}
 
               {activeGroup.id === 'models' && activeTab === 'providers' && (
-                <ModelSettingsPanel settings={settings} onSettingsChange={setSettings} />
+                <ModelSettingsPanel settings={settings} />
               )}
 
               {activeGroup.id === 'network' && activeTab === 'proxy' && settings && (

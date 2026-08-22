@@ -26,10 +26,6 @@
   .library-scan-note,
   .library-scan-duration-label,
   .settings-number-stepper__unit,
-  .llm-provider-card-tag,
-  .llm-provider-status,
-  .llm-provider-card-meta dt,
-  .llm-models-row-copy span,
   .scan-unrec-rename > summary,
   .scan-unrec-dir
 ) {
@@ -52,7 +48,6 @@
   .media-path-empty,
   .library-scan-status,
   .field-row--stacked label,
-  .llm-provider-card-meta dd,
   .plugin-empty-state,
   .scan-unrec-name,
   .scan-unrec-rename
@@ -65,7 +60,6 @@
   .settings-capability-row strong,
   .settings-interval-row strong,
   .settings-overview-agent-tool-copy strong,
-  .llm-models-row-copy strong,
   .batch-log-stats strong
 ) {
   font-size: var(--settings-fs-body, 13px);

@@ -2,6 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-08-20
+- 实施：2026-08-20（Pi 成为唯一 Agent runtime，legacy runtime 已删除）
 
 ## 背景
 
@@ -71,7 +72,7 @@ RuntimePort 只隔离第三方类型和支持 adapter wiring 测试。它表达�
 
 它不暴露 messages、continue、checkpoint、retry、tool batch 或 provider client。运行中的 Pi session 不承诺迁移到其他 runtime。
 
-所有 Pi import 只允许出现在 main 的 Pi adapter 目录。legacy runner 不实现 RuntimePort，只留在 PluginDeveloper 的迁移分支。
+所有 Pi import 只允许出现在 main 的 Pi adapter 目录。legacy runner、手写 transcript/compression 与 provider tool-chat adapter 已删除。
 
 ### 5. Pi session/checkpoint 是首选 runtime state
 
@@ -135,7 +136,7 @@ AgentDefinition 与 ToolPack 在 composition root 静态注册，不建立 compi
 - 对 Pi 0.x 和 session 格式存在有意识的依赖，需要精确 pin 与 golden-session upgrade tests。
 - RuntimePort 不提供运行中跨 runtime 可移植性。
 - ExecutionHistory 冷恢复需要额外存储、加密和 codec 测试，但不能变成第二个 live transcript。
-- Pi 0.84.2 没有 createAgentSession 级 cache options，且 summary 默认禁用 cache；需要 adapter 内的局部 stream-options bridge，或升级到带 request-purpose hook 的版本。
+- Pi 0.84.2 没有 createAgentSession 级 cache options；adapter 已在首个 prompt 前安装局部 stream-options bridge，按 primary/summarizer role 注入冻结的 affinity 与 retention。
 - Pi 0.84.2 的 compaction summary 使用 primary model；配置可保留 summarizer role，但 v1 必须解析到同一模型，直到上游提供独立 summary-model hook。
 - AgentSession 的部分观察回调不可 await，adapter 必须维护 durable observation queue，并在下一次 provider call 前 flush；这只是提交屏障，不是 next-turn scheduler。
 

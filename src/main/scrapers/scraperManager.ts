@@ -21,7 +21,7 @@ import {
   videoScrapeApplyService
 } from '../services/videoScrapeApplyService'
 import { getSettings } from '../settings/settingsStore'
-import { scrapeBrowser } from './scrapeBrowser'
+import { isScrapeBrowserBusyError, scrapeBrowser } from './scrapeBrowser'
 import { mediaAssetStore } from '../services/mediaAssetStore'
 import { normalizeVideoCode } from '@shared/videoCode'
 
@@ -576,7 +576,7 @@ export async function scrapeVideo(
       directorChoice: delivery.directorChoice
     }
   } catch (err) {
-    markScrapeFailed(videoId)
+    if (!isScrapeBrowserBusyError(err)) markScrapeFailed(videoId)
     return { ok: false, error: (err as Error).message }
   } finally {
     if (options?.closeBrowser !== false) {

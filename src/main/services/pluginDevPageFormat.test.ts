@@ -64,4 +64,23 @@ describe('pluginDevPageFormat', () => {
     assert.match(prompt, /DEFINITION_LISTS/)
     assert.match(prompt, /metadata 区链接优先/)
   })
+
+  it('keeps forms and prioritized links when raw DOM regions are very large', () => {
+    const prompt = formatPageInsightForPrompt({
+      ...tokyolibPage,
+      forms: [{
+        selector: '#search',
+        method: 'get',
+        action: '/search',
+        inputs: [{ selector: '#keyword', name: 'q', type: 'text' }],
+        buttons: []
+      }],
+      links: [{ text: 'MILK-295', href: '/videos/milk-295', region: 'other' }],
+      domRegions: [{ label: '巨型主区块', selector: 'main', html: 'x'.repeat(20_000) }]
+    })
+
+    assert.match(prompt, /#keyword/)
+    assert.match(prompt, /MILK-295 -> \/videos\/milk-295/)
+    assert.ok(Array.from(prompt).length <= 12_000)
+  })
 })

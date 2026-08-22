@@ -1,5 +1,11 @@
 import { IPC } from './ipc-channels'
-import type { LlmModelDefinition } from './llmProviders'
+import type {
+  ModelCandidate,
+  ModelManagementApplyInput,
+  ModelManagementApplyResult,
+  ModelManagementSnapshot,
+  ModelTestResult
+} from './modelManagementTypes'
 import type {
   AssetCryptoProgress,
   LibraryOverviewStats,
@@ -26,18 +32,22 @@ import type {
 import type {
   PluginDevAgentEvent,
   PluginDevAgentMessageInput,
+  PluginDevAgentSnapshot,
   PluginDevAgentSessionResult,
   PluginDevAgentStartInput,
   PluginDevDryRunInput,
   PluginDevDryRunResult,
-  PluginDevInstallInput,
-  PluginDevVerificationReport,
-  PluginDevVerifyInput
+  PluginDevInstallInput
 } from './pluginDevTypes'
 import type { ScraperPluginDescriptor } from './scraperPluginTypes'
 import type { RendererSettingsPatch, SettingsSnapshot } from './settingsTypes'
 import type { VideoResourceImportTarget } from './videoTypes'
-import type { LlmProviderConfigSaveInput } from './llmProviders'
+import type {
+  LibraryCuratorMessageInput,
+  LibraryCuratorResult,
+  LibraryCuratorSnapshot,
+  LibraryCuratorStartInput
+} from './libraryCuratorTypes'
 import type {
   IpcContractArgs,
   IpcContractChannel,
@@ -101,15 +111,18 @@ export interface AppIpcContract {
     result: LibraryPathRemovalPreview
   }
   [IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM]: { args: [path: string]; result: SettingsSnapshot }
-  [IPC.SETTINGS_LLM_TEST_MODEL]: { args: [providerId: string, modelId: string]; result: string }
-  [IPC.SETTINGS_LLM_LIST_MODELS]: { args: [providerId: string]; result: LlmModelDefinition[] }
-  [IPC.SETTINGS_LLM_PROVIDER_CONFIG_SAVE]: {
-    args: [input: LlmProviderConfigSaveInput]
-    result: SettingsSnapshot
+  [IPC.SETTINGS_MODEL_MANAGEMENT_GET]: { args: []; result: ModelManagementSnapshot }
+  [IPC.SETTINGS_MODEL_MANAGEMENT_APPLY]: {
+    args: [input: ModelManagementApplyInput]
+    result: ModelManagementApplyResult
   }
-  [IPC.SETTINGS_LLM_PROVIDER_DELETE]: {
-    args: [providerId: string]
-    result: SettingsSnapshot
+  [IPC.SETTINGS_MODEL_MANAGEMENT_DISCOVER_MODELS]: {
+    args: [connectionId: string]
+    result: ModelCandidate[]
+  }
+  [IPC.SETTINGS_MODEL_MANAGEMENT_TEST_MODEL]: {
+    args: [modelRef: string]
+    result: ModelTestResult
   }
   [IPC.SETTINGS_RECOVERY_REVEAL_BACKUP]: { args: []; result: boolean }
   [IPC.SETTINGS_PROXY_TEST]: { args: [kind: 'scrape' | 'llm', proxyUrl: string]; result: string }
@@ -227,15 +240,29 @@ export interface AppIpcContract {
     result: PluginDevAgentSessionResult
   }
   [IPC.PLUGIN_DEV_AGENT_CANCEL]: { args: [sessionId: string]; result: void }
+  [IPC.PLUGIN_DEV_AGENT_SNAPSHOT]: {
+    args: [sessionId?: string]
+    result: PluginDevAgentSnapshot | null
+  }
+  [IPC.PLUGIN_DEV_AGENT_CLEAR_HISTORY]: { args: []; result: number }
   [IPC.PLUGIN_DEV_AGENT_EXPORT_WORK_LOG]: { args: [sessionId: string]; result: string | null }
   [IPC.PLUGIN_DEV_DRY_RUN]: { args: [input: PluginDevDryRunInput]; result: PluginDevDryRunResult }
-  [IPC.PLUGIN_DEV_VERIFY]: {
-    args: [input: PluginDevVerifyInput]
-    result: PluginDevVerificationReport
-  }
   [IPC.PLUGIN_DEV_INSTALL]: {
     args: [input: PluginDevInstallInput]
     result: ScraperPluginDescriptor
+  }
+  [IPC.LIBRARY_CURATOR_START]: {
+    args: [input?: LibraryCuratorStartInput]
+    result: LibraryCuratorResult
+  }
+  [IPC.LIBRARY_CURATOR_MESSAGE]: {
+    args: [input: LibraryCuratorMessageInput]
+    result: LibraryCuratorResult
+  }
+  [IPC.LIBRARY_CURATOR_CANCEL]: { args: [runId: string]; result: void }
+  [IPC.LIBRARY_CURATOR_SNAPSHOT]: {
+    args: [runId?: string]
+    result: LibraryCuratorSnapshot | null
   }
 
   [IPC.PLAYER_PLAY]: { args: [videoId: number]; result: PlayResult }

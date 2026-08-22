@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { ActressScrapeResult, ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS, expandActressScrapeFields, ScraperPluginDescriptor, ScraperPluginKind, ScraperPluginPackage, type ActressScrapeField, type CompositeScraperInput, type ScraperPluginDelay, type ScraperPluginUpdateInput, type VideoScrapeField, type ScraperPluginPackageExport, type ScraperPluginPackageImport } from '@shared/scrapeTypes'
 import type { VideoPluginScrapeResult } from '@shared/videoScrapeTypes'
 import type { ScraperServiceId } from '@shared/scraperServiceTypes'
@@ -178,10 +179,10 @@ export async function installScraperPluginPackage(
   await validatePluginCode(normalized)
 
   const dir = pluginInstallDir(normalized.kind, normalized.name)
-  if (options.overwriteUser && fs.existsSync(dir)) {
-    fs.rmSync(dir, { recursive: true, force: true })
-  }
-  fs.mkdirSync(dir, { recursive: true })
+  const parent = path.dirname(dir)
+  const token = randomUUID()
+  const staging = path.join(parent, `.${path.basename(dir)}.install-${token}`)
+  const backup = path.join(parent, `.${path.basename(dir)}.backup-${token}`)
   const manifest: StoredPluginManifest = {
     schemaVersion: PLUGIN_SCHEMA_VERSION,
     kind: normalized.kind,
@@ -193,8 +194,29 @@ export async function installScraperPluginPackage(
     supportedFields: normalizeSupportedFields(normalized.kind, normalized.supportedFields),
     entry: 'index.cjs'
   }
-  fs.writeFileSync(path.join(dir, 'plugin.json'), JSON.stringify(manifest, null, 2), 'utf-8')
-  fs.writeFileSync(path.join(dir, manifest.entry), normalized.code, 'utf-8')
+  fs.mkdirSync(staging, { recursive: true })
+  try {
+    fs.writeFileSync(path.join(staging, 'plugin.json'), JSON.stringify(manifest, null, 2), 'utf-8')
+    fs.writeFileSync(path.join(staging, manifest.entry), normalized.code, 'utf-8')
+    const replacing = options.overwriteUser === true && fs.existsSync(dir)
+    if (replacing) fs.renameSync(dir, backup)
+    try {
+      fs.renameSync(staging, dir)
+    } catch (error) {
+      if (replacing && fs.existsSync(backup) && !fs.existsSync(dir)) fs.renameSync(backup, dir)
+      throw error
+    }
+    if (replacing && fs.existsSync(backup)) {
+      try {
+        fs.rmSync(backup, { recursive: true, force: true })
+      } catch {
+        // The new directory is already committed. A leftover hidden backup is safer than
+        // reporting a failed install after the visible plugin has actually changed.
+      }
+    }
+  } finally {
+    if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true })
+  }
   return toDescriptor(manifest)
 }
 
@@ -782,7 +804,7 @@ export function defaultSupportedFields(
   return kind === 'video' ? ALL_VIDEO_SCRAPE_FIELDS : ALL_ACTRESS_SCRAPE_FIELDS
 }
 
-function normalizeSupportedFields(
+export function normalizeSupportedFields(
   kind: ScraperPluginKind,
   fields: unknown
 ): Array<VideoScrapeField | ActressScrapeField> {

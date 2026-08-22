@@ -47,6 +47,7 @@ export interface ResolvedPiModelDescriptor {
 
 export interface ResolvedModelPreset {
   thinkingLevel: 'minimal' | 'low' | 'medium' | 'high'
+  /** Effective positive output limit frozen for this run; never the configuration sentinel 0. */
   maxTokens: number
   timeoutMs: number
   cacheRetention: ModelCacheRetention
@@ -72,6 +73,18 @@ export interface RuntimeCachePolicy {
 export interface PiRuntimeSettingsProjection {
   compaction: AgentProfile['compaction']
   retry: { enabled: boolean; maxRetries: number; baseDelayMs: number }
+  /** Per product operation; 0/undefined means unlimited. */
+  maxTurns?: number
+}
+
+export type PiNativeToolName = 'read' | 'write' | 'edit' | 'grep' | 'find' | 'ls' | 'bash'
+
+/** Frozen, allowlisted Pi resources. Paths are resolved below sessionDirectory only. */
+export interface PiRuntimeResources {
+  nativeTools: PiNativeToolName[]
+  skillNames: string[]
+  /** SHA-256 by skill name; prevents a restored run from silently changing its Skill contract. */
+  skillHashes?: Record<string, string>
 }
 
 export interface HostedToolResult {
@@ -110,6 +123,7 @@ export interface RuntimeSessionInit {
   systemPrompt: StableSystemPrompt
   tools: readonly HostedToolBinding[]
   settings: PiRuntimeSettingsProjection
+  resources?: PiRuntimeResources
   sessionDirectory: string
 }
 
@@ -119,6 +133,15 @@ export interface MessageAuditView {
   role: 'user' | 'assistant' | 'tool' | 'other'
   textPreview: string
   contentHash: string
+  /** Provider-normalized reason for ending this message. */
+  stopReason?: string
+  /** Provider-native finish reason when it differs from stopReason. */
+  rawStopReason?: string
+  /** Safe audit metrics; a product use case may separately project a bounded display copy. */
+  textChars?: number
+  reasoningChars?: number
+  toolCallCount?: number
+  contentTypes?: string[]
 }
 
 export interface RuntimeRecoveryFrame {
@@ -148,6 +171,7 @@ export interface NormalizedModelUsage {
   input: number
   uncachedInput: number
   output: number
+  reasoning: number
   cacheRead: number
   cacheWrite: number
   totalInput: number
@@ -162,6 +186,7 @@ export interface NormalizedModelUsage {
 export interface CompactionAuditView {
   reason: 'manual' | 'threshold' | 'overflow'
   tokensBefore?: number
+  tokensAfter?: number
   firstKeptEntryId?: string
   summaryHash?: string
 }
@@ -185,6 +210,7 @@ export type RuntimeObservation =
   | { type: 'retry.changed'; phase: 'start' | 'end'; attempt: number }
   | { type: 'compaction.changed'; phase: 'start' | 'end'; result?: CompactionAuditView }
   | { type: 'usage'; usage: NormalizedModelUsage }
+  | { type: 'limit.reached'; resource: 'model-turns'; current: number; limit: number }
   | { type: 'session.saved'; ref: OpaqueRuntimeSessionRef }
   | { type: 'agent.settled'; acceptedCommandIds: readonly AgentOperationId[] }
   | { type: 'runtime.fault'; category: RuntimeFaultCategory; message: string }
@@ -241,10 +267,13 @@ export interface ResolvedRunConfiguration {
   definitionId: string
   profile: AgentProfile
   model: ResolvedModelAccess
+  /** Frozen separately because verifier requests do not flow through the Pi primary runtime. */
+  verifierModel?: ResolvedModelAccess
   cache: RuntimeCachePolicy
   systemPrompt: StableSystemPrompt
   tools: readonly HostedToolBinding[]
   settings: PiRuntimeSettingsProjection
+  resources?: PiRuntimeResources
   sessionDirectory: string
 }
 
@@ -261,8 +290,11 @@ export interface PersistedRunConfigurationSnapshot {
   definitionId: string
   profile: AgentProfile
   model: FrozenModelAccessSnapshot
+  /** Missing only on legacy snapshots created before verifier routes were frozen. */
+  verifierModel?: FrozenModelAccessSnapshot
   cache: RuntimeCachePolicy
   systemPrompt: StableSystemPrompt
   tools: Array<Omit<HostedToolBinding, 'invoke'>>
   settings: PiRuntimeSettingsProjection
+  resources?: PiRuntimeResources
 }

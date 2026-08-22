@@ -60,15 +60,14 @@ import type { PendingVideoScrapeConfirmInput } from '../shared/videoScrapeTypes'
 import type { LibraryScanEvent, PendingScanGroupResolution } from '../shared/libraryTypes'
 import type { BatchProgress } from '../shared/batchScrapeTypes'
 import type { RendererSettingsPatch } from '../shared/settingsTypes'
-import type { LlmProviderConfigSaveInput } from '../shared/llmProviders'
-import type { AIConfigurationUpdateInput } from '../shared/aiConfigurationTypes'
+import type { ModelManagementApplyInput } from '../shared/modelManagementTypes'
 import type { ScanProgress, AssetCryptoProgress } from '../shared/libraryTypes'
 import type { ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../shared/actressTypes'
 import type { IpcResponse } from '../shared/ipcTypes'
 import type { InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
 import type { SortDir } from '../shared/commonTypes'
 import type { PlaylistCreateInput, PlaylistUpdateInput, PlaylistVideoSortBy } from '../shared/playlistTypes'
-import type { PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevInstallInput, PluginDevVerifyInput } from '../shared/pluginDevTypes'
+import type { PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevInstallInput } from '../shared/pluginDevTypes'
 import type {
   ClassificationEntityRef,
   ClassificationImageInput,
@@ -163,17 +162,13 @@ const api = {
       invokeApp(IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW, path),
     confirmLibraryPathRemoval: (path: string) =>
       invokeApp(IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM, path),
-    testLlmModel: (providerId: string, modelId: string) =>
-      invokeApp(IPC.SETTINGS_LLM_TEST_MODEL, providerId, modelId),
-    listLlmModels: (providerId: string) =>
-      invokeApp(IPC.SETTINGS_LLM_LIST_MODELS, providerId),
-    saveLlmProviderConfig: (input: LlmProviderConfigSaveInput) =>
-      invokeApp(IPC.SETTINGS_LLM_PROVIDER_CONFIG_SAVE, input),
-    deleteLlmProvider: (providerId: string) =>
-      invokeApp(IPC.SETTINGS_LLM_PROVIDER_DELETE, providerId),
-    getAIConfiguration: () => invokeApp(IPC.SETTINGS_AI_CONFIGURATION_GET),
-    updateAIConfiguration: (input: AIConfigurationUpdateInput) =>
-      invokeApp(IPC.SETTINGS_AI_CONFIGURATION_UPDATE, input),
+    getModelManagement: () => invokeApp(IPC.SETTINGS_MODEL_MANAGEMENT_GET),
+    applyModelManagement: (input: ModelManagementApplyInput) =>
+      invokeApp(IPC.SETTINGS_MODEL_MANAGEMENT_APPLY, input),
+    discoverManagedModels: (connectionId: string) =>
+      invokeApp(IPC.SETTINGS_MODEL_MANAGEMENT_DISCOVER_MODELS, connectionId),
+    testManagedModel: (modelRef: string) =>
+      invokeApp(IPC.SETTINGS_MODEL_MANAGEMENT_TEST_MODEL, modelRef),
     revealRecoveryBackup: () => invokeApp(IPC.SETTINGS_RECOVERY_REVEAL_BACKUP),
     testProxy: (kind: 'scrape' | 'llm', proxyUrl: string) =>
       invokeApp(IPC.SETTINGS_PROXY_TEST, kind, proxyUrl),
@@ -480,12 +475,11 @@ const api = {
       invokeApp(IPC.PLUGIN_DEV_AGENT_MESSAGE, input),
     cancel: (sessionId: string) => invokeApp(IPC.PLUGIN_DEV_AGENT_CANCEL, sessionId),
     snapshot: (sessionId?: string) => invokeApp(IPC.PLUGIN_DEV_AGENT_SNAPSHOT, sessionId),
+    clearHistory: () => invokeApp(IPC.PLUGIN_DEV_AGENT_CLEAR_HISTORY),
     exportWorkLog: (sessionId: string) =>
       invokeApp(IPC.PLUGIN_DEV_AGENT_EXPORT_WORK_LOG, sessionId),
     dryRun: (input: PluginDevDryRunInput) =>
       invokeApp(IPC.PLUGIN_DEV_DRY_RUN, input),
-    verify: (input: PluginDevVerifyInput) =>
-      invokeApp(IPC.PLUGIN_DEV_VERIFY, input),
     install: (input: PluginDevInstallInput) =>
       invokeApp(IPC.PLUGIN_DEV_INSTALL, input),
     onAgentEvent: (cb: (e: PluginDevAgentEvent) => void) =>

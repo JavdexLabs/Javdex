@@ -1,5 +1,6 @@
 import type { ResolvedLlmModelRequestConfig } from '../../llmClient'
 import { llmFetch } from '../../../utils/llmFetch'
+import type { JsonModelResponse } from './openaiChatAdapter'
 
 type AnthropicContentBlock =
   | { type: 'text'; text: string }
@@ -8,13 +9,19 @@ type AnthropicContentBlock =
 interface AnthropicMessagesPayload {
   content?: AnthropicContentBlock[]
   error?: { message?: string; type?: string }
+  usage?: {
+    input_tokens?: number
+    output_tokens?: number
+    cache_read_input_tokens?: number
+    cache_creation_input_tokens?: number
+  }
 }
 
 /** JSON-only non-Agent invocation. Agent tool streaming is owned by Pi. */
 export async function requestAnthropicJson<T>(
   messages: Array<{ role: 'system' | 'user'; content: string }>,
   config: ResolvedLlmModelRequestConfig
-): Promise<{ json: T; rawText: string }> {
+): Promise<JsonModelResponse<T>> {
   if (!config.messagesUrl) {
     throw new Error('Anthropic Messages 端点未配置')
   }
@@ -41,8 +48,8 @@ export async function requestAnthropicJson<T>(
     },
     body: JSON.stringify({
       model: config.modelId,
-      max_tokens: 12000,
-      temperature: 0.2,
+      max_tokens: config.maxTokens ?? 12000,
+      temperature: 0,
       system: config.useAnthropicPromptCache
         ? [{
             type: 'text',
@@ -56,7 +63,10 @@ export async function requestAnthropicJson<T>(
       messages: userMessages.length
         ? userMessages
         : [{ role: 'user', content: 'Respond with valid JSON only.' }]
-    })
+    }),
+    signal: config.signal
+      ? AbortSignal.any([config.signal, AbortSignal.timeout(config.timeoutMs ?? 120_000)])
+      : AbortSignal.timeout(config.timeoutMs ?? 120_000)
   })
 
   const text = await response.text()
@@ -81,7 +91,25 @@ export async function requestAnthropicJson<T>(
 
   const jsonText = extractJsonObject(rawText)
   try {
-    return { json: JSON.parse(jsonText) as T, rawText }
+    const input = payload.usage?.input_tokens ?? 0
+    const cacheRead = payload.usage?.cache_read_input_tokens ?? 0
+    const cacheWrite = payload.usage?.cache_creation_input_tokens ?? 0
+    const output = payload.usage?.output_tokens ?? 0
+    return {
+      json: JSON.parse(jsonText) as T,
+      rawText,
+      usage: payload.usage
+        ? {
+            input,
+            uncachedInput: input,
+            output,
+            reasoning: 0,
+            cacheRead,
+            cacheWrite,
+            totalTokens: input + cacheRead + cacheWrite + output
+          }
+        : undefined
+    }
   } catch {
     throw new Error(`Anthropic 未按 JSON 格式返回：${rawText.slice(0, 240)}`)
   }

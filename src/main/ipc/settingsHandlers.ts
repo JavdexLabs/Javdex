@@ -5,9 +5,7 @@ import { IPC } from '@shared/ipc-channels'
 import type { AppSettings, SettingsSnapshot } from '@shared/settingsTypes'
 import type { AssetCryptoProgress, LibraryOverviewStats } from '@shared/libraryTypes'
 import {
-  getEffectiveLlmApiKey,
   getLlmSecretMigrationError,
-  getPublicLlmProviderConfigs,
   getSettings,
   getSettingsRecoveryBackupPath,
   getSettingsRecoveryNotice,
@@ -22,7 +20,6 @@ import {
   resolveMediaAssetsRoot,
   validateMediaAssetsPath
 } from '../services/assetStoragePaths'
-import { listLlmProviderModels, testLlmModelConnection } from '../services/llmConnectionTest'
 import { testProxyConnection } from '../services/proxyConnectionTest'
 import { translateTextToChinese } from '../services/llmTextTranslate'
 import {
@@ -32,24 +29,23 @@ import {
 import { isSameLibraryPath } from '../scanner/libraryPathUtils'
 import type { IpcContext } from './shared'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
-import type { LlmModelDefinition } from '@shared/llmProviders'
-import { BUILT_IN_LLM_PROVIDER_BY_ID, normalizeDefaultLlmSelection } from '@shared/llmProviders'
-import {
-  deleteLlmApiKey,
-  getLlmSecretStorageState,
-  saveLlmApiKeys
-} from '../settings/llmSecretStore'
+import { getLlmSecretStorageState } from '../settings/llmSecretStore'
 import { isScraperPluginRunnable } from '../scrapers/scraperPluginService'
-import {
-  getAIConfigurationSnapshot,
-  saveAIConfiguration,
-  synchronizeAIConfigurationFromLegacySettings
-} from '../agent-platform/aiConfigurationRepository'
+import { ModelManagementError, modelManagement } from '../agent-platform/modelManagement'
 
 function toSettingsSnapshot(settings: AppSettings): SettingsSnapshot {
+  const {
+    defaultLlmProviderId: _defaultLlmProviderId,
+    defaultLlmModelId: _defaultLlmModelId,
+    llmProviderConfigs: _llmProviderConfigs,
+    customLlmProviders: _customLlmProviders,
+    llmCustomModels: _llmCustomModels,
+    pluginDevAgentMaxTurns: _pluginDevAgentMaxTurns,
+    pluginDevAgentMaxContextTokens: _pluginDevAgentMaxContextTokens,
+    ...publicSettings
+  } = settings
   return {
-    ...settings,
-    llmProviderConfigs: getPublicLlmProviderConfigs(settings),
+    ...publicSettings,
     mediaAssetsResolvedPath: resolveMediaAssetsRoot(),
     recoveryNotice: getSettingsRecoveryNotice(),
     llmSecretStorage: {
@@ -73,6 +69,13 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
       mediaAssetsPath: _ignoredPath,
       pendingLibraryPathCleanups: _ignoredCleanupQueue,
       lastLibraryScanSummary: _ignoredScanSummary,
+      defaultLlmProviderId: _ignoredDefaultLlmProviderId,
+      defaultLlmModelId: _ignoredDefaultLlmModelId,
+      llmProviderConfigs: _ignoredLlmProviderConfigs,
+      customLlmProviders: _ignoredCustomLlmProviders,
+      llmCustomModels: _ignoredLlmCustomModels,
+      pluginDevAgentMaxTurns: _ignoredPluginDevAgentMaxTurns,
+      pluginDevAgentMaxContextTokens: _ignoredPluginDevAgentMaxContextTokens,
       ...safePatch
     } = rawPatch
     if (
@@ -110,16 +113,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
         )
       }
     }
-    const updated = updateSettings(guardedPatch)
-    if (
-      safePatch.defaultLlmProviderId !== undefined ||
-      safePatch.defaultLlmModelId !== undefined ||
-      safePatch.customLlmProviders !== undefined ||
-      safePatch.llmCustomModels !== undefined
-    ) {
-      synchronizeAIConfigurationFromLegacySettings(updated)
-    }
-    return toSettingsSnapshot(updated)
+    return toSettingsSnapshot(updateSettings(guardedPatch))
   })
 
   appCommandAdapter.register(IPC.SETTINGS_PICK_FOLDER, async (): Promise<string[]> => {
@@ -144,102 +138,35 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
     return toSettingsSnapshot(confirmLibraryPathRemoval(libraryPath))
   })
 
-  appCommandAdapter.register(IPC.SETTINGS_LLM_PROVIDER_CONFIG_SAVE, (input) => {
-    const providerId = input.providerId.trim()
-    const settings = getSettings()
-    const exists = BUILT_IN_LLM_PROVIDER_BY_ID.has(providerId) ||
-      settings.customLlmProviders.some((provider) => provider.id === providerId)
-    if (!exists) throw new Error('未知的模型供应商')
-    if (input.protocol !== 'openai-chat' && input.protocol !== 'anthropic-messages') {
-      throw new Error('无效的接口协议')
-    }
-    const apiKey = input.apiKey?.trim() ?? ''
-    if (input.apiKeyAction === 'replace' && !apiKey) throw new Error('请填写 API Key')
+  appCommandAdapter.register(IPC.SETTINGS_MODEL_MANAGEMENT_GET, () => modelManagement.read())
 
-    const oldApiKey = getEffectiveLlmApiKey(providerId)
+  appCommandAdapter.register(IPC.SETTINGS_MODEL_MANAGEMENT_APPLY, (input) => {
     try {
-      if (input.apiKeyAction === 'replace') saveLlmApiKeys({ [providerId]: apiKey })
-      if (input.apiKeyAction === 'clear') deleteLlmApiKey(providerId)
-      const configs = { ...settings.llmProviderConfigs }
-      configs[providerId] = {
-        ...(input.baseUrl.trim() ? { baseUrl: input.baseUrl.trim() } : {}),
-        protocol: input.protocol
-      }
-      const updated = updateSettings({ llmProviderConfigs: configs })
-      synchronizeAIConfigurationFromLegacySettings(updated)
-      return toSettingsSnapshot(updated)
+      return { ok: true as const, snapshot: modelManagement.apply(input) }
     } catch (error) {
-      try {
-        if (oldApiKey) saveLlmApiKeys({ [providerId]: oldApiKey })
-        else deleteLlmApiKey(providerId)
-      } catch {
-        // Preserve the original settings failure; the next save can repair the secret entry.
-      }
-      throw error
-    }
-  })
-
-  appCommandAdapter.register(IPC.SETTINGS_LLM_PROVIDER_DELETE, (rawProviderId) => {
-    const providerId = rawProviderId.trim()
-    const settings = getSettings()
-    if (BUILT_IN_LLM_PROVIDER_BY_ID.has(providerId)) throw new Error('内置供应商不能删除')
-    if (!settings.customLlmProviders.some((provider) => provider.id === providerId)) {
-      throw new Error('自定义供应商不存在')
-    }
-    const oldApiKey = getEffectiveLlmApiKey(providerId)
-    try {
-      deleteLlmApiKey(providerId)
-      const customLlmProviders = settings.customLlmProviders.filter(
-        (provider) => provider.id !== providerId
-      )
-      const llmProviderConfigs = { ...settings.llmProviderConfigs }
-      delete llmProviderConfigs[providerId]
-      const llmCustomModels = settings.llmCustomModels.filter(
-        (model) => model.providerId !== providerId
-      )
-      const selection = normalizeDefaultLlmSelection({
-        defaultLlmProviderId:
-          settings.defaultLlmProviderId === providerId ? '' : settings.defaultLlmProviderId,
-        defaultLlmModelId:
-          settings.defaultLlmProviderId === providerId ? '' : settings.defaultLlmModelId,
-        llmProviderConfigs: getPublicLlmProviderConfigs({
-          ...settings,
-          llmProviderConfigs,
-          customLlmProviders,
-          llmCustomModels
-        }),
-        customLlmProviders,
-        llmCustomModels
-      })
-      const updated = updateSettings({
-        customLlmProviders,
-        llmProviderConfigs,
-        llmCustomModels,
-        defaultLlmProviderId: selection.providerId,
-        defaultLlmModelId: selection.modelId
-      })
-      synchronizeAIConfigurationFromLegacySettings(updated)
-      return toSettingsSnapshot(updated)
-    } catch (error) {
-      if (oldApiKey) {
-        try {
-          saveLlmApiKeys({ [providerId]: oldApiKey })
-        } catch {
-          // Preserve the original deletion failure.
+      if (!(error instanceof ModelManagementError)) throw error
+      return {
+        ok: false as const,
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(error.usages ? { usages: error.usages } : {})
         }
       }
-      throw error
     }
   })
 
   appCommandAdapter.register(
-    IPC.SETTINGS_AI_CONFIGURATION_GET,
-    () => getAIConfigurationSnapshot()
+    IPC.SETTINGS_MODEL_MANAGEMENT_DISCOVER_MODELS,
+    (connectionId) => modelManagement.discoverModels(
+      connectionId,
+      AbortSignal.timeout(30_000)
+    )
   )
 
   appCommandAdapter.register(
-    IPC.SETTINGS_AI_CONFIGURATION_UPDATE,
-    (input) => saveAIConfiguration(input.expectedRevision, input.document)
+    IPC.SETTINGS_MODEL_MANAGEMENT_TEST_MODEL,
+    (modelRef) => modelManagement.testModel(modelRef, AbortSignal.timeout(30_000))
   )
 
   appCommandAdapter.register(IPC.SETTINGS_RECOVERY_REVEAL_BACKUP, (): boolean => {
@@ -248,20 +175,6 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
     shell.showItemInFolder(backupPath)
     return true
   })
-
-  appCommandAdapter.register(
-    IPC.SETTINGS_LLM_TEST_MODEL,
-    async (providerId, modelId): Promise<string> => {
-      return testLlmModelConnection(providerId, modelId)
-    }
-  )
-
-  appCommandAdapter.register(
-    IPC.SETTINGS_LLM_LIST_MODELS,
-    async (providerId): Promise<LlmModelDefinition[]> => {
-      return listLlmProviderModels(providerId)
-    }
-  )
 
   appCommandAdapter.register(
     IPC.SETTINGS_PROXY_TEST,

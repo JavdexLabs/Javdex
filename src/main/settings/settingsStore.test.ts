@@ -104,6 +104,78 @@ describe('settingsStore video card preferences', () => {
   })
 })
 
+describe('settingsStore plugin developer model-turn budget', () => {
+  it('retires the old implicit step limit instead of carrying 24 into the new setting', () => {
+    writeSettings({ pluginDevAgentMaxSteps: 24 })
+    const settings = getSettings()
+
+    assert.equal(settings.pluginDevAgentMaxTurns, 0)
+    assert.equal('pluginDevAgentMaxSteps' in settings, false)
+  })
+
+  it('defaults to unlimited and preserves an explicit zero limit', () => {
+    writeSettings({})
+    assert.equal(getSettings().pluginDevAgentMaxTurns, 0)
+
+    writeSettings({ pluginDevAgentMaxTurns: 0 })
+    assert.equal(getSettings().pluginDevAgentMaxTurns, 0)
+  })
+
+  it('persists a positive limit through the settings interface', () => {
+    updateSettings({ pluginDevAgentMaxTurns: 36 })
+    assert.equal(getSettings().pluginDevAgentMaxTurns, 36)
+
+    resetSettingsCacheForTests()
+    assert.equal(getSettings().pluginDevAgentMaxTurns, 36)
+  })
+
+  it('stops rewriting legacy model fields after schema v3 exists', () => {
+    writeSettings({
+      defaultLlmProviderId: 'openai',
+      defaultLlmModelId: 'gpt-5.5',
+      pluginDevAgentMaxTurns: 36
+    })
+    fs.writeFileSync(
+      path.join(tempRoot!, 'ai-configuration.json'),
+      JSON.stringify({ schemaVersion: 3 }),
+      'utf8'
+    )
+
+    updateSettings({ theme: 'light' })
+
+    const persisted = JSON.parse(
+      fs.readFileSync(path.join(tempRoot!, 'settings.json'), 'utf8')
+    ) as Record<string, unknown>
+    assert.equal(persisted.theme, 'light')
+    assert.equal('defaultLlmProviderId' in persisted, false)
+    assert.equal('defaultLlmModelId' in persisted, false)
+    assert.equal('pluginDevAgentMaxTurns' in persisted, false)
+    assert.equal('pluginDevAgentMaxContextTokens' in persisted, false)
+    assert.equal('llmProviderConfigs' in persisted, false)
+    assert.equal('customLlmProviders' in persisted, false)
+    assert.equal('llmCustomModels' in persisted, false)
+  })
+
+  it('does not resurrect legacy model fields when the v3 document is unreadable', () => {
+    fs.writeFileSync(path.join(tempRoot!, 'settings.json'), JSON.stringify({
+      defaultLlmProviderId: 'openai',
+      defaultLlmModelId: 'gpt-5.5',
+      pluginDevAgentMaxTurns: 36
+    }))
+    fs.writeFileSync(path.join(tempRoot!, 'ai-configuration.json'), '{broken')
+    resetSettingsCacheForTests()
+
+    updateSettings({ theme: 'light' })
+
+    const persisted = JSON.parse(
+      fs.readFileSync(path.join(tempRoot!, 'settings.json'), 'utf8')
+    ) as Record<string, unknown>
+    assert.equal('defaultLlmProviderId' in persisted, false)
+    assert.equal('defaultLlmModelId' in persisted, false)
+    assert.equal('pluginDevAgentMaxTurns' in persisted, false)
+  })
+})
+
 describe('settingsStore deferred library path cleanup', () => {
   it('normalizes unique non-empty roots and preserves them across cache resets', () => {
     writeSettings({

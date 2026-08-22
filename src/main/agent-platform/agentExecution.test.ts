@@ -64,6 +64,7 @@ class FakeRuntime implements AgentRuntimePort {
   readonly runtimeId = 'pi' as const
   openCount = 0
   rebuildCount = 0
+  disposeCount = 0
   observer?: RuntimeObserver
   failOpen: Error | null = null
   failRebuild: Error | null = null
@@ -86,7 +87,7 @@ class FakeRuntime implements AgentRuntimePort {
         return { accepted: true }
       },
       abort: async () => undefined,
-      dispose: async () => undefined
+      dispose: async () => { this.disposeCount += 1 }
     }
   }
 
@@ -200,6 +201,47 @@ describe('AgentExecution', () => {
       }), /已尝试过重建/)
       assert.equal(runtime.rebuildCount, 1)
     } finally {
+      db.close()
+    }
+  })
+
+  it('releases runtime resources without closing the durable run', async () => {
+    const { db, store } = storeHarness()
+    const runtime = new FakeRuntime()
+    const execution = new AgentExecution(store, async () => runtime)
+    try {
+      await execution.openRun({
+        runId: 'run-release', useCase: 'test', resolved: resolved(), productState: {}
+      })
+      await execution.releaseRun('run-release')
+
+      assert.equal(runtime.disposeCount, 1)
+      assert.equal(execution.hasActiveRun('run-release'), false)
+      assert.ok(store.getRun('run-release'))
+      assert.notEqual(store.getRun('run-release')?.status, 'closed')
+    } finally {
+      await execution.dispose()
+      db.close()
+    }
+  })
+
+  it('closes a durable run after its runtime was already released', async () => {
+    const { db, store } = storeHarness()
+    const runtime = new FakeRuntime()
+    const execution = new AgentExecution(store, async () => runtime)
+    try {
+      await execution.openRun({
+        runId: 'run-clear-history', useCase: 'plugin-developer', resolved: resolved(), productState: {}
+      })
+      await execution.releaseRun('run-clear-history')
+      assert.equal(execution.hasActiveRun('run-clear-history'), false)
+
+      await execution.closeRun('run-clear-history')
+
+      assert.equal(store.getRun('run-clear-history')?.status, 'closed')
+      assert.equal(store.findLatestRun('plugin-developer'), null)
+    } finally {
+      await execution.dispose()
       db.close()
     }
   })

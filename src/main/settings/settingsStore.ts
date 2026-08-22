@@ -2,7 +2,7 @@ import { app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import process from 'node:process'
-import { DEFAULT_SETTINGS, normalizeAutoScanIntervalMinutes, normalizeCoverDisplayMode, normalizePluginDevAgentMaxContextTokens, normalizePluginDevAgentMaxSteps, normalizePrivacyModeScopes, normalizeTheme, normalizeMinScanImportDurationMinutes, type AppSettings, type SettingsRecoveryNotice } from '@shared/settingsTypes'
+import { DEFAULT_SETTINGS, normalizeAutoScanIntervalMinutes, normalizeCoverDisplayMode, normalizePluginDevAgentMaxContextTokens, normalizePluginDevAgentMaxTurns, normalizePrivacyModeScopes, normalizeTheme, normalizeMinScanImportDurationMinutes, type AppSettings, type SettingsRecoveryNotice } from '@shared/settingsTypes'
 import { expandActressScrapeFields, type CompositeScraperDefinition, type ScraperPluginDelaySettings } from '@shared/scrapeTypes'
 import {
   BUILT_IN_LLM_PROVIDER_BY_ID,
@@ -115,9 +115,12 @@ export function updateSettings(patch: Partial<AppSettings>): AppSettings {
 function writeSettingsFile(settings: AppSettings): void {
   const file = settingsFilePath()
   const temporaryFile = `${file}.tmp-${process.pid}`
+  const persisted = shouldPersistLegacyLlmMigrationInputs()
+    ? settings
+    : omitLegacyLlmSettings(settings)
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(temporaryFile, JSON.stringify(settings, null, 2), {
+    fs.writeFileSync(temporaryFile, JSON.stringify(persisted, null, 2), {
       encoding: 'utf8',
       mode: 0o600
     })
@@ -131,6 +134,41 @@ function writeSettingsFile(settings: AppSettings): void {
     }
     throw new Error(`保存设置失败：${(err as Error).message}`)
   }
+}
+
+function shouldPersistLegacyLlmMigrationInputs(): boolean {
+  const configFile = path.join(path.dirname(settingsFilePath()), 'ai-configuration.json')
+  try {
+    const value = JSON.parse(fs.readFileSync(configFile, 'utf8')) as { schemaVersion?: unknown }
+    return value.schemaVersion === 2
+  } catch (error) {
+    // A missing file still needs the migration inputs. Any existing unreadable/unknown document is
+    // fail-closed and must not cause retired model settings to be written again.
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+  }
+}
+
+function omitLegacyLlmSettings(settings: AppSettings): Omit<
+  AppSettings,
+  | 'defaultLlmProviderId'
+  | 'defaultLlmModelId'
+  | 'llmProviderConfigs'
+  | 'customLlmProviders'
+  | 'llmCustomModels'
+  | 'pluginDevAgentMaxTurns'
+  | 'pluginDevAgentMaxContextTokens'
+> {
+  const {
+    defaultLlmProviderId: _defaultLlmProviderId,
+    defaultLlmModelId: _defaultLlmModelId,
+    llmProviderConfigs: _llmProviderConfigs,
+    customLlmProviders: _customLlmProviders,
+    llmCustomModels: _llmCustomModels,
+    pluginDevAgentMaxTurns: _pluginDevAgentMaxTurns,
+    pluginDevAgentMaxContextTokens: _pluginDevAgentMaxContextTokens,
+    ...persisted
+  } = settings
+  return persisted
 }
 
 function recoverCorruptSettings(file: string, cause: unknown): AppSettings {
@@ -269,9 +307,13 @@ export function migrateRetiredVideoScraperSettings(): void {
   })
 }
 
-type ParsedSettings = Partial<AppSettings>
+type ParsedSettings = Partial<AppSettings> & {
+  /** Retired hidden default; it was never a user-configurable turn budget. */
+  pluginDevAgentMaxSteps?: unknown
+}
 
 function normalizeSettings(parsed: ParsedSettings): AppSettings {
+  const { pluginDevAgentMaxSteps: _retiredPluginDevAgentMaxSteps, ...currentSettings } = parsed
   const scraperServiceConfigs = normalizeScraperServiceConfigs(parsed.scraperServiceConfigs)
   const requestedDefaultScraper =
     typeof parsed.defaultScraper === 'string' && parsed.defaultScraper.trim()
@@ -299,7 +341,7 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
   const llm = normalizeLlmSettings(parsed)
   return {
     ...DEFAULT_SETTINGS,
-    ...parsed,
+    ...currentSettings,
     defaultScraper,
     defaultActressScraper,
     theme: normalizeTheme(parsed.theme),
@@ -370,7 +412,7 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
         : DEFAULT_SETTINGS.llmProxyUrlEnabled
     ),
     ...llm,
-    pluginDevAgentMaxSteps: normalizePluginDevAgentMaxSteps(parsed.pluginDevAgentMaxSteps),
+    pluginDevAgentMaxTurns: normalizePluginDevAgentMaxTurns(parsed.pluginDevAgentMaxTurns),
     pluginDevAgentMaxContextTokens: normalizePluginDevAgentMaxContextTokens(
       parsed.pluginDevAgentMaxContextTokens
     ),

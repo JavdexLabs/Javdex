@@ -9,15 +9,18 @@ import { APP_PACKAGE_NAME } from '@shared/appIdentity'
 import { PLUGIN_DEV_TOOL_SCHEMAS } from '../main/services/pluginDevAgent/toolSchemas'
 import { createSession } from '../main/services/pluginDevAgent/sessionStore'
 import type { PluginDevAgentStartInput } from '../main/services/pluginDevAgent/types'
-import type { ScraperPluginKind, VideoScrapeField } from '@shared/scrapeTypes'
+import type { ScraperPluginKind } from '@shared/scrapeTypes'
 import { normalizeTestTargets, parseTestTargetList } from '@shared/pluginDevKindProfile'
 import { createHash, randomUUID } from 'node:crypto'
+import os from 'node:os'
+import path from 'node:path'
 import Database from 'better-sqlite3'
 import { AGENT_PLATFORM_SCHEMA_SQL } from '../main/db/schema'
 import { AgentRunStore } from '../main/agent-platform/agentRunStore'
 import { ToolHost } from '../main/agent-platform/toolHost'
 import type { ResolvedRunConfiguration } from '../main/agent-platform/types'
 import { PLUGIN_DEVELOPER_TOOL_PACK, createPluginDeveloperToolHandlers } from '../main/services/pluginDevAgent/toolPack'
+import { pluginWorkspace } from '../main/services/pluginDevAgent/pluginWorkspace'
 
 const MCP_SERVER_NAME = `${APP_PACKAGE_NAME}-plugin-dev`
 
@@ -30,9 +33,7 @@ function readEnvSessionInput(): PluginDevAgentStartInput {
         .split(',')
         .map((field) => field.trim())
         .filter(Boolean) as PluginDevAgentStartInput['supportedFields'])
-    : kind === 'video'
-      ? (['title', 'maker', 'publisher'] as VideoScrapeField[])
-      : ['avatar']
+    : []
 
   const testTargets = normalizeTestTargets({
     testTargets: process.env.AV_PLUGIN_DEV_TEST_TARGETS?.trim()
@@ -64,8 +65,15 @@ function toMcpTools(): Tool[] {
 }
 
 async function main(): Promise<void> {
-  const session = createSession(readEnvSessionInput())
+  const task = readEnvSessionInput()
+  const session = createSession(task)
   const sessionId = session.id
+  const workspaceDirectory = path.resolve(
+    process.env.AV_PLUGIN_DEV_WORKSPACE?.trim() ||
+      path.join(os.tmpdir(), 'javdex-plugin-dev-mcp', sessionId)
+  )
+  session.workspaceDirectory = workspaceDirectory
+  pluginWorkspace.open({ directory: workspaceDirectory, task, package: session.package })
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
   database.exec(AGENT_PLATFORM_SCHEMA_SQL)
@@ -78,13 +86,13 @@ async function main(): Promise<void> {
     definitionId: 'plugin-developer',
     routes: { primary: 'mcp:primary', verifier: 'mcp:verifier', summarizer: 'mcp:summarizer' },
     toolPackRefs: [PLUGIN_DEVELOPER_TOOL_PACK.ref],
-    capabilityGrants: ['plugin.read', 'plugin.write', 'plugin.test', 'browser.read', 'browser.interact', 'plugin.install'],
-    approvalRequiredEffects: process.env.AV_PLUGIN_DEV_ALLOW_INSTALL === '1' ? [] : ['install' as const],
+    capabilityGrants: ['plugin.write', 'plugin.test', 'browser.interact'],
+    approvalRequiredEffects: [],
     compaction: { enabled: false, reserveTokens: 0, keepRecentTokens: 0 }
   }
   const prompt = 'MCP PluginDeveloper ToolHost session'
   const resolved: ResolvedRunConfiguration = {
-    revision: 'mcp-v1',
+    revision: 'mcp-v7',
     definitionId: 'plugin-developer',
     profile,
     model: {
@@ -93,7 +101,7 @@ async function main(): Promise<void> {
         providerId: 'mcp-unused', modelId: 'mcp-unused', name: 'MCP unused', api: 'openai-completions',
         baseUrl: 'http://127.0.0.1', contextWindow: 1, maxTokens: 1, reasoning: false
       },
-      routeRevision: 'mcp-v1',
+      routeRevision: 'mcp-v7',
       preset: { thinkingLevel: 'minimal', maxTokens: 1, timeoutMs: 1, cacheRetention: 'none' },
       cacheCompatibility: {
         supportsPromptCache: false, supportsLongCacheRetention: false,
@@ -113,7 +121,7 @@ async function main(): Promise<void> {
       compaction: profile.compaction,
       retry: { enabled: false, maxRetries: 0, baseDelayMs: 0 }
     },
-    sessionDirectory: process.cwd()
+    sessionDirectory: workspaceDirectory
   }
   runStore.createRun({ runId: sessionId, useCase: 'mcp-plugin-developer', resolved, productState: {} })
   const bindings = host.registerRun({
@@ -124,10 +132,9 @@ async function main(): Promise<void> {
     handlers: createPluginDeveloperToolHandlers({
       domainSessionId: sessionId,
       step: () => session.step,
-      emit: (event) => {
-        if (event.type === 'waiting_user') runStore.updateProductState(sessionId, 'waiting_user', {})
-        if (event.type === 'done') runStore.updateProductState(sessionId, event.success ? 'settled' : 'failed', {})
-      }
+      // MCP clients own their conversational pause/resume. Typed requests are returned in the
+      // tool result, while this capability host stays executable for the client's next turn.
+      emit: () => undefined
     })
   })
   const bindingByName = new Map(bindings.map((binding) => [binding.name, binding]))
@@ -135,7 +142,7 @@ async function main(): Promise<void> {
   const server = new Server(
     {
       name: MCP_SERVER_NAME,
-      version: '1.0.0'
+      version: '7.0.0'
     },
     {
       capabilities: {
@@ -174,7 +181,9 @@ async function main(): Promise<void> {
 
   const transport = new StdioServerTransport()
   await server.connect(transport)
-  console.error(`[${MCP_SERVER_NAME}] session=${sessionId} site=${session.siteName}`)
+  console.error(
+    `[${MCP_SERVER_NAME}] session=${sessionId} site=${session.siteName} workspace=${workspaceDirectory}`
+  )
 }
 
 main().catch((err) => {

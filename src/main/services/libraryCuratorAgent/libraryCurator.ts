@@ -34,6 +34,7 @@ interface LibraryCuratorProductState extends Record<string, unknown> {
 interface ActiveCuratorRun {
   state: LibraryCuratorProductState
   assistantText: string
+  lastAssistantStopReason?: string
   waiter?: (result: LibraryCuratorResult) => void
 }
 
@@ -72,10 +73,11 @@ export class LibraryCurator {
   }
 
   private resolveConfiguration(runId: string): ResolvedRunConfiguration {
-    const { revision, profile, definition } = agentConfiguration.getProfile('profile:library-curator:default')
-    const primary = modelControlPlane.resolveAgentModel(profile.id, 'primary')
-    const verifier = modelControlPlane.resolveAgentModel(profile.id, 'verifier')
-    const summarizer = modelControlPlane.resolveAgentModel(profile.id, 'summarizer')
+    const { revision, profile, definition, workload } = agentConfiguration.getProfile(
+      'profile:library-curator:default'
+    )
+    const primary = modelControlPlane.resolveWorkloadModel('library-curator')
+    const summarizer = primary
     const tools = this.registerTools(runId, profile)
     const systemText = definition.systemPrompt
     return {
@@ -85,11 +87,11 @@ export class LibraryCurator {
       model: primary,
       cache: {
         primaryAffinityId: createCacheAffinityId(runId, 'primary', primary.routeRevision),
-        verifierAffinityId: createCacheAffinityId(runId, 'verifier', verifier.routeRevision),
+        verifierAffinityId: createCacheAffinityId(runId, 'verifier', 'disabled'),
         summarizerAffinityId: createCacheAffinityId(runId, 'summarizer', summarizer.routeRevision),
         retention: {
           primary: primary.preset.cacheRetention,
-          verifier: verifier.preset.cacheRetention,
+          verifier: 'none',
           summarizer: summarizer.preset.cacheRetention
         }
       },
@@ -100,7 +102,8 @@ export class LibraryCurator {
       tools,
       settings: {
         compaction: profile.compaction,
-        retry: { enabled: true, maxRetries: 3, baseDelayMs: 1_000 }
+        retry: { enabled: true, maxRetries: 3, baseDelayMs: 1_000 },
+        maxTurns: workload.limits.maxTurns
       },
       sessionDirectory: sessionDirectory(runId)
     }
@@ -143,6 +146,7 @@ export class LibraryCurator {
     event: RuntimeDurableObservation
   ): { state: LibraryCuratorProductState; status: AgentRunRecord['status'] } {
     if (event.type === 'message.completed' && event.audit.role === 'assistant') {
+      active.lastAssistantStopReason = event.audit.stopReason
       active.state.summary = (active.assistantText.trim() || event.audit.textPreview.trim()).slice(-2_000)
       active.assistantText = ''
     }
@@ -153,8 +157,19 @@ export class LibraryCurator {
       active.state.status = 'failed'
       active.state.summary = event.message
     }
+    if (event.type === 'limit.reached' && active.state.status === 'running') {
+      active.state.status = 'waiting_user'
+      active.state.summary = `Agent 已达到本次模型轮次上限（${event.current}/${event.limit}），可继续当前任务。`
+    }
     if (event.type === 'agent.settled') {
-      if (active.state.status === 'running') active.state.status = 'completed'
+      if (active.state.status === 'running') {
+        if (active.lastAssistantStopReason === 'length') {
+          active.state.status = 'waiting_user'
+          active.state.summary = '模型输出达到上限，自动续跑后仍未完成；可继续当前任务。'
+        } else {
+          active.state.status = 'completed'
+        }
+      }
       const waiter = active.waiter
       active.waiter = undefined
       waiter?.(result(runId, active))

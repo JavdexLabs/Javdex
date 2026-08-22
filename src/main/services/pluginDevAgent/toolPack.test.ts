@@ -61,13 +61,21 @@ function resolved(profileValue: AgentProfile): ResolvedRunConfiguration {
   }
 }
 
-describe('PluginDeveloper ToolPack declaration', () => {
-  it('migrates all 18 domain tools with stable schema order and sequential execution', () => {
+describe('PluginDeveloper ToolPack v11', () => {
+  it('matches the compact Pi-native schema in stable order', () => {
     const expected = PLUGIN_DEV_TOOL_SCHEMAS.map((item) => item.function.name)
     const actual = PLUGIN_DEVELOPER_TOOL_PACK.tools.map((tool) => tool.name)
-    assert.equal(actual.length, 18)
+    assert.equal(PLUGIN_DEVELOPER_TOOL_PACK.ref, 'toolpack:plugin-developer:v11')
     assert.deepEqual(actual, expected)
     assert.equal(new Set(actual).size, actual.length)
+    assert.deepEqual(actual, ['plugin_dry_run', 'browser', 'ask_user'])
+    assert.equal(actual.length, 3)
+    for (const removed of [
+      'plugin_check', 'plugin_get_state', 'plugin_update_code', 'plugin_update_package', 'plugin_test',
+      'plugin_finish', 'plugin_install', 'session_note', 'session_request_user'
+    ]) {
+      assert.equal(actual.includes(removed), false)
+    }
     for (const tool of PLUGIN_DEVELOPER_TOOL_PACK.tools) {
       assert.equal(tool.executionMode, 'sequential')
       assert.equal(typeof tool.schema.type, 'string')
@@ -76,28 +84,27 @@ describe('PluginDeveloper ToolPack declaration', () => {
     }
   })
 
-  it('classifies install, browser mutation, reads and source redaction explicitly', () => {
+  it('classifies dry-run, browser reads/interactions and secret typing explicitly', () => {
     const byName = new Map(PLUGIN_DEVELOPER_TOOL_PACK.tools.map((tool) => [tool.name, tool]))
-    assert.equal(byName.get('plugin_install')?.effect, 'install')
-    assert.equal(byName.get('browser_click')?.capability, 'browser.interact')
-    assert.equal(byName.get('browser_html')?.effect, 'read')
+    assert.equal(byName.get('plugin_dry_run')?.capability, 'plugin.test')
+    assert.equal(byName.get('plugin_dry_run')?.effect, 'network')
+    assert.equal(byName.get('ask_user')?.effect, 'write')
+    assert.equal(byName.get('browser')?.capability, 'browser.interact')
+    assert.equal(byName.get('browser')?.effect, 'network')
     assert.deepEqual(
-      byName.get('plugin_update_code')?.redact({ code: 'sensitive source' }),
-      { code: '[source 16 chars]' }
-    )
-    assert.deepEqual(
-      byName.get('browser_type')?.redact({ text: 'password' }),
-      { text: '[redacted 8 chars]' }
+      byName.get('browser')?.redact({ action: 'fill', text: 'password' }),
+      { action: 'fill', text: '[redacted 8 chars]' }
     )
   })
 
-  it('governs all 18 tools through permission, abort, redaction and ledger fixtures', async () => {
+  it('governs every remaining host capability through permission, abort and ledger', async () => {
     const db = new Database(':memory:')
     db.pragma('foreign_keys = ON')
     db.exec(AGENT_PLATFORM_SCHEMA_SQL)
     const store = new AgentRunStore(() => db)
     const host = new ToolHost(store)
     host.registerToolPack(PLUGIN_DEVELOPER_TOOL_PACK)
+    const count = PLUGIN_DEVELOPER_TOOL_PACK.tools.length
     const capabilities = [...new Set(PLUGIN_DEVELOPER_TOOL_PACK.tools.map((tool) => tool.capability))]
     const handlers = new Map(PLUGIN_DEVELOPER_TOOL_PACK.tools.map((tool) => [
       tool.name,
@@ -114,7 +121,7 @@ describe('PluginDeveloper ToolPack declaration', () => {
       })
       for (const [index, tool] of allowed.entries()) {
         const result = await tool.invoke({
-          runId: 'all-tools', callId: `allowed-${index}`, args: { code: 'source', text: 'secret' },
+          runId: 'all-tools', callId: `allowed-${index}`, args: {},
           signal: new AbortController().signal, progress: () => undefined
         })
         assert.equal(result.ok, true)
@@ -122,28 +129,7 @@ describe('PluginDeveloper ToolPack declaration', () => {
       assert.equal((db.prepare(`
         SELECT COUNT(*) AS count FROM agent_tool_ledger
         WHERE run_id = 'all-tools' AND status = 'completed'
-      `).get() as { count: number }).count, 18)
-
-      const abortedProfile = profile(capabilities)
-      store.createRun({ runId: 'aborted-tools', useCase: 'plugin-developer', resolved: resolved(abortedProfile), productState: {} })
-      const aborted = host.registerRun({
-        runId: 'aborted-tools', profile: abortedProfile,
-        status: () => store.getRun('aborted-tools')!.status,
-        operationId: () => undefined,
-        handlers
-      })
-      for (const [index, tool] of aborted.entries()) {
-        const controller = new AbortController()
-        controller.abort(new Error('fixture abort'))
-        await assert.rejects(() => tool.invoke({
-          runId: 'aborted-tools', callId: `aborted-${index}`, args: {},
-          signal: controller.signal, progress: () => undefined
-        }), /fixture abort/)
-      }
-      assert.equal((db.prepare(`
-        SELECT COUNT(*) AS count FROM agent_tool_ledger
-        WHERE run_id = 'aborted-tools' AND status IN ('interrupted', 'uncertain')
-      `).get() as { count: number }).count, 18)
+      `).get() as { count: number }).count, count)
 
       const deniedProfile = profile([])
       store.createRun({ runId: 'denied-tools', useCase: 'plugin-developer', resolved: resolved(deniedProfile), productState: {} })
@@ -162,10 +148,7 @@ describe('PluginDeveloper ToolPack declaration', () => {
       assert.equal((db.prepare(`
         SELECT COUNT(*) AS count FROM agent_tool_ledger
         WHERE run_id = 'denied-tools' AND status = 'denied'
-      `).get() as { count: number }).count, 18)
-      for (const declaration of PLUGIN_DEVELOPER_TOOL_PACK.tools) {
-        assert.doesNotThrow(() => declaration.redact({ code: 'source', text: 'secret' }))
-      }
+      `).get() as { count: number }).count, count)
     } finally {
       db.close()
     }

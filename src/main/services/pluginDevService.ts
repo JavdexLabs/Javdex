@@ -1,7 +1,18 @@
-import type { PluginDevAgentInput, PluginDevDryRunInput, PluginDevDryRunResult, PluginDevInstallInput } from '@shared/pluginDevTypes'
+import type {
+  PluginDevAgentInput,
+  PluginDevDryRunInput,
+  PluginDevDryRunResult,
+  PluginDevInstallInput,
+  PluginDevRunTarget
+} from '@shared/pluginDevTypes'
 import type { ScraperPluginKind, ScraperPluginPackage } from '@shared/scraperPluginTypes'
+import type { ActressScrapeField, ActressScrapeResult } from '@shared/actressScrapeTypes'
+import type { ScrapeResult, VideoScrapeField } from '@shared/videoScrapeTypes'
 import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
-import { installScraperPluginPackage } from '../scrapers/scraperPluginService'
+import {
+  installScraperPluginPackage,
+  normalizeSupportedFields as normalizeInstalledSupportedFields
+} from '../scrapers/scraperPluginService'
 import {
   runUserActressPluginWithLogs,
   runUserVideoPluginWithLogs,
@@ -17,6 +28,12 @@ import {
   normalizeTestTargets
 } from '@shared/pluginDevKindProfile'
 import { normalizePluginCodeExport } from './pluginDevCodeEdit'
+import { normalizeVideoCode } from '@shared/videoCode'
+import { fieldSemanticsForKind } from '@shared/pluginFieldSemantics'
+import { scrapeBrowser } from '../scrapers/scrapeBrowser'
+import { projectVideoScrapeResult } from '../scrapers/videoScrapeFieldProjection'
+import { projectActressScrapeResult } from '../scrapers/actressScrapeFieldProjection'
+import { pluginResultContract } from '@shared/pluginResultContract'
 
 export {
   replacePluginFunctionCode,
@@ -25,49 +42,149 @@ export {
 } from './pluginDevCodeEdit'
 export type { TopLevelFunctionInfo } from './pluginDevCodeEdit'
 
+function legacyRunTarget(input: PluginDevDryRunInput): PluginDevRunTarget | undefined {
+  if (input.runTarget) return input.runTarget
+  const target =
+    (typeof input.testTarget === 'string' ? input.testTarget.trim() : '') ||
+    normalizeTestTargets(input)[0]
+  if (!target) return undefined
+  return input.package.kind === 'video'
+    ? { kind: 'video', code: target }
+    : { kind: 'actress', mainName: target, aliases: [] }
+}
+
+function projectEffectiveObject(
+  pkg: ScraperPluginPackage,
+  value: Record<string, unknown>
+): Record<string, unknown> {
+  if (pkg.kind === 'video') {
+    return projectVideoScrapeResult(
+      value as unknown as ScrapeResult,
+      new Set(normalizeInstalledSupportedFields('video', pkg.supportedFields) as VideoScrapeField[])
+    ) as unknown as Record<string, unknown>
+  }
+  return projectActressScrapeResult(
+    value as unknown as ActressScrapeResult,
+    new Set(normalizeInstalledSupportedFields('actress', pkg.supportedFields) as ActressScrapeField[])
+  ) as Record<string, unknown>
+}
+
+function projectEffectiveResult(
+  pkg: ScraperPluginPackage,
+  result: PluginDevDryRunResult['result']
+): PluginDevDryRunResult['result'] {
+  if (Array.isArray(result)) {
+    return result.map((item) => projectEffectiveObject(pkg, item as unknown as Record<string, unknown>)) as PluginDevDryRunResult['result']
+  }
+  if (!result || typeof result !== 'object') return result
+  return projectEffectiveObject(pkg, result as unknown as Record<string, unknown>) as PluginDevDryRunResult['result']
+}
+
 export async function dryRunPluginPackage(
-  input: PluginDevDryRunInput
+  input: PluginDevDryRunInput,
+  options: { signal?: AbortSignal } = {}
 ): Promise<PluginDevDryRunResult> {
   const pkg = normalizePackageForDev(input.package)
   const profile = getPluginDevKindProfile(pkg.kind)
-  const testTarget =
-    (typeof input.testTarget === 'string' ? input.testTarget.trim() : '') ||
-    normalizeTestTargets(input)[0]
+  const runTarget = legacyRunTarget({ ...input, package: pkg })
+  const testTarget = runTarget
+    ? runTarget.kind === 'video' ? runTarget.code : runTarget.mainName
+    : ''
 
   try {
-    await validateUserPluginCode(pkg.kind, pkg.name, pkg.code)
+    options.signal?.throwIfAborted()
+    await validateUserPluginCode(pkg.kind, pkg.name, pkg.code, options.signal)
     const settings = getSettings()
     const proxyUrl = resolveScrapeProxyUrl(settings)
 
     if (pkg.kind === 'video') {
+      if (runTarget?.kind !== 'video') throw new Error('影片 dry-run 缺少 video 运行目标')
       if (!testTarget) throw new Error(`请填写${profile.testTargetShortLabel}`)
-      const raw = await runUserVideoPluginWithLogs(pkg.name, pkg.code, testTarget, proxyUrl)
-      const candidates = normalizeVideoScrapeCandidates(raw.result, testTarget)
-      const result = Array.isArray(raw.result) ? candidates : candidates[0] ?? null
+      const raw = await runUserVideoPluginWithLogs(
+        pkg.name,
+        pkg.code,
+        runTarget.code,
+        proxyUrl,
+        options.signal
+      )
+      const unrecognizedResultKeys = pluginResultContract.unrecognizedResultKeys(pkg.kind, raw.result)
+      const expectedCode = normalizeVideoCode(runTarget.code)
+      const normalizedCandidates = normalizeVideoScrapeCandidates(raw.result, expectedCode)
+      const rejectedCodes: string[] = []
+      const candidates = normalizedCandidates.filter((candidate) => {
+        try {
+          const matches = normalizeVideoCode(candidate.code) === expectedCode
+          if (!matches) rejectedCodes.push(candidate.code)
+          return matches
+        } catch {
+          rejectedCodes.push(String(candidate.code ?? '无效番号'))
+          return false
+        }
+      })
+      const pluginResult = Array.isArray(raw.result)
+        ? normalizedCandidates
+        : normalizedCandidates[0] ?? null
+      const acceptedResult = Array.isArray(raw.result) ? candidates : candidates[0] ?? null
+      const effectiveResult = projectEffectiveResult(pkg, acceptedResult)
+      const { manifestCoverage } = pluginResultContract.analyze({
+        kind: pkg.kind,
+        pluginResult: acceptedResult,
+        effectiveResult,
+        declaredFields: pkg.supportedFields ?? []
+      })
       return {
         ok: candidates.length > 0,
-        result,
-        logs: raw.logs,
-        error: candidates.length > 0 ? undefined : '插件返回为空或结果格式无效'
+        result: effectiveResult,
+        pluginResult,
+        effectiveResult,
+        manifestCoverage,
+        unrecognizedResultKeys,
+        logs: rejectedCodes.length > 0
+          ? [...raw.logs, `已排除与测试番号 ${expectedCode} 不匹配的候选：${rejectedCodes.join(', ')}`]
+          : raw.logs,
+        error: candidates.length > 0
+          ? undefined
+          : rejectedCodes.length > 0
+            ? `插件返回的候选番号与测试番号 ${expectedCode} 不匹配`
+            : '插件返回为空或结果格式无效',
+        targets: [runTarget.code]
       }
     }
 
+    if (runTarget?.kind !== 'actress') throw new Error('演员 dry-run 缺少 actress 运行目标')
     if (!testTarget) throw new Error(`请填写${profile.testTargetShortLabel}`)
     const raw = await runUserActressPluginWithLogs(
       pkg.name,
       pkg.code,
-      testTarget,
-      [],
-      proxyUrl
+      runTarget.mainName,
+      runTarget.aliases,
+      proxyUrl,
+      options.signal
     )
-    const result = normalizeActressScrapeResult(raw.result)
+    const unrecognizedResultKeys = pluginResultContract.unrecognizedResultKeys(pkg.kind, raw.result)
+    const pluginResult = normalizeActressScrapeResult(raw.result)
+    const effectiveResult = projectEffectiveResult(pkg, pluginResult)
+    const { manifestCoverage } = pluginResultContract.analyze({
+      kind: pkg.kind,
+      pluginResult,
+      effectiveResult,
+      declaredFields: pkg.supportedFields ?? []
+    })
     return {
-      ok: result !== null,
-      result,
+      ok: Boolean(pluginResult),
+      result: effectiveResult,
+      pluginResult,
+      effectiveResult,
+      manifestCoverage,
+      unrecognizedResultKeys,
       logs: raw.logs,
-      error: result ? undefined : '插件返回为空或结果格式无效'
+      error: !pluginResult
+        ? '插件返回为空或结果格式无效'
+        : undefined,
+      targets: [runTarget.mainName]
     }
   } catch (err) {
+    if (options.signal?.aborted) throw err
     const logs = Array.isArray((err as { logs?: unknown }).logs)
       ? ((err as { logs: string[] }).logs ?? [])
       : []
@@ -75,14 +192,19 @@ export async function dryRunPluginPackage(
       ok: false,
       result: null,
       logs,
-      error: err instanceof Error ? err.message : String(err)
+      error: err instanceof Error ? err.message : String(err),
+      targets: testTarget ? [testTarget] : []
     }
+  } finally {
+    // Explicit Agent/user-visible owners use AsyncLocal lease context, so this only
+    // releases a lazily-created compatibility lease for standalone dry-run callers.
+    scrapeBrowser.close()
   }
 }
 
 export async function installDevPluginPackage(input: PluginDevInstallInput) {
   return installScraperPluginPackage(input.package, {
-    overwriteUser: input.overwriteUser ?? true
+    overwriteUser: input.overwriteUser ?? false
   })
 }
 
@@ -112,12 +234,40 @@ function normalizeSupportedFields(
   kind: ScraperPluginKind,
   fields: ScraperPluginPackage['supportedFields']
 ): ScraperPluginPackage['supportedFields'] {
-  const allowed = new Set(getPluginDevKindProfile(kind).allSupportedFields)
-  const out: ScraperPluginPackage['supportedFields'] = []
-  for (const field of fields ?? []) {
-    if (allowed.has(field as never) && !out.includes(field)) out.push(field)
+  if (fields !== undefined && !Array.isArray(fields)) {
+    throw new Error('plugin.json.supportedFields 必须是字段 id 数组')
   }
-  return out.length > 0 ? out : [...allowed]
+  const allowed = new Set(getPluginDevKindProfile(kind).allSupportedFields)
+  const resultKeyMappings = new Map<string, string[]>()
+  for (const definition of fieldSemanticsForKind(kind)) {
+    for (const resultKey of definition.resultKeys) {
+      const mapped = resultKeyMappings.get(resultKey) ?? []
+      if (!mapped.includes(definition.id)) mapped.push(definition.id)
+      resultKeyMappings.set(resultKey, mapped)
+    }
+  }
+  const out: ScraperPluginPackage['supportedFields'] = []
+  const invalid: string[] = []
+  for (const rawField of fields ?? []) {
+    const field = typeof rawField === 'string' ? rawField.trim() : String(rawField)
+    if (allowed.has(field as never)) {
+      if (!out.includes(field as never)) out.push(field as never)
+      continue
+    }
+    const mappedFields = resultKeyMappings.get(field)
+    invalid.push(mappedFields?.length
+      ? `${field} → ${mappedFields.join(' / ')}`
+      : `${field}（无对应字段 id）`)
+  }
+  if (invalid.length > 0) {
+    throw new Error(
+      `plugin.json.supportedFields 包含无效字段 id：${invalid.join('，')}。` +
+      'supportedFields 必须使用字段语义表中的字段 id，而不是 parse 返回键。'
+    )
+  }
+  // Omitted is the legacy "all fields" form. An explicit empty array is a
+  // valid development draft and must remain empty until discovery completes.
+  return fields === undefined ? [...allowed] : out
 }
 
 export function toDryRunInput(

@@ -6,7 +6,17 @@ export type PluginDevAgentTab = 'conversation' | 'result'
 
 export type PluginDevConversationItem =
   | { id: string; type: 'user'; text: string }
-  | { id: string; type: 'agent'; text: string }
+  | { id: string; type: 'agent'; text: string; turn?: number; streaming?: boolean }
+  | {
+      id: string
+      type: 'reasoning'
+      step: number
+      turn: number
+      text: string
+      charCount: number
+      truncated: boolean
+      streaming?: boolean
+    }
   | {
       id: string
       type: 'tool'
@@ -17,12 +27,16 @@ export type PluginDevConversationItem =
       ok?: boolean
     }
 
-export function agentStatusLabel(status: PluginDevSessionStatus | null, step: number): string {
+export function agentStatusLabel(
+  status: PluginDevSessionStatus | null,
+  step: number,
+  artifactReady = false
+): string {
   switch (status) {
     case 'running':
       return step > 0 ? `运行中 · 第 ${step} 步` : '运行中'
     case 'waiting_user':
-      return '等待操作'
+      return artifactReady ? '可安装' : '等待操作'
     case 'completed':
       return '已完成'
     case 'failed':
@@ -36,16 +50,12 @@ export function agentStatusLabel(status: PluginDevSessionStatus | null, step: nu
 
 export function agentPhaseLabel(phase: PluginDevAgentPhase): string {
   switch (phase) {
-    case 'discover':
-      return '探测'
-    case 'implement':
-      return '实现'
-    case 'dry_run':
-      return '调试'
-    case 'verify':
-      return '验证'
-    case 'finish':
-      return '收尾'
+    case 'working':
+      return '开发'
+    case 'checking':
+      return '检查'
+    case 'ready':
+      return '就绪'
     case 'waiting_user':
       return '等待'
     default:

@@ -3,6 +3,7 @@ import { copyFileSync, cpSync, createReadStream, existsSync, mkdirSync } from 'f
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import type { Plugin, ViteDevServer } from 'vite'
+import { mirrorDirectory } from './scripts/packaging-runtime.mjs'
 
 const MEDIAPIPE_RUNTIME_FILES = [
   'vision_wasm_module_internal.js',
@@ -65,8 +66,7 @@ function copyAppResourcesPlugin() {
   return {
     name: 'copy-app-resources',
     closeBundle() {
-      if (!existsSync(source)) return
-      cpSync(source, target, { recursive: true })
+      mirrorDirectory(source, target)
     }
   }
 }

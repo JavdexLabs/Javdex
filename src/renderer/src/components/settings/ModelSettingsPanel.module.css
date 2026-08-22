@@ -1,0 +1,492 @@
+.root {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.tab {
+  min-height: var(--control-h-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.tab[aria-selected='true'] {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+  color: var(--text-primary);
+}
+
+.content,
+.stack {
+  min-height: 0;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.panelCard,
+.assignmentCard,
+.advancedCard,
+.warning,
+.error,
+.loading {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.panelCard,
+.assignmentCard,
+.advancedCard {
+  padding: 14px;
+}
+
+.warning,
+.error,
+.loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--control-h-lg);
+  padding: 10px 12px;
+  color: var(--text-secondary);
+}
+
+.warning {
+  border-color: var(--border-warning);
+  background: var(--surface-warning);
+}
+
+.error {
+  justify-content: space-between;
+  border-color: var(--border-danger);
+  background: var(--surface-danger);
+  color: var(--text-danger);
+}
+
+.retryButton {
+  min-height: var(--control-h-sm);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  color: var(--text-primary);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  margin-bottom: 12px;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.sectionHint {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.modelTitle {
+  min-width: 0;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardActions,
+.toolbar,
+.modalActions,
+.inlineConfirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar,
+.inlineConfirm {
+  justify-content: flex-end;
+}
+
+.toolbar {
+  flex-wrap: wrap;
+}
+
+.searchInput {
+  width: min(230px, 28vw);
+}
+
+.gridTwo,
+.advancedGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.singleField {
+  max-width: 640px;
+}
+
+.field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.controlInput {
+  width: 100%;
+  height: var(--control-h-md);
+  min-width: 0;
+  padding: 0 var(--control-pad-x);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.controlInput:disabled {
+  color: var(--text-muted);
+  opacity: 0.72;
+}
+
+.inlineInputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.providerList,
+.modelRows,
+.discoveredList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.providerRow,
+.disclosure,
+.availableProvider {
+  min-height: var(--control-h-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.providerRow {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.9fr) minmax(220px, 1.6fr) 88px 72px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  border-color: var(--border-subtle);
+  background: var(--surface-elevated);
+  text-align: left;
+}
+
+.providerIdentity,
+.providerMeta,
+.providerCount,
+.status {
+  min-width: 0;
+}
+
+.providerIdentity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.providerMeta,
+.providerCount,
+.status,
+.metaText,
+.baselineMeta,
+.baselineSummary {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.dangerHint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.status {
+  justify-self: end;
+  color: var(--text-muted);
+}
+
+.status[data-status='ready'] {
+  color: var(--text-success);
+}
+
+.disclosure {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 8px;
+}
+
+.availableGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.availableProvider {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8px 10px;
+  border-color: var(--border-subtle);
+  background: var(--surface-elevated);
+  text-align: left;
+}
+
+.compactMeta {
+  font-size: 11px;
+}
+
+.empty {
+  display: grid;
+  min-height: 92px;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.modalBody {
+  min-height: 0;
+  max-height: min(660px, calc(100vh - 110px));
+  scrollbar-gutter: stable;
+}
+
+.modalStack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modalSection,
+.dangerZone {
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+}
+
+.modalSectionHeader,
+.dangerZone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.modalSectionHeader {
+  margin-bottom: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.modalActions {
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.modelRow,
+.discoveredRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px auto auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+}
+
+.rowIdentity {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.manualModel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.discoveredList {
+  max-height: 240px;
+  margin-top: 10px;
+  padding-inline-end: var(--scrollbar-safe-pad);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.discoveredRow {
+  grid-template-columns: minmax(0, 1fr) 130px auto;
+}
+
+.dangerZone {
+  border-color: var(--border-danger);
+  background: var(--surface-danger);
+}
+
+.baselineMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: -3px 0 10px;
+}
+
+.overrideBadge {
+  color: var(--text-warning);
+}
+
+.baselineSummary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 12px 0 0;
+}
+
+.baselineItem {
+  min-width: 0;
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-elevated);
+}
+
+.dangerCopy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.baselineLabel,
+.baselineValue {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.baselineValue {
+  margin-top: 2px;
+  color: var(--text-secondary);
+}
+
+.toggleLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-h-sm);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.tab:hover,
+.providerRow:hover,
+.disclosure:hover,
+.availableProvider:hover {
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
+
+.tab:focus-visible,
+.providerRow:focus-visible,
+.disclosure:focus-visible,
+.availableProvider:focus-visible,
+.controlInput:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
+  box-shadow: var(--focus-ring);
+}
+
+@media (width <= 980px) {
+  .providerRow {
+    grid-template-columns: minmax(130px, 1fr) minmax(180px, 1.4fr) 68px;
+  }
+
+  .status {
+    display: none;
+  }
+
+  .availableGrid,
+  .baselineSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (width <= 720px) {
+  .gridTwo,
+  .advancedGrid,
+  .availableGrid,
+  .baselineSummary {
+    grid-template-columns: 1fr;
+  }
+
+  .cardHeader,
+  .dangerZone {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .toolbar,
+  .cardActions {
+    justify-content: flex-start;
+  }
+
+  .providerRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .providerMeta,
+  .providerCount {
+    display: none;
+  }
+
+  .manualModel {
+    grid-template-columns: 1fr;
+  }
+}

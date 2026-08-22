@@ -1,21 +1,22 @@
 import Modal from '../Modal'
 import Button from '../Button'
+import styles from './PluginDevConnectionModal.module.css'
 
 export default function PluginDevConnectionModal({
-  profileLabel,
+  workloadLabel,
   providerLabel,
   modelLabel,
-  routeLabel,
   revision,
+  frozen,
   error,
   onOpenModelSettings,
   onClose
 }: {
-  profileLabel: string
+  workloadLabel: string
   providerLabel: string
   modelLabel: string
-  routeLabel: string
   revision: string
+  frozen: boolean
   error: string | null
   onOpenModelSettings: () => void
   onClose: () => void
@@ -25,16 +26,16 @@ export default function PluginDevConnectionModal({
       title="Agent 连接配置"
 
       size="sm"
-      className="modal--plugin-dev-connection"
+      className={styles.modal}
       confirmText="关闭"
       cancelText="关闭"
       onConfirm={onClose}
       onCancel={onClose}
     >
-      <div className="plugin-dev-connection-form">
-        <div className="plugin-dev-connection-default-llm">
-          <div className="plugin-dev-connection-default-copy">
-            <span>{profileLabel}</span>
+      <div className={styles.form}>
+        <div className={styles.defaultModel}>
+          <div className={styles.defaultCopy}>
+            <span>{workloadLabel}</span>
             <strong>{providerLabel}</strong>
             <small>{modelLabel}</small>
           </div>
@@ -42,9 +43,9 @@ export default function PluginDevConnectionModal({
             模型设置
           </Button>
         </div>
-        <dl className="llm-provider-card-meta">
-          <div><dt>Primary Route</dt><dd>{routeLabel}</dd></div>
-          <div><dt>配置 Revision</dt><dd title={revision}>{revision.slice(0, 12)}</dd></div>
+        <dl className={styles.meta}>
+          <div><dt>配置来源</dt><dd>{frozen ? '当前会话已冻结' : '插件开发用途'}</dd></div>
+          <div><dt>配置版本</dt><dd title={revision}>{revision.slice(0, 12)}</dd></div>
         </dl>
         {error && <div className="settings-notice settings-notice--warning" role="alert">{error}</div>}
       </div>

@@ -4,7 +4,7 @@ import { IPC } from '@shared/ipc-channels'
 import type { VideoIpcContract } from '@shared/videoIpcContract'
 import { createTypedEventAdapter, createTypedIpcAdapter } from './typedIpcAdapter'
 import { executeIpcHandler } from './shared'
-import { videoIpcSchemas } from './ipcCommandSchemas'
+import { appIpcSchemas, videoIpcSchemas } from './ipcCommandSchemas'
 import type { IpcMainInvokeEvent } from 'electron'
 
 describe('typed IPC adapter', () => {
@@ -68,6 +68,140 @@ describe('typed IPC adapter', () => {
       ]).success,
       false
     )
+  })
+
+  it('accepts one exact plugin approval decision and rejects malformed decisions', () => {
+    const schema = appIpcSchemas[IPC.PLUGIN_DEV_AGENT_MESSAGE]
+    assert.equal(
+      schema.safeParse([{
+        sessionId: 'run-1',
+        text: '批准本次安装',
+        approvalDecision: { requestId: 'apr-1', decision: 'approve' }
+      }]).success,
+      true
+    )
+    assert.equal(
+      schema.safeParse([{
+        sessionId: 'run-1',
+        text: '批准',
+        approvalDecision: { requestId: 'apr-1', decision: 'all' }
+      }]).success,
+      false
+    )
+  })
+
+  it('accepts only explicit plugin continuation kinds', () => {
+    const schema = appIpcSchemas[IPC.PLUGIN_DEV_AGENT_MESSAGE]
+    assert.equal(schema.safeParse([{
+      sessionId: 'run-1',
+      text: '继续当前任务',
+      continuationKind: 'resume'
+    }]).success, true)
+    assert.equal(schema.safeParse([{
+      sessionId: 'run-1',
+      text: '标题仍然不正确',
+      continuationKind: 'user_feedback'
+    }]).success, true)
+    assert.equal(schema.safeParse([{
+      sessionId: 'run-1',
+      text: '继续当前任务',
+      continuationKind: 'continue'
+    }]).success, false)
+  })
+
+  it('accepts only typed plugin user responses with request-bound actions', () => {
+    const schema = appIpcSchemas[IPC.PLUGIN_DEV_AGENT_MESSAGE]
+    assert.equal(schema.safeParse([{
+      sessionId: 'run-1',
+      text: '',
+      userResponse: {
+        requestId: 'choice-1',
+        type: 'choice',
+        optionId: '1'
+      }
+    }]).success, true)
+    assert.equal(schema.safeParse([{
+      sessionId: 'run-1',
+      text: '',
+      userResponse: {
+        requestId: 'login-1',
+        type: 'browser_interaction',
+        action: 'completed'
+      }
+    }]).success, true)
+    assert.equal(schema.safeParse([{
+      sessionId: 'run-1',
+      text: '',
+      userResponse: {
+        requestId: 'challenge-1',
+        type: 'browser_challenge',
+        action: 'completed'
+      }
+    }]).success, true)
+    assert.equal(schema.safeParse([{
+      sessionId: 'run-1',
+      text: '',
+      userResponse: {
+        requestId: 'freeform-1',
+        type: 'freeform',
+        text: '页面需要登录'
+      }
+    }]).success, true)
+    assert.equal(schema.safeParse([{
+      sessionId: 'run-1',
+      text: '1',
+      userResponse: { requestId: 'choice-1', type: 'choice' }
+    }]).success, false)
+    assert.equal(schema.safeParse([{
+      sessionId: 'run-1',
+      text: '',
+      approvalDecision: { requestId: 'approval-1', decision: 'approve' },
+      userResponse: { requestId: 'choice-1', type: 'choice', optionId: '1' }
+    }]).success, true, 'cross-protocol rejection belongs to PluginDeveloper, not IPC shape validation')
+  })
+
+  it('accepts plugin history clearing only without renderer-supplied run ids', () => {
+    const schema = appIpcSchemas[IPC.PLUGIN_DEV_AGENT_CLEAR_HISTORY]
+    assert.equal(schema.safeParse([]).success, true)
+    assert.equal(schema.safeParse(['run-1']).success, false)
+  })
+
+  it('keeps legacy model limits out of the generic settings mutation contract', () => {
+    const schema = appIpcSchemas[IPC.SETTINGS_UPDATE]
+    assert.equal(schema.safeParse([{ pluginDevAgentMaxTurns: 0 }]).success, false)
+    assert.equal(schema.safeParse([{ pluginDevAgentMaxSteps: 24 }]).success, false)
+  })
+
+  it('accepts only the structured model-management command vocabulary', () => {
+    const schema = appIpcSchemas[IPC.SETTINGS_MODEL_MANAGEMENT_APPLY]
+    assert.equal(schema.safeParse([{
+      expectedRevision: 'revision-1',
+      command: {
+        type: 'set-workload-assignment',
+        workloadId: 'plugin-developer',
+        model: { mode: 'inherit-default' },
+        runtime: {
+          thinkingLevel: 'medium',
+          maxTokens: 0,
+          timeoutMs: 120_000,
+          cacheRetention: 'short'
+        },
+        compaction: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000 },
+        limits: { maxTurns: 0, maxContextTokens: 128_000 }
+      }
+    }]).success, true)
+    assert.equal(schema.safeParse([{
+      expectedRevision: 'revision-1',
+      command: {
+        type: 'set-workload-assignment',
+        workloadId: 'app-default',
+        model: { mode: 'inherit-default' }
+      }
+    }]).success, false)
+    assert.equal(schema.safeParse([{
+      expectedRevision: 'revision-1',
+      command: { type: 'rewrite-route', routeId: 'route:primary' }
+    }]).success, false)
   })
 
   it('serializes successful results and thrown errors', async () => {

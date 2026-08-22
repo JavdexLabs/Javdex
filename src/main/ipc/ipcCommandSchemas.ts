@@ -99,32 +99,94 @@ const settingsPatch = z
     showVideoResourceTypeBadges: z.boolean().optional(),
     coverDisplayMode: z.enum(['portrait', 'landscape']).optional(),
     scraperPluginDelays: object.optional(),
-    compositeScrapers: object.optional(),
-    defaultLlmProviderId: text.optional(),
-    defaultLlmModelId: text.optional(),
-    customLlmProviders: z.array(object).optional(),
-    llmCustomModels: z.array(object).optional(),
-    pluginDevAgentMaxSteps: finiteNumber.nonnegative().optional(),
-    pluginDevAgentMaxContextTokens: finiteNumber.positive().optional()
+    compositeScrapers: object.optional()
   })
   .strict()
 
-const llmProviderConfig = z
-  .object({
-    providerId: nonEmptyText,
-    baseUrl: text,
-    protocol: z.enum(['openai-chat', 'anthropic-messages']),
-    apiKeyAction: z.enum(['keep', 'replace', 'clear']),
-    apiKey: text.optional()
-  })
-  .strict()
-
-const aiConfigurationUpdate = z
-  .object({
-    expectedRevision: nonEmptyText,
-    document: object
-  })
-  .strict()
+const workloadRuntime = z.object({
+  thinkingLevel: z.enum(['minimal', 'low', 'medium', 'high']),
+  maxTokens: z.number().int().nonnegative(),
+  timeoutMs: z.number().int().positive(),
+  cacheRetention: z.enum(['none', 'short', 'long'])
+}).strict()
+const workloadCompaction = z.object({
+  enabled: z.boolean(),
+  reserveTokens: z.number().int().nonnegative(),
+  keepRecentTokens: z.number().int().nonnegative()
+}).strict()
+const workloadLimits = z.object({
+  maxTurns: z.number().int().nonnegative(),
+  maxContextTokens: z.number().int().positive()
+}).strict()
+const workloadSelection = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('inherit-default') }).strict(),
+  z.object({ mode: z.literal('explicit'), modelRef: nonEmptyText }).strict()
+])
+const capabilityState = z.union([z.boolean(), z.literal('unknown')])
+const probeEvidence = z.object({
+  source: z.enum(['probe', 'manual', 'migration']),
+  checkedAt: nonEmptyText,
+  note: text.optional()
+}).strict()
+const modelOverride = z.object({
+  contextWindow: z.number().int().positive().optional(),
+  maxTokens: z.number().int().positive().optional(),
+  capabilities: z.object({
+    tools: capabilityState.optional(),
+    vision: capabilityState.optional(),
+    reasoning: capabilityState.optional()
+  }).strict().optional(),
+  cache: z.object({
+    supportsPromptCache: capabilityState.optional(),
+    supportsLongCacheRetention: z.boolean().optional(),
+    cacheControlFormat: z.literal('anthropic').optional(),
+    sessionAffinityFormat: z.enum(['openai', 'openai-nosession', 'openrouter']).optional(),
+    sendSessionAffinityHeaders: z.boolean().optional(),
+    evidence: probeEvidence
+  }).strict().optional()
+}).strict()
+const saveConnection = z.object({
+  providerId: nonEmptyText,
+  name: nonEmptyText,
+  source: z.enum(['builtin', 'custom']),
+  protocol: z.enum(['openai-chat', 'anthropic-messages']),
+  baseUrl: nonEmptyText,
+  local: z.boolean().optional(),
+  agentCompatible: z.boolean().optional(),
+  enabled: z.boolean().optional(),
+  apiKeyAction: z.enum(['keep', 'replace', 'clear']),
+  apiKey: text.optional()
+}).strict()
+const modelManagementCommand = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('set-default-model'), modelRef: nonEmptyText }).strict(),
+  z.object({
+    type: z.literal('set-workload-assignment'),
+    workloadId: z.enum(['plugin-developer', 'library-curator']),
+    model: workloadSelection,
+    runtime: workloadRuntime,
+    compaction: workloadCompaction,
+    limits: workloadLimits
+  }).strict(),
+  z.object({ type: z.literal('save-connection'), connection: saveConnection }).strict(),
+  z.object({ type: z.literal('remove-connection'), connectionId: nonEmptyText }).strict(),
+  z.object({
+    type: z.literal('add-model'),
+    connectionId: nonEmptyText,
+    modelId: nonEmptyText,
+    name: nonEmptyText
+  }).strict(),
+  z.object({ type: z.literal('remove-model'), modelRef: nonEmptyText }).strict(),
+  z.object({
+    type: z.literal('set-model-override'),
+    modelRef: nonEmptyText,
+    patch: modelOverride
+  }).strict(),
+  z.object({ type: z.literal('reset-model-override'), modelRef: nonEmptyText }).strict()
+])
+const modelManagementApply = z.object({
+  expectedRevision: nonEmptyText,
+  command: modelManagementCommand
+}).strict()
 
 const classificationEntity = z
   .object({ kind: z.enum(['organization', 'director', 'series']), id })
@@ -339,12 +401,10 @@ export const appIpcSchemas = {
   [IPC.SETTINGS_PICK_FOLDER]: noArgs,
   [IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW]: z.tuple([nonEmptyText]),
   [IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM]: z.tuple([nonEmptyText]),
-  [IPC.SETTINGS_LLM_TEST_MODEL]: z.tuple([nonEmptyText, nonEmptyText]),
-  [IPC.SETTINGS_LLM_LIST_MODELS]: z.tuple([nonEmptyText]),
-  [IPC.SETTINGS_LLM_PROVIDER_CONFIG_SAVE]: z.tuple([llmProviderConfig]),
-  [IPC.SETTINGS_LLM_PROVIDER_DELETE]: z.tuple([nonEmptyText]),
-  [IPC.SETTINGS_AI_CONFIGURATION_GET]: noArgs,
-  [IPC.SETTINGS_AI_CONFIGURATION_UPDATE]: z.tuple([aiConfigurationUpdate]),
+  [IPC.SETTINGS_MODEL_MANAGEMENT_GET]: noArgs,
+  [IPC.SETTINGS_MODEL_MANAGEMENT_APPLY]: z.tuple([modelManagementApply]),
+  [IPC.SETTINGS_MODEL_MANAGEMENT_DISCOVER_MODELS]: z.tuple([nonEmptyText]),
+  [IPC.SETTINGS_MODEL_MANAGEMENT_TEST_MODEL]: z.tuple([nonEmptyText]),
   [IPC.SETTINGS_RECOVERY_REVEAL_BACKUP]: noArgs,
   [IPC.SETTINGS_PROXY_TEST]: z.tuple([z.enum(['scrape', 'llm']), text]),
   [IPC.SETTINGS_OVERVIEW_STATS]: noArgs,
@@ -413,10 +473,41 @@ export const appIpcSchemas = {
   ]),
   [IPC.PLUGIN_DEV_AGENT_START]: z.tuple([object]),
   [IPC.PLUGIN_DEV_AGENT_MESSAGE]: z.tuple([
-    z.object({ sessionId: nonEmptyText, text, lastDryRun: object.optional() }).strict()
+    z.object({
+      sessionId: nonEmptyText,
+      text,
+      continuationKind: z.enum(['resume', 'user_feedback']).optional(),
+      approvalDecision: z.object({
+        requestId: nonEmptyText,
+        decision: z.enum(['approve', 'deny'])
+      }).strict().optional(),
+      userResponse: z.discriminatedUnion('type', [
+        z.object({
+          requestId: nonEmptyText,
+          type: z.literal('browser_interaction'),
+          action: z.literal('completed')
+        }).strict(),
+        z.object({
+          requestId: nonEmptyText,
+          type: z.literal('browser_challenge'),
+          action: z.literal('completed')
+        }).strict(),
+        z.object({
+          requestId: nonEmptyText,
+          type: z.literal('freeform'),
+          text: nonEmptyText
+        }).strict(),
+        z.object({
+          requestId: nonEmptyText,
+          type: z.literal('choice'),
+          optionId: nonEmptyText
+        }).strict()
+      ]).optional()
+    }).strict()
   ]),
   [IPC.PLUGIN_DEV_AGENT_CANCEL]: z.tuple([nonEmptyText]),
   [IPC.PLUGIN_DEV_AGENT_SNAPSHOT]: z.tuple([nonEmptyText.optional()]),
+  [IPC.PLUGIN_DEV_AGENT_CLEAR_HISTORY]: z.tuple([]),
   [IPC.PLUGIN_DEV_AGENT_EXPORT_WORK_LOG]: z.tuple([nonEmptyText]),
   [IPC.PLUGIN_DEV_DRY_RUN]: z.tuple([
     z.object({
@@ -425,9 +516,12 @@ export const appIpcSchemas = {
       testTargets: stringArray.optional()
     }).strict()
   ]),
-  [IPC.PLUGIN_DEV_VERIFY]: z.tuple([object]),
   [IPC.PLUGIN_DEV_INSTALL]: z.tuple([
-    z.object({ package: pluginPackage, overwriteUser: z.boolean().optional() }).strict()
+    z.object({
+      package: pluginPackage,
+      overwriteUser: z.boolean().optional(),
+      sessionId: nonEmptyText.optional()
+    }).strict()
   ]),
   [IPC.LIBRARY_CURATOR_START]: z.tuple([
     z.object({ prompt: text.optional() }).strict().optional()

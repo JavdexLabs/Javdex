@@ -36,6 +36,22 @@ function resolved(): ResolvedRunConfiguration {
       },
       getCredentialLease: async () => { throw new Error('not used') }
     },
+    verifierModel: {
+      credentialRef: 'llm-provider:verifier-test',
+      model: {
+        providerId: 'verifier-test', modelId: 'verifier-model', name: 'Verifier', api: 'openai-completions',
+        baseUrl: 'https://verifier.invalid/v1', contextWindow: 4_096, maxTokens: 512, reasoning: false
+      },
+      routeRevision: 'revision-1:r2',
+      preset: { thinkingLevel: 'minimal', maxTokens: 512, timeoutMs: 2_000, cacheRetention: 'none' },
+      cacheCompatibility: {
+        supportsPromptCache: false,
+        supportsLongCacheRetention: false,
+        sendSessionAffinityHeaders: false,
+        evidence: { source: 'manual', checkedAt: '2026-01-01T00:00:00.000Z' }
+      },
+      getCredentialLease: async () => { throw new Error('not used') }
+    },
     cache: {
       primaryAffinityId: 'jvx_primary', verifierAffinityId: 'jvx_verifier',
       summarizerAffinityId: 'jvx_summarizer',
@@ -64,6 +80,27 @@ function createStore(): { db: Database.Database; store: AgentRunStore } {
 afterEach(() => setAgentPayloadCipherForTests(null))
 
 describe('AgentRunStore', () => {
+  it('returns every durable non-closed run so each use case can apply its recovery policy', () => {
+    const { db, store } = createStore()
+    try {
+      for (const id of ['created', 'running', 'waiting', 'settled', 'failed', 'cancelled']) {
+        store.createRun({ runId: id, useCase: 'test-agent', resolved: resolved(), productState: {} })
+      }
+      store.updateProductState('running', 'running', {})
+      store.updateProductState('waiting', 'waiting_user', {})
+      store.updateProductState('settled', 'settled', {})
+      store.updateProductState('failed', 'failed', {})
+      store.updateProductState('cancelled', 'cancelled', {})
+
+      assert.deepEqual(
+        store.listRecoverableRuns().map((run) => run.id).sort(),
+        ['cancelled', 'created', 'failed', 'running', 'settled', 'waiting']
+      )
+    } finally {
+      db.close()
+    }
+  })
+
   it('persists a frozen config without serializing credentials or functions', () => {
     const { db, store } = createStore()
     try {
@@ -71,6 +108,8 @@ describe('AgentRunStore', () => {
         runId: 'run-1', useCase: 'test-agent', resolved: resolved(), productState: { status: 'ready' }
       })
       assert.equal(run.configSnapshot.model.credentialRef, 'llm-provider:test')
+      assert.equal(run.configSnapshot.verifierModel?.credentialRef, 'llm-provider:verifier-test')
+      assert.equal(run.configSnapshot.verifierModel?.descriptor.modelId, 'verifier-model')
       const raw = (db.prepare('SELECT config_snapshot_json AS value FROM agent_runs').get() as { value: string }).value
       assert.doesNotMatch(raw, /getCredentialLease|api[-_ ]?key|secret/i)
     } finally {
@@ -129,6 +168,30 @@ describe('AgentRunStore', () => {
       const operation = db.prepare('SELECT status FROM agent_operations WHERE id = ?').get(first.operation.id) as { status: string }
       assert.equal(operation.status, 'settled')
       assert.equal(store.getRun('run-3')?.status, 'settled')
+    } finally {
+      db.close()
+    }
+  })
+
+  it('does not overwrite a terminal runtime fault when the runtime subsequently settles', () => {
+    const { db, store } = createStore()
+    try {
+      store.createRun({ runId: 'run-fault', useCase: 'test-agent', resolved: resolved(), productState: {} })
+      const operation = store.acceptOperation({
+        runId: 'run-fault', commandKind: 'prompt', idempotencyKey: 'fault', content: 'fail'
+      }).operation
+      store.commitRuntimeObservation('run-fault', {
+        type: 'runtime.fault', category: 'provider-failed', message: 'Connection error.'
+      })
+      store.commitRuntimeObservation('run-fault', {
+        type: 'agent.settled', acceptedCommandIds: [operation.id]
+      })
+
+      assert.equal(store.getRun('run-fault')?.status, 'failed')
+      assert.equal(
+        (db.prepare('SELECT status FROM agent_operations WHERE id = ?').get(operation.id) as { status: string }).status,
+        'failed'
+      )
     } finally {
       db.close()
     }

@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   Brain,
   Bot,
@@ -13,12 +13,9 @@ import {
   UserRound
 } from 'lucide-react'
 import type { SettingsSnapshot, ThemeId } from '@shared/settingsTypes'
+import type { ModelManagementSnapshot } from '@shared/modelManagementTypes'
 import type { BatchProgress } from '@shared/batchScrapeTypes'
-import {
-  findLlmProviderViewModel,
-  listModelsForProvider,
-  normalizeDefaultLlmSelection
-} from '@shared/llmProviders'
+import { api } from '../../api'
 import { UI_ICON_SM } from '../iconDefaults'
 import { useToast } from '../Toast'
 import { useLibraryOverviewStats } from '../../hooks/useLibraryOverviewStats'
@@ -383,20 +380,26 @@ export default function SettingsOverviewPanel({
 }: SettingsOverviewPanelProps): JSX.Element {
   const toast = useToast()
   const { stats, isLoading: statsLoading } = useLibraryOverviewStats(statsRefreshKey)
+  const [modelManagement, setModelManagement] = useState<ModelManagementSnapshot | null>(null)
+  const [modelManagementError, setModelManagementError] = useState<string | null>(null)
 
-  const defaultLlmSelection = useMemo(() => normalizeDefaultLlmSelection(settings), [settings])
-  const defaultLlmProvider = useMemo(
-    () =>
-      defaultLlmSelection.providerId
-        ? findLlmProviderViewModel(settings, defaultLlmSelection.providerId)
-        : null,
-    [defaultLlmSelection.providerId, settings]
-  )
-  const defaultLlmModel = useMemo(() => {
-    if (!defaultLlmSelection.providerId) return null
-    const models = listModelsForProvider(defaultLlmSelection.providerId, settings.llmCustomModels)
-    return models.find((item) => item.id === defaultLlmSelection.modelId) ?? null
-  }, [defaultLlmSelection.modelId, defaultLlmSelection.providerId, settings.llmCustomModels])
+  useEffect(() => {
+    let cancelled = false
+    void api.settings.getModelManagement()
+      .then((snapshot) => {
+        if (cancelled) return
+        setModelManagement(snapshot)
+        setModelManagementError(null)
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setModelManagementError((error as Error).message)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  const defaultModel = modelManagement?.assignments.find(
+    (assignment) => assignment.workloadId === 'app-default'
+  )?.resolution
 
   const videoTotal = stats?.videos.total ?? 0
   const actressFemaleTotal = stats?.actresses.female ?? 0
@@ -563,14 +566,10 @@ export default function SettingsOverviewPanel({
           <SettingsStatusCard
             icon={Brain}
             label="默认 LLM"
-            value={defaultLlmProvider?.name ?? '未配置'}
-            detail={
-              defaultLlmProvider
-                ? defaultLlmModel?.name ?? defaultLlmSelection.modelId ?? '未选择模型'
-                : '未配置供应商'
-            }
+            value={defaultModel?.providerName ?? '未配置'}
+            detail={defaultModel?.modelName ?? modelManagementError ?? defaultModel?.reason ?? '未选择模型'}
             emphasizeValue
-            attention={!defaultLlmProvider || defaultLlmProvider.status !== 'ready'}
+            attention={defaultModel?.ready !== true}
             onClick={() => onNavigate('models')}
           />
           <SettingsStatusCard

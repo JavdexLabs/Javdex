@@ -1,37 +1,52 @@
 import { createHash } from 'node:crypto'
-import { getAIConfiguration, validateAIConfiguration } from './aiConfigurationRepository'
+import type { AgentProfile, AgentToolEffect } from '@shared/aiConfigurationTypes'
+import type { ModelWorkloadId } from '@shared/modelManagementTypes'
+import { PLUGIN_DEVELOPER_SYSTEM_PROMPT } from '../services/pluginDevAgent/pluginDevInstructions'
+import { modelManagement } from './modelManagement'
 
 export interface AgentDefinition {
   id: 'plugin-developer' | 'library-curator'
   useCase: 'plugin-developer' | 'library-curator'
   systemPrompt: string
-  modelRoles: readonly ['primary', 'verifier', 'summarizer']
   toolPackRefs: readonly string[]
+  capabilityGrants: readonly string[]
+  approvalRequiredEffects: readonly AgentToolEffect[]
 }
 
 const DEFINITIONS: readonly AgentDefinition[] = [
   {
     id: 'plugin-developer',
     useCase: 'plugin-developer',
-    systemPrompt: [
-      '你是 Javdex 插件开发助手。',
-      '使用提供的插件与浏览器工具完成发现、最小代码修改、dry-run 和语义验证。',
-      '已有实质代码时优先局部修改。成功结束前必须通过 dry-run 与 verify。',
-      '需要用户完成浏览器验证时使用 session_request_user。'
-    ].join('\n'),
-    modelRoles: ['primary', 'verifier', 'summarizer'],
-    toolPackRefs: ['toolpack:plugin-developer:v1']
+    systemPrompt: PLUGIN_DEVELOPER_SYSTEM_PROMPT,
+    toolPackRefs: ['toolpack:plugin-developer:v11'],
+    capabilityGrants: ['plugin.test', 'plugin.write', 'browser.read', 'browser.interact'],
+    approvalRequiredEffects: ['credential-sensitive']
   },
   {
     id: 'library-curator',
     useCase: 'library-curator',
     systemPrompt: '你是 Javdex 媒体库只读整理助手。仅使用允许的只读工具总结媒体库状态。',
-    modelRoles: ['primary', 'verifier', 'summarizer'],
-    toolPackRefs: ['toolpack:library-curator:v1']
+    toolPackRefs: ['toolpack:library-curator:v1'],
+    capabilityGrants: ['library.read'],
+    approvalRequiredEffects: []
   }
 ]
 
+function definitionIdForProfile(profileId: string): AgentDefinition['id'] {
+  if (profileId.includes('plugin-developer')) return 'plugin-developer'
+  if (profileId.includes('library-curator')) return 'library-curator'
+  throw new Error(`Agent Profile 不存在：${profileId}`)
+}
+
+function workloadIdForDefinition(definitionId: AgentDefinition['id']): ModelWorkloadId {
+  return definitionId
+}
+
 export class AgentConfiguration {
+  constructor(
+    private readonly management: Pick<typeof modelManagement, 'read'> = modelManagement
+  ) {}
+
   getDefinition(definitionId: string): AgentDefinition {
     const definition = DEFINITIONS.find((item) => item.id === definitionId)
     if (!definition) throw new Error(`Agent Definition 不存在：${definitionId}`)
@@ -39,16 +54,32 @@ export class AgentConfiguration {
   }
 
   getProfile(profileId: string) {
-    const document = getAIConfiguration()
-    const errors = validateAIConfiguration(document)
-    if (errors.length > 0) throw new Error(`AI 配置无效：${errors.join('；')}`)
-    const profile = document.agentProfiles.find((item) => item.id === profileId)
-    if (!profile) throw new Error(`Agent Profile 不存在：${profileId}`)
-    const definition = this.getDefinition(profile.definitionId)
-    if (profile.toolPackRefs.join('\0') !== definition.toolPackRefs.join('\0')) {
-      throw new Error(`Agent Profile ${profile.id} 的 ToolPack 与 Definition 不匹配`)
+    const definition = this.getDefinition(definitionIdForProfile(profileId))
+    const snapshot = this.management.read()
+    const workloadId = workloadIdForDefinition(definition.id)
+    const assignment = snapshot.assignments.find((item) => item.workloadId === workloadId)
+    if (!assignment) throw new Error(`缺少 Agent 用途配置：${workloadId}`)
+    const virtualRoute = `workload:${workloadId}`
+    const profile: AgentProfile = {
+      id: profileId,
+      name: definition.id === 'plugin-developer' ? '插件开发' : '媒体库整理',
+      definitionId: definition.id,
+      routes: {
+        primary: virtualRoute,
+        verifier: virtualRoute,
+        summarizer: virtualRoute
+      },
+      toolPackRefs: [...definition.toolPackRefs],
+      capabilityGrants: [...definition.capabilityGrants],
+      approvalRequiredEffects: [...definition.approvalRequiredEffects],
+      compaction: structuredClone(assignment.compaction)
     }
-    return { revision: document.revision, profile: structuredClone(profile), definition }
+    return {
+      revision: snapshot.revision,
+      profile,
+      definition,
+      workload: structuredClone(assignment)
+    }
   }
 
   stableSystemPrompt(definitionId: string) {

@@ -1,9 +1,11 @@
 import path from 'node:path'
 import fs from 'node:fs'
 import { createHash } from 'node:crypto'
+import { truncateUnicode } from '@shared/unicodeText'
 import type {
   AgentSession,
   AgentSessionEvent,
+  InlineExtension,
   SessionManager as PiSessionManager,
   ToolDefinition
 } from '@earendil-works/pi-coding-agent'
@@ -11,6 +13,7 @@ import type {
   AgentOperationId,
   AgentRuntimePort,
   ExecutionHistoryFrame,
+  MessageAuditView,
   NormalizedModelUsage,
   OpaqueRuntimeSessionRef,
   RuntimeDurableObservation,
@@ -22,6 +25,11 @@ import type {
 } from '../../agent-platform/types'
 
 const RECOVERY_CODEC_VERSION = 1 as const
+const MAX_OUTPUT_LIMIT_RECOVERIES = 1
+const OUTPUT_LIMIT_RECOVERY_PROMPT =
+  '上一轮输出达到模型输出上限，且没有完成工具调用。请停止内部推演，直接从当前任务继续；不要复述、重新分析已确认内容或重新读取已有大型 artifact。优先执行下一项必要工具调用，若任务确已完成则只给出简短最终响应。'
+const OUTPUT_LIMIT_COMPACTION_INSTRUCTIONS =
+  '输出达到上限且没有完成工具调用。压缩已完成的探测和历史工具输出；大型浏览器 artifact 只保留已提取的页面事实、标签行、metadata、关键 selector/ref 和结论。保留当前代码、未解决问题与下一项必须执行的工具操作。'
 type PiModule = typeof import('@earendil-works/pi-coding-agent')
 let piModule: Promise<PiModule> | null = null
 
@@ -32,6 +40,64 @@ function loadPi(): Promise<PiModule> {
 
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex')
+}
+
+function isWithinDirectory(rootInput: string, candidateInput: string): boolean {
+  const root = fs.realpathSync.native(path.resolve(rootInput))
+  const candidate = path.resolve(root, candidateInput.replace(/^@/, ''))
+  let existing = candidate
+  while (!fs.existsSync(existing)) {
+    const parent = path.dirname(existing)
+    if (parent === existing) return false
+    existing = parent
+  }
+  const realExisting = fs.realpathSync.native(existing)
+  return realExisting === root || realExisting.startsWith(`${root}${path.sep}`)
+}
+
+export function validatePluginWorkspaceToolAccess(
+  root: string,
+  toolName: string,
+  input: Record<string, unknown>
+): string | undefined {
+  if (toolName === 'bash') {
+    return '插件开发工作区未启用 shell；请使用原生文件工具和 plugin_dry_run。'
+  }
+  if (!['read', 'write', 'edit', 'grep', 'find', 'ls'].includes(toolName)) return undefined
+  const rawPath = input.path
+  if (rawPath !== undefined && typeof rawPath !== 'string') {
+    return '文件工具 path 必须是字符串。'
+  }
+  const candidatePath = typeof rawPath === 'string' && rawPath ? rawPath : '.'
+  if (!isWithinDirectory(root, candidatePath)) {
+    return '拒绝访问插件隔离工作区之外的路径。'
+  }
+  if (toolName === 'write' || toolName === 'edit') {
+    const resolvedRoot = fs.realpathSync.native(path.resolve(root))
+    const resolvedTarget = path.resolve(resolvedRoot, candidatePath.replace(/^@/, ''))
+    const writable = new Set([
+      path.join(resolvedRoot, 'plugin.json'),
+      path.join(resolvedRoot, 'index.js'),
+      path.join(resolvedRoot, '.javdex', 'dev-notes.md')
+    ])
+    if (!writable.has(resolvedTarget)) {
+      return '只允许修改工作区根目录的 plugin.json、index.js 和 .javdex/dev-notes.md。'
+    }
+  }
+  return undefined
+}
+
+function workspaceGuardExtension(root: string): InlineExtension {
+  return (pi) => {
+    pi.on('tool_call', (event) => {
+      const reason = validatePluginWorkspaceToolAccess(
+        root,
+        event.toolName,
+        event.input as Record<string, unknown>
+      )
+      if (reason) return { block: true, terminate: true, reason }
+    })
+  }
 }
 
 function recovery(kind: 'message' | 'tool-result', value: unknown): RuntimeRecoveryFrame {
@@ -54,11 +120,7 @@ function textFromContent(content: unknown): string {
     .join('\n')
 }
 
-function messageAudit(message: unknown): {
-  role: 'user' | 'assistant' | 'tool' | 'other'
-  textPreview: string
-  contentHash: string
-} {
+function messageAudit(message: unknown): MessageAuditView {
   const record = message && typeof message === 'object' ? message as Record<string, unknown> : {}
   const rawRole = typeof record.role === 'string' ? record.role : 'other'
   const role: 'user' | 'assistant' | 'tool' | 'other' =
@@ -67,11 +129,41 @@ function messageAudit(message: unknown): {
       : rawRole === 'toolResult'
         ? 'tool'
         : 'other'
-  const text = textFromContent(record.content)
+  const content = Array.isArray(record.content) ? record.content : []
+  let text = ''
+  let textChars = 0
+  let reasoningChars = 0
+  let toolCallCount = 0
+  const contentTypes: string[] = []
+  for (const item of content) {
+    if (!item || typeof item !== 'object') continue
+    const block = item as Record<string, unknown>
+    const type = typeof block.type === 'string' ? block.type : 'unknown'
+    contentTypes.push(type)
+    if (type === 'text' && typeof block.text === 'string') {
+      text += `${text ? '\n' : ''}${block.text}`
+      textChars += block.text.length
+    } else if (type === 'thinking') {
+      const thinking = typeof block.thinking === 'string'
+        ? block.thinking
+        : typeof block.text === 'string'
+          ? block.text
+          : ''
+      reasoningChars += thinking.length
+    } else if (type === 'toolCall') {
+      toolCallCount += 1
+    }
+  }
   return {
     role,
-    textPreview: text.slice(0, 500),
-    contentHash: sha256(JSON.stringify(message))
+    textPreview: truncateUnicode(text, 500),
+    contentHash: sha256(JSON.stringify(message)),
+    stopReason: typeof record.stopReason === 'string' ? record.stopReason : undefined,
+    rawStopReason: typeof record.rawStopReason === 'string' ? record.rawStopReason : undefined,
+    textChars,
+    reasoningChars,
+    toolCallCount,
+    contentTypes
   }
 }
 
@@ -105,6 +197,7 @@ function normalizedUsage(
     input: uncachedInput,
     uncachedInput,
     output: number(usage.output),
+    reasoning: number(usage.reasoning),
     cacheRead,
     cacheWrite,
     totalInput: uncachedInput + cacheRead + cacheWrite,
@@ -256,6 +349,19 @@ async function createControlledResources(input: RuntimeSessionInit) {
   }
   const agentDir = path.join(input.sessionDirectory, 'controlled-agent-dir')
   fs.mkdirSync(agentDir, { recursive: true })
+  const skillNames = new Set(input.resources?.skillNames ?? [])
+  for (const skillName of skillNames) {
+    const expectedHash = input.resources?.skillHashes?.[skillName]
+    if (!expectedHash) continue
+    const skillPath = path.join(input.sessionDirectory, '.agents', 'skills', skillName, 'SKILL.md')
+    if (!fs.existsSync(skillPath) || sha256(fs.readFileSync(skillPath, 'utf8')) !== expectedHash) {
+      throw new Error(`Pi frozen Skill hash mismatch: ${skillName}`)
+    }
+  }
+  const nativeTools = input.resources?.nativeTools ?? []
+  if (nativeTools.includes('bash')) {
+    throw new Error('Pi 原生 bash 必须由独立系统沙箱承载，当前 Adapter 拒绝启用')
+  }
   const settingsManager = SettingsManager.inMemory({
     steeringMode: 'one-at-a-time',
     followUpMode: 'one-at-a-time',
@@ -266,7 +372,7 @@ async function createControlledResources(input: RuntimeSessionInit) {
     skills: [],
     prompts: [],
     themes: [],
-    enableSkillCommands: false,
+    enableSkillCommands: skillNames.size > 0,
     defaultTools: []
   }, { projectTrusted: false })
   const resourceLoader = new DefaultResourceLoader({
@@ -274,13 +380,25 @@ async function createControlledResources(input: RuntimeSessionInit) {
     agentDir,
     settingsManager,
     noExtensions: true,
-    noSkills: true,
+    noSkills: skillNames.size === 0,
     noPromptTemplates: true,
     noThemes: true,
     noContextFiles: true,
     systemPrompt: input.systemPrompt.text,
     appendSystemPrompt: [],
-    skillsOverride: () => ({ skills: [], diagnostics: [] }),
+    additionalSkillPaths: skillNames.size > 0
+      ? [path.join(input.sessionDirectory, '.agents', 'skills')]
+      : [],
+    extensionFactories: nativeTools.length > 0
+      ? [workspaceGuardExtension(input.sessionDirectory)]
+      : [],
+    skillsOverride: (current) => ({
+      skills: current.skills.filter((skill) =>
+        skillNames.has(skill.name) &&
+        isWithinDirectory(input.sessionDirectory, skill.filePath)
+      ),
+      diagnostics: current.diagnostics
+    }),
     promptsOverride: () => ({ prompts: [], diagnostics: [] }),
     themesOverride: () => ({ themes: [], diagnostics: [] }),
     agentsFilesOverride: () => ({ agentsFiles: [] }),
@@ -289,13 +407,22 @@ async function createControlledResources(input: RuntimeSessionInit) {
   })
   await resourceLoader.reload()
   if (
-    resourceLoader.getExtensions().extensions.length !== 0 ||
-    resourceLoader.getSkills().skills.length !== 0 ||
+    resourceLoader.getExtensions().extensions.length !== (nativeTools.length > 0 ? 1 : 0) ||
     resourceLoader.getPrompts().prompts.length !== 0 ||
     resourceLoader.getThemes().themes.length !== 0 ||
     resourceLoader.getAgentsFiles().agentsFiles.length !== 0
   ) {
-    throw new Error('Pi controlled ResourceLoader discovered an unexpected resource')
+    throw new Error(`Pi controlled ResourceLoader discovered an unexpected resource: ${JSON.stringify({
+      extensions: resourceLoader.getExtensions().extensions.map((extension) => extension.path),
+      skills: resourceLoader.getSkills().skills.map((skill) => skill.name),
+      prompts: resourceLoader.getPrompts().prompts.length,
+      themes: resourceLoader.getThemes().themes.length,
+      agentsFiles: resourceLoader.getAgentsFiles().agentsFiles.length
+    })}`)
+  }
+  const loadedSkillNames = resourceLoader.getSkills().skills.map((skill) => skill.name).sort()
+  if (JSON.stringify(loadedSkillNames) !== JSON.stringify([...skillNames].sort())) {
+    throw new Error(`Pi controlled ResourceLoader 缺少冻结 Skill：${[...skillNames].join(', ')}`)
   }
   if (
     resourceLoader.getSystemPrompt() !== input.systemPrompt.text ||
@@ -339,7 +466,10 @@ function toolDefinitions(
           recovery: frame
         })
         committedToolCalls.add(toolCallId)
-        if (!result.ok) throw new Error(result.content)
+        // A terminating control result (for example waiting_user or a loop breaker) must reach Pi
+        // even when the domain operation itself did not pass. Throwing first would discard
+        // `terminate` and let the model continue the very loop the tool asked it to stop.
+        if (!result.ok && !result.terminate) throw new Error(result.content)
         return {
           content: [{ type: 'text' as const, text: result.content }],
           details: { summary: result.summary, detail: result.detail },
@@ -351,7 +481,7 @@ function toolDefinitions(
           const frame = recovery('tool-result', { toolCallId, toolName: binding.name, error: message })
           await queue.enqueue({
             type: 'tool.completed',
-            result: { callId: toolCallId, toolName: binding.name, ok: false, summary: message.slice(0, 240) },
+            result: { callId: toolCallId, toolName: binding.name, ok: false, summary: truncateUnicode(message, 240) },
             recovery: frame
           })
           committedToolCalls.add(toolCallId)
@@ -367,7 +497,14 @@ class PiRuntimeSession implements RuntimeSessionPort {
   private readonly acceptedCommandIds = new Set<AgentOperationId>()
   private readonly unsubscribe: () => void
   private compactionDepth = 0
+  private outputLimitRecoveryAttempts = 0
+  private pendingOutputLimitRecovery?: { totalInput: number; forceCompact: boolean }
+  private pendingProviderError?: string
+  private turnBudgetReached = false
+  private operationTurnCount = 0
+  private aborting = false
   private disposed = false
+  private readonly effectiveSystemPrompt: string
   constructor(
     private readonly input: RuntimeSessionInit,
     private readonly observer: RuntimeObserver,
@@ -375,9 +512,13 @@ class PiRuntimeSession implements RuntimeSessionPort {
     private readonly session: AgentSession,
     private readonly committedToolCalls: Set<string>
   ) {
+    this.effectiveSystemPrompt = input.resources
+      ? session.systemPrompt
+      : input.systemPrompt.text
     this.ref = makeRef(session)
     this.unsubscribe = session.subscribe((event) => this.handleEvent(event))
     this.installSystemPromptGuard()
+    this.installTurnBudget()
     this.installCacheBridge()
     this.queue.setAbortRuntime(async () => {
       if (!this.disposed) await this.session.abort()
@@ -387,23 +528,23 @@ class PiRuntimeSession implements RuntimeSessionPort {
   private installSystemPromptGuard(): void {
     const prepare = this.session.agent.prepareNextTurnWithContext
     if (!prepare) throw new Error('Pi Agent 缺少 prepareNextTurnWithContext prompt guard seam')
-    this.session.agent.state.systemPrompt = this.input.systemPrompt.text
+    if (!this.effectiveSystemPrompt.includes(this.input.systemPrompt.text)) {
+      throw new Error('Pi effective system prompt 丢失冻结的 Javdex prompt')
+    }
+    this.session.agent.state.systemPrompt = this.effectiveSystemPrompt
     this.session.agent.prepareNextTurnWithContext = async (turn, signal) => {
       const prepared = await prepare(turn, signal)
-      this.session.agent.state.systemPrompt = this.input.systemPrompt.text
+      this.session.agent.state.systemPrompt = this.effectiveSystemPrompt
       return {
         ...prepared,
         context: {
           ...(prepared?.context ?? turn.context),
-          systemPrompt: this.input.systemPrompt.text,
+          systemPrompt: this.effectiveSystemPrompt,
           tools: this.session.agent.state.tools.slice()
         },
         model: this.session.agent.state.model,
         thinkingLevel: this.session.agent.state.thinkingLevel
       }
-    }
-    if (this.session.systemPrompt !== this.input.systemPrompt.text) {
-      throw new Error('Pi effective system prompt differs from the frozen Javdex prompt')
     }
   }
 
@@ -414,8 +555,8 @@ class PiRuntimeSession implements RuntimeSessionPort {
       // Pi rebuilds its base prompt before a fresh prompt and adds cwd metadata. The
       // Javdex adapter owns the final provider context, so normalize it at the last
       // public seam before streaming as well as between continuation turns.
-      context.systemPrompt = this.input.systemPrompt.text
-      this.session.agent.state.systemPrompt = this.input.systemPrompt.text
+      context.systemPrompt = this.effectiveSystemPrompt
+      this.session.agent.state.systemPrompt = this.effectiveSystemPrompt
       const summarizing = this.compactionDepth > 0
       return original(model, context, {
         ...options,
@@ -432,8 +573,86 @@ class PiRuntimeSession implements RuntimeSessionPort {
     }
   }
 
+  private installTurnBudget(): void {
+    const maxTurns = Math.max(0, Math.round(this.input.settings.maxTurns ?? 0))
+    if (maxTurns === 0) return
+    const previous = this.session.agent.shouldStopAfterTurn
+    this.session.agent.shouldStopAfterTurn = async (turn, signal) => {
+      if (previous && await previous(turn, signal)) return true
+      this.operationTurnCount += 1
+      if (this.operationTurnCount < maxTurns) return false
+      this.turnBudgetReached = true
+      this.enqueue({
+        type: 'limit.reached',
+        resource: 'model-turns',
+        current: this.operationTurnCount,
+        limit: maxTurns
+      })
+      return true
+    }
+  }
+
   private enqueue(event: RuntimeDurableObservation): void {
     void this.queue.enqueue(event).catch(() => undefined)
+  }
+
+  private enqueueOutputLimitRecoveryFault(error: unknown): void {
+    this.enqueue({
+      type: 'runtime.fault',
+      category: 'runtime-failed',
+      message: `输出截断后续跑失败：${error instanceof Error ? error.message : String(error)}`
+    })
+  }
+
+  private enqueueAgentSettled(): void {
+    const acceptedCommandIds = [...this.acceptedCommandIds]
+    const barrier = this.queue.enqueue({ type: 'agent.settled', acceptedCommandIds })
+    void barrier.then(() => {
+      for (const id of acceptedCommandIds) this.acceptedCommandIds.delete(id)
+    }).catch(() => undefined)
+  }
+
+  private scheduleOutputLimitRecovery(totalInput: number, forceCompact: boolean): void {
+    this.pendingOutputLimitRecovery = { totalInput, forceCompact }
+  }
+
+  private runOutputLimitRecovery(input: { totalInput: number; forceCompact: boolean }): void {
+    const { totalInput, forceCompact } = input
+    const contextWindow = Math.max(1, this.input.model.model.contextWindow)
+    const reserve = Math.max(
+      this.input.settings.compaction.reserveTokens,
+      this.input.model.preset.maxTokens
+    )
+    const safetyLine = Math.max(1, contextWindow - reserve)
+    const compactFirst = forceCompact || totalInput >= safetyLine
+    if (!compactFirst) {
+      void this.session.followUp(OUTPUT_LIMIT_RECOVERY_PROMPT).catch((error) => {
+        this.enqueueOutputLimitRecoveryFault(error)
+        this.enqueueAgentSettled()
+      })
+      return
+    }
+    if (!this.input.settings.compaction.enabled) {
+      this.enqueueOutputLimitRecoveryFault(new Error(
+        forceCompact
+          ? '纯推理输出达到上限，禁止携带原上下文续跑；请启用 compaction 后继续'
+          : totalInput >= contextWindow
+            ? '上下文已超过模型窗口，禁止原样续跑；请启用 compaction 后继续'
+            : '上下文已达到安全线，禁止未压缩续跑；请启用 compaction 后继续'
+      ))
+      this.enqueueAgentSettled()
+      return
+    }
+    this.runCompactedOutputLimitRecovery()
+  }
+
+  private runCompactedOutputLimitRecovery(): void {
+    void this.session.compact(OUTPUT_LIMIT_COMPACTION_INSTRUCTIONS)
+      .then(() => this.session.prompt(OUTPUT_LIMIT_RECOVERY_PROMPT))
+      .catch((error) => {
+        this.enqueueOutputLimitRecoveryFault(error)
+        this.enqueueAgentSettled()
+      })
   }
 
   private handleEvent(event: AgentSessionEvent): void {
@@ -448,19 +667,36 @@ class PiRuntimeSession implements RuntimeSessionPort {
         break
       }
       case 'message_end': {
+        const audit = messageAudit(event.message)
         const frame = recovery('message', event.message)
-        this.enqueue({ type: 'message.completed', audit: messageAudit(event.message), recovery: frame })
+        this.enqueue({ type: 'message.completed', audit, recovery: frame })
         const usage = usageFromMessage(event.message)
+        const normalized = usage ? normalizedUsage(this.input, 'primary', usage) : undefined
         if (usage) {
-          this.enqueue({ type: 'usage', usage: normalizedUsage(this.input, 'primary', usage) })
+          this.enqueue({ type: 'usage', usage: normalized! })
         }
         const message = event.message as { role?: string; stopReason?: string; errorMessage?: string }
-        if (message.role === 'assistant' && message.stopReason === 'error') {
-          this.enqueue({
-            type: 'runtime.fault',
-            category: 'provider-failed',
-            message: message.errorMessage || '模型供应商返回错误'
-          })
+        if (message.role === 'assistant') {
+          // Pi emits message_end before it decides whether a provider error is retryable.
+          // Keep the attempt error local until agent_settled; a successful auto-retry clears it.
+          // `runtime.fault` is terminal downstream, so emitting it here would poison ToolHost
+          // while Pi is still retrying the same operation.
+          this.pendingProviderError = message.stopReason === 'error'
+            ? message.errorMessage || '模型供应商返回错误'
+            : undefined
+          if (
+            message.stopReason === 'length' &&
+            (audit.toolCallCount ?? 0) === 0 &&
+            this.outputLimitRecoveryAttempts < MAX_OUTPUT_LIMIT_RECOVERIES
+          ) {
+            this.outputLimitRecoveryAttempts += 1
+            this.scheduleOutputLimitRecovery(
+              normalized?.totalInput ?? 0,
+              (audit.textChars ?? 0) === 0
+            )
+          } else if (message.stopReason !== 'length') {
+            this.outputLimitRecoveryAttempts = 0
+          }
         }
         break
       }
@@ -489,7 +725,7 @@ class PiRuntimeSession implements RuntimeSessionPort {
               callId: event.toolCallId,
               toolName: event.toolName,
               ok: !event.isError,
-              summary: textFromContent((event.result as { content?: unknown })?.content).slice(0, 240)
+              summary: truncateUnicode(textFromContent((event.result as { content?: unknown })?.content), 240)
             },
             recovery: frame
           })
@@ -503,6 +739,11 @@ class PiRuntimeSession implements RuntimeSessionPort {
         this.enqueue({ type: 'retry.changed', phase: 'start', attempt: event.attempt })
         break
       case 'auto_retry_end':
+        if (event.success) {
+          this.pendingProviderError = undefined
+        } else if (!this.aborting) {
+          this.pendingProviderError = event.finalError || this.pendingProviderError || '模型供应商重试失败'
+        }
         this.enqueue({ type: 'retry.changed', phase: 'end', attempt: event.attempt })
         break
       case 'compaction_start':
@@ -515,6 +756,7 @@ class PiRuntimeSession implements RuntimeSessionPort {
           summary?: string
           firstKeptEntryId?: string
           tokensBefore?: number
+          estimatedTokensAfter?: number
           usage?: Record<string, unknown>
         }
         this.enqueue({
@@ -523,6 +765,7 @@ class PiRuntimeSession implements RuntimeSessionPort {
           result: {
             reason: event.reason,
             tokensBefore: result?.tokensBefore,
+            tokensAfter: result?.estimatedTokensAfter,
             firstKeptEntryId: result?.firstKeptEntryId,
             summaryHash: result?.summary ? sha256(result.summary) : undefined
           }
@@ -536,11 +779,24 @@ class PiRuntimeSession implements RuntimeSessionPort {
         this.enqueue({ type: 'session.saved', ref: makeRef(this.session) })
         break
       case 'agent_settled': {
-        const acceptedCommandIds = [...this.acceptedCommandIds]
-        const barrier = this.queue.enqueue({ type: 'agent.settled', acceptedCommandIds })
-        void barrier.then(() => {
-          for (const id of acceptedCommandIds) this.acceptedCommandIds.delete(id)
-        }).catch(() => undefined)
+        if (this.pendingOutputLimitRecovery) {
+          const recovery = this.pendingOutputLimitRecovery
+          this.pendingOutputLimitRecovery = undefined
+          if (!this.turnBudgetReached) {
+            this.runOutputLimitRecovery(recovery)
+            break
+          }
+        }
+        const providerError = this.pendingProviderError
+        this.pendingProviderError = undefined
+        if (providerError && !this.aborting) {
+          this.enqueue({
+            type: 'runtime.fault',
+            category: 'provider-failed',
+            message: providerError
+          })
+        }
+        this.enqueueAgentSettled()
         break
       }
       default:
@@ -567,6 +823,11 @@ class PiRuntimeSession implements RuntimeSessionPort {
       return { accepted: true }
     }
     if (this.session.isStreaming) return { accepted: false }
+    this.operationTurnCount = 0
+    this.outputLimitRecoveryAttempts = 0
+    this.pendingOutputLimitRecovery = undefined
+    this.pendingProviderError = undefined
+    this.turnBudgetReached = false
     return new Promise((resolve) => {
       let resolved = false
       const finish = (accepted: boolean): void => {
@@ -612,12 +873,20 @@ class PiRuntimeSession implements RuntimeSessionPort {
   }
 
   async abort(): Promise<void> {
-    this.session.clearQueue()
-    this.session.abortRetry()
-    this.session.abortCompaction()
-    this.session.abortBranchSummary()
-    await this.session.abort()
-    await this.queue.drain()
+    this.aborting = true
+    this.pendingOutputLimitRecovery = undefined
+    this.pendingProviderError = undefined
+    try {
+      this.session.clearQueue()
+      this.session.abortRetry()
+      this.session.abortCompaction()
+      this.session.abortBranchSummary()
+      await this.session.abort()
+      await this.queue.drain()
+    } finally {
+      this.pendingProviderError = undefined
+      this.aborting = false
+    }
   }
 
   async dispose(): Promise<void> {
@@ -669,14 +938,16 @@ async function openSession(
   const queue = new DurableObservationQueue(observer)
   const committedToolCalls = new Set<string>()
   const customTools = toolDefinitions(input, queue, observer, committedToolCalls)
+  const nativeTools = input.resources?.nativeTools ?? []
+  const enabledTools = [...nativeTools, ...input.tools.map((tool) => tool.name)]
   const { session } = await createAgentSession({
     cwd: input.sessionDirectory,
     agentDir: path.join(input.sessionDirectory, 'controlled-agent-dir'),
     modelRuntime,
     model,
     thinkingLevel: input.model.preset.thinkingLevel,
-    noTools: 'builtin',
-    tools: input.tools.map((tool) => tool.name),
+    noTools: enabledTools.length === 0 ? 'all' : undefined,
+    tools: enabledTools,
     excludeTools: [],
     customTools,
     resourceLoader,

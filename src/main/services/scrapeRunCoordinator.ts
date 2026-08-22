@@ -1,9 +1,9 @@
-/**
- * Serializes all user-visible scrape runs that share the singleton scrapeBrowser.
- *
- * The browser session carries proxy, cookies and a visible verification window, so
- * overlapping video/actress/batch runs can otherwise close or retarget each other.
- */
+import { randomUUID } from 'node:crypto'
+import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
+import { scrapeBrowser } from '../scrapers/scrapeBrowser'
+import { getSettings } from '../settings/settingsStore'
+
+/** Owns the user-visible scrape run and its browser lease. Conflicts fail immediately. */
 class ScrapeRunCoordinator {
   private activeLabel: string | null = null
 
@@ -21,8 +21,19 @@ class ScrapeRunCoordinator {
     }
 
     this.activeLabel = label
+    const controller = new AbortController()
     try {
-      return await fn()
+      const lease = await scrapeBrowser.acquire({
+        ownerId: `scrape:${randomUUID()}`,
+        purpose: 'scrape',
+        proxyUrl: resolveScrapeProxyUrl(getSettings()),
+        signal: controller.signal
+      })
+      try {
+        return await scrapeBrowser.runWithLease(lease, fn)
+      } finally {
+        await lease.release()
+      }
     } finally {
       this.activeLabel = null
     }

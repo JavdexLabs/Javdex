@@ -1,1284 +1,1103 @@
-import { BrowserWindow, dialog, session, net, type Session, type WebContents } from 'electron'
-import fs from 'fs/promises'
-import path from 'path'
-import { diagnoseCloudflareChallenge, isCloudflareChallengeText } from './challenge'
+import { app } from 'electron'
+import { spawn, type ChildProcess } from 'node:child_process'
+import crypto from 'node:crypto'
+import fs from 'node:fs'
+import net, { type Server, type Socket } from 'node:net'
+import os from 'node:os'
+import path from 'node:path'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { createRequire } from 'node:module'
+import { APP_PACKAGE_NAME, readTestUserDataPath } from '@shared/appIdentity'
+import type { Browser, Locator, Page } from 'playwright-core'
 import {
-  hasImageMagicBytes,
-  ImageBodyLruCache,
-  isImageNetworkResource,
-  normalizeNetworkUrl
-} from './scrapeBrowserImageCache'
-import { cleanUserAgent, getScrapeUaProfile } from './scrapeUaProfile'
+  SCRAPE_BROWSER_HELPER_ENV,
+  SCRAPE_BROWSER_HELPER_FLAG,
+  ScrapeBrowserFramedSocket,
+  assertScrapeBrowserHello,
+  type ScrapeBrowserHelloFrame,
+  type ScrapeBrowserHelperCommand,
+  type ScrapeBrowserProtocolFrame,
+  type ScrapeBrowserResponseFrame
+} from './scrapeBrowserProtocol'
 import {
-  canResolveScrapePage,
-  canResolveScrapeSelector,
-  ScrapeBrowserWaitBudget
-} from './scrapeBrowserWaitBudget'
+  prepareBrowserEvaluate,
+  runPreparedBrowserEvaluate
+} from './scrapeBrowserEvaluatePolicy'
+import {
+  ScrapeBrowserActionUncertainError,
+  ScrapeBrowserChallengeError,
+  ScrapeBrowserObservationPendingError,
+  type AgentBrowserCommand,
+  type AgentBrowserObservation,
+  type PluginBrowserAction,
+  type ScrapeBrowserFetchBufferOptions,
+  type ScrapeBrowserFetchPageOptions,
+  type ScrapeBrowserPurpose,
+  type ScrapeBrowserResourceResponse
+} from './scrapeBrowserTypes'
 
-const PARTITION = 'persist:scraper'
+export {
+  ScrapeBrowserActionUncertainError,
+  ScrapeBrowserChallengeError,
+  ScrapeBrowserObservationPendingError,
+  isScrapeBrowserActionUncertainError,
+  isScrapeBrowserChallengeError,
+  isScrapeBrowserObservationPendingError,
+  type AgentBrowserCommand,
+  type AgentBrowserObservation,
+  type PluginBrowserAction,
+  type ScrapeBrowserFetchBufferOptions,
+  type ScrapeBrowserFetchPageOptions,
+  type ScrapeBrowserPurpose,
+  type ScrapeBrowserResourceResponse
+} from './scrapeBrowserTypes'
 
-/** Default fallback selector indicating a real (non-challenge) page. */
-const DEFAULT_CONTENT_SELECTOR = 'main, article, .movie-list .item, .movie-panel-info, h1'
-const DOM_SETTLE_MIN_ELAPSED_MS = 1500
-const DOM_SETTLE_STABLE_MS = 1000
-const VERIFICATION_TIMEOUT_MS = 180_000
+const HELPER_START_TIMEOUT_MS = 12_000
+const HELPER_CANCEL_GRACE_MS = 500
+const HELPER_IDLE_TIMEOUT_MS = 60_000
+const MAX_START_ATTEMPTS = 3
+const MAX_AGENT_HTML_LENGTH = 20_000
+const DEFAULT_AGENT_RESULT_SNAPSHOT_LENGTH = 2_600
+const POST_ACTION_OBSERVATION_TIMEOUT_MS = 3_000
+const POST_ACTION_OBSERVATION_ATTEMPTS = 3
 
-/** Toolbar injected into challenge pages so the user can drive verification. */
-const TOOLBAR_JS = `
-(function(){
-  var BAR_H = 48;
-  var existing = document.getElementById('__cf_helper_bar__');
-  if (existing) existing.remove();
-
-  var host = document.createElement('div');
-  host.id = '__cf_helper_bar__';
-  host.style.cssText =
-    'position:fixed;top:0;left:0;right:0;z-index:2147483647;width:100%;height:' + BAR_H + 'px';
-
-  var shadow = host.attachShadow({ mode: 'open' });
-  shadow.innerHTML =
-    '<style>'
-    + '.bar{display:flex;align-items:center;gap:12px;width:100%;height:' + BAR_H + 'px;padding:0 16px;box-sizing:border-box;background:#101014;border-bottom:1px solid #2c2c38;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;box-shadow:0 2px 12px rgba(0,0,0,.6)}'
-    + '.tip{flex:1 1 auto;min-width:0;margin:0;color:#b6b6c2;font-size:13px;line-height:1.4}'
-    + '.actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}'
-    + '.btn{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;height:32px;padding:0 16px;margin:0;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;line-height:1;white-space:nowrap}'
-    + '.btn-refresh{background:#23232e;color:#f2f2f5;border:1px solid #2c2c38}'
-    + '.btn-save{background:#23232e;color:#d6d6de;border:1px solid #2c2c38}'
-    + '.btn-pass{background:#6c5ce7;color:#fff;border:1px solid #6c5ce7;font-weight:600}'
-    + '.btn:hover{filter:brightness(1.08)}'
-    + '</style>'
-    + '<div class="bar">'
-    + '<p class="tip">请在下方完成 Cloudflare 人机验证，完成后点击「验证通过」继续</p>'
-    + '<div class="actions">'
-    + '<button type="button" class="btn btn-refresh" id="cf-refresh">刷新</button>'
-    + '<button type="button" class="btn btn-save" id="cf-save">保存页面</button>'
-    + '<button type="button" class="btn btn-pass" id="cf-pass">验证通过</button>'
-    + '</div>'
-    + '</div>';
-
-  shadow.getElementById('cf-refresh').onclick = function(){ console.log('__CF_ACTION__:refresh'); };
-  shadow.getElementById('cf-save').onclick = function(){ console.log('__CF_ACTION__:save'); };
-  shadow.getElementById('cf-pass').onclick = function(){ console.log('__CF_ACTION__:pass'); };
-
-  (document.documentElement || document.body).appendChild(host);
-  if (document.body) document.body.style.paddingTop = BAR_H + 'px';
-})();
-`
-
-const REMOVE_TOOLBAR_JS = `
-(function(){
-  var bar = document.getElementById('__cf_helper_bar__');
-  if (bar) bar.remove();
-  if (document.body) document.body.style.paddingTop = '';
-})();
-`
-
-interface Brand {
-  brand: string
-  version: string
+interface RunningHelper {
+  generation: number
+  child: ChildProcess
+  server: Server
+  pipePath: string
+  framed: ScrapeBrowserFramedSocket
+  browser: Browser
+  page: Page
+  targetId: string
+  cdpPort: number
+  fatal: boolean
+  pageEpoch: number
+  snapshotEpoch: number | null
 }
 
-function getResponseHeader(
-  headers: Record<string, string | string[]> | undefined,
-  name: string
-): string | null {
-  if (!headers) return null
-  const key = Object.keys(headers).find((item) => item.toLowerCase() === name.toLowerCase())
-  if (!key) return null
-  const value = headers[key]
-  return Array.isArray(value) ? value.join(',') : value
+interface PendingRequest {
+  resolve: (value: unknown) => void
+  reject: (error: Error) => void
+  settledForCaller: boolean
+  cancelTimer?: ReturnType<typeof setTimeout>
 }
 
-/**
- * Injected at document-start in the verification window. Masks the two cheapest
- * automation tells (navigator.webdriver / missing window.chrome) so Cloudflare's
- * client-side fingerprinting matches a real Chrome.
- */
-const STEALTH_DOC_JS = `
-try {
-  Object.defineProperty(navigator, 'webdriver', { get: () => false, configurable: true });
-} catch (e) {}
-try {
-  if (!window.chrome) { window.chrome = { runtime: {} }; }
-} catch (e) {}
-`
-
-/**
- * Ensure a `sec-ch-ua`(-style) brand list contains the `"Google Chrome"` brand.
- * Electron/Chromium emits only `"Chromium"` + a GREASE token, which Cloudflare
- * treats as an instant bot signal. We preserve Chromium's natural GREASE token
- * and append `"Google Chrome"` with the same version as Chromium. If the source
- * header is missing entirely, we synthesize a plausible Chrome value.
- */
-function injectGoogleChrome(existing: string | undefined, major: string, full = false): string {
-  const ver = full ? `${major}.0.0.0` : major
-  if (existing && existing.trim()) {
-    if (/google chrome/i.test(existing)) return existing
-    // Reuse the Chromium brand's version if present so versions stay aligned.
-    const m = existing.match(/"Chromium";v="([^"]+)"/i)
-    const chromeVer = m ? m[1] : ver
-    return `${existing.trim()}, "Google Chrome";v="${chromeVer}"`
-  }
-  const grease = full ? '"Not(A:Brand";v="8.0.0.0"' : '"Not(A:Brand";v="8"'
-  return `${grease}, "Chromium";v="${ver}", "Google Chrome";v="${ver}"`
+interface ActiveLeaseState {
+  ownerId: string
+  purpose: ScrapeBrowserPurpose
+  proxyUrl?: string
+  references: number
+  generation: number
 }
 
-/**
- * Manages a single visible "verification" browser window used to fetch JavDB
- * pages. The user solves Cloudflare manually (refresh / 验证通过 buttons); the
- * persistent session then carries the clearance cookie for subsequent requests,
- * which resolve automatically.
- */
-class ScrapeBrowser {
-  private win: BrowserWindow | null = null
-  private ses: Session | null = null
-  private manualPass = false
-  private stealthApplied = false
-  private headerStealthInstalled = false
-  private currentMainFrameCfMitigated = false
-  /** Origin of the most recently loaded page, used as the image Referer. */
-  private lastOrigin = 'https://javdb.com'
-  /**
-   * All page loads share the single scraper window, so a second navigation
-   * cancels the first and both callers would read back the same DOM. Page
-   * fetches therefore run one at a time.
-   */
-  private pageQueue: Promise<void> = Promise.resolve()
+export interface ScrapeBrowserAcquireInput {
+  ownerId: string
+  purpose: ScrapeBrowserPurpose
+  proxyUrl?: string
+  signal: AbortSignal
+}
 
-  /** Image bodies captured from the scraper window via CDP Network. */
-  private readonly imageBodyCache = new ImageBodyLruCache()
-  private networkCaptureWc: WebContents | null = null
-  /** Bumped on cache clear so in-flight getResponseBody cannot write stale pages. */
-  private networkCacheGeneration = 0
-  /** requestId → URLs seen on that request (including redirects). */
-  private readonly networkRequestUrls = new Map<string, Set<string>>()
-  /** requestId → metadata for in-flight image responses awaiting body. */
-  private readonly pendingImageRequests = new Map<
-    string,
-    { mimeType: string; status: number; type: string }
-  >()
-  private readonly onDebuggerMessage = (
-    _event: Electron.Event,
-    method: string,
-    params: unknown
-  ): void => {
-    this.handleDebuggerNetworkMessage(method, params)
+export interface ScrapeBrowserPresentation {
+  url: string
+  title: string
+}
+
+export interface ScrapeBrowserLease {
+  readonly ownerId: string
+  readonly purpose: ScrapeBrowserPurpose
+  fetchPage(url: string, options?: ScrapeBrowserFetchPageOptions): Promise<string>
+  fetchBuffer(url: string, options?: ScrapeBrowserFetchBufferOptions): Promise<Buffer>
+  fetchBufferResponse(
+    url: string,
+    options?: ScrapeBrowserFetchBufferOptions
+  ): Promise<ScrapeBrowserResourceResponse>
+  pluginAction(
+    action: PluginBrowserAction,
+    params?: Record<string, unknown>
+  ): Promise<unknown>
+  agentAction(command: AgentBrowserCommand): Promise<AgentBrowserObservation>
+  /** Make the helper window visible and focused for an explicit user handoff. */
+  presentToUser(): Promise<ScrapeBrowserPresentation>
+  recycle(): Promise<void>
+  release(): Promise<void>
+}
+
+export interface ScrapeBrowserHost {
+  acquire(input: ScrapeBrowserAcquireInput): Promise<ScrapeBrowserLease>
+  dispose(): Promise<void>
+}
+
+export class ScrapeBrowserBusyError extends Error {
+  readonly code = 'SCRAPE_BROWSER_BUSY' as const
+  readonly ownerId: string
+  readonly purpose: ScrapeBrowserPurpose
+
+  constructor(active: Pick<ActiveLeaseState, 'ownerId' | 'purpose'>) {
+    super(`刮削浏览器正由 ${active.purpose} 使用`)
+    this.name = 'ScrapeBrowserBusyError'
+    this.ownerId = active.ownerId
+    this.purpose = active.purpose
   }
+}
 
-  private getSession(): Session {
-    if (!this.ses) {
-      this.ses = session.fromPartition(PARTITION)
-      this.ses.setUserAgent(cleanUserAgent())
-      this.installHeaderStealth(this.ses)
-    }
-    return this.ses
+export function isScrapeBrowserBusyError(error: unknown): error is ScrapeBrowserBusyError {
+  return (error as { code?: unknown } | null)?.code === 'SCRAPE_BROWSER_BUSY'
+}
+
+function normalizeProxy(proxyUrl: string | undefined): string | undefined {
+  const normalized = proxyUrl?.trim()
+  return normalized || undefined
+}
+
+function helperPipePath(): string {
+  const suffix = crypto.randomBytes(12).toString('hex')
+  return process.platform === 'win32'
+    ? `\\\\.\\pipe\\javdex-scraper-${process.pid}-${suffix}`
+    : path.join(process.platform === 'darwin' ? '/tmp' : os.tmpdir(), `jds-${process.pid}-${suffix}.sock`)
+}
+
+function hostAppPath(): string {
+  if (app?.getAppPath) return app.getAppPath()
+  return process.cwd()
+}
+
+function hostUserDataPath(): string {
+  if (app?.getPath) return app.getPath('userData')
+  const testPath = readTestUserDataPath()
+  if (testPath) return path.resolve(testPath)
+  if (process.env.JAVDEX_USER_DATA?.trim()) return path.resolve(process.env.JAVDEX_USER_DATA.trim())
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', APP_PACKAGE_NAME)
   }
-
-  /**
-   * Rewrite outgoing request headers on EVERY request (including the first one
-   * Cloudflare evaluates) so they look like a real Chrome:
-   *  - force the clean, Electron-free User-Agent
-   *  - repair `sec-ch-ua` / `sec-ch-ua-full-version-list` to include "Google Chrome",
-   *    deduplicating case-variant keys (Chromium emits lowercase `sec-ch-ua`).
-   * Electron's native client hints only take effect from the 2nd request, so this
-   * deterministic rewrite is what actually fixes the initial challenge.
-   */
-  private installHeaderStealth(ses: Session): void {
-    if (this.headerStealthInstalled) return
-    this.headerStealthInstalled = true
-
-    ses.webRequest.onBeforeSendHeaders((details, callback) => {
-      const profile = getScrapeUaProfile()
-      const headers = details.requestHeaders
-      let secChUa: string | undefined
-      let fullVerList: string | undefined
-
-      // Collect + strip every sec-ch-ua* variant and force the clean UA.
-      for (const key of Object.keys(headers)) {
-        const lk = key.toLowerCase()
-        if (lk === 'sec-ch-ua') {
-          secChUa = headers[key]
-          delete headers[key]
-        } else if (lk === 'sec-ch-ua-full-version-list') {
-          fullVerList = headers[key]
-          delete headers[key]
-        } else if (lk === 'user-agent') {
-          delete headers[key]
-        }
-      }
-
-      headers['User-Agent'] = profile.userAgent
-      headers['sec-ch-ua'] = injectGoogleChrome(secChUa, profile.major)
-      if (fullVerList) {
-        headers['sec-ch-ua-full-version-list'] = injectGoogleChrome(fullVerList, profile.major, true)
-      }
-      if (!Object.keys(headers).some((k) => k.toLowerCase() === 'sec-ch-ua-mobile')) {
-        headers['sec-ch-ua-mobile'] = '?0'
-      }
-      if (!Object.keys(headers).some((k) => k.toLowerCase() === 'sec-ch-ua-platform')) {
-        headers['sec-ch-ua-platform'] = profile.secChUaPlatform
-      }
-
-      callback({ requestHeaders: headers })
-    })
-
-    ses.webRequest.onHeadersReceived((details, callback) => {
-      if (details.resourceType === 'mainFrame') {
-        this.currentMainFrameCfMitigated =
-          getResponseHeader(details.responseHeaders, 'cf-mitigated')?.toLowerCase() === 'challenge'
-      }
-      callback({})
-    })
+  if (process.platform === 'win32') {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), APP_PACKAGE_NAME)
   }
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), APP_PACKAGE_NAME)
+}
 
-  /** Apply (or clear) a proxy for the scraper session. */
-  async setProxy(proxyUrl: string | undefined): Promise<void> {
-    const ses = this.getSession()
-    if (proxyUrl && proxyUrl.trim()) {
-      await ses.setProxy({ proxyRules: proxyUrl.trim() })
-    } else {
-      await ses.setProxy({ mode: 'direct' })
-    }
+function electronExecutable(): string {
+  if (process.versions.electron) return process.execPath
+  const loaded = createRequire(import.meta.url)('electron') as unknown
+  if (typeof loaded === 'string' && loaded) return loaded
+  throw new Error('无法定位 Electron scraper helper executable')
+}
+
+async function reserveLoopbackPort(): Promise<number> {
+  const server = net.createServer()
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen({ host: '127.0.0.1', port: 0, exclusive: true }, resolve)
+  })
+  const address = server.address()
+  if (!address || typeof address === 'string') {
+    server.close()
+    throw new Error('无法预留 scraper helper CDP 端口')
   }
+  const port = address.port
+  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+  return port
+}
 
-  private ensureWindow(): BrowserWindow {
-    if (this.win && !this.win.isDestroyed()) return this.win
-
-    const ua = cleanUserAgent()
-    this.getSession()
-
-    const win = new BrowserWindow({
-      width: 1080,
-      height: 820,
-      show: false,
-      title: '元数据刮削 · 浏览器',
-      backgroundColor: '#101014',
-      webPreferences: {
-        partition: PARTITION,
-        backgroundThrottling: false,
-        contextIsolation: true,
-        nodeIntegration: false
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
       }
-    })
-    win.setMenuBarVisibility(false)
-    win.webContents.setUserAgent(ua)
-
-    // Show the Cloudflare helper toolbar only on real challenge pages.
-    const syncToolbar = (): void => {
-      void this.syncChallengeToolbar(win)
-    }
-    win.webContents.on('dom-ready', syncToolbar)
-    win.webContents.on('did-finish-load', syncToolbar)
-
-    // Listen for toolbar button clicks signalled via console.log.
-    win.webContents.on('console-message', (_e, _level, message) => {
-      if (message.includes('__CF_ACTION__:refresh')) {
-        win.webContents.reload()
-      } else if (message.includes('__CF_ACTION__:save')) {
-        void this.savePageDebug(win)
-      } else if (message.includes('__CF_ACTION__:pass')) {
-        this.manualPass = true
-      }
-    })
-
-    win.on('closed', () => {
-      if (this.win !== win) return
-      this.teardownNetworkBodyCapture()
-      this.clearNetworkImageCache()
-      this.win = null
-      this.stealthApplied = false
-    })
-
-    this.win = win
-    return win
-  }
-
-  /**
-   * Make the verification window indistinguishable from a real Chrome at the
-   * client-hint level. Electron's `setUserAgent` only rewrites the UA string and
-   * leaves `sec-ch-ua` / `navigator.userAgentData` reporting "Chromium" without
-   * "Google Chrome" — an instant Cloudflare bot flag. We use CDP
-   * `Network.setUserAgentOverride` (the same mechanism Chrome DevTools uses) to
-   * align the UA string, the client-hint headers AND navigator.userAgentData,
-   * injecting the missing "Google Chrome" brand while preserving Chromium's real
-   * GREASE token.
-   */
-  private detachDebugger(wc: WebContents): void {
-    this.teardownNetworkBodyCapture()
-    try {
-      if (wc.debugger.isAttached()) wc.debugger.detach()
-    } catch {
-      /* ignore */
-    }
-  }
-
-  private clearNetworkImageCache(): void {
-    this.networkCacheGeneration += 1
-    this.imageBodyCache.clear()
-    this.networkRequestUrls.clear()
-    this.pendingImageRequests.clear()
-  }
-
-  private teardownNetworkBodyCapture(): void {
-    const wc = this.networkCaptureWc
-    this.networkCaptureWc = null
-    if (!wc || wc.isDestroyed()) return
-    try {
-      wc.debugger.removeListener('message', this.onDebuggerMessage)
-    } catch {
-      /* ignore */
-    }
-  }
-
-  private installNetworkBodyCapture(wc: WebContents): void {
-    if (this.networkCaptureWc === wc) return
-    this.teardownNetworkBodyCapture()
-    this.networkCaptureWc = wc
-    wc.debugger.on('message', this.onDebuggerMessage)
-  }
-
-  private rememberNetworkRequestUrl(requestId: string, url: string | undefined): void {
-    if (!url || !normalizeNetworkUrl(url)) return
-    let urls = this.networkRequestUrls.get(requestId)
-    if (!urls) {
-      urls = new Set()
-      this.networkRequestUrls.set(requestId, urls)
-    }
-    urls.add(url)
-  }
-
-  private handleDebuggerNetworkMessage(method: string, params: unknown): void {
-    if (!params || typeof params !== 'object') return
-    const p = params as Record<string, unknown>
-    const requestId = typeof p.requestId === 'string' ? p.requestId : ''
-    if (!requestId) return
-
-    if (method === 'Network.requestWillBeSent') {
-      const request = p.request as { url?: string } | undefined
-      this.rememberNetworkRequestUrl(requestId, request?.url)
-      const redirect = p.redirectResponse as { url?: string } | undefined
-      this.rememberNetworkRequestUrl(requestId, redirect?.url)
-      return
-    }
-
-    if (method === 'Network.responseReceived') {
-      const response = p.response as
-        | { url?: string; status?: number; mimeType?: string }
-        | undefined
-      this.rememberNetworkRequestUrl(requestId, response?.url)
-      const type = typeof p.type === 'string' ? p.type : ''
-      const status = typeof response?.status === 'number' ? response.status : 0
-      const mimeType = typeof response?.mimeType === 'string' ? response.mimeType : ''
-      if (!isImageNetworkResource({ type, mimeType, status })) {
-        return
-      }
-      this.pendingImageRequests.set(requestId, { mimeType, status, type })
-      return
-    }
-
-    if (method === 'Network.loadingFinished') {
-      if (!this.pendingImageRequests.has(requestId)) {
-        this.networkRequestUrls.delete(requestId)
-        return
-      }
-      void this.captureNetworkImageBody(requestId)
-      return
-    }
-
-    if (method === 'Network.loadingFailed') {
-      this.pendingImageRequests.delete(requestId)
-      this.networkRequestUrls.delete(requestId)
-    }
-  }
-
-  private async captureNetworkImageBody(requestId: string): Promise<void> {
-    const wc = this.networkCaptureWc
-    if (!wc || wc.isDestroyed()) return
-    if (!wc.debugger.isAttached()) return
-
-    const urls = this.networkRequestUrls.get(requestId)
-    this.pendingImageRequests.delete(requestId)
-    this.networkRequestUrls.delete(requestId)
-    if (!urls?.size) return
-
-    const generation = this.networkCacheGeneration
-    try {
-      const result = (await wc.debugger.sendCommand('Network.getResponseBody', {
-        requestId
-      })) as { body?: string; base64Encoded?: boolean }
-      if (generation !== this.networkCacheGeneration) return
-      const raw = typeof result.body === 'string' ? result.body : ''
-      if (!raw) return
-      const buf = result.base64Encoded
-        ? Buffer.from(raw, 'base64')
-        : Buffer.from(raw, 'binary')
-      if (!hasImageMagicBytes(buf)) return
-      this.imageBodyCache.set(urls, buf)
-    } catch {
-      /* Body may already be evicted from the debugger; fetchBuffer will fall back. */
-    }
-  }
-
-  private async applyStealthViaCdp(win: BrowserWindow): Promise<void> {
-    const wc = win.webContents
-    const profile = getScrapeUaProfile()
-
-    // Load a blank document so navigator.userAgentData is queryable.
-    await wc.loadURL('about:blank').catch(() => {})
-
-    // Capture Chromium's *natural* client hints (correct GREASE token).
-    let natural: {
-      brands?: Brand[]
-      mobile?: boolean
-      platform?: string
-      high?: {
-        platform?: string
-        platformVersion?: string
-        architecture?: string
-        bitness?: string
-        model?: string
-        uaFullVersion?: string
-        fullVersionList?: Brand[]
-      }
-    } | null = null
-    try {
-      const raw = await wc.executeJavaScript(
-        `(async () => {
-          const uad = navigator.userAgentData;
-          if (!uad) return null;
-          let high = {};
-          try {
-            high = await uad.getHighEntropyValues(['platform','platformVersion','architecture','bitness','model','uaFullVersion','fullVersionList']);
-          } catch (e) {}
-          return JSON.stringify({ brands: uad.brands, mobile: uad.mobile, platform: uad.platform, high });
-        })()`
-      )
-      if (raw) natural = JSON.parse(raw)
-    } catch {
-      /* fall back to synthesized values below */
-    }
-
-    const { userAgent: ua, major, fullVersion } = profile
-
-    const withGoogleChrome = (list: Brand[] | undefined, fallbackVer: string): Brand[] => {
-      let brands = (list && list.length ? list : [{ brand: 'Chromium', version: fallbackVer }]).filter(
-        (b) => !/electron|javdex/i.test(b.brand)
-      )
-      if (!brands.some((b) => b.brand === 'Google Chrome')) {
-        const chromium = brands.find((b) => /chromium/i.test(b.brand))
-        brands = [...brands, { brand: 'Google Chrome', version: chromium?.version || fallbackVer }]
-      }
-      return brands
-    }
-
-    const brands = withGoogleChrome(natural?.brands, major)
-    const fullVersionList = withGoogleChrome(
-      natural?.high?.fullVersionList,
-      fullVersion
-    ).map((b) => ({ brand: b.brand, version: b.version.includes('.') ? b.version : `${b.version}.0.0.0` }))
-
-    const high = natural?.high ?? {}
-    const platform = high.platform || natural?.platform || profile.platform
-    const platformVersion = high.platformVersion || profile.platformVersion
-
-    if (!wc.debugger.isAttached()) wc.debugger.attach('1.3')
-    await wc.debugger.sendCommand('Network.enable')
-    this.installNetworkBodyCapture(wc)
-    await wc.debugger.sendCommand('Page.enable')
-    await wc.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source: STEALTH_DOC_JS })
-    await wc.debugger.sendCommand('Network.setUserAgentOverride', {
-      userAgent: ua,
-      acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8,ja;q=0.7',
-      platform,
-      userAgentMetadata: {
-        brands,
-        fullVersionList,
-        fullVersion: high.uaFullVersion || fullVersion,
-        platform,
-        platformVersion,
-        architecture: high.architecture || profile.architecture,
-        model: high.model || '',
-        mobile: !!natural?.mobile,
-        bitness: high.bitness || profile.bitness,
-        wow64: false
-      }
-    })
-  }
-
-  private async ensureStealth(win: BrowserWindow): Promise<void> {
-    if (this.stealthApplied) return
-    const wc = win.webContents
-
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        await this.applyStealthViaCdp(win)
-        this.stealthApplied = true
-        return
-      } catch (err) {
-        this.detachDebugger(wc)
-        console.warn(
-          `[scrapeBrowser] CDP stealth attempt ${attempt}/2 failed:`,
-          (err as Error).message
-        )
-        if (attempt < 2) await this.sleep(250)
-      }
-    }
-
-    console.warn(
-      '[scrapeBrowser] CDP stealth unavailable after retries; HTTP client hints still rewritten via session hook'
     )
-  }
+  })
+}
 
-  private async readPageChallengeSample(win: BrowserWindow): Promise<string> {
-    return win.webContents
-      .executeJavaScript(
-        `(() => {
-          const title = document.title || '';
-          const bar = document.getElementById('__cf_helper_bar__');
-          const barParent = bar && bar.parentNode;
-          if (bar) bar.remove();
-          const bodyText = ((document.body && document.body.innerText) || '').slice(0, 8000);
-          const html = (document.documentElement && document.documentElement.outerHTML || '').slice(0, 30000);
-          if (bar && barParent) barParent.appendChild(bar);
-          return title + '\\n' + bodyText + '\\n' + html;
-        })()`
-      )
-      .catch(() => '')
-  }
-
-  private async savePageDebug(win: BrowserWindow): Promise<void> {
-    const sample = await this.readPageChallengeSample(win)
-    const diagnosis = diagnoseCloudflareChallenge(sample, {
-      cfMitigated: this.currentMainFrameCfMitigated,
-      allowNormalContentOverride: true
-    })
-    const html = await this.readHtml(win).catch(() => '')
-    const pageUrl = win.webContents.getURL()
-    const suggestedName = (() => {
-      try {
-        const { hostname, pathname } = new URL(pageUrl)
-        const slug = pathname.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '') || 'page'
-        return `${hostname}-${slug}-${Date.now()}.html`
-      } catch {
-        return `challenge-debug-${Date.now()}.html`
+function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted()
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(signal.reason instanceof Error ? signal.reason : new Error('浏览器操作已取消'))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
       }
+    )
+  })
+}
+
+function responseError(frame: ScrapeBrowserResponseFrame): Error {
+  const source = frame.error
+  if (source?.code === 'CHALLENGE') {
+    return new ScrapeBrowserChallengeError({ url: source.url, title: source.title })
+  }
+  const error = new Error(source?.message || 'Scraper helper request failed') as Error & {
+    code?: string
+  }
+  error.name = source?.name || 'Error'
+  if (source?.code) error.code = source.code
+  return error
+}
+
+function byteLimited(value: string, maxBytes: number): { value: string; truncated: boolean } {
+  const buffer = Buffer.from(value, 'utf8')
+  if (buffer.length <= maxBytes) return { value, truncated: false }
+  return {
+    value: buffer.subarray(0, maxBytes).toString('utf8').replace(/\uFFFD$/, ''),
+    truncated: true
+  }
+}
+
+function selectorForTarget(page: Page, target: string, snapshotFresh: boolean): Locator {
+  const normalized = target.trim()
+  if (!normalized) throw new Error('浏览器 target 不能为空')
+  if (/^(?:f\d+)?e\d+$/.test(normalized)) {
+    if (!snapshotFresh) throw new Error('浏览器 ref 已失效，请重新 snapshot')
+    return page.locator(`aria-ref=${normalized}`)
+  }
+  return page.locator(normalized)
+}
+
+function compactFind(snapshot: string, matcher: (line: string) => boolean): Array<{
+  ref?: string
+  text: string
+}> {
+  const lines = snapshot.split(/\r?\n/)
+  const matches: Array<{ ref?: string; text: string }> = []
+  for (let index = 0; index < lines.length && matches.length < 20; index += 1) {
+    if (!matcher(lines[index])) continue
+    const from = Math.max(0, index - 1)
+    const to = Math.min(lines.length, index + 2)
+    const text = lines.slice(from, to).join('\n').trim()
+    const ref = text.match(/\[ref=((?:f\d+)?e\d+)\]/)?.[1]
+    matches.push({ ...(ref ? { ref } : {}), text })
+  }
+  return matches
+}
+
+function documentRevision(helper: Pick<RunningHelper, 'generation' | 'pageEpoch'>): string {
+  return `${helper.generation}:${helper.pageEpoch}`
+}
+
+function isTransientObservationError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /execution context was destroyed|cannot find context with specified id|most likely because of a navigation|body.*(?:not found|does not match|failed to find)|waiting for locator\(['"]body['"]\)|element is not attached|timeout .* exceeded/i.test(message)
+}
+
+/** Owns helper process startup, authenticated RPC, CDP validation and the exclusive lease. */
+export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
+  private helper: RunningHelper | null = null
+  private helperPromise: Promise<RunningHelper> | null = null
+  private readonly pending = new Map<string, PendingRequest>()
+  private activeLease: ActiveLeaseState | null = null
+  private pendingAcquire: {
+    ownerId: string
+    purpose: ScrapeBrowserPurpose
+    proxyUrl?: string
+    promise: Promise<ActiveLeaseState>
+  } | null = null
+  private requestSequence = 0
+  private generation = 0
+  private idleTimer: ReturnType<typeof setTimeout> | null = null
+  private disposed = false
+  private readonly leaseContext = new AsyncLocalStorage<ScrapeBrowserLease>()
+  private legacyProxyUrl: string | undefined
+  private legacyLease: ScrapeBrowserLease | null = null
+
+  constructor(private readonly idleTimeoutMs = HELPER_IDLE_TIMEOUT_MS) {}
+
+  async acquire(input: ScrapeBrowserAcquireInput): Promise<ScrapeBrowserLease> {
+    if (this.disposed) throw new Error('ScrapeBrowserHost 已关闭')
+    input.signal.throwIfAborted()
+    const ownerId = input.ownerId.trim()
+    if (!ownerId) throw new Error('刮削浏览器 ownerId 不能为空')
+    const proxyUrl = normalizeProxy(input.proxyUrl)
+    if (this.activeLease) {
+      if (this.activeLease.ownerId !== ownerId) throw new ScrapeBrowserBusyError(this.activeLease)
+      if (this.activeLease.proxyUrl !== proxyUrl || this.activeLease.purpose !== input.purpose) {
+        throw new Error('同一刮削浏览器租约内不能切换代理或用途')
+      }
+      this.activeLease.references += 1
+      return this.createLease(this.activeLease, input.signal)
+    }
+
+    if (this.pendingAcquire) {
+      if (this.pendingAcquire.ownerId !== ownerId) {
+        throw new ScrapeBrowserBusyError(this.pendingAcquire)
+      }
+      if (this.pendingAcquire.proxyUrl !== proxyUrl || this.pendingAcquire.purpose !== input.purpose) {
+        throw new Error('同一刮削浏览器租约内不能切换代理或用途')
+      }
+      await this.pendingAcquire.promise
+      return this.acquire(input)
+    }
+
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = null
+    const promise = (async (): Promise<ActiveLeaseState> => {
+      const helper = await this.ensureHelper(input.signal)
+      await this.request('setProxy', { proxyUrl }, input.signal)
+      if (this.disposed) throw new Error('ScrapeBrowserHost 已关闭')
+      const state: ActiveLeaseState = {
+        ownerId,
+        purpose: input.purpose,
+        proxyUrl,
+        references: 1,
+        generation: helper.generation
+      }
+      this.activeLease = state
+      return state
     })()
-
-    const { canceled, filePath } = await dialog.showSaveDialog(win, {
-      title: '保存页面',
-      defaultPath: suggestedName,
-      filters: [{ name: 'HTML', extensions: ['html'] }]
-    })
-    if (canceled || !filePath) return
-
-    await fs.writeFile(filePath, html, 'utf8')
-    const metaPath = `${filePath.replace(/\.html?$/i, '')}.challenge-meta.json`
-    await fs.writeFile(
-      metaPath,
-      JSON.stringify(
-        {
-          savedAt: new Date().toISOString(),
-          url: pageUrl,
-          cfMitigated: this.currentMainFrameCfMitigated,
-          diagnosis
-        },
-        null,
-        2
-      ),
-      'utf8'
-    )
-
-    const noticePath = path.basename(metaPath)
-    await dialog.showMessageBox(win, {
-      type: 'info',
-      title: '页面已保存',
-      message: '页面 HTML 与 challenge 诊断信息已保存。',
-      detail: `${path.basename(filePath)}\n${noticePath}`,
-      buttons: ['确定']
-    })
-  }
-
-  private async isPageChallenge(win: BrowserWindow): Promise<boolean> {
-    const sample = await this.readPageChallengeSample(win)
-    const challenge = isCloudflareChallengeText(sample, {
-      cfMitigated: this.currentMainFrameCfMitigated,
-      allowNormalContentOverride: true
-    })
-    if (!challenge) this.currentMainFrameCfMitigated = false
-    return challenge
-  }
-
-  private async syncChallengeToolbar(win: BrowserWindow): Promise<void> {
-    const challenge = await this.isPageChallenge(win)
-    if (challenge) {
-      await win.webContents.executeJavaScript(TOOLBAR_JS).catch(() => {})
-      if (!win.isVisible()) win.show()
-      win.focus()
-      return
-    }
-    await win.webContents.executeJavaScript(REMOVE_TOOLBAR_JS).catch(() => {})
-  }
-
-  /**
-   * Load a URL in the verification window and return its HTML once the page is
-   * ready — either auto-detected real content, or after the user clicks
-   * 「验证通过」. Throws on timeout or if the window is closed.
-   *
-   * Concurrent calls are queued rather than run in parallel, so a plugin may
-   * safely fan out over several URLs without them clobbering each other.
-   */
-  async fetchPage(
-    url: string,
-    options: {
-      readySelector?: string
-      /** Normal page loading budget; time spent on Cloudflare verification is excluded. */
-      timeoutMs?: number
-      /** Body/title matches this → page is treated as loaded (e.g. xslist "No results found"). */
-      settleWhenText?: RegExp
-    } = {}
-  ): Promise<string> {
-    // The timeout budget starts inside loadPageExclusively, so queueing never
-    // eats into a caller's timeoutMs.
-    const run = this.pageQueue.then(
-      () => this.loadPageExclusively(url, options),
-      () => this.loadPageExclusively(url, options)
-    )
-    this.pageQueue = run.then(
-      () => undefined,
-      () => undefined
-    )
-    return run
-  }
-
-  private async loadPageExclusively(
-    url: string,
-    options: {
-      readySelector?: string
-      timeoutMs?: number
-      settleWhenText?: RegExp
-    }
-  ): Promise<string> {
-    const { readySelector = DEFAULT_CONTENT_SELECTOR, timeoutMs = 180000, settleWhenText } =
-      options
-    const settlePattern = settleWhenText?.source
-    const settleFlags = settleWhenText?.flags.includes('i') ? 'i' : ''
-    const win = this.ensureWindow()
-    this.manualPass = false
-    this.currentMainFrameCfMitigated = false
-
-    // Align client hints with a real Chrome before hitting Cloudflare.
-    await this.ensureStealth(win)
-
+    const pending = { ownerId, purpose: input.purpose, proxyUrl, promise }
+    this.pendingAcquire = pending
     try {
-      this.lastOrigin = new URL(url).origin
-    } catch {
-      /* keep previous origin */
-    }
-
-    if (!win.isVisible()) win.show()
-
-    // Drop previous page images so cover/sample downloads cannot reuse a stale body.
-    this.clearNetworkImageCache()
-
-    await win.loadURL(url).catch(() => {
-      /* navigation errors are tolerated; we poll the document state below */
-    })
-
-    const start = Date.now()
-    const waitBudget = new ScrapeBrowserWaitBudget(start, timeoutMs, VERIFICATION_TIMEOUT_MS)
-    let stableContentSince = 0
-    let lastStableSignature = ''
-    let focusedForChallenge = false
-
-    while (true) {
-      if (!this.win || this.win.isDestroyed()) {
-        throw new Error('验证窗口已被关闭')
-      }
-
-      if (this.manualPass) {
-        // “验证通过” only requests an immediate re-check. Cloudflare may still
-        // be redirecting, so the destination must pass the normal readiness loop.
-        this.manualPass = false
-        stableContentSince = 0
-        lastStableSignature = ''
-      }
-
-      const info = await win.webContents
-        .executeJavaScript(
-          `(() => {
-            const title = document.title || '';
-            const bodyText = (document.body && document.body.innerText) || '';
-            const sample = bodyText + ' ' + title;
-            const text = sample.slice(0, 5000);
-            const hasContent = !!document.querySelector(${JSON.stringify(readySelector)});
-            const readyState = document.readyState || '';
-            const textLength = text.trim().length;
-            const bodyChildCount = document.body ? document.body.children.length : 0;
-            const htmlLength = document.documentElement ? document.documentElement.outerHTML.length : 0;
-            const pageUrl = location.href;
-            let settled = false;
-            ${
-              settlePattern
-                ? `try {
-              settled = new RegExp(${JSON.stringify(settlePattern)}, ${JSON.stringify(
-                    settleFlags
-                  )}).test(text);
-            } catch (e) { settled = false; }`
-                : 'settled = false;'
-            }
-            const signature = [pageUrl, title, readyState, textLength, bodyChildCount, htmlLength].join('|');
-            return { title, hasContent, settled, readyState, textLength, bodyChildCount, htmlLength, pageUrl, signature };
-          })()`
-        )
-        .catch(() => ({
-          title: '',
-          hasContent: false,
-          settled: false,
-          readyState: '',
-          textLength: 0,
-          bodyChildCount: 0,
-          htmlLength: 0,
-          pageUrl: '',
-          signature: ''
-        }))
-
-      const isChallenge = await this.isPageChallenge(win)
-      const waitStatus = waitBudget.update(Date.now(), isChallenge)
-      if (waitStatus === 'verification-timeout') {
-        win.show()
-        win.focus()
-        throw new Error('验证超时：请在弹出的窗口中完成 Cloudflare 验证后点击「验证通过」')
-      }
-      if (waitStatus === 'page-timeout') break
-      if (isChallenge && !focusedForChallenge) {
-        await this.syncChallengeToolbar(win)
-        focusedForChallenge = true
-      }
-      const frameIdle = !win.webContents.isLoading() && !win.webContents.isLoadingMainFrame()
-      const hasAnyDom =
-        info.textLength > 0 || info.bodyChildCount > 0 || info.htmlLength > 200
-      const hasTerminalDomState =
-        info.readyState === 'complete' &&
-        frameIdle &&
-        hasAnyDom &&
-        Date.now() - start > DOM_SETTLE_MIN_ELAPSED_MS
-      const mayResolve = canResolveScrapePage(
-        isChallenge,
-        info.hasContent || info.settled || hasTerminalDomState
-      )
-      if (mayResolve) {
-        if (stableContentSince === 0 || lastStableSignature !== info.signature) {
-          stableContentSince = Date.now()
-          lastStableSignature = info.signature
-        }
-        if (Date.now() - stableContentSince > DOM_SETTLE_STABLE_MS) {
-          return this.readHtml(win)
-        }
-      } else {
-        stableContentSince = 0
-        lastStableSignature = ''
-      }
-
-      await this.sleep(700)
-    }
-
-    if (!win.isDestroyed()) {
-      win.show()
-      win.focus()
-    }
-    throw new Error('页面加载超时：请检查 URL 或网络连接后重试')
-  }
-
-  private async readHtml(win: BrowserWindow): Promise<string> {
-    return win.webContents.executeJavaScript('document.documentElement.outerHTML')
-  }
-
-  private async htmlRegion(
-    win: BrowserWindow,
-    params: Record<string, unknown>
-  ): Promise<{ url: string; selector: string; html: string; truncated: boolean }> {
-    const selector =
-      typeof params.selector === 'string' && params.selector.trim() ? params.selector.trim() : 'body'
-    const maxLength =
-      typeof params.maxLength === 'number' && Number.isFinite(params.maxLength)
-        ? Math.max(200, Math.min(20000, Math.round(params.maxLength)))
-        : 12000
-    return win.webContents.executeJavaScript(
-      `(() => {
-        const selector = ${JSON.stringify(selector)};
-        const maxLength = ${maxLength};
-        const el = document.querySelector(selector) || document.body;
-        if (!el) throw new Error('Selector not found: ' + selector);
-        const raw = (el.outerHTML || '').replace(/\\s+/g, ' ').trim();
-        return {
-          url: location.href,
-          selector,
-          html: raw.slice(0, maxLength),
-          truncated: raw.length > maxLength
-        };
-      })()`
-    )
-  }
-
-  private async evaluate(win: BrowserWindow, params: Record<string, unknown>): Promise<unknown> {
-    const expression =
-      typeof params.expression === 'string' ? params.expression.trim() : ''
-    if (!expression) throw new Error('evaluate requires expression')
-    const forbidden = /\b(fetch|import|require|XMLHttpRequest|WebSocket|eval)\b/i
-    if (forbidden.test(expression)) {
-      throw new Error('evaluate expression contains forbidden APIs')
-    }
-    const timeoutMs =
-      typeof params.timeoutMs === 'number' && Number.isFinite(params.timeoutMs)
-        ? Math.max(500, Math.min(10000, Math.round(params.timeoutMs)))
-        : 3000
-    const wrapped = `(async () => {
-      const fn = ${expression};
-      const value = typeof fn === 'function' ? await fn() : fn;
-      return JSON.parse(JSON.stringify(value));
-    })()`
-    return Promise.race([
-      win.webContents.executeJavaScript(wrapped),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('evaluate timed out')), timeoutMs)
-      )
-    ])
-  }
-
-  private async pageStatus(
-    win: BrowserWindow
-  ): Promise<{ url: string; title: string; isChallenge: boolean }> {
-    const url = win.webContents.getURL()
-    const title = await win.webContents.executeJavaScript(`document.title || ''`).catch(() => '')
-    const isChallenge = await this.isPageChallenge(win)
-    return { url, title, isChallenge }
-  }
-
-  async performAction(action: string, params: Record<string, unknown> = {}): Promise<unknown> {
-    const win = this.ensureWindow()
-    await this.ensureStealth(win)
-    if (!win.isVisible()) win.show()
-
-    switch (action) {
-      case 'snapshot':
-        return this.snapshot(win, params)
-      case 'inspect':
-        return this.inspect(win, params)
-      case 'click':
-        return this.click(win, readSelector(params))
-      case 'type':
-        return this.type(win, readSelector(params), readText(params), params.clear === true)
-      case 'press':
-        return this.press(win, readKey(params))
-      case 'waitForSelector':
-        return this.waitForSelector(win, readSelector(params), readTimeout(params.timeoutMs))
-      case 'wait':
-        await this.sleep(readTimeout(params.timeoutMs))
-        return true
-      case 'html':
-        return this.readHtml(win)
-      case 'htmlRegion':
-        return this.htmlRegion(win, params)
-      case 'evaluate':
-        return this.evaluate(win, params)
-      case 'status':
-        return this.pageStatus(win)
-      case 'url':
-        return win.webContents.getURL()
-      default:
-        throw new Error(`Unsupported browser action: ${action}`)
+      return this.createLease(await promise, input.signal)
+    } catch (error) {
+      if (!this.activeLease) this.startIdleTimer()
+      throw error
+    } finally {
+      if (this.pendingAcquire === pending) this.pendingAcquire = null
     }
   }
 
-  private async snapshot(
-    win: BrowserWindow,
-    params: Record<string, unknown>
-  ): Promise<{ url: string; title: string; text: string }> {
-    const maxTextLength =
-      typeof params.maxTextLength === 'number' && Number.isFinite(params.maxTextLength)
-        ? Math.max(200, Math.min(20000, Math.round(params.maxTextLength)))
-        : 5000
-    return win.webContents.executeJavaScript(
-      `(() => {
-        const text = ((document.body && document.body.innerText) || '').replace(/\\s+/g, ' ').trim();
-        return {
-          url: location.href,
-          title: document.title || '',
-          text: text.slice(0, ${maxTextLength})
-        };
-      })()`
-    )
+  async dispose(): Promise<void> {
+    if (this.disposed) return
+    this.disposed = true
+    this.activeLease = null
+    this.legacyLease = null
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = null
+    await this.stopHelper('host disposed')
   }
 
-  private async inspect(win: BrowserWindow, params: Record<string, unknown>): Promise<unknown> {
-    const maxLinks =
-      typeof params.maxLinks === 'number' && Number.isFinite(params.maxLinks)
-        ? Math.max(10, Math.min(160, Math.round(params.maxLinks)))
-        : 80
-    const maxTextLength =
-      typeof params.maxTextLength === 'number' && Number.isFinite(params.maxTextLength)
-        ? Math.max(200, Math.min(12000, Math.round(params.maxTextLength)))
-        : 4000
-    const maxRegionHtmlLength =
-      typeof params.maxRegionHtmlLength === 'number' && Number.isFinite(params.maxRegionHtmlLength)
-        ? Math.max(400, Math.min(8000, Math.round(params.maxRegionHtmlLength)))
-        : 2800
-    return win.webContents.executeJavaScript(
-      `(() => {
-        const cssPath = (el) => {
-          if (!el || !el.tagName) return '';
-          if (el.id) return '#' + CSS.escape(el.id);
-          const parts = [];
-          let cur = el;
-          while (cur && cur.nodeType === 1 && parts.length < 4) {
-            let part = cur.tagName.toLowerCase();
-            if (cur.classList && cur.classList.length) {
-              part += '.' + Array.from(cur.classList).slice(0, 2).map((c) => CSS.escape(c)).join('.');
-            }
-            const parent = cur.parentElement;
-            if (parent) {
-              const same = Array.from(parent.children).filter((child) => child.tagName === cur.tagName);
-              if (same.length > 1) part += ':nth-of-type(' + (same.indexOf(cur) + 1) + ')';
-            }
-            parts.unshift(part);
-            cur = parent;
-          }
-          return parts.join(' > ');
-        };
-        const compactHtml = (html) => html.replace(/\\s+/g, ' ').trim().slice(0, ${maxRegionHtmlLength});
-        const linkRegion = (el) => {
-          if (el.closest('nav.breadcrumb, .breadcrumb')) return 'breadcrumb';
-          if (el.closest('.attributes, .video-details, #video_info, .movie-info, .info-panel, .panel-block')) {
-            return 'metadata';
-          }
-          return 'other';
-        };
-        const text = ((document.body && document.body.innerText) || '').replace(/\\s+/g, ' ').trim();
-        const forms = Array.from(document.querySelectorAll('form')).slice(0, 12).map((form) => ({
-          selector: cssPath(form),
-          action: form.getAttribute('action') || '',
-          method: form.getAttribute('method') || 'get',
-          inputs: Array.from(form.querySelectorAll('input, textarea, select')).slice(0, 20).map((input) => ({
-            selector: cssPath(input),
-            name: input.getAttribute('name') || '',
-            type: input.getAttribute('type') || input.tagName.toLowerCase(),
-            placeholder: input.getAttribute('placeholder') || '',
-            value: input.getAttribute('value') || ''
-          })),
-          buttons: Array.from(form.querySelectorAll('button, input[type="submit"]')).slice(0, 10).map((button) => ({
-            selector: cssPath(button),
-            text: (button.innerText || button.getAttribute('value') || '').replace(/\\s+/g, ' ').trim(),
-            type: button.getAttribute('type') || ''
-          }))
-        }));
-        const looseInputs = Array.from(document.querySelectorAll('input, textarea, select'))
-          .filter((input) => !input.closest('form'))
-          .slice(0, 20)
-          .map((input) => ({
-            selector: cssPath(input),
-            name: input.getAttribute('name') || '',
-            type: input.getAttribute('type') || input.tagName.toLowerCase(),
-            placeholder: input.getAttribute('placeholder') || '',
-            value: input.getAttribute('value') || ''
-          }));
-        if (looseInputs.length) {
-          forms.push({ selector: 'document', action: location.href, method: 'interactive', inputs: looseInputs, buttons: [] });
-        }
-        const links = Array.from(document.querySelectorAll('a[href]')).slice(0, ${maxLinks}).map((a) => ({
-          text: (a.innerText || a.getAttribute('title') || '').replace(/\\s+/g, ' ').trim().slice(0, 120),
-          href: new URL(a.getAttribute('href'), location.href).toString(),
-          region: linkRegion(a),
-          parentSelector: cssPath(a.parentElement)
-        }));
-        const regionSpecs = [
-          { label: '面包屑导航', selector: 'nav.breadcrumb, .breadcrumb' },
-          { label: '元数据属性区', selector: '.attributes, .video-details, #video_info, .movie-info, .info-panel' },
-          { label: '标题区', selector: 'h1, .title.is-4, .video-title' },
-          { label: '页面主区块', selector: '.main, main, #content, article.page' }
-        ];
-        const domRegions = [];
-        const seenRegionSelectors = new Set();
-        for (const spec of regionSpecs) {
-          const el = document.querySelector(spec.selector);
-          if (!el) continue;
-          const selector = cssPath(el);
-          if (seenRegionSelectors.has(selector)) continue;
-          seenRegionSelectors.add(selector);
-          domRegions.push({
-            label: spec.label,
-            selector,
-            html: compactHtml(el.outerHTML)
-          });
-        }
-        const definitionLists = Array.from(document.querySelectorAll('dl'))
-          .slice(0, 10)
-          .map((dl) => {
-            const items = [];
-            let currentTerm = '';
-            for (const child of Array.from(dl.children)) {
-              if (child.tagName === 'DD') {
-                currentTerm = (child.innerText || '').replace(/\\s+/g, ' ').trim();
-              } else if (child.tagName === 'DT' && currentTerm) {
-                items.push({
-                  term: currentTerm,
-                  value: (child.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 240),
-                  valueHtml: compactHtml(child.innerHTML).slice(0, 600)
-                });
-                currentTerm = '';
-              }
-            }
-            return { selector: cssPath(dl), items };
-          })
-          .filter((list) => list.items.length > 0);
-        return {
-          url: location.href,
-          title: document.title || '',
-          text: text.slice(0, ${maxTextLength}),
-          forms,
-          links,
-          domRegions,
-          definitionLists
-        };
-      })()`
-    )
+  runWithLease<T>(lease: ScrapeBrowserLease, run: () => Promise<T>): Promise<T> {
+    return this.leaseContext.run(lease, run)
   }
 
-  private async click(win: BrowserWindow, selector: string): Promise<boolean> {
-    return win.webContents.executeJavaScript(
-      `(() => {
-        const el = document.querySelector(${JSON.stringify(selector)});
-        if (!el) throw new Error('Selector not found: ${escapeJsMessage(selector)}');
-        el.scrollIntoView({ block: 'center', inline: 'center' });
-        el.click();
-        return true;
-      })()`
-    )
-  }
-
-  private async type(
-    win: BrowserWindow,
-    selector: string,
-    text: string,
-    clear: boolean
-  ): Promise<boolean> {
-    return win.webContents.executeJavaScript(
-      `(() => {
-        const el = document.querySelector(${JSON.stringify(selector)});
-        if (!el) throw new Error('Selector not found: ${escapeJsMessage(selector)}');
-        el.scrollIntoView({ block: 'center', inline: 'center' });
-        el.focus();
-        if (${clear ? 'true' : 'false'}) el.value = '';
-        el.value = (el.value || '') + ${JSON.stringify(text)};
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        return true;
-      })()`
-    )
-  }
-
-  private async press(win: BrowserWindow, key: string): Promise<boolean> {
-    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: key })
-    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: key })
-    return true
-  }
-
-  private async waitForSelector(
-    win: BrowserWindow,
-    selector: string,
-    timeoutMs: number
-  ): Promise<boolean> {
-    const started = Date.now()
-    const waitBudget = new ScrapeBrowserWaitBudget(started, timeoutMs, VERIFICATION_TIMEOUT_MS)
-    let focusedForChallenge = false
-    while (true) {
-      const isChallenge = await this.isPageChallenge(win)
-      const found = isChallenge
-        ? false
-        : await win.webContents
-            .executeJavaScript(`!!document.querySelector(${JSON.stringify(selector)})`)
-            .catch(() => false)
-      if (canResolveScrapeSelector(isChallenge, found)) return true
-
-      const waitStatus = waitBudget.update(Date.now(), isChallenge)
-      if (waitStatus === 'verification-timeout') {
-        await this.syncChallengeToolbar(win)
-        throw new Error('验证超时：请在弹出的窗口中完成 Cloudflare 验证后点击「验证通过」')
-      }
-      if (waitStatus === 'page-timeout') break
-      if (isChallenge && !focusedForChallenge) {
-        await this.syncChallengeToolbar(win)
-        focusedForChallenge = true
-      } else if (!isChallenge) {
-        focusedForChallenge = false
-      }
-
-      await this.sleep(250)
+  /** Compatibility surface while callers are migrated to explicit lease ownership. */
+  async setProxy(proxyUrl: string | undefined): Promise<void> {
+    const normalized = normalizeProxy(proxyUrl)
+    if (this.activeLease && this.activeLease.proxyUrl !== normalized) {
+      throw new Error('当前刮削浏览器租约的代理已冻结')
     }
-    throw new Error(`Timed out waiting for selector: ${selector}`)
+    this.legacyProxyUrl = normalized
   }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms))
+  async fetchPage(url: string, options?: ScrapeBrowserFetchPageOptions): Promise<string> {
+    return (this.leaseContext.getStore() ?? await this.ensureLegacyLease()).fetchPage(url, options)
   }
 
-  /**
-   * Download a binary asset through the scraper session (UA, proxy, cookies).
-   * Prefers image bodies already loaded in the scraper window (CDP Network cache)
-   * to avoid a second HTTP fetch. Falls back to session net.request.
-   * During scraping, use session referer (current page origin). For manual import,
-   * prefer {@link fetchBufferViaNavigation} or `{ referer: 'omit' }`.
-   */
-  async fetchBuffer(
-    url: string,
-    options?: { referer?: 'omit' | 'session' | string }
-  ): Promise<Buffer> {
-    const cached = this.imageBodyCache.get(url)
-    if (cached) return cached
-    return (await this.fetchBufferResponse(url, options)).body
+  async fetchBuffer(url: string, options?: ScrapeBrowserFetchBufferOptions): Promise<Buffer> {
+    return (this.leaseContext.getStore() ?? await this.ensureLegacyLease()).fetchBuffer(url, options)
   }
 
   async fetchBufferResponse(
     url: string,
-    options?: {
-      referer?: 'omit' | 'session' | string
-      headers?: Readonly<Record<string, string>>
-    }
-  ): Promise<{ statusCode: number; body: Buffer; etag?: string }> {
-    const ses = this.getSession()
-    const profile = getScrapeUaProfile()
-    const referer = resolveFetchReferer(options?.referer, this.lastOrigin)
-    return new Promise<{ statusCode: number; body: Buffer; etag?: string }>((resolve, reject) => {
-      const request = net.request({ url, session: ses, useSessionCookies: true })
-      request.setHeader('User-Agent', profile.userAgent)
-      if (referer) request.setHeader('Referer', referer)
-      for (const [name, value] of Object.entries(options?.headers ?? {})) {
-        request.setHeader(name, value)
-      }
-      const chunks: Buffer[] = []
-      request.on('response', (response) => {
-        if (response.statusCode >= 400) {
-          reject(new Error(`HTTP ${response.statusCode}`))
-          response.on('data', () => {})
-          return
-        }
-        response.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
-        response.on('end', () =>
-          resolve({
-            statusCode: response.statusCode,
-            body: Buffer.concat(chunks),
-            etag: response.headers.etag?.[0]
-          })
-        )
-        response.on('error', reject)
-      })
-      request.on('error', reject)
-      request.end()
-    })
+    options?: ScrapeBrowserFetchBufferOptions
+  ): Promise<ScrapeBrowserResourceResponse> {
+    return (this.leaseContext.getStore() ?? await this.ensureLegacyLease()).fetchBufferResponse(url, options)
   }
 
-  /**
-   * Load an image URL as a top-level navigation (like pasting into the browser
-   * address bar), then read the bytes back from the hidden window context.
-   */
-  async fetchBufferViaNavigation(url: string, timeoutMs = 20000): Promise<Buffer> {
-    const win = new BrowserWindow({
-      show: false,
-      webPreferences: {
-        partition: PARTITION,
-        offscreen: true,
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true
-      }
-    })
-
-    try {
-      await Promise.race([
-        win.loadURL(url),
-        this.sleep(timeoutMs).then(() => {
-          throw new Error('图片加载超时')
-        })
-      ])
-
-      if (win.webContents.isDestroyed()) {
-        throw new Error('图片加载失败')
-      }
-
-      const bytes = await win.webContents.executeJavaScript(
-        `(async () => {
-          const res = await fetch(${JSON.stringify(url)}, {
-            credentials: 'include',
-            referrerPolicy: 'no-referrer'
-          })
-          if (!res.ok) throw new Error('HTTP ' + res.status)
-          return Array.from(new Uint8Array(await res.arrayBuffer()))
-        })()`,
-        true
-      )
-      return Buffer.from(bytes as number[])
-    } finally {
-      if (!win.isDestroyed()) win.close()
-    }
+  async performAction(
+    action: string,
+    params: Record<string, unknown> = {}
+  ): Promise<unknown> {
+    return (this.leaseContext.getStore() ?? await this.ensureLegacyLease())
+      .pluginAction(action as PluginBrowserAction, params)
   }
 
   close(): void {
-    // Keep the persistent Session so cookies and Cloudflare clearance survive window recycling.
-    this.clearNetworkImageCache()
-    const win = this.win
-    this.win = null
-    this.stealthApplied = false
-    if (win && !win.isDestroyed()) {
-      this.detachDebugger(win.webContents)
-      win.close()
-    } else {
-      this.teardownNetworkBodyCapture()
+    const lease = this.legacyLease
+    this.legacyLease = null
+    if (lease) void lease.release()
+  }
+
+  private async ensureLegacyLease(): Promise<ScrapeBrowserLease> {
+    if (this.legacyLease) return this.legacyLease
+    if (this.activeLease) {
+      throw new ScrapeBrowserBusyError(this.activeLease)
+    }
+    const lease = await this.acquire({
+      ownerId: `legacy:${crypto.randomUUID()}`,
+      purpose: 'scrape',
+      proxyUrl: this.legacyProxyUrl,
+      signal: new AbortController().signal
+    })
+    this.legacyLease = lease
+    return lease
+  }
+
+  private createLease(state: ActiveLeaseState, signal: AbortSignal): ScrapeBrowserLease {
+    let released = false
+    const assertCurrent = (): void => {
+      signal.throwIfAborted()
+      if (released || this.activeLease !== state || this.helper?.generation !== state.generation) {
+        throw new Error('刮削浏览器租约已失效')
+      }
+    }
+    const rpc = async <T>(
+      command: ScrapeBrowserHelperCommand,
+      payload: Record<string, unknown>
+    ): Promise<T> => {
+      assertCurrent()
+      return this.request(command, payload, signal) as Promise<T>
+    }
+    return {
+      ownerId: state.ownerId,
+      purpose: state.purpose,
+      fetchPage: (url, options) => rpc<string>('fetchPage', { url, options }),
+      fetchBuffer: (url, options) => rpc<Buffer>('fetchBuffer', { url, options }),
+      fetchBufferResponse: (url, options) =>
+        rpc<ScrapeBrowserResourceResponse>('fetchBufferResponse', { url, options }),
+      pluginAction: (action, params = {}) => rpc('performAction', { action, params }),
+      presentToUser: async () => {
+        const status = await rpc<{ url?: unknown; title?: unknown }>('performAction', {
+          action: 'present',
+          params: {}
+        })
+        return {
+          url: typeof status.url === 'string' ? status.url : '',
+          title: typeof status.title === 'string' ? status.title : ''
+        }
+      },
+      agentAction: async (command) => {
+        assertCurrent()
+        try {
+          return await withAbort(this.runAgentAction(command, signal), signal)
+        } catch (error) {
+          if (signal.aborted) await this.stopHelper('agent action aborted')
+          throw error
+        }
+      },
+      recycle: async () => {
+        assertCurrent()
+        await this.stopHelper('lease recycle')
+        const helper = await this.ensureHelper(signal)
+        await this.request('setProxy', { proxyUrl: state.proxyUrl }, signal)
+        state.generation = helper.generation
+      },
+      release: async () => {
+        if (released) return
+        released = true
+        if (this.activeLease !== state) return
+        state.references -= 1
+        if (state.references > 0) return
+        this.activeLease = null
+        if (this.legacyLease?.ownerId === state.ownerId) this.legacyLease = null
+        this.startIdleTimer()
+      }
+    }
+  }
+
+  private startIdleTimer(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null
+      if (!this.activeLease) void this.stopHelper('idle timeout')
+    }, this.idleTimeoutMs)
+    this.idleTimer.unref()
+  }
+
+  private async ensureHelper(signal: AbortSignal): Promise<RunningHelper> {
+    signal.throwIfAborted()
+    if (this.helper && !this.helper.fatal) return this.helper
+    if (!this.helperPromise) {
+      this.helperPromise = this.startHelperWithRetries().finally(() => {
+        this.helperPromise = null
+      })
+    }
+    return withTimeout(this.helperPromise, HELPER_START_TIMEOUT_MS * MAX_START_ATTEMPTS, 'Scraper helper 启动超时')
+  }
+
+  private async startHelperWithRetries(): Promise<RunningHelper> {
+    let lastError: unknown
+    for (let attempt = 1; attempt <= MAX_START_ATTEMPTS; attempt += 1) {
+      try {
+        return await this.startHelper()
+      } catch (error) {
+        lastError = error
+        await this.stopHelper(`start attempt ${attempt} failed`)
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('Scraper helper 无法启动')
+  }
+
+  private async startHelper(): Promise<RunningHelper> {
+    const token = crypto.randomBytes(32).toString('hex')
+    const pipePath = helperPipePath()
+    const cdpPort = await reserveLoopbackPort()
+    const server = net.createServer()
+    const socketPromise = new Promise<Socket>((resolve, reject) => {
+      server.once('connection', resolve)
+      server.once('error', reject)
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(pipePath, resolve)
+    })
+
+    const args = process.defaultApp || !process.versions.electron
+      ? [hostAppPath(), SCRAPE_BROWSER_HELPER_FLAG]
+      : [SCRAPE_BROWSER_HELPER_FLAG]
+    const env = { ...process.env }
+    delete env.ELECTRON_RUN_AS_NODE
+    env[SCRAPE_BROWSER_HELPER_ENV.pipe] = pipePath
+    env[SCRAPE_BROWSER_HELPER_ENV.token] = token
+    env[SCRAPE_BROWSER_HELPER_ENV.profile] = path.join(hostUserDataPath(), 'Partitions', 'scraper')
+    env[SCRAPE_BROWSER_HELPER_ENV.cdpPort] = String(cdpPort)
+    env[SCRAPE_BROWSER_HELPER_ENV.parentPid] = String(process.pid)
+    const child = spawn(electronExecutable(), args, {
+      env,
+      stdio: ['ignore', 'ignore', 'pipe'],
+      windowsHide: true
+    })
+    child.stderr?.on('data', (data: Buffer) => {
+      const rawMessage = data.toString('utf8').trim()
+      const message = rawMessage.includes('DevTools listening on')
+        ? 'DevTools listening (loopback endpoint redacted)'
+        : rawMessage
+        .replaceAll(token, '[redacted-token]')
+        .replaceAll(pipePath, '[redacted-pipe]')
+        .replaceAll(env[SCRAPE_BROWSER_HELPER_ENV.profile]!, '[redacted-profile]')
+        .replaceAll(`127.0.0.1:${cdpPort}`, '[redacted-cdp]')
+      if (message) console.error(`[scraper-helper] ${message.slice(0, 2000)}`)
+    })
+
+    const framedHolder: { value?: ScrapeBrowserFramedSocket } = {}
+    try {
+      const socket = await withTimeout(socketPromise, HELPER_START_TIMEOUT_MS, 'Scraper helper IPC 连接超时')
+      if (server.listening) server.close()
+      const helloPromise = new Promise<ScrapeBrowserHelloFrame>((resolve, reject) => {
+        framedHolder.value = new ScrapeBrowserFramedSocket(
+          socket,
+          (frame) => {
+            if (frame.type === 'hello') {
+              resolve(frame)
+              return
+            }
+            this.handleFrame(frame)
+          },
+          reject
+        )
+      })
+      const hello = await withTimeout(helloPromise, HELPER_START_TIMEOUT_MS, 'Scraper helper 握手超时')
+      const framed = framedHolder.value
+      if (!framed) throw new Error('Scraper helper IPC 尚未建立')
+      assertScrapeBrowserHello(hello, {
+        token,
+        parentPid: process.pid,
+        cdpPort,
+        childPid: child.pid
+      })
+
+      const targets = await this.readCdpTargets(cdpPort)
+      const pages = targets.filter((target) => target.type === 'page')
+      if (pages.length !== 1 || pages[0].id !== hello.targetId) {
+        throw new Error('Scraper helper CDP target 校验失败')
+      }
+      const { chromium } = await import('playwright-core')
+      const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`)
+      const contexts = browser.contexts()
+      const playwrightPages = contexts.flatMap((context) => context.pages())
+      if (contexts.length !== 1 || playwrightPages.length !== 1) {
+        await browser.close()
+        throw new Error('Scraper helper 只允许一个页面 target')
+      }
+      const page = playwrightPages[0]
+      page.setDefaultTimeout(10_000)
+      const generation = ++this.generation
+      const helper: RunningHelper = {
+        generation,
+        child,
+        server,
+        pipePath,
+        framed,
+        browser,
+        page,
+        targetId: hello.targetId,
+        cdpPort,
+        fatal: false,
+        pageEpoch: 0,
+        snapshotEpoch: null
+      }
+      this.helper = helper
+      page.on('framenavigated', (frame) => {
+        if (frame === page.mainFrame()) {
+          helper.pageEpoch += 1
+          helper.snapshotEpoch = null
+        }
+      })
+      page.on('close', () => this.markHelperFatal(helper, 'Scraper helper page target closed'))
+      for (const context of contexts) {
+        context.on('page', (newPage) => {
+          if (newPage !== page) this.markHelperFatal(helper, 'Scraper helper created an extra page target')
+        })
+      }
+      browser.on('disconnected', () => this.markHelperFatal(helper, 'Scraper helper CDP disconnected'))
+      child.once('exit', () => this.markHelperFatal(helper, 'Scraper helper exited'))
+      return helper
+    } catch (error) {
+      framedHolder.value?.close()
+      if (server.listening) server.close()
+      if (!child.killed) child.kill('SIGKILL')
+      if (process.platform !== 'win32') fs.rmSync(pipePath, { force: true })
+      throw error
+    }
+  }
+
+  private async readCdpTargets(cdpPort: number): Promise<Array<{ id: string; type: string }>> {
+    let lastError: unknown
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        const response = await fetch(`http://127.0.0.1:${cdpPort}/json/list`)
+        if (!response.ok) throw new Error(`CDP HTTP ${response.status}`)
+        return await response.json() as Array<{ id: string; type: string }>
+      } catch (error) {
+        lastError = error
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('无法读取 scraper helper CDP targets')
+  }
+
+  private handleFrame(frame: ScrapeBrowserProtocolFrame): void {
+    if (frame.type === 'response') {
+      const pending = this.pending.get(frame.id)
+      if (!pending) return
+      this.pending.delete(frame.id)
+      if (pending.cancelTimer) clearTimeout(pending.cancelTimer)
+      if (pending.settledForCaller) return
+      pending.settledForCaller = true
+      if (frame.ok) pending.resolve(frame.value)
+      else pending.reject(responseError(frame))
+      return
+    }
+    if (frame.type === 'event') {
+      const helper = this.helper
+      if (helper) this.markHelperFatal(helper, frame.message)
+    }
+  }
+
+  private request(
+    command: ScrapeBrowserHelperCommand,
+    payload: Record<string, unknown>,
+    signal: AbortSignal
+  ): Promise<unknown> {
+    signal.throwIfAborted()
+    const helper = this.helper
+    if (!helper || helper.fatal) return Promise.reject(new Error('Scraper helper 不可用'))
+    const id = `${helper.generation}:${++this.requestSequence}`
+    return new Promise((resolve, reject) => {
+      const pending: PendingRequest = { resolve, reject, settledForCaller: false }
+      this.pending.set(id, pending)
+      const onAbort = (): void => {
+        if (pending.settledForCaller) return
+        pending.settledForCaller = true
+        reject(signal.reason instanceof Error ? signal.reason : new Error('浏览器操作已取消'))
+        try {
+          helper.framed.send({ type: 'cancel', id, reason: 'parent signal aborted' })
+        } catch {
+          // Helper termination below handles a broken pipe.
+        }
+        pending.cancelTimer = setTimeout(() => {
+          if (this.pending.has(id)) void this.stopHelper('cancel grace exceeded')
+        }, HELPER_CANCEL_GRACE_MS)
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+      const settle = (fn: typeof resolve | typeof reject, value: unknown): void => {
+        signal.removeEventListener('abort', onAbort)
+        fn(value as never)
+      }
+      pending.resolve = (value) => settle(resolve, value)
+      pending.reject = (error) => settle(reject, error)
+      try {
+        helper.framed.send({ type: 'request', id, command, payload })
+      } catch (error) {
+        this.pending.delete(id)
+        pending.reject(error instanceof Error ? error : new Error(String(error)))
+      }
+    })
+  }
+
+  private markHelperFatal(helper: RunningHelper, message: string): void {
+    if (helper.fatal) return
+    helper.fatal = true
+    const error = new Error(message)
+    for (const [id, pending] of this.pending) {
+      if (!id.startsWith(`${helper.generation}:`)) continue
+      this.pending.delete(id)
+      if (pending.cancelTimer) clearTimeout(pending.cancelTimer)
+      if (!pending.settledForCaller) pending.reject(error)
+    }
+    if (this.activeLease?.generation === helper.generation) this.activeLease = null
+    void this.stopHelper(message)
+  }
+
+  private async stopHelper(_reason: string): Promise<void> {
+    const helper = this.helper
+    this.helper = null
+    if (!helper) return
+    helper.fatal = true
+    const exited = new Promise<void>((resolve) => helper.child.once('exit', () => resolve()))
+    try {
+      helper.framed.send({
+        type: 'request',
+        id: `${helper.generation}:shutdown`,
+        command: 'shutdown',
+        payload: {}
+      })
+    } catch {
+      // Already disconnected.
+    }
+    if (_reason !== 'cancel grace exceeded' && helper.child.exitCode === null) {
+      await Promise.race([
+        exited,
+        new Promise<void>((resolve) => setTimeout(resolve, HELPER_CANCEL_GRACE_MS))
+      ])
+    }
+    helper.framed.close()
+    try {
+      await helper.browser.close()
+    } catch {
+      // Browser may already be gone.
+    }
+    if (helper.server.listening) helper.server.close()
+    if (helper.child.exitCode === null && !helper.child.killed) helper.child.kill('SIGKILL')
+    if (process.platform !== 'win32') fs.rmSync(helper.pipePath, { force: true })
+    const error = new Error('Scraper helper 已终止')
+    for (const [id, pending] of this.pending) {
+      if (!id.startsWith(`${helper.generation}:`)) continue
+      this.pending.delete(id)
+      if (pending.cancelTimer) clearTimeout(pending.cancelTimer)
+      if (!pending.settledForCaller) pending.reject(error)
+    }
+  }
+
+  private async snapshot(
+    helper: RunningHelper,
+    command: Extract<AgentBrowserCommand, { action: 'snapshot' }>,
+    signal: AbortSignal,
+    timeoutMs = 10_000
+  ): Promise<AgentBrowserObservation> {
+    const deadline = Date.now() + timeoutMs
+    const locator = command.target
+      ? selectorForTarget(helper.page, command.target, helper.snapshotEpoch === helper.pageEpoch)
+      : helper.page.locator('body')
+    if (command.target && await locator.count() !== 1) {
+      throw new Error('snapshot target 必须唯一匹配一个元素')
+    }
+    const raw = await locator.ariaSnapshot({
+      mode: 'ai',
+      ...(command.depth === undefined ? {} : { depth: Math.max(1, Math.min(50, command.depth)) }),
+      boxes: command.boxes === true,
+      signal,
+      timeout: timeoutMs
+    })
+    let pageFacts: Record<string, unknown> | undefined
+    try {
+      const remaining = Math.max(1, deadline - Date.now())
+      const inspected = await withTimeout(
+        this.request('performAction', {
+          action: 'inspect',
+          params: {
+            maxLinks: 120,
+            maxTextLength: 12_000,
+            maxRegionHtmlLength: 4_000
+          }
+        }, signal),
+        Math.max(1, Math.min(1_000, Math.floor(remaining / 2))),
+        '页面事实暂时无法提取'
+      )
+      if (inspected && typeof inspected === 'object' && !Array.isArray(inspected)) {
+        pageFacts = inspected as Record<string, unknown>
+      }
+    } catch {
+      signal.throwIfAborted()
+      // ARIA remains usable if optional fact extraction fails on unusual pages.
+    }
+    helper.snapshotEpoch = helper.pageEpoch
+    const compact = byteLimited(raw, DEFAULT_AGENT_RESULT_SNAPSHOT_LENGTH)
+    const title = await withTimeout(
+      helper.page.title(),
+      Math.max(1, deadline - Date.now()),
+      'Timeout 1ms exceeded while reading page title'
+    )
+    return {
+      action: 'snapshot',
+      documentRevision: documentRevision(helper),
+      actionSucceeded: true,
+      url: helper.page.url(),
+      title,
+      snapshot: compact.value,
+      fullSnapshot: raw,
+      ...(pageFacts ? { pageFacts } : {}),
+      snapshotExcerpted: compact.truncated,
+      evidenceIncomplete: !pageFacts,
+      fullSnapshotTruncated: false
+    }
+  }
+
+  private async observePage(input: {
+    helper: RunningHelper
+    action: AgentBrowserObservation['action']
+    command?: Extract<AgentBrowserCommand, { action: 'snapshot' }>
+    signal: AbortSignal
+    beforeRevision: string
+    actionSucceeded?: boolean
+  }): Promise<AgentBrowserObservation> {
+    const deadline = Date.now() + POST_ACTION_OBSERVATION_TIMEOUT_MS
+    let lastError: unknown
+    for (let attempt = 0; attempt < POST_ACTION_OBSERVATION_ATTEMPTS; attempt += 1) {
+      input.signal.throwIfAborted()
+      const remaining = Math.max(1, deadline - Date.now())
+      if (remaining <= 1 && attempt > 0) break
+      try {
+        if (documentRevision(input.helper) !== input.beforeRevision) {
+          await input.helper.page.waitForLoadState('domcontentloaded', {
+            timeout: remaining
+          })
+        }
+        await input.helper.page.locator('body').waitFor({
+          state: 'attached',
+          timeout: Math.max(1, deadline - Date.now())
+        })
+        const observation = await this.snapshot(
+          input.helper,
+          input.command ?? { action: 'snapshot' },
+          input.signal,
+          Math.max(1, deadline - Date.now())
+        )
+        return {
+          ...observation,
+          action: input.action,
+          ...(input.actionSucceeded === undefined
+            ? {}
+            : { actionSucceeded: input.actionSucceeded }),
+          staleRefs: documentRevision(input.helper) !== input.beforeRevision
+        }
+      } catch (error) {
+        input.signal.throwIfAborted()
+        if (!isTransientObservationError(error)) throw error
+        lastError = error
+        if (Date.now() >= deadline) break
+        await input.helper.page.waitForTimeout(Math.min(75, Math.max(1, deadline - Date.now())))
+      }
+    }
+    const revision = documentRevision(input.helper)
+    if (input.actionSucceeded !== true) {
+      throw new ScrapeBrowserObservationPendingError({
+        url: input.helper.page.url(),
+        documentRevision: revision
+      })
+    }
+    return {
+      action: input.action,
+      documentRevision: revision,
+      observationMode: 'pending',
+      actionSucceeded: true,
+      url: input.helper.page.url(),
+      staleRefs: revision !== input.beforeRevision,
+      observationPendingReason: lastError instanceof Error ? lastError.message : undefined
+    }
+  }
+
+  private async performAgentAction(
+    helper: RunningHelper,
+    action: AgentBrowserObservation['action'],
+    signal: AbortSignal,
+    run: () => Promise<void>
+  ): Promise<AgentBrowserObservation> {
+    const beforeRevision = documentRevision(helper)
+    try {
+      await run()
+    } catch (error) {
+      signal.throwIfAborted()
+      if (error instanceof ScrapeBrowserChallengeError) throw error
+      const revision = documentRevision(helper)
+      if (revision !== beforeRevision) {
+        throw new ScrapeBrowserActionUncertainError({
+          url: helper.page.url(),
+          documentRevision: revision,
+          cause: error
+        })
+      }
+      throw error
+    }
+    return this.observePage({
+      helper,
+      action,
+      signal,
+      beforeRevision,
+      actionSucceeded: true
+    })
+  }
+
+  private async runAgentAction(
+    command: AgentBrowserCommand,
+    signal: AbortSignal
+  ): Promise<AgentBrowserObservation> {
+    const helper = this.helper
+    if (!helper || helper.fatal) throw new Error('Scraper helper 不可用')
+    switch (command.action) {
+      case 'open': {
+        return this.performAgentAction(helper, 'open', signal, async () => {
+          await this.request('fetchPage', {
+            url: command.url,
+            discardBody: true,
+            options: {
+              readySelector: command.readySelector,
+              timeoutMs: command.timeoutMs,
+              returnOnChallenge: true
+            }
+          }, signal)
+        })
+      }
+      case 'snapshot': {
+        const revision = documentRevision(helper)
+        return this.observePage({
+          helper,
+          action: 'snapshot',
+          command,
+          signal,
+          beforeRevision: revision,
+          actionSucceeded: undefined
+        })
+      }
+      case 'find': {
+        if (Boolean(command.text) === Boolean(command.regex)) {
+          throw new Error('find 的 text 和 regex 必须且只能提供一个')
+        }
+        const revision = documentRevision(helper)
+        const observation = await this.observePage({
+          helper,
+          action: 'snapshot',
+          signal,
+          beforeRevision: revision,
+          actionSucceeded: undefined
+        })
+        const full = String(observation.fullSnapshot ?? observation.snapshot ?? '')
+        let matcher: (line: string) => boolean
+        if (command.text) {
+          const needle = command.text.normalize('NFKC').toLocaleLowerCase()
+          matcher = (line) => line.normalize('NFKC').toLocaleLowerCase().includes(needle)
+        } else {
+          if ((command.regex?.length ?? 0) > 256) throw new Error('find regex 最长为 256 字符')
+          const regex = new RegExp(command.regex ?? '', 'iu')
+          matcher = (line) => regex.test(line)
+        }
+        return {
+          action: 'find',
+          documentRevision: documentRevision(helper),
+          actionSucceeded: true,
+          url: helper.page.url(),
+          title: await helper.page.title(),
+          matches: compactFind(full, matcher)
+        }
+      }
+      case 'html': {
+        const locator = command.target
+          ? selectorForTarget(helper.page, command.target, helper.snapshotEpoch === helper.pageEpoch)
+          : helper.page.locator('body')
+        if (command.target && await locator.count() !== 1) {
+          throw new Error('html target 必须唯一匹配一个元素')
+        }
+        const maxLength = Math.max(200, Math.min(MAX_AGENT_HTML_LENGTH, command.maxLength ?? 12_000))
+        const raw = await locator.evaluate((element) => element.outerHTML)
+        const limited = byteLimited(raw, maxLength)
+        return {
+          action: 'html',
+          documentRevision: documentRevision(helper),
+          actionSucceeded: true,
+          url: helper.page.url(),
+          html: limited.value,
+          evidenceIncomplete: limited.truncated
+        }
+      }
+      case 'evaluate': {
+        const prepared = prepareBrowserEvaluate(command.expression, command.timeoutMs)
+        const value = await runPreparedBrowserEvaluate({
+          execute: () => helper.page.evaluate(prepared.source),
+          timeoutMs: prepared.timeoutMs,
+          onTimeout: () => this.stopHelper('agent evaluate timeout')
+        })
+        return {
+          action: 'evaluate',
+          documentRevision: documentRevision(helper),
+          actionSucceeded: true,
+          url: helper.page.url(),
+          value
+        }
+      }
+      case 'click': {
+        const locator = selectorForTarget(
+          helper.page,
+          command.target,
+          helper.snapshotEpoch === helper.pageEpoch
+        )
+        if (await locator.count() !== 1) throw new Error('click target 必须唯一匹配一个元素')
+        return this.performAgentAction(helper, 'click', signal, async () => {
+          await locator.click({ signal })
+        })
+      }
+      case 'fill': {
+        const locator = selectorForTarget(
+          helper.page,
+          command.target,
+          helper.snapshotEpoch === helper.pageEpoch
+        )
+        if (await locator.count() !== 1) throw new Error('fill target 必须唯一匹配一个元素')
+        return this.performAgentAction(helper, 'fill', signal, async () => {
+          await locator.fill(command.text, { signal })
+          if (command.submit) await locator.press('Enter', { signal })
+        })
+      }
+      case 'press': {
+        const press = async (): Promise<void> => {
+          if (command.target) {
+            const locator = selectorForTarget(
+              helper.page,
+              command.target,
+              helper.snapshotEpoch === helper.pageEpoch
+            )
+            if (await locator.count() !== 1) throw new Error('press target 必须唯一匹配一个元素')
+            await locator.press(command.key, { signal })
+          } else {
+            await helper.page.keyboard.press(command.key)
+          }
+        }
+        return this.performAgentAction(helper, 'press', signal, press)
+      }
+      case 'wait': {
+        const timeoutMs = Math.max(100, Math.min(10_000, command.timeoutMs ?? 3_000))
+        return this.performAgentAction(helper, 'wait', signal, async () => {
+          if (command.target) {
+            const locator = selectorForTarget(
+              helper.page,
+              command.target,
+              helper.snapshotEpoch === helper.pageEpoch
+            )
+            await locator.waitFor({ state: 'visible', timeout: timeoutMs })
+            if (await locator.count() !== 1) throw new Error('wait target 必须唯一匹配一个元素')
+          } else {
+            await helper.page.waitForTimeout(timeoutMs)
+          }
+        })
+      }
+      case 'status': {
+        const value = await this.request('performAction', { action: 'status', params: {} }, signal)
+        return { action: 'status', ...(value as Record<string, unknown>) }
+      }
     }
   }
 }
 
-export const scrapeBrowser = new ScrapeBrowser()
-
-function resolveFetchReferer(
-  mode: 'omit' | 'session' | string | undefined,
-  sessionOrigin: string
-): string | null {
-  if (mode === 'omit') return null
-  if (mode === 'session' || mode === undefined) {
-    const origin = sessionOrigin.replace(/\/$/, '')
-    return `${origin}/`
-  }
-  if (typeof mode === 'string' && mode.trim()) {
-    const trimmed = mode.trim()
-    return trimmed.endsWith('/') ? trimmed : `${trimmed}/`
-  }
-  const origin = sessionOrigin.replace(/\/$/, '')
-  return `${origin}/`
-}
-
-function readSelector(params: Record<string, unknown>): string {
-  if (typeof params.selector !== 'string' || !params.selector.trim()) {
-    throw new Error('Browser selector must be a non-empty string')
-  }
-  return params.selector.trim()
-}
-
-function readText(params: Record<string, unknown>): string {
-  return params.text == null ? '' : String(params.text)
-}
-
-function readKey(params: Record<string, unknown>): string {
-  if (typeof params.key !== 'string' || !params.key.trim()) {
-    throw new Error('Browser key must be a non-empty string')
-  }
-  return params.key.trim()
-}
-
-function readTimeout(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? Math.max(250, Math.min(120000, Math.round(value)))
-    : 30000
-}
-
-function escapeJsMessage(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
-}
+export const scrapeBrowser = new ScrapeBrowserHostModule()

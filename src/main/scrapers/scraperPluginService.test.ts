@@ -10,6 +10,7 @@ import {
   createCompositeScraper,
   exportScraperPluginPackage,
   importScraperPluginPackage,
+  installScraperPluginPackage,
   listBundledPluginDescriptors,
   listCompositePluginDescriptors,
   listMergedPluginDescriptors,
@@ -379,6 +380,25 @@ describe('scraperPluginService', () => {
     await assert.rejects(
       importScraperPluginPackage(writePackage(pluginPackage('video', 'Example Video'))),
       /同名自定义插件/
+    )
+  })
+
+  it('atomically replaces a user plugin without leaving staging or backup directories', async () => {
+    const original = pluginPackage('video', 'Atomic Video')
+    await installScraperPluginPackage(original)
+    const updated = pluginPackage(
+      'video',
+      'Atomic Video',
+      "module.exports = { async parseVideo(ctx) { return { code: ctx.code, title: 'Updated' } } }"
+    )
+
+    await installScraperPluginPackage(updated, { overwriteUser: true })
+
+    assert.match(readScraperPluginPackage('video', 'Atomic Video').code, /Updated/)
+    const parent = path.join(tempRoot!, 'scraper_plugins', 'video')
+    assert.equal(
+      fs.readdirSync(parent).some((name) => name.includes('.install-') || name.includes('.backup-')),
+      false
     )
   })
 

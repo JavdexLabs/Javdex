@@ -50,6 +50,7 @@ export interface ModelPreset {
   id: string
   name: string
   thinkingLevel: 'minimal' | 'low' | 'medium' | 'high'
+  /** 0 removes the preset cap and uses the selected model's declared maximum. */
   maxTokens: number
   timeoutMs: number
   cacheRetention: ModelCacheRetention

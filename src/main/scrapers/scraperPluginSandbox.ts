@@ -123,14 +123,15 @@ export function setSandboxPageFetcherForTests(fetcher?: SandboxPageFetcher): voi
 export async function validateUserPluginCode(
   kind: ScraperPluginKind,
   pluginName: string,
-  code: string
+  code: string,
+  signal?: AbortSignal
 ): Promise<void> {
   await runSandboxWorker({
     mode: 'validate',
     kind,
     pluginName,
     code
-  }, PLUGIN_VALIDATE_TIMEOUT_MS)
+  }, PLUGIN_VALIDATE_TIMEOUT_MS, signal)
 }
 
 export function runUserVideoPlugin(
@@ -155,7 +156,8 @@ export function runUserVideoPluginWithLogs(
   pluginName: string,
   code: string,
   videoCode: string,
-  proxyUrl?: string
+  proxyUrl?: string,
+  signal?: AbortSignal
 ): Promise<SandboxRunResult<VideoPluginScrapeResult>> {
   return runSandboxWorkerCollect<VideoPluginScrapeResult>({
     mode: 'parse',
@@ -164,7 +166,7 @@ export function runUserVideoPluginWithLogs(
     code,
     proxyUrl,
     task: { code: videoCode }
-  }, PLUGIN_PARSE_TIMEOUT_MS)
+  }, PLUGIN_PARSE_TIMEOUT_MS, signal)
 }
 
 export function runUserActressPlugin(
@@ -189,7 +191,8 @@ export function runUserActressPluginWithLogs(
   code: string,
   mainName: string,
   aliases: string[],
-  proxyUrl?: string
+  proxyUrl?: string,
+  signal?: AbortSignal
 ): Promise<SandboxRunResult<ActressScrapeResult | null>> {
   return runSandboxWorkerCollect<ActressScrapeResult | null>({
     mode: 'parse',
@@ -198,27 +201,30 @@ export function runUserActressPluginWithLogs(
     code,
     proxyUrl,
     task: { mainName, aliases }
-  }, PLUGIN_PARSE_TIMEOUT_MS)
+  }, PLUGIN_PARSE_TIMEOUT_MS, signal)
 }
 
 function runSandboxWorker<T = void>(
   workerData: SandboxWorkerInput,
-  timeoutMs: number
+  timeoutMs: number,
+  signal?: AbortSignal
 ): Promise<T> {
-  return runSandboxWorkerInternal<T>(workerData, timeoutMs, false) as Promise<T>
+  return runSandboxWorkerInternal<T>(workerData, timeoutMs, false, signal) as Promise<T>
 }
 
 function runSandboxWorkerCollect<T = void>(
   workerData: SandboxWorkerInput,
-  timeoutMs: number
+  timeoutMs: number,
+  signal?: AbortSignal
 ): Promise<SandboxRunResult<T>> {
-  return runSandboxWorkerInternal<T>(workerData, timeoutMs, true) as Promise<SandboxRunResult<T>>
+  return runSandboxWorkerInternal<T>(workerData, timeoutMs, true, signal) as Promise<SandboxRunResult<T>>
 }
 
 function runSandboxWorkerInternal<T = void>(
   workerData: SandboxWorkerInput,
   timeoutMs: number,
-  collectLogs: boolean
+  collectLogs: boolean,
+  signal?: AbortSignal
 ): Promise<T | SandboxRunResult<T>> {
   const initialPayload = withSandboxAppRoot(workerData)
   const serviceClient = initialPayload.serviceBinding
@@ -237,7 +243,9 @@ function runSandboxWorkerInternal<T = void>(
       workerData: payload
     })
 
+    let terminalRequested = false
     let settled = false
+    const activeRpcs = new Set<Promise<void>>()
     const logs: string[] = []
     const timer = setTimeout(() => {
       settle(
@@ -247,16 +255,32 @@ function runSandboxWorkerInternal<T = void>(
     }, timeoutMs)
 
     const settle = (finish: () => void, terminate: boolean): void => {
-      if (settled) return
-      settled = true
+      if (terminalRequested) return
+      terminalRequested = true
       clearTimeout(timer)
+      if (signal) signal.removeEventListener('abort', onAbort)
       worker.removeAllListeners()
-      if (terminate) {
-        void worker.terminate()
+
+      const pendingOperations: Promise<unknown>[] = [...activeRpcs]
+      if (terminate) pendingOperations.push(worker.terminate())
+      const finishAfterOperations = (): void => {
+        if (settled) return
+        settled = true
+        finish()
       }
-      finish()
+      if (pendingOperations.length === 0) {
+        finishAfterOperations()
+        return
+      }
+      void Promise.allSettled(pendingOperations).then(finishAfterOperations)
     }
 
+    const onAbort = (): void => {
+      const error = signal?.reason instanceof Error
+        ? signal.reason
+        : new Error('Scraper plugin execution aborted')
+      settle(() => reject(error), true)
+    }
     worker.on('message', (message: SandboxMessage) => {
       if (!message || typeof message !== 'object') return
       if (message.type === 'done') {
@@ -279,7 +303,12 @@ function runSandboxWorkerInternal<T = void>(
         message.type === 'serviceGetJson' ||
         message.type === 'browserAction'
       ) {
-        void handleWorkerRpc(worker, payload, serviceClient, message)
+        const rpc = handleWorkerRpc(worker, payload, serviceClient, message)
+        activeRpcs.add(rpc)
+        void rpc.then(
+          () => activeRpcs.delete(rpc),
+          () => activeRpcs.delete(rpc)
+        )
       } else if (message.type === 'log') {
         if (collectLogs) logs.push(`[${message.level}] ${message.message}`)
         console.log(`[scraper:${payload.pluginName}] ${message.message}`)
@@ -292,7 +321,7 @@ function runSandboxWorkerInternal<T = void>(
     })
 
     worker.on('exit', (code) => {
-      if (!settled && code !== 0) {
+      if (!terminalRequested && code !== 0) {
         settle(
           () => {
             const err = new Error(
@@ -305,6 +334,9 @@ function runSandboxWorkerInternal<T = void>(
         )
       }
     })
+
+    if (signal?.aborted) onAbort()
+    else signal?.addEventListener('abort', onAbort, { once: true })
   })
 }
 
@@ -318,7 +350,11 @@ async function handleWorkerRpc(
   >
 ): Promise<void> {
   const reply = (payload: Omit<RpcReply, 'type' | 'id'>): void => {
-    worker.postMessage({ type: 'rpcResult', id: message.id, ...payload } satisfies RpcReply)
+    try {
+      worker.postMessage({ type: 'rpcResult', id: message.id, ...payload } satisfies RpcReply)
+    } catch {
+      // The worker may have been terminated while the host RPC was still settling.
+    }
   }
 
   try {

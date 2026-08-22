@@ -1,17 +1,16 @@
-import { randomUUID } from 'node:crypto'
-import { normalizePluginDevAgentMaxContextTokens, normalizePluginDevAgentMaxSteps } from '@shared/settingsTypes'
+import { createHash, randomUUID } from 'node:crypto'
+import { normalizePluginDevAgentMaxContextTokens, normalizePluginDevAgentMaxTurns } from '@shared/settingsTypes'
 import type { PluginDevAgentStartInput, PluginDevSession } from './types'
 import type { ScraperPluginPackage } from '@shared/scraperPluginTypes'
-import { getSettings } from '../../settings/settingsStore'
+import { modelManagement } from '../../agent-platform/modelManagement'
 import { hasSubstantialPluginCode } from './pluginDevCodePolicy'
 import {
   getPluginDevKindProfile,
+  configuredRunTargets,
   normalizeTestTargets
 } from '@shared/pluginDevKindProfile'
 
 const sessions = new Map<string, PluginDevSession>()
-let browserLockSessionId: string | null = null
-let browserLockQueue: Array<{ sessionId: string; resolve: () => void }> = []
 const TERMINAL_SESSION_TTL_MS = 60 * 60 * 1000
 
 function isDebugLikeMode(input: PluginDevAgentStartInput): boolean {
@@ -31,12 +30,15 @@ export function cleanupSessions(now = Date.now()): number {
 
 function resolveSessionMaxSteps(input: PluginDevAgentStartInput): number {
   if (input.maxSteps !== undefined) {
-    return normalizePluginDevAgentMaxSteps(input.maxSteps)
+    return normalizePluginDevAgentMaxTurns(input.maxSteps)
   }
   try {
-    return normalizePluginDevAgentMaxSteps(getSettings().pluginDevAgentMaxSteps)
+    const limits = modelManagement.read().assignments.find(
+      (item) => item.workloadId === 'plugin-developer'
+    )?.limits
+    return normalizePluginDevAgentMaxTurns(limits?.maxTurns)
   } catch {
-    return 0
+    return normalizePluginDevAgentMaxTurns(undefined)
   }
 }
 
@@ -45,7 +47,10 @@ function resolveSessionMaxContextTokens(input: PluginDevAgentStartInput): number
     return normalizePluginDevAgentMaxContextTokens(input.maxContextTokens)
   }
   try {
-    return normalizePluginDevAgentMaxContextTokens(getSettings().pluginDevAgentMaxContextTokens)
+    const limits = modelManagement.read().assignments.find(
+      (item) => item.workloadId === 'plugin-developer'
+    )?.limits
+    return normalizePluginDevAgentMaxContextTokens(limits?.maxContextTokens)
   } catch {
     return normalizePluginDevAgentMaxContextTokens(undefined)
   }
@@ -79,8 +84,9 @@ export function createEmptyPackage(input: PluginDevAgentStartInput): ScraperPlug
     description: input.description?.trim() || '',
     author: 'Plugin Dev Agent',
     homepage: input.siteUrl?.trim() || undefined,
-    supportedFields:
-      input.supportedFields.length > 0 ? input.supportedFields : [...profile.allSupportedFields],
+    // A create draft deliberately starts without a declared field scope. Pi
+    // fills this after inspecting the site's exact detail/profile page.
+    supportedFields: input.mode === 'create' ? [] : input.supportedFields,
     code: profile.emptyPackageStub
   }
 }
@@ -89,6 +95,7 @@ export function createSession(input: PluginDevAgentStartInput, sessionId: string
   cleanupSessions()
   const siteName = derivePluginName(input)
   const testTargets = normalizeTestTargets(input)
+  const runTargets = configuredRunTargets(input.kind, testTargets)
   const session: PluginDevSession = {
     id: sessionId,
     status: 'running',
@@ -97,22 +104,23 @@ export function createSession(input: PluginDevAgentStartInput, sessionId: string
     siteName,
     siteUrl: input.siteUrl,
     description: input.description,
-    supportedFields: input.supportedFields,
+    supportedFields: input.mode === 'create' ? [] : input.supportedFields,
     testTargets,
+    runTargets,
     package: input.package ?? createEmptyPackage(input),
-    pageNotes: [],
-    duplicateDryRunCount: 0,
     step: 0,
     limits: {
       maxSteps: resolveSessionMaxSteps(input),
       maxContextTokens: resolveSessionMaxContextTokens(input),
-      maxDuplicateDryRun: 3,
-      maxHtmlChars: 8000
+      maxHtmlChars: 20_000
     },
-    finishRequested: false,
     cancelRequested: false,
-    phase: isDebugLikeMode(input) ? 'dry_run' : 'discover',
+    phase: 'working',
     totalTokens: 0,
+    usageByRole: {},
+    contextInputTokens: 0,
+    modelTurnCount: 0,
+    discoveryToolCalls: 0,
     incrementalEditOnly:
       isDebugLikeMode(input) &&
       Boolean(input.package?.code?.trim()) &&
@@ -134,78 +142,23 @@ export function cancelSession(sessionId: string): void {
   session.cancelRequested = true
   session.status = 'cancelled'
   session.endedAt = Date.now()
-  const queued = browserLockQueue.filter((item) => item.sessionId === sessionId)
-  browserLockQueue = browserLockQueue.filter((item) => item.sessionId !== sessionId)
-  for (const item of queued) item.resolve()
-}
-
-export async function withBrowserLock<T>(
-  sessionId: string,
-  fn: () => Promise<T>
-): Promise<T> {
-  await acquireBrowserLock(sessionId)
-  try {
-    if (getSession(sessionId)?.cancelRequested) {
-      throw new Error('用户已终止，浏览器工具未执行')
-    }
-    return await fn()
-  } finally {
-    releaseBrowserLock(sessionId)
-  }
-}
-
-function acquireBrowserLock(sessionId: string): Promise<void> {
-  if (browserLockSessionId === null || browserLockSessionId === sessionId) {
-    browserLockSessionId = sessionId
-    return Promise.resolve()
-  }
-  return new Promise((resolve) => {
-    browserLockQueue.push({ sessionId, resolve })
-  })
-}
-
-function releaseBrowserLock(sessionId: string): void {
-  if (browserLockSessionId !== sessionId) return
-  let next = browserLockQueue.shift()
-  while (next && getSession(next.sessionId)?.cancelRequested) {
-    next.resolve()
-    next = browserLockQueue.shift()
-  }
-  if (next) {
-    browserLockSessionId = next.sessionId
-    next.resolve()
-  } else {
-    browserLockSessionId = null
-  }
 }
 
 export function hashCode(code: string): string {
-  let hash = 0
-  for (let i = 0; i < code.length; i += 1) {
-    hash = (hash * 31 + code.charCodeAt(i)) | 0
-  }
-  return String(hash)
+  return createHash('sha256').update(code).digest('hex')
 }
 
-export function invalidateVerification(session: PluginDevSession): void {
-  session.lastVerification = undefined
-  session.lastVerificationPromptHash = undefined
+export function fingerprintValue(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
-export function isDryRunStaleForVerify(session: PluginDevSession): boolean {
-  if (!session.lastDryRun) return true
-  if (session.lastDryRunCodeHash === undefined) return true
-  return hashCode(session.package.code) !== session.lastDryRunCodeHash
+export function invalidateExecution(session: PluginDevSession): void {
+  session.lastExecution = undefined
+  session.acceptance = undefined
 }
 
 export function deleteSession(sessionId: string): void {
   sessions.delete(sessionId)
-  const queued = browserLockQueue.filter((item) => item.sessionId === sessionId)
-  browserLockQueue = browserLockQueue.filter((item) => item.sessionId !== sessionId)
-  for (const item of queued) item.resolve()
-  if (browserLockSessionId === sessionId) {
-    releaseBrowserLock(sessionId)
-  }
 }
 
 export function markSessionEnded(sessionId: string, endedAt = Date.now()): void {

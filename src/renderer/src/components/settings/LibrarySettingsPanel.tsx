@@ -3,7 +3,8 @@ import { AlertTriangle, Clock, FolderOpen, FolderPlus, Play, Square, X } from 'l
 import {
   AUTO_SCAN_INTERVAL_MINUTES,
   type AppSettings,
-  type AutoScanIntervalMinutes
+  type AutoScanIntervalMinutes,
+  type SettingsSnapshot
 } from '@shared/settingsTypes'
 import type { LibraryScanSummary, ScanResult } from '@shared/libraryTypes'
 import { UI_ICON_SM } from '../iconDefaults'
@@ -139,7 +140,7 @@ export default function LibrarySettingsPanel({
   onStartScanScrapeBatch,
   onOpenPending
 }: {
-  settings: AppSettings
+  settings: SettingsSnapshot
   scanning: boolean
   scanStatus: string
   scanResult: ScanResult | null

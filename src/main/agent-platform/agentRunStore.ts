@@ -159,10 +159,20 @@ export class AgentRunStore {
         preset: input.resolved.model.preset,
         cacheCompatibility: input.resolved.model.cacheCompatibility
       },
+      verifierModel: input.resolved.verifierModel
+        ? {
+            credentialRef: input.resolved.verifierModel.credentialRef,
+            descriptor: input.resolved.verifierModel.model,
+            routeRevision: input.resolved.verifierModel.routeRevision,
+            preset: input.resolved.verifierModel.preset,
+            cacheCompatibility: input.resolved.verifierModel.cacheCompatibility
+          }
+        : undefined,
       cache: input.resolved.cache,
       systemPrompt: input.resolved.systemPrompt,
       tools: input.resolved.tools.map(({ invoke: _invoke, ...tool }) => tool),
-      settings: input.resolved.settings
+      settings: input.resolved.settings,
+      resources: input.resolved.resources
     }
     this.database().prepare(`
       INSERT INTO agent_runs (
@@ -176,6 +186,17 @@ export class AgentRunStore {
   getRun<ProductState = Record<string, unknown>>(runId: string): AgentRunRecord<ProductState> | null {
     const row = this.database().prepare('SELECT * FROM agent_runs WHERE id = ?').get(runId) as RunRow | undefined
     return row ? toRun<ProductState>(row) : null
+  }
+
+  updateConfigurationSnapshot(
+    runId: string,
+    snapshot: PersistedRunConfigurationSnapshot
+  ): void {
+    this.database().prepare(`
+      UPDATE agent_runs
+      SET config_snapshot_json = ?, config_revision = ?, updated_at = ?
+      WHERE id = ?
+    `).run(json(snapshot), snapshot.revision, now(), runId)
   }
 
   listRecoverableRuns(): AgentRunRecord[] {
@@ -412,7 +433,14 @@ export class AgentRunStore {
         `)
         for (const operationId of operationIds) settle.run(at, runId, operationId)
         db.prepare(`
-          UPDATE agent_runs SET status = 'settled', active_operation_id = NULL, updated_at = ? WHERE id = ?
+          UPDATE agent_runs
+          SET status = CASE
+                WHEN status IN ('failed', 'cancelled', 'closed') THEN status
+                ELSE 'settled'
+              END,
+              active_operation_id = NULL,
+              updated_at = ?
+          WHERE id = ?
         `).run(at, runId)
       }
       if (event.type === 'runtime.fault') {
@@ -503,6 +531,34 @@ export class AgentRunStore {
       now(),
       requestId
     )
+  }
+
+  denyPendingApprovals(runId: string, exceptRequestId?: string): number {
+    const result = this.database().prepare(`
+      UPDATE agent_approvals
+      SET status = 'denied', permit_ciphertext = NULL, decided_at = ?
+      WHERE run_id = ? AND status = 'pending'
+        AND (? IS NULL OR request_id <> ?)
+    `).run(now(), runId, exceptRequestId ?? null, exceptRequestId ?? null)
+    return result.changes
+  }
+
+  revokeApproval(runId: string, requestId: string): boolean {
+    const result = this.database().prepare(`
+      UPDATE agent_approvals
+      SET status = 'denied', permit_ciphertext = NULL, decided_at = ?
+      WHERE run_id = ? AND request_id = ? AND status = 'approved'
+    `).run(now(), runId, requestId)
+    return result.changes === 1
+  }
+
+  discardOpenApprovals(runId: string): number {
+    const result = this.database().prepare(`
+      UPDATE agent_approvals
+      SET status = 'denied', permit_ciphertext = NULL, decided_at = ?
+      WHERE run_id = ? AND status IN ('pending', 'approved')
+    `).run(now(), runId)
+    return result.changes
   }
 
   consumeApproval(requestId: string, permit: string): boolean {

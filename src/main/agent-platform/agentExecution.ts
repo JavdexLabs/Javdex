@@ -121,6 +121,7 @@ export class AgentExecution {
       systemPrompt: input.resolved.systemPrompt,
       tools: input.resolved.tools,
       settings: input.resolved.settings,
+      resources: input.resolved.resources,
       sessionDirectory: input.resolved.sessionDirectory
     }
     const port = await this.port()
@@ -260,10 +261,25 @@ export class AgentExecution {
 
   async closeRun(runId: string): Promise<void> {
     const active = this.active.get(runId)
+    try {
+      if (active) await active.runtime.dispose()
+    } finally {
+      this.active.delete(runId)
+      // Terminal PluginDeveloper runs normally release their runtime first. Closing history must
+      // still retire that durable record, otherwise the next unscoped snapshot restores it again.
+      this.store.closeRun(runId)
+    }
+  }
+
+  /** Dispose runtime resources while keeping the durable run available for lazy continuation. */
+  async releaseRun(runId: string): Promise<void> {
+    const active = this.active.get(runId)
     if (!active) return
-    await active.runtime.dispose()
-    this.active.delete(runId)
-    this.store.closeRun(runId)
+    try {
+      await active.runtime.dispose()
+    } finally {
+      this.active.delete(runId)
+    }
   }
 
   async dispose(): Promise<void> {

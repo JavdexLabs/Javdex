@@ -38,6 +38,19 @@ interface RegisteredRun {
   profile: AgentProfile
   operationId: () => AgentOperationId | undefined
   permits: Map<string, { requestId: string; permit: string }>
+  onApprovalRequired?: (request: {
+    requestId: string
+    toolName: string
+    args: Record<string, unknown>
+    effect: AgentToolEffect
+  }) => void
+  /** Extra mutable domain state that must be covered by an approval permit. */
+  approvalScope?: (
+    toolName: string,
+    args: Record<string, unknown>
+  ) => Record<string, unknown> | undefined
+  /** Product flows that render one approval card can supersede older pending requests. */
+  singlePendingApproval?: boolean
 }
 
 export class ApprovalRequiredError extends Error {
@@ -70,22 +83,58 @@ function schemaHash(declaration: ToolDeclaration): string {
   })
 }
 
+function abortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error('工具执行已取消')
+}
+
+async function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw abortError(signal)
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      signal.removeEventListener('abort', onAbort)
+      reject(abortError(signal))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      }
+    )
+  })
+}
+
 class ResourceLocks {
   private tails = new Map<string, Promise<void>>()
 
-  async run<T>(key: string | undefined, fn: () => Promise<T>): Promise<T> {
-    if (!key) return fn()
+  async run<T>(key: string | undefined, signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
+    if (!key) {
+      if (signal.aborted) throw abortError(signal)
+      return raceWithAbort(Promise.resolve().then(fn), signal)
+    }
     const previous = this.tails.get(key) ?? Promise.resolve()
     let release = (): void => undefined
     const current = new Promise<void>((resolve) => { release = resolve })
     const tail = previous.then(() => current)
     this.tails.set(key, tail)
-    await previous
-    try {
-      return await fn()
-    } finally {
-      release()
+    void tail.then(() => {
       if (this.tails.get(key) === tail) this.tails.delete(key)
+    })
+    let operation: Promise<T> | undefined
+    try {
+      await raceWithAbort(previous, signal)
+      if (signal.aborted) throw abortError(signal)
+      operation = fn()
+      return await raceWithAbort(operation, signal)
+    } finally {
+      // Once a resource operation starts, cancellation may return control to the caller but must
+      // not let another operation overlap an underlying handler that has not actually stopped.
+      if (operation) void operation.then(release, release)
+      else release()
     }
   }
 }
@@ -114,6 +163,9 @@ export class ToolHost {
     status: () => string
     operationId: () => AgentOperationId | undefined
     handlers: ReadonlyMap<string, ToolHandler>
+    onApprovalRequired?: RegisteredRun['onApprovalRequired']
+    approvalScope?: RegisteredRun['approvalScope']
+    singlePendingApproval?: boolean
   }): readonly HostedToolBinding[] {
     if (this.runs.has(input.runId)) throw new Error(`ToolHost run 已注册：${input.runId}`)
     const permits = new Map(
@@ -177,7 +229,9 @@ export class ToolHost {
     if (!['created', 'running'].includes(run.status())) {
       throw new Error(`run 状态 ${run.status()} 不允许执行工具`)
     }
-    const argsDigest = digest(args)
+    const approvalScope = run.approvalScope?.(declaration.name, args)
+    const effectiveArgs = approvalScope ? { ...args, ...approvalScope } : args
+    const argsDigest = digest(effectiveArgs)
     const created = this.store.beginToolCall({
       callId,
       runId,
@@ -197,7 +251,14 @@ export class ToolHost {
       const requestId = this.approvalRequestId(runId, callId, declaration.name, argsDigest)
       const approved = run.permits.get(permitKey)
       if (!approved || !this.store.consumeApproval(approved.requestId, approved.permit)) {
+        if (run.singlePendingApproval) this.store.denyPendingApprovals(runId, requestId)
         this.store.createApproval({ requestId, runId, callId, argsDigest })
+        run.onApprovalRequired?.({
+          requestId,
+          toolName: declaration.name,
+          args: declaration.redact(effectiveArgs),
+          effect: declaration.effect
+        })
         this.store.completeToolCall(callId, 'denied', { reason: 'approval-required', requestId })
         throw new ApprovalRequiredError(requestId, declaration.name)
       }
@@ -210,12 +271,15 @@ export class ToolHost {
     else parentSignal.addEventListener('abort', abort, { once: true })
     const timeout = setTimeout(() => controller.abort(new Error('工具执行超时')), declaration.timeoutMs)
     try {
-      return await this.locks.run(declaration.resourceKey(args), async () => {
+      return await this.locks.run(declaration.resourceKey(args), controller.signal, async () => {
         if (controller.signal.aborted) {
           throw controller.signal.reason instanceof Error
             ? controller.signal.reason
             : new Error('工具执行已取消')
         }
+        // ResourceLocks owns the abort race. Await the actual handler here so its operation promise
+        // remains pending until non-cooperative work really stops; otherwise the resource lock
+        // would be released as soon as this inner race rejected while the handler kept running.
         const result = await handler({
           runId,
           operationId: run.operationId(),
@@ -224,6 +288,7 @@ export class ToolHost {
           signal: controller.signal,
           progress
         })
+        if (controller.signal.aborted) throw abortError(controller.signal)
         this.store.completeToolCall(callId, result.ok ? 'completed' : 'failed', {
           ...result,
           args: declaration.redact(args)
@@ -255,6 +320,21 @@ export class ToolHost {
   deny(runId: string, requestId: string): void {
     if (!this.runs.has(runId)) throw new Error('ToolHost run 不存在')
     this.store.decideApproval(requestId, false, undefined)
+  }
+
+  revokeApproval(runId: string, requestId: string): boolean {
+    const run = this.runs.get(runId)
+    if (run) {
+      for (const [key, value] of run.permits) {
+        if (value.requestId === requestId) run.permits.delete(key)
+      }
+    }
+    return this.store.revokeApproval(runId, requestId)
+  }
+
+  discardApprovals(runId: string): void {
+    this.runs.get(runId)?.permits.clear()
+    this.store.discardOpenApprovals(runId)
   }
 
   pendingApprovals(runId: string) {

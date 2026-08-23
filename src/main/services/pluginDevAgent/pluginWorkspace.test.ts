@@ -51,7 +51,7 @@ describe('PluginWorkspaceModule', () => {
     const latestDryRunPath = path.join(root, '.javdex', 'latest-dry-run.json')
     assert.equal(fs.existsSync(latestDryRunPath), true)
     assert.deepEqual(JSON.parse(fs.readFileSync(latestDryRunPath, 'utf8')), {
-      schemaVersion: 2,
+      schemaVersion: 1,
       status: 'not_run',
       currentAcceptance: {
         installReady: false,
@@ -118,8 +118,8 @@ describe('PluginWorkspaceModule', () => {
     assert.equal(opened.package.name, 'example')
     assert.deepEqual(opened.package.supportedFields, [])
     const taskDocument = JSON.parse(fs.readFileSync(path.join(root, 'task.json'), 'utf8'))
-    assert.equal(taskDocument.schemaVersion, 3)
-    assert.equal(taskDocument.instructionSetVersion, 31)
+    assert.equal(taskDocument.schemaVersion, 1)
+    assert.equal(taskDocument.instructionSetVersion, 1)
     assert.deepEqual(taskDocument.runTargets, [{ kind: 'video', code: 'ABC-123' }])
     assert.equal(Object.hasOwn(taskDocument, 'instructions'), false)
     assert.equal(Object.hasOwn(taskDocument, 'fieldScope'), false)
@@ -155,7 +155,7 @@ describe('PluginWorkspaceModule', () => {
     fs.writeFileSync(notesPath, notes, 'utf8')
     const taskPath = path.join(root, 'task.json')
     const oldTask = JSON.parse(fs.readFileSync(taskPath, 'utf8')) as Record<string, unknown>
-    fs.writeFileSync(taskPath, `${JSON.stringify({ ...oldTask, instructionSetVersion: 7 }, null, 2)}\n`, 'utf8')
+    fs.writeFileSync(taskPath, `${JSON.stringify({ ...oldTask, instructionSetVersion: 99 }, null, 2)}\n`, 'utf8')
 
     const reopened = module.open({ directory: root, task: input, package: createEmptyPackage(input) })
 
@@ -173,12 +173,12 @@ describe('PluginWorkspaceModule', () => {
     const before = module.open({ directory: root, task: input, package: createEmptyPackage(input) })
 
     module.recordLatestDryRun(root, {
-      schemaVersion: 2,
+      schemaVersion: 1,
       status: 'completed',
       artifactHash: 'artifact',
       reportPath: '/reports/run.json',
       scope: 'all',
-      runtimeVersion: 'runtime-v2',
+      runtimeVersion: 'runtime-v1',
       targetFingerprint: 'targets',
       executionPassed: true,
       cases: [],
@@ -188,12 +188,12 @@ describe('PluginWorkspaceModule', () => {
     assert.deepEqual(
       JSON.parse(fs.readFileSync(path.join(root, '.javdex', 'latest-dry-run.json'), 'utf8')),
       {
-        schemaVersion: 2,
+        schemaVersion: 1,
         status: 'completed',
         artifactHash: 'artifact',
         reportPath: '/reports/run.json',
         scope: 'all',
-        runtimeVersion: 'runtime-v2',
+        runtimeVersion: 'runtime-v1',
         targetFingerprint: 'targets',
         executionPassed: true,
         cases: [],
@@ -218,12 +218,12 @@ describe('PluginWorkspaceModule', () => {
     const input = task()
     module.open({ directory: root, task: input, package: createEmptyPackage(input) })
     module.recordLatestDryRun(root, {
-      schemaVersion: 2,
+      schemaVersion: 1,
       status: 'completed',
       artifactHash: 'accepted-artifact',
       reportPath: '/reports/accepted.json',
       scope: 'all',
-      runtimeVersion: 'runtime-v2',
+      runtimeVersion: 'runtime-v1',
       targetFingerprint: 'accepted-targets',
       executionPassed: true,
       cases: [{ pluginResult: { title: 'accepted' } }],
@@ -238,12 +238,12 @@ describe('PluginWorkspaceModule', () => {
     assert.deepEqual(
       JSON.parse(fs.readFileSync(path.join(root, '.javdex', 'latest-dry-run.json'), 'utf8')),
       {
-        schemaVersion: 2,
+        schemaVersion: 1,
         status: 'completed',
         artifactHash: 'accepted-artifact',
         reportPath: '/reports/accepted.json',
         scope: 'all',
-        runtimeVersion: 'runtime-v2',
+        runtimeVersion: 'runtime-v1',
         targetFingerprint: 'accepted-targets',
         executionPassed: true,
         cases: [{ pluginResult: { title: 'accepted' } }],
@@ -327,7 +327,7 @@ describe('PluginWorkspaceModule', () => {
     assert.doesNotMatch(fs.readFileSync(frozenFields, 'utf8'), /legacy-fields-marker/)
     assert.equal(fs.readFileSync(decisionsPath, 'utf8'), decisionsText)
     const refreshedTask = JSON.parse(fs.readFileSync(frozenTask, 'utf8')) as Record<string, unknown>
-    assert.equal(refreshedTask.instructionSetVersion, 31)
+    assert.equal(refreshedTask.instructionSetVersion, 1)
     assert.deepEqual(refreshedTask.runTargets, [{ kind: 'video', code: 'ABC-123' }])
   })
 
@@ -341,7 +341,7 @@ describe('PluginWorkspaceModule', () => {
     const legacy = JSON.parse(fs.readFileSync(taskPath, 'utf8')) as Record<string, unknown>
     fs.writeFileSync(taskPath, `${JSON.stringify({
       ...legacy,
-      instructionSetVersion: 4,
+      instructionSetVersion: 0,
       runTargets: [{ kind: 'video', code: 'LEGACY-7' }]
     }, null, 2)}\n`, 'utf8')
 
@@ -355,7 +355,7 @@ describe('PluginWorkspaceModule', () => {
 
     fs.writeFileSync(taskPath, `${JSON.stringify({
       ...refreshed,
-      instructionSetVersion: 4
+      instructionSetVersion: 0
     }, null, 2)}\n`, 'utf8')
     module.open({
       directory: root,
@@ -393,7 +393,7 @@ describe('PluginWorkspaceModule', () => {
     const frozenSkill = `${fs.readFileSync(skillPath, 'utf8')}\nfrozen-v8-marker\n`
     fs.writeFileSync(
       taskPath,
-      `${JSON.stringify({ ...frozenTask, instructionSetVersion: 8 }, null, 2)}\n`,
+      `${JSON.stringify({ ...frozenTask, instructionSetVersion: 0 }, null, 2)}\n`,
       'utf8'
     )
     fs.writeFileSync(skillPath, frozenSkill, 'utf8')
@@ -409,7 +409,7 @@ describe('PluginWorkspaceModule', () => {
     assert.equal(
       (JSON.parse(fs.readFileSync(taskPath, 'utf8')) as Record<string, unknown>)
         .instructionSetVersion,
-      8
+      0
     )
   })
 })

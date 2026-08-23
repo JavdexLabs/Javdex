@@ -9,7 +9,7 @@ import { pluginResultContract } from '@shared/pluginResultContract'
 import { buildPluginFieldSemanticsPrompt } from '@shared/scrapeFieldPromptDocs'
 import type { ScraperPluginKind } from '@shared/scraperPluginTypes'
 
-export const PLUGIN_DEV_INSTRUCTION_SET_VERSION = 31
+export const PLUGIN_DEV_INSTRUCTION_SET_VERSION = 1
 
 export const PLUGIN_DEVELOPER_SYSTEM_PROMPT = `你是 ${APP_DISPLAY_NAME} 的插件开发 Agent，运行在当前插件专用隔离工作区。
 
@@ -235,7 +235,7 @@ function taskDocument(
   runTargets?: readonly PluginDevRunTarget[]
 ): Record<string, unknown> {
   return {
-    schemaVersion: 3,
+    schemaVersion: 1,
     instructionSetVersion: PLUGIN_DEV_INSTRUCTION_SET_VERSION,
     mode: input.mode,
     kind: input.kind,

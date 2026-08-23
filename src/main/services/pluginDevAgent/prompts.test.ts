@@ -228,8 +228,8 @@ describe('PluginDevInstructionModule', () => {
     assert.match(pluginFormat, /属性不同时另有 `rawHref`/)
     assert.match(pluginFormat, /未匹配返回 `null` 或 `\[\]`/)
     assert.doesNotMatch(pluginFormat, /应返回 `null`/)
-    assert.equal(task.schemaVersion, 3)
-    assert.equal(task.instructionSetVersion, 31)
+    assert.equal(task.schemaVersion, 1)
+    assert.equal(task.instructionSetVersion, 1)
     assert.deepEqual(task.runTargets, [{ kind: 'video', code: 'YST-222' }])
     assert.equal(Object.hasOwn(task, 'instructions'), false)
     assert.equal(Object.hasOwn(task, 'fieldScope'), false)
@@ -358,7 +358,7 @@ describe('PluginDevInstructionModule', () => {
     assert.doesNotMatch(instructionSet.initialMessage, /dev-notes|index\.js|latest-dry-run|最少|多轮|plugin_dry_run/)
   })
 
-  it('generates stable v31 resources for identical inputs', () => {
+  it('generates stable v1 resources for identical inputs', () => {
     const first = buildRunInstructionSet({ task: createTask })
     const second = buildRunInstructionSet({ task: structuredClone(createTask) })
     assert.deepEqual(second, first)

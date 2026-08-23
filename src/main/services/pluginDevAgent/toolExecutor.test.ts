@@ -111,7 +111,7 @@ function fakeArtifact(input: Parameters<typeof pluginExecution.run>[0]): PluginE
   }
 }
 
-describe('PluginDeveloper v13 tool executor', { concurrency: false }, () => {
+describe('PluginDeveloper v1 tool executor', { concurrency: false }, () => {
   it('rejects removed domain tools', async () => {
     const session = createWorkspaceSession('executor-removed-tools')
     try {
@@ -147,7 +147,7 @@ describe('PluginDeveloper v13 tool executor', { concurrency: false }, () => {
           'utf8'
         )),
         {
-          schemaVersion: 2,
+          schemaVersion: 1,
           status: 'not_run',
           currentAcceptance: { installReady: false, reasons: ['missing_execution'] }
         }
@@ -162,7 +162,7 @@ describe('PluginDeveloper v13 tool executor', { concurrency: false }, () => {
     const session = createWorkspaceSession('executor-invalid-workspace', 'video', ['ABC-1'])
     const latestPath = path.join(session.workspaceDirectory!, '.javdex', 'latest-dry-run.json')
     pluginWorkspace.recordLatestDryRun(session.workspaceDirectory!, {
-      schemaVersion: 2,
+      schemaVersion: 1,
       status: 'completed',
       artifactHash: 'previous-artifact',
       reportPath: '/previous/report.json',
@@ -463,7 +463,7 @@ describe('PluginDeveloper v13 tool executor', { concurrency: false }, () => {
     const artifactPath = path.join(session.workspaceDirectory!, artifactRef)
     fs.mkdirSync(path.dirname(artifactPath), { recursive: true })
     fs.writeFileSync(artifactPath, `${JSON.stringify({
-      schemaVersion: 2,
+      schemaVersion: 1,
       observation: {
         pageFacts: {
           links: [{ text: 'ABC-1', href: 'https://example.test/ABC-1' }]
@@ -515,7 +515,7 @@ describe('PluginDeveloper v13 tool executor', { concurrency: false }, () => {
           'utf8'
         )),
         {
-          schemaVersion: 2,
+          schemaVersion: 1,
           status: 'not_run',
           currentAcceptance: { installReady: false, reasons: ['missing_execution'] }
         }
@@ -558,7 +558,7 @@ describe('PluginDeveloper v13 tool executor', { concurrency: false }, () => {
           'utf8'
         )),
         {
-          schemaVersion: 2,
+          schemaVersion: 1,
           status: 'not_run',
           currentAcceptance: { installReady: false, reasons: ['missing_execution'] }
         }
@@ -578,7 +578,7 @@ describe('PluginDeveloper v13 tool executor', { concurrency: false }, () => {
     const controller = new AbortController()
     const latestPath = path.join(session.workspaceDirectory!, '.javdex', 'latest-dry-run.json')
     pluginWorkspace.recordLatestDryRun(session.workspaceDirectory!, {
-      schemaVersion: 2,
+      schemaVersion: 1,
       status: 'completed',
       artifactHash: 'previous-artifact',
       reportPath: '/previous/report.json',

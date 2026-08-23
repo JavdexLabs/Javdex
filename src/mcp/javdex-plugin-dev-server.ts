@@ -92,7 +92,7 @@ async function main(): Promise<void> {
   }
   const prompt = 'MCP PluginDeveloper ToolHost session'
   const resolved: ResolvedRunConfiguration = {
-    revision: 'mcp-v7',
+    revision: 'mcp-v1',
     definitionId: 'plugin-developer',
     profile,
     model: {
@@ -101,7 +101,7 @@ async function main(): Promise<void> {
         providerId: 'mcp-unused', modelId: 'mcp-unused', name: 'MCP unused', api: 'openai-completions',
         baseUrl: 'http://127.0.0.1', contextWindow: 1, maxTokens: 1, reasoning: false
       },
-      routeRevision: 'mcp-v7',
+      routeRevision: 'mcp-v1',
       preset: { thinkingLevel: 'minimal', maxTokens: 1, timeoutMs: 1, cacheRetention: 'none' },
       cacheCompatibility: {
         supportsPromptCache: false, supportsLongCacheRetention: false,

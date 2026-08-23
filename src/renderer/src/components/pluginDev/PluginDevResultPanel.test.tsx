@@ -21,9 +21,9 @@ function textContent(): string {
 }
 
 describe('PluginDevResultPanel manifest coverage', () => {
-  it('separates actionable field ids from runtime-only and legacy information', () => {
+  it('separates actionable field ids from runtime-only information', () => {
     const execution: PluginExecutionArtifact = {
-      runtimeVersion: 'runtime-v2',
+      runtimeVersion: 'runtime-v1',
       artifactHash: 'artifact',
       targetFingerprint: 'targets',
       scope: 'all',
@@ -40,7 +40,6 @@ describe('PluginDevResultPanel manifest coverage', () => {
             { key: 'sourceUrl', role: 'diagnostic' }
           ]
         },
-        legacyProjectionKeys: ['oldKey'],
         logs: [],
         runtimeAccepted: true
       }],
@@ -48,7 +47,7 @@ describe('PluginDevResultPanel manifest coverage', () => {
       reportPath: '/tmp/report.json'
     }
     const acceptance: PluginRunAcceptanceOutcome = {
-      runtimeVersion: 'runtime-v2',
+      runtimeVersion: 'runtime-v1',
       artifactHash: 'artifact',
       targetFingerprint: 'targets',
       scope: 'all',
@@ -73,14 +72,13 @@ describe('PluginDevResultPanel manifest coverage', () => {
     const text = textContent()
     assert.match(text, /插件已返回但 manifest 未声明\naliases/)
     assert.match(text, /运行\/调试信息，不属于 supportedFields\nmainName、sourceUrl/)
-    assert.match(text, /旧版投影记录\noldKey\n（仅供历史查看）/)
     assert.match(text, /机械验收通过，可安装/)
     assert.doesNotMatch(text, /完整生产运行已就绪|被 supportedFields 投影丢弃/)
   })
 
   it('renders each exact-match candidate when the plugin returns an array', () => {
     const execution: PluginExecutionArtifact = {
-      runtimeVersion: 'runtime-v2',
+      runtimeVersion: 'runtime-v1',
       artifactHash: 'artifact',
       targetFingerprint: 'targets',
       scope: 'all',
@@ -114,7 +112,7 @@ describe('PluginDevResultPanel manifest coverage', () => {
           dryRun={null}
           execution={execution}
           acceptance={{
-            runtimeVersion: 'runtime-v2',
+            runtimeVersion: 'runtime-v1',
             artifactHash: 'artifact',
             targetFingerprint: 'targets',
             scope: 'all',
@@ -143,7 +141,7 @@ describe('PluginDevResultPanel manifest coverage', () => {
 
   it('labels a targeted execution as a local diagnostic even when the saved full run is ready', () => {
     const execution: PluginExecutionArtifact = {
-      runtimeVersion: 'runtime-v2',
+      runtimeVersion: 'runtime-v1',
       artifactHash: 'artifact',
       targetFingerprint: 'targeted',
       scope: 'targeted',
@@ -171,7 +169,7 @@ describe('PluginDevResultPanel manifest coverage', () => {
           dryRun={null}
           execution={execution}
           acceptance={{
-            runtimeVersion: 'runtime-v2',
+            runtimeVersion: 'runtime-v1',
             artifactHash: 'artifact',
             targetFingerprint: 'all-targets',
             scope: 'all',
@@ -192,7 +190,7 @@ describe('PluginDevResultPanel manifest coverage', () => {
 
   it('explains null and empty array plugin returns instead of hiding the section', () => {
     const execution: PluginExecutionArtifact = {
-      runtimeVersion: 'runtime-v2',
+      runtimeVersion: 'runtime-v1',
       artifactHash: 'artifact',
       targetFingerprint: 'targets',
       scope: 'all',

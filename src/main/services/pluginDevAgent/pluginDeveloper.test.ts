@@ -232,7 +232,7 @@ function markMechanicallyReady(session: PluginDevSession, directory: string): vo
     execution: session.lastExecution
   }).outcome
   pluginWorkspace.recordLatestDryRun(directory, {
-    schemaVersion: 2,
+    schemaVersion: 1,
     status: 'completed',
     artifactHash: session.lastExecution.artifactHash,
     reportPath: session.lastExecution.reportPath,
@@ -563,7 +563,7 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       package: structuredClone(packageValue)
     }
     const productState = {
-      schemaVersion: 7,
+      schemaVersion: 1,
       input: debugInput,
       status: 'completed',
       phase: 'ready',
@@ -642,85 +642,6 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       testable(developer).active.delete(runId)
       deleteSession(runId)
       fs.rmSync(process.env.JAVDEX_TEST_USER_DATA!, { recursive: true, force: true })
-    }
-  })
-
-  it('renders schema-v5 execution history through a read-only projection adapter', () => {
-    const developer = new PluginDeveloper()
-    const runId = 'plugin-legacy-v5-history'
-    const productState = {
-      schemaVersion: 5,
-      input,
-      status: 'completed',
-      phase: 'ready',
-      step: 2,
-      totalTokens: 10,
-      modelTurnCount: 1,
-      discoveryToolCalls: 1,
-      runTargets: [{ kind: 'video' as const, code: 'ABC-123' }],
-      package: structuredClone(packageValue),
-      summary: 'legacy ready',
-      workLog: [],
-      lastExecution: {
-        runtimeVersion: 'runtime-v1',
-        artifactHash: 'legacy-artifact',
-        targetFingerprint: 'legacy-targets',
-        scope: 'all',
-        targets: [{ kind: 'video', code: 'ABC-123' }],
-        cases: [{
-          target: { kind: 'video', code: 'ABC-123' },
-          pluginResult: { code: 'ABC-123', title: 'Legacy' },
-          effectiveResult: { code: 'ABC-123' },
-          droppedResultKeys: ['title'],
-          logs: [],
-          runtimeAccepted: true
-        }],
-        executionPassed: true,
-        reportPath: '/tmp/legacy.json'
-      }
-    }
-    const record = {
-      id: runId,
-      useCase: 'plugin-developer',
-      status: 'settled',
-      configRevision: 'legacy',
-      configSnapshot: frozenSnapshot(),
-      recoveryGeneration: 0,
-      productState,
-      createdAt: '2026-08-21T00:00:00.000Z',
-      updatedAt: '2026-08-21T00:00:00.000Z'
-    } satisfies AgentRunRecord<typeof productState>
-    const restoreGetRun = replaceMethod(
-      agentRunStore,
-      'getRun',
-      (() => record) as typeof agentRunStore.getRun
-    )
-    const restoreJournal = replaceMethod(
-      agentRunStore,
-      'readProductJournal',
-      (() => []) as typeof agentRunStore.readProductJournal
-    )
-    const restoreApprovals = replaceMethod(
-      toolHost,
-      'pendingApprovals',
-      (() => []) as typeof toolHost.pendingApprovals
-    )
-    try {
-      const snapshot = developer.getSnapshot(runId)
-      assert.equal(Object.hasOwn(snapshot?.result ?? {}, 'installCurrentAllowed'), false)
-      assert.equal(snapshot?.result.historicalReadOnly, true)
-      assert.equal(snapshot?.result.acceptance, undefined)
-      assert.equal(snapshot?.result.execution?.runtimeVersion, 'runtime-v1')
-      assert.deepEqual(snapshot?.result.execution?.cases[0]?.legacyProjectionKeys, ['title'])
-      assert.deepEqual(snapshot?.result.execution?.cases[0]?.manifestCoverage, {
-        returnedFieldIds: [],
-        undeclaredReturnedFieldIds: [],
-        runtimeOnlyKeys: []
-      })
-    } finally {
-      restoreApprovals()
-      restoreJournal()
-      restoreGetRun()
     }
   })
 
@@ -1669,7 +1590,7 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       executionPassed: true
     }
     const productState = {
-      schemaVersion: 7 as const,
+      schemaVersion: 1 as const,
       input: { ...input },
       status: 'waiting_user' as const,
       phase: 'ready' as const,

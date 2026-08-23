@@ -6,9 +6,7 @@ import type {
   ModelManagementDocument,
   ModelManagementSnapshot
 } from '@shared/modelManagementTypes'
-import type { AIConfigurationDocument } from '@shared/aiConfigurationTypes'
 import {
-  buildLegacyAiConfigurationBackup,
   buildLegacyLlmSettingsBackup,
   migrateModelManagementDocument,
   ModelManagementError,
@@ -38,7 +36,7 @@ class MemoryStore implements ModelConfigurationStore {
     this.value = structuredClone(document)
   }
 
-  backupLegacy(): void {
+  backupLegacySettings(): void {
     this.backups += 1
   }
 }
@@ -107,105 +105,7 @@ function assignment(snapshot: ModelManagementSnapshot, workloadId: string) {
   return snapshot.assignments.find((item) => item.workloadId === workloadId)!
 }
 
-function legacyV2Fixture(): AIConfigurationDocument {
-  const seed = migrateModelManagementDocument(
-    DEFAULT_SETTINGS,
-    undefined,
-    'seed-revision',
-    new Date('2026-08-21T00:00:00.000Z')
-  )
-  const selected = seed.models[0]!
-  const connection = seed.connections.find((item) => item.id === selected.connectionId)!
-  const preset = {
-    id: 'preset:balanced',
-    name: 'Balanced',
-    thinkingLevel: 'medium' as const,
-    maxTokens: 0,
-    timeoutMs: 120_000,
-    cacheRetention: 'short' as const
-  }
-  const roles = ['primary', 'verifier', 'summarizer'] as const
-  const routes = roles.map((role) => ({
-    id: `route:plugin-developer:${role}`,
-    name: role,
-    role,
-    modelRecordId: selected.id,
-    presetId: preset.id
-  }))
-  const profile = (
-    id: string,
-    definitionId: 'plugin-developer' | 'library-curator'
-  ): AIConfigurationDocument['agentProfiles'][number] => ({
-    id,
-    name: definitionId,
-    definitionId,
-    routes: {
-      primary: routes[0]!.id,
-      verifier: routes[1]!.id,
-      summarizer: routes[2]!.id
-    },
-    toolPackRefs: [],
-    capabilityGrants: [],
-    approvalRequiredEffects: [],
-    compaction: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000 }
-  })
-  return {
-    schemaVersion: 2,
-    revision: 'legacy-revision',
-    updatedAt: '2026-08-21T00:00:00.000Z',
-    modelConnections: [{
-      id: connection.id,
-      name: connection.name,
-      providerId: connection.providerId,
-      protocol: connection.protocol,
-      baseUrl: connection.baseUrl,
-      credentialRef: connection.credentialRef,
-      enabled: true
-    }],
-    modelRecords: [{
-      id: selected.id,
-      connectionId: selected.connectionId,
-      modelId: selected.modelId,
-      name: selected.name,
-      api: selected.baseline.api,
-      contextWindow: selected.baseline.contextWindow,
-      maxTokens: selected.baseline.maxTokens,
-      capabilities: structuredClone(selected.baseline.capabilities),
-      cache: structuredClone(selected.baseline.cache)
-    }],
-    modelPresets: [preset],
-    routes,
-    agentProfiles: [
-      profile('profile:plugin-developer:default', 'plugin-developer'),
-      profile('profile:library-curator:default', 'library-curator')
-    ]
-  }
-}
-
 describe('ModelManagementModule', () => {
-  it('sanitizes v2 connection URLs and drops unknown secret-bearing properties from backup', () => {
-    const legacy = legacyV2Fixture() as AIConfigurationDocument & {
-      apiKey?: string
-    }
-    legacy.apiKey = 'sk-root-secret'
-    legacy.modelConnections[0] = {
-      ...legacy.modelConnections[0]!,
-      baseUrl: 'https://user:password@api.example.test/v1?api_key=query-secret#fragment',
-      proxyUrl: 'https://proxy-user:proxy-pass@proxy.example.test/path?token=proxy-secret',
-      apiKey: 'sk-connection-secret'
-    } as AIConfigurationDocument['modelConnections'][number] & { apiKey: string }
-
-    const serialized = JSON.stringify(buildLegacyAiConfigurationBackup(legacy))
-
-    assert.equal(serialized.includes('sk-root-secret'), false)
-    assert.equal(serialized.includes('sk-connection-secret'), false)
-    assert.equal(serialized.includes('query-secret'), false)
-    assert.equal(serialized.includes('proxy-secret'), false)
-    assert.equal(serialized.includes('password'), false)
-    assert.match(serialized, /api\.example\.test/)
-    assert.match(serialized, /proxy\.example\.test/)
-  })
-
   it('builds the migration backup from a strict non-secret provider whitelist', () => {
     const settings = structuredClone(DEFAULT_SETTINGS) as AppSettings & {
       llmProviderConfigs: Record<string, { baseUrl?: string; protocol?: string; apiKey?: string }>
@@ -226,14 +126,13 @@ describe('ModelManagementModule', () => {
     assert.match(serialized, /api\.example\.test/)
   })
 
-  it('migrates v2 once and then reads the same v3 revision', () => {
-    const legacy = legacyV2Fixture()
-    const { module, store } = harness({ stored: legacy })
+  it('migrates released settings once and then reads the same v2 revision', () => {
+    const { module, store } = harness()
 
     const first = module.read()
     const second = module.read()
 
-    assert.equal(first.schemaVersion, 3)
+    assert.equal(first.schemaVersion, 2)
     assert.equal(first.revision, 'revision-1')
     assert.equal(second.revision, first.revision)
     assert.equal(store.backups, 1)
@@ -242,10 +141,10 @@ describe('ModelManagementModule', () => {
     assert.equal(first.models[0]?.baseline.cache.evidence.source, 'migration')
   })
 
-  it('fails closed for an invalid v3 document', () => {
+  it('fails closed for an invalid v2 document', () => {
     const { module, store } = harness({
       stored: {
-        schemaVersion: 3,
+        schemaVersion: 2,
         revision: 'bad',
         updatedAt: '2026-08-22T00:00:00.000Z',
         connections: [],
@@ -258,10 +157,9 @@ describe('ModelManagementModule', () => {
     assert.equal(store.writes, 0)
   })
 
-  it('fails closed for malformed nested v3 data and embedding catalog entries', () => {
+  it('fails closed for malformed nested v2 data and embedding catalog entries', () => {
     const valid = migrateModelManagementDocument(
       DEFAULT_SETTINGS,
-      undefined,
       'valid-revision',
       new Date('2026-08-22T00:00:00.000Z')
     )
@@ -282,72 +180,6 @@ describe('ModelManagementModule', () => {
     const embeddingHarness = harness({ stored: embedding })
     assert.throws(() => embeddingHarness.module.read(), /kind/)
     assert.equal(embeddingHarness.store.writes, 0)
-  })
-
-  it('preserves v2-only connections, models and primary workload bindings', () => {
-    const legacy = legacyV2Fixture()
-    const modelId = 'model:legacy-only:chat'
-    const connectionId = 'connection:legacy-only'
-    legacy.modelConnections.push({
-      id: connectionId,
-      name: 'Legacy Only',
-      providerId: 'legacy-only',
-      protocol: 'anthropic-messages',
-      baseUrl: 'https://legacy.example.test',
-      proxyUrl: 'http://127.0.0.1:7890',
-      credentialRef: 'legacy-credential-ref',
-      enabled: false
-    })
-    legacy.modelRecords.push({
-      id: modelId,
-      connectionId,
-      modelId: 'legacy-chat',
-      name: 'Legacy Chat',
-      api: 'anthropic-messages',
-      contextWindow: 96_000,
-      maxTokens: 12_000,
-      capabilities: { tools: true, vision: false, reasoning: 'unknown' },
-      cache: {
-        supportsPromptCache: true,
-        supportsLongCacheRetention: false,
-        cacheControlFormat: 'anthropic',
-        sendSessionAffinityHeaders: false,
-        evidence: {
-          source: 'probe',
-          checkedAt: '2026-08-20T00:00:00.000Z',
-          note: 'legacy evidence'
-        }
-      }
-    })
-    legacy.routes.push({
-      id: 'route:plugin-developer:legacy-primary',
-      name: 'legacy primary',
-      role: 'primary',
-      modelRecordId: modelId,
-      presetId: 'preset:balanced'
-    })
-    legacy.agentProfiles.find((profile) => profile.definitionId === 'plugin-developer')!
-      .routes.primary = 'route:plugin-developer:legacy-primary'
-
-    const migrated = migrateModelManagementDocument(
-      DEFAULT_SETTINGS,
-      legacy,
-      'migrated',
-      new Date('2026-08-22T00:00:00.000Z')
-    )
-    const connection = migrated.connections.find((item) => item.id === connectionId)!
-    const model = migrated.models.find((item) => item.id === modelId)!
-    const plugin = migrated.assignments.find((item) => item.workloadId === 'plugin-developer')!
-
-    assert.equal(connection.name, 'Legacy Only')
-    assert.equal(connection.protocol, 'anthropic-messages')
-    assert.equal(connection.baseUrl, 'https://legacy.example.test')
-    assert.equal(connection.proxyUrl, 'http://127.0.0.1:7890')
-    assert.equal(connection.credentialRef, 'llm-provider:legacy-only')
-    assert.equal(connection.enabled, false)
-    assert.equal(model.baseline.contextWindow, 96_000)
-    assert.equal(model.baseline.cache.evidence.source, 'probe')
-    assert.deepEqual(plugin.model, { mode: 'explicit', modelRef: modelId })
   })
 
   it('saving a provider never changes workload assignments', () => {

@@ -34,7 +34,7 @@ interface WorkspaceManifest extends Omit<ScraperPluginPackage, 'code'> {
 }
 
 export interface PluginDevLatestDryRun {
-  schemaVersion: 2
+  schemaVersion: 1
   status: 'completed'
   artifactHash: string
   reportPath: string
@@ -47,13 +47,13 @@ export interface PluginDevLatestDryRun {
 }
 
 interface PluginDevInitialDryRunState {
-  schemaVersion: 2
+  schemaVersion: 1
   status: 'not_run'
   currentAcceptance: PluginRunAcceptanceProjection
 }
 
 const INITIAL_DRY_RUN_STATE: PluginDevInitialDryRunState = {
-  schemaVersion: 2,
+  schemaVersion: 1,
   status: 'not_run',
   currentAcceptance: {
     installReady: false,
@@ -207,7 +207,7 @@ export class PluginWorkspaceModule {
     if (!existingDraft) this.writePackage(directory, input.package)
     if (!existingTask ||
         (input.resourcePolicy !== 'preserve-frozen' &&
-          (existingTask.instructionSetVersion ?? 0) < PLUGIN_DEV_INSTRUCTION_SET_VERSION)) {
+          existingTask.instructionSetVersion !== PLUGIN_DEV_INSTRUCTION_SET_VERSION)) {
       const currentTargets = configuredRunTargets(
         input.task.kind,
         normalizeTestTargets(input.task)
@@ -325,7 +325,7 @@ export class PluginWorkspaceModule {
     }
     atomicWrite(filePath, `${JSON.stringify({
       ...current,
-      schemaVersion: 2,
+      schemaVersion: 1,
       currentAcceptance
     }, null, 2)}\n`)
   }

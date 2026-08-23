@@ -101,7 +101,7 @@ const browserSchema = (): PluginDevToolInputSchema => ({
 })
 
 /**
- * The complete custom surface for PluginDeveloper v13. Source editing uses Pi native workspace
+ * The complete custom surface for PluginDeveloper v1. Source editing uses Pi native workspace
  * tools; Javdex owns production dry-run facts, targeted browser artifact reads, the browser
  * Adapter and typed ask.
  */

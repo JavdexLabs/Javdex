@@ -36,7 +36,7 @@ function snapshot(): ModelManagementSnapshot {
   const first = metadata(true)
   const second = metadata(true)
   return {
-    schemaVersion: 3,
+    schemaVersion: 2,
     revision: 'revision-1',
     updatedAt: '2026-08-22T00:00:00.000Z',
     validationErrors: [],
@@ -134,7 +134,7 @@ function text(): string {
   return collect(renderer?.toJSON() ?? null)
 }
 
-describe('Model management v3 panels', () => {
+describe('Model management v2 panels', () => {
   it('keeps workload edits local until the explicit save action', () => {
     const commands: unknown[] = []
     act(() => {

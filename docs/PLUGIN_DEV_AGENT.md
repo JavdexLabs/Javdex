@@ -1,4 +1,4 @@
-# 插件开发助手（PluginDeveloper v13）
+# 插件开发助手（PluginDeveloper v1）
 
 PluginDeveloper 采用“Pi 主导、宿主轻量”的自适应开发架构。Pi 与冻结的 Skills 负责浏览、外部开发笔记、字段范围、代码实现和结果语义判断；Javdex 只提供隔离工作区、浏览器、生产沙箱、最新运行事实和安装机械门禁。简单网站可以一次实现并验证，只有真实缺口才进入多轮迭代。
 
@@ -28,19 +28,19 @@ Pi 负责：
 工作区的 `plugin.json` 和 `index.js` 是插件草稿的唯一真相，`.javdex/dev-notes.md` 是 Pi 的外部开发记忆。Pi 可使用受控的 `read`、`write`、`edit`、`grep`、`find`、`ls`，但只能修改这三个文件。宿主生成并冻结其他资源：
 
 ```text
-task.json                         # schema v3；站点、模式、kind、runTargets、用户要求
+task.json                         # schema v1；站点、模式、kind、runTargets、用户要求
 docs/plugin-format.md             # 精确沙箱输入和返回契约
 docs/fields-video.md              # 影片字段查询表
 docs/fields-actress.md            # 演员字段查询表
 .agents/skills/javdex-plugin-dev/SKILL.md
 .agents/skills/javdex-browser-operation/SKILL.md
 .javdex/dev-notes.md              # Pi 可写；页面事实、字段覆盖和明确未完成项，不进入插件包
-.javdex/latest-dry-run.json        # schema v2；最近执行事实 + 当前机械验收投影，宿主只写
+.javdex/latest-dry-run.json        # schema v1；最近执行事实 + 当前机械验收投影，宿主只写
 .javdex/browser/*.json            # 仅供 Pi 阅读和日志导出
 .javdex/reports/*.json            # 完整生产执行 artifact
 ```
 
-新工作区使用 `instructionSetVersion: 31`。system prompt 只声明身份、文件边界、恢复入口和 Skill 所有权；完整开发循环只存在于按当前 kind 生成的 `javdex-plugin-dev` Skill，并按“启动或恢复 → 获取证据 → 实现 → 运行与结束”四个阶段组织。initial message 和 continuation 只传递本次事件事实与适用阶段，不再复制文件读取、停止条件或验收分支。create 首次实现前读取一次当前 kind 的 `docs/plugin-format.md` 作为唯一沙箱输入、返回形状和候选处理契约，并在首次浏览前读取 `javdex-browser-operation`；debug 或恢复仅在修改涉及这些契约或 notes 明确缺少契约事实时重读。create/debug 都只创建空 notes 模板，宿主不从页面或 manifest 推断字段范围。工作区刷新会保留 `plugin.json`、`index.js`、decisions 和 dev-notes。choice 决定在 `.javdex/decisions.json` 中保存原问题、所选项 id/label/description 和关联 evidenceRefs；恢复提示会重新评估当前 blocker，不假定一次选择自动结束全部歧义或必然需要修改、dry-run。
+新工作区使用 `instructionSetVersion: 1`。system prompt 只声明身份、文件边界、恢复入口和 Skill 所有权；完整开发循环只存在于按当前 kind 生成的 `javdex-plugin-dev` Skill，并按“启动或恢复 → 获取证据 → 实现 → 运行与结束”四个阶段组织。initial message 和 continuation 只传递本次事件事实与适用阶段，不再复制文件读取、停止条件或验收分支。create 首次实现前读取一次当前 kind 的 `docs/plugin-format.md` 作为唯一沙箱输入、返回形状和候选处理契约，并在首次浏览前读取 `javdex-browser-operation`；debug 或恢复仅在修改涉及这些契约或 notes 明确缺少契约事实时重读。create/debug 都只创建空 notes 模板，宿主不从页面或 manifest 推断字段范围。工作区刷新会保留 `plugin.json`、`index.js`、decisions 和 dev-notes。choice 决定在 `.javdex/decisions.json` 中保存原问题、所选项 id/label/description 和关联 evidenceRefs；恢复提示会重新评估当前 blocker，不假定一次选择自动结束全部歧义或必然需要修改、dry-run。
 
 暂时无法解析的 `plugin.json`/`index.js` 只令工作区进入可恢复的 `WORKSPACE_INVALID`，不会把整个 Agent run 标为失败。文件修复后自动重新同步；无效期间调用 dry-run 不执行沙箱，也不覆盖最近执行事实，只把 `currentAcceptance` 更新为不可安装及 `workspace_invalid`。
 
@@ -60,7 +60,7 @@ type PluginDevRunTarget =
 
 ## Agent 可见工具
 
-ToolPack `toolpack:plugin-developer:v13` 只有三个自定义工具：
+ToolPack `toolpack:plugin-developer:v1` 只有三个自定义工具：
 
 | 工具 | 用途 |
 |---|---|
@@ -70,7 +70,7 @@ ToolPack `toolpack:plugin-developer:v13` 只有三个自定义工具：
 
 `browser` 的输入使用按 action 区分的 schema：例如 `open` 必须有 `url`，`click` 必须有 `target`，`fill` 必须有 `target/text`，`read-section` 必须有 `artifactRef/section`，`handoff` 必须有 `reason`；各分支拒绝其他 action 的参数。
 
-不存在 Agent 可见的 `plugin_check`、`plugin_test`、完成或安装工具。外部 MCP server 暴露同一组 v13 工具。
+不存在 Agent 可见的 `plugin_check`、`plugin_test`、完成或安装工具。外部 MCP server 暴露同一组 v1 工具。
 
 页面内可安全关闭的成人确认、广告、介绍或 Cookie 遮挡由 Pi 读取可见控件后按页面规则关闭，每个遮挡层最多尝试一次。登录弹窗存在关闭、跳过或访客入口时同样直接关闭；确实需要登录、人机验证或其他必须由用户亲自完成的浏览器动作时，Pi 调用 `browser(action="handoff", reason=...)`。宿主只负责显示并聚焦 helper、创建绑定 requestId 的 `browser_interaction` 请求和保持浏览器租约，不判断页面弹窗语义，也不接收账号、密码或验证码。开发助手打开的 helper 窗口在回合结束后保持，不因空闲超时关闭；离开开发页或会话终态时关闭。正式刮削从拿到浏览器租约起显示 helper，任务结束后立即关闭。
 
@@ -113,7 +113,7 @@ video 会话只接受 `videoCodes`，actress 会话只接受 `actresses`，单�
 - `manifestCoverage.runtimeOnlyKeys`：身份或调试信息，不属于 `supportedFields`；
 - 末尾日志、错误和 `runtimeAccepted`。
 
-`undeclaredReturnedFieldIds` 是唯一可直接写入 manifest 的机械建议。`runtimeOnlyKeys` 只作中性说明：演员 `mainName` 是运行身份，`sourceUrl` 是可选调试来源，二者都不能加入 `supportedFields`。宿主不会自动补字段，也不会据此判断开发是否完整。新工作区的 `.javdex/latest-dry-run.json` 初始为 schema v2、`status: "not_run"` 和 `currentAcceptance.installReady=false`；真实执行后原子保存 `status: "completed"` 的最近执行事实，并独立保存当前包、全部目标和 runtime 的验收投影。代码、`supportedFields`、目标或 runtime 变化时只更新 `currentAcceptance.reasons`，保留最近执行事实；无效输入、busy、取消或浏览器 handoff 不伪造执行。正常 dry-run 后 Pi 直接使用工具结果，只有恢复或上下文压缩时读取该文件。
+`undeclaredReturnedFieldIds` 是唯一可直接写入 manifest 的机械建议。`runtimeOnlyKeys` 只作中性说明：演员 `mainName` 是运行身份，`sourceUrl` 是可选调试来源，二者都不能加入 `supportedFields`。宿主不会自动补字段，也不会据此判断开发是否完整。新工作区的 `.javdex/latest-dry-run.json` 初始为 schema v1、`status: "not_run"` 和 `currentAcceptance.installReady=false`；真实执行后原子保存 `status: "completed"` 的最近执行事实，并独立保存当前包、全部目标和 runtime 的验收投影。代码、`supportedFields`、目标或 runtime 变化时只更新 `currentAcceptance.reasons`，保留最近执行事实；无效输入、busy、取消或浏览器 handoff 不伪造执行。正常 dry-run 后 Pi 直接使用工具结果，只有恢复或上下文压缩时读取该文件。
 
 create 草稿的空 `supportedFields` 表示“尚未声明”，但现有安装兼容层会把空数组解释为全部字段。字段契约仍会从插件结果计算 `undeclaredReturnedFieldIds`，因此 Pi 不再依赖对象键差集或额外记忆规则。
 
@@ -137,7 +137,7 @@ create 模式先确认搜索入口，再打开一条精确详情页学习选择�
 
 ## 最终生产运行验收
 
-唯一验收 Module 为 `PluginRunAcceptanceModule`。它只接受当前 `runtime-v2` 的完整执行 artifact，并检查：
+唯一验收 Module 为 `PluginRunAcceptanceModule`。它只接受当前 `runtime-v1` 的完整执行 artifact，并检查：
 
 1. 当前 `plugin.json/index.js` 可解析且导出函数可执行；
 2. 全部会话目标都真正经过生产运行时；
@@ -152,7 +152,7 @@ create 模式先确认搜索入口，再打开一条精确详情页学习选择�
 
 `browser` 由独立 Electron scraper helper 承载，使用 Electron 内置 Chromium 和既有 scraper profile，不下载 Playwright 浏览器。每个新 `documentRevision` 第一次观察优先原样内联 Playwright ARIA 和全部已采集 `pageFacts`；宿主不做字段相关性打分，也不截取数组前 N 项。`pageFacts` 可含 `scriptSrcs`、`inlineScripts`、`looseInputs`；`click` / `fill` / `press` / `wait` 后另附该动作期间的 `recentRequests`（document/xhr/fetch 的 method、url、status、resourceType），宿主不标注哪条是搜索。同一文档后续返回精确 `delta`，完全没有变化时返回不超过 3 KB 的 `unchanged`。
 
-浏览器工具保留 64 KB 页面 observation 硬上限。完整 observation 始终按内容寻址写入 browser artifact v2。超限时按完整 section 装包：`snapshot` 与每个 `pageFacts` section 都不可切开，从最大的整段开始省略，直到落入硬上限；被省略的 section 只报告 `itemCount` / `byteLength`，`nextActions` 为 `find` / `html` / `read-section`。宿主不按页面类型或字段相关性挑选 section，也不截取数组前 N 项。Pi 只需用 observation 返回的 `artifactRef` 和 section 名调用 `browser(action="read-section", ...)`；接口返回有界页面和不透明 `nextCursor`，不获取或占用浏览器租约。artifact 的索引、分片、完整性校验和路径约束由 `PluginBrowserCapabilityModule` 隐藏，不再要求 Pi 理解或原生读取存储格式。`artifactComplete` 与 `inlineComplete` 分别描述 artifact 和 Agent 当前内联结果。
+浏览器工具保留 64 KB 页面 observation 硬上限。完整 observation 始终按内容寻址写入 browser artifact v1。超限时按完整 section 装包：`snapshot` 与每个 `pageFacts` section 都不可切开，从最大的整段开始省略，直到落入硬上限；被省略的 section 只报告 `itemCount` / `byteLength`，`nextActions` 为 `find` / `html` / `read-section`。宿主不按页面类型或字段相关性挑选 section，也不截取数组前 N 项。Pi 只需用 observation 返回的 `artifactRef` 和 section 名调用 `browser(action="read-section", ...)`；接口返回有界页面和不透明 `nextCursor`，不获取或占用浏览器租约。artifact 的索引、分片、完整性校验和路径约束由 `PluginBrowserCapabilityModule` 隐藏，不再要求 Pi 理解或原生读取存储格式。`artifactComplete` 与 `inlineComplete` 分别描述 artifact 和 Agent 当前内联结果。
 
 动作完成与动作后的观察是两个状态：`open/click/fill/press/wait` 成功后会在 3 秒内重试瞬态 snapshot。动作成功但页面仍无法观察时返回 `ok=true`、`observationMode=pending`，Pi 只补一次 `snapshot`，不得重复状态动作。动作本身报错但文档 revision 已变化时返回 `BROWSER_ACTION_UNCERTAIN`，只能用 `snapshot/status` 确认。显式 snapshot 暂时失败返回可重试的 `BROWSER_OBSERVATION_PENDING`，不会令整个 Agent run 失败。
 
@@ -166,8 +166,8 @@ Browser Skill 把页面文本、ARIA、HTML、脚本和网络响应都视为不�
 
 ## 状态、升级与审计
 
-- product state 与工作日志新写 schema v7；ToolPack 为 v13；instruction set 为 v31；latest dry-run 为 schema v2；browser artifact 保持 v2；运行验收版本为 `runtime-v2`；字段语义 registry 为 v2。schema v6 终态历史继续只读导出。
-- 数据库 v27 只关闭未结束的 PluginDeveloper v12 run，并拒绝其未决许可/请求，避免用冻结的旧 ToolPack 恢复到按 action 区分的新 schema；终态历史、工作区草稿、编辑器代码、已安装插件和其他 Agent 会话不受影响。
+- product state、ToolPack、instruction set、latest dry-run、browser artifact、运行验收和字段语义 registry 均为 v1；工作日志从已发布的 schema v1 升级为 schema v2。
+- 数据库从已发布的 schema v13 升级到 v14，一次性加入 Agent 平台表；不存在未发布中间版本的 run 关闭或兼容迁移。
 - 主模型 reasoning 与回答继续流式展示并各持久化一次；正常路径不调用 verifier 模型。
 - 终态历史不会自动覆盖当前编辑器。离开开发页时关闭 helper，并清掉当前流程无法再恢复的会话（已安装、失败、取消）；`running` / `waiting_user` 保留以便回来继续。「清除会话」仍可在页内清掉包括可恢复会话在内的全部历史，并同时清空左侧未安装草稿；已经安装的插件不受影响。
 

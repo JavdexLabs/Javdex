@@ -18,7 +18,7 @@ const DEFINITIONS: readonly AgentDefinition[] = [
     id: 'plugin-developer',
     useCase: 'plugin-developer',
     systemPrompt: PLUGIN_DEVELOPER_SYSTEM_PROMPT,
-    toolPackRefs: ['toolpack:plugin-developer:v13'],
+    toolPackRefs: ['toolpack:plugin-developer:v1'],
     capabilityGrants: ['plugin.test', 'plugin.write', 'browser.read', 'browser.interact'],
     approvalRequiredEffects: ['credential-sensitive']
   },

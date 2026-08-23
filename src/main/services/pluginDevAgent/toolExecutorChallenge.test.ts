@@ -24,17 +24,12 @@ import {
 } from './toolExecutor'
 
 describe('plugin developer Cloudflare handoff', () => {
-  it('retains the browser only for current and legacy browser handoff requests', () => {
+  it('retains the browser only for browser interaction handoff requests', () => {
     assert.equal(requiresPluginDeveloperBrowserLease({
       requestId: 'new',
       type: 'browser_interaction',
       reason: 'login',
       prompt: 'login'
-    }), true)
-    assert.equal(requiresPluginDeveloperBrowserLease({
-      requestId: 'legacy',
-      type: 'browser_challenge',
-      prompt: 'challenge'
     }), true)
     assert.equal(requiresPluginDeveloperBrowserLease({
       requestId: 'question',

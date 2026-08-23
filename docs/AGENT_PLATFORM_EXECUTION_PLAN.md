@@ -1,7 +1,7 @@
 # Javdex Agent 控制面与 Pi 数据面接入执行计划
 
 > 模型连接、模型目录和用途运行参数的用户配置已由
-> [ADR-0022：模型管理 v3](adr/0022-model-management-v3.md) 取代。本文件中的
+> [ADR-0022：模型管理 v2](adr/0022-model-management-v2.md) 取代。本文件中的
 > Connection / Model / Preset / Route / Profile 配置章节仅保留为历史设计记录，不再描述当前设置界面或运行时配置源。
 
 - 状态：Approved

@@ -104,7 +104,7 @@ export async function releasePluginDeveloperBrowser(sessionId: string): Promise<
 export function requiresPluginDeveloperBrowserLease(
   request: PluginDevPendingUserRequest | undefined
 ): boolean {
-  return request?.type === 'browser_interaction' || request?.type === 'browser_challenge'
+  return request?.type === 'browser_interaction'
 }
 
 function browserInteractionPrompt(reason: PluginDevBrowserInteractionReason): string {
@@ -573,7 +573,7 @@ export async function executeTool(
           execution: session.lastExecution
         })
         pluginWorkspace.recordLatestDryRun(session.workspaceDirectory, {
-          schemaVersion: 2,
+          schemaVersion: 1,
           status: 'completed',
           artifactHash: execution.artifactHash,
           reportPath: execution.reportPath,

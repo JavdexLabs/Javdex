@@ -129,7 +129,7 @@ describe('settingsStore plugin developer model-turn budget', () => {
     assert.equal(getSettings().pluginDevAgentMaxTurns, 36)
   })
 
-  it('stops rewriting legacy model fields after schema v3 exists', () => {
+  it('stops rewriting legacy model fields after schema v2 exists', () => {
     writeSettings({
       defaultLlmProviderId: 'openai',
       defaultLlmModelId: 'gpt-5.5',
@@ -137,7 +137,7 @@ describe('settingsStore plugin developer model-turn budget', () => {
     })
     fs.writeFileSync(
       path.join(tempRoot!, 'ai-configuration.json'),
-      JSON.stringify({ schemaVersion: 3 }),
+      JSON.stringify({ schemaVersion: 2 }),
       'utf8'
     )
 
@@ -156,7 +156,7 @@ describe('settingsStore plugin developer model-turn budget', () => {
     assert.equal('llmCustomModels' in persisted, false)
   })
 
-  it('does not resurrect legacy model fields when the v3 document is unreadable', () => {
+  it('does not resurrect legacy model fields when the v2 document is unreadable', () => {
     fs.writeFileSync(path.join(tempRoot!, 'settings.json'), JSON.stringify({
       defaultLlmProviderId: 'openai',
       defaultLlmModelId: 'gpt-5.5',

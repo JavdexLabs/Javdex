@@ -693,7 +693,7 @@ function readBrowserArtifactIndex(
   }
   if (!fs.existsSync(artifactPath)) throw new Error('BROWSER_ARTIFACT_NOT_FOUND')
   const value = JSON.parse(fs.readFileSync(artifactPath, 'utf8')) as unknown
-  if (!isRecord(value) || value.schemaVersion !== 2 || !isRecord(value.observation)) {
+  if (!isRecord(value) || value.schemaVersion !== 1 || !isRecord(value.observation)) {
     throw new Error('BROWSER_ARTIFACT_INVALID')
   }
   return value
@@ -999,7 +999,7 @@ export class PluginBrowserCapabilityModule {
         (!pageObservation || hasPageFacts)
     }
     const artifact = {
-      schemaVersion: 2,
+      schemaVersion: 1,
       action: input.action,
       args: safeArgs(input.action, input.args),
       ok: result.ok,

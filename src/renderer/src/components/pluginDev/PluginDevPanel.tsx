@@ -207,7 +207,6 @@ export default function PluginDevPanel({
   const [execution, setExecution] = useState<PluginExecutionArtifact | null>(null)
   const [acceptance, setAcceptance] = useState<PluginRunAcceptanceOutcome | null>(null)
   const [executionPackageFingerprint, setExecutionPackageFingerprint] = useState<string | null>(null)
-  const [historicalReadOnly, setHistoricalReadOnly] = useState(false)
   const [hasAgentHistory, setHasAgentHistory] = useState(false)
   const [agentSessionId, setAgentSessionId] = useState<string | null>(null)
   const [agentStatus, setAgentStatus] = useState<PluginDevSessionStatus | null>(null)
@@ -270,7 +269,7 @@ export default function PluginDevPanel({
     if (testTargets.length > 0) return testTargets
     return testTargetsFromDryRun(kind, dryRun)
   }, [kind, testTargets, dryRun])
-  const canResumeAgent = !historicalReadOnly && canResumeAgentSession(agentSessionId, agentStatus)
+  const canResumeAgent = canResumeAgentSession(agentSessionId, agentStatus)
   const hasPackage = (siteName.trim().length > 0 || siteUrl.trim().length > 0) && code.trim().length > 0
   const pluginModelAssignment = modelManagement?.assignments.find(
     (assignment) => assignment.workloadId === 'plugin-developer'
@@ -390,7 +389,6 @@ export default function PluginDevPanel({
     setExecution(result.execution ?? null)
     setAcceptance(result.acceptance ?? null)
     setExecutionPackageFingerprint(result.execution ? fingerprintPluginRuntime(result.package) : null)
-    setHistoricalReadOnly(result.historicalReadOnly === true)
     setConversationItems(conversationFromWorkLog(snapshot.workLog))
     updatePendingApproval(snapshot.pendingApprovals?.[0] ?? null)
     updatePendingUserRequest(snapshot.pendingUserRequest ?? null)
@@ -637,7 +635,6 @@ export default function PluginDevPanel({
     setExecution(null)
     setAcceptance(null)
     setExecutionPackageFingerprint(null)
-    setHistoricalReadOnly(false)
     setConversationItems([])
     setAgentTab('conversation')
   }, [updateAgentSessionId, updateAgentStatus, updatePendingApproval, updatePendingUserRequest])
@@ -1056,14 +1053,10 @@ export default function PluginDevPanel({
 
   const continueAfterBrowserInteraction = async (): Promise<void> => {
     const request = pendingUserRequestRef.current
-    if (request?.type !== 'browser_interaction' && request?.type !== 'browser_challenge') return
-    await continueAgent('已完成浏览器中的必要操作', undefined, request.type === 'browser_interaction' ? {
+    if (request?.type !== 'browser_interaction') return
+    await continueAgent('已完成浏览器中的必要操作', undefined, {
       requestId: request.requestId,
       type: 'browser_interaction',
-      action: 'completed'
-    } : {
-      requestId: request.requestId,
-      type: 'browser_challenge',
       action: 'completed'
     })
   }

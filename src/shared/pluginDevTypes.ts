@@ -120,13 +120,6 @@ export type PluginDevPendingUserRequest =
       prompt: string
       url?: string
     }
-  /** Legacy read compatibility for PluginDeveloper runs created before ToolPack v11. */
-  | {
-      requestId: string
-      type: 'browser_challenge'
-      prompt: string
-      url?: string
-    }
   | {
       requestId: string
       type: 'freeform'
@@ -142,7 +135,6 @@ export type PluginDevPendingUserRequest =
 
 export type PluginDevUserResponse =
   | { requestId: string; type: 'browser_interaction'; action: 'completed' }
-  | { requestId: string; type: 'browser_challenge'; action: 'completed' }
   | { requestId: string; type: 'freeform'; text: string }
   | { requestId: string; type: 'choice'; optionId: string }
 
@@ -272,7 +264,7 @@ export type PluginDevAgentWorkLogEntry =
     }
 
 export interface PluginDevAgentWorkLogExport {
-  schemaVersion: 7
+  schemaVersion: 2
   kind: 'pluginDevAgentWorkLog'
   exportedAt: string
   sessionId: string
@@ -310,8 +302,6 @@ export interface PluginDevAgentSessionResult {
   runTargets: PluginDevRunTarget[]
   execution?: PluginExecutionArtifact
   acceptance?: PluginRunAcceptanceOutcome
-  /** Schema-v5/v6 history may be inspected but cannot resume or satisfy runtime-v2 installation. */
-  historicalReadOnly?: boolean
   summary: string
 }
 
@@ -414,8 +404,6 @@ export interface PluginExecutionCase {
   manifestCoverage: PluginManifestCoverage
   /** Raw plugin result keys that are not part of the current kind contract. */
   unrecognizedResultKeys?: string[]
-  /** Read-only compatibility label produced when rendering schema-v5 history. */
-  legacyProjectionKeys?: string[]
   logs: string[]
   error?: string
   runtimeAccepted: boolean
@@ -445,7 +433,7 @@ export interface PluginRunAcceptanceOutcome {
 
 export interface PluginDevDryRunInput {
   package: ScraperPluginPackage
-  /** Preferred typed runtime input for PluginDeveloper v13. */
+  /** Preferred typed runtime input for PluginDeveloper v1. */
   runTarget?: PluginDevRunTarget
   /** Primary target for this dry-run invocation. */
   testTarget?: string

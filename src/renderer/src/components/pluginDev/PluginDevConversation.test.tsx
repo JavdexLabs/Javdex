@@ -428,7 +428,8 @@ describe('PluginDevConversation history controls', () => {
           {...base}
           pendingUserRequest={{
             requestId: 'challenge-1',
-            type: 'browser_challenge',
+            type: 'browser_interaction',
+            reason: 'human_verification',
             prompt: '完成浏览器验证',
             url: 'https://missav.example'
           }}

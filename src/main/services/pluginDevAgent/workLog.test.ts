@@ -90,7 +90,7 @@ describe('pluginDevAgent workLog', () => {
       writePluginDevAgentWorkLog(session.id, outFile)
       const raw = fs.readFileSync(outFile, 'utf-8')
       const parsed = JSON.parse(raw) as { schemaVersion: number }
-      assert.equal(parsed.schemaVersion, 7)
+      assert.equal(parsed.schemaVersion, 2)
       assert.equal(raw.includes('\\ud83d'), false)
     } finally {
       fs.rmSync(outDir, { recursive: true, force: true })

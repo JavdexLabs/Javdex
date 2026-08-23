@@ -139,8 +139,8 @@ function writeSettingsFile(settings: AppSettings): void {
 function shouldPersistLegacyLlmMigrationInputs(): boolean {
   const configFile = path.join(path.dirname(settingsFilePath()), 'ai-configuration.json')
   try {
-    const value = JSON.parse(fs.readFileSync(configFile, 'utf8')) as { schemaVersion?: unknown }
-    return value.schemaVersion === 2
+    fs.readFileSync(configFile, 'utf8')
+    return false
   } catch (error) {
     // A missing file still needs the migration inputs. Any existing unreadable/unknown document is
     // fail-closed and must not cause retired model settings to be written again.

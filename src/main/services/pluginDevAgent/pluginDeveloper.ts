@@ -14,8 +14,7 @@ import type {
   PluginDevAgentWorkLogEntry,
   PluginDevPendingApproval,
   PluginDevRunTarget,
-  PluginDevUserResponse,
-  PluginExecutionArtifact
+  PluginDevUserResponse
 } from '@shared/pluginDevTypes'
 import { agentConfiguration } from '../../agent-platform/agentConfiguration'
 import { agentExecution } from '../../agent-platform/agentExecution'
@@ -61,8 +60,10 @@ import {
   releasePluginDeveloperBrowser
 } from './toolExecutor'
 
+const PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION = 1 as const
+
 interface PluginDeveloperProductState extends Record<string, unknown> {
-  schemaVersion: 7
+  schemaVersion: typeof PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION
   input: PluginDevAgentStartInput
   status: PluginDevSession['status']
   phase: PluginDevSession['phase']
@@ -86,11 +87,6 @@ interface PluginDeveloperProductState extends Record<string, unknown> {
   recoveryBlocked?: boolean
 }
 
-interface LegacyPluginDeveloperProductState extends Record<string, unknown> {
-  schemaVersion: 5 | 6
-  lastExecution?: Record<string, unknown>
-}
-
 function persistCurrentAcceptance(
   session: PluginDevSession,
   projection: PluginRunAcceptanceProjection
@@ -109,49 +105,6 @@ function invalidateRecoverableExecution(
 ): void {
   invalidateExecution(session)
   persistCurrentAcceptance(session, projection)
-}
-
-function legacyExecutionForDisplay(value: unknown): PluginExecutionArtifact | undefined {
-  if (!value || typeof value !== 'object') return undefined
-  const execution = value as Record<string, unknown>
-  if (!Array.isArray(execution.targets) || !Array.isArray(execution.cases)) return undefined
-  const scope = execution.scope === 'targeted' ? 'targeted' : execution.scope === 'all' ? 'all' : undefined
-  if (!scope) return undefined
-  const cases = execution.cases.flatMap((rawCase) => {
-    if (!rawCase || typeof rawCase !== 'object') return []
-    const item = rawCase as Record<string, unknown>
-    if (!item.target || typeof item.target !== 'object') return []
-    const legacyProjectionKeys = Array.isArray(item.droppedResultKeys)
-      ? item.droppedResultKeys.filter((key): key is string => typeof key === 'string')
-      : []
-    return [{
-      target: structuredClone(item.target) as PluginDevRunTarget,
-      pluginResult: (item.pluginResult ?? null) as PluginExecutionArtifact['cases'][number]['pluginResult'],
-      effectiveResult: (item.effectiveResult ?? null) as PluginExecutionArtifact['cases'][number]['effectiveResult'],
-      manifestCoverage: {
-        returnedFieldIds: [],
-        undeclaredReturnedFieldIds: [],
-        runtimeOnlyKeys: []
-      },
-      ...(legacyProjectionKeys.length > 0 ? { legacyProjectionKeys } : {}),
-      logs: Array.isArray(item.logs)
-        ? item.logs.filter((log): log is string => typeof log === 'string')
-        : [],
-      ...(typeof item.error === 'string' ? { error: item.error } : {}),
-      runtimeAccepted: item.runtimeAccepted === true
-    }]
-  })
-  return {
-    runtimeVersion: typeof execution.runtimeVersion === 'string' ? execution.runtimeVersion : 'runtime-v1',
-    artifactHash: typeof execution.artifactHash === 'string' ? execution.artifactHash : '',
-    targetFingerprint: typeof execution.targetFingerprint === 'string' ? execution.targetFingerprint : '',
-    scope,
-    targets: structuredClone(execution.targets) as PluginDevRunTarget[],
-    cases,
-    executionPassed: execution.executionPassed === true,
-    reportPath: typeof execution.reportPath === 'string' ? execution.reportPath : '',
-    cached: execution.cached === true
-  }
 }
 
 interface ActivePluginRun {
@@ -226,7 +179,7 @@ function toProductState(
   summary: string
 ): PluginDeveloperProductState {
   return {
-    schemaVersion: 7,
+    schemaVersion: PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION,
     input: structuredClone(input),
     status: session.status,
     phase: session.phase,
@@ -902,7 +855,7 @@ export class PluginDeveloper {
     runId: AgentRunId,
     state: PluginDeveloperProductState
   ): PluginDevSession {
-    if (state.schemaVersion !== 7 || !state.input || !state.package) {
+    if (state.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION || !state.input || !state.package) {
       throw new Error('PluginDeveloper 产品快照版本不兼容')
     }
     const session = createSession(state.input, runId)
@@ -1088,7 +1041,7 @@ export class PluginDeveloper {
       throw new Error('会话不存在')
     }
     const state = record.productState
-    if (state.schemaVersion !== 7 || state.recoveryBlocked) {
+    if (state.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION || state.recoveryBlocked) {
       throw new Error(state.recoveryBlocked ? '会话恢复已被阻止' : '会话快照版本不兼容')
     }
     const session = this.restoreSession(runId, state)
@@ -1149,36 +1102,26 @@ export class PluginDeveloper {
     if (!runId) return null
     const active = this.active.get(runId)
     if (!active) {
-      const record = agentRunStore.getRun<PluginDeveloperProductState | LegacyPluginDeveloperProductState>(runId)
+      const record = agentRunStore.getRun<PluginDeveloperProductState>(runId)
       const state = record?.productState
-      if (!record || record.useCase !== 'plugin-developer' ||
-          (state?.schemaVersion !== 5 && state?.schemaVersion !== 6 && state?.schemaVersion !== 7)) return null
-      const legacyV5 = state.schemaVersion === 5
-      const historicalReadOnly = state.schemaVersion !== 7
-      const readable = state as unknown as PluginDeveloperProductState
-      const execution = legacyV5
-        ? legacyExecutionForDisplay(state.lastExecution)
-        : readable.lastExecution ? structuredClone(readable.lastExecution) : undefined
-      const workLog = structuredClone(readable.workLog ?? [])
+      if (!record || record.useCase !== 'plugin-developer' || state?.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION) return null
+      const workLog = structuredClone(state.workLog ?? [])
       return {
         cursor: agentRunStore.readProductJournal(runId).at(-1)?.seq ?? 0,
-        input: structuredClone(readable.input),
+        input: structuredClone(state.input),
         result: {
           sessionId: runId,
-          status: readable.status,
+          status: state.status,
           frozenModel: frozenModelSummary(record.configSnapshot.revision, record.configSnapshot.model.descriptor),
-          package: structuredClone(readable.package),
-          runTargets: structuredClone(readable.runTargets),
-          execution,
-          acceptance: historicalReadOnly || !readable.acceptance
-            ? undefined
-            : structuredClone(readable.acceptance),
-          historicalReadOnly,
-          summary: readable.summary || 'Agent 已结束'
+          package: structuredClone(state.package),
+          runTargets: structuredClone(state.runTargets),
+          execution: state.lastExecution ? structuredClone(state.lastExecution) : undefined,
+          acceptance: state.acceptance ? structuredClone(state.acceptance) : undefined,
+          summary: state.summary || 'Agent 已结束'
         },
-        phase: readable.phase,
-        step: readable.step,
-        totalTokens: readable.totalTokens,
+        phase: state.phase,
+        step: state.step,
+        totalTokens: state.totalTokens,
         events: workLog
           .filter((entry): entry is Extract<PluginDevAgentWorkLogEntry, { kind: 'event' }> =>
             entry.kind === 'event'
@@ -1186,8 +1129,8 @@ export class PluginDeveloper {
           .map((entry) => structuredClone(entry.event)),
         workLog,
         pendingApprovals: this.pendingApprovalViews(runId, workLog),
-        pendingUserRequest: readable.pendingUserRequest
-          ? structuredClone(readable.pendingUserRequest)
+        pendingUserRequest: state.pendingUserRequest
+          ? structuredClone(state.pendingUserRequest)
           : undefined
       }
     }
@@ -1214,7 +1157,7 @@ export class PluginDeveloper {
   assertReadyArtifact(sessionId: string, packageInput: PluginDevSession['package']): void {
     const active = this.active.get(sessionId)
     const record = active ? undefined : agentRunStore.getRun<PluginDeveloperProductState>(sessionId)
-    if (!active && record?.productState.schemaVersion !== 7) {
+    if (!active && record?.productState.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION) {
       throw new Error('历史插件开发会话只读，不能用于当前安装门禁。')
     }
     const workspaceDraftError = active?.session.workspaceDraftError ?? record?.productState.workspaceDraftError
@@ -1256,7 +1199,7 @@ export class PluginDeveloper {
     }
 
     const record = agentRunStore.getRun<PluginDeveloperProductState>(sessionId)
-    if (!record || record.useCase !== 'plugin-developer' || record.productState.schemaVersion !== 7) {
+    if (!record || record.useCase !== 'plugin-developer' || record.productState.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION) {
       throw new Error('插件开发会话不存在或版本不兼容')
     }
     const gate = pluginRunAcceptance.evaluate({
@@ -1331,17 +1274,6 @@ export class PluginDeveloper {
     if (!pending) throw new Error('当前没有待处理的用户请求')
     if (pending.requestId !== response.requestId || pending.type !== response.type) {
       throw new Error('用户响应已过期、类型不匹配或属于其他会话')
-    }
-    if (pending.type === 'browser_challenge' && response.type === 'browser_challenge') {
-      session.pendingUserRequest = undefined
-      return {
-        prompt: buildContinuation({
-          kind: 'browser_interaction_resolved',
-          reason: 'human_verification'
-        }),
-        transcriptText: '用户已确认浏览器挑战处理完成。',
-        updatesInstruction: false
-      }
     }
     if (pending.type === 'browser_interaction' && response.type === 'browser_interaction') {
       session.pendingUserRequest = undefined

@@ -10,7 +10,7 @@ import {
   type VideoScrapeField
 } from './videoScrapeTypes'
 
-export const PLUGIN_FIELD_SEMANTICS_VERSION = 2
+export const PLUGIN_FIELD_SEMANTICS_VERSION = 1
 
 export type PluginSemanticField = VideoScrapeField | ActressScrapeField
 export type PluginFieldValueType =

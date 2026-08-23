@@ -258,7 +258,7 @@ export default function PluginDevConversation({
       ? '请先批准或拒绝上方待处理操作…'
       : pendingUserRequest?.type === 'choice'
           ? '请先选择上方选项…'
-        : pendingUserRequest?.type === 'browser_challenge' || pendingUserRequest?.type === 'browser_interaction'
+        : pendingUserRequest?.type === 'browser_interaction'
           ? '请先在浏览器中完成必要操作…'
           : pendingUserRequest?.type === 'freeform'
             ? '请输入对上方问题的回复…'
@@ -299,11 +299,11 @@ export default function PluginDevConversation({
         批准本次
       </Button>
     </div>
-  ) : pendingUserRequest?.type === 'browser_challenge' || pendingUserRequest?.type === 'browser_interaction' ? (
+  ) : pendingUserRequest?.type === 'browser_interaction' ? (
     <div className={styles.userPrompt} role="status" aria-live="polite">
       <div className={styles.userPromptCopy}>
         <span className={styles.userPromptKicker}>
-          {pendingUserRequest.type === 'browser_challenge' || pendingUserRequest.reason === 'human_verification'
+          {pendingUserRequest.reason === 'human_verification'
             ? '浏览器验证'
             : pendingUserRequest.reason === 'login'
               ? '需要登录'

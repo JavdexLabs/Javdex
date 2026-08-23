@@ -130,12 +130,6 @@ function ExecutionCaseView({ kind, item }: {
           <span>{runtimeOnly.map((entry) => entry.key).join('、')}</span>
         </div>
       ) : null}
-      {item.legacyProjectionKeys?.length ? (
-        <div className={`${styles.banner} ${styles.info}`}>
-          <span>旧版投影记录</span>
-          <span>{item.legacyProjectionKeys.join('、')}（仅供历史查看）</span>
-        </div>
-      ) : null}
     </details>
   )
 }

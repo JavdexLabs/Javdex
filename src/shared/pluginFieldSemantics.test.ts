@@ -11,7 +11,7 @@ import { buildPluginFieldSemanticsPrompt } from './scrapeFieldPromptDocs'
 
 describe('plugin field semantics registry', () => {
   it('covers every video and actress field with valid symmetric conflicts', () => {
-    assert.equal(PLUGIN_FIELD_SEMANTICS_VERSION, 2)
+    assert.equal(PLUGIN_FIELD_SEMANTICS_VERSION, 1)
     assert.doesNotThrow(() => assertCompleteFieldSemantics())
     assert.equal(new Set(VIDEO_FIELD_SEMANTICS.map((item) => item.id)).size, VIDEO_FIELD_SEMANTICS.length)
     assert.equal(new Set(ACTRESS_FIELD_SEMANTICS.map((item) => item.id)).size, ACTRESS_FIELD_SEMANTICS.length)

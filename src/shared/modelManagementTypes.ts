@@ -7,6 +7,7 @@ import type { LlmApiKeyAction, LlmProviderProtocol } from './llmProviders'
 
 export type ModelWorkloadId = 'app-default' | 'plugin-developer' | 'library-curator'
 export type ModelCandidateKind = 'chat' | 'embedding'
+export const MODEL_MANAGEMENT_SCHEMA_VERSION = 2 as const
 
 export interface ManagedModelConnection {
   id: string
@@ -87,7 +88,7 @@ export interface ModelWorkloadAssignment {
 }
 
 export interface ModelManagementDocument {
-  schemaVersion: 3
+  schemaVersion: typeof MODEL_MANAGEMENT_SCHEMA_VERSION
   revision: string
   updatedAt: string
   connections: ManagedModelConnection[]
@@ -122,7 +123,7 @@ export interface ModelWorkloadAssignmentView extends ModelWorkloadAssignment {
 }
 
 export interface ModelManagementSnapshot {
-  schemaVersion: 3
+  schemaVersion: typeof MODEL_MANAGEMENT_SCHEMA_VERSION
   revision: string
   updatedAt: string
   connections: ManagedModelConnectionView[]

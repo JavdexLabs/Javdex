@@ -20,7 +20,7 @@ const LEGACY_EMPTY_OR_INVALID_ERROR = '插件返回为空或结果格式无效'
 import { pluginArtifactHash } from './pluginArtifact'
 import { pluginResultContract } from '@shared/pluginResultContract'
 
-export const PLUGIN_RUNTIME_VERSION = 'runtime-v2'
+export const PLUGIN_RUNTIME_VERSION = 'runtime-v1'
 
 interface PluginRuntimePort {
   run(input: PluginDevDryRunInput, signal: AbortSignal): Promise<PluginDevDryRunResult>

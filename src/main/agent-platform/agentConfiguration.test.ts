@@ -5,8 +5,8 @@ import { AgentConfiguration } from './agentConfiguration'
 
 function snapshot(): ModelManagementSnapshot {
   return {
-    schemaVersion: 3,
-    revision: 'model-management:r4',
+    schemaVersion: 2,
+    revision: 'model-management:r1',
     updatedAt: '2026-08-22T00:00:00.000Z',
     connections: [],
     models: [],
@@ -62,9 +62,9 @@ describe('AgentConfiguration', () => {
       'profile:plugin-developer:default'
     )
 
-    assert.equal(revision, 'model-management:r4')
+    assert.equal(revision, 'model-management:r1')
     assert.equal(definition.id, 'plugin-developer')
-    assert.deepEqual(profile.toolPackRefs, ['toolpack:plugin-developer:v13'])
+    assert.deepEqual(profile.toolPackRefs, ['toolpack:plugin-developer:v1'])
     assert.deepEqual(profile.capabilityGrants, [
       'plugin.test',
       'plugin.write',

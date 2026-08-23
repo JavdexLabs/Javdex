@@ -25,7 +25,7 @@
 
 ### 2. 只加载受控资源
 
-工作区的 Skills、任务和规范由 Javdex 生成并按 SHA-256 冻结。Pi 不发现用户全局资源、仓库父目录资源或未审核 package。首期不启用 `bash`；原生写工具只能修改两个草稿文件与 `.javdex/dev-notes.md`，并拒绝 realpath/symlink 逃逸。`.javdex/latest-dry-run.json` 由宿主创建为 schema v2 的 `not_run`，真实执行后原子保存 `completed` 事实；独立的 `currentAcceptance` 投影在包、目标、runtime 或工作区有效性变化时同步更新。Pi 只读，正常 dry-run 后直接使用工具结果，只在恢复时读取该文件；两种开发记忆文件都不进入插件包或 artifact hash。
+工作区的 Skills、任务和规范由 Javdex 生成并按 SHA-256 冻结。Pi 不发现用户全局资源、仓库父目录资源或未审核 package。首期不启用 `bash`；原生写工具只能修改两个草稿文件与 `.javdex/dev-notes.md`，并拒绝 realpath/symlink 逃逸。`.javdex/latest-dry-run.json` 由宿主创建为 schema v1 的 `not_run`，真实执行后原子保存 `completed` 事实；独立的 `currentAcceptance` 投影在包、目标、runtime 或工作区有效性变化时同步更新。Pi 只读，正常 dry-run 后直接使用工具结果，只在恢复时读取该文件；两种开发记忆文件都不进入插件包或 artifact hash。
 
 ### 3. 浏览器是环境，不是裁判
 
@@ -56,7 +56,7 @@ URL、路径和控制字符在工具边界被拒绝。这是输入类型保护�
 
 ### 6. 最终门禁只证明能运行
 
-删除 `PluginCheckModule`、`PluginArtifactGate` 和隐藏机械修复 continuation。唯一最终门禁 `PluginRunAcceptanceModule` 只接受与当前包、全部目标和 `runtime-v2` 精确匹配的完整生产执行，并要求每个目标都有至少一个含实际值的可声明生产字段。
+删除 `PluginCheckModule`、`PluginArtifactGate` 和隐藏机械修复 continuation。唯一最终门禁 `PluginRunAcceptanceModule` 只接受与当前包、全部目标和 `runtime-v1` 精确匹配的完整生产执行，并要求每个目标都有至少一个含实际值的可声明生产字段。
 
 它不判断内容值、页面匹配、字段来源、未实现字段或 `supportedFields` 完整性。Pi 必须显式执行最后一次完整 dry-run；自然停止不会触发隐藏运行。`agent.settled` 只结束当前模型 operation：机械 artifact 缺失或过期时进入 `waiting_user/working`，通过时进入 `waiting_user/ready`。两种状态都可继续 Agent，只有 ready 状态可安装；安装写盘成功后才把会话投影为 `completed`，并采用实际安装的包（含展示字段改名）作为会话与工作区草稿。
 
@@ -68,11 +68,9 @@ URL、路径和控制字符在工具边界被拒绝。这是输入类型保护�
 
 ### 8. 状态与升级
 
-- task schema v3 / instruction set v31；
-- ToolPack `toolpack:plugin-developer:v13`；
-- product state 与工作日志新写 schema v7，schema v6 终态历史只读导出；
-- runtime acceptance `runtime-v2`；
-- 数据库 v22 关闭未结束的 PluginDeveloper v8 run，并拒绝其未决请求/许可；v23 删除已失去运行时消费者的旧站点字段映射表；v24 关闭未结束的 v9 run；v25 关闭未结束的 v10 run；v26 关闭未结束的 v11 run；v27 关闭未结束的 v12 run，并拒绝其未决请求/许可。
+- task、instruction set、ToolPack、product state、latest dry-run、browser artifact、runtime acceptance 和字段语义 registry 均为 v1；
+- 工作日志从已发布的 schema v1 升级为 schema v2；
+- 数据库从已发布的 schema v13 升级为 v14，一次性加入 Agent 平台表，不保留未发布中间版本的兼容迁移。
 
 工作区草稿、当前编辑器代码、已安装插件和其他 Agent 会话不受影响。
 

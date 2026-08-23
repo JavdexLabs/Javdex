@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 import { readTestUserDataPath } from '@shared/appIdentity'
-import type { AIConfigurationDocument, ModelCacheCompatibility } from '@shared/aiConfigurationTypes'
+import type { ModelCacheCompatibility } from '@shared/aiConfigurationTypes'
 import {
   BUILT_IN_LLM_PROVIDER_BY_ID,
   buildLlmProviderViewModels,
@@ -14,24 +14,25 @@ import {
   normalizeDefaultLlmSelection
 } from '@shared/llmProviders'
 import type { AppSettings } from '@shared/settingsTypes'
-import type {
-  ManagedModel,
-  ManagedModelConnection,
-  ManagedModelConnectionView,
-  ManagedModelView,
-  ManualModelOverrides,
-  ModelCandidate,
-  ModelManagementApplyInput,
-  ModelManagementCommand,
-  ModelManagementDocument,
-  ModelManagementErrorCode,
-  ModelManagementSnapshot,
-  ModelRuntimeMetadata,
-  ModelTestResult,
-  ModelWorkloadAssignment,
-  ModelWorkloadAssignmentView,
-  ModelWorkloadId,
-  SaveModelConnectionInput
+import {
+  MODEL_MANAGEMENT_SCHEMA_VERSION,
+  type ManagedModel,
+  type ManagedModelConnection,
+  type ManagedModelConnectionView,
+  type ManagedModelView,
+  type ManualModelOverrides,
+  type ModelCandidate,
+  type ModelManagementApplyInput,
+  type ModelManagementCommand,
+  type ModelManagementDocument,
+  type ModelManagementErrorCode,
+  type ModelManagementSnapshot,
+  type ModelRuntimeMetadata,
+  type ModelTestResult,
+  type ModelWorkloadAssignment,
+  type ModelWorkloadAssignmentView,
+  type ModelWorkloadId,
+  type SaveModelConnectionInput
 } from '@shared/modelManagementTypes'
 import { getPublicLlmProviderConfigs, getSettings } from '../settings/settingsStore'
 import {
@@ -52,8 +53,7 @@ import { llmFetch } from '../utils/llmFetch'
 import type { CredentialLease, ResolvedModelAccess } from './types'
 
 const CONFIG_FILE = 'ai-configuration.json'
-const CONFIG_BACKUP_FILE = 'ai-configuration.v2.backup.json'
-const SETTINGS_BACKUP_FILE = 'settings.llm-v2.backup.json'
+const SETTINGS_BACKUP_FILE = 'settings.llm-v1.backup.json'
 const MODEL_CONTEXT_DEFAULT = 128_000
 const MODEL_OUTPUT_DEFAULT = 16_384
 const LEASE_TTL_MS = 5 * 60 * 1000
@@ -149,7 +149,7 @@ const assignmentSchema = z.object({
   }).strict()
 }).strict()
 const modelManagementDocumentSchema = z.object({
-  schemaVersion: z.literal(3),
+  schemaVersion: z.literal(MODEL_MANAGEMENT_SCHEMA_VERSION),
   revision: nonEmptyString,
   updatedAt: nonEmptyString,
   connections: z.array(connectionSchema),
@@ -160,7 +160,7 @@ const modelManagementDocumentSchema = z.object({
 export interface ModelConfigurationStore {
   read(): unknown | null
   write(document: ModelManagementDocument): void
-  backupLegacy(document: unknown | null, settings: AppSettings): void
+  backupLegacySettings(settings: AppSettings): void
 }
 
 export interface CredentialVaultPort {
@@ -295,20 +295,6 @@ export function effectiveModelMetadata(model: ManagedModel): ModelRuntimeMetadat
   }
 }
 
-function isV2Document(value: unknown): value is AIConfigurationDocument {
-  if (!value || typeof value !== 'object') return false
-  const input = value as Partial<AIConfigurationDocument>
-  return input.schemaVersion === 2 && typeof input.revision === 'string' &&
-    Array.isArray(input.modelConnections) && Array.isArray(input.modelRecords) &&
-    Array.isArray(input.modelPresets) && Array.isArray(input.routes) &&
-    Array.isArray(input.agentProfiles)
-}
-
-function isSchemaVersion(value: unknown, version: number): boolean {
-  return Boolean(value && typeof value === 'object' &&
-    (value as { schemaVersion?: unknown }).schemaVersion === version)
-}
-
 function formatSchemaIssues(error: z.ZodError): string[] {
   return error.issues.map((issue) => {
     const location = issue.path.length > 0 ? issue.path.join('.') : 'document'
@@ -328,31 +314,15 @@ function selectionForProviderModel(
   )?.id
 }
 
-function v2ProfileAssignment(
-  document: AIConfigurationDocument | undefined,
-  definitionId: string,
-  defaultRef: string,
+function workloadAssignment(
   workloadId: Exclude<ModelWorkloadId, 'app-default'>,
   settings: AppSettings
 ): ModelWorkloadAssignment {
-  const profile = document?.agentProfiles.find((item) => item.definitionId === definitionId)
-  const route = document?.routes.find((item) => item.id === profile?.routes.primary)
-  const preset = document?.modelPresets.find((item) => item.id === route?.presetId)
-  const selectedRef = route?.modelRecordId || defaultRef
   return {
     workloadId,
-    model: selectedRef === defaultRef
-      ? { mode: 'inherit-default' }
-      : { mode: 'explicit', modelRef: selectedRef },
-    runtime: preset
-      ? {
-          thinkingLevel: preset.thinkingLevel,
-          maxTokens: preset.maxTokens,
-          timeoutMs: preset.timeoutMs,
-          cacheRetention: preset.cacheRetention
-        }
-      : { ...DEFAULT_RUNTIME },
-    compaction: profile ? structuredClone(profile.compaction) : { ...DEFAULT_COMPACTION },
+    model: { mode: 'inherit-default' },
+    runtime: { ...DEFAULT_RUNTIME },
+    compaction: { ...DEFAULT_COMPACTION },
     limits: workloadId === 'plugin-developer'
       ? {
           maxTurns: settings.pluginDevAgentMaxTurns,
@@ -364,7 +334,6 @@ function v2ProfileAssignment(
 
 export function migrateModelManagementDocument(
   settings: AppSettings,
-  legacy: AIConfigurationDocument | undefined,
   revision: string,
   now: Date
 ): ModelManagementDocument {
@@ -374,76 +343,25 @@ export function migrateModelManagementDocument(
     llmProviderConfigs: getPublicSettingsWithoutSecrets(settings)
   }
   const providers = buildLlmProviderViewModels(publicSettings)
-  const providerById = new Map(providers.map((provider) => [provider.id, provider]))
-  const connections: ManagedModelConnection[] = []
-  for (const previous of legacy?.modelConnections ?? []) {
-    const provider = providerById.get(previous.providerId)
-    const builtIn = BUILT_IN_LLM_PROVIDER_BY_ID.get(previous.providerId)
-    const legacyRecords = legacy?.modelRecords.filter(
-      (model) => model.connectionId === previous.id
-    ) ?? []
-    connections.push({
-      id: previous.id,
-      providerId: previous.providerId,
-      name: previous.name,
-      source: builtIn ? 'builtin' : 'custom',
-      protocol: previous.protocol,
-      baseUrl: previous.baseUrl,
-      ...(previous.proxyUrl ? { proxyUrl: previous.proxyUrl } : {}),
-      credentialRef: `llm-provider:${previous.providerId}`,
-      local: builtIn?.local === true || provider?.local === true,
-      agentCompatible: builtIn?.agentCompatible ?? provider?.agentCompatible ??
-        legacyRecords.some((model) => model.capabilities.tools === true),
-      enabled: previous.enabled
-    })
-  }
-  for (const provider of providers) {
-    if (connections.some((connection) => connection.providerId === provider.id)) continue
-    connections.push({
-      id: connectionId(provider.id),
-      providerId: provider.id,
-      name: provider.name,
-      source: provider.source,
-      protocol: provider.protocol,
-      baseUrl: provider.baseUrl,
-      credentialRef: `llm-provider:${provider.id}`,
-      local: provider.local,
-      agentCompatible: provider.agentCompatible,
-      enabled: true
-    })
-  }
+  const connections: ManagedModelConnection[] = providers.map((provider) => ({
+    id: connectionId(provider.id),
+    providerId: provider.id,
+    name: provider.name,
+    source: provider.source,
+    protocol: provider.protocol,
+    baseUrl: provider.baseUrl,
+    credentialRef: `llm-provider:${provider.id}`,
+    local: provider.local,
+    agentCompatible: provider.agentCompatible,
+    enabled: true
+  }))
 
   const models: ManagedModel[] = []
-  for (const previous of legacy?.modelRecords ?? []) {
-    const connection = connections.find((item) => item.id === previous.connectionId)
-    if (!connection || inferLlmModelKind(previous) !== 'chat') continue
-    const builtIn = BUILT_IN_LLM_PROVIDER_BY_ID.get(connection.providerId)?.models.some(
-      (model) => model.id === previous.modelId
-    ) === true
-    models.push({
-      id: previous.id,
-      connectionId: previous.connectionId,
-      modelId: previous.modelId,
-      name: previous.name,
-      kind: 'chat',
-      builtin: builtIn,
-      baseline: {
-        api: previous.api,
-        contextWindow: previous.contextWindow,
-        maxTokens: previous.maxTokens,
-        capabilities: structuredClone(previous.capabilities),
-        cache: structuredClone(previous.cache)
-      }
-    })
-  }
   for (const provider of providers) {
     const connection = connections.find((item) => item.providerId === provider.id)
     if (!connection) continue
     for (const model of provider.models) {
       if (inferLlmModelKind(model) !== 'chat') continue
-      if (models.some(
-        (item) => item.connectionId === connection.id && item.modelId === model.id
-      )) continue
       models.push({
         id: modelRef(provider.id, model.id),
         connectionId: connection.id,
@@ -478,11 +396,11 @@ export function migrateModelManagementDocument(
       compaction: { ...DEFAULT_COMPACTION, enabled: false },
       limits: { maxTurns: 0, maxContextTokens: MODEL_CONTEXT_DEFAULT }
     },
-    v2ProfileAssignment(legacy, 'plugin-developer', defaultRef, 'plugin-developer', settings),
-    v2ProfileAssignment(legacy, 'library-curator', defaultRef, 'library-curator', settings)
+    workloadAssignment('plugin-developer', settings),
+    workloadAssignment('library-curator', settings)
   ]
   return {
-    schemaVersion: 3,
+    schemaVersion: MODEL_MANAGEMENT_SCHEMA_VERSION,
     revision,
     updatedAt: checkedAt,
     connections,
@@ -529,90 +447,6 @@ export function buildLegacyLlmSettingsBackup(settings: AppSettings): Record<stri
     llmCustomModels: structuredClone(settings.llmCustomModels),
     pluginDevAgentMaxTurns: settings.pluginDevAgentMaxTurns,
     pluginDevAgentMaxContextTokens: settings.pluginDevAgentMaxContextTokens
-  }
-}
-
-export function buildLegacyAiConfigurationBackup(
-  document: unknown
-): AIConfigurationDocument | null {
-  if (!isV2Document(document)) return null
-  return {
-    schemaVersion: 2,
-    revision: document.revision,
-    updatedAt: document.updatedAt,
-    modelConnections: document.modelConnections.map((connection) => ({
-      id: connection.id,
-      name: connection.name,
-      providerId: connection.providerId,
-      protocol: connection.protocol,
-      baseUrl: rendererSafeBaseUrl(connection.baseUrl),
-      ...(connection.proxyUrl ? { proxyUrl: rendererSafeBaseUrl(connection.proxyUrl) } : {}),
-      credentialRef: connection.credentialRef,
-      enabled: connection.enabled
-    })),
-    modelRecords: document.modelRecords.map((model) => ({
-      id: model.id,
-      connectionId: model.connectionId,
-      modelId: model.modelId,
-      name: model.name,
-      api: model.api,
-      contextWindow: model.contextWindow,
-      maxTokens: model.maxTokens,
-      capabilities: {
-        tools: model.capabilities.tools,
-        vision: model.capabilities.vision,
-        reasoning: model.capabilities.reasoning
-      },
-      cache: {
-        supportsPromptCache: model.cache.supportsPromptCache,
-        supportsLongCacheRetention: model.cache.supportsLongCacheRetention,
-        ...(model.cache.cacheControlFormat
-          ? { cacheControlFormat: model.cache.cacheControlFormat }
-          : {}),
-        ...(model.cache.sessionAffinityFormat
-          ? { sessionAffinityFormat: model.cache.sessionAffinityFormat }
-          : {}),
-        sendSessionAffinityHeaders: model.cache.sendSessionAffinityHeaders,
-        evidence: {
-          source: model.cache.evidence.source,
-          checkedAt: model.cache.evidence.checkedAt,
-          ...(model.cache.evidence.note ? { note: model.cache.evidence.note } : {})
-        }
-      }
-    })),
-    modelPresets: document.modelPresets.map((preset) => ({
-      id: preset.id,
-      name: preset.name,
-      thinkingLevel: preset.thinkingLevel,
-      maxTokens: preset.maxTokens,
-      timeoutMs: preset.timeoutMs,
-      cacheRetention: preset.cacheRetention
-    })),
-    routes: document.routes.map((route) => ({
-      id: route.id,
-      name: route.name,
-      role: route.role,
-      modelRecordId: route.modelRecordId,
-      presetId: route.presetId
-    })),
-    agentProfiles: document.agentProfiles.map((profile) => ({
-      id: profile.id,
-      name: profile.name,
-      definitionId: profile.definitionId,
-      routes: {
-        primary: profile.routes.primary,
-        verifier: profile.routes.verifier,
-        summarizer: profile.routes.summarizer
-      },
-      toolPackRefs: [...profile.toolPackRefs],
-      capabilityGrants: [...profile.capabilityGrants],
-      approvalRequiredEffects: [...profile.approvalRequiredEffects],
-      compaction: {
-        enabled: profile.compaction.enabled,
-        reserveTokens: profile.compaction.reserveTokens,
-        keepRecentTokens: profile.compaction.keepRecentTokens
-      }
-    }))
   }
 }
 
@@ -855,7 +689,7 @@ export class ModelManagementModule {
   private document(): ModelManagementDocument {
     if (this.cache) return structuredClone(this.cache)
     const raw = this.dependencies.store.read()
-    if (isSchemaVersion(raw, 3)) {
+    if (raw !== null) {
       const parsed = modelManagementDocumentSchema.safeParse(raw)
       if (!parsed.success) {
         throw new Error(`读取模型配置失败：${formatSchemaIssues(parsed.error).join('；')}`)
@@ -866,19 +700,15 @@ export class ModelManagementModule {
       this.cache = structuredClone(document)
       return structuredClone(document)
     }
-    if (raw !== null && !isV2Document(raw)) {
-      throw new Error('读取模型配置失败：配置格式或版本无效')
-    }
     const settings = this.dependencies.readLegacySettings()
     const migrated = migrateModelManagementDocument(
       settings,
-      raw ?? undefined,
       this.dependencies.nextRevision(),
       this.dependencies.now()
     )
     const errors = validateModelManagementDocument(migrated)
     if (errors.length > 0) throw new Error(`迁移模型配置失败：${errors.join('；')}`)
-    this.dependencies.store.backupLegacy(raw, settings)
+    this.dependencies.store.backupLegacySettings(settings)
     this.dependencies.store.write(migrated)
     this.cache = structuredClone(migrated)
     return structuredClone(migrated)
@@ -913,7 +743,7 @@ export class ModelManagementModule {
       resolution: this.workloadResolution(document, assignment.workloadId)
     }))
     return {
-      schemaVersion: 3,
+      schemaVersion: MODEL_MANAGEMENT_SCHEMA_VERSION,
       revision: document.revision,
       updatedAt: document.updatedAt,
       connections,
@@ -1279,11 +1109,8 @@ const productionStore: ModelConfigurationStore = {
       throw new Error(`保存模型配置失败：${(error as Error).message}`)
     }
   },
-  backupLegacy(document, settings) {
+  backupLegacySettings(settings) {
     const root = userDataPath()
-    const configBackup = path.join(root, CONFIG_BACKUP_FILE)
-    const safeDocument = buildLegacyAiConfigurationBackup(document)
-    if (safeDocument && !fs.existsSync(configBackup)) writePrivateJson(configBackup, safeDocument)
     const settingsBackup = path.join(root, SETTINGS_BACKUP_FILE)
     if (!fs.existsSync(settingsBackup)) {
       writePrivateJson(settingsBackup, buildLegacyLlmSettingsBackup(settings))

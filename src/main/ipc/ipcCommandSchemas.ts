@@ -489,11 +489,6 @@ export const appIpcSchemas = {
         }).strict(),
         z.object({
           requestId: nonEmptyText,
-          type: z.literal('browser_challenge'),
-          action: z.literal('completed')
-        }).strict(),
-        z.object({
-          requestId: nonEmptyText,
           type: z.literal('freeform'),
           text: nonEmptyText
         }).strict(),

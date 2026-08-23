@@ -133,11 +133,11 @@ describe('typed IPC adapter', () => {
       sessionId: 'run-1',
       text: '',
       userResponse: {
-        requestId: 'challenge-1',
-        type: 'browser_challenge',
+        requestId: 'unsupported-1',
+        type: 'unsupported_browser_request',
         action: 'completed'
       }
-    }]).success, true)
+    }]).success, false)
     assert.equal(schema.safeParse([{
       sessionId: 'run-1',
       text: '',

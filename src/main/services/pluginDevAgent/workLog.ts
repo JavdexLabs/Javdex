@@ -179,7 +179,7 @@ export function buildPluginDevAgentWorkLog(sessionId: string): PluginDevAgentWor
     message: session.failureMessage
   })
   return {
-    schemaVersion: 7,
+    schemaVersion: 2,
     kind: 'pluginDevAgentWorkLog',
     exportedAt: nowIso(),
     sessionId: session.id,
@@ -218,7 +218,7 @@ export function buildPluginDevAgentWorkLogFromSnapshot(
     message: snapshot.result.summary
   })
   return {
-    schemaVersion: 7,
+    schemaVersion: 2,
     kind: 'pluginDevAgentWorkLog',
     exportedAt: nowIso(),
     sessionId: snapshot.result.sessionId,

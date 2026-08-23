@@ -54,7 +54,6 @@ export {
 
 const HELPER_START_TIMEOUT_MS = 12_000
 const HELPER_CANCEL_GRACE_MS = 500
-const HELPER_IDLE_TIMEOUT_MS = 60_000
 const MAX_START_ATTEMPTS = 3
 const MAX_AGENT_HTML_LENGTH = 20_000
 const DEFAULT_AGENT_RESULT_SNAPSHOT_LENGTH = 2_600
@@ -267,6 +266,19 @@ function selectorForTarget(page: Page, target: string, snapshotFresh: boolean): 
   return page.locator(normalized)
 }
 
+function uniqueTargetRequiredError(action: string, target: string, count: number): Error {
+  return new Error(`${action} target 匹配 ${count} 个元素（${target}）`)
+}
+
+async function assertUniqueTarget(
+  action: string,
+  target: string,
+  locator: Locator
+): Promise<void> {
+  const count = await locator.count()
+  if (count !== 1) throw uniqueTargetRequiredError(action, target, count)
+}
+
 function compactFind(snapshot: string, matcher: (line: string) => boolean): Array<{
   ref?: string
   text: string
@@ -307,13 +319,10 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
   } | null = null
   private requestSequence = 0
   private generation = 0
-  private idleTimer: ReturnType<typeof setTimeout> | null = null
   private disposed = false
   private readonly leaseContext = new AsyncLocalStorage<ScrapeBrowserLease>()
   private legacyProxyUrl: string | undefined
   private legacyLease: ScrapeBrowserLease | null = null
-
-  constructor(private readonly idleTimeoutMs = HELPER_IDLE_TIMEOUT_MS) {}
 
   async acquire(input: ScrapeBrowserAcquireInput): Promise<ScrapeBrowserLease> {
     if (this.disposed) throw new Error('ScrapeBrowserHost 已关闭')
@@ -341,8 +350,6 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
       return this.acquire(input)
     }
 
-    if (this.idleTimer) clearTimeout(this.idleTimer)
-    this.idleTimer = null
     const promise = (async (): Promise<ActiveLeaseState> => {
       const helper = await this.ensureHelper(input.signal)
       await this.request('setProxy', { proxyUrl }, input.signal)
@@ -360,9 +367,17 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
     const pending = { ownerId, purpose: input.purpose, proxyUrl, promise }
     this.pendingAcquire = pending
     try {
-      return this.createLease(await promise, input.signal)
+      const lease = this.createLease(await promise, input.signal)
+      if (input.purpose === 'scrape' || input.purpose === 'plugin-check') {
+        try {
+          await lease.presentToUser()
+        } catch {
+          // Show is best-effort; the scrape lease is already live.
+        }
+      }
+      return lease
     } catch (error) {
-      if (!this.activeLease) this.startIdleTimer()
+      if (!this.activeLease) void this.stopHelper('acquire failed')
       throw error
     } finally {
       if (this.pendingAcquire === pending) this.pendingAcquire = null
@@ -374,8 +389,6 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
     this.disposed = true
     this.activeLease = null
     this.legacyLease = null
-    if (this.idleTimer) clearTimeout(this.idleTimer)
-    this.idleTimer = null
     await this.stopHelper('host disposed')
   }
 
@@ -493,18 +506,9 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         if (state.references > 0) return
         this.activeLease = null
         if (this.legacyLease?.ownerId === state.ownerId) this.legacyLease = null
-        this.startIdleTimer()
+        await this.stopHelper('lease released')
       }
     }
-  }
-
-  private startIdleTimer(): void {
-    if (this.idleTimer) clearTimeout(this.idleTimer)
-    this.idleTimer = setTimeout(() => {
-      this.idleTimer = null
-      if (!this.activeLease) void this.stopHelper('idle timeout')
-    }, this.idleTimeoutMs)
-    this.idleTimer.unref()
   }
 
   private async ensureHelper(signal: AbortSignal): Promise<RunningHelper> {
@@ -558,7 +562,8 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
     const child = spawn(electronExecutable(), args, {
       env,
       stdio: ['ignore', 'ignore', 'pipe'],
-      windowsHide: true
+      // CREATE_NO_WINDOW hides the helper BrowserWindow on Windows.
+      windowsHide: false
     })
     child.stderr?.on('data', (data: Buffer) => {
       const rawMessage = data.toString('utf8').trim()
@@ -792,9 +797,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
     const locator = command.target
       ? selectorForTarget(helper.page, command.target, helper.snapshotEpoch === helper.pageEpoch)
       : helper.page.locator('body')
-    if (command.target && await locator.count() !== 1) {
-      throw new Error('snapshot target 必须唯一匹配一个元素')
-    }
+    if (command.target) await assertUniqueTarget('snapshot', command.target, locator)
     const raw = await locator.ariaSnapshot({
       mode: 'ai',
       ...(command.depth === undefined ? {} : { depth: Math.max(1, Math.min(50, command.depth)) }),
@@ -917,6 +920,13 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
     run: () => Promise<void>
   ): Promise<AgentBrowserObservation> {
     const beforeRevision = documentRevision(helper)
+    if (action === 'click' || action === 'fill' || action === 'press' || action === 'wait') {
+      try {
+        await this.request('performAction', { action: 'beginNetworkCapture', params: {} }, signal)
+      } catch {
+        signal.throwIfAborted()
+      }
+    }
     try {
       await run()
     } catch (error) {
@@ -1007,9 +1017,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         const locator = command.target
           ? selectorForTarget(helper.page, command.target, helper.snapshotEpoch === helper.pageEpoch)
           : helper.page.locator('body')
-        if (command.target && await locator.count() !== 1) {
-          throw new Error('html target 必须唯一匹配一个元素')
-        }
+        if (command.target) await assertUniqueTarget('html', command.target, locator)
         const maxLength = Math.max(200, Math.min(MAX_AGENT_HTML_LENGTH, command.maxLength ?? 12_000))
         const raw = await locator.evaluate((element) => element.outerHTML)
         const limited = byteLimited(raw, maxLength)
@@ -1043,7 +1051,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
           command.target,
           helper.snapshotEpoch === helper.pageEpoch
         )
-        if (await locator.count() !== 1) throw new Error('click target 必须唯一匹配一个元素')
+        await assertUniqueTarget('click', command.target, locator)
         return this.performAgentAction(helper, 'click', signal, async () => {
           await locator.click({ signal })
         })
@@ -1054,7 +1062,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
           command.target,
           helper.snapshotEpoch === helper.pageEpoch
         )
-        if (await locator.count() !== 1) throw new Error('fill target 必须唯一匹配一个元素')
+        await assertUniqueTarget('fill', command.target, locator)
         return this.performAgentAction(helper, 'fill', signal, async () => {
           await locator.fill(command.text, { signal })
           if (command.submit) await locator.press('Enter', { signal })
@@ -1068,7 +1076,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
               command.target,
               helper.snapshotEpoch === helper.pageEpoch
             )
-            if (await locator.count() !== 1) throw new Error('press target 必须唯一匹配一个元素')
+            await assertUniqueTarget('press', command.target, locator)
             await locator.press(command.key, { signal })
           } else {
             await helper.page.keyboard.press(command.key)
@@ -1086,7 +1094,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
               helper.snapshotEpoch === helper.pageEpoch
             )
             await locator.waitFor({ state: 'visible', timeout: timeoutMs })
-            if (await locator.count() !== 1) throw new Error('wait target 必须唯一匹配一个元素')
+            await assertUniqueTarget('wait', command.target, locator)
           } else {
             await helper.page.waitForTimeout(timeoutMs)
           }

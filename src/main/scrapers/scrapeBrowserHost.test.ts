@@ -95,12 +95,12 @@ function actionHost(input: {
   return { host, internals }
 }
 
-function fakeHost(idleTimeoutMs = 10): {
+function fakeHost(): {
   host: ScrapeBrowserHostModule
   calls: Array<{ command: string; payload: Record<string, unknown> }>
   stops: string[]
 } {
-  const host = new ScrapeBrowserHostModule(idleTimeoutMs)
+  const host = new ScrapeBrowserHostModule()
   const calls: Array<{ command: string; payload: Record<string, unknown> }> = []
   const stops: string[] = []
   const internals = host as unknown as TestHostInternals
@@ -144,13 +144,19 @@ describe('ScrapeBrowserHost leases', () => {
       (error) => error instanceof ScrapeBrowserBusyError && error.ownerId === 'owner-a'
     )
     assert.equal(calls.filter((call) => call.command === 'setProxy').length, 1)
+    assert.equal(
+      calls.filter((call) =>
+        call.command === 'performAction' && call.payload.action === 'present'
+      ).length,
+      1
+    )
     await first.release()
     await second.fetchPage('https://example.com')
     await second.release()
   })
 
-  it('freezes proxy and stops the helper after the idle timeout', async () => {
-    const { host, stops } = fakeHost(5)
+  it('freezes proxy and stops the helper as soon as a scrape lease is released', async () => {
+    const { host, stops } = fakeHost()
     const signal = new AbortController().signal
     const lease = await host.acquire({ ownerId: 'owner', purpose: 'scrape', signal })
     await assert.rejects(
@@ -163,8 +169,7 @@ describe('ScrapeBrowserHost leases', () => {
       /不能切换代理/
     )
     await lease.release()
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    assert.deepEqual(stops, ['idle timeout'])
+    assert.deepEqual(stops, ['lease released'])
   })
 
   it('presents the helper through the lease without exposing it as a plugin browser action', async () => {
@@ -174,6 +179,12 @@ describe('ScrapeBrowserHost leases', () => {
       purpose: 'agent-browser',
       signal: new AbortController().signal
     })
+    assert.equal(
+      calls.filter((call) =>
+        call.command === 'performAction' && call.payload.action === 'present'
+      ).length,
+      0
+    )
 
     assert.deepEqual(await lease.presentToUser(), { url: '', title: '' })
     assert.deepEqual(calls.at(-1), {
@@ -383,7 +394,21 @@ describe('ScrapeBrowserHost leases', () => {
         { action: 'click', target: '.duplicate' },
         new AbortController().signal
       ),
-      /必须唯一匹配/
+      /click target 匹配 2 个元素（\.duplicate）/
+    )
+  })
+
+  it('reports zero matches separately from multiple matches', async () => {
+    const fixture = actionHost({
+      count: 0,
+      snapshot: async () => ({ action: 'snapshot' })
+    })
+    await assert.rejects(
+      fixture.internals.runAgentAction(
+        { action: 'html', target: '#search-box' },
+        new AbortController().signal
+      ),
+      /html target 匹配 0 个元素（#search-box）/
     )
   })
 })

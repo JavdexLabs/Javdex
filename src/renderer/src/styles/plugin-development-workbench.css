@@ -365,45 +365,6 @@
   justify-content: center;
 }
 
-.plugin-dev-agent-flow {
-  flex-shrink: 0;
-  margin: 8px 10px 0;
-  display: flex;
-  flex-direction: column;
-  padding: 8px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--surface-control);
-}
-
-.plugin-dev-phase-track {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 4px;
-}
-
-.plugin-dev-phase-chip {
-  min-width: 0;
-  min-height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 6px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 999px;
-  background: var(--surface-panel);
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.plugin-dev-phase-chip.is-active {
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-subtle));
-  background: var(--surface-selected);
-  color: var(--text-accent);
-}
-
 .plugin-dev-composer-stack {
   flex-shrink: 0;
 }
@@ -755,10 +716,6 @@
   border-top: 1px solid var(--border-subtle);
 }
 
-.plugin-dev-chat-message--agent p {
-  border-left: 2px solid color-mix(in srgb, var(--accent) 55%, var(--border-subtle));
-}
-
 .plugin-dev-verification-section > summary {
   min-height: 28px;
   display: flex;
@@ -1080,7 +1037,7 @@
   font-weight: 700;
 }
 
-.plugin-dev-chat-message p {
+.plugin-dev-chat-message > p {
   margin: 0;
   padding: 8px 10px;
   border: 1px solid var(--border-subtle);
@@ -1093,7 +1050,7 @@
   user-select: text;
 }
 
-.plugin-dev-chat-message--user p {
+.plugin-dev-chat-message--user > p {
   border-color: color-mix(in srgb, var(--border-accent) 58%, var(--border-subtle));
   background: var(--surface-selected);
   color: var(--text-primary);

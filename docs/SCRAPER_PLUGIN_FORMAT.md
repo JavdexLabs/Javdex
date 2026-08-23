@@ -63,7 +63,7 @@ app.getPath('userData')/scraper_plugins/{video|actress}/{plugin-name}/
 |------|------|
 | `ctx.code` | 待刮削番号 |
 | `ctx.proxyUrl` | 当前刮削代理（可能为空） |
-| `ctx.fetchPage(url, options?): Promise<string>` | 拉取并直接返回页面 HTML 字符串，不返回 `{ html, url }` 对象，也不包含最终 URL；`options`: `readySelector`、`timeoutMs`、`settleWhenText`（`RegExp`）。`timeoutMs` 只计算正常页面加载时间；Cloudflare 人工验证暂停该计时，并使用独立的 3 分钟验证上限。 |
+| `ctx.fetchPage(url, options?): Promise<string>` | 拉取并直接返回页面 HTML 字符串，不返回 `{ html, url }` 对象，也不包含最终 URL。`url` 必须是绝对 `http:` / `https:`；相对路径和 `//host/...` 须先用 `ctx.helpers.absoluteUrl(href, base)` 解析，否则会抛 `Invalid URL`。`options`: `readySelector`、`timeoutMs`、`settleWhenText`（`RegExp`）。`timeoutMs` 只计算正常页面加载时间；Cloudflare 人工验证暂停该计时，并使用独立的 3 分钟验证上限。 |
 | `ctx.fetchBuffer(url, options?)` | 拉取二进制（如图片）；持久缓存选项见下文 |
 | `ctx.cheerio` | Cheerio 模块；**每个 HTML 须先 `const $ = ctx.cheerio.load(html)`**，沙箱内无全局 `$` |
 | `ctx.browser` | 见下方浏览器辅助 |
@@ -77,9 +77,11 @@ app.getPath('userData')/scraper_plugins/{video|actress}/{plugin-name}/
 标准 HTML 解析方式：
 
 ```js
-const html = await ctx.fetchPage(url)
+const html = await ctx.fetchPage(ctx.helpers.absoluteUrl(href, searchUrl))
 const $ = ctx.cheerio.load(html)
 ```
+
+浏览器开发 observation 的 `pageFacts.links.href` 已按当前页 resolve，供继续浏览。cheerio 读到的是 HTML 原始属性；两者不同时 observation 会另给 `rawHref`。不要把已 resolve 的 href 直接传给 `fetchPage`。
 
 ### 受信内置服务绑定
 
@@ -167,7 +169,7 @@ const body = await ctx.fetchBuffer(url, {
 
 - `null` 或空数组：未匹配。
 - 单个对象：兼容旧插件的单结果形式；`code` 建议提供，省略时主进程使用本次查询番号。
-- 对象数组：精确查询实际得到多个同番号候选时返回全部候选。普通模糊搜索列表不是多候选契约的触发条件；找不到精确番号应返回 `null`。数组中每个对象都必须提供非空 `code`，任一项无效都会拒绝整次插件结果。
+- 对象数组：搜索结果第一页上番号规范化后完全相等的条目必须全部抓取详情；多于一条时返回全部候选。普通模糊搜索列表、标题包含、前缀匹配和第二页都不是多候选契约的触发条件。未匹配返回 `null` 或空数组，不得返回相似目标。数组中每个对象都必须提供非空 `code`，任一项无效或任一条完全匹配详情失败都会拒绝整次插件结果，不得用其余详情凑成不完整集合。
 
 候选对象除 `code` 外的字段均为可选，但须与 `supportedFields` 一致：
 
@@ -208,7 +210,7 @@ const body = await ctx.fetchBuffer(url, {
 ### 推荐抓取策略
 
 - **直连详情页**：仅当 URL 可由番号可靠推导，或搜索 URL 会跳转到详情页时使用；须用选择器与番号/标题证明命中。
-- **搜索进详情**：搜索页只用于定位详情链接；用 `ctx.helpers.absoluteUrl(href, searchUrl)` 解析链接后再抓详情页，并将 `sourceUrl` 设为详情页 URL。
+- **搜索进详情**：搜索页只用于定位第一页全部番号完全匹配的详情链接；用 `ctx.helpers.absoluteUrl(href, searchUrl)` 解析链接后再抓详情页，并将 `sourceUrl` 设为详情页 URL。规范化后与查询番号逐字符相等的条目必须全部抓取；多于一条返回数组，任一条详情失败则整次失败。不要用模糊匹配、标题包含、第一条回退或第二页补位。
 
 ## 演员插件 `parseActress(ctx)`
 
@@ -259,7 +261,7 @@ const body = await ctx.fetchBuffer(url, {
 
 - **直连资料页**：URL 可由名称/slug 可靠推导时使用。
 - **搜索进资料页**：依次尝试 `mainName` 与各 `alias`；搜索页仅用于找资料链接。
-- **动态搜索**：若结果通过 AJAX 更新而 URL 不变，用 `fetchPage` 复现对应请求，勿把未变化的 URL 当作失败。
+- **动态搜索**：若结果通过 AJAX 更新而 URL 不变，用 `fetchPage` 复现对应请求（可从站点脚本或开发浏览的 `recentRequests` 还原 method/URL），勿把未变化的 URL 当作失败。
 - **头像专用来源**：只提供头像的演员头像源应仅声明 `avatar`，不返回别名或其他资料，也不据此改变演员身份；未精确命中时返回 `null`。
 
 ## 组合刮削器

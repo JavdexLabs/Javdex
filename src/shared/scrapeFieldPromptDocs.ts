@@ -41,7 +41,6 @@ export function buildPluginFieldSemanticsPrompt(
   const fields = fieldSemanticsForKind(kind).filter((field) => !selected || selected.has(field.id))
   return `字段语义查询表（registry v${PLUGIN_FIELD_SEMANTICS_VERSION}，不是实现清单）：
 每项标题开头是 plugin.json.supportedFields 使用的字段 id；“返回键”是 parse 结果对象使用的键，两者不得互换。
-create 模式应先观察精确详情页，再用 grep 按页面实际出现的标签或字段 id 查询本表；不要为了逐项排除字段而通读或继续浏览。
 ${fields.map((field) => [
     `- ${field.id}（${field.title}）`,
     `  定义：${field.description}`,

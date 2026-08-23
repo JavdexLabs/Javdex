@@ -9,7 +9,10 @@ import type {
   RuntimeObservation,
   RuntimeSessionInit
 } from '../../agent-platform/types'
-import { createPiRuntimePort, validatePluginWorkspaceToolAccess } from './piRuntime'
+import {
+  createPiRuntimePort,
+  validatePluginWorkspaceToolAccess
+} from './piRuntime'
 
 let roots: string[] = []
 
@@ -599,22 +602,19 @@ describe('PiRuntime contract', () => {
     await opened.session.dispose()
   })
 
-  it('compacts before recovering from a reasoning-only length stop', async () => {
+  it('does not compact or inject a host recovery prompt after a length stop', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-pi-length-'))
     roots.push(root)
     const requests: Array<{ url: string; headers: Headers; body: Record<string, unknown> }> = []
     const durable: RuntimeDurableObservation[] = []
     const input = runtimeInput(root, requests)
-    const artifactMarker = `BROWSER_ARTIFACT_SHOULD_BE_COMPACTED_${'page facts '.repeat(4_000)}`
-    let requestCount = 0
     input.model.fetch = async (request, init) => {
-      requestCount += 1
       const url = typeof request === 'string' ? request : request instanceof URL ? request.href : request.url
       const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : {}
       requests.push({ url, headers: new Headers(init?.headers), body })
-      return requestCount === 1
+      return requests.length === 1
         ? openAiLengthStream('drafting code '.repeat(3_000))
-        : openAiStream('finished after recovery')
+        : openAiStream('host must not continue')
     }
     let settle: (() => void) | undefined
     const opened = await createPiRuntimePort().open(input, {
@@ -626,7 +626,7 @@ describe('PiRuntime contract', () => {
     })
     const settled = new Promise<void>((resolve) => { settle = resolve })
     const dispatched = await opened.session.dispatch({
-      commandId: 'length-command', kind: 'prompt', content: { text: artifactMarker }
+      commandId: 'length-command', kind: 'prompt', content: { text: 'build the plugin' }
     })
     assert.equal(dispatched.accepted, true)
     await Promise.race([
@@ -634,114 +634,19 @@ describe('PiRuntime contract', () => {
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('agent_settled timeout')), 5_000))
     ])
 
-    assert.equal(requests.length, 3)
+    assert.equal(requests.length, 1, 'the host must not compact or prompt after Pi settles a length stop')
     const truncated = durable.find(
       (event) => event.type === 'message.completed' && event.audit.role === 'assistant'
     )
     assert.ok(truncated?.type === 'message.completed')
-    const audit = truncated.audit as unknown as Record<string, unknown>
-    assert.equal(audit.stopReason, 'length')
-    assert.equal(audit.textChars, 0)
-    assert.ok(Number(audit.reasoningChars) > 0)
-    assert.equal(audit.toolCallCount, 0)
-    assert.deepEqual(
-      durable
-        .filter((event) => event.type === 'compaction.changed')
-        .map((event) => event.type === 'compaction.changed' ? event.phase : undefined),
-      ['start', 'end']
-    )
-    const compactionEnd = durable.find(
-      (event) => event.type === 'compaction.changed' && event.phase === 'end'
-    )
-    assert.ok(compactionEnd?.type === 'compaction.changed' && compactionEnd.result)
-    assert.ok(
-      Number((compactionEnd.result as unknown as Record<string, unknown>).tokensAfter) > 0,
-      'the runtime must expose Pi\'s post-compaction context estimate'
-    )
-    const recoveryMessages = requests[2]!.body.messages as Array<{
-      role?: string
-      content?: string | Array<{ type?: string; text?: string }>
-    }>
-    assert.equal(recoveryMessages.at(-1)?.role, 'user')
-    const recoveryContent = recoveryMessages.at(-1)?.content
-    const recoveryText = typeof recoveryContent === 'string'
-      ? recoveryContent
-      : recoveryContent?.map((item) => item.text ?? '').join('\n') ?? ''
-    assert.match(recoveryText, /输出上限|工具调用/)
-    assert.match(JSON.stringify(requests[1]!.body), /BROWSER_ARTIFACT_SHOULD_BE_COMPACTED/)
-    assert.doesNotMatch(JSON.stringify(requests[2]!.body), /BROWSER_ARTIFACT_SHOULD_BE_COMPACTED/)
-    assert.equal(durable.filter((event) => event.type === 'agent.settled').length, 1)
-    await opened.session.dispose()
-  })
-
-  it('bounds output-limit recovery once per user operation', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-pi-length-bounded-'))
-    roots.push(root)
-    const requests: Array<{ url: string; headers: Headers; body: Record<string, unknown> }> = []
-    const durable: RuntimeDurableObservation[] = []
-    const input = runtimeInput(root, requests)
-    input.model.fetch = async (request, init) => {
-      const requestNumber = requests.length + 1
-      const url = typeof request === 'string' ? request : request instanceof URL ? request.href : request.url
-      const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : {}
-      requests.push({ url, headers: new Headers(init?.headers), body })
-      return [2, 5, 6].includes(requestNumber)
-        ? openAiStream('compact summary')
-        : openAiLengthStream('drafting code '.repeat(3_000))
-    }
-    let settle: (() => void) | undefined
-    const opened = await createPiRuntimePort().open(input, {
-      notify: () => undefined,
-      commit: async (event) => {
-        durable.push(event)
-        if (event.type === 'agent.settled') settle?.()
-      }
-    })
-    const settled = new Promise<void>((resolve) => { settle = resolve })
-    const dispatched = await opened.session.dispatch({
-      commandId: 'bounded-length-command', kind: 'prompt', content: { text: 'build the plugin' }
-    })
-    assert.equal(dispatched.accepted, true)
-    await Promise.race([
-      settled,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('agent_settled timeout')), 5_000))
-    ])
-
-    assert.equal(requests.length, 3)
-    assert.equal(
-      durable.filter(
-        (event) => event.type === 'message.completed' &&
-          event.audit.role === 'assistant' &&
-          event.audit.stopReason === 'length'
-      ).length,
-      2
-    )
+    assert.equal(truncated.audit.stopReason, 'length')
+    assert.equal(durable.filter((event) => event.type === 'compaction.changed').length, 0)
     assert.equal(durable.filter((event) => event.type === 'runtime.fault').length, 0)
     assert.equal(durable.filter((event) => event.type === 'agent.settled').length, 1)
-
-    const secondSettled = new Promise<void>((resolve) => { settle = resolve })
-    const secondDispatch = await opened.session.dispatch({
-      commandId: 'second-bounded-length-command', kind: 'prompt', content: { text: 'continue the plugin' }
-    })
-    assert.equal(secondDispatch.accepted, true)
-    await Promise.race([
-      secondSettled,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('second agent_settled timeout')), 5_000))
-    ])
-    assert.equal(requests.length, 7)
-    assert.equal(
-      durable.filter(
-        (event) => event.type === 'message.completed' &&
-          event.audit.role === 'assistant' &&
-          event.audit.stopReason === 'length'
-      ).length,
-      4
-    )
-    assert.equal(durable.filter((event) => event.type === 'agent.settled').length, 2)
     await opened.session.dispose()
   })
 
-  it('does not start output-limit recovery after the model-turn budget stops the operation', async () => {
+  it('does not start a host continuation after the model-turn budget stops the operation', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-pi-length-turn-budget-'))
     roots.push(root)
     const requests: Array<{ url: string; headers: Headers; body: Record<string, unknown> }> = []

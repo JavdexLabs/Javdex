@@ -50,6 +50,13 @@ export function registerPluginDevHandlers(ctx: IpcContext): void {
   })
 
   appCommandAdapter.register(
+    IPC.PLUGIN_DEV_AGENT_RELEASE_BROWSER,
+    async (sessionId): Promise<void> => {
+      await pluginDeveloper.releaseBrowser(sessionId)
+    }
+  )
+
+  appCommandAdapter.register(
     IPC.PLUGIN_DEV_AGENT_SNAPSHOT,
     (sessionId) => pluginDeveloper.getSnapshot(sessionId)
   )
@@ -57,6 +64,11 @@ export function registerPluginDevHandlers(ctx: IpcContext): void {
   appCommandAdapter.register(
     IPC.PLUGIN_DEV_AGENT_CLEAR_HISTORY,
     () => pluginDeveloper.clearHistory()
+  )
+
+  appCommandAdapter.register(
+    IPC.PLUGIN_DEV_AGENT_DISCARD_UNRECOVERABLE,
+    () => pluginDeveloper.discardUnrecoverableSessions()
   )
 
   appCommandAdapter.register(

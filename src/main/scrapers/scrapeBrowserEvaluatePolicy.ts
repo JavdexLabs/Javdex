@@ -107,6 +107,33 @@ const FORBIDDEN_EVALUATE_MEMBERS = new Set([
 
 const SENSITIVE_LITERAL = /(?:password|passwd|passcode|credential|captcha|hcaptcha|g-recaptcha|cf-turnstile|api[-_ ]?key|access[-_ ]?token|auth[-_ ]?token|secret)/iu
 
+const MARKUP_EVALUATE_MEMBERS = new Set([
+  'outerHTML',
+  'innerHTML',
+  'getAttribute',
+  'getAttributeNames'
+])
+
+export type ForbiddenEvaluateReason =
+  | { kind: 'name'; name: string }
+  | { kind: 'computed' }
+  | { kind: 'this' }
+  | { kind: 'import' }
+  | { kind: 'sensitive-literal' }
+  | { kind: 'unparseable' }
+
+export function forbiddenEvaluateErrorMessage(reason: ForbiddenEvaluateReason): string {
+  if (reason.kind === 'name' && MARKUP_EVALUATE_MEMBERS.has(reason.name)) {
+    return `evaluate 禁止 ${reason.name}，读局部标记请用 html`
+  }
+  if (reason.kind === 'name') return `evaluate 禁止 ${reason.name}`
+  if (reason.kind === 'computed') return 'evaluate 禁止计算属性访问'
+  if (reason.kind === 'this') return 'evaluate 禁止 this'
+  if (reason.kind === 'import') return 'evaluate 禁止 import'
+  if (reason.kind === 'sensitive-literal') return 'evaluate 表达式含有敏感字面量'
+  return 'evaluate 表达式无法解析或含有禁止的 API'
+}
+
 function isNode(value: unknown): value is Node {
   return Boolean(value && typeof value === 'object' && typeof (value as Node).type === 'string')
 }
@@ -116,14 +143,14 @@ function nodeContainsForbiddenEvaluateApi(
   visited: WeakSet<object>,
   parent?: Node,
   grandparent?: Node
-): boolean {
-  if (visited.has(node)) return false
+): ForbiddenEvaluateReason | undefined {
+  if (visited.has(node)) return undefined
   visited.add(node)
 
   const record = node as Node & Record<string, unknown>
-  if (node.type === 'ThisExpression' || node.type === 'ImportExpression' || record.computed === true) {
-    return true
-  }
+  if (node.type === 'ThisExpression') return { kind: 'this' }
+  if (node.type === 'ImportExpression') return { kind: 'import' }
+  if (record.computed === true) return { kind: 'computed' }
   if (node.type === 'Identifier') {
     const name = record.name
     const parentRecord = parent as (Node & Record<string, unknown>) | undefined
@@ -131,12 +158,11 @@ function nodeContainsForbiddenEvaluateApi(
     const isPatternKey = parent?.type === 'Property' &&
       parentRecord?.key === node &&
       grandparent?.type === 'ObjectPattern'
-    if (
-      typeof name === 'string' &&
-      (FORBIDDEN_EVALUATE_IDENTIFIERS.has(name) ||
-        ((isMemberName || isPatternKey) && FORBIDDEN_EVALUATE_MEMBERS.has(name)))
-    ) {
-      return true
+    if (typeof name === 'string' && FORBIDDEN_EVALUATE_IDENTIFIERS.has(name)) {
+      return { kind: 'name', name }
+    }
+    if (typeof name === 'string' && (isMemberName || isPatternKey) && FORBIDDEN_EVALUATE_MEMBERS.has(name)) {
+      return { kind: 'name', name }
     }
   }
   if (node.type === 'Literal' && typeof record.value === 'string') {
@@ -144,25 +170,27 @@ function nodeContainsForbiddenEvaluateApi(
     const isPatternKey = parent?.type === 'Property' &&
       parentRecord?.key === node &&
       grandparent?.type === 'ObjectPattern'
-    if (
-      SENSITIVE_LITERAL.test(record.value) ||
-      (isPatternKey && FORBIDDEN_EVALUATE_MEMBERS.has(record.value))
-    ) {
-      return true
+    if (isPatternKey && FORBIDDEN_EVALUATE_MEMBERS.has(record.value)) {
+      return { kind: 'name', name: record.value }
     }
+    if (SENSITIVE_LITERAL.test(record.value)) return { kind: 'sensitive-literal' }
   }
 
   for (const value of Object.values(record)) {
     if (Array.isArray(value)) {
-      if (value.some((item) => isNode(item) &&
-        nodeContainsForbiddenEvaluateApi(item, visited, node, parent))) {
-        return true
+      for (const item of value) {
+        if (!isNode(item)) continue
+        const reason = nodeContainsForbiddenEvaluateApi(item, visited, node, parent)
+        if (reason) return reason
       }
       continue
     }
-    if (isNode(value) && nodeContainsForbiddenEvaluateApi(value, visited, node, parent)) return true
+    if (isNode(value)) {
+      const reason = nodeContainsForbiddenEvaluateApi(value, visited, node, parent)
+      if (reason) return reason
+    }
   }
-  return false
+  return undefined
 }
 
 /**
@@ -170,13 +198,19 @@ function nodeContainsForbiddenEvaluateApi(
  * comments or regular-expression patterns as executable API references. Forbidden property names
  * are rejected everywhere in executable code so destructuring cannot bypass member-access checks.
  */
-export function containsForbiddenBrowserEvaluateApi(expression: string): boolean {
+export function findForbiddenBrowserEvaluateApi(
+  expression: string
+): ForbiddenEvaluateReason | undefined {
   try {
     const program = parse(`(${expression}\n)`, { ecmaVersion: 'latest' })
     return nodeContainsForbiddenEvaluateApi(program, new WeakSet())
   } catch {
-    return true
+    return { kind: 'unparseable' }
   }
+}
+
+export function containsForbiddenBrowserEvaluateApi(expression: string): boolean {
+  return findForbiddenBrowserEvaluateApi(expression) !== undefined
 }
 
 export function prepareBrowserEvaluate(
@@ -185,8 +219,9 @@ export function prepareBrowserEvaluate(
 ): { source: string; timeoutMs: number } {
   const normalized = expression.trim()
   if (!normalized) throw new Error('evaluate requires expression')
-  if (containsForbiddenBrowserEvaluateApi(normalized)) {
-    throw new Error('evaluate expression contains forbidden or sensitive APIs')
+  const forbidden = findForbiddenBrowserEvaluateApi(normalized)
+  if (forbidden) {
+    throw new Error(forbiddenEvaluateErrorMessage(forbidden))
   }
   const timeoutMs = typeof requestedTimeoutMs === 'number' && Number.isFinite(requestedTimeoutMs)
     ? Math.max(500, Math.min(10_000, Math.round(requestedTimeoutMs)))

@@ -255,9 +255,14 @@ export function pluginDevAgentEndNotice(
   return { message: 'Agent 状态已更新', kind: 'info' }
 }
 
+/** Sessions the current workbench can restore after leaving the page. */
+export function isRecoverablePluginDevSessionStatus(status: PluginDevSessionStatus): boolean {
+  return status === 'running' || status === 'waiting_user'
+}
+
 /** Terminal history is discoverable but must never overwrite the current editor on entry. */
 export function shouldApplyInitialPluginDevSnapshot(status: PluginDevSessionStatus): boolean {
-  return status === 'running' || status === 'waiting_user'
+  return isRecoverablePluginDevSessionStatus(status)
 }
 
 export interface PluginDevSelectablePlugin {

@@ -123,7 +123,8 @@ function stableJsonValue(value: unknown): unknown {
 }
 
 function stableSerialize(value: unknown): string {
-  return JSON.stringify(stableJsonValue(value))
+  if (value === undefined) return 'null'
+  return JSON.stringify(stableJsonValue(value)) ?? 'null'
 }
 
 interface BrowserObservationBaseline {
@@ -142,7 +143,10 @@ function pageFactsDelta(
   const previousRecord = previous ?? {}
   const currentRecord = current ?? {}
   for (const key of Object.keys(currentRecord).sort()) {
-    if (sha256(stableSerialize(previousRecord[key])) !== sha256(stableSerialize(currentRecord[key]))) {
+    if (
+      !Object.hasOwn(previousRecord, key) ||
+      stableSerialize(previousRecord[key]) !== stableSerialize(currentRecord[key])
+    ) {
       changed[key] = currentRecord[key]
     }
   }
@@ -239,6 +243,89 @@ function observationJson(input: {
   }, null, 2)
 }
 
+interface PackableObservationSection {
+  name: string
+  bytes: number
+  apply: (target: AgentBrowserObservation) => void
+}
+
+const TARGETED_NEXT_ACTIONS: NonNullable<AgentBrowserObservation['nextActions']> = [
+  'find',
+  'html',
+  'read-section'
+]
+
+function collectPackableSections(observation: AgentBrowserObservation): PackableObservationSection[] {
+  const sections: PackableObservationSection[] = []
+  if (typeof observation.snapshot === 'string') {
+    sections.push({
+      name: 'snapshot',
+      bytes: Buffer.byteLength(observation.snapshot, 'utf8'),
+      apply: (target) => {
+        target.snapshot = observation.snapshot
+      }
+    })
+  }
+  if (isRecord(observation.pageFacts)) {
+    for (const key of Object.keys(observation.pageFacts).sort()) {
+      const value = observation.pageFacts[key]
+      sections.push({
+        name: key,
+        bytes: Buffer.byteLength(stableSerialize(value), 'utf8'),
+        apply: (target) => {
+          target.pageFacts = { ...target.pageFacts, [key]: value }
+        }
+      })
+    }
+  }
+  if (typeof observation.ariaDelta === 'string' && observation.ariaDelta) {
+    sections.push({
+      name: 'ariaDelta',
+      bytes: Buffer.byteLength(observation.ariaDelta, 'utf8'),
+      apply: (target) => {
+        target.ariaDelta = observation.ariaDelta
+      }
+    })
+  }
+  if (observation.pageFactsDelta) {
+    sections.push({
+      name: 'pageFactsDelta',
+      bytes: Buffer.byteLength(stableSerialize(observation.pageFactsDelta), 'utf8'),
+      apply: (target) => {
+        target.pageFactsDelta = observation.pageFactsDelta
+      }
+    })
+  }
+  if (typeof observation.html === 'string') {
+    sections.push({
+      name: 'html',
+      bytes: Buffer.byteLength(observation.html, 'utf8'),
+      apply: (target) => {
+        target.html = observation.html
+      }
+    })
+  }
+  if (observation.matches) {
+    sections.push({
+      name: 'matches',
+      bytes: Buffer.byteLength(stableSerialize(observation.matches), 'utf8'),
+      apply: (target) => {
+        target.matches = observation.matches
+      }
+    })
+  }
+  if (Object.hasOwn(observation, 'value')) {
+    sections.push({
+      name: 'value',
+      bytes: Buffer.byteLength(stableSerialize(observation.value), 'utf8'),
+      apply: (target) => {
+        target.value = observation.value
+      }
+    })
+  }
+  return sections
+}
+
 function transparentObservationResult(input: {
   observation: AgentBrowserObservation
   ok: boolean
@@ -257,6 +344,10 @@ function transparentObservationResult(input: {
   const pageFacts = isRecord(input.observation.pageFacts)
     ? input.observation.pageFacts
     : undefined
+  const snapshot = typeof input.observation.snapshot === 'string'
+    ? input.observation.snapshot
+    : undefined
+  const sourceByteLength = Buffer.byteLength(completeContent, 'utf8')
   const identity: AgentBrowserObservation = {
     action: input.observation.action,
     documentRevision: input.observation.documentRevision,
@@ -267,58 +358,73 @@ function transparentObservationResult(input: {
     evidenceIncomplete: input.observation.evidenceIncomplete,
     artifactComplete: input.observation.artifactComplete
   }
-  const sourceByteLength = Buffer.byteLength(completeContent, 'utf8')
-  const snapshot = typeof input.observation.snapshot === 'string'
-    ? input.observation.snapshot
-    : undefined
-  const snapshotOnly: AgentBrowserObservation | undefined = snapshot && pageFacts
-    ? {
-        ...identity,
-        observationMode: 'artifact',
-        snapshot,
-        inlineComplete: false,
-        sourceByteLength,
-        snapshotByteLength: Buffer.byteLength(snapshot, 'utf8'),
-        pageFactsSummary: pageFactSectionSummary(pageFacts),
-        omittedInlineSections: ['pageFacts'],
-        nextActions: ['find', 'snapshot-target', 'html', 'read-artifact']
-      }
-    : undefined
-  if (snapshotOnly) {
-    const snapshotContent = observationJson({ ...input, observation: snapshotOnly })
-    if (Buffer.byteLength(snapshotContent, 'utf8') <= input.maxBytes) {
-      return { observation: snapshotOnly, content: snapshotContent }
+  const packable = collectPackableSections(input.observation)
+  const sortedAscending = [...packable].sort((left, right) => (
+    left.bytes - right.bytes || left.name.localeCompare(right.name)
+  ))
+
+  const buildPacked = (
+    keptNames: ReadonlySet<string>,
+    includeOmittedSummary: boolean
+  ): AgentBrowserObservation => {
+    const packed: AgentBrowserObservation = {
+      ...identity,
+      observationMode: 'artifact',
+      inlineComplete: false,
+      sourceByteLength,
+      ...(snapshot
+        ? { snapshotByteLength: Buffer.byteLength(snapshot, 'utf8') }
+        : {}),
+      nextActions: TARGETED_NEXT_ACTIONS
+    }
+    const omitted: string[] = []
+    for (const section of packable) {
+      if (keptNames.has(section.name)) section.apply(packed)
+      else omitted.push(section.name)
+    }
+    packed.omittedInlineSections = omitted.sort()
+    if (includeOmittedSummary && pageFacts) {
+      const omittedFacts = Object.fromEntries(
+        Object.entries(pageFacts).filter(([key]) => omitted.includes(key))
+      )
+      const summary = pageFactSectionSummary(omittedFacts)
+      if (summary.length > 0) packed.pageFactsSummary = summary
+    }
+    return packed
+  }
+
+  const tryPacked = (
+    keptCount: number,
+    includeOmittedSummary: boolean
+  ): { observation: AgentBrowserObservation; content: string } | null => {
+    const keptNames = new Set(sortedAscending.slice(0, keptCount).map((section) => section.name))
+    const observation = buildPacked(keptNames, includeOmittedSummary)
+    const content = observationJson({ ...input, observation })
+    return Buffer.byteLength(content, 'utf8') <= input.maxBytes
+      ? { observation, content }
+      : null
+  }
+
+  let bestKeptCount = -1
+  let bestWithoutSummary: { observation: AgentBrowserObservation; content: string } | null = null
+  let low = 0
+  let high = sortedAscending.length
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2)
+    const candidate = tryPacked(middle, false)
+    if (candidate) {
+      bestKeptCount = middle
+      bestWithoutSummary = candidate
+      low = middle + 1
+    } else {
+      high = middle - 1
     }
   }
 
-  const artifactObservation: AgentBrowserObservation = {
-    ...identity,
-    observationMode: 'artifact',
-    inlineComplete: false,
-    sourceByteLength,
-    ...(snapshot
-      ? { snapshotByteLength: Buffer.byteLength(snapshot, 'utf8') }
-      : {}),
-    ...(pageFacts
-      ? { pageFactsSummary: pageFactSectionSummary(pageFacts) }
-      : {}),
-    omittedInlineSections: [
-      ...(snapshot ? ['snapshot'] : []),
-      ...(pageFacts ? ['pageFacts'] : []),
-      ...(input.observation.ariaDelta ? ['ariaDelta'] : []),
-      ...(input.observation.pageFactsDelta ? ['pageFactsDelta'] : []),
-      ...(input.observation.html ? ['html'] : []),
-      ...(Object.hasOwn(input.observation, 'value') ? ['value'] : []),
-      ...(input.observation.matches ? ['matches'] : [])
-    ],
-    nextActions: snapshot || pageFacts
-      ? ['find', 'snapshot-target', 'html', 'read-artifact']
-      : ['read-artifact']
+  if (bestWithoutSummary && bestKeptCount >= 0) {
+    return tryPacked(bestKeptCount, true) ?? bestWithoutSummary
   }
-  const artifactContent = observationJson({ ...input, observation: artifactObservation })
-  if (Buffer.byteLength(artifactContent, 'utf8') <= input.maxBytes) {
-    return { observation: artifactObservation, content: artifactContent }
-  }
+
   const minimalObservation: AgentBrowserObservation = {
     action: input.observation.action,
     documentRevision: input.observation.documentRevision,
@@ -331,7 +437,7 @@ function transparentObservationResult(input: {
     artifactComplete: input.observation.artifactComplete,
     sourceByteLength,
     omittedInlineSections: ['observation'],
-    nextActions: ['read-artifact']
+    nextActions: ['read-section']
   }
   return {
     observation: minimalObservation,
@@ -469,9 +575,10 @@ function resolveArtifactTextReferences(workspaceDirectory: string, value: unknow
   const ref = value.$artifactTextRef
   if (typeof ref === 'string') {
     const root = path.resolve(workspaceDirectory)
+    const browserRoot = path.resolve(root, '.javdex', 'browser')
     const partPath = path.resolve(root, ref)
-    if (partPath !== root && !partPath.startsWith(`${root}${path.sep}`)) {
-      throw new Error('browser artifact part escapes the workspace')
+    if (partPath !== browserRoot && !partPath.startsWith(`${browserRoot}${path.sep}`)) {
+      throw new Error('browser artifact part escapes the browser artifact directory')
     }
     const part = JSON.parse(fs.readFileSync(partPath, 'utf8')) as Record<string, unknown>
     if (part.kind !== 'browser-artifact-text' || !Array.isArray(part.chunks)) {
@@ -504,12 +611,303 @@ export function readBrowserArtifactBundle(
   artifactRef: string
 ): Record<string, unknown> {
   const root = path.resolve(workspaceDirectory)
+  const browserRoot = path.resolve(root, '.javdex', 'browser')
   const artifactPath = path.resolve(root, artifactRef)
-  if (artifactPath !== root && !artifactPath.startsWith(`${root}${path.sep}`)) {
-    throw new Error('browser artifact escapes the workspace')
+  if (artifactPath !== browserRoot && !artifactPath.startsWith(`${browserRoot}${path.sep}`)) {
+    throw new Error('browser artifact escapes the browser artifact directory')
   }
   const value = JSON.parse(fs.readFileSync(artifactPath, 'utf8')) as Record<string, unknown>
   return resolveArtifactTextReferences(root, value) as Record<string, unknown>
+}
+
+export interface BrowserArtifactSectionInput {
+  workspaceDirectory: string
+  artifactRef: string
+  section: string
+  cursor?: string
+}
+
+interface BrowserArtifactSectionCursor {
+  version: 1
+  artifactRef: string
+  section: string
+  offset: number
+  textOffset: number
+}
+
+const BROWSER_ARTIFACT_SECTION_RESULT_BYTES = 18_000
+const BROWSER_ARTIFACT_SECTION_MAX_ENTRIES = 200
+
+function artifactSectionError(code: string, message: string): ToolExecutionResult {
+  return {
+    ok: false,
+    content: JSON.stringify({ code, message }, null, 2),
+    structured: { code }
+  }
+}
+
+function encodeSectionCursor(cursor: BrowserArtifactSectionCursor): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url')
+}
+
+function decodeSectionCursor(
+  raw: string | undefined,
+  artifactRef: string,
+  section: string
+): BrowserArtifactSectionCursor {
+  if (!raw) {
+    return { version: 1, artifactRef, section, offset: 0, textOffset: 0 }
+  }
+  let value: unknown
+  try {
+    value = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as unknown
+  } catch {
+    throw new Error('BROWSER_ARTIFACT_CURSOR_INVALID')
+  }
+  if (!isRecord(value) ||
+      value.version !== 1 ||
+      value.artifactRef !== artifactRef ||
+      value.section !== section ||
+      !Number.isSafeInteger(value.offset) || Number(value.offset) < 0 ||
+      !Number.isSafeInteger(value.textOffset) || Number(value.textOffset) < 0) {
+    throw new Error('BROWSER_ARTIFACT_CURSOR_INVALID')
+  }
+  return {
+    version: 1,
+    artifactRef,
+    section,
+    offset: Number(value.offset),
+    textOffset: Number(value.textOffset)
+  }
+}
+
+function readBrowserArtifactIndex(
+  workspaceDirectory: string,
+  artifactRef: string
+): Record<string, unknown> {
+  const root = path.resolve(workspaceDirectory)
+  const browserRoot = path.resolve(root, '.javdex', 'browser')
+  const artifactPath = path.resolve(root, artifactRef)
+  if (artifactPath !== browserRoot && !artifactPath.startsWith(`${browserRoot}${path.sep}`)) {
+    throw new Error('BROWSER_ARTIFACT_PATH_INVALID')
+  }
+  if (!fs.existsSync(artifactPath)) throw new Error('BROWSER_ARTIFACT_NOT_FOUND')
+  const value = JSON.parse(fs.readFileSync(artifactPath, 'utf8')) as unknown
+  if (!isRecord(value) || value.schemaVersion !== 2 || !isRecord(value.observation)) {
+    throw new Error('BROWSER_ARTIFACT_INVALID')
+  }
+  return value
+}
+
+function sectionValueSummary(section: string, value: unknown): Record<string, unknown> {
+  const external = isRecord(value) && typeof value.$artifactTextRef === 'string'
+  const byteLength = external && typeof value.byteLength === 'number'
+    ? value.byteLength
+    : Buffer.byteLength(stableSerialize(value), 'utf8')
+  return {
+    section,
+    byteLength,
+    itemCount: Array.isArray(value)
+      ? value.length
+      : typeof value === 'string'
+        ? Array.from(value).length
+        : isRecord(value)
+          ? Object.keys(value).length
+          : value === undefined || value === null
+            ? 0
+            : 1
+  }
+}
+
+function artifactSectionCatalog(observation: Record<string, unknown>): Array<Record<string, unknown>> {
+  const sections = new Map<string, unknown>()
+  for (const key of ['snapshot', 'ariaDelta', 'pageFactsDelta', 'html', 'matches', 'value']) {
+    if (Object.hasOwn(observation, key)) sections.set(key, observation[key])
+  }
+  if (isRecord(observation.pageFacts)) {
+    for (const [key, value] of Object.entries(observation.pageFacts)) sections.set(key, value)
+  }
+  return [...sections.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([section, value]) => sectionValueSummary(section, value))
+}
+
+function rawArtifactSection(
+  artifact: Record<string, unknown>,
+  section: string
+): unknown {
+  const observation = artifact.observation as Record<string, unknown>
+  if (section === 'observation') return artifactSectionCatalog(observation)
+  if (Object.hasOwn(observation, section) && section !== 'pageFacts') return observation[section]
+  if (isRecord(observation.pageFacts) && Object.hasOwn(observation.pageFacts, section)) {
+    return observation.pageFacts[section]
+  }
+  throw new Error('BROWSER_ARTIFACT_SECTION_NOT_FOUND')
+}
+
+function contentFits(value: unknown): boolean {
+  return Buffer.byteLength(JSON.stringify(value, null, 2), 'utf8') <=
+    BROWSER_ARTIFACT_SECTION_RESULT_BYTES
+}
+
+function scalarChunk(value: string, offset: number, build: (chunk: string, complete: boolean) => unknown): {
+  chunk: string
+  nextOffset: number
+  complete: boolean
+} {
+  const scalars = Array.from(value)
+  if (offset >= scalars.length) return { chunk: '', nextOffset: scalars.length, complete: true }
+  let low = 1
+  let high = scalars.length - offset
+  let best = 0
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2)
+    const chunk = scalars.slice(offset, offset + middle).join('')
+    const complete = offset + middle >= scalars.length
+    if (contentFits(build(chunk, complete))) {
+      best = middle
+      low = middle + 1
+    } else {
+      high = middle - 1
+    }
+  }
+  if (best === 0) throw new Error('BROWSER_ARTIFACT_SECTION_ITEM_TOO_LARGE')
+  return {
+    chunk: scalars.slice(offset, offset + best).join(''),
+    nextOffset: offset + best,
+    complete: offset + best >= scalars.length
+  }
+}
+
+function buildSectionPage(input: {
+  artifactRef: string
+  section: string
+  value: unknown
+  cursor: BrowserArtifactSectionCursor
+}): Record<string, unknown> {
+  const base = {
+    action: 'read-section',
+    artifactRef: input.artifactRef,
+    section: input.section
+  }
+  if (typeof input.value === 'string') {
+    if (input.cursor.offset !== 0) throw new Error('BROWSER_ARTIFACT_CURSOR_INVALID')
+    const page = scalarChunk(input.value, input.cursor.textOffset, (text, complete) => ({
+      ...base,
+      kind: 'text',
+      text,
+      complete,
+      ...(complete ? {} : { nextCursor: 'cursor' })
+    }))
+    const nextCursor = page.complete
+      ? undefined
+      : encodeSectionCursor({ ...input.cursor, textOffset: page.nextOffset })
+    return {
+      ...base,
+      kind: 'text',
+      text: page.chunk,
+      complete: page.complete,
+      ...(nextCursor ? { nextCursor } : {})
+    }
+  }
+
+  const entries = Array.isArray(input.value)
+    ? input.value.map((value, index) => ({ index, value }))
+    : isRecord(input.value)
+      ? Object.entries(input.value).map(([key, value]) => ({ key, value }))
+      : undefined
+  if (!entries) {
+    if (input.cursor.offset !== 0 || input.cursor.textOffset !== 0) {
+      throw new Error('BROWSER_ARTIFACT_CURSOR_INVALID')
+    }
+    return { ...base, kind: 'value', value: input.value, complete: true }
+  }
+  if (input.cursor.offset > entries.length) throw new Error('BROWSER_ARTIFACT_CURSOR_INVALID')
+  if (input.cursor.textOffset > 0 && (
+    input.cursor.offset >= entries.length ||
+    typeof entries[input.cursor.offset]?.value !== 'string'
+  )) {
+    throw new Error('BROWSER_ARTIFACT_CURSOR_INVALID')
+  }
+  const pageEntries: Array<Record<string, unknown>> = []
+  let offset = input.cursor.offset
+  while (offset < entries.length && pageEntries.length < BROWSER_ARTIFACT_SECTION_MAX_ENTRIES) {
+    const entry = entries[offset]
+    if (typeof entry.value === 'string' && input.cursor.textOffset > 0) {
+      const textPage = scalarChunk(entry.value, input.cursor.textOffset, (text, valueComplete) => ({
+        ...base,
+        kind: 'entries',
+        entries: [{ ...entry, value: text, valueComplete }],
+        complete: false,
+        nextCursor: 'cursor'
+      }))
+      const nextOffset = textPage.complete ? offset + 1 : offset
+      const complete = nextOffset >= entries.length
+      const nextCursor = complete
+        ? undefined
+        : encodeSectionCursor({
+            ...input.cursor,
+            offset: nextOffset,
+            textOffset: textPage.complete ? 0 : textPage.nextOffset
+          })
+      return {
+        ...base,
+        kind: 'entries',
+        entries: [{ ...entry, value: textPage.chunk, valueComplete: textPage.complete }],
+        complete,
+        ...(nextCursor ? { nextCursor } : {})
+      }
+    }
+    const candidate = [...pageEntries, { ...entry, valueComplete: true }]
+    const complete = offset + 1 >= entries.length
+    if (!contentFits({
+      ...base,
+      kind: 'entries',
+      entries: candidate,
+      complete,
+      ...(complete ? {} : { nextCursor: 'cursor' })
+    })) {
+      if (pageEntries.length > 0) break
+      if (typeof entry.value !== 'string') {
+        throw new Error('BROWSER_ARTIFACT_SECTION_ITEM_TOO_LARGE')
+      }
+      const textPage = scalarChunk(entry.value, 0, (text, valueComplete) => ({
+        ...base,
+        kind: 'entries',
+        entries: [{ ...entry, value: text, valueComplete }],
+        complete: false,
+        nextCursor: 'cursor'
+      }))
+      const nextOffset = textPage.complete ? offset + 1 : offset
+      const complete = nextOffset >= entries.length
+      const nextCursor = complete
+        ? undefined
+        : encodeSectionCursor({
+            ...input.cursor,
+            offset: nextOffset,
+            textOffset: textPage.complete ? 0 : textPage.nextOffset
+          })
+      return {
+        ...base,
+        kind: 'entries',
+        entries: [{ ...entry, value: textPage.chunk, valueComplete: textPage.complete }],
+        complete,
+        ...(nextCursor ? { nextCursor } : {})
+      }
+    }
+    pageEntries.push(...candidate.slice(pageEntries.length))
+    offset += 1
+  }
+  const complete = offset >= entries.length
+  return {
+    ...base,
+    kind: 'entries',
+    entries: pageEntries,
+    complete,
+    ...(complete
+      ? {}
+      : { nextCursor: encodeSectionCursor({ ...input.cursor, offset, textOffset: 0 }) })
+  }
 }
 
 /**
@@ -522,6 +920,48 @@ export class PluginBrowserCapabilityModule {
 
   reset(sessionId: string): void {
     this.baselines.delete(sessionId)
+  }
+
+  readSection(input: BrowserArtifactSectionInput): ToolExecutionResult {
+    try {
+      const artifact = readBrowserArtifactIndex(input.workspaceDirectory, input.artifactRef)
+      const cursor = decodeSectionCursor(input.cursor, input.artifactRef, input.section)
+      const raw = rawArtifactSection(artifact, input.section)
+      const value = resolveArtifactTextReferences(path.resolve(input.workspaceDirectory), raw)
+      const page = buildSectionPage({
+        artifactRef: input.artifactRef,
+        section: input.section,
+        value,
+        cursor
+      })
+      return {
+        ok: true,
+        content: JSON.stringify(page, null, 2),
+        structured: {
+          action: 'read-section',
+          artifactRef: input.artifactRef,
+          section: input.section,
+          complete: page.complete,
+          ...(typeof page.nextCursor === 'string' ? { nextCursor: page.nextCursor } : {})
+        }
+      }
+    } catch (error) {
+      const code = error instanceof Error && error.message.startsWith('BROWSER_ARTIFACT_')
+        ? error.message
+        : 'BROWSER_ARTIFACT_READ_FAILED'
+      const messages: Record<string, string> = {
+        BROWSER_ARTIFACT_PATH_INVALID: 'artifactRef 必须指向当前工作区 .javdex/browser 内的 artifact。',
+        BROWSER_ARTIFACT_NOT_FOUND: 'browser artifact 不存在或已失效。',
+        BROWSER_ARTIFACT_INVALID: 'browser artifact 格式无效。',
+        BROWSER_ARTIFACT_SECTION_NOT_FOUND: 'browser artifact 中不存在请求的 section。',
+        BROWSER_ARTIFACT_CURSOR_INVALID: 'read-section cursor 无效、已过期或属于其他 section。',
+        BROWSER_ARTIFACT_SECTION_ITEM_TOO_LARGE: '该 section 的单项过大；请改用 browser find 或局部 html。'
+      }
+      return artifactSectionError(
+        code,
+        messages[code] ?? (error instanceof Error ? error.message : String(error))
+      )
+    }
   }
 
   async execute(input: BrowserCapabilityInput): Promise<ToolExecutionResult> {

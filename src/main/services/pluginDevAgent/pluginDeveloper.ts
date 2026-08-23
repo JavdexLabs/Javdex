@@ -19,7 +19,7 @@ import type {
 } from '@shared/pluginDevTypes'
 import { agentConfiguration } from '../../agent-platform/agentConfiguration'
 import { agentExecution } from '../../agent-platform/agentExecution'
-import { agentRunStore } from '../../agent-platform/agentRunStore'
+import { agentRunStore, type AgentRunStatus } from '../../agent-platform/agentRunStore'
 import { createCacheAffinityId } from '../../agent-platform/cacheAffinity'
 import { modelControlPlane } from '../../agent-platform/modelControlPlane'
 import { toolHost } from '../../agent-platform/toolHost'
@@ -49,11 +49,16 @@ import {
 } from './sessionStore'
 import { createPluginDeveloperToolHandlers } from './toolPack'
 import type { PluginDevSession } from './types'
+import { pluginArtifactHash } from './pluginArtifact'
+import { isPluginExecutionUnmatchedTargets } from './pluginExecution'
 import { pluginWorkspace } from './pluginWorkspace'
-import { pluginRunAcceptance } from './pluginRunAcceptance'
 import {
-  releasePluginDeveloperBrowser,
-  requiresPluginDeveloperBrowserLease
+  pluginRunAcceptance,
+  projectPluginRunAcceptance,
+  type PluginRunAcceptanceProjection
+} from './pluginRunAcceptance'
+import {
+  releasePluginDeveloperBrowser
 } from './toolExecutor'
 
 interface PluginDeveloperProductState extends Record<string, unknown> {
@@ -84,6 +89,26 @@ interface PluginDeveloperProductState extends Record<string, unknown> {
 interface LegacyPluginDeveloperProductState extends Record<string, unknown> {
   schemaVersion: 5 | 6
   lastExecution?: Record<string, unknown>
+}
+
+function persistCurrentAcceptance(
+  session: PluginDevSession,
+  projection: PluginRunAcceptanceProjection
+): void {
+  if (!session.workspaceDirectory) return
+  try {
+    pluginWorkspace.updateCurrentAcceptance(session.workspaceDirectory, projection)
+  } catch (error) {
+    console.error('[plugin-dev] failed to persist current acceptance projection', error)
+  }
+}
+
+function invalidateRecoverableExecution(
+  session: PluginDevSession,
+  projection: PluginRunAcceptanceProjection
+): void {
+  invalidateExecution(session)
+  persistCurrentAcceptance(session, projection)
 }
 
 function legacyExecutionForDisplay(value: unknown): PluginExecutionArtifact | undefined {
@@ -245,6 +270,17 @@ function runStatus(session: PluginDevSession): 'running' | 'waiting_user' | 'set
   return 'running'
 }
 
+const PLUGIN_DEV_RECOVERABLE_RUN_STATUSES = new Set<AgentRunStatus>([
+  'created',
+  'running',
+  'recovering',
+  'waiting_user'
+])
+
+function isRecoverablePluginDevRunStatus(status: AgentRunStatus): boolean {
+  return PLUGIN_DEV_RECOVERABLE_RUN_STATUSES.has(status)
+}
+
 export class PluginDeveloper {
   private readonly active = new Map<string, ActivePluginRun>()
   private readonly releases = new Map<string, {
@@ -278,7 +314,10 @@ export class PluginDeveloper {
       // This also upgrades old runs whose result keys were previously filtered silently.
       session.workspaceDraftError =
         `插件工作区当前无效，请检查 plugin.json 或 index.js：${error instanceof Error ? error.message : String(error)}`
-      invalidateExecution(session)
+      invalidateRecoverableExecution(session, {
+        installReady: false,
+        reasons: ['workspace_invalid']
+      })
       return
     }
     session.package = snapshot.package
@@ -289,10 +328,21 @@ export class PluginDeveloper {
     const wasInvalid = Boolean(active.session.workspaceDraftError)
     const snapshot = pluginWorkspace.snapshot(active.session.workspaceDirectory)
     const changed = fingerprintValue(snapshot.package) !== fingerprintValue(active.session.package)
+    const runtimeChanged = pluginArtifactHash(snapshot.package) !== pluginArtifactHash(active.session.package)
     active.session.workspaceDraftError = undefined
     if (changed) {
       active.session.package = snapshot.package
-      invalidateExecution(active.session)
+      if (runtimeChanged) {
+        const stale = pluginRunAcceptance.evaluate({
+          package: snapshot.package,
+          targets: active.session.runTargets,
+          execution: active.session.lastExecution
+        })
+        invalidateRecoverableExecution(
+          active.session,
+          projectPluginRunAcceptance(stale)
+        )
+      }
       this.emitDomainEvent(active, {
         type: 'package_updated',
         sessionId: active.session.id,
@@ -653,7 +703,10 @@ export class PluginDeveloper {
           const firstInvalidObservation = !session.workspaceDraftError
           session.workspaceDraftError =
             `插件工作区当前无效，请检查 plugin.json 或 index.js：${error instanceof Error ? error.message : String(error)}`
-          invalidateExecution(session)
+          invalidateRecoverableExecution(session, {
+            installReady: false,
+            reasons: ['workspace_invalid']
+          })
           active.summary = session.workspaceDraftError
           if (firstInvalidObservation) {
             this.emitDomainEvent(active, {
@@ -687,9 +740,6 @@ export class PluginDeveloper {
           this.settleAgentTurn(active)
         }
       }
-      if (!requiresPluginDeveloperBrowserLease(session.pendingUserRequest)) {
-        void releasePluginDeveloperBrowser(session.id)
-      }
       const waiter = active.waiter
       active.waiter = undefined
       waiter?.resolve(toResult(active))
@@ -709,13 +759,17 @@ export class PluginDeveloper {
     } catch (error) {
       session.workspaceDraftError =
         `插件工作区当前无效，请检查 plugin.json 或 index.js：${error instanceof Error ? error.message : String(error)}`
-      invalidateExecution(session)
+      invalidateRecoverableExecution(session, {
+        installReady: false,
+        reasons: ['workspace_invalid']
+      })
     }
     const existing = pluginRunAcceptance.evaluate({
-        package: session.package,
-        targets: session.runTargets,
-        execution: session.lastExecution
-      })
+      package: session.package,
+      targets: session.runTargets,
+      execution: session.lastExecution
+    })
+    persistCurrentAcceptance(session, projectPluginRunAcceptance(existing))
     session.acceptance = existing.outcome
     session.status = 'waiting_user'
     session.phase = existing.ready ? 'ready' : 'working'
@@ -735,7 +789,9 @@ export class PluginDeveloper {
           ? `${session.workspaceDraftError} 请继续 Agent 修复后显式调用完整 plugin_dry_run。`
           : session.runTargets.length === 0
             ? 'Agent 本轮已停止；尚无运行目标，请继续 Agent 发现目标并显式调用完整 plugin_dry_run。'
-            : 'Agent 本轮已停止；当前草稿缺少匹配的完整机械验收，请继续 Agent 并显式调用完整 plugin_dry_run。'
+            : session.lastExecution && isPluginExecutionUnmatchedTargets(session.lastExecution)
+              ? 'Agent 本轮已停止；当前测试目标没有精确匹配，空结果不能安装。请继续 Agent，用站点上已观察的真实目标调用 plugin_dry_run。'
+              : 'Agent 本轮已停止；当前草稿缺少匹配的完整机械验收，请继续 Agent 并显式调用完整 plugin_dry_run。'
     )
     this.emitDomainEvent(active, {
       type: 'waiting_user',
@@ -850,6 +906,7 @@ export class PluginDeveloper {
       targets: session.runTargets,
       execution: session.lastExecution
     })
+    persistCurrentAcceptance(session, projectPluginRunAcceptance(acceptance))
     if (!acceptance.ready) {
       session.lastExecution = undefined
       session.acceptance = undefined
@@ -919,7 +976,7 @@ export class PluginDeveloper {
     const failures: Array<{ runId: string; error: string }> = []
     for (const record of agentRunStore.listRecoverableRuns()) {
       if (record.useCase !== 'plugin-developer' || this.active.has(record.id)) continue
-      if (!['created', 'running', 'recovering', 'waiting_user'].includes(record.status)) continue
+      if (!isRecoverablePluginDevRunStatus(record.status)) continue
       let active: ActivePluginRun | undefined
       try {
         const state = record.productState as PluginDeveloperProductState
@@ -1277,18 +1334,26 @@ export class PluginDeveloper {
       const option = pending.options.find((item) => item.id === response.optionId)
       if (!option) throw new Error('选择项不存在或已过期')
       if (!session.workspaceDirectory) throw new Error('插件工作区尚未初始化')
-      pluginWorkspace.recordDecision(session.workspaceDirectory, {
+      const decision = {
         requestId: pending.requestId,
-        optionId: option.id,
-        label: option.label
-      })
+        question: pending.prompt,
+        selectedOption: {
+          id: option.id,
+          label: option.label,
+          ...(option.description ? { description: option.description } : {})
+        },
+        evidenceRefs: [...pending.evidenceRefs]
+      }
+      pluginWorkspace.recordDecision(session.workspaceDirectory, decision)
       session.pendingUserRequest = undefined
       return {
         prompt: buildContinuation({
           kind: 'choice_resolved',
-          decision: { optionId: option.id, label: option.label }
+          decision
         }),
-        transcriptText: `用户针对请求 ${pending.requestId} 选择了「${option.label}」（optionId=${option.id}）。`,
+        transcriptText:
+          `用户针对“${pending.prompt}”选择了「${option.label}」（optionId=${option.id}）` +
+          `${option.description ? `：${option.description}` : '。'}`,
         updatesInstruction: false
       }
     }
@@ -1487,6 +1552,10 @@ ${continuationPrompt}`
     }
   }
 
+  async releaseBrowser(sessionId: string): Promise<void> {
+    await releasePluginDeveloperBrowser(sessionId)
+  }
+
   async cancel(sessionId: string): Promise<void> {
     const active = this.active.get(sessionId)
     cancelSession(sessionId)
@@ -1508,36 +1577,30 @@ ${continuationPrompt}`
     }
   }
 
-  /**
-   * Retire all persisted PluginDeveloper runs so opening the workbench starts clean.
-   * Closed runs remain available to platform retention/audit policy, but are excluded from
-   * recovery and from the unscoped "latest run" snapshot used by the renderer.
-   */
-  async clearHistory(): Promise<number> {
-    const initialIds = new Set(
+  private collectPluginDevRunIds(): Set<string> {
+    const ids = new Set(
       agentRunStore
         .listRecoverableRuns()
         .filter((record) => record.useCase === 'plugin-developer')
         .map((record) => record.id)
     )
-    for (const runId of this.active.keys()) initialIds.add(runId)
+    for (const runId of this.active.keys()) ids.add(runId)
+    return ids
+  }
 
-    await Promise.all([...initialIds].map((runId) => this.waitForPriorRelease(runId)))
+  private isRecoverablePluginDevRun(runId: string): boolean {
+    const active = this.active.get(runId)
+    if (active?.waiter) return true
+    if (active?.session.status === 'running' || active?.session.status === 'waiting_user') {
+      return true
+    }
+    const record = agentRunStore.getRun(runId)
+    return Boolean(record && isRecoverablePluginDevRunStatus(record.status))
+  }
 
-    const targetIds = new Set(
-      agentRunStore
-        .listRecoverableRuns()
-        .filter((record) => record.useCase === 'plugin-developer')
-        .map((record) => record.id)
-    )
-    for (const runId of this.active.keys()) targetIds.add(runId)
-
-    const running = [...targetIds]
-      .map((runId) => this.active.get(runId))
-      .find((active) => active?.waiter || active?.session.status === 'running')
-    if (running) throw new Error('Agent 正在运行或收尾，请先终止并等待完成后再清除历史会话')
-
-    for (const runId of targetIds) {
+  private async retirePluginDevRuns(runIds: Iterable<string>): Promise<number> {
+    const unique = [...new Set(runIds)]
+    for (const runId of unique) {
       const active = this.active.get(runId)
       toolHost.discardApprovals(runId)
       toolHost.disposeRun(runId)
@@ -1546,7 +1609,35 @@ ${continuationPrompt}`
       deleteSession(runId)
       pluginWorkspace.remove(agentSessionDirectory(runId))
     }
-    return targetIds.size
+    return unique.length
+  }
+
+  /**
+   * Retire all persisted PluginDeveloper runs so opening the workbench starts clean.
+   * Closed runs remain available to platform retention/audit policy, but are excluded from
+   * recovery and from the unscoped "latest run" snapshot used by the renderer.
+   */
+  async clearHistory(): Promise<number> {
+    const initialIds = this.collectPluginDevRunIds()
+    await Promise.all([...initialIds].map((runId) => this.waitForPriorRelease(runId)))
+    const targetIds = this.collectPluginDevRunIds()
+    const running = [...targetIds]
+      .map((runId) => this.active.get(runId))
+      .find((active) => active?.waiter || active?.session.status === 'running')
+    if (running) throw new Error('Agent 正在运行或收尾，请先终止并等待完成后再清除历史会话')
+    return this.retirePluginDevRuns(targetIds)
+  }
+
+  /**
+   * Close installed, failed, cancelled and other terminal PluginDeveloper runs that the
+   * current workbench will not restore. Keep running / waiting_user sessions.
+   */
+  async discardUnrecoverableSessions(): Promise<number> {
+    const initialIds = this.collectPluginDevRunIds()
+    await Promise.all([...initialIds].map((runId) => this.waitForPriorRelease(runId)))
+    return this.retirePluginDevRuns(
+      [...this.collectPluginDevRunIds()].filter((runId) => !this.isRecoverablePluginDevRun(runId))
+    )
   }
 
   async dispose(): Promise<void> {

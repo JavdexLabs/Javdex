@@ -1,6 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { PluginDevAgentStartInput, PluginDevRunTarget } from '@shared/pluginDevTypes'
+import type {
+  PluginDevAgentStartInput,
+  PluginDevChoiceDecision,
+  PluginDevRunTarget
+} from '@shared/pluginDevTypes'
 import {
   configuredRunTargets,
   normalizeRunTargets,
@@ -13,6 +17,7 @@ import {
   buildRunInstructionSet,
   PLUGIN_DEV_INSTRUCTION_SET_VERSION
 } from './pluginDevInstructions'
+import type { PluginRunAcceptanceProjection } from './pluginRunAcceptance'
 
 const MANIFEST_FILE = 'plugin.json'
 const CODE_FILE = 'index.js'
@@ -29,7 +34,7 @@ interface WorkspaceManifest extends Omit<ScraperPluginPackage, 'code'> {
 }
 
 export interface PluginDevLatestDryRun {
-  schemaVersion: 1
+  schemaVersion: 2
   status: 'completed'
   artifactHash: string
   reportPath: string
@@ -38,16 +43,22 @@ export interface PluginDevLatestDryRun {
   targetFingerprint: string
   executionPassed: boolean
   cases: Array<Record<string, unknown>>
+  currentAcceptance: PluginRunAcceptanceProjection
 }
 
 interface PluginDevInitialDryRunState {
-  schemaVersion: 1
+  schemaVersion: 2
   status: 'not_run'
+  currentAcceptance: PluginRunAcceptanceProjection
 }
 
 const INITIAL_DRY_RUN_STATE: PluginDevInitialDryRunState = {
-  schemaVersion: 1,
-  status: 'not_run'
+  schemaVersion: 2,
+  status: 'not_run',
+  currentAcceptance: {
+    installReady: false,
+    reasons: ['missing_execution']
+  }
 }
 
 const DEV_NOTES_TEMPLATE = `# 插件开发笔记
@@ -262,7 +273,7 @@ export class PluginWorkspaceModule {
 
   recordDecision(
     directoryInput: string,
-    decision: { requestId: string; optionId: string; label: string; at?: string }
+    decision: PluginDevChoiceDecision & { at?: string }
   ): void {
     const directory = assertWorkspacePath(directoryInput)
     const filePath = path.join(directory, DECISIONS_FILE)
@@ -293,6 +304,30 @@ export class PluginWorkspaceModule {
       path.join(directory, LATEST_DRY_RUN_FILE),
       `${JSON.stringify(latest, null, 2)}\n`
     )
+  }
+
+  updateCurrentAcceptance(
+    directoryInput: string,
+    currentAcceptance: PluginRunAcceptanceProjection
+  ): void {
+    const directory = assertWorkspacePath(directoryInput)
+    const filePath = path.join(directory, LATEST_DRY_RUN_FILE)
+    let current: Record<string, unknown> = { ...structuredClone(INITIAL_DRY_RUN_STATE) }
+    if (fs.existsSync(filePath)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as unknown
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          current = parsed as Record<string, unknown>
+        }
+      } catch {
+        // Replace an unreadable recovery projection without touching execution reports.
+      }
+    }
+    atomicWrite(filePath, `${JSON.stringify({
+      ...current,
+      schemaVersion: 2,
+      currentAcceptance
+    }, null, 2)}\n`)
   }
 
   remove(directoryInput: string): void {

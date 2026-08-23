@@ -14,17 +14,34 @@ export interface PluginRunAcceptanceInput {
   execution?: PluginExecutionArtifact
 }
 
+export type PluginRunAcceptanceReason =
+  | 'missing_execution'
+  | 'execution_failed'
+  | 'wrong_scope'
+  | 'stale_runtime'
+  | 'stale_artifact'
+  | 'target_mismatch'
+
+export type PluginRunRecoveryReason = PluginRunAcceptanceReason | 'workspace_invalid'
+
+export interface PluginRunAcceptanceProjection {
+  installReady: boolean
+  reasons: PluginRunRecoveryReason[]
+}
+
 export interface PluginRunAcceptanceDecision {
   ready: boolean
-  reasons: Array<
-    | 'missing_execution'
-    | 'execution_failed'
-    | 'wrong_scope'
-    | 'stale_runtime'
-    | 'stale_artifact'
-    | 'target_mismatch'
-  >
+  reasons: PluginRunAcceptanceReason[]
   outcome?: PluginRunAcceptanceOutcome
+}
+
+export function projectPluginRunAcceptance(
+  decision: Pick<PluginRunAcceptanceDecision, 'ready' | 'reasons'>
+): PluginRunAcceptanceProjection {
+  return {
+    installReady: decision.ready,
+    reasons: [...decision.reasons]
+  }
 }
 
 /** Pure final gate: current full production execution is the only source of readiness. */

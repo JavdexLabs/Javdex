@@ -10,7 +10,7 @@ import type {
 } from '@shared/pluginDevTypes'
 import PluginDevConversation from './PluginDevConversation'
 import PluginDevResultPanel from './PluginDevResultPanel'
-import { agentPhaseLabel, type PluginDevAgentTab, type PluginDevConversationItem, type PluginKind } from './types'
+import { type PluginDevAgentTab, type PluginDevConversationItem, type PluginKind } from './types'
 import { WorkbenchRail, WorkbenchTabs } from '../workbench'
 
 export default function PluginDevAgentRail({
@@ -89,11 +89,6 @@ export default function PluginDevAgentRail({
   onExportWorkLog: () => void
 }): JSX.Element {
   const running = agentStatus === 'running' && busy
-  const phaseItems: PluginDevAgentPhase[] = [
-    'working',
-    'checking',
-    'ready'
-  ]
 
   return (
     <WorkbenchRail className="plugin-dev-rail plugin-dev-rail--agent">
@@ -116,19 +111,6 @@ export default function PluginDevAgentRail({
         ]}
         onChange={onTabChange}
       />
-
-      <div className="plugin-dev-agent-flow" aria-label="Agent 流程">
-        <div className="plugin-dev-phase-track">
-          {phaseItems.map((phase) => (
-            <span
-              key={phase}
-              className={`plugin-dev-phase-chip ${agentPhase === phase ? 'is-active' : ''}`}
-            >
-              {agentPhaseLabel(phase)}
-            </span>
-          ))}
-        </div>
-      </div>
 
       <div className="plugin-dev-agent-body">
         <div

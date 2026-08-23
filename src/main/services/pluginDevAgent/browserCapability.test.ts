@@ -26,7 +26,7 @@ describe('PluginBrowserCapabilityModule', () => {
     assert.equal(browserCapabilityResultLimitBytes('snapshot'), 64_000)
   })
 
-  it('keeps the complete ARIA when page facts make a new-document result exceed its budget', async () => {
+  it('inlines complete small page-fact sections instead of keeping an oversized snapshot', async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-browser-capability-'))
     directories.push(directory)
     const module = new PluginBrowserCapabilityModule()
@@ -110,9 +110,12 @@ describe('PluginBrowserCapabilityModule', () => {
     assert.equal(compact.action, 'open')
     assert.equal(compact.url, 'https://example.test/MILK-181')
     assert.equal(compact.title, 'MILK-181 detail')
-    assert.match(String(compact.snapshot), /MILK-181 detail/)
-    assert.match(String(compact.snapshot), /發行日期/)
-    assert.match(String(compact.snapshot), /样张 13/)
+    const packedFacts = compact.pageFacts as {
+      labeledRows?: typeof pageFacts.labeledRows
+      links?: typeof pageFacts.links
+      headings?: string[]
+      metadata?: Record<string, string>
+    } | undefined
     assert.equal(compact.observationMode, 'artifact')
     assert.equal(compact.inlineComplete, false)
     assert.equal(compact.artifactComplete, true)
@@ -120,17 +123,26 @@ describe('PluginBrowserCapabilityModule', () => {
     assert.equal(compact.evidenceIncomplete, false)
     assert.equal(compact.truncated, undefined)
     assert.equal(compact.compactResult, undefined)
-    assert.equal(compact.pageFacts, undefined)
-    assert.deepEqual(compact.omittedInlineSections, ['pageFacts'])
-    assert.deepEqual(
-      (compact.pageFactsSummary as Array<Record<string, unknown>>)
-        .find((item) => item.section === 'links'),
-      {
-        section: 'links',
-        byteLength: Buffer.byteLength(JSON.stringify(pageFacts.links), 'utf8'),
-        itemCount: 500
-      }
-    )
+    assert.ok((compact.omittedInlineSections as string[]).includes('snapshot'))
+    assert.equal(compact.snapshot, undefined)
+    assert.deepEqual(packedFacts?.labeledRows, pageFacts.labeledRows)
+    assert.deepEqual(packedFacts?.headings, pageFacts.headings)
+    assert.deepEqual(packedFacts?.metadata, pageFacts.metadata)
+    if (packedFacts?.links) {
+      assert.equal(packedFacts.links.length, 500)
+      assert.equal(packedFacts.links.at(-1)?.text, '页面链接 500')
+    } else {
+      assert.deepEqual(
+        (compact.pageFactsSummary as Array<Record<string, unknown>>)
+          .find((item) => item.section === 'links'),
+        {
+          section: 'links',
+          byteLength: Buffer.byteLength(JSON.stringify(pageFacts.links), 'utf8'),
+          itemCount: 500
+        }
+      )
+    }
+    assert.deepEqual(compact.nextActions, ['find', 'html', 'read-section'])
     assert.equal(first.structured?.artifactRef, second.structured?.artifactRef)
     const unchanged = JSON.parse(second.content) as Record<string, unknown>
     assert.equal(unchanged.observationMode, 'unchanged')
@@ -148,7 +160,180 @@ describe('PluginBrowserCapabilityModule', () => {
     assert.match(first.content, /artifactRef/)
   })
 
-  it('stores oversized artifact strings in native-read-friendly segments', async () => {
+  it('omits an oversized page-fact section as a whole and never returns a prefix', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-browser-capability-omit-section-'))
+    directories.push(directory)
+    const module = new PluginBrowserCapabilityModule()
+    const labeledRows = [
+      { label: '發行日期', value: '2023-08-03', links: [] },
+      { label: '番號', value: 'MILK-181', links: [] }
+    ]
+    const links = Array.from({ length: 2_000 }, (_, index) => ({
+      text: `页面链接 ${index + 1}`,
+      href: `/links/${index + 1}`
+    }))
+    const result = await module.execute({
+      sessionId: 'session-omit-links',
+      workspaceDirectory: directory,
+      action: 'open',
+      args: { url: 'https://example.test/MILK-181' },
+      run: async () => ({
+        ok: true,
+        content: '',
+        structured: {
+          observation: {
+            action: 'open',
+            documentRevision: '1:1',
+            url: 'https://example.test/MILK-181',
+            title: 'MILK-181 detail',
+            snapshot: '- heading "MILK-181 detail" [ref=e1]',
+            pageFacts: { labeledRows, links }
+          },
+          fullSnapshot: '- heading "MILK-181 detail" [ref=e1]'
+        }
+      })
+    })
+    const compact = JSON.parse(result.content) as Record<string, unknown>
+    const packedFacts = compact.pageFacts as {
+      labeledRows?: typeof labeledRows
+      links?: typeof links
+    } | undefined
+
+    assert.ok(Buffer.byteLength(result.content, 'utf8') <= browserCapabilityResultLimitBytes('open'))
+    assert.equal(compact.inlineComplete, false)
+    assert.deepEqual(packedFacts?.labeledRows, labeledRows)
+    assert.equal(packedFacts?.links, undefined)
+    assert.ok((compact.omittedInlineSections as string[]).includes('links'))
+    assert.doesNotMatch(result.content, /页面链接 1/)
+    assert.doesNotMatch(result.content, /页面链接 2000/)
+    const linksSummary = (compact.pageFactsSummary as Array<Record<string, unknown>>)
+      .find((item) => item.section === 'links')
+    assert.equal(linksSummary?.section, 'links')
+    assert.equal(linksSummary?.itemCount, 2_000)
+    assert.ok(Number(linksSummary?.byteLength) > 0)
+    assert.deepEqual(compact.nextActions, ['find', 'html', 'read-section'])
+  })
+
+  it('returns an omitted artifact section through bounded cursor pages', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-browser-section-pages-'))
+    directories.push(directory)
+    const module = new PluginBrowserCapabilityModule()
+    const links = Array.from({ length: 2_000 }, (_, index) => ({
+      text: `页面链接 ${index + 1}`,
+      href: `https://example.test/links/${index + 1}`
+    }))
+    const observation = await module.execute({
+      sessionId: 'session-section-pages',
+      workspaceDirectory: directory,
+      action: 'open',
+      args: { url: 'https://example.test/detail' },
+      run: async () => ({
+        ok: true,
+        content: '',
+        structured: {
+          observation: {
+            action: 'open',
+            documentRevision: '1:1',
+            url: 'https://example.test/detail',
+            snapshot: '- heading "detail" [ref=e1]',
+            pageFacts: { links }
+          },
+          fullSnapshot: '- heading "detail" [ref=e1]'
+        }
+      })
+    })
+    const artifactRef = String(observation.structured?.artifactRef)
+    const received: Array<{ text: string; href: string }> = []
+    let cursor: string | undefined
+    let pages = 0
+    do {
+      const result = module.readSection({
+        workspaceDirectory: directory,
+        artifactRef,
+        section: 'links',
+        ...(cursor ? { cursor } : {})
+      })
+      const page = JSON.parse(result.content) as {
+        entries: Array<{ value: { text: string; href: string } }>
+        complete: boolean
+        nextCursor?: string
+      }
+      assert.equal(result.ok, true)
+      assert.ok(Buffer.byteLength(result.content, 'utf8') <= 20_000)
+      assert.doesNotMatch(result.content, /\$artifactTextRef|\.part-/)
+      received.push(...page.entries.map((entry) => entry.value))
+      cursor = page.nextCursor
+      pages += 1
+      assert.ok(pages < 30)
+    } while (cursor)
+
+    assert.deepEqual(received, links)
+    assert.ok(pages > 1)
+  })
+
+  it('rejects read-section paths outside the browser artifact directory', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-browser-section-path-'))
+    directories.push(directory)
+    const module = new PluginBrowserCapabilityModule()
+
+    const result = module.readSection({
+      workspaceDirectory: directory,
+      artifactRef: 'plugin.json',
+      section: 'snapshot'
+    })
+
+    assert.equal(result.ok, false)
+    assert.equal(result.structured?.code, 'BROWSER_ARTIFACT_PATH_INVALID')
+  })
+
+  it('keeps a small localeLinks section when snapshot and content links are omitted', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-browser-capability-locale-'))
+    directories.push(directory)
+    const module = new PluginBrowserCapabilityModule()
+    const localeLinks = [
+      { text: '简体中文', href: 'https://example.test/cn', rawHref: '/cn' },
+      { text: '繁體中文', href: 'https://example.test/', rawHref: '/' }
+    ]
+    const links = Array.from({ length: 2_000 }, (_, index) => ({
+      text: `页面链接 ${index + 1}`,
+      href: `/links/${index + 1}`
+    }))
+    const snapshot = `${'- link "广告和推荐内容" [ref=ad]\n'.repeat(800)}`
+    const result = await module.execute({
+      sessionId: 'session-locale-links',
+      workspaceDirectory: directory,
+      action: 'open',
+      args: { url: 'https://example.test/' },
+      run: async () => ({
+        ok: true,
+        content: '',
+        structured: {
+          observation: {
+            action: 'open',
+            documentRevision: '1:1',
+            url: 'https://example.test/',
+            title: 'Home',
+            snapshot,
+            pageFacts: { links, localeLinks }
+          },
+          fullSnapshot: snapshot
+        }
+      })
+    })
+    const compact = JSON.parse(result.content) as Record<string, unknown>
+    const packedFacts = compact.pageFacts as {
+      links?: typeof links
+      localeLinks?: typeof localeLinks
+    } | undefined
+
+    assert.ok(Buffer.byteLength(result.content, 'utf8') <= browserCapabilityResultLimitBytes('open'))
+    assert.equal(compact.inlineComplete, false)
+    assert.ok((compact.omittedInlineSections as string[]).includes('links'))
+    assert.equal(packedFacts?.links, undefined)
+    assert.deepEqual(packedFacts?.localeLinks, localeLinks)
+  })
+
+  it('hides oversized artifact string segments behind read-section pagination', async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-browser-readable-artifact-'))
     directories.push(directory)
     const module = new PluginBrowserCapabilityModule()
@@ -192,6 +377,27 @@ describe('PluginBrowserCapabilityModule', () => {
       String(result.structured?.artifactRef)
     ) as unknown as { observation: { snapshot: string } }
     assert.equal(artifact.observation.snapshot, fullSnapshot)
+
+    let cursor: string | undefined
+    let reconstructed = ''
+    do {
+      const section = module.readSection({
+        workspaceDirectory: directory,
+        artifactRef: String(result.structured?.artifactRef),
+        section: 'snapshot',
+        ...(cursor ? { cursor } : {})
+      })
+      const page = JSON.parse(section.content) as {
+        text: string
+        nextCursor?: string
+      }
+      assert.equal(section.ok, true)
+      assert.ok(Buffer.byteLength(section.content, 'utf8') <= 20_000)
+      assert.doesNotMatch(section.content, /\$artifactTextRef|\.part-/)
+      reconstructed += page.text
+      cursor = page.nextCursor
+    } while (cursor)
+    assert.equal(reconstructed, fullSnapshot)
   })
 
   it('returns every captured page-fact item when the complete observation fits', async () => {
@@ -267,8 +473,17 @@ describe('PluginBrowserCapabilityModule', () => {
     assert.ok(Buffer.byteLength(result.content, 'utf8') <= browserCapabilityResultLimitBytes('open'))
     assert.equal(observation.observationMode, 'artifact')
     assert.equal(observation.inlineComplete, false)
-    assert.deepEqual(observation.omittedInlineSections, ['observation'])
-    assert.deepEqual(observation.nextActions, ['read-artifact'])
+    const packedFacts = observation.pageFacts as Record<string, unknown> | undefined
+    if (packedFacts) {
+      for (const value of Object.values(packedFacts)) {
+        assert.ok(Array.isArray(value))
+        assert.equal((value as unknown[]).length, 1)
+      }
+      assert.deepEqual(observation.nextActions, ['find', 'html', 'read-section'])
+    } else {
+      assert.deepEqual(observation.omittedInlineSections, ['observation'])
+      assert.deepEqual(observation.nextActions, ['read-section'])
+    }
   })
 
   it('marks evidence incomplete only when the complete page evidence was actually capped', async () => {
@@ -376,6 +591,79 @@ describe('PluginBrowserCapabilityModule', () => {
     assert.equal(artifact.observation.snapshot, after)
   })
 
+  it('records a newly appeared pageFacts section after fill without throwing', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-browser-capability-fill-delta-'))
+    directories.push(directory)
+    const module = new PluginBrowserCapabilityModule()
+    const snapshot = [
+      '- main:',
+      '  - textbox "search" [ref=e1]',
+      '  - button "search" [ref=e2]'
+    ].join('\n')
+    const pageFacts = {
+      forms: [{ selector: 'form.search', action: '', method: 'get' }],
+      links: []
+    }
+    await module.execute({
+      sessionId: 'session-fill-delta',
+      workspaceDirectory: directory,
+      action: 'open',
+      args: { url: 'https://example.test/' },
+      run: async () => ({
+        ok: true,
+        content: '',
+        structured: {
+          observation: {
+            action: 'open',
+            documentRevision: '1:1',
+            url: 'https://example.test/',
+            title: 'Home',
+            snapshot,
+            pageFacts
+          },
+          fullSnapshot: snapshot
+        }
+      })
+    })
+    const result = await module.execute({
+      sessionId: 'session-fill-delta',
+      workspaceDirectory: directory,
+      action: 'fill',
+      args: { target: 'e1', text: 'ABC-123' },
+      run: async () => ({
+        ok: true,
+        content: '',
+        structured: {
+          observation: {
+            action: 'fill',
+            actionSucceeded: true,
+            documentRevision: '1:1',
+            url: 'https://example.test/',
+            title: 'Home',
+            snapshot,
+            pageFacts: {
+              ...pageFacts,
+              recentRequests: [
+                { method: 'GET', url: 'https://example.test/search', resourceType: 'Document' }
+              ]
+            }
+          },
+          fullSnapshot: snapshot
+        }
+      })
+    })
+    const compact = JSON.parse(result.content) as Record<string, unknown>
+    assert.equal(compact.observationMode, 'delta')
+    assert.deepEqual(compact.pageFactsDelta, {
+      changed: {
+        recentRequests: [
+          { method: 'GET', url: 'https://example.test/search', resourceType: 'Document' }
+        ]
+      },
+      removedKeys: []
+    })
+  })
+
   it('falls back explicitly to the artifact when a complete delta exceeds its budget', async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-browser-capability-fallback-'))
     directories.push(directory)
@@ -412,7 +700,7 @@ describe('PluginBrowserCapabilityModule', () => {
     assert.equal(compact.ariaDelta, undefined)
     assert.equal(compact.evidenceIncomplete, false)
     assert.ok((compact.omittedInlineSections as string[]).includes('ariaDelta'))
-    assert.ok((compact.nextActions as string[]).includes('read-artifact'))
+    assert.deepEqual(compact.nextActions, ['find', 'html', 'read-section'])
     assert.ok(Buffer.byteLength(result.content, 'utf8') <= 12_000)
     const artifact = readBrowserArtifactBundle(
       directory,

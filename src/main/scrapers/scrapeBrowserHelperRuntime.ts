@@ -9,7 +9,17 @@ import {
   normalizeNetworkUrl
 } from './scrapeBrowserImageCache'
 import { cleanUserAgent, getScrapeUaProfile } from './scrapeUaProfile'
-import { prioritizeInspectLinks } from './scrapeBrowserInspect'
+import { ActionNetworkCapture } from './scrapeBrowserActionNetwork'
+import {
+  INSPECT_INLINE_SCRIPT_TEXT_LIMIT,
+  INSPECT_MAX_INLINE_SCRIPTS,
+  INSPECT_MAX_LOCALE_LINKS,
+  INSPECT_MAX_SCRIPT_SRCS,
+  inspectLinkRawHref,
+  prioritizeInspectLinks,
+  selectInspectLocaleLinks,
+  selectInspectScriptSrcs
+} from './scrapeBrowserInspect'
 import {
   prepareBrowserEvaluate,
   runPreparedBrowserEvaluate
@@ -173,6 +183,7 @@ export class ScrapeBrowserHelperRuntime {
   ): void => {
     this.handleDebuggerNetworkMessage(method, params)
   }
+  private readonly actionNetwork = new ActionNetworkCapture()
 
   constructor(private readonly onWindowClosed?: () => void) {}
 
@@ -181,6 +192,7 @@ export class ScrapeBrowserHelperRuntime {
     const win = this.ensureWindow()
     await this.ensureStealth(win)
     signal?.throwIfAborted()
+    win.show()
     return { targetId: win.webContents.getOrCreateDevToolsTargetId() }
   }
 
@@ -271,7 +283,7 @@ export class ScrapeBrowserHelperRuntime {
     const win = new BrowserWindow({
       width: 1080,
       height: 820,
-      show: false,
+      show: true,
       title: '元数据刮削 · 浏览器',
       backgroundColor: '#101014',
       webPreferences: {
@@ -379,10 +391,17 @@ export class ScrapeBrowserHelperRuntime {
     if (!requestId) return
 
     if (method === 'Network.requestWillBeSent') {
-      const request = p.request as { url?: string } | undefined
+      const request = p.request as { url?: string; method?: string; postData?: string } | undefined
       this.rememberNetworkRequestUrl(requestId, request?.url)
       const redirect = p.redirectResponse as { url?: string } | undefined
       this.rememberNetworkRequestUrl(requestId, redirect?.url)
+      this.actionNetwork.rememberRequest({
+        requestId,
+        url: request?.url,
+        method: request?.method,
+        type: typeof p.type === 'string' ? p.type : '',
+        postData: request?.postData
+      })
       return
     }
 
@@ -394,6 +413,12 @@ export class ScrapeBrowserHelperRuntime {
       const type = typeof p.type === 'string' ? p.type : ''
       const status = typeof response?.status === 'number' ? response.status : 0
       const mimeType = typeof response?.mimeType === 'string' ? response.mimeType : ''
+      this.actionNetwork.rememberResponse({
+        requestId,
+        url: response?.url,
+        status,
+        type
+      })
       if (!isImageNetworkResource({ type, mimeType, status })) {
         return
       }
@@ -892,6 +917,9 @@ export class ScrapeBrowserHelperRuntime {
         return this.pageStatus(win)
       case 'snapshot':
         return this.snapshot(win, params)
+      case 'beginNetworkCapture':
+        this.actionNetwork.begin()
+        return true
       case 'inspect':
         return this.inspect(win, params)
       case 'click':
@@ -954,9 +982,15 @@ export class ScrapeBrowserHelperRuntime {
         ? Math.max(400, Math.min(8000, Math.round(params.maxRegionHtmlLength)))
         : 2800
     const prioritizeInspectLinksSource = prioritizeInspectLinks.toString()
-    return win.webContents.executeJavaScript(
+    const selectInspectLocaleLinksSource = selectInspectLocaleLinks.toString()
+    const selectInspectScriptSrcsSource = selectInspectScriptSrcs.toString()
+    const inspectLinkRawHrefSource = inspectLinkRawHref.toString()
+    const facts = await win.webContents.executeJavaScript(
       `(() => {
         const prioritizeLinks = (${prioritizeInspectLinksSource});
+        const selectLocaleLinks = (${selectInspectLocaleLinksSource});
+        const selectScriptSrcs = (${selectInspectScriptSrcsSource});
+        const rawHrefOf = (${inspectLinkRawHrefSource});
         const cssPath = (el) => {
           if (!el || !el.tagName) return '';
           if (el.id) return '#' + CSS.escape(el.id);
@@ -1033,20 +1067,51 @@ export class ScrapeBrowserHelperRuntime {
             placeholder: input.getAttribute('placeholder') || '',
             value: input.getAttribute('value') || ''
           }));
-        if (looseInputs.length) {
-          forms.push({ selector: 'document', action: location.href, method: 'interactive', inputs: looseInputs, buttons: [] });
+        const scriptSrcCandidates = [];
+        for (const script of Array.from(document.querySelectorAll('script[src]'))) {
+          const rawHref = script.getAttribute('src') || '';
+          let href = '';
+          try { href = new URL(rawHref, location.href).toString(); } catch { continue; }
+          const item = { href };
+          const raw = rawHrefOf(href, rawHref);
+          if (raw) item.rawHref = raw;
+          scriptSrcCandidates.push(item);
+        }
+        const scriptSrcs = selectScriptSrcs(scriptSrcCandidates, ${INSPECT_MAX_SCRIPT_SRCS});
+        const inlineScripts = [];
+        for (const script of Array.from(document.querySelectorAll('script'))) {
+          if (script.getAttribute('src')) continue;
+          const type = (script.getAttribute('type') || '').toLowerCase();
+          if (type === 'application/ld+json') continue;
+          const text = (script.textContent || '').replace(/\\s+/g, ' ').trim();
+          if (!text) continue;
+          inlineScripts.push({
+            byteLength: text.length,
+            text: text.slice(0, ${INSPECT_INLINE_SCRIPT_TEXT_LIMIT})
+          });
+          if (inlineScripts.length >= ${INSPECT_MAX_INLINE_SCRIPTS}) break;
         }
         const linkCandidates = Array.from(document.querySelectorAll('a[href]')).map((a) => ({
           element: a,
           href: new URL(a.getAttribute('href'), location.href).toString(),
+          rawHref: a.getAttribute('href') || '',
           ...inspectLinkFlags(a)
         }));
-        const links = prioritizeLinks(linkCandidates, ${maxLinks}).map((link) => ({
-          text: (link.element.innerText || link.element.getAttribute('title') || '').replace(/\\s+/g, ' ').trim().slice(0, 120),
-          href: link.href,
-          region: linkRegion(link.element),
-          parentSelector: cssPath(link.element.parentElement)
-        }));
+        const toLinkItem = (link) => {
+          const item = {
+            text: (link.element.innerText || link.element.getAttribute('title') || '').replace(/\\s+/g, ' ').trim().slice(0, 120),
+            href: link.href,
+            region: linkRegion(link.element),
+            parentSelector: cssPath(link.element.parentElement)
+          };
+          const rawHref = rawHrefOf(link.href, link.rawHref);
+          return rawHref ? Object.assign(item, { rawHref }) : item;
+        };
+        const localeLinks = selectLocaleLinks(linkCandidates, ${INSPECT_MAX_LOCALE_LINKS}).map(toLinkItem);
+        const links = prioritizeLinks(
+          linkCandidates.filter((link) => !link.isLocaleLink),
+          ${maxLinks}
+        ).map(toLinkItem);
         const regionSpecs = [
           { label: '面包屑导航', selector: 'nav.breadcrumb, .breadcrumb' },
           { label: '元数据属性区', selector: '.attributes, .video-details, #video_info, .movie-info, .info-panel' },
@@ -1166,7 +1231,11 @@ export class ScrapeBrowserHelperRuntime {
           title: document.title || '',
           text: text.slice(0, ${maxTextLength}),
           forms,
+          looseInputs,
+          scriptSrcs,
+          inlineScripts,
           links,
+          localeLinks,
           domRegions,
           definitionLists,
           metadataTags,
@@ -1175,6 +1244,13 @@ export class ScrapeBrowserHelperRuntime {
         };
       })()`
     )
+    if (facts && typeof facts === 'object' && !Array.isArray(facts)) {
+      const recentRequests = this.actionNetwork.take()
+      if (recentRequests) {
+        (facts as Record<string, unknown>).recentRequests = recentRequests
+      }
+    }
+    return facts
   }
 
   private async click(win: BrowserWindow, selector: string): Promise<boolean> {

@@ -51,6 +51,17 @@ describe('PluginRunAcceptanceModule', () => {
     assert.deepEqual(decision.reasons, [])
   })
 
+  it('keeps readiness when only the plugin display name changes', () => {
+    const decision = gate.evaluate({
+      package: { ...pkg, name: 'renamed-after-ready' },
+      targets,
+      execution: artifact()
+    })
+    assert.equal(decision.ready, true)
+    assert.deepEqual(decision.reasons, [])
+    assert.equal(pluginArtifactHash({ ...pkg, name: 'renamed-after-ready' }), pluginArtifactHash(pkg))
+  })
+
   it('rejects targeted, stale package, stale target, stale runtime, and failed execution artifacts', () => {
     assert.equal(gate.evaluate({ package: pkg, targets, execution: artifact({ scope: 'targeted' }) }).ready, false)
     assert.equal(gate.evaluate({

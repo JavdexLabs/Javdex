@@ -36,7 +36,7 @@ import PluginDevCodeModal from './PluginDevCodeModal'
 import PluginDevConnectionModal from './PluginDevConnectionModal'
 import PluginDevConfigRail from './PluginDevConfigRail'
 import { usePluginDevLeaveGuard } from './PluginDevLeaveGuard'
-import { fingerprintPluginPackage } from './pluginDevPackageSnapshot'
+import { fingerprintPluginPackage, fingerprintPluginRuntime } from './pluginDevPackageSnapshot'
 import { suggestForkedPluginName } from './pluginDevName'
 import {
   canClearPluginDevAgentHistory,
@@ -239,6 +239,7 @@ export default function PluginDevPanel({
   const snapshotGateRef = useRef(createPluginDevSnapshotGate())
   const latestSnapshotCursorRef = useRef(-1)
   const packageFingerprintRef = useRef<string | null>(null)
+  const executionRuntimeRef = useRef<string | null>(null)
   const onLoadConsumedRef = useRef(onLoadConsumed)
 
   const updateAgentSessionId = useCallback((sessionId: string | null): void => {
@@ -322,6 +323,14 @@ export default function PluginDevPanel({
   }, [agentSessionId])
 
   useEffect(() => {
+    return () => {
+      const sessionId = agentSessionIdRef.current
+      if (sessionId) void api.pluginDev.releaseBrowser(sessionId)
+      void api.pluginDev.discardUnrecoverableSessions()
+    }
+  }, [])
+
+  useEffect(() => {
     agentStatusRef.current = agentStatus
   }, [agentStatus])
 
@@ -380,7 +389,7 @@ export default function PluginDevPanel({
     applyGeneratedPackage(result.package)
     setExecution(result.execution ?? null)
     setAcceptance(result.acceptance ?? null)
-    setExecutionPackageFingerprint(result.execution ? fingerprintPluginPackage(result.package) : null)
+    setExecutionPackageFingerprint(result.execution ? fingerprintPluginRuntime(result.package) : null)
     setHistoricalReadOnly(result.historicalReadOnly === true)
     setConversationItems(conversationFromWorkLog(snapshot.workLog))
     updatePendingApproval(snapshot.pendingApprovals?.[0] ?? null)
@@ -521,9 +530,13 @@ export default function PluginDevPanel({
         ])
       }
       if (event.type === 'package_updated') {
-        setExecution(null)
-        setAcceptance(null)
-        setExecutionPackageFingerprint(null)
+        const nextRuntime = fingerprintPluginRuntime(event.package)
+        if (executionRuntimeRef.current && executionRuntimeRef.current !== nextRuntime) {
+          setExecution(null)
+          setAcceptance(null)
+          setExecutionPackageFingerprint(null)
+          executionRuntimeRef.current = null
+        }
       }
       if (event.type === 'run_targets_updated') {
         setTestTarget(event.runTargets.map(runTargetLabel).join('\n'))
@@ -562,7 +575,7 @@ export default function PluginDevPanel({
         setActiveTool(null)
         if (event.execution) {
           setExecution(event.execution)
-          setExecutionPackageFingerprint(fingerprintPluginPackage(event.package))
+          setExecutionPackageFingerprint(fingerprintPluginRuntime(event.package))
         }
         if (event.acceptance) setAcceptance(event.acceptance)
         if (event.success && event.acceptance?.ready) setAgentTab('result')
@@ -673,6 +686,7 @@ export default function PluginDevPanel({
     setExecutionPackageFingerprint(null)
     resetAgentUi()
     setFeedbackText('')
+    setShowCodeModal(false)
   }
 
   useEffect(() => {
@@ -731,12 +745,12 @@ export default function PluginDevPanel({
     return true
   }, [buildPackage, hasPackage, installedBaseline])
 
-  const currentPackageFingerprint = hasPackage ? fingerprintPluginPackage(buildPackage()) : null
+  const currentRuntimeFingerprint = hasPackage ? fingerprintPluginRuntime(buildPackage()) : null
   const resultStale =
-    (Boolean(dryRun && dryRunPackageFingerprint && currentPackageFingerprint) &&
-      dryRunPackageFingerprint !== currentPackageFingerprint) ||
-    (Boolean(execution && executionPackageFingerprint && currentPackageFingerprint) &&
-      executionPackageFingerprint !== currentPackageFingerprint)
+    (Boolean(dryRun && dryRunPackageFingerprint && currentRuntimeFingerprint) &&
+      dryRunPackageFingerprint !== currentRuntimeFingerprint) ||
+    (Boolean(execution && executionPackageFingerprint && currentRuntimeFingerprint) &&
+      executionPackageFingerprint !== currentRuntimeFingerprint)
   const installState: 'not-installed' | 'dirty' | 'synced' = installedBaseline
     ? hasUninstalledChanges
       ? 'dirty'
@@ -767,8 +781,9 @@ export default function PluginDevPanel({
           : null
 
   useEffect(() => {
-    packageFingerprintRef.current = currentPackageFingerprint
-  }, [currentPackageFingerprint])
+    packageFingerprintRef.current = currentRuntimeFingerprint
+    executionRuntimeRef.current = executionPackageFingerprint
+  }, [currentRuntimeFingerprint, executionPackageFingerprint])
 
   const needsLeaveConfirm = hasUninstalledChanges || activeAgent
   const leaveConfirmMessage = activeAgent
@@ -888,7 +903,7 @@ export default function PluginDevPanel({
       setTestTarget(result.runTargets.map(runTargetLabel).join('\n'))
       setExecution(result.execution ?? null)
       setAcceptance(result.acceptance ?? null)
-      setExecutionPackageFingerprint(result.execution ? fingerprintPluginPackage(result.package) : null)
+      setExecutionPackageFingerprint(result.execution ? fingerprintPluginRuntime(result.package) : null)
       if (priorDryRun) setDryRun(priorDryRun)
       if (shouldOpenResultAfterAgentDone(
         result.status,
@@ -965,7 +980,7 @@ export default function PluginDevPanel({
       setTestTarget(result.runTargets.map(runTargetLabel).join('\n'))
       setExecution(result.execution ?? null)
       setAcceptance(result.acceptance ?? null)
-      setExecutionPackageFingerprint(result.execution ? fingerprintPluginPackage(result.package) : null)
+      setExecutionPackageFingerprint(result.execution ? fingerprintPluginRuntime(result.package) : null)
       if (shouldOpenResultAfterAgentDone(
         result.status,
         result.execution,
@@ -1155,13 +1170,13 @@ export default function PluginDevPanel({
       localAgentOperationRef.current = null
       latestSnapshotCursorRef.current = -1
       initialSnapshotPendingRef.current = false
-      resetAgentUi()
-      setDryRun(null)
-      setDryRunPackageFingerprint(null)
-      setFeedbackText('')
+      resetToNewPlugin(kind)
       setHasAgentHistory(false)
       setShowClearHistoryModal(false)
-      toast.show(cleared > 0 ? `已清除 ${cleared} 个历史会话` : '没有可清除的历史会话', 'success')
+      toast.show(
+        cleared > 0 ? `已清除 ${cleared} 个历史会话，并回到新建插件` : '已回到新建插件',
+        'success'
+      )
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     } finally {
@@ -1362,7 +1377,7 @@ export default function PluginDevPanel({
 
       {showClearHistoryModal && (
         <ConfirmModal
-          title="清除插件开发历史会话？"
+          title="清除会话并回到新建插件？"
           confirmText={busy === 'clear-history' ? '清除中…' : '清除会话'}
           danger
           busy={busy === 'clear-history'}
@@ -1370,8 +1385,8 @@ export default function PluginDevPanel({
           onCancel={() => setShowClearHistoryModal(false)}
         >
           <p>
-            将关闭插件开发助手保存的全部历史会话，并清空对话、dry-run 和验证结果；下次进入时不会再自动恢复。
-            左侧当前插件代码和已经安装的插件不会被删除。
+            将关闭全部历史会话，清空对话、dry-run 和验证结果，并把左侧未安装草稿恢复为「新建插件」空表单；下次进入时不会再自动恢复。
+            已经安装到应用里的插件不会被删除。
           </p>
         </ConfirmModal>
       )}

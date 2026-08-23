@@ -231,6 +231,26 @@ function markMechanicallyReady(session: PluginDevSession, directory: string): vo
     targets: session.runTargets,
     execution: session.lastExecution
   }).outcome
+  pluginWorkspace.recordLatestDryRun(directory, {
+    schemaVersion: 2,
+    status: 'completed',
+    artifactHash: session.lastExecution.artifactHash,
+    reportPath: session.lastExecution.reportPath,
+    scope: session.lastExecution.scope,
+    runtimeVersion: session.lastExecution.runtimeVersion,
+    targetFingerprint: session.lastExecution.targetFingerprint,
+    executionPassed: session.lastExecution.executionPassed,
+    cases: session.lastExecution.cases.map((item) => ({
+      runtimeInput: item.target,
+      runtimeAccepted: item.runtimeAccepted,
+      pluginResult: item.pluginResult,
+      effectiveResult: item.effectiveResult,
+      manifestCoverage: item.manifestCoverage,
+      unrecognizedResultKeys: item.unrecognizedResultKeys ?? [],
+      error: item.error
+    })),
+    currentAcceptance: { installReady: true, reasons: [] }
+  })
 }
 
 let previousUserData: string | undefined
@@ -367,6 +387,81 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       restoreList()
       testable(developer).active.delete(session.id)
       deleteSession(session.id)
+    }
+  })
+
+  it('discards unrecoverable plugin-development history without touching recoverable runs', async () => {
+    const developer = new PluginDeveloper()
+    const records = [
+      { id: 'plugin-settled', useCase: 'plugin-developer', status: 'settled' as const },
+      { id: 'plugin-failed', useCase: 'plugin-developer', status: 'failed' as const },
+      { id: 'plugin-cancelled', useCase: 'plugin-developer', status: 'cancelled' as const },
+      { id: 'plugin-waiting', useCase: 'plugin-developer', status: 'waiting_user' as const },
+      { id: 'library-history', useCase: 'library-curator', status: 'settled' as const }
+    ].map((item) => ({
+      ...item,
+      configRevision: 'test',
+      configSnapshot: frozenSnapshot(),
+      recoveryGeneration: 0,
+      productState: {},
+      createdAt: '2026-08-20T00:00:00.000Z',
+      updatedAt: '2026-08-20T00:00:00.000Z'
+    })) satisfies AgentRunRecord[]
+    const closed: string[] = []
+    const historyRoot = path.join(process.env.JAVDEX_TEST_USER_DATA!, 'agent-sessions')
+    for (const id of [
+      'plugin-settled',
+      'plugin-failed',
+      'plugin-cancelled',
+      'plugin-waiting',
+      'plugin-running',
+      'library-history'
+    ]) {
+      fs.mkdirSync(path.join(historyRoot, id), { recursive: true })
+      fs.writeFileSync(path.join(historyRoot, id, 'history.txt'), id, 'utf8')
+    }
+    const waiting = createSession({ ...input, package: structuredClone(packageValue) }, 'plugin-waiting')
+    waiting.status = 'waiting_user'
+    testable(developer).active.set(waiting.id, activeRun(waiting))
+    const running = createSession({ ...input, package: structuredClone(packageValue) }, 'plugin-running')
+    testable(developer).active.set(running.id, activeRun(running))
+    const restoreList = replaceMethod(
+      agentRunStore,
+      'listRecoverableRuns',
+      (() => records) as typeof agentRunStore.listRecoverableRuns
+    )
+    const restoreGet = replaceMethod(
+      agentRunStore,
+      'getRun',
+      ((runId: string) => records.find((record) => record.id === runId) ?? null) as typeof agentRunStore.getRun
+    )
+    const restoreClose = replaceMethod(agentExecution, 'closeRun', (async (runId) => {
+      closed.push(runId)
+    }) as typeof agentExecution.closeRun)
+    const restoreDiscard = replaceMethod(toolHost, 'discardApprovals', (() => undefined) as typeof toolHost.discardApprovals)
+    const restoreDispose = replaceMethod(toolHost, 'disposeRun', (() => undefined) as typeof toolHost.disposeRun)
+    try {
+      const count = await developer.discardUnrecoverableSessions()
+
+      assert.equal(count, 3)
+      assert.deepEqual(closed.sort(), ['plugin-cancelled', 'plugin-failed', 'plugin-settled'])
+      assert.equal(testable(developer).active.has(waiting.id), true)
+      assert.equal(testable(developer).active.has(running.id), true)
+      assert.equal(fs.existsSync(path.join(historyRoot, 'plugin-settled')), false)
+      assert.equal(fs.existsSync(path.join(historyRoot, 'plugin-waiting')), true)
+      assert.equal(fs.existsSync(path.join(historyRoot, 'plugin-running')), true)
+      assert.equal(fs.existsSync(path.join(historyRoot, 'library-history')), true)
+    } finally {
+      restoreDispose()
+      restoreDiscard()
+      restoreClose()
+      restoreGet()
+      restoreList()
+      testable(developer).active.delete(waiting.id)
+      testable(developer).active.delete(running.id)
+      deleteSession(waiting.id)
+      deleteSession(running.id)
+      fs.rmSync(process.env.JAVDEX_TEST_USER_DATA!, { recursive: true, force: true })
     }
   })
 
@@ -1047,12 +1142,32 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
         optionId: '1'
       })
       assert.equal(result.updatesInstruction, false)
+      assert.match(result.prompt, /问题：请选择字段/)
       assert.match(result.prompt, /发行商/)
-      assert.match(result.prompt, /当前歧义已经解决，探索阶段结束/)
-      assert.match(result.prompt, /直接更新受该决定影响的 dev-notes 和所需的 index\.js\/plugin\.json/)
-      assert.match(result.prompt, /相关文件一致后调用 plugin_dry_run/)
-      assert.match(result.prompt, /不要求为该决定拆出额外开发批次/)
-      assert.match(result.prompt, /不要重新读取文档或重新浏览/)
+      assert.match(result.prompt, /选项说明：用户确认/)
+      assert.match(result.prompt, /关联证据：\.javdex\/browser\/page\.json/)
+      assert.match(result.prompt, /重新评估当前具体 blocker/)
+      assert.match(result.prompt, /不会自动结束其他尚未解决的歧义/)
+      assert.doesNotMatch(result.prompt, /探索阶段结束|相关文件一致后.*调用一次完整 plugin_dry_run/)
+      const decisions = JSON.parse(fs.readFileSync(
+        path.join(session.workspaceDirectory!, '.javdex', 'decisions.json'),
+        'utf8'
+      )) as Array<Record<string, unknown>>
+      assert.equal(decisions.length, 1)
+      assert.deepEqual(
+        {
+          requestId: decisions[0]?.requestId,
+          question: decisions[0]?.question,
+          selectedOption: decisions[0]?.selectedOption,
+          evidenceRefs: decisions[0]?.evidenceRefs
+        },
+        {
+          requestId: 'choice-1',
+          question: '请选择字段',
+          selectedOption: { id: '1', label: '发行商', description: '用户确认' },
+          evidenceRefs: ['.javdex/browser/page.json']
+        }
+      )
       assert.equal(session.lastUserInstruction, '原始缺陷反馈')
       assert.equal(session.pendingUserRequest, undefined)
       assert.throws(() => testable(developer).applyUserResponse(session, {
@@ -1237,6 +1352,28 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
 
       assert.deepEqual(session.lastExecution, originalExecution)
       assert.equal(session.acceptance?.ready, true)
+      assert.deepEqual(
+        (JSON.parse(fs.readFileSync(workspace.files.latestDryRun, 'utf8')) as {
+          currentAcceptance: unknown
+        }).currentAcceptance,
+        { installReady: true, reasons: [] }
+      )
+
+      const manifest = JSON.parse(fs.readFileSync(workspace.files.manifest, 'utf8')) as Record<string, unknown>
+      fs.writeFileSync(
+        workspace.files.manifest,
+        `${JSON.stringify({ ...manifest, name: 'Renamed After Ready' }, null, 2)}\n`,
+        'utf8'
+      )
+      testable(developer).runtimeProject(active, {
+        type: 'tool.completed',
+        result: { callId: 'name-edit', toolName: 'edit', ok: true, summary: 'updated plugin name' },
+        recovery: { codecVersion: 1, payload: '{}', contentHash: 'name-edit' }
+      })
+
+      assert.deepEqual(session.lastExecution, originalExecution)
+      assert.equal(session.acceptance?.ready, true)
+      assert.equal(session.package.name, 'Renamed After Ready')
 
       fs.writeFileSync(
         workspace.files.code,
@@ -1251,6 +1388,15 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
 
       assert.equal(session.lastExecution, undefined)
       assert.equal(session.acceptance, undefined)
+      const latest = JSON.parse(fs.readFileSync(workspace.files.latestDryRun, 'utf8')) as {
+        artifactHash?: string
+        currentAcceptance?: unknown
+      }
+      assert.equal(latest.artifactHash, originalExecution?.artifactHash)
+      assert.deepEqual(latest.currentAcceptance, {
+        installReady: false,
+        reasons: ['stale_artifact']
+      })
     } finally {
       restoreGetRun()
       deleteSession(session.id)
@@ -1344,6 +1490,10 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
     testable(developer).active.set(session.id, activeRun(session))
     try {
       assert.doesNotThrow(() => developer.assertReadyArtifact(session.id, session.package))
+      assert.doesNotThrow(() => developer.assertReadyArtifact(session.id, {
+        ...session.package,
+        name: 'Renamed For Install'
+      }))
       assert.throws(() => developer.assertReadyArtifact(session.id, {
         ...session.package,
         code: `${session.package.code}\n// changed`

@@ -474,8 +474,12 @@ const api = {
     message: (input: PluginDevAgentMessageInput) =>
       invokeApp(IPC.PLUGIN_DEV_AGENT_MESSAGE, input),
     cancel: (sessionId: string) => invokeApp(IPC.PLUGIN_DEV_AGENT_CANCEL, sessionId),
+    releaseBrowser: (sessionId: string) =>
+      invokeApp(IPC.PLUGIN_DEV_AGENT_RELEASE_BROWSER, sessionId),
     snapshot: (sessionId?: string) => invokeApp(IPC.PLUGIN_DEV_AGENT_SNAPSHOT, sessionId),
     clearHistory: () => invokeApp(IPC.PLUGIN_DEV_AGENT_CLEAR_HISTORY),
+    discardUnrecoverableSessions: () =>
+      invokeApp(IPC.PLUGIN_DEV_AGENT_DISCARD_UNRECOVERABLE),
     exportWorkLog: (sessionId: string) =>
       invokeApp(IPC.PLUGIN_DEV_AGENT_EXPORT_WORK_LOG, sessionId),
     dryRun: (input: PluginDevDryRunInput) =>

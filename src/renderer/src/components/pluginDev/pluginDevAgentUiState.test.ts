@@ -4,6 +4,7 @@ import type { PluginDevPendingApproval } from '@shared/pluginDevTypes'
 import type { ScraperPluginPackage } from '@shared/scraperPluginTypes'
 import {
   canClearPluginDevAgentHistory,
+  isRecoverablePluginDevSessionStatus,
   canInstallPluginDevDraft,
   checkPluginDevMessageDispatch,
   createPluginDevSnapshotGate,
@@ -158,6 +159,9 @@ describe('plugin dev Agent UI state', () => {
   })
 
   it('auto-applies only unfinished history and leaves terminal editor state untouched', () => {
+    assert.equal(isRecoverablePluginDevSessionStatus('running'), true)
+    assert.equal(isRecoverablePluginDevSessionStatus('waiting_user'), true)
+    assert.equal(isRecoverablePluginDevSessionStatus('completed'), false)
     assert.equal(shouldApplyInitialPluginDevSnapshot('running'), true)
     assert.equal(shouldApplyInitialPluginDevSnapshot('waiting_user'), true)
     assert.equal(shouldApplyInitialPluginDevSnapshot('completed'), false)

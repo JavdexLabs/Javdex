@@ -12,7 +12,7 @@ import {
   VIDEO_SOURCES_SCHEMA_SQL
 } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 25
+export const CURRENT_SCHEMA_VERSION = 27
 
 type Migration = {
   version: number
@@ -1115,6 +1115,22 @@ function migrateToV25(database: Database.Database): void {
   )
 }
 
+function migrateToV26(database: Database.Database): void {
+  closeOpenPluginDeveloperRuns(
+    database,
+    'PluginDeveloper v11 会话已在 ToolPack v12 持久化验收与 browser read-section 接口升级时关闭；插件草稿保持不变。',
+    true
+  )
+}
+
+function migrateToV27(database: Database.Database): void {
+  closeOpenPluginDeveloperRuns(
+    database,
+    'PluginDeveloper v12 会话已在 ToolPack v13 浏览器 action 参数契约升级时关闭；插件草稿保持不变。',
+    true
+  )
+}
+
 const MIGRATIONS: Migration[] = [
   {
     version: 2,
@@ -1211,6 +1227,14 @@ const MIGRATIONS: Migration[] = [
   {
     version: 25,
     migrate: migrateToV25
+  },
+  {
+    version: 26,
+    migrate: migrateToV26
+  },
+  {
+    version: 27,
+    migrate: migrateToV27
   }
 ]
 

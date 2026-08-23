@@ -20,8 +20,16 @@ import {
   invalidateExecution
 } from './sessionStore'
 import type { ToolExecutionResult } from './types'
-import { isPluginExecutionCloudflareInterruption, pluginExecution } from './pluginExecution'
-import { pluginRunAcceptance } from './pluginRunAcceptance'
+import {
+  isPluginExecutionCloudflareInterruption,
+  isPluginExecutionUnmatchedTargets,
+  pluginExecution,
+  pluginRunTargetFingerprint
+} from './pluginExecution'
+import {
+  pluginRunAcceptance,
+  projectPluginRunAcceptance
+} from './pluginRunAcceptance'
 import { pluginWorkspace } from './pluginWorkspace'
 import {
   PluginDevRunTargetInputError,
@@ -54,7 +62,6 @@ function toolError(
 interface PluginDevBrowserLeaseState {
   lease: ScrapeBrowserLease
   controller: AbortController
-  interactionTimer?: ReturnType<typeof setTimeout>
 }
 
 const pluginDevBrowserLeases = new Map<string, PluginDevBrowserLeaseState>()
@@ -67,11 +74,8 @@ async function pluginDevBrowserLease(
   if (existing) {
     if (existing.controller.signal.aborted) {
       pluginDevBrowserLeases.delete(sessionId)
-      if (existing.interactionTimer) clearTimeout(existing.interactionTimer)
       await existing.lease.release()
     } else {
-      if (existing.interactionTimer) clearTimeout(existing.interactionTimer)
-      existing.interactionTimer = undefined
       return existing
     }
   }
@@ -93,7 +97,6 @@ export async function releasePluginDeveloperBrowser(sessionId: string): Promise<
   const state = pluginDevBrowserLeases.get(sessionId)
   if (!state) return
   pluginDevBrowserLeases.delete(sessionId)
-  if (state.interactionTimer) clearTimeout(state.interactionTimer)
   await state.lease.release()
   state.controller.abort(new Error('PluginDeveloper operation settled'))
 }
@@ -128,19 +131,6 @@ function createBrowserInteractionRequest(input: {
     prompt: browserInteractionPrompt(input.reason),
     ...(input.url ? { url: input.url } : {})
   }
-}
-
-function keepBrowserForUser(
-  sessionId: string,
-  state: PluginDevBrowserLeaseState
-): void {
-  if (state.interactionTimer) clearTimeout(state.interactionTimer)
-  state.interactionTimer = setTimeout(() => {
-    if (pluginDevBrowserLeases.get(sessionId) === state) {
-      void releasePluginDeveloperBrowser(sessionId)
-    }
-  }, 180_000)
-  state.interactionTimer.unref()
 }
 
 export async function runWithPluginDeveloperBrowser<T>(
@@ -214,7 +204,6 @@ async function executeBrowserHandoff(input: {
       reason,
       url: presentation.url
     })
-    keepBrowserForUser(sessionId, state)
     return pendingUserResult(session, request, step, events, {
       reason,
       url: presentation.url,
@@ -348,7 +337,6 @@ async function executeBrowserAction(input: {
         reason: 'human_verification',
         url: error.url
       })
-      keepBrowserForUser(sessionId, state)
       return pendingUserResult(session, request, step, events, {
         challengeCode: error.code,
         reason: 'human_verification',
@@ -378,10 +366,33 @@ export async function executeTool(
     if (toolName === 'browser') {
       if (!session.workspaceDirectory) return toolError('WORKSPACE_NOT_READY', '插件工作区尚未初始化。')
       const action = typeof args.action === 'string' ? args.action : undefined
-      if (!action || !['open', 'snapshot', 'find', 'html', 'evaluate', 'click', 'fill', 'press', 'wait', 'status', 'handoff'].includes(action)) {
+      if (!action || !['open', 'snapshot', 'find', 'html', 'evaluate', 'click', 'fill', 'press', 'wait', 'status', 'read-section', 'handoff'].includes(action)) {
         return toolError('BROWSER_ACTION_INVALID', 'browser.action 无效。')
       }
       const { action: _action, ...browserArgs } = args
+      if (action === 'read-section') {
+        const artifactRef = typeof browserArgs.artifactRef === 'string'
+          ? browserArgs.artifactRef.trim()
+          : ''
+        const section = typeof browserArgs.section === 'string'
+          ? browserArgs.section.trim()
+          : ''
+        const cursor = typeof browserArgs.cursor === 'string'
+          ? browserArgs.cursor
+          : undefined
+        if (!artifactRef || !section) {
+          return toolError(
+            'BROWSER_ARTIFACT_SECTION_INPUT_INVALID',
+            'browser action=read-section 时必须提供 artifactRef 和 section。'
+          )
+        }
+        return pluginBrowserCapability.readSection({
+          workspaceDirectory: session.workspaceDirectory,
+          artifactRef,
+          section,
+          ...(cursor ? { cursor } : {})
+        })
+      }
       if (action === 'handoff') {
         const reason = typeof browserArgs.reason === 'string' ? browserArgs.reason : ''
         if (!['human_verification', 'login', 'required_user_action'].includes(reason)) {
@@ -429,6 +440,10 @@ export async function executeTool(
           '请修复 plugin.json 或 index.js 后重试。'
         session.workspaceDraftError = message
         invalidateExecution(session)
+        pluginWorkspace.updateCurrentAcceptance(session.workspaceDirectory, {
+          installReady: false,
+          reasons: ['workspace_invalid']
+        })
         events.push({
           type: 'workspace_status',
           sessionId,
@@ -466,10 +481,27 @@ export async function executeTool(
             : 'task.json 没有运行目标。请先从精确资料页提取演员主名，再用 actresses 调用 plugin_dry_run。'
         )
       }
-      const adoptsDiscoveredTargets = requested.explicit && session.runTargets.length === 0
+      const replacesUnmatchedTargets = requested.explicit &&
+        session.runTargets.length > 0 &&
+        session.lastExecution != null &&
+        pluginRunTargetFingerprint(session.lastExecution.targets) ===
+          pluginRunTargetFingerprint(session.runTargets) &&
+        isPluginExecutionUnmatchedTargets(session.lastExecution)
+      const adoptsDiscoveredTargets =
+        (requested.explicit && session.runTargets.length === 0) || replacesUnmatchedTargets
       if (adoptsDiscoveredTargets) {
         pluginWorkspace.updateRunTargets(session.workspaceDirectory, requested.targets)
         session.runTargets = structuredClone(requested.targets)
+        const targetDecision = pluginRunAcceptance.evaluate({
+          package: workspace.package,
+          targets: session.runTargets,
+          execution: session.lastExecution
+        })
+        pluginWorkspace.updateCurrentAcceptance(
+          session.workspaceDirectory,
+          projectPluginRunAcceptance(targetDecision)
+        )
+        invalidateExecution(session)
         const event: PluginDevAgentEvent = {
           type: 'run_targets_updated',
           sessionId,
@@ -480,7 +512,11 @@ export async function executeTool(
         else events.push(event)
       }
       const dryRunSignal = context.signal ?? new AbortController().signal
-      const scope = requested.explicit && !adoptsDiscoveredTargets ? 'targeted' : 'all'
+      const coversSessionTargets = session.runTargets.length > 0 &&
+        pluginRunTargetFingerprint(requested.targets) === pluginRunTargetFingerprint(session.runTargets)
+      const scope = requested.explicit && !adoptsDiscoveredTargets && !coversSessionTargets
+        ? 'targeted'
+        : 'all'
       const execution = await runWithPluginDeveloperBrowser(sessionId, dryRunSignal, async () =>
         pluginExecution.run({
           package: workspace.package,
@@ -514,25 +550,6 @@ export async function executeTool(
           events
         }
       }
-      pluginWorkspace.recordLatestDryRun(session.workspaceDirectory, {
-        schemaVersion: 1,
-        status: 'completed',
-        artifactHash: execution.artifactHash,
-        reportPath: execution.reportPath,
-        scope: execution.scope,
-        runtimeVersion: execution.runtimeVersion,
-        targetFingerprint: execution.targetFingerprint,
-        executionPassed: execution.executionPassed,
-        cases: execution.cases.map((item) => ({
-          runtimeInput: item.target,
-          runtimeAccepted: item.runtimeAccepted,
-          pluginResult: item.pluginResult,
-          effectiveResult: item.effectiveResult,
-          manifestCoverage: item.manifestCoverage,
-          unrecognizedResultKeys: item.unrecognizedResultKeys ?? [],
-          error: item.error
-        }))
-      })
       events.push({ type: 'execution_updated', sessionId, step, execution })
       const acceptanceDecision = pluginRunAcceptance.evaluate({
         package: workspace.package,
@@ -551,6 +568,31 @@ export async function executeTool(
           })
         }
       }
+      const currentAcceptance = pluginRunAcceptance.evaluate({
+        package: workspace.package,
+        targets: session.runTargets,
+        execution: session.lastExecution
+      })
+      pluginWorkspace.recordLatestDryRun(session.workspaceDirectory, {
+        schemaVersion: 2,
+        status: 'completed',
+        artifactHash: execution.artifactHash,
+        reportPath: execution.reportPath,
+        scope: execution.scope,
+        runtimeVersion: execution.runtimeVersion,
+        targetFingerprint: execution.targetFingerprint,
+        executionPassed: execution.executionPassed,
+        cases: execution.cases.map((item) => ({
+          runtimeInput: item.target,
+          runtimeAccepted: item.runtimeAccepted,
+          pluginResult: item.pluginResult,
+          effectiveResult: item.effectiveResult,
+          manifestCoverage: item.manifestCoverage,
+          unrecognizedResultKeys: item.unrecognizedResultKeys ?? [],
+          error: item.error
+        })),
+        currentAcceptance: projectPluginRunAcceptance(currentAcceptance)
+      })
       const compact = {
         executionPassed: execution.executionPassed,
         scope: execution.scope,
@@ -568,7 +610,8 @@ export async function executeTool(
         artifactHash: execution.artifactHash,
         targetFingerprint: execution.targetFingerprint,
         mechanicalAcceptance: {
-          installReady: acceptanceDecision.ready
+          installReady: acceptanceDecision.ready,
+          reasons: acceptanceDecision.reasons
         },
         reportPath: execution.reportPath,
         adoptedTargets: adoptsDiscoveredTargets
@@ -580,7 +623,8 @@ export async function executeTool(
           targets: execution.targets.map(runTargetLabel),
           artifactHash: execution.artifactHash,
           mechanicalAcceptance: {
-            installReady: acceptanceDecision.ready
+            installReady: acceptanceDecision.ready,
+            reasons: acceptanceDecision.reasons
           },
           message: '完整 dry-run 结果过大；可从 execution_updated 事件或结果面板查看。'
         }),
@@ -589,7 +633,8 @@ export async function executeTool(
           targetCount: execution.targets.length,
           artifactHash: execution.artifactHash,
           mechanicalAcceptance: {
-            installReady: acceptanceDecision.ready
+            installReady: acceptanceDecision.ready,
+            reasons: acceptanceDecision.reasons
           },
           adoptedTargets: adoptsDiscoveredTargets
         },

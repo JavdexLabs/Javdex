@@ -5,7 +5,12 @@ import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { PluginDevDryRunInput, PluginDevDryRunResult } from '@shared/pluginDevTypes'
 import type { ScraperPluginPackage } from '@shared/scraperPluginTypes'
-import { PluginExecutionModule, PLUGIN_RUNTIME_VERSION } from './pluginExecution'
+import {
+  isPluginExecutionUnmatchedTargets,
+  PluginExecutionModule,
+  PLUGIN_RUNTIME_VERSION
+} from './pluginExecution'
+import { PLUGIN_UNMATCHED_TARGET_ERROR } from '../pluginDevService'
 
 const directories: string[] = []
 
@@ -154,5 +159,46 @@ describe('PluginExecutionModule', () => {
 
     assert.equal(artifact.executionPassed, false)
     assert.equal(artifact.cases[0]?.runtimeAccepted, false)
+  })
+
+  it('treats a full empty contract return as unmatched targets, not a broken shape', () => {
+    assert.equal(isPluginExecutionUnmatchedTargets({
+      runtimeVersion: PLUGIN_RUNTIME_VERSION,
+      artifactHash: 'hash',
+      targetFingerprint: 'fp',
+      scope: 'all',
+      targets: [{ kind: 'video', code: 'SHKD-999' }],
+      cases: [{
+        target: { kind: 'video', code: 'SHKD-999' },
+        pluginResult: null,
+        effectiveResult: null,
+        manifestCoverage: { returnedFieldIds: [], undeclaredReturnedFieldIds: [], runtimeOnlyKeys: [] },
+        unrecognizedResultKeys: [],
+        logs: [],
+        error: PLUGIN_UNMATCHED_TARGET_ERROR,
+        runtimeAccepted: false
+      }],
+      executionPassed: false,
+      reportPath: '/tmp/empty.json'
+    }), true)
+    assert.equal(isPluginExecutionUnmatchedTargets({
+      runtimeVersion: PLUGIN_RUNTIME_VERSION,
+      artifactHash: 'hash',
+      targetFingerprint: 'fp',
+      scope: 'all',
+      targets: [{ kind: 'video', code: 'SHKD-999' }],
+      cases: [{
+        target: { kind: 'video', code: 'SHKD-999' },
+        pluginResult: null,
+        effectiveResult: null,
+        manifestCoverage: { returnedFieldIds: [], undeclaredReturnedFieldIds: [], runtimeOnlyKeys: [] },
+        unrecognizedResultKeys: [],
+        logs: [],
+        error: '插件返回结果格式无效',
+        runtimeAccepted: false
+      }],
+      executionPassed: false,
+      reportPath: '/tmp/invalid.json'
+    }), false)
   })
 })

@@ -28,6 +28,13 @@ import {
   normalizeTestTargets
 } from '@shared/pluginDevKindProfile'
 import { normalizePluginCodeExport } from './pluginDevCodeEdit'
+
+export const PLUGIN_UNMATCHED_TARGET_ERROR = '插件未找到精确匹配目标'
+export const PLUGIN_INVALID_RESULT_ERROR = '插件返回结果格式无效'
+
+function isContractEmptyResult(result: unknown): boolean {
+  return result == null || (Array.isArray(result) && result.length === 0)
+}
 import { normalizeVideoCode } from '@shared/videoCode'
 import { fieldSemanticsForKind } from '@shared/pluginFieldSemantics'
 import { scrapeBrowser } from '../scrapers/scrapeBrowser'
@@ -146,7 +153,9 @@ export async function dryRunPluginPackage(
           ? undefined
           : rejectedCodes.length > 0
             ? `插件返回的候选番号与测试番号 ${expectedCode} 不匹配`
-            : '插件返回为空或结果格式无效',
+            : isContractEmptyResult(raw.result)
+              ? PLUGIN_UNMATCHED_TARGET_ERROR
+              : PLUGIN_INVALID_RESULT_ERROR,
         targets: [runTarget.code]
       }
     }
@@ -179,7 +188,9 @@ export async function dryRunPluginPackage(
       unrecognizedResultKeys,
       logs: raw.logs,
       error: !pluginResult
-        ? '插件返回为空或结果格式无效'
+        ? isContractEmptyResult(raw.result)
+          ? PLUGIN_UNMATCHED_TARGET_ERROR
+          : PLUGIN_INVALID_RESULT_ERROR
         : undefined,
       targets: [runTarget.mainName]
     }

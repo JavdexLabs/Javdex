@@ -64,7 +64,7 @@ describe('AgentConfiguration', () => {
 
     assert.equal(revision, 'model-management:r4')
     assert.equal(definition.id, 'plugin-developer')
-    assert.deepEqual(profile.toolPackRefs, ['toolpack:plugin-developer:v11'])
+    assert.deepEqual(profile.toolPackRefs, ['toolpack:plugin-developer:v13'])
     assert.deepEqual(profile.capabilityGrants, [
       'plugin.test',
       'plugin.write',

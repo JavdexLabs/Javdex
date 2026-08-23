@@ -182,6 +182,56 @@ describe('PluginDevConversation history controls', () => {
     const text = renderer?.root.findAllByType('span').flatMap((span) => span.children).join(' ')
     assert.match(text ?? '', /思考中/)
     assert.equal(renderer?.root.findByType('em').children.join(''), '回答中…')
+    assert.equal(
+      renderer?.root.findAllByProps({ 'data-reasoning-preview': true }).length,
+      0
+    )
+  })
+
+  it('renders agent answers as markdown', () => {
+    act(() => {
+      renderer = TestRenderer.create(
+        <PluginDevConversation
+          visible
+          items={[{
+            id: 'agent-md',
+            type: 'agent',
+            text: '已实现 **parseVideo**，搜索入口为 `ctx.code`。\n\n- 探索完成\n- 验收通过'
+          }]}
+          activeTool={null}
+          agentPhase="ready"
+          agentStep={2}
+          contextStats={null}
+          running={false}
+          feedbackText=""
+          agentStatus="waiting_user"
+          busy={false}
+          canSend={false}
+          canCancelAgent={false}
+          canClearHistory={false}
+          clearHistoryBusy={false}
+          canExportWorkLog={false}
+          exportWorkLogBusy={false}
+          waitingUserReason={null}
+          pendingApproval={null}
+          pendingUserRequest={null}
+          onFeedbackChange={() => undefined}
+          onSend={() => undefined}
+          onCancelAgent={() => undefined}
+          onClearHistory={() => undefined}
+          onContinueBrowserInteraction={() => undefined}
+          onFieldMapping={() => undefined}
+          onApprovalDecision={() => undefined}
+          onExportWorkLog={() => undefined}
+        />
+      )
+    })
+
+    const html = JSON.stringify(renderer?.toJSON())
+    assert.match(html ?? '', /parseVideo/)
+    assert.match(html ?? '', /"type":"strong"/)
+    assert.match(html ?? '', /"type":"code"/)
+    assert.match(html ?? '', /"type":"li"/)
   })
 
   it('renders compact context metrics with the cache-hit ratio', () => {

@@ -9,25 +9,101 @@ export interface PluginDevToolDefinition {
 
 export interface PluginDevToolInputSchema extends Record<string, unknown> {
   type: 'object'
-  properties: Record<string, object>
-  required: string[]
-  additionalProperties: false
+  properties?: Record<string, object>
+  required?: string[]
+  additionalProperties?: false
+  oneOf?: PluginDevToolInputSchema[]
 }
 
 const objectSchema = (
   properties: Record<string, object>,
-  required: string[] = []
+  required: string[] = [],
+  constraints: Record<string, unknown> = {}
 ): PluginDevToolInputSchema => ({
   type: 'object',
   properties,
   required,
-  additionalProperties: false
+  additionalProperties: false,
+  ...constraints
+})
+
+const browserActionSchema = (
+  action: string,
+  properties: Record<string, object> = {},
+  required: string[] = [],
+  constraints: Record<string, unknown> = {}
+): PluginDevToolInputSchema => objectSchema(
+  {
+    action: { type: 'string', enum: [action] },
+    ...properties
+  },
+  ['action', ...required],
+  constraints
+)
+
+const browserSchema = (): PluginDevToolInputSchema => ({
+  type: 'object',
+  oneOf: [
+    browserActionSchema('open', {
+      url: { type: 'string', maxLength: 4_096, description: '要打开的绝对 http(s) URL。' },
+      readySelector: { type: 'string', description: '可选；等待该 CSS selector 出现。' },
+      timeoutMs: { type: 'number', description: '可选导航超时。' }
+    }, ['url']),
+    browserActionSchema('snapshot', {
+      target: { type: 'string', description: '可选；当前 ARIA ref 或唯一 Playwright selector。' },
+      depth: { type: 'number' },
+      boxes: { type: 'boolean' }
+    }),
+    browserActionSchema('find', {
+      text: { type: 'string', description: '要查找的字面文本；与 regex 至少提供一个。' },
+      regex: { type: 'string', maxLength: 256, description: '要查找的正则；与 text 至少提供一个。' }
+    }, [], {
+      anyOf: [{ required: ['text'] }, { required: ['regex'] }]
+    }),
+    browserActionSchema('html', {
+      target: { type: 'string', description: '可选；当前 ARIA ref 或唯一 Playwright selector，省略时读取当前文档。' },
+      maxLength: { type: 'number', description: '可选返回字符上限。' }
+    }),
+    browserActionSchema('evaluate', {
+      expression: { type: 'string', description: '在净化只读文档上执行的 JavaScript 表达式。' },
+      timeoutMs: { type: 'number' }
+    }, ['expression']),
+    browserActionSchema('click', {
+      target: { type: 'string', description: '当前 ARIA ref 或唯一 Playwright selector。' }
+    }, ['target']),
+    browserActionSchema('fill', {
+      target: { type: 'string', description: '当前 ARIA ref 或唯一 Playwright selector。' },
+      text: { type: 'string', description: '要填入的文本；空字符串会清空控件。' },
+      submit: { type: 'boolean', description: '填入后是否提交。' }
+    }, ['target', 'text']),
+    browserActionSchema('press', {
+      key: { type: 'string', description: '要按下的键；省略时为 Enter。' },
+      target: { type: 'string', description: '可选；先聚焦该 ARIA ref 或唯一 Playwright selector。' }
+    }),
+    browserActionSchema('wait', {
+      target: { type: 'string', description: '可选；等待该 ARIA ref 或唯一 Playwright selector。' },
+      timeoutMs: { type: 'number', description: '可选等待时长。' }
+    }),
+    browserActionSchema('status'),
+    browserActionSchema('read-section', {
+      artifactRef: { type: 'string', maxLength: 512, description: 'browser observation 返回的 artifactRef。' },
+      section: { type: 'string', maxLength: 160, description: 'omittedInlineSections 中的 section；整份省略时用 observation。' },
+      cursor: { type: 'string', maxLength: 1_024, description: '可选；原样传回上一次结果的 nextCursor。' }
+    }, ['artifactRef', 'section']),
+    browserActionSchema('handoff', {
+      reason: {
+        type: 'string',
+        enum: ['human_verification', 'login', 'required_user_action'],
+        description: '必须由用户亲自完成的浏览器操作类型。'
+      }
+    }, ['reason'])
+  ]
 })
 
 /**
- * The complete custom surface for PluginDeveloper v11. Source editing and artifact reading use
- * Pi native workspace tools; Javdex owns production dry-run facts, browser Adapter
- * and typed ask.
+ * The complete custom surface for PluginDeveloper v13. Source editing uses Pi native workspace
+ * tools; Javdex owns production dry-run facts, targeted browser artifact reads, the browser
+ * Adapter and typed ask.
  */
 export const PLUGIN_DEV_TOOL_SCHEMAS: PluginDevToolDefinition[] = [
   {
@@ -69,36 +145,8 @@ export const PLUGIN_DEV_TOOL_SCHEMAS: PluginDevToolDefinition[] = [
     function: {
       name: 'browser',
       description:
-        '受控浏览器操作接口。导航动作返回 ARIA、pageFacts 和 artifactRef；交互 target 接受当前 ARIA ref 或唯一 Playwright selector。',
-      parameters: objectSchema(
-        {
-          action: {
-            type: 'string',
-            enum: ['open', 'snapshot', 'find', 'html', 'evaluate', 'click', 'fill', 'press', 'wait', 'status', 'handoff']
-          },
-          reason: {
-            type: 'string',
-            enum: ['human_verification', 'login', 'required_user_action'],
-            description: '仅 action=handoff 时使用；由宿主生成固定用户提示。'
-          },
-          url: { type: 'string' },
-          readySelector: { type: 'string' },
-          target: {
-            type: 'string',
-            description: '当前 ARIA snapshot 的 ref（例如 e12）或唯一 Playwright selector。'
-          },
-          expression: { type: 'string' },
-          text: { type: 'string' },
-          regex: { type: 'string', maxLength: 256 },
-          submit: { type: 'boolean' },
-          key: { type: 'string' },
-          timeoutMs: { type: 'number' },
-          maxLength: { type: 'number' },
-          depth: { type: 'number' },
-          boxes: { type: 'boolean' }
-        },
-        ['action']
-      )
+        '受控浏览器操作与 browser artifact 分区读取接口。每个 action 只接受自己的参数组合；导航动作返回 ARIA、pageFacts 和 artifactRef。',
+      parameters: browserSchema()
     }
   },
   {

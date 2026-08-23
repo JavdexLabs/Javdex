@@ -261,7 +261,7 @@ const body = await ctx.fetchBuffer(url, {
 
 - **直连资料页**：URL 可由名称/slug 可靠推导时使用。
 - **搜索进资料页**：依次尝试 `mainName` 与各 `alias`；搜索页仅用于找资料链接。
-- **动态搜索**：若结果通过 AJAX 更新而 URL 不变，用 `fetchPage` 复现对应请求（可从站点脚本或开发浏览的 `recentRequests` 还原 method/URL），勿把未变化的 URL 当作失败。
+- **动态搜索**：若结果通过 AJAX 更新而 URL 不变，用 `fetchPage` 复现对应请求（可从站点脚本或开发浏览的 `recentRequests` 还原 method/URL），勿把未变化的 URL 当作失败。插件开发助手按四档确认搜索入口，生产实现同样优先 `fetchPage`，能直连请求时不要把浏览器点选流程写入插件。
 - **头像专用来源**：只提供头像的演员头像源应仅声明 `avatar`，不返回别名或其他资料，也不据此改变演员身份；未精确命中时返回 `null`。
 
 ## 组合刮削器

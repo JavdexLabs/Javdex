@@ -40,7 +40,7 @@ docs/fields-actress.md            # 演员字段查询表
 .javdex/reports/*.json            # 完整生产执行 artifact
 ```
 
-新工作区使用 `instructionSetVersion: 26`。system prompt 只声明身份、文件边界、恢复入口和 Skill 所有权；完整开发循环只存在于按当前 kind 生成的 `javdex-plugin-dev` Skill，并按“启动或恢复 → 获取证据 → 实现 → 运行与结束”四个阶段组织。initial message 和 continuation 只传递本次事件事实与适用阶段，不再复制文件读取、停止条件或验收分支。create 首次实现前读取一次当前 kind 的 `docs/plugin-format.md` 作为唯一沙箱输入、返回形状和候选处理契约，并在首次浏览前读取 `javdex-browser-operation`；debug 或恢复仅在修改涉及这些契约或 notes 明确缺少契约事实时重读。create/debug 都只创建空 notes 模板，宿主不从页面或 manifest 推断字段范围。工作区刷新会保留 `plugin.json`、`index.js`、decisions 和 dev-notes。choice 决定在 `.javdex/decisions.json` 中保存原问题、所选项 id/label/description 和关联 evidenceRefs；恢复提示会重新评估当前 blocker，不假定一次选择自动结束全部歧义或必然需要修改、dry-run。
+新工作区使用 `instructionSetVersion: 31`。system prompt 只声明身份、文件边界、恢复入口和 Skill 所有权；完整开发循环只存在于按当前 kind 生成的 `javdex-plugin-dev` Skill，并按“启动或恢复 → 获取证据 → 实现 → 运行与结束”四个阶段组织。initial message 和 continuation 只传递本次事件事实与适用阶段，不再复制文件读取、停止条件或验收分支。create 首次实现前读取一次当前 kind 的 `docs/plugin-format.md` 作为唯一沙箱输入、返回形状和候选处理契约，并在首次浏览前读取 `javdex-browser-operation`；debug 或恢复仅在修改涉及这些契约或 notes 明确缺少契约事实时重读。create/debug 都只创建空 notes 模板，宿主不从页面或 manifest 推断字段范围。工作区刷新会保留 `plugin.json`、`index.js`、decisions 和 dev-notes。choice 决定在 `.javdex/decisions.json` 中保存原问题、所选项 id/label/description 和关联 evidenceRefs；恢复提示会重新评估当前 blocker，不假定一次选择自动结束全部歧义或必然需要修改、dry-run。
 
 暂时无法解析的 `plugin.json`/`index.js` 只令工作区进入可恢复的 `WORKSPACE_INVALID`，不会把整个 Agent run 标为失败。文件修复后自动重新同步；无效期间调用 dry-run 不执行沙箱，也不覆盖最近执行事实，只把 `currentAcceptance` 更新为不可安装及 `workspace_invalid`。
 
@@ -79,10 +79,10 @@ ToolPack `toolpack:plugin-developer:v13` 只有三个自定义工具：
 影片：
 
 ```json
-{ "videoCodes": ["YST-222"] }
+{ "videoCodes": ["ABC-123"] }
 ```
 
-`YST-222` 只演示参数格式；实际值必须来自本次精确详情页，不是固定测试目标。
+`ABC-123` 只演示参数格式；实际值必须来自本次精确详情页，不是固定测试目标。
 
 演员：
 
@@ -125,7 +125,7 @@ create 草稿的空 `supportedFields` 表示“尚未声明”，但现有安装
 
 ## 自适应开发循环
 
-create 模式先确认搜索入口，再打开一条精确详情页学习选择器和字段，并把页面结构和全部已观察明确字段写入 dev-notes。搜索页若有多条番号完全匹配，浏览不要把其余候选点开；生成的影片插件仍须抓取第一页全部完全匹配详情，多于一条返回对象数组，任一条详情失败则整次失败。确认搜索入口只能按三档降级，写在 `javdex-plugin-dev`：已有可提交的搜索控件或可 `open` 的搜索链接时必须先 `fill` / `press` / `click` 或直接 `open`，`action` 为空或控件无 `name` 不是跳过第一档的理由；第一档成功后记下新文档 URL 并立即打开一条精确详情，不要再读脚本、解释 `recentRequests` 或在搜索结果页学习列表结构。仅当第一档失败后再阅读 `pageFacts.scriptSrcs` / `inlineScripts`；仅当第二档也失败后再用 `pageFacts.recentRequests` 复现 `fetchPage`。`runTargets` 为空时浏览发现身份；用户目标零条精确匹配时另外打开一条代表性详情，先记下原目标的空完整 dry-run，再 `ask_user` 换目标。证据充分的简单网站可以在一个连贯修改中实现全部字段、同步 manifest 并立即 dry-run。只有代码确实复杂、部分实现需要真实运行验证或仍有具体不确定性时，才先提交一个可运行批次，并把明确未完成项留在 notes 中。第一页完全匹配合同只写在 `docs/plugin-format.md`。
+create 模式先确认搜索入口，再打开一条精确详情页学习选择器和字段，并把页面结构和全部已观察明确字段写入 dev-notes。搜索页若有多条番号完全匹配，浏览不要把其余候选点开；生成的影片插件仍须抓取第一页全部完全匹配详情，多于一条返回对象数组，任一条详情失败则整次失败。确认搜索入口只能按四档降级，写在 `javdex-plugin-dev`：已有可提交的搜索控件或可 `open` 的搜索链接时必须先 `fill` / `press` / `click` 或直接 `open`，`action` 为空或控件无 `name` 不是跳过第一档的理由。第一档成功仅指提交后 observation 的 `url` 变为另一个地址，用该地址写成 `fetchPage` 搜索并立即打开一条精确详情，不要再读脚本、解释 `recentRequests` 或在结果页学习列表结构；提交后 `url` 未变化不算成功，同一 `url` 上的 overlay 或 AJAX 结果也不能当作第一档成功，但可用已出现的精确链接打开一条详情学字段，搜索实现继续降级。第一档失败后再阅读 `pageFacts.scriptSrcs` / `inlineScripts` 还原 `fetchPage`；第二档失败后再用 `pageFacts.recentRequests` 复现 `fetchPage`；第三档失败后才用生产 `ctx.browser` 的 click/type/press/wait。生产搜索优先 `fetchPage`。`runTargets` 为空时浏览发现身份；用户目标零条精确匹配时另外打开一条代表性详情，先记下原目标的空完整 dry-run，再 `ask_user` 换目标。证据充分的简单网站可以在一个连贯修改中实现全部字段、同步 manifest 并立即 dry-run。只有代码确实复杂、部分实现需要真实运行验证或仍有具体不确定性时，才先提交一个可运行批次，并把明确未完成项留在 notes 中。第一页完全匹配合同只写在 `docs/plugin-format.md`。
 
 每次 dry-run 后，Pi 只在三种行动中选择一种：`mechanicalAcceptance.installReady=true` 且没有明确未完成项时停止；有明确错误或剩余字段时做针对性修改后再运行；没有新证据或没有必要修改时停止。`wrong_scope` 不是代码错误：省略参数再跑一次完整 dry-run，不要用同一组显式参数重跑。多轮开发是解决真实缺口的能力，不是完成任务必须经历的阶段。dev-notes 只在页面事实、字段覆盖、未完成事项或下一步变化时更新，不要求每次写代码都重复维护。
 
@@ -146,7 +146,7 @@ create 模式先确认搜索入口，再打开一条精确详情页学习选择�
 
 它不生成字段语义问题，不读取 dev-notes 或 browser artifact，不判断内容值是否正确，也不要求 `supportedFields` 覆盖插件所有返回键。Pi 必须显式执行最后一次完整 dry-run；宿主不会在模型自然停止后运行隐藏检查。
 
-`agent.settled` 只表示本轮模型正常停止：artifact 未通过时进入 `waiting_user/working`，已通过时进入 `waiting_user/ready`，不得按运行错误展示。未通过时可直接继续 Agent；已通过时安装是界面主操作，只有输入具体反馈后才可继续完善。安装只要求当前完整 execution artifact 的 `ready=true`。只有安装写盘成功后，会话才投影为 `completed`；代码、`supportedFields`、目标或 runtime version 变化会立即使旧资格失效。改插件名等展示字段仍可继续安装。
+`agent.settled` 只表示本轮模型正常停止：artifact 未通过时进入 `waiting_user/working`，已通过时进入 `waiting_user/ready`，不得按运行错误展示。未通过时可直接继续 Agent；已通过时安装是界面主操作，只有输入具体反馈后才可继续完善。安装只要求当前完整 execution artifact 的 `ready=true`。只有安装写盘成功后，会话才投影为 `completed`；代码、`supportedFields`、目标或 runtime version 变化会立即使旧资格失效。改插件名等展示字段仍可继续安装。安装采用用户提交的包（含改名后的展示字段）写入会话草稿、工作区 `plugin.json` 和 `done` 事件；终态 `done` 不再覆盖当前编辑器。
 
 ## 浏览器与 helper
 
@@ -166,7 +166,7 @@ Browser Skill 把页面文本、ARIA、HTML、脚本和网络响应都视为不�
 
 ## 状态、升级与审计
 
-- product state 与工作日志新写 schema v7；ToolPack 为 v13；instruction set 为 v25；latest dry-run 为 schema v2；browser artifact 保持 v2；运行验收版本为 `runtime-v2`；字段语义 registry 为 v2。schema v6 终态历史继续只读导出。
+- product state 与工作日志新写 schema v7；ToolPack 为 v13；instruction set 为 v31；latest dry-run 为 schema v2；browser artifact 保持 v2；运行验收版本为 `runtime-v2`；字段语义 registry 为 v2。schema v6 终态历史继续只读导出。
 - 数据库 v27 只关闭未结束的 PluginDeveloper v12 run，并拒绝其未决许可/请求，避免用冻结的旧 ToolPack 恢复到按 action 区分的新 schema；终态历史、工作区草稿、编辑器代码、已安装插件和其他 Agent 会话不受影响。
 - 主模型 reasoning 与回答继续流式展示并各持久化一次；正常路径不调用 verifier 模型。
 - 终态历史不会自动覆盖当前编辑器。离开开发页时关闭 helper，并清掉当前流程无法再恢复的会话（已安装、失败、取消）；`running` / `waiting_user` 保留以便回来继续。「清除会话」仍可在页内清掉包括可恢复会话在内的全部历史，并同时清空左侧未安装草稿；已经安装的插件不受影响。
@@ -184,7 +184,9 @@ Browser Skill 把页面文本、ARIA、HTML、脚本和网络响应都视为不�
 - 第 4 次和第 10 次 dry-run 仍真实执行，且没有隐藏最终运行或模型重启。
 - 同一文档重复观察只返回事实增量；`unchanged` 后不继续相同探索。
 - 导航动作成功而 snapshot 暂不可用时只补 snapshot，不重复 click/fill/press。
-- YST-222 和三上悠亜只作为参数示例；当前详情页决定真正 dry-run 目标。
+- ABC-123 和三上悠亜只作为参数示例；当前详情页决定真正 dry-run 目标。
 - create 可以一次实现全部明确字段；相关写入完成后优先 dry-run，notes 仍有明确未完成项时不得声称完整完成。
 - 浏览只打开一条精确详情；生成的影片插件仍须抓取第一页全部番号完全匹配，多于一条返回数组，任一条详情失败则整次失败。
+- 搜索入口四档：提交后 `url` 变为另一个地址才算第一档成功；同一 `url` 上的 overlay 或 AJAX 结果不算；再降脚本、`recentRequests`、`ctx.browser`。生产搜索优先 `fetchPage`。
 - 离开开发页不清掉 `running` / `waiting_user`；已安装、失败、取消会话在离开时关闭，不再出现在下次进入的恢复快照里。
+- 安装时改名后，会话草稿、`done` 包和编辑器都保持安装名；终态 `done` 不得把工作区旧名称写回表单。

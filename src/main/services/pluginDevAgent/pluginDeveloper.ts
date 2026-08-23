@@ -194,6 +194,32 @@ function workspaceSkillHashes(session: PluginDevSession): Record<string, string>
   }
 }
 
+/** The installed package is the draft of record, including display-only rename at install. */
+function persistInstalledPackage(
+  directory: string | undefined,
+  packageInput: PluginDevSession['package']
+): void {
+  if (!directory || !fs.existsSync(path.join(directory, 'plugin.json'))) return
+  try {
+    pluginWorkspace.writePackage(directory, packageInput)
+  } catch (error) {
+    console.error('[plugin-dev] failed to persist installed package onto workspace', error)
+  }
+}
+
+function adoptInstalledPackage(
+  session: PluginDevSession,
+  packageInput: PluginDevSession['package'],
+  startInput?: PluginDevAgentStartInput
+): PluginDevSession['package'] {
+  const installed = structuredClone(packageInput)
+  session.package = installed
+  session.siteName = installed.name
+  if (startInput) startInput.siteName = installed.name
+  persistInstalledPackage(session.workspaceDirectory, installed)
+  return installed
+}
+
 function toProductState(
   session: PluginDevSession,
   input: PluginDevAgentStartInput,
@@ -1210,6 +1236,7 @@ export class PluginDeveloper {
     const installedAt = Date.now()
     const summary = '当前机械验收通过的插件版本已安装。'
     if (active) {
+      const installed = adoptInstalledPackage(active.session, packageInput, active.input)
       active.session.status = 'completed'
       active.session.phase = 'ready'
       active.session.endedAt = installedAt
@@ -1220,7 +1247,7 @@ export class PluginDeveloper {
         step: active.session.step,
         success: true,
         summary,
-        package: active.session.package,
+        package: installed,
         execution: active.session.lastExecution,
         acceptance: active.session.acceptance
       })
@@ -1237,12 +1264,19 @@ export class PluginDeveloper {
       targets: record.productState.runTargets,
       execution: record.productState.lastExecution
     })
+    const installed = structuredClone(packageInput)
+    persistInstalledPackage(agentSessionDirectory(sessionId), installed)
     const nextState: PluginDeveloperProductState = {
       ...structuredClone(record.productState),
       status: 'completed',
       phase: 'ready',
       endedAt: installedAt,
       summary,
+      package: installed,
+      input: {
+        ...structuredClone(record.productState.input),
+        siteName: installed.name
+      },
       acceptance: gate.outcome
     }
     agentRunStore.updateProductState(sessionId, 'settled', nextState)
@@ -1252,7 +1286,7 @@ export class PluginDeveloper {
       step: nextState.step,
       success: true,
       summary,
-      package: packageInput,
+      package: installed,
       execution: nextState.lastExecution,
       acceptance: nextState.acceptance
     })

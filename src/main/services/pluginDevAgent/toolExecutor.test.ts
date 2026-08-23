@@ -340,7 +340,7 @@ describe('PluginDeveloper v13 tool executor', { concurrency: false }, () => {
       assert.deepEqual(session.runTargets, [{ kind: 'video', code: 'SHKD-999' }])
       assert.deepEqual(result.structured?.mechanicalAcceptance, {
         installReady: false,
-        reasons: ['execution_failed', 'wrong_scope', 'target_mismatch']
+        reasons: ['wrong_scope']
       })
     } finally {
       await releasePluginDeveloperBrowser(session.id)
@@ -365,14 +365,26 @@ describe('PluginDeveloper v13 tool executor', { concurrency: false }, () => {
       }), 2)
       assert.deepEqual(targeted.structured?.mechanicalAcceptance, {
         installReady: false,
-        reasons: ['execution_failed', 'wrong_scope', 'target_mismatch']
+        reasons: ['wrong_scope']
       })
       assert.deepEqual(session.runTargets, [
         { kind: 'video', code: 'ABC-1' },
         { kind: 'video', code: 'ABC-2' }
       ])
+      const latestAfterTargeted = JSON.parse(fs.readFileSync(
+        path.join(session.workspaceDirectory!, '.javdex', 'latest-dry-run.json'),
+        'utf8'
+      )) as { status?: string; scope?: string }
+      assert.equal(latestAfterTargeted.status, 'not_run')
+      assert.equal(session.lastExecution, undefined)
       const full = await executeTool(session.id, 'plugin_dry_run', '{}', 3)
       assert.deepEqual(full.structured?.mechanicalAcceptance, { installReady: true, reasons: [] })
+      const latestAfterFull = JSON.parse(fs.readFileSync(
+        path.join(session.workspaceDirectory!, '.javdex', 'latest-dry-run.json'),
+        'utf8'
+      )) as { status?: string; scope?: string }
+      assert.equal(latestAfterFull.status, 'completed')
+      assert.equal(latestAfterFull.scope, 'all')
       const fullExplicit = await executeTool(session.id, 'plugin_dry_run', JSON.stringify({
         videoCodes: ['ABC-1', 'ABC-2']
       }), 4)

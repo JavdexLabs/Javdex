@@ -105,7 +105,7 @@ describe('PluginWorkspaceModule', () => {
     assert.match(pluginSkill, /按证据推进/)
     assert.doesNotMatch(pluginSkill, /纵向切片|下一模型轮次/)
     assert.doesNotMatch(pluginSkill, /整个用户操作最多三次 dry-run/)
-    assert.match(pluginSkill, /videoCodes.*YST-222/)
+    assert.match(pluginSkill, /videoCodes.*ABC-123/)
     assert.doesNotMatch(pluginSkill, /actresses.*三上悠亜/)
     assert.match(pluginSkill, /页面 URL.*永远不是 dry-run 目标/)
     assert.doesNotMatch(pluginSkill, /`plugin_check`/)
@@ -119,7 +119,7 @@ describe('PluginWorkspaceModule', () => {
     assert.deepEqual(opened.package.supportedFields, [])
     const taskDocument = JSON.parse(fs.readFileSync(path.join(root, 'task.json'), 'utf8'))
     assert.equal(taskDocument.schemaVersion, 3)
-    assert.equal(taskDocument.instructionSetVersion, 26)
+    assert.equal(taskDocument.instructionSetVersion, 31)
     assert.deepEqual(taskDocument.runTargets, [{ kind: 'video', code: 'ABC-123' }])
     assert.equal(Object.hasOwn(taskDocument, 'instructions'), false)
     assert.equal(Object.hasOwn(taskDocument, 'fieldScope'), false)
@@ -327,7 +327,7 @@ describe('PluginWorkspaceModule', () => {
     assert.doesNotMatch(fs.readFileSync(frozenFields, 'utf8'), /legacy-fields-marker/)
     assert.equal(fs.readFileSync(decisionsPath, 'utf8'), decisionsText)
     const refreshedTask = JSON.parse(fs.readFileSync(frozenTask, 'utf8')) as Record<string, unknown>
-    assert.equal(refreshedTask.instructionSetVersion, 26)
+    assert.equal(refreshedTask.instructionSetVersion, 31)
     assert.deepEqual(refreshedTask.runTargets, [{ kind: 'video', code: 'ABC-123' }])
   })
 

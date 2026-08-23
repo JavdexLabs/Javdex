@@ -567,32 +567,32 @@ export async function executeTool(
             outcome: acceptanceDecision.outcome
           })
         }
+        const currentAcceptance = pluginRunAcceptance.evaluate({
+          package: workspace.package,
+          targets: session.runTargets,
+          execution: session.lastExecution
+        })
+        pluginWorkspace.recordLatestDryRun(session.workspaceDirectory, {
+          schemaVersion: 2,
+          status: 'completed',
+          artifactHash: execution.artifactHash,
+          reportPath: execution.reportPath,
+          scope: execution.scope,
+          runtimeVersion: execution.runtimeVersion,
+          targetFingerprint: execution.targetFingerprint,
+          executionPassed: execution.executionPassed,
+          cases: execution.cases.map((item) => ({
+            runtimeInput: item.target,
+            runtimeAccepted: item.runtimeAccepted,
+            pluginResult: item.pluginResult,
+            effectiveResult: item.effectiveResult,
+            manifestCoverage: item.manifestCoverage,
+            unrecognizedResultKeys: item.unrecognizedResultKeys ?? [],
+            error: item.error
+          })),
+          currentAcceptance: projectPluginRunAcceptance(currentAcceptance)
+        })
       }
-      const currentAcceptance = pluginRunAcceptance.evaluate({
-        package: workspace.package,
-        targets: session.runTargets,
-        execution: session.lastExecution
-      })
-      pluginWorkspace.recordLatestDryRun(session.workspaceDirectory, {
-        schemaVersion: 2,
-        status: 'completed',
-        artifactHash: execution.artifactHash,
-        reportPath: execution.reportPath,
-        scope: execution.scope,
-        runtimeVersion: execution.runtimeVersion,
-        targetFingerprint: execution.targetFingerprint,
-        executionPassed: execution.executionPassed,
-        cases: execution.cases.map((item) => ({
-          runtimeInput: item.target,
-          runtimeAccepted: item.runtimeAccepted,
-          pluginResult: item.pluginResult,
-          effectiveResult: item.effectiveResult,
-          manifestCoverage: item.manifestCoverage,
-          unrecognizedResultKeys: item.unrecognizedResultKeys ?? [],
-          error: item.error
-        })),
-        currentAcceptance: projectPluginRunAcceptance(currentAcceptance)
-      })
       const compact = {
         executionPassed: execution.executionPassed,
         scope: execution.scope,

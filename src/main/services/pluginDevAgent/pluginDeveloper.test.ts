@@ -1575,4 +1575,166 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       deleteSession(session.id)
     }
   })
+
+  it('adopts the installed display name when install renames to avoid a conflict', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-install-rename-'))
+    const developer = new PluginDeveloper()
+    const session = createSession(
+      { ...input, package: structuredClone(packageValue) },
+      'installed-rename'
+    )
+    session.workspaceDirectory = directory
+    pluginWorkspace.open({ directory, task: input, package: packageValue })
+    session.status = 'waiting_user'
+    session.phase = 'ready'
+    session.lastExecution = {
+      runtimeVersion: PLUGIN_RUNTIME_VERSION,
+      artifactHash: pluginArtifactHash(session.package),
+      targetFingerprint: pluginRunTargetFingerprint(session.runTargets),
+      scope: 'all',
+      targets: structuredClone(session.runTargets),
+      cases: session.runTargets.map((target) => ({
+        target,
+        pluginResult: { code: 'ABC-123', title: 'unchecked' },
+        effectiveResult: { code: 'ABC-123', title: 'unchecked' },
+        manifestCoverage: {
+          returnedFieldIds: ['title'],
+          undeclaredReturnedFieldIds: [],
+          runtimeOnlyKeys: []
+        },
+        logs: [],
+        runtimeAccepted: true
+      })),
+      reportPath: '/tmp/report.json',
+      executionPassed: true
+    }
+    session.acceptance = pluginRunAcceptance.evaluate({
+      package: session.package,
+      targets: session.runTargets,
+      execution: session.lastExecution
+    }).outcome
+    const events: PluginDevAgentEvent[] = []
+    const active = { ...activeRun(session), emit: (event: PluginDevAgentEvent) => events.push(event) }
+    testable(developer).active.set(session.id, active)
+    const restoreGetRun = replaceMethod(agentRunStore, 'getRun', (() => null) as typeof agentRunStore.getRun)
+    const restoreDiscard = replaceMethod(toolHost, 'discardApprovals', (() => undefined) as typeof toolHost.discardApprovals)
+    const restoreDispose = replaceMethod(toolHost, 'disposeRun', (() => undefined) as typeof toolHost.disposeRun)
+    const restoreRelease = replaceMethod(agentExecution, 'releaseRun', (async () => undefined) as typeof agentExecution.releaseRun)
+    const renamed = { ...session.package, name: 'missav-003' }
+    try {
+      developer.markInstalled(session.id, renamed)
+
+      const done = events.find((event) => event.type === 'done')
+      assert.ok(done && done.type === 'done')
+      assert.equal(done.package.name, 'missav-003')
+      assert.equal(session.package.name, 'missav-003')
+      assert.equal(session.siteName, 'missav-003')
+      assert.equal(active.input.siteName, 'missav-003')
+      assert.equal(
+        JSON.parse(fs.readFileSync(path.join(directory, 'plugin.json'), 'utf8')).name,
+        'missav-003'
+      )
+    } finally {
+      restoreRelease()
+      restoreDispose()
+      restoreDiscard()
+      restoreGetRun()
+      testable(developer).active.delete(session.id)
+      deleteSession(session.id)
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('persists the renamed installed package onto settled product state', () => {
+    const developer = new PluginDeveloper()
+    const lastExecution = {
+      runtimeVersion: PLUGIN_RUNTIME_VERSION,
+      artifactHash: pluginArtifactHash(packageValue),
+      targetFingerprint: pluginRunTargetFingerprint([{ kind: 'video' as const, code: 'ABC-123' }]),
+      scope: 'all' as const,
+      targets: [{ kind: 'video' as const, code: 'ABC-123' }],
+      cases: [{
+        target: { kind: 'video' as const, code: 'ABC-123' },
+        pluginResult: { code: 'ABC-123', title: 'unchecked' },
+        effectiveResult: { code: 'ABC-123', title: 'unchecked' },
+        manifestCoverage: {
+          returnedFieldIds: ['title'],
+          undeclaredReturnedFieldIds: [],
+          runtimeOnlyKeys: []
+        },
+        logs: [],
+        runtimeAccepted: true
+      }],
+      reportPath: '/tmp/report.json',
+      executionPassed: true
+    }
+    const productState = {
+      schemaVersion: 7 as const,
+      input: { ...input },
+      status: 'waiting_user' as const,
+      phase: 'ready' as const,
+      step: 4,
+      totalTokens: 0,
+      modelTurnCount: 0,
+      discoveryToolCalls: 0,
+      runTargets: [{ kind: 'video' as const, code: 'ABC-123' }],
+      package: structuredClone(packageValue),
+      lastExecution,
+      summary: 'ready',
+      workLog: []
+    }
+    const record = {
+      id: 'installed-rename-settled',
+      useCase: 'plugin-developer',
+      status: 'waiting_user',
+      activeOperationId: 'op-install',
+      configRevision: 'test',
+      configSnapshot: frozenSnapshot(),
+      recoveryGeneration: 0,
+      productState,
+      createdAt: '2026-08-23T00:00:00.000Z',
+      updatedAt: '2026-08-23T00:00:00.000Z'
+    } satisfies AgentRunRecord<typeof productState>
+    const directory = path.join(
+      process.env.JAVDEX_TEST_USER_DATA!,
+      'agent-sessions',
+      record.id
+    )
+    pluginWorkspace.open({ directory, task: input, package: packageValue })
+    let persisted: typeof productState | undefined
+    const restoreGetRun = replaceMethod(agentRunStore, 'getRun', (() => record) as typeof agentRunStore.getRun)
+    const restoreUpdate = replaceMethod(
+      agentRunStore,
+      'updateProductState',
+      ((_, __, next) => {
+        persisted = next as typeof productState
+      }) as typeof agentRunStore.updateProductState
+    )
+    const restoreAppend = replaceMethod(
+      agentRunStore,
+      'appendProductEvent',
+      (() => 0) as typeof agentRunStore.appendProductEvent
+    )
+    const restoreArtifact = replaceMethod(
+      agentRunStore,
+      'recordArtifact',
+      ((() => undefined) as unknown) as typeof agentRunStore.recordArtifact
+    )
+    try {
+      developer.markInstalled(record.id, { ...packageValue, name: 'missav-003' })
+      assert.equal(persisted?.package.name, 'missav-003')
+      assert.equal(persisted?.input.siteName, 'missav-003')
+      assert.equal(persisted?.status, 'completed')
+      assert.equal(
+        JSON.parse(fs.readFileSync(path.join(directory, 'plugin.json'), 'utf8')).name,
+        'missav-003'
+      )
+    } finally {
+      restoreArtifact()
+      restoreAppend()
+      restoreUpdate()
+      restoreGetRun()
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  })
 })

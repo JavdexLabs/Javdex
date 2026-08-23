@@ -83,8 +83,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  column-gap: 10px;
-  row-gap: 2px;
+  gap: 2px 10px;
   min-height: 32px;
   padding: 6px 10px;
   color: var(--text-muted);
@@ -164,15 +163,6 @@
   line-height: 1.4;
 }
 
-.mdHeading:first-child,
-.mdParagraph:first-child,
-.mdList:first-child,
-.mdQuote:first-child,
-.mdRule:first-child,
-.mdPre:first-child {
-  margin-top: 0;
-}
-
 .mdParagraph {
   margin: 7px 0;
 }
@@ -228,6 +218,15 @@
 .mdRule {
   border: 0;
   border-top: 1px solid var(--border-subtle);
+}
+
+.mdHeading:first-child,
+.mdParagraph:first-child,
+.mdList:first-child,
+.mdQuote:first-child,
+.mdRule:first-child,
+.mdPre:first-child {
+  margin-top: 0;
 }
 
 .reasoningContent {

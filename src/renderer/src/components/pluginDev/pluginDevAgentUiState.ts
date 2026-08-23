@@ -150,11 +150,11 @@ export function isAgentDispatchSettlingEvent(event: PluginDevAgentEvent): boolea
   return event.type === 'waiting_user' || event.type === 'done' || event.type === 'error'
 }
 
-/** Project the authoritative workspace package carried by a live Agent event. */
+/** Live workspace drafts arrive via `package_updated`. Terminal `done` must not clobber the editor. */
 export function packageFromPluginDevAgentEvent(
   event: PluginDevAgentEvent
 ): ScraperPluginPackage | null {
-  return event.type === 'package_updated' || event.type === 'done' ? event.package : null
+  return event.type === 'package_updated' ? event.package : null
 }
 
 export function shouldReleaseAgentBusyForEvent(

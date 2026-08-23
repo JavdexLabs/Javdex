@@ -58,7 +58,7 @@ URL、路径和控制字符在工具边界被拒绝。这是输入类型保护�
 
 删除 `PluginCheckModule`、`PluginArtifactGate` 和隐藏机械修复 continuation。唯一最终门禁 `PluginRunAcceptanceModule` 只接受与当前包、全部目标和 `runtime-v2` 精确匹配的完整生产执行，并要求每个目标都有至少一个含实际值的可声明生产字段。
 
-它不判断内容值、页面匹配、字段来源、未实现字段或 `supportedFields` 完整性。Pi 必须显式执行最后一次完整 dry-run；自然停止不会触发隐藏运行。`agent.settled` 只结束当前模型 operation：机械 artifact 缺失或过期时进入 `waiting_user/working`，通过时进入 `waiting_user/ready`。两种状态都可继续 Agent，只有 ready 状态可安装；安装写盘成功后才把会话投影为 `completed`。
+它不判断内容值、页面匹配、字段来源、未实现字段或 `supportedFields` 完整性。Pi 必须显式执行最后一次完整 dry-run；自然停止不会触发隐藏运行。`agent.settled` 只结束当前模型 operation：机械 artifact 缺失或过期时进入 `waiting_user/working`，通过时进入 `waiting_user/ready`。两种状态都可继续 Agent，只有 ready 状态可安装；安装写盘成功后才把会话投影为 `completed`，并采用实际安装的包（含展示字段改名）作为会话与工作区草稿。
 
 ### 7. 自适应开发循环
 
@@ -68,7 +68,7 @@ URL、路径和控制字符在工具边界被拒绝。这是输入类型保护�
 
 ### 8. 状态与升级
 
-- task schema v3 / instruction set v26；
+- task schema v3 / instruction set v31；
 - ToolPack `toolpack:plugin-developer:v13`；
 - product state 与工作日志新写 schema v7，schema v6 终态历史只读导出；
 - runtime acceptance `runtime-v2`；

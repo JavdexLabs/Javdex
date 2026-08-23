@@ -9,7 +9,7 @@ import { pluginResultContract } from '@shared/pluginResultContract'
 import { buildPluginFieldSemanticsPrompt } from '@shared/scrapeFieldPromptDocs'
 import type { ScraperPluginKind } from '@shared/scraperPluginTypes'
 
-export const PLUGIN_DEV_INSTRUCTION_SET_VERSION = 26
+export const PLUGIN_DEV_INSTRUCTION_SET_VERSION = 31
 
 export const PLUGIN_DEVELOPER_SYSTEM_PROMPT = `你是 ${APP_DISPLAY_NAME} 的插件开发 Agent，运行在当前插件专用隔离工作区。
 
@@ -106,8 +106,10 @@ function pluginFormatDocument(kind: ScraperPluginKind): string {
     : '- 演员插件的运行输入只有 `ctx.mainName` 和 `ctx.aliases`。'
   const kindContract = kind === 'video'
     ? `- \`code\` 是始终保留的影片身份键，不属于 \`supportedFields\`。单对象结果可以省略 \`code\`，宿主会使用本次 \`ctx.code\`，但建议显式返回精确番号；对象数组中的每项都必须提供非空、与目标精确相等的 \`code\`。搜索结果第一页上，番号去空格并转大写后与 \`ctx.code\` 逐字符相等的条目必须全部抓取详情后返回：零条返回 \`null\` 或 \`[]\`；一条可返回单对象或单元素数组；多条必须返回对象数组。任一条完全匹配详情失败则整次失败，不得用其余详情或模糊项凑成不完整集合。普通模糊搜索列表、标题包含、前缀匹配和第二页都不是多候选契约的触发条件。
-- \`actresses\` 按每项显式 \`gender: "female" | "male"\` 分别投影到 \`actressesFemale\` / \`actressesMale\`。`
+- \`actresses\` 按每项显式 \`gender: "female" | "male"\` 分别投影到 \`actressesFemale\` / \`actressesMale\`。每项 \`name\` 只放一个名字：去掉括号及其中的罗马字、年龄等附加说明；同一个人不要拆成多项，也不要把中英文拼进同一个 \`name\`。`
     : `- \`mainName\` 是运行身份键，\`sourceUrl\` 是可选调试来源；二者都不属于 \`supportedFields\`，预计不会进入 \`effectiveResult\`，不得尝试声明。
+- \`nameZh\`、\`nameEn\`、\`aliases\` 以及 dry-run 用的 \`mainName\`/\`aliases\` 都是单一人名：去掉括号及其中的年龄、罗马字等附加说明；中文、英文/罗马字、曾用名分别写入对应字段或 \`aliases\` 的不同项，不要把「三上悠亜(Yua Mikami/33岁)」整段当作一个名称。
+- \`cupSize\` 只返回一个大写罩杯字母（如 \`C\`）。
 - 演员结果只声明下面列出的演员字段 id。`
   return `# Javdex 刮削插件工作区规范
 
@@ -147,7 +149,7 @@ function pluginDevelopmentSkill(kind: ScraperPluginKind): string {
   const targetPage = kind === 'video' ? '精确影片详情页' : '精确演员资料页'
   const targetIdentity = kind === 'video' ? '真正番号' : '主名和页面明确给出的别名'
   const sandboxStart = kind === 'video'
-    ? '插件必须从 `ctx.code` 开始搜索并打开详情页。「从 ctx.code 搜索」是生产沙箱输入契约。从精确详情页发现番号后，用该番号调用 dry-run；例如发现 YST-222 时传 `{"videoCodes":["YST-222"]}`。YST-222 只是参数格式示例，不是固定测试目标。返回的 `actresses` 每项要显式给出 `gender`。'
+    ? '插件必须从 `ctx.code` 开始搜索并打开详情页。「从 ctx.code 搜索」是生产沙箱输入契约。从精确详情页发现番号后，用该番号调用 dry-run；例如发现 ABC-123 时传 `{"videoCodes":["ABC-123"]}`。ABC-123 只是参数格式示例，不是固定测试目标。返回的 `actresses` 每项要显式给出 `gender`。'
     : '插件必须从 `ctx.mainName` / `ctx.aliases` 开始搜索并打开资料页。「从 ctx.mainName 搜索」是生产沙箱输入契约。从精确资料页发现主名后，用该主名和页面明确别名调用 dry-run；例如可传 `{"actresses":[{"mainName":"三上悠亜","aliases":["Yua Mikami"]}]}`。三上悠亜只是参数格式示例，不是固定测试目标。`mainName` / `sourceUrl` 只是运行与调试信息，不要加入 `supportedFields`。'
   const browseThenCode = kind === 'video'
     ? '浏览顺序：先确认搜索入口，再只打开一条精确详情学习选择器和字段；搜索页若有多条番号完全匹配，不要把其余候选点开。浏览一条详情不是允许代码只处理一条：生成的 `parseVideo` 按 `docs/plugin-format.md` 的第一页完全匹配合同实现。'
@@ -174,10 +176,12 @@ description: Create or debug the Javdex scraper plugin in the current isolated w
 ## 2. 获取证据
 
 - 目标分两条路径。\`task.json.runTargets\` 为空时，浏览站点找到一个代表性的${targetPage}并提取${targetIdentity}。用户目标搜索后零条精确匹配时，不反复证明不存在，也不用相似条目充当命中；另外打开一条代表性的${targetPage}并取出${targetIdentity}，先省略参数做一次完整 dry-run 记录原目标的空结果，再 \`ask_user\` 是否改用该身份，用户同意后用该身份显式调用 \`plugin_dry_run\`。页面 URL 只用于理解网站和编写搜索逻辑，永远不是 dry-run 目标。
-- ${sandboxStart} 禁止假设存在任何 URL 型 ctx 输入。确认搜索入口按三档降级，不得提前进入下一档：
-  1. observation 有可提交的搜索控件或可 \`open\` 的搜索链接时，先 \`fill\` / \`press\` / \`click\` 或直接 \`open\`；\`action\` 为空或控件无 \`name\` 不是跳过本档的理由。成功后记下新文档 URL 并立即打开一条精确详情，不再读脚本、解释 \`recentRequests\` 或在结果页学习列表结构；搜索匹配与相对 href 留给首次 dry-run 验证。工具失败但页面显示提交正在进行或已经生效时，仍在本档补一次最直接的提交。本档失败仅指没有可见搜索控件/链接，或提交后既未进入搜索文档也未出现搜索结果。
-  2. 第一档失败后，阅读 \`pageFacts.scriptSrcs\` / \`inlineScripts\`；外链源码用 \`open\` 打开脚本 URL 后再 \`html\`。
+- ${sandboxStart} 禁止假设存在任何 URL 型 ctx 输入。确认搜索入口按四档降级，不得提前进入下一档：
+  1. observation 有可提交的搜索控件或可 \`open\` 的搜索链接时，先 \`fill\` / \`press\` / \`click\` 或直接 \`open\`；\`action\` 为空或控件无 \`name\` 不是跳过本档的理由。成功仅指提交后 observation 的 \`url\` 变为另一个地址：用该地址写成 \`fetchPage\` 搜索并立即打开一条精确详情，不再读脚本、解释 \`recentRequests\` 或在结果页学习列表结构。提交后 \`url\` 未变化不算本档成功，同一 \`url\` 上的 overlay 或 AJAX 结果也不能当作本档成功；此时可用已出现的精确链接 \`open\` 一条详情学习字段，但搜索实现必须继续降级，不得把 click/type/press 写入插件。工具失败但页面显示提交正在进行或已经生效时，仍在本档补一次最直接的提交。本档失败仅指没有可见搜索控件/链接，或提交后 \`url\` 未变化。
+  2. 第一档失败后，阅读 \`pageFacts.scriptSrcs\` / \`inlineScripts\`；外链源码用 \`open\` 打开脚本 URL 后再 \`html\`，还原请求并用 \`fetchPage\`。
   3. 第二档失败后，用 \`pageFacts.recentRequests\` 复现 \`fetchPage\`；没有请求记录时再提交一次可见搜索以采集。
+  4. 第三档失败后，才用生产 \`ctx.browser\` 的 click/type/press/wait 实现搜索。
+  搜索匹配与相对 href 留给首次 dry-run 验证。生产搜索优先 \`fetchPage\`；能 \`fetchPage\` 时不要把开发 helper 的点选流程写入 \`index.js\`。
   不主动浏览理论镜像域名、模糊搜索或无结果页。${browseThenCode}
 - 首次出现精确目标详情页 observation 时，无论来自 open、click、fill、press 或 snapshot，只要能确定搜索入口、详情选择器和当前可见字段，就把全部已观察且映射明确的字段与页面结构写入 \`.javdex/dev-notes.md\` 并进入实现。若仍有事实明确阻止编码，按 Browser Skill 每次处理一个具体 blocker 后重新评估；新证据暴露新 blocker 时可以继续，不设任意总次数上限。没有新增事实、返回 \`unchanged\` 或只剩理论问题时停止浏览，不能按字段逐项证明。只有真实字段歧义才调用 \`ask_user\`。
 
@@ -186,6 +190,7 @@ description: Create or debug the Javdex scraper plugin in the current isolated w
 - reasoning 只用一至三句话说明下一项工具行动；不在 reasoning 中预写插件、重复字段表、复述页面、粘贴 HTML、重新论证已确认事实或预演 dry-run。证据足够时立即 write/edit。
 - 简单网站在一个连贯修改中实现全部已观察且映射明确的字段。只有代码复杂、部分实现仍需真实运行验证或存在具体不确定性时，才先实现一个可运行批次，并在 dev-notes 中记录具体未完成项；不得按预设字段组合拆分实现。
 - create 在 dry-run 前保持 \`index.js\`、\`plugin.json\` 和 dev-notes 一致；debug 只修改真正需要变化的文件。仅在页面事实、字段覆盖、未完成事项或下一步变化时更新 dev-notes。相关写入完成后优先调用 \`plugin_dry_run\`。
+- 生产搜索优先 \`fetchPage\`；能 \`fetchPage\` 时不要把开发 helper 的点选流程写入 \`index.js\`。
 - ${formatPointer}
 - \`plugin.json.supportedFields\` 只使用当前 kind 的字段 id，不使用结果键。
 

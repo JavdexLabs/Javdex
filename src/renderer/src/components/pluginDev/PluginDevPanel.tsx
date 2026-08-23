@@ -1131,7 +1131,11 @@ export default function PluginDevPanel({
       setLoadedInstalledName(descriptor.name)
       setForkedFromBuiltIn(null)
       setSelectedPluginName(descriptor.name)
-      setInstalledBaseline(fingerprintPluginPackage(packageToInstall))
+      setSiteName(descriptor.name)
+      setInstalledBaseline(fingerprintPluginPackage({
+        ...packageToInstall,
+        name: descriptor.name
+      }))
       if (agentSessionId) {
         updateAgentStatus('completed')
         setAgentPhase('ready')

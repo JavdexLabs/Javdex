@@ -4,6 +4,7 @@ import type { PluginDevPendingApproval } from '@shared/pluginDevTypes'
 import type { ScraperPluginPackage } from '@shared/scraperPluginTypes'
 import {
   canClearPluginDevAgentHistory,
+  isRecoverablePluginDevSessionStatus,
   canInstallPluginDevDraft,
   checkPluginDevMessageDispatch,
   createPluginDevSnapshotGate,
@@ -158,6 +159,9 @@ describe('plugin dev Agent UI state', () => {
   })
 
   it('auto-applies only unfinished history and leaves terminal editor state untouched', () => {
+    assert.equal(isRecoverablePluginDevSessionStatus('running'), true)
+    assert.equal(isRecoverablePluginDevSessionStatus('waiting_user'), true)
+    assert.equal(isRecoverablePluginDevSessionStatus('completed'), false)
     assert.equal(shouldApplyInitialPluginDevSnapshot('running'), true)
     assert.equal(shouldApplyInitialPluginDevSnapshot('waiting_user'), true)
     assert.equal(shouldApplyInitialPluginDevSnapshot('completed'), false)
@@ -286,7 +290,7 @@ describe('plugin dev Agent UI state', () => {
     }, null), false)
   })
 
-  it('projects the final package from done immediately instead of waiting for the IPC promise', () => {
+  it('projects live workspace drafts from package_updated, not terminal done', () => {
     const packageValue: ScraperPluginPackage = {
       schemaVersion: 1,
       kind: 'video',
@@ -305,16 +309,21 @@ describe('plugin dev Agent UI state', () => {
       ],
       code: 'module.exports = { async parseVideo() { return null } }'
     }
-    const event = {
-      type: 'done' as const,
+
+    assert.equal(packageFromPluginDevAgentEvent({
+      type: 'package_updated',
+      sessionId: 'session-a',
+      step: 4,
+      package: packageValue
+    }), packageValue)
+    assert.equal(packageFromPluginDevAgentEvent({
+      type: 'done',
       sessionId: 'session-a',
       step: 4,
       success: true,
       summary: 'done',
-      package: packageValue
-    }
-
-    assert.equal(packageFromPluginDevAgentEvent(event), packageValue)
+      package: { ...packageValue, name: 'stale-workspace-name' }
+    }), null)
   })
 
   it('blocks ordinary messages until the exact pending approval is decided', () => {

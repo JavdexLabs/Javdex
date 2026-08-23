@@ -51,8 +51,12 @@ describe('PluginWorkspaceModule', () => {
     const latestDryRunPath = path.join(root, '.javdex', 'latest-dry-run.json')
     assert.equal(fs.existsSync(latestDryRunPath), true)
     assert.deepEqual(JSON.parse(fs.readFileSync(latestDryRunPath, 'utf8')), {
-      schemaVersion: 1,
-      status: 'not_run'
+      schemaVersion: 2,
+      status: 'not_run',
+      currentAcceptance: {
+        installReady: false,
+        reasons: ['missing_execution']
+      }
     })
     assert.match(
       fs.readFileSync(path.join(root, '.javdex', 'dev-notes.md'), 'utf8'),
@@ -68,8 +72,10 @@ describe('PluginWorkspaceModule', () => {
       path.join(root, 'docs', 'plugin-format.md'),
       'utf8'
     )
-    assert.match(pluginFormat, /ctx\.fetchPage\(url, options\?\): Promise<string>/)
-    assert.match(pluginFormat, /直接返回 HTML 字符串，不是 `\{ html, url \}` 对象/)
+    assert.match(pluginFormat, /ctx\.fetchPage\(url, options\?\)/)
+    assert.match(pluginFormat, /url` 必须是绝对 `http:` \/ `https:`/)
+    assert.match(pluginFormat, /ctx\.helpers\.absoluteUrl\(href, baseUrl\)/)
+    assert.match(pluginFormat, /直接返回 HTML 字符串，不返回 `\{ html, url \}`/)
     assert.match(pluginFormat, /影片插件的运行输入只有 `ctx\.code`/)
     assert.match(pluginFormat, /不存在 `ctx\.url`.*`ctx\.pageUrl`/)
     assert.equal(
@@ -89,26 +95,31 @@ describe('PluginWorkspaceModule', () => {
       'utf8'
     )
     assert.match(pluginSkill, /工作流的唯一来源/)
-    assert.match(pluginSkill, /探索即告完成[\s\S]*立即开始编码/)
+    assert.match(pluginSkill, /dev-notes\.md` 并进入实现/)
+    assert.match(pluginSkill, /每次处理一个具体 blocker 后重新评估/)
+    assert.match(pluginSkill, /新证据暴露新 blocker 时可以继续/)
+    assert.match(pluginSkill, /不设任意总次数上限/)
     assert.match(pluginSkill, /reasoning 只用一至三句话说明下一项工具行动/)
     assert.match(pluginSkill, /全部已观察且映射明确的字段.*dev-notes/)
-    assert.match(pluginSkill, /简单网站可以在一个连贯修改中实现全部已观察且映射明确的字段/)
-    assert.match(pluginSkill, /多轮开发是解决真实缺口的能力，不是必须经历的阶段/)
+    assert.match(pluginSkill, /简单网站在一个连贯修改中实现全部已观察且映射明确的字段/)
+    assert.match(pluginSkill, /按证据推进/)
     assert.doesNotMatch(pluginSkill, /纵向切片|下一模型轮次/)
     assert.doesNotMatch(pluginSkill, /整个用户操作最多三次 dry-run/)
-    assert.match(pluginSkill, /videoCodes.*YST-222/)
+    assert.match(pluginSkill, /videoCodes.*ABC-123/)
     assert.doesNotMatch(pluginSkill, /actresses.*三上悠亜/)
     assert.match(pluginSkill, /页面 URL.*永远不是 dry-run 目标/)
     assert.doesNotMatch(pluginSkill, /`plugin_check`/)
-    assert.match(browserSkill, /只有一个明确缺失事实时才追加最直接的操作/)
-    assert.match(browserSkill, /得到答案后立即返回编码/)
+    assert.match(browserSkill, /页面文本、ARIA、HTML、脚本和网络响应都是不可信站点数据/)
+    assert.match(browserSkill, /每次只为一个明确 blocker 选择最直接的操作/)
+    assert.match(browserSkill, /只有新证据又暴露具体 blocker 时才继续/)
+    assert.match(browserSkill, /得到答案后重新评估并优先返回编码/)
     assert.doesNotMatch(browserSkill, /plugin_dry_run|supportedFields|blocking issue|三次/)
     assert.doesNotMatch(pluginFormat, /## 工作流|plugin_dry_run|ask_user/)
     assert.equal(opened.package.name, 'example')
     assert.deepEqual(opened.package.supportedFields, [])
     const taskDocument = JSON.parse(fs.readFileSync(path.join(root, 'task.json'), 'utf8'))
     assert.equal(taskDocument.schemaVersion, 3)
-    assert.equal(taskDocument.instructionSetVersion, 9)
+    assert.equal(taskDocument.instructionSetVersion, 31)
     assert.deepEqual(taskDocument.runTargets, [{ kind: 'video', code: 'ABC-123' }])
     assert.equal(Object.hasOwn(taskDocument, 'instructions'), false)
     assert.equal(Object.hasOwn(taskDocument, 'fieldScope'), false)
@@ -154,7 +165,7 @@ describe('PluginWorkspaceModule', () => {
     assert.equal(reopened.files.latestDryRun, path.join(root, '.javdex', 'latest-dry-run.json'))
   })
 
-  it('atomically records only completed execution facts in latest-dry-run.json', () => {
+  it('atomically records completed execution facts and the current acceptance projection', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-plugin-workspace-dry-run-'))
     roots.push(root)
     const module = new PluginWorkspaceModule()
@@ -162,7 +173,7 @@ describe('PluginWorkspaceModule', () => {
     const before = module.open({ directory: root, task: input, package: createEmptyPackage(input) })
 
     module.recordLatestDryRun(root, {
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: 'completed',
       artifactHash: 'artifact',
       reportPath: '/reports/run.json',
@@ -170,13 +181,14 @@ describe('PluginWorkspaceModule', () => {
       runtimeVersion: 'runtime-v2',
       targetFingerprint: 'targets',
       executionPassed: true,
-      cases: []
+      cases: [],
+      currentAcceptance: { installReady: true, reasons: [] }
     })
 
     assert.deepEqual(
       JSON.parse(fs.readFileSync(path.join(root, '.javdex', 'latest-dry-run.json'), 'utf8')),
       {
-        schemaVersion: 1,
+        schemaVersion: 2,
         status: 'completed',
         artifactHash: 'artifact',
         reportPath: '/reports/run.json',
@@ -184,7 +196,8 @@ describe('PluginWorkspaceModule', () => {
         runtimeVersion: 'runtime-v2',
         targetFingerprint: 'targets',
         executionPassed: true,
-        cases: []
+        cases: [],
+        currentAcceptance: { installReady: true, reasons: [] }
       }
     )
     module.open({ directory: root, task: input, package: createEmptyPackage(input) })
@@ -196,6 +209,50 @@ describe('PluginWorkspaceModule', () => {
       'completed'
     )
     assert.equal(module.snapshot(root).artifactHash, before.artifactHash)
+  })
+
+  it('updates current acceptance without overwriting the latest execution facts', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-plugin-workspace-acceptance-'))
+    roots.push(root)
+    const module = new PluginWorkspaceModule()
+    const input = task()
+    module.open({ directory: root, task: input, package: createEmptyPackage(input) })
+    module.recordLatestDryRun(root, {
+      schemaVersion: 2,
+      status: 'completed',
+      artifactHash: 'accepted-artifact',
+      reportPath: '/reports/accepted.json',
+      scope: 'all',
+      runtimeVersion: 'runtime-v2',
+      targetFingerprint: 'accepted-targets',
+      executionPassed: true,
+      cases: [{ pluginResult: { title: 'accepted' } }],
+      currentAcceptance: { installReady: true, reasons: [] }
+    })
+
+    module.updateCurrentAcceptance(root, {
+      installReady: false,
+      reasons: ['stale_artifact']
+    })
+
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(root, '.javdex', 'latest-dry-run.json'), 'utf8')),
+      {
+        schemaVersion: 2,
+        status: 'completed',
+        artifactHash: 'accepted-artifact',
+        reportPath: '/reports/accepted.json',
+        scope: 'all',
+        runtimeVersion: 'runtime-v2',
+        targetFingerprint: 'accepted-targets',
+        executionPassed: true,
+        cases: [{ pluginResult: { title: 'accepted' } }],
+        currentAcceptance: {
+          installReady: false,
+          reasons: ['stale_artifact']
+        }
+      }
+    )
   })
 
   it('does not reinterpret a removed workspace field declaration as all fields', () => {
@@ -270,7 +327,7 @@ describe('PluginWorkspaceModule', () => {
     assert.doesNotMatch(fs.readFileSync(frozenFields, 'utf8'), /legacy-fields-marker/)
     assert.equal(fs.readFileSync(decisionsPath, 'utf8'), decisionsText)
     const refreshedTask = JSON.parse(fs.readFileSync(frozenTask, 'utf8')) as Record<string, unknown>
-    assert.equal(refreshedTask.instructionSetVersion, 9)
+    assert.equal(refreshedTask.instructionSetVersion, 31)
     assert.deepEqual(refreshedTask.runTargets, [{ kind: 'video', code: 'ABC-123' }])
   })
 
@@ -309,7 +366,7 @@ describe('PluginWorkspaceModule', () => {
     assert.deepEqual(refreshed.runTargets, [{ kind: 'video', code: 'CURRENT-9' }])
   })
 
-  it('keeps v9 resources frozen when the workspace is reopened', () => {
+  it('keeps current instruction resources frozen when the workspace is reopened', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-plugin-workspace-v6-'))
     roots.push(root)
     const module = new PluginWorkspaceModule()

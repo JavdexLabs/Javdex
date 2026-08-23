@@ -61,11 +61,11 @@ function resolved(profileValue: AgentProfile): ResolvedRunConfiguration {
   }
 }
 
-describe('PluginDeveloper ToolPack v11', () => {
+describe('PluginDeveloper ToolPack v13', () => {
   it('matches the compact Pi-native schema in stable order', () => {
     const expected = PLUGIN_DEV_TOOL_SCHEMAS.map((item) => item.function.name)
     const actual = PLUGIN_DEVELOPER_TOOL_PACK.tools.map((tool) => tool.name)
-    assert.equal(PLUGIN_DEVELOPER_TOOL_PACK.ref, 'toolpack:plugin-developer:v11')
+    assert.equal(PLUGIN_DEVELOPER_TOOL_PACK.ref, 'toolpack:plugin-developer:v13')
     assert.deepEqual(actual, expected)
     assert.equal(new Set(actual).size, actual.length)
     assert.deepEqual(actual, ['plugin_dry_run', 'browser', 'ask_user'])

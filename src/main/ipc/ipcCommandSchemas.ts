@@ -506,8 +506,10 @@ export const appIpcSchemas = {
     }).strict()
   ]),
   [IPC.PLUGIN_DEV_AGENT_CANCEL]: z.tuple([nonEmptyText]),
+  [IPC.PLUGIN_DEV_AGENT_RELEASE_BROWSER]: z.tuple([nonEmptyText]),
   [IPC.PLUGIN_DEV_AGENT_SNAPSHOT]: z.tuple([nonEmptyText.optional()]),
   [IPC.PLUGIN_DEV_AGENT_CLEAR_HISTORY]: z.tuple([]),
+  [IPC.PLUGIN_DEV_AGENT_DISCARD_UNRECOVERABLE]: z.tuple([]),
   [IPC.PLUGIN_DEV_AGENT_EXPORT_WORK_LOG]: z.tuple([nonEmptyText]),
   [IPC.PLUGIN_DEV_DRY_RUN]: z.tuple([
     z.object({

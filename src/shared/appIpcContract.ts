@@ -240,11 +240,13 @@ export interface AppIpcContract {
     result: PluginDevAgentSessionResult
   }
   [IPC.PLUGIN_DEV_AGENT_CANCEL]: { args: [sessionId: string]; result: void }
+  [IPC.PLUGIN_DEV_AGENT_RELEASE_BROWSER]: { args: [sessionId: string]; result: void }
   [IPC.PLUGIN_DEV_AGENT_SNAPSHOT]: {
     args: [sessionId?: string]
     result: PluginDevAgentSnapshot | null
   }
   [IPC.PLUGIN_DEV_AGENT_CLEAR_HISTORY]: { args: []; result: number }
+  [IPC.PLUGIN_DEV_AGENT_DISCARD_UNRECOVERABLE]: { args: []; result: number }
   [IPC.PLUGIN_DEV_AGENT_EXPORT_WORK_LOG]: { args: [sessionId: string]; result: string | null }
   [IPC.PLUGIN_DEV_DRY_RUN]: { args: [input: PluginDevDryRunInput]; result: PluginDevDryRunResult }
   [IPC.PLUGIN_DEV_INSTALL]: {

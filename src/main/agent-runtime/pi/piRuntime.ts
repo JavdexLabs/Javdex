@@ -25,11 +25,7 @@ import type {
 } from '../../agent-platform/types'
 
 const RECOVERY_CODEC_VERSION = 1 as const
-const MAX_OUTPUT_LIMIT_RECOVERIES = 1
-const OUTPUT_LIMIT_RECOVERY_PROMPT =
-  '上一轮输出达到模型输出上限，且没有完成工具调用。请停止内部推演，直接从当前任务继续；不要复述、重新分析已确认内容或重新读取已有大型 artifact。优先执行下一项必要工具调用，若任务确已完成则只给出简短最终响应。'
-const OUTPUT_LIMIT_COMPACTION_INSTRUCTIONS =
-  '输出达到上限且没有完成工具调用。压缩已完成的探测和历史工具输出；大型浏览器 artifact 只保留已提取的页面事实、标签行、metadata、关键 selector/ref 和结论。保留当前代码、未解决问题与下一项必须执行的工具操作。'
+
 type PiModule = typeof import('@earendil-works/pi-coding-agent')
 let piModule: Promise<PiModule> | null = null
 
@@ -497,10 +493,7 @@ class PiRuntimeSession implements RuntimeSessionPort {
   private readonly acceptedCommandIds = new Set<AgentOperationId>()
   private readonly unsubscribe: () => void
   private compactionDepth = 0
-  private outputLimitRecoveryAttempts = 0
-  private pendingOutputLimitRecovery?: { totalInput: number; forceCompact: boolean }
   private pendingProviderError?: string
-  private turnBudgetReached = false
   private operationTurnCount = 0
   private aborting = false
   private disposed = false
@@ -581,7 +574,6 @@ class PiRuntimeSession implements RuntimeSessionPort {
       if (previous && await previous(turn, signal)) return true
       this.operationTurnCount += 1
       if (this.operationTurnCount < maxTurns) return false
-      this.turnBudgetReached = true
       this.enqueue({
         type: 'limit.reached',
         resource: 'model-turns',
@@ -596,63 +588,12 @@ class PiRuntimeSession implements RuntimeSessionPort {
     void this.queue.enqueue(event).catch(() => undefined)
   }
 
-  private enqueueOutputLimitRecoveryFault(error: unknown): void {
-    this.enqueue({
-      type: 'runtime.fault',
-      category: 'runtime-failed',
-      message: `输出截断后续跑失败：${error instanceof Error ? error.message : String(error)}`
-    })
-  }
-
   private enqueueAgentSettled(): void {
     const acceptedCommandIds = [...this.acceptedCommandIds]
     const barrier = this.queue.enqueue({ type: 'agent.settled', acceptedCommandIds })
     void barrier.then(() => {
       for (const id of acceptedCommandIds) this.acceptedCommandIds.delete(id)
     }).catch(() => undefined)
-  }
-
-  private scheduleOutputLimitRecovery(totalInput: number, forceCompact: boolean): void {
-    this.pendingOutputLimitRecovery = { totalInput, forceCompact }
-  }
-
-  private runOutputLimitRecovery(input: { totalInput: number; forceCompact: boolean }): void {
-    const { totalInput, forceCompact } = input
-    const contextWindow = Math.max(1, this.input.model.model.contextWindow)
-    const reserve = Math.max(
-      this.input.settings.compaction.reserveTokens,
-      this.input.model.preset.maxTokens
-    )
-    const safetyLine = Math.max(1, contextWindow - reserve)
-    const compactFirst = forceCompact || totalInput >= safetyLine
-    if (!compactFirst) {
-      void this.session.followUp(OUTPUT_LIMIT_RECOVERY_PROMPT).catch((error) => {
-        this.enqueueOutputLimitRecoveryFault(error)
-        this.enqueueAgentSettled()
-      })
-      return
-    }
-    if (!this.input.settings.compaction.enabled) {
-      this.enqueueOutputLimitRecoveryFault(new Error(
-        forceCompact
-          ? '纯推理输出达到上限，禁止携带原上下文续跑；请启用 compaction 后继续'
-          : totalInput >= contextWindow
-            ? '上下文已超过模型窗口，禁止原样续跑；请启用 compaction 后继续'
-            : '上下文已达到安全线，禁止未压缩续跑；请启用 compaction 后继续'
-      ))
-      this.enqueueAgentSettled()
-      return
-    }
-    this.runCompactedOutputLimitRecovery()
-  }
-
-  private runCompactedOutputLimitRecovery(): void {
-    void this.session.compact(OUTPUT_LIMIT_COMPACTION_INSTRUCTIONS)
-      .then(() => this.session.prompt(OUTPUT_LIMIT_RECOVERY_PROMPT))
-      .catch((error) => {
-        this.enqueueOutputLimitRecoveryFault(error)
-        this.enqueueAgentSettled()
-      })
   }
 
   private handleEvent(event: AgentSessionEvent): void {
@@ -684,19 +625,6 @@ class PiRuntimeSession implements RuntimeSessionPort {
           this.pendingProviderError = message.stopReason === 'error'
             ? message.errorMessage || '模型供应商返回错误'
             : undefined
-          if (
-            message.stopReason === 'length' &&
-            (audit.toolCallCount ?? 0) === 0 &&
-            this.outputLimitRecoveryAttempts < MAX_OUTPUT_LIMIT_RECOVERIES
-          ) {
-            this.outputLimitRecoveryAttempts += 1
-            this.scheduleOutputLimitRecovery(
-              normalized?.totalInput ?? 0,
-              (audit.textChars ?? 0) === 0
-            )
-          } else if (message.stopReason !== 'length') {
-            this.outputLimitRecoveryAttempts = 0
-          }
         }
         break
       }
@@ -779,14 +707,6 @@ class PiRuntimeSession implements RuntimeSessionPort {
         this.enqueue({ type: 'session.saved', ref: makeRef(this.session) })
         break
       case 'agent_settled': {
-        if (this.pendingOutputLimitRecovery) {
-          const recovery = this.pendingOutputLimitRecovery
-          this.pendingOutputLimitRecovery = undefined
-          if (!this.turnBudgetReached) {
-            this.runOutputLimitRecovery(recovery)
-            break
-          }
-        }
         const providerError = this.pendingProviderError
         this.pendingProviderError = undefined
         if (providerError && !this.aborting) {
@@ -824,10 +744,7 @@ class PiRuntimeSession implements RuntimeSessionPort {
     }
     if (this.session.isStreaming) return { accepted: false }
     this.operationTurnCount = 0
-    this.outputLimitRecoveryAttempts = 0
-    this.pendingOutputLimitRecovery = undefined
     this.pendingProviderError = undefined
-    this.turnBudgetReached = false
     return new Promise((resolve) => {
       let resolved = false
       const finish = (accepted: boolean): void => {
@@ -874,7 +791,6 @@ class PiRuntimeSession implements RuntimeSessionPort {
 
   async abort(): Promise<void> {
     this.aborting = true
-    this.pendingOutputLimitRecovery = undefined
     this.pendingProviderError = undefined
     try {
       this.session.clearQueue()

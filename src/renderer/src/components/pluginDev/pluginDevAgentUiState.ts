@@ -150,11 +150,11 @@ export function isAgentDispatchSettlingEvent(event: PluginDevAgentEvent): boolea
   return event.type === 'waiting_user' || event.type === 'done' || event.type === 'error'
 }
 
-/** Project the authoritative workspace package carried by a live Agent event. */
+/** Live workspace drafts arrive via `package_updated`. Terminal `done` must not clobber the editor. */
 export function packageFromPluginDevAgentEvent(
   event: PluginDevAgentEvent
 ): ScraperPluginPackage | null {
-  return event.type === 'package_updated' || event.type === 'done' ? event.package : null
+  return event.type === 'package_updated' ? event.package : null
 }
 
 export function shouldReleaseAgentBusyForEvent(
@@ -255,9 +255,14 @@ export function pluginDevAgentEndNotice(
   return { message: 'Agent 状态已更新', kind: 'info' }
 }
 
+/** Sessions the current workbench can restore after leaving the page. */
+export function isRecoverablePluginDevSessionStatus(status: PluginDevSessionStatus): boolean {
+  return status === 'running' || status === 'waiting_user'
+}
+
 /** Terminal history is discoverable but must never overwrite the current editor on entry. */
 export function shouldApplyInitialPluginDevSnapshot(status: PluginDevSessionStatus): boolean {
-  return status === 'running' || status === 'waiting_user'
+  return isRecoverablePluginDevSessionStatus(status)
 }
 
 export interface PluginDevSelectablePlugin {

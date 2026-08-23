@@ -101,6 +101,17 @@ export type PluginDevBrowserInteractionReason =
   | 'login'
   | 'required_user_action'
 
+export interface PluginDevChoiceDecision {
+  requestId: string
+  question: string
+  selectedOption: {
+    id: string
+    label: string
+    description?: string
+  }
+  evidenceRefs: string[]
+}
+
 export type PluginDevPendingUserRequest =
   | {
       requestId: string
@@ -349,6 +360,15 @@ export interface PluginDevPageInsight {
   links: Array<{
     text: string
     href: string
+    rawHref?: string
+    region?: 'breadcrumb' | 'metadata' | 'other'
+    parentSelector?: string
+  }>
+  /** Inspect-classified language anchors only. Empty means none found, not that the page has no language UI. */
+  localeLinks?: Array<{
+    text: string
+    href: string
+    rawHref?: string
     region?: 'breadcrumb' | 'metadata' | 'other'
     parentSelector?: string
   }>
@@ -425,7 +445,7 @@ export interface PluginRunAcceptanceOutcome {
 
 export interface PluginDevDryRunInput {
   package: ScraperPluginPackage
-  /** Preferred typed runtime input for PluginDeveloper v11. */
+  /** Preferred typed runtime input for PluginDeveloper v13. */
   runTarget?: PluginDevRunTarget
   /** Primary target for this dry-run invocation. */
   testTarget?: string

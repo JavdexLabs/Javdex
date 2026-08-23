@@ -53,6 +53,18 @@ describe('pluginDevPageFormat', () => {
     assert.match(dom, /元数据属性区/)
   })
 
+  it('formats inspect locale anchors without treating them as a language API', () => {
+    const dom = formatPageDomForPrompt({
+      ...tokyolibPage,
+      localeLinks: [
+        { text: '简体中文', href: 'https://www.tokyolib.com/cn', rawHref: '/cn' }
+      ]
+    })
+    assert.match(dom, /LOCALE_LINKS/)
+    assert.match(dom, /不是页面语言 API/)
+    assert.match(dom, /简体中文 -> https:\/\/www\.tokyolib\.com\/cn rawHref=\/cn/)
+  })
+
   it('includes link region markers', () => {
     const links = formatPageLinksForPrompt(tokyolibPage)
     assert.match(links, /region=breadcrumb/)

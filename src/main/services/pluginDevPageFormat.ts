@@ -20,6 +20,17 @@ export function formatPageDomForPrompt(page: PluginDevPageInsight): string {
     )
   }
 
+  if (page.localeLinks?.length) {
+    sections.push(
+      `LOCALE_LINKS（inspect 识别到的语言锚点，不是页面语言 API）：\n${page.localeLinks
+        .map((link) => {
+          const raw = link.rawHref ? ` rawHref=${link.rawHref}` : ''
+          return `- ${link.text || '(no text)'} -> ${link.href}${raw}`
+        })
+        .join('\n')}`
+    )
+  }
+
   if (page.labeledRows?.length) {
     sections.push(
       `LABELED_ROWS（页面标签行，含稳定 selector 与链接）：\n${page.labeledRows

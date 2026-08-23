@@ -30,20 +30,28 @@ function formatResultValue(key: string, value: unknown): string {
   return String(value)
 }
 
-function resultEntries(result: unknown): Array<{ key: string; value: string }> {
-  if (!result || typeof result !== 'object' || Array.isArray(result)) return []
-  return Object.entries(result as Record<string, unknown>)
+function resultRecords(value: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === 'object' && !Array.isArray(item)
+    )
+  }
+  return value && typeof value === 'object' ? [value as Record<string, unknown>] : []
+}
+
+function objectEntries(result: Record<string, unknown>): Array<{ key: string; value: string }> {
+  return Object.entries(result)
     .filter(([, value]) => value !== null && value !== undefined && value !== '')
     .map(([key, value]) => ({ key, value: formatResultValue(key, value) }))
 }
 
-function ResultRows({ kind, value, prefix }: {
+function ResultKv({ kind, record, prefix }: {
   kind: PluginKind
-  value: unknown
+  record: Record<string, unknown>
   prefix: string
-}): JSX.Element | null {
-  const entries = resultEntries(value)
-  if (entries.length === 0) return null
+}): JSX.Element {
+  const entries = objectEntries(record)
+  if (entries.length === 0) return <p className={styles.resultEmpty}>无字段</p>
   return (
     <div className={styles.resultKv}>
       {entries.map((entry) => (
@@ -56,6 +64,36 @@ function ResultRows({ kind, value, prefix }: {
   )
 }
 
+function ResultRows({ kind, value, prefix }: {
+  kind: PluginKind
+  value: unknown
+  prefix: string
+}): JSX.Element {
+  if (value == null) return <p className={styles.resultEmpty}>无返回</p>
+  if (Array.isArray(value) && value.length === 0) return <p className={styles.resultEmpty}>空数组</p>
+  const records = resultRecords(value)
+  if (records.length === 0) return <p className={styles.resultEmpty}>无法展示该返回形状</p>
+  return (
+    <div className={styles.resultGroup}>
+      {records.map((record, index) => {
+        const recordPrefix = records.length === 1 ? prefix : `${prefix}:${index}`
+        return (
+          <div key={recordPrefix} className={styles.resultCandidate}>
+            {records.length > 1 ? (
+              <span className={styles.resultCandidateLabel}>{`候选 ${index + 1}/${records.length}`}</span>
+            ) : null}
+            <ResultKv kind={kind} record={record} prefix={recordPrefix} />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function resultHasMultipleRecords(value: unknown): boolean {
+  return resultRecords(value).length > 1
+}
+
 function ExecutionCaseView({ kind, item }: {
   kind: PluginKind
   item: PluginExecutionCase
@@ -63,8 +101,12 @@ function ExecutionCaseView({ kind, item }: {
   const label = runTargetLabel(item.target)
   const undeclared = item.manifestCoverage.undeclaredReturnedFieldIds
   const runtimeOnly = item.manifestCoverage.runtimeOnlyKeys
+  const open = !item.runtimeAccepted ||
+    undeclared.length > 0 ||
+    resultHasMultipleRecords(item.pluginResult) ||
+    resultHasMultipleRecords(item.effectiveResult)
   return (
-    <details className={`plugin-dev-details ${styles.resultCase}`} open={!item.runtimeAccepted || undeclared.length > 0}>
+    <details className={`plugin-dev-details ${styles.resultCase}`} open={open}>
       <summary>
         <span>{label}</span>
         <span className={item.runtimeAccepted ? styles.statusOk : styles.statusFail}>
@@ -144,6 +186,7 @@ export default function PluginDevResultPanel({
   const installStateClass = installState === 'not-installed'
     ? styles.notInstalled
     : styles[installState]
+  const fullExecutionReady = execution?.scope === 'all' && acceptance?.ready === true
 
   return (
     <div className={styles.panel}>
@@ -172,8 +215,8 @@ export default function PluginDevResultPanel({
               item={item}
             />
           ))}
-          <div className={`${styles.banner} ${acceptance?.ready ? styles.success : styles.warning}`}>
-            <span>{acceptance?.ready ? '机械验收通过，可安装' : execution.scope === 'targeted' ? '局部诊断结果' : '机械验收未通过'}</span>
+          <div className={`${styles.banner} ${fullExecutionReady ? styles.success : styles.warning}`}>
+            <span>{execution.scope === 'targeted' ? '局部诊断结果' : fullExecutionReady ? '机械验收通过，可安装' : '机械验收未通过'}</span>
             <span>{execution.runtimeVersion} · {execution.scope === 'all' ? '全部目标' : '局部目标'}</span>
           </div>
         </section>

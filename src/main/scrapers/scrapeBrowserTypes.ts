@@ -98,7 +98,7 @@ export interface AgentBrowserObservation {
   snapshotByteLength?: number
   pageFactsSummary?: AgentBrowserPageFactSectionSummary[]
   omittedInlineSections?: string[]
-  nextActions?: Array<'find' | 'snapshot-target' | 'html' | 'read-artifact'>
+  nextActions?: Array<'find' | 'html' | 'read-section'>
   /** Legacy/helper signal that a lower layer capped ARIA before artifact persistence. */
   snapshotExcerpted?: boolean
   /** The host could not retain or extract the complete evidence needed to assess this observation. */

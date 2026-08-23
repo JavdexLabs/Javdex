@@ -51,8 +51,23 @@ describe('PluginRunAcceptanceModule', () => {
     assert.deepEqual(decision.reasons, [])
   })
 
+  it('keeps readiness when only the plugin display name changes', () => {
+    const decision = gate.evaluate({
+      package: { ...pkg, name: 'renamed-after-ready' },
+      targets,
+      execution: artifact()
+    })
+    assert.equal(decision.ready, true)
+    assert.deepEqual(decision.reasons, [])
+    assert.equal(pluginArtifactHash({ ...pkg, name: 'renamed-after-ready' }), pluginArtifactHash(pkg))
+  })
+
   it('rejects targeted, stale package, stale target, stale runtime, and failed execution artifacts', () => {
     assert.equal(gate.evaluate({ package: pkg, targets, execution: artifact({ scope: 'targeted' }) }).ready, false)
+    assert.deepEqual(
+      gate.evaluate({ package: pkg, targets, execution: artifact({ scope: 'targeted' }) }).reasons,
+      ['wrong_scope']
+    )
     assert.equal(gate.evaluate({
       package: { ...pkg, code: `${pkg.code}\n// changed` }, targets, execution: artifact()
     }).ready, false)
@@ -93,5 +108,69 @@ describe('PluginRunAcceptanceModule', () => {
     assert.equal(decision.ready, false)
     assert.ok(decision.reasons.includes('execution_failed'))
     assert.ok(decision.reasons.includes('target_mismatch'))
+  })
+
+  it('treats a successful proper-subset run as wrong_scope, not execution_failed', () => {
+    const sessionTargets = [
+      { kind: 'video' as const, code: 'ABC-1' },
+      { kind: 'video' as const, code: 'ABC-2' }
+    ]
+    const subset = [sessionTargets[0]]
+    const decision = gate.evaluate({
+      package: pkg,
+      targets: sessionTargets,
+      execution: artifact({
+        scope: 'targeted',
+        targets: subset,
+        targetFingerprint: pluginRunTargetFingerprint(subset),
+        cases: [{
+          target: subset[0],
+          pluginResult: { code: 'ABC-1', title: 'ok' },
+          effectiveResult: { code: 'ABC-1', title: 'ok' },
+          manifestCoverage: {
+            returnedFieldIds: ['title'],
+            undeclaredReturnedFieldIds: [],
+            runtimeOnlyKeys: []
+          },
+          logs: [],
+          runtimeAccepted: true
+        }]
+      })
+    })
+    assert.equal(decision.ready, false)
+    assert.deepEqual(decision.reasons, ['wrong_scope'])
+  })
+
+  it('keeps execution_failed when a targeted subset itself failed', () => {
+    const sessionTargets = [
+      { kind: 'video' as const, code: 'ABC-1' },
+      { kind: 'video' as const, code: 'ABC-2' }
+    ]
+    const subset = [sessionTargets[0]]
+    const decision = gate.evaluate({
+      package: pkg,
+      targets: sessionTargets,
+      execution: artifact({
+        scope: 'targeted',
+        targets: subset,
+        targetFingerprint: pluginRunTargetFingerprint(subset),
+        executionPassed: false,
+        cases: [{
+          target: subset[0],
+          pluginResult: null,
+          effectiveResult: null,
+          manifestCoverage: {
+            returnedFieldIds: [],
+            undeclaredReturnedFieldIds: [],
+            runtimeOnlyKeys: []
+          },
+          logs: [],
+          error: 'sandbox crash',
+          runtimeAccepted: false
+        }]
+      })
+    })
+    assert.equal(decision.ready, false)
+    assert.deepEqual(decision.reasons, ['execution_failed', 'wrong_scope'])
   })
 })

@@ -191,8 +191,10 @@ export const IPC = {
   PLUGIN_DEV_AGENT_START: 'pluginDev:agentStart',
   PLUGIN_DEV_AGENT_MESSAGE: 'pluginDev:agentMessage',
   PLUGIN_DEV_AGENT_CANCEL: 'pluginDev:agentCancel',
+  PLUGIN_DEV_AGENT_RELEASE_BROWSER: 'pluginDev:agentReleaseBrowser',
   PLUGIN_DEV_AGENT_SNAPSHOT: 'pluginDev:agentSnapshot',
   PLUGIN_DEV_AGENT_CLEAR_HISTORY: 'pluginDev:agentClearHistory',
+  PLUGIN_DEV_AGENT_DISCARD_UNRECOVERABLE: 'pluginDev:agentDiscardUnrecoverable',
   PLUGIN_DEV_AGENT_EVENT: 'pluginDev:agentEvent', // main -> renderer event
   PLUGIN_DEV_AGENT_EXPORT_WORK_LOG: 'pluginDev:agentExportWorkLog',
   PLUGIN_DEV_DRY_RUN: 'pluginDev:dryRun',

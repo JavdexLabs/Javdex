@@ -10,7 +10,13 @@ import type {
 } from '@shared/pluginDevTypes'
 import type { ScraperPluginPackage } from '@shared/scraperPluginTypes'
 import { normalizeRunTargets } from '@shared/pluginDevKindProfile'
-import { dryRunPluginPackage, normalizePackageForDev } from '../pluginDevService'
+import {
+  dryRunPluginPackage,
+  normalizePackageForDev,
+  PLUGIN_UNMATCHED_TARGET_ERROR
+} from '../pluginDevService'
+
+const LEGACY_EMPTY_OR_INVALID_ERROR = '插件返回为空或结果格式无效'
 import { pluginArtifactHash } from './pluginArtifact'
 import { pluginResultContract } from '@shared/pluginResultContract'
 
@@ -47,6 +53,24 @@ export function isPluginExecutionCloudflareInterruption(
   return failures.length > 0 && failures.every((item) =>
     /(?:Cloudflare.*\u9a8c\u8bc1|\u9a8c\u8bc1.*Cloudflare|\u9a8c\u8bc1\u8d85\u65f6)/iu.test(item.error ?? '')
   )
+}
+
+function isEmptyPluginResult(result: unknown): boolean {
+  return result == null || (Array.isArray(result) && result.length === 0)
+}
+
+/** Full-scope empty returns are a miss, not a broken plugin shape. */
+export function isPluginExecutionUnmatchedTargets(
+  execution: PluginExecutionArtifact
+): boolean {
+  return execution.scope === 'all' &&
+    execution.cases.length > 0 &&
+    execution.cases.every((item) =>
+      !item.runtimeAccepted &&
+      isEmptyPluginResult(item.pluginResult) &&
+      (item.error === PLUGIN_UNMATCHED_TARGET_ERROR ||
+        item.error === LEGACY_EMPTY_OR_INVALID_ERROR)
+    )
 }
 
 function atomicReport(filePath: string, artifact: PluginExecutionArtifact): void {

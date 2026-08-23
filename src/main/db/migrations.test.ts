@@ -1666,6 +1666,140 @@ describe('database schema', () => {
     }
   })
 
+  it('closes only unfinished PluginDeveloper v11 runs for the v12 durable recovery interfaces', () => {
+    const db = new Database(':memory:')
+    try {
+      db.exec(AGENT_PLATFORM_SCHEMA_SQL)
+      db.pragma('user_version = 25')
+      const insertRun = db.prepare(`
+        INSERT INTO agent_runs (
+          id, use_case, status, config_revision, config_snapshot_json, runtime_id,
+          product_state_json, created_at, updated_at
+        ) VALUES (?, ?, ?, 'revision', '{}', 'pi', ?, '2026-08-23', '2026-08-23')
+      `)
+      insertRun.run(
+        'plugin-v11-active',
+        'plugin-developer',
+        'waiting_user',
+        JSON.stringify({
+          schemaVersion: 7,
+          pendingUserRequest: { requestId: 'old-v11', type: 'freeform' }
+        })
+      )
+      insertRun.run(
+        'plugin-v11-history',
+        'plugin-developer',
+        'settled',
+        JSON.stringify({ schemaVersion: 7, summary: 'keep history' })
+      )
+      insertRun.run(
+        'curator-v1',
+        'library-curator',
+        'waiting_user',
+        JSON.stringify({ schemaVersion: 1 })
+      )
+      db.prepare(`
+        INSERT INTO agent_approvals (
+          request_id, run_id, call_id, args_digest, status, permit_ciphertext, created_at
+        ) VALUES ('v11-approval', 'plugin-v11-active', 'call', 'digest', 'approved', X'01', '2026-08-23')
+      `).run()
+
+      migrateDatabase(db)
+
+      assert.deepEqual(
+        db.prepare('SELECT id, status FROM agent_runs ORDER BY id').all(),
+        [
+          { id: 'curator-v1', status: 'waiting_user' },
+          { id: 'plugin-v11-active', status: 'closed' },
+          { id: 'plugin-v11-history', status: 'settled' }
+        ]
+      )
+      const state = JSON.parse((db.prepare(
+        `SELECT product_state_json FROM agent_runs WHERE id = 'plugin-v11-active'`
+      ).get() as { product_state_json: string }).product_state_json) as Record<string, unknown>
+      assert.equal(state.status, 'cancelled')
+      assert.equal('pendingUserRequest' in state, false)
+      assert.match(String(state.summary), /ToolPack v12 持久化验收与 browser read-section/)
+      assert.deepEqual(
+        db.prepare(`
+          SELECT status, permit_ciphertext IS NULL AS cleared
+          FROM agent_approvals WHERE request_id = 'v11-approval'
+        `).get(),
+        { status: 'denied', cleared: 1 }
+      )
+      assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('closes only unfinished PluginDeveloper v12 runs for the v13 browser action contract', () => {
+    const db = new Database(':memory:')
+    try {
+      db.exec(AGENT_PLATFORM_SCHEMA_SQL)
+      db.pragma('user_version = 26')
+      const insertRun = db.prepare(`
+        INSERT INTO agent_runs (
+          id, use_case, status, config_revision, config_snapshot_json, runtime_id,
+          product_state_json, created_at, updated_at
+        ) VALUES (?, ?, ?, 'revision', '{}', 'pi', ?, '2026-08-23', '2026-08-23')
+      `)
+      insertRun.run(
+        'plugin-v12-active',
+        'plugin-developer',
+        'waiting_user',
+        JSON.stringify({
+          schemaVersion: 7,
+          pendingUserRequest: { requestId: 'old-v12', type: 'freeform' }
+        })
+      )
+      insertRun.run(
+        'plugin-v12-history',
+        'plugin-developer',
+        'settled',
+        JSON.stringify({ schemaVersion: 7, summary: 'keep history' })
+      )
+      insertRun.run(
+        'curator-v1',
+        'library-curator',
+        'waiting_user',
+        JSON.stringify({ schemaVersion: 1 })
+      )
+      db.prepare(`
+        INSERT INTO agent_approvals (
+          request_id, run_id, call_id, args_digest, status, permit_ciphertext, created_at
+        ) VALUES ('v12-approval', 'plugin-v12-active', 'call', 'digest', 'approved', X'01', '2026-08-23')
+      `).run()
+
+      migrateDatabase(db)
+
+      assert.deepEqual(
+        db.prepare('SELECT id, status FROM agent_runs ORDER BY id').all(),
+        [
+          { id: 'curator-v1', status: 'waiting_user' },
+          { id: 'plugin-v12-active', status: 'closed' },
+          { id: 'plugin-v12-history', status: 'settled' }
+        ]
+      )
+      const state = JSON.parse((db.prepare(
+        `SELECT product_state_json FROM agent_runs WHERE id = 'plugin-v12-active'`
+      ).get() as { product_state_json: string }).product_state_json) as Record<string, unknown>
+      assert.equal(state.status, 'cancelled')
+      assert.equal('pendingUserRequest' in state, false)
+      assert.match(String(state.summary), /ToolPack v13 浏览器 action 参数契约/)
+      assert.deepEqual(
+        db.prepare(`
+          SELECT status, permit_ciphertext IS NULL AS cleared
+          FROM agent_approvals WHERE request_id = 'v12-approval'
+        `).get(),
+        { status: 'denied', cleared: 1 }
+      )
+      assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+    } finally {
+      db.close()
+    }
+  })
+
   it('creates the current schema and records user_version', () => {
     const db = new Database(':memory:')
     try {

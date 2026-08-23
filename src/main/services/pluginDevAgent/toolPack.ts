@@ -48,7 +48,7 @@ function redact(name: string, args: Record<string, unknown>): Record<string, unk
 }
 
 export const PLUGIN_DEVELOPER_TOOL_PACK: ToolPack = {
-  ref: 'toolpack:plugin-developer:v11',
+  ref: 'toolpack:plugin-developer:v13',
   tools: PLUGIN_DEV_TOOL_SCHEMAS.map(({ function: tool }) => ({
     name: tool.name,
     label: tool.name,

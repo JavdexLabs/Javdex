@@ -73,14 +73,10 @@
 
 .resultKv {
   display: flex;
-  flex: 1;
-  min-height: 0;
+  flex: 0 0 auto;
   flex-direction: column;
-  overflow: hidden auto;
-  padding-inline-end: var(--scrollbar-safe-pad);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  scrollbar-gutter: stable;
 }
 
 .resultKvRow {
@@ -108,15 +104,11 @@
 
 .resultKvRow > span:last-child {
   min-width: 0;
-  max-height: 9rem;
-  overflow: hidden auto;
   overflow-wrap: anywhere;
-  padding-inline-end: var(--scrollbar-safe-pad);
   color: var(--text-primary);
   line-height: 1.45;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
   white-space: pre-wrap;
+  user-select: text;
 }
 
 .resultSection {
@@ -124,17 +116,39 @@
   flex-shrink: 0;
   flex-direction: column;
   gap: 8px;
-  overflow: hidden;
+  overflow: visible;
   padding: 8px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background: var(--surface-panel);
 }
 
-.resultSection h4 {
+.resultSection h4,
+.resultCase h5 {
   margin: 0;
   color: var(--text-primary);
   font-size: 12px;
+}
+
+.resultCase h5 {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.resultGroup,
+.resultCandidate {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.resultCandidateLabel,
+.resultEmpty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .resultCase {

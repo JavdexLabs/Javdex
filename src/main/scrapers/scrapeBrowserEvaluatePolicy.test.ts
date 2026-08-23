@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
   containsForbiddenBrowserEvaluateApi,
+  forbiddenEvaluateErrorMessage,
+  findForbiddenBrowserEvaluateApi,
   prepareBrowserEvaluate,
   runPreparedBrowserEvaluate
 } from './scrapeBrowserEvaluatePolicy'
@@ -97,6 +99,37 @@ describe('browser evaluate policy', () => {
         `() => { const { ['con' + 'structor']: C } = (() => {}); return C('return globalThis')() }`
       ),
       true
+    )
+  })
+
+  it('names the forbidden API and points markup reads to html', () => {
+    assert.deepEqual(
+      findForbiddenBrowserEvaluateApi('document.querySelector("h1").outerHTML'),
+      { kind: 'name', name: 'outerHTML' }
+    )
+    assert.equal(
+      forbiddenEvaluateErrorMessage({ kind: 'name', name: 'outerHTML' }),
+      'evaluate 禁止 outerHTML，读局部标记请用 html'
+    )
+    assert.equal(
+      forbiddenEvaluateErrorMessage({ kind: 'name', name: 'getAttribute' }),
+      'evaluate 禁止 getAttribute，读局部标记请用 html'
+    )
+    assert.equal(
+      forbiddenEvaluateErrorMessage({ kind: 'name', name: 'cookie' }),
+      'evaluate 禁止 cookie'
+    )
+    assert.throws(
+      () => prepareBrowserEvaluate('() => document.querySelector("h1").nextElementSibling.outerHTML', undefined),
+      /evaluate 禁止 outerHTML，读局部标记请用 html/
+    )
+    assert.throws(
+      () => prepareBrowserEvaluate('() => fetch("/private")', undefined),
+      /evaluate 禁止 fetch/
+    )
+    assert.throws(
+      () => prepareBrowserEvaluate('() => ["safe", "data"][0]', undefined),
+      /evaluate 禁止计算属性访问/
     )
   })
 

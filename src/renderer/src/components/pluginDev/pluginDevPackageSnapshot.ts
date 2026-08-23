@@ -1,3 +1,4 @@
+import { pluginRuntimeIdentity } from '@shared/pluginRuntimeIdentity'
 import type { ScraperPluginPackage } from '@shared/scraperPluginTypes'
 
 export function fingerprintPluginPackage(pkg: ScraperPluginPackage): string {
@@ -12,4 +13,8 @@ export function fingerprintPluginPackage(pkg: ScraperPluginPackage): string {
     supportedFields: pkg.supportedFields ?? [],
     code: pkg.code
   })
+}
+
+export function fingerprintPluginRuntime(pkg: ScraperPluginPackage): string {
+  return JSON.stringify(pluginRuntimeIdentity(pkg))
 }

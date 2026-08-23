@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, type CSSProperties } from 'react'
 import { Bot, BrainCircuit, Download, Trash2 } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
 import type {
   PluginDevAgentContextStats,
   PluginDevAgentPhase,
@@ -13,6 +14,106 @@ import { UI_ICON_SM } from '../iconDefaults'
 import { agentPhaseLabel, type PluginDevConversationItem } from './types'
 import Button from '../Button'
 import styles from './PluginDevConversation.module.css'
+
+type ReasoningItem = Extract<PluginDevConversationItem, { type: 'reasoning' }>
+
+function ReasoningBlock({ item }: { item: ReasoningItem }): JSX.Element {
+  const contentRef = useRef<HTMLPreElement | null>(null)
+  const followRef = useRef(true)
+
+  useLayoutEffect(() => {
+    if (!item.streaming) {
+      followRef.current = true
+      return
+    }
+    const el = contentRef.current
+    if (!el || !followRef.current) return
+    el.scrollTop = el.scrollHeight
+  }, [item.text, item.streaming])
+
+  const handleContentScroll = (): void => {
+    const el = contentRef.current
+    if (!el) return
+    followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+  }
+
+  return (
+    <details
+      className={styles.reasoning}
+      open={item.streaming || undefined}
+      aria-busy={item.streaming || undefined}
+    >
+      <summary
+        className={styles.reasoningSummary}
+        title="模型供应商返回的 reasoning 内容"
+      >
+        <span className={styles.reasoningHead}>
+          <BrainCircuit {...UI_ICON_SM} aria-hidden />
+          <span className={styles.reasoningLabel}>模型推理</span>
+          {item.streaming ? <span className={styles.streamingState}>思考中…</span> : null}
+        </span>
+        <span className={styles.reasoningMeta}>
+          第 {item.turn} 轮{item.step > 0 ? ` · #${item.step}` : ''}
+          <span className={styles.reasoningChars}>
+            {` · ${item.charCount.toLocaleString('zh-CN')} 字符`}
+          </span>
+        </span>
+        {!item.streaming ? (
+          <span className={styles.reasoningPreview} data-reasoning-preview>
+            {reasoningPreview(item.text)}
+          </span>
+        ) : null}
+      </summary>
+      <pre
+        ref={contentRef}
+        className={styles.reasoningContent}
+        onScroll={handleContentScroll}
+      >
+        {item.text}
+      </pre>
+      {item.truncated ? (
+        <p className={styles.reasoningNotice}>内容过长，界面仅保留前 64,000 字符。</p>
+      ) : null}
+    </details>
+  )
+}
+
+function AgentMarkdown({ text }: { text: string }): JSX.Element {
+  return (
+    <ReactMarkdown
+      components={{
+        h1: ({ children }) => <h1 className={styles.mdHeading}>{children}</h1>,
+        h2: ({ children }) => <h2 className={styles.mdHeading}>{children}</h2>,
+        h3: ({ children }) => <h3 className={styles.mdHeading}>{children}</h3>,
+        h4: ({ children }) => <h4 className={styles.mdHeading}>{children}</h4>,
+        p: ({ children }) => <p className={styles.mdParagraph}>{children}</p>,
+        ul: ({ children }) => <ul className={styles.mdList}>{children}</ul>,
+        ol: ({ children }) => <ol className={styles.mdList}>{children}</ol>,
+        li: ({ children }) => <li className={styles.mdItem}>{children}</li>,
+        a: ({ href, children }) => (
+          <a
+            className={styles.mdLink}
+            href={href}
+            onClick={(event) => {
+              event.preventDefault()
+              if (href) void window.api.externalLinks.open(href)
+            }}
+          >
+            {children}
+          </a>
+        ),
+        code: ({ className, children }) => (
+          <code className={className ? styles.mdCodeBlock : styles.mdCode}>{children}</code>
+        ),
+        pre: ({ children }) => <pre className={styles.mdPre}>{children}</pre>,
+        blockquote: ({ children }) => <blockquote className={styles.mdQuote}>{children}</blockquote>,
+        hr: () => <hr className={styles.mdRule} />
+      }}
+    >
+      {text}
+    </ReactMarkdown>
+  )
+}
 
 function tokenK(value: number): string {
   const compact = value / 1000
@@ -300,42 +401,15 @@ export default function PluginDevConversation({
                     Agent
                     {item.streaming ? <em className={styles.streamingState}>回答中…</em> : null}
                   </span>
-                  <p>
-                    {item.text}
+                  <div className={styles.agentBody}>
+                    {item.text ? <AgentMarkdown text={item.text} /> : null}
                     {item.streaming ? <i className={styles.streamingCursor} aria-hidden /> : null}
-                  </p>
+                  </div>
                 </div>
               )
             }
             if (item.type === 'reasoning') {
-              return (
-                <details
-                  key={item.id}
-                  className={styles.reasoning}
-                  open={item.streaming || undefined}
-                  aria-busy={item.streaming || undefined}
-                >
-                  <summary
-                    className={styles.reasoningSummary}
-                    title="模型供应商返回的 reasoning 内容"
-                  >
-                    <BrainCircuit {...UI_ICON_SM} aria-hidden />
-                    <span className={styles.reasoningLabel}>模型推理</span>
-                    {item.streaming ? <span className={styles.streamingState}>思考中…</span> : null}
-                    <span className={styles.reasoningMeta}>
-                      第 {item.turn} 轮{item.step > 0 ? ` · #${item.step}` : ''}
-                    </span>
-                    <span className={styles.reasoningPreview}>{reasoningPreview(item.text)}</span>
-                    <span className={styles.reasoningChars}>
-                      {item.charCount.toLocaleString('zh-CN')} 字符
-                    </span>
-                  </summary>
-                  <pre className={styles.reasoningContent}>{item.text}</pre>
-                  {item.truncated ? (
-                    <p className={styles.reasoningNotice}>内容过长，界面仅保留前 64,000 字符。</p>
-                  ) : null}
-                </details>
-              )
+              return <ReasoningBlock key={item.id} item={item} />
             }
             const category = toolCategory(item.tool)
             const state = item.ok === false ? 'is-fail' : item.ok === true ? 'is-ok' : ''

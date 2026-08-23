@@ -9,6 +9,7 @@ import { executeTool, releasePluginDeveloperBrowser } from './toolExecutor'
 import { createSession, deleteSession } from './sessionStore'
 import { pluginWorkspace } from './pluginWorkspace'
 import { pluginExecution, pluginRunTargetFingerprint, PLUGIN_RUNTIME_VERSION } from './pluginExecution'
+import { PLUGIN_UNMATCHED_TARGET_ERROR } from '../pluginDevService'
 import { pluginArtifactHash } from './pluginArtifact'
 import {
   ScrapeBrowserBusyError,
@@ -110,7 +111,7 @@ function fakeArtifact(input: Parameters<typeof pluginExecution.run>[0]): PluginE
   }
 }
 
-describe('PluginDeveloper v11 tool executor', { concurrency: false }, () => {
+describe('PluginDeveloper v13 tool executor', { concurrency: false }, () => {
   it('rejects removed domain tools', async () => {
     const session = createWorkspaceSession('executor-removed-tools')
     try {
@@ -145,7 +146,11 @@ describe('PluginDeveloper v11 tool executor', { concurrency: false }, () => {
           path.join(session.workspaceDirectory!, '.javdex', 'latest-dry-run.json'),
           'utf8'
         )),
-        { schemaVersion: 1, status: 'not_run' }
+        {
+          schemaVersion: 2,
+          status: 'not_run',
+          currentAcceptance: { installReady: false, reasons: ['missing_execution'] }
+        }
       )
     } finally {
       pluginExecution.run = originalRun
@@ -157,7 +162,7 @@ describe('PluginDeveloper v11 tool executor', { concurrency: false }, () => {
     const session = createWorkspaceSession('executor-invalid-workspace', 'video', ['ABC-1'])
     const latestPath = path.join(session.workspaceDirectory!, '.javdex', 'latest-dry-run.json')
     pluginWorkspace.recordLatestDryRun(session.workspaceDirectory!, {
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: 'completed',
       artifactHash: 'previous-artifact',
       reportPath: '/previous/report.json',
@@ -165,15 +170,23 @@ describe('PluginDeveloper v11 tool executor', { concurrency: false }, () => {
       runtimeVersion: PLUGIN_RUNTIME_VERSION,
       targetFingerprint: 'previous-targets',
       executionPassed: true,
-      cases: []
+      cases: [],
+      currentAcceptance: { installReady: true, reasons: [] }
     })
     fs.writeFileSync(path.join(session.workspaceDirectory!, 'plugin.json'), '{ broken', 'utf8')
     try {
       const result = await executeTool(session.id, 'plugin_dry_run', '{}', 2)
       assert.equal(result.ok, false)
       assert.match(result.content, /WORKSPACE_INVALID/)
-      const latest = JSON.parse(fs.readFileSync(latestPath, 'utf8')) as { artifactHash?: string }
+      const latest = JSON.parse(fs.readFileSync(latestPath, 'utf8')) as {
+        artifactHash?: string
+        currentAcceptance?: unknown
+      }
       assert.equal(latest.artifactHash, 'previous-artifact')
+      assert.deepEqual(latest.currentAcceptance, {
+        installReady: false,
+        reasons: ['workspace_invalid']
+      })
     } finally {
       deleteSession(session.id)
     }
@@ -213,6 +226,7 @@ describe('PluginDeveloper v11 tool executor', { concurrency: false }, () => {
       assert.equal(latest.status, 'completed')
       assert.equal(latest.artifactHash, session.lastExecution?.artifactHash)
       assert.equal(latest.scope, 'all')
+      assert.deepEqual(latest.currentAcceptance, { installReady: true, reasons: [] })
     } finally {
       await releasePluginDeveloperBrowser(session.id)
       restoreBrowser()
@@ -249,6 +263,93 @@ describe('PluginDeveloper v11 tool executor', { concurrency: false }, () => {
     }
   })
 
+  it('replaces session targets after a full unmatched execution', async () => {
+    const session = createWorkspaceSession('executor-replace-unmatched', 'video', ['SHKD-999'])
+    const originalRun = pluginExecution.run
+    const restoreBrowser = installFakeBrowserLease()
+    pluginExecution.run = async (input) => fakeArtifact(input)
+    try {
+      session.lastExecution = {
+        runtimeVersion: PLUGIN_RUNTIME_VERSION,
+        artifactHash: pluginArtifactHash(session.package),
+        targetFingerprint: pluginRunTargetFingerprint(session.runTargets),
+        scope: 'all',
+        targets: structuredClone(session.runTargets),
+        cases: session.runTargets.map((target) => ({
+          target,
+          pluginResult: null,
+          effectiveResult: null,
+          manifestCoverage: { returnedFieldIds: [], undeclaredReturnedFieldIds: [], runtimeOnlyKeys: [] },
+          unrecognizedResultKeys: [],
+          logs: [],
+          error: PLUGIN_UNMATCHED_TARGET_ERROR,
+          runtimeAccepted: false
+        })),
+        executionPassed: false,
+        reportPath: path.join(session.workspaceDirectory!, '.javdex', 'reports', 'empty.json')
+      }
+      const result = await executeTool(session.id, 'plugin_dry_run', JSON.stringify({
+        videoCodes: ['SHKD-996']
+      }), 2)
+      const payload = JSON.parse(result.content) as {
+        scope?: string
+        mechanicalAcceptance?: { installReady?: boolean }
+      }
+      assert.equal(result.structured?.adoptedTargets, true)
+      assert.deepEqual(session.runTargets, [{ kind: 'video', code: 'SHKD-996' }])
+      assert.equal(payload.scope, 'all')
+      assert.equal(payload.mechanicalAcceptance?.installReady, true)
+      assert.equal(result.events?.some((event) => event.type === 'run_targets_updated'), true)
+    } finally {
+      await releasePluginDeveloperBrowser(session.id)
+      restoreBrowser()
+      pluginExecution.run = originalRun
+      deleteSession(session.id)
+    }
+  })
+
+  it('keeps later explicit targets targeted when the last full run was not an empty miss', async () => {
+    const session = createWorkspaceSession('executor-no-replace-invalid', 'video', ['SHKD-999'])
+    const originalRun = pluginExecution.run
+    const restoreBrowser = installFakeBrowserLease()
+    pluginExecution.run = async (input) => fakeArtifact(input)
+    try {
+      session.lastExecution = {
+        runtimeVersion: PLUGIN_RUNTIME_VERSION,
+        artifactHash: pluginArtifactHash(session.package),
+        targetFingerprint: pluginRunTargetFingerprint(session.runTargets),
+        scope: 'all',
+        targets: structuredClone(session.runTargets),
+        cases: session.runTargets.map((target) => ({
+          target,
+          pluginResult: null,
+          effectiveResult: null,
+          manifestCoverage: { returnedFieldIds: [], undeclaredReturnedFieldIds: [], runtimeOnlyKeys: [] },
+          unrecognizedResultKeys: [],
+          logs: [],
+          error: '插件返回结果格式无效',
+          runtimeAccepted: false
+        })),
+        executionPassed: false,
+        reportPath: path.join(session.workspaceDirectory!, '.javdex', 'reports', 'invalid.json')
+      }
+      const result = await executeTool(session.id, 'plugin_dry_run', JSON.stringify({
+        videoCodes: ['SHKD-996']
+      }), 2)
+      assert.equal(result.structured?.adoptedTargets, false)
+      assert.deepEqual(session.runTargets, [{ kind: 'video', code: 'SHKD-999' }])
+      assert.deepEqual(result.structured?.mechanicalAcceptance, {
+        installReady: false,
+        reasons: ['wrong_scope']
+      })
+    } finally {
+      await releasePluginDeveloperBrowser(session.id)
+      restoreBrowser()
+      pluginExecution.run = originalRun
+      deleteSession(session.id)
+    }
+  })
+
   it('uses later explicit targets only for targeted diagnostics', async () => {
     const session = createWorkspaceSession('executor-targeted-scope', 'video', ['ABC-1', 'ABC-2'])
     const originalRun = pluginExecution.run
@@ -262,14 +363,64 @@ describe('PluginDeveloper v11 tool executor', { concurrency: false }, () => {
       const targeted = await executeTool(session.id, 'plugin_dry_run', JSON.stringify({
         videoCodes: ['ABC-1']
       }), 2)
-      assert.deepEqual(targeted.structured?.mechanicalAcceptance, { installReady: false })
+      assert.deepEqual(targeted.structured?.mechanicalAcceptance, {
+        installReady: false,
+        reasons: ['wrong_scope']
+      })
       assert.deepEqual(session.runTargets, [
         { kind: 'video', code: 'ABC-1' },
         { kind: 'video', code: 'ABC-2' }
       ])
+      const latestAfterTargeted = JSON.parse(fs.readFileSync(
+        path.join(session.workspaceDirectory!, '.javdex', 'latest-dry-run.json'),
+        'utf8'
+      )) as { status?: string; scope?: string }
+      assert.equal(latestAfterTargeted.status, 'not_run')
+      assert.equal(session.lastExecution, undefined)
       const full = await executeTool(session.id, 'plugin_dry_run', '{}', 3)
-      assert.deepEqual(full.structured?.mechanicalAcceptance, { installReady: true })
-      assert.deepEqual(scopes, ['targeted', 'all'])
+      assert.deepEqual(full.structured?.mechanicalAcceptance, { installReady: true, reasons: [] })
+      const latestAfterFull = JSON.parse(fs.readFileSync(
+        path.join(session.workspaceDirectory!, '.javdex', 'latest-dry-run.json'),
+        'utf8'
+      )) as { status?: string; scope?: string }
+      assert.equal(latestAfterFull.status, 'completed')
+      assert.equal(latestAfterFull.scope, 'all')
+      const fullExplicit = await executeTool(session.id, 'plugin_dry_run', JSON.stringify({
+        videoCodes: ['ABC-1', 'ABC-2']
+      }), 4)
+      assert.deepEqual(fullExplicit.structured?.mechanicalAcceptance, { installReady: true, reasons: [] })
+      assert.equal(fullExplicit.structured?.adoptedTargets, false)
+      assert.deepEqual(scopes, ['targeted', 'all', 'all'])
+    } finally {
+      await releasePluginDeveloperBrowser(session.id)
+      restoreBrowser()
+      pluginExecution.run = originalRun
+      deleteSession(session.id)
+    }
+  })
+
+  it('treats explicit targets that cover the session set as a full run', async () => {
+    const session = createWorkspaceSession('executor-cover-session-set', 'video', ['HMN-893'])
+    const originalRun = pluginExecution.run
+    const restoreBrowser = installFakeBrowserLease()
+    const scopes: string[] = []
+    pluginExecution.run = async (input) => {
+      scopes.push(input.scope)
+      return fakeArtifact(input)
+    }
+    try {
+      const result = await executeTool(session.id, 'plugin_dry_run', JSON.stringify({
+        videoCodes: ['HMN-893']
+      }), 2)
+      const payload = JSON.parse(result.content) as {
+        scope?: string
+        mechanicalAcceptance?: { installReady?: boolean; reasons?: string[] }
+      }
+      assert.equal(result.structured?.adoptedTargets, false)
+      assert.deepEqual(session.runTargets, [{ kind: 'video', code: 'HMN-893' }])
+      assert.equal(payload.scope, 'all')
+      assert.deepEqual(payload.mechanicalAcceptance, { installReady: true, reasons: [] })
+      assert.deepEqual(scopes, ['all'])
     } finally {
       await releasePluginDeveloperBrowser(session.id)
       restoreBrowser()
@@ -304,6 +455,49 @@ describe('PluginDeveloper v11 tool executor', { concurrency: false }, () => {
     }
   })
 
+  it('reads an artifact section without acquiring the live browser lease', async () => {
+    const session = createWorkspaceSession('executor-read-section', 'video', ['ABC-1'])
+    const originalAcquire = scrapeBrowser.acquire
+    let acquireCalls = 0
+    const artifactRef = path.join('.javdex', 'browser', 'section.json')
+    const artifactPath = path.join(session.workspaceDirectory!, artifactRef)
+    fs.mkdirSync(path.dirname(artifactPath), { recursive: true })
+    fs.writeFileSync(artifactPath, `${JSON.stringify({
+      schemaVersion: 2,
+      observation: {
+        pageFacts: {
+          links: [{ text: 'ABC-1', href: 'https://example.test/ABC-1' }]
+        }
+      }
+    }, null, 2)}\n`, 'utf8')
+    scrapeBrowser.acquire = async () => {
+      acquireCalls += 1
+      throw new Error('read-section must not acquire a browser lease')
+    }
+    try {
+      const result = await executeTool(session.id, 'browser', JSON.stringify({
+        action: 'read-section',
+        artifactRef,
+        section: 'links'
+      }), 2)
+      const payload = JSON.parse(result.content) as {
+        complete?: boolean
+        entries?: Array<{ value?: unknown }>
+      }
+
+      assert.equal(result.ok, true)
+      assert.equal(acquireCalls, 0)
+      assert.equal(payload.complete, true)
+      assert.deepEqual(payload.entries?.[0]?.value, {
+        text: 'ABC-1',
+        href: 'https://example.test/ABC-1'
+      })
+    } finally {
+      scrapeBrowser.acquire = originalAcquire
+      deleteSession(session.id)
+    }
+  })
+
   it('terminates on browser busy without replacing the initial dry-run state', async () => {
     const session = createWorkspaceSession('executor-browser-busy')
     const restoreBrowser = installFakeBrowserLease()
@@ -320,7 +514,11 @@ describe('PluginDeveloper v11 tool executor', { concurrency: false }, () => {
           path.join(session.workspaceDirectory!, '.javdex', 'latest-dry-run.json'),
           'utf8'
         )),
-        { schemaVersion: 1, status: 'not_run' }
+        {
+          schemaVersion: 2,
+          status: 'not_run',
+          currentAcceptance: { installReady: false, reasons: ['missing_execution'] }
+        }
       )
     } finally {
       restoreBrowser()
@@ -359,7 +557,11 @@ describe('PluginDeveloper v11 tool executor', { concurrency: false }, () => {
           path.join(session.workspaceDirectory!, '.javdex', 'latest-dry-run.json'),
           'utf8'
         )),
-        { schemaVersion: 1, status: 'not_run' }
+        {
+          schemaVersion: 2,
+          status: 'not_run',
+          currentAcceptance: { installReady: false, reasons: ['missing_execution'] }
+        }
       )
     } finally {
       await releasePluginDeveloperBrowser(session.id)
@@ -376,7 +578,7 @@ describe('PluginDeveloper v11 tool executor', { concurrency: false }, () => {
     const controller = new AbortController()
     const latestPath = path.join(session.workspaceDirectory!, '.javdex', 'latest-dry-run.json')
     pluginWorkspace.recordLatestDryRun(session.workspaceDirectory!, {
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: 'completed',
       artifactHash: 'previous-artifact',
       reportPath: '/previous/report.json',
@@ -384,7 +586,8 @@ describe('PluginDeveloper v11 tool executor', { concurrency: false }, () => {
       runtimeVersion: PLUGIN_RUNTIME_VERSION,
       targetFingerprint: 'previous-targets',
       executionPassed: true,
-      cases: []
+      cases: [],
+      currentAcceptance: { installReady: true, reasons: [] }
     })
     let calls = 0
     pluginExecution.run = async (input) => {

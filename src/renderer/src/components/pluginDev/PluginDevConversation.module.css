@@ -80,11 +80,12 @@
 }
 
 .reasoningSummary {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
+  gap: 2px 10px;
   min-height: 32px;
-  padding: 5px 10px;
+  padding: 6px 10px;
   color: var(--text-muted);
   font-size: 11px;
   cursor: pointer;
@@ -107,6 +108,13 @@
   display: none;
 }
 
+.reasoningHead {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .reasoningLabel {
   color: var(--text-secondary);
   font-weight: 700;
@@ -117,7 +125,14 @@
   font-variant-numeric: tabular-nums;
 }
 
+.reasoningMeta {
+  justify-self: end;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .reasoningPreview {
+  grid-column: 1 / -1;
   min-width: 0;
   overflow: hidden;
   color: var(--text-muted);
@@ -126,8 +141,98 @@
 }
 
 .reasoningChars {
-  margin-inline-start: auto;
   flex-shrink: 0;
+}
+
+.agentBody {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-left: 2px solid color-mix(in srgb, var(--accent) 55%, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.mdHeading {
+  margin: 12px 0 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.mdParagraph {
+  margin: 7px 0;
+}
+
+.mdList {
+  margin: 7px 0;
+  padding-left: 22px;
+}
+
+.mdItem + .mdItem {
+  margin-top: 3px;
+}
+
+.mdLink {
+  color: var(--text-accent);
+  text-decoration: none;
+}
+
+.mdLink:hover {
+  text-decoration: underline;
+}
+
+.mdLink:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+.mdCode {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+  padding: 1px 4px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.95em;
+}
+
+.mdPre {
+  overflow: auto;
+  margin: 8px 0;
+  padding: 8px calc(8px + var(--scrollbar-safe-pad)) 8px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+  scrollbar-gutter: stable;
+}
+
+.mdCodeBlock {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.95em;
+}
+
+.mdQuote {
+  margin: 8px 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-accent);
+  color: var(--text-muted);
+}
+
+.mdRule {
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.mdHeading:first-child,
+.mdParagraph:first-child,
+.mdList:first-child,
+.mdQuote:first-child,
+.mdRule:first-child,
+.mdPre:first-child {
+  margin-top: 0;
 }
 
 .reasoningContent {
@@ -156,7 +261,6 @@
 }
 
 .streamingState {
-  margin-inline-start: 6px;
   color: var(--text-accent);
   font-style: normal;
   font-weight: 500;

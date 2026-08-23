@@ -166,6 +166,12 @@ describe('typed IPC adapter', () => {
     assert.equal(schema.safeParse(['run-1']).success, false)
   })
 
+  it('accepts unrecoverable plugin-session discard only without renderer-supplied run ids', () => {
+    const schema = appIpcSchemas[IPC.PLUGIN_DEV_AGENT_DISCARD_UNRECOVERABLE]
+    assert.equal(schema.safeParse([]).success, true)
+    assert.equal(schema.safeParse(['run-1']).success, false)
+  })
+
   it('keeps legacy model limits out of the generic settings mutation contract', () => {
     const schema = appIpcSchemas[IPC.SETTINGS_UPDATE]
     assert.equal(schema.safeParse([{ pluginDevAgentMaxTurns: 0 }]).success, false)

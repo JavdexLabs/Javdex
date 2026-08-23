@@ -9,7 +9,7 @@ import { pluginResultContract } from '@shared/pluginResultContract'
 import { buildPluginFieldSemanticsPrompt } from '@shared/scrapeFieldPromptDocs'
 import type { ScraperPluginKind } from '@shared/scraperPluginTypes'
 
-export const PLUGIN_DEV_INSTRUCTION_SET_VERSION = 25
+export const PLUGIN_DEV_INSTRUCTION_SET_VERSION = 26
 
 export const PLUGIN_DEVELOPER_SYSTEM_PROMPT = `你是 ${APP_DISPLAY_NAME} 的插件开发 Agent，运行在当前插件专用隔离工作区。
 
@@ -162,22 +162,40 @@ description: Create or debug the Javdex scraper plugin in the current isolated w
 
 # Javdex Plugin Development
 
-本 Skill 是插件开发工作流的唯一来源。目标是用最少的有效行动完成插件，而不是制造固定轮数。多轮开发是解决真实缺口的能力，不是必须经历的阶段。
+本 Skill 是插件开发工作流的唯一来源。按证据推进：证据充分时连贯实现并验证，只有明确 blocker 或真实运行问题才继续迭代。
 
-1. create 首次：读取本 Skill、\`task.json\` 和 \`docs/plugin-format.md\`；\`docs/plugin-format.md\` 是当前 kind 的唯一沙箱输入、返回形状和候选处理契约，首次实现前只读一次。任何 \`browser\` 调用之前，必须先读取 \`.agents/skills/javdex-browser-operation/SKILL.md\`；读完后立即浏览。空的 \`.javdex/dev-notes.md\`、stub \`index.js\` 和空 \`supportedFields\` 不必再读。继续、压缩恢复或 debug 时，先读取 \`.javdex/dev-notes.md\`、\`index.js\`、\`plugin.json\` 和存在时的 \`.javdex/latest-dry-run.json\`；若尚未读过 Browser Skill 又需要浏览，先补读再操作。只有修改涉及沙箱 API、返回形状、候选规则，或 notes 明确缺少契约事实时，才重新读取一次 \`docs/plugin-format.md\`。字段文档是按实际标签查询的参考表，不是实现清单：见到页面标签后再用 grep 查询，禁止通读。
-2. 目标分两条路径，不要混用。\`task.json.runTargets\` 为空时，浏览站点找到一个代表性的${targetPage}，并提取${targetIdentity}。用户目标搜索后零条精确匹配时，不要反复证明该目标不存在，也不要用相似条目充当命中；另外打开一条代表性的${targetPage}，取出${targetIdentity}，先省略参数做一次完整 dry-run 记下原用户目标的空结果，再 \`ask_user\` 改用该身份，用户同意后用该身份显式调用 \`plugin_dry_run\`。页面 URL 只用于理解网站和编写搜索逻辑，永远不是 dry-run 目标。
-3. ${sandboxStart} 禁止假设存在任何 URL 型 ctx 输入。确认搜索入口只能按下面三档降级，不得提前进入下一档。当前 observation 已有可提交的搜索控件或可 \`open\` 的搜索链接时，必须先 \`fill\` / \`press\` / \`click\` 或直接 \`open\`；\`action\` 为空或控件无 \`name\` 不是跳过第一档的理由。第一档成功后记下新文档 URL，立即打开一条精确详情；不要再读脚本，不要解释 \`recentRequests\`，不要在搜索结果页学习列表结构。搜索匹配与相对 href 仍由第一次 \`plugin_dry_run\` 验证。工具失败但页面已表明提交正在进行或已经生效时，仍留在第一档补一次最直接的提交。第一档失败是指当前页没有可见搜索控件或搜索链接，或提交后未进入搜索文档且页面也没有因此给出搜索结果。仅当第一档失败后，再阅读 \`pageFacts.scriptSrcs\` / \`inlineScripts\`；需要外链源码就 \`open\` 该脚本 URL 后 \`html\`。仅当第二档也失败后，再用 \`pageFacts.recentRequests\` 复现 \`fetchPage\`；若还没有请求记录，再提交一次可见搜索以采集。不主动浏览理论镜像域名、模糊搜索或无结果页。${browseThenCode}
-4. 首次出现精确目标详情页 observation 时，无论来自 open、click、fill、press 或 snapshot，只要已经能确定搜索入口、详情选择器和当前可见字段，就把全部已观察且映射明确的字段与已确认页面结构写入 \`.javdex/dev-notes.md\` 并开始编码。若仍有事实明确阻止写出可运行插件，每次只选择一个具体 blocker，执行最直接的 browser 操作后重新评估；新证据确实暴露另一个具体 blocker 时可以继续处理，不设任意的总次数上限。没有新增事实、返回 \`unchanged\` 或只剩理论问题时立即停止浏览；不能按字段逐项证明。只有真实字段歧义才调用 \`ask_user\`。
-5. reasoning 只用一至三句话说明下一项工具行动；不要在 reasoning 中预先编写插件、重复字段表、复述页面、粘贴 HTML、重新论证已确认事实，或预演 dry-run 能验证的问题。证据足以修改时立即 write/edit。
-6. 根据当前证据自适应选择实现范围：简单网站可以在一个连贯修改中实现全部已观察且映射明确的字段；不得为了形成多轮流程而故意延后字段。只有代码确实复杂、部分实现仍需真实运行结果验证，或存在尚未解决的具体不确定性时，才先实现一个可运行批次，并在 dev-notes 中写明具体未完成项。实现范围不使用任何预设字段组合。
-7. create 模式在调用 dry-run 前保证 \`index.js\`、\`plugin.json\` 和 dev-notes 的当前状态相互一致；debug 模式只修改真正需要变化的文件。只有页面事实、字段覆盖、未完成事项或下一步发生变化时才更新 dev-notes，不为满足流程仪式重写文件。完成相关写入后，下一项行动优先调用 \`plugin_dry_run\`。
-8. ${formatPointer}
-9. 更新 \`plugin.json.supportedFields\` 时只使用当前 kind 的字段 id，而不是结果键。
-10. 每次 dry-run 后直接检查该次工具结果中的 \`pluginResult\`、\`effectiveResult\`、\`manifestCoverage\`、\`unrecognizedResultKeys\` 和 \`mechanicalAcceptance\`，不要再读取 \`.javdex/latest-dry-run.json\` 重复确认，然后只作一个决定：\`installReady=true\` 且没有明确未完成项时停止；有明确错误或剩余字段时做一次针对性修改后再运行；没有新证据或没有必要修改时停止，不重复相同运行。不要用 reasoning 代替实际 write/edit 或 dry-run。完整 dry-run 得到空结果（未找到精确匹配）不是实现错误，不要改成返回相似番号。
-11. 对照首次浏览器 observation 自行判断内容是否正确。\`unrecognizedResultKeys\` 非空时按结果契约修正代码键；只把 \`manifestCoverage.undeclaredReturnedFieldIds\` 加入 \`supportedFields\`；\`runtimeOnlyKeys\` 只是中性运行信息，不得由此修改 manifest。宿主不替你作网页语义判断。
-12. 最终回应前只检查一次 dev-notes。正常运行后以该次工具结果的 \`mechanicalAcceptance\` 为准；恢复或压缩后以 \`.javdex/latest-dry-run.json.currentAcceptance\` 为准。\`currentAcceptance\` 缺失或 \`installReady=false\` 都表示当前版本尚无有效完整验收，按 \`reasons\` 处理下一步，不能因为最近一次执行没有报错就停止。仍有明确未完成字段时不得声称插件完整完成；空结果的完整 dry-run 不得声称可供安装。没有明确未完成项、当前 \`installReady=true\` 且结果没有明显错误时，简短说明当前版本可供用户安装。一次实现并一次 dry-run 即可满足这些条件，不要求额外开发轮次；该标记只代表机械可安装，不证明字段语义完整。
-13. \`plugin_dry_run\` 目标按下面三条，不要把显式参数一律当成局部诊断：\`task.json.runTargets\` 为空时，第一次合法显式目标成为完整目标集；会话已有目标后，显式参数与当前完整目标集相同则仍是完整验收，真子集才是 \`scope=targeted\` 诊断，\`installReady=false\` 不是运行失败，不要为此改代码，也不要用同一组显式参数再跑，省略参数才看 ready；若上一次完整执行为空结果，下一次合法显式 \`plugin_dry_run\` 会把该身份收成新的完整目标集。
-14. debug 模式先读取当前代码、manifest、dev-notes 与宿主提供的初始 dry-run，增量修改；代码变化前不要重复运行，也不要重新探索整个站点。需要产品决定时才使用 \`ask_user\`。
+## 1. 启动或恢复
+
+- create 首次读取本 Skill、\`task.json\` 和 \`docs/plugin-format.md\`。\`docs/plugin-format.md\` 是当前 kind 的唯一沙箱输入、返回形状和候选处理契约，首次实现前只读一次。任何 \`browser\` 调用之前先读取 \`.agents/skills/javdex-browser-operation/SKILL.md\`，然后立即浏览；空的 \`.javdex/dev-notes.md\`、stub \`index.js\` 和空 \`supportedFields\` 不必读取。
+- 继续、压缩恢复或 debug 时，读取 \`.javdex/dev-notes.md\`、\`index.js\`、\`plugin.json\` 和存在时的 \`.javdex/latest-dry-run.json\`，保留已有页面事实与决定。只有修改涉及沙箱 API、返回形状、候选规则，或 notes 明确缺少契约事实时，才重读一次 \`docs/plugin-format.md\`；需要浏览但尚未读过 Browser Skill 时先补读。
+- debug 使用宿主提供的初始 dry-run 增量修改；代码变化前不重复运行，也不重新探索整个站点。只有真实产品决定需要用户选择时才调用 \`ask_user\`。
+- 字段文档是按实际标签查询的参考表，不是实现清单；见到页面标签后再用 grep 查询，禁止通读。
+
+## 2. 获取证据
+
+- 目标分两条路径。\`task.json.runTargets\` 为空时，浏览站点找到一个代表性的${targetPage}并提取${targetIdentity}。用户目标搜索后零条精确匹配时，不反复证明不存在，也不用相似条目充当命中；另外打开一条代表性的${targetPage}并取出${targetIdentity}，先省略参数做一次完整 dry-run 记录原目标的空结果，再 \`ask_user\` 是否改用该身份，用户同意后用该身份显式调用 \`plugin_dry_run\`。页面 URL 只用于理解网站和编写搜索逻辑，永远不是 dry-run 目标。
+- ${sandboxStart} 禁止假设存在任何 URL 型 ctx 输入。确认搜索入口按三档降级，不得提前进入下一档：
+  1. observation 有可提交的搜索控件或可 \`open\` 的搜索链接时，先 \`fill\` / \`press\` / \`click\` 或直接 \`open\`；\`action\` 为空或控件无 \`name\` 不是跳过本档的理由。成功后记下新文档 URL 并立即打开一条精确详情，不再读脚本、解释 \`recentRequests\` 或在结果页学习列表结构；搜索匹配与相对 href 留给首次 dry-run 验证。工具失败但页面显示提交正在进行或已经生效时，仍在本档补一次最直接的提交。本档失败仅指没有可见搜索控件/链接，或提交后既未进入搜索文档也未出现搜索结果。
+  2. 第一档失败后，阅读 \`pageFacts.scriptSrcs\` / \`inlineScripts\`；外链源码用 \`open\` 打开脚本 URL 后再 \`html\`。
+  3. 第二档失败后，用 \`pageFacts.recentRequests\` 复现 \`fetchPage\`；没有请求记录时再提交一次可见搜索以采集。
+  不主动浏览理论镜像域名、模糊搜索或无结果页。${browseThenCode}
+- 首次出现精确目标详情页 observation 时，无论来自 open、click、fill、press 或 snapshot，只要能确定搜索入口、详情选择器和当前可见字段，就把全部已观察且映射明确的字段与页面结构写入 \`.javdex/dev-notes.md\` 并进入实现。若仍有事实明确阻止编码，按 Browser Skill 每次处理一个具体 blocker 后重新评估；新证据暴露新 blocker 时可以继续，不设任意总次数上限。没有新增事实、返回 \`unchanged\` 或只剩理论问题时停止浏览，不能按字段逐项证明。只有真实字段歧义才调用 \`ask_user\`。
+
+## 3. 实现
+
+- reasoning 只用一至三句话说明下一项工具行动；不在 reasoning 中预写插件、重复字段表、复述页面、粘贴 HTML、重新论证已确认事实或预演 dry-run。证据足够时立即 write/edit。
+- 简单网站在一个连贯修改中实现全部已观察且映射明确的字段。只有代码复杂、部分实现仍需真实运行验证或存在具体不确定性时，才先实现一个可运行批次，并在 dev-notes 中记录具体未完成项；不得按预设字段组合拆分实现。
+- create 在 dry-run 前保持 \`index.js\`、\`plugin.json\` 和 dev-notes 一致；debug 只修改真正需要变化的文件。仅在页面事实、字段覆盖、未完成事项或下一步变化时更新 dev-notes。相关写入完成后优先调用 \`plugin_dry_run\`。
+- ${formatPointer}
+- \`plugin.json.supportedFields\` 只使用当前 kind 的字段 id，不使用结果键。
+
+## 4. 运行与结束
+
+- 每次 dry-run 后直接检查工具结果中的 \`pluginResult\`、\`effectiveResult\`、\`manifestCoverage\`、\`unrecognizedResultKeys\` 和 \`mechanicalAcceptance\`，不再读取 \`.javdex/latest-dry-run.json\` 重复确认。只作一个决定：\`installReady=true\` 且没有明确未完成项时停止；有明确错误或剩余字段时针对性修改后再运行；没有新证据或没有必要修改时停止，不重复相同运行。完整 dry-run 的空结果不是实现错误，不得改成返回相似目标。
+- 对照首次浏览器 observation 判断内容是否正确。\`unrecognizedResultKeys\` 非空时按结果契约修正代码键；只把 \`manifestCoverage.undeclaredReturnedFieldIds\` 加入 \`supportedFields\`；\`runtimeOnlyKeys\` 只是中性运行信息，不得由此修改 manifest。宿主不替你作网页语义判断。
+- 正常运行后以该次工具结果的 \`mechanicalAcceptance\` 为准；恢复或压缩后以 \`.javdex/latest-dry-run.json.currentAcceptance\` 为准。恢复时按 \`reasons\` 处理：\`workspace_invalid\` 先修复草稿；\`execution_failed\` 先看最近 cases，空结果走未匹配路径，其他真实错误才修改；\`wrong_scope\`、\`stale_runtime\`、\`stale_artifact\` 或 \`target_mismatch\` 且代码正确时，省略目标参数做一次完整 dry-run；\`missing_execution\` 且没有 runTargets 时先发现合法目标，否则直接完整运行。\`currentAcceptance\` 缺失或 \`installReady=false\` 都不是完成状态。
+- dry-run 目标规则：没有 runTargets 时，第一次合法显式目标成为完整目标集；已有目标后，与完整目标集相同的显式参数仍是完整验收，真子集才是 \`scope=targeted\` 诊断；targeted 的 \`installReady=false\` 不是运行失败，不修改代码或用同一组显式参数重跑，省略参数才执行完整验收；上一次完整执行为空结果时，下一次合法显式目标替换完整目标集。
+- 最终回应前检查一次 dev-notes。仍有明确未完成字段或当前 \`installReady\` 不为 true 时，不得声称插件完整或可安装；空结果同样不可安装。条件满足且结果没有明显错误时，简短说明当前版本可供安装；机械 ready 不证明字段语义完整。
 `
 }
 
@@ -226,12 +244,10 @@ function taskDocument(
 
 function initialMessage(input: PluginDevAgentStartInput, debugResult?: string): string {
   if (input.mode === 'create') {
-    return '按 javdex-plugin-dev Skill 以最少的有效行动完成当前 create 任务。task.json 包含本轮全部动态任务事实和用户要求。'
+    return '执行 task.json 中的 create 任务，并从 javdex-plugin-dev Skill 的“启动或恢复”阶段开始。'
   }
   const result = debugResult?.trim() || '宿主未返回可用的初始生产运行摘要。'
-  return `先读取 .javdex/dev-notes.md、index.js、plugin.json 和 .javdex/latest-dry-run.json，再按 javdex-plugin-dev Skill 调试当前工作区草稿。
-
-宿主已经对当前草稿执行了初始 plugin_dry_run。先检查 pluginResult、effectiveResult、unrecognizedResultKeys、manifestCoverage 和日志；代码发生变化前不要重复运行 plugin_dry_run。若当前结果已经满足任务且没有明确未完成项，直接简短回应，不要为了形成多轮流程而修改代码。
+  return `宿主已经对当前草稿执行了初始 plugin_dry_run。以下是本次运行事实；从 javdex-plugin-dev Skill 的“启动或恢复”阶段继续。
 
 ${result}`
 }
@@ -256,9 +272,7 @@ export function buildRunInstructionSet(input: {
 
 export function buildContinuation(input: PluginDevContinuationInput): string {
   if (input.kind === 'resume') {
-    return `继续当前插件任务，不把本次继续操作视为新的缺陷或需求。
-先读取 .javdex/dev-notes.md、index.js、plugin.json 和 .javdex/latest-dry-run.json，并保留已有页面事实和已确认决定，不重新开始探索或通读大型文档。
-先检查 latest-dry-run.json 的 currentAcceptance：字段缺失或 installReady=false 表示当前版本没有有效完整验收。workspace_invalid 先修复草稿文件；execution_failed 先看最近 cases，空结果按 Skill 的未匹配路径处理，其他真实运行错误才做最小修复。代码已正确但只是 wrong_scope、stale_runtime、stale_artifact 或 target_mismatch 时，省略目标参数显式调用一次完整 plugin_dry_run。missing_execution 且 task.json.runTargets 为空时先按 Skill 发现合法目标，否则直接完整运行。只有 currentAcceptance.installReady=true 且 dev-notes 没有明确未完成项时才直接简短回应。不要假设继续操作必须产生新的修改或开发轮次。`
+    return '继续当前插件任务；这是恢复，不是新的缺陷或需求。按 javdex-plugin-dev Skill 的“启动或恢复”阶段读取当前事实并继续。'
   }
   if (input.kind === 'choice_resolved') {
     const option = input.decision.selectedOption
@@ -270,7 +284,7 @@ export function buildContinuation(input: PluginDevContinuationInput): string {
 问题：${input.decision.question}
 选择：${option.label}（optionId=${option.id}）${description}${evidence}
 
-应用这个决定，并重新评估当前具体 blocker；这个选择不会自动结束其他尚未解决的歧义。只有证据已经充分时才结束探索。只修改该决定实际影响的 dev-notes、index.js、plugin.json 或运行目标；若包或运行目标发生变化，完成相关写入后省略目标参数调用一次完整 plugin_dry_run。若决定是跳过、停止或无需修改插件，则记录必要的 notes 后直接简短回应，不要制造额外改动或运行。`
+应用这个决定，并从 javdex-plugin-dev Skill 的“获取证据”阶段重新评估当前 blocker。这个选择不会自动结束其他歧义，也不会自动要求修改或 dry-run。`
   }
   if (input.kind === 'browser_interaction_resolved') {
     return `用户已确认浏览器中的必要操作处理完成（reason=${input.reason}）。下一步只检查 browser(action="status") 或在确有必要时调用一次 snapshot，然后从中断位置继续；不要重新开始探索，也不要重复触发原操作。`
@@ -279,5 +293,5 @@ export function buildContinuation(input: PluginDevContinuationInput): string {
   return `用户的新指示：
 ${text}
 
-先读取 .javdex/dev-notes.md、index.js、plugin.json 和 .javdex/latest-dry-run.json，并保留已有页面事实和已确认决定，不重新开始探索或通读大型文档。只处理这次指示带来的明确差异；需要修改时完成一个连贯改动后省略目标参数调用一次完整 plugin_dry_run，不需要修改时直接回应。不要为了维持多轮流程制造额外改动。`
+保留未被这次指示推翻的页面事实和已确认决定，并从 javdex-plugin-dev Skill 的适用阶段继续。`
 }

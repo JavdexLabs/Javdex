@@ -1146,9 +1146,10 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       assert.match(result.prompt, /发行商/)
       assert.match(result.prompt, /选项说明：用户确认/)
       assert.match(result.prompt, /关联证据：\.javdex\/browser\/page\.json/)
-      assert.match(result.prompt, /重新评估当前具体 blocker/)
-      assert.match(result.prompt, /不会自动结束其他尚未解决的歧义/)
-      assert.doesNotMatch(result.prompt, /探索阶段结束|相关文件一致后.*调用一次完整 plugin_dry_run/)
+      assert.match(result.prompt, /“获取证据”阶段重新评估当前 blocker/)
+      assert.match(result.prompt, /不会自动结束其他歧义/)
+      assert.match(result.prompt, /不会自动要求修改或 dry-run/)
+      assert.doesNotMatch(result.prompt, /dev-notes\.md|index\.js|plugin\.json|plugin_dry_run|探索阶段结束/)
       const decisions = JSON.parse(fs.readFileSync(
         path.join(session.workspaceDirectory!, '.javdex', 'decisions.json'),
         'utf8'

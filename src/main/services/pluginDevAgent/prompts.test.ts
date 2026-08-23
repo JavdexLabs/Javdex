@@ -40,79 +40,102 @@ describe('PluginDevInstructionModule', () => {
   })
 
   it('makes javdex-plugin-dev the only owner of the development workflow', () => {
-    const resources = buildRunInstructionSet({ task: createTask }).workspaceResources
+    const instructionSet = buildRunInstructionSet({ task: createTask })
+    const resources = instructionSet.workspaceResources
     const pluginSkill = resources['.agents/skills/javdex-plugin-dev/SKILL.md']
     const browserSkill = resources['.agents/skills/javdex-browser-operation/SKILL.md']
     const pluginFormat = resources['docs/plugin-format.md']
     const task = JSON.parse(resources['task.json']) as Record<string, unknown>
+    const stageHeadings = [
+      '## 1. 启动或恢复',
+      '## 2. 获取证据',
+      '## 3. 实现',
+      '## 4. 运行与结束'
+    ]
+    const continuations = [
+      buildContinuation({ kind: 'resume' }),
+      buildContinuation({ kind: 'user_feedback', text: '继续补齐字段' }),
+      buildContinuation({
+        kind: 'choice_resolved',
+        decision: {
+          requestId: 'choice-1',
+          question: '该字段如何处理？',
+          selectedOption: { id: 'skip', label: '跳过字段' },
+          evidenceRefs: []
+        }
+      })
+    ].join('\n')
 
     assert.match(pluginSkill, /工作流的唯一来源/)
-    assert.match(pluginSkill, /dev-notes\.md` 并开始编码/)
-    assert.match(pluginSkill, /每次只选择一个具体 blocker/)
-    assert.match(pluginSkill, /新证据确实暴露另一个具体 blocker 时可以继续处理/)
-    assert.match(pluginSkill, /不设任意的总次数上限/)
+    for (let index = 0; index < stageHeadings.length; index += 1) {
+      assert.match(pluginSkill, new RegExp(stageHeadings[index].replace('.', '\\.')))
+      if (index > 0) {
+        assert.ok(pluginSkill.indexOf(stageHeadings[index - 1]) < pluginSkill.indexOf(stageHeadings[index]))
+      }
+    }
+    assert.equal(pluginSkill.match(/^## [1-4]\. /gm)?.length, 4)
+    assert.match(pluginSkill, /按证据推进/)
+    assert.match(pluginSkill, /dev-notes\.md` 并进入实现/)
+    assert.match(pluginSkill, /每次处理一个具体 blocker 后重新评估/)
+    assert.match(pluginSkill, /新证据暴露新 blocker 时可以继续/)
+    assert.match(pluginSkill, /不设任意总次数上限/)
     assert.doesNotMatch(pluginSkill, /才允许追加一次最直接的 browser 操作/)
-    assert.match(pluginSkill, /目标是用最少的有效行动完成插件，而不是制造固定轮数/)
     assert.match(pluginSkill, /reasoning 只用一至三句话说明下一项工具行动/)
-    assert.match(pluginSkill, /简单网站可以在一个连贯修改中实现全部已观察且映射明确的字段/)
-    assert.match(pluginSkill, /多轮开发是解决真实缺口的能力，不是必须经历的阶段/)
+    assert.match(pluginSkill, /简单网站在一个连贯修改中实现全部已观察且映射明确的字段/)
     assert.doesNotMatch(pluginSkill, /完整可运行的纵向切片/)
     assert.doesNotMatch(pluginSkill, /必须一次实现|一次性生成全部代码/)
     assert.doesNotMatch(pluginSkill, /标题.*封面.*来源链接/)
     assert.match(pluginSkill, /task\.json\.runTargets.*为空/)
     assert.match(pluginSkill, /用户目标搜索后零条精确匹配/)
-    assert.match(pluginSkill, /空结果的完整 dry-run 不得声称可供安装/)
+    assert.match(pluginSkill, /空结果同样不可安装/)
     assert.match(pluginSkill, /上一次完整执行为空结果/)
-    assert.match(pluginSkill, /不要改成返回相似番号/)
+    assert.match(pluginSkill, /不得改成返回相似目标/)
     assert.match(pluginSkill, /ctx\.code/)
     assert.doesNotMatch(pluginSkill, /ctx\.mainName|actresses.*mainName/)
     assert.match(pluginSkill, /pluginResult[\s\S]*manifestCoverage\.undeclaredReturnedFieldIds/)
     assert.match(pluginSkill, /runtimeOnlyKeys.*不得由此修改 manifest/)
     assert.doesNotMatch(pluginSkill, /最多三次|三次 dry-run|DRY_RUN_LIMIT_REACHED/)
-    assert.match(pluginSkill, /仍有明确未完成字段时不得声称插件完整完成/)
-    assert.match(pluginSkill, /一次实现并一次 dry-run 即可满足这些条件，不要求额外开发轮次/)
+    assert.match(pluginSkill, /仍有明确未完成字段.*不得声称插件完整或可安装/)
     assert.match(pluginSkill, /正常运行后以该次工具结果的 `mechanicalAcceptance` 为准/)
     assert.match(pluginSkill, /恢复或压缩后以 `\.javdex\/latest-dry-run\.json\.currentAcceptance` 为准/)
-    assert.match(pluginSkill, /`currentAcceptance` 缺失或 `installReady=false`.*尚无有效完整验收/)
-    assert.match(pluginSkill, /当前 `installReady=true`.*只代表机械可安装/)
-    assert.match(pluginSkill, /不要再读取 `\.javdex\/latest-dry-run\.json` 重复确认/)
-    assert.match(pluginSkill, /不要把显式参数一律当成局部诊断/)
-    assert.match(pluginSkill, /scope=targeted.*installReady=false.*不是运行失败/)
-    assert.match(pluginSkill, /显式参数与当前完整目标集相同则仍是完整验收/)
+    assert.match(pluginSkill, /`currentAcceptance` 缺失或 `installReady=false` 都不是完成状态/)
+    assert.match(pluginSkill, /机械 ready 不证明字段语义完整/)
+    assert.match(pluginSkill, /不再读取 `\.javdex\/latest-dry-run\.json` 重复确认/)
+    assert.match(pluginSkill, /targeted 的 `installReady=false` 不是运行失败/)
+    assert.match(pluginSkill, /与完整目标集相同的显式参数仍是完整验收/)
     assert.match(pluginSkill, /真子集才是 `scope=targeted` 诊断/)
-    assert.match(pluginSkill, /也不要用同一组显式参数再跑/)
-    assert.match(pluginSkill, /会话已有目标后[\s\S]*省略参数才看 ready/)
+    assert.match(pluginSkill, /不修改代码或用同一组显式参数重跑/)
+    assert.match(pluginSkill, /已有目标后[\s\S]*省略参数才执行完整验收/)
     assert.match(pluginSkill, /无论来自 open、click、fill、press 或 snapshot/)
-    assert.match(pluginSkill, /证据足以修改时立即 write\/edit/)
-    assert.match(pluginSkill, /不得为了形成多轮流程而故意延后字段/)
-    assert.match(pluginSkill, /完成相关写入后，下一项行动优先调用 `plugin_dry_run`/)
+    assert.match(pluginSkill, /证据足够时立即 write\/edit/)
+    assert.match(pluginSkill, /相关写入完成后优先调用 `plugin_dry_run`/)
     assert.match(pluginSkill, /`installReady=true` 且没有明确未完成项时停止/)
-    assert.match(pluginSkill, /有明确错误或剩余字段时做一次针对性修改后再运行/)
+    assert.match(pluginSkill, /有明确错误或剩余字段时针对性修改后再运行/)
     assert.match(pluginSkill, /没有新证据或没有必要修改时停止/)
     assert.doesNotMatch(pluginSkill, /下一模型轮次|其余已观察字段保留在 dev-notes 待办中/)
-    assert.match(pluginSkill, /目标分两条路径，不要混用/)
+    assert.match(pluginSkill, /目标分两条路径/)
     assert.match(pluginSkill, /另外打开一条代表性的精确影片详情页/)
-    assert.match(pluginSkill, /记下原用户目标的空结果/)
-    assert.match(pluginSkill, /确认搜索入口只能按下面三档降级/)
-    assert.match(pluginSkill, /`action` 为空或控件无 `name` 不是跳过第一档的理由/)
-    assert.match(pluginSkill, /必须先 `fill` \/ `press` \/ `click` 或直接 `open`/)
-    assert.match(pluginSkill, /不要在搜索结果页学习列表结构/)
-    assert.match(pluginSkill, /仅当第一档失败后[\s\S]*scriptSrcs/)
-    assert.match(pluginSkill, /仅当第二档也失败后[\s\S]*recentRequests/)
+    assert.match(pluginSkill, /记录原目标的空结果/)
+    assert.match(pluginSkill, /确认搜索入口按三档降级/)
+    assert.match(pluginSkill, /`action` 为空或控件无 `name` 不是跳过本档的理由/)
+    assert.match(pluginSkill, /先 `fill` \/ `press` \/ `click` 或直接 `open`/)
+    assert.match(pluginSkill, /不再读脚本、解释 `recentRequests` 或在结果页学习列表结构/)
+    assert.match(pluginSkill, /第一档失败后[\s\S]*scriptSrcs/)
+    assert.match(pluginSkill, /第二档失败后[\s\S]*recentRequests/)
     assert.doesNotMatch(pluginSkill, /先用当前 observation 里已明确的 form action/)
     assert.doesNotMatch(pluginSkill, /确认入口不是演练搜索结果|确认搜索入口按优先级/)
     assert.match(pluginSkill, /不主动浏览理论镜像域名、模糊搜索或无结果页/)
     assert.match(pluginSkill, /不要把其余候选点开/)
     assert.match(pluginSkill, /docs\/plugin-format\.md.*第一页完全匹配合同/)
     assert.doesNotMatch(pluginSkill, /零条返回|任一条完全匹配详情失败则整次失败|普通模糊搜索列表不是多候选契约/)
-    assert.equal(pluginSkill.match(/确认搜索入口只能按下面三档降级/g)?.length, 1)
+    assert.equal(pluginSkill.match(/确认搜索入口按三档降级/g)?.length, 1)
     assert.match(pluginSkill, /YST-222 只是参数格式示例，不是固定测试目标/)
-    assert.match(pluginSkill, /create 首次：读取本 Skill、`task\.json` 和 `docs\/plugin-format\.md`/)
+    assert.match(pluginSkill, /create 首次读取本 Skill、`task\.json` 和 `docs\/plugin-format\.md`/)
     assert.match(pluginSkill, /plugin-format\.md` 是当前 kind 的唯一沙箱输入、返回形状和候选处理契约/)
     assert.match(pluginSkill, /首次实现前只读一次/)
-    assert.match(pluginSkill, /任何 `browser` 调用之前，必须先读取 `\.agents\/skills\/javdex-browser-operation\/SKILL\.md`/)
-    assert.match(pluginSkill, /读完后立即浏览/)
-    assert.match(pluginSkill, /空的 `\.javdex\/dev-notes\.md`、stub `index\.js` 和空 `supportedFields` 不必再读/)
+    assert.match(pluginSkill, /任何 `browser` 调用之前先读取 `\.agents\/skills\/javdex-browser-operation\/SKILL\.md`/)
+    assert.match(pluginSkill, /然后立即浏览/)
+    assert.match(pluginSkill, /空的 `\.javdex\/dev-notes\.md`、stub `index\.js` 和空 `supportedFields` 不必读取/)
     assert.match(pluginSkill, /只有修改涉及沙箱 API、返回形状、候选规则，或 notes 明确缺少契约事实时/)
     assert.match(pluginSkill, /见到页面标签后再用 grep 查询，禁止通读/)
     assert.match(pluginSkill, /生产沙箱输入契约/)
@@ -124,7 +147,15 @@ describe('PluginDevInstructionModule', () => {
     assert.match(pluginSkill, /浏览一条详情不是允许代码只处理一条/)
     assert.doesNotMatch(pluginSkill, /不要 fill 搜索框演练/)
     assert.doesNotMatch(pluginSkill, /不要 grep\/read browser artifact 找搜索 URL/)
-    assert.match(pluginSkill, /不要在 reasoning 中.*粘贴 HTML/)
+    assert.match(pluginSkill, /不在 reasoning 中.*粘贴 HTML/)
+
+    assert.match(instructionSet.initialMessage, /“启动或恢复”阶段/)
+    assert.doesNotMatch(instructionSet.initialMessage, /currentAcceptance|workspace_invalid|scope=targeted|未完成项|多轮/)
+    assert.match(continuations, /“启动或恢复”阶段/)
+    assert.match(continuations, /适用阶段/)
+    assert.match(continuations, /“获取证据”阶段/)
+    assert.doesNotMatch(continuations, /workspace_invalid|execution_failed|scope=targeted|manifestCoverage|supportedFields/)
+    assert.equal(pluginSkill.match(/workspace_invalid/g)?.length, 1)
 
     assert.match(browserSkill, /Required before any browser action/)
     assert.match(browserSkill, /action 为 `open\|snapshot\|find\|html\|evaluate\|click\|fill\|press\|wait\|status\|read-section\|handoff`/)
@@ -191,7 +222,7 @@ describe('PluginDevInstructionModule', () => {
     assert.match(pluginFormat, /未匹配返回 `null` 或 `\[\]`/)
     assert.doesNotMatch(pluginFormat, /应返回 `null`/)
     assert.equal(task.schemaVersion, 3)
-    assert.equal(task.instructionSetVersion, 25)
+    assert.equal(task.instructionSetVersion, 26)
     assert.deepEqual(task.runTargets, [{ kind: 'video', code: 'YST-222' }])
     assert.equal(Object.hasOwn(task, 'instructions'), false)
     assert.equal(Object.hasOwn(task, 'fieldScope'), false)
@@ -232,11 +263,11 @@ describe('PluginDevInstructionModule', () => {
     assert.match(actressSkill, /ctx\.mainName.*ctx\.aliases/)
     assert.match(actressSkill, /"actresses"/)
     assert.match(actressSkill, /三上悠亜只是参数格式示例，不是固定测试目标/)
-    assert.match(actressSkill, /目标分两条路径，不要混用/)
+    assert.match(actressSkill, /目标分两条路径/)
     assert.match(actressSkill, /另外打开一条代表性的精确演员资料页/)
-    assert.match(actressSkill, /确认搜索入口只能按下面三档降级/)
-    assert.equal(actressSkill.match(/确认搜索入口只能按下面三档降级/g)?.length, 1)
-    assert.match(actressSkill, /`action` 为空或控件无 `name` 不是跳过第一档的理由/)
+    assert.match(actressSkill, /确认搜索入口按三档降级/)
+    assert.equal(actressSkill.match(/确认搜索入口按三档降级/g)?.length, 1)
+    assert.match(actressSkill, /`action` 为空或控件无 `name` 不是跳过本档的理由/)
     assert.match(actressSkill, /pageFacts\.scriptSrcs/)
     assert.match(actressSkill, /pageFacts\.recentRequests/)
     assert.doesNotMatch(actressSkill, /ctx\.code|videoCodes|actressesFemale|actressesMale|gender/)
@@ -273,11 +304,10 @@ describe('PluginDevInstructionModule', () => {
     assert.match(prompt, /选择：跳过字段（optionId=skip）/)
     assert.match(prompt, /选项说明：当前版本不支持/)
     assert.match(prompt, /关联证据：\.javdex\/browser\/page\.json/)
-    assert.match(prompt, /重新评估当前具体 blocker/)
-    assert.match(prompt, /不会自动结束其他尚未解决的歧义/)
-    assert.match(prompt, /若包或运行目标发生变化.*plugin_dry_run/)
-    assert.match(prompt, /跳过、停止或无需修改插件.*不要制造额外改动或运行/)
-    assert.doesNotMatch(prompt, /探索阶段结束|相关文件一致后.*调用一次完整 plugin_dry_run/)
+    assert.match(prompt, /“获取证据”阶段重新评估当前 blocker/)
+    assert.match(prompt, /不会自动结束其他歧义/)
+    assert.match(prompt, /不会自动要求修改或 dry-run/)
+    assert.doesNotMatch(prompt, /dev-notes\.md|index\.js|plugin\.json|plugin_dry_run|探索阶段结束/)
   })
 
   it('resumes a completed browser handoff from the interrupted location', () => {
@@ -298,22 +328,20 @@ describe('PluginDevInstructionModule', () => {
     })
 
     assert.match(instructionSet.initialMessage, /宿主已经.*执行了初始 plugin_dry_run/)
-    assert.match(instructionSet.initialMessage, /代码发生变化前不要重复运行/)
-    assert.match(instructionSet.initialMessage, /不要为了形成多轮流程而修改代码/)
+    assert.match(instructionSet.initialMessage, /“启动或恢复”阶段/)
     assert.match(instructionSet.initialMessage, /ok=true; title=YST-222/)
-    assert.doesNotMatch(instructionSet.initialMessage, /先调用 plugin_dry_run/)
+    assert.doesNotMatch(instructionSet.initialMessage, /dev-notes|index\.js|plugin\.json|代码发生变化前|未完成项|多轮/)
   })
 
   it('starts create from the Skill instead of a five-file reading ritual', () => {
     const instructionSet = buildRunInstructionSet({ task: createTask })
 
-    assert.match(instructionSet.initialMessage, /按 javdex-plugin-dev Skill 以最少的有效行动完成当前 create 任务/)
-    assert.match(instructionSet.initialMessage, /task\.json 包含本轮全部动态任务事实/)
-    assert.doesNotMatch(instructionSet.initialMessage, /读取 task\.json、\.javdex\/dev-notes\.md、index\.js/)
-    assert.doesNotMatch(instructionSet.initialMessage, /latest-dry-run\.json（若存在）/)
+    assert.match(instructionSet.initialMessage, /执行 task\.json 中的 create 任务/)
+    assert.match(instructionSet.initialMessage, /“启动或恢复”阶段/)
+    assert.doesNotMatch(instructionSet.initialMessage, /dev-notes|index\.js|latest-dry-run|最少|多轮|plugin_dry_run/)
   })
 
-  it('generates stable v25 resources for identical inputs', () => {
+  it('generates stable v26 resources for identical inputs', () => {
     const first = buildRunInstructionSet({ task: createTask })
     const second = buildRunInstructionSet({ task: structuredClone(createTask) })
     assert.deepEqual(second, first)
@@ -326,25 +354,19 @@ describe('PluginDevInstructionModule', () => {
   it('applies user feedback without manufacturing an extra development round', () => {
     const prompt = buildContinuation({ kind: 'user_feedback', text: '继续补齐字段' })
 
-    assert.match(prompt, /dev-notes\.md、index\.js、plugin\.json 和 \.javdex\/latest-dry-run\.json/)
-    assert.match(prompt, /不重新开始探索或通读大型文档/)
-    assert.match(prompt, /只处理这次指示带来的明确差异/)
-    assert.match(prompt, /省略目标参数调用一次完整 plugin_dry_run/)
-    assert.match(prompt, /不要为了维持多轮流程制造额外改动/)
+    assert.match(prompt, /用户的新指示：\s*继续补齐字段/)
+    assert.match(prompt, /保留未被这次指示推翻的页面事实和已确认决定/)
+    assert.match(prompt, /javdex-plugin-dev Skill 的适用阶段/)
+    assert.doesNotMatch(prompt, /dev-notes\.md|index\.js|plugin\.json|latest-dry-run|plugin_dry_run|多轮|不重新开始探索/)
   })
 
   it('treats the resume button as continuation rather than new defect feedback', () => {
     const prompt = buildContinuation({ kind: 'resume' })
 
-    assert.match(prompt, /不把本次继续操作视为新的缺陷或需求/)
-    assert.match(prompt, /dev-notes\.md、index\.js、plugin\.json 和 \.javdex\/latest-dry-run\.json/)
-    assert.match(prompt, /currentAcceptance.*字段缺失或 installReady=false.*没有有效完整验收/)
-    assert.match(prompt, /workspace_invalid 先修复草稿文件/)
-    assert.match(prompt, /execution_failed 先看最近 cases，空结果按 Skill 的未匹配路径处理/)
-    assert.match(prompt, /missing_execution.*task\.json\.runTargets 为空/)
-    assert.match(prompt, /currentAcceptance\.installReady=true.*才直接简短回应/)
-    assert.match(prompt, /不要假设继续操作必须产生新的修改或开发轮次/)
-    assert.doesNotMatch(prompt, /用户的新指示/)
+    assert.match(prompt, /这是恢复，不是新的缺陷或需求/)
+    assert.match(prompt, /“启动或恢复”阶段/)
+    assert.doesNotMatch(prompt, /currentAcceptance|workspace_invalid|execution_failed|missing_execution/)
+    assert.doesNotMatch(prompt, /dev-notes\.md|index\.js|plugin\.json|latest-dry-run|plugin_dry_run|用户的新指示/)
   })
 
   it('exposes only dry-run, typed user input and the browser adapter tools', () => {

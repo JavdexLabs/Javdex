@@ -40,7 +40,7 @@ docs/fields-actress.md            # 演员字段查询表
 .javdex/reports/*.json            # 完整生产执行 artifact
 ```
 
-新工作区使用 `instructionSetVersion: 25`。system prompt 只声明身份、文件边界、恢复入口和 Skill 所有权；完整开发循环只存在于按当前 kind 生成的 `javdex-plugin-dev` Skill。create 首次实现前读取一次当前 kind 的 `docs/plugin-format.md` 作为唯一沙箱输入、返回形状和候选处理契约，并在首次浏览前读取 `javdex-browser-operation`；debug 或恢复仅在修改涉及这些契约或 notes 明确缺少契约事实时重读。create/debug 都只创建空 notes 模板，宿主不从页面或 manifest 推断字段范围。工作区刷新会保留 `plugin.json`、`index.js`、decisions 和 dev-notes。choice 决定在 `.javdex/decisions.json` 中保存原问题、所选项 id/label/description 和关联 evidenceRefs；恢复提示会重新评估当前 blocker，不假定一次选择自动结束全部歧义或必然需要修改、dry-run。
+新工作区使用 `instructionSetVersion: 26`。system prompt 只声明身份、文件边界、恢复入口和 Skill 所有权；完整开发循环只存在于按当前 kind 生成的 `javdex-plugin-dev` Skill，并按“启动或恢复 → 获取证据 → 实现 → 运行与结束”四个阶段组织。initial message 和 continuation 只传递本次事件事实与适用阶段，不再复制文件读取、停止条件或验收分支。create 首次实现前读取一次当前 kind 的 `docs/plugin-format.md` 作为唯一沙箱输入、返回形状和候选处理契约，并在首次浏览前读取 `javdex-browser-operation`；debug 或恢复仅在修改涉及这些契约或 notes 明确缺少契约事实时重读。create/debug 都只创建空 notes 模板，宿主不从页面或 manifest 推断字段范围。工作区刷新会保留 `plugin.json`、`index.js`、decisions 和 dev-notes。choice 决定在 `.javdex/decisions.json` 中保存原问题、所选项 id/label/description 和关联 evidenceRefs；恢复提示会重新评估当前 blocker，不假定一次选择自动结束全部歧义或必然需要修改、dry-run。
 
 暂时无法解析的 `plugin.json`/`index.js` 只令工作区进入可恢复的 `WORKSPACE_INVALID`，不会把整个 Agent run 标为失败。文件修复后自动重新同步；无效期间调用 dry-run 不执行沙箱，也不覆盖最近执行事实，只把 `currentAcceptance` 更新为不可安装及 `workspace_invalid`。
 

@@ -62,11 +62,13 @@ URL、路径和控制字符在工具边界被拒绝。这是输入类型保护�
 
 ### 7. 自适应开发循环
 
-`plugin_dry_run` 不设领域次数上限。Pi 在首次精确详情页后把已观察字段、当前实现和明确未完成项记录到 dev-notes。证据充分的简单网站可以在一个连贯修改中实现全部明确字段并运行一次；只有复杂实现、具体不确定性或真实 dry-run 问题存在时，才继续 `write/edit ↔ plugin_dry_run`。浏览同样按证据自适应：每次处理一个具体 blocker，新证据暴露新 blocker 时可继续，不用任意总次数上限；没有新事实、`unchanged` 或只剩理论问题时停止。多轮是解决真实缺口的能力，不是必须经历的状态机。choice 决定持久化原问题、完整所选项和证据引用，恢复时重新评估 blocker，不把一次决定硬编码为探索结束或必然 dry-run。恢复、继续或上下文压缩后先读取 dev-notes、当前代码、manifest 和最新 dry-run 小文件，避免重新浏览或通读大型证据。通用模型轮次上限由用户配置，`0` 表示不限制且为默认值；取消、工具超时和浏览器租约仍负责资源保护。
+`plugin_dry_run` 不设领域次数上限。Pi 在首次精确详情页后把已观察字段、当前实现和明确未完成项记录到 dev-notes。证据充分的简单网站可以在一个连贯修改中实现全部明确字段并运行一次；只有复杂实现、具体不确定性或真实 dry-run 问题存在时，才继续 `write/edit ↔ plugin_dry_run`。浏览同样按证据自适应：每次处理一个具体 blocker，新证据暴露新 blocker 时可继续，不用任意总次数上限；没有新事实、`unchanged` 或只剩理论问题时停止。多轮是解决真实缺口的能力，不是必须经历的状态机。
+
+这些规则只由 `javdex-plugin-dev` Skill 持有，并组织为“启动或恢复、获取证据、实现、运行与结束”四个阶段。initial message 和各类 continuation 只描述本次事件变化并指回适用阶段，避免形成与主 Skill 漂移的第二套流程。choice 决定持久化原问题、完整所选项和证据引用，恢复时重新评估 blocker，不把一次决定硬编码为探索结束或必然 dry-run。恢复、继续或上下文压缩后先读取 dev-notes、当前代码、manifest 和最新 dry-run 小文件，避免重新浏览或通读大型证据。通用模型轮次上限由用户配置，`0` 表示不限制且为默认值；取消、工具超时和浏览器租约仍负责资源保护。
 
 ### 8. 状态与升级
 
-- task schema v3 / instruction set v25；
+- task schema v3 / instruction set v26；
 - ToolPack `toolpack:plugin-developer:v13`；
 - product state 与工作日志新写 schema v7，schema v6 终态历史只读导出；
 - runtime acceptance `runtime-v2`；

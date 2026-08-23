@@ -19,9 +19,20 @@ describe('action network capture', () => {
     assert.equal(isActionNetworkResourceType('Image'), false)
   })
 
+  it('redacts credential-bearing query values before exposing recent requests', () => {
+    assert.equal(
+      sanitizeActionNetworkUrl(
+        'https://example.test/search?q=Alice&access_token=token-value&api_key=key-value&x-amz-signature=signed'
+      ),
+      'https://example.test/search?q=Alice&access_token=%5BREDACTED%5D&api_key=%5BREDACTED%5D&x-amz-signature=%5BREDACTED%5D'
+    )
+  })
+
   it('omits sensitive post bodies', () => {
     assert.equal(sanitizeActionNetworkPostData('query=hatano'), 'query=hatano')
     assert.equal(sanitizeActionNetworkPostData('password=secret'), undefined)
+    assert.equal(sanitizeActionNetworkPostData('csrf=nonce-value'), undefined)
+    assert.equal(sanitizeActionNetworkPostData('token=opaque-value'), undefined)
   })
 
   it('records only an active action window and does not label search', () => {

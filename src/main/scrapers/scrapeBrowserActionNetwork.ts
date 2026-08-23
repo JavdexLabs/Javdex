@@ -2,7 +2,13 @@ export const ACTION_NETWORK_MAX_REQUESTS = 24
 export const ACTION_NETWORK_POST_DATA_LIMIT = 512
 
 const ACTION_NETWORK_TYPES = new Set(['Document', 'XHR', 'Fetch'])
-const SENSITIVE_POST_DATA = /(?:password|passwd|passcode|credential|captcha|api[-_ ]?key|access[-_ ]?token|auth[-_ ]?token|secret)/iu
+const SENSITIVE_POST_DATA = /(?:password|passwd|passcode|credential|captcha|csrf|xsrf|api[-_ ]?key|token|authorization|signature|secret)/iu
+const SENSITIVE_QUERY_KEY =
+  /(?:password|passwd|passcode|credential|captcha|csrf|xsrf|apikey|token|authorization|signature|secret)/iu
+
+function isSensitiveQueryKey(value: string): boolean {
+  return SENSITIVE_QUERY_KEY.test(value.toLowerCase().replace(/[^a-z0-9]/gu, ''))
+}
 
 export interface AgentActionNetworkRequest {
   method: string
@@ -23,6 +29,9 @@ export function sanitizeActionNetworkUrl(url: string | undefined): string | null
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
     parsed.username = ''
     parsed.password = ''
+    for (const key of new Set(parsed.searchParams.keys())) {
+      if (isSensitiveQueryKey(key)) parsed.searchParams.set(key, '[REDACTED]')
+    }
     return parsed.href
   } catch {
     return null

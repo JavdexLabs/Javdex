@@ -186,6 +186,7 @@ export default function PluginDevResultPanel({
   const installStateClass = installState === 'not-installed'
     ? styles.notInstalled
     : styles[installState]
+  const fullExecutionReady = execution?.scope === 'all' && acceptance?.ready === true
 
   return (
     <div className={styles.panel}>
@@ -214,8 +215,8 @@ export default function PluginDevResultPanel({
               item={item}
             />
           ))}
-          <div className={`${styles.banner} ${acceptance?.ready ? styles.success : styles.warning}`}>
-            <span>{acceptance?.ready ? '机械验收通过，可安装' : execution.scope === 'targeted' ? '局部诊断结果' : '机械验收未通过'}</span>
+          <div className={`${styles.banner} ${fullExecutionReady ? styles.success : styles.warning}`}>
+            <span>{execution.scope === 'targeted' ? '局部诊断结果' : fullExecutionReady ? '机械验收通过，可安装' : '机械验收未通过'}</span>
             <span>{execution.runtimeVersion} · {execution.scope === 'all' ? '全部目标' : '局部目标'}</span>
           </div>
         </section>

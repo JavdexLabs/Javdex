@@ -185,9 +185,15 @@
   text-decoration: underline;
 }
 
+.mdLink:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
 .mdCode {
   border: 1px solid var(--border-subtle);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--surface-base);
   padding: 1px 4px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;

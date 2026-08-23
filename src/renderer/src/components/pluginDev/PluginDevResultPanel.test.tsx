@@ -141,6 +141,55 @@ describe('PluginDevResultPanel manifest coverage', () => {
     assert.equal(details[0].props.open, true)
   })
 
+  it('labels a targeted execution as a local diagnostic even when the saved full run is ready', () => {
+    const execution: PluginExecutionArtifact = {
+      runtimeVersion: 'runtime-v2',
+      artifactHash: 'artifact',
+      targetFingerprint: 'targeted',
+      scope: 'targeted',
+      targets: [{ kind: 'video', code: 'ABC-1' }],
+      cases: [{
+        target: { kind: 'video', code: 'ABC-1' },
+        pluginResult: { code: 'ABC-1', title: 'Subset result' },
+        effectiveResult: { code: 'ABC-1', title: 'Subset result' },
+        manifestCoverage: {
+          returnedFieldIds: ['title'],
+          undeclaredReturnedFieldIds: [],
+          runtimeOnlyKeys: []
+        },
+        logs: [],
+        runtimeAccepted: true
+      }],
+      executionPassed: true,
+      reportPath: '/tmp/targeted-report.json'
+    }
+
+    act(() => {
+      renderer = TestRenderer.create(
+        <PluginDevResultPanel
+          kind="video"
+          dryRun={null}
+          execution={execution}
+          acceptance={{
+            runtimeVersion: 'runtime-v2',
+            artifactHash: 'artifact',
+            targetFingerprint: 'all-targets',
+            scope: 'all',
+            executionPassed: true,
+            ready: true,
+            reportPath: '/tmp/full-report.json'
+          }}
+          stale={false}
+          installState="not-installed"
+        />
+      )
+    })
+
+    const text = textContent()
+    assert.match(text, /局部诊断结果/)
+    assert.doesNotMatch(text, /机械验收通过，可安装/)
+  })
+
   it('explains null and empty array plugin returns instead of hiding the section', () => {
     const execution: PluginExecutionArtifact = {
       runtimeVersion: 'runtime-v2',

@@ -4,6 +4,16 @@ const path = require('node:path')
 const originalResolveFilename = Module._resolveFilename
 
 Module._resolveFilename = function resolveWithProjectAliases(request, parent, isMain, options) {
+  if (request.startsWith('@pi-coding-agent-runtime/')) {
+    return path.join(
+      process.cwd(),
+      'node_modules',
+      '@earendil-works',
+      'pi-coding-agent',
+      'dist',
+      request.slice('@pi-coding-agent-runtime/'.length)
+    )
+  }
   if (request.startsWith('@shared/')) {
     return path.join(process.cwd(), 'src', 'shared', `${request.slice('@shared/'.length)}.ts`)
   }

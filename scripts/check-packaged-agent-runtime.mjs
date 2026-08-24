@@ -22,19 +22,6 @@ function findAsars(directory, depth = 0) {
   return found
 }
 
-function collectResourceEntries(directory, relative = '') {
-  if (!existsSync(directory)) return []
-  const entries = []
-  for (const item of readdirSync(directory, { withFileTypes: true })) {
-    const itemRelative = path.posix.join(relative, item.name)
-    entries.push(`/out/resources/${itemRelative}`)
-    if (item.isDirectory()) {
-      entries.push(...collectResourceEntries(path.join(directory, item.name), itemRelative))
-    }
-  }
-  return entries
-}
-
 function assertPackagedElectronLanguages(archive) {
   const resourcesDirectory = path.dirname(archive)
   const macFrameworkResources = path.resolve(
@@ -79,8 +66,9 @@ for (const archive of archives) {
   const entries = listPackage(archive).map((entry) => entry.replaceAll('\\', '/'))
   const required = [
     /^\/out\/main\/chunks\/piRuntime-.*\.js$/,
-    /^\/node_modules\/@earendil-works\/pi-coding-agent\/dist\/index\.js$/,
-    /^\/node_modules\/@earendil-works\/pi-coding-agent\/node_modules\/@earendil-works\/pi-ai\/dist\/index\.js$/,
+    /^\/out\/main\/chunks\/piSdk-.*\.js$/,
+    /^\/out\/main\/chunks\/photon_rs_bg\.wasm$/,
+    /^\/out\/renderer\/icon-192\.png$/,
     /^\/node_modules\/playwright-core\/package\.json$/,
     /^\/node_modules\/playwright-core\/lib\/coreBundle\.js$/
   ]
@@ -110,15 +98,17 @@ for (const archive of archives) {
       `${archive} contains bundled renderer dependencies: ${packagedRendererDependencies.join(', ')}`
     )
   }
-  const allowedResourceEntries = new Set([
-    '/out/resources',
-    ...collectResourceEntries(path.resolve('resources'))
-  ])
-  const staleResources = entries.filter(
-    (entry) => entry.startsWith('/out/resources/') && !allowedResourceEntries.has(entry)
+  const redundantRuntimeEntries = entries.filter(
+    (entry) =>
+      entry.startsWith('/out/resources/') ||
+      entry.startsWith('/node_modules/@earendil-works/pi-coding-agent/') ||
+      entry.startsWith('/node_modules/playwright-core/lib/vite/') ||
+      entry.startsWith('/node_modules/undici/') ||
+      /^\/out\/renderer\/icon-(?:16|32|48|512)\.png$/.test(entry) ||
+      /^\/out\/renderer\/assets\/icon-.*\.png$/.test(entry)
   )
-  if (staleResources.length > 0) {
-    throw new Error(`${archive} contains ${staleResources.length} stale build resources`)
+  if (redundantRuntimeEntries.length > 0) {
+    throw new Error(`${archive} contains ${redundantRuntimeEntries.length} redundant runtime files`)
   }
   const playwrightPackage = JSON.parse(
     extractFile(archive, 'node_modules/playwright-core/package.json').toString('utf8')

@@ -41,13 +41,17 @@ const base = {
   },
   files: [
     'out/**/*',
+    '!out/resources/**/*',
+    '!out/renderer/icon-{16,32,48,512}.png',
     '!node_modules/@mediapipe/tasks-vision/**/*',
     '!node_modules/**/*.d.ts',
     '!node_modules/**/*.d.mts',
     '!node_modules/**/*.d.cts',
     '!node_modules/**/*.d.ts.map',
     '!node_modules/**/*.map',
-    '!node_modules/@earendil-works/pi-coding-agent/{docs,examples,tests}/**/*'
+    '!node_modules/playwright-core/lib/vite/**/*',
+    '!node_modules/@earendil-works/pi-coding-agent/**/*',
+    '!node_modules/undici/**/*'
   ],
   asar: true,
   npmRebuild: true,

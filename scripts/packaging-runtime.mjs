@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, rmSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 
@@ -43,13 +43,6 @@ export function macElectronLocaleNames(languages = MAC_ELECTRON_LANGUAGES) {
   )
 }
 
-export function mirrorDirectory(source, target) {
-  rmSync(target, { recursive: true, force: true })
-  if (!existsSync(source)) return
-  mkdirSync(path.dirname(target), { recursive: true })
-  cpSync(source, target, { recursive: true })
-}
-
 export function electronBuilderArchName(arch) {
   const name = BUILDER_ARCH_NAMES[arch]
   if (!name) throw new Error(`Unsupported electron-builder arch: ${String(arch)}`)
@@ -88,6 +81,17 @@ export function pruneBetterSqlitePrebuilds(prebuildDirectory, platformName, arch
   return { kept: [...expected].sort(), removed: removed.sort() }
 }
 
+export function pruneBetterSqliteBuildFiles(packageDirectory) {
+  const removed = []
+  for (const name of ['binding.gyp', 'build', 'deps', 'src']) {
+    const target = path.join(packageDirectory, name)
+    if (!existsSync(target)) continue
+    rmSync(target, { recursive: true, force: true })
+    removed.push(name)
+  }
+  return removed
+}
+
 export function pruneElectronFrameworkLocales(resourcesDirectory, languages = MAC_ELECTRON_LANGUAGES) {
   if (!existsSync(resourcesDirectory)) {
     throw new Error(`Missing Electron Framework resources: ${resourcesDirectory}`)
@@ -116,6 +120,7 @@ export function prunePackagedRuntime(context) {
     'prebuilds'
   )
   const sqlite = pruneBetterSqlitePrebuilds(sqlitePrebuilds, platformName, archName)
+  const sqliteBuildFiles = pruneBetterSqliteBuildFiles(path.dirname(sqlitePrebuilds))
 
   let removedLocales = []
   if (platformName === 'darwin') {
@@ -134,6 +139,7 @@ export function prunePackagedRuntime(context) {
 
   console.log(
     `Pruned packaged runtime (${platformName}/${archName}): ` +
-    `${sqlite.removed.length} SQLite prebuilds, ${removedLocales.length} Electron locales`
+    `${sqlite.removed.length} SQLite prebuilds, ${sqliteBuildFiles.length} SQLite build files, ` +
+    `${removedLocales.length} Electron locales`
   )
 }

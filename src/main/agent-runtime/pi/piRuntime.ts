@@ -26,11 +26,11 @@ import type {
 
 const RECOVERY_CODEC_VERSION = 1 as const
 
-type PiModule = typeof import('@earendil-works/pi-coding-agent')
+type PiModule = typeof import('./piSdk')
 let piModule: Promise<PiModule> | null = null
 
 function loadPi(): Promise<PiModule> {
-  piModule ??= import('@earendil-works/pi-coding-agent')
+  piModule ??= import('./piSdk')
   return piModule
 }
 

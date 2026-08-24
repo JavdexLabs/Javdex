@@ -11,7 +11,7 @@
     "pages:build": "node website/scripts/build.mjs",
     "pages:build:offline": "node website/scripts/build.mjs --offline",
     "pages:preview": "npm run pages:build && vite dist-pages",
-    "build": "electron-vite build && node scripts/check-mediapipe-assets.mjs",
+    "build": "electron-vite build && node scripts/check-mediapipe-assets.mjs && node scripts/check-built-pi-runtime.mjs",
     "generate:icons": "python scripts/generate-app-icons.py",
     "packaging:list": "node scripts/dist.mjs --list",
     "packaging:configure": "node scripts/configure-packaging.mjs",

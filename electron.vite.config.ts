@@ -3,12 +3,14 @@ import { copyFileSync, cpSync, createReadStream, existsSync, mkdirSync } from 'f
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import type { Plugin, ViteDevServer } from 'vite'
-import { mirrorDirectory } from './scripts/packaging-runtime.mjs'
 
 const MEDIAPIPE_RUNTIME_FILES = [
   'vision_wasm_module_internal.js',
   'vision_wasm_module_internal.wasm'
 ] as const
+const PI_EXTENSION_LOADER_SUFFIX =
+  '/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/loader.js'
+const PI_EXTENSION_API_STUB = '\0javdex-pi-extension-api-stub'
 
 function mediaPipeRuntimePlugin(): Plugin {
   const source = resolve('node_modules/@mediapipe/tasks-vision/wasm')
@@ -60,23 +62,54 @@ function copyBundledPluginsPlugin() {
   }
 }
 
-function copyAppResourcesPlugin() {
-  const source = resolve('resources')
-  const target = resolve('out/resources')
+function slimPiRuntimePlugin(): Plugin {
   return {
-    name: 'copy-app-resources',
+    name: 'slim-pi-runtime',
+    enforce: 'pre',
+    resolveId(source, importer) {
+      if (
+        source === '../../index.js' &&
+        importer?.replaceAll('\\', '/').endsWith(PI_EXTENSION_LOADER_SUFFIX)
+      ) {
+        return PI_EXTENSION_API_STUB
+      }
+      return null
+    },
+    load(id) {
+      if (id === PI_EXTENSION_API_STUB) return 'export {}'
+      return null
+    }
+  }
+}
+
+function copyPiRuntimeAssetsPlugin(): Plugin {
+  const source = resolve(
+    'node_modules/@earendil-works/pi-coding-agent/node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm'
+  )
+  const target = resolve('out/main/chunks/photon_rs_bg.wasm')
+  return {
+    name: 'copy-pi-runtime-assets',
     closeBundle() {
-      mirrorDirectory(source, target)
+      mkdirSync(resolve('out/main/chunks'), { recursive: true })
+      copyFileSync(source, target)
     }
   }
 }
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin(), copyBundledPluginsPlugin(), copyAppResourcesPlugin()],
+    plugins: [
+      slimPiRuntimePlugin(),
+      externalizeDepsPlugin({ exclude: ['undici'] }),
+      copyBundledPluginsPlugin(),
+      copyPiRuntimeAssetsPlugin()
+    ],
     resolve: {
       alias: {
-        '@shared': resolve('src/shared')
+        '@shared': resolve('src/shared'),
+        '@pi-coding-agent-runtime': resolve(
+          'node_modules/@earendil-works/pi-coding-agent/dist'
+        )
       }
     },
     build: {

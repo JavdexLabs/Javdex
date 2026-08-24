@@ -22,6 +22,9 @@
     "resolveJsonModule": true,
     "outDir": "./out-tsc/node",
     "paths": {
+      "@pi-coding-agent-runtime/*": [
+        "node_modules/@earendil-works/pi-coding-agent/dist/*"
+      ],
       "@shared/*": ["src/shared/*"]
     }
   }

@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import {
   MAC_ELECTRON_LANGUAGES,
   expectedBetterSqlitePrebuilds,
-  mirrorDirectory,
   pruneBetterSqlitePrebuilds,
+  pruneBetterSqliteBuildFiles,
   pruneElectronFrameworkLocales,
   resolveNodeGypPythonEnvironment
 } from './packaging-runtime.mjs'
@@ -15,22 +15,6 @@ import {
 function tempDirectory(name) {
   return mkdtempSync(path.join(tmpdir(), `javdex-${name}-`))
 }
-
-test('mirrorDirectory removes stale build resources before copying the source', (t) => {
-  const root = tempDirectory('resources')
-  t.after(() => rmSync(root, { recursive: true, force: true }))
-  const source = path.join(root, 'source')
-  const target = path.join(root, 'target')
-  mkdirSync(source, { recursive: true })
-  mkdirSync(path.join(target, 'stale'), { recursive: true })
-  writeFileSync(path.join(source, 'icon.png'), 'current')
-  writeFileSync(path.join(target, 'stale', 'old.png'), 'stale')
-
-  mirrorDirectory(source, target)
-
-  assert.equal(existsSync(path.join(target, 'stale', 'old.png')), false)
-  assert.equal(existsSync(path.join(target, 'icon.png')), true)
-})
 
 test('pruneBetterSqlitePrebuilds retains only the current platform and arch', (t) => {
   const root = tempDirectory('sqlite')
@@ -49,6 +33,20 @@ test('pruneBetterSqlitePrebuilds retains only the current platform and arch', (t
 
   assert.deepEqual(result.kept, ['darwin-arm64.node'])
   assert.deepEqual(readdirSync(root), ['darwin-arm64.node'])
+})
+
+test('pruneBetterSqliteBuildFiles removes sources but preserves runtime files', (t) => {
+  const root = tempDirectory('sqlite-build-files')
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  for (const name of ['build', 'deps', 'lib', 'prebuilds', 'src']) {
+    mkdirSync(path.join(root, name))
+    writeFileSync(path.join(root, name, 'file'), name)
+  }
+  writeFileSync(path.join(root, 'binding.gyp'), 'build config')
+  writeFileSync(path.join(root, 'package.json'), '{}')
+
+  assert.deepEqual(pruneBetterSqliteBuildFiles(root), ['binding.gyp', 'build', 'deps', 'src'])
+  assert.deepEqual(readdirSync(root).sort(), ['lib', 'package.json', 'prebuilds'])
 })
 
 test('better-sqlite3 prebuild selection covers every configured packaging platform', () => {

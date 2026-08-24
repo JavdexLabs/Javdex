@@ -124,6 +124,7 @@ export interface ScrapeBrowserLease {
 
 export interface ScrapeBrowserHost {
   acquire(input: ScrapeBrowserAcquireInput): Promise<ScrapeBrowserLease>
+  closeSession(): Promise<void>
   dispose(): Promise<void>
 }
 
@@ -319,12 +320,17 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
   } | null = null
   private requestSequence = 0
   private generation = 0
+  private sessionEpoch = 0
+  private sessionClosePromise: Promise<void> | null = null
   private disposed = false
   private readonly leaseContext = new AsyncLocalStorage<ScrapeBrowserLease>()
   private legacyProxyUrl: string | undefined
   private legacyLease: ScrapeBrowserLease | null = null
 
   async acquire(input: ScrapeBrowserAcquireInput): Promise<ScrapeBrowserLease> {
+    if (this.sessionClosePromise) {
+      await withAbort(this.sessionClosePromise, input.signal)
+    }
     if (this.disposed) throw new Error('ScrapeBrowserHost 已关闭')
     input.signal.throwIfAborted()
     const ownerId = input.ownerId.trim()
@@ -350,10 +356,12 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
       return this.acquire(input)
     }
 
+    const sessionEpoch = this.sessionEpoch
     const promise = (async (): Promise<ActiveLeaseState> => {
       const helper = await this.ensureHelper(input.signal)
       await this.request('setProxy', { proxyUrl }, input.signal)
       if (this.disposed) throw new Error('ScrapeBrowserHost 已关闭')
+      if (sessionEpoch !== this.sessionEpoch) throw new Error('刮削浏览器会话已关闭')
       const state: ActiveLeaseState = {
         ownerId,
         purpose: input.purpose,
@@ -377,19 +385,50 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
       }
       return lease
     } catch (error) {
-      if (!this.activeLease) void this.stopHelper('acquire failed')
+      if (!this.activeLease && sessionEpoch === this.sessionEpoch && !this.disposed) {
+        void this.stopHelper('acquire failed')
+      }
       throw error
     } finally {
       if (this.pendingAcquire === pending) this.pendingAcquire = null
     }
   }
 
-  async dispose(): Promise<void> {
-    if (this.disposed) return
-    this.disposed = true
+  closeSession(): Promise<void> {
+    if (this.disposed) return Promise.resolve()
+    if (this.sessionClosePromise) return this.sessionClosePromise
+    this.sessionEpoch += 1
     this.activeLease = null
     this.legacyLease = null
+    const helperPromise = this.helperPromise
+    const pendingAcquirePromise = this.pendingAcquire?.promise
+    const closePromise = (async (): Promise<void> => {
+      await this.stopHelper('host session closed')
+      if (helperPromise) await helperPromise.catch(() => undefined)
+      await this.stopHelper('host session closed during startup')
+      if (pendingAcquirePromise) await pendingAcquirePromise.catch(() => undefined)
+      await this.stopHelper('host session closed after acquire')
+    })().finally(() => {
+      if (this.sessionClosePromise === closePromise) this.sessionClosePromise = null
+    })
+    this.sessionClosePromise = closePromise
+    return closePromise
+  }
+
+  async dispose(): Promise<void> {
+    if (this.disposed) {
+      if (this.sessionClosePromise) await this.sessionClosePromise
+      return
+    }
+    this.disposed = true
+    this.sessionEpoch += 1
+    this.activeLease = null
+    this.legacyLease = null
+    if (this.sessionClosePromise) await this.sessionClosePromise
+    const helperPromise = this.helperPromise
     await this.stopHelper('host disposed')
+    if (helperPromise) await helperPromise.catch(() => undefined)
+    await this.stopHelper('host disposed during startup')
   }
 
   runWithLease<T>(lease: ScrapeBrowserLease, run: () => Promise<T>): Promise<T> {

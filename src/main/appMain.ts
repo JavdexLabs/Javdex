@@ -107,6 +107,10 @@ function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
   }
 
   mainWindow.on('closed', () => {
+    // macOS keeps the application resident, but the scraper helper must not outlive its main window.
+    void scrapeBrowser.closeSession().catch((error) => {
+      console.error(`[scraper-helper] 主窗口关闭时清理失败：${(error as Error).message}`)
+    })
     mainWindow = null
   })
 }

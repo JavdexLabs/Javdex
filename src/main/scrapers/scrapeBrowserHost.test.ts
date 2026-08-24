@@ -117,6 +117,7 @@ function fakeHost(): {
     return command === 'fetchBuffer' ? Buffer.from('ok') : true
   }
   internals.stopHelper = async (reason) => {
+    if (!internals.helper) return
     stops.push(reason)
     internals.helper = null
   }
@@ -170,6 +171,26 @@ describe('ScrapeBrowserHost leases', () => {
     )
     await lease.release()
     assert.deepEqual(stops, ['lease released'])
+  })
+
+  it('closes the active helper session with the main window and remains reusable', async () => {
+    const { host, stops } = fakeHost()
+    const activeLease = await host.acquire({
+      ownerId: 'window-session',
+      purpose: 'scrape',
+      signal: new AbortController().signal
+    })
+
+    await host.closeSession()
+
+    await assert.rejects(activeLease.fetchPage('https://example.test'), /租约已失效/)
+    const reopenedLease = await host.acquire({
+      ownerId: 'reopened-window-session',
+      purpose: 'scrape',
+      signal: new AbortController().signal
+    })
+    await reopenedLease.release()
+    assert.deepEqual(stops, ['host session closed', 'lease released'])
   })
 
   it('presents the helper through the lease without exposing it as a plugin browser action', async () => {

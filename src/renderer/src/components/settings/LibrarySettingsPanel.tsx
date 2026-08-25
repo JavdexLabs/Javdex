@@ -1,4 +1,4 @@
-import type { RefObject } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import { AlertTriangle, Clock, FolderOpen, FolderPlus, Play, Square, X } from 'lucide-react'
 import {
   AUTO_SCAN_INTERVAL_MINUTES,
@@ -6,7 +6,12 @@ import {
   type AutoScanIntervalMinutes,
   type SettingsSnapshot
 } from '@shared/settingsTypes'
-import type { LibraryScanSummary, ScanResult } from '@shared/libraryTypes'
+import type {
+  LibraryScanAudit,
+  LibraryScanMetricKey,
+  LibraryScanSummary,
+  ScanResult
+} from '@shared/libraryTypes'
 import { UI_ICON_SM } from '../iconDefaults'
 import SettingsSwitchRow from '../SettingsSwitchRow'
 import {
@@ -16,10 +21,11 @@ import {
   SettingsSectionBlock,
   SettingsStatusPill
 } from './SettingsPrimitives'
-import UnrecognizedRow from './UnrecognizedRow'
+import LibraryScanAuditPanel from './LibraryScanAuditPanel'
 import ListMaintenanceBanner from '../ListMaintenanceBanner'
 import Button from '../Button'
 import SelectControl from '../SelectControl'
+import { api } from '../../api'
 
 const SCAN_TRIGGER_LABEL: Record<LibraryScanSummary['trigger'], string> = {
   manual: '手动',
@@ -42,25 +48,31 @@ function formatScanTime(value: string): string {
 
 function ScanSummary({
   summary,
-  onOpenPending
+  audit,
+  selected,
+  unrecognized,
+  unrecognizedScanFinishedAt,
+  currentPendingGroupIds,
+  onSelect,
+  onResolvedUnrecognized,
+  onOpenPending,
+  onOpenVideo,
+  unrecognizedRef
 }: {
   summary: LibraryScanSummary
-  onOpenPending: () => void
+  audit: LibraryScanAudit | null
+  selected: LibraryScanMetricKey | null
+  unrecognized: string[]
+  unrecognizedScanFinishedAt: string | null
+  currentPendingGroupIds: Set<number>
+  onSelect: (key: LibraryScanMetricKey | null) => void
+  onResolvedUnrecognized: (path: string) => void
+  onOpenPending: (groupId?: number) => void
+  onOpenVideo: (videoId: number) => void
+  unrecognizedRef: RefObject<HTMLDivElement>
 }): JSX.Element {
-  const metrics = [
-    ['新增资源', summary.resourcesAdded],
-    ['更新资源', summary.resourcesUpdated],
-    ['移除资源', summary.resourcesRemoved],
-    ['提升主资源', summary.primaryResourcesPromoted],
-    ['删除影片', summary.videosDeleted],
-    ['扫描文件', summary.scannedFiles],
-    ['跳过文件', summary.skippedFiles],
-    ['异常文件', summary.failedFiles],
-    ['待确认组', summary.pendingScanGroups],
-    ['待确认资源', summary.pendingScanResources]
-  ] as const
   return (
-    <div className="library-scan-summary">
+    <div className="library-scan-summary" ref={unrecognizedRef}>
       <div className="library-scan-summary-head">
         <div>
           <strong>{SCAN_TRIGGER_LABEL[summary.trigger]}扫描</strong>
@@ -76,24 +88,31 @@ function ScanSummary({
           {SCAN_STATUS_LABEL[summary.status]}
         </SettingsStatusPill>
       </div>
-      <div className="library-scan-summary-metrics">
-        {metrics.map(([label, value]) => (
-          <div key={label}>
-            <strong>{value}</strong>
-            <span>{label}</span>
-          </div>
-        ))}
-      </div>
-      {summary.pendingScanGroups > 0 ? (
-        <Button type="button" size="sm" onClick={onOpenPending}>
-          处理待确认扫描资源
-        </Button>
-      ) : null}
+      <LibraryScanAuditPanel
+        summary={summary}
+        audit={audit}
+        selected={selected}
+        unrecognized={unrecognized}
+        unrecognizedScanFinishedAt={unrecognizedScanFinishedAt}
+        currentPendingGroupIds={currentPendingGroupIds}
+        onSelect={onSelect}
+        onResolvedUnrecognized={onResolvedUnrecognized}
+        onOpenPending={onOpenPending}
+        onOpenVideo={onOpenVideo}
+      />
       {summary.offlineFolders.length > 0 ? (
         <div className="library-scan-summary-detail is-warning">
           <strong>{summary.offlineFolders.length} 个离线目录</strong>
           {summary.offlineFolders.map((folder) => (
-            <span className="copyable-text" key={folder}>{folder}</span>
+            <div className="library-scan-path-detail" key={folder}>
+              <span className="copyable-text">{folder}</span>
+              <Button type="button" size="sm" onClick={() => void navigator.clipboard.writeText(folder)}>
+                复制路径
+              </Button>
+              <Button type="button" size="sm" onClick={() => void api.scan.revealAuditFile(folder)}>
+                在文件夹中显示
+              </Button>
+            </div>
           ))}
         </div>
       ) : null}
@@ -125,6 +144,9 @@ export default function LibrarySettingsPanel({
   scanning,
   scanStatus,
   scanResult,
+  scanAudit,
+  pendingScanGroupIds,
+  focusUnrecognized,
   unrecognized,
   unrecognizedRef,
   onAddFolders,
@@ -138,12 +160,16 @@ export default function LibrarySettingsPanel({
   defaultScraper = '',
   onDismissScanScrapePrompt,
   onStartScanScrapeBatch,
-  onOpenPending
+  onOpenPending,
+  onOpenVideo
 }: {
   settings: SettingsSnapshot
   scanning: boolean
   scanStatus: string
   scanResult: ScanResult | null
+  scanAudit: LibraryScanAudit | null
+  pendingScanGroupIds: Set<number>
+  focusUnrecognized: boolean
   unrecognized: string[]
   unrecognizedRef: RefObject<HTMLDivElement>
   onAddFolders: () => void
@@ -168,8 +194,38 @@ export default function LibrarySettingsPanel({
   defaultScraper?: string
   onDismissScanScrapePrompt?: () => void
   onStartScanScrapeBatch?: () => void
-  onOpenPending: () => void
+  onOpenPending: (groupId?: number) => void
+  onOpenVideo: (videoId: number) => void
 }): JSX.Element {
+  const [selectedMetric, setSelectedMetric] = useState<LibraryScanMetricKey | null>(() => {
+    const stored = sessionStorage.getItem('library.scan.selectedMetric')
+    return stored as LibraryScanMetricKey | null
+  })
+  const didAutoSelectUnrecognized = useRef(false)
+
+  useEffect(() => {
+    if (unrecognized.length === 0) {
+      didAutoSelectUnrecognized.current = false
+      return
+    }
+    if (didAutoSelectUnrecognized.current) return
+    didAutoSelectUnrecognized.current = true
+    setSelectedMetric('failedFiles')
+    sessionStorage.setItem('library.scan.selectedMetric', 'failedFiles')
+  }, [unrecognized.length])
+
+  useEffect(() => {
+    if (focusUnrecognized) {
+      setSelectedMetric('failedFiles')
+      sessionStorage.setItem('library.scan.selectedMetric', 'failedFiles')
+    }
+  }, [focusUnrecognized])
+
+  const selectMetric = (key: LibraryScanMetricKey | null): void => {
+    setSelectedMetric(key)
+    if (key) sessionStorage.setItem('library.scan.selectedMetric', key)
+    else sessionStorage.removeItem('library.scan.selectedMetric')
+  }
   const minDuration = settings.minScanImportDurationMinutes
   const canScan = settings.libraryPaths.length > 0
   const pathCount = settings.libraryPaths.length
@@ -212,7 +268,19 @@ export default function LibrarySettingsPanel({
           </SettingsStatusPill>
           <SettingsStatusPill status={scanStateTone}>{scanStateLabel}</SettingsStatusPill>
           {unrecognized.length > 0 ? (
-            <SettingsStatusPill status="warning">{unrecognized.length} 个待处理</SettingsStatusPill>
+            <button
+              type="button"
+              className="library-status-action"
+              onClick={() => {
+                selectMetric('failedFiles')
+                window.setTimeout(
+                  () => unrecognizedRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+                  0
+                )
+              }}
+            >
+              <SettingsStatusPill status="warning">{unrecognized.length} 个待处理</SettingsStatusPill>
+            </button>
           ) : null}
           {pendingCleanupCount > 0 ? (
             <SettingsStatusPill status="warning">{pendingCleanupCount} 个路径待清理</SettingsStatusPill>
@@ -332,7 +400,19 @@ export default function LibrarySettingsPanel({
               <span>只保留最近一次手动或后台扫描的审计摘要。</span>
             </div>
             {settings.lastLibraryScanSummary ? (
-              <ScanSummary summary={settings.lastLibraryScanSummary} onOpenPending={onOpenPending} />
+              <ScanSummary
+                summary={settings.lastLibraryScanSummary}
+                audit={scanAudit}
+                selected={selectedMetric}
+                unrecognized={unrecognized}
+                unrecognizedScanFinishedAt={settings.unrecognizedFilesScanFinishedAt}
+                currentPendingGroupIds={pendingScanGroupIds}
+                onSelect={selectMetric}
+                onResolvedUnrecognized={onResolvedUnrecognized}
+                onOpenPending={onOpenPending}
+                onOpenVideo={onOpenVideo}
+                unrecognizedRef={unrecognizedRef}
+              />
             ) : (
               <SettingsEmptyPanel variant="compact">尚无扫描记录</SettingsEmptyPanel>
             )}
@@ -441,32 +521,6 @@ export default function LibrarySettingsPanel({
         </div>
       </SettingsSectionBlock>
 
-      {unrecognized.length > 0 ? (
-        <SettingsSectionBlock
-          id="library-unrecognized"
-          blockRef={unrecognizedRef}
-          className="library-unrec-block"
-          title={
-            <>
-              无法识别
-              <em>{unrecognized.length}</em>
-            </>
-          }
-          hint="手工填写番号导入，或重命名文件后重新识别。"
-          actions={
-            <SettingsStatusPill status="warning">
-              <AlertTriangle {...UI_ICON_SM} aria-hidden />
-              待处理
-            </SettingsStatusPill>
-          }
-        >
-          <div className="scan-unrec-list">
-            {unrecognized.map((path) => (
-              <UnrecognizedRow key={path} path={path} onResolved={onResolvedUnrecognized} />
-            ))}
-          </div>
-        </SettingsSectionBlock>
-      ) : null}
     </SettingsCard>
   )
 }

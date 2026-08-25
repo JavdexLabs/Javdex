@@ -12,6 +12,7 @@ import {
   getPublicLlmProviderConfigs,
   getSettingsRecoveryNotice,
   migrateRetiredVideoScraperSettings,
+  removeUnrecognizedFileFromSnapshot,
   resetSettingsCacheForTests,
   updateSettings
 } from './settingsStore'
@@ -268,6 +269,7 @@ describe('settingsStore scan cleanup defaults', () => {
     writeSettings({})
     assert.equal(getSettings().autoDeleteResourceLessVideos, false)
     assert.equal(getSettings().lastLibraryScanSummary, null)
+    assert.deepEqual(getSettings().unrecognizedFiles, [])
   })
 
   it('preserves an explicit automatic deletion preference', () => {
@@ -299,6 +301,30 @@ describe('settingsStore scan cleanup defaults', () => {
     assert.equal(summary?.trigger, 'interval')
     assert.equal(summary?.offlineFolders[0], '/offline')
     assert.equal(summary?.errorSummary?.includes('secret'), false)
+  })
+
+  it('persists a normalized unrecognized-file snapshot and removes resolved paths', () => {
+    writeSettings({
+      unrecognizedFiles: ['/library/UNKNOWN.mp4', ' /library/SECOND.mp4 ', '', 42],
+      unrecognizedFilesScanFinishedAt: '2026-08-24T01:00:00.000Z'
+    })
+
+    assert.deepEqual(getSettings().unrecognizedFiles, [
+      '/library/UNKNOWN.mp4',
+      '/library/SECOND.mp4'
+    ])
+
+    removeUnrecognizedFileFromSnapshot('/library/UNKNOWN.mp4')
+    resetSettingsCacheForTests()
+
+    assert.deepEqual(getSettings().unrecognizedFiles, ['/library/SECOND.mp4'])
+    assert.equal(
+      getSettings().unrecognizedFilesScanFinishedAt,
+      '2026-08-24T01:00:00.000Z'
+    )
+
+    removeUnrecognizedFileFromSnapshot('/library/SECOND.mp4')
+    assert.equal(getSettings().unrecognizedFilesScanFinishedAt, null)
   })
 })
 

@@ -15,6 +15,7 @@ import {
 } from '../db/pendingScanRepo'
 import { selectPrimaryVideoResourceCandidate } from '../services/videoResourcePromotion'
 import { createVideoMaintenanceService } from '../services/videoMaintenanceService'
+import type { LibraryScanFileAuditEntry } from '@shared/libraryTypes'
 
 let tempRoot: string | null = null
 
@@ -1250,7 +1251,7 @@ describe('scanFolders', () => {
     const result = await scanFolders([library], undefined, { ...scanOptions, yieldEvery: 1 })
 
     assert.equal(result.imported, 0)
-    assert.equal(result.skipped, 1)
+    assert.equal(result.skipped, 0)
     assert.equal(result.refreshed, 1)
     const row = getDb()
       .prepare("SELECT duration_seconds AS file_duration_seconds FROM video_resources WHERE kind = 'local' AND locator = ?")
@@ -1288,5 +1289,26 @@ describe('scanFolders', () => {
       .get(filePath) as { file_duration_seconds: number | null; file_mtime_ms: number | null }
     assert.equal(row.file_duration_seconds, 3661)
     assert.notEqual(row.file_mtime_ms, null)
+  })
+
+  it('emits one final audit outcome for every processed file', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    fs.writeFileSync(path.join(library, 'AUDIT-001.mp4'), 'video')
+    fs.writeFileSync(path.join(library, 'unknown-name.mp4'), 'video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const entries: LibraryScanFileAuditEntry[] = []
+
+    const result = await scanFolders([library], undefined, {
+      minImportDurationSeconds: null,
+      readDurationSeconds: async () => 3600,
+      onFileResult: (entry) => entries.push(entry)
+    })
+
+    assert.equal(entries.length, result.scannedFiles)
+    assert.deepEqual(entries.map((entry) => entry.outcome).sort(), ['added', 'unrecognized'])
+    assert.equal(entries.filter((entry) => entry.outcome === 'added').length, result.imported)
+    assert.equal(entries.filter((entry) => entry.outcome === 'unrecognized').length, result.failed)
   })
 })

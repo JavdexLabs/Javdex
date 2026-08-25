@@ -10,6 +10,7 @@ import type {
   AssetCryptoProgress,
   LibraryOverviewStats,
   LibraryPathRemovalPreview,
+  LibraryScanAudit,
   LibraryScanEvent,
   ManualImportResult,
   PendingScanGroup,
@@ -137,6 +138,8 @@ export interface AppIpcContract {
 
   [IPC.SCAN_RUN]: { args: [folders?: string[]]; result: ScanResult }
   [IPC.SCAN_CANCEL]: { args: []; result: boolean }
+  [IPC.SCAN_AUDIT_GET]: { args: []; result: LibraryScanAudit | null }
+  [IPC.SCAN_AUDIT_REVEAL_FILE]: { args: [filePath: string]; result: PlayResult }
   [IPC.FILE_RENAME]: {
     args: [oldPath: string, newName: string, code: string, target: VideoResourceImportTarget]
     result: RenameImportResult

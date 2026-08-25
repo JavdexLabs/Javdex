@@ -1,15 +1,21 @@
 import fs from 'node:fs'
 import type {
+  LibraryScanAudit,
   LibraryScanEvent,
+  LibraryScanFileAuditEntry,
+  LibraryScanPendingGroupAuditEntry,
+  LibraryScanResourceAuditEntry,
   LibraryScanSummary,
   LibraryScanTrigger,
   ScanProgress,
   ScanResult
 } from '@shared/libraryTypes'
 import { sanitizeLibraryScanError } from '@shared/libraryScanSummary'
-import type { VideoResource } from '@shared/videoTypes'
+import type { Video, VideoResource } from '@shared/videoTypes'
 import {
+  getVideoById,
   getVideoResourceById,
+  listResourceLessVideos,
   listSourceManagedVideoResourceRefs,
   listVideoResources,
   removeVideoResourceRecord,
@@ -28,7 +34,8 @@ import {
 import { isPathUnderRoot, isSameLibraryPath } from './libraryPathUtils'
 import { scanFolders, type ScanOptions, type ScanProgressFn } from './scanner'
 import { deleteResourceLessVideos } from '../services/resourceLessVideoCleanupService'
-import { reconcilePendingScanResources } from '../db/pendingScanRepo'
+import { listPendingScanGroups, reconcilePendingScanResources } from '../db/pendingScanRepo'
+import { writeLibraryScanAudit } from './libraryScanAuditStore'
 
 export type ScanTrigger = LibraryScanTrigger
 
@@ -57,6 +64,7 @@ interface ScanCoordinatorDependencies {
   ) => Promise<ScanResult>
   listLocalResources: () => LocalResourceRef[]
   getResourceById: (resourceId: number) => VideoResource | null
+  getVideoById: (videoId: number) => Video | null
   listResources: (videoId: number) => VideoResource[]
   removeResourceRecord: (resourceId: number) => void
   setPrimaryResource: (videoId: number, resourceId: number) => void
@@ -68,7 +76,13 @@ interface ScanCoordinatorDependencies {
   runCleanupTransaction: <T>(operation: () => T) => T
   shouldAutoDeleteResourceLessVideos: () => boolean
   deleteResourceLessVideos: () => number
-  recordScanSummary: (summary: LibraryScanSummary) => void
+  listResourceLessVideos: () => Array<Pick<Video, 'id' | 'code' | 'title'>>
+  listPendingScanGroups: typeof listPendingScanGroups
+  recordScanSummary: (
+    summary: LibraryScanSummary,
+    unrecognizedFiles: string[] | undefined,
+    audit: LibraryScanAudit
+  ) => void
   now: () => string
   gate: MaintenanceTaskGate
 }
@@ -128,6 +142,38 @@ export class ScanCoordinator {
     let result = this.emptyResult()
     let offlineFolders: string[] = []
     let failure: string | null = null
+    const auditState: Omit<
+      LibraryScanAudit,
+      'schemaVersion' | 'trigger' | 'startedAt' | 'finishedAt' | 'status'
+    > = {
+      files: [],
+      removedResources: [],
+      promotedResources: [],
+      deletedVideos: [],
+      pendingGroups: []
+    }
+    const refreshPendingAudit = (): void => {
+      const auditPendingIds = new Set(
+        auditState.files
+          .filter(
+            (entry): entry is Extract<LibraryScanFileAuditEntry, { outcome: 'pending' }> =>
+              entry.outcome === 'pending' && entry.groupId != null
+          )
+          .map((entry) => entry.groupId as number)
+      )
+      auditState.pendingGroups = this.dependencies
+        .listPendingScanGroups()
+        .filter((group) => auditPendingIds.has(group.id))
+        .map((group): LibraryScanPendingGroupAuditEntry => ({
+          groupId: group.id,
+          normalizedCode: group.normalizedCode,
+          resourceCount: group.resources.filter((resource) =>
+            auditState.files.some(
+              (entry) => entry.outcome === 'pending' && entry.filePath === resource.filePath
+            )
+          ).length
+        }))
+    }
     try {
       const configuredFolders = Array.from(new Set(this.dependencies.getConfiguredFolders()))
       const folders = request.folders?.length
@@ -147,7 +193,7 @@ export class ScanCoordinator {
       for (const folder of folders) {
         if (controller.signal.aborted) {
           result = this.cancelledResult(offlineFolders)
-          this.recordSummary(trigger, startedAt, 'cancelled', result)
+          this.recordSummary(trigger, startedAt, 'cancelled', result, null, auditState)
           return result
         }
         if (await this.dependencies.inspectFolder(folder)) accessibleFolders.push(folder)
@@ -162,7 +208,8 @@ export class ScanCoordinator {
         },
         {
           signal: controller.signal,
-          unavailableRoots: offlineFolders
+          unavailableRoots: offlineFolders,
+          onFileResult: (entry) => auditState.files.push(entry)
         }
       )
       for (const folder of [...accessibleFolders]) {
@@ -173,9 +220,10 @@ export class ScanCoordinator {
       result.offlineFolders = offlineFolders
       result.promoted ??= 0
       result.deletedVideos ??= 0
+      refreshPendingAudit()
       if (controller.signal.aborted || result.cancelled) {
         result.cancelled = true
-        this.recordSummary(trigger, startedAt, 'cancelled', result)
+        this.recordSummary(trigger, startedAt, 'cancelled', result, null, auditState)
         return result
       }
       const processingFailures = Math.max(
@@ -191,7 +239,8 @@ export class ScanCoordinator {
           startedAt,
           'failed',
           result,
-          `有 ${processingFailures} 个文件处理失败，已跳过资源清理`
+          `有 ${processingFailures} 个文件处理失败，已跳过资源清理`,
+          auditState
         )
         return result
       }
@@ -212,33 +261,60 @@ export class ScanCoordinator {
           accessibleFolders,
           offlineFolders
         )
+        const deferredAudit = this.previewPendingPathCleanupAudit(pendingCleanupRoots)
         const deferredCleanup =
           pendingCleanupRoots.length > 0
             ? this.dependencies.applyPendingPathCleanups(pendingCleanupRoots)
             : { removed: 0, promoted: 0, consumedRoots: [] }
+        const deletedCandidates = shouldDeleteResourceLessVideos
+          ? this.dependencies.listResourceLessVideos()
+          : []
         const deletedVideos = shouldDeleteResourceLessVideos
           ? this.dependencies.deleteResourceLessVideos()
           : 0
-        return { missingResources, deferredCleanup, deletedVideos }
+        return { missingResources, deferredCleanup, deferredAudit, deletedVideos, deletedCandidates }
       })
       this.dependencies.clearPendingPathCleanups(pendingCleanupRoots)
       result.removed += cleanup.missingResources.removed + cleanup.deferredCleanup.removed
       result.promoted += cleanup.missingResources.promoted + cleanup.deferredCleanup.promoted
       result.deletedVideos = cleanup.deletedVideos
+      auditState.removedResources.push(
+        ...cleanup.missingResources.removedResources,
+        ...cleanup.deferredAudit.removedResources
+      )
+      auditState.promotedResources.push(
+        ...cleanup.missingResources.promotedResources,
+        ...cleanup.deferredAudit.promotedResources
+      )
+      auditState.deletedVideos.push(
+        ...cleanup.deletedCandidates.slice(0, cleanup.deletedVideos).map((video) => ({
+          videoId: video.id,
+          videoCode: video.code,
+          videoTitle: video.title,
+          reason: 'resource_less' as const
+        }))
+      )
       this.recordSummary(
         trigger,
         startedAt,
         result.strmFailures.length + result.omittedStrmFailures > 0
           ? 'completed_with_errors'
           : 'success',
-        result
+        result,
+        null,
+        auditState
       )
       return result
     } catch (error) {
       const errorSummary = sanitizeLibraryScanError(error)
       failure = errorSummary
       result.offlineFolders = offlineFolders
-      this.recordSummary(trigger, startedAt, 'failed', result, errorSummary)
+      try {
+        refreshPendingAudit()
+      } catch {
+        // Preserve the original scan failure when pending state is also unavailable.
+      }
+      this.recordSummary(trigger, startedAt, 'failed', result, errorSummary, auditState)
       throw new Error(errorSummary)
     } finally {
       if (this.activeController === controller) this.activeController = null
@@ -296,12 +372,17 @@ export class ScanCoordinator {
     startedAt: string,
     status: LibraryScanSummary['status'],
     result: ScanResult,
-    errorSummary: string | null = null
+    errorSummary: string | null,
+    auditState: Omit<
+      LibraryScanAudit,
+      'schemaVersion' | 'trigger' | 'startedAt' | 'finishedAt' | 'status'
+    >
   ): void {
+    const finishedAt = this.dependencies.now()
     const summary: LibraryScanSummary = {
       trigger,
       startedAt,
-      finishedAt: this.dependencies.now(),
+      finishedAt,
       status,
       scannedFiles: result.scannedFiles,
       resourcesAdded: result.imported,
@@ -321,7 +402,20 @@ export class ScanCoordinator {
       errorSummary
     }
     try {
-      this.dependencies.recordScanSummary(summary)
+      this.dependencies.recordScanSummary(
+        summary,
+        status === 'success' || status === 'completed_with_errors'
+          ? [...result.unrecognizedFiles]
+          : undefined,
+        {
+          schemaVersion: 1,
+          trigger,
+          startedAt,
+          finishedAt,
+          status,
+          ...auditState
+        }
+      )
     } catch (error) {
       console.error('Failed to persist scan summary:', sanitizeLibraryScanError(error))
     }
@@ -330,9 +424,16 @@ export class ScanCoordinator {
   private removeMissingAccessibleResources(
     accessibleFolders: string[],
     offlineFolders: string[]
-  ): { removed: number; promoted: number } {
+  ): {
+    removed: number
+    promoted: number
+    removedResources: LibraryScanResourceAuditEntry[]
+    promotedResources: LibraryScanResourceAuditEntry[]
+  } {
     let removed = 0
     let promoted = 0
+    const removedResources: LibraryScanResourceAuditEntry[] = []
+    const promotedResources: LibraryScanResourceAuditEntry[] = []
     for (const ref of this.dependencies.listLocalResources()) {
       if (offlineFolders.some((folder) => isPathUnderRoot(ref.locator, folder))) continue
       if (!accessibleFolders.some((folder) => isPathUnderRoot(ref.locator, folder))) continue
@@ -347,8 +448,10 @@ export class ScanCoordinator {
       const remaining = this.dependencies
         .listResources(ref.video_id)
         .filter((item) => item.id !== resource.id)
+      const removedAudit = this.resourceAuditEntry(resource, 'missing')
       this.dependencies.removeResourceRecord(resource.id)
       removed += 1
+      if (removedAudit) removedResources.push(removedAudit)
       if (!resource.is_primary) continue
       const promotedResource = selectPrimaryVideoResourceCandidate(
         remaining,
@@ -357,8 +460,70 @@ export class ScanCoordinator {
       if (!promotedResource) continue
       this.dependencies.setPrimaryResource(ref.video_id, promotedResource.id)
       promoted += 1
+      const promotedAudit = this.resourceAuditEntry(
+        promotedResource,
+        'promoted_after_removal'
+      )
+      if (promotedAudit) promotedResources.push(promotedAudit)
     }
-    return { removed, promoted }
+    return { removed, promoted, removedResources, promotedResources }
+  }
+
+  private previewPendingPathCleanupAudit(roots: string[]): {
+    removedResources: LibraryScanResourceAuditEntry[]
+    promotedResources: LibraryScanResourceAuditEntry[]
+  } {
+    if (roots.length === 0) return { removedResources: [], promotedResources: [] }
+    const refs = this.dependencies
+      .listLocalResources()
+      .filter((ref) => roots.some((root) => isPathUnderRoot(ref.locator, root)))
+    const removedIds = new Set(refs.map((ref) => ref.resource_id))
+    const removedResources: LibraryScanResourceAuditEntry[] = []
+    const promotedResources: LibraryScanResourceAuditEntry[] = []
+    const videoIds = new Set<number>()
+    for (const ref of refs) {
+      videoIds.add(ref.video_id)
+      const resource = this.dependencies.getResourceById(ref.resource_id)
+      const entry = resource
+        ? this.resourceAuditEntry(resource, 'removed_library_path')
+        : null
+      if (entry) removedResources.push(entry)
+    }
+    for (const videoId of videoIds) {
+      const resources = this.dependencies.listResources(videoId)
+      const removedPrimary = resources.some(
+        (resource) => removedIds.has(resource.id) && resource.is_primary === 1
+      )
+      if (!removedPrimary) continue
+      const promoted = selectPrimaryVideoResourceCandidate(
+        resources.filter((resource) => !removedIds.has(resource.id)),
+        fs.existsSync
+      )
+      const entry = promoted
+        ? this.resourceAuditEntry(promoted, 'promoted_after_removal')
+        : null
+      if (entry) promotedResources.push(entry)
+    }
+    return { removedResources, promotedResources }
+  }
+
+  private resourceAuditEntry(
+    resource: VideoResource,
+    reason: LibraryScanResourceAuditEntry['reason']
+  ): LibraryScanResourceAuditEntry | null {
+    const video = this.dependencies.getVideoById(resource.video_id)
+    if (!video) return null
+    return {
+      resourceId: resource.id,
+      videoId: video.id,
+      videoCode: video.code,
+      videoTitle: video.title,
+      resourceKind: resource.kind,
+      sourcePath:
+        resource.kind === 'local' ? resource.locator : resource.strm_source_path,
+      displayName: resource.display_name,
+      reason
+    }
   }
 }
 
@@ -375,6 +540,7 @@ export function createScanCoordinator(
     listLocalResources:
       dependencies.listLocalResources ?? listSourceManagedVideoResourceRefs,
     getResourceById: dependencies.getResourceById ?? getVideoResourceById,
+    getVideoById: dependencies.getVideoById ?? getVideoById,
     listResources: dependencies.listResources ?? listVideoResources,
     removeResourceRecord: dependencies.removeResourceRecord ?? removeVideoResourceRecord,
     setPrimaryResource: dependencies.setPrimaryResource ?? setPrimaryVideoResource,
@@ -394,10 +560,24 @@ export function createScanCoordinator(
       (() => getSettings().autoDeleteResourceLessVideos),
     deleteResourceLessVideos:
       dependencies.deleteResourceLessVideos ?? deleteResourceLessVideos,
+    listResourceLessVideos:
+      dependencies.listResourceLessVideos ?? listResourceLessVideos,
+    listPendingScanGroups:
+      dependencies.listPendingScanGroups ?? listPendingScanGroups,
     recordScanSummary:
       dependencies.recordScanSummary ??
-      ((summary) => {
-        updateSettings({ lastLibraryScanSummary: summary })
+      ((summary, unrecognizedFiles, audit) => {
+        updateSettings({
+          lastLibraryScanSummary: summary,
+          ...(unrecognizedFiles !== undefined
+            ? {
+                unrecognizedFiles,
+                unrecognizedFilesScanFinishedAt:
+                  unrecognizedFiles.length > 0 ? summary.finishedAt : null
+              }
+            : {})
+        })
+        writeLibraryScanAudit(audit)
       }),
     now: dependencies.now ?? (() => new Date().toISOString()),
     gate: dependencies.gate ?? maintenanceTaskGate

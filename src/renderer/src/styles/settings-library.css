@@ -27,6 +27,20 @@
   gap: 5px;
 }
 
+.library-status-action {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.library-status-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+
 .library-settings-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -418,6 +432,20 @@
   padding: 9px 10px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
+}
+
+.library-scan-path-detail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.library-scan-path-detail > span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .library-scan-summary-detail.is-warning {

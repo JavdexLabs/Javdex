@@ -4,6 +4,7 @@ import { isVideoFile, parseCode } from './codeParser'
 import {
   backfillLocalVideoResourceFingerprint,
   getVideoByCode,
+  getVideoById,
   getLocalVideoResourceByLocator,
   getStrmVideoResourceBySourcePath,
   getPreferredLocalVideoResource,
@@ -25,6 +26,7 @@ import {
 } from '../db/videoRepo'
 import type {
   ManualImportResult,
+  LibraryScanFileAuditEntry,
   RenameImportResult,
   ScanProgress,
   ScanResult,
@@ -60,6 +62,7 @@ import {
 import { normalizeExternalVideoResource } from '@shared/videoResourceLinks'
 import { normalizeLocalPathIdentity } from '@shared/localPathIdentity'
 import { selectDefaultPendingScanPrimary } from '@shared/pendingScanPrimary'
+import { sanitizeLibraryScanError } from '@shared/libraryScanSummary'
 
 export type ScanProgressFn = (progress: ScanProgress) => void
 
@@ -78,6 +81,8 @@ export interface ScanOptions {
   inspectPath?: (filePath: string) => 'present' | 'missing' | 'unknown'
   /** Override same-code resource auto-assignment (tests). */
   autoMergeSameCodeResources?: boolean
+  /** Receives exactly one final audit outcome for every processed file. */
+  onFileResult?: (entry: LibraryScanFileAuditEntry) => void
 }
 
 const DEFAULT_YIELD_EVERY = 50
@@ -395,6 +400,12 @@ export async function scanFolders(
   }
   const pendingGroupIds = new Set<number>()
   const primarySelectionVideoIds = new Set<number>()
+  const recordFile = (entry: LibraryScanFileAuditEntry): void => options.onFileResult?.(entry)
+
+  const videoIdentity = (videoId: number): { videoId: number; videoCode: string } => ({
+    videoId,
+    videoCode: getVideoById(videoId)?.code ?? ''
+  })
 
   const recordStrmFailure = (failure: StrmScanFailure): void => {
     result.failed += 1
@@ -413,12 +424,20 @@ export async function scanFolders(
       if (isStrmFile(file)) {
         const prepared = readStrmTarget(file)
         if (options.signal?.aborted) {
+          result.scannedFiles -= 1
           result.cancelled = true
           break
         }
         if (!prepared.ok) {
           removePendingScanResource(file)
           recordStrmFailure(prepared.failure)
+          recordFile({
+            filePath: file,
+            sourceKind: 'strm',
+            outcome: 'strm_failure',
+            failureCode: prepared.failure.code,
+            message: prepared.failure.message
+          })
           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
           await maybeYield(result.scannedFiles, yieldEvery)
           continue
@@ -434,8 +453,26 @@ export async function scanFolders(
             })
           ) {
             result.refreshed += 1
+            recordFile({
+              filePath: file,
+              sourceKind: 'strm',
+              outcome: 'updated',
+              updateKind: 'strm_target_synced',
+              ...videoIdentity(existingResource.video_id),
+              resourceId: existingResource.id,
+              resourceKind: target.kind
+            })
           } else {
             result.skipped += 1
+            recordFile({
+              filePath: file,
+              sourceKind: 'strm',
+              outcome: 'skipped',
+              skipReason: 'unchanged',
+              ...videoIdentity(existingResource.video_id),
+              resourceId: existingResource.id,
+              resourceKind: existingResource.kind
+            })
           }
           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
           await maybeYield(result.scannedFiles, yieldEvery)
@@ -444,6 +481,7 @@ export async function scanFolders(
 
         const code = parseCode(path.basename(file, path.extname(file)))
         if (pendingScanResourceExists(file)) {
+          let groupId: number | null = null
           if (code) {
             const pending = upsertPendingScanResources(code, [
               {
@@ -460,7 +498,16 @@ export async function scanFolders(
               }
             ])
             pendingGroupIds.add(pending.groupId)
+            groupId = pending.groupId
           }
+          recordFile({
+            filePath: file,
+            sourceKind: 'strm',
+            outcome: 'pending',
+            normalizedCode: code ? normalizeVideoCode(code) : null,
+            groupId,
+            addedToQueue: false
+          })
           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
           await maybeYield(result.scannedFiles, yieldEvery)
           continue
@@ -479,6 +526,15 @@ export async function scanFolders(
             locator: target.locator
           })
           result.relocated += 1
+          recordFile({
+            filePath: file,
+            sourceKind: 'strm',
+            outcome: 'updated',
+            updateKind: 'relocated',
+            ...videoIdentity(relocation.video_id),
+            resourceId: relocation.resource_id,
+            resourceKind: target.kind
+          })
           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
           await maybeYield(result.scannedFiles, yieldEvery)
           continue
@@ -487,6 +543,7 @@ export async function scanFolders(
         if (!code) {
           result.failed += 1
           result.unrecognizedFiles.push(file)
+          recordFile({ filePath: file, sourceKind: 'strm', outcome: 'unrecognized' })
           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
           await maybeYield(result.scannedFiles, yieldEvery)
           continue
@@ -514,6 +571,14 @@ export async function scanFolders(
           ])
           pendingGroupIds.add(pending.groupId)
           result.pendingResources += pending.addedResources
+          recordFile({
+            filePath: file,
+            sourceKind: 'strm',
+            outcome: 'pending',
+            normalizedCode: normalizeVideoCode(code),
+            groupId: pending.groupId,
+            addedToQueue: pending.addedResources > 0
+          })
           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
           await maybeYield(result.scannedFiles, yieldEvery)
           continue
@@ -533,6 +598,25 @@ export async function scanFolders(
             result.imported += 1
             if (needsPrimarySelection) primarySelectionVideoIds.add(existingVideos[0].id)
           }
+          recordFile(
+            resourceId == null
+              ? {
+                  filePath: file,
+                  sourceKind: 'strm',
+                  outcome: 'skipped',
+                  skipReason: 'duplicate'
+                }
+              : {
+                  filePath: file,
+                  sourceKind: 'strm',
+                  outcome: 'added',
+                  videoId: existingVideos[0].id,
+                  videoCode: existingVideos[0].code,
+                  resourceId,
+                  resourceKind: target.kind,
+                  createdVideo: false
+                }
+          )
         } else {
           const videoId = insertNewScannedStrmVideo({
             code,
@@ -547,6 +631,26 @@ export async function scanFolders(
             result.newCodes.push(code)
             primarySelectionVideoIds.add(videoId)
           }
+          const resource = videoId == null ? null : getStrmVideoResourceBySourcePath(file)
+          recordFile(
+            videoId == null || !resource
+              ? {
+                  filePath: file,
+                  sourceKind: 'strm',
+                  outcome: 'skipped',
+                  skipReason: 'duplicate'
+                }
+              : {
+                  filePath: file,
+                  sourceKind: 'strm',
+                  outcome: 'added',
+                  videoId,
+                  videoCode: code,
+                  resourceId: resource.id,
+                  resourceKind: resource.kind,
+                  createdVideo: true
+                }
+          )
         }
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
@@ -554,10 +658,37 @@ export async function scanFolders(
       }
 
       if (localVideoResourceExistsByLocator(file)) {
-        if (await refreshScannedFileDuration(file, readDurationSeconds)) {
+        const existingResource = getLocalVideoResourceByLocator(file)
+        const refreshed = await refreshScannedFileDuration(file, readDurationSeconds)
+        if (refreshed) {
           result.refreshed += 1
+          if (existingResource) {
+            recordFile({
+              filePath: file,
+              sourceKind: 'local',
+              outcome: 'updated',
+              updateKind: 'metadata_refreshed',
+              ...videoIdentity(existingResource.video_id),
+              resourceId: existingResource.id,
+              resourceKind: 'local'
+            })
+          }
+        } else {
+          result.skipped += 1
+          recordFile({
+            filePath: file,
+            sourceKind: 'local',
+            outcome: 'skipped',
+            skipReason: 'unchanged',
+            ...(existingResource
+              ? {
+                  ...videoIdentity(existingResource.video_id),
+                  resourceId: existingResource.id,
+                  resourceKind: 'local' as const
+                }
+              : {})
+          })
         }
-        result.skipped += 1
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
@@ -565,6 +696,7 @@ export async function scanFolders(
 
       if (pendingScanResourceExists(file)) {
         const code = parseCode(path.basename(file, path.extname(file)))
+        let groupId: number | null = null
         if (code) {
           const fingerprint = statFileFingerprint(file)
           const fileDurationSeconds = await readDurationSeconds(file)
@@ -579,7 +711,16 @@ export async function scanFolders(
             }
           ])
           pendingGroupIds.add(pending.groupId)
+          groupId = pending.groupId
         }
+        recordFile({
+          filePath: file,
+          sourceKind: 'local',
+          outcome: 'pending',
+          normalizedCode: code ? normalizeVideoCode(code) : null,
+          groupId,
+          addedToQueue: false
+        })
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
@@ -591,6 +732,12 @@ export async function scanFolders(
         if (isBelowMinImportDuration(probedDuration, minImportDurationSeconds)) {
           result.skipped += 1
           result.skippedShort += 1
+          recordFile({
+            filePath: file,
+            sourceKind: 'local',
+            outcome: 'skipped',
+            skipReason: 'below_min_duration'
+          })
           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
           await maybeYield(result.scannedFiles, yieldEvery)
           continue
@@ -602,6 +749,7 @@ export async function scanFolders(
       if (!code) {
         result.failed += 1
         result.unrecognizedFiles.push(file)
+        recordFile({ filePath: file, sourceKind: 'local', outcome: 'unrecognized' })
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
@@ -630,6 +778,15 @@ export async function scanFolders(
           fingerprint?.file_mtime_ms ?? null
         )
         result.relocated += 1
+        recordFile({
+          filePath: file,
+          sourceKind: 'local',
+          outcome: 'updated',
+          updateKind: 'relocated',
+          ...videoIdentity(relocation.video_id),
+          resourceId: relocation.id,
+          resourceKind: 'local'
+        })
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
@@ -651,6 +808,14 @@ export async function scanFolders(
         ])
         pendingGroupIds.add(pending.groupId)
         result.pendingResources += pending.addedResources
+        recordFile({
+          filePath: file,
+          sourceKind: 'local',
+          outcome: 'pending',
+          normalizedCode: normalizeVideoCode(code),
+          groupId: pending.groupId,
+          addedToQueue: pending.addedResources > 0
+        })
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
@@ -669,6 +834,25 @@ export async function scanFolders(
           result.imported += 1
           if (needsPrimarySelection) primarySelectionVideoIds.add(existingVideos[0].id)
         } else result.skipped += 1
+        recordFile(
+          resourceId == null
+            ? {
+                filePath: file,
+                sourceKind: 'local',
+                outcome: 'skipped',
+                skipReason: 'duplicate'
+              }
+            : {
+                filePath: file,
+                sourceKind: 'local',
+                outcome: 'added',
+                videoId: existingVideos[0].id,
+                videoCode: existingVideos[0].code,
+                resourceId,
+                resourceKind: 'local',
+                createdVideo: false
+              }
+        )
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
@@ -681,10 +865,37 @@ export async function scanFolders(
         result.imported += 1
         result.newCodes.push(code)
         primarySelectionVideoIds.add(id)
-      } else result.skipped += 1
+        const resource = getLocalVideoResourceByLocator(file)
+        if (resource) {
+          recordFile({
+            filePath: file,
+            sourceKind: 'local',
+            outcome: 'added',
+            videoId: id,
+            videoCode: code,
+            resourceId: resource.id,
+            resourceKind: 'local',
+            createdVideo: true
+          })
+        }
+      } else {
+        result.skipped += 1
+        recordFile({
+          filePath: file,
+          sourceKind: 'local',
+          outcome: 'skipped',
+          skipReason: 'duplicate'
+        })
+      }
     } catch (err) {
       console.error('Scan error for', file, err)
       result.failed += 1
+      recordFile({
+        filePath: file,
+        sourceKind: isStrmFile(file) ? 'strm' : 'local',
+        outcome: 'processing_failure',
+        message: sanitizeLibraryScanError(err)
+      })
     }
 
     onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })

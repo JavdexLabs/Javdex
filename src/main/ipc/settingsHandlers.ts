@@ -69,6 +69,8 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
       mediaAssetsPath: _ignoredPath,
       pendingLibraryPathCleanups: _ignoredCleanupQueue,
       lastLibraryScanSummary: _ignoredScanSummary,
+      unrecognizedFiles: _ignoredUnrecognizedFiles,
+      unrecognizedFilesScanFinishedAt: _ignoredUnrecognizedFilesScanFinishedAt,
       defaultLlmProviderId: _ignoredDefaultLlmProviderId,
       defaultLlmModelId: _ignoredDefaultLlmModelId,
       llmProviderConfigs: _ignoredLlmProviderConfigs,

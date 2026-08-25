@@ -416,6 +416,8 @@ export const appIpcSchemas = {
   [IPC.APP_UPDATE_IGNORE_VERSION]: z.tuple([nonEmptyText]),
   [IPC.SCAN_RUN]: z.tuple([stringArray.optional()]),
   [IPC.SCAN_CANCEL]: noArgs,
+  [IPC.SCAN_AUDIT_GET]: noArgs,
+  [IPC.SCAN_AUDIT_REVEAL_FILE]: z.tuple([nonEmptyText]),
   [IPC.FILE_RENAME]: z.tuple([
     nonEmptyText,
     nonEmptyText,

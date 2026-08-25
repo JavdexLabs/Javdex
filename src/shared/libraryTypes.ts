@@ -76,6 +76,103 @@ export interface LibraryScanSummary {
   errorSummary: string | null
 }
 
+export type LibraryScanMetricKey =
+  | 'resourcesAdded'
+  | 'resourcesUpdated'
+  | 'resourcesRemoved'
+  | 'primaryResourcesPromoted'
+  | 'videosDeleted'
+  | 'scannedFiles'
+  | 'skippedFiles'
+  | 'failedFiles'
+  | 'pendingScanGroups'
+  | 'pendingScanResources'
+
+interface LibraryScanFileAuditBase {
+  filePath: string
+  sourceKind: 'local' | 'strm'
+}
+
+export type LibraryScanFileAuditEntry =
+  | (LibraryScanFileAuditBase & {
+      outcome: 'added'
+      videoId: number
+      videoCode: string
+      resourceId: number
+      resourceKind: import('./videoTypes').VideoResourceKind
+      createdVideo: boolean
+    })
+  | (LibraryScanFileAuditBase & {
+      outcome: 'updated'
+      updateKind: 'relocated' | 'metadata_refreshed' | 'strm_target_synced'
+      videoId: number
+      videoCode: string
+      resourceId: number
+      resourceKind: import('./videoTypes').VideoResourceKind
+    })
+  | (LibraryScanFileAuditBase & {
+      outcome: 'pending'
+      normalizedCode: string | null
+      groupId: number | null
+      addedToQueue: boolean
+    })
+  | (LibraryScanFileAuditBase & {
+      outcome: 'skipped'
+      skipReason: 'unchanged' | 'below_min_duration' | 'duplicate'
+      videoId?: number
+      videoCode?: string
+      resourceId?: number
+      resourceKind?: import('./videoTypes').VideoResourceKind
+    })
+  | (LibraryScanFileAuditBase & { outcome: 'unrecognized' })
+  | (LibraryScanFileAuditBase & {
+      outcome: 'strm_failure'
+      failureCode: StrmScanFailureCode
+      message: string
+    })
+  | (LibraryScanFileAuditBase & {
+      outcome: 'processing_failure'
+      message: string
+    })
+
+export interface LibraryScanResourceAuditEntry {
+  resourceId: number
+  videoId: number
+  videoCode: string
+  videoTitle: string | null
+  resourceKind: import('./videoTypes').VideoResourceKind
+  /** Local locator or STRM source path. External targets are never persisted. */
+  sourcePath: string | null
+  displayName: string | null
+  reason: 'missing' | 'removed_library_path' | 'promoted_after_removal'
+}
+
+export interface LibraryScanDeletedVideoAuditEntry {
+  videoId: number
+  videoCode: string
+  videoTitle: string | null
+  reason: 'resource_less'
+}
+
+export interface LibraryScanPendingGroupAuditEntry {
+  groupId: number
+  normalizedCode: string
+  resourceCount: number
+}
+
+export interface LibraryScanAudit {
+  schemaVersion: 1
+  trigger: LibraryScanTrigger
+  startedAt: string
+  finishedAt: string
+  status: LibraryScanStatus
+  files: LibraryScanFileAuditEntry[]
+  removedResources: LibraryScanResourceAuditEntry[]
+  promotedResources: LibraryScanResourceAuditEntry[]
+  deletedVideos: LibraryScanDeletedVideoAuditEntry[]
+  pendingGroups: LibraryScanPendingGroupAuditEntry[]
+}
+
 // ---- Scan results ----
 
 export interface ScanResult {

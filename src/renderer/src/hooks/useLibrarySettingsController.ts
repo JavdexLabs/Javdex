@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import type { AppSettings, SettingsSnapshot } from '@shared/settingsTypes'
-import type { LibraryPathRemovalPreview, ScanResult } from '@shared/libraryTypes'
+import type { LibraryPathRemovalPreview, LibraryScanAudit, ScanResult } from '@shared/libraryTypes'
 import { buildLibraryScanNotification } from '@shared/libraryScanNotification'
 import { api } from '../api'
 import { useToast } from '../components/Toast'
@@ -29,11 +29,31 @@ export default function useLibrarySettingsController({ settings, setSettings }: 
   const [scanStatus, setScanStatus] = useState('')
   const [scanResult, setScanResult] = useState<ScanResult | null>(null)
   const [unrecognized, setUnrecognized] = useState<string[]>([])
+  const [scanAudit, setScanAudit] = useState<LibraryScanAudit | null>(null)
+  const [pendingScanGroupIds, setPendingScanGroupIds] = useState<Set<number>>(new Set())
   const [overviewStatsRefreshKey, setOverviewStatsRefreshKey] = useState(0)
   const [scanScrapePrompt, setScanScrapePrompt] = useState<{
     imported: number
     unscraped: number
   } | null>(null)
+  const persistedUnrecognized = settings?.unrecognizedFiles
+
+  useEffect(() => {
+    setUnrecognized(persistedUnrecognized ?? [])
+  }, [persistedUnrecognized])
+
+  const refreshScanAudit = useCallback(async (): Promise<void> => {
+    const [audit, pendingGroups] = await Promise.all([
+      api.scan.getAudit(),
+      api.scan.listPending()
+    ])
+    setScanAudit(audit)
+    setPendingScanGroupIds(new Set(pendingGroups.map((group) => group.id)))
+  }, [])
+
+  useEffect(() => {
+    void refreshScanAudit().catch(() => undefined)
+  }, [refreshScanAudit])
 
   useEffect(
     () =>
@@ -60,12 +80,20 @@ export default function useLibrarySettingsController({ settings, setSettings }: 
         setScanStatus(event.phase === 'failed' ? `自动扫描失败：${event.error}` : '')
         if (event.phase === 'completed') {
           setScanResult(event.result)
-          setUnrecognized(event.result.unrecognizedFiles)
+          const strmFailures = event.result.strmFailures.length + event.result.omittedStrmFailures
+          const processingFailures = Math.max(
+            0,
+            event.result.failed - event.result.unrecognizedFiles.length - strmFailures
+          )
+          if (!event.result.cancelled && processingFailures === 0) {
+            setUnrecognized(event.result.unrecognizedFiles)
+          }
         }
         void api.settings.get().then(setSettings).catch(() => undefined)
+        void refreshScanAudit().catch(() => undefined)
         setOverviewStatsRefreshKey((key) => key + 1)
       }),
-    [setSettings]
+    [refreshScanAudit, setSettings]
   )
 
   const addFolders = async (): Promise<void> => {
@@ -155,7 +183,14 @@ export default function useLibrarySettingsController({ settings, setSettings }: 
     try {
       const result = await api.scan.run()
       setScanResult(result)
-      setUnrecognized(result.unrecognizedFiles)
+      const strmFailures = result.strmFailures.length + result.omittedStrmFailures
+      const processingFailures = Math.max(
+        0,
+        result.failed - result.unrecognizedFiles.length - strmFailures
+      )
+      if (!result.cancelled && processingFailures === 0) {
+        setUnrecognized(result.unrecognizedFiles)
+      }
       setScanStatus('')
       const notification = buildLibraryScanNotification(result)
       if (notification) {
@@ -165,6 +200,7 @@ export default function useLibrarySettingsController({ settings, setSettings }: 
         )
       }
       await refreshSettingsSnapshot()
+      await refreshScanAudit()
       invalidateAllLibraryQueries(queryClient)
       setOverviewStatsRefreshKey((key) => key + 1)
       if (!result.cancelled && result.imported > 0) {
@@ -222,6 +258,8 @@ export default function useLibrarySettingsController({ settings, setSettings }: 
     scanning,
     scanStatus,
     scanResult,
+    scanAudit,
+    pendingScanGroupIds,
     unrecognized,
     overviewStatsRefreshKey,
     scanScrapePrompt,

@@ -1,6 +1,3 @@
-import { Notification } from 'electron'
-import { buildLibraryScanNotification } from '@shared/libraryScanNotification'
-import { sanitizeLibraryScanError } from '@shared/libraryScanSummary'
 import type { LibraryScanTrigger, ScanResult } from '@shared/libraryTypes'
 import type { AppSettings } from '@shared/settingsTypes'
 import { scanCoordinator } from '../scanner/scanCoordinator'
@@ -20,8 +17,6 @@ export interface AutomaticScanSchedulerDependencies {
   clearTimer: (timer: TimerToken) => void
   isMaintenanceBusy: () => boolean
   runScan: (trigger: LibraryScanTrigger) => Promise<ScanResult>
-  onResult?: (trigger: LibraryScanTrigger, result: ScanResult) => void
-  onError?: (trigger: LibraryScanTrigger, error: string) => void
 }
 
 function validFinishedAt(settings: AppSettings): number | null {
@@ -106,10 +101,9 @@ export class AutomaticScanScheduler {
 
     this.runInFlight = true
     try {
-      const result = await this.dependencies.runScan(trigger)
-      this.dependencies.onResult?.(trigger, result)
-    } catch (error) {
-      this.dependencies.onError?.(trigger, sanitizeLibraryScanError(error))
+      await this.dependencies.runScan(trigger)
+    } catch {
+      // Automatic scans are intentionally silent; the coordinator persists their outcome.
     } finally {
       this.runInFlight = false
     }
@@ -125,21 +119,11 @@ export class AutomaticScanScheduler {
   }
 }
 
-function showAutomaticScanNotification(message: string): void {
-  if (!Notification.isSupported()) return
-  new Notification({ title: 'Javdex 媒体库扫描', body: message }).show()
-}
-
 export const automaticScanScheduler = new AutomaticScanScheduler({
   getSettings,
   now: Date.now,
   setTimer: (callback, delay) => setTimeout(() => void callback(), delay),
   clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
   isMaintenanceBusy: () => maintenanceTaskGate.active !== null || scanCoordinator.running,
-  runScan: (trigger) => scanCoordinator.run({ trigger }),
-  onResult: (_trigger, result) => {
-    const notification = buildLibraryScanNotification(result)
-    if (notification) showAutomaticScanNotification(notification.message)
-  },
-  onError: (_trigger, error) => showAutomaticScanNotification(`扫描失败：${error}`)
+  runScan: (trigger) => scanCoordinator.run({ trigger })
 })

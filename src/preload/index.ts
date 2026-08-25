@@ -177,6 +177,8 @@ const api = {
   scan: {
     run: (folders?: string[]) => invokeApp(IPC.SCAN_RUN, folders),
     cancel: () => invokeApp(IPC.SCAN_CANCEL),
+    getAudit: () => invokeApp(IPC.SCAN_AUDIT_GET),
+    revealAuditFile: (filePath: string) => invokeApp(IPC.SCAN_AUDIT_REVEAL_FILE, filePath),
     rename: (
       oldPath: string,
       newName: string,

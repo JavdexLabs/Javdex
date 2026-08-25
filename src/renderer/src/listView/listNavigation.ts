@@ -131,6 +131,15 @@ export function navigateBackFromVideoDetail(
   location: Location,
   patch?: Record<string, string | null | undefined>
 ): void {
+  const returnToSettings = (location.state as { returnToSettings?: unknown } | null)
+    ?.returnToSettings
+  if (typeof returnToSettings === 'string' && returnToSettings.startsWith('/settings/')) {
+    navigate(returnToSettings, {
+      state: { libraryFocus: 'scan-audit' },
+      preventScrollReset: true
+    })
+    return
+  }
   const pending = parsePendingVideoPath(location.pathname)
   if (pending?.videoId != null) {
     const nextSearch = patch

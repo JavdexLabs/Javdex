@@ -276,6 +276,35 @@ describe('AutomaticScanScheduler', () => {
     scheduler.stop()
   })
 
+  it('keeps failed automatic scans silent and continues scheduling checks', async () => {
+    const timers = new FakeTimers()
+    const now = Date.parse('2026-08-10T02:00:00.000Z')
+    const current = settings({
+      autoScanEnabled: true,
+      autoScanIntervalMinutes: 15,
+      lastLibraryScanSummary: summary('2026-08-10T01:00:00.000Z')
+    })
+    let runs = 0
+    const scheduler = new AutomaticScanScheduler({
+      getSettings: () => current,
+      now: () => now,
+      setTimer: timers.set,
+      clearTimer: timers.clear,
+      isMaintenanceBusy: () => false,
+      runScan: async () => {
+        runs += 1
+        throw new Error('automatic scan failed')
+      }
+    })
+
+    scheduler.start()
+    await timers.runNext(30_000)
+
+    assert.equal(runs, 1)
+    assert.equal(timers.tasks.some((task) => task.delay === 60_000), true)
+    scheduler.stop()
+  })
+
   it('clears startup, interval, and resume checks when stopped', async () => {
     const timers = new FakeTimers()
     const scheduler = new AutomaticScanScheduler({

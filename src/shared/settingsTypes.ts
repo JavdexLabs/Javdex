@@ -68,6 +68,10 @@ export interface AppSettings {
   autoScanIntervalMinutes: AutoScanIntervalMinutes
   /** Most recent scan audit record. */
   lastLibraryScanSummary: LibraryScanSummary | null
+  /** Persisted snapshot of files whose code was not recognized by the latest safe scan. */
+  unrecognizedFiles: string[]
+  /** Completion time of the safe scan that produced the actionable snapshot. */
+  unrecognizedFilesScanFinishedAt: string | null
   /** Minimum local file duration (minutes) required for scan import; 0 disables the filter. */
   minScanImportDurationMinutes: number
   /** Automatically attach scanned resources when their normalized code has one clear owner. */
@@ -169,6 +173,8 @@ export type RendererSettingsPatch = Partial<
     AppSettings,
     | 'assetEncryption'
     | 'lastLibraryScanSummary'
+    | 'unrecognizedFiles'
+    | 'unrecognizedFilesScanFinishedAt'
     | 'llmProviderConfigs'
     | 'defaultLlmProviderId'
     | 'defaultLlmModelId'
@@ -222,6 +228,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoScanEnabled: false,
   autoScanIntervalMinutes: 60,
   lastLibraryScanSummary: null,
+  unrecognizedFiles: [],
+  unrecognizedFilesScanFinishedAt: null,
   minScanImportDurationMinutes: 30,
   autoMergeSameCodeResources: true,
   proxyUrl: '',

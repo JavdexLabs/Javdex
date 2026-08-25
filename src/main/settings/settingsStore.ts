@@ -112,6 +112,17 @@ export function updateSettings(patch: Partial<AppSettings>): AppSettings {
   return next
 }
 
+export function removeUnrecognizedFileFromSnapshot(filePath: string): AppSettings {
+  const current = getSettings()
+  const unrecognizedFiles = current.unrecognizedFiles.filter((item) => item !== filePath)
+  if (unrecognizedFiles.length === current.unrecognizedFiles.length) return current
+  return updateSettings({
+    unrecognizedFiles,
+    unrecognizedFilesScanFinishedAt:
+      unrecognizedFiles.length > 0 ? current.unrecognizedFilesScanFinishedAt : null
+  })
+}
+
 function writeSettingsFile(settings: AppSettings): void {
   const file = settingsFilePath()
   const temporaryFile = `${file}.tmp-${process.pid}`
@@ -388,6 +399,12 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
       parsed.autoScanIntervalMinutes
     ),
     lastLibraryScanSummary: normalizeLibraryScanSummary(parsed.lastLibraryScanSummary),
+    unrecognizedFiles: normalizeStringList(parsed.unrecognizedFiles),
+    unrecognizedFilesScanFinishedAt:
+      typeof parsed.unrecognizedFilesScanFinishedAt === 'string' &&
+      !Number.isNaN(Date.parse(parsed.unrecognizedFilesScanFinishedAt))
+        ? parsed.unrecognizedFilesScanFinishedAt
+        : null,
     mediaAssetsPath:
       typeof parsed.mediaAssetsPath === 'string' ? parsed.mediaAssetsPath.trim() : '',
     minScanImportDurationMinutes: normalizeMinScanImportDurationMinutes(

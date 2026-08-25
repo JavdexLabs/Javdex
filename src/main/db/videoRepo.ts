@@ -1139,6 +1139,20 @@ export function replaceVideoTagsByOrigin(
   }
 }
 
+/** Read-only snapshot used by the scan audit before optional destructive cleanup. */
+export function listResourceLessVideos(): Array<Pick<Video, 'id' | 'code' | 'title'>> {
+  return getDb()
+    .prepare(
+      `SELECT id, code, title
+       FROM videos v
+       WHERE NOT EXISTS (
+         SELECT 1 FROM video_resources vr WHERE vr.video_id = v.id
+       )
+       ORDER BY id ASC`
+    )
+    .all() as Array<Pick<Video, 'id' | 'code' | 'title'>>
+}
+
 export function addManualVideoTag(videoId: number, name: string): void {
   const trimmed = name.trim()
   if (!trimmed) throw new Error('标签名称不能为空')

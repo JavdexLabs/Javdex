@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import type { LibraryScanEvent, LibraryScanSummary, ScanResult } from '@shared/libraryTypes'
+import type { LibraryScanAudit, LibraryScanEvent, LibraryScanSummary, ScanResult } from '@shared/libraryTypes'
 import type { VideoResource } from '@shared/videoTypes'
 import { MaintenanceTaskGate } from '../services/maintenanceTaskGate'
 import { createScanCoordinator } from './scanCoordinator'
@@ -18,6 +18,9 @@ function createTestScanCoordinator(
     reconcilePendingScanResources: () => ({ removedResources: 0, removedGroups: 0 }),
     shouldAutoDeleteResourceLessVideos: () => false,
     deleteResourceLessVideos: () => 0,
+    listResourceLessVideos: () => [],
+    listPendingScanGroups: () => [],
+    getVideoById: () => null,
     recordScanSummary: () => undefined,
     now: () => '2026-08-10T00:00:00.000Z',
     ...dependencies
@@ -61,6 +64,38 @@ function resource(input: Partial<VideoResource> & Pick<VideoResource, 'id' | 'vi
 }
 
 describe('ScanCoordinator', () => {
+  it('persists matching complete audit details with the latest summary', async () => {
+    const persisted: LibraryScanAudit[] = []
+    const coordinator = createTestScanCoordinator({
+      gate: new MaintenanceTaskGate(),
+      getConfiguredFolders: () => ['/online'],
+      inspectFolder: async () => true,
+      scanFolders: async (_folders, _onProgress, options) => {
+        options?.onFileResult?.({
+          filePath: '/online/AUDIT-001.mp4',
+          sourceKind: 'local',
+          outcome: 'unrecognized'
+        })
+        return {
+          ...emptyScanResult(),
+          scannedFiles: 1,
+          failed: 1,
+          unrecognizedFiles: ['/online/AUDIT-001.mp4']
+        }
+      },
+      listLocalResources: () => [],
+      recordScanSummary: (_summary, _unrecognized, audit) => {
+        persisted.push(audit)
+      }
+    })
+
+    await coordinator.run()
+
+    assert.equal(persisted.length, 1)
+    assert.equal(persisted[0].files.length, 1)
+    assert.equal(persisted[0].status, 'success')
+  })
+
   it('publishes scan lifecycle events for every trigger', async () => {
     const events: LibraryScanEvent[] = []
     const progress = { scanned: 1, imported: 1, currentFile: '/online/A-001.mp4' }
@@ -232,6 +267,7 @@ describe('ScanCoordinator', () => {
       scanningStarted = resolve
     })
     const summaries: LibraryScanSummary[] = []
+    const snapshots: Array<string[] | undefined> = []
     const coordinator = createTestScanCoordinator({
       gate,
       getConfiguredFolders: () => ['/online'],
@@ -251,7 +287,10 @@ describe('ScanCoordinator', () => {
       deleteResourceLessVideos: () => {
         throw new Error('cancelled scans must not auto-delete videos')
       },
-      recordScanSummary: (summary) => summaries.push(summary)
+      recordScanSummary: (summary, unrecognizedFiles) => {
+        summaries.push(summary)
+        snapshots.push(unrecognizedFiles)
+      }
     })
 
     const running = coordinator.run()
@@ -261,6 +300,7 @@ describe('ScanCoordinator', () => {
     assert.equal(cleanupReads, 0)
     assert.equal(gate.active, null)
     assert.equal(summaries[0].status, 'cancelled')
+    assert.deepEqual(snapshots, [undefined])
   })
 
   it('keeps resources after a coordinator-level failure', async () => {
@@ -300,6 +340,7 @@ describe('ScanCoordinator', () => {
     let deferredCleanupRuns = 0
     let autoDeleteRuns = 0
     const summaries: LibraryScanSummary[] = []
+    const snapshots: Array<string[] | undefined> = []
     const coordinator = createTestScanCoordinator({
       gate: new MaintenanceTaskGate(),
       getConfiguredFolders: () => ['/online'],
@@ -319,7 +360,10 @@ describe('ScanCoordinator', () => {
         autoDeleteRuns += 1
         return 1
       },
-      recordScanSummary: (summary) => summaries.push(summary)
+      recordScanSummary: (summary, unrecognizedFiles) => {
+        summaries.push(summary)
+        snapshots.push(unrecognizedFiles)
+      }
     })
 
     const result = await coordinator.run()
@@ -331,6 +375,34 @@ describe('ScanCoordinator', () => {
     assert.equal(deferredCleanupRuns, 0)
     assert.equal(autoDeleteRuns, 0)
     assert.equal(summaries[0].status, 'failed')
+    assert.deepEqual(snapshots, [undefined])
+  })
+
+  it('replaces the unrecognized-file snapshot after every safe completed scan', async () => {
+    const pendingResults: ScanResult[] = [
+      {
+        ...emptyScanResult(),
+        failed: 1,
+        unrecognizedFiles: ['/online/UNKNOWN.mp4']
+      },
+      emptyScanResult()
+    ]
+    const snapshots: Array<string[] | undefined> = []
+    const coordinator = createTestScanCoordinator({
+      gate: new MaintenanceTaskGate(),
+      getConfiguredFolders: () => ['/online'],
+      inspectFolder: async () => true,
+      scanFolders: async () => pendingResults.shift() ?? emptyScanResult(),
+      listLocalResources: () => [],
+      recordScanSummary: (_summary, unrecognizedFiles) => {
+        snapshots.push(unrecognizedFiles)
+      }
+    })
+
+    await coordinator.run()
+    await coordinator.run()
+
+    assert.deepEqual(snapshots, [['/online/UNKNOWN.mp4'], []])
   })
 
   it('completes safe cleanup with errors when failures are isolated to STRM files', async () => {

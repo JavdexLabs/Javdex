@@ -30,6 +30,8 @@ export const IPC = {
   // Scan / import
   SCAN_RUN: 'scan:run',
   SCAN_CANCEL: 'scan:cancel',
+  SCAN_AUDIT_GET: 'scan:auditGet',
+  SCAN_AUDIT_REVEAL_FILE: 'scan:auditRevealFile',
   SCAN_PROGRESS: 'scan:progress', // main -> renderer event
   SCAN_STATE_CHANGED: 'scan:stateChanged', // main -> renderer event
   FILE_RENAME: 'file:rename',

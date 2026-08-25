@@ -34,7 +34,8 @@ import { useTheme } from '../components/ThemeProvider'
 import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
 import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
 import { useAvatarAutoCropBatch } from '../contexts/AvatarAutoCropBatchContext'
-import { pendingCenterPath } from '../listView/pendingRoutes'
+import { pendingCenterPath, pendingItemKey } from '../listView/pendingRoutes'
+import { libraryVideoDetailPath } from '../listView/libraryRoutes'
 import useNetworkSettingsController from '../hooks/useNetworkSettingsController'
 import useLatestAsyncLabel from '../hooks/useLatestAsyncLabel'
 import useScraperPluginSettingsController from '../hooks/useScraperPluginSettingsController'
@@ -147,6 +148,8 @@ export default function SettingsPage(): JSX.Element {
     scanning,
     scanStatus,
     scanResult,
+    scanAudit,
+    pendingScanGroupIds,
     unrecognized,
     overviewStatsRefreshKey,
     scanScrapePrompt,
@@ -214,7 +217,10 @@ export default function SettingsPage(): JSX.Element {
   const libraryFocus = (location.state as { libraryFocus?: string } | null)?.libraryFocus
 
   useEffect(() => {
-    if (activeGroup.id !== 'library' || libraryFocus !== 'unrecognized') return
+    if (
+      activeGroup.id !== 'library' ||
+      (libraryFocus !== 'unrecognized' && libraryFocus !== 'scan-audit')
+    ) return
     const timer = window.setTimeout(() => {
       libraryUnrecRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       navigate(location.pathname, { replace: true, state: {} })
@@ -756,6 +762,9 @@ export default function SettingsPage(): JSX.Element {
                   scanning={scanning}
                   scanStatus={scanStatus}
                   scanResult={scanResult}
+                  scanAudit={scanAudit}
+                  pendingScanGroupIds={pendingScanGroupIds}
+                  focusUnrecognized={libraryFocus === 'unrecognized'}
                   unrecognized={unrecognized}
                   unrecognizedRef={libraryUnrecRef}
                   onAddFolders={() => void addFolders()}
@@ -769,7 +778,19 @@ export default function SettingsPage(): JSX.Element {
                   defaultScraper={settings.defaultScraper}
                   onDismissScanScrapePrompt={dismissScanScrapePrompt}
                   onStartScanScrapeBatch={startVideoBatchDefault}
-                  onOpenPending={() => navigate(pendingCenterPath({ type: 'scan' }))}
+                  onOpenPending={(groupId) =>
+                    navigate(
+                      pendingCenterPath({
+                        type: 'scan',
+                        item: groupId ? pendingItemKey('scan', groupId) : undefined
+                      })
+                    )
+                  }
+                  onOpenVideo={(videoId) =>
+                    navigate(libraryVideoDetailPath(videoId), {
+                      state: { returnToSettings: settingsPath('library') }
+                    })
+                  }
                 />
               )}
 

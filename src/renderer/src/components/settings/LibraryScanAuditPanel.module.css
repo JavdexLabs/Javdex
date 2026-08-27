@@ -1,69 +1,96 @@
 .root {
   display: grid;
-  gap: 9px;
+  gap: 10px;
 }
 
-.metrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
-  gap: 6px;
-}
-
-.metric,
-.metricSelected {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-  padding: 8px 9px;
+/* Tab 筛选栏 */
+.tabsNav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  background: var(--surface-control);
-  color: inherit;
-  text-align: left;
+  background: color-mix(in srgb, var(--surface-base) 45%, var(--surface-control));
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabsNav::-webkit-scrollbar {
+  display: none;
+}
+
+.tabBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--motion-fast);
 }
 
-.metric:hover {
-  border-color: var(--control-border-hover);
+.tabBtn:hover {
   background: var(--surface-control-hover);
-}
-
-.metricSelected {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface-control));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
-}
-
-.metric:focus-visible,
-.metricSelected:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
-.metric strong,
-.metricSelected strong {
   color: var(--text-primary);
-  font-size: 16px;
+}
+
+.tabBtn.tabBtnActive {
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+.tabBtn:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
+  box-shadow: var(--focus-ring);
+}
+
+.tabBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-control-hover) 80%, transparent);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
-.metric span,
-.metricSelected span {
-  color: var(--text-muted);
-  font-size: 11px;
+.tabBtnActive .tabBadge {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-control));
+  color: var(--text-accent);
 }
 
+.tabBtn .tabBadgeWarning,
+.tabBtnActive .tabBadgeWarning {
+  background: color-mix(in srgb, var(--warning) 22%, transparent);
+  color: var(--warning);
+}
+
+/* 详情卡片 */
 .detail {
   display: grid;
   gap: 8px;
   padding: 10px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+  background: color-mix(in srgb, var(--surface-panel) 60%, transparent);
 }
 
-.detailHead,
-.unrecognizedHead {
+.detailHead {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -75,15 +102,50 @@
   gap: 2px;
 }
 
-.detailHead strong,
-.unrecognizedHead strong {
+.detailTitle {
   color: var(--text-primary);
   font-size: 12px;
+  font-weight: 600;
 }
 
-.detailHead span {
+.detailDesc {
   color: var(--text-muted);
   font-size: 11px;
+}
+
+.subFilters {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding-bottom: 2px;
+}
+
+.subFilterChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--target-min);
+  padding: 3px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all var(--motion-fast);
+}
+
+.subFilterChip:hover {
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
+
+.subFilterChip.subFilterChipActive {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-control));
+  color: var(--text-accent);
+  font-weight: 600;
 }
 
 .toolbar {
@@ -94,48 +156,126 @@
 
 .list {
   min-width: 0;
+  display: grid;
+}
+
+.virtualList {
+  box-sizing: border-box;
+  padding-inline-end: var(--scrollbar-safe-pad);
+  scrollbar-gutter: stable;
 }
 
 .rowSlot {
   box-sizing: border-box;
-  padding-bottom: 6px;
+  padding-bottom: 8px;
+  outline: none;
+}
+
+.rowSlot:focus-visible > * {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
 }
 
 .row {
   min-width: 0;
-  min-height: 72px;
+  min-height: 64px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px 9px;
+  padding: 8px 10px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background: var(--surface-control);
   box-sizing: border-box;
+  transition: border-color var(--motion-fast);
+}
+
+.row:hover {
+  border-color: var(--border-strong, var(--border-subtle));
 }
 
 .rowCopy {
   min-width: 0;
   display: grid;
-  gap: 2px;
+  gap: 3px;
+  flex: 1;
 }
 
-.rowCopy strong {
+.rowTitle {
+  min-width: 0;
+  flex: 0 1 auto;
   overflow: hidden;
   color: var(--text-primary);
   font-size: 12px;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.rowCopy span,
-.rowCopy small {
+.rowStateTag {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: var(--radius-xs, 3px);
+  background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.rowStateWarning {
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  color: var(--warning);
+}
+
+.rowSubtitle {
   overflow: hidden;
   color: var(--text-muted);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.rowTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.rowOutcomeTag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: var(--radius-xs, 3px);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--text-muted) 15%, transparent);
+  color: var(--text-secondary);
+}
+
+.outcomeAdded {
+  background: color-mix(in srgb, var(--text-accent) 18%, transparent);
+  color: var(--text-accent);
+}
+
+.outcomeUpdated {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--text-accent);
+}
+
+.outcomePending {
+  background: color-mix(in srgb, var(--warning) 20%, transparent);
+  color: var(--warning);
+}
+
+.outcomeFailed {
+  background: color-mix(in srgb, var(--warning) 22%, transparent);
+  color: var(--warning);
 }
 
 .rowActions {
@@ -145,33 +285,49 @@
   gap: 5px;
 }
 
-.unrecognized {
-  display: grid;
-  gap: 8px;
-  padding-top: 9px;
-  border-top: 1px solid var(--border-subtle);
+.rowIconButton {
+  width: 26px;
+  height: 26px;
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-xs, 4px);
+  background: var(--surface-control);
+  color: var(--text-secondary);
 }
 
-@media (width <= 980px) {
-  .metrics {
-    grid-template-columns: repeat(3, minmax(72px, 1fr));
-  }
+.rowIconButton:hover:not(:disabled) {
+  border-color: var(--border-strong, var(--border-subtle));
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
 
-  .row {
-    align-items: stretch;
-    flex-direction: column;
-  }
+.rowIconButton:focus-visible:not(:disabled) {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
+  box-shadow: var(--focus-ring);
+}
 
-  .rowActions {
-    flex-wrap: wrap;
-  }
+/* 紧凑跳过行 */
+.skippedRow {
+  min-height: 40px;
+  padding: 4px 10px;
+}
+
+.skippedRow .rowCopy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.skippedRow .rowTitle {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.skippedRow .rowSubtitle {
+  font-size: 11px;
 }
 
 @media (width <= 640px) {
-  .metrics {
-    grid-template-columns: repeat(2, minmax(72px, 1fr));
-  }
-
   .toolbar {
     grid-template-columns: minmax(0, 1fr);
   }

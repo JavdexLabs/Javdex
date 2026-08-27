@@ -51,7 +51,6 @@ function ScanSummary({
   audit,
   selected,
   unrecognized,
-  unrecognizedScanFinishedAt,
   currentPendingGroupIds,
   onSelect,
   onResolvedUnrecognized,
@@ -63,7 +62,6 @@ function ScanSummary({
   audit: LibraryScanAudit | null
   selected: LibraryScanMetricKey | null
   unrecognized: string[]
-  unrecognizedScanFinishedAt: string | null
   currentPendingGroupIds: Set<number>
   onSelect: (key: LibraryScanMetricKey | null) => void
   onResolvedUnrecognized: (path: string) => void
@@ -76,7 +74,9 @@ function ScanSummary({
       <div className="library-scan-summary-head">
         <div>
           <strong>{SCAN_TRIGGER_LABEL[summary.trigger]}扫描</strong>
-          <span>{formatScanTime(summary.startedAt)} 至 {formatScanTime(summary.finishedAt)}</span>
+          <span>
+            {formatScanTime(summary.startedAt)} 至 {formatScanTime(summary.finishedAt)}
+          </span>
         </div>
         <SettingsStatusPill
           status={
@@ -93,7 +93,6 @@ function ScanSummary({
         audit={audit}
         selected={selected}
         unrecognized={unrecognized}
-        unrecognizedScanFinishedAt={unrecognizedScanFinishedAt}
         currentPendingGroupIds={currentPendingGroupIds}
         onSelect={onSelect}
         onResolvedUnrecognized={onResolvedUnrecognized}
@@ -105,11 +104,21 @@ function ScanSummary({
           <strong>{summary.offlineFolders.length} 个离线目录</strong>
           {summary.offlineFolders.map((folder) => (
             <div className="library-scan-path-detail" key={folder}>
-              <span className="copyable-text">{folder}</span>
-              <Button type="button" size="sm" onClick={() => void navigator.clipboard.writeText(folder)}>
+              <span className="copyable-text" title={folder}>
+                {folder}
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void navigator.clipboard.writeText(folder)}
+              >
                 复制路径
               </Button>
-              <Button type="button" size="sm" onClick={() => void api.scan.revealAuditFile(folder)}>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void api.scan.revealAuditFile(folder)}
+              >
                 在文件夹中显示
               </Button>
             </div>
@@ -405,7 +414,6 @@ export default function LibrarySettingsPanel({
                 audit={scanAudit}
                 selected={selectedMetric}
                 unrecognized={unrecognized}
-                unrecognizedScanFinishedAt={settings.unrecognizedFilesScanFinishedAt}
                 currentPendingGroupIds={pendingScanGroupIds}
                 onSelect={selectMetric}
                 onResolvedUnrecognized={onResolvedUnrecognized}

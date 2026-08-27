@@ -25,9 +25,7 @@
   .library-scan-metric-label,
   .library-scan-note,
   .library-scan-duration-label,
-  .settings-number-stepper__unit,
-  .scan-unrec-rename > summary,
-  .scan-unrec-dir
+  .settings-number-stepper__unit
 ) {
   font-size: var(--settings-fs-caption, 11px);
   line-height: var(--settings-lh, 1.45);
@@ -48,9 +46,7 @@
   .media-path-empty,
   .library-scan-status,
   .field-row--stacked label,
-  .plugin-empty-state,
-  .scan-unrec-name,
-  .scan-unrec-rename
+  .plugin-empty-state
 ) {
   font-size: var(--settings-fs-secondary, 12px);
   line-height: var(--settings-lh, 1.45);

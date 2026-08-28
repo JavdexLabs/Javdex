@@ -11,12 +11,16 @@ export interface ScrapeBrowserFetchPageOptions {
 export interface ScrapeBrowserFetchBufferOptions {
   referer?: 'omit' | 'session' | string
   headers?: Readonly<Record<string, string>>
+  /** Abort the response before buffering more than this many bytes. */
+  maxBytes?: number
+  redirect?: 'follow' | 'error' | 'manual'
 }
 
 export interface ScrapeBrowserResourceResponse {
   statusCode: number
   body: Buffer
   etag?: string
+  location?: string
 }
 
 export class ScrapeBrowserChallengeError extends Error {

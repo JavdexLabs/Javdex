@@ -1080,7 +1080,7 @@ describe('database schema', () => {
     }
   })
 
-  it('upgrades the released schema once to add the Agent platform', () => {
+  it('upgrades the released schema once to add the Agent platform and metadata drafts', () => {
     const db = new Database(':memory:')
     try {
       db.exec(`
@@ -1095,7 +1095,7 @@ describe('database schema', () => {
       migrateDatabase(db)
       migrateDatabase(db)
 
-      assert.equal(db.pragma('user_version', { simple: true }), 14)
+      assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       assert.deepEqual(
         db.prepare('SELECT id, value FROM release_marker').all(),
         [{ id: 1, value: 'preserved' }]
@@ -1107,7 +1107,9 @@ describe('database schema', () => {
         'agent_execution_history',
         'agent_tool_ledger',
         'agent_approvals',
-        'agent_artifacts'
+        'agent_artifacts',
+        'agent_metadata_drafts',
+        'agent_metadata_draft_resources'
       ]) {
         assert.equal(tableExistsForTest(db, table), true)
       }
@@ -1178,7 +1180,9 @@ describe('database schema', () => {
         'agent_execution_history',
         'agent_tool_ledger',
         'agent_approvals',
-        'agent_artifacts'
+        'agent_artifacts',
+        'agent_metadata_drafts',
+        'agent_metadata_draft_resources'
       ]
       assert.deepEqual(
         expectedTables.map(

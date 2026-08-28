@@ -81,4 +81,20 @@ describe('AgentConfiguration', () => {
     assert.equal(profile.routes.verifier, profile.routes.primary)
     assert.equal(profile.routes.summarizer, profile.routes.primary)
   })
+
+  it('binds metadata collection to the curator workload and explicit staging capabilities', () => {
+    const configuration = new AgentConfiguration({ read: snapshot })
+    const { profile, definition, workload } = configuration.getProfile(
+      'profile:metadata-collector:default'
+    )
+
+    assert.equal(definition.id, 'metadata-collector')
+    assert.equal(workload.workloadId, 'library-curator')
+    assert.deepEqual(profile.toolPackRefs, ['toolpack:metadata-collector:v1'])
+    assert.deepEqual(profile.capabilityGrants, [
+      'browser.read',
+      'metadata.stage-remote-candidate'
+    ])
+    assert.deepEqual(profile.approvalRequiredEffects, [])
+  })
 })

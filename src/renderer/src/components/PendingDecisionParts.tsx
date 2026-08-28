@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { WorkbenchStatusPill } from '../components/workbench'
+import { WorkbenchStatusPill } from './workbench'
 import styles from './PendingDecisionParts.module.css'
 
 /**

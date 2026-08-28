@@ -34,7 +34,7 @@ import {
   PendingStep,
   PendingWorkspace,
   PendingWorkspacePanel
-} from './PendingDecisionParts'
+} from '../components/PendingDecisionParts'
 import { arePendingScrapeSelectionsComplete } from './pendingCenterState'
 import { formatBytes, formatMinutes } from './pendingFormat'
 import styles from './PendingScrapePane.module.css'

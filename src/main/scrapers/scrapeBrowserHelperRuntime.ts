@@ -1357,7 +1357,12 @@ export class ScrapeBrowserHelperRuntime {
   ): Promise<Buffer> {
     signal?.throwIfAborted()
     const cached = this.imageBodyCache.get(url)
-    if (cached) return cached
+    if (cached) {
+      if (options?.maxBytes != null && cached.byteLength > options.maxBytes) {
+        throw new Error(`资源超过 ${options.maxBytes} 字节上限`)
+      }
+      return cached
+    }
     return (await this.fetchBufferResponse(url, options, signal)).body
   }
 
@@ -1370,17 +1375,33 @@ export class ScrapeBrowserHelperRuntime {
     const ses = this.getSession()
     const profile = getScrapeUaProfile()
     const referer = resolveFetchReferer(options?.referer, this.lastOrigin)
+    const maxBytes = options?.maxBytes
+    if (maxBytes != null && (!Number.isSafeInteger(maxBytes) || maxBytes <= 0)) {
+      throw new Error('资源体积上限无效')
+    }
     return new Promise<ScrapeBrowserResourceResponse>((resolve, reject) => {
-      const request = net.request({ url, session: ses, useSessionCookies: true })
-      const onAbort = (): void => {
-        request.abort()
-        reject(signal?.reason instanceof Error ? signal.reason : new Error('浏览器操作已取消'))
-      }
-      signal?.addEventListener('abort', onAbort, { once: true })
+      const request = net.request({
+        url,
+        session: ses,
+        useSessionCookies: true,
+        redirect: options?.redirect ?? 'follow'
+      })
+      let settled = false
+      let onAbort = (): void => {}
       const finish = <T>(fn: (value: T) => void, value: T): void => {
+        if (settled) return
+        settled = true
         signal?.removeEventListener('abort', onAbort)
         fn(value)
       }
+      onAbort = (): void => {
+        request.abort()
+        finish(
+          reject,
+          signal?.reason instanceof Error ? signal.reason : new Error('浏览器操作已取消')
+        )
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
       request.setHeader('User-Agent', profile.userAgent)
       if (referer) request.setHeader('Referer', referer)
       for (const [name, value] of Object.entries(options?.headers ?? {})) {
@@ -1393,12 +1414,29 @@ export class ScrapeBrowserHelperRuntime {
           response.on('data', () => {})
           return
         }
-        response.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+        const declaredLength = Number(response.headers['content-length']?.[0])
+        if (maxBytes != null && Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+          request.abort()
+          finish(reject, new Error(`资源超过 ${maxBytes} 字节上限`))
+          return
+        }
+        let totalBytes = 0
+        response.on('data', (chunk) => {
+          const body = Buffer.from(chunk)
+          totalBytes += body.byteLength
+          if (maxBytes != null && totalBytes > maxBytes) {
+            request.abort()
+            finish(reject, new Error(`资源超过 ${maxBytes} 字节上限`))
+            return
+          }
+          chunks.push(body)
+        })
         response.on('end', () =>
           finish(resolve, {
             statusCode: response.statusCode,
             body: Buffer.concat(chunks),
-            etag: response.headers.etag?.[0]
+            etag: response.headers.etag?.[0],
+            location: response.headers.location?.[0]
           })
         )
         response.on('error', (error) => finish(reject, error))

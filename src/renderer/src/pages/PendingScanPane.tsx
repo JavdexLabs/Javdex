@@ -18,7 +18,7 @@ import {
   PendingStep,
   PendingWorkspace,
   PendingWorkspacePanel
-} from './PendingDecisionParts'
+} from '../components/PendingDecisionParts'
 import {
   arePendingScanAssignmentsComplete,
   defaultPendingScanPrimaryResourceId,

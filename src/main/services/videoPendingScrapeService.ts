@@ -44,7 +44,14 @@ export function cleanupOrphanedVideoScrapeStaging(options?: {
   olderThanMs?: number
 }): number {
   const referencedPaths = (
-    getDb().prepare('SELECT staged_path FROM pending_video_scrape_resources').all() as Array<{
+    getDb().prepare(
+      `SELECT staged_path FROM pending_video_scrape_resources
+       UNION
+       SELECT r.staged_path
+         FROM agent_metadata_draft_resources r
+         JOIN agent_metadata_drafts d ON d.id = r.draft_id
+        WHERE d.status = 'ready' AND r.field IN ('cover', 'samples', 'actressAvatar')`
+    ).all() as Array<{
       staged_path: string
     }>
   ).map((row) => row.staged_path)

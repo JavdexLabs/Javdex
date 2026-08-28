@@ -31,6 +31,7 @@ import {
   SettingsPluginDevOutlet,
   SettingsSectionOutlet
 } from './settings/SettingsRouteOutlet'
+import { AgentMetadataCollectorProvider } from './components/agentMetadata/AgentMetadataCollectorContext'
 
 function FacetDetailRoute({
   kind,
@@ -53,124 +54,126 @@ function AppContent(): JSX.Element {
   return (
     <ToastProvider>
       <AvatarAutoCropBatchProvider>
-        <DisplayModeProvider>
-          <AppBackgroundProvider>
-            <ImagePreviewOverlayProvider previewEnabled={imagePreviewEnabled}>
-              <PluginDevLeaveGuardProvider>
-                <Layout>
-                  <ResetListStateOnReload />
-                  <Routes>
-                    <Route path={ROUTE_PATH.library} element={<LibraryShell />}>
-                      <Route index element={null} />
-                      <Route path={ROUTE_SEGMENT.libraryDetail} element={<DetailPage />}>
+        <AgentMetadataCollectorProvider>
+          <DisplayModeProvider>
+            <AppBackgroundProvider>
+              <ImagePreviewOverlayProvider previewEnabled={imagePreviewEnabled}>
+                <PluginDevLeaveGuardProvider>
+                  <Layout>
+                    <ResetListStateOnReload />
+                    <Routes>
+                      <Route path={ROUTE_PATH.library} element={<LibraryShell />}>
+                        <Route index element={null} />
+                        <Route path={ROUTE_SEGMENT.libraryDetail} element={<DetailPage />}>
+                          <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
+                        </Route>
+                      </Route>
+                      <Route path={ROUTE_PATH.actresses} element={<ActressShell />}>
+                        <Route index element={null} />
+                        <Route
+                          path={ROUTE_SEGMENT.actressConflicts}
+                          element={<Navigate to={pendingCenterPath({ type: 'actress' })} replace />}
+                        />
+                        <Route path={ROUTE_SEGMENT.actressDetail} element={<ActressDetailPage />}>
+                          <Route path={ROUTE_SEGMENT.actressVideo} element={<DetailPage />}>
+                            <Route
+                              path={ROUTE_SEGMENT.detailActress}
+                              element={<ActressDetailPage />}
+                            />
+                          </Route>
+                        </Route>
+                      </Route>
+                      <Route path={ROUTE_PATH.playlists} element={<PlaylistShell />}>
+                        <Route index element={null} />
+                        <Route path={ROUTE_SEGMENT.playlistDetail} element={<PlaylistDetailPage />}>
+                          <Route path={ROUTE_SEGMENT.playlistVideo} element={<DetailPage />}>
+                            <Route
+                              path={ROUTE_SEGMENT.detailActress}
+                              element={<ActressDetailPage />}
+                            />
+                          </Route>
+                        </Route>
+                      </Route>
+                      <Route path={ROUTE_PATH.facetList} element={<FacetShell />}>
+                        <Route index element={null} />
+                        <Route
+                          path={ROUTE_SEGMENT.organizationDetail}
+                          element={
+                            <FacetDetailRoute kind="organization">
+                              <OrganizationDetailPage />
+                            </FacetDetailRoute>
+                          }
+                        >
+                          <Route path={ROUTE_SEGMENT.organizationVideo} element={<DetailPage />}>
+                            <Route
+                              path={ROUTE_SEGMENT.detailActress}
+                              element={<ActressDetailPage />}
+                            />
+                          </Route>
+                        </Route>
+                        <Route
+                          path={ROUTE_SEGMENT.directorDetail}
+                          element={
+                            <FacetDetailRoute kind="director">
+                              <DirectorDetailPage />
+                            </FacetDetailRoute>
+                          }
+                        >
+                          <Route path={ROUTE_SEGMENT.directorVideo} element={<DetailPage />}>
+                            <Route
+                              path={ROUTE_SEGMENT.detailActress}
+                              element={<ActressDetailPage />}
+                            />
+                          </Route>
+                        </Route>
+                        <Route
+                          path={ROUTE_SEGMENT.seriesDetail}
+                          element={
+                            <FacetDetailRoute kind="series">
+                              <SeriesDetailPage />
+                            </FacetDetailRoute>
+                          }
+                        >
+                          <Route path={ROUTE_SEGMENT.seriesVideo} element={<DetailPage />}>
+                            <Route
+                              path={ROUTE_SEGMENT.detailActress}
+                              element={<ActressDetailPage />}
+                            />
+                          </Route>
+                        </Route>
+                      </Route>
+                      <Route path={ROUTE_PATH.settings} element={<SettingsPage />}>
+                        <Route index element={<Navigate to={settingsPath('overview')} replace />} />
+                        {SETTINGS_GROUPS.flatMap((group) =>
+                          group.tabs.map((tab) => (
+                            <Route
+                              key={`${group.id}:${tab.id}`}
+                              path={`${group.id}/${tab.id}`}
+                              element={<SettingsSectionOutlet />}
+                            />
+                          ))
+                        )}
+                        <Route path="plugin-dev" element={<SettingsPluginDevOutlet />} />
+                        <Route
+                          path="*"
+                          element={<Navigate to={settingsPath('overview')} replace />}
+                        />
+                      </Route>
+                      <Route path={ROUTE_PATH.pending} element={<PendingCenterShell />}>
+                        <Route index element={null} />
                         <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
-                      </Route>
-                    </Route>
-                    <Route path={ROUTE_PATH.actresses} element={<ActressShell />}>
-                      <Route index element={null} />
-                      <Route
-                        path={ROUTE_SEGMENT.actressConflicts}
-                        element={<Navigate to={pendingCenterPath({ type: 'actress' })} replace />}
-                      />
-                      <Route path={ROUTE_SEGMENT.actressDetail} element={<ActressDetailPage />}>
-                        <Route path={ROUTE_SEGMENT.actressVideo} element={<DetailPage />}>
-                          <Route
-                            path={ROUTE_SEGMENT.detailActress}
-                            element={<ActressDetailPage />}
-                          />
+                        <Route path={ROUTE_SEGMENT.pendingVideo} element={<DetailPage />}>
+                          <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
                         </Route>
                       </Route>
-                    </Route>
-                    <Route path={ROUTE_PATH.playlists} element={<PlaylistShell />}>
-                      <Route index element={null} />
-                      <Route path={ROUTE_SEGMENT.playlistDetail} element={<PlaylistDetailPage />}>
-                        <Route path={ROUTE_SEGMENT.playlistVideo} element={<DetailPage />}>
-                          <Route
-                            path={ROUTE_SEGMENT.detailActress}
-                            element={<ActressDetailPage />}
-                          />
-                        </Route>
-                      </Route>
-                    </Route>
-                    <Route path={ROUTE_PATH.facetList} element={<FacetShell />}>
-                      <Route index element={null} />
-                      <Route
-                        path={ROUTE_SEGMENT.organizationDetail}
-                        element={
-                          <FacetDetailRoute kind="organization">
-                            <OrganizationDetailPage />
-                          </FacetDetailRoute>
-                        }
-                      >
-                        <Route path={ROUTE_SEGMENT.organizationVideo} element={<DetailPage />}>
-                          <Route
-                            path={ROUTE_SEGMENT.detailActress}
-                            element={<ActressDetailPage />}
-                          />
-                        </Route>
-                      </Route>
-                      <Route
-                        path={ROUTE_SEGMENT.directorDetail}
-                        element={
-                          <FacetDetailRoute kind="director">
-                            <DirectorDetailPage />
-                          </FacetDetailRoute>
-                        }
-                      >
-                        <Route path={ROUTE_SEGMENT.directorVideo} element={<DetailPage />}>
-                          <Route
-                            path={ROUTE_SEGMENT.detailActress}
-                            element={<ActressDetailPage />}
-                          />
-                        </Route>
-                      </Route>
-                      <Route
-                        path={ROUTE_SEGMENT.seriesDetail}
-                        element={
-                          <FacetDetailRoute kind="series">
-                            <SeriesDetailPage />
-                          </FacetDetailRoute>
-                        }
-                      >
-                        <Route path={ROUTE_SEGMENT.seriesVideo} element={<DetailPage />}>
-                          <Route
-                            path={ROUTE_SEGMENT.detailActress}
-                            element={<ActressDetailPage />}
-                          />
-                        </Route>
-                      </Route>
-                    </Route>
-                    <Route path={ROUTE_PATH.settings} element={<SettingsPage />}>
-                      <Route index element={<Navigate to={settingsPath('overview')} replace />} />
-                      {SETTINGS_GROUPS.flatMap((group) =>
-                        group.tabs.map((tab) => (
-                          <Route
-                            key={`${group.id}:${tab.id}`}
-                            path={`${group.id}/${tab.id}`}
-                            element={<SettingsSectionOutlet />}
-                          />
-                        ))
-                      )}
-                      <Route path="plugin-dev" element={<SettingsPluginDevOutlet />} />
-                      <Route
-                        path="*"
-                        element={<Navigate to={settingsPath('overview')} replace />}
-                      />
-                    </Route>
-                    <Route path={ROUTE_PATH.pending} element={<PendingCenterShell />}>
-                      <Route index element={null} />
-                      <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
-                      <Route path={ROUTE_SEGMENT.pendingVideo} element={<DetailPage />}>
-                        <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
-                      </Route>
-                    </Route>
-                    <Route path="*" element={<Navigate to={ROUTE_PATH.library} replace />} />
-                  </Routes>
-                </Layout>
-              </PluginDevLeaveGuardProvider>
-            </ImagePreviewOverlayProvider>
-          </AppBackgroundProvider>
-        </DisplayModeProvider>
+                      <Route path="*" element={<Navigate to={ROUTE_PATH.library} replace />} />
+                    </Routes>
+                  </Layout>
+                </PluginDevLeaveGuardProvider>
+              </ImagePreviewOverlayProvider>
+            </AppBackgroundProvider>
+          </DisplayModeProvider>
+        </AgentMetadataCollectorProvider>
       </AvatarAutoCropBatchProvider>
     </ToastProvider>
   )

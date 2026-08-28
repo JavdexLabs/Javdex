@@ -1,9 +1,11 @@
 import { z } from 'zod'
 import { IPC } from '@shared/ipc-channels'
 import type { ActressIpcContract } from '@shared/actressIpcContract'
+import { ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/actressScrapeTypes'
 import type { AppIpcContract } from '@shared/appIpcContract'
 import type { ScrapeIpcContract } from '@shared/scrapeIpcContract'
 import type { VideoIpcContract } from '@shared/videoIpcContract'
+import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import type { IpcArgsSchemaMap } from './typedIpcAdapter'
 
 const id = z.number().int().positive()
@@ -196,6 +198,29 @@ const classificationImage = z.discriminatedUnion('source', [
   z.object({ source: z.literal('file'), sourcePath: nonEmptyText }).strict(),
   z.object({ source: z.literal('url'), remoteUrl: nonEmptyText }).strict(),
   z.object({ source: z.literal('video-cover'), videoId: id }).strict()
+])
+
+const agentMetadataTarget = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('video'), id }).strict(),
+  z.object({ kind: z.literal('actress'), id }).strict()
+])
+const agentMetadataPlan = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('video'),
+    draftId: nonEmptyText,
+    expectedRevision: revision,
+    fields: z.array(z.enum(ALL_VIDEO_SCRAPE_FIELDS)).max(ALL_VIDEO_SCRAPE_FIELDS.length),
+    mode: z.enum(['replace', 'fillEmpty', 'replaceIfPresent']),
+    directorSelectionId: id.optional()
+  }).strict(),
+  z.object({
+    kind: z.literal('actress'),
+    draftId: nonEmptyText,
+    expectedRevision: revision,
+    fields: z.array(z.enum(ALL_ACTRESS_SCRAPE_FIELDS)).max(ALL_ACTRESS_SCRAPE_FIELDS.length),
+    mode: z.enum(['replace', 'fillEmpty', 'replaceIfPresent']),
+    identityConfirmed: z.boolean().optional()
+  }).strict()
 ])
 
 const pluginPackage = z
@@ -530,6 +555,34 @@ export const appIpcSchemas = {
   ]),
   [IPC.LIBRARY_CURATOR_CANCEL]: z.tuple([nonEmptyText]),
   [IPC.LIBRARY_CURATOR_SNAPSHOT]: z.tuple([nonEmptyText.optional()]),
+  [IPC.AGENT_METADATA_START]: z.tuple([
+    z.object({
+      target: agentMetadataTarget,
+      sourceUrl: nonEmptyText.max(4_096),
+      idempotencyKey: nonEmptyText.max(200)
+    }).strict()
+  ]),
+  [IPC.AGENT_METADATA_RESUME]: z.tuple([
+    z.object({
+      runId: nonEmptyText,
+      requestId: nonEmptyText,
+      idempotencyKey: nonEmptyText.max(200)
+    }).strict()
+  ]),
+  [IPC.AGENT_METADATA_CANCEL]: z.tuple([nonEmptyText]),
+  [IPC.AGENT_METADATA_SNAPSHOT]: z.tuple([nonEmptyText]),
+  [IPC.AGENT_METADATA_FIND_READY]: z.tuple([agentMetadataTarget]),
+  [IPC.AGENT_METADATA_PLAN]: z.tuple([agentMetadataPlan]),
+  [IPC.AGENT_METADATA_APPLY]: z.tuple([
+    z.object({
+      draftId: nonEmptyText,
+      reviewToken: nonEmptyText,
+      idempotencyKey: nonEmptyText.max(200)
+    }).strict()
+  ]),
+  [IPC.AGENT_METADATA_DISCARD]: z.tuple([
+    z.object({ draftId: nonEmptyText, expectedRevision: revision }).strict()
+  ]),
   [IPC.PLAYER_PLAY]: z.tuple([id]),
   [IPC.PLAYER_REVEAL]: z.tuple([id]),
   [IPC.PLAYER_OPEN_RESOURCE]: z.tuple([id]),

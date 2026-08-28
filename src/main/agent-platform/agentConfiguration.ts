@@ -2,11 +2,12 @@ import { createHash } from 'node:crypto'
 import type { AgentProfile, AgentToolEffect } from '@shared/aiConfigurationTypes'
 import type { ModelWorkloadId } from '@shared/modelManagementTypes'
 import { PLUGIN_DEVELOPER_SYSTEM_PROMPT } from '../services/pluginDevAgent/pluginDevInstructions'
+import { AGENT_METADATA_COLLECTOR_SYSTEM_PROMPT } from '../services/agentMetadata/agentMetadataInstructions'
 import { modelManagement } from './modelManagement'
 
 export interface AgentDefinition {
-  id: 'plugin-developer' | 'library-curator'
-  useCase: 'plugin-developer' | 'library-curator'
+  id: 'plugin-developer' | 'library-curator' | 'metadata-collector'
+  useCase: 'plugin-developer' | 'library-curator' | 'metadata-collector'
   systemPrompt: string
   toolPackRefs: readonly string[]
   capabilityGrants: readonly string[]
@@ -29,17 +30,26 @@ const DEFINITIONS: readonly AgentDefinition[] = [
     toolPackRefs: ['toolpack:library-curator:v1'],
     capabilityGrants: ['library.read'],
     approvalRequiredEffects: []
+  },
+  {
+    id: 'metadata-collector',
+    useCase: 'metadata-collector',
+    systemPrompt: AGENT_METADATA_COLLECTOR_SYSTEM_PROMPT,
+    toolPackRefs: ['toolpack:metadata-collector:v1'],
+    capabilityGrants: ['browser.read', 'metadata.stage-remote-candidate'],
+    approvalRequiredEffects: []
   }
 ]
 
 function definitionIdForProfile(profileId: string): AgentDefinition['id'] {
   if (profileId.includes('plugin-developer')) return 'plugin-developer'
   if (profileId.includes('library-curator')) return 'library-curator'
+  if (profileId.includes('metadata-collector')) return 'metadata-collector'
   throw new Error(`Agent Profile 不存在：${profileId}`)
 }
 
 function workloadIdForDefinition(definitionId: AgentDefinition['id']): ModelWorkloadId {
-  return definitionId
+  return definitionId === 'metadata-collector' ? 'library-curator' : definitionId
 }
 
 export class AgentConfiguration {
@@ -62,7 +72,12 @@ export class AgentConfiguration {
     const virtualRoute = `workload:${workloadId}`
     const profile: AgentProfile = {
       id: profileId,
-      name: definition.id === 'plugin-developer' ? '插件开发' : '媒体库整理',
+      name:
+        definition.id === 'plugin-developer'
+          ? '插件开发'
+          : definition.id === 'metadata-collector'
+            ? '外部元数据采集'
+            : '媒体库整理',
       definitionId: definition.id,
       routes: {
         primary: virtualRoute,

@@ -461,6 +461,54 @@ CREATE INDEX IF NOT EXISTS idx_agent_artifacts_run_created
     ON agent_artifacts(run_id, created_at);
 `
 
+export const AGENT_METADATA_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS agent_metadata_drafts (
+    id TEXT PRIMARY KEY,
+    run_id TEXT,
+    entity_kind TEXT NOT NULL CHECK(entity_kind IN ('video', 'actress')),
+    entity_id INTEGER NOT NULL,
+    adapter_schema_version INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL CHECK(status IN ('ready', 'applied', 'routed_to_pending', 'discarded', 'failed')),
+    revision INTEGER NOT NULL DEFAULT 1,
+    requested_url TEXT NOT NULL,
+    resolved_url TEXT,
+    display_url TEXT NOT NULL,
+    source_name TEXT,
+    page_title TEXT,
+    payload_json TEXT NOT NULL,
+    warnings_json TEXT NOT NULL DEFAULT '[]',
+    review_json TEXT,
+    review_token TEXT,
+    apply_idempotency_key TEXT,
+    outcome_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    applied_at TEXT,
+    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE SET NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_metadata_drafts_ready_target
+    ON agent_metadata_drafts(entity_kind, entity_id) WHERE status = 'ready';
+CREATE INDEX IF NOT EXISTS idx_agent_metadata_drafts_run
+    ON agent_metadata_drafts(run_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS agent_metadata_draft_resources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    draft_id TEXT NOT NULL,
+    field TEXT NOT NULL CHECK(field IN ('cover', 'samples', 'actressAvatar', 'avatar', 'gallery')),
+    position INTEGER NOT NULL DEFAULT 0,
+    remote_url TEXT,
+    staged_path TEXT NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    size_bytes INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    FOREIGN KEY (draft_id) REFERENCES agent_metadata_drafts(id) ON DELETE CASCADE,
+    UNIQUE (draft_id, field, position)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_metadata_draft_resources_draft
+    ON agent_metadata_draft_resources(draft_id, field, position);
+`
+
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
 
@@ -763,4 +811,6 @@ ${PENDING_VIDEO_DECISIONS_SCHEMA_SQL}
 ${RELATED_LINKS_SCHEMA_SQL}
 
 ${AGENT_PLATFORM_SCHEMA_SQL}
+
+${AGENT_METADATA_SCHEMA_SQL}
 `

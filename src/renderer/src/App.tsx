@@ -31,6 +31,7 @@ import {
   SettingsPluginDevOutlet,
   SettingsSectionOutlet
 } from './settings/SettingsRouteOutlet'
+import { AgentMetadataCollectorProvider } from './components/agentMetadata/AgentMetadataCollectorContext'
 
 function FacetDetailRoute({
   kind,
@@ -53,11 +54,12 @@ function AppContent(): JSX.Element {
   return (
     <ToastProvider>
       <AvatarAutoCropBatchProvider>
-        <DisplayModeProvider>
-          <AppBackgroundProvider>
-            <ImagePreviewOverlayProvider previewEnabled={imagePreviewEnabled}>
-              <PluginDevLeaveGuardProvider>
-                <Layout>
+        <AgentMetadataCollectorProvider>
+          <DisplayModeProvider>
+            <AppBackgroundProvider>
+              <ImagePreviewOverlayProvider previewEnabled={imagePreviewEnabled}>
+                <PluginDevLeaveGuardProvider>
+                  <Layout>
                   <ResetListStateOnReload />
                   <Routes>
                     <Route path={ROUTE_PATH.library} element={<LibraryShell />}>
@@ -166,11 +168,12 @@ function AppContent(): JSX.Element {
                     </Route>
                     <Route path="*" element={<Navigate to={ROUTE_PATH.library} replace />} />
                   </Routes>
-                </Layout>
-              </PluginDevLeaveGuardProvider>
-            </ImagePreviewOverlayProvider>
-          </AppBackgroundProvider>
-        </DisplayModeProvider>
+                  </Layout>
+                </PluginDevLeaveGuardProvider>
+              </ImagePreviewOverlayProvider>
+            </AppBackgroundProvider>
+          </DisplayModeProvider>
+        </AgentMetadataCollectorProvider>
       </AvatarAutoCropBatchProvider>
     </ToastProvider>
   )

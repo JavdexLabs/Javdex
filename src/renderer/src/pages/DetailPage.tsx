@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
-import { ListPlus, Pencil, Play, SearchCheck, SearchX } from 'lucide-react'
+import { Bot, ListPlus, Pencil, Play, SearchCheck, SearchX } from 'lucide-react'
 import type {
   LastVideoResourceRemovalMode,
   Video,
@@ -64,6 +64,7 @@ import VideoResourceImportModal from '../components/VideoResourceImportModal'
 import DirectorScrapeChoiceModal from '../components/DirectorScrapeChoiceModal'
 import Button from '../components/Button'
 import { isVideoBusinessIdentityConflictError } from './videoBusinessIdentityConflict'
+import { useAgentMetadataCollector } from '../components/agentMetadata/AgentMetadataCollectorContext'
 
 interface PendingDirectorChoice {
   fields: VideoScrapeField[]
@@ -191,6 +192,7 @@ export default function DetailPage(): JSX.Element {
     },
     [videoId]
   )
+  const agentMetadata = useAgentMetadataCollector()
 
   useListSurfaceRefetch(actressStackOpen, () => {
     void load({ silent: true })
@@ -741,6 +743,15 @@ export default function DetailPage(): JSX.Element {
                     icon: <Pencil {...UI_ICON} />,
                     label: '编辑',
                     onClick: () => setShowEdit(true)
+                  },
+                  {
+                    key: 'agent-scrape',
+                    icon: <Bot {...UI_ICON} />,
+                    label: 'Agent 刮削',
+                    onClick: () => agentMetadata.open(
+                      { kind: 'video', id: videoId },
+                      () => { void load({ silent: true }) }
+                    )
                   },
                   {
                     key: 'scrape',

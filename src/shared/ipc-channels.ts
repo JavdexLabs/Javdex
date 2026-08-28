@@ -208,6 +208,17 @@ export const IPC = {
   LIBRARY_CURATOR_CANCEL: 'libraryCurator:cancel',
   LIBRARY_CURATOR_SNAPSHOT: 'libraryCurator:snapshot',
 
+  // External detail-page metadata collection Agent
+  AGENT_METADATA_START: 'agentMetadata:start',
+  AGENT_METADATA_RESUME: 'agentMetadata:resume',
+  AGENT_METADATA_CANCEL: 'agentMetadata:cancel',
+  AGENT_METADATA_SNAPSHOT: 'agentMetadata:snapshot',
+  AGENT_METADATA_FIND_READY: 'agentMetadata:findReady',
+  AGENT_METADATA_PLAN: 'agentMetadata:plan',
+  AGENT_METADATA_APPLY: 'agentMetadata:apply',
+  AGENT_METADATA_DISCARD: 'agentMetadata:discard',
+  AGENT_METADATA_SNAPSHOT_CHANGED: 'agentMetadata:snapshotChanged', // main -> renderer event
+
   // Player
   PLAYER_PLAY: 'player:play',
   PLAYER_REVEAL: 'player:reveal',

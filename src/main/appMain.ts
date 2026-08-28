@@ -21,6 +21,7 @@ import { pluginDeveloper } from './services/pluginDevAgent/pluginDeveloper'
 import { initializeAgentPlatform } from './agent-platform/composition'
 import { modelManagement } from './agent-platform/modelManagement'
 import { libraryCurator } from './services/libraryCuratorAgent/libraryCurator'
+import { agentMetadataCollection } from './services/agentMetadata/agentMetadataCollection'
 import { resolveMainWindowAssetPaths } from './mainWindowPaths'
 
 let mainWindow: BrowserWindow | null = null
@@ -159,7 +160,8 @@ if (gotSingleInstanceLock) {
     initializeAgentPlatform()
     const recoveryFailures = [
       ...await pluginDeveloper.restoreRecoverableRuns(),
-      ...await libraryCurator.restoreRecoverableRuns()
+      ...await libraryCurator.restoreRecoverableRuns(),
+      ...await agentMetadataCollection.restoreRecoverableRuns()
     ]
     for (const failure of recoveryFailures) {
       console.error(`[agent-recovery:${failure.runId}] ${failure.error}`)
@@ -204,6 +206,7 @@ if (gotSingleInstanceLock) {
     void Promise.allSettled([
       pluginDeveloper.dispose(),
       libraryCurator.dispose(),
+      agentMetadataCollection.dispose(),
       scrapeBrowser.dispose()
     ]).finally(() => {
       closeDatabase()

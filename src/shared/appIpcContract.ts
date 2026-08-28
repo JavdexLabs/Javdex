@@ -97,6 +97,19 @@ import type {
   SeriesProfileInput,
   SeriesUpdateInput
 } from './classificationTypes'
+import type {
+  AgentMetadataApplyInput,
+  AgentMetadataApplyOutcome,
+  AgentMetadataDiscardInput,
+  AgentMetadataDraft,
+  AgentMetadataPlanInput,
+  AgentMetadataResumeInput,
+  AgentMetadataReview,
+  AgentMetadataSnapshot,
+  AgentMetadataSnapshotChangedEvent,
+  AgentMetadataStartInput,
+  AgentMetadataTarget
+} from './agentMetadataTypes'
 
 export interface RemoteImagePreviewResult {
   mimeType: string
@@ -269,6 +282,32 @@ export interface AppIpcContract {
     args: [runId?: string]
     result: LibraryCuratorSnapshot | null
   }
+  [IPC.AGENT_METADATA_START]: {
+    args: [input: AgentMetadataStartInput]
+    result: AgentMetadataSnapshot
+  }
+  [IPC.AGENT_METADATA_RESUME]: {
+    args: [input: AgentMetadataResumeInput]
+    result: AgentMetadataSnapshot
+  }
+  [IPC.AGENT_METADATA_CANCEL]: { args: [runId: string]; result: void }
+  [IPC.AGENT_METADATA_SNAPSHOT]: {
+    args: [runId: string]
+    result: AgentMetadataSnapshot | null
+  }
+  [IPC.AGENT_METADATA_FIND_READY]: {
+    args: [target: AgentMetadataTarget]
+    result: AgentMetadataDraft | null
+  }
+  [IPC.AGENT_METADATA_PLAN]: {
+    args: [input: AgentMetadataPlanInput]
+    result: AgentMetadataReview
+  }
+  [IPC.AGENT_METADATA_APPLY]: {
+    args: [input: AgentMetadataApplyInput]
+    result: AgentMetadataApplyOutcome
+  }
+  [IPC.AGENT_METADATA_DISCARD]: { args: [input: AgentMetadataDiscardInput]; result: void }
 
   [IPC.PLAYER_PLAY]: { args: [videoId: number]; result: PlayResult }
   [IPC.PLAYER_REVEAL]: { args: [videoId: number]; result: PlayResult }
@@ -287,6 +326,7 @@ export interface AppIpcEventContract {
   [IPC.SCAN_STATE_CHANGED]: LibraryScanEvent
   [IPC.PLUGIN_DEV_AGENT_EVENT]: PluginDevAgentEvent
   [IPC.ASSET_CRYPTO_PROGRESS]: AssetCryptoProgress
+  [IPC.AGENT_METADATA_SNAPSHOT_CHANGED]: AgentMetadataSnapshotChangedEvent
 }
 
 export type AppIpcChannel = IpcContractChannel<AppIpcContract>

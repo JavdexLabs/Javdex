@@ -499,6 +499,25 @@ const api = {
     cancel: (runId: string) => invokeApp(IPC.LIBRARY_CURATOR_CANCEL, runId),
     snapshot: (runId?: string) => invokeApp(IPC.LIBRARY_CURATOR_SNAPSHOT, runId)
   },
+  agentMetadata: {
+    start: (input: import('../shared/agentMetadataTypes').AgentMetadataStartInput) =>
+      invokeApp(IPC.AGENT_METADATA_START, input),
+    resume: (input: import('../shared/agentMetadataTypes').AgentMetadataResumeInput) =>
+      invokeApp(IPC.AGENT_METADATA_RESUME, input),
+    cancel: (runId: string) => invokeApp(IPC.AGENT_METADATA_CANCEL, runId),
+    snapshot: (runId: string) => invokeApp(IPC.AGENT_METADATA_SNAPSHOT, runId),
+    findReady: (target: import('../shared/agentMetadataTypes').AgentMetadataTarget) =>
+      invokeApp(IPC.AGENT_METADATA_FIND_READY, target),
+    plan: (input: import('../shared/agentMetadataTypes').AgentMetadataPlanInput) =>
+      invokeApp(IPC.AGENT_METADATA_PLAN, input),
+    apply: (input: import('../shared/agentMetadataTypes').AgentMetadataApplyInput) =>
+      invokeApp(IPC.AGENT_METADATA_APPLY, input),
+    discard: (input: import('../shared/agentMetadataTypes').AgentMetadataDiscardInput) =>
+      invokeApp(IPC.AGENT_METADATA_DISCARD, input),
+    onSnapshotChanged: (
+      cb: (event: import('../shared/agentMetadataTypes').AgentMetadataSnapshotChangedEvent) => void
+    ) => onAppEvent(IPC.AGENT_METADATA_SNAPSHOT_CHANGED, cb)
+  },
   batchScrape: {
     getState: () => invokeScrape(IPC.BATCH_SCRAPE_STATE),
     pause: () => invokeScrape(IPC.BATCH_SCRAPE_PAUSE),

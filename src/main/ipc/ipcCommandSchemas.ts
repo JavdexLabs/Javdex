@@ -198,6 +198,35 @@ const classificationImage = z.discriminatedUnion('source', [
   z.object({ source: z.literal('video-cover'), videoId: id }).strict()
 ])
 
+const agentMetadataTarget = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('video'), id }).strict(),
+  z.object({ kind: z.literal('actress'), id }).strict()
+])
+const agentMetadataPlan = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('video'),
+    draftId: nonEmptyText,
+    expectedRevision: revision,
+    fields: z.array(z.enum([
+      'title', 'summary', 'cover', 'releaseDate', 'maker', 'publisher', 'series', 'director',
+      'duration', 'actressesFemale', 'actressesMale', 'tags', 'source', 'rating', 'samples'
+    ])).max(16),
+    mode: z.enum(['replace', 'fillEmpty', 'replaceIfPresent']),
+    directorSelectionId: id.optional()
+  }).strict(),
+  z.object({
+    kind: z.literal('actress'),
+    draftId: nonEmptyText,
+    expectedRevision: revision,
+    fields: z.array(z.enum([
+      'avatar', 'gallery', 'birthDate', 'nameZh', 'nameEn', 'debutDate', 'heightCm',
+      'measurements', 'cupSize', 'bloodType', 'zodiac', 'nationality', 'profileSummary', 'aliases'
+    ])).max(15),
+    mode: z.enum(['replace', 'fillEmpty', 'replaceIfPresent']),
+    identityConfirmed: z.boolean().optional()
+  }).strict()
+])
+
 const pluginPackage = z
   .object({
     schemaVersion: z.literal(1),
@@ -530,6 +559,34 @@ export const appIpcSchemas = {
   ]),
   [IPC.LIBRARY_CURATOR_CANCEL]: z.tuple([nonEmptyText]),
   [IPC.LIBRARY_CURATOR_SNAPSHOT]: z.tuple([nonEmptyText.optional()]),
+  [IPC.AGENT_METADATA_START]: z.tuple([
+    z.object({
+      target: agentMetadataTarget,
+      sourceUrl: nonEmptyText.max(4_096),
+      idempotencyKey: nonEmptyText.max(200)
+    }).strict()
+  ]),
+  [IPC.AGENT_METADATA_RESUME]: z.tuple([
+    z.object({
+      runId: nonEmptyText,
+      requestId: nonEmptyText,
+      idempotencyKey: nonEmptyText.max(200)
+    }).strict()
+  ]),
+  [IPC.AGENT_METADATA_CANCEL]: z.tuple([nonEmptyText]),
+  [IPC.AGENT_METADATA_SNAPSHOT]: z.tuple([nonEmptyText]),
+  [IPC.AGENT_METADATA_FIND_READY]: z.tuple([agentMetadataTarget]),
+  [IPC.AGENT_METADATA_PLAN]: z.tuple([agentMetadataPlan]),
+  [IPC.AGENT_METADATA_APPLY]: z.tuple([
+    z.object({
+      draftId: nonEmptyText,
+      reviewToken: nonEmptyText,
+      idempotencyKey: nonEmptyText.max(200)
+    }).strict()
+  ]),
+  [IPC.AGENT_METADATA_DISCARD]: z.tuple([
+    z.object({ draftId: nonEmptyText, expectedRevision: revision }).strict()
+  ]),
   [IPC.PLAYER_PLAY]: z.tuple([id]),
   [IPC.PLAYER_REVEAL]: z.tuple([id]),
   [IPC.PLAYER_OPEN_RESOURCE]: z.tuple([id]),

@@ -36,7 +36,7 @@ export const PRIVACY_MODE_SCOPES = [
 
 export type PrivacyModeScope = (typeof PRIVACY_MODE_SCOPES)[number]
 
-export const AUTO_SCAN_INTERVAL_MINUTES = [15, 30, 60, 180, 360] as const
+export const AUTO_SCAN_INTERVAL_MINUTES = [15, 30, 60, 180, 360, 1440] as const
 
 export type AutoScanIntervalMinutes = (typeof AUTO_SCAN_INTERVAL_MINUTES)[number]
 
@@ -162,6 +162,18 @@ type LegacyLlmSettingsKey =
   | 'pluginDevAgentMaxTurns'
   | 'pluginDevAgentMaxContextTokens'
 
+export type LegacyMediaLibrarySettingsKey =
+  | 'libraryPaths'
+  | 'pendingLibraryPathCleanups'
+  | 'autoDeleteResourceLessVideos'
+  | 'autoScanEnabled'
+  | 'autoScanIntervalMinutes'
+  | 'lastLibraryScanSummary'
+  | 'unrecognizedFiles'
+  | 'unrecognizedFilesScanFinishedAt'
+  | 'minScanImportDurationMinutes'
+  | 'autoMergeSameCodeResources'
+
 export type SettingsSnapshot = Omit<AppSettings, LegacyLlmSettingsKey> & {
   mediaAssetsResolvedPath: string
   recoveryNotice: SettingsRecoveryNotice | null
@@ -185,6 +197,7 @@ export type RendererSettingsPatch = Partial<
     | 'mediaAssetsPath'
     | 'pendingLibraryPathCleanups'
     | 'scraperServiceConfigs'
+    | LegacyMediaLibrarySettingsKey
   >
 >
 

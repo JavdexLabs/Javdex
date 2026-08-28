@@ -27,6 +27,25 @@ import type {
   VideoIpcResult
 } from '../shared/videoIpcContract'
 import type {
+  AddMediaLibraryRootInput,
+  CancelMediaLibraryRootRemovalInput,
+  DeleteMediaLibraryInput,
+  MediaLibraryIpcArgs,
+  MediaLibraryIpcChannel,
+  MediaLibraryIpcResult,
+  MediaLibraryDeletePreviewInput,
+  MediaLibraryListInput,
+  MediaLibraryRootMigrationPreviewInput,
+  MediaLibraryRevisionInput,
+  RemoveMediaLibraryRootInput,
+  UpdateMediaLibraryConfigInput,
+  UpdateMediaLibraryInput,
+  UpdateMediaLibraryRootInput
+} from '../shared/mediaLibraryIpcContract'
+import type { GlobalSearchInput, HomeDiscoveryInput } from '../shared/catalogTypes'
+import type { CatalogScope, CreateMediaLibraryInput } from '../shared/mediaLibraryTypes'
+import type { MigrateMediaLibraryRootInput } from '../shared/mediaLibraryTypes'
+import type {
   LastVideoResourceRemovalMode,
   VideoEditInput,
   VideoFieldUpdateInput,
@@ -37,6 +56,11 @@ import type {
   VideoResourceImportTarget,
   VideoSampleImportInput
 } from '../shared/videoTypes'
+import type {
+  DeleteVideoGloballyInput,
+  MoveVideoResourceInput,
+  RemoveVideoFromLibraryInput
+} from '../shared/videoLifecycleTypes'
 import type {
   ActressAvatarAutoCropOutcome,
   ActressAvatarAutoCropRequest,
@@ -61,7 +85,10 @@ import type { LibraryScanEvent, PendingScanGroupResolution } from '../shared/lib
 import type { BatchProgress } from '../shared/batchScrapeTypes'
 import type { RendererSettingsPatch } from '../shared/settingsTypes'
 import type { ModelManagementApplyInput } from '../shared/modelManagementTypes'
-import type { ScanProgress, AssetCryptoProgress } from '../shared/libraryTypes'
+import type {
+  AssetCryptoProgress,
+  LibraryScanProgressEvent
+} from '../shared/libraryTypes'
 import type { ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../shared/actressTypes'
 import type { IpcResponse } from '../shared/ipcTypes'
 import type { InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
@@ -107,6 +134,13 @@ function invokeVideo<Channel extends VideoIpcChannel>(
   return invoke<VideoIpcResult<Channel>>(channel, ...args)
 }
 
+function invokeMediaLibrary<Channel extends MediaLibraryIpcChannel>(
+  channel: Channel,
+  ...args: MediaLibraryIpcArgs<Channel>
+): Promise<MediaLibraryIpcResult<Channel>> {
+  return invoke<MediaLibraryIpcResult<Channel>>(channel, ...args)
+}
+
 function invokeScrape<Channel extends ScrapeIpcChannel>(
   channel: Channel,
   ...args: ScrapeIpcArgs<Channel>
@@ -140,6 +174,43 @@ function onScrapeEvent<Channel extends ScrapeIpcEventChannel>(
 }
 
 const api = {
+  mediaLibraries: {
+    list: (input?: MediaLibraryListInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_LIST, input),
+    get: (libraryId: number) => invokeMediaLibrary(IPC.MEDIA_LIBRARY_GET, libraryId),
+    create: (input: CreateMediaLibraryInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_CREATE, input),
+    update: (input: UpdateMediaLibraryInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_UPDATE, input),
+    updateConfig: (input: UpdateMediaLibraryConfigInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_CONFIG_UPDATE, input),
+    addRoot: (input: AddMediaLibraryRootInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_ROOT_ADD, input),
+    updateRoot: (input: UpdateMediaLibraryRootInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_ROOT_UPDATE, input),
+    removeRoot: (input: RemoveMediaLibraryRootInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_ROOT_REMOVE, input),
+    cancelRootRemoval: (input: CancelMediaLibraryRootRemovalInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_ROOT_REMOVE_CANCEL, input),
+    previewRootMigration: (input: MediaLibraryRootMigrationPreviewInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_ROOT_MIGRATE_PREVIEW, input),
+    migrateRoot: (input: MigrateMediaLibraryRootInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_ROOT_MIGRATE, input),
+    archive: (input: MediaLibraryRevisionInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_ARCHIVE, input),
+    restore: (input: MediaLibraryRevisionInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_RESTORE, input),
+    previewRemoval: (libraryId: number) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_DELETE_PREVIEW, {
+        libraryId
+      } satisfies MediaLibraryDeletePreviewInput),
+    remove: (input: DeleteMediaLibraryInput) =>
+      invokeMediaLibrary(IPC.MEDIA_LIBRARY_DELETE, input)
+  },
+  home: {
+    load: (input: HomeDiscoveryInput) => invokeMediaLibrary(IPC.HOME_LOAD, input),
+    search: (input: GlobalSearchInput) => invokeMediaLibrary(IPC.HOME_SEARCH, input)
+  },
   externalLinks: {
     open: (url: string) => invokeApp(IPC.EXTERNAL_LINK_OPEN, url)
   },
@@ -158,10 +229,21 @@ const api = {
     get: () => invokeApp(IPC.SETTINGS_GET),
     update: (patch: RendererSettingsPatch) => invokeApp(IPC.SETTINGS_UPDATE, patch),
     pickFolder: () => invokeApp(IPC.SETTINGS_PICK_FOLDER),
-    previewLibraryPathRemoval: (path: string) =>
-      invokeApp(IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW, path),
-    confirmLibraryPathRemoval: (path: string) =>
-      invokeApp(IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM, path),
+    previewLibraryPathRemoval: (libraryId: number, rootId: number) =>
+      invokeApp(IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW, libraryId, rootId),
+    confirmLibraryPathRemoval: (
+      libraryId: number,
+      rootId: number,
+      expectedRevision: number,
+      expectedImpactRevision: string
+    ) =>
+      invokeApp(
+        IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM,
+        libraryId,
+        rootId,
+        expectedRevision,
+        expectedImpactRevision
+      ),
     getModelManagement: () => invokeApp(IPC.SETTINGS_MODEL_MANAGEMENT_GET),
     applyModelManagement: (input: ModelManagementApplyInput) =>
       invokeApp(IPC.SETTINGS_MODEL_MANAGEMENT_APPLY, input),
@@ -175,38 +257,60 @@ const api = {
     getOverviewStats: () => invokeApp(IPC.SETTINGS_OVERVIEW_STATS)
   },
   scan: {
-    run: (folders?: string[]) => invokeApp(IPC.SCAN_RUN, folders),
-    cancel: () => invokeApp(IPC.SCAN_CANCEL),
-    getAudit: () => invokeApp(IPC.SCAN_AUDIT_GET),
-    revealAuditFile: (filePath: string) => invokeApp(IPC.SCAN_AUDIT_REVEAL_FILE, filePath),
+    run: (libraryId: number, rootIds?: number[]) =>
+      invokeApp(IPC.SCAN_RUN, libraryId, rootIds),
+    cancel: (runId: string) => invokeApp(IPC.SCAN_CANCEL, runId),
+    getLatest: (libraryId: number) => invokeApp(IPC.SCAN_LATEST_GET, libraryId),
+    getAudit: (libraryId: number) => invokeApp(IPC.SCAN_AUDIT_GET, libraryId),
+    revealAuditFile: (libraryId: number, filePath: string) =>
+      invokeApp(IPC.SCAN_AUDIT_REVEAL_FILE, libraryId, filePath),
     rename: (
+      libraryId: number,
+      rootId: number,
       oldPath: string,
       newName: string,
       code: string,
       target: VideoResourceImportTarget
-    ) => invokeApp(IPC.FILE_RENAME, oldPath, newName, code, target),
-    importManual: (filePath: string, code: string, target: VideoResourceImportTarget) =>
-      invokeApp(IPC.FILE_IMPORT_MANUAL, filePath, code, target),
-    listPending: () => invokeApp(IPC.PENDING_SCAN_LIST),
-    resolvePending: (groupId: number, resolution: PendingScanGroupResolution) =>
-      invokeApp(IPC.PENDING_SCAN_RESOLVE, groupId, resolution),
-    onProgress: (cb: (p: ScanProgress) => void) => onAppEvent(IPC.SCAN_PROGRESS, cb),
+    ) =>
+      invokeApp(
+        IPC.FILE_RENAME,
+        libraryId,
+        rootId,
+        oldPath,
+        newName,
+        code,
+        target
+      ),
+    importManual: (
+      libraryId: number,
+      rootId: number,
+      filePath: string,
+      code: string,
+      target: VideoResourceImportTarget
+    ) => invokeApp(IPC.FILE_IMPORT_MANUAL, libraryId, rootId, filePath, code, target),
+    listPending: (libraryId: number) => invokeApp(IPC.PENDING_SCAN_LIST, libraryId),
+    resolvePending: (
+      libraryId: number,
+      groupId: number,
+      resolution: PendingScanGroupResolution
+    ) => invokeApp(IPC.PENDING_SCAN_RESOLVE, libraryId, groupId, resolution),
+    onProgress: (cb: (event: LibraryScanProgressEvent) => void) =>
+      onAppEvent(IPC.SCAN_PROGRESS, cb),
     onStateChanged: (cb: (event: LibraryScanEvent) => void) =>
       onAppEvent(IPC.SCAN_STATE_CHANGED, cb)
   },
   videos: {
-    list: (q: VideoQuery) => invokeVideo(IPC.VIDEO_LIST, q),
-    get: (id: number) => invokeVideo(IPC.VIDEO_GET, id),
+    list: (scope: CatalogScope, q?: VideoQuery) => invokeVideo(IPC.VIDEO_LIST, scope, q),
+    get: (scope: CatalogScope, id: number) => invokeVideo(IPC.VIDEO_GET, scope, id),
     update: (id: number, fields: VideoFieldUpdateInput) => invokeVideo(IPC.VIDEO_UPDATE, id, fields),
     edit: (id: number, input: VideoEditInput) => invokeVideo(IPC.VIDEO_EDIT, id, input),
     clearMeta: (id: number) => invokeVideo(IPC.VIDEO_CLEAR_META, id),
     markScrapeSuccess: (id: number) => invokeVideo(IPC.VIDEO_MARK_SCRAPE_SUCCESS, id),
-    remove: (id: number) => invokeVideo(IPC.VIDEO_DELETE, id),
     setRating: (id: number, rating: number) =>
       invokeVideo(IPC.VIDEO_SET_RATING, id, rating),
     correctImport: (id: number, code: string, discardPendingScrape?: boolean) =>
       invokeVideo(IPC.VIDEO_CORRECT_IMPORT, id, code, discardPendingScrape),
-    years: () => invokeVideo(IPC.VIDEO_YEARS),
+    years: (scope: CatalogScope) => invokeVideo(IPC.VIDEO_YEARS, scope),
     importSample: (id: number, input: VideoSampleImportInput) =>
       invokeVideo(IPC.VIDEO_SAMPLE_IMPORT, id, input),
     deleteSample: (id: number, assetId: number) =>
@@ -219,26 +323,67 @@ const api = {
       invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId),
     importLinkResource: (input: VideoLinkResourceImportInput) =>
       invokeVideo(IPC.VIDEO_RESOURCE_IMPORT, input),
-    getResource: (videoId: number, resourceId: number) =>
-      invokeVideo(IPC.VIDEO_RESOURCE_GET, videoId, resourceId),
+    getResource: (libraryId: number, videoId: number, resourceId: number) =>
+      invokeVideo(IPC.VIDEO_RESOURCE_GET, libraryId, videoId, resourceId),
     checkResourceLink: (url: string) => invokeVideo(IPC.VIDEO_RESOURCE_CHECK, url),
     updateLinkResource: (
+      libraryId: number,
       videoId: number,
       resourceId: number,
       input: VideoLinkResourceUpdateInput
-    ) => invokeVideo(IPC.VIDEO_RESOURCE_UPDATE, videoId, resourceId, input),
-    updateLocalResourceLabel: (videoId: number, resourceId: number, label: string | null) =>
-      invokeVideo(IPC.VIDEO_RESOURCE_UPDATE_LOCAL_LABEL, videoId, resourceId, label),
-    setPrimaryResource: (videoId: number, resourceId: number) =>
-      invokeVideo(IPC.VIDEO_RESOURCE_SET_PRIMARY, videoId, resourceId),
+    ) => invokeVideo(IPC.VIDEO_RESOURCE_UPDATE, libraryId, videoId, resourceId, input),
+    updateLocalResourceLabel: (
+      libraryId: number,
+      videoId: number,
+      resourceId: number,
+      label: string | null
+    ) =>
+      invokeVideo(
+        IPC.VIDEO_RESOURCE_UPDATE_LOCAL_LABEL,
+        libraryId,
+        videoId,
+        resourceId,
+        label
+      ),
+    setPrimaryResource: (libraryId: number, videoId: number, resourceId: number) =>
+      invokeVideo(IPC.VIDEO_RESOURCE_SET_PRIMARY, libraryId, videoId, resourceId),
     removeResource: (
+      libraryId: number,
       videoId: number,
       resourceId: number,
       lastResourceMode?: LastVideoResourceRemovalMode
-    ) => invokeVideo(IPC.VIDEO_RESOURCE_REMOVE, videoId, resourceId, lastResourceMode),
+    ) =>
+      invokeVideo(
+        IPC.VIDEO_RESOURCE_REMOVE,
+        libraryId,
+        videoId,
+        resourceId,
+        lastResourceMode
+      ),
+    previewRemoveFromLibrary: (libraryId: number, videoId: number) =>
+      invokeVideo(IPC.VIDEO_REMOVE_FROM_LIBRARY_PREVIEW, libraryId, videoId),
+    removeFromLibrary: (input: RemoveVideoFromLibraryInput) =>
+      invokeVideo(IPC.VIDEO_REMOVE_FROM_LIBRARY, input),
+    previewMoveResource: (
+      sourceLibraryId: number,
+      targetLibraryId: number,
+      resourceId: number
+    ) =>
+      invokeVideo(
+        IPC.VIDEO_RESOURCE_MOVE_PREVIEW,
+        sourceLibraryId,
+        targetLibraryId,
+        resourceId
+      ),
+    moveResource: (input: MoveVideoResourceInput) =>
+      invokeVideo(IPC.VIDEO_RESOURCE_MOVE, input),
+    previewDeleteGlobally: (videoId: number) =>
+      invokeVideo(IPC.VIDEO_DELETE_GLOBAL_PREVIEW, videoId),
+    deleteGlobally: (input: DeleteVideoGloballyInput) =>
+      invokeVideo(IPC.VIDEO_DELETE_GLOBAL, input),
     merge: (input: VideoMergeInput) => invokeVideo(IPC.VIDEO_MERGE, input),
-    splitResource: (videoId: number, resourceId: number) =>
-      invokeVideo(IPC.VIDEO_RESOURCE_SPLIT, videoId, resourceId)
+    splitResource: (libraryId: number, videoId: number, resourceId: number) =>
+      invokeVideo(IPC.VIDEO_RESOURCE_SPLIT, libraryId, videoId, resourceId)
   },
   playlists: {
     list: () => invokeApp(IPC.PLAYLIST_LIST),
@@ -338,8 +483,18 @@ const api = {
       scraperName?: string,
       fields?: VideoScrapeField[],
       mode?: VideoScrapeUpdateMode,
-      directorSelectionId?: number
-    ) => invokeScrape(IPC.SCRAPE_ONE, videoId, scraperName, fields, mode, directorSelectionId),
+      directorSelectionId?: number,
+      libraryId?: number
+    ) =>
+      invokeScrape(
+        IPC.SCRAPE_ONE,
+        videoId,
+        scraperName,
+        fields,
+        mode,
+        directorSelectionId,
+        libraryId
+      ),
     listPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_LIST),
     confirmPending: (input: PendingVideoScrapeConfirmInput) =>
       invokeScrape(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, input),
@@ -529,11 +684,14 @@ const api = {
     end: (token: string) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_END, token)
   },
   player: {
-    play: (videoId: number) => invokeApp(IPC.PLAYER_PLAY, videoId),
-    reveal: (videoId: number) => invokeApp(IPC.PLAYER_REVEAL, videoId),
-    openResource: (resourceId: number) => invokeApp(IPC.PLAYER_OPEN_RESOURCE, resourceId),
-    revealResource: (resourceId: number) =>
-      invokeApp(IPC.PLAYER_REVEAL_RESOURCE, resourceId)
+    play: (libraryId: number, videoId: number) =>
+      invokeApp(IPC.PLAYER_PLAY, libraryId, videoId),
+    reveal: (libraryId: number, videoId: number) =>
+      invokeApp(IPC.PLAYER_REVEAL, libraryId, videoId),
+    openResource: (libraryId: number, resourceId: number) =>
+      invokeApp(IPC.PLAYER_OPEN_RESOURCE, libraryId, resourceId),
+    revealResource: (libraryId: number, resourceId: number) =>
+      invokeApp(IPC.PLAYER_REVEAL_RESOURCE, libraryId, resourceId)
   },
   assetCrypto: {
     setEnabled: (enabled: boolean) => invokeApp(IPC.ASSET_CRYPTO_SET, enabled),

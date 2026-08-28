@@ -1,16 +1,22 @@
+import { Navigate, useParams } from 'react-router-dom'
 import ListDetailShell from './ListDetailShell'
-import { ROUTE_MATCH } from '../listView/routePaths'
+import { ROUTE_MATCH, ROUTE_PATH } from '../listView/routePaths'
 import LibraryPage from '../pages/LibraryPage'
+import { parsePositiveRouteId } from '../listView/routeIds'
 
-/** Stable element so route transitions do not remount the list (scroll + filters). */
-const LIBRARY_LIST = <LibraryPage />
-
-/** Keeps the library mounted while viewing a video detail page. */
+/** Keeps one parameterized library mounted while viewing its video detail stack. */
 export default function LibraryShell(): JSX.Element {
+  const { libraryId: rawLibraryId } = useParams()
+  const libraryId = parsePositiveRouteId(rawLibraryId)
+  if (libraryId == null) return <Navigate to={ROUTE_PATH.home} replace />
+
   return (
     <ListDetailShell
-      list={LIBRARY_LIST}
-      detailMatchPath={ROUTE_MATCH.libraryDetailOpen}
+      list={<LibraryPage key={libraryId} libraryId={libraryId} />}
+      detailMatchPath={[
+        ROUTE_MATCH.mediaLibraryVideoOpen,
+        ROUTE_MATCH.mediaLibrarySettings
+      ]}
       detailMatchEnd={false}
     />
   )

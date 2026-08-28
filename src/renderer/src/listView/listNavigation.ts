@@ -25,6 +25,23 @@ import {
   parseLibraryVideoPath
 } from './libraryRoutes'
 import {
+  homeVideoActressPath,
+  homeVideoDetailPath,
+  parseHomeVideoPath
+} from './homeRoutes'
+import {
+  mediaLibraryPath,
+  mediaLibraryVideoActressPath,
+  mediaLibraryVideoDetailPath,
+  parseMediaLibraryRoute,
+  parseMediaLibraryVideoPath
+} from './mediaLibraryRoutes'
+import {
+  parseSearchVideoPath,
+  searchVideoActressPath,
+  searchVideoDetailPath
+} from './searchRoutes'
+import {
   parsePendingActressDetailPath,
   parsePendingVideoPath,
   pendingActressDetailPath,
@@ -38,13 +55,29 @@ import {
 } from './playlistRoutes'
 import { patchSearchParams } from './listQueryParams'
 import { ROUTE_PATH } from './routePaths'
+import {
+  canonicalizeVideoDetailSearchParams,
+  setVideoDetailLibraryId,
+  stripVideoDetailSearchParams
+} from './videoDetailContext'
+
+interface VideoDetailNavigationOptions {
+  replace?: boolean
+  /** Required for cards on cross-library surfaces so detail resource scope survives reload. */
+  libraryId?: number
+}
+
+function detailSearch(location: Location, libraryId?: number): string {
+  const params = canonicalizeVideoDetailSearchParams(new URLSearchParams(location.search))
+  return (libraryId == null ? params : setVideoDetailLibraryId(params, libraryId)).toString()
+}
 
 /** Open video detail; nested under facet list when already in that flow. */
 export function navigateToVideoDetail(
   navigate: NavigateFunction,
   location: Location,
   videoId: number,
-  options?: { replace?: boolean }
+  options?: VideoDetailNavigationOptions
 ): void {
   const pending = parsePendingVideoPath(location.pathname)
   if (pending || location.pathname === ROUTE_PATH.pending) {
@@ -116,6 +149,34 @@ export function navigateToVideoDetail(
     )
     return
   }
+
+  const mediaLibrary = parseMediaLibraryRoute(location.pathname)
+  if (mediaLibrary) {
+    navigate(
+      {
+        pathname: mediaLibraryVideoDetailPath(mediaLibrary.libraryId, videoId),
+        search: stripVideoDetailSearchParams(new URLSearchParams(location.search)).toString()
+      },
+      { replace: options?.replace }
+    )
+    return
+  }
+
+  if (location.pathname === ROUTE_PATH.search || parseSearchVideoPath(location.pathname)) {
+    navigate(
+      { pathname: searchVideoDetailPath(videoId), search: detailSearch(location, options?.libraryId) },
+      { replace: options?.replace }
+    )
+    return
+  }
+
+  if (location.pathname === ROUTE_PATH.home || parseHomeVideoPath(location.pathname)) {
+    navigate(
+      { pathname: homeVideoDetailPath(videoId), search: detailSearch(location, options?.libraryId) },
+      { replace: options?.replace }
+    )
+    return
+  }
   navigate(
     {
       pathname: libraryVideoDetailPath(videoId),
@@ -138,6 +199,30 @@ export function navigateBackFromVideoDetail(
       state: { libraryFocus: 'scan-audit' },
       preventScrollReset: true
     })
+    return
+  }
+  const mediaLibrary = parseMediaLibraryVideoPath(location.pathname)
+  if (mediaLibrary) {
+    const nextSearch = patch
+      ? patchSearchParams(stripVideoDetailSearchParams(new URLSearchParams(location.search)), patch)
+      : stripVideoDetailSearchParams(new URLSearchParams(location.search))
+    navigate({ pathname: mediaLibraryPath(mediaLibrary.libraryId), search: nextSearch.toString() })
+    return
+  }
+  const home = parseHomeVideoPath(location.pathname)
+  if (home) {
+    const nextSearch = patch
+      ? patchSearchParams(stripVideoDetailSearchParams(new URLSearchParams(location.search)), patch)
+      : stripVideoDetailSearchParams(new URLSearchParams(location.search))
+    navigate({ pathname: ROUTE_PATH.home, search: nextSearch.toString() })
+    return
+  }
+  const search = parseSearchVideoPath(location.pathname)
+  if (search) {
+    const nextSearch = patch
+      ? patchSearchParams(stripVideoDetailSearchParams(new URLSearchParams(location.search)), patch)
+      : stripVideoDetailSearchParams(new URLSearchParams(location.search))
+    navigate({ pathname: ROUTE_PATH.search, search: nextSearch.toString() })
     return
   }
   const pending = parsePendingVideoPath(location.pathname)
@@ -206,15 +291,19 @@ export function navigateBackFromVideoDetail(
     })
     return
   }
-  navigateToLibrary(navigate, location, patch)
+  navigateToVideoListSurface(navigate, location, patch)
 }
 
-/** Return to library list (closes detail) preserving or replacing search params. */
-export function navigateToLibrary(
+/** Return to the scoped media-library list, or home when no library scope is available. */
+export function navigateToVideoListSurface(
   navigate: NavigateFunction,
   location: Location,
   patch?: Record<string, string | null | undefined>,
-  options?: { replace?: boolean; tagLabel?: { id: number; name: string } }
+  options?: {
+    replace?: boolean
+    libraryId?: number
+    tagLabel?: { id: number; name: string }
+  }
 ): void {
   const nextSearch = patch
     ? patchSearchParams(new URLSearchParams(location.search), patch)
@@ -230,9 +319,14 @@ export function navigateToLibrary(
           }
         }
       : location.state
+  const scopedLibrary = parseMediaLibraryVideoPath(location.pathname)
+  const targetLibraryId = scopedLibrary?.libraryId ?? options?.libraryId
+  const pathname =
+    targetLibraryId == null ? ROUTE_PATH.home : mediaLibraryPath(targetLibraryId)
+  nextSearch.delete('lib')
   navigate(
     {
-      pathname: '/',
+      pathname,
       search: nextSearch.toString()
     },
     { replace: options?.replace ?? false, preventScrollReset: true, state: nextState }
@@ -246,6 +340,24 @@ export function navigateToActressFromVideoDetail(
   videoId: number,
   actressId: number
 ): void {
+  const mediaLibrary = parseMediaLibraryVideoPath(location.pathname)
+  if (mediaLibrary) {
+    navigate({
+      pathname: mediaLibraryVideoActressPath(mediaLibrary.libraryId, videoId, actressId),
+      search: location.search
+    })
+    return
+  }
+  const home = parseHomeVideoPath(location.pathname)
+  if (home) {
+    navigate({ pathname: homeVideoActressPath(videoId, actressId), search: location.search })
+    return
+  }
+  const search = parseSearchVideoPath(location.pathname)
+  if (search) {
+    navigate({ pathname: searchVideoActressPath(videoId, actressId), search: location.search })
+    return
+  }
   const pending = parsePendingVideoPath(location.pathname)
   if (pending?.videoId != null) {
     navigate({
@@ -309,6 +421,24 @@ export function navigateBackFromActressDetail(
   navigate: NavigateFunction,
   location: Location
 ): void {
+  const mediaLibrary = parseMediaLibraryVideoPath(location.pathname)
+  if (mediaLibrary?.actressId != null) {
+    navigate({
+      pathname: mediaLibraryVideoDetailPath(mediaLibrary.libraryId, mediaLibrary.videoId),
+      search: location.search
+    })
+    return
+  }
+  const home = parseHomeVideoPath(location.pathname)
+  if (home?.actressId != null) {
+    navigate({ pathname: homeVideoDetailPath(home.videoId), search: location.search })
+    return
+  }
+  const search = parseSearchVideoPath(location.pathname)
+  if (search?.actressId != null) {
+    navigate({ pathname: searchVideoDetailPath(search.videoId), search: location.search })
+    return
+  }
   const pending = parsePendingVideoPath(location.pathname)
   if (pending?.videoId != null && pending.actressId != null) {
     navigate({

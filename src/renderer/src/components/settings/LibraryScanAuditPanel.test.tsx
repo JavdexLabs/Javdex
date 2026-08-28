@@ -2,7 +2,11 @@ import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
-import type { LibraryScanAudit, LibraryScanSummary } from '@shared/libraryTypes'
+import type {
+  LibraryScanAudit,
+  LibraryScanLatestSnapshot,
+  LibraryScanSummary
+} from '@shared/libraryTypes'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 Object.defineProperty(globalThis, 'window', {
@@ -28,6 +32,9 @@ afterEach(() => {
 
 function summary(overrides: Partial<LibraryScanSummary> = {}): LibraryScanSummary {
   return {
+    libraryId: 1,
+    runId: 'run-1',
+    configRevision: 1,
     trigger: 'manual',
     startedAt: '2026-08-27T01:00:00.000Z',
     finishedAt: '2026-08-27T01:00:05.000Z',
@@ -51,6 +58,9 @@ function summary(overrides: Partial<LibraryScanSummary> = {}): LibraryScanSummar
 function audit(files: LibraryScanAudit['files']): LibraryScanAudit {
   return {
     schemaVersion: 1,
+    libraryId: 1,
+    runId: 'run-1',
+    configRevision: 1,
     trigger: 'manual',
     startedAt: '2026-08-27T01:00:00.000Z',
     finishedAt: '2026-08-27T01:00:05.000Z',
@@ -70,7 +80,7 @@ async function renderPanel({
 }: {
   scanSummary: LibraryScanSummary
   scanAudit: LibraryScanAudit | null
-  unrecognized?: string[]
+  unrecognized?: LibraryScanLatestSnapshot['unrecognized']
 }): Promise<void> {
   const { default: LibraryScanAuditPanel } = await import('./LibraryScanAuditPanel')
   act(() => {
@@ -91,17 +101,18 @@ async function renderPanel({
 }
 
 describe('LibraryScanAuditPanel', () => {
-  it('keeps cached unrecognized files actionable when the matching audit is unavailable', async () => {
+  it('keeps cached unrecognized files visible with their root-scoped resolution controls', async () => {
     await renderPanel({
       scanSummary: summary(),
       scanAudit: null,
-      unrecognized: ['D:\\Downloads\\UNKNOWN.mp4']
+      unrecognized: [{ rootId: 1, filePath: 'D:\\Downloads\\UNKNOWN.mp4' }]
     })
 
     const output = JSON.stringify(renderer?.toJSON())
     assert.match(output, /UNKNOWN\.mp4/)
     assert.match(output, /无法识别番号/)
     assert.match(output, /异常与待办.*1/s)
+    assert.match(output, /输入番号/)
   })
 
   it('does not describe current scan failures as resolved', async () => {
@@ -110,6 +121,7 @@ describe('LibraryScanAuditPanel', () => {
       scanAudit: audit([
         {
           outcome: 'strm_failure',
+          rootId: 1,
           sourceKind: 'strm',
           filePath: 'D:\\Media\\BROKEN.strm',
           failureCode: 'read_failed',
@@ -128,8 +140,8 @@ describe('LibraryScanAuditPanel', () => {
     const filePath = 'D:\\Downloads\\UNKNOWN.mp4'
     await renderPanel({
       scanSummary: summary({ scannedFiles: 1, failedFiles: 1 }),
-      scanAudit: audit([{ outcome: 'unrecognized', sourceKind: 'local', filePath }]),
-      unrecognized: [filePath]
+      scanAudit: audit([{ outcome: 'unrecognized', rootId: 1, sourceKind: 'local', filePath }]),
+      unrecognized: [{ rootId: 1, filePath }]
     })
 
     const allFilesTab = renderer!.root

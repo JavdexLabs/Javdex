@@ -3,7 +3,6 @@ import { ROUTE_PATH } from '../listView/routePaths'
 
 export type SettingsGroup =
   | 'overview'
-  | 'library'
   | 'plugins'
   | 'models'
   | 'appearance'
@@ -13,7 +12,6 @@ export type SettingsGroup =
 
 export type SettingsTab =
   | 'status'
-  | 'paths'
   | 'video'
   | 'providers'
   | 'theme'
@@ -43,14 +41,6 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
     description: '库状态、默认配置与连接一览。',
     defaultTab: 'status',
     tabs: [{ id: 'status', label: '状态' }]
-  },
-  {
-    id: 'library',
-    label: '媒体库',
-    hint: '路径与扫描',
-    description: '管理扫描路径、导入影片与处理无法识别文件。',
-    defaultTab: 'paths',
-    tabs: [{ id: 'paths', label: '路径' }]
   },
   {
     id: 'plugins',

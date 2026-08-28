@@ -17,7 +17,7 @@ import {
 import {
   getVideoById,
   hasPendingVideoScrape,
-  listVideoResources,
+  listVideoResourcesAcrossLibraries,
   markScrapeFailed,
   mergeVideoRecords
 } from '../db/videoRepo'
@@ -229,8 +229,8 @@ export const videoPendingScrapeService = {
               ? conflictVideoId
               : snapshot.pending.videoId
           const mergeResources = [
-            ...listVideoResources(input.mergeRetainedVideoId),
-            ...listVideoResources(sourceVideoId)
+            ...listVideoResourcesAcrossLibraries(input.mergeRetainedVideoId),
+            ...listVideoResourcesAcrossLibraries(sourceVideoId)
           ]
           const hasPrimary = mergeResources.some((resource) => Boolean(resource.is_primary))
           const fallbackPrimaryResourceId = hasPrimary

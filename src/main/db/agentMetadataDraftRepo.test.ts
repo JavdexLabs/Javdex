@@ -14,14 +14,20 @@ function fixture() {
        product_state_json, created_at, updated_at
      ) VALUES (?, 'metadata-collector', 'running', 'test', '{}', 'pi', '{}', ?, ?)`
   ).run('run-1', new Date().toISOString(), new Date().toISOString())
+  db.exec("INSERT INTO videos (id, code) VALUES (7, 'ABC-123'), (8, 'XYZ-008')")
   return { db, repo: new AgentMetadataDraftRepo(() => db) }
 }
 
-function createVideoDraft(repo: AgentMetadataDraftRepo, id: string, stagedPath: string) {
+function createVideoDraft(
+  repo: AgentMetadataDraftRepo,
+  id: string,
+  stagedPath: string,
+  targetId = 7
+) {
   return repo.create({
     id,
     runId: 'run-1',
-    target: { kind: 'video', id: 7 },
+    target: { kind: 'video', id: targetId },
     source: {
       requestedUrl: 'https://example.test/video/ABC-123',
       finalUrl: 'https://example.test/video/ABC-123',
@@ -105,6 +111,38 @@ describe('AgentMetadataDraftRepo', () => {
       assert.deepEqual(repo.getStoredOutcome({ draftId: draft.id, idempotencyKey: 'apply-1' }), outcome)
       assert.equal(repo.getStoredOutcome({ draftId: draft.id, idempotencyKey: 'other' }), null)
       assert.equal(repo.require(draft.id).status, 'applied')
+    } finally {
+      db.close()
+    }
+  })
+
+  it('rechecks target existence inside create without mutating existing drafts', () => {
+    const { db, repo } = fixture()
+    try {
+      createVideoDraft(repo, 'draft-7', '.video_scrape_staging/seven/cover-0.jpg')
+      createVideoDraft(repo, 'draft-8', '.video_scrape_staging/eight/cover-0.jpg', 8)
+      db.prepare('DELETE FROM videos WHERE id = 7').run()
+
+      assert.throws(
+        () => createVideoDraft(repo, 'draft-race', '.video_scrape_staging/race/cover-0.jpg'),
+        /影片不存在/
+      )
+      assert.equal(repo.require('draft-7').status, 'ready')
+      assert.equal(repo.require('draft-8').status, 'ready')
+      assert.deepEqual(
+        db
+          .prepare(
+            `SELECT draft_id, staged_path
+             FROM agent_metadata_draft_resources
+             ORDER BY draft_id`
+          )
+          .all(),
+        [
+          { draft_id: 'draft-7', staged_path: '.video_scrape_staging/seven/cover-0.jpg' },
+          { draft_id: 'draft-8', staged_path: '.video_scrape_staging/eight/cover-0.jpg' }
+        ]
+      )
+      assert.equal(repo.get('draft-race'), null)
     } finally {
       db.close()
     }

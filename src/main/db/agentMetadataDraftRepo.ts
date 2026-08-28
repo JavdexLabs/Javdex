@@ -69,6 +69,10 @@ export class AgentMetadataDraftRepo {
   }): { draft: AgentMetadataDraft; supersededStagedPaths: string[] } {
     const db = this.database()
     return db.transaction(() => {
+      const targetTable = input.target.kind === 'video' ? 'videos' : 'actresses'
+      if (!db.prepare(`SELECT 1 FROM ${targetTable} WHERE id = ?`).get(input.target.id)) {
+        throw new Error(input.target.kind === 'video' ? '影片不存在。' : '演员不存在。')
+      }
       const superseded = db
         .prepare(
           `SELECT r.staged_path

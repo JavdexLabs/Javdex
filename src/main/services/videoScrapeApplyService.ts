@@ -1010,8 +1010,11 @@ export function resolveEffectiveVideoScrapeFields(
 export function resolveVideoBatchTargets(
   filter: VideoBatchScrapeFilter
 ): Array<{ id: number; code: string }> {
+  // libraryId is an optional compatibility seam: scoped library surfaces must pass it,
+  // while Settings and legacy callers intentionally keep their global-catalog behavior.
   // Explicit videoIds (library multi-select) are the scope — do not further
-  // filter by missingFields. Settings full-library batches pass status +
+  // filter by missingFields. Media-library membership and active-state constraints
+  // still apply when libraryId is present. Settings global batches pass status +
   // missingFields without videoIds.
   if (filter.videoIds) {
     return listVideosForBatchScrape({ ...filter, missingFields: [] })

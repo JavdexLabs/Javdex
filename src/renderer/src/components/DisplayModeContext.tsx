@@ -7,6 +7,7 @@ export type CoverMode = CoverDisplayMode
 interface DisplayModeCtx {
   mode: CoverMode
   setMode: (m: CoverMode) => void
+  setScopedMode: (m: CoverMode | null) => void
   toggle: () => void
   showResourceTypeBadges: boolean
   syncResourceTypeBadges: (show: boolean) => void
@@ -17,6 +18,7 @@ const LEGACY_STORAGE_KEY = 'coverDisplayMode'
 const Ctx = createContext<DisplayModeCtx>({
   mode: 'portrait',
   setMode: () => {},
+  setScopedMode: () => {},
   toggle: () => {},
   showResourceTypeBadges: false,
   syncResourceTypeBadges: () => {}
@@ -26,6 +28,18 @@ export function useDisplayMode(): DisplayModeCtx {
   return useContext(Ctx)
 }
 
+/**
+ * Temporarily applies a surface-owned cover mode without mutating the application default.
+ * The latest application setting becomes visible again as soon as the surface unmounts.
+ */
+export function useScopedDisplayMode(mode: CoverMode | null): void {
+  const { setScopedMode } = useDisplayMode()
+  useEffect(() => {
+    setScopedMode(mode)
+    return () => setScopedMode(null)
+  }, [mode, setScopedMode])
+}
+
 function readLegacyCoverMode(): CoverMode | null {
   const value = localStorage.getItem(LEGACY_STORAGE_KEY)
   if (value === 'landscape' || value === 'portrait') return value
@@ -33,8 +47,12 @@ function readLegacyCoverMode(): CoverMode | null {
 }
 
 export function DisplayModeProvider({ children }: { children: ReactNode }): JSX.Element {
-  const [mode, setModeState] = useState<CoverMode>(() => readLegacyCoverMode() ?? 'portrait')
+  const [applicationMode, setApplicationMode] = useState<CoverMode>(
+    () => readLegacyCoverMode() ?? 'portrait'
+  )
+  const [scopedMode, setScopedModeState] = useState<CoverMode | null>(null)
   const [showResourceTypeBadges, setShowResourceTypeBadges] = useState(false)
+  const mode = scopedMode ?? applicationMode
 
   useEffect(() => {
     let active = true
@@ -50,16 +68,16 @@ export function DisplayModeProvider({ children }: { children: ReactNode }): JSX.
             const next = await api.settings.update({ coverDisplayMode: legacy })
             if (!active) return
             localStorage.removeItem(LEGACY_STORAGE_KEY)
-            setModeState(normalizeCoverDisplayMode(next.coverDisplayMode))
+            setApplicationMode(normalizeCoverDisplayMode(next.coverDisplayMode))
             return
           } catch {
             if (!active) return
-            setModeState(legacy)
+            setApplicationMode(legacy)
             return
           }
         }
         localStorage.removeItem(LEGACY_STORAGE_KEY)
-        setModeState(fromSettings)
+        setApplicationMode(fromSettings)
       })
       .catch(() => {
         if (!active) return
@@ -71,11 +89,17 @@ export function DisplayModeProvider({ children }: { children: ReactNode }): JSX.
   }, [])
 
   const setMode = useCallback((m: CoverMode) => {
-    setModeState(m)
+    setApplicationMode(m)
+  }, [])
+
+  const setScopedMode = useCallback((m: CoverMode | null) => {
+    setScopedModeState(m)
   }, [])
 
   const toggle = useCallback(() => {
-    setModeState((previous) => (previous === 'portrait' ? 'landscape' : 'portrait'))
+    setApplicationMode((previous) =>
+      previous === 'portrait' ? 'landscape' : 'portrait'
+    )
   }, [])
 
   const syncResourceTypeBadges = useCallback((show: boolean): void => {
@@ -88,7 +112,14 @@ export function DisplayModeProvider({ children }: { children: ReactNode }): JSX.
 
   return (
     <Ctx.Provider
-      value={{ mode, setMode, toggle, showResourceTypeBadges, syncResourceTypeBadges }}
+      value={{
+        mode,
+        setMode,
+        setScopedMode,
+        toggle,
+        showResourceTypeBadges,
+        syncResourceTypeBadges
+      }}
     >
       {children}
     </Ctx.Provider>

@@ -3,6 +3,9 @@ import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import ResetListStateOnReload from './listView/ResetListStateOnReload'
 import Layout from './components/Layout'
 import LibraryShell from './components/LibraryShell'
+import HomeShell from './components/HomeShell'
+import GlobalSearchShell from './components/GlobalSearchShell'
+import LegacyLibraryRedirect from './components/LegacyLibraryRedirect'
 import ActressShell from './components/ActressShell'
 import FacetShell from './components/FacetShell'
 import DetailPage from './pages/DetailPage'
@@ -14,6 +17,7 @@ import PlaylistShell from './components/PlaylistShell'
 import PlaylistDetailPage from './pages/PlaylistDetailPage'
 import SettingsPage from './pages/SettingsPage'
 import PendingCenterShell from './components/PendingCenterShell'
+import MediaLibrarySettingsPage from './pages/MediaLibrarySettingsPage'
 import { PluginDevLeaveGuardProvider } from './components/pluginDev/PluginDevLeaveGuard'
 import { ToastProvider } from './components/Toast'
 import { DisplayModeProvider } from './components/DisplayModeContext'
@@ -42,7 +46,7 @@ function FacetDetailRoute({
 }): JSX.Element {
   const { type } = useParams()
   if (supportsFacetDetail(type, kind)) return children
-  return <Navigate to={isFacetType(type) ? facetListPath(type) : ROUTE_PATH.library} replace />
+  return <Navigate to={isFacetType(type) ? facetListPath(type) : ROUTE_PATH.home} replace />
 }
 
 function AppContent(): JSX.Element {
@@ -62,12 +66,40 @@ function AppContent(): JSX.Element {
                   <Layout>
                   <ResetListStateOnReload />
                   <Routes>
-                    <Route path={ROUTE_PATH.library} element={<LibraryShell />}>
+                    <Route path={ROUTE_PATH.home} element={<HomeShell />}>
                       <Route index element={null} />
-                      <Route path={ROUTE_SEGMENT.libraryDetail} element={<DetailPage />}>
+                      <Route path={ROUTE_SEGMENT.homeVideo} element={<DetailPage />}>
                         <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
                       </Route>
                     </Route>
+                    <Route path={ROUTE_PATH.search} element={<GlobalSearchShell />}>
+                      <Route index element={null} />
+                      <Route path={ROUTE_SEGMENT.searchVideo} element={<DetailPage />}>
+                        <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
+                      </Route>
+                    </Route>
+                    <Route path={ROUTE_PATH.mediaLibrary} element={<LibraryShell />}>
+                      <Route index element={null} />
+                      <Route path={ROUTE_SEGMENT.mediaLibraryVideo} element={<DetailPage />}>
+                        <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
+                      </Route>
+                      <Route
+                        path={ROUTE_SEGMENT.mediaLibrarySettings}
+                        element={<MediaLibrarySettingsPage />}
+                      />
+                    </Route>
+                    <Route
+                      path={ROUTE_PATH.legacyLibrary}
+                      element={<LegacyLibraryRedirect />}
+                    />
+                    <Route
+                      path={ROUTE_PATH.libraryDetail}
+                      element={<LegacyLibraryRedirect detail />}
+                    />
+                    <Route
+                      path={ROUTE_PATH.libraryActressStack}
+                      element={<LegacyLibraryRedirect detail />}
+                    />
                     <Route path={ROUTE_PATH.actresses} element={<ActressShell />}>
                       <Route index element={null} />
                       <Route
@@ -166,7 +198,7 @@ function AppContent(): JSX.Element {
                         <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage />} />
                       </Route>
                     </Route>
-                    <Route path="*" element={<Navigate to={ROUTE_PATH.library} replace />} />
+                    <Route path="*" element={<Navigate to={ROUTE_PATH.home} replace />} />
                   </Routes>
                   </Layout>
                 </PluginDevLeaveGuardProvider>

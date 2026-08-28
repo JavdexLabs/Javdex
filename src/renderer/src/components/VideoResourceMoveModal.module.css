@@ -1,0 +1,123 @@
+.body {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+.resourceCard {
+  display: grid;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  gap: 3px;
+}
+
+.resourceKind {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.resourceName,
+.resourceLocator {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resourceName {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.resourceLocator {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.targetSelect {
+  width: 100%;
+}
+
+.route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+  gap: 10px;
+}
+
+.route > span:first-child,
+.route > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route > strong {
+  color: var(--text-primary);
+  text-align: right;
+}
+
+.impactGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  gap: 8px;
+}
+
+.impactItem {
+  display: grid;
+  padding: 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  gap: 3px;
+}
+
+.impactItem dt {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.impactItem dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 6%, var(--surface-control));
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.45;
+  gap: 12px;
+}
+
+@media (width <= 620px) {
+  .impactGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .error {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

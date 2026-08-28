@@ -6,6 +6,9 @@ import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { insertTestVideoWithFile } from '../db/testVideoFixtures'
 import { createVideoQueryService } from './videoQueryService'
+import { buildVideoResourceSourceIdentity } from '../../shared/videoResourceIdentity'
+
+const DEFAULT_SCOPE = { kind: 'library', libraryId: 1 } as const
 
 let tempRoot: string | null = null
 
@@ -55,10 +58,11 @@ describe('VideoQueryService', () => {
     const videoModifiedBefore = fs.statSync(videoPath).mtimeMs
     const imageModifiedBefore = fs.statSync(imagePath).mtimeMs
 
-    assert.deepEqual(videos.list({ search: 'APP-001' }).items.map((item) => item.code), [
-      'APP-001'
-    ])
-    const detail = videos.get(1)
+    assert.deepEqual(
+      videos.list(DEFAULT_SCOPE, { search: 'APP-001' }).items.map((item) => item.code),
+      ['APP-001']
+    )
+    const detail = videos.get(DEFAULT_SCOPE, 1)
     assert.equal(detail?.title, 'Application boundary')
     assert.equal(detail?.resources.length, 1)
     assert.equal(detail?.resources[0]?.kind, 'local')
@@ -86,21 +90,23 @@ describe('VideoQueryService', () => {
       db
         .prepare(
           `INSERT INTO video_resources
-             (video_id, kind, locator, resource_key, is_primary)
-           VALUES (1, 'direct', ?, ?, 0)`
+             (library_id, video_id, kind, locator, resource_key, is_primary)
+           VALUES (1, 1, 'direct', ?, ?, 0)`
         )
         .run(locator, `http:${locator}`).lastInsertRowid
     )
     const videos = createVideoQueryService()
 
-    const projected = videos.get(1)?.resources.find((resource) => resource.id === resourceId)
+    const projected = videos
+      .get(DEFAULT_SCOPE, 1)
+      ?.resources.find((resource) => resource.id === resourceId)
 
     assert.ok(projected)
     assert.equal(projected.display_locator, 'cdn.example / APP-001.mp4')
     assert.equal('locator' in projected, false)
     assert.equal('resource_key' in projected, false)
-    assert.equal(videos.getResource(1, resourceId)?.locator, locator)
-    assert.equal(videos.getResource(2, resourceId), null)
+    assert.equal(videos.getResource(1, 1, resourceId)?.locator, locator)
+    assert.equal(videos.getResource(2, 1, resourceId), null)
   })
 
   it('projects a STRM source path while keeping its complete target main-process only', () => {
@@ -112,19 +118,31 @@ describe('VideoQueryService', () => {
       db
         .prepare(
           `INSERT INTO video_resources
-             (video_id, kind, locator, resource_key, strm_source_path, is_primary)
-           VALUES (1, 'direct', ?, ?, ?, 0)`
+             (library_id, video_id, kind, locator, resource_key, source_identity,
+              strm_source_path, is_primary)
+           VALUES (1, 1, 'direct', ?, ?, ?, ?, 0)`
         )
-        .run(locator, `strm:${sourcePath}`, sourcePath).lastInsertRowid
+        .run(
+          locator,
+          `strm:${sourcePath}`,
+          buildVideoResourceSourceIdentity({
+            kind: 'direct',
+            locator,
+            strmSourcePath: sourcePath
+          }),
+          sourcePath
+        ).lastInsertRowid
     )
     const videos = createVideoQueryService()
 
-    const projected = videos.get(1)?.resources.find((resource) => resource.id === resourceId)
+    const projected = videos
+      .get(DEFAULT_SCOPE, 1)
+      ?.resources.find((resource) => resource.id === resourceId)
 
     assert.ok(projected)
     assert.equal(projected.strm_source_path, sourcePath)
     assert.equal(projected.display_locator, 'cdn.example / APP-001.mp4')
     assert.equal('locator' in projected, false)
-    assert.equal(videos.getResource(1, resourceId)?.locator, locator)
+    assert.equal(videos.getResource(1, 1, resourceId)?.locator, locator)
   })
 })

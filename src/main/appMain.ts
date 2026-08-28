@@ -6,6 +6,7 @@ import { applyAppIcons, resolveWindowIcon } from './appIcon'
 import { configureAppIdentity } from './appPaths'
 import fs from 'node:fs'
 import { initDatabaseAtPath, closeDatabase } from './db/database'
+import { recoverInterruptedLibraryScanRuns } from './db/libraryScanRepo'
 import { mediaAssetStore } from './services/mediaAssetStore'
 import { registerIpcHandlers } from './ipc'
 import { scrapeBrowser } from './scrapers/scrapeBrowser'
@@ -23,6 +24,8 @@ import { modelManagement } from './agent-platform/modelManagement'
 import { libraryCurator } from './services/libraryCuratorAgent/libraryCurator'
 import { agentMetadataCollection } from './services/agentMetadata/agentMetadataCollection'
 import { resolveMainWindowAssetPaths } from './mainWindowPaths'
+import { bootstrapLegacyMediaLibrary } from './services/legacyMediaLibraryBootstrap'
+import { getSettings, updateSettings } from './settings/settingsStore'
 
 let mainWindow: BrowserWindow | null = null
 let shutdownInProgress = false
@@ -150,7 +153,23 @@ if (gotSingleInstanceLock) {
     applyAppIcons()
     const databaseDir = path.join(app.getPath('userData'), 'data')
     fs.mkdirSync(databaseDir, { recursive: true })
-    initDatabaseAtPath(path.join(databaseDir, 'library.db'))
+    const database = initDatabaseAtPath(path.join(databaseDir, 'library.db'))
+    const libraryBootstrap = bootstrapLegacyMediaLibrary({
+      database,
+      readSettings: getSettings,
+      updateSettings
+    })
+    if (libraryBootstrap.settingsCleanup.status === 'failed') {
+      console.error(
+        `[media-library-bootstrap] 旧设置清理失败，将在下次启动重试：${libraryBootstrap.settingsCleanup.error}`
+      )
+    }
+    const scanRecovery = recoverInterruptedLibraryScanRuns(database)
+    if (scanRecovery.recoveredRunCount > 0) {
+      console.warn(
+        `[media-library-scan-recovery] 已收敛 ${scanRecovery.recoveredRunCount} 个异常中断的扫描任务。`
+      )
+    }
     try {
       modelManagement.read()
     } catch (error) {

@@ -5,10 +5,25 @@ import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { insertTestVideoWithFile } from '../db/testVideoFixtures'
-import { createVideoMaintenanceService } from './videoMaintenanceService'
-import { createVideoQueryService } from './videoQueryService'
+import { ensureVideoMembership } from '../db/libraryMembershipRepo'
+import {
+  addMediaLibraryRoot,
+  createMediaLibrary,
+  updateMediaLibraryRoot
+} from '../db/mediaLibraryRepo'
+import {
+  createVideoMaintenanceService as createScopedVideoMaintenanceService
+} from './videoMaintenanceService'
+import { createVideoQueryService as createScopedVideoQueryService } from './videoQueryService'
+import type {
+  VideoLinkResourceImportInput,
+  VideoLinkResourceUpdateInput,
+  VideoQuery
+} from '../../shared/videoTypes'
 import { classificationQueryService } from './classificationQueryService'
 import { recoverPendingLocalFileDeletions } from './pendingLocalFileDeletionService'
+import { buildStrmResourceKey } from '../../shared/strmResource'
+import { buildVideoResourceSourceIdentity } from '../../shared/videoResourceIdentity'
 
 let tempRoot: string | null = null
 
@@ -17,30 +32,121 @@ const PNG_1X1 = Buffer.from(
   'base64'
 )
 
-function setupDb(prefix = 'javdex-video-maintenance-'): { videoPath: string; imagePath: string } {
+const DEFAULT_SCOPE = { kind: 'library', libraryId: 1 } as const
+
+/** Keeps legacy single-library cases terse while production APIs remain explicitly scoped. */
+function createVideoMaintenanceService(dependencies?: unknown) {
+  const service = createScopedVideoMaintenanceService(
+    dependencies as Parameters<typeof createScopedVideoMaintenanceService>[0]
+  )
+  return {
+    ...service,
+    importLinkResource(input: Omit<VideoLinkResourceImportInput, 'libraryId'>) {
+      return service.importLinkResource({ ...input, libraryId: DEFAULT_SCOPE.libraryId })
+    },
+    updateLinkResource(
+      videoId: number,
+      resourceId: number,
+      input: VideoLinkResourceUpdateInput
+    ) {
+      return service.updateLinkResource(
+        DEFAULT_SCOPE.libraryId,
+        videoId,
+        resourceId,
+        input
+      )
+    },
+    updateLocalResourceLabel(videoId: number, resourceId: number, label: string | null) {
+      return service.updateLocalResourceLabel(
+        DEFAULT_SCOPE.libraryId,
+        videoId,
+        resourceId,
+        label
+      )
+    },
+    setPrimaryResource(videoId: number, resourceId: number) {
+      return service.setPrimaryResource(DEFAULT_SCOPE.libraryId, videoId, resourceId)
+    },
+    removeResource(
+      videoId: number,
+      resourceId: number,
+      lastResourceMode?: 'retain-video'
+    ) {
+      return service.removeResource(
+        DEFAULT_SCOPE.libraryId,
+        videoId,
+        resourceId,
+        lastResourceMode
+      )
+    },
+    splitResource(videoId: number, resourceId: number) {
+      return service.splitResource(DEFAULT_SCOPE.libraryId, videoId, resourceId)
+    }
+  }
+}
+
+function createVideoQueryService() {
+  const service = createScopedVideoQueryService()
+  return {
+    list(query?: VideoQuery) {
+      return service.list(DEFAULT_SCOPE, query)
+    },
+    get(videoId: number) {
+      return service.get(DEFAULT_SCOPE, videoId)
+    },
+    getResource(videoId: number, resourceId: number) {
+      return service.getResource(DEFAULT_SCOPE.libraryId, videoId, resourceId)
+    },
+    listYears() {
+      return service.listYears(DEFAULT_SCOPE)
+    }
+  }
+}
+
+function setupDb(prefix = 'javdex-video-maintenance-'): {
+  videoPath: string
+  imagePath: string
+  mediaRoot: string
+  rootId: number
+} {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
   process.env.JAVDEX_TEST_USER_DATA = tempRoot
-  const videoPath = path.join(tempRoot, 'APP-001.mp4')
+  const mediaRoot = path.join(tempRoot, 'media-root')
+  fs.mkdirSync(mediaRoot)
+  const videoPath = path.join(mediaRoot, 'APP-001.mp4')
   const imagePath = path.join(tempRoot, 'image.png')
   fs.writeFileSync(videoPath, 'video')
   fs.writeFileSync(imagePath, PNG_1X1)
   const db = initDatabaseAtPath(path.join(tempRoot, 'library.db'))
+  const root = addMediaLibraryRoot({
+    libraryId: 1,
+    expectedRevision: 1,
+    root: { path: mediaRoot }
+  })
   insertTestVideoWithFile(db, {
     code: 'APP-001',
     filePath: videoPath,
     title: 'Application boundary',
-    scrapedStatus: 1
+    scrapedStatus: 1,
+    rootId: root.id
   })
-  return { videoPath, imagePath }
+  return { videoPath, imagePath, mediaRoot, rootId: root.id }
 }
 
 function setupPolicyDb(): { root: string; videoPath: string } {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-video-maintenance-policy-'))
   process.env.JAVDEX_TEST_USER_DATA = tempRoot
-  const videoPath = path.join(tempRoot, 'IPX-535.mp4')
+  const root = path.join(tempRoot, 'media-root')
+  fs.mkdirSync(root)
+  const videoPath = path.join(root, 'IPX-535.mp4')
   fs.writeFileSync(videoPath, 'video')
   initDatabaseAtPath(path.join(tempRoot, 'library.db'))
   const db = getDb()
+  const mediaLibraryRoot = addMediaLibraryRoot({
+    libraryId: 1,
+    expectedRevision: 1,
+    root: { path: root }
+  })
   insertTestVideoWithFile(db, {
     code: 'IPX-535',
     filePath: videoPath,
@@ -51,9 +157,10 @@ function setupPolicyDb(): { root: string; videoPath: string } {
     maker: 'Maker',
     series: 'Series',
     director: 'Director',
-    scrapedStatus: 1
+    scrapedStatus: 1,
+    rootId: mediaLibraryRoot.id
   })
-  return { root: tempRoot, videoPath }
+  return { root, videoPath }
 }
 
 afterEach(() => {
@@ -262,18 +369,26 @@ describe('VideoMaintenanceService', () => {
   })
 
   it('keeps STRM targets read-only while editing metadata and safely deletes the source file', () => {
-    setupDb()
-    const sourcePath = path.join(tempRoot!, 'APP-001.strm')
+    const { mediaRoot, rootId } = setupDb()
+    const sourcePath = path.join(mediaRoot, 'APP-001.strm')
     const locator = 'https://cdn.example/APP-001.mp4?token=secret'
     fs.writeFileSync(sourcePath, locator)
     const resourceId = Number(
       getDb()
         .prepare(
           `INSERT INTO video_resources (
-             video_id, kind, locator, resource_key, strm_source_path, display_name, is_primary
-           ) VALUES (1, 'direct', ?, ?, ?, 'APP-001.strm', 0)`
+             library_id, video_id, root_id, kind, locator, resource_key, source_identity,
+             strm_source_path, display_name, is_primary
+           ) VALUES (1, 1, ?, 'direct', ?, ?, ?, ?, 'APP-001.strm', 0)`
         )
-        .run(locator, `strm:${sourcePath}`, sourcePath).lastInsertRowid
+        .run(
+          rootId,
+          locator,
+          buildStrmResourceKey(sourcePath),
+          buildStrmResourceKey(sourcePath),
+          sourcePath
+        )
+        .lastInsertRowid
     )
     const videos = createVideoMaintenanceService()
 
@@ -285,7 +400,7 @@ describe('VideoMaintenanceService', () => {
     })
     assert.equal(updated.display_name, '远端高清版')
     assert.equal(updated.size_bytes, 123456789)
-    assert.equal(updated.resource_key, `strm:${sourcePath}`)
+    assert.equal(updated.resource_key, buildStrmResourceKey(sourcePath))
     assert.throws(
       () =>
         videos.updateLinkResource(1, resourceId, {
@@ -303,19 +418,21 @@ describe('VideoMaintenanceService', () => {
   })
 
   it('restores a staged STRM source and rolls back removal when primary promotion fails', () => {
-    setupDb()
-    const sourcePath = path.join(tempRoot!, 'ROLLBACK-001.strm')
+    const { mediaRoot, rootId } = setupDb()
+    const sourcePath = path.join(mediaRoot, 'ROLLBACK-001.strm')
     fs.writeFileSync(sourcePath, 'https://example.test/rollback.mp4')
+    getDb().prepare('UPDATE video_resources SET is_primary = 0 WHERE id = 1').run()
     const resourceId = Number(
       getDb()
         .prepare(
           `INSERT INTO video_resources (
-             video_id, kind, locator, resource_key, strm_source_path, is_primary
-           ) VALUES (1, 'direct', 'https://example.test/rollback.mp4', ?, ?, 1)`
+             library_id, video_id, root_id, kind, locator, resource_key, source_identity,
+             strm_source_path, is_primary
+           ) VALUES (1, 1, ?, 'direct', 'https://example.test/rollback.mp4', ?, ?, ?, 1)`
         )
-        .run(`strm:${sourcePath}`, sourcePath).lastInsertRowid
+        .run(rootId, buildStrmResourceKey(sourcePath), buildStrmResourceKey(sourcePath), sourcePath)
+        .lastInsertRowid
     )
-    getDb().prepare('UPDATE video_resources SET is_primary = 0 WHERE id = 1').run()
     getDb().exec(`
       CREATE TRIGGER reject_strm_primary_promotion
       BEFORE UPDATE OF is_primary ON video_resources
@@ -333,24 +450,50 @@ describe('VideoMaintenanceService', () => {
     assert.ok(getDb().prepare('SELECT 1 FROM video_resources WHERE id = ?').get(resourceId))
   })
 
-  it('deletes local videos and STRM source files when deleting the whole video', () => {
-    const { videoPath } = setupDb()
-    const sourcePath = path.join(tempRoot!, 'APP-001.strm')
-    const locator = 'https://example.test/APP-001.mp4'
-    fs.writeFileSync(sourcePath, locator)
-    getDb()
-      .prepare(
-        `INSERT INTO video_resources (
-           video_id, kind, locator, resource_key, strm_source_path, is_primary
-         ) VALUES (1, 'direct', ?, ?, ?, 0)`
-      )
-      .run(locator, `strm:${sourcePath}`, sourcePath)
+  it('refuses to remove an active-root STRM source after the root path is replaced', () => {
+    const { mediaRoot, rootId } = setupDb()
+    const retiredRoot = `${mediaRoot}-retired`
+    const sourcePath = path.join(mediaRoot, 'REPLACED-STRM.strm')
+    fs.writeFileSync(sourcePath, 'https://example.test/replaced.mp4')
+    const resourceId = Number(
+      getDb()
+        .prepare(
+          `INSERT INTO video_resources (
+             library_id, video_id, root_id, kind, locator, resource_key, source_identity,
+             strm_source_path, is_primary
+           ) VALUES (1, 1, ?, 'direct', 'https://example.test/replaced.mp4', ?, ?, ?, 0)`
+        )
+        .run(rootId, buildStrmResourceKey(sourcePath), buildStrmResourceKey(sourcePath), sourcePath)
+        .lastInsertRowid
+    )
+    fs.renameSync(mediaRoot, retiredRoot)
+    fs.mkdirSync(mediaRoot)
+    fs.writeFileSync(sourcePath, 'replacement')
 
-    createVideoMaintenanceService().delete(1)
+    let removalError: unknown = null
+    let renameCalls = 0
+    let unlinkCalls = 0
+    const videos = createVideoMaintenanceService({
+      renameSync: (from: string, to: string) => {
+        renameCalls += 1
+        fs.renameSync(from, to)
+      },
+      unlinkSync: (filePath: string) => {
+        unlinkCalls += 1
+        fs.unlinkSync(filePath)
+      }
+    })
+    try {
+      videos.removeResource(1, resourceId)
+    } catch (error) {
+      removalError = error
+    }
 
-    assert.equal(fs.existsSync(videoPath), false)
-    assert.equal(fs.existsSync(sourcePath), false)
-    assert.equal(getDb().prepare('SELECT 1 FROM videos WHERE id = 1').get(), undefined)
+    assert.match(String(removalError), /启用媒体库根目录/)
+    assert.equal(renameCalls, 0)
+    assert.equal(unlinkCalls, 0)
+    assert.equal(fs.readFileSync(sourcePath, 'utf8'), 'replacement')
+    assert.ok(getDb().prepare('SELECT 1 FROM video_resources WHERE id = ?').get(resourceId))
   })
 
   it('edits metadata, status, rating, poster, and manual tags', () => {
@@ -393,17 +536,21 @@ describe('VideoMaintenanceService', () => {
     assert.equal(query.get(1)?.poster_path, null)
   })
 
-  it('switches the primary resource, deletes a local resource, then deletes the video', () => {
+  it('switches the primary resource and deletes only the selected local resource', () => {
     const { videoPath } = setupDb()
     const secondaryPath = path.join(tempRoot!, 'APP-001-CD2.mp4')
     fs.writeFileSync(secondaryPath, 'video 2')
     const fileInfo = getDb()
       .prepare(
         `INSERT INTO video_resources
-           (video_id, kind, locator, resource_key, is_primary)
-         VALUES (1, 'local', ?, 'local:' || ?, 0)`
+           (library_id, video_id, kind, locator, resource_key, source_identity, is_primary)
+         VALUES (1, 1, 'local', ?, 'local:' || ?, ?, 0)`
       )
-      .run(secondaryPath, secondaryPath)
+      .run(
+        secondaryPath,
+        secondaryPath,
+        buildVideoResourceSourceIdentity({ kind: 'local', locator: secondaryPath })
+      )
     const secondaryId = Number(fileInfo.lastInsertRowid)
     const videos = createVideoMaintenanceService()
     const query = createVideoQueryService()
@@ -412,10 +559,8 @@ describe('VideoMaintenanceService', () => {
     videos.removeResource(1, 1)
     assert.equal(fs.existsSync(videoPath), false)
     assert.equal(query.get(1)?.resources[0]?.display_locator, secondaryPath)
-
-    videos.delete(1)
-    assert.equal(fs.existsSync(secondaryPath), false)
-    assert.equal(query.get(1), null)
+    assert.equal(fs.existsSync(secondaryPath), true)
+    assert.ok(query.get(1))
   })
 
   it('restores a staged local file and rolls back resource removal when promotion fails', () => {
@@ -543,16 +688,133 @@ describe('VideoMaintenanceService', () => {
     )
     assert.equal(createVideoQueryService().get(retained.videoId)?.resources.length, 0)
 
-    const deleted = videos.importLinkResource({
+    const protectedVideo = videos.importLinkResource({
       code: 'ONLY-002',
       target: { kind: 'new' },
       url: 'https://example.com/delete'
     })
-    assert.deepEqual(
-      videos.removeResource(deleted.videoId, deleted.resource.id, 'delete-video'),
-      { videoDeleted: true, promotedResourceId: null }
+    assert.throws(
+      () =>
+        videos.removeResource(
+          protectedVideo.videoId,
+          protectedVideo.resource.id,
+          'delete-video' as never
+        ),
+      /全局删除必须先预览影响/
     )
-    assert.equal(createVideoQueryService().get(deleted.videoId), null)
+    assert.ok(createVideoQueryService().get(protectedVideo.videoId))
+  })
+
+  it('never turns last-resource removal into a global deletion', () => {
+    setupDb()
+    const videos = createVideoMaintenanceService()
+    const retainedElsewhere = videos.importLinkResource({
+      code: 'ONLY-OTHER-001',
+      target: { kind: 'new' },
+      url: 'https://example.com/only-other'
+    })
+    const otherLibrary = createMediaLibrary({ name: 'Metadata only' })
+    assert.equal(
+      ensureVideoMembership({
+        libraryId: otherLibrary.id,
+        videoId: retainedElsewhere.videoId,
+        addedVia: 'shared'
+      }),
+      true
+    )
+
+    assert.throws(
+      () =>
+        videos.removeResource(
+          retainedElsewhere.videoId,
+          retainedElsewhere.resource.id,
+          'delete-video' as never
+        ),
+      /全局删除必须先预览影响/
+    )
+    assert.ok(createVideoQueryService().get(retainedElsewhere.videoId))
+    assert.equal(
+      (
+        getDb()
+          .prepare(
+            'SELECT COUNT(*) AS count FROM library_video_memberships WHERE video_id = ?'
+          )
+          .get(retainedElsewhere.videoId) as { count: number }
+      ).count,
+      2
+    )
+  })
+
+  it('rejects every resource mutation for missing or archived media libraries', () => {
+    setupDb()
+    const database = getDb()
+    const service = createScopedVideoMaintenanceService()
+    const link = service.importLinkResource({
+      libraryId: 1,
+      code: 'APP-001',
+      target: { kind: 'existing', videoId: 1 },
+      url: 'https://example.com/original',
+      kind: 'web',
+      displayName: 'Original'
+    }).resource
+    const before = database
+      .prepare(
+        `SELECT id, video_id, locator, display_name, is_primary
+         FROM video_resources ORDER BY id`
+      )
+      .all()
+    const videoCount = (
+      database.prepare('SELECT COUNT(*) AS count FROM videos').get() as { count: number }
+    ).count
+
+    assert.throws(
+      () =>
+        service.importLinkResource({
+          libraryId: 99,
+          code: 'MISSING-001',
+          target: { kind: 'new' },
+          url: 'https://example.com/missing'
+        }),
+      /媒体库不存在/
+    )
+
+    database.prepare("UPDATE media_libraries SET status = 'archived' WHERE id = 1").run()
+    const assertArchived = (operation: () => unknown): void => {
+      assert.throws(operation, /已归档媒体库必须恢复后才能修改资源/)
+    }
+    assertArchived(() =>
+      service.importLinkResource({
+        libraryId: 1,
+        code: 'ARCHIVED-001',
+        target: { kind: 'new' },
+        url: 'https://example.com/archived'
+      })
+    )
+    assertArchived(() =>
+      service.updateLinkResource(1, 1, link.id, {
+        url: 'https://example.com/changed',
+        kind: 'web',
+        displayName: 'Changed'
+      })
+    )
+    assertArchived(() => service.updateLocalResourceLabel(1, 1, 1, 'Changed'))
+    assertArchived(() => service.setPrimaryResource(1, 1, link.id))
+    assertArchived(() => service.removeResource(1, 1, link.id))
+    assertArchived(() => service.splitResource(1, 1, link.id))
+
+    assert.deepEqual(
+      database
+        .prepare(
+          `SELECT id, video_id, locator, display_name, is_primary
+           FROM video_resources ORDER BY id`
+        )
+        .all(),
+      before
+    )
+    assert.equal(
+      (database.prepare('SELECT COUNT(*) AS count FROM videos').get() as { count: number }).count,
+      videoCount
+    )
   })
 
   it('updates only the display label of a local resource', () => {
@@ -563,10 +825,10 @@ describe('VideoMaintenanceService', () => {
     assert.equal(updated.locator.endsWith('APP-001.mp4'), true)
   })
 
-  it('deletes a symbolic link without deleting its target file', () => {
-    const { videoPath } = setupDb()
-    const targetPath = path.join(tempRoot!, 'target.mp4')
-    const linkPath = path.join(tempRoot!, 'linked.mp4')
+  it('removes a symbolic-link resource without deleting its target file', () => {
+    const { videoPath, mediaRoot } = setupDb()
+    const targetPath = path.join(mediaRoot, 'target.mp4')
+    const linkPath = path.join(mediaRoot, 'linked.mp4')
     fs.writeFileSync(targetPath, 'target')
     fs.symlinkSync(targetPath, linkPath, 'file')
     getDb()
@@ -574,11 +836,145 @@ describe('VideoMaintenanceService', () => {
       .run(linkPath, linkPath)
     const videos = createVideoMaintenanceService()
 
-    videos.delete(1)
+    videos.removeResource(1, 1, 'retain-video')
 
     assert.equal(fs.existsSync(linkPath), false)
     assert.equal(fs.existsSync(targetPath), true)
     assert.equal(fs.existsSync(videoPath), true)
+  })
+
+  it('refuses to remove a disabled-root resource after the root path is replaced', () => {
+    setupDb()
+    const database = getDb()
+    const rootPath = path.join(tempRoot!, 'identity-owned-root')
+    const originalRootPath = `${rootPath}-original`
+    const resourcePath = path.join(rootPath, 'IDENTITY-001.mp4')
+    fs.mkdirSync(rootPath)
+    fs.writeFileSync(resourcePath, 'original')
+    const initialRevision = (
+      database.prepare('SELECT revision FROM media_libraries WHERE id = 1').get() as {
+        revision: number
+      }
+    ).revision
+    const root = addMediaLibraryRoot({
+      libraryId: 1,
+      expectedRevision: initialRevision,
+      root: { path: rootPath }
+    })
+    assert.ok(root.normalizedRealPath)
+    assert.ok(root.inode)
+    const resource = insertTestVideoWithFile(database, {
+      code: 'IDENTITY-001',
+      filePath: resourcePath,
+      rootId: root.id
+    })
+    updateMediaLibraryRoot({
+      libraryId: 1,
+      rootId: root.id,
+      expectedRevision: initialRevision + 1,
+      patch: { state: 'disabled' }
+    })
+
+    fs.renameSync(rootPath, originalRootPath)
+    fs.mkdirSync(rootPath)
+    fs.writeFileSync(resourcePath, 'replacement')
+
+    let removalError: unknown = null
+    let renameCalls = 0
+    let unlinkCalls = 0
+    const videos = createVideoMaintenanceService({
+      renameSync: (from: string, to: string) => {
+        renameCalls += 1
+        fs.renameSync(from, to)
+      },
+      unlinkSync: (filePath: string) => {
+        unlinkCalls += 1
+        fs.unlinkSync(filePath)
+      }
+    })
+    try {
+      videos.removeResource(resource.videoId, resource.fileId, 'retain-video')
+    } catch (error) {
+      removalError = error
+    }
+
+    assert.deepEqual(
+      {
+        rejected: removalError !== null,
+        renameCalls,
+        unlinkCalls,
+        replacementContents: fs.existsSync(resourcePath)
+          ? fs.readFileSync(resourcePath, 'utf8')
+          : null,
+        resourceRecordPreserved: Boolean(
+          database.prepare('SELECT 1 FROM video_resources WHERE id = ?').get(resource.fileId)
+        )
+      },
+      {
+        rejected: true,
+        renameCalls: 0,
+        unlinkCalls: 0,
+        replacementContents: 'replacement',
+        resourceRecordPreserved: true
+      }
+    )
+  })
+
+  it('rejects local source deletion for every non-active root state before staging', () => {
+    const { videoPath } = setupPolicyDb()
+    const database = getDb()
+    const resource = database
+      .prepare('SELECT id, root_id FROM video_resources WHERE video_id = 1')
+      .get() as { id: number; root_id: number }
+    let renameCalls = 0
+    let unlinkCalls = 0
+    const videos = createVideoMaintenanceService({
+      renameSync: () => {
+        renameCalls += 1
+      },
+      unlinkSync: () => {
+        unlinkCalls += 1
+      }
+    })
+
+    for (const state of ['disabled', 'pending_removal', 'archived'] as const) {
+      database
+        .prepare('UPDATE media_library_roots SET state = ? WHERE id = ?')
+        .run(state, resource.root_id)
+      assert.throws(
+        () => videos.removeResource(1, resource.id, 'retain-video'),
+        /启用媒体库根目录/
+      )
+      assert.equal(fs.existsSync(videoPath), true, state)
+      assert.ok(database.prepare('SELECT 1 FROM video_resources WHERE id = ?').get(resource.id))
+    }
+    assert.equal(renameCalls, 0)
+    assert.equal(unlinkCalls, 0)
+  })
+
+  it('rejects physical source deletion when the resource has no root ownership', () => {
+    const { videoPath } = setupPolicyDb()
+    const database = getDb()
+    database.prepare('UPDATE video_resources SET root_id = NULL WHERE id = 1').run()
+    let renameCalls = 0
+    let unlinkCalls = 0
+    const videos = createVideoMaintenanceService({
+      renameSync: () => {
+        renameCalls += 1
+      },
+      unlinkSync: () => {
+        unlinkCalls += 1
+      }
+    })
+
+    assert.throws(
+      () => videos.removeResource(1, 1, 'retain-video'),
+      /缺少有效的媒体库根目录归属/
+    )
+    assert.equal(renameCalls, 0)
+    assert.equal(unlinkCalls, 0)
+    assert.equal(fs.existsSync(videoPath), true)
+    assert.ok(database.prepare('SELECT 1 FROM video_resources WHERE id = 1').get())
   })
 
   it('corrects an imported code', () => {
@@ -593,27 +989,7 @@ describe('VideoMaintenanceService', () => {
     assert.equal(query.get(1)?.code, 'APP-002')
   })
 
-  it('deletes the source file and database row', () => {
-    const { videoPath } = setupPolicyDb()
-    const videos = createVideoMaintenanceService()
-    videos.importLinkResource({
-      code: 'IPX-535',
-      target: { kind: 'existing', videoId: 1 },
-      url: 'https://example.com/watch?id=535',
-      kind: 'web'
-    })
-
-    videos.delete(1)
-
-    assert.equal(fs.existsSync(videoPath), false)
-    assert.equal((getDb().prepare('SELECT COUNT(*) AS c FROM videos').get() as { c: number }).c, 0)
-    assert.equal(
-      (getDb().prepare('SELECT COUNT(*) AS c FROM video_resources').get() as { c: number }).c,
-      0
-    )
-  })
-
-  it('persists a committed cleanup task when physical deletion must be retried', () => {
+  it('persists a committed cleanup task when resource-file deletion must be retried', () => {
     const { videoPath } = setupPolicyDb()
     const videos = createVideoMaintenanceService({
       unlinkSync: () => {
@@ -621,10 +997,14 @@ describe('VideoMaintenanceService', () => {
       }
     })
 
-    videos.delete(1)
+    videos.removeResource(1, 1, 'retain-video')
 
     assert.equal(fs.existsSync(videoPath), false)
-    assert.equal((getDb().prepare('SELECT COUNT(*) AS c FROM videos').get() as { c: number }).c, 0)
+    assert.equal((getDb().prepare('SELECT COUNT(*) AS c FROM videos').get() as { c: number }).c, 1)
+    assert.equal(
+      (getDb().prepare('SELECT COUNT(*) AS c FROM video_resources').get() as { c: number }).c,
+      0
+    )
     const pending = getDb()
       .prepare(
         `SELECT original_path, staged_path, state
@@ -651,17 +1031,50 @@ describe('VideoMaintenanceService', () => {
     )
   })
 
-  it('does not delete database records when the file storage cannot be audited', () => {
-    setupPolicyDb()
-    const offlinePath = path.join(tempRoot!, 'offline-volume', 'IPX-535.mp4')
+  it('revalidates the root identity before unlinking an already staged source', () => {
+    const { root } = setupPolicyDb()
+    const retiredRoot = `${root}-retired-before-unlink`
+    let unlinkCalls = 0
+    const videos = createVideoMaintenanceService({
+      runDatabaseTransaction: <T>(work: () => T): T => {
+        const result = getDb().transaction(work)()
+        fs.renameSync(root, retiredRoot)
+        fs.mkdirSync(root)
+        return result
+      },
+      unlinkSync: () => {
+        unlinkCalls += 1
+      }
+    })
+
+    videos.removeResource(1, 1, 'retain-video')
+
+    const pending = getDb()
+      .prepare('SELECT staged_path, state FROM pending_local_file_deletions')
+      .get() as { staged_path: string; state: string }
+    const retiredStagedPath = path.join(retiredRoot, path.basename(pending.staged_path))
+    assert.equal(unlinkCalls, 0)
+    assert.equal(pending.state, 'committed')
+    assert.equal(fs.existsSync(pending.staged_path), false)
+    assert.equal(fs.existsSync(retiredStagedPath), true)
+    assert.equal(getDb().prepare('SELECT 1 FROM video_resources WHERE id = 1').get(), undefined)
+  })
+
+  it('does not delete resource records when the file storage cannot be audited', () => {
+    const { root } = setupPolicyDb()
+    const offlinePath = path.join(root, 'offline-volume', 'IPX-535.mp4')
     getDb()
       .prepare("UPDATE video_resources SET locator = ?, resource_key = 'local:' || ? WHERE id = 1")
       .run(offlinePath, offlinePath)
     const videos = createVideoMaintenanceService()
 
-    assert.throws(() => videos.delete(1), /无法确认影片文件是否存在/)
+    assert.throws(() => videos.removeResource(1, 1, 'retain-video'), /无法确认影片文件是否存在/)
     assert.equal(
       (getDb().prepare('SELECT COUNT(*) AS c FROM videos').get() as { c: number }).c,
+      1
+    )
+    assert.equal(
+      (getDb().prepare('SELECT COUNT(*) AS c FROM video_resources').get() as { c: number }).c,
       1
     )
     assert.equal(
@@ -674,7 +1087,7 @@ describe('VideoMaintenanceService', () => {
     )
   })
 
-  it('adopts an interrupted prepared task when deletion is retried', () => {
+  it('adopts an interrupted prepared task when resource removal is retried', () => {
     const { videoPath } = setupPolicyDb()
     const stagedPath = `${videoPath}.javdex-delete-retry`
     const deviceId = fs.lstatSync(videoPath).dev
@@ -687,11 +1100,15 @@ describe('VideoMaintenanceService', () => {
       .run(videoPath, stagedPath, deviceId)
     fs.renameSync(videoPath, stagedPath)
 
-    createVideoMaintenanceService().delete(1)
+    createVideoMaintenanceService().removeResource(1, 1, 'retain-video')
 
     assert.equal(fs.existsSync(videoPath), false)
     assert.equal(fs.existsSync(stagedPath), false)
-    assert.equal((getDb().prepare('SELECT COUNT(*) AS c FROM videos').get() as { c: number }).c, 0)
+    assert.equal((getDb().prepare('SELECT COUNT(*) AS c FROM videos').get() as { c: number }).c, 1)
+    assert.equal(
+      (getDb().prepare('SELECT COUNT(*) AS c FROM video_resources').get() as { c: number }).c,
+      0
+    )
     assert.equal(
       (
         getDb().prepare('SELECT COUNT(*) AS c FROM pending_local_file_deletions').get() as {
@@ -702,7 +1119,7 @@ describe('VideoMaintenanceService', () => {
     )
   })
 
-  it('does not adopt a prepared task when the original path was replaced', () => {
+  it('does not adopt a prepared resource-removal task when the original path was replaced', () => {
     const { videoPath } = setupPolicyDb()
     const stagedPath = `${videoPath}.javdex-delete-conflict`
     const deviceId = fs.lstatSync(videoPath).dev
@@ -716,7 +1133,10 @@ describe('VideoMaintenanceService', () => {
     fs.renameSync(videoPath, stagedPath)
     fs.writeFileSync(videoPath, 'replacement')
 
-    assert.throws(() => createVideoMaintenanceService().delete(1), /原路径已被占用/)
+    assert.throws(
+      () => createVideoMaintenanceService().removeResource(1, 1, 'retain-video'),
+      /原路径已被占用/
+    )
 
     assert.equal(fs.existsSync(videoPath), true)
     assert.equal(fs.existsSync(stagedPath), true)
@@ -826,10 +1246,10 @@ describe('VideoMaintenanceService', () => {
   })
 
   it('retains prepared state and database records when both file paths are missing', () => {
-    setupPolicyDb()
-    const originalPath = path.join(tempRoot!, 'missing.mp4')
+    const { root } = setupPolicyDb()
+    const originalPath = path.join(root, 'missing.mp4')
     const stagedPath = `${originalPath}.javdex-delete-missing`
-    const deviceId = fs.lstatSync(tempRoot!).dev
+    const deviceId = fs.lstatSync(root).dev
     getDb()
       .prepare(
         `INSERT INTO pending_local_file_deletions (
@@ -847,7 +1267,7 @@ describe('VideoMaintenanceService', () => {
       failed: 1
     })
     assert.throws(
-      () => createVideoMaintenanceService().delete(1),
+      () => createVideoMaintenanceService().removeResource(1, 1, 'retain-video'),
       /暂存文件和原文件均不存在/
     )
     assert.equal(
@@ -864,40 +1284,10 @@ describe('VideoMaintenanceService', () => {
     )
   })
 
-  it('restores staged local files when deleting the video record fails', () => {
-    const { videoPath } = setupPolicyDb()
-    const videos = createVideoMaintenanceService()
-    getDb().exec(`
-      CREATE TRIGGER reject_video_deletion
-      BEFORE DELETE ON videos
-      BEGIN
-        SELECT RAISE(ABORT, 'forced video deletion failure');
-      END;
-    `)
-
-    assert.throws(() => videos.delete(1), /forced video deletion failure/)
-
-    assert.equal(fs.existsSync(videoPath), true)
-    assert.equal(
-      (getDb().prepare('SELECT COUNT(*) AS count FROM videos WHERE id = 1').get() as {
-        count: number
-      }).count,
-      1
-    )
-    assert.equal(
-      (
-        getDb()
-          .prepare('SELECT locator FROM video_resources WHERE video_id = 1 AND kind = \'local\'')
-          .get() as { locator: string }
-      ).locator,
-      videoPath
-    )
-  })
-
-  it('keeps the prepared task when storage disappears during transaction rollback', () => {
-    const { videoPath } = setupPolicyDb()
-    const mediaDir = path.join(tempRoot!, 'media-volume')
-    const offlineDir = path.join(tempRoot!, 'media-volume-offline')
+  it('keeps the prepared task when storage disappears during resource-removal rollback', () => {
+    const { root, videoPath } = setupPolicyDb()
+    const mediaDir = path.join(root, 'media-volume')
+    const offlineDir = path.join(root, 'media-volume-offline')
     const relocatedPath = path.join(mediaDir, path.basename(videoPath))
     fs.mkdirSync(mediaDir)
     fs.renameSync(videoPath, relocatedPath)
@@ -911,7 +1301,10 @@ describe('VideoMaintenanceService', () => {
       }
     })
 
-    assert.throws(() => videos.delete(1), /暂存文件所在存储当前不可用/)
+    assert.throws(
+      () => videos.removeResource(1, 1, 'retain-video'),
+      /暂存文件所在存储当前不可用/
+    )
     const pending = getDb()
       .prepare(
         `SELECT staged_path, state
@@ -1228,7 +1621,7 @@ describe('VideoMaintenanceService', () => {
     const deletedPaths: string[] = []
 
     createVideoMaintenanceService({
-      deleteBestEffort(storedPath) {
+      deleteBestEffort(storedPath: string | null) {
         if (storedPath) deletedPaths.push(storedPath)
       }
     }).mergeVideos({ retainedVideoId: 1, sourceVideoId: source.videoId })
@@ -1513,7 +1906,7 @@ describe('VideoMaintenanceService', () => {
     ).run(candidateId)
     const cleaned: string[][] = []
     const videos = createVideoMaintenanceService({
-      cleanupVideoScrapeStagingPaths(paths) {
+      cleanupVideoScrapeStagingPaths(paths: string[]) {
         cleaned.push(paths)
       }
     })
@@ -1532,39 +1925,6 @@ describe('VideoMaintenanceService', () => {
     })
     assert.equal(db.prepare('SELECT 1 FROM pending_video_scrapes WHERE video_id = 1').get(), undefined)
     assert.deepEqual(cleaned, [['stage/cover.jpg']])
-  })
-
-  it('cleans pending scrape staging when deleting a video', () => {
-    setupPolicyDb()
-    const db = getDb()
-    const pendingId = Number(db.prepare(
-      `INSERT INTO pending_video_scrapes (
-         video_id, selected_fields_json, applicable_fields_json, update_mode,
-         request_json, warnings_json, created_at, updated_at
-       ) VALUES (1, '[]', '[]', 'replace', '{}', '[]', '2025-01-01', '2025-01-01')`
-    ).run().lastInsertRowid)
-    const sourceId = Number(db.prepare(
-      `INSERT INTO pending_video_scrape_sources (
-         pending_scrape_id, plugin_name, plugin_source, plugin_config_json,
-         source_name, selected_fields_json
-       ) VALUES (?, 'test', 'builtin', '{}', 'test', '[]')`
-    ).run(pendingId).lastInsertRowid)
-    const candidateId = Number(db.prepare(
-      "INSERT INTO pending_video_scrape_candidates (source_id, result_json) VALUES (?, '{\"code\":\"IPX-535\"}')"
-    ).run(sourceId).lastInsertRowid)
-    db.prepare(
-      "INSERT INTO pending_video_scrape_resources (candidate_id, field, staged_path) VALUES (?, 'cover', 'stage/delete.jpg')"
-    ).run(candidateId)
-    const cleaned: string[][] = []
-
-    createVideoMaintenanceService({
-      cleanupVideoScrapeStagingPaths(paths) {
-        cleaned.push(paths)
-      }
-    }).delete(1)
-
-    assert.equal(db.prepare('SELECT 1 FROM videos WHERE id = 1').get(), undefined)
-    assert.deepEqual(cleaned, [['stage/delete.jpg']])
   })
 
   it('rolls back the whole edit when it would create a complete business identity conflict', () => {

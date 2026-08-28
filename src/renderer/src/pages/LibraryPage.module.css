@@ -1,0 +1,25 @@
+.identity {
+  display: flex;
+  align-items: center;
+  max-width: 210px;
+  min-width: 0;
+  padding-right: 14px;
+  border-right: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  gap: 8px;
+}
+
+.identityIcon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--media-library-color, var(--text-muted));
+}
+
+.identityName {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

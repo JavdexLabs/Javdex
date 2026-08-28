@@ -7,28 +7,43 @@ import { useLayoutSpacing } from '../hooks/useLayoutSpacing'
 import { resolveScrollTopForKey, setListScroll } from '../listView/listViewMemory'
 import ScrollToTopButton, { SCROLL_TO_TOP_THRESHOLD } from './ScrollToTopButton'
 import PosterCard from './PosterCard'
+import ScopedPosterCard from './ScopedPosterCard'
+import type { ScopedVideo } from '@shared/catalogTypes'
 import { useDisplayMode } from './DisplayModeContext'
 import {
   computePosterGridLayout,
-  POSTER_META_HEIGHT
+  computePosterGridRowHeight
 } from '../coverAspect'
 import { scrollbarWidth } from '../utils/scrollbar'
 
 const GAP = 12
 
-interface VirtualPosterGridProps {
-  videos: Video[]
+function isScopedVideo(video: Video): video is ScopedVideo {
+  const candidate = video as Partial<ScopedVideo>
+  return (
+    Number.isSafeInteger(candidate.preferredLibraryId) &&
+    Array.isArray(candidate.libraries)
+  )
+}
+
+interface VirtualPosterGridProps<TVideo extends Video> {
+  videos: TVideo[]
+  detailLibraryId?: number
+  detailLibraryIds?: ReadonlyMap<number, number>
   hasMore?: boolean
   loadingMore?: boolean
   onLoadMore?: () => void
   selectedIds?: Set<number>
   selectionMode?: boolean
-  onToggleSelect?: (video: Video, index: number, event?: React.MouseEvent) => void
-  onEdit?: (video: Video) => void
-  onAddToPlaylist?: (video: Video) => void
-  onScrape?: (video: Video) => void
-  onMarkScrapeSuccess?: (video: Video) => void
-  onDelete?: (video: Video) => void
+  onToggleSelect?: (video: TVideo, index: number, event?: React.MouseEvent) => void
+  onEdit?: (video: TVideo) => void
+  onAddToPlaylist?: (video: TVideo) => void
+  onScrape?: (video: TVideo) => void
+  onMarkScrapeSuccess?: (video: TVideo) => void
+  onDelete?: (video: TVideo) => void
+  deleteLabel?: string
+  /** Show the bounded cross-library membership strip returned by global catalog projections. */
+  showLibraryBadges?: boolean
   /** Session-only key for scroll restoration (see listViewMemory). */
   scrollMemoryKey?: string
 }
@@ -37,8 +52,10 @@ interface VirtualPosterGridProps {
  * Windowed poster wall. Only renders visible cells, so tens of thousands of
  * videos scroll smoothly. Column count is derived from container width.
  */
-export default function VirtualPosterGrid({
+export default function VirtualPosterGrid<TVideo extends Video>({
   videos,
+  detailLibraryId,
+  detailLibraryIds,
   hasMore = false,
   loadingMore = false,
   onLoadMore,
@@ -50,8 +67,10 @@ export default function VirtualPosterGrid({
   onScrape,
   onMarkScrapeSuccess,
   onDelete,
+  deleteLabel,
+  showLibraryBadges = false,
   scrollMemoryKey
-}: VirtualPosterGridProps): JSX.Element {
+}: VirtualPosterGridProps<TVideo>): JSX.Element {
   const { pagePadX, cardAreaPadTop, cardAreaPadBottom } = useLayoutSpacing()
   const { ref, width, height } = useElementSize<HTMLDivElement>()
   const { mode } = useDisplayMode()
@@ -86,8 +105,10 @@ export default function VirtualPosterGrid({
     mode,
     GAP
   )
-  const cardHeight = posterHeight + POSTER_META_HEIGHT
-  const rowHeight = cardHeight + GAP
+  const rowHeight = computePosterGridRowHeight(posterHeight, {
+    gap: GAP,
+    showLibraryBadges
+  })
   const renderedItemCount = videos.length + (hasMore ? columnCount : 0)
   const rowCount = Math.ceil(renderedItemCount / columnCount)
   const stride = columnWidth + GAP
@@ -182,22 +203,48 @@ export default function VirtualPosterGrid({
           boxSizing: 'border-box'
         }}
       >
-        <PosterCard
-          video={video}
-          thumbHeight={posterHeight}
-          selected={selectedIds.has(video.id)}
-          selectionMode={selectionMode}
-          onToggleSelect={
-            onToggleSelect
-              ? (selectedVideo, event) => onToggleSelect(selectedVideo, index, event)
-              : undefined
-          }
-          onEdit={onEdit}
-          onAddToPlaylist={onAddToPlaylist}
-          onScrape={onScrape}
-          onMarkScrapeSuccess={onMarkScrapeSuccess}
-          onDelete={onDelete}
-        />
+        {showLibraryBadges && isScopedVideo(video) ? (
+          <ScopedPosterCard
+            video={video}
+            thumbHeight={posterHeight}
+            selected={selectedIds.has(video.id)}
+            selectionMode={selectionMode}
+            onToggleSelect={
+              onToggleSelect
+                ? (_selectedVideo, event) => onToggleSelect(video, index, event)
+                : undefined
+            }
+            onEdit={onEdit ? () => onEdit(video) : undefined}
+            onAddToPlaylist={onAddToPlaylist ? () => onAddToPlaylist(video) : undefined}
+            onScrape={onScrape ? () => onScrape(video) : undefined}
+            onMarkScrapeSuccess={
+              onMarkScrapeSuccess ? () => onMarkScrapeSuccess(video) : undefined
+            }
+            onDelete={onDelete ? () => onDelete(video) : undefined}
+            deleteLabel={deleteLabel}
+          />
+        ) : (
+          <PosterCard
+            video={video}
+            detailLibraryId={detailLibraryIds?.get(video.id) ?? detailLibraryId}
+            thumbHeight={posterHeight}
+            selected={selectedIds.has(video.id)}
+            selectionMode={selectionMode}
+            onToggleSelect={
+              onToggleSelect
+                ? (_selectedVideo, event) => onToggleSelect(video, index, event)
+                : undefined
+            }
+            onEdit={onEdit ? () => onEdit(video) : undefined}
+            onAddToPlaylist={onAddToPlaylist ? () => onAddToPlaylist(video) : undefined}
+            onScrape={onScrape ? () => onScrape(video) : undefined}
+            onMarkScrapeSuccess={
+              onMarkScrapeSuccess ? () => onMarkScrapeSuccess(video) : undefined
+            }
+            onDelete={onDelete ? () => onDelete(video) : undefined}
+            deleteLabel={deleteLabel}
+          />
+        )}
       </div>
     )
   }

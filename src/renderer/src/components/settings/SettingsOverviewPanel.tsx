@@ -87,10 +87,13 @@ interface SettingsOverviewPanelProps {
   videoBatchPct: number
   actressPct: number
   actressConflictGroupCount: number
-  unrecognizedCount: number
+  mediaLibraryCount: number
+  mediaLibraryRootCount: number
+  mediaLibrariesLoading: boolean
+  mediaLibrariesError: boolean
   statsRefreshKey?: number
   onNavigate: (group: SettingsGroup, tab?: SettingsTab) => void
-  onNavigateLibraryUnrecognized: () => void
+  onOpenMediaLibrarySettings: () => void
   onOpenAgentTool: (toolId: SettingsOverviewAgentToolId) => void
   onStartVideoBatchDefault: () => void
   onStartActressBatchDefault: () => void
@@ -358,10 +361,13 @@ export default function SettingsOverviewPanel({
   videoBatchPct,
   actressPct,
   actressConflictGroupCount,
-  unrecognizedCount,
+  mediaLibraryCount,
+  mediaLibraryRootCount,
+  mediaLibrariesLoading,
+  mediaLibrariesError,
   statsRefreshKey = 0,
   onNavigate,
-  onNavigateLibraryUnrecognized,
+  onOpenMediaLibrarySettings,
   onOpenAgentTool,
   onStartVideoBatchDefault,
   onStartActressBatchDefault,
@@ -510,27 +516,25 @@ export default function SettingsOverviewPanel({
           <SettingsStatusCard
             icon={FolderOpen}
             label="媒体库"
-            value={`${settings.libraryPaths.length} 个路径`}
-            detail={
-              statsLoading
-                ? '统计加载中…'
-                : settings.libraryPaths.length > 0
-                  ? `${formatCount(videoTotal)} 部影片`
-                  : '点击添加文件夹'
+            value={
+              mediaLibrariesError
+                ? '读取失败'
+                : mediaLibrariesLoading
+                  ? '读取中…'
+                  : `${mediaLibraryCount} 个媒体库`
             }
-            attention={settings.libraryPaths.length === 0}
-            onClick={() => onNavigate('library')}
+            detail={
+              mediaLibrariesError
+                ? '无法读取独立媒体库状态'
+                : mediaLibrariesLoading
+                ? '正在读取独立媒体库配置'
+                : mediaLibraryRootCount > 0
+                  ? `${mediaLibraryRootCount} 个来源目录 · ${formatCount(videoTotal)} 部影片`
+                  : '前往独立媒体库设置来源目录'
+            }
+            attention={mediaLibrariesError || (!mediaLibrariesLoading && mediaLibraryRootCount === 0)}
+            onClick={onOpenMediaLibrarySettings}
           />
-          {unrecognizedCount > 0 && (
-            <SettingsStatusCard
-              icon={FolderOpen}
-              label="无法识别"
-              value={`${unrecognizedCount} 个文件`}
-              detail="需手动填写番号"
-              attention
-              onClick={onNavigateLibraryUnrecognized}
-            />
-          )}
           <SettingsStatusCard
             icon={Clapperboard}
             label="影片刮削"
@@ -639,7 +643,7 @@ export default function SettingsOverviewPanel({
               </Button>
             </div>
             <small>
-              {settings.defaultScraper || '未设置插件'} · 未刮削项 · 空字段补齐 · 全字段
+              全部媒体库 · {settings.defaultScraper || '未设置插件'} · 未刮削项 · 空字段补齐 · 全字段
             </small>
           </div>
 

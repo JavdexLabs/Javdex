@@ -90,6 +90,8 @@ userData/
 
 ### 媒体库
 
+- 创建多个命名媒体库；每个媒体库独立管理来源目录、扫描策略、默认刮削器和显示偏好
+- 首页集中展示跨库搜索、随机发现、近期添加和各媒体库状态
 - 扫描本地目录并识别常见视频格式，支持定时自动扫描
 - 解析编号，并统一管理本地文件、HTTP 直链、网页、Magnet 与 ED2K 资源
 - 按资源类型筛选，支持多资源关联、主资源切换与本地路径迁移
@@ -195,6 +197,7 @@ Javdex 基于 Electron、React、TypeScript、Vite 和 `better-sqlite3` 构建�
 | [第三方说明](docs/THIRD_PARTY_NOTICES.md) | 第三方项目、许可与集成边界 |
 | [UI 设计规范](docs/UI_DESIGN_GUIDELINES.md) | 视觉原则与语义 token |
 | [路由设计](docs/ROUTING_DESIGN.md) | 页面路由、查询状态与返回栈 |
+| [多媒体库设计](docs/MULTI_LIBRARY_DESIGN.md) | 多库领域模型、数据隔离、首页与生命周期设计 |
 | [更新日志](CHANGELOG.md) | 版本变更记录 |
 
 ## 反馈

@@ -357,7 +357,16 @@ function queryActressListRows(
   return db
     .prepare(
       `SELECT a.*,
-              COUNT(va.video_id) AS video_count,
+              COUNT(
+                CASE WHEN EXISTS (
+                  SELECT 1
+                  FROM library_video_memberships membership
+                  JOIN media_libraries library ON library.id = membership.library_id
+                  WHERE membership.video_id = va.video_id
+                    AND membership.is_hidden = 0
+                    AND library.status = 'active'
+                ) THEN va.video_id END
+              ) AS video_count,
               (SELECT COUNT(*) FROM actress_gallery_assets ag WHERE ag.actress_id = a.id) AS gallery_count
        FROM actresses a
        LEFT JOIN video_actress va ON va.actress_id = a.id
@@ -551,6 +560,14 @@ export function getActressDetail(id: number): ActressDetail | null {
       `SELECT v.*${videoListSelectExtras()} FROM videos v
        JOIN video_actress va ON va.video_id = v.id
        WHERE va.actress_id = ?
+         AND EXISTS (
+           SELECT 1
+           FROM library_video_memberships membership
+           JOIN media_libraries library ON library.id = membership.library_id
+           WHERE membership.video_id = v.id
+             AND membership.is_hidden = 0
+             AND library.status = 'active'
+         )
        ORDER BY v.release_date DESC, v.add_time DESC`
     )
     .all(id) as VideoListProjectionRow[]

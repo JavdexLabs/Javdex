@@ -9,17 +9,23 @@ import {
 import { appCommandAdapter } from './appContractAdapter'
 
 export function registerPlayerHandlers(): void {
-  appCommandAdapter.register(IPC.PLAYER_PLAY, (videoId): Promise<PlayResult> =>
-    playVideo(videoId)
+  appCommandAdapter.register(IPC.PLAYER_PLAY, (libraryId, videoId): Promise<PlayResult> =>
+    playVideo(libraryId, videoId)
   )
 
-  appCommandAdapter.register(IPC.PLAYER_REVEAL, (videoId): PlayResult => revealVideo(videoId))
-
-  appCommandAdapter.register(IPC.PLAYER_OPEN_RESOURCE, (resourceId): Promise<PlayResult> =>
-    openVideoResource(resourceId)
+  appCommandAdapter.register(IPC.PLAYER_REVEAL, (libraryId, videoId): PlayResult =>
+    revealVideo(libraryId, videoId)
   )
 
-  appCommandAdapter.register(IPC.PLAYER_REVEAL_RESOURCE, (resourceId): PlayResult =>
-    revealVideoResource(resourceId)
+  appCommandAdapter.register(
+    IPC.PLAYER_OPEN_RESOURCE,
+    (libraryId, resourceId): Promise<PlayResult> =>
+      openVideoResource(libraryId, resourceId)
+  )
+
+  appCommandAdapter.register(
+    IPC.PLAYER_REVEAL_RESOURCE,
+    (libraryId, resourceId): PlayResult =>
+      revealVideoResource(libraryId, resourceId)
   )
 }

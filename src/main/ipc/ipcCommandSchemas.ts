@@ -5,6 +5,7 @@ import type { AppIpcContract } from '@shared/appIpcContract'
 import type { ScrapeIpcContract } from '@shared/scrapeIpcContract'
 import type { VideoIpcContract } from '@shared/videoIpcContract'
 import type { IpcArgsSchemaMap } from './typedIpcAdapter'
+import { positiveSafeInteger, videoQueryIpcSchema } from './videoQueryIpcSchema'
 
 const id = z.number().int().positive()
 const revision = z.number().int().nonnegative()
@@ -22,13 +23,95 @@ const sortDirection = z.enum(['asc', 'desc'])
 const organizationRole = z.enum(['maker', 'publisher'])
 const pluginKind = z.enum(['video', 'actress'])
 const scrapeFields = z.array(text)
+const videoScrapeField = z.enum([
+  'title',
+  'summary',
+  'cover',
+  'releaseDate',
+  'maker',
+  'publisher',
+  'series',
+  'director',
+  'duration',
+  'actressesFemale',
+  'actressesMale',
+  'tags',
+  'source',
+  'rating',
+  'samples'
+])
+const videoScrapeFields = z
+  .array(videoScrapeField)
+  .max(16)
+  .refine((values) => new Set(values).size === values.length, '影片刮削字段不能重复')
+const videoBatchScrapeStatus = z.union([
+  z.literal(0),
+  z.literal(1),
+  z.literal(2),
+  z.literal('all')
+])
+const videoBatchScrapeFilter = z
+  .object({
+    libraryId: id.optional(),
+    status: videoBatchScrapeStatus,
+    videoIds: z
+      .array(id)
+      .max(10_000)
+      .refine((values) => new Set(values).size === values.length, '影片 ID 不能重复')
+      .optional(),
+    missingFields: videoScrapeFields.optional(),
+    sourceName: text.optional(),
+    ratingSourceName: text.optional(),
+    scraperName: text.optional()
+  })
+  .strict()
+const videoBatchScrapeRequest = videoBatchScrapeFilter
+  .extend({
+    fields: videoScrapeFields.min(1),
+    mode: z.enum(['replace', 'fillEmpty', 'replaceIfPresent']).optional()
+  })
+  .strict()
 const videoResourceImportTarget = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('new') }).strict(),
   z.object({ kind: z.literal('existing'), videoId: id }).strict()
 ])
+const pendingScanResolution = z
+  .object({
+    expectedRevision: id,
+    assignments: z
+      .array(
+        z
+          .object({
+            resourceId: id,
+            target: z.discriminatedUnion('kind', [
+              z.object({ kind: z.literal('existing'), videoId: id }).strict(),
+              z.object({ kind: z.literal('new'), groupKey: nonEmptyText.max(200) }).strict()
+            ])
+          })
+          .strict()
+      )
+      .min(1)
+      .max(1_000),
+    primaryResourceIds: z.record(nonEmptyText.max(200), id).optional()
+  })
+  .strict()
+const catalogScope = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('library'), libraryId: positiveSafeInteger }).strict(),
+  z
+    .object({
+      kind: z.literal('all'),
+      libraryIds: z
+        .array(positiveSafeInteger)
+        .max(500)
+        .refine((values) => new Set(values).size === values.length, '媒体库 ID 不能重复')
+        .optional()
+    })
+    .strict()
+])
 
 const videoLinkImport = z
   .object({
+    libraryId: id,
     code: nonEmptyText,
     target: videoResourceImportTarget,
     url: nonEmptyText,
@@ -38,7 +121,12 @@ const videoLinkImport = z
   })
   .strict()
 
-const videoLinkUpdate = videoLinkImport.omit({ code: true, target: true })
+const videoLinkUpdate = videoLinkImport.omit({ libraryId: true, code: true, target: true })
+
+const lifecycleCommit = {
+  operationId: nonEmptyText.max(200),
+  expectedRevision: nonEmptyText
+}
 
 const mediaImageImport = z.discriminatedUnion('source', [
   z.object({ source: z.literal('file'), sourcePath: nonEmptyText, remoteUrl: nullableText.optional() }),
@@ -59,18 +147,6 @@ const replacementMainName = z
 
 const settingsPatch = z
   .object({
-    libraryPaths: stringArray.optional(),
-    autoDeleteResourceLessVideos: z.boolean().optional(),
-    autoMergeSameCodeResources: z.boolean().optional(),
-    autoScanEnabled: z.boolean().optional(),
-    autoScanIntervalMinutes: z.union([
-      z.literal(15),
-      z.literal(30),
-      z.literal(60),
-      z.literal(180),
-      z.literal(360)
-    ]).optional(),
-    minScanImportDurationMinutes: finiteNumber.nonnegative().optional(),
     proxyUrl: text.optional(),
     proxyUrlEnabled: z.boolean().optional(),
     llmProxyUrl: text.optional(),
@@ -242,36 +318,60 @@ const pluginPackage = z
   .strict()
 
 export const videoIpcSchemas = {
-  [IPC.VIDEO_LIST]: z.tuple([object.optional()]),
-  [IPC.VIDEO_GET]: z.tuple([id]),
+  [IPC.VIDEO_LIST]: z.tuple([catalogScope, videoQueryIpcSchema.optional()]),
+  [IPC.VIDEO_GET]: z.tuple([catalogScope, positiveSafeInteger]),
   [IPC.VIDEO_UPDATE]: z.tuple([id, object]),
   [IPC.VIDEO_EDIT]: z.tuple([id, object]),
   [IPC.VIDEO_CLEAR_META]: z.tuple([id]),
   [IPC.VIDEO_MARK_SCRAPE_SUCCESS]: z.tuple([id]),
-  [IPC.VIDEO_DELETE]: z.tuple([id]),
   [IPC.VIDEO_SET_RATING]: z.tuple([id, finiteNumber.min(0).max(5)]),
   [IPC.VIDEO_CORRECT_IMPORT]: z.tuple([id, nonEmptyText, z.boolean().optional()]),
-  [IPC.VIDEO_YEARS]: noArgs,
+  [IPC.VIDEO_YEARS]: z.tuple([catalogScope]),
   [IPC.VIDEO_SAMPLE_IMPORT]: z.tuple([id, mediaImageImport]),
   [IPC.VIDEO_SAMPLE_DELETE]: z.tuple([id, id]),
   [IPC.VIDEO_POSTER_SET]: z.tuple([id, nullableText]),
   [IPC.VIDEO_MANUAL_TAG_ADD]: z.tuple([id, nonEmptyText]),
   [IPC.VIDEO_MANUAL_TAG_REMOVE]: z.tuple([id, id]),
   [IPC.VIDEO_RESOURCE_IMPORT]: z.tuple([videoLinkImport]),
-  [IPC.VIDEO_RESOURCE_GET]: z.tuple([id, id]),
+  [IPC.VIDEO_RESOURCE_GET]: z.tuple([id, id, id]),
   [IPC.VIDEO_RESOURCE_CHECK]: z.tuple([nonEmptyText]),
-  [IPC.VIDEO_RESOURCE_UPDATE]: z.tuple([id, id, videoLinkUpdate]),
-  [IPC.VIDEO_RESOURCE_UPDATE_LOCAL_LABEL]: z.tuple([id, id, nullableText]),
-  [IPC.VIDEO_RESOURCE_SET_PRIMARY]: z.tuple([id, id]),
+  [IPC.VIDEO_RESOURCE_UPDATE]: z.tuple([id, id, id, videoLinkUpdate]),
+  [IPC.VIDEO_RESOURCE_UPDATE_LOCAL_LABEL]: z.tuple([id, id, id, nullableText]),
+  [IPC.VIDEO_RESOURCE_SET_PRIMARY]: z.tuple([id, id, id]),
   [IPC.VIDEO_RESOURCE_REMOVE]: z.tuple([
     id,
     id,
-    z.enum(['retain-video', 'delete-video']).optional()
+    id,
+    z.literal('retain-video').optional()
+  ]),
+  [IPC.VIDEO_REMOVE_FROM_LIBRARY_PREVIEW]: z.tuple([id, id]),
+  [IPC.VIDEO_REMOVE_FROM_LIBRARY]: z.tuple([
+    z.object({
+      ...lifecycleCommit,
+      libraryId: id,
+      videoId: id
+    }).strict()
+  ]),
+  [IPC.VIDEO_RESOURCE_MOVE_PREVIEW]: z.tuple([id, id, id]),
+  [IPC.VIDEO_RESOURCE_MOVE]: z.tuple([
+    z.object({
+      ...lifecycleCommit,
+      sourceLibraryId: id,
+      targetLibraryId: id,
+      resourceId: id
+    }).strict()
+  ]),
+  [IPC.VIDEO_DELETE_GLOBAL_PREVIEW]: z.tuple([id]),
+  [IPC.VIDEO_DELETE_GLOBAL]: z.tuple([
+    z.object({
+      ...lifecycleCommit,
+      videoId: id
+    }).strict()
   ]),
   [IPC.VIDEO_MERGE]: z.tuple([
     z.object({ retainedVideoId: id, sourceVideoId: id }).strict()
   ]),
-  [IPC.VIDEO_RESOURCE_SPLIT]: z.tuple([id, id])
+  [IPC.VIDEO_RESOURCE_SPLIT]: z.tuple([id, id, id])
 } satisfies IpcArgsSchemaMap<VideoIpcContract>
 
 export const actressIpcSchemas = {
@@ -354,8 +454,9 @@ export const scrapeIpcSchemas = {
   [IPC.SCRAPE_ONE]: z.tuple([
     id,
     optionalText,
-    scrapeFields.optional(),
-    text.optional(),
+    videoScrapeFields.optional(),
+    z.enum(['replace', 'fillEmpty', 'replaceIfPresent']).optional(),
+    id.optional(),
     id.optional()
   ]),
   [IPC.PENDING_VIDEO_SCRAPE_LIST]: noArgs,
@@ -370,8 +471,8 @@ export const scrapeIpcSchemas = {
   [IPC.PENDING_VIDEO_SCRAPE_DISCARD]: z.tuple([id]),
   [IPC.SCRAPE_BATCH_START]: z.tuple([optionalText]),
   [IPC.SCRAPE_BATCH_CANCEL]: noArgs,
-  [IPC.SCRAPE_VIDEO_BATCH_COUNT]: z.tuple([object]),
-  [IPC.SCRAPE_VIDEO_BATCH_START]: z.tuple([object]),
+  [IPC.SCRAPE_VIDEO_BATCH_COUNT]: z.tuple([videoBatchScrapeFilter]),
+  [IPC.SCRAPE_VIDEO_BATCH_START]: z.tuple([videoBatchScrapeRequest]),
   [IPC.SCRAPE_VIDEO_BATCH_CANCEL]: noArgs,
   [IPC.SCRAPE_REMATCH_COUNT]: z.tuple([z.enum(['scraped', 'failed', 'all'])]),
   [IPC.SCRAPE_REMATCH_BATCH_START]: z.tuple([object]),
@@ -428,8 +529,13 @@ export const appIpcSchemas = {
   [IPC.SETTINGS_GET]: noArgs,
   [IPC.SETTINGS_UPDATE]: z.tuple([settingsPatch]),
   [IPC.SETTINGS_PICK_FOLDER]: noArgs,
-  [IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW]: z.tuple([nonEmptyText]),
-  [IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM]: z.tuple([nonEmptyText]),
+  [IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW]: z.tuple([id, id]),
+  [IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM]: z.tuple([
+    id,
+    id,
+    id,
+    z.string().regex(/^[a-f0-9]{64}$/)
+  ]),
   [IPC.SETTINGS_MODEL_MANAGEMENT_GET]: noArgs,
   [IPC.SETTINGS_MODEL_MANAGEMENT_APPLY]: z.tuple([modelManagementApply]),
   [IPC.SETTINGS_MODEL_MANAGEMENT_DISCOVER_MODELS]: z.tuple([nonEmptyText]),
@@ -443,19 +549,35 @@ export const appIpcSchemas = {
   [IPC.APP_UPDATE_OPEN_PROJECT_PAGE]: z.tuple([z.enum(['project', 'releases', 'license'])]),
   [IPC.EXTERNAL_LINK_OPEN]: z.tuple([nonEmptyText]),
   [IPC.APP_UPDATE_IGNORE_VERSION]: z.tuple([nonEmptyText]),
-  [IPC.SCAN_RUN]: z.tuple([stringArray.optional()]),
-  [IPC.SCAN_CANCEL]: noArgs,
-  [IPC.SCAN_AUDIT_GET]: noArgs,
-  [IPC.SCAN_AUDIT_REVEAL_FILE]: z.tuple([nonEmptyText]),
+  [IPC.SCAN_RUN]: z.tuple([
+    id,
+    z
+      .array(id)
+      .max(64)
+      .refine((values) => new Set(values).size === values.length, '根目录 ID 不能重复')
+      .optional()
+  ]),
+  [IPC.SCAN_CANCEL]: z.tuple([nonEmptyText]),
+  [IPC.SCAN_LATEST_GET]: z.tuple([id]),
+  [IPC.SCAN_AUDIT_GET]: z.tuple([id]),
+  [IPC.SCAN_AUDIT_REVEAL_FILE]: z.tuple([id, nonEmptyText]),
   [IPC.FILE_RENAME]: z.tuple([
+    id,
+    id,
     nonEmptyText,
     nonEmptyText,
     nonEmptyText,
     videoResourceImportTarget
   ]),
-  [IPC.FILE_IMPORT_MANUAL]: z.tuple([nonEmptyText, nonEmptyText, videoResourceImportTarget]),
-  [IPC.PENDING_SCAN_LIST]: noArgs,
-  [IPC.PENDING_SCAN_RESOLVE]: z.tuple([id, object]),
+  [IPC.FILE_IMPORT_MANUAL]: z.tuple([
+    id,
+    id,
+    nonEmptyText,
+    nonEmptyText,
+    videoResourceImportTarget
+  ]),
+  [IPC.PENDING_SCAN_LIST]: z.tuple([id]),
+  [IPC.PENDING_SCAN_RESOLVE]: z.tuple([id, id, pendingScanResolution]),
   [IPC.PLAYLIST_LIST]: noArgs,
   [IPC.PLAYLIST_GET]: z.tuple([
     id,
@@ -587,10 +709,10 @@ export const appIpcSchemas = {
   [IPC.AGENT_METADATA_DISCARD]: z.tuple([
     z.object({ draftId: nonEmptyText, expectedRevision: revision }).strict()
   ]),
-  [IPC.PLAYER_PLAY]: z.tuple([id]),
-  [IPC.PLAYER_REVEAL]: z.tuple([id]),
-  [IPC.PLAYER_OPEN_RESOURCE]: z.tuple([id]),
-  [IPC.PLAYER_REVEAL_RESOURCE]: z.tuple([id]),
+  [IPC.PLAYER_PLAY]: z.tuple([id, id]),
+  [IPC.PLAYER_REVEAL]: z.tuple([id, id]),
+  [IPC.PLAYER_OPEN_RESOURCE]: z.tuple([id, id]),
+  [IPC.PLAYER_REVEAL_RESOURCE]: z.tuple([id, id]),
   [IPC.ASSET_CRYPTO_SET]: z.tuple([z.boolean()]),
   [IPC.ASSET_STORAGE_RELOCATE]: z.tuple([nullableText.optional()]),
   [IPC.ASSET_FETCH_REMOTE_IMAGE]: z.tuple([nonEmptyText]),

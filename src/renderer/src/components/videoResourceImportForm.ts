@@ -23,7 +23,7 @@ export function buildVideoResourceImportInput(input: {
   displayName: string
   size: string
   sizeUnit: VideoResourceSizeUnit
-}): Omit<VideoLinkResourceImportInput, 'target'> {
+}): Omit<VideoLinkResourceImportInput, 'libraryId' | 'target'> {
   const code = normalizeVideoCode(input.code)
   const normalized = normalizeExternalVideoResource(
     input.url,

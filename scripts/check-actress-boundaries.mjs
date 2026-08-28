@@ -56,6 +56,7 @@ const contractFiles = [
   'src/shared/actressIpcContract.ts',
   'src/shared/videoIpcContract.ts',
   'src/shared/scrapeIpcContract.ts',
+  'src/shared/mediaLibraryIpcContract.ts',
   'src/shared/appIpcContract.ts'
 ]
 const contractSources = contractFiles.map((file) => readFileSync(file, 'utf8'))
@@ -139,7 +140,8 @@ for (const specifier of importsOf(actressHandler)) {
 
 const videoApplicationSeams = new Set([
   '../services/videoQueryService',
-  '../services/videoMaintenanceService'
+  '../services/videoMaintenanceService',
+  '../services/videoLifecycleService'
 ])
 
 const videoHandler = 'src/main/ipc/videoHandlers.ts'

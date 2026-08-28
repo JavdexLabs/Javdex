@@ -29,6 +29,7 @@ import SortSwitch from '../components/SortSwitch'
 import { useToast } from '../components/Toast'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { useInfiniteVideoList } from '../query/useInfiniteVideoList'
+import { ALL_CATALOG_SCOPE } from '../query/catalogScopes'
 import { seriesKeys, videoKeys } from '../query/queryKeys'
 import {
   hashListQuery,
@@ -82,7 +83,7 @@ export default function SeriesDetailPage(): JSX.Element {
     [toast]
   )
   const { videos, total, loading, loadingMore, hasMore, loadMore, refetchSilent } =
-    useInfiniteVideoList(videoQuery, hash, onError, valid)
+    useInfiniteVideoList(ALL_CATALOG_SCOPE, videoQuery, hash, onError, valid)
   useListSurfaceRefetch(stacked, refetchSilent)
   const scroll = useScrollContainerMemory(`series-detail:${hash}`)
   const save = async (input: SeriesUpdateInput): Promise<void> => {

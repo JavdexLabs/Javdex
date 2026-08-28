@@ -42,10 +42,6 @@
   .settings-empty-panel,
   .settings-run-status,
   .batch-log-head span,
-  .path-row,
-  .media-path-empty,
-  .library-scan-status,
-  .field-row--stacked label,
   .plugin-empty-state
 ) {
   font-size: var(--settings-fs-secondary, 12px);

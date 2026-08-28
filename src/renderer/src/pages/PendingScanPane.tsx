@@ -4,6 +4,7 @@ import { FileText, FileVideo } from 'lucide-react'
 import type { PendingScanGroup, PendingScanResourceTarget } from '@shared/libraryTypes'
 import { normalizeVideoCode } from '@shared/videoCode'
 import { api } from '../api'
+import { ALL_CATALOG_SCOPE } from '../query/catalogScopes'
 import Button from '../components/Button'
 import SelectControl from '../components/SelectControl'
 import { useToast } from '../components/Toast'
@@ -38,9 +39,11 @@ function formatDuration(value: number | null): string {
 
 export default function PendingScanPane({
   group,
+  libraryName,
   onResolved
 }: {
   group: PendingScanGroup
+  libraryName?: string
   onResolved: () => void
 }): JSX.Element {
   const toast = useToast()
@@ -50,9 +53,12 @@ export default function PendingScanPane({
   const [primaryByGroup, setPrimaryByGroup] = useState<Record<string, number>>({})
   const [busy, setBusy] = useState(false)
   const existingQuery = useQuery({
-    queryKey: ['pending-scan-existing-videos', group.normalizedCode],
+    queryKey: ['pending-scan-existing-videos', group.libraryId, group.normalizedCode],
     queryFn: async () => {
-      const result = await api.videos.list({ search: group.normalizedCode, limit: 200 })
+      const result = await api.videos.list(ALL_CATALOG_SCOPE, {
+        search: group.normalizedCode,
+        limit: 200
+      })
       return result.items.filter((video) => {
         try {
           return normalizeVideoCode(video.code) === group.normalizedCode
@@ -65,7 +71,7 @@ export default function PendingScanPane({
   useEffect(() => {
     setAssignments({})
     setPrimaryByGroup({})
-  }, [group.id])
+  }, [group.id, group.libraryId])
 
   const complete = arePendingScanAssignmentsComplete(
     group.resources.map((resource) => resource.id),
@@ -79,7 +85,8 @@ export default function PendingScanPane({
     if (!complete || busy) return
     setBusy(true)
     try {
-      await api.scan.resolvePending(group.id, {
+      await api.scan.resolvePending(group.libraryId, group.id, {
+        expectedRevision: group.revision,
         assignments: group.resources.map((resource) => ({
           resourceId: resource.id,
           target: assignments[resource.id]!
@@ -97,7 +104,7 @@ export default function PendingScanPane({
 
   return (
     <PendingWorkspace
-      eyebrow="扫描资源"
+      eyebrow={`扫描资源 · ${libraryName ?? `媒体库 #${group.libraryId}`}`}
       title={`「${group.normalizedCode}」的 ${group.resources.length} 条资源属于哪部影片？`}
       description="扫描到同一番号的多份文件，无法自动判断归属。每条资源必须恰好分配一次。"
       status={complete ? '可确认' : '待确认'}

@@ -4,9 +4,9 @@
  *
  * Route tree (pathname only; search params omitted):
  *
- * /                          LibraryPage
- * /detail/:id                + DetailPage (list stays mounted)
- * /detail/:id/actress/:aid   + ActressDetailPage stack
+ * /                          HomePage
+ * /search                    GlobalSearchPage
+ * /libraries/:libraryId      LibraryPage
  *
  * /actresses                 ActressesPage
  * /actresses/:id             + ActressDetailPage
@@ -24,7 +24,8 @@
 
 /** True only for list roots — not detail/stack overlays that keep the list mounted. */
 export function isLibraryListSurfacePath(pathname: string): boolean {
-  if (pathname === ROUTE_PATH.library) return true
+  if (pathname === ROUTE_PATH.home || pathname === ROUTE_PATH.search) return true
+  if (parseMediaLibraryRoute(pathname)?.kind === 'list') return true
   if (pathname === ROUTE_PATH.actresses) return true
   if (pathname === ROUTE_PATH.playlists) return true
   return Boolean(matchPath({ path: ROUTE_PATH.facetList, end: true }, pathname))
@@ -45,3 +46,4 @@ export function shouldRefetchLibraryOnRouteChange(
 }
 import { matchPath } from 'react-router-dom'
 import { ROUTE_PATH } from '../listView/routePaths'
+import { parseMediaLibraryRoute } from '../listView/mediaLibraryRoutes'

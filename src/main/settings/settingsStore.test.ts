@@ -12,7 +12,6 @@ import {
   getPublicLlmProviderConfigs,
   getSettingsRecoveryNotice,
   migrateRetiredVideoScraperSettings,
-  removeUnrecognizedFileFromSnapshot,
   resetSettingsCacheForTests,
   updateSettings
 } from './settingsStore'
@@ -303,7 +302,7 @@ describe('settingsStore scan cleanup defaults', () => {
     assert.equal(summary?.errorSummary?.includes('secret'), false)
   })
 
-  it('persists a normalized unrecognized-file snapshot and removes resolved paths', () => {
+  it('normalizes the retired unrecognized-file snapshot for migration', () => {
     writeSettings({
       unrecognizedFiles: ['/library/UNKNOWN.mp4', ' /library/SECOND.mp4 ', '', 42],
       unrecognizedFilesScanFinishedAt: '2026-08-24T01:00:00.000Z'
@@ -313,18 +312,10 @@ describe('settingsStore scan cleanup defaults', () => {
       '/library/UNKNOWN.mp4',
       '/library/SECOND.mp4'
     ])
-
-    removeUnrecognizedFileFromSnapshot('/library/UNKNOWN.mp4')
-    resetSettingsCacheForTests()
-
-    assert.deepEqual(getSettings().unrecognizedFiles, ['/library/SECOND.mp4'])
     assert.equal(
       getSettings().unrecognizedFilesScanFinishedAt,
       '2026-08-24T01:00:00.000Z'
     )
-
-    removeUnrecognizedFileFromSnapshot('/library/SECOND.mp4')
-    assert.equal(getSettings().unrecognizedFilesScanFinishedAt, null)
   })
 })
 

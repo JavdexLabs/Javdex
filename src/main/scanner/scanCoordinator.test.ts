@@ -1,34 +1,246 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import type { LibraryScanAudit, LibraryScanEvent, LibraryScanSummary, ScanResult } from '@shared/libraryTypes'
-import type { VideoResource } from '@shared/videoTypes'
+import type {
+  LibraryScanAudit,
+  LibraryScanEvent,
+  LibraryScanSummary,
+  PendingScanGroup,
+  ScanProgress,
+  ScanResult
+} from '@shared/libraryTypes'
+import type { Video, VideoResource } from '@shared/videoTypes'
+import { DEFAULT_MEDIA_LIBRARY_CONFIG } from '@shared/mediaLibraryTypes'
 import { MaintenanceTaskGate } from '../services/maintenanceTaskGate'
 import { createScanCoordinator } from './scanCoordinator'
+import type { ScanOptions, ScanProgressFn } from './scanner'
 
-type CoordinatorDependencies = Parameters<typeof createScanCoordinator>[0]
+interface LegacyCoordinatorDependencies {
+  gate?: MaintenanceTaskGate
+  getConfiguredFolders?: () => string[]
+  inspectFolder?: (folder: string) => Promise<boolean>
+  authorizeRoot?: (folder: string) => void
+  scanFolders?: (
+    folders: string[],
+    onProgress?: ScanProgressFn,
+    options?: ScanOptions & { unavailableRoots?: string[] }
+  ) => Promise<ScanResult>
+  listLocalResources?: () => Array<{ video_id: number; resource_id: number; locator: string }>
+  getResourceById?: (resourceId: number) => VideoResource | null
+  getVideoById?: (videoId: number) => Video | null
+  listResources?: (videoId: number) => VideoResource[]
+  removeResourceRecord?: (resourceId: number) => void
+  setPrimaryResource?: (videoId: number, resourceId: number) => void
+  inspectPath?: (filePath: string) => 'present' | 'missing' | 'unknown'
+  reconcilePendingScanResources?: (
+    roots: string[],
+    inspectPath: (filePath: string) => 'present' | 'missing' | 'unknown'
+  ) => { removedResources: number; removedGroups: number }
+  recoverPendingPathCleanups?: () => { recovered: number; waiting: number }
+  getPendingPathCleanupRoots?: () => string[]
+  applyPendingPathCleanups?: (roots: string[]) => {
+    removed: number
+    promoted: number
+    consumedRoots: string[]
+  }
+  clearPendingPathCleanups?: (roots: string[]) => void
+  runCleanupTransaction?: <T>(operation: () => T) => T
+  getMinImportDurationMinutes?: () => number
+  getAutoMergeSameCodeResources?: () => boolean
+  shouldAutoDeleteResourceLessVideos?: () => boolean
+  deleteResourceLessVideos?: () => number
+  listResourceLessVideos?: () => Array<Pick<Video, 'id' | 'code' | 'title'>>
+  listPendingScanGroups?: () => PendingScanGroup[]
+  recordScanSummary?: (
+    summary: LibraryScanSummary,
+    unrecognizedFiles: string[] | undefined,
+    audit: LibraryScanAudit
+  ) => void
+  now?: () => string
+  initiallyOfflineIdentity?: boolean
+  bindRootIdentities?: () => void
+}
+
+interface TestScanCoordinatorRequest {
+  libraryId?: number
+  folders?: string[]
+  trigger?: LibraryScanSummary['trigger']
+  onProgress?: (progress: ScanProgress) => void
+}
+
+type TestCoordinator = Omit<ReturnType<typeof createScanCoordinator>, 'run'> & {
+  run: (request?: TestScanCoordinatorRequest) => Promise<ScanResult>
+}
 
 function createTestScanCoordinator(
-  dependencies: CoordinatorDependencies
-): ReturnType<typeof createScanCoordinator> {
-  return createScanCoordinator({
-    getPendingPathCleanupRoots: () => [],
-    applyPendingPathCleanups: (roots) => ({ removed: 0, promoted: 0, consumedRoots: roots }),
-    clearPendingPathCleanups: () => undefined,
+  dependencies: LegacyCoordinatorDependencies
+): TestCoordinator {
+  let rootsBound = !dependencies.initiallyOfflineIdentity
+  const configuredFolders = (): string[] => dependencies.getConfiguredFolders?.() ?? ['/online']
+  const roots = () =>
+    configuredFolders().map((rootPath, index) => ({
+      id: index + 1,
+      libraryId: 1,
+      path: rootPath,
+      normalizedPath: rootPath,
+      realPath: rootsBound ? rootPath : null,
+      normalizedRealPath: rootsBound ? rootPath : null,
+      deviceId: rootsBound ? `device-${index + 1}` : null,
+      inode: rootsBound ? `inode-${index + 1}` : null,
+      position: index,
+      state: 'active' as const,
+      createdAt: '2026-08-10T00:00:00.000Z',
+      updatedAt: '2026-08-10T00:00:00.000Z'
+    }))
+  const rootPathById = (rootId: number): string | undefined =>
+    roots().find((root) => root.id === rootId)?.path
+  const legacyScanFolders = dependencies.scanFolders ?? (async () => emptyScanResult())
+  const coordinator = createScanCoordinator({
+    readScanSnapshot: () => ({
+      libraryId: 1,
+      libraryRevision: rootsBound ? 2 : 1,
+      configRevision: 7,
+      capturedAt: '2026-08-10T00:00:00.000Z',
+      config: {
+        libraryId: 1,
+        revision: 7,
+        ...DEFAULT_MEDIA_LIBRARY_CONFIG,
+        minImportDurationMinutes: dependencies.getMinImportDurationMinutes?.() ?? 0,
+        autoMergeSameCodeResources: dependencies.getAutoMergeSameCodeResources?.() ?? false,
+        removeResourceLessMemberships: Boolean(
+          dependencies.shouldAutoDeleteResourceLessVideos?.()
+        )
+      },
+      roots: roots()
+    }),
+    bindRootIdentities: ({ rootIds }) => {
+      dependencies.bindRootIdentities?.()
+      rootsBound = true
+      return { boundRootIds: [...rootIds], revision: 2 }
+    },
+    inspectRoot: async (root) => dependencies.inspectFolder?.(root.path) ?? true,
+    authorizeRoot: (_libraryId, rootId, expectedRoot) => {
+      const root = expectedRoot ?? roots().find((candidate) => candidate.id === rootId)
+      assert.ok(root)
+      dependencies.authorizeRoot?.(root.path)
+      return root
+    },
+    authorizeRootFile: (_libraryId, rootId, _filePath, expectedRoot) => {
+      const root = expectedRoot ?? roots().find((candidate) => candidate.id === rootId)
+      assert.ok(root)
+      return root
+    },
+    authorizeRootDeletionTarget: (_libraryId, rootId, _filePath, expectedRoot) => {
+      const root = expectedRoot ?? roots().find((candidate) => candidate.id === rootId)
+      assert.ok(root)
+      return root
+    },
+    scanFolders: async (request, onProgress, options) => ({
+      ...(await legacyScanFolders(
+        request.roots.map((root) => root.path),
+        onProgress,
+        {
+          ...options,
+          unavailableRoots: (options?.unavailableRootIds ?? []).flatMap((rootId) => {
+            const rootPath = rootPathById(rootId)
+            return rootPath ? [rootPath] : []
+          })
+        }
+      )),
+      libraryId: request.libraryId,
+      runId: request.runId
+    }),
+    listLocalResources: () =>
+      (dependencies.listLocalResources?.() ?? []).map((resource) => ({
+        library_id: 1,
+        ...resource
+      })),
+    getResourceById: (_libraryId, resourceId) =>
+      dependencies.getResourceById?.(resourceId) ?? null,
+    getVideoById: (videoId) => dependencies.getVideoById?.(videoId) ?? null,
+    listResources: (_libraryId, videoId) => dependencies.listResources?.(videoId) ?? [],
+    removeResourceRecord: (_libraryId, resourceId) =>
+      dependencies.removeResourceRecord?.(resourceId),
+    setPrimaryResource: (_libraryId, videoId, resourceId) =>
+      dependencies.setPrimaryResource?.(videoId, resourceId),
+    inspectPath: dependencies.inspectPath ?? (() => 'present'),
     runCleanupTransaction: (operation) => operation(),
-    reconcilePendingScanResources: () => ({ removedResources: 0, removedGroups: 0 }),
-    shouldAutoDeleteResourceLessVideos: () => false,
-    deleteResourceLessVideos: () => 0,
-    listResourceLessVideos: () => [],
-    listPendingScanGroups: () => [],
-    getVideoById: () => null,
-    recordScanSummary: () => undefined,
-    now: () => '2026-08-10T00:00:00.000Z',
-    ...dependencies
+    reconcilePendingScanResources: (_libraryId, rootIds, inspectPath) =>
+      dependencies.reconcilePendingScanResources?.(
+        rootIds.flatMap((rootId: number) => {
+          const rootPath = rootPathById(rootId)
+          return rootPath ? [rootPath] : []
+        }),
+        inspectPath
+      ) ?? { removedResources: 0, removedGroups: 0 },
+    recoverPendingPathCleanups: () =>
+      dependencies.recoverPendingPathCleanups?.() ?? { recovered: 0, waiting: 0 },
+    listPendingPathCleanups: () =>
+      (dependencies.getPendingPathCleanupRoots?.() ?? []).map(
+        (rootPath: string, index: number) => ({
+          jobId: rootPath,
+          libraryId: 1,
+          rootId: 10_000 + index
+        })
+      ),
+    applyPendingPathCleanups: (cleanups) => {
+      const legacyRoots = cleanups.map((cleanup) => cleanup.jobId)
+      const result = dependencies.applyPendingPathCleanups?.(legacyRoots) ?? {
+        removed: 0,
+        promoted: 0,
+        consumedRoots: legacyRoots
+      }
+      return { ...result, consumedRoots: cleanups }
+    },
+    removeResourceLessMemberships: () => {
+      if (!dependencies.shouldAutoDeleteResourceLessVideos?.()) return []
+      const candidates = dependencies.listResourceLessVideos?.() ?? []
+      const removed = dependencies.deleteResourceLessVideos?.() ?? 0
+      return Array.from({ length: removed }, (_, index) => {
+        const video = candidates[index]
+        return {
+          videoId: video?.id ?? index + 1,
+          videoCode: video?.code ?? `REMOVED-${index + 1}`,
+          videoTitle: video?.title ?? null
+        }
+      })
+    },
+    listPendingScanGroups: () => dependencies.listPendingScanGroups?.() ?? [],
+    beginRun: () => undefined,
+    finishRun: (input) =>
+      dependencies.recordScanSummary?.(
+        input.summary,
+        input.replaceUnrecognizedRootIds ? input.unrecognizedFiles?.map((file) => file.filePath) ?? [] : undefined,
+        input.audit
+      ),
+    now: dependencies.now ?? (() => '2026-08-10T00:00:00.000Z'),
+    createRunId: () => 'test-run',
+    gate: dependencies.gate ?? new MaintenanceTaskGate(),
+    ...(dependencies.runCleanupTransaction
+      ? { runCleanupTransaction: dependencies.runCleanupTransaction }
+      : {})
   })
+  const scopedRun = coordinator.run.bind(coordinator)
+  coordinator.run = ((request: TestScanCoordinatorRequest = {}) => {
+    const requestedFolders = request.folders
+    const rootIds = requestedFolders?.map((folder) => {
+      const root = roots().find((candidate) => candidate.path === folder)
+      if (!root) throw new Error('测试根目录不存在')
+      return root.id
+    })
+    return scopedRun({
+      libraryId: request.libraryId ?? 1,
+      ...(rootIds ? { rootIds } : {}),
+      ...(request.trigger ? { trigger: request.trigger } : {}),
+      ...(request.onProgress ? { onProgress: request.onProgress } : {})
+    })
+  }) as typeof coordinator.run
+  return coordinator as TestCoordinator
 }
 
 function emptyScanResult(): ScanResult {
   return {
+    libraryId: 1,
+    runId: 'test-run',
     scannedFiles: 0,
     imported: 0,
     skipped: 0,
@@ -51,7 +263,13 @@ function emptyScanResult(): ScanResult {
 
 function resource(input: Partial<VideoResource> & Pick<VideoResource, 'id' | 'video_id' | 'kind' | 'locator'>): VideoResource {
   return {
+    library_id: 1,
+    root_id: input.locator.startsWith('/offline/') ? 2 : 1,
     resource_key: `${input.kind}:${input.locator}`,
+    source_identity:
+      input.kind === 'local' || input.strm_source_path
+        ? `${input.kind}:${input.strm_source_path ?? input.locator}`
+        : null,
     strm_source_path: null,
     size_bytes: null,
     duration_seconds: null,
@@ -64,6 +282,28 @@ function resource(input: Partial<VideoResource> & Pick<VideoResource, 'id' | 'vi
 }
 
 describe('ScanCoordinator', () => {
+  it('binds an offline-created root identity and refreshes the frozen snapshot before scanning', async () => {
+    let bindings = 0
+    let scanned = 0
+    const coordinator = createTestScanCoordinator({
+      initiallyOfflineIdentity: true,
+      bindRootIdentities: () => {
+        bindings += 1
+      },
+      inspectFolder: async () => true,
+      scanFolders: async (folders) => {
+        scanned += 1
+        assert.deepEqual(folders, ['/online'])
+        return emptyScanResult()
+      }
+    })
+
+    await coordinator.run()
+
+    assert.equal(bindings, 1)
+    assert.equal(scanned, 1)
+  })
+
   it('persists matching complete audit details with the latest summary', async () => {
     const persisted: LibraryScanAudit[] = []
     const coordinator = createTestScanCoordinator({
@@ -72,6 +312,7 @@ describe('ScanCoordinator', () => {
       inspectFolder: async () => true,
       scanFolders: async (_folders, _onProgress, options) => {
         options?.onFileResult?.({
+          rootId: 1,
           filePath: '/online/AUDIT-001.mp4',
           sourceKind: 'local',
           outcome: 'unrecognized'
@@ -115,10 +356,44 @@ describe('ScanCoordinator', () => {
     unsubscribe()
 
     assert.deepEqual(events.slice(0, 2), [
-      { phase: 'started', trigger: 'startup' },
-      { phase: 'progress', trigger: 'startup', progress }
+      { phase: 'started', libraryId: 1, runId: 'test-run', trigger: 'startup' },
+      {
+        phase: 'progress',
+        libraryId: 1,
+        runId: 'test-run',
+        trigger: 'startup',
+        progress
+      }
     ])
-    assert.deepEqual(events[2], { phase: 'completed', trigger: 'startup', result })
+    assert.deepEqual(events[2], {
+      phase: 'completed',
+      libraryId: 1,
+      runId: 'test-run',
+      trigger: 'startup',
+      result
+    })
+  })
+
+  it('uses one frozen configuration snapshot for the complete run', async () => {
+    let minImportDurationMinutes = 30
+    let autoMergeSameCodeResources = true
+    const coordinator = createTestScanCoordinator({
+      getConfiguredFolders: () => ['/online'],
+      getMinImportDurationMinutes: () => minImportDurationMinutes,
+      getAutoMergeSameCodeResources: () => autoMergeSameCodeResources,
+      inspectFolder: async () => {
+        minImportDurationMinutes = 90
+        autoMergeSameCodeResources = false
+        return true
+      },
+      scanFolders: async (_folders, _progress, options) => {
+        assert.equal(options?.minImportDurationSeconds, 30 * 60)
+        assert.equal(options?.autoMergeSameCodeResources, true)
+        return emptyScanResult()
+      }
+    })
+
+    await coordinator.run()
   })
 
   it('preserves offline roots and removes only missing local resources under accessible roots', async () => {
@@ -259,6 +534,36 @@ describe('ScanCoordinator', () => {
     assert.deepEqual(reconciledRoots, [[]])
   })
 
+  it('rechecks the frozen root identity immediately before cleanup writes', async () => {
+    let scanFinished = false
+    let cleanupReads = 0
+    let reconcileRuns = 0
+    const coordinator = createTestScanCoordinator({
+      gate: new MaintenanceTaskGate(),
+      getConfiguredFolders: () => ['/online'],
+      inspectFolder: async () => true,
+      scanFolders: async () => {
+        scanFinished = true
+        return emptyScanResult()
+      },
+      authorizeRoot: () => {
+        if (scanFinished) throw new Error('root identity changed')
+      },
+      reconcilePendingScanResources: () => {
+        reconcileRuns += 1
+        return { removedResources: 0, removedGroups: 0 }
+      },
+      listLocalResources: () => {
+        cleanupReads += 1
+        return []
+      }
+    })
+
+    await assert.rejects(() => coordinator.run(), /root identity changed/)
+    assert.equal(reconcileRuns, 0)
+    assert.equal(cleanupReads, 0)
+  })
+
   it('does not run cleanup after cancellation and releases the mutual-exclusion lease', async () => {
     const gate = new MaintenanceTaskGate()
     let cleanupReads = 0
@@ -295,7 +600,9 @@ describe('ScanCoordinator', () => {
 
     const running = coordinator.run()
     await started
-    assert.equal(coordinator.cancel(), true)
+    assert.equal(coordinator.activeRunId, 'test-run')
+    assert.equal(coordinator.cancel('another-run'), false)
+    assert.equal(coordinator.cancel('test-run'), true)
     assert.equal((await running).cancelled, true)
     assert.equal(cleanupReads, 0)
     assert.equal(gate.active, null)
@@ -330,8 +637,14 @@ describe('ScanCoordinator', () => {
     assert.equal(cleanupReads, 0)
     assert.equal(deferredCleanupRuns, 0)
     assert.deepEqual(events, [
-      { phase: 'started', trigger: 'manual' },
-      { phase: 'failed', trigger: 'manual', error: 'adapter failed' }
+      { phase: 'started', libraryId: 1, runId: 'test-run', trigger: 'manual' },
+      {
+        phase: 'failed',
+        libraryId: 1,
+        runId: 'test-run',
+        trigger: 'manual',
+        error: 'adapter failed'
+      }
     ])
   })
 
@@ -504,7 +817,6 @@ describe('ScanCoordinator', () => {
     const coordinator = createTestScanCoordinator({
       gate: new MaintenanceTaskGate(),
       getConfiguredFolders: () => [],
-      hasPendingPathCleanups: () => true,
       scanFolders: async (folders) => {
         scannedFolders = folders
         return emptyScanResult()
@@ -561,6 +873,9 @@ describe('ScanCoordinator', () => {
     assert.equal(result.promoted, 1)
     assert.deepEqual(summaries, [
       {
+        libraryId: 1,
+        runId: 'test-run',
+        configRevision: 7,
         trigger: 'manual',
         startedAt: '2026-08-10T01:00:00.000Z',
         finishedAt: '2026-08-10T01:00:03.000Z',

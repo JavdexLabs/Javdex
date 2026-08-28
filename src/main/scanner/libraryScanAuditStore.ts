@@ -8,11 +8,12 @@ import type {
   LibraryScanFileAuditEntry,
   LibraryScanResourceAuditEntry
 } from '@shared/libraryTypes'
+import { getDb } from '../db/database'
 
-function auditFilePath(): string {
+function auditFilePath(libraryId: number): string {
   const userData = readTestUserDataPath() ?? (app?.getPath ? app.getPath('userData') : undefined)
   if (!userData) throw new Error('Electron app userData path is unavailable')
-  return path.join(userData, 'library-scan-audit.json')
+  return path.join(userData, `library-scan-audit-${libraryId}.json`)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -24,7 +25,10 @@ function hasText(value: unknown): value is string {
 }
 
 function isFileEntry(value: unknown): value is LibraryScanFileAuditEntry {
-  if (!isRecord(value) || !hasText(value.filePath)) return false
+  if (!isRecord(value) || !Number.isSafeInteger(value.rootId) || Number(value.rootId) <= 0) {
+    return false
+  }
+  if (!hasText(value.filePath)) return false
   if (value.sourceKind !== 'local' && value.sourceKind !== 'strm') return false
   return [
     'added',
@@ -49,6 +53,9 @@ function isResourceEntry(value: unknown): value is LibraryScanResourceAuditEntry
 
 function normalizeAudit(value: unknown): LibraryScanAudit | null {
   if (!isRecord(value) || value.schemaVersion !== 1) return null
+  if (!Number.isSafeInteger(value.libraryId) || Number(value.libraryId) <= 0) return null
+  if (!hasText(value.runId)) return null
+  if (!Number.isSafeInteger(value.configRevision) || Number(value.configRevision) < 0) return null
   if (!['manual', 'startup', 'interval', 'resume'].includes(String(value.trigger))) return null
   if (!['success', 'completed_with_errors', 'cancelled', 'failed'].includes(String(value.status))) {
     return null
@@ -65,9 +72,33 @@ function normalizeAudit(value: unknown): LibraryScanAudit | null {
   return value as unknown as LibraryScanAudit
 }
 
-export function readLibraryScanAudit(): LibraryScanAudit | null {
+function readPersistedAudit(libraryId: number): LibraryScanAudit | null | undefined {
   try {
-    return normalizeAudit(JSON.parse(fs.readFileSync(auditFilePath(), 'utf8')))
+    const row = getDb()
+      .prepare(
+        `SELECT audit_json
+           FROM library_scan_runs
+          WHERE library_id = ? AND audit_json IS NOT NULL
+          ORDER BY started_at DESC, id DESC
+          LIMIT 1`
+      )
+      .get(libraryId) as { audit_json: string } | undefined
+    if (!row) return null
+    const audit = normalizeAudit(JSON.parse(row.audit_json))
+    return audit?.libraryId === libraryId ? audit : null
+  } catch (error) {
+    if ((error as Error).message.includes('Database not initialised')) return undefined
+    return null
+  }
+}
+
+export function readLibraryScanAudit(libraryId: number): LibraryScanAudit | null {
+  if (!Number.isSafeInteger(libraryId) || libraryId <= 0) return null
+  const persisted = readPersistedAudit(libraryId)
+  if (persisted !== undefined) return persisted
+  try {
+    const audit = normalizeAudit(JSON.parse(fs.readFileSync(auditFilePath(libraryId), 'utf8')))
+    return audit?.libraryId === libraryId ? audit : null
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
     return null
@@ -75,7 +106,7 @@ export function readLibraryScanAudit(): LibraryScanAudit | null {
 }
 
 export function writeLibraryScanAudit(audit: LibraryScanAudit): void {
-  const file = auditFilePath()
+  const file = auditFilePath(audit.libraryId)
   const temporaryFile = `${file}.tmp-${process.pid}`
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true })

@@ -5,6 +5,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { insertTestVideoWithFile } from '../db/testVideoFixtures'
+import { createMediaLibrary, archiveMediaLibrary } from '../db/mediaLibraryRepo'
+import { ensureVideoMembership } from '../db/libraryMembershipRepo'
 import { addManualVideoTag, getVideoDetail } from '../db/videoRepo'
 import type { ScrapeResult, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/videoScrapeTypes'
 import {
@@ -1456,6 +1458,81 @@ describe('videoScrapeApplyService classification entity resolution', () => {
 })
 
 describe('videoScrapeApplyService.resolveVideoBatchTargets', () => {
+  it('keeps active media-library batch targets inside their membership scope', () => {
+    setupDb()
+    const db = getDb()
+    const secondLibrary = createMediaLibrary({ name: 'Second library' })
+    ensureVideoMembership({
+      libraryId: secondLibrary.id,
+      videoId: 1,
+      addedVia: 'shared'
+    })
+    const exclusive = insertTestVideoWithFile(db, {
+      code: 'ONLY-002',
+      filePath: 'only-second.mp4',
+      libraryId: secondLibrary.id,
+      scrapedStatus: 0
+    })
+
+    assert.deepEqual(
+      resolveVideoBatchTargets({ status: 'all', libraryId: 1 }).map((video) => video.id),
+      [1, 2]
+    )
+    assert.deepEqual(
+      resolveVideoBatchTargets({ status: 'all', libraryId: secondLibrary.id }).map(
+        (video) => video.id
+      ),
+      [1, exclusive.videoId]
+    )
+    db.prepare('UPDATE videos SET summary = ? WHERE id = 1').run('Shared summary')
+    assert.deepEqual(
+      resolveVideoBatchTargets({ status: 0, libraryId: secondLibrary.id }).map(
+        (video) => video.id
+      ),
+      [exclusive.videoId]
+    )
+    assert.deepEqual(
+      resolveVideoBatchTargets({
+        status: 'all',
+        libraryId: secondLibrary.id,
+        missingFields: ['summary']
+      }).map((video) => video.id),
+      [exclusive.videoId]
+    )
+    assert.deepEqual(
+      resolveVideoBatchTargets({
+        status: 'all',
+        libraryId: 1,
+        videoIds: [1, exclusive.videoId]
+      }).map((video) => video.id),
+      [1]
+    )
+  })
+
+  it('returns no targets for an archived media-library scope while preserving global compatibility', () => {
+    setupDb()
+    const secondLibrary = createMediaLibrary({ name: 'Archived batch library' })
+    const exclusive = insertTestVideoWithFile(getDb(), {
+      code: 'ARCHIVE-001',
+      filePath: 'archived.mp4',
+      libraryId: secondLibrary.id
+    })
+
+    archiveMediaLibrary({
+      libraryId: secondLibrary.id,
+      expectedRevision: secondLibrary.revision
+    })
+
+    assert.deepEqual(
+      resolveVideoBatchTargets({ status: 'all', libraryId: secondLibrary.id }),
+      []
+    )
+    assert.equal(
+      resolveVideoBatchTargets({ status: 'all' }).some((video) => video.id === exclusive.videoId),
+      true
+    )
+  })
+
   it('excludes videos that already have a pending scrape decision', () => {
     setupDb()
     getDb().prepare(

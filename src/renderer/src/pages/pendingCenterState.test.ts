@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   arePendingScanAssignmentsComplete,
   arePendingScrapeSelectionsComplete,
+  buildPendingQueueSections,
   defaultPendingScanPrimaryResourceId,
   pendingScanTargetFromValue,
   pendingScanTargetValue
@@ -69,6 +70,8 @@ describe('pending center resolution state', () => {
       sizeBytes: number | null
     ) => ({
       id,
+      libraryId: 1,
+      rootId: 1,
       groupId: 1,
       filePath,
       scanRoot: '/library',
@@ -103,5 +106,29 @@ describe('pending center resolution state', () => {
       2
     )
     assert.equal(defaultPendingScanPrimaryResourceId([]), null)
+  })
+
+  it('labels scan decisions with their owning media library', () => {
+    const sections = buildPendingQueueSections(
+      {
+        scanGroups: [
+          {
+            id: 9,
+            libraryId: 7,
+            normalizedCode: 'ABC-123',
+            revision: 1,
+            createdAt: '2026-08-29T00:00:00.000Z',
+            updatedAt: '2026-08-29T00:00:00.000Z',
+            resources: []
+          }
+        ],
+        scrapeItems: [],
+        conflictGroups: [],
+        libraryNames: new Map([[7, 'NAS 媒体库']])
+      },
+      'scan'
+    )
+
+    assert.equal(sections[0]?.items[0]?.meta, 'NAS 媒体库 · 0 条资源')
   })
 })

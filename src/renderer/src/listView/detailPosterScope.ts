@@ -7,9 +7,14 @@ import {
 import { parseLibraryVideoPath } from './libraryRoutes'
 import { parsePendingActressDetailPath, parsePendingVideoPath } from './pendingRoutes'
 import { parsePlaylistVideoPath } from './playlistRoutes'
+import { parseVideoDetailRouteContext } from './videoDetailContext'
 
 /** Scope key for detail poster backgrounds (actress:id / video:id). */
 export function getDetailPosterScope(pathname: string): string | null {
+  const multiLibrary = parseVideoDetailRouteContext(pathname, new URLSearchParams())
+  if (multiLibrary?.actressId != null) return `actress:${multiLibrary.actressId}`
+  if (multiLibrary?.videoId != null) return `video:${multiLibrary.videoId}`
+
   const pendingActress = parsePendingActressDetailPath(pathname)
   if (pendingActress) return `actress:${pendingActress.actressId}`
 

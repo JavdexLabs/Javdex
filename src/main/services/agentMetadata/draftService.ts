@@ -172,10 +172,24 @@ function sanitizePayloadResourceUrls(payload: AgentMetadataDraftPayload): void {
   }
 }
 
+interface AgentMetadataDraftPreparationHooks {
+  stageResources?: (input: {
+    runId: string
+    payload: AgentMetadataDraftPayload
+    warnings: string[]
+    signal: AbortSignal
+  }) => Promise<AgentMetadataDraftResource[]>
+  cleanupStaging?: (
+    kind: AgentMetadataTarget['kind'],
+    stagedPaths: string[]
+  ) => void
+}
+
 export class AgentMetadataDraftService {
   constructor(
     private readonly repo: AgentMetadataDraftRepo = agentMetadataDraftRepo,
-    private readonly browser: AgentMetadataBrowserAdapter = agentMetadataBrowser
+    private readonly browser: AgentMetadataBrowserAdapter = agentMetadataBrowser,
+    private readonly preparationHooks: AgentMetadataDraftPreparationHooks = {}
   ) {}
 
   async prepare(input: {
@@ -195,17 +209,33 @@ export class AgentMetadataDraftService {
       source.finalUrl ?? source.requestedUrl
     )
     const warnings: string[] = []
-    const resources = await this.stageResources(input.runId, payload, warnings, input.signal)
+    const resources = this.preparationHooks.stageResources
+      ? await this.preparationHooks.stageResources({
+          runId: input.runId,
+          payload,
+          warnings,
+          signal: input.signal
+        })
+      : await this.stageResources(input.runId, payload, warnings, input.signal)
     sanitizePayloadResourceUrls(payload)
-    const created = this.repo.create({
-      id: randomUUID(),
-      runId: input.runId,
-      target: input.target,
-      source,
-      payload,
-      resources,
-      warnings
-    })
+    let created: ReturnType<AgentMetadataDraftRepo['create']>
+    try {
+      created = this.repo.create({
+        id: randomUUID(),
+        runId: input.runId,
+        target: input.target,
+        source,
+        payload,
+        resources,
+        warnings
+      })
+    } catch (error) {
+      this.cleanupStaging(
+        input.target.kind,
+        resources.map((resource) => resource.stagedPath)
+      )
+      throw error
+    }
     this.cleanupStaging(input.target.kind, created.supersededStagedPaths)
     return payload
   }
@@ -745,6 +775,10 @@ export class AgentMetadataDraftService {
   }
 
   private cleanupStaging(kind: AgentMetadataTarget['kind'], stagedPaths: string[]): void {
+    if (this.preparationHooks.cleanupStaging) {
+      this.preparationHooks.cleanupStaging(kind, stagedPaths)
+      return
+    }
     if (kind === 'video') mediaAssetStore.cleanupVideoScrapeStagingPaths(stagedPaths)
     else mediaAssetStore.cleanupActressScrapeStagingPaths(stagedPaths)
   }

@@ -1,0 +1,482 @@
+import type Database from 'better-sqlite3'
+import type { CatalogScope } from '@shared/mediaLibraryTypes'
+import type { MediaLibraryBadge, ScopedVideo, ScopedVideoListResult } from '@shared/catalogTypes'
+import type {
+  StoredVideoDetail,
+  VideoQuery,
+  VideoResource,
+  VideoResourceKind
+} from '@shared/videoTypes'
+import { actressOwnedNamePatternSearchSql } from './actressSearchSql'
+import { getDb } from './database'
+import { getVideoDetail } from './videoRepo'
+import { videoClassificationSelectExtras } from './videoListProjection'
+
+type ScopedVideoListRow = ScopedVideo & {
+  resource_kinds_csv: string | null
+  libraries_json: string
+  has_pending_scrape: number | boolean
+}
+
+export interface ScopedStoredVideoDetail extends StoredVideoDetail {
+  activeLibraryId: number
+  membershipAddedAt: string
+  libraries: MediaLibraryBadge[]
+}
+
+export interface ScopedVideoCatalogRepo {
+  list(scope: CatalogScope, query?: VideoQuery): ScopedVideoListResult
+  listByIds(scope: CatalogScope, videoIds: number[]): ScopedVideo[]
+  listByLibrarySelections(
+    selections: Array<{ videoId: number; libraryId: number }>
+  ): ScopedVideo[]
+  get(scope: CatalogScope, videoId: number): ScopedStoredVideoDetail | null
+  listYears(scope: CatalogScope): number[]
+}
+
+type ScopeSql = {
+  membershipJoin: string
+  resourceFilter: (resourceAlias: string) => string
+}
+
+const VIDEO_RESOURCE_KINDS = new Set<VideoResourceKind>([
+  'local',
+  'direct',
+  'web',
+  'magnet',
+  'ed2k'
+])
+
+function positiveId(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${label} 必须是正整数`)
+  return value
+}
+
+function normalizedLibraryIds(values: number[] | undefined): number[] {
+  if (!values || values.length === 0) return []
+  return Array.from(new Set(values.map((value) => positiveId(value, '媒体库 ID')))).sort(
+    (left, right) => left - right
+  )
+}
+
+function activeLibraryPredicate(alias: string, libraryIds: number[]): string {
+  const selected = libraryIds.length > 0 ? ` AND ${alias}.id IN (${libraryIds.join(',')})` : ''
+  return `${alias}.status = 'active'${selected}`
+}
+
+function scopeSql(scope: CatalogScope): ScopeSql {
+  if (scope.kind === 'library') {
+    const libraryId = positiveId(scope.libraryId, '媒体库 ID')
+    return {
+      membershipJoin: `JOIN (
+        SELECT membership.video_id,
+               membership.library_id AS preferred_library_id,
+               membership.added_at AS membership_added_at
+        FROM library_video_memberships membership
+        JOIN media_libraries scope_library ON scope_library.id = membership.library_id
+        WHERE membership.library_id = ${libraryId}
+          AND membership.is_hidden = 0
+          AND scope_library.status = 'active'
+      ) scope_m ON scope_m.video_id = v.id`,
+      resourceFilter: (resourceAlias) => `${resourceAlias}.library_id = ${libraryId}`
+    }
+  }
+
+  const libraryIds = normalizedLibraryIds(scope.libraryIds)
+  const activePredicate = activeLibraryPredicate('scope_library', libraryIds)
+  return {
+    membershipJoin: `JOIN (
+      SELECT video_id, library_id AS preferred_library_id, added_at AS membership_added_at
+      FROM (
+        SELECT
+          membership.video_id,
+          membership.library_id,
+          membership.added_at,
+          ROW_NUMBER() OVER (
+            PARTITION BY membership.video_id
+            ORDER BY membership.added_at DESC, membership.library_id ASC
+          ) AS row_number
+        FROM library_video_memberships membership
+        JOIN media_libraries scope_library ON scope_library.id = membership.library_id
+        WHERE membership.is_hidden = 0 AND ${activePredicate}
+      ) ranked_membership
+      WHERE row_number = 1
+    ) scope_m ON scope_m.video_id = v.id`,
+    resourceFilter: (resourceAlias) =>
+      `EXISTS (
+        SELECT 1 FROM media_libraries resource_library
+        WHERE resource_library.id = ${resourceAlias}.library_id
+          AND ${activeLibraryPredicate('resource_library', libraryIds)}
+      )`
+  }
+}
+
+function listProjection(): string {
+  return `${videoClassificationSelectExtras('v')},
+    (SELECT resource.kind
+     FROM video_resources resource
+     WHERE resource.video_id = v.id
+       AND resource.library_id = scope_m.preferred_library_id
+       AND resource.is_primary = 1
+     ORDER BY resource.id ASC
+     LIMIT 1) AS primary_resource_kind,
+    (SELECT COUNT(*)
+     FROM video_resources resource
+     WHERE resource.video_id = v.id
+       AND resource.library_id = scope_m.preferred_library_id) AS resource_count,
+    (SELECT group_concat(resource_kind, ',')
+     FROM (
+       SELECT resource.kind AS resource_kind,
+              MAX(resource.is_primary) AS has_primary,
+              MIN(resource.add_time) AS first_added,
+              MIN(resource.id) AS first_id
+       FROM video_resources resource
+       WHERE resource.video_id = v.id
+         AND resource.library_id = scope_m.preferred_library_id
+       GROUP BY resource.kind
+       ORDER BY has_primary DESC, first_added ASC, first_id ASC
+     )) AS resource_kinds_csv,
+    scope_m.preferred_library_id,
+    scope_m.membership_added_at,
+    COALESCE((
+      SELECT json_group_array(json_object(
+        'libraryId', badge.library_id,
+        'name', badge.name,
+        'icon', badge.icon,
+        'color', badge.color
+      ))
+      FROM (
+        SELECT membership.library_id, library.name, library.icon, library.color
+        FROM library_video_memberships membership
+        JOIN media_libraries library ON library.id = membership.library_id
+        WHERE membership.video_id = v.id AND library.status = 'active'
+        ORDER BY library.position ASC, library.id ASC
+      ) badge
+    ), '[]') AS libraries_json`
+}
+
+function buildWhere(
+  query: VideoQuery,
+  scope: ScopeSql
+): { joins: string; sql: string; params: unknown[] } {
+  const conditions: string[] = []
+  const params: unknown[] = []
+  let joins = scope.membershipJoin
+
+  if (query.search?.trim()) {
+    const like = `%${query.search.trim()}%`
+    conditions.push(
+      `(v.code LIKE ? OR v.title LIKE ? OR v.id IN (
+         SELECT va.video_id FROM video_actress va
+         JOIN actresses a ON a.id = va.actress_id
+         WHERE ${actressOwnedNamePatternSearchSql('a')}
+       ))`
+    )
+    params.push(like, like, like)
+  }
+  if (query.scrapedStatus !== undefined && query.scrapedStatus !== 'all') {
+    conditions.push('v.scraped_status = ?')
+    params.push(query.scrapedStatus)
+  }
+  if (query.pendingScrape === 'pending') {
+    conditions.push('EXISTS (SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id)')
+  } else if (query.pendingScrape === 'none') {
+    conditions.push(
+      'NOT EXISTS (SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id)'
+    )
+  }
+  if (query.minRating !== undefined && query.minRating > 0) {
+    conditions.push('v.rating >= ?')
+    params.push(query.minRating)
+  }
+  if (query.year !== undefined && query.year !== 'all') {
+    conditions.push("strftime('%Y', v.release_date) = ?")
+    params.push(String(query.year))
+  }
+  if (query.actressId !== undefined) {
+    joins += ' JOIN video_actress vaf ON vaf.video_id = v.id'
+    conditions.push('vaf.actress_id = ?')
+    params.push(query.actressId)
+  }
+  if (query.tagId !== undefined) {
+    joins += ' JOIN video_tag vtf ON vtf.video_id = v.id'
+    conditions.push('vtf.tag_id = ?')
+    params.push(query.tagId)
+  }
+  if (query.tagIds && query.tagIds.length > 0) {
+    const placeholders = query.tagIds.map(() => '?').join(',')
+    conditions.push(
+      `v.id IN (
+        SELECT video_id FROM video_tag
+        WHERE tag_id IN (${placeholders})
+        GROUP BY video_id
+        HAVING COUNT(DISTINCT tag_id) = ?
+      )`
+    )
+    params.push(...query.tagIds, query.tagIds.length)
+  }
+  if (query.makerOrganizationId !== undefined) {
+    conditions.push('v.maker_organization_id = ?')
+    params.push(query.makerOrganizationId)
+  }
+  if (query.publisherOrganizationId !== undefined) {
+    conditions.push('v.publisher_organization_id = ?')
+    params.push(query.publisherOrganizationId)
+  }
+  if (query.seriesId !== undefined) {
+    conditions.push('v.series_id = ?')
+    params.push(query.seriesId)
+  }
+  if (query.directorId !== undefined) {
+    conditions.push('v.director_id = ?')
+    params.push(query.directorId)
+  }
+  if (query.codePrefix?.trim()) {
+    conditions.push('v.code LIKE ?')
+    params.push(`${query.codePrefix.trim().toUpperCase()}-%`)
+  }
+  if (query.resourceKinds && query.resourceKinds.length > 0) {
+    const kinds = Array.from(new Set(query.resourceKinds))
+    const includeNone = kinds.includes('none')
+    const concreteKinds = kinds.filter((kind) => kind !== 'none')
+    const alternatives: string[] = []
+    if (concreteKinds.length > 0) {
+      alternatives.push(
+        `EXISTS (
+          SELECT 1 FROM video_resources vrf
+          WHERE vrf.video_id = v.id
+            AND ${scope.resourceFilter('vrf')}
+            AND vrf.kind IN (${concreteKinds.map(() => '?').join(',')})
+        )`
+      )
+      params.push(...concreteKinds)
+    }
+    if (includeNone) {
+      alternatives.push(
+        `NOT EXISTS (
+          SELECT 1 FROM video_resources vrf
+          WHERE vrf.video_id = v.id AND ${scope.resourceFilter('vrf')}
+        )`
+      )
+    }
+    if (alternatives.length > 0) conditions.push(`(${alternatives.join(' OR ')})`)
+  }
+  return {
+    joins,
+    sql: conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '',
+    params
+  }
+}
+
+function orderBy(query: VideoQuery): string {
+  const direction = query.sortDir === 'asc' ? 'ASC' : 'DESC'
+  switch (query.sortBy ?? 'add_time') {
+    case 'release_date':
+      return `(v.release_date IS NULL OR trim(v.release_date) = '') ASC,
+              v.release_date ${direction}, scope_m.membership_added_at DESC, v.id ASC`
+    case 'rating':
+      return `v.rating ${direction}, scope_m.membership_added_at DESC, v.id ASC`
+    case 'code':
+      return `v.code ${direction}, v.id ${direction}`
+    default:
+      return `scope_m.membership_added_at ${direction}, v.id ${direction}`
+  }
+}
+
+function parseBadges(value: string): MediaLibraryBadge[] {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(
+      (badge): badge is MediaLibraryBadge =>
+        typeof badge === 'object' &&
+        badge !== null &&
+        Number.isSafeInteger((badge as MediaLibraryBadge).libraryId) &&
+        typeof (badge as MediaLibraryBadge).name === 'string' &&
+        typeof (badge as MediaLibraryBadge).icon === 'string' &&
+        typeof (badge as MediaLibraryBadge).color === 'string'
+    )
+  } catch {
+    return []
+  }
+}
+
+function hydrateRows(rows: ScopedVideoListRow[]): ScopedVideo[] {
+  return rows.map((row) => {
+    const {
+      resource_kinds_csv: resourceKindsCsv,
+      libraries_json: librariesJson,
+      preferred_library_id: preferredLibraryId,
+      membership_added_at: membershipAddedAt,
+      ...video
+    } = row as ScopedVideoListRow & {
+      preferred_library_id: number
+      membership_added_at: string
+    }
+    const resourceKinds = (resourceKindsCsv?.split(',') ?? []).filter(
+      (kind): kind is VideoResourceKind => VIDEO_RESOURCE_KINDS.has(kind as VideoResourceKind)
+    )
+    return {
+      ...video,
+      has_pending_scrape: Boolean(video.has_pending_scrape),
+      resource_kinds: resourceKinds,
+      preferredLibraryId,
+      membershipAddedAt,
+      libraries: parseBadges(librariesJson)
+    }
+  })
+}
+
+function readMembershipContext(
+  database: Database.Database,
+  scope: CatalogScope,
+  videoId: number
+): { libraryId: number; addedAt: string } | null {
+  const scoped = scopeSql(scope)
+  return (
+    (database
+      .prepare(
+        `SELECT scope_m.preferred_library_id AS libraryId,
+                scope_m.membership_added_at AS addedAt
+         FROM videos v ${scoped.membershipJoin}
+         WHERE v.id = ?`
+      )
+      .get(positiveId(videoId, '影片 ID')) as { libraryId: number; addedAt: string } | undefined) ??
+    null
+  )
+}
+
+function readBadges(database: Database.Database, videoId: number): MediaLibraryBadge[] {
+  return database
+    .prepare(
+      `SELECT library.id AS libraryId, library.name, library.icon, library.color
+       FROM library_video_memberships membership
+       JOIN media_libraries library ON library.id = membership.library_id
+       WHERE membership.video_id = ? AND library.status = 'active'
+       ORDER BY library.position ASC, library.id ASC`
+    )
+    .all(videoId) as MediaLibraryBadge[]
+}
+
+export function createScopedVideoCatalogRepo(
+  database: Database.Database = getDb()
+): ScopedVideoCatalogRepo {
+  return {
+    list(scope, query = {}) {
+      const scoped = scopeSql(scope)
+      const where = buildWhere(query, scoped)
+      const total = database
+        .prepare(`SELECT COUNT(DISTINCT v.id) AS count FROM videos v ${where.joins} ${where.sql}`)
+        .get(...where.params) as { count: number }
+      const limit = Math.max(1, Math.min(200, Math.trunc(query.limit ?? 60)))
+      const offset = Math.max(0, Math.trunc(query.offset ?? 0))
+      const rows = database
+        .prepare(
+          `SELECT DISTINCT v.*${listProjection()}
+           FROM videos v ${where.joins} ${where.sql}
+           ORDER BY ${orderBy(query)}
+           LIMIT ? OFFSET ?`
+        )
+        .all(...where.params, limit, offset) as ScopedVideoListRow[]
+      return { items: hydrateRows(rows), total: total.count }
+    },
+
+    listByIds(scope, videoIds) {
+      const ids = Array.from(new Set(videoIds.map((id) => positiveId(id, '影片 ID'))))
+      if (ids.length === 0) return []
+      const scoped = scopeSql(scope)
+      const where = buildWhere({}, scoped)
+      const idCondition = `v.id IN (${ids.join(',')})`
+      const sql = where.sql ? `${where.sql} AND ${idCondition}` : `WHERE ${idCondition}`
+      const rows = database
+        .prepare(
+          `SELECT DISTINCT v.*${listProjection()}
+           FROM videos v ${where.joins} ${sql}
+           ORDER BY scope_m.membership_added_at DESC, v.id ASC`
+        )
+        .all(...where.params) as ScopedVideoListRow[]
+      return hydrateRows(rows)
+    },
+
+    listByLibrarySelections(selections) {
+      const unique = new Map<number, { videoId: number; libraryId: number }>()
+      for (const selection of selections) {
+        const videoId = positiveId(selection.videoId, '影片 ID')
+        const libraryId = positiveId(selection.libraryId, '媒体库 ID')
+        if (!unique.has(videoId)) unique.set(videoId, { videoId, libraryId })
+      }
+      const requested = [...unique.values()]
+      if (requested.length === 0) return []
+      const values = requested.map(() => '(?, ?, ?)').join(', ')
+      const params = requested.flatMap((selection, position) => [
+        selection.videoId,
+        selection.libraryId,
+        position
+      ])
+      const rows = database
+        .prepare(
+          `WITH requested(video_id, library_id, position) AS (VALUES ${values})
+           SELECT v.*${listProjection()}
+           FROM requested
+           JOIN videos v ON v.id = requested.video_id
+           JOIN (
+             SELECT membership.video_id,
+                    membership.library_id AS preferred_library_id,
+                    membership.added_at AS membership_added_at
+             FROM library_video_memberships membership
+             JOIN media_libraries scope_library
+               ON scope_library.id = membership.library_id
+             WHERE membership.is_hidden = 0
+               AND scope_library.status = 'active'
+           ) scope_m
+             ON scope_m.video_id = requested.video_id
+            AND scope_m.preferred_library_id = requested.library_id
+           ORDER BY requested.position ASC`
+        )
+        .all(...params) as ScopedVideoListRow[]
+      return hydrateRows(rows)
+    },
+
+    get(scope, videoId) {
+      const context = readMembershipContext(database, scope, videoId)
+      if (!context) return null
+      const detail = getVideoDetail(videoId, database)
+      if (!detail) return null
+      const resources = detail.resources.filter(
+        (resource) => (resource as VideoResource & { library_id: number }).library_id === context.libraryId
+      )
+      const primary = resources.find((resource) => resource.is_primary === 1)
+      return {
+        ...detail,
+        resources,
+        primary_resource_kind: primary?.kind ?? null,
+        resource_count: resources.length,
+        activeLibraryId: context.libraryId,
+        membershipAddedAt: context.addedAt,
+        libraries: readBadges(database, videoId)
+      }
+    },
+
+    listYears(scope) {
+      const scoped = scopeSql(scope)
+      const rows = database
+        .prepare(
+          `SELECT DISTINCT strftime('%Y', v.release_date) AS year
+           FROM videos v ${scoped.membershipJoin}
+           WHERE v.release_date IS NOT NULL AND trim(v.release_date) != ''
+           ORDER BY year DESC`
+        )
+        .all() as Array<{ year: string }>
+      return rows.map((row) => Number(row.year)).filter(Number.isFinite)
+    }
+  }
+}
+
+export const scopedVideoCatalogRepo: ScopedVideoCatalogRepo = {
+  list: (scope, query) => createScopedVideoCatalogRepo().list(scope, query),
+  listByIds: (scope, videoIds) => createScopedVideoCatalogRepo().listByIds(scope, videoIds),
+  listByLibrarySelections: (selections) =>
+    createScopedVideoCatalogRepo().listByLibrarySelections(selections),
+  get: (scope, videoId) => createScopedVideoCatalogRepo().get(scope, videoId),
+  listYears: (scope) => createScopedVideoCatalogRepo().listYears(scope)
+}

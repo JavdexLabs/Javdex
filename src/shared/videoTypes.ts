@@ -21,10 +21,13 @@ export type VideoResourceImportTarget =
 
 export interface VideoResource {
   id: number
+  library_id: number
   video_id: number
+  root_id: number | null
   kind: VideoResourceKind
   locator: string
   resource_key: string
+  source_identity: string | null
   strm_source_path: string | null
   size_bytes: number | null
   duration_seconds: number | null
@@ -36,12 +39,14 @@ export interface VideoResource {
 
 export type LocalVideoResource = VideoResource & { kind: 'local' }
 
-export interface VideoResourceDetail extends Omit<VideoResource, 'locator' | 'resource_key'> {
+export interface VideoResourceDetail
+  extends Omit<VideoResource, 'locator' | 'resource_key' | 'source_identity'> {
   /** Safe display value; external resource credentials and query parameters are omitted. */
   display_locator: string
 }
 
 export interface VideoLinkResourceImportInput {
+  libraryId: number
   code: string
   target: VideoResourceImportTarget
   url: string
@@ -85,7 +90,8 @@ export interface VideoResourceLinkCheckResult {
   error?: string
 }
 
-export type LastVideoResourceRemovalMode = 'retain-video' | 'delete-video'
+/** Explicit confirmation that removing the last resource keeps the canonical video. */
+export type LastVideoResourceRemovalMode = 'retain-video'
 
 export interface VideoResourceRemovalResult {
   videoDeleted: boolean

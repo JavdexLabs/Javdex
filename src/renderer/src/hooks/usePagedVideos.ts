@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Video, VideoQuery } from '@shared/videoTypes'
+import type { CatalogScope } from '@shared/mediaLibraryTypes'
 import { api } from '../api'
 
 const DEFAULT_PAGE_SIZE = 240
@@ -14,6 +15,7 @@ interface UsePagedVideosResult {
 }
 
 export function usePagedVideos(
+  scope: CatalogScope,
   query: VideoQuery,
   onError: (error: unknown) => void,
   pageSize = DEFAULT_PAGE_SIZE,
@@ -44,7 +46,7 @@ export function usePagedVideos(
     setLoadingMore(false)
 
     api.videos
-      .list({ ...query, limit: pageSize, offset: 0 })
+      .list(scope, { ...query, limit: pageSize, offset: 0 })
       .then((res) => {
         if (requestSeqRef.current !== requestId) return
         setVideos(res.items)
@@ -54,7 +56,7 @@ export function usePagedVideos(
       .finally(() => {
         if (requestSeqRef.current === requestId) setLoading(false)
       })
-  }, [enabled, onError, pageSize, query])
+  }, [enabled, onError, pageSize, query, scope])
 
   const hasMore = videos.length < total
 
@@ -68,7 +70,7 @@ export function usePagedVideos(
     setLoadingMore(true)
 
     api.videos
-      .list({ ...query, limit: pageSize, offset })
+      .list(scope, { ...query, limit: pageSize, offset })
       .then((res) => {
         if (requestSeqRef.current !== requestId) return
         setVideos((current) => {
@@ -85,7 +87,7 @@ export function usePagedVideos(
           setLoadingMore(false)
         }
       })
-  }, [enabled, loading, onError, pageSize, query, total, videos.length])
+  }, [enabled, loading, onError, pageSize, query, scope, total, videos.length])
 
   return { videos, total, loading, loadingMore, hasMore, loadMore }
 }

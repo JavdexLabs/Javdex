@@ -15,7 +15,7 @@ import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import ScopedPosterCard from '../components/ScopedPosterCard'
 import { NavIcon } from '../components/NavIcons'
-import { UI_ICON_SM } from '../components/iconDefaults'
+import { UI_ICON, UI_ICON_SM } from '../components/iconDefaults'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useDebounce } from '../hooks/useDebounce'
 import { navigateToVideoDetail } from '../listView/listNavigation'
@@ -183,7 +183,7 @@ export default function HomePage(): JSX.Element {
         </div>
         <form className={styles.searchForm} role="search" onSubmit={submitSearch}>
           <div className={styles.searchControl}>
-            <Search {...UI_ICON_SM} className={styles.searchIcon} aria-hidden />
+            <Search {...UI_ICON} className={styles.searchIcon} aria-hidden />
             <input
               id={HOME_GLOBAL_SEARCH_ID}
               className={styles.searchInput}

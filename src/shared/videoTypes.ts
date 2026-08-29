@@ -178,6 +178,9 @@ export type StoredVideoDetail = Omit<VideoDetail, 'resources'> & {
   resources: VideoResource[]
 }
 
+/** Maximum number of videos accepted by one `video:list` IPC request. */
+export const VIDEO_LIST_PAGE_LIMIT_MAX = 200
+
 export interface VideoQuery {
   search?: string
   scrapedStatus?: ScrapedStatus | 'all'

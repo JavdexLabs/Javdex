@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Video, VideoQuery } from '@shared/videoTypes'
+import {
+  VIDEO_LIST_PAGE_LIMIT_MAX,
+  type Video,
+  type VideoQuery
+} from '@shared/videoTypes'
 import type { CatalogScope } from '@shared/mediaLibraryTypes'
 import { api } from '../api'
 
-const DEFAULT_PAGE_SIZE = 240
+const DEFAULT_PAGE_SIZE = VIDEO_LIST_PAGE_LIMIT_MAX
 
 interface UsePagedVideosResult {
   videos: Video[]

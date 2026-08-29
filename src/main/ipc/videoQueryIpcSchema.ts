@@ -3,7 +3,7 @@ import {
   MEDIA_LIBRARY_DEFAULT_SORTS,
   MEDIA_LIBRARY_SORT_DIRECTIONS
 } from '@shared/mediaLibraryTypes'
-import type { VideoQuery } from '@shared/videoTypes'
+import { VIDEO_LIST_PAGE_LIMIT_MAX, type VideoQuery } from '@shared/videoTypes'
 
 export const positiveSafeInteger = z
   .number()
@@ -40,7 +40,7 @@ const videoQueryShape = {
   pendingScrape: z.enum(['all', 'pending', 'none']).optional(),
   sortBy: z.enum(MEDIA_LIBRARY_DEFAULT_SORTS).optional(),
   sortDir: z.enum(MEDIA_LIBRARY_SORT_DIRECTIONS).optional(),
-  limit: z.number().int().min(1).max(200).optional(),
+  limit: z.number().int().min(1).max(VIDEO_LIST_PAGE_LIMIT_MAX).optional(),
   offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional()
 } satisfies Record<keyof VideoQuery, z.ZodType>
 

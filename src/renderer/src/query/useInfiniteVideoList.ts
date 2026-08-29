@@ -2,11 +2,9 @@ import { useInfiniteQuery } from '@tanstack/react-query'
 import { useEffect, useMemo } from 'react'
 import type { ScopedVideo } from '@shared/catalogTypes'
 import type { CatalogScope } from '@shared/mediaLibraryTypes'
-import type { VideoQuery } from '@shared/videoTypes'
+import { VIDEO_LIST_PAGE_LIMIT_MAX, type VideoQuery } from '@shared/videoTypes'
 import { api } from '../api'
 import { videoKeys } from './queryKeys'
-
-const PAGE_SIZE = 240
 
 export interface InfiniteVideoListResult {
   videos: ScopedVideo[]
@@ -34,7 +32,11 @@ export function useInfiniteVideoList(
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
       const offset = typeof pageParam === 'number' ? pageParam : 0
-      return api.videos.list(scope, { ...stableQuery, limit: PAGE_SIZE, offset })
+      return api.videos.list(scope, {
+        ...stableQuery,
+        limit: VIDEO_LIST_PAGE_LIMIT_MAX,
+        offset
+      })
     },
     getNextPageParam: (lastPage, allPages) => {
       const loaded = allPages.reduce((n, p) => n + p.items.length, 0)

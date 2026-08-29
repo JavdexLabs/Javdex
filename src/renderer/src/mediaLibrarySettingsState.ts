@@ -8,7 +8,6 @@ import type {
   MediaLibraryPatch
 } from '@shared/mediaLibraryTypes'
 import { DEFAULT_MEDIA_LIBRARY_CONFIG } from '@shared/mediaLibraryTypes'
-import type { CoverDisplayMode } from '@shared/settingsTypes'
 import type { LibraryPathRemovalPreview } from '@shared/libraryTypes'
 
 export interface MediaLibraryIdentityDraft {
@@ -67,7 +66,6 @@ export const MEDIA_LIBRARY_CONFIG_KEYS = [
   'defaultVideoScraper',
   'defaultSortBy',
   'defaultSortDir',
-  'defaultCoverMode',
   'includeInHomeDiscovery'
 ] as const satisfies readonly (keyof MediaLibraryConfigValues)[]
 
@@ -142,12 +140,6 @@ function validateMediaLibraryConfigValues(draft: MediaLibraryConfigValues): void
   ) {
     throw new Error('最小时长必须为 0 到 1440 分钟的整数')
   }
-}
-
-export function mediaLibraryDefaultCoverDisplayMode(
-  config: Pick<MediaLibraryConfig, 'defaultCoverMode'>
-): CoverDisplayMode {
-  return config.defaultCoverMode === 'poster' ? 'portrait' : 'landscape'
 }
 
 /**

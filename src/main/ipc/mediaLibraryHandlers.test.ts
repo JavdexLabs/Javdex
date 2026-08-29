@@ -182,13 +182,18 @@ describe('media-library IPC schemas', () => {
             autoScanEnabled: true,
             autoScanIntervalMinutes: 60,
             defaultSortBy: 'release_date',
-            defaultSortDir: 'desc',
-            defaultCoverMode: 'cover'
+            defaultSortDir: 'desc'
           },
           roots: [{ path: '/media/movies', state: 'active' }]
         }
       ]).success,
       true
+    )
+    assert.equal(
+      mediaLibraryIpcSchemas[IPC.MEDIA_LIBRARY_CREATE].safeParse([
+        { name: '电影', config: { defaultCoverMode: 'cover' } }
+      ]).success,
+      false
     )
     assert.equal(
       mediaLibraryIpcSchemas[IPC.MEDIA_LIBRARY_CREATE].safeParse([

@@ -56,7 +56,7 @@ type CreateErrorFocus = 'alert' | 'name' | 'scanInterval' | 'minDuration'
 function stepForCreateError(message: string): CreateStep {
   if (/名称/.test(message)) return 0
   if (/根目录|路径|来源/.test(message)) return 1
-  if (/扫描|周期|时长|刮削|排序|封面/.test(message)) return 2
+  if (/扫描|周期|时长|刮削|排序/.test(message)) return 2
   return 3
 }
 
@@ -319,7 +319,7 @@ export default function MediaLibraryCreateModal({
                 : step === 1
                   ? '选择此库独占管理的目录；也可以先创建空库。'
                   : step === 2
-                    ? '这些扫描、刮削与显示默认值只作用于当前媒体库。'
+                    ? '这些扫描、刮削、列表与首页选项只作用于当前媒体库。'
                     : '确认摘要，并决定创建完成后是否立即扫描。'}
             </p>
           </header>
@@ -493,7 +493,7 @@ export default function MediaLibraryCreateModal({
                 />
               </AppFormSection>
 
-              <AppFormSection title="刮削与显示默认值" hint="创建后仍可在媒体库设置中调整。">
+              <AppFormSection title="刮削与列表默认值" hint="创建后仍可在媒体库设置中调整。">
                 <div className={styles.fieldGrid}>
                   <AppFormField label="默认影片刮削器">
                     <SelectControl
@@ -549,21 +549,6 @@ export default function MediaLibraryCreateModal({
                     >
                       <option value="desc">降序</option>
                       <option value="asc">升序</option>
-                    </SelectControl>
-                  </AppFormField>
-                  <AppFormField label="默认封面形态">
-                    <SelectControl
-                      value={draft.config.defaultCoverMode}
-                      disabled={busy}
-                      onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                        patchConfig(
-                          'defaultCoverMode',
-                          event.target.value as CreateMediaLibraryDraft['config']['defaultCoverMode']
-                        )
-                      }
-                    >
-                      <option value="cover">横版封面</option>
-                      <option value="poster">竖版海报</option>
                     </SelectControl>
                   </AppFormField>
                 </div>

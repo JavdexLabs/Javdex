@@ -58,8 +58,8 @@ describe('V17 pending scan path identity migration', () => {
 
       migrateDatabase(database)
 
-      assert.equal(CURRENT_SCHEMA_VERSION, 17)
-      assert.equal(database.pragma('user_version', { simple: true }), 17)
+      assert.equal(CURRENT_SCHEMA_VERSION, 18)
+      assert.equal(database.pragma('user_version', { simple: true }), 18)
       assert.deepEqual(
         database
           .prepare(

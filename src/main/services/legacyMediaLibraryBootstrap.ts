@@ -519,7 +519,6 @@ function importLegacySettings(
              auto_merge_same_code_resources = ?,
              remove_resource_less_memberships = ?,
              default_video_scraper = ?,
-             default_cover_mode = ?,
              legacy_settings_imported_at = CURRENT_TIMESTAMP
          WHERE library_id = ?`,
       )
@@ -530,7 +529,6 @@ function importLegacySettings(
         settings.autoMergeSameCodeResources ? 1 : 0,
         settings.autoDeleteResourceLessVideos ? 1 : 0,
         settings.defaultScraper.trim() || null,
-        settings.coverDisplayMode === "landscape" ? "cover" : "poster",
         defaultLibrary.id,
       );
   } else {

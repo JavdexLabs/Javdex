@@ -250,8 +250,6 @@ CREATE TABLE IF NOT EXISTS media_library_configs (
     default_sort_by TEXT NOT NULL DEFAULT 'release_date'
         CHECK(default_sort_by IN ('add_time', 'release_date', 'rating', 'code')),
     default_sort_dir TEXT NOT NULL DEFAULT 'desc' CHECK(default_sort_dir IN ('asc', 'desc')),
-    default_cover_mode TEXT NOT NULL DEFAULT 'cover'
-        CHECK(default_cover_mode IN ('cover', 'poster')),
     include_in_home_discovery INTEGER NOT NULL DEFAULT 1
         CHECK(include_in_home_discovery IN (0, 1)),
     revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),

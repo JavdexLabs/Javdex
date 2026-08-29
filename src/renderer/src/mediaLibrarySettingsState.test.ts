@@ -9,7 +9,6 @@ import {
   canRunMediaLibraryScan,
   configDraftFromLibrary,
   identityDraftFromLibrary,
-  mediaLibraryDefaultCoverDisplayMode,
   mediaLibraryLifecycleCapabilities,
   mediaLibraryRootAddFailureMessage,
   mediaLibrarySettingsLoadState,
@@ -37,7 +36,6 @@ const library: MediaLibraryDetail = {
     defaultVideoScraper: null,
     defaultSortBy: 'release_date',
     defaultSortDir: 'desc',
-    defaultCoverMode: 'cover',
     includeInHomeDiscovery: true,
     revision: 4
   },
@@ -110,8 +108,7 @@ describe('media-library settings state', () => {
     )
   })
 
-  it('maps cover defaults and gates destructive lifecycle commands', () => {
-    assert.equal(mediaLibraryDefaultCoverDisplayMode(library.config), 'landscape')
+  it('gates destructive lifecycle commands', () => {
     assert.deepEqual(mediaLibraryLifecycleCapabilities(library), {
       canArchive: true,
       canRestore: false,

@@ -33,7 +33,6 @@ export const MEDIA_LIBRARY_ROOT_EDITABLE_STATES = [
   'disabled'
 ] as const
 export const MEDIA_LIBRARY_SORT_DIRECTIONS = ['asc', 'desc'] as const
-export const MEDIA_LIBRARY_COVER_MODES = ['cover', 'poster'] as const
 
 export type MediaLibraryIcon = (typeof MEDIA_LIBRARY_ICONS)[number]
 export type MediaLibraryColor = (typeof MEDIA_LIBRARY_COLORS)[number]
@@ -42,7 +41,6 @@ export type MediaLibraryRootState = (typeof MEDIA_LIBRARY_ROOT_STATES)[number]
 export type MediaLibraryRootEditableState = (typeof MEDIA_LIBRARY_ROOT_EDITABLE_STATES)[number]
 export type MediaLibraryDefaultSortBy = NonNullable<VideoQuery['sortBy']>
 export type MediaLibrarySortDirection = (typeof MEDIA_LIBRARY_SORT_DIRECTIONS)[number]
-export type MediaLibraryCoverMode = (typeof MEDIA_LIBRARY_COVER_MODES)[number]
 
 export const MEDIA_LIBRARY_DEFAULT_SORTS = [
   'add_time',
@@ -74,7 +72,6 @@ export interface MediaLibraryConfig {
   defaultVideoScraper: string | null
   defaultSortBy: MediaLibraryDefaultSortBy
   defaultSortDir: MediaLibrarySortDirection
-  defaultCoverMode: MediaLibraryCoverMode
   includeInHomeDiscovery: boolean
   revision: number
 }
@@ -90,7 +87,6 @@ export const DEFAULT_MEDIA_LIBRARY_CONFIG: Readonly<MediaLibraryConfigValues> = 
   defaultVideoScraper: null,
   defaultSortBy: 'release_date',
   defaultSortDir: 'desc',
-  defaultCoverMode: 'cover',
   includeInHomeDiscovery: true
 }
 
@@ -237,7 +233,6 @@ export interface MediaLibraryConfigPatch {
   defaultVideoScraper?: string | null
   defaultSortBy?: MediaLibraryDefaultSortBy
   defaultSortDir?: MediaLibrarySortDirection
-  defaultCoverMode?: MediaLibraryCoverMode
   includeInHomeDiscovery?: boolean
 }
 

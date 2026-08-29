@@ -3,7 +3,6 @@ import { IPC } from '@shared/ipc-channels'
 import type { MediaLibraryIpcContract } from '@shared/mediaLibraryIpcContract'
 import {
   MEDIA_LIBRARY_COLORS,
-  MEDIA_LIBRARY_COVER_MODES,
   MEDIA_LIBRARY_DEFAULT_SORTS,
   MEDIA_LIBRARY_ICONS,
   MEDIA_LIBRARY_SORT_DIRECTIONS
@@ -38,7 +37,6 @@ const mediaLibraryConfigPatch = requirePatch(
       defaultVideoScraper: scraperName.nullable().optional(),
       defaultSortBy: z.enum(MEDIA_LIBRARY_DEFAULT_SORTS).optional(),
       defaultSortDir: z.enum(MEDIA_LIBRARY_SORT_DIRECTIONS).optional(),
-      defaultCoverMode: z.enum(MEDIA_LIBRARY_COVER_MODES).optional(),
       includeInHomeDiscovery: z.boolean().optional()
     })
     .strict()
@@ -54,7 +52,6 @@ const mediaLibraryConfigPatchForCreate = z
     defaultVideoScraper: scraperName.nullable().optional(),
     defaultSortBy: z.enum(MEDIA_LIBRARY_DEFAULT_SORTS).optional(),
     defaultSortDir: z.enum(MEDIA_LIBRARY_SORT_DIRECTIONS).optional(),
-    defaultCoverMode: z.enum(MEDIA_LIBRARY_COVER_MODES).optional(),
     includeInHomeDiscovery: z.boolean().optional()
   })
   .strict()

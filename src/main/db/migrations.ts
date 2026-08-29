@@ -21,7 +21,7 @@ import {
   VIDEO_SOURCES_SCHEMA_SQL
 } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 17
+export const CURRENT_SCHEMA_VERSION = 18
 
 type Migration = {
   version: number
@@ -1281,6 +1281,69 @@ function migrateToV17(database: Database.Database): void {
   `)
 }
 
+/** Cover presentation is application-wide; library configuration no longer owns an override. */
+function migrateToV18(database: Database.Database): void {
+  if (!tableExists(database, 'media_library_configs')) {
+    database.exec(MEDIA_LIBRARY_CORE_SCHEMA_SQL)
+    return
+  }
+  if (!columnNames(database, 'media_library_configs').has('default_cover_mode')) return
+
+  database.exec(`
+    ALTER TABLE media_library_configs RENAME TO media_library_configs_v17;
+    CREATE TABLE media_library_configs (
+      library_id INTEGER PRIMARY KEY,
+      auto_scan_enabled INTEGER NOT NULL DEFAULT 0 CHECK(auto_scan_enabled IN (0, 1)),
+      auto_scan_interval_minutes INTEGER NOT NULL DEFAULT 1440
+          CHECK(auto_scan_interval_minutes BETWEEN 5 AND 10080),
+      min_import_duration_minutes INTEGER NOT NULL DEFAULT 0
+          CHECK(min_import_duration_minutes BETWEEN 0 AND 1440),
+      auto_merge_same_code_resources INTEGER NOT NULL DEFAULT 0
+          CHECK(auto_merge_same_code_resources IN (0, 1)),
+      remove_resource_less_memberships INTEGER NOT NULL DEFAULT 0
+          CHECK(remove_resource_less_memberships IN (0, 1)),
+      default_video_scraper TEXT,
+      default_sort_by TEXT NOT NULL DEFAULT 'release_date'
+          CHECK(default_sort_by IN ('add_time', 'release_date', 'rating', 'code')),
+      default_sort_dir TEXT NOT NULL DEFAULT 'desc' CHECK(default_sort_dir IN ('asc', 'desc')),
+      include_in_home_discovery INTEGER NOT NULL DEFAULT 1
+          CHECK(include_in_home_discovery IN (0, 1)),
+      revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+      legacy_settings_imported_at TEXT,
+      FOREIGN KEY (library_id) REFERENCES media_libraries(id) ON DELETE CASCADE
+    );
+    INSERT INTO media_library_configs (
+      library_id,
+      auto_scan_enabled,
+      auto_scan_interval_minutes,
+      min_import_duration_minutes,
+      auto_merge_same_code_resources,
+      remove_resource_less_memberships,
+      default_video_scraper,
+      default_sort_by,
+      default_sort_dir,
+      include_in_home_discovery,
+      revision,
+      legacy_settings_imported_at
+    )
+    SELECT
+      library_id,
+      auto_scan_enabled,
+      auto_scan_interval_minutes,
+      min_import_duration_minutes,
+      auto_merge_same_code_resources,
+      remove_resource_less_memberships,
+      default_video_scraper,
+      default_sort_by,
+      default_sort_dir,
+      include_in_home_discovery,
+      revision,
+      legacy_settings_imported_at
+    FROM media_library_configs_v17;
+    DROP TABLE media_library_configs_v17;
+  `)
+}
+
 const MIGRATIONS: Migration[] = [
   {
     version: 2,
@@ -1345,6 +1408,10 @@ const MIGRATIONS: Migration[] = [
   {
     version: 17,
     migrate: migrateToV17
+  },
+  {
+    version: 18,
+    migrate: migrateToV18
   }
 ]
 

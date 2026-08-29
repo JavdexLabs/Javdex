@@ -85,8 +85,6 @@ import {
 } from '../utils/maintenanceHints'
 import Button from '../components/Button'
 import { NavIcon } from '../components/NavIcons'
-import { useScopedDisplayMode } from '../components/DisplayModeContext'
-import { mediaLibraryDefaultCoverDisplayMode } from '../mediaLibrarySettingsState'
 import styles from './LibraryPage.module.css'
 import { mediaLibrarySurfaceMode } from './mediaLibrarySurfaceState'
 import { rememberRecentMediaLibraryId } from '../listView/recentMediaLibrary'
@@ -172,9 +170,6 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     [library?.config.defaultSortBy, library?.config.defaultSortDir]
   )
   const effectiveDefaultScraper = library?.config.defaultVideoScraper || defaultScraper
-  useScopedDisplayMode(
-    library ? mediaLibraryDefaultCoverDisplayMode(library.config) : null
-  )
 
   const dismissOverlays = useCallback(() => {
     setFilterOpen(false)

@@ -8,7 +8,6 @@ import {
   DEFAULT_MEDIA_LIBRARY_CONFIG,
   DEFAULT_MEDIA_LIBRARY_ID,
   MEDIA_LIBRARY_COLORS,
-  MEDIA_LIBRARY_COVER_MODES,
   MEDIA_LIBRARY_DEFAULT_SORTS,
   MEDIA_LIBRARY_ICONS,
   MEDIA_LIBRARY_ROOT_EDITABLE_STATES,
@@ -65,7 +64,6 @@ interface MediaLibraryConfigRow {
   default_video_scraper: string | null
   default_sort_by: MediaLibraryConfig['defaultSortBy']
   default_sort_dir: MediaLibraryConfig['defaultSortDir']
-  default_cover_mode: MediaLibraryConfig['defaultCoverMode']
   include_in_home_discovery: 0 | 1
   revision: number
 }
@@ -104,7 +102,6 @@ interface MediaLibrarySummaryRow {
   default_video_scraper: string | null
   default_sort_by: MediaLibraryConfig['defaultSortBy']
   default_sort_dir: MediaLibraryConfig['defaultSortDir']
-  default_cover_mode: MediaLibraryConfig['defaultCoverMode']
   include_in_home_discovery: 0 | 1
   config_revision: number
   root_count: number
@@ -160,7 +157,6 @@ const SUMMARY_SELECT_SQL = `
     config.default_video_scraper,
     config.default_sort_by,
     config.default_sort_dir,
-    config.default_cover_mode,
     config.include_in_home_discovery,
     config.revision AS config_revision,
     COUNT(root.id) AS root_count,
@@ -296,12 +292,6 @@ function normalizeConfigPatch(input: MediaLibraryConfigPatch): MediaLibraryConfi
     }
     patch.defaultSortDir = input.defaultSortDir
   }
-  if (input.defaultCoverMode !== undefined) {
-    if (!includesValue(MEDIA_LIBRARY_COVER_MODES, input.defaultCoverMode)) {
-      validationError('默认封面模式无效。')
-    }
-    patch.defaultCoverMode = input.defaultCoverMode
-  }
   if (input.includeInHomeDiscovery !== undefined) {
     if (typeof input.includeInHomeDiscovery !== 'boolean') {
       validationError('首页发现开关必须是布尔值。')
@@ -374,7 +364,6 @@ function hydrateConfig(row: MediaLibraryConfigRow): MediaLibraryConfig {
     defaultVideoScraper: row.default_video_scraper,
     defaultSortBy: row.default_sort_by,
     defaultSortDir: row.default_sort_dir,
-    defaultCoverMode: row.default_cover_mode,
     includeInHomeDiscovery: Boolean(row.include_in_home_discovery),
     revision: row.revision
   }
@@ -419,7 +408,6 @@ function hydrateSummary(row: MediaLibrarySummaryRow): MediaLibrarySummary {
       default_video_scraper: row.default_video_scraper,
       default_sort_by: row.default_sort_by,
       default_sort_dir: row.default_sort_dir,
-      default_cover_mode: row.default_cover_mode,
       include_in_home_discovery: row.include_in_home_discovery,
       revision: row.config_revision
     }),
@@ -711,7 +699,6 @@ function insertConfig(
          default_video_scraper,
          default_sort_by,
          default_sort_dir,
-         default_cover_mode,
          include_in_home_discovery,
          revision
        ) VALUES (
@@ -724,7 +711,6 @@ function insertConfig(
          @defaultVideoScraper,
          @defaultSortBy,
          @defaultSortDir,
-         @defaultCoverMode,
          @includeInHomeDiscovery,
          1
        )`
@@ -739,7 +725,6 @@ function insertConfig(
       defaultVideoScraper: values.defaultVideoScraper,
       defaultSortBy: values.defaultSortBy,
       defaultSortDir: values.defaultSortDir,
-      defaultCoverMode: values.defaultCoverMode,
       includeInHomeDiscovery: values.includeInHomeDiscovery ? 1 : 0
     })
 }
@@ -1094,7 +1079,6 @@ export function updateMediaLibraryConfig(input: {
           : currentRow.default_video_scraper,
       defaultSortBy: patch.defaultSortBy ?? currentRow.default_sort_by,
       defaultSortDir: patch.defaultSortDir ?? currentRow.default_sort_dir,
-      defaultCoverMode: patch.defaultCoverMode ?? currentRow.default_cover_mode,
       includeInHomeDiscovery:
         patch.includeInHomeDiscovery ?? Boolean(currentRow.include_in_home_discovery)
     }
@@ -1109,7 +1093,6 @@ export function updateMediaLibraryConfig(input: {
                 default_video_scraper = @defaultVideoScraper,
                 default_sort_by = @defaultSortBy,
                 default_sort_dir = @defaultSortDir,
-                default_cover_mode = @defaultCoverMode,
                 include_in_home_discovery = @includeInHomeDiscovery,
                 revision = revision + 1
           WHERE library_id = @libraryId AND revision = @expectedRevision`
@@ -1125,7 +1108,6 @@ export function updateMediaLibraryConfig(input: {
         defaultVideoScraper: next.defaultVideoScraper,
         defaultSortBy: next.defaultSortBy,
         defaultSortDir: next.defaultSortDir,
-        defaultCoverMode: next.defaultCoverMode,
         includeInHomeDiscovery: next.includeInHomeDiscovery ? 1 : 0
       })
     if (info.changes !== 1) {

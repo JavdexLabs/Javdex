@@ -58,7 +58,6 @@ describe("legacy media-library settings bootstrap", () => {
             `SELECT auto_scan_enabled, auto_scan_interval_minutes,
                     min_import_duration_minutes, auto_merge_same_code_resources,
                     remove_resource_less_memberships, default_video_scraper,
-                    default_cover_mode,
                     legacy_settings_imported_at IS NOT NULL AS imported
              FROM media_library_configs WHERE library_id = 1`,
           )
@@ -70,7 +69,6 @@ describe("legacy media-library settings bootstrap", () => {
           auto_merge_same_code_resources: 0,
           remove_resource_less_memberships: 0,
           default_video_scraper: null,
-          default_cover_mode: "cover",
           imported: 1,
         },
       );
@@ -147,7 +145,7 @@ describe("legacy media-library settings bootstrap", () => {
             `SELECT auto_scan_enabled, auto_scan_interval_minutes,
                     min_import_duration_minutes, auto_merge_same_code_resources,
                     remove_resource_less_memberships, default_video_scraper,
-                    default_cover_mode, legacy_settings_imported_at IS NOT NULL AS imported
+                    legacy_settings_imported_at IS NOT NULL AS imported
              FROM media_library_configs WHERE library_id = 1`,
           )
           .get(),
@@ -158,7 +156,6 @@ describe("legacy media-library settings bootstrap", () => {
           auto_merge_same_code_resources: 0,
           remove_resource_less_memberships: 1,
           default_video_scraper: "Custom Video",
-          default_cover_mode: "cover",
           imported: 1,
         },
       );
@@ -456,13 +453,12 @@ describe("legacy media-library settings bootstrap", () => {
       assert.deepEqual(
         database
           .prepare(
-            `SELECT default_video_scraper, default_cover_mode
+            `SELECT default_video_scraper
              FROM media_library_configs WHERE library_id = 1`,
           )
           .get(),
         {
           default_video_scraper: "Custom Video",
-          default_cover_mode: "cover",
         },
       );
       assert.equal(persisted.defaultScraper, "Custom Video");
@@ -479,13 +475,12 @@ describe("legacy media-library settings bootstrap", () => {
       assert.deepEqual(
         database
           .prepare(
-            `SELECT default_video_scraper, default_cover_mode
+            `SELECT default_video_scraper
              FROM media_library_configs WHERE library_id = 1`,
           )
           .get(),
         {
           default_video_scraper: "Custom Video",
-          default_cover_mode: "cover",
         },
       );
     } finally {

@@ -160,7 +160,6 @@ describe('mediaLibraryRepo', () => {
         defaultVideoScraper: '  JavDB  ',
         defaultSortBy: 'rating',
         defaultSortDir: 'asc',
-        defaultCoverMode: 'poster',
         includeInHomeDiscovery: false
       },
       roots: [{ path: `${mediaRoot}${path.sep}`, state: 'active' }]
@@ -177,7 +176,7 @@ describe('mediaLibraryRepo', () => {
     assert.equal(detail.config.defaultVideoScraper, 'JavDB')
     assert.equal(detail.config.defaultSortBy, 'rating')
     assert.equal(detail.config.defaultSortDir, 'asc')
-    assert.equal(detail.config.defaultCoverMode, 'poster')
+    assert.equal(detail.config.includeInHomeDiscovery, false)
     assert.equal(detail.rootCount, 1)
     assert.equal(detail.activeRootCount, 1)
     assert.equal(detail.roots[0].path, path.normalize(mediaRoot))

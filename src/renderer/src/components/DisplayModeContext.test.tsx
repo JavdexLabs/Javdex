@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
-import type { CoverDisplayMode } from '@shared/settingsTypes'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
@@ -46,15 +45,10 @@ afterEach(() => {
 })
 
 describe('DisplayModeProvider', () => {
-  it('keeps a library override through async settings load and restores the app default on exit', async () => {
-    const {
-      DisplayModeProvider,
-      useDisplayMode,
-      useScopedDisplayMode
-    } = await import('./DisplayModeContext')
+  it('loads and exposes the application-wide cover mode', async () => {
+    const { DisplayModeProvider, useDisplayMode } = await import('./DisplayModeContext')
 
-    function Harness({ libraryMode }: { libraryMode: CoverDisplayMode | null }): JSX.Element {
-      useScopedDisplayMode(libraryMode)
+    function Harness(): JSX.Element {
       const { mode } = useDisplayMode()
       return <span data-mode={mode}>{mode}</span>
     }
@@ -62,31 +56,22 @@ describe('DisplayModeProvider', () => {
     await act(async () => {
       renderer = TestRenderer.create(
         <DisplayModeProvider>
-          <Harness libraryMode="landscape" />
+          <Harness />
         </DisplayModeProvider>
       )
       await Promise.resolve()
     })
     assert.ok(renderer)
-    assert.equal(renderer.root.findByType('span').props['data-mode'], 'landscape')
+    assert.equal(renderer.root.findByType('span').props['data-mode'], 'portrait')
 
     await act(async () => {
       resolveSettings?.({
-        coverDisplayMode: 'portrait',
+        coverDisplayMode: 'landscape',
         showVideoResourceTypeBadges: false
       })
       await Promise.resolve()
       await Promise.resolve()
     })
     assert.equal(renderer.root.findByType('span').props['data-mode'], 'landscape')
-
-    act(() => {
-      renderer?.update(
-        <DisplayModeProvider>
-          <Harness libraryMode={null} />
-        </DisplayModeProvider>
-      )
-    })
-    assert.equal(renderer.root.findByType('span').props['data-mode'], 'portrait')
   })
 })

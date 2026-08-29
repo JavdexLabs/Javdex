@@ -73,7 +73,6 @@ const SCRAPING_CONFIG_KEYS = [
 const DISPLAY_CONFIG_KEYS = [
   'defaultSortBy',
   'defaultSortDir',
-  'defaultCoverMode',
   'includeInHomeDiscovery'
 ] as const satisfies readonly MediaLibraryConfigKey[]
 
@@ -795,22 +794,6 @@ export function DisplaySettingsTab({
             >
               <option value="desc">降序</option>
               <option value="asc">升序</option>
-            </SelectControl>
-          </AppFormField>
-          <AppFormField label="默认封面形态">
-            <SelectControl
-              value={configDraft.defaultCoverMode}
-              disabled={formDisabled}
-              onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                updateConfigDraft(
-                  'defaultCoverMode',
-                  event.target
-                    .value as MediaLibraryConfigValues['defaultCoverMode']
-                )
-              }
-            >
-              <option value="cover">横版封面</option>
-              <option value="poster">竖版海报</option>
             </SelectControl>
           </AppFormField>
         </div>

@@ -312,5 +312,10 @@ export function exportAvatarCrop(
   ctx.drawImage(img, -iw / 2, -ih / 2, iw, ih)
   ctx.restore()
 
-  return canvas.toDataURL('image/jpeg', 0.92).split(',')[1] ?? ''
+  try {
+    return canvas.toDataURL('image/jpeg', 0.92).split(',')[1] ?? ''
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'SecurityError') return ''
+    throw error
+  }
 }

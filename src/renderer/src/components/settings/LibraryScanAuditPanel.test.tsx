@@ -101,6 +101,22 @@ async function renderPanel({
 }
 
 describe('LibraryScanAuditPanel', () => {
+  it('defaults to the attention tab even when the latest scan has no issues', async () => {
+    await renderPanel({
+      scanSummary: summary(),
+      scanAudit: audit([])
+    })
+
+    const attentionTab = renderer!.root
+      .findAllByType('button')
+      .find((button) =>
+        button.findAllByType('span').some((span) => span.children.includes('异常与待办'))
+      )
+    assert.ok(attentionTab)
+    assert.match(attentionTab.props.className, /tabBtnActive/)
+    assert.match(JSON.stringify(renderer?.toJSON()), /异常与待办清单/)
+  })
+
   it('keeps cached unrecognized files visible with their root-scoped resolution controls', async () => {
     await renderPanel({
       scanSummary: summary(),

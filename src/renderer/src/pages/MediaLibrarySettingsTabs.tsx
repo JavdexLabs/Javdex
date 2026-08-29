@@ -1,7 +1,21 @@
 import type { Dispatch, SetStateAction, ChangeEvent } from 'react'
 import type { NavigateFunction } from 'react-router-dom'
-import { Archive, FolderPlus, RefreshCw, Save, Trash2 } from 'lucide-react'
+import {
+  AlertTriangle,
+  Archive,
+  Clock,
+  FolderOpen,
+  FolderPlus,
+  Play,
+  RefreshCw,
+  Save,
+  SlidersHorizontal,
+  Square,
+  Trash2
+} from 'lucide-react'
+import { AUTO_SCAN_INTERVAL_MINUTES } from '@shared/settingsTypes'
 import type {
+  LibraryScanLatestSnapshot,
   LibraryScanMetricKey,
   LibraryScanSummary
 } from '@shared/libraryTypes'
@@ -14,14 +28,19 @@ import {
   type MediaLibraryRoot
 } from '@shared/mediaLibraryTypes'
 import Button from '../components/Button'
-import EmptyState from '../components/EmptyState'
 import { AppFormField, AppFormSection } from '../components/FormPrimitives'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { NavIcon } from '../components/NavIcons'
 import SelectControl from '../components/SelectControl'
+import SettingsSwitchRow from '../components/SettingsSwitchRow'
 import Switch from '../components/Switch'
 import LibraryScanAuditPanel from '../components/settings/LibraryScanAuditPanel'
-import UnrecognizedRow from '../components/settings/UnrecognizedRow'
+import {
+  SettingsEmptyPanel,
+  SettingsNumberStepper,
+  SettingsSectionBlock,
+  SettingsStatusPill
+} from '../components/settings/SettingsPrimitives'
 import type { useMediaLibraryScanController } from '../hooks/useMediaLibraryScanController'
 import {
   canRunMediaLibraryScan,
@@ -32,6 +51,28 @@ import {
 import { mediaLibraryVideoDetailPath } from '../listView/mediaLibraryRoutes'
 import { pendingCenterPath, pendingItemKey } from '../listView/pendingRoutes'
 import styles from './MediaLibrarySettingsPage.module.css'
+import { api } from '../api'
+
+const SCAN_TRIGGER_LABEL: Record<LibraryScanSummary['trigger'], string> = {
+  manual: '手动',
+  startup: '启动后',
+  interval: '定时',
+  resume: '唤醒后'
+}
+
+const SCAN_STATUS_LABEL: Record<LibraryScanSummary['status'], string> = {
+  success: '成功',
+  completed_with_errors: '完成但有失败项',
+  cancelled: '已取消',
+  failed: '失败'
+}
+
+function formatScanTime(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleString('zh-CN', { hour12: false })
+}
 
 const ICON_LABELS: Record<(typeof MEDIA_LIBRARY_ICONS)[number], string> = {
   library: '媒体库',
@@ -58,14 +99,6 @@ const ROOT_STATUS_LABELS: Record<MediaLibraryRoot['state'], string> = {
   archived: '已归档'
 }
 
-const SCAN_CONFIG_KEYS = [
-  'autoScanEnabled',
-  'autoScanIntervalMinutes',
-  'minImportDurationMinutes',
-  'autoMergeSameCodeResources',
-  'removeResourceLessMemberships'
-] as const satisfies readonly MediaLibraryConfigKey[]
-
 const SCRAPING_CONFIG_KEYS = [
   'defaultVideoScraper'
 ] as const satisfies readonly MediaLibraryConfigKey[]
@@ -86,19 +119,118 @@ type UpdateConfigDraft = <Key extends keyof MediaLibraryConfigValues>(
   value: MediaLibraryConfigValues[Key]
 ) => void
 
+type UpdateConfigImmediately = <Key extends keyof MediaLibraryConfigValues>(
+  key: Key,
+  value: MediaLibraryConfigValues[Key]
+) => Promise<void>
+
 type ScanController = ReturnType<typeof useMediaLibraryScanController>
 
-export interface MediaLibraryScanMetrics {
-  scanned: number
-  imported: number
-  failed: number
-  pending: number
-  unrecognized: number
-  offline: number
-  offlineFolders: string[]
-  errorSummary: string | null
-  cancelled: boolean
-  finishedAt: string | null
+function ScanHistorySummary({
+  summary,
+  audit,
+  selected,
+  unrecognized,
+  currentPendingGroupIds,
+  onSelect,
+  onResolvedUnrecognized,
+  onOpenPending,
+  onOpenVideo
+}: {
+  summary: LibraryScanSummary
+  audit: LibraryScanLatestSnapshot['audit']
+  selected: LibraryScanMetricKey | null
+  unrecognized: LibraryScanLatestSnapshot['unrecognized']
+  currentPendingGroupIds: Set<number>
+  onSelect: (key: LibraryScanMetricKey | null) => void
+  onResolvedUnrecognized: (path: string) => void
+  onOpenPending: (groupId?: number) => void
+  onOpenVideo: (videoId: number) => void
+}): JSX.Element {
+  return (
+    <div className={styles.scanHistorySummary}>
+      <div className={styles.scanHistorySummaryHead}>
+        <div>
+          <strong>{SCAN_TRIGGER_LABEL[summary.trigger]}扫描</strong>
+          <span>
+            {formatScanTime(summary.startedAt)} 至 {formatScanTime(summary.finishedAt)}
+          </span>
+        </div>
+        <SettingsStatusPill
+          status={
+            summary.status === 'failed' ||
+            summary.status === 'completed_with_errors'
+              ? 'warning'
+              : summary.status
+          }
+        >
+          {SCAN_STATUS_LABEL[summary.status]}
+        </SettingsStatusPill>
+      </div>
+      <LibraryScanAuditPanel
+        summary={summary}
+        audit={audit}
+        selected={selected}
+        unrecognized={unrecognized}
+        currentPendingGroupIds={currentPendingGroupIds}
+        onSelect={onSelect}
+        onResolvedUnrecognized={onResolvedUnrecognized}
+        onOpenPending={onOpenPending}
+        onOpenVideo={onOpenVideo}
+      />
+      {summary.offlineFolders.length > 0 ? (
+        <div className={`${styles.scanHistoryDetail} ${styles.warningDetail}`}>
+          <strong>{summary.offlineFolders.length} 个离线目录</strong>
+          {summary.offlineFolders.map((folder) => (
+            <div className={styles.scanHistoryPathDetail} key={folder}>
+              <span className="copyable-text" title={folder}>
+                {folder}
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void navigator.clipboard.writeText(folder)}
+              >
+                复制路径
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() =>
+                  void api.scan.revealAuditFile(summary.libraryId, folder)
+                }
+              >
+                在文件夹中显示
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {(summary.strmFailures?.length ?? 0) > 0 ||
+      (summary.omittedStrmFailures ?? 0) > 0 ? (
+        <div className={`${styles.scanHistoryDetail} ${styles.warningDetail}`}>
+          <strong>STRM 失败项</strong>
+          {summary.strmFailures?.map((failure) => (
+            <span
+              className="copyable-text"
+              key={`${failure.sourcePath}:${failure.code}`}
+            >
+              {failure.sourcePath} · {failure.message}
+            </span>
+          ))}
+          {(summary.omittedStrmFailures ?? 0) > 0 ? (
+            <span>另有 {summary.omittedStrmFailures} 项未显示</span>
+          ) : null}
+        </div>
+      ) : null}
+      {summary.errorSummary ? (
+        <div className={`${styles.scanHistoryDetail} ${styles.errorDetail}`}>
+          <strong>错误摘要</strong>
+          <span className="copyable-text">{summary.errorSummary}</span>
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 function ToggleRow({
@@ -130,7 +262,7 @@ function ToggleRow({
   )
 }
 
-export function GeneralSettingsTab({
+export function OverviewSettingsTab({
   identityDraft,
   setIdentityDraft,
   formDisabled,
@@ -150,8 +282,8 @@ export function GeneralSettingsTab({
       }}
     >
       <AppFormSection
-        title="名称与识别"
-        hint="名称显示在侧栏和媒体库页面；图标与颜色只用于区分媒体库。"
+        title="身份与侧栏显示"
+        hint="名称、图标、颜色和排序用于识别当前媒体库，不会改变库内影片数据。"
       >
         <AppFormField label="媒体库名称">
           <input
@@ -244,7 +376,7 @@ export function GeneralSettingsTab({
           disabled={formDisabled}
         >
           <Save {...UI_ICON_SM} aria-hidden />
-          保存常规设置
+          保存媒体库身份
         </Button>
       </div>
     </form>
@@ -269,94 +401,100 @@ export function SourcesSettingsTab({
   cancelRootRemoval: (root: MediaLibraryRoot) => Promise<void>
 }): JSX.Element {
   return (
-    <div className={styles.sectionStack}>
-      <AppFormSection
-        title="来源目录"
-        hint="每个路径只能归属于一个媒体库；启用的目录会参与该媒体库扫描。"
-        actions={
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={formDisabled}
-            onClick={() => void addRoots()}
-          >
-            <FolderPlus {...UI_ICON_SM} aria-hidden />
-            添加目录
-          </Button>
-        }
-      >
-        {library.roots.length === 0 ? (
-          <EmptyState
-            variant="compact"
-            title="尚未添加来源目录"
-            description="添加后即可扫描本地影片或 STRM 文件。"
-          />
-        ) : (
-          <div className={styles.rootList}>
-            {library.roots.map((root) => (
-              <div className={styles.rootRow} key={root.id}>
-                <span className={styles.rootCopy}>
-                  <span
-                    className={`${styles.rootPath} copyable-text`}
-                    title={root.path}
-                  >
-                    {root.path}
-                  </span>
-                  <span className={styles.rootMeta}>
-                    <span className={styles.rootState} data-state={root.state}>
-                      {ROOT_STATUS_LABELS[root.state]}
-                    </span>
-                    {root.realPath == null && root.state !== 'archived'
-                      ? ' · 当前不可访问'
-                      : ''}
-                  </span>
-                </span>
-                <span className={styles.rootActions}>
-                  {root.state === 'active' || root.state === 'disabled' ? (
-                    <>
-                      <Button
-                        size="sm"
-                        disabled={formDisabled}
-                        onClick={() => void requestRootMigration(root)}
-                      >
-                        迁移
-                      </Button>
-                      <Button
-                        size="sm"
-                        disabled={formDisabled}
-                        onClick={() => void toggleRoot(root)}
-                      >
-                        {root.state === 'active' ? '停用' : '启用'}
-                      </Button>
-                    </>
-                  ) : null}
-                  {root.state !== 'pending_removal' &&
-                  root.state !== 'archived' ? (
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      disabled={formDisabled}
-                      onClick={() => void requestRootRemoval(root)}
-                    >
-                      移除
-                    </Button>
-                  ) : null}
-                  {root.state === 'pending_removal' ? (
-                    <Button
-                      size="sm"
-                      disabled={formDisabled}
-                      onClick={() => void cancelRootRemoval(root)}
-                    >
-                      取消移除（保持停用）
-                    </Button>
-                  ) : null}
-                </span>
-              </div>
-            ))}
+    <section className={styles.sourcePanel} aria-label="来源目录">
+      <div className={styles.sourcePanelHead}>
+        <div className={styles.sourcePanelTitle}>
+          <span className={styles.sourcePanelIcon} aria-hidden="true">
+            <FolderOpen {...UI_ICON_SM} />
+          </span>
+          <div>
+            <h4>来源目录</h4>
+            <p>每个路径只归属于一个媒体库；启用的目录会参与扫描。</p>
           </div>
-        )}
-      </AppFormSection>
-    </div>
+        </div>
+        <Button
+          size="sm"
+          disabled={formDisabled}
+          onClick={() => void addRoots()}
+        >
+          <FolderPlus {...UI_ICON_SM} aria-hidden />
+          添加目录
+        </Button>
+      </div>
+      {library.roots.length === 0 ? (
+        <SettingsEmptyPanel variant="dashed" className={styles.sourceEmpty}>
+          尚未添加来源目录
+        </SettingsEmptyPanel>
+      ) : (
+        <div className={styles.rootList}>
+          {library.roots.map((root) => (
+            <div className={styles.rootRow} key={root.id}>
+              <FolderOpen
+                className={styles.rootIcon}
+                {...UI_ICON_SM}
+                aria-hidden
+              />
+              <span className={styles.rootCopy}>
+                <span
+                  className={`${styles.rootPath} copyable-text`}
+                  title={root.path}
+                >
+                  {root.path}
+                </span>
+                <span className={styles.rootMeta}>
+                  <span className={styles.rootState} data-state={root.state}>
+                    {ROOT_STATUS_LABELS[root.state]}
+                  </span>
+                  {root.realPath == null && root.state !== 'archived'
+                    ? ' · 当前不可访问'
+                    : ''}
+                </span>
+              </span>
+              <span className={styles.rootActions}>
+                {root.state === 'active' || root.state === 'disabled' ? (
+                  <>
+                    <Button
+                      size="sm"
+                      disabled={formDisabled}
+                      onClick={() => void requestRootMigration(root)}
+                    >
+                      迁移
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={formDisabled}
+                      onClick={() => void toggleRoot(root)}
+                    >
+                      {root.state === 'active' ? '停用' : '启用'}
+                    </Button>
+                  </>
+                ) : null}
+                {root.state !== 'pending_removal' &&
+                root.state !== 'archived' ? (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={formDisabled}
+                    onClick={() => void requestRootRemoval(root)}
+                  >
+                    移除
+                  </Button>
+                ) : null}
+                {root.state === 'pending_removal' ? (
+                  <Button
+                    size="sm"
+                    disabled={formDisabled}
+                    onClick={() => void cancelRootRemoval(root)}
+                  >
+                    取消移除（保持停用）
+                  </Button>
+                ) : null}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -364,314 +502,268 @@ export function ScanSettingsTab({
   libraryId,
   library,
   scan,
-  scanMetrics,
   latestScanSummary,
   pendingScanGroupIds,
   selectedScanMetric,
   setSelectedScanMetric,
   configDraft,
-  updateConfigDraft,
+  updateConfigImmediately,
   formDisabled,
-  saveConfig,
   navigate
 }: {
   libraryId: number
   library: MediaLibraryDetail
   scan: ScanController
-  scanMetrics: MediaLibraryScanMetrics | null
   latestScanSummary: LibraryScanSummary | null
   pendingScanGroupIds: Set<number>
   selectedScanMetric: LibraryScanMetricKey | null
   setSelectedScanMetric: Dispatch<SetStateAction<LibraryScanMetricKey | null>>
   configDraft: MediaLibraryConfigValues
-  updateConfigDraft: UpdateConfigDraft
+  updateConfigImmediately: UpdateConfigImmediately
   formDisabled: boolean
-  saveConfig: SaveConfig
   navigate: NavigateFunction
 }): JSX.Element {
+  const scanStatus = scan.running
+    ? scan.progress
+      ? `已扫描 ${scan.progress.scanned} 个文件，新导入 ${scan.progress.imported} 部${scan.progress.currentFile ? ` · ${scan.progress.currentFile}` : ''}`
+      : '正在准备目录与资源快照…'
+    : scan.error
+      ? `扫描失败：${scan.error}`
+      : ''
+
   return (
-    <div className={styles.sectionStack}>
-      <AppFormSection
-        title="手动扫描"
-        hint="只扫描当前媒体库的启用来源；运行中配置使用开始时的固定快照。"
-        actions={
-          scan.running ? (
-            <Button
-              size="sm"
-              variant="danger"
-              disabled={scan.cancelling || !scan.activeRunId}
-              onClick={() => void scan.cancel()}
-            >
-              {scan.cancelling ? '正在取消…' : '取消扫描'}
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={!canRunMediaLibraryScan(library)}
-              onClick={() => void scan.start()}
-            >
-              开始扫描
-            </Button>
-          )
-        }
+    <>
+      <section
+        className={`${styles.scanConsole}${scan.running ? ` ${styles.scanConsoleScanning}` : ''}`}
+        aria-label="扫描导入"
       >
-        {library.activeRootCount === 0 &&
-        library.pendingCleanupJobCount === 0 ? (
-          <div className={styles.scanNotice} data-tone="warning">
-            当前媒体库没有启用的来源目录，请先在“来源”页添加或启用目录。
-          </div>
-        ) : library.activeRootCount === 0 ? (
-          <div className={styles.scanNotice} data-tone="warning">
-            当前没有启用的来源目录；本次运行只会完成待移除来源的资源清理。
-          </div>
-        ) : null}
-        {scan.running ? (
-          <div className={styles.scanProgress} role="status" aria-live="polite">
-            <span className={styles.scanProgressTitle}>
-              {scan.cancelling ? '正在请求取消扫描…' : '正在扫描当前媒体库…'}
+        <div className={styles.scanPanelHead}>
+          <div className={styles.scanPanelTitle}>
+            <span className={styles.scanPanelIcon} aria-hidden="true">
+              {scan.running ? (
+                <Square {...UI_ICON_SM} />
+              ) : (
+                <Play {...UI_ICON_SM} />
+              )}
             </span>
-            <span className={styles.scanProgressDetail}>
-              {scan.progress
-                ? `已扫描 ${scan.progress.scanned} 个文件，新导入 ${scan.progress.imported} 部${scan.progress.currentFile ? ` · ${scan.progress.currentFile}` : ''}`
-                : '正在准备目录与资源快照…'}
-            </span>
-          </div>
-        ) : null}
-        {scan.error ? (
-          <div className={styles.scanNotice} data-tone="danger" role="alert">
-            扫描失败：{scan.error}
-          </div>
-        ) : null}
-        {scanMetrics ? (
-          <div className={styles.scanSummary}>
-            <div className={styles.scanSummaryHead}>
-              <span>
-                {scan.result ? '本次扫描' : '最近一次扫描'}
-                {scanMetrics.cancelled ? '（已取消）' : ''}
-              </span>
-              {scanMetrics.finishedAt ? (
-                <time
-                  className={styles.scanSummaryTime}
-                  dateTime={scanMetrics.finishedAt}
-                >
-                  {new Date(scanMetrics.finishedAt).toLocaleString()}
-                </time>
-              ) : null}
-            </div>
-            <dl className={styles.scanMetrics}>
-              <div className={styles.scanMetric}>
-                <dt className={styles.scanMetricLabel}>已扫描</dt>
-                <dd className={styles.scanMetricValue}>
-                  {scanMetrics.scanned}
-                </dd>
-              </div>
-              <div className={styles.scanMetric}>
-                <dt className={styles.scanMetricLabel}>新导入</dt>
-                <dd className={styles.scanMetricValue}>
-                  {scanMetrics.imported}
-                </dd>
-              </div>
-              <div className={styles.scanMetric}>
-                <dt className={styles.scanMetricLabel}>失败</dt>
-                <dd className={styles.scanMetricValue}>{scanMetrics.failed}</dd>
-              </div>
-              <div className={styles.scanMetric}>
-                <dt className={styles.scanMetricLabel}>待确认组</dt>
-                <dd className={styles.scanMetricValue}>
-                  {scanMetrics.pending}
-                </dd>
-              </div>
-              <div className={styles.scanMetric}>
-                <dt className={styles.scanMetricLabel}>离线目录</dt>
-                <dd className={styles.scanMetricValue}>
-                  {scanMetrics.offline}
-                </dd>
-              </div>
-              <div className={styles.scanMetric}>
-                <dt className={styles.scanMetricLabel}>未识别文件</dt>
-                <dd className={styles.scanMetricValue}>
-                  {scanMetrics.unrecognized}
-                </dd>
-              </div>
-            </dl>
-            {scanMetrics.errorSummary ? (
-              <div
-                className={styles.scanNotice}
-                data-tone="danger"
-                role="alert"
-              >
-                {scanMetrics.errorSummary}
-              </div>
-            ) : null}
-            {scanMetrics.offlineFolders.length > 0 ? (
-              <div
-                className={`${styles.scanNotice} copyable-text`}
-                data-tone="warning"
-              >
-                离线目录：{scanMetrics.offlineFolders.join('；')}
-              </div>
-            ) : null}
-            <div className={styles.scanSummaryActions}>
-              <Button size="sm" onClick={() => void scan.refreshLatest()}>
-                刷新摘要
-              </Button>
-              {scanMetrics.pending > 0 ? (
-                <Button
-                  size="sm"
-                  onClick={() =>
-                    navigate(pendingCenterPath({ type: 'scan', libraryId }))
-                  }
-                >
-                  进入待确认
-                </Button>
-              ) : null}
+            <div>
+              <h4>扫描导入</h4>
+              <p>导入新影片、同步路径变动并清理失效记录。</p>
             </div>
           </div>
-        ) : scan.latestLoading ? (
-          <div className={styles.scanNotice}>正在读取最近扫描摘要…</div>
-        ) : (
-          <div className={styles.scanNotice}>当前媒体库还没有扫描记录。</div>
-        )}
-      </AppFormSection>
-      {latestScanSummary ? (
-        <AppFormSection
-          title="扫描审计"
-          hint="审计、无法识别文件和待确认归属只属于当前媒体库。"
-        >
-          <LibraryScanAuditPanel
-            summary={latestScanSummary}
-            audit={scan.latest?.audit ?? null}
-            selected={selectedScanMetric}
-            unrecognized={scan.latest?.unrecognized ?? []}
-            currentPendingGroupIds={pendingScanGroupIds}
-            onSelect={setSelectedScanMetric}
-            onResolvedUnrecognized={() => {
-              void scan.refreshLatest()
-            }}
-            onOpenVideo={(videoId) =>
-              navigate(mediaLibraryVideoDetailPath(libraryId, videoId))
-            }
-            onOpenPending={(groupId) =>
-              navigate(
-                pendingCenterPath({
-                  type: 'scan',
-                  libraryId,
-                  item: groupId ? pendingItemKey('scan', groupId) : undefined
-                })
-              )
-            }
-          />
-        </AppFormSection>
-      ) : null}
-      {!latestScanSummary && (scan.latest?.unrecognized.length ?? 0) > 0 ? (
-        <AppFormSection
-          title="无法识别文件"
-          hint="这些记录由目录迁移或旧数据恢复产生，仍只属于当前媒体库。"
-        >
-          <div className={styles.unrecognizedList}>
-            {scan.latest!.unrecognized.map((item) => (
-              <UnrecognizedRow
-                key={`${item.rootId}:${item.filePath}`}
-                libraryId={libraryId}
-                rootId={item.rootId}
-                path={item.filePath}
-                onResolved={() => {
-                  void scan.refreshLatest()
-                }}
-              />
-            ))}
-          </div>
-        </AppFormSection>
-      ) : null}
-      <AppFormSection
-        title="扫描计划"
-        hint="设置仅作用于当前媒体库，扫描开始后会使用一份固定配置快照。"
-      >
-        <ToggleRow
-          title="自动扫描"
-          description="按设定周期检查当前媒体库的启用来源。"
-          checked={configDraft.autoScanEnabled}
-          disabled={formDisabled}
-          onChange={(value) => updateConfigDraft('autoScanEnabled', value)}
-        />
-        <div className={styles.fieldGrid}>
-          <AppFormField label="扫描周期" hint="5–10080 分钟">
-            <div className={styles.numberControl}>
-              <input
-                className={`text-input ${styles.textControl}`}
-                type="number"
-                min={5}
-                max={10_080}
-                step={1}
-                value={configDraft.autoScanIntervalMinutes}
-                disabled={formDisabled || !configDraft.autoScanEnabled}
-                onChange={(event) =>
-                  updateConfigDraft(
-                    'autoScanIntervalMinutes',
-                    Number(event.target.value)
-                  )
-                }
-              />
-              <span className={styles.numberUnit}>分钟</span>
-            </div>
-          </AppFormField>
-          <AppFormField
-            label="导入最小时长"
-            hint="0 表示不限制；最大 1440 分钟"
-          >
-            <div className={styles.numberControl}>
-              <input
-                className={`text-input ${styles.textControl}`}
-                type="number"
-                min={0}
-                max={1_440}
-                step={1}
-                value={configDraft.minImportDurationMinutes}
-                disabled={formDisabled}
-                onChange={(event) =>
-                  updateConfigDraft(
-                    'minImportDurationMinutes',
-                    Number(event.target.value)
-                  )
-                }
-              />
-              <span className={styles.numberUnit}>分钟</span>
-            </div>
-          </AppFormField>
         </div>
-      </AppFormSection>
-      <AppFormSection title="导入与清理策略">
-        <ToggleRow
-          title="同番号自动合并资源"
-          description="同一媒体库扫描到同番号文件时，直接加入现有影片成员。"
-          checked={configDraft.autoMergeSameCodeResources}
-          disabled={formDisabled}
-          onChange={(value) =>
-            updateConfigDraft('autoMergeSameCodeResources', value)
-          }
-        />
-        <ToggleRow
-          title="清理无资源成员"
-          description="安全扫描清理后，移除当前媒体库中不再拥有资源的影片成员。"
-          checked={configDraft.removeResourceLessMemberships}
-          disabled={formDisabled}
-          onChange={(value) =>
-            updateConfigDraft('removeResourceLessMemberships', value)
-          }
-        />
-      </AppFormSection>
-      <div className={styles.saveRow}>
-        <Button
-          size="sm"
-          variant="primary"
-          disabled={formDisabled}
-          onClick={() => void saveConfig(SCAN_CONFIG_KEYS, '扫描设置已保存')}
+
+        <div className={styles.scanCommandRow}>
+          <Button
+            type="button"
+            variant={scan.running ? 'default' : 'primary'}
+            disabled={
+              scan.running
+                ? scan.cancelling || !scan.activeRunId
+                : formDisabled || !canRunMediaLibraryScan(library)
+            }
+            title={
+              !scan.running && !canRunMediaLibraryScan(library)
+                ? '请先添加或启用来源目录'
+                : undefined
+            }
+            onClick={() => void (scan.running ? scan.cancel() : scan.start())}
+          >
+            {scan.running ? (
+              <Square {...UI_ICON_SM} aria-hidden />
+            ) : (
+              <Play {...UI_ICON_SM} aria-hidden />
+            )}
+            {scan.running
+              ? scan.cancelling
+                ? '正在取消…'
+                : '取消扫描'
+              : library.activeRootCount > 0
+                ? '扫描并导入'
+                : '执行待清理'}
+          </Button>
+          <div className={styles.scanDuration}>
+            <span className={styles.scanDurationLabel}>
+              <Clock {...UI_ICON_SM} aria-hidden />
+              最短时长
+            </span>
+            <SettingsNumberStepper
+              aria-label="最短导入时长（分钟）"
+              value={configDraft.minImportDurationMinutes}
+              min={0}
+              max={600}
+              step={1}
+              unit="分钟"
+              disabled={formDisabled}
+              onChange={(value) =>
+                void updateConfigImmediately('minImportDurationMinutes', value)
+              }
+            />
+          </div>
+        </div>
+
+        <div className={styles.scanMessageRow}>
+          <span className={styles.scanNote}>
+            {configDraft.minImportDurationMinutes > 0
+              ? `自动跳过不足 ${configDraft.minImportDurationMinutes} 分钟的本地视频；STRM 不受时长过滤影响`
+              : '未启用本地视频时长过滤；STRM 始终参与扫描'}
+          </span>
+          {scanStatus ? (
+            <span className={styles.scanStatus} role="status" aria-live="polite">
+              {scanStatus}
+            </span>
+          ) : null}
+        </div>
+        <section
+          className={styles.scanHistory}
+          aria-labelledby="library-last-scan-title"
         >
-          <Save {...UI_ICON_SM} aria-hidden />
-          保存扫描设置
-        </Button>
-      </div>
+          <div className={styles.scanHistoryHead}>
+            <h5 id="library-last-scan-title">最近一次扫描</h5>
+            <span>只保留最近一次手动或后台扫描的审计摘要。</span>
+          </div>
+          {latestScanSummary ? (
+            <ScanHistorySummary
+              summary={latestScanSummary}
+              audit={scan.latest?.audit ?? null}
+              selected={selectedScanMetric}
+              unrecognized={scan.latest?.unrecognized ?? []}
+              currentPendingGroupIds={pendingScanGroupIds}
+              onSelect={setSelectedScanMetric}
+              onResolvedUnrecognized={() => {
+                void scan.refreshLatest()
+              }}
+              onOpenVideo={(videoId) =>
+                navigate(mediaLibraryVideoDetailPath(libraryId, videoId))
+              }
+              onOpenPending={(groupId) =>
+                navigate(
+                  pendingCenterPath({
+                    type: 'scan',
+                    libraryId,
+                    item: groupId
+                      ? pendingItemKey('scan', groupId)
+                      : undefined
+                  })
+                )
+              }
+            />
+          ) : (
+            <SettingsEmptyPanel variant="compact">尚无扫描记录</SettingsEmptyPanel>
+          )}
+        </section>
+      </section>
+      <section className={styles.scanSettingsPanel} aria-label="扫描设置">
+        <div className={styles.scanSettingsPanelHead}>
+          <div className={styles.scanSettingsPanelTitle}>
+            <span className={styles.scanSettingsPanelIcon} aria-hidden="true">
+              <SlidersHorizontal {...UI_ICON_SM} />
+            </span>
+            <div>
+              <h4>扫描设置</h4>
+              <p>配置资源归属、自动扫描与扫描后的清理策略。</p>
+            </div>
+          </div>
+        </div>
+        <SettingsSectionBlock
+          className={styles.scanSettingsBlock}
+          title="资源归属"
+          hint="只影响之后扫描发现的新资源；不会自动处理已有待确认组。"
+        >
+          <div className="settings-toggle-list settings-toggle-list--compact">
+            <SettingsSwitchRow
+              title="同番号自动合并资源"
+              description="同一媒体库扫描到同番号文件时，直接加入现有影片成员。"
+              checked={configDraft.autoMergeSameCodeResources}
+              disabled={formDisabled}
+              onChange={(value) =>
+                void updateConfigImmediately('autoMergeSameCodeResources', value)
+              }
+            />
+          </div>
+        </SettingsSectionBlock>
+        <SettingsSectionBlock
+          className={styles.scanSettingsBlock}
+          title="自动扫描"
+          hint="应用启动、系统唤醒及运行期间会检查是否已达到扫描间隔。"
+        >
+          <div className="settings-toggle-list settings-toggle-list--compact">
+            <SettingsSwitchRow
+              title="按固定间隔自动扫描媒体库"
+              description="默认关闭；开启后不会立即扫描"
+              checked={configDraft.autoScanEnabled}
+              disabled={formDisabled}
+              onChange={(value) =>
+                void updateConfigImmediately('autoScanEnabled', value)
+              }
+            />
+          </div>
+          <label
+            className={`${styles.scanAutoInterval}${configDraft.autoScanEnabled ? '' : ` ${styles.scanAutoIntervalDisabled}`}`}
+          >
+            <span>
+              <strong>扫描间隔</strong>
+              <small>以上一次扫描完成时间为起点</small>
+            </span>
+            <SelectControl
+              className={styles.scanIntervalSelect}
+              aria-label="自动扫描间隔"
+              value={configDraft.autoScanIntervalMinutes}
+              disabled={formDisabled || !configDraft.autoScanEnabled}
+              onChange={(event) =>
+                void updateConfigImmediately(
+                  'autoScanIntervalMinutes',
+                  Number(event.target.value)
+                )
+              }
+            >
+              {AUTO_SCAN_INTERVAL_MINUTES.map((minutes) => (
+                <option key={minutes} value={minutes}>
+                  {minutes < 60 ? `${minutes} 分钟` : `${minutes / 60} 小时`}
+                </option>
+              ))}
+            </SelectControl>
+          </label>
+        </SettingsSectionBlock>
+        <SettingsSectionBlock
+          className={styles.scanSettingsBlock}
+          title="扫描后清理"
+          hint="只在完整扫描成功且所有目录在线时执行。"
+        >
+          <div className="settings-toggle-list settings-toggle-list--compact">
+            <SettingsSwitchRow
+              title="扫描后自动清理无资源成员"
+              description="仅移除当前媒体库中的成员关系；不会删除媒体目录中的源文件"
+              checked={configDraft.removeResourceLessMemberships}
+              disabled={formDisabled}
+              onChange={(value) =>
+                void updateConfigImmediately('removeResourceLessMemberships', value)
+              }
+            />
+          </div>
+          <div className={styles.scanCleanupNotice}>
+            <AlertTriangle {...UI_ICON_SM} aria-hidden />
+            <span className={styles.scanCleanupCopy}>
+              <strong>成员清理</strong>
+              <span>扫描失败、取消或存在离线目录时不会执行清理。</span>
+            </span>
+          </div>
+        </SettingsSectionBlock>
+      </section>
+    </>
+  )
+}
+
+type SourcesSettingsProps = Parameters<typeof SourcesSettingsTab>[0]
+type ScanSettingsProps = Parameters<typeof ScanSettingsTab>[0]
+
+export function SourcesAndScanSettingsTab(
+  props: SourcesSettingsProps & ScanSettingsProps
+): JSX.Element {
+  return (
+    <div className={styles.importWorkspace}>
+      <SourcesSettingsTab {...props} />
+      <ScanSettingsTab {...props} />
     </div>
   )
 }
@@ -828,15 +920,15 @@ export function MaintenanceSettingsTab({
   library,
   archived,
   busy,
+  requestArchive,
   restoreLibrary,
-  setLifecycleConfirm,
   openDeleteConfirmation
 }: {
   library: MediaLibraryDetail
   archived: boolean
   busy: string | null
+  requestArchive: () => void
   restoreLibrary: () => Promise<void>
-  setLifecycleConfirm: Dispatch<SetStateAction<'archive' | null>>
   openDeleteConfirmation: () => Promise<void>
 }): JSX.Element {
   const lifecycle = mediaLibraryLifecycleCapabilities(library)
@@ -844,57 +936,61 @@ export function MaintenanceSettingsTab({
     <div className={styles.sectionStack}>
       {library.isDefault ? (
         <div className={styles.protectedNotice}>
-          默认媒体库受保护，不能归档或永久删除。
+          默认媒体库受系统保护，不能归档或永久删除。
         </div>
-      ) : null}
-      <section className={styles.lifecycleRow}>
-        <span className={styles.lifecycleCopy}>
-          <strong className={styles.lifecycleTitle}>
-            {archived ? '恢复媒体库' : '归档媒体库'}
-          </strong>
-          <span className={styles.lifecycleDescription}>
-            {archived
-              ? '恢复后会重新校验来源目录身份，并重新出现在侧栏和全局结果中。'
-              : '归档会暂停扫描并从普通导航中隐藏，目录与影片数据仍保留。'}
-          </span>
-        </span>
-        {archived ? (
-          <Button
-            size="sm"
-            disabled={!lifecycle.canRestore || busy !== null}
-            onClick={() => void restoreLibrary()}
-          >
-            <RefreshCw {...UI_ICON_SM} aria-hidden />
-            恢复
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            disabled={!lifecycle.canArchive || busy !== null}
-            onClick={() => setLifecycleConfirm('archive')}
-          >
-            <Archive {...UI_ICON_SM} aria-hidden />
-            归档
-          </Button>
-        )}
-      </section>
-      <section className={`${styles.lifecycleRow} ${styles.dangerRow}`}>
-        <span className={styles.lifecycleCopy}>
-          <strong className={styles.lifecycleTitle}>永久删除媒体库</strong>
-          <span className={styles.lifecycleDescription}>
-            仅归档后可用。该操作删除媒体库配置与成员关系，无法撤销。
-          </span>
-        </span>
-        <Button
-          size="sm"
-          variant="danger"
-          disabled={!lifecycle.canDelete || busy !== null}
-          onClick={() => void openDeleteConfirmation()}
-        >
-          <Trash2 {...UI_ICON_SM} aria-hidden />
-          永久删除
-        </Button>
-      </section>
+      ) : (
+        <>
+          <section className={styles.lifecycleRow}>
+            <span className={styles.lifecycleCopy}>
+              <strong className={styles.lifecycleTitle}>
+                {archived ? '恢复媒体库' : '归档媒体库'}
+              </strong>
+              <span className={styles.lifecycleDescription}>
+                {archived
+                  ? '恢复后重新校验来源目录，并重新显示在普通导航中。'
+                  : '停止扫描并从普通导航中隐藏；归档后仍可恢复。'}
+              </span>
+            </span>
+            <Button
+              size="sm"
+              variant={archived ? 'primary' : undefined}
+              disabled={
+                busy !== null ||
+                (archived ? !lifecycle.canRestore : !lifecycle.canArchive)
+              }
+              onClick={() =>
+                archived ? void restoreLibrary() : requestArchive()
+              }
+            >
+              {archived ? (
+                <RefreshCw {...UI_ICON_SM} aria-hidden />
+              ) : (
+                <Archive {...UI_ICON_SM} aria-hidden />
+              )}
+              {archived ? '恢复媒体库' : '归档媒体库'}
+            </Button>
+          </section>
+          {archived ? (
+            <section className={`${styles.lifecycleRow} ${styles.dangerRow}`}>
+              <span className={styles.lifecycleCopy}>
+                <strong className={styles.lifecycleTitle}>永久删除媒体库</strong>
+                <span className={styles.lifecycleDescription}>
+                  删除媒体库配置与成员关系，无法撤销。
+                </span>
+              </span>
+              <Button
+                size="sm"
+                variant="danger"
+                disabled={!lifecycle.canDelete || busy !== null}
+                onClick={() => void openDeleteConfirmation()}
+              >
+                <Trash2 {...UI_ICON_SM} aria-hidden />
+                永久删除
+              </Button>
+            </section>
+          ) : null}
+        </>
+      )}
     </div>
   )
 }

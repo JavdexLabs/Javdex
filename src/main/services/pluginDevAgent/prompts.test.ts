@@ -20,6 +20,16 @@ const createTask = {
   userMessage: '抓取详情页全部明确字段'
 }
 
+function assertTextAppearsInOrder(text: string, fragments: readonly string[]): void {
+  let previousIndex = -1
+  for (const fragment of fragments) {
+    const index = text.indexOf(fragment)
+    assert.ok(index >= 0, `missing ordered fragment: ${fragment}`)
+    assert.ok(index > previousIndex, `fragment appears out of order: ${fragment}`)
+    previousIndex = index
+  }
+}
+
 describe('PluginDevInstructionModule', () => {
   it('keeps the system prompt limited to identity, workspace and host boundaries', () => {
     const prompt = PLUGIN_DEVELOPER_SYSTEM_PROMPT
@@ -75,13 +85,15 @@ describe('PluginDevInstructionModule', () => {
     }
     assert.equal(pluginSkill.match(/^## [1-4]\. /gm)?.length, 4)
     assert.match(pluginSkill, /按证据推进/)
-    assert.match(pluginSkill, /dev-notes\.md` 并进入实现/)
+    assert.match(pluginSkill, /搜索页代码检查点/)
+    assert.match(pluginSkill, /详情页代码检查点/)
     assert.match(pluginSkill, /每次处理一个具体 blocker 后重新评估/)
     assert.match(pluginSkill, /新证据暴露新 blocker 时可以继续/)
     assert.match(pluginSkill, /不设任意总次数上限/)
     assert.doesNotMatch(pluginSkill, /才允许追加一次最直接的 browser 操作/)
     assert.match(pluginSkill, /reasoning 只用一至三句话说明下一项工具行动/)
-    assert.match(pluginSkill, /简单网站在一个连贯修改中实现全部已观察且映射明确的字段/)
+    assert.match(pluginSkill, /简单网站仍在一个连贯开发过程内完成搜索与详情实现/)
+    assert.match(pluginSkill, /页面级代码检查点按搜索页和详情页划分，不是按字段拆分/)
     assert.doesNotMatch(pluginSkill, /完整可运行的纵向切片/)
     assert.doesNotMatch(pluginSkill, /必须一次实现|一次性生成全部代码/)
     assert.doesNotMatch(pluginSkill, /标题.*封面.*来源链接/)
@@ -108,7 +120,7 @@ describe('PluginDevInstructionModule', () => {
     assert.match(pluginSkill, /已有目标后[\s\S]*省略参数才执行完整验收/)
     assert.match(pluginSkill, /无论来自 open、click、fill、press 或 snapshot/)
     assert.match(pluginSkill, /证据足够时立即 write\/edit/)
-    assert.match(pluginSkill, /相关写入完成后优先调用 `plugin_dry_run`/)
+    assert.match(pluginSkill, /搜索与详情实现完成、`plugin\.json` 和 dev-notes 同步后，才执行第一次完整 `plugin_dry_run`/)
     assert.match(pluginSkill, /`installReady=true` 且没有明确未完成项时停止/)
     assert.match(pluginSkill, /有明确错误或剩余字段时针对性修改后再运行/)
     assert.match(pluginSkill, /没有新证据或没有必要修改时停止/)
@@ -122,7 +134,11 @@ describe('PluginDevInstructionModule', () => {
     assert.match(pluginSkill, /成功仅指提交后 observation 的 `url` 变为另一个地址/)
     assert.match(pluginSkill, /提交后 `url` 未变化不算本档成功/)
     assert.match(pluginSkill, /同一 `url` 上的 overlay 或 AJAX 结果也不能当作本档成功/)
-    assert.match(pluginSkill, /不再读脚本、解释 `recentRequests` 或在结果页学习列表结构/)
+    assert.match(pluginSkill, /在结果页上确认精确详情链接的 href 形态/)
+    assert.match(pluginSkill, /排除语言切换、分页和搜索 URL 本身/)
+    assert.match(pluginSkill, /字段选择器到详情页再学/)
+    assert.match(pluginSkill, /不要为此读脚本或 `recentRequests`/)
+    assert.doesNotMatch(pluginSkill, /学习列表结构|搜索匹配与相对 href 留给首次 dry-run/)
     assert.match(pluginSkill, /第一档失败后[\s\S]*scriptSrcs/)
     assert.match(pluginSkill, /第二档失败后[\s\S]*recentRequests/)
     assert.match(pluginSkill, /第三档失败后[\s\S]*ctx\.browser/)
@@ -149,8 +165,8 @@ describe('PluginDevInstructionModule', () => {
     assert.match(pluginSkill, /pageFacts\.scriptSrcs/)
     assert.match(pluginSkill, /pageFacts\.recentRequests/)
     assert.doesNotMatch(pluginSkill, /半成品|只含搜索/)
-    assert.match(pluginSkill, /先确认搜索入口，再只打开一条精确详情/)
-    assert.match(pluginSkill, /只打开一条精确详情学习选择器和字段/)
+    assert.match(pluginSkill, /搜索页代码检查点写入后，才离开搜索阶段并只打开一条精确.*详情页/)
+    assert.match(pluginSkill, /收齐当前详情页\/资料页已明确的身份、字段、选择器和 metadata/)
     assert.match(pluginSkill, /浏览一条详情不是允许代码只处理一条/)
     assert.doesNotMatch(pluginSkill, /不要 fill 搜索框演练/)
     assert.doesNotMatch(pluginSkill, /不要 grep\/read browser artifact 找搜索 URL/)
@@ -234,6 +250,49 @@ describe('PluginDevInstructionModule', () => {
     assert.equal(Object.hasOwn(task, 'instructions'), false)
     assert.equal(Object.hasOwn(task, 'fieldScope'), false)
     assert.equal(Object.hasOwn(task, 'supportedFields'), false)
+  })
+
+  it('orders page-level search and detail code checkpoints for video and actress skills', () => {
+    const videoSkill = buildRunInstructionSet({ task: createTask })
+      .workspaceResources['.agents/skills/javdex-plugin-dev/SKILL.md']
+    const actressSkill = buildRunInstructionSet({
+      task: { ...createTask, kind: 'actress', testTargets: ['三上悠亜'] }
+    }).workspaceResources['.agents/skills/javdex-plugin-dev/SKILL.md']
+
+    for (const skill of [videoSkill, actressSkill]) {
+      assert.match(skill, /进入详情页前，必须在搜索阶段收齐以下生产搜索证据/)
+      assert.match(skill, /搜索 URL 或请求构造方式/)
+      assert.match(skill, /候选容器或响应集合与详情\/资料链接选择器或字段/)
+      assert.match(skill, /候选身份的可靠判断信号/)
+      assert.match(skill, /相对 href 的解析基准/)
+      assert.match(skill, /证据齐全后立即用 write\/edit 将搜索逻辑固化到 `index\.js`/)
+      assert.match(skill, /代码保持语法有效，但暂时不要求功能完整、可安装或执行 dry-run/)
+      assert.match(skill, /中间搜索代码检查点不得调用 `plugin_dry_run`/)
+      assert.match(skill, /搜索页代码检查点写入后，才离开搜索阶段并只打开一条精确/)
+      assert.match(skill, /立即用 write\/edit 实现详情解析逻辑/)
+      assert.match(skill, /第一次完整 `plugin_dry_run` 前不得返回搜索页/)
+      assert.match(skill, /只有 `plugin_dry_run` 暴露与搜索候选相关的具体错误，才允许针对该 blocker 回访搜索页/)
+      assert.match(skill, /首次完整运行前，不为验证分支而另外浏览空结果页、推荐结果、模糊搜索、分页、理论镜像域名/)
+      assert.match(skill, /空结果和多候选合同先按 `docs\/plugin-format\.md` 实现/)
+      assert.match(skill, /页面级代码检查点按搜索页和详情页划分，不是按字段拆分/)
+      assertTextAppearsInOrder(skill, [
+        '进入详情页前，必须在搜索阶段收齐以下生产搜索证据',
+        '证据齐全后立即用 write/edit 将搜索逻辑固化到 `index.js`',
+        '搜索页代码检查点写入后，才离开搜索阶段并只打开一条精确',
+        '收齐当前详情页/资料页已明确的身份、字段、选择器和 metadata',
+        '立即用 write/edit 实现详情解析逻辑',
+        '才执行第一次完整 `plugin_dry_run`'
+      ])
+      assert.doesNotMatch(skill, /搜索匹配与相对 href 留给首次 dry-run/)
+      assert.doesNotMatch(skill, /立即打开一条精确详情，不再读脚本、解释 `recentRequests` 或在结果页学习列表结构/)
+      assert.doesNotMatch(skill, /然后打开一条精确详情/)
+      assert.doesNotMatch(skill, /可用已出现的精确链接.*打开一条详情/)
+      assert.doesNotMatch(skill, /简单网站在一个连贯修改中实现全部已观察且映射明确的字段/)
+      assert.doesNotMatch(skill, /相关写入完成后优先调用 `plugin_dry_run`/)
+    }
+
+    assert.match(videoSkill, /`findDetailUrls\(ctx\)` 等影片详情定位函数/)
+    assert.match(actressSkill, /`findProfileUrl\(ctx, query\)` 等演员资料定位函数/)
   })
 
   it('generates isolated result contracts and workflow examples for each plugin kind', () => {

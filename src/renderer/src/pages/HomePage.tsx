@@ -2,31 +2,30 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
-  type FormEvent,
-  type KeyboardEvent as ReactKeyboardEvent
+  useState
 } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { LibraryBig, RefreshCw, Search } from 'lucide-react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { LibraryBig, RefreshCw, Search, SearchX } from 'lucide-react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
-import ScopedPosterCard from '../components/ScopedPosterCard'
+import PosterCard from '../components/PosterCard'
+import VirtualPosterGrid from '../components/VirtualPosterGrid'
 import { NavIcon } from '../components/NavIcons'
 import { UI_ICON, UI_ICON_SM } from '../components/iconDefaults'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useDebounce } from '../hooks/useDebounce'
-import { navigateToVideoDetail } from '../listView/listNavigation'
+import { LIST_PARAM, patchSearchParams } from '../listView/listQueryParams'
 import { mediaLibraryPath } from '../listView/mediaLibraryRoutes'
-import { ROUTE_PATH } from '../listView/routePaths'
 import styles from './HomePage.module.css'
 import { homeKeys } from '../query/queryKeys'
 import { HOME_GLOBAL_SEARCH_ID } from '../globalSearchShortcut'
 import { mediaLibraryIdentityStyle } from '../components/mediaLibraryIdentity'
+import type { HomeSnapshot } from '@shared/catalogTypes'
 
-const HOME_DISCOVERY_SEED_KEY = 'javdex:home-discovery-seed'
+const HOME_SEARCH_PAGE_SIZE = 120
 
 const HOME_SCAN_STATUS_LABEL = {
   queued: '等待扫描',
@@ -69,107 +68,88 @@ function createDiscoverySeed(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
-function initialDiscoverySeed(): string {
-  try {
-    const stored = window.sessionStorage.getItem(HOME_DISCOVERY_SEED_KEY)?.trim()
-    if (stored) return stored
-  } catch {
-    // Session storage may be unavailable in hardened renderer contexts.
-  }
-  return createDiscoverySeed()
+// Keep the active discovery batch for the lifetime of this renderer process.
+// Route remounts and query invalidations reuse it; an app restart recreates it.
+let activeDiscovery = {
+  seed: createDiscoverySeed(),
+  videos: null as HomeSnapshot['discovery'] | null
+}
+
+async function loadHomeSnapshot(seed: string): Promise<HomeSnapshot> {
+  const snapshot = await api.home.load({ seed, recentLimit: 12, discoveryLimit: 12 })
+  if (seed !== activeDiscovery.seed) return snapshot
+
+  activeDiscovery.videos ??= snapshot.discovery
+  return snapshot.discovery === activeDiscovery.videos
+    ? snapshot
+    : { ...snapshot, discovery: activeDiscovery.videos }
 }
 
 export default function HomePage(): JSX.Element {
-  const navigate = useNavigate()
-  const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
   const searchRef = useRef<HTMLInputElement>(null)
-  const [search, setSearch] = useState('')
-  const [searchFocused, setSearchFocused] = useState(false)
-  const [activeSuggestion, setActiveSuggestion] = useState(-1)
-  const debouncedSearch = useDebounce(search.trim(), 180)
-  const [seed, setSeed] = useState(initialDiscoverySeed)
+  const urlSearch = searchParams.get(LIST_PARAM.q) ?? ''
+  const [search, setSearch] = useState(urlSearch)
+  const debouncedSearch = useDebounce(search, 300)
+  const [seed, setSeed] = useState(() => activeDiscovery.seed)
   const scroll = useScrollContainerMemory(`home:${seed}`)
+
+  useEffect(() => {
+    setSearch(urlSearch)
+  }, [urlSearch])
+
+  useEffect(() => {
+    const normalized = debouncedSearch.trim()
+    if (normalized === urlSearch.trim()) return
+    setSearchParams(
+      (current) => patchSearchParams(current, { [LIST_PARAM.q]: normalized || null }),
+      { replace: true }
+    )
+  }, [debouncedSearch, setSearchParams, urlSearch])
+
   const homeQuery = useQuery({
     queryKey: homeKeys.snapshot(seed),
-    queryFn: () => api.home.load({ seed, recentLimit: 12, discoveryLimit: 12 }),
+    queryFn: () => loadHomeSnapshot(seed),
     staleTime: 30_000
   })
-  const suggestionsQuery = useQuery({
-    queryKey: homeKeys.search(`suggestions:${debouncedSearch}`),
-    queryFn: () => api.home.search({ search: debouncedSearch, limit: 6, offset: 0 }),
-    enabled: debouncedSearch.length > 0,
+  const normalizedSearch = search.trim()
+  const settledSearch = debouncedSearch.trim()
+  const searchSettled = normalizedSearch === settledSearch
+  const searchQuery = useInfiniteQuery({
+    queryKey: homeKeys.search(`home:${settledSearch}`),
+    enabled: settledSearch.length > 0,
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) =>
+      api.home.search({
+        search: settledSearch,
+        limit: HOME_SEARCH_PAGE_SIZE,
+        offset: typeof pageParam === 'number' ? pageParam : 0
+      }),
+    getNextPageParam: (lastPage, pages) => {
+      const loaded = pages.reduce((total, page) => total + page.items.length, 0)
+      return loaded < lastPage.total ? loaded : undefined
+    },
     staleTime: 15_000
   })
-  const suggestions = useMemo(
-    () =>
-      debouncedSearch === search.trim() ? (suggestionsQuery.data?.items ?? []) : [],
-    [debouncedSearch, search, suggestionsQuery.data]
+  const searchVideos = useMemo(
+    () => searchQuery.data?.pages.flatMap((page) => page.items) ?? [],
+    [searchQuery.data]
   )
-  const suggestionsVisible = searchFocused && search.trim().length > 0
-
-  useEffect(() => {
-    setActiveSuggestion(-1)
-  }, [debouncedSearch])
-
-  useEffect(() => {
-    if (activeSuggestion < suggestions.length) return
-    setActiveSuggestion(suggestions.length > 0 ? suggestions.length - 1 : -1)
-  }, [activeSuggestion, suggestions.length])
-
-  const openSuggestion = (index: number): void => {
-    const suggestion = suggestions[index]
-    if (!suggestion) return
-    setSearchFocused(false)
-    navigateToVideoDetail(navigate, location, suggestion.id, {
-      libraryId: suggestion.preferredLibraryId
-    })
-  }
-
-  const onSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
-    if (event.key === 'Escape') {
-      setSearchFocused(false)
-      setActiveSuggestion(-1)
-      searchRef.current?.blur()
-      return
-    }
-    if (!suggestionsVisible || suggestions.length === 0) return
-    if (event.key === 'ArrowDown') {
-      event.preventDefault()
-      setActiveSuggestion((current) => (current + 1) % suggestions.length)
-      return
-    }
-    if (event.key === 'ArrowUp') {
-      event.preventDefault()
-      setActiveSuggestion((current) =>
-        current <= 0 ? suggestions.length - 1 : current - 1
-      )
-      return
-    }
-    if (event.key === 'Enter' && activeSuggestion >= 0) {
-      event.preventDefault()
-      openSuggestion(activeSuggestion)
-    }
-  }
-
-  const submitSearch = (event: FormEvent): void => {
-    event.preventDefault()
-    const q = search.trim()
-    if (!q) {
-      searchRef.current?.focus()
-      return
-    }
-    const params = new URLSearchParams({ q })
-    navigate({ pathname: ROUTE_PATH.search, search: params.toString() })
-  }
+  const searchTotal = searchQuery.data?.pages[0]?.total ?? 0
+  const detailLibraryIds = useMemo(
+    () => new Map(searchVideos.map((video) => [video.id, video.preferredLibraryId])),
+    [searchVideos]
+  )
+  const hasSearch = normalizedSearch.length > 0
+  const searchLoading =
+    hasSearch &&
+    (!searchSettled ||
+      searchQuery.isLoading ||
+      (searchQuery.isFetching && searchVideos.length === 0))
 
   const refreshDiscovery = (): void => {
-    const nextSeed = createDiscoverySeed()
-    setSeed(nextSeed)
-    try {
-      window.sessionStorage.setItem(HOME_DISCOVERY_SEED_KEY, nextSeed)
-    } catch {
-      // In-memory state still keeps this batch stable for the current mount.
-    }
+    activeDiscovery = { seed: createDiscoverySeed(), videos: null }
+    setSeed(activeDiscovery.seed)
   }
 
   const snapshot = homeQuery.data
@@ -181,7 +161,7 @@ export default function HomePage(): JSX.Element {
           <h1 className={styles.pageTitle}>首页</h1>
           <span className={styles.pageSubtitle}>跨媒体库发现与搜索</span>
         </div>
-        <form className={styles.searchForm} role="search" onSubmit={submitSearch}>
+        <div className={styles.searchArea} role="search">
           <div className={styles.searchControl}>
             <Search {...UI_ICON} className={styles.searchIcon} aria-hidden />
             <input
@@ -189,102 +169,92 @@ export default function HomePage(): JSX.Element {
               className={`text-input ${styles.searchInput}`}
               ref={searchRef}
               value={search}
-              onChange={(event) => {
-                setSearch(event.target.value)
-                setActiveSuggestion(-1)
-              }}
-              onFocus={() => setSearchFocused(true)}
-              onBlur={() => setSearchFocused(false)}
-              onKeyDown={onSearchKeyDown}
+              onChange={(event) => setSearch(event.target.value)}
               type="search"
-              role="combobox"
               placeholder="搜索番号、标题或演员（含别名）…"
               aria-label="跨媒体库搜索"
-              aria-autocomplete="list"
-              aria-expanded={suggestionsVisible}
-              aria-controls="home-search-suggestions"
-              aria-activedescendant={
-                activeSuggestion >= 0 ? `home-search-suggestion-${activeSuggestion}` : undefined
-              }
+              aria-busy={searchLoading || undefined}
             />
             <span className={styles.shortcut} aria-hidden>
               {navigator.platform.includes('Mac') ? '⌘K' : 'Ctrl K'}
             </span>
-            {suggestionsVisible ? (
-              <div
-                className={styles.suggestions}
-                id="home-search-suggestions"
-                role="listbox"
-                aria-label="搜索建议"
-                aria-busy={suggestionsQuery.isFetching || undefined}
-              >
-                {suggestionsQuery.isFetching && suggestions.length === 0 ? (
-                  <div className={styles.suggestionState}>正在搜索…</div>
-                ) : suggestions.length > 0 ? (
-                  suggestions.map((suggestion, index) => (
-                    <button
-                      className={`${styles.suggestion}${index === activeSuggestion ? ` ${styles.suggestionActive}` : ''}`}
-                      id={`home-search-suggestion-${index}`}
-                      key={suggestion.id}
-                      type="button"
-                      role="option"
-                      tabIndex={-1}
-                      aria-selected={index === activeSuggestion}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onMouseEnter={() => setActiveSuggestion(index)}
-                      onClick={() => openSuggestion(index)}
-                    >
-                      <span className={styles.suggestionText}>
-                        <strong className={styles.suggestionCode}>{suggestion.code}</strong>
-                        <span className={styles.suggestionTitle}>
-                          {suggestion.title || '— 待刮削 —'}
-                        </span>
-                      </span>
-                      <span className={styles.suggestionLibraries}>
-                        {suggestion.libraries.map((library) => library.name).join(' · ')}
-                      </span>
-                    </button>
-                  ))
-                ) : debouncedSearch === search.trim() ? (
-                  <div className={styles.suggestionState}>没有匹配的影片，按 Enter 查看完整搜索</div>
-                ) : (
-                  <div className={styles.suggestionState}>正在搜索…</div>
-                )}
-              </div>
-            ) : null}
           </div>
-          <Button type="submit" variant="primary" size="sm">
-            搜索
-          </Button>
-        </form>
+          {hasSearch ? (
+            <span className="count-badge count-badge--stable count-badge--media" aria-live="polite">
+              共 {searchSettled ? searchTotal : '…'} 部
+            </span>
+          ) : null}
+        </div>
       </div>
 
-      <ListSurface
-        variant="scroll"
-        scrollRef={scroll.ref}
-        innerClassName={styles.content}
-        showScrollToTop={scroll.showScrollToTop}
-        onScrollToTop={scroll.scrollToTop}
-      >
-        {homeQuery.isLoading ? (
-          <EmptyState loading title="正在整理首页…" />
-        ) : homeQuery.isError ? (
-          <EmptyState
-            icon={<LibraryBig {...UI_ICON_SM} aria-hidden />}
-            title="首页暂时无法加载"
-            description="请检查媒体库状态后重试。"
-          >
-            <Button size="sm" onClick={() => void homeQuery.refetch()}>
-              重新加载
-            </Button>
-          </EmptyState>
-        ) : snapshot ? (
-          <div className={styles.sections}>
+      {hasSearch ? (
+        <ListSurface variant="fill" withInner={false}>
+          {searchLoading ? (
+            <div className="scroll-body-inner">
+              <EmptyState loading title="搜索中…" />
+            </div>
+          ) : searchQuery.isError ? (
+            <div className="scroll-body-inner">
+              <EmptyState
+                icon={<SearchX {...UI_ICON_SM} aria-hidden />}
+                title="搜索失败"
+                description="读取跨媒体库结果时发生错误。"
+              >
+                <Button size="sm" onClick={() => void searchQuery.refetch()}>
+                  重新搜索
+                </Button>
+              </EmptyState>
+            </div>
+          ) : searchVideos.length === 0 ? (
+            <div className="scroll-body-inner">
+              <EmptyState
+                icon={<SearchX {...UI_ICON_SM} aria-hidden />}
+                title="没有匹配的影片"
+                description="尝试其它番号、标题或演员名称。"
+              />
+            </div>
+          ) : (
+            <VirtualPosterGrid
+              videos={searchVideos}
+              detailLibraryIds={detailLibraryIds}
+              hasMore={Boolean(searchQuery.hasNextPage)}
+              loadingMore={searchQuery.isFetchingNextPage}
+              onLoadMore={() => {
+                if (!searchQuery.isFetchingNextPage) void searchQuery.fetchNextPage()
+              }}
+              scrollMemoryKey={`home-search:${settledSearch}`}
+            />
+          )}
+        </ListSurface>
+      ) : (
+        <ListSurface
+          variant="scroll"
+          scrollRef={scroll.ref}
+          innerClassName={styles.content}
+          showScrollToTop={scroll.showScrollToTop}
+          onScrollToTop={scroll.scrollToTop}
+        >
+          {homeQuery.isLoading ? (
+            <EmptyState loading title="正在整理首页…" />
+          ) : homeQuery.isError ? (
+            <EmptyState
+              icon={<LibraryBig {...UI_ICON_SM} aria-hidden />}
+              title="首页暂时无法加载"
+              description="请检查媒体库状态后重试。"
+            >
+              <Button size="sm" onClick={() => void homeQuery.refetch()}>
+                重新加载
+              </Button>
+            </EmptyState>
+          ) : snapshot ? (
+            <div className={styles.sections}>
             <section className={styles.section} aria-labelledby="home-discovery-title">
               <div className={styles.sectionHeader}>
                 <div>
                   <h2 className={styles.sectionTitle} id="home-discovery-title">随机发现</h2>
-                  <p className={styles.sectionDescription}>当前批次保持稳定，仅在换一批时更新。</p>
+                  <p className={styles.sectionDescription}>
+                    当前批次保持稳定，仅在重启软件或换一批时更新。
+                  </p>
                 </div>
                 <Button size="sm" disabled={homeQuery.isFetching} onClick={refreshDiscovery}>
                   <RefreshCw {...UI_ICON_SM} aria-hidden />
@@ -294,7 +264,11 @@ export default function HomePage(): JSX.Element {
               {snapshot.discovery.length > 0 ? (
                 <div className={styles.posterGrid}>
                   {snapshot.discovery.map((video) => (
-                    <ScopedPosterCard key={video.id} video={video} />
+                    <PosterCard
+                      key={video.id}
+                      video={video}
+                      detailLibraryId={video.preferredLibraryId}
+                    />
                   ))}
                 </div>
               ) : (
@@ -316,7 +290,11 @@ export default function HomePage(): JSX.Element {
               {snapshot.recent.length > 0 ? (
                 <div className={styles.posterGrid}>
                   {snapshot.recent.map((video) => (
-                    <ScopedPosterCard key={video.id} video={video} />
+                    <PosterCard
+                      key={video.id}
+                      video={video}
+                      detailLibraryId={video.preferredLibraryId}
+                    />
                   ))}
                 </div>
               ) : (
@@ -415,9 +393,10 @@ export default function HomePage(): JSX.Element {
                 />
               )}
             </section>
-          </div>
-        ) : null}
-      </ListSurface>
+            </div>
+          ) : null}
+        </ListSurface>
+      )}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 — 2026-08-29
 
 ### 多媒体库与首页
 
@@ -9,13 +9,23 @@
 - 原媒体库列表拆分为独立路由和导航项，库内筛选、详情返回、滚动位置、批量任务和资源操作均保留媒体库上下文
 - 全局影片资料由多个媒体库共享，成员关系、影片资源、扫描结果、待确认项和清理任务按库隔离
 - 新增移出媒体库、跨库移动资源和全局删除的影响预览与并发保护；旧单库数据启动时无损迁入默认媒体库
+- 媒体库设置并入全局设置工作区；扫描审计可按次查看新增、跳过、清理和待确认结果
+- 扫描完成后的无资源清理改为移出媒体库成员，不再显示为删除影片
+- 详情页删除影片与媒体库批量删除会删除本地视频和 STRM 源文件，避免再次扫描后自动加回
 
 ### Agent 平台
 
 - 插件开发助手切换为“Javdex 产品控制面 + Pi `0.84.2` 数据面”，同一 run 长期复用一个 Pi AgentSession，并删除手写 loop、transcript 压缩与 provider tool-chat runtime
-- 新增统一 Model/Route/Profile 配置、稳定 cache affinity、CredentialLease、ToolHost 权限/审批/锁/ledger，以及 schema 14 的 ProductJournal、ExecutionHistory 与恢复记录
+- 新增统一 Model/Route/Profile 配置、稳定 cache affinity、CredentialLease、ToolHost 权限/审批/锁/ledger，以及 ProductJournal、ExecutionHistory 与恢复记录
 - PluginDevPanel 支持 renderer reload 与应用重启恢复，18 个工具统一经过 ToolHost；增加只读 LibraryCurator 作为第二个 Agent 复用证明
+- 影片和演员详情支持 Agent 辅助元数据采集，草稿写入待确认后再应用
 - Electron 升级到 `43.4.1`（内置 Node 满足 Pi 要求），`better-sqlite3` 升级到 `13.0.3`
+
+### 升级说明
+
+- 首次启动会自动将媒体库数据库升级到 schema 18；已有影片、资源、分类关系和设置会保留
+- 旧单库路径、扫描配置和资源会迁入默认媒体库；全局影片资料不会被复制
+- 本版本不提供应用内自动安装更新，各平台均需重新下载对应安装包
 
 ## 0.5.0 — 2026-08-17
 

@@ -254,7 +254,7 @@ describe('video lifecycle repo', () => {
       `)
       const fresh = lifecycle.previewDeleteGlobally(91)
       assert.equal(fresh.removesCanonicalVideo, true)
-      assert.equal(fresh.sourceFilesPreserved, true)
+      assert.equal(fresh.sourceFilesPreserved, false)
       assert.deepEqual(
         fresh.libraries.map((library) => [library.libraryId, library.name, library.resourceCount]),
         [

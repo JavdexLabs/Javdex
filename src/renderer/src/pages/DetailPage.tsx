@@ -1498,8 +1498,8 @@ export default function DetailPage(): JSX.Element {
           {video.resources.length === 1 && removeResourceDeletesSource ? (
             <div className="modal-path-hint">
               {removeResourceIsStrm
-                ? '选择“保留影片元数据”会删除 STRM 源文件；选择“永久删除影片”会进入完整影响预览，并默认保留该源文件。'
-                : '选择“保留影片元数据”会删除本地视频文件；选择“永久删除影片”会进入完整影响预览，并默认保留该文件。'}
+                ? '选择“保留影片元数据”会删除 STRM 源文件并保留影片资料；选择“永久删除影片”会删除影片资料和该源文件。'
+                : '选择“保留影片元数据”会删除本地视频文件并保留影片资料；选择“永久删除影片”会删除影片资料和该文件。'}
             </div>
           ) : null}
           {video.resources.length === 1 && video.has_pending_scrape ? (

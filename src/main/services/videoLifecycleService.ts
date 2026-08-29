@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import type { VideoResource } from '@shared/videoTypes'
 import type {
   DeleteVideoGloballyInput,
   MoveVideoResourceInput,
@@ -11,6 +12,7 @@ import {
   type DeleteVideoGloballyRepoResult,
   type VideoLifecycleRepo
 } from '../db/videoLifecycleRepo'
+import { listVideoResourcesAcrossLibraries } from '../db/videoRepo'
 import { getDb } from '../db/database'
 import {
   collectVideoLibraryCleanupHints,
@@ -19,6 +21,7 @@ import {
 } from '../db/libraryCleanup'
 import { maintenanceTaskGate } from './maintenanceTaskGate'
 import { mediaAssetStore } from './mediaAssetStore'
+import { videoMaintenanceService } from './videoMaintenanceService'
 
 export interface VideoLifecycleService {
   previewRemoveFromLibrary(libraryId: number, videoId: number): VideoLifecycleImpact
@@ -42,6 +45,8 @@ interface VideoLifecycleServiceDependencies {
   cleanupVideoScrapeStagingPaths: (stagedPaths: string[]) => void
   collectVideoLibraryCleanupHints: (videoId: number) => LibraryCleanupHints
   runLibraryCleanup: (hints: LibraryCleanupHints) => void
+  listSourceResources: (videoId: number) => VideoResource[]
+  deleteManagedSourceFiles: <T>(resources: readonly VideoResource[], work: () => T) => T
 }
 
 function publicDeleteResult(result: DeleteVideoGloballyRepoResult): VideoLifecycleResult {
@@ -77,6 +82,12 @@ export function createVideoLifecycleService(
   const collectCleanupHints =
     dependencies.collectVideoLibraryCleanupHints ?? collectVideoLibraryCleanupHints
   const cleanupLibrary = dependencies.runLibraryCleanup ?? runLibraryCleanup
+  const listSourceResources =
+    dependencies.listSourceResources ?? listVideoResourcesAcrossLibraries
+  const deleteManagedSourceFiles =
+    dependencies.deleteManagedSourceFiles ??
+    ((resources, work) =>
+      videoMaintenanceService.runWithManagedSourceFileDeletion(resources, work))
 
   return {
     previewRemoveFromLibrary(libraryId: number, videoId: number): VideoLifecycleImpact {
@@ -106,12 +117,15 @@ export function createVideoLifecycleService(
     deleteGlobally(input: DeleteVideoGloballyInput): VideoLifecycleResult {
       return withResourceMaintenance(() => {
         const cleanupHints = collectCleanupHints(input.videoId)
-        const result = runInCoordinatedChange(() => {
-          const deleted = resolveRepo().deleteGlobally(input)
-          for (const storedPath of deleted.obsoleteAssetPaths) deleteOwnedAsset(storedPath)
-          cleanupStaging(deleted.pendingStagingPaths)
-          return deleted
-        })
+        const sourceResources = listSourceResources(input.videoId)
+        const result = runInCoordinatedChange(() =>
+          deleteManagedSourceFiles(sourceResources, () => {
+            const deleted = resolveRepo().deleteGlobally(input)
+            for (const storedPath of deleted.obsoleteAssetPaths) deleteOwnedAsset(storedPath)
+            cleanupStaging(deleted.pendingStagingPaths)
+            return deleted
+          })
+        )
         try {
           cleanupLibrary(cleanupHints)
         } catch (error) {

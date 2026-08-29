@@ -213,10 +213,12 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
         <nav className="sidebar-nav">
           <NavItems items={NAV_MAIN.slice(0, 1)} />
           <MediaLibraryNav />
-          <NavItems items={NAV_MAIN.slice(1)} />
-          <div className={`nav-group${facetActive ? ' nav-group--active' : ''}`}>
-            <div className="nav-group-label">分类</div>
-            <NavItems items={NAV_FACETS} />
+          <div role="group" aria-label="全局浏览">
+            <NavItems items={NAV_MAIN.slice(1)} />
+            <div className={`nav-group${facetActive ? ' nav-group--active' : ''}`}>
+              <div className="nav-group-label">分类</div>
+              <NavItems items={NAV_FACETS} />
+            </div>
           </div>
           <div className="sidebar-nav-spacer" />
           <NavItems

@@ -18,14 +18,20 @@ const pipePaths: string[] = []
 
 afterEach(() => {
   for (const socket of sockets.splice(0)) socket.close()
-  for (const pipePath of pipePaths.splice(0)) fs.rmSync(pipePath, { force: true })
+  for (const pipePath of pipePaths.splice(0)) {
+    if (process.platform !== 'win32') fs.rmSync(pipePath, { force: true })
+  }
 })
 
 async function socketPair(): Promise<[Socket, Socket]> {
-  const pipePath = path.join(
-    process.platform === 'darwin' ? '/tmp' : os.tmpdir(),
-    `jdf-${process.pid}-${Date.now()}-${Math.round(Math.random() * 1e6)}.sock`
-  )
+  const suffix = `${process.pid}-${Date.now()}-${Math.round(Math.random() * 1e6)}`
+  const pipePath =
+    process.platform === 'win32'
+      ? `\\\\.\\pipe\\javdex-scraper-test-${suffix}`
+      : path.join(
+          process.platform === 'darwin' ? '/tmp' : os.tmpdir(),
+          `jdf-${suffix}.sock`
+        )
   pipePaths.push(pipePath)
   const server = net.createServer()
   const accepted = new Promise<Socket>((resolve) => server.once('connection', resolve))

@@ -18,7 +18,7 @@ export interface VideoLifecycleResourceImpact {
   /** Credential-safe display value. External resource secrets are never exposed by a preview. */
   displayLocator: string
   isPrimary: boolean
-  /** Local video or STRM source retained on disk by the global-delete command. */
+  /** Local video or STRM source deleted from disk by the global-delete command. */
   sourceFilePath: string | null
 }
 
@@ -53,7 +53,7 @@ export interface VideoLifecycleImpact {
   pendingScrapeCount: number
   pendingAgentDraftCount: number
   pendingStagingAssetCount: number
-  /** Global deletion removes resource records but intentionally keeps source media on disk. */
+  /** Global deletion removes resource records and local/STRM source files. */
   sourceFilesPreserved: boolean
 }
 

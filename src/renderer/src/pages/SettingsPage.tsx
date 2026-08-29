@@ -20,6 +20,7 @@ import NetworkSettingsPanel from '../components/settings/NetworkSettingsPanel'
 import PluginsSettingsPanel from '../components/settings/PluginsSettingsPanel'
 import StorageSettingsPanel from '../components/settings/StorageSettingsPanel'
 import SettingsOverviewPanel from '../components/settings/SettingsOverviewPanel'
+import { MediaLibrarySettingsContent } from './MediaLibrarySettingsPage'
 import SettingsWorkspaceShell, {
   SettingsPluginDevShell
 } from '../components/settings/SettingsWorkspaceShell'
@@ -34,7 +35,14 @@ import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
 import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
 import { useAvatarAutoCropBatch } from '../contexts/AvatarAutoCropBatchContext'
 import { pendingCenterPath } from '../listView/pendingRoutes'
-import { mediaLibrarySettingsPath } from '../listView/mediaLibraryRoutes'
+import {
+  isMediaLibrarySettingsTab,
+  mediaLibrarySettingsPath,
+  parseMediaLibrarySettingsLibraryId,
+  peekMediaLibrarySettingsLibraryId,
+  rememberMediaLibrarySettingsLibraryId,
+  type MediaLibrarySettingsTab
+} from '../listView/mediaLibraryRoutes'
 import { ROUTE_PATH } from '../listView/routePaths'
 import useNetworkSettingsController from '../hooks/useNetworkSettingsController'
 import useLatestAsyncLabel from '../hooks/useLatestAsyncLabel'
@@ -43,6 +51,7 @@ import {
   resolveSettingsRoute,
   settingsPath,
   settingsPluginDevPath,
+  settingsTabDomId,
   type SettingsGroup,
   type SettingsTab
 } from '../settings/settingsRoutes'
@@ -147,6 +156,50 @@ export default function SettingsPage(): JSX.Element {
     queryFn: () => api.mediaLibraries.list(),
     refetchOnMount: 'always'
   })
+  const mediaLibrarySettingsQuery = useQuery({
+    queryKey: mediaLibraryKeys.fullList(),
+    queryFn: () => api.mediaLibraries.list({ includeArchived: true }),
+    enabled: activeGroup.id === 'library',
+    refetchOnMount: 'always'
+  })
+  const requestedSettingsLibraryId = parseMediaLibrarySettingsLibraryId(location.search)
+  const rememberedSettingsLibraryId = peekMediaLibrarySettingsLibraryId()
+  const mediaLibrarySettingsLibraries = mediaLibrarySettingsQuery.data ?? []
+  const selectedSettingsLibrary =
+    mediaLibrarySettingsLibraries.find((library) => library.id === requestedSettingsLibraryId) ??
+    mediaLibrarySettingsLibraries.find((library) => library.id === rememberedSettingsLibraryId) ??
+    mediaLibrarySettingsLibraries.find(
+      (library) => library.status === 'active' && library.isDefault
+    ) ??
+    mediaLibrarySettingsLibraries.find((library) => library.status === 'active') ??
+    mediaLibrarySettingsLibraries[0] ??
+    null
+  const activeMediaLibrarySettingsTab: MediaLibrarySettingsTab =
+    isMediaLibrarySettingsTab(activeTab) ? activeTab : 'sources'
+
+  useEffect(() => {
+    if (requestedSettingsLibraryId) {
+      rememberMediaLibrarySettingsLibraryId(requestedSettingsLibraryId)
+    }
+  }, [requestedSettingsLibraryId])
+
+  useEffect(() => {
+    if (activeGroup.id !== 'library' || !selectedSettingsLibrary) return
+    rememberMediaLibrarySettingsLibraryId(selectedSettingsLibrary.id)
+    const canonical = mediaLibrarySettingsPath(
+      selectedSettingsLibrary.id,
+      activeMediaLibrarySettingsTab
+    )
+    if (`${location.pathname}${location.search}` === canonical) return
+    navigate(canonical, { replace: true })
+  }, [
+    activeGroup.id,
+    activeMediaLibrarySettingsTab,
+    location.pathname,
+    location.search,
+    navigate,
+    selectedSettingsLibrary
+  ])
   const {
     videoBatch,
     actressBatch,
@@ -301,21 +354,32 @@ export default function SettingsPage(): JSX.Element {
       if (tabs.length < 2) return
       const index = tabs.findIndex((tab) => tab.id === activeTab)
       if (index < 0) return
+      let nextIndex: number
       if (e.key === 'ArrowRight') {
-        e.preventDefault()
-        navigate(settingsPath(activeGroup.id, tabs[(index + 1) % tabs.length].id))
+        nextIndex = (index + 1) % tabs.length
       } else if (e.key === 'ArrowLeft') {
-        e.preventDefault()
-        navigate(settingsPath(activeGroup.id, tabs[(index - 1 + tabs.length) % tabs.length].id))
+        nextIndex = (index - 1 + tabs.length) % tabs.length
       } else if (e.key === 'Home') {
-        e.preventDefault()
-        navigate(settingsPath(activeGroup.id, tabs[0].id))
+        nextIndex = 0
       } else if (e.key === 'End') {
-        e.preventDefault()
-        navigate(settingsPath(activeGroup.id, tabs[tabs.length - 1].id))
-      }
+        nextIndex = tabs.length - 1
+      } else return
+      e.preventDefault()
+      const nextTab = tabs[nextIndex].id
+      navigate(
+        activeGroup.id === 'library' &&
+          selectedSettingsLibrary &&
+          isMediaLibrarySettingsTab(nextTab)
+          ? mediaLibrarySettingsPath(selectedSettingsLibrary.id, nextTab)
+          : settingsPath(activeGroup.id, nextTab)
+      )
+      window.requestAnimationFrame(() => {
+        document
+          .getElementById(settingsTabDomId(activeGroup.id, nextTab))
+          ?.focus()
+      })
     },
-    [activeGroup, activeTab, navigate]
+    [activeGroup, activeTab, navigate, selectedSettingsLibrary]
   )
 
   if (!settings) {
@@ -534,6 +598,15 @@ export default function SettingsPage(): JSX.Element {
   }
 
   const navigateSettings = (group: SettingsGroup, tab?: SettingsTab): void => {
+    if (group === 'library' && selectedSettingsLibrary) {
+      navigate(
+        mediaLibrarySettingsPath(
+          selectedSettingsLibrary.id,
+          isMediaLibrarySettingsTab(tab) ? tab : 'sources'
+        )
+      )
+      return
+    }
     navigate(settingsPath(group, tab))
   }
 
@@ -601,14 +674,17 @@ export default function SettingsPage(): JSX.Element {
     (total, library) => total + library.rootCount,
     0
   )
-  const mediaLibrarySettingsTarget =
-    mediaLibraries.find((library) => library.isDefault) ?? mediaLibraries[0] ?? null
+  const overviewMediaLibrarySettingsTarget =
+    mediaLibraries.find((library) => library.id === peekMediaLibrarySettingsLibraryId()) ??
+    mediaLibraries.find((library) => library.isDefault) ??
+    mediaLibraries[0] ??
+    null
   const openMediaLibrarySettings = (): void => {
-    if (!mediaLibrarySettingsTarget) {
+    if (!overviewMediaLibrarySettingsTarget) {
       navigate(ROUTE_PATH.home)
       return
     }
-    navigate(mediaLibrarySettingsPath(mediaLibrarySettingsTarget.id, 'sources'))
+    navigate(mediaLibrarySettingsPath(overviewMediaLibrarySettingsTarget.id, 'sources'))
   }
   const overviewNotices = [
     ...(settings.recoveryNotice &&
@@ -666,7 +742,7 @@ export default function SettingsPage(): JSX.Element {
           {
             tone: 'warning' as const,
             title: '媒体库尚未配置来源目录',
-            body: '请在独立媒体库设置中添加本地文件夹，然后运行该媒体库的扫描。',
+            body: '请在媒体库设置中添加本地文件夹，然后运行该媒体库的扫描。',
             action: openMediaLibrarySettings,
             actionLabel: '打开媒体库设置'
           }
@@ -715,6 +791,15 @@ export default function SettingsPage(): JSX.Element {
         activeTab={activeTab}
         onNavigate={navigateSettings}
         onTabKeyDown={onSettingsTabKeyDown}
+        hrefForGroup={(group) =>
+          group.id === 'library' && selectedSettingsLibrary
+            ? mediaLibrarySettingsPath(
+                selectedSettingsLibrary.id,
+                isMediaLibrarySettingsTab(activeTab) ? activeTab : 'sources'
+              )
+            : settingsPath(group.id)
+        }
+        tabsPlacement={activeGroup.id === 'library' ? 'content' : 'shell'}
       >
               {activeGroup.id === 'overview' && (
                 <SettingsOverviewPanel
@@ -755,6 +840,41 @@ export default function SettingsPage(): JSX.Element {
                   actressBatchUnrecoverableReason={actressBatchUnrecoverableReason}
                 />
               )}
+
+              {activeGroup.id === 'library' &&
+                (mediaLibrarySettingsQuery.isLoading ? (
+                  <EmptyState loading title="正在读取媒体库…" />
+                ) : mediaLibrarySettingsQuery.isError ? (
+                  <EmptyState
+                    title="媒体库读取失败"
+                    description="暂时无法读取媒体库配置。"
+                  >
+                    <Button
+                      size="sm"
+                      onClick={() => void mediaLibrarySettingsQuery.refetch()}
+                    >
+                      重新读取
+                    </Button>
+                  </EmptyState>
+                ) : selectedSettingsLibrary ? (
+                  <MediaLibrarySettingsContent
+                    libraryId={selectedSettingsLibrary.id}
+                    tab={activeMediaLibrarySettingsTab}
+                    libraries={mediaLibrarySettingsLibraries}
+                    onSelectLibrary={(libraryId) =>
+                      navigate(mediaLibrarySettingsPath(libraryId, activeMediaLibrarySettingsTab))
+                    }
+                    onSelectTab={(tab) =>
+                      navigate(mediaLibrarySettingsPath(selectedSettingsLibrary.id, tab))
+                    }
+                    onTabKeyDown={onSettingsTabKeyDown}
+                  />
+                ) : (
+                  <EmptyState
+                    title="尚未配置媒体库"
+                    description="请通过侧栏媒体库区域新建媒体库。"
+                  />
+                ))}
 
               {activeGroup.id === 'plugins' && (
                 <PluginsSettingsPanel

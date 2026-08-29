@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { VideoLifecycleImpact } from '@shared/videoLifecycleTypes'
+import type { VideoResource } from '@shared/videoTypes'
 import type {
   DeleteVideoGloballyRepoResult,
   VideoLifecycleRepo
@@ -27,7 +28,7 @@ function impact(): VideoLifecycleImpact {
     pendingScrapeCount: 1,
     pendingAgentDraftCount: 1,
     pendingStagingAssetCount: 2,
-    sourceFilesPreserved: true
+    sourceFilesPreserved: false
   }
 }
 
@@ -78,7 +79,9 @@ describe('video lifecycle service', () => {
       deleteOwnedAsset: (path) => deletedAssets.push(path),
       cleanupVideoScrapeStagingPaths: (paths) => cleanedStaging.push(paths),
       collectVideoLibraryCleanupHints: () => ({ actressIds: [7] }),
-      runLibraryCleanup: (hints) => events.push(`cleanup:${hints.actressIds?.join(',')}`)
+      runLibraryCleanup: (hints) => events.push(`cleanup:${hints.actressIds?.join(',')}`),
+      listSourceResources: () => [],
+      deleteManagedSourceFiles: (_resources, work) => work()
     })
 
     const publicResult = service.deleteGlobally({
@@ -123,7 +126,9 @@ describe('video lifecycle service', () => {
         cleanupCalls += 1
       },
       collectVideoLibraryCleanupHints: () => ({}),
-      runLibraryCleanup: () => {}
+      runLibraryCleanup: () => {},
+      listSourceResources: () => [],
+      deleteManagedSourceFiles: (_resources, work) => work()
     })
     const input = {
       videoId: 91,
@@ -134,5 +139,64 @@ describe('video lifecycle service', () => {
     assert.deepEqual(service.deleteGlobally(input), service.deleteGlobally(input))
     assert.equal(deleteCalls, 2)
     assert.equal(cleanupCalls, 2)
+  })
+
+  it('deletes managed source files before committing the global video record', () => {
+    const events: string[] = []
+    const seenPaths: string[][] = []
+    const result: DeleteVideoGloballyRepoResult = {
+      operationId: 'delete-91',
+      kind: 'delete-globally',
+      videoId: 91,
+      sourceLibraryId: null,
+      targetLibraryId: null,
+      resourceIds: [911],
+      promotedResourceId: null,
+      canonicalVideoDeleted: true,
+      obsoleteAssetPaths: ['covers/ML-091.jpg'],
+      pendingStagingPaths: []
+    }
+    const service = createVideoLifecycleService({
+      repo: repoWithDelete(result),
+      withResourceMaintenance: (work) => work(),
+      runInCoordinatedChange: (work) => work(),
+      deleteOwnedAsset: () => events.push('asset'),
+      cleanupVideoScrapeStagingPaths: () => events.push('staging'),
+      collectVideoLibraryCleanupHints: () => ({}),
+      runLibraryCleanup: () => events.push('cleanup'),
+      listSourceResources: (): VideoResource[] => [
+          {
+            id: 911,
+            library_id: 1,
+            video_id: 91,
+            root_id: 3,
+            kind: 'local',
+            locator: '/library/ML-091.mp4',
+            resource_key: 'local:/library/ML-091.mp4',
+            source_identity: null,
+            strm_source_path: null,
+            size_bytes: null,
+            duration_seconds: null,
+            file_mtime_ms: null,
+            display_name: null,
+            is_primary: 1,
+            add_time: '2026-01-01'
+          }
+        ],
+      deleteManagedSourceFiles: (resources, work) => {
+        seenPaths.push(resources.map((resource) => resource.locator))
+        events.push('source-files')
+        return work()
+      }
+    })
+
+    service.deleteGlobally({
+      videoId: 91,
+      operationId: 'delete-91',
+      expectedRevision: 'revision-1'
+    })
+
+    assert.deepEqual(seenPaths, [['/library/ML-091.mp4']])
+    assert.deepEqual(events, ['source-files', 'asset', 'staging', 'cleanup'])
   })
 })

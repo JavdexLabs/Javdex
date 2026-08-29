@@ -24,6 +24,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: var(--control-h-sm);
   padding: 5px 10px;
   border: 0;
   border-radius: calc(var(--radius-sm) - 2px);

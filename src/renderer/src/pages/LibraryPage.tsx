@@ -39,6 +39,7 @@ import AddToPlaylistModal from '../components/AddToPlaylistModal'
 import AddVideosToPlaylistModal from '../components/AddVideosToPlaylistModal'
 import EditMetadataModal from '../components/EditMetadataModal'
 import Modal from '../components/Modal'
+import VideoDeleteImpact from '../components/VideoDeleteImpact'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
 import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
 import {
@@ -558,13 +559,13 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     }
   }
 
-  const loadRemovalPreviews = async (targets: Video[]): Promise<void> => {
+  const loadDeletePreviews = async (targets: Video[]): Promise<void> => {
     const requestId = ++removalPreviewRequestRef.current
     setRemovalPreviewLoading(true)
     setRemovalImpacts(new Map())
     try {
       const impacts = await Promise.all(
-        targets.map((video) => api.videos.previewRemoveFromLibrary(libraryId, video.id))
+        targets.map((video) => api.videos.previewDeleteGlobally(video.id))
       )
       if (requestId !== removalPreviewRequestRef.current) return
       setRemovalImpacts(new Map(impacts.map((impact) => [impact.videoId, impact])))
@@ -580,18 +581,18 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
 
   const openSingleRemoval = (video: Video): void => {
     setDeleteTarget(video)
-    void loadRemovalPreviews([video])
+    void loadDeletePreviews([video])
   }
 
   const openBulkRemoval = (): void => {
     setConfirmBulkDelete(true)
-    void loadRemovalPreviews(selectedVideos)
+    void loadDeletePreviews(selectedVideos)
   }
 
   const deleteVideos = async (targets: Video[]): Promise<void> => {
     if (deleting || targets.length === 0) return
     if (targets.some((video) => !removalImpacts.has(video.id))) {
-      toast.show('移出影响预览尚未就绪，请稍后重试', 'error')
+      toast.show('删除影响预览尚未就绪，请稍后重试', 'error')
       return
     }
     setDeleting(true)
@@ -600,14 +601,13 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     for (const video of targets) {
       try {
         const impact = removalImpacts.get(video.id)
-        if (!impact) throw new Error('缺少移出影响预览')
-        await api.videos.removeFromLibrary({
-          libraryId,
+        if (!impact) throw new Error('缺少删除影响预览')
+        await api.videos.deleteGlobally({
           videoId: video.id,
           operationId:
             typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
               ? crypto.randomUUID()
-              : `remove-${libraryId}-${video.id}-${Date.now()}`,
+              : `delete-${video.id}-${Date.now()}`,
           expectedRevision: impact.revision
         })
         deleted += 1
@@ -627,12 +627,9 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
       refetchSilent()
     }
     if (failed > 0) {
-      toast.show(`已移出 ${deleted} 部，${failed} 部失败`, 'error')
+      toast.show(`已删除 ${deleted} 部，${failed} 部失败`, 'error')
     } else {
-      toast.show(
-        targets.length > 1 ? `已从媒体库移出 ${deleted} 部影片` : '已从媒体库移出影片',
-        'success'
-      )
+      toast.show(targets.length > 1 ? `已删除 ${deleted} 部影片` : '已删除影片', 'success')
     }
   }
 
@@ -715,12 +712,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
               <Button
                 type="button"
                 size="sm"
-                onClick={() =>
-                  navigate({
-                    pathname: mediaLibrarySettingsPath(libraryId, 'danger'),
-                    search: location.search
-                  })
-                }
+                onClick={() => navigate(mediaLibrarySettingsPath(libraryId, 'danger'))}
               >
                 <Settings {...UI_ICON_SM} aria-hidden />
                 恢复设置
@@ -738,12 +730,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
               <Button
                 size="sm"
                 variant="primary"
-                onClick={() =>
-                  navigate({
-                    pathname: mediaLibrarySettingsPath(libraryId, 'danger'),
-                    search: location.search
-                  })
-                }
+                onClick={() => navigate(mediaLibrarySettingsPath(libraryId, 'danger'))}
               >
                 前往恢复媒体库
               </Button>
@@ -776,7 +763,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
               },
               {
                 key: 'delete',
-                label: '移出媒体库',
+                label: '删除影片',
                 icon: <Trash2 {...UI_ICON_SM} aria-hidden />,
                 danger: true,
                 onClick: openBulkRemoval
@@ -863,12 +850,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
                 <Button
                   type="button"
                   size="sm"
-                  onClick={() =>
-                    navigate({
-                      pathname: mediaLibrarySettingsPath(libraryId, 'general'),
-                      search: location.search
-                    })
-                  }
+                  onClick={() => navigate(mediaLibrarySettingsPath(libraryId, 'sources'))}
                 >
                   <Settings {...UI_ICON_SM} aria-hidden />
                   设置
@@ -979,7 +961,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
               void markScrapeSuccess(video)
             }}
             onDelete={openSingleRemoval}
-            deleteLabel="移出媒体库"
+            deleteLabel="删除影片"
           />
         )}
       </ListSurface>
@@ -1075,9 +1057,10 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
 
       {deleteTarget && (
         <Modal
-          title="移出媒体库"
+          title="删除影片"
+          size="lg"
           danger
-          confirmText={deleting ? '移出中…' : removalPreviewLoading ? '读取影响…' : '移出'}
+          confirmText={deleting ? '删除中…' : removalPreviewLoading ? '读取影响…' : '永久删除'}
           confirmDisabled={removalPreviewLoading || !removalImpacts.has(deleteTarget.id)}
           busy={deleting}
           onConfirm={() => {
@@ -1091,23 +1074,20 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
             }
           }}
         >
-          确定要将「{deleteTarget.code}」移出“{library?.name}”吗？只会删除当前媒体库的成员关系和库内资源记录；不会删除磁盘文件、全局影片资料或其它媒体库的资源。
+          {removalPreviewLoading && !removalImpacts.get(deleteTarget.id) ? (
+            <p>正在读取完整影响范围…</p>
+          ) : null}
           {removalImpacts.get(deleteTarget.id) ? (
-            <div className="modal-path-hint">
-              将移除 {removalImpacts.get(deleteTarget.id)?.resourceIds.length ?? 0} 个库内资源记录
-              {(removalImpacts.get(deleteTarget.id)?.remainingLibraryIds.length ?? 0) > 0
-                ? `；影片仍属于 ${removalImpacts.get(deleteTarget.id)?.remainingLibraryIds.length} 个其它媒体库`
-                : '；全局影片资料仍会保留'}
-            </div>
+            <VideoDeleteImpact impact={removalImpacts.get(deleteTarget.id)!} />
           ) : null}
         </Modal>
       )}
 
       {confirmBulkDelete && (
         <Modal
-          title="批量移出媒体库"
+          title="批量删除影片"
           danger
-          confirmText={deleting ? '移出中…' : removalPreviewLoading ? '读取影响…' : '移出'}
+          confirmText={deleting ? '删除中…' : removalPreviewLoading ? '读取影响…' : '永久删除'}
           confirmDisabled={
             removalPreviewLoading || selectedVideos.some((video) => !removalImpacts.has(video.id))
           }
@@ -1123,15 +1103,20 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
             }
           }}
         >
-          确定要将已选择的 {selectedCount} 部影片移出“{library?.name}”吗？不会删除磁盘文件、全局影片资料或其它媒体库的资源。
+          确定要永久删除已选择的 {selectedCount} 部影片吗？会删除全局影片资料、各媒体库中的成员关系，以及本地视频 / STRM 源文件。
           {removalImpacts.size > 0 ? (
             <div className="modal-path-hint">
-              将移除{' '}
+              将删除{' '}
+              {[...removalImpacts.values()].reduce(
+                (totalResources, impact) => totalResources + impact.sourcePaths.length,
+                0
+              )}{' '}
+              个本地或 STRM 源文件，并移除{' '}
               {[...removalImpacts.values()].reduce(
                 (totalResources, impact) => totalResources + impact.resourceIds.length,
                 0
               )}{' '}
-              个库内资源记录
+              条资源记录
             </div>
           ) : null}
         </Modal>

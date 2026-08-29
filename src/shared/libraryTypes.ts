@@ -227,7 +227,7 @@ export interface ScanResult {
   removed: number
   /** Primary resources promoted after missing local resources were removed. */
   promoted: number
-  /** Resource-less videos removed by the opt-in safe post-scan cleanup. */
+  /** Resource-less memberships removed by the opt-in safe post-scan cleanup. Does not delete global videos. */
   deletedVideos: number
   /** Configured roots that were missing or unreadable and therefore preserved. */
   offlineFolders: string[]

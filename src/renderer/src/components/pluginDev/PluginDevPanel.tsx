@@ -1200,7 +1200,7 @@ export default function PluginDevPanel({
         <button
           type="button"
           className="settings-back-link"
-          onClick={() => leaveGuard.requestLeave(() => navigate('/settings'))}
+          onClick={() => leaveGuard.requestLeave(() => navigate(settingsPath('overview')))}
         >
           设置
         </button>
@@ -1366,7 +1366,7 @@ export default function PluginDevPanel({
           error={llmReady ? null : llmReason}
           onOpenModelSettings={() => {
             setShowConnectionModal(false)
-            leaveGuard.requestLeave(() => navigate('/settings/models/providers'))
+            leaveGuard.requestLeave(() => navigate(settingsPath('models', 'providers')))
           }}
           onClose={() => setShowConnectionModal(false)}
         />

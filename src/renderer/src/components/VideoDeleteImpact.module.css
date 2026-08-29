@@ -5,8 +5,7 @@
 
 .lead,
 .empty,
-.pending,
-.safeText {
+.pending {
   margin: 0;
   font-size: 12px;
   line-height: 1.55;
@@ -45,8 +44,7 @@
   font-weight: 700;
 }
 
-.section,
-.safe {
+.section {
   display: grid;
   padding: 10px 12px;
   border: 1px solid var(--border-subtle);
@@ -62,8 +60,7 @@
   font-weight: 700;
 }
 
-.list,
-.sourcePaths {
+.list {
   display: grid;
   margin: 0;
   padding: 0;
@@ -119,8 +116,7 @@
   font-size: 11px;
 }
 
-.path,
-.sourcePath {
+.path {
   min-width: 0;
   overflow: hidden;
   color: var(--text-secondary);
@@ -132,26 +128,6 @@
 
 .rowPath {
   text-align: right;
-}
-
-.safe {
-  border-color: var(--border-success);
-  background: var(--surface-success);
-}
-
-.safeTitle {
-  color: var(--text-success);
-}
-
-.safeText {
-  color: var(--text-secondary);
-}
-
-.sourcePaths {
-  max-height: 92px;
-  padding-inline-end: var(--scrollbar-safe-pad);
-  overflow: hidden auto;
-  scrollbar-gutter: stable;
 }
 
 @media (width <= 680px) {

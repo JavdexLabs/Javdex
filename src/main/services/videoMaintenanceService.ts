@@ -99,6 +99,7 @@ export interface VideoMaintenanceService {
   ): VideoResourceRemovalResult
   mergeVideos(input: VideoMergeInput): VideoMergeResult
   splitResource(libraryId: number, videoId: number, resourceId: number): VideoResourceSplitResult
+  runWithManagedSourceFileDeletion<T>(resources: readonly VideoResource[], work: () => T): T
 }
 
 interface VideoMaintenanceServiceDependencies {
@@ -760,6 +761,41 @@ export function createVideoMaintenanceService(
         requireActiveMediaLibrary(libraryId)
         return splitResourceRecord(libraryId, videoId, resourceId)
       })
+    },
+    runWithManagedSourceFileDeletion(resources, work) {
+      const rootsByOriginalPath = new Map<string, NonNullable<ReturnType<typeof readMediaLibraryRoot>>>()
+      const filePaths: string[] = []
+      for (const resource of resources) {
+        const filePath =
+          resource.kind === 'local' ? resource.locator : resource.strm_source_path
+        if (!filePath) continue
+        if (resource.root_id == null) {
+          throw new Error('影片源文件缺少有效的媒体库根目录归属，无法安全删除')
+        }
+        requireActiveMediaLibrary(resource.library_id)
+        const root = readMediaLibraryRoot(resource.library_id, resource.root_id)
+        if (!root) {
+          throw new Error('影片源文件缺少有效的媒体库根目录归属，无法安全删除')
+        }
+        assertMediaLibraryRootDeletionTarget(filePath, root)
+        if (!rootsByOriginalPath.has(filePath)) {
+          rootsByOriginalPath.set(filePath, root)
+          filePaths.push(filePath)
+        }
+      }
+      const rootForPath = (filePath: string) => {
+        const exact = rootsByOriginalPath.get(filePath)
+        if (exact) return exact
+        for (const [original, root] of rootsByOriginalPath) {
+          if (filePath.startsWith(`${original}.javdex-delete-`)) return root
+        }
+        throw new Error('影片源文件缺少有效的媒体库根目录归属，无法安全删除')
+      }
+      return withStagedLocalFileDeletion(
+        filePaths,
+        (filePath) => assertMediaLibraryRootDeletionTarget(filePath, rootForPath(filePath)),
+        work
+      )
     }
   }
 }

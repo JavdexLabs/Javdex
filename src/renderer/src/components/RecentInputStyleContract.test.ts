@@ -30,6 +30,6 @@ describe('recent text input style contract', () => {
       }
     }
 
-    assert.equal(auditedInputCount, 10)
+    assert.equal(auditedInputCount, 8)
   })
 })

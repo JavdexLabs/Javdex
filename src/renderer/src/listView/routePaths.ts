@@ -12,6 +12,7 @@ export const ROUTE_PATH = {
   mediaLibraryVideoStack: '/libraries/:libraryId/video/:videoId',
   mediaLibraryActressStack:
     '/libraries/:libraryId/video/:videoId/actress/:actressId',
+  /** Legacy media-library settings entry; redirects into the unified settings workspace. */
   mediaLibrarySettings: '/libraries/:libraryId/settings/:tab',
   /** Former named entry; redirects to the default active media library. */
   legacyLibrary: '/library',
@@ -62,6 +63,7 @@ export const ROUTE_SEGMENT = {
   homeVideo: 'home/video/:videoId',
   searchVideo: 'video/:videoId',
   mediaLibraryVideo: 'video/:videoId',
+  /** Legacy media-library settings segment. */
   mediaLibrarySettings: 'settings/:tab',
   /** @deprecated Compatibility segment for the former single-library detail stack. */
   libraryDetail: 'detail/:id',

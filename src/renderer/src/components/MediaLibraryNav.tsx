@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate, NavLink } from 'react-router-dom'
-import { useState, type MouseEvent } from 'react'
+import { useEffect, useState, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Plus } from 'lucide-react'
 import { api } from '../api'
@@ -8,7 +8,8 @@ import { clearListScrollForPrimaryNav } from '../listView/listViewMemory'
 import {
   mediaLibraryPath,
   mediaLibrarySettingsPath,
-  parseMediaLibraryRoute
+  parseActiveMediaLibraryId,
+  rememberMediaLibrarySettingsLibraryId
 } from '../listView/mediaLibraryRoutes'
 import {
   primaryListRoot,
@@ -35,7 +36,10 @@ export default function MediaLibraryNav(): JSX.Element {
   const { requestLeave } = usePluginDevLeaveGuard()
   const [createOpen, setCreateOpen] = useState(false)
   const activeRoot = primaryListRoot(location.pathname)
-  const activeLibrary = parseMediaLibraryRoute(location.pathname)
+  const activeLibraryId = parseActiveMediaLibraryId(location.pathname, location.search)
+  useEffect(() => {
+    if (activeLibraryId) rememberMediaLibrarySettingsLibraryId(activeLibraryId)
+  }, [activeLibraryId])
   const librariesQuery = useQuery({
     queryKey: mediaLibraryKeys.fullList(),
     queryFn: () => api.mediaLibraries.list({ includeArchived: true }),
@@ -86,99 +90,111 @@ export default function MediaLibraryNav(): JSX.Element {
 
   return (
     <>
-      <div className={`nav-group${activeLibrary ? ' nav-group--active' : ''}`}>
-      <div className={styles.groupHeader}>
-        <div className="nav-group-label">媒体库</div>
-        <IconButton
-          className={styles.addButton}
-          size="sm"
-          label="新建媒体库"
-          icon={<Plus {...UI_ICON_SM} />}
-          onClick={() => setCreateOpen(true)}
-        />
-      </div>
-      <div className={styles.list} aria-label="媒体库">
-        {librariesQuery.isLoading ? (
-          <div className={styles.status} role="status">
-            正在读取…
-          </div>
-        ) : librariesQuery.isError ? (
-          <button
-            type="button"
-            className={styles.retry}
-            onClick={() => void librariesQuery.refetch()}
-          >
-            读取失败，重试
-          </button>
-        ) : (librariesQuery.data ?? []).length === 0 ? (
-          <div className={styles.status}>暂无媒体库</div>
-        ) : (
-          <>
-            {activeLibraries.map((library) => {
-              const to = mediaLibraryPath(library.id)
-              return (
-                <div className="nav-item-row" key={library.id}>
-                  <NavLink
-                    to={primaryNavLinkTo(to, location.pathname, location.search)}
-                    draggable={false}
-                    onClick={(event) => handleClick(event, to)}
-                    className={({ isActive }) =>
-                      `nav-item ${styles.item}${isActive ? ' active' : ''}`
-                    }
-                    title={library.name}
-                  >
-                    <span
-                      className={`nav-icon ${styles.icon}`}
-                      style={mediaLibraryIdentityStyle(library.color)}
-                    >
-                      <NavIcon name={library.icon} />
-                    </span>
-                    <span className={`nav-label ${styles.name}`}>{library.name}</span>
-                    {library.pendingRemovalRootCount > 0 ? (
-                      <span
-                        className={styles.warning}
-                        title={`${library.pendingRemovalRootCount} 个来源待移除`}
-                        aria-label={`${library.pendingRemovalRootCount} 个来源待移除`}
-                      />
-                    ) : null}
-                  </NavLink>
-                </div>
-              )
-            })}
-            {archivedLibraries.length > 0 ? (
-              <div className={styles.archivedLabel}>已归档</div>
+      <div
+        className={styles.group}
+        data-active={activeLibraryId ? true : undefined}
+        role="group"
+        aria-label="媒体库"
+      >
+        <div className={styles.groupHeader}>
+          <div className={styles.groupTitle}>
+            <span>媒体库</span>
+            {!librariesQuery.isLoading && !librariesQuery.isError ? (
+              <span className={styles.groupCount} aria-hidden>
+                {activeLibraries.length}
+              </span>
             ) : null}
-            {archivedLibraries.map((library) => {
-              const to = mediaLibrarySettingsPath(library.id, 'danger')
-              const active = activeLibrary?.libraryId === library.id
-              return (
-                <div className="nav-item-row" key={library.id}>
-                  <NavLink
-                    to={to}
-                    draggable={false}
-                    onClick={(event) => {
-                      event.preventDefault()
-                      const go = (): void => navigate(to)
-                      if (location.pathname === ROUTE_PATH.settingsPluginDev) requestLeave(go)
-                      else go()
-                    }}
-                    className={`nav-item ${styles.item} ${styles.archivedItem}${active ? ' active' : ''}`}
-                    title={`${library.name}（已归档）`}
-                  >
-                    <span
-                      className={`nav-icon ${styles.icon}`}
-                      style={mediaLibraryIdentityStyle(library.color)}
+          </div>
+          <IconButton
+            className={styles.addButton}
+            size="sm"
+            label="新建媒体库"
+            icon={<Plus {...UI_ICON_SM} />}
+            onClick={() => setCreateOpen(true)}
+          />
+        </div>
+        <div className={styles.list} aria-label="媒体库列表">
+          {librariesQuery.isLoading ? (
+            <div className={styles.status} role="status">
+              正在读取…
+            </div>
+          ) : librariesQuery.isError ? (
+            <button
+              type="button"
+              className={styles.retry}
+              onClick={() => void librariesQuery.refetch()}
+            >
+              读取失败，重试
+            </button>
+          ) : (librariesQuery.data ?? []).length === 0 ? (
+            <div className={styles.status}>暂无媒体库</div>
+          ) : (
+            <>
+              {activeLibraries.map((library) => {
+                const to = mediaLibraryPath(library.id)
+                return (
+                  <div className="nav-item-row" key={library.id}>
+                    <NavLink
+                      to={primaryNavLinkTo(to, location.pathname, location.search)}
+                      draggable={false}
+                      onClick={(event) => handleClick(event, to)}
+                      className={({ isActive }) =>
+                        `nav-item ${styles.item}${isActive || activeLibraryId === library.id ? ' active' : ''}`
+                      }
+                      title={library.name}
                     >
-                      <NavIcon name={library.icon} />
-                    </span>
-                    <span className={`nav-label ${styles.name}`}>{library.name}</span>
-                  </NavLink>
-                </div>
-              )
-            })}
-          </>
-        )}
-      </div>
+                      <span
+                        className={`nav-icon ${styles.icon}`}
+                        style={mediaLibraryIdentityStyle(library.color)}
+                      >
+                        <NavIcon name={library.icon} />
+                      </span>
+                      <span className={`nav-label ${styles.name}`}>{library.name}</span>
+                      {library.pendingRemovalRootCount > 0 ? (
+                        <span
+                          className={styles.warning}
+                          title={`${library.pendingRemovalRootCount} 个来源待移除`}
+                          aria-label={`${library.pendingRemovalRootCount} 个来源待移除`}
+                        />
+                      ) : null}
+                    </NavLink>
+                  </div>
+                )
+              })}
+              {archivedLibraries.length > 0 ? (
+                <div className={styles.archivedLabel}>已归档</div>
+              ) : null}
+              {archivedLibraries.map((library) => {
+                const to = mediaLibrarySettingsPath(library.id, 'danger')
+                const active = activeLibraryId === library.id
+                return (
+                  <div className="nav-item-row" key={library.id}>
+                    <NavLink
+                      to={to}
+                      draggable={false}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        const go = (): void => navigate(to)
+                        if (location.pathname === ROUTE_PATH.settingsPluginDev) requestLeave(go)
+                        else go()
+                      }}
+                      className={`nav-item ${styles.item} ${styles.archivedItem}${active ? ' active' : ''}`}
+                      title={`${library.name}（已归档）`}
+                    >
+                      <span
+                        className={`nav-icon ${styles.icon}`}
+                        style={mediaLibraryIdentityStyle(library.color)}
+                      >
+                        <NavIcon name={library.icon} />
+                      </span>
+                      <span className={`nav-label ${styles.name}`}>{library.name}</span>
+                    </NavLink>
+                  </div>
+                )
+              })}
+            </>
+          )}
+        </div>
       </div>
       {createOpen ? (
         // The sidebar establishes a clipped stacking context; mount the dialog at

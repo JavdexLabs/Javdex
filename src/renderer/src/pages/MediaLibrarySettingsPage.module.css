@@ -7,11 +7,45 @@
 }
 
 .header {
+  display: grid;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  gap: 10px;
+}
+
+.headerMain {
   display: flex;
   align-items: center;
   justify-content: space-between;
   min-width: 0;
-  gap: 16px;
+  gap: 12px;
+}
+
+.headerControls {
+  display: flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.libraryPicker {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  gap: 8px;
+}
+
+.librarySelect {
+  width: min(240px, 28vw);
+  min-width: 160px;
 }
 
 .identity {
@@ -43,13 +77,6 @@
   color: var(--media-library-color, var(--text-muted));
 }
 
-.identityCopy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
-}
-
 .pageTitle {
   max-width: min(62vw, 680px);
   margin: 0;
@@ -61,14 +88,8 @@
   white-space: nowrap;
 }
 
-.eyebrow {
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
-.status {
+.status,
+.activityStatus {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
@@ -82,11 +103,21 @@
   font-weight: 700;
 }
 
+.status[data-status="active"] {
+  border-color: color-mix(in srgb, var(--success) 38%, var(--border-subtle));
+  color: var(--success);
+}
+
 .status[data-status="archived"] {
   color: var(--text-muted);
 }
 
-.archivedNotice,
+.activityStatus {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-subtle));
+  background: var(--surface-selected);
+  color: var(--text-accent);
+}
+
 .protectedNotice {
   padding: 10px 12px;
   border: 1px solid var(--border-subtle);
@@ -97,68 +128,44 @@
   line-height: 1.45;
 }
 
-.tabs {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  padding: 5px;
-  overflow-x: auto;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-panel);
-  scrollbar-gutter: stable;
-  gap: 4px;
-}
-
-.tabButton {
-  flex: 0 0 auto;
-  min-width: 72px;
-  min-height: var(--control-h-sm);
-  padding: 0 12px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  outline: none;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  transition:
-    background var(--motion-fast),
-    border-color var(--motion-fast),
-    color var(--motion-fast);
-}
-
-.tabButton:hover,
-.tabButton:focus-visible {
-  border-color: var(--border-strong);
-  background: var(--surface-control-hover);
-  color: var(--text-primary);
-}
-
-.tabButton:focus-visible {
-  outline: var(--focus-outline);
-  outline-offset: 2px;
-}
-
-.tabButton[data-active="true"] {
-  border-color: var(--border-accent);
-  background: var(--surface-selected);
-  color: var(--text-primary);
-}
-
 .panel {
   min-width: 0;
-  padding: 18px;
+  padding: 14px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-panel);
+}
+
+.importPanel {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.importWorkspace {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
 }
 
 .sectionStack {
   display: grid;
   min-width: 0;
   gap: 16px;
+}
+
+.sourcePanel,
+.scanSettingsPanel {
+  display: flex;
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  flex-direction: column;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-control) 38%, transparent);
+  gap: 12px;
 }
 
 .textControl {
@@ -269,6 +276,345 @@
   padding-top: 2px;
 }
 
+.scanConsole {
+  display: flex;
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  flex-direction: column;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent) 7%, transparent),
+      transparent 42%
+    ),
+    color-mix(in srgb, var(--surface-control) 34%, transparent);
+  gap: 12px;
+}
+
+.scanConsoleScanning {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border-subtle));
+}
+
+.sourcePanelHead,
+.scanSettingsPanelHead,
+.scanPanelHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 10px;
+}
+
+.sourcePanelHead > :global(.btn) {
+  min-width: 104px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.sourcePanelTitle,
+.scanSettingsPanelTitle,
+.scanPanelTitle {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 9px;
+}
+
+.sourcePanelTitle > div,
+.scanSettingsPanelTitle > div,
+.scanPanelTitle > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.sourcePanelTitle h4,
+.scanSettingsPanelTitle h4,
+.scanPanelTitle h4 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--settings-fs-title, 14px);
+  font-weight: var(--settings-fw-title, 700);
+  line-height: var(--settings-lh-tight, 1.35);
+}
+
+.sourcePanelTitle p,
+.scanSettingsPanelTitle p,
+.scanPanelTitle p {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourcePanelIcon,
+.scanSettingsPanelIcon,
+.scanPanelIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface-panel));
+  color: var(--text-accent);
+}
+
+.sourceEmpty {
+  justify-content: center;
+  min-height: 86px;
+  color: var(--text-muted);
+}
+
+.scanCommandRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.scanCommandRow > :global(.btn) {
+  min-width: 128px;
+  white-space: nowrap;
+}
+
+.scanDuration {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-h-md);
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-base) 38%, var(--surface-control));
+  gap: 10px;
+}
+
+.scanDurationLabel {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  gap: 5px;
+}
+
+.scanMessageRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 20px;
+  gap: 10px;
+}
+
+.scanStatus {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-accent);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scanNote {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.scanHistory {
+  display: grid;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+  gap: 8px;
+}
+
+.scanHistoryHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 12px;
+}
+
+.scanHistoryHead h5 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--settings-fs-body, 13px);
+  font-weight: var(--settings-fw-label, 600);
+}
+
+.scanHistoryHead > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption, 11px);
+  line-height: var(--settings-lh, 1.45);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scanHistorySummary {
+  display: grid;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-control) 38%, transparent);
+  gap: 10px;
+}
+
+.scanHistorySummaryHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.scanHistorySummaryHead > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.scanHistorySummaryHead strong,
+.scanHistoryDetail strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.scanHistorySummaryHead span,
+.scanHistoryDetail span {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.scanHistoryDetail {
+  display: grid;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  gap: 4px;
+}
+
+.scanHistoryPathDetail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scanHistoryPathDetail > span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.warningDetail {
+  border-color: var(--border-warning);
+  background: var(--surface-warning);
+}
+
+.errorDetail {
+  border-color: var(--border-danger);
+  background: var(--surface-danger);
+}
+
+.scanSettingsBlock {
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.scanAutoInterval {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  margin-top: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-control) 44%, transparent);
+  gap: 16px;
+}
+
+.scanAutoInterval > span {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 2px;
+}
+
+.scanAutoInterval strong {
+  color: var(--text-primary);
+  font-size: var(--settings-fs-body, 13px);
+  font-weight: var(--settings-fw-label, 600);
+}
+
+.scanAutoInterval small {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption, 11px);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.scanAutoInterval > .scanIntervalSelect {
+  width: 132px;
+  min-width: 132px;
+  max-width: 132px;
+  flex: 0 0 132px;
+}
+
+.scanAutoIntervalDisabled {
+  opacity: 0.58;
+}
+
+.scanCleanupNotice {
+  display: flex;
+  align-items: flex-start;
+  margin-top: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-warning);
+  border-radius: var(--radius-sm);
+  background: var(--surface-warning);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  gap: 8px;
+}
+
+.scanCleanupNotice > svg {
+  flex: 0 0 auto;
+  color: var(--warning);
+}
+
+.scanCleanupCopy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.scanCleanupCopy strong {
+  color: var(--warning);
+  font-size: var(--settings-fs-caption, 11px);
+  font-weight: 700;
+}
+
+.scanCleanupCopy > span {
+  color: var(--text-muted);
+}
+
 .scanNotice {
   padding: 10px 12px;
   border: 1px solid var(--border-subtle);
@@ -289,102 +635,33 @@
   color: var(--danger);
 }
 
-.scanProgress,
-.scanSummary {
+.rootList {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  max-height: 220px;
+  padding-inline-end: var(--scrollbar-safe-pad);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  gap: 6px;
+}
+
+.rootRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
   min-width: 0;
-  padding: 12px;
+  min-height: var(--control-h-sm);
+  padding: 6px 8px 6px 10px;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: var(--surface-control);
   gap: 8px;
 }
 
-.scanProgressTitle {
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.scanProgressDetail {
-  overflow: hidden;
+.rootIcon {
+  flex: 0 0 auto;
   color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.45;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.scanSummaryHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-width: 0;
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 700;
-  gap: 10px;
-}
-
-.scanSummaryTime {
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 500;
-}
-
-.scanMetrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
-  margin: 0;
-  gap: 7px;
-}
-
-.scanMetric {
-  display: grid;
-  padding: 8px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--surface-panel);
-  gap: 3px;
-}
-
-.scanMetricLabel {
-  color: var(--text-muted);
-  font-size: 10px;
-}
-
-.scanMetricValue {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-}
-
-.scanSummaryActions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.rootList {
-  display: grid;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.unrecognizedList {
-  display: grid;
-  gap: 8px;
-}
-
-.rootRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-width: 0;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border-subtle);
-  gap: 12px;
 }
 
 .rootCopy,
@@ -397,7 +674,7 @@
 }
 
 .rootCopy {
-  gap: 4px;
+  gap: 2px;
 }
 
 .rootPath {
@@ -426,7 +703,7 @@
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
 
 .toggleRow,
@@ -467,19 +744,6 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-}
-
-.numberControl {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  gap: 8px;
-}
-
-.numberUnit {
-  flex: 0 0 auto;
-  color: var(--text-muted);
-  font-size: 11px;
 }
 
 .lifecycleRow {
@@ -551,18 +815,69 @@
 
 @media (width <= 760px) {
   .fieldGrid,
-  .impactGrid,
-  .scanMetrics {
+  .impactGrid {
     grid-template-columns: 1fr;
   }
 
-  .rootRow,
-  .lifecycleRow {
+  .lifecycleRow,
+  .headerMain {
     align-items: flex-start;
     flex-direction: column;
   }
 
+  .headerControls,
+  .libraryPicker,
+  .librarySelect {
+    width: 100%;
+  }
+
+  .headerControls {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
   .rootActions {
-    align-self: flex-end;
+    grid-column: 2;
+    justify-self: start;
+    flex-wrap: wrap;
+  }
+
+  .rootList {
+    grid-template-columns: 1fr;
+    max-height: none;
+  }
+
+  .rootRow {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .scanCommandRow > :global(.btn),
+  .scanDuration {
+    width: 100%;
+  }
+
+  .scanDuration {
+    justify-content: space-between;
+  }
+
+  .sourcePanelHead,
+  .scanSettingsPanelHead,
+  .scanPanelHead,
+  .scanHistoryHead,
+  .scanMessageRow,
+  .scanAutoInterval {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .scanStatus {
+    text-align: left;
+  }
+
+  .scanAutoInterval > .scanIntervalSelect {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    flex-basis: auto;
   }
 }

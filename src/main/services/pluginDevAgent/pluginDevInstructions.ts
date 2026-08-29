@@ -148,12 +148,16 @@ ${kindContract}
 function pluginDevelopmentSkill(kind: ScraperPluginKind): string {
   const targetPage = kind === 'video' ? '精确影片详情页' : '精确演员资料页'
   const targetIdentity = kind === 'video' ? '真正番号' : '主名和页面明确给出的别名'
+  const targetLink = kind === 'video' ? '精确详情链接' : '精确资料链接'
+  const searchCheckpointImplementation = kind === 'video'
+    ? '`findDetailUrls(ctx)` 等影片详情定位函数'
+    : '`findProfileUrl(ctx, query)` 等演员资料定位函数'
   const sandboxStart = kind === 'video'
     ? '插件必须从 `ctx.code` 开始搜索并打开详情页。「从 ctx.code 搜索」是生产沙箱输入契约。从精确详情页发现番号后，用该番号调用 dry-run；例如发现 ABC-123 时传 `{"videoCodes":["ABC-123"]}`。ABC-123 只是参数格式示例，不是固定测试目标。返回的 `actresses` 每项要显式给出 `gender`。'
     : '插件必须从 `ctx.mainName` / `ctx.aliases` 开始搜索并打开资料页。「从 ctx.mainName 搜索」是生产沙箱输入契约。从精确资料页发现主名后，用该主名和页面明确别名调用 dry-run；例如可传 `{"actresses":[{"mainName":"三上悠亜","aliases":["Yua Mikami"]}]}`。三上悠亜只是参数格式示例，不是固定测试目标。`mainName` / `sourceUrl` 只是运行与调试信息，不要加入 `supportedFields`。'
-  const browseThenCode = kind === 'video'
-    ? '浏览顺序：先确认搜索入口，再只打开一条精确详情学习选择器和字段；搜索页若有多条番号完全匹配，不要把其余候选点开。浏览一条详情不是允许代码只处理一条：生成的 `parseVideo` 按 `docs/plugin-format.md` 的第一页完全匹配合同实现。'
-    : '浏览顺序：先确认搜索入口，再只打开一条精确资料页学习选择器和字段。不主动打开多结果页；只有精确查询当前实际返回列表，或 dry-run 已证明列表路径是首版运行所必需时，才实现列表回退。'
+  const candidateContract = kind === 'video'
+    ? '搜索页若有多条番号完全匹配，不要把其余候选点开。浏览一条详情不是允许代码只处理一条：生成的 `parseVideo` 按 `docs/plugin-format.md` 的第一页完全匹配合同实现。'
+    : '不主动打开多结果页；只有精确查询当前实际返回列表，或 dry-run 已证明列表路径是首版运行所必需时，才实现列表回退。'
   const formatPointer = kind === 'video'
     ? '返回形状、未匹配与第一页候选合同以 `docs/plugin-format.md` 为准，不要另写一套空结果规则。'
     : '返回形状与未匹配以 `docs/plugin-format.md` 为准，不要另写一套空结果规则。'
@@ -177,19 +181,27 @@ description: Create or debug the Javdex scraper plugin in the current isolated w
 
 - 目标分两条路径。\`task.json.runTargets\` 为空时，浏览站点找到一个代表性的${targetPage}并提取${targetIdentity}。用户目标搜索后零条精确匹配时，不反复证明不存在，也不用相似条目充当命中；另外打开一条代表性的${targetPage}并取出${targetIdentity}，先省略参数做一次完整 dry-run 记录原目标的空结果，再 \`ask_user\` 是否改用该身份，用户同意后用该身份显式调用 \`plugin_dry_run\`。页面 URL 只用于理解网站和编写搜索逻辑，永远不是 dry-run 目标。
 - ${sandboxStart} 禁止假设存在任何 URL 型 ctx 输入。确认搜索入口按四档降级，不得提前进入下一档：
-  1. observation 有可提交的搜索控件或可 \`open\` 的搜索链接时，先 \`fill\` / \`press\` / \`click\` 或直接 \`open\`；\`action\` 为空或控件无 \`name\` 不是跳过本档的理由。成功仅指提交后 observation 的 \`url\` 变为另一个地址：用该地址写成 \`fetchPage\` 搜索并立即打开一条精确详情，不再读脚本、解释 \`recentRequests\` 或在结果页学习列表结构。提交后 \`url\` 未变化不算本档成功，同一 \`url\` 上的 overlay 或 AJAX 结果也不能当作本档成功；此时可用已出现的精确链接 \`open\` 一条详情学习字段，但搜索实现必须继续降级，不得把 click/type/press 写入插件。工具失败但页面显示提交正在进行或已经生效时，仍在本档补一次最直接的提交。本档失败仅指没有可见搜索控件/链接，或提交后 \`url\` 未变化。
+  1. observation 有可提交的搜索控件或可 \`open\` 的搜索链接时，先 \`fill\` / \`press\` / \`click\` 或直接 \`open\`；\`action\` 为空或控件无 \`name\` 不是跳过本档的理由。成功仅指提交后 observation 的 \`url\` 变为另一个地址：用该地址写成 \`fetchPage\` 搜索。在结果页上确认${targetLink}的 href 形态（相对路径用搜索 URL 解析），排除语言切换、分页和搜索 URL 本身；详情字段选择器到详情页再学，搜索候选选择器必须在当前页确认。不要为此读脚本或 \`recentRequests\`。本档成功后继续完成下面的搜索页代码检查点，不得立即打开详情。提交后 \`url\` 未变化不算本档成功，同一 \`url\` 上的 overlay 或 AJAX 结果也不能当作本档成功；此时只记下已出现的精确链接，搜索实现继续降级，不得在搜索页代码检查点完成前打开它，也不得把开发 helper 的 click/type/press 写入插件。工具失败但页面显示提交正在进行或已经生效时，仍在本档补一次最直接的提交。本档失败仅指没有可见搜索控件/链接，或提交后 \`url\` 未变化。
   2. 第一档失败后，阅读 \`pageFacts.scriptSrcs\` / \`inlineScripts\`；外链源码用 \`open\` 打开脚本 URL 后再 \`html\`，还原请求并用 \`fetchPage\`。
   3. 第二档失败后，用 \`pageFacts.recentRequests\` 复现 \`fetchPage\`；没有请求记录时再提交一次可见搜索以采集。
   4. 第三档失败后，才用生产 \`ctx.browser\` 的 click/type/press/wait 实现搜索。
-  搜索匹配与相对 href 留给首次 dry-run 验证。生产搜索优先 \`fetchPage\`；能 \`fetchPage\` 时不要把开发 helper 的点选流程写入 \`index.js\`。
-  不主动浏览理论镜像域名、模糊搜索或无结果页。${browseThenCode}
-- 首次出现精确目标详情页 observation 时，无论来自 open、click、fill、press 或 snapshot，只要能确定搜索入口、详情选择器和当前可见字段，就把全部已观察且映射明确的字段与页面结构写入 \`.javdex/dev-notes.md\` 并进入实现。若仍有事实明确阻止编码，按 Browser Skill 每次处理一个具体 blocker 后重新评估；新证据暴露新 blocker 时可以继续，不设任意总次数上限。没有新增事实、返回 \`unchanged\` 或只剩理论问题时停止浏览，不能按字段逐项证明。只有真实字段歧义才调用 \`ask_user\`。
+  生产搜索优先 \`fetchPage\`；能 \`fetchPage\` 时不要把开发 helper 的点选流程写入 \`index.js\`。四档降级中为还原请求而打开站内脚本仍属于搜索阶段，不得借此进入详情阶段。
+- 搜索页代码检查点：
+  - 进入详情页前，必须在搜索阶段收齐以下生产搜索证据：搜索 URL 或请求构造方式；候选容器或响应集合与详情/资料链接选择器或字段；候选身份的可靠判断信号；相对 href 的解析基准。候选事实须排除语言切换、分页、搜索 URL 本身和非精确结果。
+  - 证据齐全后立即用 write/edit 将搜索逻辑固化到 \`index.js\`，例如 ${searchCheckpointImplementation}，并把搜索事实写入 dev-notes。代码保持语法有效，但暂时不要求功能完整、可安装或执行 dry-run。这是不运行的页面级代码检查点；中间搜索代码检查点不得调用 \`plugin_dry_run\`。
+  - 搜索页代码检查点写入后，才离开搜索阶段并只打开一条${targetPage}。不得先进入详情页、以后再返回搜索页补候选选择器或身份判断。
+- 详情页代码检查点：
+  - 首次出现精确目标详情页 observation 时，无论来自 open、click、fill、press 或 snapshot，收齐当前详情页/资料页已明确的身份、字段、选择器和 metadata；缺少确实阻止编码的局部事实时，按 Browser Skill 在当前页做一次最直接查询。
+  - 证据齐全后立即用 write/edit 实现详情解析逻辑，把全部已观察且映射明确的字段与页面结构写入 dev-notes。若仍有事实明确阻止编码，按 Browser Skill 每次处理一个具体 blocker 后重新评估；新证据暴露新 blocker 时可以继续在当前详情页处理，不设任意总次数上限。没有新增事实、返回 \`unchanged\` 或只剩理论问题时停止浏览，不能按字段逐项证明。只有真实字段歧义才调用 \`ask_user\`。
+  - 第一次完整 \`plugin_dry_run\` 前不得返回搜索页。只有 \`plugin_dry_run\` 暴露与搜索候选相关的具体错误，才允许针对该 blocker 回访搜索页。
+- 首次完整运行前，不为验证分支而另外浏览空结果页、推荐结果、模糊搜索、分页、理论镜像域名或其他理论分支。不主动浏览理论镜像域名、模糊搜索或无结果页。空结果和多候选合同先按 \`docs/plugin-format.md\` 实现，由第一次完整生产 dry-run 验证。${candidateContract}
 
 ## 3. 实现
 
 - reasoning 只用一至三句话说明下一项工具行动；不在 reasoning 中预写插件、重复字段表、复述页面、粘贴 HTML、重新论证已确认事实或预演 dry-run。证据足够时立即 write/edit。
-- 简单网站在一个连贯修改中实现全部已观察且映射明确的字段。只有代码复杂、部分实现仍需真实运行验证或存在具体不确定性时，才先实现一个可运行批次，并在 dev-notes 中记录具体未完成项；不得按预设字段组合拆分实现。
-- create 在 dry-run 前保持 \`index.js\`、\`plugin.json\` 和 dev-notes 一致；debug 只修改真正需要变化的文件。仅在页面事实、字段覆盖、未完成事项或下一步变化时更新 dev-notes。相关写入完成后优先调用 \`plugin_dry_run\`。
+- 简单网站仍在一个连贯开发过程内完成搜索与详情实现，但允许先写不运行的搜索页代码检查点，再写详情页代码检查点；不要求一次 write/edit 完成全部代码。页面级代码检查点按搜索页和详情页划分，不是按字段拆分；仍不得按预设字段组合逐项实现。
+- 搜索页代码检查点只要求当前草稿语法有效；详情页代码检查点应一次实现当前页面全部已观察且映射明确的字段。只有代码复杂、部分实现仍需真实运行验证或存在具体不确定性时，才在 dev-notes 中记录具体未完成项。
+- create 在第一次 dry-run 前保持 \`index.js\`、\`plugin.json\` 和 dev-notes 一致；debug 只修改真正需要变化的文件。仅在页面事实、字段覆盖、未完成事项或下一步变化时更新 dev-notes。搜索与详情实现完成、\`plugin.json\` 和 dev-notes 同步后，才执行第一次完整 \`plugin_dry_run\`；中间搜索代码检查点后不得运行。
 - 生产搜索优先 \`fetchPage\`；能 \`fetchPage\` 时不要把开发 helper 的点选流程写入 \`index.js\`。
 - ${formatPointer}
 - \`plugin.json.supportedFields\` 只使用当前 kind 的字段 id，不使用结果键。

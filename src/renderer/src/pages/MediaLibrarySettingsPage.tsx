@@ -1,6 +1,12 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEventHandler
+} from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import type { LibraryScanMetricKey } from '@shared/libraryTypes'
 import {
   type MediaLibraryConfigValues,
@@ -10,21 +16,27 @@ import {
 } from '@shared/mediaLibraryTypes'
 import { api } from '../api'
 import Button from '../components/Button'
-import DetailScrollBody from '../components/DetailScrollBody'
 import EmptyState from '../components/EmptyState'
 import { NavIcon } from '../components/NavIcons'
+import SelectControl from '../components/SelectControl'
 import { useToast } from '../components/Toast'
 import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import { useMediaLibraryScanController } from '../hooks/useMediaLibraryScanController'
 import { mediaLibraryIdentityStyle } from '../components/mediaLibraryIdentity'
+import { SettingsTabBar } from '../components/settings/SettingsPrimitives'
 import { ROUTE_PATH } from '../listView/routePaths'
 import {
   MEDIA_LIBRARY_SETTINGS_TABS,
-  mediaLibraryPath,
+  MEDIA_LIBRARY_SETTINGS_TAB_LABELS,
   mediaLibrarySettingsPath,
   type MediaLibrarySettingsTab
 } from '../listView/mediaLibraryRoutes'
 import { parsePositiveRouteId } from '../listView/routeIds'
+import {
+  settingsPath,
+  settingsTabDomId,
+  settingsTabPanelDomId
+} from '../settings/settingsRoutes'
 import {
   buildMediaLibraryConfigPatch,
   buildMediaLibraryIdentityPatch,
@@ -40,11 +52,10 @@ import {
 import styles from './MediaLibrarySettingsPage.module.css'
 import {
   DisplaySettingsTab,
-  GeneralSettingsTab,
   MaintenanceSettingsTab,
-  ScanSettingsTab,
+  OverviewSettingsTab,
   ScrapingSettingsTab,
-  SourcesSettingsTab
+  SourcesAndScanSettingsTab
 } from './MediaLibrarySettingsTabs'
 import {
   MediaLibrarySettingsDialogs,
@@ -52,15 +63,6 @@ import {
   type RootMigrationState,
   type RootRemovalState
 } from './MediaLibrarySettingsDialogs'
-
-const TAB_LABELS: Record<MediaLibrarySettingsTab, string> = {
-  general: '常规',
-  sources: '来源',
-  scan: '扫描',
-  scraping: '刮削',
-  display: '显示',
-  danger: '维护'
-}
 
 function isSettingsTab(
   value: string | undefined
@@ -72,15 +74,22 @@ function messageFromError(error: unknown): string {
   return String((error as Error)?.message ?? error)
 }
 
-function MediaLibrarySettingsContent({
+export function MediaLibrarySettingsContent({
   libraryId,
-  tab
+  tab,
+  libraries,
+  onSelectLibrary,
+  onSelectTab,
+  onTabKeyDown
 }: {
   libraryId: number
   tab: MediaLibrarySettingsTab
+  libraries: readonly MediaLibrarySummary[]
+  onSelectLibrary: (libraryId: number) => void
+  onSelectTab: (tab: MediaLibrarySettingsTab) => void
+  onTabKeyDown: KeyboardEventHandler<HTMLDivElement>
 }): JSX.Element {
   const navigate = useNavigate()
-  const location = useLocation()
   const toast = useToast()
   const queryClient = useQueryClient()
   const { scrapers, defaultScraper } = useScraperPluginCatalog('video')
@@ -112,6 +121,7 @@ function MediaLibrarySettingsContent({
     useState<MediaLibraryIdentityDraft | null>(null)
   const [configDraft, setConfigDraft] =
     useState<MediaLibraryConfigValues | null>(null)
+  const immediateConfigMutationPendingRef = useRef(false)
   const [busy, setBusy] = useState<MediaLibrarySettingsBusyAction>(null)
   const [rootRemoval, setRootRemoval] = useState<RootRemovalState | null>(null)
   const [rootMigration, setRootMigration] = useState<RootMigrationState | null>(
@@ -486,42 +496,12 @@ function MediaLibrarySettingsContent({
         queryClient.invalidateQueries({ queryKey: ['videos'] })
       ])
       toast.show('媒体库已永久删除', 'success')
-      navigate(ROUTE_PATH.home, { replace: true })
+      navigate(settingsPath('library'), { replace: true })
     } catch (error) {
       toast.show(messageFromError(error), 'error')
     } finally {
       setBusy(null)
     }
-  }
-
-  const navigateTab = (nextTab: MediaLibrarySettingsTab): void => {
-    navigate(
-      {
-        pathname: mediaLibrarySettingsPath(libraryId, nextTab),
-        search: location.search
-      },
-      { replace: true }
-    )
-  }
-
-  const handleTabKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-    event.preventDefault()
-    const currentIndex = MEDIA_LIBRARY_SETTINGS_TABS.indexOf(tab)
-    const nextIndex =
-      event.key === 'Home'
-        ? 0
-        : event.key === 'End'
-          ? MEDIA_LIBRARY_SETTINGS_TABS.length - 1
-          : (currentIndex +
-              (event.key === 'ArrowRight' ? 1 : -1) +
-              MEDIA_LIBRARY_SETTINGS_TABS.length) %
-            MEDIA_LIBRARY_SETTINGS_TABS.length
-    event.currentTarget
-      .querySelectorAll<HTMLButtonElement>('[role="tab"]')
-      .item(nextIndex)
-      ?.focus()
-    navigateTab(MEDIA_LIBRARY_SETTINGS_TABS[nextIndex])
   }
 
   const loadState = mediaLibrarySettingsLoadState({
@@ -533,79 +513,84 @@ function MediaLibrarySettingsContent({
 
   if (loadState === 'error') {
     return (
-      <div className="detail-pane">
-        <DetailScrollBody onBack={() => navigate(ROUTE_PATH.home)}>
-          <EmptyState
-            title="无法打开媒体库设置"
-            description="媒体库不存在，或设置暂时无法读取。"
-          >
-            <Button size="sm" onClick={() => void libraryQuery.refetch()}>
-              重新加载
-            </Button>
-          </EmptyState>
-        </DetailScrollBody>
-      </div>
+      <EmptyState
+        title="无法打开媒体库设置"
+        description="媒体库不存在，或设置暂时无法读取。"
+      >
+        <Button size="sm" onClick={() => void libraryQuery.refetch()}>
+          重新加载
+        </Button>
+      </EmptyState>
     )
+  }
+
+  const updateConfigImmediately = async <
+    Key extends keyof MediaLibraryConfigValues
+  >(
+    key: Key,
+    value: MediaLibraryConfigValues[Key]
+  ): Promise<void> => {
+    if (
+      !library ||
+      !configDraft ||
+      busy ||
+      immediateConfigMutationPendingRef.current ||
+      Object.is(configDraft[key], value)
+    ) {
+      return
+    }
+
+    const previousValue = configDraft[key]
+    const nextDraft: MediaLibraryConfigValues = {
+      ...configDraft,
+      [key]: value
+    }
+    const patch = buildMediaLibraryConfigPatch(
+      library.config,
+      nextDraft,
+      [key]
+    )
+    if (!patch) return
+
+    setConfigDraft(nextDraft)
+    immediateConfigMutationPendingRef.current = true
+    setBusy('config')
+    try {
+      await api.mediaLibraries.updateConfig({
+        libraryId,
+        expectedRevision: library.config.revision,
+        patch
+      })
+      await refreshSurfaces()
+    } catch (error) {
+      setConfigDraft((current) =>
+        current ? { ...current, [key]: previousValue } : current
+      )
+      toast.show(messageFromError(error), 'error')
+    } finally {
+      immediateConfigMutationPendingRef.current = false
+      setBusy(null)
+    }
   }
 
   if (loadState === 'loading' || !library || !identityDraft || !configDraft) {
-    return (
-      <div className="detail-pane">
-        <DetailScrollBody onBack={() => navigate(mediaLibraryPath(libraryId))}>
-          <EmptyState loading title="正在读取媒体库设置…" />
-        </DetailScrollBody>
-      </div>
-    )
+    return <EmptyState loading title="正在读取媒体库设置…" />
   }
 
   const archived = library.status === 'archived'
-  const formDisabled = archived || busy !== null
+  const formDisabled = archived || scan.running || busy !== null
   const configuredScrapers = library.config.defaultVideoScraper
     ? [library.config.defaultVideoScraper, ...scrapers]
     : scrapers
   const scraperOptions = [...new Set(configuredScrapers)]
   const migrationTargets = migrationTargetsFrom(activeLibrariesQuery.data)
   const latestScanSummary = scan.latest?.summary ?? null
-  const scanMetrics = scan.result
-    ? {
-        scanned: scan.result.scannedFiles,
-        imported: scan.result.imported,
-        failed: scan.result.failed,
-        pending: scan.result.pendingGroups,
-        unrecognized: scan.result.unrecognizedFiles.length,
-        offline: scan.result.offlineFolders.length,
-        offlineFolders: scan.result.offlineFolders,
-        errorSummary: null as string | null,
-        cancelled: Boolean(scan.result.cancelled),
-        finishedAt: null as string | null
-      }
-    : latestScanSummary
-      ? {
-          scanned: latestScanSummary.scannedFiles,
-          imported: latestScanSummary.resourcesAdded,
-          failed: latestScanSummary.failedFiles,
-          pending: latestScanSummary.pendingScanGroups,
-          unrecognized: scan.latest?.unrecognized.length ?? 0,
-          offline: latestScanSummary.offlineFolders.length,
-          offlineFolders: latestScanSummary.offlineFolders,
-          errorSummary: latestScanSummary.errorSummary,
-          cancelled: latestScanSummary.status === 'cancelled',
-          finishedAt: latestScanSummary.finishedAt
-        }
-      : null
 
   return (
-    <div className="detail-pane">
-      <DetailScrollBody
-        onBack={() =>
-          navigate({
-            pathname: mediaLibraryPath(libraryId),
-            search: location.search
-          })
-        }
-      >
-        <div className={styles.page}>
-          <header className={styles.header}>
+    <>
+      <div className={styles.page}>
+        <header className={styles.header}>
+          <div className={styles.headerMain}>
             <div
               className={styles.identity}
               style={mediaLibraryIdentityStyle(library.color)}
@@ -613,139 +598,145 @@ function MediaLibrarySettingsContent({
               <span className={styles.identityIcon} aria-hidden>
                 <NavIcon name={library.icon} />
               </span>
-              <span className={styles.identityCopy}>
-                <span className={styles.eyebrow}>媒体库设置</span>
-                <h1 className={styles.pageTitle}>{library.name}</h1>
+              <h1 className={styles.pageTitle}>{library.name}</h1>
+            </div>
+            <div className={styles.headerControls}>
+              {libraries.length > 1 ? (
+                <div className={styles.libraryPicker}>
+                  <SelectControl
+                    className={styles.librarySelect}
+                    value={libraryId}
+                    aria-label="选择要配置的媒体库"
+                    onChange={(event) =>
+                      onSelectLibrary(Number(event.target.value))
+                    }
+                  >
+                    {libraries.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                        {item.status === 'archived' ? '（已归档）' : ''}
+                      </option>
+                    ))}
+                  </SelectControl>
+                </div>
+              ) : null}
+              <span className={styles.status} data-status={library.status}>
+                {archived
+                  ? '已归档'
+                  : library.isDefault
+                    ? '系统默认库'
+                    : '活动中'}
               </span>
+              {scan.running ? (
+                <span className={styles.activityStatus} role="status">
+                  正在扫描
+                </span>
+              ) : null}
             </div>
-            <span className={styles.status} data-status={library.status}>
-              {archived ? '已归档' : library.isDefault ? '默认媒体库' : '正常'}
-            </span>
-          </header>
+          </div>
+        </header>
 
-          {archived ? (
-            <div className={styles.archivedNotice} role="status">
-              该媒体库已归档。恢复后才能修改配置、来源目录和扫描策略。
-            </div>
-          ) : null}
-
-          <nav
-            className={styles.tabs}
-            role="tablist"
-            aria-label="媒体库设置分类"
-            onKeyDown={handleTabKeyDown}
-          >
-            {MEDIA_LIBRARY_SETTINGS_TABS.map((item) => (
-              <button
-                key={item}
-                type="button"
-                role="tab"
-                className={styles.tabButton}
-                aria-selected={tab === item}
-                tabIndex={tab === item ? 0 : -1}
-                data-active={tab === item || undefined}
-                onClick={() => navigateTab(item)}
-              >
-                {TAB_LABELS[item]}
-              </button>
-            ))}
-          </nav>
-
-          <main
-            className={styles.panel}
-            role="tabpanel"
-            aria-label={TAB_LABELS[tab]}
-          >
-            {tab === 'general' ? (
-              <GeneralSettingsTab
-                identityDraft={identityDraft}
-                setIdentityDraft={setIdentityDraft}
-                formDisabled={formDisabled}
-                saveIdentity={saveIdentity}
-              />
-            ) : null}
-            {tab === 'sources' ? (
-              <SourcesSettingsTab
-                library={library}
-                formDisabled={formDisabled}
-                addRoots={addRoots}
-                requestRootMigration={requestRootMigration}
-                toggleRoot={toggleRoot}
-                requestRootRemoval={requestRootRemoval}
-                cancelRootRemoval={cancelRootRemoval}
-              />
-            ) : null}
-            {tab === 'scan' ? (
-              <ScanSettingsTab
-                libraryId={libraryId}
-                library={library}
-                scan={scan}
-                scanMetrics={scanMetrics}
-                latestScanSummary={latestScanSummary}
-                pendingScanGroupIds={pendingScanGroupIds}
-                selectedScanMetric={selectedScanMetric}
-                setSelectedScanMetric={setSelectedScanMetric}
-                configDraft={configDraft}
-                updateConfigDraft={updateConfigDraft}
-                formDisabled={formDisabled}
-                saveConfig={saveConfig}
-                navigate={navigate}
-              />
-            ) : null}
-            {tab === 'scraping' ? (
-              <ScrapingSettingsTab
-                configDraft={configDraft}
-                updateConfigDraft={updateConfigDraft}
-                formDisabled={formDisabled}
-                defaultScraper={defaultScraper}
-                scraperOptions={scraperOptions}
-                saveConfig={saveConfig}
-              />
-            ) : null}
-            {tab === 'display' ? (
-              <DisplaySettingsTab
-                configDraft={configDraft}
-                updateConfigDraft={updateConfigDraft}
-                formDisabled={formDisabled}
-                saveConfig={saveConfig}
-              />
-            ) : null}
-            {tab === 'danger' ? (
-              <MaintenanceSettingsTab
-                library={library}
-                archived={archived}
-                busy={busy}
-                restoreLibrary={restoreLibrary}
-                setLifecycleConfirm={setLifecycleConfirm}
-                openDeleteConfirmation={openDeleteConfirmation}
-              />
-            ) : null}
-          </main>
-        </div>
-
-        <MediaLibrarySettingsDialogs
-          rootRemoval={rootRemoval}
-          setRootRemoval={setRootRemoval}
-          rootMigration={rootMigration}
-          setRootMigration={setRootMigration}
-          migrationTargets={migrationTargets}
-          lifecycleConfirm={lifecycleConfirm}
-          setLifecycleConfirm={setLifecycleConfirm}
-          deleteConfirmOpen={deleteConfirmOpen}
-          setDeleteConfirmOpen={setDeleteConfirmOpen}
-          deletePreview={deletePreview}
-          setDeletePreview={setDeletePreview}
-          deleteConfirmation={deleteConfirmation}
-          setDeleteConfirmation={setDeleteConfirmation}
-          library={library}
-          busy={busy}
-          confirmRootRemoval={confirmRootRemoval}
-          confirmRootMigration={confirmRootMigration}
-          archiveLibrary={archiveLibrary}
-          deleteLibrary={deleteLibrary}
+        <SettingsTabBar
+          group="library"
+          tabs={MEDIA_LIBRARY_SETTINGS_TABS.map((id) => ({
+            id,
+            label: MEDIA_LIBRARY_SETTINGS_TAB_LABELS[id]
+          }))}
+          activeTab={tab}
+          label="媒体库设置页签"
+          onSelect={(nextTab) => {
+            if (isSettingsTab(nextTab)) onSelectTab(nextTab)
+          }}
+          onKeyDown={onTabKeyDown}
         />
-      </DetailScrollBody>
-    </div>
+
+        <section
+          className={`${styles.panel}${tab === 'sources' ? ` ${styles.importPanel}` : ''}`}
+          role="tabpanel"
+          id={settingsTabPanelDomId('library', tab)}
+          aria-labelledby={settingsTabDomId('library', tab)}
+        >
+          {tab === 'general' ? (
+            <OverviewSettingsTab
+              identityDraft={identityDraft}
+              setIdentityDraft={setIdentityDraft}
+              formDisabled={formDisabled}
+              saveIdentity={saveIdentity}
+            />
+          ) : null}
+          {tab === 'sources' ? (
+            <SourcesAndScanSettingsTab
+              libraryId={libraryId}
+              library={library}
+              scan={scan}
+              latestScanSummary={latestScanSummary}
+              pendingScanGroupIds={pendingScanGroupIds}
+              selectedScanMetric={selectedScanMetric}
+              setSelectedScanMetric={setSelectedScanMetric}
+              configDraft={configDraft}
+              updateConfigImmediately={updateConfigImmediately}
+              formDisabled={formDisabled}
+              navigate={navigate}
+              addRoots={addRoots}
+              requestRootMigration={requestRootMigration}
+              toggleRoot={toggleRoot}
+              requestRootRemoval={requestRootRemoval}
+              cancelRootRemoval={cancelRootRemoval}
+            />
+          ) : null}
+          {tab === 'scraping' ? (
+            <ScrapingSettingsTab
+              configDraft={configDraft}
+              updateConfigDraft={updateConfigDraft}
+              formDisabled={formDisabled}
+              defaultScraper={defaultScraper}
+              scraperOptions={scraperOptions}
+              saveConfig={saveConfig}
+            />
+          ) : null}
+          {tab === 'display' ? (
+            <DisplaySettingsTab
+              configDraft={configDraft}
+              updateConfigDraft={updateConfigDraft}
+              formDisabled={formDisabled}
+              saveConfig={saveConfig}
+            />
+          ) : null}
+          {tab === 'danger' ? (
+            <MaintenanceSettingsTab
+              library={library}
+              archived={archived}
+              busy={busy}
+              requestArchive={() => setLifecycleConfirm('archive')}
+              restoreLibrary={restoreLibrary}
+              openDeleteConfirmation={openDeleteConfirmation}
+            />
+          ) : null}
+        </section>
+      </div>
+
+      <MediaLibrarySettingsDialogs
+        rootRemoval={rootRemoval}
+        setRootRemoval={setRootRemoval}
+        rootMigration={rootMigration}
+        setRootMigration={setRootMigration}
+        migrationTargets={migrationTargets}
+        lifecycleConfirm={lifecycleConfirm}
+        setLifecycleConfirm={setLifecycleConfirm}
+        deleteConfirmOpen={deleteConfirmOpen}
+        setDeleteConfirmOpen={setDeleteConfirmOpen}
+        deletePreview={deletePreview}
+        setDeletePreview={setDeletePreview}
+        deleteConfirmation={deleteConfirmation}
+        setDeleteConfirmation={setDeleteConfirmation}
+        library={library}
+        busy={busy}
+        confirmRootRemoval={confirmRootRemoval}
+        confirmRootMigration={confirmRootMigration}
+        archiveLibrary={archiveLibrary}
+        deleteLibrary={deleteLibrary}
+      />
+    </>
   )
 }
 
@@ -756,8 +747,8 @@ export default function MediaLibrarySettingsPage(): JSX.Element {
   if (libraryId == null) return <Navigate to={ROUTE_PATH.home} replace />
   if (!isSettingsTab(tab)) {
     return (
-      <Navigate to={mediaLibrarySettingsPath(libraryId, 'general')} replace />
+      <Navigate to={mediaLibrarySettingsPath(libraryId, 'sources')} replace />
     )
   }
-  return <MediaLibrarySettingsContent libraryId={libraryId} tab={tab} />
+  return <Navigate to={mediaLibrarySettingsPath(libraryId, tab)} replace />
 }

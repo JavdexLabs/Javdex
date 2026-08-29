@@ -28,7 +28,7 @@ export default function VideoDeleteImpact({
   return (
     <div className={`${styles.root} selectable-text`}>
       <p className={styles.lead}>
-        将永久删除全局影片资料，以及下列媒体库成员、资源记录和关联数据。此操作不可恢复。
+        将永久删除全局影片资料、下列媒体库成员和资源记录，以及本地视频 / STRM 源文件。此操作不可恢复。
       </p>
 
       <dl className={styles.metrics} aria-label="删除影响汇总">
@@ -79,8 +79,16 @@ export default function VideoDeleteImpact({
                   <span className={styles.meta}>媒体库 #{resource.libraryId}</span>
                 </span>
                 <span className={styles.path} title={resource.displayLocator}>
-                  {resource.displayName || resource.displayLocator}
+                  {resource.displayName && resource.displayName !== resource.displayLocator
+                    ? `${resource.displayName} · ${resource.displayLocator}`
+                    : resource.displayLocator}
                 </span>
+                {resource.sourceFilePath &&
+                resource.sourceFilePath !== resource.displayLocator ? (
+                  <span className={styles.path} title={resource.sourceFilePath}>
+                    {resource.sourceFilePath}
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -125,22 +133,6 @@ export default function VideoDeleteImpact({
           待确认刮削 {impact.pendingScrapeCount} 项，Agent 草稿 {impact.pendingAgentDraftCount} 项，
           暂存图片 {impact.pendingStagingAssetCount} 个；相关暂存文件会一并清理。
         </p>
-      </section>
-
-      <section className={styles.safe} aria-labelledby="delete-impact-source-files">
-        <h4 id="delete-impact-source-files" className={`${styles.sectionTitle} ${styles.safeTitle}`}>
-          磁盘源文件会保留
-        </h4>
-        <p className={styles.safeText}>本地视频与 STRM 源文件不会删除，只移除 Javdex 中的资源记录。</p>
-        {impact.sourcePaths.length > 0 ? (
-          <ul className={styles.sourcePaths}>
-            {impact.sourcePaths.map((sourcePath) => (
-              <li key={sourcePath} className={styles.sourcePath} title={sourcePath}>
-                {sourcePath}
-              </li>
-            ))}
-          </ul>
-        ) : null}
       </section>
     </div>
   )

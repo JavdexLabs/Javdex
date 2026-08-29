@@ -14,7 +14,7 @@
 
 当前路由使用嵌套路径表达上下文：
 
-- `/`: 首页，展示跨媒体库搜索入口、随机推荐与近期添加。
+- `/`: 首页，展示跨媒体库即时搜索、随机推荐与近期添加；存在 `q` 时原地切换为搜索结果列表。
 - `/home/video/:videoId`: 从首页打开影片详情。
 - `/home/video/:videoId/actress/:actressId`: 从首页影片详情继续打开演员详情。
 - `/search`: 跨媒体库搜索结果列表。
@@ -23,7 +23,8 @@
 - `/libraries/:libraryId`: 一个媒体库的独立影片列表。
 - `/libraries/:libraryId/video/:videoId`: 从指定媒体库打开影片详情。
 - `/libraries/:libraryId/video/:videoId/actress/:actressId`: 从库内影片详情继续打开演员详情。
-- `/libraries/:libraryId/settings/:tab`: 指定媒体库的独立设置。
+- `/settings/library/:tab?library=:libraryId`: 全局设置工作区内的媒体库设置，位于“概览”之后；默认 `sources` 页合并来源管理与扫描导入。
+- `/libraries/:libraryId/settings/:tab`: 旧媒体库设置入口，仅兼容重定向到全局设置工作区。
 - `/library` 与旧 `/detail/:id` 只是兼容入口；它们会解析可用媒体库并重定向到上述新路由。
 - `/actresses`: 演员列表。
 - `/actresses/:id`: 从演员列表打开演员详情。

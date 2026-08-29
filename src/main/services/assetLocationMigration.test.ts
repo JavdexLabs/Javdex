@@ -17,6 +17,10 @@ let newRoot: string | null = null
 
 const MIN_JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00, 0xff, 0xd9])
 
+function removeTempPath(target: string): void {
+  fs.rmSync(target, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 })
+}
+
 function statIfAvailable(filePath: string): fs.Stats | null {
   try {
     return fs.statSync(filePath)
@@ -42,7 +46,11 @@ afterEach(() => {
   resetSettingsCacheForTests()
   closeDatabase()
   if (tempRoot) {
-    fs.rmSync(tempRoot, { recursive: true, force: true })
+    try {
+      removeTempPath(tempRoot)
+    } catch {
+      // Windows junctions that point at their parent can leave an unresolvable tree.
+    }
     tempRoot = null
   }
   delete process.env.JAVDEX_TEST_USER_DATA
@@ -141,11 +149,19 @@ describe('assetLocationMigration', () => {
     fs.symlinkSync(tempRoot!, aliasParent, process.platform === 'win32' ? 'junction' : 'dir')
     const aliasedTarget = path.join(aliasParent, path.basename(oldRoot!))
 
-    await assert.rejects(
-      () => prepareMediaAssetsLocationMigration(oldRoot!, aliasedTarget, () => {}),
-      /实际指向同一位置/
-    )
-    assert.equal(fs.readFileSync(source, 'utf8'), 'source')
+    try {
+      await assert.rejects(
+        () => prepareMediaAssetsLocationMigration(oldRoot!, aliasedTarget, () => {}),
+        /实际指向同一位置/
+      )
+      assert.equal(fs.readFileSync(source, 'utf8'), 'source')
+    } finally {
+      try {
+        fs.unlinkSync(aliasParent)
+      } catch {
+        removeTempPath(aliasParent)
+      }
+    }
   })
 
   it('rejects a differently-cased path that resolves to the same directory', async () => {
@@ -255,8 +271,8 @@ describe('assetLocationMigration', () => {
       assert.equal(fs.readFileSync(externalFile, 'utf8'), 'outside')
       assert.equal(fs.existsSync(newRoot!), false)
     } finally {
-      fs.rmSync(linkPath, { force: true })
-      fs.rmSync(externalRoot, { recursive: true, force: true })
+      removeTempPath(linkPath)
+      removeTempPath(externalRoot)
     }
   })
 
@@ -275,8 +291,8 @@ describe('assetLocationMigration', () => {
       assert.equal(fs.readFileSync(externalFile, 'utf8'), 'outside')
       assert.equal(fs.existsSync(newRoot!), false)
     } finally {
-      fs.rmSync(oldRoot!, { force: true })
-      fs.rmSync(externalRoot, { recursive: true, force: true })
+      removeTempPath(oldRoot!)
+      removeTempPath(externalRoot)
     }
   })
 })

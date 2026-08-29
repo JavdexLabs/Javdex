@@ -411,7 +411,7 @@ function buildGlobalDeleteImpact(snapshot: GlobalDeleteSnapshot): VideoLifecycle
     pendingScrapeCount: snapshot.pendingScrapes.length,
     pendingAgentDraftCount: snapshot.agentDrafts.length,
     pendingStagingAssetCount: staging.length,
-    sourceFilesPreserved: true
+    sourceFilesPreserved: false
   }
 }
 

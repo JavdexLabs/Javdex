@@ -7,13 +7,19 @@ import {
 } from './homeRoutes'
 import {
   MEDIA_LIBRARY_SETTINGS_TABS,
+  isMediaLibrarySettingsTab,
   mediaLibraryPath,
   mediaLibrarySettingsPath,
   mediaLibraryVideoActressPath,
   mediaLibraryVideoDetailPath,
+  parseActiveMediaLibraryId,
   parseMediaLibraryRoute,
+  parseMediaLibrarySettingsLibraryId,
   parseMediaLibrarySettingsPath,
-  parseMediaLibraryVideoPath
+  parseMediaLibraryVideoPath,
+  peekMediaLibrarySettingsLibraryId,
+  rememberMediaLibrarySettingsLibraryId,
+  clearMediaLibrarySettingsLibraryMemory
 } from './mediaLibraryRoutes'
 import {
   parseSearchVideoPath,
@@ -61,9 +67,8 @@ describe('multi-library route builders and parsers', () => {
 
   it('round-trips media-library list, detail, nested actress and settings routes', () => {
     assert.deepEqual(MEDIA_LIBRARY_SETTINGS_TABS, [
-      'general',
       'sources',
-      'scan',
+      'general',
       'scraping',
       'display',
       'danger'
@@ -74,7 +79,13 @@ describe('multi-library route builders and parsers', () => {
       mediaLibraryVideoActressPath(3, 42, 7),
       '/libraries/3/video/42/actress/7'
     )
-    assert.equal(mediaLibrarySettingsPath(3, 'sources'), '/libraries/3/settings/sources')
+    assert.equal(
+      mediaLibrarySettingsPath(3, 'sources'),
+      '/settings/library/sources?library=3'
+    )
+    assert.equal(parseMediaLibrarySettingsLibraryId('?library=003'), 3)
+    assert.equal(parseMediaLibrarySettingsLibraryId('?library=invalid'), null)
+    assert.equal(isMediaLibrarySettingsTab('scan'), false)
 
     assert.deepEqual(parseMediaLibraryRoute('/libraries/3'), {
       kind: 'list',
@@ -94,6 +105,17 @@ describe('multi-library route builders and parsers', () => {
       libraryId: 3,
       tab: 'display'
     })
+    assert.equal(parseActiveMediaLibraryId('/libraries/3'), 3)
+    assert.equal(
+      parseActiveMediaLibraryId('/settings/library/sources', '?library=7'),
+      7
+    )
+    assert.equal(parseActiveMediaLibraryId('/settings/plugins/video', '?library=7'), null)
+    clearMediaLibrarySettingsLibraryMemory()
+    rememberMediaLibrarySettingsLibraryId(9)
+    assert.equal(peekMediaLibrarySettingsLibraryId(), 9)
+    clearMediaLibrarySettingsLibraryMemory()
+    assert.equal(peekMediaLibrarySettingsLibraryId(), null)
   })
 
   it('rejects malformed, non-positive, fractional and unsafe route ids', () => {

@@ -60,7 +60,12 @@ import {
   playlistDetailPath,
   playlistVideoDetailPath
 } from './playlistRoutes'
-import { resolveSettingsRoute, settingsPath, settingsPluginDevPath } from '../settings/settingsRoutes'
+import {
+  SETTINGS_GROUPS,
+  resolveSettingsRoute,
+  settingsPath,
+  settingsPluginDevPath
+} from '../settings/settingsRoutes'
 import {
   parsePendingCenterSearch,
   pendingCenterPath,
@@ -721,9 +726,25 @@ describe('navigation helpers', () => {
 describe('settings route contract', () => {
   it('builds canonical settings paths and resolves valid sections', () => {
     assert.equal(settingsPath('overview'), '/settings/overview/status')
+    assert.equal(settingsPath('library'), '/settings/library/sources')
     assert.equal(settingsPath('network'), '/settings/network/proxy')
+    assert.deepEqual(SETTINGS_GROUPS.slice(0, 2).map((group) => group.id), [
+      'overview',
+      'library'
+    ])
+    assert.deepEqual(SETTINGS_GROUPS[1].tabs[0], {
+      id: 'sources',
+      label: '来源与扫描'
+    })
     assert.equal(settingsPluginDevPath(), '/settings/plugin-dev')
-    assert.equal(resolveSettingsRoute('/settings/library/paths').group.id, 'overview')
+    assert.deepEqual(resolveSettingsRoute('/settings/library/paths'), {
+      group: SETTINGS_GROUPS[1],
+      tab: 'sources'
+    })
+    assert.deepEqual(resolveSettingsRoute('/settings/library/scan'), {
+      group: SETTINGS_GROUPS[1],
+      tab: 'sources'
+    })
     assert.deepEqual(resolveSettingsRoute('/settings/network/proxy'), {
       group: {
         id: 'network',

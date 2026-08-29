@@ -802,7 +802,7 @@ describe('ScanCoordinator', () => {
       },
       shouldAutoDeleteResourceLessVideos: () => true,
       deleteResourceLessVideos: () => {
-        throw new Error('partial scans must not auto-delete videos')
+        throw new Error('partial scans must not remove resource-less memberships')
       }
     })
 
@@ -836,7 +836,7 @@ describe('ScanCoordinator', () => {
     assert.equal(result.removed, 2)
   })
 
-  it('auto-deletes zero-resource videos after deferred cleanup on a safe full scan', async () => {
+  it('removes resource-less memberships after deferred cleanup on a safe full scan', async () => {
     const order: string[] = []
     const summaries: LibraryScanSummary[] = []
     const times = ['2026-08-10T01:00:00.000Z', '2026-08-10T01:00:03.000Z']

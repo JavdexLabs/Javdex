@@ -38,12 +38,12 @@ describe('buildLibraryScanNotification', () => {
       result({ imported: 2, relocated: 1, removed: 3, promoted: 1, deletedVideos: 4 })
     )
     assert.equal(notification?.tone, 'success')
-    assert.match(notification?.message ?? '', /新增 2.*更新 1.*移除 3.*提升主资源 1.*删除影片 4/)
+    assert.match(notification?.message ?? '', /新增 2.*更新 1.*移除 3.*提升主资源 1.*移出无资源成员 4/)
   })
 
   it('reports a metadata-only resource refresh as an update', () => {
     assert.deepEqual(buildLibraryScanNotification(result({ refreshed: 2 })), {
-      message: '扫描完成：新增 0，更新 2，移除 0，提升主资源 0，删除影片 0',
+      message: '扫描完成：新增 0，更新 2，移除 0，提升主资源 0，移出无资源成员 0',
       tone: 'success'
     })
   })

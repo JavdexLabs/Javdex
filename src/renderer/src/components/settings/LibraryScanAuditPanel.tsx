@@ -292,12 +292,7 @@ export default function LibraryScanAuditPanel({
   onOpenVideo: (videoId: number) => void
   onOpenPending: (groupId?: number) => void
 }): JSX.Element {
-  const [activeTab, setActiveTab] = useState<ScanAuditTab>(() => {
-    if (unrecognized.length > 0 || summary.failedFiles > 0 || summary.pendingScanGroups > 0) {
-      return 'failed'
-    }
-    return 'all'
-  })
+  const [activeTab, setActiveTab] = useState<ScanAuditTab>('failed')
   const [search, setSearch] = useState('')
   const [outcome, setOutcome] = useState<LibraryScanFileAuditEntry['outcome'] | 'all'>('all')
   const [changesFilter, setChangesFilter] = useState<'all' | 'removed' | 'promoted' | 'deleted'>('all')
@@ -355,6 +350,14 @@ export default function LibraryScanAuditPanel({
       setActiveTab('changes')
     }
   }, [selected])
+
+  useEffect(() => {
+    setActiveTab('failed')
+    setSearch('')
+    setOutcome('all')
+    setChangesFilter('all')
+    onSelect('failedFiles')
+  }, [onSelect, summary.libraryId, summary.runId])
 
   const items = useMemo((): ViewItem[] => {
     if (activeTab === 'failed') {
@@ -430,7 +433,7 @@ export default function LibraryScanAuditPanel({
       const deleted: ViewItem[] = matchedAudit.deletedVideos.map((entry, index) => ({
         key: `deleted:${index}:${entry.videoId}`,
         title: `${entry.videoCode}${entry.videoTitle ? ` · ${entry.videoTitle}` : ''}`,
-        detail: '扫描后清理的无资源影片'
+        detail: '扫描后移出的无资源成员'
       }))
 
       if (changesFilter === 'removed') return removed
@@ -579,14 +582,14 @@ export default function LibraryScanAuditPanel({
               {activeTab === 'all' && '全部已扫描文件'}
               {activeTab === 'added_updated' && '本次新增与更新的资源'}
               {activeTab === 'skipped' && '已跳过处理的文件'}
-              {activeTab === 'changes' && '资源移除、提升与删除记录'}
+              {activeTab === 'changes' && '资源移除、提升与移出记录'}
             </strong>
             <span className={styles.detailDesc}>
               {activeTab === 'failed' && '包含无法识别、STRM 解析失败、处理失败及待确认归属项。'}
               {activeTab === 'all' && '包含本次扫描涉及的所有文件及最终处理结果。'}
               {activeTab === 'added_updated' && '已成功新建影片或挂载到已有影片的资源。'}
               {activeTab === 'skipped' && '未发生变更、低于最短时长限制或重复的文件。'}
-              {activeTab === 'changes' && '源文件缺失清理、主资源替补提升及无资源影片删除。'}
+              {activeTab === 'changes' && '源文件缺失清理、主资源替补提升及无资源成员移出。'}
             </span>
           </div>
           <SettingsStatusPill status="muted">{filtered.length} 项</SettingsStatusPill>
@@ -621,7 +624,7 @@ export default function LibraryScanAuditPanel({
               className={`${styles.subFilterChip}${changesFilter === 'deleted' ? ` ${styles.subFilterChipActive}` : ''}`}
               onClick={() => setChangesFilter('deleted')}
             >
-              删除影片 ({summary.videosDeleted})
+              移出无资源成员 ({summary.videosDeleted})
             </button>
           </div>
         ) : null}

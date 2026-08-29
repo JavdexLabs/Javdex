@@ -1,3 +1,6 @@
+import { parseMediaLibraryRoute } from './mediaLibraryRoutes'
+import { ROUTE_PATH } from './routePaths'
+
 /** In-memory list scroll (cleared on full reload; not written to storage). */
 
 export interface ListScrollSnapshot {
@@ -27,26 +30,26 @@ export function clearAllListViewMemory(): void {
 /** Sidebar primary nav: do not restore scroll for the destination list. */
 export function clearListScrollForPrimaryNav(pathname: string): void {
   const keys = [...scrollByKey.keys()]
-  if (pathname === '/') {
+  if (pathname === ROUTE_PATH.home) {
     for (const key of keys) {
       if (key.startsWith('home:')) scrollByKey.delete(key)
     }
     return
   }
-  if (pathname === '/search') {
+  if (pathname === ROUTE_PATH.search) {
     for (const key of keys) {
       if (key.startsWith('global-search:')) scrollByKey.delete(key)
     }
     return
   }
-  const libraryMatch = /^\/libraries\/([1-9]\d*)$/.exec(pathname)
-  if (libraryMatch) {
+  const libraryRoute = parseMediaLibraryRoute(pathname)
+  if (libraryRoute?.kind === 'list') {
     for (const key of keys) {
-      if (key.startsWith(`library:${libraryMatch[1]}:`)) scrollByKey.delete(key)
+      if (key.startsWith(`library:${libraryRoute.libraryId}:`)) scrollByKey.delete(key)
     }
     return
   }
-  if (pathname === '/actresses') {
+  if (pathname === ROUTE_PATH.actresses) {
     for (const key of keys) {
       if (key.startsWith('actresses:')) scrollByKey.delete(key)
     }

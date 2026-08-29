@@ -8,7 +8,7 @@ import VideoDeleteImpact from './VideoDeleteImpact'
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
 describe('VideoDeleteImpact', () => {
-  it('shows every affected domain and makes retained source files explicit', () => {
+  it('shows every affected domain without a duplicate source-file section', () => {
     const impact: VideoLifecycleImpact = {
       kind: 'delete-globally',
       revision: 'rev',
@@ -50,7 +50,7 @@ describe('VideoDeleteImpact', () => {
       pendingScrapeCount: 1,
       pendingAgentDraftCount: 2,
       pendingStagingAssetCount: 3,
-      sourceFilesPreserved: true
+      sourceFilesPreserved: false
     }
 
     const markup = renderToStaticMarkup(<VideoDeleteImpact impact={impact} />)
@@ -63,10 +63,12 @@ describe('VideoDeleteImpact', () => {
       '稍后观看',
       'covers/ML-091.jpg',
       'Agent 草稿 2 项',
-      '磁盘源文件会保留',
+      '本地视频 / STRM 源文件',
+      '/media/ML-091.mp4',
       '/media/ML-091.strm'
     ]) {
       assert.match(markup, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     }
+    assert.doesNotMatch(markup, /将删除磁盘源文件|磁盘源文件会保留/)
   })
 })

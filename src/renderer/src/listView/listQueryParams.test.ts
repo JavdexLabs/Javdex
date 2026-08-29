@@ -5,6 +5,7 @@ import {
   canonicalizeLibrarySearchParams,
   libraryQueryHash,
   libraryVideoQueryFromSearchParams,
+  isDefaultLibraryParams,
   parseVideoResourceFilters,
   videoResourceFiltersParam
 } from './listQueryParams'
@@ -54,5 +55,21 @@ describe('library resource filter URL contract', () => {
     assert.equal(libraryVideoQueryFromSearchParams(pending).pendingScrape, 'pending')
     assert.equal(invalid.has(LIST_PARAM.pending), false)
     assert.notEqual(libraryQueryHash(pending), libraryQueryHash(new URLSearchParams()))
+  })
+
+  it('resolves omitted sort state from each media library configuration', () => {
+    const params = new URLSearchParams()
+    const configured = {
+      status: 'all' as const,
+      year: 'all' as const,
+      sortBy: 'code' as const,
+      sortDir: 'asc' as const
+    }
+
+    const query = libraryVideoQueryFromSearchParams(params, configured)
+    assert.equal(query.sortBy, 'code')
+    assert.equal(query.sortDir, 'asc')
+    assert.equal(isDefaultLibraryParams(params, configured), true)
+    assert.notEqual(libraryQueryHash(params, configured), libraryQueryHash(params))
   })
 })

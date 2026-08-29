@@ -12,13 +12,15 @@ import type {
   LibraryPathRemovalPreview,
   LibraryScanAudit,
   LibraryScanEvent,
+  LibraryScanLatestSnapshot,
+  LibraryScanProgressEvent,
   ManualImportResult,
+  PendingLibraryPathCleanup,
   PendingScanGroup,
   PendingScanGroupResolution,
   PendingScanGroupResolutionResult,
   PlayResult,
   RenameImportResult,
-  ScanProgress,
   ScanResult
 } from './libraryTypes'
 import type { TagListItem, SortDir } from './commonTypes'
@@ -121,10 +123,18 @@ export interface AppIpcContract {
   [IPC.SETTINGS_UPDATE]: { args: [patch: RendererSettingsPatch]; result: SettingsSnapshot }
   [IPC.SETTINGS_PICK_FOLDER]: { args: []; result: string[] }
   [IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW]: {
-    args: [path: string]
+    args: [libraryId: number, rootId: number]
     result: LibraryPathRemovalPreview
   }
-  [IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM]: { args: [path: string]; result: SettingsSnapshot }
+  [IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM]: {
+    args: [
+      libraryId: number,
+      rootId: number,
+      expectedRevision: number,
+      expectedImpactRevision: string
+    ]
+    result: PendingLibraryPathCleanup
+  }
   [IPC.SETTINGS_MODEL_MANAGEMENT_GET]: { args: []; result: ModelManagementSnapshot }
   [IPC.SETTINGS_MODEL_MANAGEMENT_APPLY]: {
     args: [input: ModelManagementApplyInput]
@@ -149,21 +159,50 @@ export interface AppIpcContract {
   [IPC.EXTERNAL_LINK_OPEN]: { args: [url: string]; result: boolean }
   [IPC.APP_UPDATE_IGNORE_VERSION]: { args: [version: string]; result: UpdateCheckState }
 
-  [IPC.SCAN_RUN]: { args: [folders?: string[]]; result: ScanResult }
-  [IPC.SCAN_CANCEL]: { args: []; result: boolean }
-  [IPC.SCAN_AUDIT_GET]: { args: []; result: LibraryScanAudit | null }
-  [IPC.SCAN_AUDIT_REVEAL_FILE]: { args: [filePath: string]; result: PlayResult }
+  [IPC.SCAN_RUN]: {
+    args: [libraryId: number, rootIds?: number[]]
+    result: ScanResult
+  }
+  [IPC.SCAN_CANCEL]: { args: [runId: string]; result: boolean }
+  [IPC.SCAN_LATEST_GET]: {
+    args: [libraryId: number]
+    result: LibraryScanLatestSnapshot
+  }
+  [IPC.SCAN_AUDIT_GET]: {
+    args: [libraryId: number]
+    result: LibraryScanAudit | null
+  }
+  [IPC.SCAN_AUDIT_REVEAL_FILE]: {
+    args: [libraryId: number, filePath: string]
+    result: PlayResult
+  }
   [IPC.FILE_RENAME]: {
-    args: [oldPath: string, newName: string, code: string, target: VideoResourceImportTarget]
+    args: [
+      libraryId: number,
+      rootId: number,
+      oldPath: string,
+      newName: string,
+      code: string,
+      target: VideoResourceImportTarget
+    ]
     result: RenameImportResult
   }
   [IPC.FILE_IMPORT_MANUAL]: {
-    args: [filePath: string, code: string, target: VideoResourceImportTarget]
+    args: [
+      libraryId: number,
+      rootId: number,
+      filePath: string,
+      code: string,
+      target: VideoResourceImportTarget
+    ]
     result: ManualImportResult
   }
-  [IPC.PENDING_SCAN_LIST]: { args: []; result: PendingScanGroup[] }
+  [IPC.PENDING_SCAN_LIST]: {
+    args: [libraryId: number]
+    result: PendingScanGroup[]
+  }
   [IPC.PENDING_SCAN_RESOLVE]: {
-    args: [groupId: number, resolution: PendingScanGroupResolution]
+    args: [libraryId: number, groupId: number, resolution: PendingScanGroupResolution]
     result: PendingScanGroupResolutionResult
   }
 
@@ -309,10 +348,22 @@ export interface AppIpcContract {
   }
   [IPC.AGENT_METADATA_DISCARD]: { args: [input: AgentMetadataDiscardInput]; result: void }
 
-  [IPC.PLAYER_PLAY]: { args: [videoId: number]; result: PlayResult }
-  [IPC.PLAYER_REVEAL]: { args: [videoId: number]; result: PlayResult }
-  [IPC.PLAYER_OPEN_RESOURCE]: { args: [resourceId: number]; result: PlayResult }
-  [IPC.PLAYER_REVEAL_RESOURCE]: { args: [resourceId: number]; result: PlayResult }
+  [IPC.PLAYER_PLAY]: {
+    args: [libraryId: number, videoId: number]
+    result: PlayResult
+  }
+  [IPC.PLAYER_REVEAL]: {
+    args: [libraryId: number, videoId: number]
+    result: PlayResult
+  }
+  [IPC.PLAYER_OPEN_RESOURCE]: {
+    args: [libraryId: number, resourceId: number]
+    result: PlayResult
+  }
+  [IPC.PLAYER_REVEAL_RESOURCE]: {
+    args: [libraryId: number, resourceId: number]
+    result: PlayResult
+  }
 
   [IPC.ASSET_CRYPTO_SET]: { args: [enabled: boolean]; result: SettingsSnapshot }
   [IPC.ASSET_STORAGE_RELOCATE]: { args: [targetPath?: string | null]; result: SettingsSnapshot }
@@ -322,7 +373,7 @@ export interface AppIpcContract {
 
 export interface AppIpcEventContract {
   [IPC.APP_UPDATE_STATE_CHANGED]: UpdateCheckState
-  [IPC.SCAN_PROGRESS]: ScanProgress
+  [IPC.SCAN_PROGRESS]: LibraryScanProgressEvent
   [IPC.SCAN_STATE_CHANGED]: LibraryScanEvent
   [IPC.PLUGIN_DEV_AGENT_EVENT]: PluginDevAgentEvent
   [IPC.ASSET_CRYPTO_PROGRESS]: AssetCryptoProgress

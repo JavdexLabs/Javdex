@@ -14,6 +14,7 @@ import type { IpcContext } from './shared'
 import { configureIpcSecurity } from './ipcSecurity'
 import { registerLibraryCuratorHandlers } from './libraryCuratorHandlers'
 import { registerAgentMetadataHandlers } from './agentMetadataHandlers'
+import { registerMediaLibraryHandlers } from './mediaLibraryHandlers'
 
 export function registerIpcHandlers(
   getWindow: () => BrowserWindow | null,
@@ -23,6 +24,7 @@ export function registerIpcHandlers(
   configureIpcSecurity({ getWindow, isTrustedUrl })
 
   registerSettingsHandlers(ctx)
+  registerMediaLibraryHandlers()
   registerUpdateHandlers(ctx)
   registerAssetHandlers()
   registerScanHandlers(ctx)

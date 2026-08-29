@@ -52,7 +52,8 @@ export interface ScrapeIpcContract {
       scraperName?: string,
       fields?: VideoScrapeField[],
       mode?: VideoScrapeUpdateMode,
-      directorSelectionId?: number
+      directorSelectionId?: number,
+      libraryId?: number
     ]
     result: VideoScrapeOneResult
   }

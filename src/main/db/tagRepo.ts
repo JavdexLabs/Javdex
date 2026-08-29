@@ -19,7 +19,16 @@ export function listTags(): TagListItem[] {
   const db = getDb()
   return db
     .prepare(
-      `SELECT t.*, COUNT(vt.video_id) AS video_count
+      `SELECT t.*, COUNT(
+         CASE WHEN EXISTS (
+           SELECT 1
+           FROM library_video_memberships membership
+           JOIN media_libraries library ON library.id = membership.library_id
+           WHERE membership.video_id = vt.video_id
+             AND membership.is_hidden = 0
+             AND library.status = 'active'
+         ) THEN vt.video_id END
+       ) AS video_count
        FROM tags t
        LEFT JOIN video_tag vt ON vt.tag_id = t.id
        GROUP BY t.id
@@ -33,7 +42,14 @@ export function listManualTags(): TagListItem[] {
   const db = getDb()
   return db
     .prepare(
-      `SELECT t.*, COUNT(DISTINCT vt.video_id) AS video_count
+      `SELECT t.*, COUNT(DISTINCT CASE WHEN EXISTS (
+         SELECT 1
+         FROM library_video_memberships membership
+         JOIN media_libraries library ON library.id = membership.library_id
+         WHERE membership.video_id = vt.video_id
+           AND membership.is_hidden = 0
+           AND library.status = 'active'
+       ) THEN vt.video_id END) AS video_count
        FROM tags t
        JOIN video_tag vt ON vt.tag_id = t.id AND vt.origin = 'manual'
        GROUP BY t.id

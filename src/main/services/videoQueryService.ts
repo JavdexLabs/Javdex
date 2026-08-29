@@ -1,8 +1,13 @@
-import { getVideoDetail, getVideoResourceById, listVideos, listYears } from '../db/videoRepo'
+import { getVideoResourceInLibrary } from '../db/videoRepo'
+import {
+  scopedVideoCatalogRepo,
+  type ScopedStoredVideoDetail,
+  type ScopedVideoCatalogRepo
+} from '../db/scopedVideoCatalogRepo'
 import { resolveVideoDisplayDurationSeconds } from '../scanner/videoDuration'
+import type { CatalogScope } from '@shared/mediaLibraryTypes'
+import type { ScopedVideoDetail, ScopedVideoListResult } from '@shared/catalogTypes'
 import type {
-  VideoDetail,
-  VideoListResult,
   VideoQuery,
   VideoResource,
   VideoResourceDetail
@@ -10,35 +15,31 @@ import type {
 import { maskVideoResourceLocator } from '@shared/videoResourceLinks'
 
 export interface VideoQueryService {
-  list(query?: VideoQuery): VideoListResult
-  get(id: number): VideoDetail | null
-  getResource(videoId: number, resourceId: number): VideoResource | null
-  listYears(): number[]
+  list(scope: CatalogScope, query?: VideoQuery): ScopedVideoListResult
+  get(scope: CatalogScope, id: number): ScopedVideoDetail | null
+  getResource(libraryId: number, videoId: number, resourceId: number): VideoResource | null
+  listYears(scope: CatalogScope): number[]
 }
 
 interface VideoQueryServiceDependencies {
-  listVideos: typeof listVideos
-  getVideoDetail: typeof getVideoDetail
-  getVideoResourceById: typeof getVideoResourceById
-  listYears: typeof listYears
+  catalog: ScopedVideoCatalogRepo
+  getVideoResourceInLibrary: typeof getVideoResourceInLibrary
   resolveDuration: typeof resolveVideoDisplayDurationSeconds
 }
 
 export function createVideoQueryService(
   dependencies: Partial<VideoQueryServiceDependencies> = {}
 ): VideoQueryService {
-  const readList = dependencies.listVideos ?? listVideos
-  const readDetail = dependencies.getVideoDetail ?? getVideoDetail
-  const readResource = dependencies.getVideoResourceById ?? getVideoResourceById
-  const readYears = dependencies.listYears ?? listYears
+  const catalog = dependencies.catalog ?? scopedVideoCatalogRepo
+  const readResource = dependencies.getVideoResourceInLibrary ?? getVideoResourceInLibrary
   const resolveDuration = dependencies.resolveDuration ?? resolveVideoDisplayDurationSeconds
 
   return {
-    list(query): VideoListResult {
-      return readList(query ?? {})
+    list(scope, query): ScopedVideoListResult {
+      return catalog.list(scope, query ?? {})
     },
-    get(id): VideoDetail | null {
-      const detail = readDetail(id)
+    get(scope, id): ScopedVideoDetail | null {
+      const detail: ScopedStoredVideoDetail | null = catalog.get(scope, id)
       if (!detail) return null
       const primary = detail.resources.find((resource) => resource.is_primary === 1)
       const resolved_duration_seconds = resolveDuration({
@@ -46,7 +47,12 @@ export function createVideoQueryService(
         primary_resource_duration_seconds: primary?.duration_seconds ?? null
       })
       const resources: VideoResourceDetail[] = detail.resources.map((resource) => {
-        const { locator, resource_key: _resourceKey, ...projected } = resource
+        const {
+          locator,
+          resource_key: _resourceKey,
+          source_identity: _sourceIdentity,
+          ...projected
+        } = resource
         return {
           ...projected,
           display_locator:
@@ -57,12 +63,12 @@ export function createVideoQueryService(
       })
       return { ...detail, resources, resolved_duration_seconds }
     },
-    getResource(videoId, resourceId): VideoResource | null {
-      const resource = readResource(resourceId)
+    getResource(libraryId, videoId, resourceId): VideoResource | null {
+      const resource = readResource(libraryId, resourceId)
       return resource?.video_id === videoId ? resource : null
     },
-    listYears(): number[] {
-      return readYears()
+    listYears(scope): number[] {
+      return catalog.listYears(scope)
     }
   }
 }

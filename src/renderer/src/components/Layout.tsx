@@ -20,12 +20,18 @@ import { usePluginDevLeaveGuard } from './pluginDev/PluginDevLeaveGuard'
 import { NavIcon, type NavIconName } from './NavIcons'
 import { ROUTE_PATH } from '../listView/routePaths'
 import { pendingCenterPath } from '../listView/pendingRoutes'
-import { actressKeys } from '../query/queryKeys'
+import { actressKeys, mediaLibraryKeys } from '../query/queryKeys'
+import MediaLibraryNav from './MediaLibraryNav'
+import { pendingInboxCount } from '../pendingInboxState'
+import {
+  isGlobalSearchShortcut,
+  queueHomeGlobalSearchFocus
+} from '../globalSearchShortcut'
 
 type NavItem = { to: string; label: string; icon: NavIconName; end?: boolean }
 
 const NAV_MAIN: NavItem[] = [
-  { to: ROUTE_PATH.library, label: '媒体库', icon: 'library', end: true },
+  { to: ROUTE_PATH.home, label: '首页', icon: 'home', end: true },
   { to: ROUTE_PATH.playlists, label: '清单', icon: 'playlist' },
   { to: ROUTE_PATH.actresses, label: '演员', icon: 'actress' }
 ]
@@ -105,7 +111,9 @@ function NavItems({
               end={n.end}
               draggable={false}
               onClick={(event) => handleNavClick(event, n.to)}
-              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+              className={({ isActive }) =>
+                `nav-item ${isActive || activeListRoot === n.to ? 'active' : ''}`
+              }
             >
               <span className="nav-icon">
                 <NavIcon name={n.icon} />
@@ -134,6 +142,8 @@ function NavItems({
 
 export default function Layout({ children }: { children: ReactNode }): JSX.Element {
   const location = useLocation()
+  const navigate = useNavigate()
+  const { requestLeave } = usePluginDevLeaveGuard()
   const { getBackground } = useAppBackground()
   const { isOpen: imagePreviewOpen } = useImagePreviewOverlay()
   const { privacyMode } = useTheme()
@@ -150,9 +160,10 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
     queryFn: () => api.actressScrape.conflictSummary(),
     refetchInterval: 3_000
   })
-  const pendingScanQuery = useQuery({
-    queryKey: ['pending-scan-groups'],
-    queryFn: () => api.scan.listPending(),
+  const librariesQuery = useQuery({
+    queryKey: mediaLibraryKeys.activeList(),
+    queryFn: () => api.mediaLibraries.list(),
+    staleTime: 2_000,
     refetchInterval: 3_000
   })
   const pendingVideoQuery = useQuery({
@@ -162,15 +173,31 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
   })
   /** One inbox, one badge: scan groups, scrape snapshots and actress name conflicts. */
   const pendingBadges: Record<string, number> = {
-    [ROUTE_PATH.pending]:
-      (pendingScanQuery.data?.length ?? 0) +
-      (pendingVideoQuery.data?.length ?? 0) +
-      (conflictSummaryQuery.data?.groupCount ?? 0)
+    [ROUTE_PATH.pending]: pendingInboxCount({
+      libraries: librariesQuery.data ?? [],
+      pendingVideoCount: pendingVideoQuery.data?.length ?? 0,
+      actressConflictGroupCount: conflictSummaryQuery.data?.groupCount ?? 0
+    })
   }
 
   useEffect(() => {
     syncPrimaryNavigationMemory(location.pathname, location.search)
   }, [location.pathname, location.search])
+
+  useEffect(() => {
+    const handleGlobalSearchShortcut = (event: KeyboardEvent): void => {
+      if (!isGlobalSearchShortcut(event)) return
+      event.preventDefault()
+      const go = (): void => {
+        if (location.pathname !== ROUTE_PATH.home) navigate(ROUTE_PATH.home)
+        queueHomeGlobalSearchFocus(document, window.requestAnimationFrame.bind(window))
+      }
+      if (isPluginDevPath(location.pathname)) requestLeave(go)
+      else go()
+    }
+    window.addEventListener('keydown', handleGlobalSearchShortcut)
+    return () => window.removeEventListener('keydown', handleGlobalSearchShortcut)
+  }, [location.pathname, navigate, requestLeave])
 
   return (
     <div className={`app-shell${hasBackgroundLayer ? ' app-shell--with-background' : ''}`}>
@@ -184,7 +211,9 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
       <aside className="sidebar">
         <AppBrand />
         <nav className="sidebar-nav">
-          <NavItems items={NAV_MAIN} />
+          <NavItems items={NAV_MAIN.slice(0, 1)} />
+          <MediaLibraryNav />
+          <NavItems items={NAV_MAIN.slice(1)} />
           <div className={`nav-group${facetActive ? ' nav-group--active' : ''}`}>
             <div className="nav-group-label">分类</div>
             <NavItems items={NAV_FACETS} />

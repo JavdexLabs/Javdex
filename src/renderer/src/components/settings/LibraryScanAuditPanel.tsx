@@ -5,7 +5,8 @@ import type {
   LibraryScanFileAuditEntry,
   LibraryScanMetricKey,
   LibraryScanResourceAuditEntry,
-  LibraryScanSummary
+  LibraryScanSummary,
+  LibraryScanLatestSnapshot
 } from '@shared/libraryTypes'
 import { Copy, FolderOpen, AlertTriangle, CheckCircle2, RefreshCw, FileText, Trash2 } from 'lucide-react'
 import Button from '../Button'
@@ -39,6 +40,7 @@ type ViewItem = {
   detail: string
   outcome?: LibraryScanFileAuditEntry['outcome']
   path?: string
+  rootId?: number
   videoId?: number
   groupId?: number
   status?: string
@@ -86,6 +88,7 @@ function fileView(entry: LibraryScanFileAuditEntry, index: number): ViewItem {
     detail: fileDetail(entry),
     outcome: entry.outcome,
     path: entry.filePath,
+    rootId: entry.rootId,
     videoId: 'videoId' in entry ? entry.videoId : undefined,
     groupId: entry.outcome === 'pending' ? entry.groupId ?? undefined : undefined
   }
@@ -126,12 +129,14 @@ function getOutcomeClass(outcome?: LibraryScanFileAuditEntry['outcome']): string
 }
 
 function AuditRowContent({
+  libraryId,
   item,
   style,
   activeTab,
   onOpenAttention,
   onResolvedUnrecognized
 }: {
+  libraryId: number
   item: ViewItem
   style?: React.CSSProperties
   activeTab: ScanAuditTab
@@ -140,7 +145,7 @@ function AuditRowContent({
 }): JSX.Element {
   const toast = useToast()
 
-  if (item.isUnrecognizedPending && item.path) {
+  if (item.isUnrecognizedPending && item.path && item.rootId) {
     return (
       <div
         className={styles.rowSlot}
@@ -148,7 +153,12 @@ function AuditRowContent({
         data-audit-anchor={auditItemAnchor(item)}
         tabIndex={-1}
       >
-        <UnrecognizedRow path={item.path} onResolved={onResolvedUnrecognized} />
+        <UnrecognizedRow
+          libraryId={libraryId}
+          rootId={item.rootId}
+          path={item.path}
+          onResolved={onResolvedUnrecognized}
+        />
       </div>
     )
   }
@@ -161,7 +171,7 @@ function AuditRowContent({
 
   const reveal = async (): Promise<void> => {
     if (!item.path) return
-    const result = await api.scan.revealAuditFile(item.path)
+    const result = await api.scan.revealAuditFile(libraryId, item.path)
     if (!result.ok) {
       toast.show(result.fileMissing ? '文件已不存在' : result.error || '无法打开目录', 'error')
     }
@@ -243,6 +253,7 @@ function AuditRow({
   style,
   data
 }: ListChildComponentProps<{
+  libraryId: number
   items: ViewItem[]
   activeTab: ScanAuditTab
   onOpenAttention: (item: ViewItem) => void
@@ -250,6 +261,7 @@ function AuditRow({
 }>): JSX.Element {
   return (
     <AuditRowContent
+      libraryId={data.libraryId}
       item={data.items[index]}
       style={style}
       activeTab={data.activeTab}
@@ -273,7 +285,7 @@ export default function LibraryScanAuditPanel({
   summary: LibraryScanSummary
   audit: LibraryScanAudit | null
   selected: LibraryScanMetricKey | null
-  unrecognized: string[]
+  unrecognized: LibraryScanLatestSnapshot['unrecognized']
   currentPendingGroupIds: Set<number>
   onSelect: (key: LibraryScanMetricKey | null) => void
   onResolvedUnrecognized: (path: string) => void
@@ -293,8 +305,16 @@ export default function LibraryScanAuditPanel({
   const listContainerRef = useRef<HTMLDivElement | null>(null)
   const virtualListRef = useRef<FixedSizeList | null>(null)
 
-  const matchedAudit = audit?.finishedAt === summary.finishedAt ? audit : null
-  const cachedUnrecognizedPaths = useMemo(() => new Set(unrecognized), [unrecognized])
+  const matchedAudit =
+    audit?.libraryId === summary.libraryId &&
+    audit.runId === summary.runId &&
+    audit.finishedAt === summary.finishedAt
+      ? audit
+      : null
+  const cachedUnrecognizedPaths = useMemo(
+    () => new Set(unrecognized.map((item) => item.filePath)),
+    [unrecognized]
+  )
   const auditedUnrecognizedPaths = useMemo(
     () =>
       new Set(
@@ -305,7 +325,9 @@ export default function LibraryScanAuditPanel({
     [matchedAudit]
   )
   const extraCachedUnrecognizedCount = unrecognized.filter(
-    (path, index) => unrecognized.indexOf(path) === index && !auditedUnrecognizedPaths.has(path)
+    (item, index) =>
+      unrecognized.findIndex((candidate) => candidate.filePath === item.filePath) === index &&
+      !auditedUnrecognizedPaths.has(item.filePath)
   ).length
 
   const totalFailed =
@@ -363,13 +385,18 @@ export default function LibraryScanAuditPanel({
       // Unrecognized files that might not be in file list (e.g. persistent across scans)
       const listedPaths = new Set(failedFileEntries.map((f) => f.filePath))
       const extraUnrecItems: ViewItem[] = unrecognized
-        .filter((path, index) => unrecognized.indexOf(path) === index && !listedPaths.has(path))
-        .map((path, idx) => ({
-          key: `extra-unrec:${idx}:${path}`,
-          title: path.split(/[\\/]/).pop() || path,
+        .filter(
+          (item, index) =>
+            unrecognized.findIndex((candidate) => candidate.filePath === item.filePath) === index &&
+            !listedPaths.has(item.filePath)
+        )
+        .map((item, idx) => ({
+          key: `extra-unrec:${idx}:${item.filePath}`,
+          title: item.filePath.split(/[\\/]/).pop() || item.filePath,
           detail: '未识别番号文件',
           outcome: 'unrecognized',
-          path,
+          path: item.filePath,
+          rootId: item.rootId,
           isUnrecognizedPending: true,
           status: '待处理',
           requiresAttention: true
@@ -649,6 +676,7 @@ export default function LibraryScanAuditPanel({
                     itemCount={filtered.length}
                     itemSize={rowHeight}
                     itemData={{
+                      libraryId: summary.libraryId,
                       items: filtered,
                       activeTab,
                       onOpenAttention: handleOpenAttention,
@@ -661,6 +689,7 @@ export default function LibraryScanAuditPanel({
                   filtered.map((item) => (
                     <AuditRowContent
                       key={item.key}
+                      libraryId={summary.libraryId}
                       item={item}
                       activeTab={activeTab}
                       onOpenAttention={handleOpenAttention}

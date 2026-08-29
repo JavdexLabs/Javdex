@@ -21,6 +21,7 @@ import { UI_ICON_SM } from '../components/iconDefaults'
 import { VIDEO_RESOURCE_KIND_LABELS } from '../components/videoResourcePresentation'
 import { navigateToVideoDetail } from '../listView/listNavigation'
 import { videoKeys } from '../query/queryKeys'
+import { ALL_CATALOG_SCOPE } from '../query/catalogScopes'
 import {
   PendingAlert,
   PendingConfirmBar,
@@ -136,8 +137,8 @@ export default function PendingScrapePane({
   } | null>(null)
   const [directorId, setDirectorId] = useState<number | null>(null)
   const videoQuery = useQuery({
-    queryKey: videoKeys.detail(pending.videoId),
-    queryFn: () => api.videos.get(pending.videoId)
+    queryKey: videoKeys.detail(ALL_CATALOG_SCOPE, pending.videoId),
+    queryFn: () => api.videos.get(ALL_CATALOG_SCOPE, pending.videoId)
   })
   const video = videoQuery.data ?? null
   const code = video?.code?.trim()
@@ -213,11 +214,12 @@ export default function PendingScrapePane({
   }
 
   const openPrimaryResource = async (mode: 'play' | 'reveal'): Promise<void> => {
+    if (!video) return
     try {
       const result =
         mode === 'play'
-          ? await api.player.play(pending.videoId)
-          : await api.player.reveal(pending.videoId)
+          ? await api.player.play(video.activeLibraryId, pending.videoId)
+          : await api.player.reveal(video.activeLibraryId, pending.videoId)
       if (!result.ok) {
         toast.show(result.error ?? (mode === 'play' ? '播放失败' : '打开文件夹失败'), 'error')
       }

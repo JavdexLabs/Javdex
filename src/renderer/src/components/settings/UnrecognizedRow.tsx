@@ -11,12 +11,17 @@ import IconButton from '../IconButton'
 import SelectControl from '../SelectControl'
 import { UI_ICON_SM } from '../iconDefaults'
 import styles from './UnrecognizedRow.module.css'
+import { ALL_CATALOG_SCOPE } from '../../query/catalogScopes'
 
 /** One editable resolution card in the audit list: manual import or rename on disk. */
 export default function UnrecognizedRow({
+  libraryId,
+  rootId,
   path: filePath,
   onResolved
 }: {
+  libraryId: number
+  rootId: number
   path: string
   onResolved: (oldPath: string) => void
 }): JSX.Element {
@@ -48,7 +53,7 @@ export default function UnrecognizedRow({
     const timer = window.setTimeout(() => {
       setLoadingTargets(true)
       void api.videos
-        .list({ search: normalized, limit: 100, offset: 0 })
+        .list(ALL_CATALOG_SCOPE, { search: normalized, limit: 100, offset: 0 })
         .then((result) => {
           if (!cancelled) {
             setMatchingVideos(
@@ -95,7 +100,15 @@ export default function UnrecognizedRow({
     if (busy || !canImport) return
     setBusy('import')
     try {
-      finishImport(await api.scan.importManual(filePath, codeTrimmed, selectedTarget()))
+      finishImport(
+        await api.scan.importManual(
+          libraryId,
+          rootId,
+          filePath,
+          codeTrimmed,
+          selectedTarget()
+        )
+      )
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     } finally {
@@ -107,7 +120,14 @@ export default function UnrecognizedRow({
     if (busy || !canRename) return
     setBusy('rename')
     try {
-      const res = await api.scan.rename(filePath, renameTrimmed, codeTrimmed, selectedTarget())
+      const res = await api.scan.rename(
+        libraryId,
+        rootId,
+        filePath,
+        renameTrimmed,
+        codeTrimmed,
+        selectedTarget()
+      )
       if (res.imported) {
         toast.show(`已重命名并导入：${res.code}`, 'success')
         onResolved(filePath)
@@ -127,7 +147,7 @@ export default function UnrecognizedRow({
   }
 
   const revealFile = async (): Promise<void> => {
-    const result = await api.scan.revealAuditFile(filePath)
+    const result = await api.scan.revealAuditFile(libraryId, filePath)
     if (!result.ok) {
       toast.show(result.fileMissing ? '文件已不存在' : result.error || '无法打开目录', 'error')
     }

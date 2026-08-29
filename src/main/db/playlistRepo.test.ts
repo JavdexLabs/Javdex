@@ -98,6 +98,23 @@ describe('playlistRepo', () => {
     assert.equal(listPlaylists()[0].preview_cover_path, 'covers/ipx-535.jpg')
   })
 
+  it('does not expose playlist links to videos outside the active visible catalog', () => {
+    setupDb()
+    const db = getDb()
+    const playlistId = createPlaylistRecord({ name: 'Reachable only' })
+    addVideoToPlaylist({ playlistId, videoId: 1 })
+    addVideoToPlaylist({ playlistId, videoId: 2 })
+    db.prepare('UPDATE library_video_memberships SET is_hidden = 1 WHERE video_id = 2').run()
+
+    assert.deepEqual(getPlaylistDetail(playlistId)?.videos.map((video) => video.id), [1])
+    assert.equal(listPlaylists()[0].video_count, 1)
+
+    db.prepare('DELETE FROM library_video_memberships WHERE video_id = 1').run()
+    assert.deepEqual(getPlaylistDetail(playlistId)?.videos, [])
+    assert.equal(listPlaylists()[0].video_count, 0)
+    assert.equal(listPlaylists()[0].preview_cover_path, null)
+  })
+
   it('updates playlist metadata and custom cover', () => {
     setupDb()
     const id = createPlaylistRecord(

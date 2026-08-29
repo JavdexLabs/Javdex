@@ -21,6 +21,7 @@ import PosterCard from '../components/PosterCard'
 import { useToast } from '../components/Toast'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { useInfiniteVideoList } from '../query/useInfiniteVideoList'
+import { ALL_CATALOG_SCOPE } from '../query/catalogScopes'
 import { directorKeys, videoKeys } from '../query/queryKeys'
 import { hashListQuery } from '../listView/listQueryParams'
 import { navigateToFacetList } from '../listView/listNavigation'
@@ -56,7 +57,7 @@ export default function DirectorDetailPage(): JSX.Element {
     [toast],
   )
   const { videos, total, loading, loadingMore, hasMore, loadMore, refetchSilent } =
-    useInfiniteVideoList(videoQuery, hash, onError, valid)
+    useInfiniteVideoList(ALL_CATALOG_SCOPE, videoQuery, hash, onError, valid)
   useListSurfaceRefetch(stacked, refetchSilent)
   const scroll = useScrollContainerMemory(`director-detail:${hash}`)
   const save = async (input: DirectorUpdateInput): Promise<void> => {

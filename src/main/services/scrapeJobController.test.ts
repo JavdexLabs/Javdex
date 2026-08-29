@@ -61,6 +61,7 @@ function dependencies(
       skipped: false
     }),
     getActress: () => null,
+    hasVideoInLibraryScope: () => true,
     countVideos: () => 0,
     countRematches: () => 0,
     countActresses: () => 0,
@@ -101,6 +102,79 @@ function dependencies(
 }
 
 describe('ScrapeJobController', () => {
+  it('preserves media-library scope through batch count and start orchestration', async () => {
+    let countedFilter: unknown
+    let startedRequest: unknown
+    const base = dependencies()
+    const controller = createScrapeJobController(
+      dependencies({
+        countVideos: (filter) => {
+          countedFilter = filter
+          return 3
+        },
+        resolveVideoFieldSources: () => ({
+          sourceName: 'Source',
+          ratingSourceName: 'Source'
+        }),
+        videoQueue: {
+          ...base.videoQueue,
+          start: async (request) => {
+            startedRequest = request
+          }
+        }
+      })
+    )
+
+    assert.equal(
+      controller.countVideoBatch({ libraryId: 7, status: 0, missingFields: ['summary'] }),
+      3
+    )
+    assert.deepEqual(countedFilter, {
+      libraryId: 7,
+      status: 0,
+      missingFields: ['summary'],
+      sourceName: 'Source',
+      ratingSourceName: 'Source'
+    })
+    assert.equal(
+      controller.startVideoBatch('scrape:videoBatchProgress', {
+        libraryId: 7,
+        status: 'all',
+        videoIds: [11],
+        fields: ['title']
+      }),
+      true
+    )
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.deepEqual(startedRequest, {
+      libraryId: 7,
+      status: 'all',
+      videoIds: [11],
+      fields: ['title']
+    })
+  })
+
+  it('rejects a single-video scrape outside the requesting active media library', async () => {
+    let scraped = false
+    const controller = createScrapeJobController(
+      dependencies({
+        hasVideoInLibraryScope: (libraryId, videoId) => libraryId === 2 && videoId === 7,
+        scrapeVideo: async () => {
+          scraped = true
+          return { ok: true, result: { code: 'TEST-001' }, skipped: false }
+        }
+      })
+    )
+
+    await assert.rejects(
+      () => controller.scrapeOneVideo(8, undefined, ['title'], 'fillEmpty', undefined, 2),
+      /影片不属于当前活动媒体库/
+    )
+    assert.equal(scraped, false)
+    await controller.scrapeOneVideo(7, undefined, ['title'], 'fillEmpty', undefined, 2)
+    assert.equal(scraped, true)
+  })
+
   it('forwards an explicit director choice and returns structured classification outcomes', async () => {
     let receivedOptions: Parameters<ScrapeJobControllerDependencies['scrapeVideo']>[2]
     const controller = createScrapeJobController(
@@ -194,7 +268,7 @@ describe('ScrapeJobController', () => {
       saveBatchScrapeJob({
         jobId: 'restart-job',
         kind: 'video',
-        request: { status: 'all', fields: ['title'] },
+        request: { libraryId: 7, status: 'all', fields: ['title'] },
         targets: [{ id: 1, label: 'TEST-001' }],
         nextIndex: 0,
         success: 0,
@@ -215,6 +289,10 @@ describe('ScrapeJobController', () => {
 
       assert.equal(loadBatchScrapeJob()?.status, 'paused')
       assert.equal(loadBatchScrapeJob()?.jobId, 'restart-job')
+      assert.equal(
+        (loadBatchScrapeJob()?.request as { libraryId?: number } | undefined)?.libraryId,
+        7
+      )
     } finally {
       resetBatchScrapeJobCache()
       if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA

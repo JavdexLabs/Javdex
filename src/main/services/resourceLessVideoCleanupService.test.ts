@@ -47,9 +47,13 @@ describe('resourceLessVideoCleanupService', () => {
         .run().lastInsertRowid
     )
     db.prepare(
+      `INSERT INTO library_video_memberships (library_id, video_id, discovery_key)
+       VALUES (1, ?, ?)`
+    ).run(linkedVideoId, linkedVideoId)
+    db.prepare(
       `INSERT INTO video_resources
-         (video_id, kind, locator, resource_key, is_primary)
-       VALUES (?, 'web', ?, ?, 1)`
+         (library_id, video_id, kind, locator, resource_key, is_primary)
+       VALUES (1, ?, 'web', ?, ?, 1)`
     ).run(
       linkedVideoId,
       'https://example.test/watch?id=1&token=secret',

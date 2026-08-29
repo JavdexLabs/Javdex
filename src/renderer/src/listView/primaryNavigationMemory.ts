@@ -1,6 +1,10 @@
 import { LIST_PARAM } from './listQueryParams'
 import { matchPath } from 'react-router-dom'
 import { ROUTE_PATH } from './routePaths'
+import { parseHomeVideoPath } from './homeRoutes'
+import { mediaLibraryPath, parseMediaLibraryRoute } from './mediaLibraryRoutes'
+import { parseSearchVideoPath } from './searchRoutes'
+import { GLOBAL_SEARCH_LIBRARY_PARAM } from './globalSearchState'
 
 const listSearchByRoot = new Map<string, string>()
 
@@ -8,8 +12,7 @@ const listSearchByRoot = new Map<string, string>()
 let prevRoot: string | null = null
 let prevSearch = ''
 
-const SEARCH_KEYS_BY_ROOT: Record<string, readonly string[]> = {
-  '/': [
+const LIBRARY_SEARCH_KEYS = [
     LIST_PARAM.q,
     LIST_PARAM.sort,
     LIST_PARAM.dir,
@@ -19,7 +22,11 @@ const SEARCH_KEYS_BY_ROOT: Record<string, readonly string[]> = {
     LIST_PARAM.year,
     LIST_PARAM.resources,
     LIST_PARAM.pending
-  ],
+] as const
+
+const SEARCH_KEYS_BY_ROOT: Record<string, readonly string[]> = {
+  '/': [],
+  '/search': [LIST_PARAM.q, GLOBAL_SEARCH_LIBRARY_PARAM],
   '/actresses': [
     LIST_PARAM.q,
     LIST_PARAM.gender,
@@ -41,11 +48,12 @@ function facetRoot(pathname: string): string | null {
 }
 
 export function primaryListRoot(pathname: string): string | null {
-  if (
-    pathname === ROUTE_PATH.library ||
-    matchPath({ path: ROUTE_PATH.libraryDetailOpen, end: false }, pathname)
-  ) {
-    return ROUTE_PATH.library
+  if (pathname === ROUTE_PATH.home || parseHomeVideoPath(pathname)) return ROUTE_PATH.home
+  if (pathname === ROUTE_PATH.search || parseSearchVideoPath(pathname)) return ROUTE_PATH.search
+  const mediaLibrary = parseMediaLibraryRoute(pathname)
+  if (mediaLibrary) return mediaLibraryPath(mediaLibrary.libraryId)
+  if (matchPath({ path: ROUTE_PATH.libraryDetailOpen, end: false }, pathname)) {
+    return ROUTE_PATH.home
   }
   if (matchPath({ path: ROUTE_PATH.actressTree, end: false }, pathname)) {
     return ROUTE_PATH.actresses
@@ -64,7 +72,9 @@ function scopedSearch(root: string, search: string): string {
     ? /^\/facet\/(maker|publisher|director|series)$/.test(root)
       ? [LIST_PARAM.q, LIST_PARAM.sort, LIST_PARAM.dir]
       : [LIST_PARAM.q]
-    : SEARCH_KEYS_BY_ROOT[root]
+    : /^\/libraries\/[1-9]\d*$/.test(root)
+      ? LIBRARY_SEARCH_KEYS
+      : SEARCH_KEYS_BY_ROOT[root]
   if (!allowedKeys) return ''
   const source = new URLSearchParams(search)
   const next = new URLSearchParams()
@@ -87,7 +97,12 @@ function scopedSearch(root: string, search: string): string {
 }
 
 function resolveRoot(pathnameOrRoot: string): string | null {
-  return primaryListRoot(pathnameOrRoot) ?? (SEARCH_KEYS_BY_ROOT[pathnameOrRoot] ? pathnameOrRoot : null)
+  return (
+    primaryListRoot(pathnameOrRoot) ??
+    (SEARCH_KEYS_BY_ROOT[pathnameOrRoot] || /^\/libraries\/[1-9]\d*$/.test(pathnameOrRoot)
+      ? pathnameOrRoot
+      : null)
+  )
 }
 
 /** Persist scoped search for a list root (tests and explicit writes). */
@@ -129,7 +144,8 @@ export function resolvePrimaryNavTarget(
   const activeRoot = primaryListRoot(pathname)
   if (activeRoot === itemTo) {
     if (pathname === itemTo) return null
-    return search ? { pathname: itemTo, search } : { pathname: itemTo }
+    const scoped = scopedSearch(itemTo, search)
+    return scoped ? { pathname: itemTo, search: scoped } : { pathname: itemTo }
   }
   return primaryNavigationTarget(itemTo)
 }
@@ -142,7 +158,8 @@ export function primaryNavLinkTo(
 ): { pathname: string; search?: string } {
   const activeRoot = primaryListRoot(pathname)
   if (activeRoot === itemTo) {
-    return search ? { pathname: itemTo, search } : { pathname: itemTo }
+    const scoped = scopedSearch(itemTo, search)
+    return scoped ? { pathname: itemTo, search: scoped } : { pathname: itemTo }
   }
   return primaryNavigationTarget(itemTo)
 }

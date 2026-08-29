@@ -2,6 +2,8 @@ import type { QueryClient } from '@tanstack/react-query'
 import {
   actressKeys,
   directorKeys,
+  homeKeys,
+  mediaLibraryKeys,
   organizationKeys,
   overviewStatsKeys,
   seriesKeys,
@@ -15,6 +17,8 @@ export function invalidateVideoLibraryQueries(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: directorKeys.all })
   void queryClient.invalidateQueries({ queryKey: seriesKeys.all })
   void queryClient.invalidateQueries({ queryKey: overviewStatsKeys.all })
+  void queryClient.invalidateQueries({ queryKey: homeKeys.all })
+  void queryClient.invalidateQueries({ queryKey: mediaLibraryKeys.all })
 }
 
 export async function invalidateActressLibraryQueries(queryClient: QueryClient): Promise<void> {
@@ -37,6 +41,8 @@ export function invalidateAllLibraryQueries(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: directorKeys.all })
   void queryClient.invalidateQueries({ queryKey: seriesKeys.all })
   void queryClient.invalidateQueries({ queryKey: overviewStatsKeys.all })
+  void queryClient.invalidateQueries({ queryKey: homeKeys.all })
+  void queryClient.invalidateQueries({ queryKey: mediaLibraryKeys.all })
 }
 
 /** Refetch stale library queries when a list surface becomes visible again. */

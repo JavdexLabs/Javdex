@@ -28,11 +28,21 @@ afterEach(() => {
 function audit(): LibraryScanAudit {
   return {
     schemaVersion: 1,
+    libraryId: 1,
+    runId: 'scan-audit-test',
+    configRevision: 1,
     trigger: 'manual',
     startedAt: '2026-08-24T01:00:00.000Z',
     finishedAt: '2026-08-24T01:00:01.000Z',
     status: 'success',
-    files: [{ filePath: 'D:\\Media\\A-001.mp4', sourceKind: 'local', outcome: 'unrecognized' }],
+    files: [
+      {
+        rootId: 1,
+        filePath: 'D:\\Media\\A-001.mp4',
+        sourceKind: 'local',
+        outcome: 'unrecognized'
+      }
+    ],
     removedResources: [],
     promotedResources: [],
     deletedVideos: [],
@@ -45,12 +55,13 @@ describe('libraryScanAuditStore', () => {
     const value = audit()
     writeLibraryScanAudit(value)
 
-    assert.deepEqual(readLibraryScanAudit(), value)
+    assert.deepEqual(readLibraryScanAudit(1), value)
+    assert.equal(readLibraryScanAudit(2), null)
     assert.equal(libraryScanAuditContainsPath(value, 'd:\\media\\A-001.mp4'), true)
   })
 
   it('fails closed for malformed audit documents', () => {
-    fs.writeFileSync(path.join(tempRoot, 'library-scan-audit.json'), '{"schemaVersion":1}')
-    assert.equal(readLibraryScanAudit(), null)
+    fs.writeFileSync(path.join(tempRoot, 'library-scan-audit-1.json'), '{"schemaVersion":1}')
+    assert.equal(readLibraryScanAudit(1), null)
   })
 })

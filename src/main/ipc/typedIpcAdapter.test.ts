@@ -8,6 +8,12 @@ import { appIpcSchemas, videoIpcSchemas } from './ipcCommandSchemas'
 import type { IpcMainInvokeEvent } from 'electron'
 
 describe('typed IPC adapter', () => {
+  it('does not expose the legacy unreviewed video deletion command', () => {
+    assert.equal('VIDEO_DELETE' in IPC, false)
+    assert.equal(Object.values(IPC).includes('video:delete' as never), false)
+    assert.equal('video:delete' in videoIpcSchemas, false)
+  })
+
   it('forwards command arguments and returns the application result', async () => {
     let registered: ((id: number, rating: number) => unknown | Promise<unknown>) | null = null
     const adapter = createTypedIpcAdapter<VideoIpcContract>(
@@ -53,11 +59,12 @@ describe('typed IPC adapter', () => {
     const schema = videoIpcSchemas[IPC.VIDEO_RESOURCE_UPDATE]
 
     assert.equal(
-      schema.safeParse([7, 11, { url: 'https://example.test/movie', kind: 'web' }]).success,
+      schema.safeParse([3, 7, 11, { url: 'https://example.test/movie', kind: 'web' }]).success,
       true
     )
     assert.equal(
       schema.safeParse([
+        3,
         7,
         11,
         {
@@ -68,6 +75,13 @@ describe('typed IPC adapter', () => {
       ]).success,
       false
     )
+  })
+
+  it('only accepts metadata retention when removing a last video resource', () => {
+    const schema = videoIpcSchemas[IPC.VIDEO_RESOURCE_REMOVE]
+
+    assert.equal(schema.safeParse([1, 7, 11, 'retain-video']).success, true)
+    assert.equal(schema.safeParse([1, 7, 11, 'delete-video']).success, false)
   })
 
   it('accepts one exact plugin approval decision and rejects malformed decisions', () => {
@@ -176,6 +190,13 @@ describe('typed IPC adapter', () => {
     const schema = appIpcSchemas[IPC.SETTINGS_UPDATE]
     assert.equal(schema.safeParse([{ pluginDevAgentMaxTurns: 0 }]).success, false)
     assert.equal(schema.safeParse([{ pluginDevAgentMaxSteps: 24 }]).success, false)
+  })
+
+  it('requires the path-removal impact revision at the settings boundary', () => {
+    const schema = appIpcSchemas[IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM]
+    assert.equal(schema.safeParse([3, 8, 2, 'a'.repeat(64)]).success, true)
+    assert.equal(schema.safeParse([3, 8, 2]).success, false)
+    assert.equal(schema.safeParse([3, 8, 2, 'stale']).success, false)
   })
 
   it('accepts only the structured model-management command vocabulary', () => {

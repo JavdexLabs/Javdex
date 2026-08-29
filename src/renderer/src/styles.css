@@ -152,6 +152,7 @@
   --control-h-md: 36px;
   --control-h-lg: 40px;
   --control-pad-x: 14px;
+  --settings-content-max: 1080px;
   --modal-picker-h-md: 580px;
   --modal-viewport-inset: 48px;
   --modal-backdrop: rgba(0, 0, 0, 0.6);
@@ -679,7 +680,6 @@ textarea,
   container-name: detail-page;
 }
 .scroll-body-inner--settings {
-  --settings-content-max: 1080px;
   --settings-fs-title: 14px;
   --settings-fs-body: 13px;
   --settings-fs-secondary: 12px;

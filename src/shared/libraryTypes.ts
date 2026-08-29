@@ -32,10 +32,24 @@ export interface LibraryOverviewStats {
 }
 
 export interface LibraryPathRemovalPreview {
+  libraryId: number
+  rootId: number
+  libraryRevision: number
+  /** Frozen impact snapshot because scan/resource writes do not bump the library revision. */
+  impactRevision: string
   path: string
   localResourceCount: number
   strmResourceCount: number
+  pendingScanResourceCount: number
+  unrecognizedFileCount: number
+  terminalCleanupJobCount: number
   videosBecomingResourceLess: number
+}
+
+export interface PendingLibraryPathCleanup {
+  jobId: string
+  libraryId: number
+  rootId: number
 }
 
 export type LibraryScanTrigger = 'manual' | 'startup' | 'interval' | 'resume'
@@ -56,6 +70,9 @@ export interface StrmScanFailure {
 }
 
 export interface LibraryScanSummary {
+  libraryId: number
+  runId: string
+  configRevision: number
   trigger: LibraryScanTrigger
   startedAt: string
   finishedAt: string
@@ -89,6 +106,7 @@ export type LibraryScanMetricKey =
   | 'pendingScanResources'
 
 interface LibraryScanFileAuditBase {
+  rootId: number
   filePath: string
   sourceKind: 'local' | 'strm'
 }
@@ -162,6 +180,9 @@ export interface LibraryScanPendingGroupAuditEntry {
 
 export interface LibraryScanAudit {
   schemaVersion: 1
+  libraryId: number
+  runId: string
+  configRevision: number
   trigger: LibraryScanTrigger
   startedAt: string
   finishedAt: string
@@ -173,9 +194,20 @@ export interface LibraryScanAudit {
   pendingGroups: LibraryScanPendingGroupAuditEntry[]
 }
 
+export interface LibraryScanLatestSnapshot {
+  summary: LibraryScanSummary | null
+  audit: LibraryScanAudit | null
+  unrecognized: Array<{
+    rootId: number
+    filePath: string
+  }>
+}
+
 // ---- Scan results ----
 
 export interface ScanResult {
+  libraryId: number
+  runId: string
   scannedFiles: number
   imported: number
   skipped: number
@@ -210,9 +242,10 @@ export interface ScanResult {
 
 export interface PendingScanResource {
   id: number
+  libraryId: number
   groupId: number
+  rootId: number
   filePath: string
-  scanRoot: string
   sourceKind: 'local' | 'strm'
   targetKind: import('./videoTypes').ExternalVideoResourceKind | null
   /** Masked target display. The complete snapshot remains main-process only. */
@@ -225,7 +258,9 @@ export interface PendingScanResource {
 
 export interface PendingScanGroup {
   id: number
+  libraryId: number
   normalizedCode: string
+  revision: number
   createdAt: string
   updatedAt: string
   resources: PendingScanResource[]
@@ -241,6 +276,7 @@ export interface PendingScanResourceAssignment {
 }
 
 export interface PendingScanGroupResolution {
+  expectedRevision: number
   assignments: PendingScanResourceAssignment[]
   /** Optional primary overrides keyed by a `new` target's groupKey. */
   primaryResourceIds?: Record<string, number>
@@ -258,11 +294,40 @@ export interface ScanProgress {
   currentFile: string
 }
 
+export interface LibraryScanProgressEvent {
+  libraryId: number
+  runId: string
+  progress: ScanProgress
+}
+
 export type LibraryScanEvent =
-  | { phase: 'started'; trigger: LibraryScanTrigger }
-  | { phase: 'progress'; trigger: LibraryScanTrigger; progress: ScanProgress }
-  | { phase: 'completed'; trigger: LibraryScanTrigger; result: ScanResult }
-  | { phase: 'failed'; trigger: LibraryScanTrigger; error: string }
+  | {
+      phase: 'started'
+      libraryId: number
+      runId: string
+      trigger: LibraryScanTrigger
+    }
+  | {
+      phase: 'progress'
+      libraryId: number
+      runId: string
+      trigger: LibraryScanTrigger
+      progress: ScanProgress
+    }
+  | {
+      phase: 'completed'
+      libraryId: number
+      runId: string
+      trigger: LibraryScanTrigger
+      result: ScanResult
+    }
+  | {
+      phase: 'failed'
+      libraryId: number
+      runId: string
+      trigger: LibraryScanTrigger
+      error: string
+    }
 
 /** Outcome of renaming an unrecognized file and importing it into an explicit target. */
 export interface RenameImportResult {

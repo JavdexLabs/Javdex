@@ -112,17 +112,6 @@ export function updateSettings(patch: Partial<AppSettings>): AppSettings {
   return next
 }
 
-export function removeUnrecognizedFileFromSnapshot(filePath: string): AppSettings {
-  const current = getSettings()
-  const unrecognizedFiles = current.unrecognizedFiles.filter((item) => item !== filePath)
-  if (unrecognizedFiles.length === current.unrecognizedFiles.length) return current
-  return updateSettings({
-    unrecognizedFiles,
-    unrecognizedFilesScanFinishedAt:
-      unrecognizedFiles.length > 0 ? current.unrecognizedFilesScanFinishedAt : null
-  })
-}
-
 function writeSettingsFile(settings: AppSettings): void {
   const file = settingsFilePath()
   const temporaryFile = `${file}.tmp-${process.pid}`

@@ -7,7 +7,7 @@ import type { BatchProgress } from '@shared/batchScrapeTypes'
 import { ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS, ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS, ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS, VIDEO_BATCH_SCRAPE_STATUS_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_UPDATE_MODE_OPTIONS } from '@shared/scrapeTypes'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { api } from '../api'
-import { actressKeys, overviewStatsKeys } from '../query/queryKeys'
+import { actressKeys, mediaLibraryKeys, overviewStatsKeys } from '../query/queryKeys'
 import ConfirmModal from '../components/ConfirmModal'
 import EmptyState from '../components/EmptyState'
 import Modal from '../components/Modal'
@@ -15,7 +15,6 @@ import PluginDevPanel from '../components/pluginDev/PluginDevPanel'
 import AppearanceSettingsPanel from '../components/settings/AppearanceSettingsPanel'
 import AboutSettingsPanel from '../components/settings/AboutSettingsPanel'
 import BatchSettingsPanel from '../components/settings/BatchSettingsPanel'
-import LibrarySettingsPanel from '../components/settings/LibrarySettingsPanel'
 import ModelSettingsPanel from '../components/settings/ModelSettingsPanel'
 import NetworkSettingsPanel from '../components/settings/NetworkSettingsPanel'
 import PluginsSettingsPanel from '../components/settings/PluginsSettingsPanel'
@@ -34,12 +33,12 @@ import { useTheme } from '../components/ThemeProvider'
 import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
 import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
 import { useAvatarAutoCropBatch } from '../contexts/AvatarAutoCropBatchContext'
-import { pendingCenterPath, pendingItemKey } from '../listView/pendingRoutes'
-import { libraryVideoDetailPath } from '../listView/libraryRoutes'
+import { pendingCenterPath } from '../listView/pendingRoutes'
+import { mediaLibrarySettingsPath } from '../listView/mediaLibraryRoutes'
+import { ROUTE_PATH } from '../listView/routePaths'
 import useNetworkSettingsController from '../hooks/useNetworkSettingsController'
 import useLatestAsyncLabel from '../hooks/useLatestAsyncLabel'
 import useScraperPluginSettingsController from '../hooks/useScraperPluginSettingsController'
-import useLibrarySettingsController from '../hooks/useLibrarySettingsController'
 import {
   resolveSettingsRoute,
   settingsPath,
@@ -51,6 +50,10 @@ import { THEME_OPTIONS } from '../theme'
 import type { ThemeId } from '@shared/settingsTypes'
 import type { UpdateCheckState } from '@shared/updateTypes'
 import Button from '../components/Button'
+import {
+  withVideoBatchFilterScope,
+  withVideoBatchRequestScope
+} from '../utils/videoBatchScope'
 
 function shouldAutoScrollBatchLog(container: HTMLDivElement): boolean {
   const selection = window.getSelection()
@@ -139,27 +142,11 @@ export default function SettingsPage(): JSX.Element {
     testScrapeProxy,
     testLlmProxy
   } = useNetworkSettingsController(settings, setSettings)
-  const {
-    pathRemoval,
-    pathRemoveBusy,
-    closePathRemoval,
-    requestRemovePath,
-    confirmRemovePath,
-    scanning,
-    scanStatus,
-    scanResult,
-    scanAudit,
-    pendingScanGroupIds,
-    unrecognized,
-    overviewStatsRefreshKey,
-    scanScrapePrompt,
-    addFolders,
-    patchLibrarySettings,
-    runScan,
-    cancelScan,
-    handleResolved,
-    dismissScanScrapePrompt
-  } = useLibrarySettingsController({ settings, setSettings })
+  const mediaLibrariesQuery = useQuery({
+    queryKey: mediaLibraryKeys.activeList(),
+    queryFn: () => api.mediaLibraries.list(),
+    refetchOnMount: 'always'
+  })
   const {
     videoBatch,
     actressBatch,
@@ -184,7 +171,7 @@ export default function SettingsPage(): JSX.Element {
   } = useLatestAsyncLabel('- 位演员')
   const [storageBusy, setStorageBusy] = useState(false)
   const { stats: overviewStats } = useLibraryOverviewStats(
-    overviewStatsRefreshKey,
+    0,
     activeGroup.id === 'overview' && location.pathname !== settingsPluginDevPath()
   )
   const actressConflictSummaryQuery = useQuery({
@@ -196,7 +183,6 @@ export default function SettingsPage(): JSX.Element {
   const videoBatchLogRef = useRef<HTMLDivElement>(null)
   const actressLogRef = useRef<HTMLDivElement>(null)
   const avatarBatchLogRef = useRef<HTMLDivElement>(null)
-  const libraryUnrecRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (activeGroup.id !== 'overview') return
     void queryClient.invalidateQueries({ queryKey: overviewStatsKeys.all })
@@ -206,27 +192,12 @@ export default function SettingsPage(): JSX.Element {
     setEditingPlugin(null)
     setEditingComposite(null)
     setPluginDeleteTarget(null)
-    closePathRemoval()
     setShowVideoBatchModal(false)
     setShowActressBatchModal(false)
     setBatchDetailScope(null)
-  }, [closePathRemoval, setEditingComposite, setEditingPlugin, setPluginDeleteTarget])
+  }, [setEditingComposite, setEditingPlugin, setPluginDeleteTarget])
 
   useDismissOverlaysOnNavigate(dismissSettingsOverlays, location.pathname)
-
-  const libraryFocus = (location.state as { libraryFocus?: string } | null)?.libraryFocus
-
-  useEffect(() => {
-    if (
-      activeGroup.id !== 'library' ||
-      (libraryFocus !== 'unrecognized' && libraryFocus !== 'scan-audit')
-    ) return
-    const timer = window.setTimeout(() => {
-      libraryUnrecRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      navigate(location.pathname, { replace: true, state: {} })
-    }, 120)
-    return () => window.clearTimeout(timer)
-  }, [activeGroup.id, libraryFocus, location.pathname, navigate])
 
   useEffect(() => {
     let active = true
@@ -286,8 +257,14 @@ export default function SettingsPage(): JSX.Element {
     scraperName?: string
   ): Promise<void> => {
     await refreshVideoBatchScopeCount(
-      () => api.scrape.videoBatchCount({ status, missingFields, scraperName }),
-      (count) => `${count} 部影片`
+      () =>
+        api.scrape.videoBatchCount(
+          withVideoBatchFilterScope(
+            { kind: 'all' },
+            { status, missingFields, scraperName }
+          )
+        ),
+      (count) => `全部媒体库 · ${count} 部影片`
     )
   }, [refreshVideoBatchScopeCount])
 
@@ -488,18 +465,27 @@ export default function SettingsPage(): JSX.Element {
     site: string,
     status: VideoBatchScrapeStatus,
     mode?: VideoScrapeUpdateMode,
-    missingFields: VideoScrapeField[] = []
+    missingFields: VideoScrapeField[] = [],
+    libraryId?: number
   ): Promise<void> => {
     setShowVideoBatchModal(false)
     try {
-      await api.scrape.videoBatchStart({
-        fields,
-        scraperName: site || undefined,
-        status,
-        missingFields,
-        mode
-      })
-      toast.show('已开始影片批量更新', 'success')
+      await api.scrape.videoBatchStart(
+        withVideoBatchRequestScope(
+          libraryId === undefined ? { kind: 'all' } : { kind: 'library', libraryId },
+          {
+            fields,
+            scraperName: site || undefined,
+            status,
+            missingFields,
+            mode
+          }
+        )
+      )
+      toast.show(
+        libraryId ? '已开始当前媒体库的影片批量更新' : '已开始全部媒体库的影片批量更新',
+        'success'
+      )
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     }
@@ -561,7 +547,6 @@ export default function SettingsPage(): JSX.Element {
     navigate(pendingCenterPath({ type: 'scrape' }))
   }
 
-  const unrecognizedCount = unrecognized.length
   const videoBatchRunning = videoBatch?.status === 'running'
   const actressBatchRunning = actressBatch?.status === 'running'
   const videoBatchPaused = videoBatch?.status === 'paused'
@@ -611,6 +596,20 @@ export default function SettingsPage(): JSX.Element {
     updateCheckState?.status === 'available' &&
     Boolean(updateRelease) &&
     updateRelease?.version !== updateCheckState.ignoredVersion
+  const mediaLibraries = mediaLibrariesQuery.data ?? []
+  const mediaLibraryRootCount = mediaLibraries.reduce(
+    (total, library) => total + library.rootCount,
+    0
+  )
+  const mediaLibrarySettingsTarget =
+    mediaLibraries.find((library) => library.isDefault) ?? mediaLibraries[0] ?? null
+  const openMediaLibrarySettings = (): void => {
+    if (!mediaLibrarySettingsTarget) {
+      navigate(ROUTE_PATH.home)
+      return
+    }
+    navigate(mediaLibrarySettingsPath(mediaLibrarySettingsTarget.id, 'sources'))
+  }
   const overviewNotices = [
     ...(settings.recoveryNotice &&
     settings.recoveryNotice.backupFileName !== dismissedRecoveryBackup
@@ -650,25 +649,26 @@ export default function SettingsPage(): JSX.Element {
           }
         ]
       : []),
-    ...(settings.libraryPaths.length === 0
+    ...(mediaLibrariesQuery.isError
       ? [
           {
             tone: 'warning' as const,
-            title: '尚未添加媒体库路径',
-            body: '添加本地文件夹后才能扫描和导入影片。',
-            action: () => navigateSettings('library'),
-            actionLabel: '去添加'
+            title: '媒体库状态暂时无法读取',
+            body: '独立媒体库配置未被修改，请重新读取状态。',
+            action: () => {
+              void mediaLibrariesQuery.refetch()
+            },
+            actionLabel: '重新读取'
           }
         ]
-      : []),
-    ...(unrecognizedCount > 0
+      : !mediaLibrariesQuery.isLoading && mediaLibraryRootCount === 0
       ? [
           {
             tone: 'warning' as const,
-            title: '存在无法识别的文件',
-            body: `${unrecognizedCount} 个文件需要手动填写番号或重命名。`,
-            action: () => navigate(settingsPath('library'), { state: { libraryFocus: 'unrecognized' } }),
-            actionLabel: '查看'
+            title: '媒体库尚未配置来源目录',
+            body: '请在独立媒体库设置中添加本地文件夹，然后运行该媒体库的扫描。',
+            action: openMediaLibrarySettings,
+            actionLabel: '打开媒体库设置'
           }
         ]
       : []),
@@ -730,12 +730,12 @@ export default function SettingsPage(): JSX.Element {
                   videoBatchPct={videoBatchPct}
                   actressPct={actressPct}
                   actressConflictGroupCount={actressConflictGroupCount}
-                  unrecognizedCount={unrecognizedCount}
-                  statsRefreshKey={overviewStatsRefreshKey}
+                  mediaLibraryCount={mediaLibraries.length}
+                  mediaLibraryRootCount={mediaLibraryRootCount}
+                  mediaLibrariesLoading={mediaLibrariesQuery.isLoading}
+                  mediaLibrariesError={mediaLibrariesQuery.isError}
                   onNavigate={navigateSettings}
-                  onNavigateLibraryUnrecognized={() =>
-                    navigate(settingsPath('library'), { state: { libraryFocus: 'unrecognized' } })
-                  }
+                  onOpenMediaLibrarySettings={openMediaLibrarySettings}
                   onOpenAgentTool={(toolId) => {
                     if (toolId === 'plugin-dev') navigate(settingsPluginDevPath())
                   }}
@@ -753,44 +753,6 @@ export default function SettingsPage(): JSX.Element {
                   onDiscardActressBatch={() => discardBatch('actress')}
                   actressBatchRecoverable={actressBatchRecoverable}
                   actressBatchUnrecoverableReason={actressBatchUnrecoverableReason}
-                />
-              )}
-
-              {activeGroup.id === 'library' && (
-                <LibrarySettingsPanel
-                  settings={settings}
-                  scanning={scanning}
-                  scanStatus={scanStatus}
-                  scanResult={scanResult}
-                  scanAudit={scanAudit}
-                  pendingScanGroupIds={pendingScanGroupIds}
-                  focusUnrecognized={libraryFocus === 'unrecognized'}
-                  unrecognized={unrecognized}
-                  unrecognizedRef={libraryUnrecRef}
-                  onAddFolders={() => void addFolders()}
-                  onRunScan={() => void runScan()}
-                  onCancelScan={() => void cancelScan()}
-                  onRequestRemovePath={(path) => void requestRemovePath(path)}
-                  onResolvedUnrecognized={handleResolved}
-                  onPatchSettings={(patch) => void patchLibrarySettings(patch)}
-                  scanScrapePrompt={scanScrapePrompt}
-                  videoBatchActive={anyBatchActive}
-                  defaultScraper={settings.defaultScraper}
-                  onDismissScanScrapePrompt={dismissScanScrapePrompt}
-                  onStartScanScrapeBatch={startVideoBatchDefault}
-                  onOpenPending={(groupId) =>
-                    navigate(
-                      pendingCenterPath({
-                        type: 'scan',
-                        item: groupId ? pendingItemKey('scan', groupId) : undefined
-                      })
-                    )
-                  }
-                  onOpenVideo={(videoId) =>
-                    navigate(libraryVideoDetailPath(videoId), {
-                      state: { returnToSettings: settingsPath('library') }
-                    })
-                  }
                 />
               )}
 
@@ -981,7 +943,7 @@ export default function SettingsPage(): JSX.Element {
       {showVideoBatchModal && settings && (
         <ScrapeFieldsModal<VideoScrapeField, VideoBatchScrapeStatus>
           title="影片批量更新"
-          hint="先确定范围与更新方式，再勾选要写入的字段。"
+          hint="作用范围为全部媒体库。先确定影片状态与更新方式，再勾选要写入的字段。"
           options={VIDEO_SCRAPE_FIELD_OPTIONS}
           initialSelected={ALL_VIDEO_SCRAPE_FIELDS}
           scrapers={scrapers}
@@ -1104,48 +1066,6 @@ export default function SettingsPage(): JSX.Element {
           }
           onCancel={() => setEditingComposite(null)}
         />
-      )}
-      {pathRemoval && (
-        <ConfirmModal
-          title="移除媒体库路径"
-          confirmText={
-            pathRemoveBusy === 'preview'
-              ? '正在统计…'
-              : pathRemoveBusy === 'confirm'
-                ? '移除中…'
-                : '确认移除'
-          }
-          danger
-          busy={Boolean(pathRemoveBusy)}
-          confirmDisabled={!pathRemoval.preview}
-          onCancel={closePathRemoval}
-          onConfirm={() => void confirmRemovePath()}
-        >
-          <p>确定从媒体库中移除以下路径？</p>
-          <div className="modal-path-text">{pathRemoval.path}</div>
-          {pathRemoval.preview ? (
-            <div className="library-path-removal-impact" aria-label="目录移除影响">
-              <div>
-                <strong>{pathRemoval.preview.localResourceCount}</strong>
-                <span>条本地资源记录</span>
-              </div>
-              <div>
-                <strong>{pathRemoval.preview.strmResourceCount}</strong>
-                <span>条 STRM 资源记录</span>
-              </div>
-              <div>
-                <strong>{pathRemoval.preview.videosBecomingResourceLess}</strong>
-                <span>部影片可能变为无资源</span>
-              </div>
-            </div>
-          ) : (
-            <p className="modal-field-hint" aria-live="polite">正在统计目录影响…</p>
-          )}
-          <p className="modal-field-hint library-path-removal-note">
-            确认后会立即停止扫描该路径。下一次成功完成的扫描将移除上述资源记录，
-            但不会删除目录中的视频文件或 STRM 源文件；此操作不提供保留资源记录选项。
-          </p>
-        </ConfirmModal>
       )}
       {pluginDeleteTarget && (
         <ConfirmModal

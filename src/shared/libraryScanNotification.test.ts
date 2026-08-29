@@ -5,6 +5,8 @@ import { buildLibraryScanNotification } from './libraryScanNotification'
 
 function result(patch: Partial<ScanResult> = {}): ScanResult {
   return {
+    libraryId: 1,
+    runId: 'run-1',
     scannedFiles: 0,
     imported: 0,
     skipped: 0,

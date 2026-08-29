@@ -1,7 +1,7 @@
 import type { LibraryScanTrigger, ScanResult } from '@shared/libraryTypes'
-import type { AppSettings } from '@shared/settingsTypes'
+import type { MediaLibraryAutomaticScanState } from '@shared/mediaLibraryTypes'
+import { listMediaLibraryAutomaticScanStates } from '../db/mediaLibraryRepo'
 import { scanCoordinator } from '../scanner/scanCoordinator'
-import { getSettings } from '../settings/settingsStore'
 import { maintenanceTaskGate } from './maintenanceTaskGate'
 
 export const AUTOMATIC_SCAN_STARTUP_DELAY_MS = 30_000
@@ -11,37 +11,42 @@ const AUTOMATIC_SCAN_POLL_INTERVAL_MS = 60_000
 type TimerToken = unknown
 
 export interface AutomaticScanSchedulerDependencies {
-  getSettings: () => AppSettings
+  listLibraries: () => MediaLibraryAutomaticScanState[]
   now: () => number
   setTimer: (callback: () => void | Promise<void>, delay: number) => TimerToken
   clearTimer: (timer: TimerToken) => void
   isMaintenanceBusy: () => boolean
-  runScan: (trigger: LibraryScanTrigger) => Promise<ScanResult>
+  runScan: (libraryId: number, trigger: LibraryScanTrigger) => Promise<ScanResult>
 }
 
-function validFinishedAt(settings: AppSettings): number | null {
-  const value = settings.lastLibraryScanSummary?.finishedAt
+function parsedTimestamp(value: string | null): number | null {
   if (!value) return null
   const parsed = Date.parse(value)
   return Number.isFinite(parsed) ? parsed : null
 }
 
+/**
+ * Calculates due scans per media library while preserving the process-wide maintenance lock.
+ * Library configuration and scan state are read afresh on every tick; legacy settings are not
+ * consulted after bootstrap.
+ */
 export class AutomaticScanScheduler {
   private started = false
-  private observedEnabled = false
-  private enabledAt: number | null = null
   private startupTimer: TimerToken | null = null
   private pollTimer: TimerToken | null = null
   private resumeTimer: TimerToken | null = null
   private runInFlight = false
+  private readonly enabledAt = new Map<number, number>()
+  private readonly observedEnabled = new Map<number, boolean>()
 
   constructor(private readonly dependencies: AutomaticScanSchedulerDependencies) {}
 
   start(): void {
     if (this.started) return
     this.started = true
-    this.observedEnabled = this.dependencies.getSettings().autoScanEnabled
-    this.enabledAt = null
+    for (const library of this.dependencies.listLibraries()) {
+      this.observedEnabled.set(library.libraryId, library.enabled)
+    }
     this.startupTimer = this.dependencies.setTimer(async () => {
       this.startupTimer = null
       await this.checkDue('startup')
@@ -54,6 +59,8 @@ export class AutomaticScanScheduler {
     this.clearTimer('startupTimer')
     this.clearTimer('pollTimer')
     this.clearTimer('resumeTimer')
+    this.enabledAt.clear()
+    this.observedEnabled.clear()
   }
 
   handleResume(): void {
@@ -74,44 +81,64 @@ export class AutomaticScanScheduler {
     }, AUTOMATIC_SCAN_POLL_INTERVAL_MS)
   }
 
+  private refreshEnabledTransitions(
+    libraries: MediaLibraryAutomaticScanState[],
+    now: number
+  ): void {
+    const present = new Set(libraries.map((library) => library.libraryId))
+    for (const libraryId of this.enabledAt.keys()) {
+      if (!present.has(libraryId)) this.enabledAt.delete(libraryId)
+    }
+    for (const libraryId of this.observedEnabled.keys()) {
+      if (!present.has(libraryId)) this.observedEnabled.delete(libraryId)
+    }
+    for (const library of libraries) {
+      const wasEnabled = this.observedEnabled.get(library.libraryId)
+      if (!library.enabled) {
+        this.enabledAt.delete(library.libraryId)
+      } else if (wasEnabled !== true) {
+        this.enabledAt.set(library.libraryId, now)
+      }
+      this.observedEnabled.set(library.libraryId, library.enabled)
+    }
+  }
+
   private async checkDue(trigger: LibraryScanTrigger): Promise<void> {
-    if (!this.started) return
-    const settings = this.dependencies.getSettings()
+    if (!this.started || this.runInFlight || this.dependencies.isMaintenanceBusy()) return
     const now = this.dependencies.now()
-
-    if (!settings.autoScanEnabled) {
-      this.observedEnabled = false
-      this.enabledAt = null
-      return
-    }
-    if (!this.observedEnabled) {
-      this.observedEnabled = true
-      this.enabledAt = now
-      return
-    }
-    if (settings.libraryPaths.length === 0 && settings.pendingLibraryPathCleanups.length === 0) {
-      return
-    }
-
-    const lastFinishedAt = validFinishedAt(settings)
-    const dueFrom = lastFinishedAt ?? this.enabledAt
-    const intervalMs = settings.autoScanIntervalMinutes * 60_000
-    if (dueFrom !== null && now - dueFrom < intervalMs) return
-    if (this.runInFlight || this.dependencies.isMaintenanceBusy()) return
+    const libraries = [...this.dependencies.listLibraries()].sort(
+      (left, right) => left.position - right.position || left.libraryId - right.libraryId
+    )
+    this.refreshEnabledTransitions(libraries, now)
+    const due = libraries.filter((library) => {
+      if (
+        !library.enabled ||
+        (library.activeRootCount === 0 && library.pendingCleanupJobCount === 0)
+      ) {
+        return false
+      }
+      const dueFrom =
+        parsedTimestamp(library.lastFinishedAt) ?? this.enabledAt.get(library.libraryId)
+      return dueFrom == null || now - dueFrom >= library.intervalMinutes * 60_000
+    })
+    if (due.length === 0) return
 
     this.runInFlight = true
     try {
-      await this.dependencies.runScan(trigger)
-    } catch {
-      // Automatic scans are intentionally silent; the coordinator persists their outcome.
+      for (const library of due) {
+        if (!this.started || this.dependencies.isMaintenanceBusy()) break
+        try {
+          await this.dependencies.runScan(library.libraryId, trigger)
+        } catch {
+          // Automatic scans are silent; each library coordinator state records the failure.
+        }
+      }
     } finally {
       this.runInFlight = false
     }
   }
 
-  private clearTimer(
-    key: 'startupTimer' | 'pollTimer' | 'resumeTimer'
-  ): void {
+  private clearTimer(key: 'startupTimer' | 'pollTimer' | 'resumeTimer'): void {
     const timer = this[key]
     if (timer === null) return
     this.dependencies.clearTimer(timer)
@@ -120,10 +147,10 @@ export class AutomaticScanScheduler {
 }
 
 export const automaticScanScheduler = new AutomaticScanScheduler({
-  getSettings,
+  listLibraries: listMediaLibraryAutomaticScanStates,
   now: Date.now,
   setTimer: (callback, delay) => setTimeout(() => void callback(), delay),
   clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
   isMaintenanceBusy: () => maintenanceTaskGate.active !== null || scanCoordinator.running,
-  runScan: (trigger) => scanCoordinator.run({ trigger })
+  runScan: (libraryId, trigger) => scanCoordinator.run({ libraryId, trigger })
 })

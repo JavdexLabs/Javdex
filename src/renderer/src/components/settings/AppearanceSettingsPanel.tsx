@@ -479,7 +479,7 @@ export default function AppearanceSettingsPanel({
             <span className="settings-cover-mode-copy">
               <span className="settings-cover-mode-title">封面比例</span>
               <span className="settings-cover-mode-description">
-                媒体库影片卡片使用竖版海报或横板封面
+                所有媒体库的影片卡片统一使用竖版海报或横版封面
               </span>
             </span>
             <div className="mode-toggle" title="封面显示方式" role="group" aria-label="封面显示方式">
@@ -499,7 +499,7 @@ export default function AppearanceSettingsPanel({
                 onClick={() => void changeCoverDisplayMode('landscape')}
               >
                 <RectangleHorizontal {...UI_ICON_SM} aria-hidden />
-                <span>横板</span>
+                <span>横版</span>
               </button>
             </div>
           </div>

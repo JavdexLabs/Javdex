@@ -18,8 +18,11 @@ const STATUS_BADGE: Record<number, { text: string; cls: string } | null> = {
   2: { text: '刮削失败', cls: 'failed' }
 }
 
-interface PosterCardProps {
+export interface PosterCardProps {
   video: Video
+  className?: string
+  /** Active library for a card on home/search/global surfaces. */
+  detailLibraryId?: number
   /** Fixed thumbnail height from virtual grid layout (keeps portrait rows aligned). */
   thumbHeight?: number
   selected?: boolean
@@ -30,12 +33,15 @@ interface PosterCardProps {
   onScrape?: (video: Video) => void
   onMarkScrapeSuccess?: (video: Video) => void
   onDelete?: (video: Video) => void
+  deleteLabel?: string
   onRemove?: (video: Video) => void
   removeDisabled?: boolean
 }
 
 export default function PosterCard({
   video,
+  className = '',
+  detailLibraryId,
   thumbHeight,
   selected = false,
   selectionMode = false,
@@ -45,6 +51,7 @@ export default function PosterCard({
   onScrape,
   onMarkScrapeSuccess,
   onDelete,
+  deleteLabel = '删除影片',
   onRemove,
   removeDisabled = false
 }: PosterCardProps): JSX.Element {
@@ -91,7 +98,7 @@ export default function PosterCard({
       onToggleSelect(video, event)
       return
     }
-    navigateToVideoDetail(navigate, location, video.id)
+    navigateToVideoDetail(navigate, location, video.id, { libraryId: detailLibraryId })
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
@@ -120,7 +127,7 @@ export default function PosterCard({
 
   return (
     <div
-      className={`poster-card card-interactive${selected ? ' is-selected' : ''}${selectionMode ? ' is-selection-mode' : ''}`}
+      className={`poster-card card-interactive${className ? ` ${className}` : ''}${selected ? ' is-selected' : ''}${selectionMode ? ' is-selection-mode' : ''}`}
       role="button"
       tabIndex={0}
       onClick={openVideo}
@@ -245,7 +252,7 @@ export default function PosterCard({
                     className="danger"
                     onClick={(e) => stopAndRun(e, onDelete)}
                   >
-                    删除影片
+                    {deleteLabel}
                   </button>
                 )}
               </div>

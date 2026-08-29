@@ -123,18 +123,6 @@
 
 .sourceForm input {
   width: 100%;
-  min-height: var(--control-h-md);
-  padding: 0 var(--control-pad-x);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  outline: none;
-  background: var(--surface-control);
-  color: var(--text-primary);
-}
-
-.sourceForm input:focus {
-  border-color: var(--border-accent);
-  box-shadow: var(--focus-ring);
 }
 
 .sourceForm p {

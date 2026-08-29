@@ -219,6 +219,7 @@ function VideoLocalResourceRow({
   onRevealResource,
   onSetPrimaryResource,
   onSplitResource,
+  onMoveResource,
   onEditResource,
   onRemoveResource
 }: {
@@ -228,6 +229,7 @@ function VideoLocalResourceRow({
   onRevealResource?: (resourceId: number) => void
   onSetPrimaryResource?: (resourceId: number) => void
   onSplitResource?: (resource: VideoResourceDetail) => void
+  onMoveResource?: (resource: VideoResourceDetail) => void
   onEditResource?: (resource: VideoResourceDetail) => void
   onRemoveResource?: (resource: VideoResourceDetail) => void
 }): JSX.Element {
@@ -325,6 +327,17 @@ function VideoLocalResourceRow({
               >
                 在文件夹中显示
               </button>
+              <button
+                type="button"
+                className="detail-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false)
+                  onMoveResource?.(resource)
+                }}
+              >
+                移动到其它媒体库
+              </button>
               {!isPrimary ? (
                 <ResourceReassignmentMenuItems
                   resource={resource}
@@ -362,6 +375,7 @@ function VideoLinkResourceRow({
   onEditResource,
   onSetPrimaryResource,
   onSplitResource,
+  onMoveResource,
   onRemoveResource
 }: {
   resource: VideoResourceDetail
@@ -372,6 +386,7 @@ function VideoLinkResourceRow({
   onEditResource?: (resource: VideoResourceDetail) => void
   onSetPrimaryResource?: (resourceId: number) => void
   onSplitResource?: (resource: VideoResourceDetail) => void
+  onMoveResource?: (resource: VideoResourceDetail) => void
   onRemoveResource?: (resource: VideoResourceDetail) => void
 }): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -490,6 +505,17 @@ function VideoLinkResourceRow({
                   在文件夹中显示
                 </button>
               ) : null}
+              <button
+                type="button"
+                className="detail-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false)
+                  onMoveResource?.(resource)
+                }}
+              >
+                移动到其它媒体库
+              </button>
               {!isPrimary ? (
                 <ResourceReassignmentMenuItems
                   resource={resource}
@@ -612,6 +638,7 @@ export function VideoDetailSecondaryMeta({
   onEditResource,
   onSetPrimaryResource,
   onSplitResource,
+  onMoveResource,
   onRemoveResource,
   onAddResource
 }: {
@@ -622,6 +649,7 @@ export function VideoDetailSecondaryMeta({
   onEditResource?: (resource: VideoResourceDetail) => void
   onSetPrimaryResource?: (resourceId: number) => void
   onSplitResource?: (resource: VideoResourceDetail) => void
+  onMoveResource?: (resource: VideoResourceDetail) => void
   onRemoveResource?: (resource: VideoResourceDetail) => void
   onAddResource: () => void
 }): JSX.Element {
@@ -654,6 +682,7 @@ export function VideoDetailSecondaryMeta({
                   onRevealResource={onRevealResource}
                   onSetPrimaryResource={onSetPrimaryResource}
                   onSplitResource={onSplitResource}
+                  onMoveResource={onMoveResource}
                   onEditResource={onEditResource}
                   onRemoveResource={onRemoveResource}
                 />
@@ -668,6 +697,7 @@ export function VideoDetailSecondaryMeta({
                   onEditResource={onEditResource}
                   onSetPrimaryResource={onSetPrimaryResource}
                   onSplitResource={onSplitResource}
+                  onMoveResource={onMoveResource}
                   onRemoveResource={onRemoveResource}
                 />
               )

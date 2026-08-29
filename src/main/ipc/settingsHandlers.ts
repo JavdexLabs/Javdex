@@ -26,7 +26,6 @@ import {
   confirmLibraryPathRemoval,
   previewLibraryPathRemoval
 } from '../services/libraryPathCleanupService'
-import { isSameLibraryPath } from '../scanner/libraryPathUtils'
 import type { IpcContext } from './shared'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 import { getLlmSecretStorageState } from '../settings/llmSecretStore'
@@ -71,6 +70,12 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
       lastLibraryScanSummary: _ignoredScanSummary,
       unrecognizedFiles: _ignoredUnrecognizedFiles,
       unrecognizedFilesScanFinishedAt: _ignoredUnrecognizedFilesScanFinishedAt,
+      libraryPaths: _ignoredLibraryPaths,
+      autoDeleteResourceLessVideos: _ignoredResourceLessPolicy,
+      autoScanEnabled: _ignoredAutoScan,
+      autoScanIntervalMinutes: _ignoredAutoScanInterval,
+      minScanImportDurationMinutes: _ignoredMinimumDuration,
+      autoMergeSameCodeResources: _ignoredAutoMerge,
       defaultLlmProviderId: _ignoredDefaultLlmProviderId,
       defaultLlmModelId: _ignoredDefaultLlmModelId,
       llmProviderConfigs: _ignoredLlmProviderConfigs,
@@ -92,30 +97,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
     ) {
       throw new Error(`演员刮削插件「${safePatch.defaultActressScraper}」不可用`)
     }
-    let guardedPatch: Partial<AppSettings> = safePatch
-    if (safePatch.libraryPaths !== undefined) {
-      if (!Array.isArray(safePatch.libraryPaths) || safePatch.libraryPaths.some((item) => typeof item !== 'string')) {
-        throw new Error('无效的媒体库路径')
-      }
-      const current = getSettings()
-      const libraryPaths = Array.from(
-        new Set(safePatch.libraryPaths.map((item) => item.trim()).filter(Boolean))
-      )
-      const bypassedRemoval = current.libraryPaths.some(
-        (currentPath) =>
-          !libraryPaths.some((nextPath) => isSameLibraryPath(currentPath, nextPath))
-      )
-      if (bypassedRemoval) throw new Error('请通过媒体库路径的移除按钮完成此操作')
-      guardedPatch = {
-        ...safePatch,
-        libraryPaths,
-        pendingLibraryPathCleanups: current.pendingLibraryPathCleanups.filter(
-          (queuedRoot) =>
-            !libraryPaths.some((libraryPath) => isSameLibraryPath(queuedRoot, libraryPath))
-        )
-      }
-    }
-    return toSettingsSnapshot(updateSettings(guardedPatch))
+    return toSettingsSnapshot(updateSettings(safePatch))
   })
 
   appCommandAdapter.register(IPC.SETTINGS_PICK_FOLDER, async (): Promise<string[]> => {
@@ -126,19 +108,21 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
     return res.canceled ? [] : res.filePaths
   })
 
-  appCommandAdapter.register(IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW, (libraryPath) => {
-    if (typeof libraryPath !== 'string' || !libraryPath.trim()) {
-      throw new Error('无效的媒体库路径')
-    }
-    return previewLibraryPathRemoval(libraryPath)
-  })
+  appCommandAdapter.register(
+    IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW,
+    (libraryId, rootId) => previewLibraryPathRemoval({ libraryId, rootId })
+  )
 
-  appCommandAdapter.register(IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM, (libraryPath) => {
-    if (typeof libraryPath !== 'string' || !libraryPath.trim()) {
-      throw new Error('无效的媒体库路径')
-    }
-    return toSettingsSnapshot(confirmLibraryPathRemoval(libraryPath))
-  })
+  appCommandAdapter.register(
+    IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM,
+    (libraryId, rootId, expectedRevision, expectedImpactRevision) =>
+      confirmLibraryPathRemoval({
+        libraryId,
+        rootId,
+        expectedRevision,
+        expectedImpactRevision
+      })
+  )
 
   appCommandAdapter.register(IPC.SETTINGS_MODEL_MANAGEMENT_GET, () => modelManagement.read())
 

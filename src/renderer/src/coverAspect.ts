@@ -29,6 +29,21 @@ export const PORTRAIT_CROP_WIDTH_SCALE = LANDSCAPE_RATIO / PORTRAIT_RATIO
 /** Space below the thumbnail for code + title (no star row on library cards). */
 export const POSTER_META_HEIGHT = 58
 
+/** Space reserved below a global-search poster for its media-library membership strip. */
+export const POSTER_LIBRARY_BADGE_ROW_HEIGHT = 27
+
+export function computePosterGridRowHeight(
+  posterHeight: number,
+  options: { gap?: number; showLibraryBadges?: boolean } = {}
+): number {
+  return (
+    posterHeight +
+    POSTER_META_HEIGHT +
+    (options.showLibraryBadges ? POSTER_LIBRARY_BADGE_ROW_HEIGHT : 0) +
+    (options.gap ?? 12)
+  )
+}
+
 /** Minimum poster column width in portrait mode (drives grid density). */
 export const MIN_PORTRAIT_COL_WIDTH = 135
 

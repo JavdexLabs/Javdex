@@ -2,6 +2,25 @@
 // the preload bridge and the main-process handler registry.
 
 export const IPC = {
+  // Named media libraries and cross-library home discovery
+  MEDIA_LIBRARY_LIST: 'mediaLibrary:list',
+  MEDIA_LIBRARY_GET: 'mediaLibrary:get',
+  MEDIA_LIBRARY_CREATE: 'mediaLibrary:create',
+  MEDIA_LIBRARY_UPDATE: 'mediaLibrary:update',
+  MEDIA_LIBRARY_CONFIG_UPDATE: 'mediaLibrary:updateConfig',
+  MEDIA_LIBRARY_ROOT_ADD: 'mediaLibrary:addRoot',
+  MEDIA_LIBRARY_ROOT_UPDATE: 'mediaLibrary:updateRoot',
+  MEDIA_LIBRARY_ROOT_REMOVE: 'mediaLibrary:removeRoot',
+  MEDIA_LIBRARY_ROOT_REMOVE_CANCEL: 'mediaLibrary:cancelRootRemoval',
+  MEDIA_LIBRARY_ROOT_MIGRATE_PREVIEW: 'mediaLibrary:previewRootMigration',
+  MEDIA_LIBRARY_ROOT_MIGRATE: 'mediaLibrary:migrateRoot',
+  MEDIA_LIBRARY_ARCHIVE: 'mediaLibrary:archive',
+  MEDIA_LIBRARY_RESTORE: 'mediaLibrary:restore',
+  MEDIA_LIBRARY_DELETE_PREVIEW: 'mediaLibrary:previewDelete',
+  MEDIA_LIBRARY_DELETE: 'mediaLibrary:delete',
+  HOME_LOAD: 'home:load',
+  HOME_SEARCH: 'home:search',
+
   // Settings
   SETTINGS_GET: 'settings:get',
   SETTINGS_UPDATE: 'settings:update',
@@ -30,6 +49,7 @@ export const IPC = {
   // Scan / import
   SCAN_RUN: 'scan:run',
   SCAN_CANCEL: 'scan:cancel',
+  SCAN_LATEST_GET: 'scan:getLatest',
   SCAN_AUDIT_GET: 'scan:auditGet',
   SCAN_AUDIT_REVEAL_FILE: 'scan:auditRevealFile',
   SCAN_PROGRESS: 'scan:progress', // main -> renderer event
@@ -46,7 +66,6 @@ export const IPC = {
   VIDEO_EDIT: 'video:edit',
   VIDEO_CLEAR_META: 'video:clearMeta',
   VIDEO_MARK_SCRAPE_SUCCESS: 'video:markScrapeSuccess',
-  VIDEO_DELETE: 'video:delete',
   VIDEO_SET_RATING: 'video:setRating',
   VIDEO_CORRECT_IMPORT: 'video:correctImport',
   VIDEO_YEARS: 'video:years',
@@ -62,6 +81,12 @@ export const IPC = {
   VIDEO_RESOURCE_UPDATE_LOCAL_LABEL: 'video:resourceUpdateLocalLabel',
   VIDEO_RESOURCE_SET_PRIMARY: 'video:resourceSetPrimary',
   VIDEO_RESOURCE_REMOVE: 'video:resourceRemove',
+  VIDEO_REMOVE_FROM_LIBRARY_PREVIEW: 'video:removeFromLibraryPreview',
+  VIDEO_REMOVE_FROM_LIBRARY: 'video:removeFromLibrary',
+  VIDEO_RESOURCE_MOVE_PREVIEW: 'video:resourceMovePreview',
+  VIDEO_RESOURCE_MOVE: 'video:resourceMove',
+  VIDEO_DELETE_GLOBAL_PREVIEW: 'video:deleteGlobalPreview',
+  VIDEO_DELETE_GLOBAL: 'video:deleteGlobal',
   VIDEO_MERGE: 'video:merge',
   VIDEO_RESOURCE_SPLIT: 'video:resourceSplit',
 

@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import type {
   LibraryScanAudit,
   LibraryScanEvent,
@@ -7,92 +8,133 @@ import type {
   LibraryScanResourceAuditEntry,
   LibraryScanSummary,
   LibraryScanTrigger,
+  PendingLibraryPathCleanup,
   ScanProgress,
   ScanResult
 } from '@shared/libraryTypes'
+import { LEGACY_CLEANUP_WAITING_ERROR } from '@shared/legacyLibraryCleanup'
 import { sanitizeLibraryScanError } from '@shared/libraryScanSummary'
+import { normalizeLocalPathIdentity } from '@shared/localPathIdentity'
+import type { MediaLibraryRoot, MediaLibraryScanSnapshot } from '@shared/mediaLibraryTypes'
 import type { Video, VideoResource } from '@shared/videoTypes'
 import {
   getVideoById,
-  getVideoResourceById,
-  listResourceLessVideos,
+  getVideoResourceInLibrary,
   listSourceManagedVideoResourceRefs,
   listVideoResources,
   removeVideoResourceRecord,
-  setPrimaryVideoResource
+  setPrimaryVideoResource,
+  type LocalVideoResourceRef
 } from '../db/videoRepo'
-import { getSettings, updateSettings } from '../settings/settingsStore'
+import { getDb } from '../db/database'
+import {
+  bindOnlineMediaLibraryRootIdentities,
+  readMediaLibraryScanSnapshot,
+  resolveMediaLibraryRootPath
+} from '../db/mediaLibraryRepo'
+import {
+  removeResourceLessMemberships,
+  type RemovedResourceLessMembership
+} from '../db/libraryMembershipRepo'
+import {
+  beginLibraryScanRun,
+  finishLibraryScanRun,
+  type LibraryUnrecognizedFileInput
+} from '../db/libraryScanRepo'
+import { listPendingScanGroups, reconcilePendingScanResources } from '../db/pendingScanRepo'
 import { maintenanceTaskGate, type MaintenanceTaskGate } from '../services/maintenanceTaskGate'
+import {
+  authorizeMediaLibraryRoot,
+  authorizeMediaLibraryRootDeletionTarget,
+  authorizeMediaLibraryRootFile
+} from '../services/mediaLibraryRootFileGuard'
 import { selectPrimaryVideoResourceCandidate } from '../services/videoResourcePromotion'
 import {
   applyPendingLibraryPathCleanups,
-  clearPendingLibraryPathCleanups,
   listPendingLibraryPathCleanupRoots,
-  runLibraryScanCleanupTransaction,
+  recoverLegacyLibraryPathCleanups,
+  type RecoverLegacyLibraryPathCleanupResult,
   type PendingLibraryPathCleanupResult
 } from '../services/libraryPathCleanupService'
-import { isPathUnderRoot, isSameLibraryPath } from './libraryPathUtils'
-import { scanFolders, type ScanOptions, type ScanProgressFn } from './scanner'
-import { deleteResourceLessVideos } from '../services/resourceLessVideoCleanupService'
-import { listPendingScanGroups, reconcilePendingScanResources } from '../db/pendingScanRepo'
-import { writeLibraryScanAudit } from './libraryScanAuditStore'
+import { isPathUnderRoot } from './libraryPathUtils'
+import {
+  scanFolders,
+  type ScanFoldersRequest,
+  type ScanOptions,
+  type ScanProgressFn
+} from './scanner'
+import { resolveMinScanImportDurationSeconds } from './videoDuration'
 
 export type ScanTrigger = LibraryScanTrigger
 
 export interface ScanCoordinatorRequest {
-  folders?: string[]
+  libraryId: number
+  rootIds?: number[]
   trigger?: ScanTrigger
   onProgress?: (progress: ScanProgress) => void
 }
 
-interface LocalResourceRef {
-  video_id: number
-  resource_id: number
-  locator: string
-}
-
 type LocalPathState = 'present' | 'missing' | 'unknown'
 
-interface ScanCoordinatorDependencies {
-  getConfiguredFolders: () => string[]
-  hasPendingPathCleanups: () => boolean
-  inspectFolder: (folder: string) => Promise<boolean>
+interface FinishRunInput {
+  libraryId: number
+  runId: string
+  status: 'completed' | 'failed' | 'cancelled'
+  summary: LibraryScanSummary
+  audit: LibraryScanAudit
+  replaceUnrecognizedRootIds?: readonly number[]
+  unrecognizedFiles?: readonly LibraryUnrecognizedFileInput[]
+}
+
+export interface ScanCoordinatorDependencies {
+  readScanSnapshot: (libraryId: number) => MediaLibraryScanSnapshot
+  bindRootIdentities: typeof bindOnlineMediaLibraryRootIdentities
+  inspectRoot: (root: Readonly<MediaLibraryRoot>) => Promise<boolean>
+  authorizeRoot: typeof authorizeMediaLibraryRoot
+  authorizeRootFile: typeof authorizeMediaLibraryRootFile
+  authorizeRootDeletionTarget: typeof authorizeMediaLibraryRootDeletionTarget
   scanFolders: (
-    folders: string[],
+    request: ScanFoldersRequest,
     onProgress?: ScanProgressFn,
     options?: ScanOptions
   ) => Promise<ScanResult>
-  listLocalResources: () => LocalResourceRef[]
-  getResourceById: (resourceId: number) => VideoResource | null
+  listLocalResources: (libraryId: number) => LocalVideoResourceRef[]
+  getResourceById: (libraryId: number, resourceId: number) => VideoResource | null
   getVideoById: (videoId: number) => Video | null
-  listResources: (videoId: number) => VideoResource[]
-  removeResourceRecord: (resourceId: number) => void
-  setPrimaryResource: (videoId: number, resourceId: number) => void
+  listResources: (libraryId: number, videoId: number) => VideoResource[]
+  removeResourceRecord: (libraryId: number, resourceId: number) => void
+  setPrimaryResource: (libraryId: number, videoId: number, resourceId: number) => void
   inspectPath: (filePath: string) => LocalPathState
   reconcilePendingScanResources: typeof reconcilePendingScanResources
-  getPendingPathCleanupRoots: () => string[]
-  applyPendingPathCleanups: (roots: string[]) => PendingLibraryPathCleanupResult
-  clearPendingPathCleanups: (roots: string[]) => void
+  recoverPendingPathCleanups: (libraryId: number) => RecoverLegacyLibraryPathCleanupResult
+  listPendingPathCleanups: (libraryId: number) => PendingLibraryPathCleanup[]
+  applyPendingPathCleanups: (
+    cleanups: PendingLibraryPathCleanup[]
+  ) => PendingLibraryPathCleanupResult
   runCleanupTransaction: <T>(operation: () => T) => T
-  shouldAutoDeleteResourceLessVideos: () => boolean
-  deleteResourceLessVideos: () => number
-  listResourceLessVideos: () => Array<Pick<Video, 'id' | 'code' | 'title'>>
+  removeResourceLessMemberships: (libraryId: number) => RemovedResourceLessMembership[]
   listPendingScanGroups: typeof listPendingScanGroups
-  recordScanSummary: (
-    summary: LibraryScanSummary,
-    unrecognizedFiles: string[] | undefined,
-    audit: LibraryScanAudit
-  ) => void
+  beginRun: typeof beginLibraryScanRun
+  finishRun: (input: FinishRunInput) => void
   now: () => string
+  createRunId: () => string
   gate: MaintenanceTaskGate
 }
 
-async function inspectReadableDirectory(folder: string): Promise<boolean> {
+async function inspectStableRoot(root: Readonly<MediaLibraryRoot>): Promise<boolean> {
   try {
-    const stat = await fs.promises.stat(folder)
-    if (!stat.isDirectory()) return false
-    await fs.promises.access(folder, fs.constants.R_OK)
-    await fs.promises.readdir(folder)
+    const current = resolveMediaLibraryRootPath(root.path)
+    if (!current.realPath || !current.normalizedRealPath) return false
+    await fs.promises.access(current.realPath, fs.constants.R_OK)
+    await fs.promises.readdir(current.realPath)
+    if (
+      root.normalizedRealPath != null &&
+      current.normalizedRealPath !== root.normalizedRealPath
+    ) {
+      return false
+    }
+    if (root.deviceId != null && current.deviceId !== root.deviceId) return false
+    if (root.inode != null && current.inode !== root.inode) return false
     return true
   } catch {
     return false
@@ -109,14 +151,22 @@ function inspectLocalPath(filePath: string): LocalPathState {
   }
 }
 
+function runCleanupTransaction<T>(operation: () => T): T {
+  return getDb().transaction(operation)()
+}
+
 export class ScanCoordinator {
-  private activeController: AbortController | null = null
+  private activeRun: { runId: string; controller: AbortController } | null = null
   private readonly listeners = new Set<(event: LibraryScanEvent) => void>()
 
   constructor(private readonly dependencies: ScanCoordinatorDependencies) {}
 
   get running(): boolean {
-    return this.activeController !== null
+    return this.activeRun !== null
+  }
+
+  get activeRunId(): string | null {
+    return this.activeRun?.runId ?? null
   }
 
   subscribe(listener: (event: LibraryScanEvent) => void): () => void {
@@ -124,27 +174,40 @@ export class ScanCoordinator {
     return () => this.listeners.delete(listener)
   }
 
-  cancel(): boolean {
-    if (!this.activeController) return false
-    this.activeController.abort()
+  cancel(runId?: string): boolean {
+    if (!this.activeRun || (runId != null && runId !== this.activeRun.runId)) return false
+    this.activeRun.controller.abort()
     return true
   }
 
-  async run(request: ScanCoordinatorRequest = {}): Promise<ScanResult> {
+  async run(request: ScanCoordinatorRequest): Promise<ScanResult> {
+    if (!Number.isSafeInteger(request.libraryId) || request.libraryId <= 0) {
+      throw new Error('媒体库 ID 无效')
+    }
     const lease = this.dependencies.gate.tryAcquire('scan')
     if (!lease) throw new Error('已有扫描或资源维护任务正在运行')
 
     const trigger = request.trigger ?? 'manual'
     const startedAt = this.dependencies.now()
+    const runId = this.dependencies.createRunId()
     const controller = new AbortController()
-    this.activeController = controller
-    this.emit({ phase: 'started', trigger })
-    let result = this.emptyResult()
-    let offlineFolders: string[] = []
-    let failure: string | null = null
+    this.activeRun = { runId, controller }
+    let result = this.emptyResult(request.libraryId, runId)
+    const offlineRoots: Readonly<MediaLibraryRoot>[] = []
+    let eventFailure: string | null = null
+    let snapshot: MediaLibraryScanSnapshot | null = null
+    let selectedRoots: Readonly<MediaLibraryRoot>[] = []
+    let beganRun = false
     const auditState: Omit<
       LibraryScanAudit,
-      'schemaVersion' | 'trigger' | 'startedAt' | 'finishedAt' | 'status'
+      | 'schemaVersion'
+      | 'libraryId'
+      | 'runId'
+      | 'configRevision'
+      | 'trigger'
+      | 'startedAt'
+      | 'finishedAt'
+      | 'status'
     > = {
       files: [],
       removedResources: [],
@@ -152,80 +215,116 @@ export class ScanCoordinator {
       deletedVideos: [],
       pendingGroups: []
     }
-    const refreshPendingAudit = (): void => {
-      const auditPendingIds = new Set(
-        auditState.files
-          .filter(
-            (entry): entry is Extract<LibraryScanFileAuditEntry, { outcome: 'pending' }> =>
-              entry.outcome === 'pending' && entry.groupId != null
-          )
-          .map((entry) => entry.groupId as number)
-      )
-      auditState.pendingGroups = this.dependencies
-        .listPendingScanGroups()
-        .filter((group) => auditPendingIds.has(group.id))
-        .map((group): LibraryScanPendingGroupAuditEntry => ({
-          groupId: group.id,
-          normalizedCode: group.normalizedCode,
-          resourceCount: group.resources.filter((resource) =>
-            auditState.files.some(
-              (entry) => entry.outcome === 'pending' && entry.filePath === resource.filePath
-            )
-          ).length
-        }))
-    }
-    try {
-      const configuredFolders = Array.from(new Set(this.dependencies.getConfiguredFolders()))
-      const folders = request.folders?.length
-        ? Array.from(new Set(request.folders))
-        : configuredFolders
-      const isFullScan =
-        folders.length === configuredFolders.length &&
-        folders.every((folder) =>
-          configuredFolders.some((configured) => isSameLibraryPath(folder, configured))
-        )
-      if (folders.length === 0 && !this.dependencies.hasPendingPathCleanups()) {
-        throw new Error('尚未配置媒体库路径')
-      }
 
-      const accessibleFolders: string[] = []
-      offlineFolders = []
-      for (const folder of folders) {
+    try {
+      const legacyCleanupRecovery = !request.rootIds?.length
+        ? this.dependencies.recoverPendingPathCleanups(request.libraryId)
+        : { recovered: 0, waiting: 0 }
+      snapshot = this.dependencies.readScanSnapshot(request.libraryId)
+      selectedRoots = this.selectRoots(snapshot, request.rootIds)
+      const unboundRootIds = selectedRoots
+        .filter((root) => !root.normalizedRealPath || !root.deviceId || !root.inode)
+        .map((root) => root.id)
+      if (unboundRootIds.length > 0) {
+        const binding = this.dependencies.bindRootIdentities({
+          libraryId: request.libraryId,
+          rootIds: unboundRootIds,
+          expectedRevision: snapshot.libraryRevision
+        })
+        if (binding.boundRootIds.length > 0) {
+          snapshot = this.dependencies.readScanSnapshot(request.libraryId)
+          selectedRoots = this.selectRoots(snapshot, request.rootIds)
+        }
+      }
+      const pendingPathCleanups = request.rootIds?.length
+        ? []
+        : this.dependencies.listPendingPathCleanups(request.libraryId)
+      const hasNoRunnableWork = selectedRoots.length === 0 && pendingPathCleanups.length === 0
+      if (hasNoRunnableWork && legacyCleanupRecovery.waiting === 0) {
+        throw new Error('尚未配置可扫描的媒体库根目录')
+      }
+      this.dependencies.beginRun({
+        libraryId: request.libraryId,
+        runId,
+        configRevision: snapshot.configRevision,
+        trigger,
+        startedAt
+      })
+      beganRun = true
+      this.emit({ phase: 'started', libraryId: request.libraryId, runId, trigger })
+      if (hasNoRunnableWork) throw new Error(LEGACY_CLEANUP_WAITING_ERROR)
+
+      const accessibleRoots: Readonly<MediaLibraryRoot>[] = []
+      for (const root of selectedRoots) {
         if (controller.signal.aborted) {
-          result = this.cancelledResult(offlineFolders)
-          this.recordSummary(trigger, startedAt, 'cancelled', result, null, auditState)
+          result = this.cancelledResult(request.libraryId, runId, offlineRoots)
+          this.recordSummary(
+            snapshot,
+            runId,
+            trigger,
+            startedAt,
+            'cancelled',
+            result,
+            null,
+            auditState,
+            []
+          )
           return result
         }
-        if (await this.dependencies.inspectFolder(folder)) accessibleFolders.push(folder)
-        else offlineFolders.push(folder)
+        if (await this.dependencies.inspectRoot(root)) accessibleRoots.push(root)
+        else offlineRoots.push(root)
       }
 
       result = await this.dependencies.scanFolders(
-        accessibleFolders,
+        {
+          libraryId: request.libraryId,
+          runId,
+          roots: accessibleRoots
+        },
         (progress) => {
           request.onProgress?.(progress)
-          this.emit({ phase: 'progress', trigger, progress })
+          this.emit({
+            phase: 'progress',
+            libraryId: request.libraryId,
+            runId,
+            trigger,
+            progress
+          })
         },
         {
           signal: controller.signal,
-          unavailableRoots: offlineFolders,
+          unavailableRootIds: offlineRoots.map((root) => root.id),
+          minImportDurationSeconds: resolveMinScanImportDurationSeconds(
+            snapshot.config.minImportDurationMinutes
+          ),
+          autoMergeSameCodeResources: snapshot.config.autoMergeSameCodeResources,
           onFileResult: (entry) => auditState.files.push(entry)
         }
       )
-      for (const folder of [...accessibleFolders]) {
-        if (await this.dependencies.inspectFolder(folder)) continue
-        accessibleFolders.splice(accessibleFolders.indexOf(folder), 1)
-        offlineFolders.push(folder)
+
+      const safeRoots: Readonly<MediaLibraryRoot>[] = []
+      for (const root of accessibleRoots) {
+        if (await this.dependencies.inspectRoot(root)) safeRoots.push(root)
+        else if (!offlineRoots.some((offline) => offline.id === root.id)) offlineRoots.push(root)
       }
-      result.offlineFolders = offlineFolders
-      result.promoted ??= 0
-      result.deletedVideos ??= 0
-      refreshPendingAudit()
+      result.offlineFolders = offlineRoots.map((root) => root.path)
+      this.refreshPendingAudit(request.libraryId, auditState)
       if (controller.signal.aborted || result.cancelled) {
         result.cancelled = true
-        this.recordSummary(trigger, startedAt, 'cancelled', result, null, auditState)
+        this.recordSummary(
+          snapshot,
+          runId,
+          trigger,
+          startedAt,
+          'cancelled',
+          result,
+          null,
+          auditState,
+          []
+        )
         return result
       }
+
       const processingFailures = Math.max(
         0,
         result.failed -
@@ -234,97 +333,190 @@ export class ScanCoordinator {
           result.omittedStrmFailures
       )
       if (processingFailures > 0) {
+        eventFailure = `有 ${processingFailures} 个文件处理失败，已跳过资源清理`
         this.recordSummary(
+          snapshot,
+          runId,
           trigger,
           startedAt,
           'failed',
           result,
-          `有 ${processingFailures} 个文件处理失败，已跳过资源清理`,
-          auditState
+          eventFailure,
+          auditState,
+          []
         )
         return result
       }
 
-      const pendingCleanupRoots = isFullScan
-        ? this.dependencies.getPendingPathCleanupRoots()
-        : []
-      const shouldDeleteResourceLessVideos =
-        isFullScan &&
-        offlineFolders.length === 0 &&
-        this.dependencies.shouldAutoDeleteResourceLessVideos()
+      const isFullScan =
+        !request.rootIds?.length &&
+        selectedRoots.length === snapshot.roots.length &&
+        selectedRoots.every((root) => snapshot?.roots.some((item) => item.id === root.id))
+      const safeRootIds = new Set(safeRoots.map((root) => root.id))
+      const safeRootsById = new Map(safeRoots.map((root) => [root.id, root] as const))
       const cleanup = this.dependencies.runCleanupTransaction(() => {
+        for (const root of safeRoots) {
+          this.dependencies.authorizeRoot(request.libraryId, root.id, root)
+        }
+        const inspectAuthorizedPendingPath = (filePath: string): LocalPathState => {
+          const root = safeRoots.find(
+            (candidate) =>
+              isPathUnderRoot(filePath, candidate.path) ||
+              Boolean(candidate.realPath && isPathUnderRoot(filePath, candidate.realPath))
+          )
+          if (!root) return 'unknown'
+          const state = this.dependencies.inspectPath(filePath)
+          if (state === 'present') {
+            this.dependencies.authorizeRootFile(request.libraryId, root.id, filePath, root)
+          } else if (state === 'missing') {
+            this.dependencies.authorizeRootDeletionTarget(
+              request.libraryId,
+              root.id,
+              filePath,
+              root
+            )
+          } else {
+            this.dependencies.authorizeRoot(request.libraryId, root.id, root)
+          }
+          return state
+        }
         this.dependencies.reconcilePendingScanResources(
-          accessibleFolders,
-          this.dependencies.inspectPath
+          request.libraryId,
+          [...safeRootIds],
+          inspectAuthorizedPendingPath
         )
         const missingResources = this.removeMissingAccessibleResources(
-          accessibleFolders,
-          offlineFolders
+          request.libraryId,
+          safeRootsById
         )
-        const deferredAudit = this.previewPendingPathCleanupAudit(pendingCleanupRoots)
         const deferredCleanup =
-          pendingCleanupRoots.length > 0
-            ? this.dependencies.applyPendingPathCleanups(pendingCleanupRoots)
+          isFullScan && pendingPathCleanups.length > 0
+            ? this.dependencies.applyPendingPathCleanups(pendingPathCleanups)
             : { removed: 0, promoted: 0, consumedRoots: [] }
-        const deletedCandidates = shouldDeleteResourceLessVideos
-          ? this.dependencies.listResourceLessVideos()
-          : []
-        const deletedVideos = shouldDeleteResourceLessVideos
-          ? this.dependencies.deleteResourceLessVideos()
-          : 0
-        return { missingResources, deferredCleanup, deferredAudit, deletedVideos, deletedCandidates }
+        const removedMemberships =
+          isFullScan && offlineRoots.length === 0 && snapshot?.config.removeResourceLessMemberships
+            ? this.dependencies.removeResourceLessMemberships(request.libraryId)
+            : []
+        return { missingResources, deferredCleanup, removedMemberships }
       })
-      this.dependencies.clearPendingPathCleanups(pendingCleanupRoots)
       result.removed += cleanup.missingResources.removed + cleanup.deferredCleanup.removed
       result.promoted += cleanup.missingResources.promoted + cleanup.deferredCleanup.promoted
-      result.deletedVideos = cleanup.deletedVideos
-      auditState.removedResources.push(
-        ...cleanup.missingResources.removedResources,
-        ...cleanup.deferredAudit.removedResources
-      )
-      auditState.promotedResources.push(
-        ...cleanup.missingResources.promotedResources,
-        ...cleanup.deferredAudit.promotedResources
-      )
+      result.deletedVideos = cleanup.removedMemberships.length
+      auditState.removedResources.push(...cleanup.missingResources.removedResources)
+      auditState.promotedResources.push(...cleanup.missingResources.promotedResources)
       auditState.deletedVideos.push(
-        ...cleanup.deletedCandidates.slice(0, cleanup.deletedVideos).map((video) => ({
-          videoId: video.id,
-          videoCode: video.code,
-          videoTitle: video.title,
+        ...cleanup.removedMemberships.map((video) => ({
+          videoId: video.videoId,
+          videoCode: video.videoCode,
+          videoTitle: video.videoTitle,
           reason: 'resource_less' as const
         }))
       )
-      this.recordSummary(
-        trigger,
-        startedAt,
+      const status =
         result.strmFailures.length + result.omittedStrmFailures > 0
           ? 'completed_with_errors'
-          : 'success',
+          : 'success'
+      this.recordSummary(
+        snapshot,
+        runId,
+        trigger,
+        startedAt,
+        status,
         result,
         null,
-        auditState
+        auditState,
+        safeRoots
       )
       return result
     } catch (error) {
       const errorSummary = sanitizeLibraryScanError(error)
-      failure = errorSummary
-      result.offlineFolders = offlineFolders
-      try {
-        refreshPendingAudit()
-      } catch {
-        // Preserve the original scan failure when pending state is also unavailable.
+      eventFailure = errorSummary
+      result.offlineFolders = offlineRoots.map((root) => root.path)
+      if (snapshot && beganRun) {
+        try {
+          this.refreshPendingAudit(request.libraryId, auditState)
+        } catch {
+          // Preserve the original scan failure when pending state is also unavailable.
+        }
+        this.recordSummary(
+          snapshot,
+          runId,
+          trigger,
+          startedAt,
+          'failed',
+          result,
+          errorSummary,
+          auditState,
+          []
+        )
       }
-      this.recordSummary(trigger, startedAt, 'failed', result, errorSummary, auditState)
       throw new Error(errorSummary)
     } finally {
-      if (this.activeController === controller) this.activeController = null
+      if (this.activeRun?.controller === controller) this.activeRun = null
       lease.release()
-      this.emit(
-        failure
-          ? { phase: 'failed', trigger, error: failure }
-          : { phase: 'completed', trigger, result }
-      )
+      if (beganRun) {
+        this.emit(
+          eventFailure
+            ? {
+                phase: 'failed',
+                libraryId: request.libraryId,
+                runId,
+                trigger,
+                error: eventFailure
+              }
+            : {
+                phase: 'completed',
+                libraryId: request.libraryId,
+                runId,
+                trigger,
+                result
+              }
+        )
+      }
     }
+  }
+
+  private selectRoots(
+    snapshot: MediaLibraryScanSnapshot,
+    requestedRootIds: number[] | undefined
+  ): Readonly<MediaLibraryRoot>[] {
+    if (!requestedRootIds?.length) return [...snapshot.roots]
+    const rootIds = new Set(requestedRootIds)
+    if (
+      rootIds.size !== requestedRootIds.length ||
+      requestedRootIds.some((rootId) => !Number.isSafeInteger(rootId) || rootId <= 0)
+    ) {
+      throw new Error('扫描根目录选择无效')
+    }
+    const selected = snapshot.roots.filter((root) => rootIds.has(root.id))
+    if (selected.length !== rootIds.size) throw new Error('扫描根目录不属于该媒体库或已停用')
+    return selected
+  }
+
+  private refreshPendingAudit(
+    libraryId: number,
+    auditState: Pick<LibraryScanAudit, 'files' | 'pendingGroups'>
+  ): void {
+    const auditPendingIds = new Set(
+      auditState.files
+        .filter(
+          (entry): entry is Extract<LibraryScanFileAuditEntry, { outcome: 'pending' }> =>
+            entry.outcome === 'pending' && entry.groupId != null
+        )
+        .map((entry) => entry.groupId as number)
+    )
+    auditState.pendingGroups = this.dependencies
+      .listPendingScanGroups(libraryId)
+      .filter((group) => auditPendingIds.has(group.id))
+      .map((group): LibraryScanPendingGroupAuditEntry => ({
+        groupId: group.id,
+        normalizedCode: group.normalizedCode,
+        resourceCount: group.resources.filter((resource) =>
+          auditState.files.some(
+            (entry) => entry.outcome === 'pending' && entry.filePath === resource.filePath
+          )
+        ).length
+      }))
   }
 
   private emit(event: LibraryScanEvent): void {
@@ -337,8 +529,10 @@ export class ScanCoordinator {
     }
   }
 
-  private emptyResult(): ScanResult {
+  private emptyResult(libraryId: number, runId: string): ScanResult {
     return {
+      libraryId,
+      runId,
       scannedFiles: 0,
       imported: 0,
       skipped: 0,
@@ -359,15 +553,21 @@ export class ScanCoordinator {
     }
   }
 
-  private cancelledResult(offlineFolders: string[]): ScanResult {
+  private cancelledResult(
+    libraryId: number,
+    runId: string,
+    offlineRoots: readonly Readonly<MediaLibraryRoot>[]
+  ): ScanResult {
     return {
-      ...this.emptyResult(),
+      ...this.emptyResult(libraryId, runId),
       cancelled: true,
-      offlineFolders
+      offlineFolders: offlineRoots.map((root) => root.path)
     }
   }
 
   private recordSummary(
+    snapshot: MediaLibraryScanSnapshot,
+    runId: string,
     trigger: LibraryScanTrigger,
     startedAt: string,
     status: LibraryScanSummary['status'],
@@ -375,11 +575,28 @@ export class ScanCoordinator {
     errorSummary: string | null,
     auditState: Omit<
       LibraryScanAudit,
-      'schemaVersion' | 'trigger' | 'startedAt' | 'finishedAt' | 'status'
-    >
+      | 'schemaVersion'
+      | 'libraryId'
+      | 'runId'
+      | 'configRevision'
+      | 'trigger'
+      | 'startedAt'
+      | 'finishedAt'
+      | 'status'
+    >,
+    safeRoots: readonly Readonly<MediaLibraryRoot>[]
   ): void {
+    const completedSafely = status === 'success' || status === 'completed_with_errors'
+    if (completedSafely) {
+      for (const root of safeRoots) {
+        this.dependencies.authorizeRoot(snapshot.libraryId, root.id, root)
+      }
+    }
     const finishedAt = this.dependencies.now()
     const summary: LibraryScanSummary = {
+      libraryId: snapshot.libraryId,
+      runId,
+      configRevision: snapshot.configRevision,
       trigger,
       startedAt,
       finishedAt,
@@ -401,29 +618,55 @@ export class ScanCoordinator {
         : {}),
       errorSummary
     }
-    try {
-      this.dependencies.recordScanSummary(
-        summary,
-        status === 'success' || status === 'completed_with_errors'
-          ? [...result.unrecognizedFiles]
-          : undefined,
-        {
-          schemaVersion: 1,
-          trigger,
-          startedAt,
-          finishedAt,
-          status,
-          ...auditState
-        }
-      )
-    } catch (error) {
-      console.error('Failed to persist scan summary:', sanitizeLibraryScanError(error))
+    const audit: LibraryScanAudit = {
+      schemaVersion: 1,
+      libraryId: snapshot.libraryId,
+      runId,
+      configRevision: snapshot.configRevision,
+      trigger,
+      startedAt,
+      finishedAt,
+      status,
+      ...auditState
     }
+    const unrecognizedFiles: LibraryUnrecognizedFileInput[] = result.unrecognizedFiles.flatMap(
+      (filePath) => {
+        const root = safeRoots.find((candidate) => isPathUnderRoot(filePath, candidate.path))
+        if (!root) return []
+        this.dependencies.authorizeRootFile(snapshot.libraryId, root.id, filePath, root)
+        return [
+          {
+            rootId: root.id,
+            filePath,
+            normalizedPath: normalizeLocalPathIdentity(filePath),
+            reason: 'unrecognized_code'
+          }
+        ]
+      }
+    )
+    this.dependencies.finishRun({
+      libraryId: snapshot.libraryId,
+      runId,
+      status:
+        status === 'success' || status === 'completed_with_errors'
+          ? 'completed'
+          : status === 'cancelled'
+            ? 'cancelled'
+            : 'failed',
+      summary,
+      audit,
+      ...(completedSafely
+        ? {
+            replaceUnrecognizedRootIds: safeRoots.map((root) => root.id),
+            unrecognizedFiles
+          }
+        : {})
+    })
   }
 
   private removeMissingAccessibleResources(
-    accessibleFolders: string[],
-    offlineFolders: string[]
+    libraryId: number,
+    accessibleRoots: ReadonlyMap<number, Readonly<MediaLibraryRoot>>
   ): {
     removed: number
     promoted: number
@@ -434,22 +677,29 @@ export class ScanCoordinator {
     let promoted = 0
     const removedResources: LibraryScanResourceAuditEntry[] = []
     const promotedResources: LibraryScanResourceAuditEntry[] = []
-    for (const ref of this.dependencies.listLocalResources()) {
-      if (offlineFolders.some((folder) => isPathUnderRoot(ref.locator, folder))) continue
-      if (!accessibleFolders.some((folder) => isPathUnderRoot(ref.locator, folder))) continue
+    for (const ref of this.dependencies.listLocalResources(libraryId)) {
+      const resource = this.dependencies.getResourceById(libraryId, ref.resource_id)
+      if (!resource?.root_id) continue
+      const root = accessibleRoots.get(resource.root_id)
+      if (!root) continue
+      if (resource.kind !== 'local' && !resource.strm_source_path) continue
       const pathState = this.dependencies.inspectPath(ref.locator)
       if (pathState === 'present') continue
       if (pathState === 'unknown') {
         throw new Error(`无法确认本地资源是否存在：${ref.locator}`)
       }
 
-      const resource = this.dependencies.getResourceById(ref.resource_id)
-      if (!resource || (resource.kind !== 'local' && !resource.strm_source_path)) continue
+      this.dependencies.authorizeRootDeletionTarget(
+        libraryId,
+        root.id,
+        ref.locator,
+        root
+      )
       const remaining = this.dependencies
-        .listResources(ref.video_id)
+        .listResources(libraryId, ref.video_id)
         .filter((item) => item.id !== resource.id)
       const removedAudit = this.resourceAuditEntry(resource, 'missing')
-      this.dependencies.removeResourceRecord(resource.id)
+      this.dependencies.removeResourceRecord(libraryId, resource.id)
       removed += 1
       if (removedAudit) removedResources.push(removedAudit)
       if (!resource.is_primary) continue
@@ -458,53 +708,12 @@ export class ScanCoordinator {
         (locator) => this.dependencies.inspectPath(locator) === 'present'
       )
       if (!promotedResource) continue
-      this.dependencies.setPrimaryResource(ref.video_id, promotedResource.id)
+      this.dependencies.setPrimaryResource(libraryId, ref.video_id, promotedResource.id)
       promoted += 1
-      const promotedAudit = this.resourceAuditEntry(
-        promotedResource,
-        'promoted_after_removal'
-      )
+      const promotedAudit = this.resourceAuditEntry(promotedResource, 'promoted_after_removal')
       if (promotedAudit) promotedResources.push(promotedAudit)
     }
     return { removed, promoted, removedResources, promotedResources }
-  }
-
-  private previewPendingPathCleanupAudit(roots: string[]): {
-    removedResources: LibraryScanResourceAuditEntry[]
-    promotedResources: LibraryScanResourceAuditEntry[]
-  } {
-    if (roots.length === 0) return { removedResources: [], promotedResources: [] }
-    const refs = this.dependencies
-      .listLocalResources()
-      .filter((ref) => roots.some((root) => isPathUnderRoot(ref.locator, root)))
-    const removedIds = new Set(refs.map((ref) => ref.resource_id))
-    const removedResources: LibraryScanResourceAuditEntry[] = []
-    const promotedResources: LibraryScanResourceAuditEntry[] = []
-    const videoIds = new Set<number>()
-    for (const ref of refs) {
-      videoIds.add(ref.video_id)
-      const resource = this.dependencies.getResourceById(ref.resource_id)
-      const entry = resource
-        ? this.resourceAuditEntry(resource, 'removed_library_path')
-        : null
-      if (entry) removedResources.push(entry)
-    }
-    for (const videoId of videoIds) {
-      const resources = this.dependencies.listResources(videoId)
-      const removedPrimary = resources.some(
-        (resource) => removedIds.has(resource.id) && resource.is_primary === 1
-      )
-      if (!removedPrimary) continue
-      const promoted = selectPrimaryVideoResourceCandidate(
-        resources.filter((resource) => !removedIds.has(resource.id)),
-        fs.existsSync
-      )
-      const entry = promoted
-        ? this.resourceAuditEntry(promoted, 'promoted_after_removal')
-        : null
-      if (entry) promotedResources.push(entry)
-    }
-    return { removedResources, promotedResources }
   }
 
   private resourceAuditEntry(
@@ -519,8 +728,7 @@ export class ScanCoordinator {
       videoCode: video.code,
       videoTitle: video.title,
       resourceKind: resource.kind,
-      sourcePath:
-        resource.kind === 'local' ? resource.locator : resource.strm_source_path,
+      sourcePath: resource.kind === 'local' ? resource.locator : resource.strm_source_path,
       displayName: resource.display_name,
       reason
     }
@@ -531,15 +739,17 @@ export function createScanCoordinator(
   dependencies: Partial<ScanCoordinatorDependencies> = {}
 ): ScanCoordinator {
   return new ScanCoordinator({
-    getConfiguredFolders: dependencies.getConfiguredFolders ?? (() => getSettings().libraryPaths),
-    hasPendingPathCleanups:
-      dependencies.hasPendingPathCleanups ??
-      (() => getSettings().pendingLibraryPathCleanups.length > 0),
-    inspectFolder: dependencies.inspectFolder ?? inspectReadableDirectory,
+    readScanSnapshot: dependencies.readScanSnapshot ?? readMediaLibraryScanSnapshot,
+    bindRootIdentities:
+      dependencies.bindRootIdentities ?? bindOnlineMediaLibraryRootIdentities,
+    inspectRoot: dependencies.inspectRoot ?? inspectStableRoot,
+    authorizeRoot: dependencies.authorizeRoot ?? authorizeMediaLibraryRoot,
+    authorizeRootFile: dependencies.authorizeRootFile ?? authorizeMediaLibraryRootFile,
+    authorizeRootDeletionTarget:
+      dependencies.authorizeRootDeletionTarget ?? authorizeMediaLibraryRootDeletionTarget,
     scanFolders: dependencies.scanFolders ?? scanFolders,
-    listLocalResources:
-      dependencies.listLocalResources ?? listSourceManagedVideoResourceRefs,
-    getResourceById: dependencies.getResourceById ?? getVideoResourceById,
+    listLocalResources: dependencies.listLocalResources ?? listSourceManagedVideoResourceRefs,
+    getResourceById: dependencies.getResourceById ?? getVideoResourceInLibrary,
     getVideoById: dependencies.getVideoById ?? getVideoById,
     listResources: dependencies.listResources ?? listVideoResources,
     removeResourceRecord: dependencies.removeResourceRecord ?? removeVideoResourceRecord,
@@ -547,39 +757,20 @@ export function createScanCoordinator(
     inspectPath: dependencies.inspectPath ?? inspectLocalPath,
     reconcilePendingScanResources:
       dependencies.reconcilePendingScanResources ?? reconcilePendingScanResources,
-    getPendingPathCleanupRoots:
-      dependencies.getPendingPathCleanupRoots ?? listPendingLibraryPathCleanupRoots,
+    recoverPendingPathCleanups:
+      dependencies.recoverPendingPathCleanups ?? recoverLegacyLibraryPathCleanups,
+    listPendingPathCleanups:
+      dependencies.listPendingPathCleanups ?? listPendingLibraryPathCleanupRoots,
     applyPendingPathCleanups:
       dependencies.applyPendingPathCleanups ?? applyPendingLibraryPathCleanups,
-    clearPendingPathCleanups:
-      dependencies.clearPendingPathCleanups ?? clearPendingLibraryPathCleanups,
-    runCleanupTransaction:
-      dependencies.runCleanupTransaction ?? runLibraryScanCleanupTransaction,
-    shouldAutoDeleteResourceLessVideos:
-      dependencies.shouldAutoDeleteResourceLessVideos ??
-      (() => getSettings().autoDeleteResourceLessVideos),
-    deleteResourceLessVideos:
-      dependencies.deleteResourceLessVideos ?? deleteResourceLessVideos,
-    listResourceLessVideos:
-      dependencies.listResourceLessVideos ?? listResourceLessVideos,
-    listPendingScanGroups:
-      dependencies.listPendingScanGroups ?? listPendingScanGroups,
-    recordScanSummary:
-      dependencies.recordScanSummary ??
-      ((summary, unrecognizedFiles, audit) => {
-        updateSettings({
-          lastLibraryScanSummary: summary,
-          ...(unrecognizedFiles !== undefined
-            ? {
-                unrecognizedFiles,
-                unrecognizedFilesScanFinishedAt:
-                  unrecognizedFiles.length > 0 ? summary.finishedAt : null
-              }
-            : {})
-        })
-        writeLibraryScanAudit(audit)
-      }),
+    runCleanupTransaction: dependencies.runCleanupTransaction ?? runCleanupTransaction,
+    removeResourceLessMemberships:
+      dependencies.removeResourceLessMemberships ?? removeResourceLessMemberships,
+    listPendingScanGroups: dependencies.listPendingScanGroups ?? listPendingScanGroups,
+    beginRun: dependencies.beginRun ?? beginLibraryScanRun,
+    finishRun: dependencies.finishRun ?? finishLibraryScanRun,
     now: dependencies.now ?? (() => new Date().toISOString()),
+    createRunId: dependencies.createRunId ?? randomUUID,
     gate: dependencies.gate ?? maintenanceTaskGate
   })
 }

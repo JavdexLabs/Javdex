@@ -53,13 +53,16 @@ export function parsePendingCenterSearch(params: URLSearchParams): {
   type: PendingTypeFilter
   item: PendingItemKey | null
   videoId: number | null
+  libraryId: number | null
 } {
   const rawType = params.get(LIST_PARAM.pendingType)
   const videoId = Number(params.get(LIST_PARAM.pendingVideoId))
+  const libraryId = Number(params.get(LIST_PARAM.pendingLibraryId))
   return {
     type: isPendingDomain(rawType) ? rawType : 'all',
     item: parsePendingItemKey(params.get(LIST_PARAM.pendingItem)),
-    videoId: Number.isInteger(videoId) && videoId > 0 ? videoId : null
+    videoId: Number.isInteger(videoId) && videoId > 0 ? videoId : null,
+    libraryId: Number.isSafeInteger(libraryId) && libraryId > 0 ? libraryId : null
   }
 }
 
@@ -68,12 +71,16 @@ export function pendingCenterPath(
     type?: PendingTypeFilter
     item?: PendingItemKey | null
     videoId?: number
+    libraryId?: number
   } = {}
 ): string {
   const params = new URLSearchParams()
   if (options.type && options.type !== 'all') params.set(LIST_PARAM.pendingType, options.type)
   if (options.item) params.set(LIST_PARAM.pendingItem, formatPendingItemKey(options.item))
   if (options.videoId != null) params.set(LIST_PARAM.pendingVideoId, String(options.videoId))
+  if (options.libraryId != null) {
+    params.set(LIST_PARAM.pendingLibraryId, String(options.libraryId))
+  }
   const query = params.toString()
   return query ? `${ROUTE_PATH.pending}?${query}` : ROUTE_PATH.pending
 }

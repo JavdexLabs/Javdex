@@ -31,6 +31,7 @@ import PosterCard from '../components/PosterCard'
 import { useToast } from '../components/Toast'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { useInfiniteVideoList } from '../query/useInfiniteVideoList'
+import { ALL_CATALOG_SCOPE } from '../query/catalogScopes'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { hashListQuery } from '../listView/listQueryParams'
@@ -99,7 +100,13 @@ export default function OrganizationDetailPage(): JSX.Element {
     [toast]
   )
   const { videos, total, loading, loadingMore, hasMore, loadMore, refetchSilent } =
-    useInfiniteVideoList(videoQuery, videoQueryHash, handlePageError, Boolean(role && validId))
+    useInfiniteVideoList(
+      ALL_CATALOG_SCOPE,
+      videoQuery,
+      videoQueryHash,
+      handlePageError,
+      Boolean(role && validId)
+    )
 
   useListSurfaceRefetch(videoStackOpen, refetchSilent)
   const dismissEditing = useCallback(() => {

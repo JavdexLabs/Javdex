@@ -14,8 +14,17 @@
 
 当前路由使用嵌套路径表达上下文：
 
-- `/`: 媒体库列表。
-- `/detail/:id`: 从媒体库打开影片详情。
+- `/`: 首页，展示跨媒体库搜索入口、随机推荐与近期添加。
+- `/home/video/:videoId`: 从首页打开影片详情。
+- `/home/video/:videoId/actress/:actressId`: 从首页影片详情继续打开演员详情。
+- `/search`: 跨媒体库搜索结果列表。
+- `/search/video/:videoId`: 从全局搜索打开影片详情。
+- `/search/video/:videoId/actress/:actressId`: 从全局搜索影片详情继续打开演员详情。
+- `/libraries/:libraryId`: 一个媒体库的独立影片列表。
+- `/libraries/:libraryId/video/:videoId`: 从指定媒体库打开影片详情。
+- `/libraries/:libraryId/video/:videoId/actress/:actressId`: 从库内影片详情继续打开演员详情。
+- `/libraries/:libraryId/settings/:tab`: 指定媒体库的独立设置。
+- `/library` 与旧 `/detail/:id` 只是兼容入口；它们会解析可用媒体库并重定向到上述新路由。
 - `/actresses`: 演员列表。
 - `/actresses/:id`: 从演员列表打开演员详情。
 - `/actresses/:id/:videoId`: 从演员详情打开影片详情。
@@ -49,6 +58,8 @@
 
 新增列表参数时，应先扩展 `listQueryParams.ts`，再由页面消费。不要在页面里手写分散的 query key 字符串。
 
+首页和全局搜索的影片详情路径不含媒体库 ID，因此用 detail-only `lib` query 保存本次打开时选中的资源作用域。`lib` 不改变列表结果，返回列表前必须移除；`/libraries/:libraryId/...` 由 pathname 持有作用域，不应保留冗余 `lib`。全局搜索的 `libraries` query 则是可共享的结果集筛选。
+
 待确认收件箱把队列筛选和当前选中项也放在 URL：`type` 是领域筛选（`all`/`scan`/`scrape`/`actress`），`item` 是 `domain:id` 形式的选中项。两者由 `pendingRoutes.ts` 统一构造与解析，页面不拼接 key。
 
 ### Query Scope
@@ -81,7 +92,8 @@
 - `navigateBackFromVideoDetail`: 关闭影片详情并回到原列表面。
 - `navigateToActressFromVideoDetail`: 在影片详情中打开演员详情。
 - `navigateToOrganizationDetail` / `navigateToDirectorDetail` / `navigateToSeriesDetail`: 打开稳定分类实体详情。
-- `navigateToLibrary` / `navigateToActressList` / `navigateToFacetList` / `navigateToPlaylistList`: 回到一级列表。
+- `navigateToVideoListSurface`: 回到当前媒体库列表；没有库作用域时回首页。
+- `navigateToActressList` / `navigateToFacetList` / `navigateToPlaylistList`: 回到对应一级列表。
 
 新增路由时，按职责分层：
 
@@ -92,7 +104,7 @@
 
 ## Scroll And Refetch
 
-列表面滚动位置需要绑定到稳定 key。key 应包含列表作用域和影响结果集的筛选 hash，例如 `library:${queryHash}` 或 `organization:${role}:${organizationId}:${queryHash}`。
+列表面滚动位置需要绑定到稳定 key。key 应包含列表作用域和影响结果集的筛选 hash，例如 `library:${libraryId}:${queryHash}`、`global-search:${queryHash}` 或 `organization:${role}:${organizationId}:${queryHash}`。
 
 详情关闭或嵌套层关闭后，列表面应静默刷新数据，而不是重新挂载列表。`useListSurfaceRefetch` 用于这个场景。
 

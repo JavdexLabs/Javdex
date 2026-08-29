@@ -29,7 +29,20 @@ export function clearListScrollForPrimaryNav(pathname: string): void {
   const keys = [...scrollByKey.keys()]
   if (pathname === '/') {
     for (const key of keys) {
-      if (key.startsWith('library:')) scrollByKey.delete(key)
+      if (key.startsWith('home:')) scrollByKey.delete(key)
+    }
+    return
+  }
+  if (pathname === '/search') {
+    for (const key of keys) {
+      if (key.startsWith('global-search:')) scrollByKey.delete(key)
+    }
+    return
+  }
+  const libraryMatch = /^\/libraries\/([1-9]\d*)$/.exec(pathname)
+  if (libraryMatch) {
+    for (const key of keys) {
+      if (key.startsWith(`library:${libraryMatch[1]}:`)) scrollByKey.delete(key)
     }
     return
   }

@@ -1,21 +1,26 @@
+import type Database from 'better-sqlite3'
 import type {
   PendingScanGroup,
   PendingScanGroupResolution,
   PendingScanGroupResolutionResult,
   PendingScanResource
 } from '@shared/libraryTypes'
-import { normalizeLocalPathIdentity } from '@shared/localPathIdentity'
+import {
+  isNormalizedLocalPathUnderRoot,
+  normalizeAbsoluteLocalPath,
+  normalizeLocalPathIdentity
+} from '@shared/localPathIdentity'
 import { selectDefaultPendingScanPrimary } from '@shared/pendingScanPrimary'
 import { normalizeVideoCode } from '@shared/videoCode'
 import type { ExternalVideoResourceKind } from '@shared/videoTypes'
 import { maskVideoResourceLocator } from '@shared/videoResourceLinks'
-import { buildStrmResourceKey } from '@shared/strmResource'
 import { readStrmFile } from '../scanner/strmParser'
 import { getDb } from './database'
+import { insertLocalVideoResource, insertStrmVideoResource } from './videoRepo'
 
 export interface PendingScanResourceInput {
+  rootId: number
   filePath: string
-  scanRoot: string
   sourceKind?: 'local' | 'strm'
   targetKind?: ExternalVideoResourceKind | null
   targetLocator?: string | null
@@ -26,24 +31,179 @@ export interface PendingScanResourceInput {
   displayName?: string | null
 }
 
-function mapPendingResource(row: {
+export interface PendingScanUpsertResult {
+  groupId: number
+  revision: number
+  addedResources: number
+}
+
+export interface PendingScanStrmRefreshResult {
+  changed: boolean
+  message: string | null
+  group: PendingScanGroup | null
+}
+
+export type PendingScanRepoErrorCode =
+  | 'LIBRARY_NOT_FOUND'
+  | 'ROOT_NOT_FOUND'
+  | 'GROUP_NOT_FOUND'
+  | 'REVISION_CONFLICT'
+  | 'VALIDATION_FAILED'
+
+export class PendingScanRepoError extends Error {
+  constructor(
+    readonly code: PendingScanRepoErrorCode,
+    message: string,
+    readonly currentRevision?: number
+  ) {
+    super(message)
+    this.name = 'PendingScanRepoError'
+  }
+}
+
+interface LibraryRow {
   id: number
+  status: 'active' | 'archived'
+}
+
+interface RootRow {
+  id: number
+  library_id: number
+  normalized_path: string
+  normalized_real_path: string | null
+  state: 'active' | 'pending_removal' | 'disabled' | 'archived'
+}
+
+interface PendingGroupRow {
+  id: number
+  library_id: number
+  normalized_code: string
+  revision: number
+  created_at: string
+  updated_at: string
+}
+
+interface PendingResourceRow {
+  id: number
+  library_id: number
   group_id: number
+  root_id: number
   file_path: string
-  scan_root: string
+  normalized_path: string
   source_kind: 'local' | 'strm'
   target_kind: ExternalVideoResourceKind | null
   target_locator: string | null
+  target_key: string | null
   size_bytes: number | null
   duration_seconds: number | null
   file_mtime_ms: number | null
   display_name: string | null
-}): PendingScanResource {
+  created_at: string
+  updated_at: string
+}
+
+interface PreparedPendingResource {
+  rootId: number
+  filePath: string
+  normalizedPath: string
+  sourceKind: 'local' | 'strm'
+  targetKind: ExternalVideoResourceKind | null
+  targetLocator: string | null
+  targetKey: string | null
+  sizeBytes: number | null
+  durationSeconds: number | null
+  fileMtimeMs: number | null
+  displayName: string | null
+}
+
+function validationError(message: string): never {
+  throw new PendingScanRepoError('VALIDATION_FAILED', message)
+}
+
+function positiveId(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) validationError(`${label}必须是正整数。`)
+  return value
+}
+
+function positiveRevision(value: number): number {
+  return positiveId(value, 'revision')
+}
+
+function requireLibrary(database: Database.Database, libraryId: number): LibraryRow {
+  positiveId(libraryId, 'libraryId')
+  const library = database
+    .prepare('SELECT id, status FROM media_libraries WHERE id = ?')
+    .get(libraryId) as LibraryRow | undefined
+  if (!library) throw new PendingScanRepoError('LIBRARY_NOT_FOUND', '媒体库不存在。')
+  return library
+}
+
+function requireActiveLibrary(database: Database.Database, libraryId: number): LibraryRow {
+  const library = requireLibrary(database, libraryId)
+  if (library.status !== 'active') {
+    throw new PendingScanRepoError('LIBRARY_NOT_FOUND', '媒体库已归档，不能修改待确认扫描。')
+  }
+  return library
+}
+
+function getRoot(database: Database.Database, libraryId: number, rootId: number): RootRow | null {
+  positiveId(rootId, 'rootId')
+  return (
+    (database
+      .prepare(
+        `SELECT id, library_id, normalized_path, normalized_real_path, state
+           FROM media_library_roots
+          WHERE id = ? AND library_id = ?`
+      )
+      .get(rootId, libraryId) as RootRow | undefined) ?? null
+  )
+}
+
+function requireActiveRoot(
+  database: Database.Database,
+  libraryId: number,
+  rootId: number
+): RootRow {
+  const root = getRoot(database, libraryId, rootId)
+  if (!root || root.state !== 'active') {
+    throw new PendingScanRepoError(
+      'ROOT_NOT_FOUND',
+      '根目录不属于该媒体库或当前不可用于扫描。'
+    )
+  }
+  return root
+}
+
+function getGroupRow(
+  database: Database.Database,
+  libraryId: number,
+  groupId: number
+): PendingGroupRow | null {
+  positiveId(groupId, 'groupId')
+  return (
+    (database
+      .prepare('SELECT * FROM pending_scan_groups WHERE id = ? AND library_id = ?')
+      .get(groupId, libraryId) as PendingGroupRow | undefined) ?? null
+  )
+}
+
+function requireGroupRow(
+  database: Database.Database,
+  libraryId: number,
+  groupId: number
+): PendingGroupRow {
+  const group = getGroupRow(database, libraryId, groupId)
+  if (!group) throw new PendingScanRepoError('GROUP_NOT_FOUND', '待确认扫描组不存在。')
+  return group
+}
+
+function mapPendingResource(row: PendingResourceRow): PendingScanResource {
   return {
     id: row.id,
+    libraryId: row.library_id,
     groupId: row.group_id,
+    rootId: row.root_id,
     filePath: row.file_path,
-    scanRoot: row.scan_root,
     sourceKind: row.source_kind,
     targetKind: row.target_kind,
     targetDisplay:
@@ -57,178 +217,353 @@ function mapPendingResource(row: {
   }
 }
 
+function mapPendingGroup(
+  row: PendingGroupRow,
+  resources: PendingScanResource[]
+): PendingScanGroup {
+  return {
+    id: row.id,
+    libraryId: row.library_id,
+    normalizedCode: row.normalized_code,
+    revision: row.revision,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    resources
+  }
+}
+
+function prepareResourceInput(
+  database: Database.Database,
+  libraryId: number,
+  input: PendingScanResourceInput
+): PreparedPendingResource {
+  const root = requireActiveRoot(database, libraryId, input.rootId)
+  let filePath: string
+  let normalizedPath: string
+  try {
+    ;({ path: filePath, normalizedPath } = normalizeAbsoluteLocalPath(input.filePath))
+  } catch {
+    validationError('待确认资源路径必须是绝对路径。')
+  }
+  if (
+    !isNormalizedLocalPathUnderRoot(normalizedPath, root.normalized_path) &&
+    (!root.normalized_real_path ||
+      !isNormalizedLocalPathUnderRoot(normalizedPath, root.normalized_real_path))
+  ) {
+    throw new PendingScanRepoError('ROOT_NOT_FOUND', '待确认资源不在指定媒体库根目录内。')
+  }
+
+  const sourceKind = input.sourceKind ?? 'local'
+  if (sourceKind !== 'local' && sourceKind !== 'strm') {
+    validationError('待确认资源类型无效。')
+  }
+  const targetKind = input.targetKind ?? null
+  const targetLocator = input.targetLocator ?? null
+  const targetKey = input.targetKey ?? null
+  if (sourceKind === 'strm' && (!targetKind || !targetLocator || !targetKey)) {
+    validationError('STRM 待确认资源缺少有效目标快照。')
+  }
+  if (sourceKind === 'local' && (targetKind || targetLocator || targetKey)) {
+    validationError('本地待确认资源不能包含 STRM 目标快照。')
+  }
+
+  return {
+    rootId: root.id,
+    filePath,
+    normalizedPath,
+    sourceKind,
+    targetKind,
+    targetLocator,
+    targetKey,
+    sizeBytes: input.sizeBytes,
+    durationSeconds: input.durationSeconds,
+    fileMtimeMs: input.fileMtimeMs,
+    displayName: input.displayName?.trim() || null
+  }
+}
+
+function touchOrDeleteGroup(
+  database: Database.Database,
+  libraryId: number,
+  groupId: number
+): 'updated' | 'deleted' | 'missing' {
+  const group = getGroupRow(database, libraryId, groupId)
+  if (!group) return 'missing'
+  const hasResources = Boolean(
+    database
+      .prepare(
+        `SELECT 1 FROM pending_scan_resources
+          WHERE library_id = ? AND group_id = ? LIMIT 1`
+      )
+      .get(libraryId, groupId)
+  )
+  if (!hasResources) {
+    database
+      .prepare('DELETE FROM pending_scan_groups WHERE id = ? AND library_id = ?')
+      .run(groupId, libraryId)
+    return 'deleted'
+  }
+  database
+    .prepare(
+      `UPDATE pending_scan_groups
+          SET revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND library_id = ?`
+    )
+    .run(groupId, libraryId)
+  return 'updated'
+}
+
 export function upsertPendingScanResources(
+  libraryId: number,
   code: string,
   inputs: PendingScanResourceInput[]
-): { groupId: number; addedResources: number } {
-  const db = getDb()
+): PendingScanUpsertResult {
+  const database = getDb()
+  requireActiveLibrary(database, libraryId)
+  if (!Array.isArray(inputs) || inputs.length === 0) {
+    validationError('待确认扫描资源不能为空。')
+  }
   const normalizedCode = normalizeVideoCode(code)
-  return db.transaction(() => {
-    db.prepare(
-      `INSERT INTO pending_scan_groups (normalized_code, created_at, updated_at)
-       VALUES (?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-       ON CONFLICT(normalized_code) DO UPDATE SET updated_at = CURRENT_TIMESTAMP`
-    ).run(normalizedCode)
-    const group = db
-      .prepare('SELECT id FROM pending_scan_groups WHERE normalized_code = ?')
-      .get(normalizedCode) as { id: number }
-    const upsert = db.prepare(
+  const prepared = inputs.map((input) => prepareResourceInput(database, libraryId, input))
+  if (new Set(prepared.map((input) => input.normalizedPath)).size !== prepared.length) {
+    validationError('同一次待确认写入不能包含重复路径。')
+  }
+
+  return database.transaction(() => {
+    requireActiveLibrary(database, libraryId)
+    for (const input of inputs) requireActiveRoot(database, libraryId, input.rootId)
+
+    let group = database
+      .prepare(
+        'SELECT * FROM pending_scan_groups WHERE library_id = ? AND normalized_code = ?'
+      )
+      .get(libraryId, normalizedCode) as PendingGroupRow | undefined
+    const groupExisted = Boolean(group)
+    if (!group) {
+      const info = database
+        .prepare(
+          `INSERT INTO pending_scan_groups (
+             library_id, normalized_code, revision, created_at, updated_at
+           ) VALUES (?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+        )
+        .run(libraryId, normalizedCode)
+      group = requireGroupRow(database, libraryId, Number(info.lastInsertRowid))
+    }
+
+    const previousGroupIds = new Set<number>()
+    const insert = database.prepare(
       `INSERT INTO pending_scan_resources (
-         group_id, file_path, normalized_path, scan_root, source_kind,
-         target_kind, target_locator, target_key, size_bytes,
-         duration_seconds, file_mtime_ms, display_name, created_at, updated_at
+         library_id, group_id, root_id, file_path, normalized_path, source_kind,
+         target_kind, target_locator, target_key, size_bytes, duration_seconds,
+         file_mtime_ms, display_name, created_at, updated_at
        ) VALUES (
-         @groupId, @filePath, @normalizedPath, @scanRoot, @sourceKind,
-         @targetKind, @targetLocator, @targetKey, @sizeBytes,
-         @durationSeconds, @fileMtimeMs, @displayName, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-       )
-       ON CONFLICT(normalized_path) DO UPDATE SET
-         group_id = excluded.group_id,
-         file_path = excluded.file_path,
-         scan_root = excluded.scan_root,
-         source_kind = excluded.source_kind,
-         target_kind = excluded.target_kind,
-         target_locator = excluded.target_locator,
-         target_key = excluded.target_key,
-         size_bytes = excluded.size_bytes,
-         duration_seconds = excluded.duration_seconds,
-         file_mtime_ms = excluded.file_mtime_ms,
-         display_name = excluded.display_name,
-         updated_at = CURRENT_TIMESTAMP`
+         @libraryId, @groupId, @rootId, @filePath, @normalizedPath, @sourceKind,
+         @targetKind, @targetLocator, @targetKey, @sizeBytes, @durationSeconds,
+         @fileMtimeMs, @displayName, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+       )`
+    )
+    const update = database.prepare(
+      `UPDATE pending_scan_resources
+          SET group_id = @groupId,
+              root_id = @rootId,
+              file_path = @filePath,
+              source_kind = @sourceKind,
+              target_kind = @targetKind,
+              target_locator = @targetLocator,
+              target_key = @targetKey,
+              size_bytes = @sizeBytes,
+              duration_seconds = @durationSeconds,
+              file_mtime_ms = @fileMtimeMs,
+              display_name = @displayName,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = @id AND library_id = @libraryId`
     )
     let addedResources = 0
-    for (const input of inputs) {
-      const normalizedPath = normalizeLocalPathIdentity(input.filePath)
-      const existed = Boolean(
-        db
-          .prepare('SELECT 1 FROM pending_scan_resources WHERE normalized_path = ?')
-          .get(normalizedPath)
-      )
-      upsert.run({
-        groupId: group.id,
-        filePath: input.filePath,
-        normalizedPath,
-        scanRoot: input.scanRoot,
-        sourceKind: input.sourceKind ?? 'local',
-        targetKind: input.targetKind ?? null,
-        targetLocator: input.targetLocator ?? null,
-        targetKey: input.targetKey ?? null,
-        sizeBytes: input.sizeBytes,
-        durationSeconds: input.durationSeconds,
-        fileMtimeMs: input.fileMtimeMs,
-        displayName: input.displayName ?? null
-      })
-      if (!existed) addedResources += 1
+    for (const resource of prepared) {
+      const existing = database
+        .prepare(
+          `SELECT id, library_id, group_id
+             FROM pending_scan_resources
+            WHERE library_id = ? AND normalized_path = ?`
+        )
+        .get(libraryId, resource.normalizedPath) as
+        | { id: number; library_id: number; group_id: number }
+        | undefined
+      const parameters = { libraryId, groupId: group.id, ...resource }
+      if (existing) {
+        if (existing.group_id !== group.id) previousGroupIds.add(existing.group_id)
+        update.run({ id: existing.id, ...parameters })
+      } else {
+        insert.run(parameters)
+        addedResources += 1
+      }
     }
-    return { groupId: group.id, addedResources }
-  })()
+
+    if (groupExisted) {
+      database
+        .prepare(
+          `UPDATE pending_scan_groups
+              SET revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND library_id = ?`
+        )
+        .run(group.id, libraryId)
+    }
+    for (const previousGroupId of previousGroupIds) {
+      touchOrDeleteGroup(database, libraryId, previousGroupId)
+    }
+    const current = requireGroupRow(database, libraryId, group.id)
+    return { groupId: current.id, revision: current.revision, addedResources }
+  }).immediate()
 }
 
-export function pendingScanResourceExists(filePath: string): boolean {
+export function pendingScanResourceExists(libraryId: number, filePath: string): boolean {
+  const database = getDb()
+  requireLibrary(database, libraryId)
+  let normalizedPath: string
+  try {
+    ;({ normalizedPath } = normalizeAbsoluteLocalPath(filePath))
+  } catch {
+    validationError('待确认资源路径必须是绝对路径。')
+  }
   return Boolean(
-    getDb()
-      .prepare('SELECT 1 FROM pending_scan_resources WHERE normalized_path = ?')
-      .get(normalizeLocalPathIdentity(filePath))
+    database
+      .prepare(
+        'SELECT 1 FROM pending_scan_resources WHERE library_id = ? AND normalized_path = ?'
+      )
+      .get(libraryId, normalizedPath)
   )
 }
 
-export function removePendingScanResource(filePath: string): boolean {
-  const db = getDb()
-  return db.transaction(() => {
-    const resource = db
-      .prepare('SELECT id, group_id FROM pending_scan_resources WHERE normalized_path = ?')
-      .get(normalizeLocalPathIdentity(filePath)) as { id: number; group_id: number } | undefined
+export function removePendingScanResource(libraryId: number, filePath: string): boolean {
+  const database = getDb()
+  requireLibrary(database, libraryId)
+  let normalizedPath: string
+  try {
+    ;({ normalizedPath } = normalizeAbsoluteLocalPath(filePath))
+  } catch {
+    validationError('待确认资源路径必须是绝对路径。')
+  }
+  return database.transaction(() => {
+    requireLibrary(database, libraryId)
+    const resource = database
+      .prepare(
+        `SELECT id, group_id FROM pending_scan_resources
+          WHERE library_id = ? AND normalized_path = ?`
+      )
+      .get(libraryId, normalizedPath) as { id: number; group_id: number } | undefined
     if (!resource) return false
-    db.prepare('DELETE FROM pending_scan_resources WHERE id = ?').run(resource.id)
-    db.prepare(
-      `DELETE FROM pending_scan_groups
-       WHERE id = ? AND NOT EXISTS (
-         SELECT 1 FROM pending_scan_resources WHERE group_id = pending_scan_groups.id
-       )`
-    ).run(resource.group_id)
+    database
+      .prepare('DELETE FROM pending_scan_resources WHERE id = ? AND library_id = ?')
+      .run(resource.id, libraryId)
+    touchOrDeleteGroup(database, libraryId, resource.group_id)
     return true
-  })()
+  }).immediate()
 }
 
-export function listPendingScanGroups(): PendingScanGroup[] {
-  const db = getDb()
-  const groups = db
+export function listPendingScanGroups(libraryId: number): PendingScanGroup[] {
+  const database = getDb()
+  requireLibrary(database, libraryId)
+  const groups = database
     .prepare(
-      `SELECT id, normalized_code, created_at, updated_at
-       FROM pending_scan_groups ORDER BY updated_at, id`
+      'SELECT * FROM pending_scan_groups WHERE library_id = ? ORDER BY updated_at, id'
     )
-    .all() as Array<{
-    id: number
-    normalized_code: string
-    created_at: string
-    updated_at: string
-  }>
-  const listResources = db.prepare(
-    `SELECT id, group_id, file_path, scan_root, source_kind, target_kind,
-            target_locator, size_bytes, duration_seconds, file_mtime_ms, display_name
-     FROM pending_scan_resources WHERE group_id = ? ORDER BY normalized_path, id`
-  )
-  return groups.map((group) => ({
-    id: group.id,
-    normalizedCode: group.normalized_code,
-    createdAt: group.created_at,
-    updatedAt: group.updated_at,
-    resources: (listResources.all(group.id) as Parameters<typeof mapPendingResource>[0][]).map(
-      mapPendingResource
+    .all(libraryId) as PendingGroupRow[]
+  if (groups.length === 0) return []
+  const resources = database
+    .prepare(
+      `SELECT * FROM pending_scan_resources
+        WHERE library_id = ? ORDER BY group_id, normalized_path, id`
     )
-  }))
+    .all(libraryId) as PendingResourceRow[]
+  const resourcesByGroup = new Map<number, PendingScanResource[]>()
+  for (const row of resources) {
+    const resource = mapPendingResource(row)
+    const items = resourcesByGroup.get(row.group_id)
+    if (items) items.push(resource)
+    else resourcesByGroup.set(row.group_id, [resource])
+  }
+  return groups.map((group) => mapPendingGroup(group, resourcesByGroup.get(group.id) ?? []))
+}
+
+export function getPendingScanGroup(libraryId: number, groupId: number): PendingScanGroup | null {
+  const database = getDb()
+  requireLibrary(database, libraryId)
+  const group = getGroupRow(database, libraryId, groupId)
+  if (!group) return null
+  const resources = (
+    database
+      .prepare(
+        `SELECT * FROM pending_scan_resources
+          WHERE library_id = ? AND group_id = ? ORDER BY normalized_path, id`
+      )
+      .all(libraryId, groupId) as PendingResourceRow[]
+  ).map(mapPendingResource)
+  return mapPendingGroup(group, resources)
 }
 
 export function reconcilePendingScanResources(
-  accessibleRoots: string[],
+  libraryId: number,
+  accessibleRootIds: number[],
   inspectPath: (filePath: string) => 'present' | 'missing' | 'unknown'
 ): { removedResources: number; removedGroups: number } {
-  const db = getDb()
-  return db.transaction(() => {
-    const resources = db
-      .prepare('SELECT id, file_path, scan_root FROM pending_scan_resources ORDER BY id')
-      .all() as Array<{ id: number; file_path: string; scan_root: string }>
+  const database = getDb()
+  requireLibrary(database, libraryId)
+  const rootIds = Array.from(
+    new Set(accessibleRootIds.map((rootId) => positiveId(rootId, 'rootId')))
+  )
+  if (rootIds.length === 0) return { removedResources: 0, removedGroups: 0 }
+
+  return database.transaction(() => {
+    requireLibrary(database, libraryId)
+    for (const rootId of rootIds) requireActiveRoot(database, libraryId, rootId)
+    const placeholders = rootIds.map(() => '?').join(', ')
+    const resources = database
+      .prepare(
+        `SELECT id, group_id, file_path FROM pending_scan_resources
+          WHERE library_id = ? AND root_id IN (${placeholders}) ORDER BY id`
+      )
+      .all(libraryId, ...rootIds) as Array<{
+      id: number
+      group_id: number
+      file_path: string
+    }>
+    const affectedGroupIds = new Set<number>()
     let removedResources = 0
     for (const resource of resources) {
-      if (!accessibleRoots.some(
-        (root) => normalizeLocalPathIdentity(root) === normalizeLocalPathIdentity(resource.scan_root)
-      )) {
-        continue
-      }
-      if (inspectPath(resource.file_path) === 'missing') {
-        removedResources += db.prepare('DELETE FROM pending_scan_resources WHERE id = ?').run(resource.id)
-          .changes
+      if (inspectPath(resource.file_path) !== 'missing') continue
+      const info = database
+        .prepare('DELETE FROM pending_scan_resources WHERE id = ? AND library_id = ?')
+        .run(resource.id, libraryId)
+      if (info.changes > 0) {
+        removedResources += info.changes
+        affectedGroupIds.add(resource.group_id)
       }
     }
-    const removedGroups = db
-      .prepare(
-        `DELETE FROM pending_scan_groups
-         WHERE NOT EXISTS (
-           SELECT 1 FROM pending_scan_resources WHERE group_id = pending_scan_groups.id
-         )`
-      )
-      .run().changes
+    let removedGroups = 0
+    for (const groupId of affectedGroupIds) {
+      if (touchOrDeleteGroup(database, libraryId, groupId) === 'deleted') removedGroups += 1
+    }
     return { removedResources, removedGroups }
-  })()
+  }).immediate()
 }
 
-function refreshPendingStrmSnapshots(groupId: number): string | null {
-  const db = getDb()
-  const rows = db
+export function refreshPendingStrmSnapshots(
+  libraryId: number,
+  groupId: number
+): PendingScanStrmRefreshResult {
+  const database = getDb()
+  requireActiveLibrary(database, libraryId)
+  const initialGroup = requireGroupRow(database, libraryId, groupId)
+  const rows = database
     .prepare(
-      `SELECT id, file_path, target_kind, target_key, target_locator
-       FROM pending_scan_resources
-       WHERE group_id = ? AND source_kind = 'strm'
-       ORDER BY id`
+      `SELECT * FROM pending_scan_resources
+        WHERE library_id = ? AND group_id = ? AND source_kind = 'strm'
+        ORDER BY id`
     )
-    .all(groupId) as Array<{
-    id: number
-    file_path: string
-    target_kind: ExternalVideoResourceKind | null
-    target_key: string | null
-    target_locator: string | null
-  }>
-  if (rows.length === 0) return null
+    .all(libraryId, groupId) as PendingResourceRow[]
+  if (rows.length === 0) {
+    return { changed: false, message: null, group: getPendingScanGroup(libraryId, groupId) }
+  }
 
   const invalidIds: number[] = []
   const updates: Array<{
@@ -259,71 +594,110 @@ function refreshPendingStrmSnapshots(groupId: number): string | null {
     }
   }
 
-  if (invalidIds.length === 0 && updates.length === 0) return null
-  db.transaction(() => {
-    const update = db.prepare(
+  if (invalidIds.length === 0 && updates.length === 0) {
+    return { changed: false, message: null, group: getPendingScanGroup(libraryId, groupId) }
+  }
+  database.transaction(() => {
+    const currentGroup = requireGroupRow(database, libraryId, groupId)
+    if (currentGroup.revision !== initialGroup.revision) {
+      throw new PendingScanRepoError(
+        'REVISION_CONFLICT',
+        '待确认扫描组已被其他操作更新，请刷新后重试。',
+        currentGroup.revision
+      )
+    }
+    const update = database.prepare(
       `UPDATE pending_scan_resources
-       SET target_kind = ?, target_locator = ?, target_key = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
+          SET target_kind = ?, target_locator = ?, target_key = ?,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND library_id = ? AND group_id = ?`
     )
     for (const item of updates) {
-      update.run(item.kind, item.locator, item.targetKey, item.id)
+      update.run(item.kind, item.locator, item.targetKey, item.id, libraryId, groupId)
     }
-    const remove = db.prepare('DELETE FROM pending_scan_resources WHERE id = ?')
-    for (const id of invalidIds) remove.run(id)
-    db.prepare(
-      `DELETE FROM pending_scan_groups
-       WHERE id = ? AND NOT EXISTS (
-         SELECT 1 FROM pending_scan_resources WHERE group_id = pending_scan_groups.id
-       )`
-    ).run(groupId)
-  })()
+    const remove = database.prepare(
+      'DELETE FROM pending_scan_resources WHERE id = ? AND library_id = ? AND group_id = ?'
+    )
+    for (const id of invalidIds) remove.run(id, libraryId, groupId)
+    touchOrDeleteGroup(database, libraryId, groupId)
+  }).immediate()
 
-  if (invalidIds.length > 0) return '待确认 STRM 已失效或消失，待确认组已刷新'
-  if (targetChanged) return '待确认 STRM 目标已变化，待确认组已刷新'
-  return null
+  const message =
+    invalidIds.length > 0
+      ? '待确认 STRM 已失效或消失，待确认组已刷新'
+      : targetChanged
+        ? '待确认 STRM 目标已变化，待确认组已刷新'
+        : null
+  return {
+    changed: true,
+    message,
+    group: getPendingScanGroup(libraryId, groupId)
+  }
+}
+
+function assertResolutionAssignments(
+  resources: PendingScanResource[],
+  resolution: PendingScanGroupResolution
+): void {
+  const expectedIds = new Set(resources.map((resource) => resource.id))
+  const assignedIds = resolution.assignments.map((assignment) => assignment.resourceId)
+  if (
+    assignedIds.length !== resources.length ||
+    new Set(assignedIds).size !== assignedIds.length ||
+    assignedIds.some((id) => !expectedIds.has(id))
+  ) {
+    validationError('必须将待确认扫描组内每条资源恰好分配一次。')
+  }
 }
 
 export function resolvePendingScanGroup(
+  libraryId: number,
   groupId: number,
   resolution: PendingScanGroupResolution,
-  options?: { selectFallbackPrimaryResourceId?: (videoId: number) => number | null }
+  options?: {
+    selectFallbackPrimaryResourceId?: (libraryId: number, videoId: number) => number | null
+  }
 ): PendingScanGroupResolutionResult {
-  const db = getDb()
-  const staleMessage = refreshPendingStrmSnapshots(groupId)
-  if (staleMessage) throw new Error(staleMessage)
-  return db.transaction(() => {
-    const group = db
-      .prepare('SELECT id, normalized_code FROM pending_scan_groups WHERE id = ?')
-      .get(groupId) as { id: number; normalized_code: string } | undefined
-    if (!group) throw new Error('待确认扫描组不存在')
-    const resources = (
-      db
-        .prepare(
-          `SELECT id, group_id, file_path, scan_root, source_kind, target_kind,
-                  target_locator, size_bytes, duration_seconds, file_mtime_ms, display_name
-           FROM pending_scan_resources WHERE group_id = ? ORDER BY id`
-        )
-        .all(groupId) as Parameters<typeof mapPendingResource>[0][]
-    ).map(mapPendingResource)
-    const expectedIds = new Set(resources.map((resource) => resource.id))
-    const assignedIds = resolution.assignments.map((assignment) => assignment.resourceId)
-    if (
-      assignedIds.length !== resources.length ||
-      new Set(assignedIds).size !== assignedIds.length ||
-      assignedIds.some((id) => !expectedIds.has(id))
-    ) {
-      throw new Error('必须将待确认扫描组内每条资源恰好分配一次')
+  positiveRevision(resolution.expectedRevision)
+  requireActiveLibrary(getDb(), libraryId)
+  const refresh = refreshPendingStrmSnapshots(libraryId, groupId)
+  if (refresh.changed) {
+    throw new PendingScanRepoError(
+      'REVISION_CONFLICT',
+      refresh.message ?? '待确认扫描组已刷新，请重新确认。',
+      refresh.group?.revision
+    )
+  }
+
+  const database = getDb()
+  return database.transaction(() => {
+    requireActiveLibrary(database, libraryId)
+    const group = requireGroupRow(database, libraryId, groupId)
+    if (group.revision !== resolution.expectedRevision) {
+      throw new PendingScanRepoError(
+        'REVISION_CONFLICT',
+        '待确认扫描组已被其他操作更新，请刷新后重试。',
+        group.revision
+      )
     }
+    const resourceRows = database
+      .prepare(
+        `SELECT * FROM pending_scan_resources
+          WHERE library_id = ? AND group_id = ? ORDER BY id`
+      )
+      .all(libraryId, groupId) as PendingResourceRow[]
+    const resources = resourceRows.map(mapPendingResource)
+    assertResolutionAssignments(resources, resolution)
 
     const assignmentsByTarget = new Map<string, typeof resolution.assignments>()
     for (const assignment of resolution.assignments) {
+      positiveId(assignment.resourceId, 'resourceId')
       const key =
         assignment.target.kind === 'existing'
-          ? `existing:${assignment.target.videoId}`
+          ? `existing:${positiveId(assignment.target.videoId, 'videoId')}`
           : `new:${assignment.target.groupKey.trim()}`
       if (assignment.target.kind === 'new' && !assignment.target.groupKey.trim()) {
-        throw new Error('新影片分组标识不能为空')
+        validationError('新影片分组标识不能为空。')
       }
       const items = assignmentsByTarget.get(key)
       if (items) items.push(assignment)
@@ -331,51 +705,46 @@ export function resolvePendingScanGroup(
     }
 
     const resourcesById = new Map(resources.map((resource) => [resource.id, resource]))
+    const rawResourcesById = new Map(resourceRows.map((resource) => [resource.id, resource]))
     const existingVideoIds: number[] = []
     const createdVideoIds: number[] = []
-    const insertLocalResource = db.prepare(
-      `INSERT INTO video_resources (
-         video_id, kind, locator, resource_key, size_bytes, duration_seconds,
-         file_mtime_ms, display_name, is_primary, add_time
-       ) VALUES (?, 'local', ?, 'local:' || ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
-    )
-    const insertStrmResource = db.prepare(
-      `INSERT INTO video_resources (
-         video_id, kind, locator, resource_key, strm_source_path, size_bytes,
-         duration_seconds, file_mtime_ms, display_name, is_primary, add_time
-       ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, CURRENT_TIMESTAMP)`
-    )
 
     for (const assignments of assignmentsByTarget.values()) {
       const target = assignments[0].target
       let videoId: number
-      let primaryResourceId: number | null = null
+      let existingPrimaryResourceId: number | null = null
+      let selectedPendingPrimaryId: number | null = null
       if (target.kind === 'existing') {
-        const video = db
+        const video = database
           .prepare('SELECT id, code FROM videos WHERE id = ?')
           .get(target.videoId) as { id: number; code: string | null } | undefined
-        if (!video || !video.code || normalizeVideoCode(video.code) !== group.normalized_code) {
-          throw new Error('待确认资源只能分配给同番号现有影片')
+        if (!video?.code || normalizeVideoCode(video.code) !== group.normalized_code) {
+          validationError('待确认资源只能分配给同番号现有影片。')
         }
         videoId = video.id
         existingVideoIds.push(videoId)
-        const existingPrimary = db
-          .prepare('SELECT id FROM video_resources WHERE video_id = ? AND is_primary = 1 LIMIT 1')
-          .get(videoId) as { id: number } | undefined
-        primaryResourceId = existingPrimary?.id ?? null
+        const primary = database
+          .prepare(
+            `SELECT id FROM video_resources
+              WHERE library_id = ? AND video_id = ? AND is_primary = 1 LIMIT 1`
+          )
+          .get(libraryId, videoId) as { id: number } | undefined
+        existingPrimaryResourceId = primary?.id ?? null
       } else {
         videoId = Number(
-          db
+          database
             .prepare('INSERT INTO videos (code, scraped_status) VALUES (?, 0)')
             .run(group.normalized_code).lastInsertRowid
         )
         createdVideoIds.push(videoId)
-        const assignedResources = assignments.map((assignment) => resourcesById.get(assignment.resourceId)!)
+        const assignedResources = assignments.map(
+          (assignment) => resourcesById.get(assignment.resourceId)!
+        )
         const overrideId = resolution.primaryResourceIds?.[target.groupKey]
         if (overrideId != null && !assignedResources.some((resource) => resource.id === overrideId)) {
-          throw new Error(`主资源不属于新影片分组 ${target.groupKey}`)
+          validationError(`主资源不属于新影片分组 ${target.groupKey}。`)
         }
-        primaryResourceId =
+        selectedPendingPrimaryId =
           overrideId ??
           selectDefaultPendingScanPrimary(assignedResources, normalizeLocalPathIdentity)?.id ??
           null
@@ -383,64 +752,88 @@ export function resolvePendingScanGroup(
 
       for (const assignment of assignments) {
         const resource = resourcesById.get(assignment.resourceId)!
+        const isPrimary = selectedPendingPrimaryId === resource.id
+        let insertedResourceId: number | null
         if (resource.sourceKind === 'strm') {
-          const raw = db
-            .prepare(
-              `SELECT target_kind, target_locator
-               FROM pending_scan_resources WHERE id = ?`
-            )
-            .get(resource.id) as {
-            target_kind: ExternalVideoResourceKind | null
-            target_locator: string | null
-          }
+          const raw = rawResourcesById.get(resource.id)!
           if (!raw.target_kind || !raw.target_locator) {
-            throw new Error('待确认 STRM 目标快照无效')
+            validationError('待确认 STRM 目标快照无效。')
           }
-          insertStrmResource.run(
+          insertedResourceId = insertStrmVideoResource({
+            libraryId,
             videoId,
-            raw.target_kind,
-            raw.target_locator,
-            buildStrmResourceKey(resource.filePath),
-            resource.filePath,
-            resource.displayName,
-            primaryResourceId === resource.id ? 1 : 0
-          )
+            rootId: resource.rootId,
+            sourcePath: resource.filePath,
+            kind: raw.target_kind,
+            locator: raw.target_locator,
+            displayName: resource.displayName,
+            isPrimary
+          })
         } else {
-          insertLocalResource.run(
+          insertedResourceId = insertLocalVideoResource({
+            libraryId,
             videoId,
-            resource.filePath,
-            resource.filePath,
-            resource.sizeBytes,
-            resource.durationSeconds,
-            resource.fileMtimeMs,
-            resource.displayName,
-            primaryResourceId === resource.id ? 1 : 0
-          )
+            rootId: resource.rootId,
+            locator: resource.filePath,
+            sizeBytes: resource.sizeBytes,
+            durationSeconds: resource.durationSeconds,
+            fileMtimeMs: resource.fileMtimeMs,
+            displayName: resource.displayName,
+            isPrimary
+          })
+        }
+        if (insertedResourceId == null) {
+          validationError('待确认资源已被其它影片或媒体库占用。')
         }
       }
-      if (target.kind === 'existing' && primaryResourceId == null) {
+
+      if (target.kind === 'existing' && existingPrimaryResourceId == null) {
         const fallbackId = options?.selectFallbackPrimaryResourceId
-          ? options.selectFallbackPrimaryResourceId(videoId)
+          ? options.selectFallbackPrimaryResourceId(libraryId, videoId)
           : (
-              db
-                .prepare('SELECT id FROM video_resources WHERE video_id = ? ORDER BY id LIMIT 1')
-                .get(videoId) as { id: number } | undefined
+              database
+                .prepare(
+                  `SELECT id FROM video_resources
+                    WHERE library_id = ? AND video_id = ?
+                    ORDER BY is_primary DESC, id LIMIT 1`
+                )
+                .get(libraryId, videoId) as { id: number } | undefined
             )?.id ?? null
         if (fallbackId != null) {
-          const fallback = db
-            .prepare('SELECT id FROM video_resources WHERE video_id = ? AND id = ?')
-            .get(videoId, fallbackId) as { id: number } | undefined
-          if (!fallback) throw new Error('主资源候选不属于所选现有影片')
-          db.prepare('UPDATE video_resources SET is_primary = 1 WHERE id = ?').run(fallback.id)
+          const fallback = database
+            .prepare(
+              `SELECT id FROM video_resources
+                WHERE id = ? AND library_id = ? AND video_id = ?`
+            )
+            .get(fallbackId, libraryId, videoId) as { id: number } | undefined
+          if (!fallback) validationError('主资源候选不属于当前媒体库中的所选影片。')
+          database
+            .prepare(
+              `UPDATE video_resources
+                  SET is_primary = CASE WHEN id = ? THEN 1 ELSE 0 END
+                WHERE library_id = ? AND video_id = ?`
+            )
+            .run(fallback.id, libraryId, videoId)
         }
       }
     }
 
-    db.prepare('DELETE FROM pending_scan_groups WHERE id = ?').run(groupId)
+    const deleted = database
+      .prepare(
+        `DELETE FROM pending_scan_groups
+          WHERE id = ? AND library_id = ? AND revision = ?`
+      )
+      .run(groupId, libraryId, resolution.expectedRevision)
+    if (deleted.changes !== 1) {
+      throw new PendingScanRepoError(
+        'REVISION_CONFLICT',
+        '待确认扫描组已被其他操作更新，请刷新后重试。'
+      )
+    }
     return {
       assignedResources: resources.length,
       existingVideoIds: Array.from(new Set(existingVideoIds)),
       createdVideoIds
     }
-  })()
+  }).immediate()
 }

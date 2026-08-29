@@ -133,7 +133,7 @@ export default function MediaLibraryNav(): JSX.Element {
                     >
                       <NavIcon name={library.icon} />
                     </span>
-                    <span className="nav-label">{library.name}</span>
+                    <span className={`nav-label ${styles.name}`}>{library.name}</span>
                     {library.pendingRemovalRootCount > 0 ? (
                       <span
                         className={styles.warning}
@@ -171,7 +171,7 @@ export default function MediaLibraryNav(): JSX.Element {
                     >
                       <NavIcon name={library.icon} />
                     </span>
-                    <span className="nav-label">{library.name}</span>
+                    <span className={`nav-label ${styles.name}`}>{library.name}</span>
                   </NavLink>
                 </div>
               )

@@ -21,6 +21,12 @@
   min-width: 0;
 }
 
+.name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .icon {
   color: var(--media-library-color, var(--text-muted));
 }

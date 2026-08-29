@@ -243,6 +243,7 @@ export default function MediaLibraryCreateModal({
       subtitle={`第 ${step + 1} 步，共 ${CREATE_STEPS.length} 步`}
       hint="依次设置识别信息、来源与独立配置；根目录和首次扫描均可跳过。"
       size="lg"
+      bodyClassName={styles.modalBody}
       busy={busy}
       onCancel={onCancel}
       actions={

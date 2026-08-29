@@ -31,4 +31,14 @@ describe('MediaLibraryCreateModal control style', () => {
     assert.equal(declarations.get('outline'), 'none')
     assert.equal(declarations.get('box-shadow'), 'var(--focus-ring)')
   })
+
+  it('reserves a visible gutter for the left edge of the focus ring', () => {
+    const declarations = declarationsFor('.modalBody')
+
+    assert.equal(
+      declarations.get('margin-inline-start'),
+      'calc(-1 * var(--scrollbar-safe-pad))'
+    )
+    assert.equal(declarations.get('padding-inline-start'), 'var(--scrollbar-safe-pad)')
+  })
 })

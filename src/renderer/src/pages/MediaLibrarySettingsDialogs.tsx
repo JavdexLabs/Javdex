@@ -404,7 +404,7 @@ export function MediaLibrarySettingsDialogs({
               </div>
             ) : null}
             <input
-              className={styles.textControl}
+              className={`text-input ${styles.textControl}`}
               autoFocus
               value={deleteConfirmation}
               aria-label="输入媒体库名称确认永久删除"

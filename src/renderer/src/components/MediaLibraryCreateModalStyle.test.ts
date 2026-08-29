@@ -24,14 +24,6 @@ function declarationsFor(selector: string): Map<string, string> {
 }
 
 describe('MediaLibraryCreateModal control style', () => {
-  it('uses the standard input focus treatment without a second outline', () => {
-    const declarations = declarationsFor('.control:focus-visible')
-
-    assert.equal(declarations.get('border-color'), 'var(--border-accent)')
-    assert.equal(declarations.get('outline'), 'none')
-    assert.equal(declarations.get('box-shadow'), 'var(--focus-ring)')
-  })
-
   it('reserves a visible gutter for the left edge of the focus ring', () => {
     const declarations = declarationsFor('.modalBody')
 

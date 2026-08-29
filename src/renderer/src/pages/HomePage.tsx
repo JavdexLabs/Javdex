@@ -186,7 +186,7 @@ export default function HomePage(): JSX.Element {
             <Search {...UI_ICON} className={styles.searchIcon} aria-hidden />
             <input
               id={HOME_GLOBAL_SEARCH_ID}
-              className={styles.searchInput}
+              className={`text-input ${styles.searchInput}`}
               ref={searchRef}
               value={search}
               onChange={(event) => {

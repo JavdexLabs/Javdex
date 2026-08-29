@@ -410,6 +410,7 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
                         <label htmlFor="agent-metadata-source-url">外部详情页 URL</label>
                         <input
                           id="agent-metadata-source-url"
+                          className="text-input"
                           type="url"
                           inputMode="url"
                           autoFocus

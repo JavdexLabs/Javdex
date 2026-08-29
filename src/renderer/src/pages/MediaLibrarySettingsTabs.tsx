@@ -155,7 +155,7 @@ export function GeneralSettingsTab({
       >
         <AppFormField label="媒体库名称">
           <input
-            className={styles.textControl}
+            className={`text-input ${styles.textControl}`}
             value={identityDraft.name}
             maxLength={200}
             disabled={formDisabled}
@@ -172,7 +172,7 @@ export function GeneralSettingsTab({
           hint="数字越小越靠前；相同时按创建顺序排列。"
         >
           <input
-            className={styles.textControl}
+            className={`text-input ${styles.textControl}`}
             type="number"
             min={0}
             step={1}
@@ -599,7 +599,7 @@ export function ScanSettingsTab({
           <AppFormField label="扫描周期" hint="5–10080 分钟">
             <div className={styles.numberControl}>
               <input
-                className={styles.textControl}
+                className={`text-input ${styles.textControl}`}
                 type="number"
                 min={5}
                 max={10_080}
@@ -622,7 +622,7 @@ export function ScanSettingsTab({
           >
             <div className={styles.numberControl}>
               <input
-                className={styles.textControl}
+                className={`text-input ${styles.textControl}`}
                 type="number"
                 min={0}
                 max={1_440}

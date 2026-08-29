@@ -156,26 +156,6 @@
 .control {
   width: 100%;
   min-width: 0;
-  min-height: var(--control-h-md);
-  padding: 0 var(--control-pad-x);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  outline: none;
-  background: var(--surface-control);
-  color: var(--text-primary);
-  font: inherit;
-}
-
-.control:focus-visible {
-  border-color: var(--border-accent);
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-.control:disabled {
-  color: var(--text-muted);
-  cursor: not-allowed;
-  opacity: 0.65;
 }
 
 .choiceGrid {

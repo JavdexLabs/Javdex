@@ -341,7 +341,7 @@ export default function MediaLibraryCreateModal({
               <AppFormField label="媒体库名称">
                 <input
                   ref={nameRef}
-                  className={styles.control}
+                  className={`text-input ${styles.control}`}
                   value={draft.name}
                   maxLength={200}
                   disabled={busy}
@@ -434,7 +434,7 @@ export default function MediaLibraryCreateModal({
                   <AppFormField label="自动扫描周期" hint="5–10080 分钟">
                     <input
                       ref={scanIntervalRef}
-                      className={styles.control}
+                      className={`text-input ${styles.control}`}
                       type="number"
                       min={5}
                       max={10_080}
@@ -453,7 +453,7 @@ export default function MediaLibraryCreateModal({
                   <AppFormField label="导入最小时长" hint="0–1440 分钟">
                     <input
                       ref={minDurationRef}
-                      className={styles.control}
+                      className={`text-input ${styles.control}`}
                       type="number"
                       min={0}
                       max={1_440}

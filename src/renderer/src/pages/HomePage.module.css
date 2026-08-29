@@ -45,17 +45,6 @@
   min-width: 180px;
   height: var(--control-h-md);
   padding: 0 66px 0 36px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-control);
-  color: var(--text-primary);
-  font-size: 13px;
-}
-
-.searchInput:focus {
-  border-color: var(--accent);
-  outline: none;
-  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .searchIcon {

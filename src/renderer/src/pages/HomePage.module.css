@@ -41,10 +41,13 @@
 }
 
 .searchInput {
+  --text-input-pad-block: 0;
+  --text-input-pad-inline-start: 36px;
+  --text-input-pad-inline-end: 66px;
+
   width: 100%;
   min-width: 180px;
   height: var(--control-h-md);
-  padding: 0 66px 0 36px;
 }
 
 .searchIcon {

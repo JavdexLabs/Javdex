@@ -1,3 +1,7 @@
+.modal {
+  height: min(760px, calc(100vh - var(--modal-viewport-inset)));
+}
+
 .modalBody {
   margin-inline-start: calc(-1 * var(--scrollbar-safe-pad));
   padding-inline-start: var(--scrollbar-safe-pad);

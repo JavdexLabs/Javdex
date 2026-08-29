@@ -24,6 +24,21 @@ function declarationsFor(selector: string): Map<string, string> {
 }
 
 describe('MediaLibraryCreateModal control style', () => {
+  it('keeps all workflow steps at one viewport-safe dialog height', () => {
+    const declarations = declarationsFor('.modal')
+
+    assert.equal(
+      declarations.get('height'),
+      'min(760px, calc(100vh - var(--modal-viewport-inset)))'
+    )
+
+    const component = readFileSync(
+      path.resolve('src/renderer/src/components/MediaLibraryCreateModal.tsx'),
+      'utf8'
+    )
+    assert.match(component, /className=\{styles\.modal\}/)
+  })
+
   it('reserves a visible gutter for the left edge of the focus ring', () => {
     const declarations = declarationsFor('.modalBody')
 

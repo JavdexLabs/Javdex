@@ -377,7 +377,7 @@ export default function PluginDevConversation({
             variant="fill"
             className="plugin-dev-agent-empty"
             icon={<Bot {...UI_ICON_SM} aria-hidden />}
-            title="开始与 Agent 对话"
+            title="开始 Agent 运行"
             description="填写配置后点击「AI开发 / AI调试」，或在底部输入指示开始调试。"
           />
         ) : (

@@ -104,8 +104,8 @@
 }
 
 .status[data-status="active"] {
-  border-color: color-mix(in srgb, var(--success) 38%, var(--border-subtle));
-  color: var(--success);
+  border-color: color-mix(in srgb, var(--text-success) 38%, var(--border-subtle));
+  color: var(--text-success);
 }
 
 .status[data-status="archived"] {
@@ -113,7 +113,7 @@
 }
 
 .activityStatus {
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-subtle));
+  border-color: color-mix(in srgb, var(--border-accent) 42%, var(--border-subtle));
   background: var(--surface-selected);
   color: var(--text-accent);
 }
@@ -284,18 +284,12 @@
   flex-direction: column;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--accent) 7%, transparent),
-      transparent 42%
-    ),
-    color-mix(in srgb, var(--surface-control) 34%, transparent);
+  background: var(--surface-control);
   gap: 12px;
 }
 
 .scanConsoleScanning {
-  border-color: color-mix(in srgb, var(--accent) 36%, var(--border-subtle));
+  border-color: var(--border-accent);
 }
 
 .sourcePanelHead,
@@ -363,9 +357,9 @@
   width: 26px;
   height: 26px;
   flex: 0 0 auto;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border-subtle));
+  border: 1px solid var(--border-accent);
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--accent) 9%, var(--surface-panel));
+  background: color-mix(in srgb, var(--text-accent) 9%, var(--surface-panel));
   color: var(--text-accent);
 }
 
@@ -596,7 +590,7 @@
 
 .scanCleanupNotice > svg {
   flex: 0 0 auto;
-  color: var(--warning);
+  color: var(--text-warning);
 }
 
 .scanCleanupCopy {
@@ -606,7 +600,7 @@
 }
 
 .scanCleanupCopy strong {
-  color: var(--warning);
+  color: var(--text-warning);
   font-size: var(--settings-fs-caption, 11px);
   font-weight: 700;
 }
@@ -626,8 +620,8 @@
 }
 
 .scanNotice[data-tone="warning"] {
-  border-color: color-mix(in srgb, var(--warning) 42%, var(--border-subtle));
-  color: var(--warning);
+  border-color: var(--border-warning);
+  color: var(--text-warning);
 }
 
 .scanNotice[data-tone="danger"] {
@@ -692,11 +686,11 @@
 }
 
 .rootState[data-state="active"] {
-  color: var(--success);
+  color: var(--text-success);
 }
 
 .rootState[data-state="pending_removal"] {
-  color: var(--warning);
+  color: var(--text-warning);
 }
 
 .rootActions {

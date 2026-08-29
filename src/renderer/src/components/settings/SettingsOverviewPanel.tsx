@@ -643,7 +643,7 @@ export default function SettingsOverviewPanel({
               </Button>
             </div>
             <small>
-              全部媒体库 · {settings.defaultScraper || '未设置插件'} · 未刮削项 · 空字段补齐 · 全字段
+              全局目录 · {settings.defaultScraper || '未设置插件'} · 未刮削项 · 空字段补齐 · 全字段
             </small>
           </div>
 

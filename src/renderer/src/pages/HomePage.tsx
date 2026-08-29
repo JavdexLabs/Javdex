@@ -5,16 +5,17 @@ import {
   useState
 } from 'react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { LibraryBig, RefreshCw, Search, SearchX } from 'lucide-react'
+import { LibraryBig, RefreshCw, SearchX } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
+import ListToolbar from '../components/ListToolbar'
 import ListSurface from '../components/ListSurface'
 import PosterCard from '../components/PosterCard'
 import VirtualPosterGrid from '../components/VirtualPosterGrid'
 import { NavIcon } from '../components/NavIcons'
-import { UI_ICON, UI_ICON_SM } from '../components/iconDefaults'
+import { UI_ICON_SM } from '../components/iconDefaults'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useDebounce } from '../hooks/useDebounce'
 import { LIST_PARAM, patchSearchParams } from '../listView/listQueryParams'
@@ -157,34 +158,35 @@ export default function HomePage(): JSX.Element {
   return (
     <div className="list-page">
       <div className={`${styles.header} topbar`}>
-        <div className={styles.heading}>
-          <h1 className={styles.pageTitle}>首页</h1>
-          <span className={styles.pageSubtitle}>跨媒体库发现与搜索</span>
-        </div>
-        <div className={styles.searchArea} role="search">
-          <div className={styles.searchControl}>
-            <Search {...UI_ICON} className={styles.searchIcon} aria-hidden />
-            <input
-              id={HOME_GLOBAL_SEARCH_ID}
-              className={`text-input ${styles.searchInput}`}
-              ref={searchRef}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              type="search"
-              placeholder="搜索番号、标题或演员（含别名）…"
-              aria-label="跨媒体库搜索"
-              aria-busy={searchLoading || undefined}
-            />
-            <span className={styles.shortcut} aria-hidden>
-              {navigator.platform.includes('Mac') ? '⌘K' : 'Ctrl K'}
-            </span>
-          </div>
-          {hasSearch ? (
-            <span className="count-badge count-badge--stable count-badge--media" aria-live="polite">
-              共 {searchSettled ? searchTotal : '…'} 部
-            </span>
-          ) : null}
-        </div>
+        <ListToolbar
+          leading={
+            <div className={styles.heading}>
+              <h1 className={styles.pageTitle}>首页</h1>
+              <span className={styles.pageSubtitle}>跨媒体库发现与搜索</span>
+            </div>
+          }
+          search={{
+            id: HOME_GLOBAL_SEARCH_ID,
+            inputRef: searchRef,
+            value: search,
+            placeholder: '搜索番号、标题或演员（含别名）…',
+            ariaLabel: '跨媒体库搜索',
+            onChange: setSearch,
+            busy: searchLoading,
+            endAdornment: (
+              <span className={styles.shortcut} aria-hidden>
+                {navigator.platform.includes('Mac') ? '⌘K' : 'Ctrl K'}
+              </span>
+            )
+          }}
+          resultCount={
+            hasSearch ? (
+              <span className="count-badge count-badge--stable count-badge--media" aria-live="polite">
+                共 {searchSettled ? searchTotal : '…'} 部
+              </span>
+            ) : undefined
+          }
+        />
       </div>
 
       {hasSearch ? (
@@ -273,7 +275,7 @@ export default function HomePage(): JSX.Element {
                 </div>
               ) : (
                 <EmptyState
-                  variant="panel"
+                  variant="compact"
                   title="暂无可发现的影片"
                   description="启用媒体库的首页发现并导入影片后，这里会显示随机内容。"
                 />
@@ -298,7 +300,7 @@ export default function HomePage(): JSX.Element {
                   ))}
                 </div>
               ) : (
-                <EmptyState variant="panel" title="还没有近期添加" />
+                <EmptyState variant="compact" title="还没有近期添加" />
               )}
             </section>
 
@@ -387,7 +389,7 @@ export default function HomePage(): JSX.Element {
                 </div>
               ) : (
                 <EmptyState
-                  variant="panel"
+                  variant="compact"
                   title="尚未配置媒体库"
                   description="创建媒体库并添加来源目录后即可开始使用。"
                 />

@@ -20,15 +20,26 @@ function assetLabel(asset: VideoLifecycleMediaAssetImpact): string {
   return asset.type
 }
 
+function libraryName(
+  impact: VideoLifecycleImpact,
+  libraryId: number
+): string {
+  return impact.libraries.find((library) => library.libraryId === libraryId)?.name
+    ?? `媒体库 #${libraryId}`
+}
+
 export default function VideoDeleteImpact({
   impact
 }: {
   impact: VideoLifecycleImpact
 }): JSX.Element {
+  const removingMembership = impact.kind === 'remove-from-library'
   return (
     <div className={`${styles.root} selectable-text`}>
       <p className={styles.lead}>
-        将永久删除全局影片资料、下列媒体库成员和资源记录，以及本地视频 / STRM 源文件。此操作不可恢复。
+        {removingMembership
+          ? '将从当前媒体库移出该影片及其在本库的资源记录。不会删除全局影片资料、其它媒体库成员，也不会删除磁盘文件。'
+          : '将永久删除全局影片资料、下列媒体库成员和资源记录，以及本地视频 / STRM 源文件。此操作不可恢复。'}
       </p>
 
       <dl className={styles.metrics} aria-label="删除影响汇总">
@@ -76,7 +87,7 @@ export default function VideoDeleteImpact({
                     {RESOURCE_KIND_LABELS[resource.kind]}
                     {resource.isPrimary ? ' · 主资源' : ''}
                   </span>
-                  <span className={styles.meta}>媒体库 #{resource.libraryId}</span>
+                  <span className={styles.meta}>{libraryName(impact, resource.libraryId)}</span>
                 </span>
                 <span className={styles.path} title={resource.displayLocator}>
                   {resource.displayName && resource.displayName !== resource.displayLocator

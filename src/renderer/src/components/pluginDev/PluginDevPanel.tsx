@@ -770,9 +770,9 @@ export default function PluginDevPanel({
   })
   const agentPrimaryDisabledReason =
     pendingApproval
-      ? '请先在对话区批准或拒绝当前操作。'
+      ? '请先在运行记录中批准或拒绝当前操作。'
       : pendingUserRequest
-        ? '请先在对话区完成当前结构化请求。'
+        ? '请先在运行记录中完成当前结构化请求。'
         : continuationNeedsFeedback
           ? '当前版本已可安装；如需继续完善，请先在右侧输入具体反馈。'
           : null

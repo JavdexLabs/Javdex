@@ -92,11 +92,72 @@
 }
 
 .setupBody {
+  display: grid;
+  align-content: start;
+  gap: 16px;
   min-height: 0;
   padding: 18px;
   flex: 1 1 auto;
   overflow: hidden auto;
   scrollbar-gutter: stable;
+}
+
+.intro,
+.steps {
+  display: grid;
+  gap: 10px;
+}
+
+.intro p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: setup-step;
+}
+
+.steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.steps li::before {
+  counter-increment: setup-step;
+  content: counter(setup-step);
+  display: grid;
+  place-items: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-selected);
+  color: var(--text-accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.stepCopy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.steps strong {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .resultBody {
@@ -123,13 +184,6 @@
 
 .sourceForm input {
   width: 100%;
-}
-
-.sourceForm p {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.55;
 }
 
 .controls,

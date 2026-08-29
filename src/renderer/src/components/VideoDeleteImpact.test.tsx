@@ -64,11 +64,51 @@ describe('VideoDeleteImpact', () => {
       'covers/ML-091.jpg',
       'Agent 草稿 2 项',
       '本地视频 / STRM 源文件',
+      '主库',
       '/media/ML-091.mp4',
       '/media/ML-091.strm'
     ]) {
       assert.match(markup, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     }
-    assert.doesNotMatch(markup, /将删除磁盘源文件|磁盘源文件会保留/)
+    assert.doesNotMatch(markup, /将删除磁盘源文件|磁盘源文件会保留|媒体库 #/)
+  })
+
+  it('names the current library when previewing a membership removal', () => {
+    const impact: VideoLifecycleImpact = {
+      kind: 'remove-from-library',
+      revision: 'rev',
+      videoId: 91,
+      sourceLibraryId: 1,
+      targetLibraryId: null,
+      resourceIds: [1],
+      sourcePaths: ['/media/ML-091.mp4'],
+      remainingLibraryIds: [2],
+      removesCanonicalVideo: false,
+      playlistCount: 0,
+      assetCount: 0,
+      libraries: [{ libraryId: 1, name: '主库', status: 'active', resourceCount: 1 }],
+      resources: [
+        {
+          resourceId: 1,
+          libraryId: 1,
+          kind: 'local',
+          displayName: 'ML-091.mp4',
+          displayLocator: '/media/ML-091.mp4',
+          isPrimary: true,
+          sourceFilePath: '/media/ML-091.mp4'
+        }
+      ],
+      playlists: [],
+      mediaAssets: [],
+      pendingScrapeCount: 0,
+      pendingAgentDraftCount: 0,
+      pendingStagingAssetCount: 0,
+      sourceFilesPreserved: true
+    }
+
+    const markup = renderToStaticMarkup(<VideoDeleteImpact impact={impact} />)
+    assert.match(markup, /不会删除全局影片资料/)
+    assert.match(markup, /主库/)
+    assert.doesNotMatch(markup, /媒体库 #1/)
   })
 })

@@ -52,6 +52,8 @@ const library: MediaLibraryDetail = {
 describe('media-library settings state', () => {
   it('builds a trimmed create command, deduplicates roots and still allows an empty library', () => {
     const empty = createMediaLibraryDraft()
+    assert.equal(empty.config.minImportDurationMinutes, 30)
+    assert.equal(empty.config.autoMergeSameCodeResources, true)
     empty.name = '  新媒体库  '
     assert.deepEqual(buildCreateMediaLibraryInput(empty).roots, [])
 

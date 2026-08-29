@@ -6,6 +6,19 @@
   gap: 12px 16px;
 }
 
+.searchWrap {
+  position: relative;
+  min-width: 160px;
+  max-width: min(760px, 100%);
+  flex: 1 1 auto;
+}
+
+.searchWrap .search {
+  width: 100%;
+  max-width: none;
+  padding-inline-end: 66px;
+}
+
 .search {
   box-sizing: border-box;
   min-width: 160px;

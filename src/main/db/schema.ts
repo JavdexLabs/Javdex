@@ -240,9 +240,9 @@ CREATE TABLE IF NOT EXISTS media_library_configs (
     auto_scan_enabled INTEGER NOT NULL DEFAULT 0 CHECK(auto_scan_enabled IN (0, 1)),
     auto_scan_interval_minutes INTEGER NOT NULL DEFAULT 1440
         CHECK(auto_scan_interval_minutes BETWEEN 5 AND 10080),
-    min_import_duration_minutes INTEGER NOT NULL DEFAULT 0
+    min_import_duration_minutes INTEGER NOT NULL DEFAULT 30
         CHECK(min_import_duration_minutes BETWEEN 0 AND 1440),
-    auto_merge_same_code_resources INTEGER NOT NULL DEFAULT 0
+    auto_merge_same_code_resources INTEGER NOT NULL DEFAULT 1
         CHECK(auto_merge_same_code_resources IN (0, 1)),
     remove_resource_less_memberships INTEGER NOT NULL DEFAULT 0
         CHECK(remove_resource_less_memberships IN (0, 1)),

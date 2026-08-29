@@ -224,7 +224,7 @@ export default function PendingCenterPage(): JSX.Element {
                   navigate(pendingCenterPath({ type, libraryId: nextLibraryId }))
                 }}
               >
-                <option value="">全部媒体库</option>
+                <option value="">所有媒体库</option>
                 {(librariesQuery.data ?? []).map((library) => (
                   <option key={library.id} value={library.id}>
                     {library.name}

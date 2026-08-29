@@ -317,7 +317,7 @@ export default function SettingsPage(): JSX.Element {
             { status, missingFields, scraperName }
           )
         ),
-      (count) => `全部媒体库 · ${count} 部影片`
+      (count) => `全局目录 · ${count} 部影片`
     )
   }, [refreshVideoBatchScopeCount])
 
@@ -547,7 +547,7 @@ export default function SettingsPage(): JSX.Element {
         )
       )
       toast.show(
-        libraryId ? '已开始当前媒体库的影片批量更新' : '已开始全部媒体库的影片批量更新',
+        libraryId ? '已开始当前媒体库的影片批量更新' : '已开始全局目录的影片批量更新',
         'success'
       )
     } catch (e) {
@@ -1063,7 +1063,7 @@ export default function SettingsPage(): JSX.Element {
       {showVideoBatchModal && settings && (
         <ScrapeFieldsModal<VideoScrapeField, VideoBatchScrapeStatus>
           title="影片批量更新"
-          hint="作用范围为全部媒体库。先确定影片状态与更新方式，再勾选要写入的字段。"
+          hint="作用范围为全局目录。先确定影片状态与更新方式，再勾选要写入的字段。"
           options={VIDEO_SCRAPE_FIELD_OPTIONS}
           initialSelected={ALL_VIDEO_SCRAPE_FIELDS}
           scrapers={scrapers}

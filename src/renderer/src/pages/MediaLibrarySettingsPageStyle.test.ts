@@ -2,25 +2,12 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import postcss from 'postcss'
+import { declarationsFor as readDeclarations } from '../test/cssDeclarations'
+
+const cssPath = 'src/renderer/src/pages/MediaLibrarySettingsPage.module.css'
 
 function declarationsFor(selector: string): Map<string, string> {
-  const source = readFileSync(
-    path.resolve('src/renderer/src/pages/MediaLibrarySettingsPage.module.css'),
-    'utf8'
-  )
-  const declarations = new Map<string, string>()
-  const root = postcss.parse(source)
-
-  root.walkRules((rule) => {
-    if (rule.parent?.type !== 'root') return
-    if (!rule.selector.split(',').map((item) => item.trim()).includes(selector)) return
-    rule.walkDecls((declaration) => {
-      declarations.set(declaration.prop, declaration.value)
-    })
-  })
-
-  return declarations
+  return readDeclarations(cssPath, selector, { rootRulesOnly: true })
 }
 
 describe('MediaLibrarySettingsPage layout', () => {
@@ -74,7 +61,7 @@ describe('MediaLibrarySettingsPage layout', () => {
     assert.equal(sourcePanelIcon.get('height'), '26px')
     assert.equal(scanConsole.get('display'), 'flex')
     assert.equal(scanConsole.get('padding'), '12px')
-    assert.match(scanConsole.get('background') ?? '', /linear-gradient/)
+    assert.equal(scanConsole.get('background'), 'var(--surface-control)')
     assert.equal(scanPanelIcon.get('width'), '26px')
     assert.equal(scanPanelIcon.get('height'), '26px')
     assert.equal(scanSettingsPanel.get('display'), 'flex')

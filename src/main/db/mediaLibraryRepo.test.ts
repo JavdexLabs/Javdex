@@ -227,6 +227,8 @@ describe('mediaLibraryRepo', () => {
   it('keeps library and config revisions independent and rejects stale writes', () => {
     setupDb()
     const created = createMediaLibrary({ name: 'Library' })
+    assert.equal(created.config.minImportDurationMinutes, 30)
+    assert.equal(created.config.autoMergeSameCodeResources, true)
 
     const config = updateMediaLibraryConfig({
       libraryId: created.id,

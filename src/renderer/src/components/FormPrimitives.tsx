@@ -70,6 +70,23 @@ export function EditFormSection({
   )
 }
 
+/** Muted caption under an entity-edit control. */
+export function EditFormHint({
+  children,
+  as: Component = 'span',
+  id
+}: {
+  children: ReactNode
+  as?: 'span' | 'p'
+  id?: string
+}): JSX.Element {
+  return (
+    <Component id={id} className={`${styles.editHint} entity-edit-field-hint`}>
+      {children}
+    </Component>
+  )
+}
+
 /** Label + control row inside entity edit modals. */
 export function EditFormField({
   label,
@@ -95,7 +112,7 @@ export function EditFormField({
         {labelExtra}
       </label>
       {children}
-      {hint ? <span className={`${styles.editHint} entity-edit-field-hint`}>{hint}</span> : null}
+      {hint ? <EditFormHint>{hint}</EditFormHint> : null}
     </div>
   )
 }

@@ -6,7 +6,6 @@ import { describe, it } from 'node:test'
 const RECENT_INPUT_FILES = [
   'src/renderer/src/components/MediaLibraryCreateModal.tsx',
   'src/renderer/src/components/agentMetadata/AgentMetadataCollectorContext.tsx',
-  'src/renderer/src/pages/HomePage.tsx',
   'src/renderer/src/pages/MediaLibrarySettingsDialogs.tsx',
   'src/renderer/src/pages/MediaLibrarySettingsTabs.tsx'
 ] as const
@@ -30,6 +29,6 @@ describe('recent text input style contract', () => {
       }
     }
 
-    assert.equal(auditedInputCount, 8)
+    assert.equal(auditedInputCount, 7)
   })
 })

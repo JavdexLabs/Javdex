@@ -51,7 +51,13 @@ const base = {
     '!node_modules/**/*.map',
     '!node_modules/playwright-core/lib/vite/**/*',
     '!node_modules/@earendil-works/pi-coding-agent/**/*',
-    '!node_modules/undici/**/*'
+    // Main process bundles undici; scrapers use cheerio/slim and do not need these.
+    '!node_modules/undici/**/*',
+    '!node_modules/parse5/**/*',
+    '!node_modules/parse5-htmlparser2-tree-adapter/**/*',
+    '!node_modules/parse5-parser-stream/**/*',
+    '!node_modules/encoding-sniffer/**/*',
+    '!node_modules/whatwg-mimetype/**/*'
   ],
   asar: true,
   npmRebuild: true,

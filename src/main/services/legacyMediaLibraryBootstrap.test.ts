@@ -65,8 +65,8 @@ describe("legacy media-library settings bootstrap", () => {
         {
           auto_scan_enabled: 0,
           auto_scan_interval_minutes: 1440,
-          min_import_duration_minutes: 0,
-          auto_merge_same_code_resources: 0,
+          min_import_duration_minutes: 30,
+          auto_merge_same_code_resources: 1,
           remove_resource_less_memberships: 0,
           default_video_scraper: null,
           imported: 1,

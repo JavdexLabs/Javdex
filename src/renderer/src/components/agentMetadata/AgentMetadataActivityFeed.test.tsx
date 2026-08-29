@@ -3,6 +3,7 @@ import { afterEach, describe, it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
 import type { AgentMetadataSnapshot } from '@shared/agentMetadataTypes'
+import { declarationsFor } from '../../test/cssDeclarations'
 import AgentMetadataActivityFeed from './AgentMetadataActivityFeed'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
@@ -118,6 +119,32 @@ describe('AgentMetadataActivityFeed', () => {
     assert.equal(
       renderer.root.findAllByType('button').some((node) => node.children.includes('回到最新')),
       false
+    )
+  })
+
+  it('caps the thinking box height and still shows the full streamed text', () => {
+    const longText = '核对封面与演员。'.repeat(80)
+    const value = snapshot()
+    const reasoning = value.activities[0]
+    if (reasoning?.kind === 'reasoning') {
+      reasoning.text = longText
+      reasoning.charCount = longText.length
+    }
+
+    act(() => {
+      renderer = TestRenderer.create(<AgentMetadataActivityFeed snapshot={value} />)
+    })
+
+    const content = declarationsFor(
+      'src/renderer/src/components/agentMetadata/AgentMetadataActivityFeed.module.css',
+      '.reasoningContent'
+    )
+    assert.equal(content.get('max-height'), '240px')
+    assert.equal(content.get('overflow'), 'hidden auto')
+    assert.equal(content.get('scrollbar-gutter'), 'stable')
+    assert.equal(
+      renderer?.root.findAllByType('div').some((node) => node.children.includes(longText)),
+      true
     )
   })
 })

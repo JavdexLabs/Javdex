@@ -42,6 +42,7 @@ interface VirtualPosterGridProps<TVideo extends Video> {
   onMarkScrapeSuccess?: (video: TVideo) => void
   onDelete?: (video: TVideo) => void
   deleteLabel?: string
+  onRemoveFromLibrary?: (video: TVideo) => void
   /** Show the bounded cross-library membership strip returned by global catalog projections. */
   showLibraryBadges?: boolean
   /** Session-only key for scroll restoration (see listViewMemory). */
@@ -68,6 +69,7 @@ export default function VirtualPosterGrid<TVideo extends Video>({
   onMarkScrapeSuccess,
   onDelete,
   deleteLabel,
+  onRemoveFromLibrary,
   showLibraryBadges = false,
   scrollMemoryKey
 }: VirtualPosterGridProps<TVideo>): JSX.Element {
@@ -222,6 +224,9 @@ export default function VirtualPosterGrid<TVideo extends Video>({
             }
             onDelete={onDelete ? () => onDelete(video) : undefined}
             deleteLabel={deleteLabel}
+            onRemoveFromLibrary={
+              onRemoveFromLibrary ? () => onRemoveFromLibrary(video) : undefined
+            }
           />
         ) : (
           <PosterCard
@@ -243,6 +248,9 @@ export default function VirtualPosterGrid<TVideo extends Video>({
             }
             onDelete={onDelete ? () => onDelete(video) : undefined}
             deleteLabel={deleteLabel}
+            onRemoveFromLibrary={
+              onRemoveFromLibrary ? () => onRemoveFromLibrary(video) : undefined
+            }
           />
         )}
       </div>

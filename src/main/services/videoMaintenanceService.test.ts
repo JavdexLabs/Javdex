@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { insertTestVideoWithFile } from '../db/testVideoFixtures'
+import { listVideoResourcesAcrossLibraries } from '../db/videoRepo'
 import { ensureVideoMembership } from '../db/libraryMembershipRepo'
 import {
   addMediaLibraryRoot,
@@ -975,6 +976,24 @@ describe('VideoMaintenanceService', () => {
     assert.equal(unlinkCalls, 0)
     assert.equal(fs.existsSync(videoPath), true)
     assert.ok(database.prepare('SELECT 1 FROM video_resources WHERE id = 1').get())
+  })
+
+  it('skips unmanaged source files when deleting a video globally', () => {
+    const { videoPath } = setupPolicyDb()
+    const database = getDb()
+    database.prepare('UPDATE video_resources SET root_id = NULL WHERE video_id = 1').run()
+    const resources = listVideoResourcesAcrossLibraries(1)
+    assert.equal(resources.some((resource) => resource.root_id == null), true)
+    let ran = false
+    const videos = createVideoMaintenanceService()
+
+    videos.runWithManagedSourceFileDeletion(resources, () => {
+      ran = true
+      return true
+    })
+
+    assert.equal(ran, true)
+    assert.equal(fs.existsSync(videoPath), true)
   })
 
   it('corrects an imported code', () => {

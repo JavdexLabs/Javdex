@@ -770,7 +770,7 @@ export function createVideoMaintenanceService(
           resource.kind === 'local' ? resource.locator : resource.strm_source_path
         if (!filePath) continue
         if (resource.root_id == null) {
-          throw new Error('影片源文件缺少有效的媒体库根目录归属，无法安全删除')
+          continue
         }
         requireActiveMediaLibrary(resource.library_id)
         const root = readMediaLibraryRoot(resource.library_id, resource.root_id)

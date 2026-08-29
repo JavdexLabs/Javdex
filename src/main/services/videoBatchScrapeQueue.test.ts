@@ -19,7 +19,7 @@ describe('videoBatchScrapeQueue feedback', () => {
     )
     assert.equal(
       formatVideoBatchStatusLabel({ status: 'all', fields: ['title'] }),
-      '全部媒体库 · 全部影片'
+      '全局目录 · 全部影片'
     )
   })
 

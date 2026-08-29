@@ -14,6 +14,7 @@ import { normalizeVideoCode } from '@shared/videoCode'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
+import { AppFormField } from '../components/FormPrimitives'
 import SelectControl from '../components/SelectControl'
 import EditMetadataModal from '../components/EditMetadataModal'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
@@ -148,6 +149,12 @@ export default function DetailPage(): JSX.Element {
   const [deletePreviewLoading, setDeletePreviewLoading] = useState(false)
   const [deletingVideo, setDeletingVideo] = useState(false)
   const [deleteOperationId, setDeleteOperationId] = useState<string | null>(null)
+  const removePreviewRequestRef = useRef(0)
+  const [confirmRemoveFromLibrary, setConfirmRemoveFromLibrary] = useState(false)
+  const [removePreview, setRemovePreview] = useState<VideoLifecycleImpact | null>(null)
+  const [removePreviewLoading, setRemovePreviewLoading] = useState(false)
+  const [removingFromLibrary, setRemovingFromLibrary] = useState(false)
+  const [removeOperationId, setRemoveOperationId] = useState<string | null>(null)
   const [showEdit, setShowEdit] = useState(false)
   const [editIdentityConflict, setEditIdentityConflict] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
@@ -738,6 +745,75 @@ export default function DetailPage(): JSX.Element {
     }
   }
 
+  const createRemoveOperationId = (): string =>
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `remove-video-${videoId}-${Date.now()}`
+
+  const closeRemovePreview = (): void => {
+    removePreviewRequestRef.current += 1
+    setConfirmRemoveFromLibrary(false)
+    setRemovePreview(null)
+    setRemovePreviewLoading(false)
+    setRemoveOperationId(null)
+  }
+
+  const openRemovePreview = async (): Promise<void> => {
+    const libraryId = video?.activeLibraryId
+    if (libraryId == null) return
+    const requestId = ++removePreviewRequestRef.current
+    setConfirmRemoveFromLibrary(true)
+    setRemovePreview(null)
+    setRemovePreviewLoading(true)
+    setRemoveOperationId(createRemoveOperationId())
+    try {
+      const impact = await api.videos.previewRemoveFromLibrary(libraryId, videoId)
+      if (requestId !== removePreviewRequestRef.current) return
+      setRemovePreview(impact)
+    } catch (error) {
+      if (requestId !== removePreviewRequestRef.current) return
+      closeRemovePreview()
+      toast.show(String((error as Error).message ?? error), 'error')
+    } finally {
+      if (requestId === removePreviewRequestRef.current) setRemovePreviewLoading(false)
+    }
+  }
+
+  const doRemoveFromLibrary = async (): Promise<void> => {
+    const libraryId = video?.activeLibraryId
+    if (!removePreview || !removeOperationId || removingFromLibrary || libraryId == null) return
+    setRemovingFromLibrary(true)
+    try {
+      await api.videos.removeFromLibrary({
+        libraryId,
+        videoId,
+        operationId: removeOperationId,
+        expectedRevision: removePreview.revision
+      })
+      toast.show('已移出媒体库', 'success')
+      invalidateVideos()
+      navigateBackFromVideoDetail(navigate, location)
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+      const requestId = ++removePreviewRequestRef.current
+      setRemovePreview(null)
+      setRemovePreviewLoading(true)
+      try {
+        const refreshed = await api.videos.previewRemoveFromLibrary(libraryId, videoId)
+        if (requestId === removePreviewRequestRef.current) {
+          setRemovePreview(refreshed)
+          setRemoveOperationId(createRemoveOperationId())
+        }
+      } catch {
+        if (requestId === removePreviewRequestRef.current) closeRemovePreview()
+      } finally {
+        if (requestId === removePreviewRequestRef.current) setRemovePreviewLoading(false)
+      }
+    } finally {
+      setRemovingFromLibrary(false)
+    }
+  }
+
   const openCorrectImport = (): void => {
     setCorrectCode(video?.code ?? '')
     setShowCorrectImport(true)
@@ -874,7 +950,7 @@ export default function DetailPage(): JSX.Element {
                     >
                       设置 · 概览
                     </button>
-                    一键刮削全部媒体库中的未刮削影片。
+                    一键刮削全局目录中的未刮削影片。
                   </span>
                 ) : null}
               </div>
@@ -942,7 +1018,7 @@ export default function DetailPage(): JSX.Element {
                     icon: <Bot {...UI_ICON} />,
                     label: 'Agent 刮削',
                     onClick: () => agentMetadata.open(
-                      { kind: 'video', id: videoId },
+                      { kind: 'video', id: videoId, label: video.code },
                       () => { void load({ silent: true }) }
                     )
                   },
@@ -996,6 +1072,14 @@ export default function DetailPage(): JSX.Element {
                     label: '清除元数据',
                     danger: true,
                     onClick: () => setConfirmClear(true)
+                  },
+                  {
+                    key: 'remove-from-library',
+                    label: '移出媒体库',
+                    hidden: video.activeLibraryId == null,
+                    onClick: () => {
+                      void openRemovePreview()
+                    }
                   },
                   {
                     key: 'delete-video',
@@ -1358,8 +1442,7 @@ export default function DetailPage(): JSX.Element {
           onConfirm={() => void saveLocalResourceLabel()}
           onCancel={() => setEditResourceTarget(null)}
         >
-          <label className="settings-form-field">
-            <span className="settings-form-label">资源标签</span>
+          <AppFormField label="资源标签" hint="留空时显示文件名。">
             <input
               className="text-input form-control-full"
               value={localResourceLabel}
@@ -1367,8 +1450,7 @@ export default function DetailPage(): JSX.Element {
               placeholder="可选"
               autoFocus
             />
-            <small className="settings-form-hint">留空时显示文件名。</small>
-          </label>
+          </AppFormField>
           <div className="modal-path-text">{editResourceTarget.locator}</div>
         </Modal>
       )}
@@ -1406,6 +1488,27 @@ export default function DetailPage(): JSX.Element {
           onCancel={() => setConfirmClear(false)}
         >
           确定要清除「{video.code}」的所有刮削元数据吗？将清空标题、简介、封面、演员、标签、外部评分等并恢复为「未刮削」状态（不影响影片资源、自定义评分与相关链接）。
+        </Modal>
+      )}
+
+      {confirmRemoveFromLibrary && (
+        <Modal
+          title="移出媒体库"
+          size="lg"
+          busy={removingFromLibrary}
+          confirmText={
+            removingFromLibrary ? '移出中…' : removePreviewLoading ? '读取影响…' : '移出媒体库'
+          }
+          confirmDisabled={removePreviewLoading || !removePreview}
+          onConfirm={() => {
+            void doRemoveFromLibrary()
+          }}
+          onCancel={() => {
+            if (!removingFromLibrary) closeRemovePreview()
+          }}
+        >
+          {removePreviewLoading && !removePreview ? <p>正在读取完整影响范围…</p> : null}
+          {removePreview ? <VideoDeleteImpact impact={removePreview} /> : null}
         </Modal>
       )}
 

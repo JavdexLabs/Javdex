@@ -323,7 +323,7 @@ export default function ActressDetailPage(): JSX.Element {
           icon: <Bot {...UI_ICON} />,
           label: 'Agent 刮削',
           onClick: () => agentMetadata.open(
-            { kind: 'actress', id: actressId },
+            { kind: 'actress', id: actressId, label: actress.main_name },
             () => { void load({ silent: true }) }
           )
         },

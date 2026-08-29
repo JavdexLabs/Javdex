@@ -1407,7 +1407,7 @@ function assertPermanentDeletionCandidate(library: MediaLibraryRow): void {
   if (library.id === DEFAULT_MEDIA_LIBRARY_ID || library.is_default) {
     throw new MediaLibraryRepoError(
       'DEFAULT_LIBRARY_PROTECTED',
-      '默认媒体库不能永久删除。'
+      '此媒体库受系统保护，不能永久删除。'
     )
   }
   if (library.status !== 'archived') {
@@ -1573,7 +1573,7 @@ export function archiveMediaLibrary(input: {
     if (library.id === DEFAULT_MEDIA_LIBRARY_ID || library.is_default) {
       throw new MediaLibraryRepoError(
         'DEFAULT_LIBRARY_PROTECTED',
-        '默认媒体库不能归档。'
+        '此媒体库受系统保护，不能归档。'
       )
     }
     if (library.status === 'archived') return

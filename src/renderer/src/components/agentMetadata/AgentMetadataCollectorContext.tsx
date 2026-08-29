@@ -46,8 +46,10 @@ import { PendingImpactList, PendingImpactRow } from '../PendingDecisionParts'
 import AgentMetadataActivityFeed from './AgentMetadataActivityFeed'
 import styles from './AgentMetadataCollectorContext.module.css'
 
+type OpenAgentMetadataTarget = AgentMetadataTarget & { label?: string }
+
 interface AgentMetadataCollectorContextValue {
-  open: (target: AgentMetadataTarget, onApplied?: () => void) => void
+  open: (target: OpenAgentMetadataTarget, onApplied?: () => void) => void
 }
 
 const AgentMetadataCollectorContext = createContext<AgentMetadataCollectorContextValue | null>(null)
@@ -117,9 +119,49 @@ function resourceLabel(field: AgentMetadataDraft['resources'][number]['field']):
   }[field]
 }
 
-function targetLabel(target: AgentMetadataTarget | null): string {
+function targetIdentity(target: OpenAgentMetadataTarget): AgentMetadataTarget {
+  return { kind: target.kind, id: target.id }
+}
+
+function targetLabel(target: AgentMetadataTarget | null, label?: string): string {
   if (!target) return '外部详情页'
-  return `${TARGET_PRESENTATION[target.kind].label} #${target.id}`
+  const display = label?.trim()
+  return display || TARGET_PRESENTATION[target.kind].label
+}
+
+function setupSubject(kind: AgentMetadataTargetKind | undefined): string {
+  return kind === 'actress' ? '这位演员' : '这部影片'
+}
+
+function AgentMetadataSetupIntro({ kind }: { kind: AgentMetadataTargetKind | undefined }): JSX.Element {
+  return (
+    <div className={styles.intro}>
+      <p>
+        没有对应刮削器，或「修正匹配」缺封面、演员、剧情等字段时，把{setupSubject(kind)}的详情页交给
+        Agent。它会打开页面抽取资料，先出现在右侧，不会直接改库。
+      </p>
+      <ol className={styles.steps}>
+        <li>
+          <span className={styles.stepCopy}>
+            <strong>粘贴详情页</strong>
+            使用该条目自己的资料页，不要用搜索页或列表页。
+          </span>
+        </li>
+        <li>
+          <span className={styles.stepCopy}>
+            <strong>Agent 读取</strong>
+            左侧显示采集过程；遇到验证码或登录时会暂停，请你处理后继续。
+          </span>
+        </li>
+        <li>
+          <span className={styles.stepCopy}>
+            <strong>预览后写入</strong>
+            右侧勾选字段和应用方式，确认后再写入媒体库。
+          </span>
+        </li>
+      </ol>
+    </div>
+  )
 }
 
 function collectionIsActive(snapshot: AgentMetadataSnapshot | null): boolean {
@@ -140,6 +182,7 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
   const toast = useToast()
   const [visible, setVisible] = useState(false)
   const [target, setTarget] = useState<AgentMetadataTarget | null>(null)
+  const [targetDisplayLabel, setTargetDisplayLabel] = useState('')
   const [sourceUrl, setSourceUrl] = useState('')
   const [snapshot, setSnapshot] = useState<AgentMetadataSnapshot | null>(null)
   const [draft, setDraft] = useState<AgentMetadataDraft | null>(null)
@@ -243,11 +286,13 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
     void runPlan({ draft, fields: selectedFields, nextMode: mode })
   }, [busy, draft, mode, review, runPlan, selectedFields, visible])
 
-  const open = useCallback((nextTarget: AgentMetadataTarget, onApplied?: () => void): void => {
+  const open = useCallback((nextTarget: OpenAgentMetadataTarget, onApplied?: () => void): void => {
+    const identity = targetIdentity(nextTarget)
     const generation = openGeneration.current + 1
     openGeneration.current = generation
     setVisible(true)
-    setTarget(nextTarget)
+    setTarget(identity)
+    setTargetDisplayLabel(nextTarget.label?.trim() ?? '')
     setSourceUrl('')
     setSnapshot(null)
     setDraft(null)
@@ -263,7 +308,7 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
     automaticPlanKey.current = null
     onAppliedRef.current = onApplied
     void (async () => {
-      const ready = await api.agentMetadata.findReady(nextTarget)
+      const ready = await api.agentMetadata.findReady(identity)
       if (openGeneration.current !== generation || !ready) return
       adoptDraft(ready)
       if (!ready.runId) return
@@ -438,7 +483,7 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
   }
 
   const contextValue = useMemo(() => ({ open }), [open])
-  const modalTitle = `Agent 刮削 · ${targetLabel(target)}`
+  const modalTitle = `Agent 刮削 · ${targetLabel(target, targetDisplayLabel)}`
   const images = draft?.resources.filter((resource) =>
     ['cover', 'samples', 'actressAvatar', 'avatar', 'gallery'].includes(resource.field)
   ) ?? []
@@ -449,7 +494,7 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
       {visible ? (
         <Modal
           title={modalTitle}
-          hint="Agent 会读取外部详情页；所有采集结果都需要经过你的预览确认。"
+          hint="和「修正匹配」不同：这里由你指定网页，Agent 读取后抽出资料，写入前必须预览确认。"
           size="xl"
           className={styles.collectorModal}
           bodyClassName={styles.collectorBody}
@@ -480,7 +525,7 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
           )}
         >
           <div className={styles.workspace}>
-            <section className={styles.conversationPane} aria-label="Agent 对话">
+            <section className={styles.conversationPane} aria-label="Agent 运行">
               {snapshot ? (
                 <AgentMetadataActivityFeed key={snapshot.runId} snapshot={snapshot} />
               ) : (
@@ -488,8 +533,10 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
                   <header className={styles.paneHeader}>
                     <span className={styles.paneIcon}><Bot {...UI_ICON_SM} aria-hidden /></span>
                     <span className={styles.paneHeaderCopy}>
-                      <strong className={styles.paneTitle}>Agent 对话</strong>
-                      <small className={styles.paneHint}>{draft ? '已载入此前保存的采集草稿。' : '输入详情页地址后开始采集。'}</small>
+                      <strong className={styles.paneTitle}>Agent 运行</strong>
+                      <small className={styles.paneHint}>
+                        {draft ? '已载入此前保存的采集草稿。' : `粘贴${setupSubject(target?.kind)}的详情页地址。`}
+                      </small>
                     </span>
                     <span className={styles.paneStatus}>{draft ? '已完成' : '待开始'}</span>
                   </header>
@@ -502,6 +549,7 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
                     />
                   ) : (
                     <div className={styles.setupBody}>
+                      <AgentMetadataSetupIntro kind={target?.kind} />
                       <div className={styles.sourceForm}>
                         <label htmlFor="agent-metadata-source-url">外部详情页 URL</label>
                         <input
@@ -518,7 +566,6 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
                             if (event.key === 'Enter' && sourceUrl.trim() && !busy) void start()
                           }}
                         />
-                        <p>Agent 只会读取该站点，不会直接修改媒体库。</p>
                       </div>
                     </div>
                   )}
@@ -532,7 +579,7 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
                 <span className={styles.paneHeaderCopy}>
                   <strong className={styles.paneTitle}>结果预览</strong>
                   <small className={styles.paneHint} title={draft?.source.displayUrl}>
-                    {draft ? `来源：${draft.source.displayUrl}` : '采集结果生成后会显示在这里。'}
+                    {draft ? `来源：${draft.source.displayUrl}` : '采集完成后在这里勾选要写入的字段。'}
                   </small>
                 </span>
                 <span className={styles.paneStatus} data-ready={Boolean(draft) || undefined}>
@@ -695,7 +742,7 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
                     title={snapshot?.phase === 'failed' ? '本次采集没有生成结果' : '等待采集结果'}
                     description={snapshot?.phase === 'failed'
                       ? '查看左侧最后一步和错误信息后，可以重新开始采集。'
-                      : 'Agent 提交经过验证的字段后，你可以在这里选择应用方式。'}
+                      : 'Agent 提交经过验证的字段后，在这里选择应用方式和要写入的内容。'}
                   />
                 )}
               </div>

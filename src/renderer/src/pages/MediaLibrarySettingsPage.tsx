@@ -621,11 +621,7 @@ export function MediaLibrarySettingsContent({
                 </div>
               ) : null}
               <span className={styles.status} data-status={library.status}>
-                {archived
-                  ? '已归档'
-                  : library.isDefault
-                    ? '系统默认库'
-                    : '活动中'}
+                {archived ? '已归档' : '活动中'}
               </span>
               {scan.running ? (
                 <span className={styles.activityStatus} role="status">

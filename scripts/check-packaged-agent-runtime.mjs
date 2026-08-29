@@ -70,7 +70,8 @@ for (const archive of archives) {
     /^\/out\/main\/chunks\/photon_rs_bg\.wasm$/,
     /^\/out\/renderer\/icon-192\.png$/,
     /^\/node_modules\/playwright-core\/package\.json$/,
-    /^\/node_modules\/playwright-core\/lib\/coreBundle\.js$/
+    /^\/node_modules\/playwright-core\/lib\/coreBundle\.js$/,
+    /^\/node_modules\/cheerio\/dist\/commonjs\/slim\.js$/
   ]
   for (const pattern of required) {
     if (!entries.some((entry) => pattern.test(entry))) {
@@ -104,6 +105,11 @@ for (const archive of archives) {
       entry.startsWith('/node_modules/@earendil-works/pi-coding-agent/') ||
       entry.startsWith('/node_modules/playwright-core/lib/vite/') ||
       entry.startsWith('/node_modules/undici/') ||
+      entry.startsWith('/node_modules/parse5/') ||
+      entry.startsWith('/node_modules/parse5-htmlparser2-tree-adapter/') ||
+      entry.startsWith('/node_modules/parse5-parser-stream/') ||
+      entry.startsWith('/node_modules/encoding-sniffer/') ||
+      entry.startsWith('/node_modules/whatwg-mimetype/') ||
       /^\/out\/renderer\/icon-(?:16|32|48|512)\.png$/.test(entry) ||
       /^\/out\/renderer\/assets\/icon-.*\.png$/.test(entry)
   )
@@ -111,7 +117,7 @@ for (const archive of archives) {
     throw new Error(`${archive} contains ${redundantRuntimeEntries.length} redundant runtime files`)
   }
   const playwrightPackage = JSON.parse(
-    extractFile(archive, 'node_modules/playwright-core/package.json').toString('utf8')
+    extractFile(archive, path.join('node_modules', 'playwright-core', 'package.json')).toString('utf8')
   )
   if (playwrightPackage.version !== '1.62.1') {
     throw new Error(`${archive} contains playwright-core ${playwrightPackage.version}, expected 1.62.1`)

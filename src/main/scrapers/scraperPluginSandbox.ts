@@ -548,7 +548,7 @@ const vm = require('node:vm');
 const { createRequire } = require('node:module');
 const { join } = require('node:path');
 const requireFromApp = createRequire(join(workerData.appRoot, 'package.json'));
-const cheerio = requireFromApp('cheerio');
+const cheerio = requireFromApp('cheerio/slim');
 
 let nextRpcId = 1;
 const pending = new Map();

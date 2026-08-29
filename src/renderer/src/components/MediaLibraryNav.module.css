@@ -119,5 +119,5 @@
   height: 6px;
   flex: 0 0 auto;
   border-radius: 50%;
-  background: var(--warning);
+  background: var(--text-warning);
 }

@@ -76,7 +76,26 @@ function ReasoningItem({
   expanded: boolean
   onExpandedChange: (expanded: boolean) => void
 }): JSX.Element {
+  const contentRef = useRef<HTMLDivElement | null>(null)
+  const followTailRef = useRef(true)
   const streaming = activity.status === 'running'
+
+  useLayoutEffect(() => {
+    if (!streaming) {
+      followTailRef.current = true
+      return
+    }
+    const element = contentRef.current
+    if (!element || !expanded || !followTailRef.current) return
+    element.scrollTop = element.scrollHeight
+  }, [activity.text, expanded, streaming])
+
+  const handleContentScroll = (): void => {
+    const element = contentRef.current
+    if (!element) return
+    followTailRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24
+  }
+
   return (
     <div className={styles.reasoningRow} data-status={activity.status}>
       <span className={styles.activityIcon} data-status={activity.status}>
@@ -108,7 +127,11 @@ function ReasoningItem({
             <span className={styles.reasoningPreview}>{compactText(activity.text)}</span>
           ) : null}
         </summary>
-        <div className={`${styles.reasoningContent} selectable-text`}>
+        <div
+          ref={contentRef}
+          className={`${styles.reasoningContent} selectable-text`}
+          onScroll={handleContentScroll}
+        >
           {activity.text || '正在生成思考内容…'}
         </div>
         {activity.truncated ? (
@@ -218,7 +241,7 @@ export default function AgentMetadataActivityFeed({
   const live = snapshot.phase === 'collecting' || snapshot.phase === 'preparing'
 
   return (
-    <section className={styles.feed} aria-label="Agent 对话">
+    <section className={styles.feed} aria-label="Agent 运行">
       <header className={styles.header} role="status" aria-live="polite">
         <span className={styles.agentIcon} data-live={live || undefined}>
           {live
@@ -227,7 +250,7 @@ export default function AgentMetadataActivityFeed({
         </span>
         <span className={styles.headerCopy}>
           <span className={styles.headerTitleLine}>
-            <strong className={styles.paneTitle}>Agent 对话</strong>
+            <strong className={styles.paneTitle}>Agent 运行</strong>
             <span className={styles.phase} data-phase={snapshot.phase}>{phaseLabel(snapshot)}</span>
           </span>
           <span className={styles.summary}>{snapshot.summary}</span>

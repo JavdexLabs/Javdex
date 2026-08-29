@@ -2,24 +2,12 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import postcss from 'postcss'
+import { declarationsFor as readDeclarations } from '../test/cssDeclarations'
+
+const cssPath = 'src/renderer/src/components/MediaLibraryNav.module.css'
 
 function declarationsFor(selector: string): Map<string, string> {
-  const source = readFileSync(
-    path.resolve('src/renderer/src/components/MediaLibraryNav.module.css'),
-    'utf8'
-  )
-  const declarations = new Map<string, string>()
-  const root = postcss.parse(source)
-
-  root.walkRules((rule) => {
-    if (!rule.selector.split(',').map((item) => item.trim()).includes(selector)) return
-    rule.walkDecls((declaration) => {
-      declarations.set(declaration.prop, declaration.value)
-    })
-  })
-
-  return declarations
+  return readDeclarations(cssPath, selector)
 }
 
 describe('MediaLibraryNav name style', () => {

@@ -167,7 +167,7 @@ export default function GlobalSearchPage(): JSX.Element {
           <div className="scroll-body-inner">
             <EmptyState
               icon={<LibraryBig {...UI_ICON_SM} aria-hidden />}
-              title="搜索全部媒体库"
+              title="跨媒体库搜索"
               description="输入番号、标题或演员名称开始搜索。"
             />
           </div>

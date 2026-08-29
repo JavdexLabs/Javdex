@@ -64,7 +64,7 @@ export function formatVideoBatchStatusLabel(
     : (STATUS_LABEL.get(request.status) ?? String(request.status))
   const scopeLabel = request.libraryId
     ? `媒体库“${libraryName?.trim() || `#${request.libraryId}`}”`
-    : '全部媒体库'
+    : '全局目录'
   return `${scopeLabel} · ${targetLabel}`
 }
 

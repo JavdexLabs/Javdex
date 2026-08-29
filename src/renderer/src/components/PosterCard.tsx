@@ -34,6 +34,7 @@ export interface PosterCardProps {
   onMarkScrapeSuccess?: (video: Video) => void
   onDelete?: (video: Video) => void
   deleteLabel?: string
+  onRemoveFromLibrary?: (video: Video) => void
   onRemove?: (video: Video) => void
   removeDisabled?: boolean
 }
@@ -52,6 +53,7 @@ export default function PosterCard({
   onMarkScrapeSuccess,
   onDelete,
   deleteLabel = '删除影片',
+  onRemoveFromLibrary,
   onRemove,
   removeDisabled = false
 }: PosterCardProps): JSX.Element {
@@ -63,7 +65,9 @@ export default function PosterCard({
   const [tallCover, setTallCover] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  const hasQuickActions = Boolean(onAddToPlaylist || onScrape || onMarkScrapeSuccess || onDelete)
+  const hasQuickActions = Boolean(
+    onAddToPlaylist || onScrape || onMarkScrapeSuccess || onRemoveFromLibrary || onDelete
+  )
   const resourceBadges = getVideoResourceBadgeSummary(video.resource_kinds ?? [])
 
   const dismissMenu = useCallback(() => {
@@ -243,6 +247,15 @@ export default function PosterCard({
                     onClick={(e) => stopAndRun(e, onMarkScrapeSuccess)}
                   >
                     标记为刮削成功
+                  </button>
+                )}
+                {onRemoveFromLibrary && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => stopAndRun(e, onRemoveFromLibrary)}
+                  >
+                    移出媒体库
                   </button>
                 )}
                 {onDelete && (

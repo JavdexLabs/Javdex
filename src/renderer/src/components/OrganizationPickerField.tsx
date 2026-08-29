@@ -69,9 +69,6 @@ export default function OrganizationPickerField({
           onAssignmentChange({ organizationId: option.id })
         }}
       />
-      <span id={`${id}-hint`} className="entity-edit-field-hint">
-        搜索已有{FACET_LABEL[role]}；输入新名称会在保存时创建。
-      </span>
       {optionsQuery.isError ? (
         <span className="classification-picker-error" role="alert">
           {FACET_LABEL[role]}候选加载失败，请稍后重试。

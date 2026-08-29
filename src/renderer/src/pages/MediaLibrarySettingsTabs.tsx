@@ -936,7 +936,7 @@ export function MaintenanceSettingsTab({
     <div className={styles.sectionStack}>
       {library.isDefault ? (
         <div className={styles.protectedNotice}>
-          默认媒体库受系统保护，不能归档或永久删除。
+          此媒体库受系统保护，不能归档或永久删除。
         </div>
       ) : (
         <>

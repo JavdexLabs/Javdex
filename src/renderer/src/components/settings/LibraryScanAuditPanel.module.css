@@ -71,14 +71,14 @@
 }
 
 .tabBtnActive .tabBadge {
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface-control));
+  background: color-mix(in srgb, var(--text-accent) 14%, var(--surface-control));
   color: var(--text-accent);
 }
 
 .tabBtn .tabBadgeWarning,
 .tabBtnActive .tabBadgeWarning {
-  background: color-mix(in srgb, var(--warning) 22%, transparent);
-  color: var(--warning);
+  background: color-mix(in srgb, var(--text-warning) 22%, transparent);
+  color: var(--text-warning);
 }
 
 /* 详情卡片 */
@@ -143,8 +143,8 @@
 }
 
 .subFilterChip.subFilterChipActive {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface-control));
+  border-color: var(--border-accent);
+  background: color-mix(in srgb, var(--text-accent) 12%, var(--surface-control));
   color: var(--text-accent);
   font-weight: 600;
 }
@@ -227,8 +227,8 @@
 }
 
 .rowStateWarning {
-  background: color-mix(in srgb, var(--warning) 18%, transparent);
-  color: var(--warning);
+  background: color-mix(in srgb, var(--text-warning) 18%, transparent);
+  color: var(--text-warning);
 }
 
 .rowSubtitle {
@@ -265,18 +265,18 @@
 }
 
 .outcomeUpdated {
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  background: color-mix(in srgb, var(--text-accent) 15%, transparent);
   color: var(--text-accent);
 }
 
 .outcomePending {
-  background: color-mix(in srgb, var(--warning) 20%, transparent);
-  color: var(--warning);
+  background: color-mix(in srgb, var(--text-warning) 20%, transparent);
+  color: var(--text-warning);
 }
 
 .outcomeFailed {
-  background: color-mix(in srgb, var(--warning) 22%, transparent);
-  color: var(--warning);
+  background: color-mix(in srgb, var(--text-warning) 22%, transparent);
+  color: var(--text-warning);
 }
 
 .rowActions {

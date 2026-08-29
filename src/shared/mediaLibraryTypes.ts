@@ -81,8 +81,8 @@ export type MediaLibraryConfigValues = Omit<MediaLibraryConfig, 'libraryId' | 'r
 export const DEFAULT_MEDIA_LIBRARY_CONFIG: Readonly<MediaLibraryConfigValues> = {
   autoScanEnabled: false,
   autoScanIntervalMinutes: 1440,
-  minImportDurationMinutes: 0,
-  autoMergeSameCodeResources: false,
+  minImportDurationMinutes: 30,
+  autoMergeSameCodeResources: true,
   removeResourceLessMemberships: false,
   defaultVideoScraper: null,
   defaultSortBy: 'release_date',

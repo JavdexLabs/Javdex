@@ -1,13 +1,15 @@
 .root {
   display: flex;
+  max-width: 100%;
   min-width: 0;
   align-items: center;
-  flex-wrap: wrap;
-  margin-top: 7px;
+  flex-wrap: nowrap;
+  overflow: hidden;
   gap: 5px;
 }
 
 .label {
+  flex: 0 0 auto;
   margin-right: 1px;
   color: var(--text-muted);
   font-size: 11px;
@@ -30,6 +32,10 @@
   gap: 5px;
 }
 
+.badge {
+  flex: 0 1 auto;
+}
+
 .badge[data-current="true"] {
   border-color: var(--border-accent);
   background: var(--surface-selected);
@@ -46,6 +52,7 @@
 
 .name {
   max-width: 132px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

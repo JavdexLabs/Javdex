@@ -810,7 +810,15 @@ export default function DetailPage(): JSX.Element {
     removeResourceTarget?.kind === 'local' || removeResourceIsStrm
   return (
     <div className={`detail-pane${actressStackOpen ? ' detail-pane--stacked' : ''}`}>
-      <DetailScrollBody onBack={() => navigateBackFromVideoDetail(navigate, location)}>
+      <DetailScrollBody
+        onBack={() => navigateBackFromVideoDetail(navigate, location)}
+        headerContext={
+          <VideoLibraryMembershipBadges
+            activeLibraryId={video.activeLibraryId}
+            libraries={video.libraries}
+          />
+        }
+      >
         <article className="detail-hero">
           <div className="detail-title-block">
             <h1 className="detail-title">
@@ -837,10 +845,6 @@ export default function DetailPage(): JSX.Element {
               )}
               {video.title ? `  ${video.title}` : ''}
             </h1>
-            <VideoLibraryMembershipBadges
-              activeLibraryId={video.activeLibraryId}
-              libraries={video.libraries}
-            />
             {video.scraped_status !== 1 || video.has_pending_scrape ? (
               <div className="detail-title-badges">
                 {video.scraped_status !== 1 ? (

@@ -711,6 +711,41 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
     }
   })
 
+  it('surfaces an unpersistable runtime fault and resolves the active operation', () => {
+    const developer = new PluginDeveloper()
+    const session = createSession(
+      { ...input, package: structuredClone(packageValue) },
+      'runtime-persistence-fault'
+    )
+    const events: PluginDevAgentEvent[] = []
+    const active = { ...activeRun(session), emit: (event: PluginDevAgentEvent) => events.push(event) }
+    let resolvedStatus = ''
+    active.waiter = {
+      resolve: (result) => { resolvedStatus = (result as { status: string }).status }
+    }
+
+    try {
+      testable(developer).runtimeNotify(active, {
+        type: 'runtime.fault',
+        category: 'persistence-failed',
+        message: 'UNIQUE constraint failed: agent_product_journal'
+      })
+      testable(developer).runtimeNotify(active, {
+        type: 'runtime.fault',
+        category: 'persistence-failed',
+        message: 'UNIQUE constraint failed: agent_product_journal'
+      })
+
+      assert.equal(session.status, 'failed')
+      assert.equal(session.failureMessage, 'UNIQUE constraint failed: agent_product_journal')
+      assert.equal(resolvedStatus, 'failed')
+      assert.equal(active.waiter, undefined)
+      assert.equal(events.filter((event) => event.type === 'error').length, 1)
+    } finally {
+      deleteSession(session.id)
+    }
+  })
+
   it('publishes the reduced active context immediately after Pi compaction', () => {
     const developer = new PluginDeveloper()
     const session = createSession(
@@ -1656,6 +1691,51 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
       restoreUpdate()
       restoreGetRun()
       fs.rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('releases only PluginDeveloper-owned runs during application disposal', async () => {
+    const developer = new PluginDeveloper()
+    const session = createSession(
+      { ...input, package: structuredClone(packageValue) },
+      'plugin-dispose-owned-run'
+    )
+    testable(developer).active.set(session.id, activeRun(session))
+    const released: string[] = []
+    let globalDisposeCalls = 0
+    const restoreDiscard = replaceMethod(
+      toolHost,
+      'discardApprovals',
+      (() => undefined) as typeof toolHost.discardApprovals
+    )
+    const restoreToolDispose = replaceMethod(
+      toolHost,
+      'disposeRun',
+      (() => undefined) as typeof toolHost.disposeRun
+    )
+    const restoreRelease = replaceMethod(
+      agentExecution,
+      'releaseRun',
+      (async (runId) => { released.push(runId) }) as typeof agentExecution.releaseRun
+    )
+    const restoreGlobalDispose = replaceMethod(
+      agentExecution,
+      'dispose',
+      (async () => { globalDisposeCalls += 1 }) as typeof agentExecution.dispose
+    )
+    try {
+      await developer.dispose()
+
+      assert.deepEqual(released, [session.id])
+      assert.equal(globalDisposeCalls, 0)
+      assert.equal(testable(developer).active.size, 0)
+    } finally {
+      restoreGlobalDispose()
+      restoreRelease()
+      restoreToolDispose()
+      restoreDiscard()
+      testable(developer).active.delete(session.id)
+      deleteSession(session.id)
     }
   })
 })

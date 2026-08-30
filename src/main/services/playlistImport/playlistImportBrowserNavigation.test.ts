@@ -5,10 +5,9 @@ import {
   assertPlaylistImportTerminalVerified,
   assertPlaylistImportVirtualStart,
   observePlaylistImportDynamicStability,
-  playlistImportRecoveryFailureCode,
+  playlistImportFailureCode,
   playlistImportVirtualAdvanceDecision,
   playlistImportTerminalProof,
-  shouldAutoRecoverPlaylistImportRun,
   shouldValidatePlaylistImportAdvanceAtCheckpoint,
   shouldValidatePlaylistImportBrowserLocation
 } from './playlistImportBrowserNavigation'
@@ -23,31 +22,18 @@ describe('playlist import browser navigation guard', () => {
     }), false)
   })
 
-  it('keeps every user-attention state paused across application restart', () => {
-    assert.equal(shouldAutoRecoverPlaylistImportRun({
-      phase: 'waiting_user',
-      attention: {
-        kind: 'browser-handoff',
-        requestId: 'handoff-1',
-        reason: 'login',
-        prompt: '请登录'
-      }
-    }), false)
-    assert.equal(shouldAutoRecoverPlaylistImportRun({
-      phase: 'waiting_user',
-      attention: { kind: 'identity-review', items: [] }
-    }), false)
-    assert.equal(shouldAutoRecoverPlaylistImportRun({
-      phase: 'discovering-list',
-      attention: undefined
-    }), true)
-  })
-
-  it('still validates ordinary browser actions that can change the current page', () => {
-    assert.equal(shouldValidatePlaylistImportBrowserLocation('status', {
+  it('allows passive observation after a same-site redirect but still guards navigation', () => {
+    for (const action of ['snapshot', 'find', 'html', 'evaluate', 'wait', 'status', 'read-section']) {
+      assert.equal(shouldValidatePlaylistImportBrowserLocation(action, {
+        ok: true,
+        content: '{}',
+        summary: `浏览器 ${action} 完成`
+      }), false)
+    }
+    assert.equal(shouldValidatePlaylistImportBrowserLocation('click', {
       ok: true,
       content: '{}',
-      summary: '浏览器 status 完成'
+      summary: '浏览器 click 完成'
     }), true)
     assert.equal(shouldValidatePlaylistImportBrowserLocation('open', {
       ok: true,
@@ -237,21 +223,21 @@ describe('playlist import browser navigation guard', () => {
     }).settled, true)
   })
 
-  it('reports recovery budget exhaustion separately from source changes', () => {
+  it('classifies foreground retry failures without treating them as restart recovery', () => {
     assert.equal(
-      playlistImportRecoveryFailureCode(new Error('LIMIT_REACHED:VIRTUAL_REPLAY')),
+      playlistImportFailureCode(new Error('LIMIT_REACHED:VIRTUAL_REPLAY')),
       'LIMIT_REACHED'
     )
     assert.equal(
-      playlistImportRecoveryFailureCode(new Error('SOURCE_CHANGED:VIRTUAL_PREFIX')),
+      playlistImportFailureCode(new Error('SOURCE_CHANGED:VIRTUAL_PREFIX')),
       'SOURCE_CHANGED'
     )
     assert.equal(
-      playlistImportRecoveryFailureCode(new Error('工具执行超时')),
+      playlistImportFailureCode(new Error('工具执行超时')),
       'NETWORK_TIMEOUT'
     )
     assert.equal(
-      playlistImportRecoveryFailureCode(new Error('Agent 元数据浏览器会话不存在。')),
+      playlistImportFailureCode(new Error('Agent 元数据浏览器会话不存在。')),
       'BROWSER_SESSION_LOST'
     )
   })

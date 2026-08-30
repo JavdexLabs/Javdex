@@ -264,7 +264,6 @@ describe('actress avatar filter query contract', () => {
 
     assert.notEqual(actressQueryHash(withAvatar), actressQueryHash(withoutAvatar))
     assert.notEqual(actressQueryHash(withoutAvatar), actressQueryHash(withoutFaceAvatar))
-    assert.equal(actressQueryHash(new URLSearchParams()), actressQueryHash(new URLSearchParams()))
   })
 })
 

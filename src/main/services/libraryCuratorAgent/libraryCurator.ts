@@ -303,7 +303,9 @@ export class LibraryCurator {
   }
 
   async dispose(): Promise<void> {
-    for (const runId of this.active.keys()) toolHost.disposeRun(runId)
+    const runIds = [...this.active.keys()]
+    for (const runId of runIds) toolHost.disposeRun(runId)
+    await Promise.allSettled(runIds.map((runId) => agentExecution.releaseRun(runId)))
     this.active.clear()
   }
 }

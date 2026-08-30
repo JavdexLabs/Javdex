@@ -25,10 +25,29 @@ describe('PlaylistImportProvider workspace', () => {
 
     assert.match(source, /const terminationAction/)
     assert.match(source, /setCancelConfirmation\(true\)/)
-    assert.equal(source.match(/\{terminationAction\}/g)?.length, 4)
+    assert.equal(source.match(/\{terminationAction\}/g)?.length, 3)
+    assert.doesNotMatch(source, /后台运行/)
+    assert.doesNotMatch(source, /api\.playlistImport\.snapshot\(\)/)
     assert.match(source, /<ConfirmModal/)
     assert.match(source, /title="终止外部清单导入？"/)
     assert.match(source, /confirmText="终止任务"/)
+  })
+
+  it('closes the import workspace after the host confirms task termination', () => {
+    const source = readFileSync(path.resolve(sourcePath), 'utf8')
+    const cancelFlow = source.slice(
+      source.indexOf('const cancel = async'),
+      source.indexOf('const resolveIdentities = async')
+    )
+
+    assert.match(
+      cancelFlow,
+      /await api\.playlistImport\.control[\s\S]*?setSnapshot\(next\)[\s\S]*?currentRunId\.current = null[\s\S]*?setVisible\(false\)/
+    )
+    assert.doesNotMatch(
+      cancelFlow.slice(cancelFlow.indexOf('catch (cancelError)')),
+      /setVisible\(false\)/
+    )
   })
 
   it('closes only through the actions rendered inside the import dialog', () => {

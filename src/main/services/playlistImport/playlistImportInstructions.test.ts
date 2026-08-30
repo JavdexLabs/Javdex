@@ -19,4 +19,30 @@ describe('playlist importer browser guidance', () => {
     assert.match(PLAYLIST_IMPORTER_SYSTEM_PROMPT, /没有可靠名称时省略/)
     assert.match(PLAYLIST_IMPORTER_SYSTEM_PROMPT, /首个清单页.*提交 suggestedPlaylistName/)
   })
+
+  it('requires every newly opened static page to be inspected and checkpointed before advancing again', () => {
+    assert.match(
+      PLAYLIST_IMPORTER_SYSTEM_PROMPT,
+      /普通链接分页.*只打开下一清单页.*检查并提交 checkpoint_playlist_page.*再次调用 advance_playlist_page/s
+    )
+    assert.doesNotMatch(
+      PLAYLIST_IMPORTER_SYSTEM_PROMPT,
+      /该工具会在同一宿主操作中执行动作、等待、全量提取并落盘新窗口/
+    )
+  })
+
+  it('distinguishes checkpoint evidence from status artifacts and explains terminal selectors', () => {
+    assert.match(
+      PLAYLIST_IMPORTER_SYSTEM_PROMPT,
+      /evidenceRef.*snapshot、find、html 或 evaluate.*不得使用 status/s
+    )
+    assert.match(
+      PLAYLIST_IMPORTER_SYSTEM_PROMPT,
+      /explicit-last-page.*selector.*命中.*可见.*末页标记/s
+    )
+    assert.match(
+      PLAYLIST_IMPORTER_SYSTEM_PROMPT,
+      /不存在下一页链接.*known-total-reached/s
+    )
+  })
 })

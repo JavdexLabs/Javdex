@@ -1087,46 +1087,6 @@ describe('database schema', () => {
     }
   })
 
-  it('upgrades the released schema once to add all unreleased V14 features', () => {
-    const db = new Database(':memory:')
-    try {
-      db.exec(`
-        CREATE TABLE release_marker (
-          id INTEGER PRIMARY KEY,
-          value TEXT NOT NULL
-        );
-        INSERT INTO release_marker (id, value) VALUES (1, 'preserved');
-      `)
-      db.pragma('user_version = 13')
-
-      migrateDatabase(db)
-      migrateDatabase(db)
-
-      assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
-      assert.deepEqual(
-        db.prepare('SELECT id, value FROM release_marker').all(),
-        [{ id: 1, value: 'preserved' }]
-      )
-      for (const table of [
-        'agent_runs',
-        'agent_operations',
-        'agent_product_journal',
-        'agent_execution_history',
-        'agent_tool_ledger',
-        'agent_approvals',
-        'agent_artifacts',
-        'agent_metadata_drafts',
-        'agent_metadata_draft_resources',
-        'media_libraries',
-        'library_video_memberships',
-        'playlist_import_jobs'
-      ]) {
-        assert.equal(tableExistsForTest(db, table), true)
-      }
-    } finally {
-      db.close()
-    }
-  })
   it('creates the current schema and records user_version', () => {
     const db = new Database(':memory:')
     try {

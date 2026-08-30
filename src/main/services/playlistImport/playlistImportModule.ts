@@ -7,6 +7,7 @@ import type {
   PlaylistImportStartInput
 } from '@shared/playlistImportTypes'
 import { getDb } from '../../db/database'
+import { agentRunStore } from '../../agent-platform/agentRunStore'
 import {
   normalizePlaylistImportHost,
   PlaylistImportRepository
@@ -22,7 +23,8 @@ export interface PlaylistImportRunDriver {
   ): Promise<void>
   start(runId: string, input: PlaylistImportStartInput): Promise<void>
   resume(runId: string, requestId: string, idempotencyKey: string): Promise<PlaylistImportSnapshot>
-  recover?(runId: string, retryOperationKey?: string): Promise<void>
+  retry(runId: string, retryOperationKey: string): Promise<void>
+  finish(runId: string): Promise<void>
   cancel(runId: string): Promise<void>
   discard(runId: string): Promise<void>
 }
@@ -76,21 +78,22 @@ export class PlaylistImportModuleImpl implements PlaylistImportModule {
       if (replay.inputHash !== expectedHash) throw new Error('IDEMPOTENCY_KEY_REUSED')
       return this.present(repository.snapshot(replay.runId)!)
     }
+    if (repository.activeRunId()) throw new Error('PLAYLIST_IMPORT_ALREADY_RUNNING')
     repository.validateStartTargets(normalizedInput)
     const runId = randomUUID()
     let createdRun = false
     let snapshot: PlaylistImportSnapshot | null = null
     try {
-      // The driver inserts the Agent run first because the domain job is bound to agent_runs
-      // with a foreign key. Persist the domain job immediately after that insert,
-      // before opening the runtime can publish its first durable observation.
+      // Create the generic Agent run, then initialize the foreground Session before the
+      // runtime can publish its first observation.
       const provisional = provisionalSnapshot(runId, normalizedInput)
       await this.driver.create(runId, provisional, () => {
         createdRun = true
         snapshot = repository.createJob({ ...normalizedInput, idempotencyKey: key, runId })
       })
-      if (!snapshot) throw new Error('PLAYLIST_IMPORT_JOB_NOT_PERSISTED')
+      if (!snapshot) throw new Error('PLAYLIST_IMPORT_SESSION_NOT_CREATED')
       await this.driver.start(runId, normalizedInput)
+      snapshot = repository.snapshot(runId) ?? snapshot
       const presented = this.present(snapshot)
       this.emit(presented)
       return presented
@@ -112,11 +115,10 @@ export class PlaylistImportModuleImpl implements PlaylistImportModule {
 
   snapshot(runId?: string): PlaylistImportSnapshot | null {
     const database = this.database()
-    const selectedRunId = runId ?? (database.prepare(
-      `SELECT run_id FROM playlist_import_jobs ORDER BY updated_at DESC, rowid DESC LIMIT 1`
-    ).get() as { run_id: string } | undefined)?.run_id
+    const repository = new PlaylistImportRepository(database)
+    const selectedRunId = runId ?? repository.latestRunId()
     const snapshot = selectedRunId
-      ? new PlaylistImportRepository(database).snapshot(selectedRunId)
+      ? repository.snapshot(selectedRunId)
       : null
     return snapshot ? this.present(snapshot) : null
   }
@@ -178,6 +180,7 @@ export class PlaylistImportModuleImpl implements PlaylistImportModule {
       } catch (error) {
         const failed = repository.snapshot(runId)
         if (failed?.phase === 'failed') {
+          await this.driver.finish(runId)
           const presented = this.present(failed)
           this.emit(presented)
           return presented
@@ -189,18 +192,17 @@ export class PlaylistImportModuleImpl implements PlaylistImportModule {
         this.emit(presented)
         if (snapshot.phase === 'resolving-identities') {
           try {
-            if (!this.driver.recover) throw new Error('PLAYLIST_IMPORT_RECOVERY_UNAVAILABLE')
-            await this.driver.recover(runId)
+            await this.driver.retry(runId, `preview-stale:${command.idempotencyKey}`)
             snapshot = repository.snapshot(runId)!
             presented = this.present(snapshot)
             this.emit(presented)
-          } catch (recoveryError) {
+          } catch (retryError) {
             snapshot = repository.snapshot(runId)!
             if (snapshot.phase !== 'failed' && !snapshot.error?.retryable) {
               snapshot = repository.fail(
                 runId,
-                'RECOVERY_FAILED',
-                recoveryError instanceof Error ? recoveryError.message : String(recoveryError)
+                'PLAYLIST_IMPORT_RETRY_FAILED',
+                retryError instanceof Error ? retryError.message : String(retryError)
               )
             }
             presented = this.present(snapshot)
@@ -209,6 +211,9 @@ export class PlaylistImportModuleImpl implements PlaylistImportModule {
         }
         return presented
       }
+    }
+    if (['completed', 'failed', 'cancelled'].includes(snapshot.phase)) {
+      await this.driver.finish(runId)
     }
     const presented = this.present(snapshot)
     this.emit(presented)
@@ -220,48 +225,27 @@ export class PlaylistImportModuleImpl implements PlaylistImportModule {
     runId: string,
     command: Extract<PlaylistImportControlCommand, { kind: 'retry' }>
   ): Promise<PlaylistImportSnapshot> {
-    const reservation = repository.reserveRetryControl(
-      runId,
-      command.idempotencyKey,
-      command.expectedRevision
-    )
-    if (reservation.kind === 'completed') return this.present(reservation.snapshot)
-    if (reservation.kind === 'effect-completed') {
-      repository.completeRetryControl(
-        runId,
-        command.idempotencyKey,
-        command.expectedRevision,
-        reservation.snapshot
-      )
-      return this.present(reservation.snapshot)
-    }
     let snapshot = repository.snapshot(runId)
     if (!snapshot) throw new Error('PLAYLIST_IMPORT_NOT_FOUND')
+    if (snapshot.revision !== command.expectedRevision) {
+      throw new Error('PLAYLIST_IMPORT_REVISION_STALE')
+    }
+    if (!snapshot.error?.retryable) throw new Error('PLAYLIST_IMPORT_RETRY_NOT_AVAILABLE')
     if (snapshot.phase === 'ready-to-apply') {
       try {
         repository.apply(runId, `retry-apply:${command.idempotencyKey}`)
       } catch {
-        // The repository persists retryable apply errors and stale-preview transitions.
+        // The foreground Session records retryable apply errors and stale-preview transitions.
       }
       snapshot = repository.snapshot(runId)!
     }
     if (['discovering-list', 'resolving-identities'].includes(snapshot.phase)) {
-      if (!this.driver.recover) throw new Error('PLAYLIST_IMPORT_RECOVERY_UNAVAILABLE')
-      await this.driver.recover(runId, command.idempotencyKey)
+      await this.driver.retry(runId, command.idempotencyKey)
       snapshot = repository.snapshot(runId)!
     }
-    repository.markRetryControlEffectCompleted(
-      runId,
-      command.idempotencyKey,
-      command.expectedRevision,
-      snapshot
-    )
-    repository.completeRetryControl(
-      runId,
-      command.idempotencyKey,
-      command.expectedRevision,
-      snapshot
-    )
+    if (['completed', 'failed', 'cancelled'].includes(snapshot.phase)) {
+      await this.driver.finish(runId)
+    }
     const presented = this.present(snapshot)
     this.emit(presented)
     return presented
@@ -308,6 +292,8 @@ function provisionalSnapshot(
 
 export async function createPlaylistImportModule(): Promise<PlaylistImportModule> {
   const { playlistImportRunDriver } = await import('./playlistImportRunDriver')
-  await playlistImportRunDriver.recoverPending()
+  for (const run of agentRunStore.listRecoverableRuns()) {
+    if (run.useCase === 'playlist-importer') agentRunStore.closeRun(run.id)
+  }
   return new PlaylistImportModuleImpl(getDb, playlistImportRunDriver)
 }

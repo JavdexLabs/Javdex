@@ -202,15 +202,6 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
       .finally(() => setBusy(false))
   }, [snapshot])
 
-  useEffect(() => {
-    if (visible || currentRunId.current) return
-    void api.playlistImport.snapshot().then((latest) => {
-      if (!latest || ['completed', 'cancelled', 'failed'].includes(latest.phase)) return
-      currentRunId.current = latest.runId
-      setSnapshot(latest)
-    }).catch(() => undefined)
-  }, [visible])
-
   const start = async (): Promise<void> => {
     if (!sourceUrl.trim() || !targetLibraryId || (destinationKind === 'append' && !playlistId)) return
     setBusy(true)
@@ -249,6 +240,8 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
         idempotencyKey: `renderer-cancel:${crypto.randomUUID()}`
       })
       setSnapshot(next)
+      currentRunId.current = null
+      setVisible(false)
     } catch (cancelError) {
       setError(cancelError instanceof Error ? cancelError.message : String(cancelError))
     } finally {
@@ -334,14 +327,13 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
       {visible ? (
         <AgentWorkspaceModal
           title="导入外部清单"
-          hint="Agent 会完整读取可验证的分页；已有影片跨媒体库复用，未匹配条目按导入选项处理。"
+          hint="Agent 会在当前前台窗口完整读取清单；退出软件或终止任务后需要重新导入。"
           busy={busy}
           dismissible={false}
           onCancel={() => setVisible(false)}
           actions={snapshot ? (
             snapshot.attention?.kind === 'browser-handoff' ? (
               <>
-                <Button disabled={busy} onClick={() => setVisible(false)}>后台运行</Button>
                 {terminationAction}
                 <Button variant="primary" disabled={busy} onClick={() => void resumeBrowser()}>
                   我已完成，继续
@@ -349,7 +341,6 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
               </>
             ) : snapshot.phase === 'waiting_user' && reviewItems.length > 0 ? (
               <>
-                <Button disabled={busy} onClick={() => setVisible(false)}>后台运行</Button>
                 {terminationAction}
                 <Button variant="primary" disabled={busy || reviewItems.some((item) => !choices[item.itemId])} onClick={() => void resolveIdentities()}>
                   应用身份选择
@@ -370,7 +361,6 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
               </>
             ) : snapshot.error?.retryable ? (
               <>
-                <Button disabled={busy} onClick={() => setVisible(false)}>后台运行</Button>
                 {terminationAction}
                 <Button variant="primary" disabled={busy} onClick={() => void retry()}>
                   重试
@@ -379,10 +369,7 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
             ) : ['failed', 'cancelled'].includes(snapshot.phase) ? (
               <Button onClick={() => setVisible(false)}>关闭</Button>
             ) : (
-              <>
-                <Button disabled={busy} onClick={() => setVisible(false)}>后台运行</Button>
-                {terminationAction}
-              </>
+              terminationAction
             )
           ) : (
             <>
@@ -485,7 +472,7 @@ export function PlaylistImportProvider({ children }: { children: ReactNode }): J
                         </div>
                       </EditFormSection>
                       <div className={styles.setupRule}>
-                        不下载播放资源；被清单引用的无资源影片不会被自动清理。
+                        不下载播放资源；被清单引用的无资源影片不会被自动清理。导入期间请保持软件和弹窗打开。
                       </div>
                     </div>
                   </AgentWorkspacePaneBody>

@@ -5,6 +5,7 @@
 ## 基线
 
 - 发布基线：v0.5.0 的 SQLite V13；0.6.0 未发布功能统一由一次 V13 → V14 迁移落地。
+- 保留 V2–V13 的已发布历史升级链；不兼容或修复 0.6.0 开发期间出现过的 V14 中间 schema，开发库直接重建。
 - 实施前基线：`npm run typecheck`、`npm run lint`、`npm run check:css-architecture` 通过。
 - 完成时必须运行完整 `npm test`、`npm run build` 和本文列出的针对性测试。
 

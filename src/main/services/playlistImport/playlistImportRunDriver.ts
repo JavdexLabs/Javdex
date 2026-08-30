@@ -7,6 +7,7 @@ import type {
   PlaylistImportSnapshot,
   PlaylistImportStartInput
 } from '@shared/playlistImportTypes'
+import type { AgentMetadataBrowserHandoff } from '@shared/agentMetadataTypes'
 import { agentConfiguration } from '../../agent-platform/agentConfiguration'
 import { createCacheAffinityId } from '../../agent-platform/cacheAffinity'
 import { agentExecution } from '../../agent-platform/agentExecution'
@@ -21,7 +22,10 @@ import type {
   HostedToolResult
 } from '../../agent-platform/types'
 import { getDb } from '../../db/database'
-import type { ScrapeBrowserListExtractionPlan } from '../../scrapers/scrapeBrowserTypes'
+import {
+  isScrapeBrowserChallengeError,
+  type ScrapeBrowserListExtractionPlan
+} from '../../scrapers/scrapeBrowserTypes'
 import {
   AgentMetadataBrowserAdapter,
   sanitizeAgentMetadataUrl
@@ -30,10 +34,8 @@ import { AgentMetadataActivityTimeline } from '../agentMetadata/activityTimeline
 import type { PlaylistImportRunDriver } from './playlistImportModule'
 import {
   normalizePlaylistImportUrl,
-  PLAYLIST_IMPORT_DISCOVERY_LIMITS,
   PlaylistImportRepository,
-  type PlaylistImportBrowserWork,
-  type PlaylistImportOpenDynamicPage
+  type PlaylistImportBrowserWork
 } from './playlistImportRepository'
 import {
   assertPlaylistImportFinalAdvance,
@@ -41,10 +43,9 @@ import {
   assertPlaylistImportVirtualStart,
   isPlaylistImportBrowserSessionLostMessage,
   observePlaylistImportDynamicStability,
-  playlistImportRecoveryFailureCode,
+  playlistImportFailureCode,
   playlistImportVirtualAdvanceDecision,
   playlistImportTerminalProof,
-  shouldAutoRecoverPlaylistImportRun,
   shouldValidatePlaylistImportAdvanceAtCheckpoint,
   shouldValidatePlaylistImportBrowserLocation
 } from './playlistImportBrowserNavigation'
@@ -75,6 +76,28 @@ function objectArg(args: Record<string, unknown>, key: string): Record<string, u
     throw new Error(`PLAYLIST_IMPORT_ARGUMENT_INVALID:${key}`)
   }
   return value as Record<string, unknown>
+}
+
+function withoutCheckpointEvidenceForStatus(result: HostedToolResult): HostedToolResult {
+  if (!result.ok) return result
+  let content: Record<string, unknown>
+  try {
+    const parsed = JSON.parse(result.content) as unknown
+    content = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : { action: 'status' }
+  } catch {
+    content = { action: 'status' }
+  }
+  delete content.artifactRef
+  return {
+    ...result,
+    content: JSON.stringify({
+      ...content,
+      checkpointEvidenceEligible: false,
+      checkpointEvidenceHint: 'status 只用于检查浏览器状态；提交页面检查点前请使用 snapshot、find、html 或 evaluate 获取 evidenceRef。'
+    }, null, 2)
+  }
 }
 
 function extractionPlan(args: Record<string, unknown>): ScrapeBrowserListExtractionPlan {
@@ -158,17 +181,23 @@ function playlistNameInstruction(input: PlaylistImportStartInput): string {
 }
 
 type RecoverablePlaylistImportToolFailure = {
-  code: 'NETWORK_TIMEOUT' | 'BROWSER_SESSION_LOST' | 'SOURCE_CHANGED'
+  code: 'NETWORK_TIMEOUT' | 'SOURCE_CHANGED'
   message: string
 }
 
 type TerminalPlaylistImportToolFailure = {
-  code: 'UNSUPPORTED_LIST_STRUCTURE' | 'UNSUPPORTED_PAGINATION'
+  code: 'BROWSER_SESSION_LOST' | 'UNSUPPORTED_LIST_STRUCTURE' | 'UNSUPPORTED_PAGINATION'
   message: string
 }
 
 function playlistImportTerminalToolFailure(error: unknown): TerminalPlaylistImportToolFailure | null {
   const message = error instanceof Error ? error.message : String(error)
+  if (isPlaylistImportBrowserSessionLostMessage(message)) {
+    return {
+      code: 'BROWSER_SESSION_LOST',
+      message: '当前前台浏览器会话已经中断，本次导入无法继续，请重新发起导入。'
+    }
+  }
   if (/^VIRTUAL_LIST_POSITION_(?:MISSING|INVALID|DUPLICATED)$/u.test(message)) {
     return {
       code: 'UNSUPPORTED_LIST_STRUCTURE',
@@ -199,24 +228,6 @@ function reportedPlaylistImportFailureMessage(code: string, reason: string): str
   return messages[reason] ?? `${code}: 外部清单无法安全、完整地遍历。`
 }
 
-type RecoverablePlaylistImportRecoveryCode = RecoverablePlaylistImportToolFailure['code']
-
-function isRecoverablePlaylistImportRecoveryCode(
-  code: string
-): code is RecoverablePlaylistImportRecoveryCode {
-  return ['SOURCE_CHANGED', 'NETWORK_TIMEOUT', 'BROWSER_SESSION_LOST'].includes(code)
-}
-
-function playlistImportRecoveryMessage(code: RecoverablePlaylistImportRecoveryCode): string {
-  if (code === 'SOURCE_CHANGED') {
-    return '外部清单内容与已保存的检查点不一致，请重试恢复或重新开始导入。'
-  }
-  if (code === 'NETWORK_TIMEOUT') {
-    return '恢复外部清单页面时网络超时，请从已保存的检查点重试。'
-  }
-  return '恢复时浏览器会话中断，请从已保存的检查点重试。'
-}
-
 export function playlistImportRecoverableToolFailure(
   error: unknown,
   signal?: AbortSignal
@@ -229,10 +240,7 @@ export function playlistImportRecoverableToolFailure(
     return { code: 'SOURCE_CHANGED', message: errorMessage }
   }
   if (isPlaylistImportBrowserSessionLostMessage(errorMessage)) {
-    return {
-      code: 'BROWSER_SESSION_LOST',
-      message: '浏览器会话已中断，请从已保存的检查点恢复。'
-    }
+    return null
   }
   if (/timeout|timed out|超时/iu.test(`${signalMessage}\n${errorMessage}`)) {
     return { code: 'NETWORK_TIMEOUT', message: '读取外部页面超时，请从当前检查点重试。' }
@@ -306,289 +314,27 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
     this.liveEmitTimers.delete(runId)
   }
 
-  private persistRecoveryFailure(
-    runId: string,
-    error: unknown
-  ): { snapshot: PlaylistImportSnapshot; recoverable: boolean } {
-    const repository = this.repository()
-    const current = repository.snapshot(runId)
-    if (!current) throw new Error('PLAYLIST_IMPORT_NOT_FOUND')
-    if (current.phase === 'failed') return { snapshot: current, recoverable: false }
-    const code = playlistImportRecoveryFailureCode(error)
-    if (isRecoverablePlaylistImportRecoveryCode(code)) {
-      const snapshot = repository.markRecoverableError(
-        runId,
-        code,
-        playlistImportRecoveryMessage(code)
-      )
-      return { snapshot, recoverable: true }
-    }
-    return {
-      snapshot: repository.fail(
-        runId,
-        code,
-        error instanceof Error ? error.message : String(error)
-      ),
-      recoverable: false
-    }
-  }
-
-  private async releaseRecoveryResources(runId: string, recoverable: boolean): Promise<void> {
-    toolHost.disposeRun(runId)
-    await Promise.allSettled([
-      this.browser.release(runId, 'Playlist import recovery failed'),
-      recoverable ? agentExecution.releaseRun(runId) : agentExecution.closeRun(runId)
-    ])
-  }
-
-  private async restoreRun(runId: string): Promise<PlaylistImportSnapshot> {
-    const repository = this.repository()
-    const snapshot = repository.snapshot(runId)
-    if (!snapshot) throw new Error('PLAYLIST_IMPORT_NOT_FOUND')
-    if (agentExecution.hasActiveRun(runId)) {
-      if (!this.browser.hasSession(runId)) {
-        await this.browser.openSession({
-          runId,
-          sourceUrl: snapshot.frozenInput.sourceUrl,
-          workspaceDirectory: sessionDirectory(runId)
-        })
-      }
-      return snapshot
-    }
-    const durableRun = agentRunStore.getRun(runId)
-    if (!durableRun || durableRun.status === 'closed') {
-      throw new Error('PLAYLIST_IMPORT_AGENT_RUN_NOT_RECOVERABLE')
-    }
-    const persistedActivities = durableRun.productState.activities
-    this.timeline(
+  private recordBrowserHandoff(runId: string, handoff: AgentMetadataBrowserHandoff): void {
+    const waiting = this.repository().setBrowserHandoff({
       runId,
-      Array.isArray(persistedActivities) ? persistedActivities as PlaylistImportActivity[] : []
-    )
-    await this.browser.openSession({
-      runId,
-      sourceUrl: snapshot.frozenInput.sourceUrl,
-      workspaceDirectory: sessionDirectory(runId)
+      requestId: handoff.requestId,
+      reason: handoff.reason,
+      prompt: handoff.prompt
     })
-    try {
-      const resolved = this.resolveConfiguration(runId)
-      await agentExecution.openRun({
-        runId,
-        useCase: 'playlist-importer',
-        resolved,
-        productState: structuredClone(snapshot) as unknown as Record<string, unknown>,
-        resume: durableRun,
-        notify: (event) => this.notify(runId, event),
-        project: (event) => this.project(runId, event)
-      })
-      return snapshot
-    } catch (error) {
-      toolHost.disposeRun(runId)
-      await this.browser.release(runId, 'Playlist import recovery failed')
-      throw error
-    }
+    this.emit(waiting)
   }
 
-  private async dispatchRecovery(
+  private requestBrowserHandoff(
     runId: string,
-    revision: number,
-    retryOperationKey?: string
-  ): Promise<void> {
-    const repository = this.repository()
-    const snapshot = repository.snapshot(runId)
-    if (!snapshot) throw new Error('PLAYLIST_IMPORT_NOT_FOUND')
-    const signal = new AbortController().signal
-    const work = await this.restoreCurrentBrowserWork(runId, signal)
-    const dispatched = await agentExecution.dispatch({
-      runId,
-      kind: 'follow-up',
-      idempotencyKey: retryOperationKey
-        ? `playlist-import-recovery-control:${createHash('sha256').update(retryOperationKey).digest('hex')}`
-        : `playlist-import-recovery:${runId}:${revision}`,
-      text: [
-        '应用已经重启。此前成功的页面检查点都已恢复，禁止重复提交或回访已封存页面。',
-        playlistNameInstruction({
-          idempotencyKey: '',
-          sourceUrl: snapshot.frozenInput.sourceUrl,
-          targetLibraryId: snapshot.frozenInput.targetLibraryId,
-          destination: snapshot.frozenInput.destination
-        }),
-        `当前唯一允许的工作项：${JSON.stringify(workPayload(work))}`,
-        '宿主已重新打开当前工作项；先用只读 browser 确认页面，再从这个检查点继续。'
-      ].join('\n')
-    })
-    if (!dispatched.accepted) throw new Error('PLAYLIST_IMPORT_RUNTIME_REJECTED')
-  }
-
-  private async restoreCurrentBrowserWork(
-    runId: string,
+    reason: AgentMetadataBrowserHandoff['reason'],
     signal: AbortSignal
-  ): Promise<PlaylistImportBrowserWork | null> {
-    const repository = this.repository()
-    const snapshot = repository.snapshot(runId)
-    const dynamic = repository.openDynamicPage(runId)
-    if (snapshot?.error?.code === 'TOTAL_MISMATCH') {
-      repository.resetDiscoveryForTotalMismatch(runId)
-    } else if (dynamic && snapshot?.error?.code === 'PAGE_CHANGED') {
-      repository.resetDynamicPageForRecovery(runId, dynamic.pageKey)
-    }
-    const work = repository.nextBrowserWork(runId)
-    if (work) {
-      await this.browser.hostAction({
-        runId,
-        command: { action: 'open', url: work.url },
-        signal
-      })
-    }
-    const recoveredDynamic = repository.openDynamicPage(runId)
-    if (recoveredDynamic) await this.replayDynamicPage(runId, recoveredDynamic, signal)
-    return work
-  }
-
-  private dynamicOccurrenceKeys(
-    extracted: Awaited<ReturnType<AgentMetadataBrowserAdapter['extractList']>>,
-    kind: PlaylistImportOpenDynamicPage['enumerationKind']
-  ): Array<{ position: number; key: string }> {
-    return extracted.items.map((item, index) => {
-      const position = kind === 'load-more' ? index : item.absolutePosition
-      if (position == null || !Number.isInteger(position) || position < 0) {
-        throw new Error('SOURCE_CHANGED:POSITION_MISSING')
-      }
-      return {
-        position,
-        key: kind === 'load-more'
-          ? `${position}:${normalizePlaylistImportUrl(item.detailUrl)}`
-          : item.occurrenceKey ?? `${position}:${normalizePlaylistImportUrl(item.detailUrl)}`
-      }
+  ): Promise<HostedToolResult> {
+    return this.browser.execute({
+      runId,
+      args: { action: 'handoff', reason },
+      signal,
+      onHandoff: (handoff) => this.recordBrowserHandoff(runId, handoff)
     })
-  }
-
-  private assertRecoveryExtraction(
-    dynamic: PlaylistImportOpenDynamicPage,
-    extracted: Awaited<ReturnType<AgentMetadataBrowserAdapter['extractList']>>,
-    seen: Set<number>
-  ): Array<{ position: number; key: string }> {
-    const expectedFingerprint = dynamic.batches[0]?.containerFingerprint
-    if (!expectedFingerprint || extracted.containerFingerprint !== expectedFingerprint) {
-      throw new Error('SOURCE_CHANGED:CONTAINER')
-    }
-    const expected = new Map(dynamic.occurrences.map((item) => [item.position, item.key]))
-    const actual = this.dynamicOccurrenceKeys(extracted, dynamic.enumerationKind)
-    for (const occurrence of actual) {
-      const expectedKey = expected.get(occurrence.position)
-      if (expectedKey != null && expectedKey !== occurrence.key) {
-        throw new Error('SOURCE_CHANGED:OCCURRENCE')
-      }
-      if (expectedKey != null) seen.add(occurrence.position)
-    }
-    return actual
-  }
-
-  async replayDynamicPage(
-    runId: string,
-    dynamic: PlaylistImportOpenDynamicPage,
-    signal: AbortSignal
-  ): Promise<void> {
-    const contract = dynamic.containerContract
-    const plan = contract.plan as ScrapeBrowserListExtractionPlan
-    const seen = new Set<number>()
-    if (dynamic.enumerationKind === 'virtual-scroll') {
-      const reset = await this.browser.hostAction({
-        runId,
-        command: {
-          action: 'scroll',
-          ...(plan.containerSelector ? { target: plan.containerSelector } : {}),
-          direction: 'start'
-        },
-        signal
-      })
-      assertPlaylistImportVirtualStart(reset.scrollState, 'SOURCE_CHANGED:VIRTUAL_START')
-    }
-    let extracted = await this.browser.extractList({ runId, plan, signal })
-    if (dynamic.enumerationKind === 'virtual-scroll') {
-      assertPlaylistImportVirtualStart(extracted.scrollState, 'SOURCE_CHANGED:VIRTUAL_START')
-    }
-    let actual = this.assertRecoveryExtraction(dynamic, extracted, seen)
-    if (dynamic.enumerationKind === 'load-more') {
-      if (actual.map((item) => item.key).join('\n') !== dynamic.batches[0]?.occurrenceKeys.join('\n')) {
-        throw new Error('SOURCE_CHANGED:LOAD_MORE_PREFIX')
-      }
-      const advance = contract.advance as Record<string, unknown>
-      const selector = stringArg(advance, 'selector')!
-      for (const batch of dynamic.batches.slice(1)) {
-        await this.browser.hostAction({
-          runId,
-          command: { action: 'click', target: selector },
-          signal
-        })
-        extracted = await this.waitForLoadMoreExtraction(
-          runId,
-          plan,
-          batch.occurrenceKeys.length,
-          signal
-        )
-        actual = this.assertRecoveryExtraction(dynamic, extracted, seen)
-        if (actual.map((item) => item.key).join('\n') !== batch.occurrenceKeys.join('\n')) {
-          throw new Error('SOURCE_CHANGED:LOAD_MORE_PREFIX')
-        }
-      }
-      return
-    }
-
-    const lastPosition = dynamic.occurrences.at(-1)?.position
-    const hasSeenLastPosition = (): boolean => (
-      lastPosition == null || seen.has(lastPosition)
-    )
-    const advance = contract.advance as Record<string, unknown>
-    const expectedLoadMoreClicks = dynamic.batches.filter(
-      (batch) => batch.operationKey.startsWith('virtual-load-more:')
-    ).length
-    let replayedLoadMoreClicks = 0
-    const maxAttempts = PLAYLIST_IMPORT_DISCOVERY_LIMITS.maxDynamicBatchesPerPage
-    let attempts = 0
-    while ((
-      !hasSeenLastPosition() ||
-      seen.size < dynamic.occurrences.length ||
-      replayedLoadMoreClicks < expectedLoadMoreClicks
-    ) && attempts < maxAttempts) {
-      const advanced = await this.scrollVirtualWithContinuity(runId, plan, seen, signal)
-      const scrolled = advanced.scrolled
-      extracted = advanced.extracted
-      actual = this.assertRecoveryExtraction(dynamic, extracted, seen)
-      attempts += 1
-      if (!scrolled.scrollState?.moved) {
-        if (
-          advance.kind === 'load-more' &&
-          replayedLoadMoreClicks < expectedLoadMoreClicks &&
-          extracted.loadMoreAvailable === true
-        ) {
-          const beforeExpansion = extracted
-          await this.browser.hostAction({
-            runId,
-            command: { action: 'click', target: stringArg(advance, 'selector')! },
-            signal
-          })
-          extracted = await this.waitForVirtualLoadMoreExpansion(
-            runId,
-            plan,
-            beforeExpansion,
-            signal
-          )
-          actual = this.assertRecoveryExtraction(dynamic, extracted, seen)
-          replayedLoadMoreClicks += 1
-          continue
-        }
-        if (!hasSeenLastPosition() || replayedLoadMoreClicks < expectedLoadMoreClicks) {
-          throw new Error('SOURCE_CHANGED:VIRTUAL_PREFIX')
-        }
-      }
-    }
-    if (
-      !hasSeenLastPosition() ||
-      seen.size < dynamic.occurrences.length ||
-      replayedLoadMoreClicks < expectedLoadMoreClicks
-    ) {
-      throw new Error('LIMIT_REACHED:VIRTUAL_REPLAY')
-    }
   }
 
   private async waitForLoadMoreExtraction(
@@ -678,38 +424,6 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
         command: { action: 'wait', timeoutMs: 250 },
         signal
       })
-    }
-  }
-
-  async recoverPending(): Promise<void> {
-    const repository = this.repository()
-    for (const runId of repository.recoverableRunIds()) {
-      const snapshot = repository.snapshot(runId)!
-      if (!shouldAutoRecoverPlaylistImportRun(snapshot)) continue
-      try {
-        repository.assertRunWithinBudget(runId)
-        if (snapshot.phase === 'ready-to-apply') {
-          repository.apply(runId, `auto-apply:${runId}`)
-          this.emit(repository.snapshot(runId)!)
-          await agentExecution.closeRun(runId)
-          continue
-        }
-        if (snapshot.phase === 'applying') {
-          throw new Error('PLAYLIST_IMPORT_APPLY_STATE_UNCERTAIN')
-        }
-        const recovering = repository.beginOperationalRecovery(runId)
-        await this.restoreRun(runId)
-        await this.dispatchRecovery(runId, recovering.revision)
-      } catch (error) {
-        const current = repository.snapshot(runId)
-        if (current?.phase === 'ready-to-apply' && current.error?.retryable) {
-          this.emit(current)
-          continue
-        }
-        const failure = this.persistRecoveryFailure(runId, error)
-        this.emit(failure.snapshot)
-        await this.releaseRecoveryResources(runId, failure.recoverable)
-      }
     }
   }
 
@@ -864,6 +578,9 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
       try {
         return await handler(context)
       } catch (error) {
+        if (isScrapeBrowserChallengeError(error)) {
+          return this.requestBrowserHandoff(runId, 'human_verification', context.signal)
+        }
         const failure = playlistImportRecoverableToolFailure(error, context.signal)
         if (failure) {
           return this.result(
@@ -897,15 +614,7 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
             runId,
             args,
             signal,
-            onHandoff: (handoff) => {
-              const waiting = this.repository().setBrowserHandoff({
-                runId,
-                requestId: handoff.requestId,
-                reason: handoff.reason,
-                prompt: handoff.prompt
-              })
-              this.emit(waiting)
-            }
+            onHandoff: (handoff) => this.recordBrowserHandoff(runId, handoff)
           })
           if (!result.ok) {
             const failure = playlistImportRecoverableToolFailure(
@@ -925,7 +634,9 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
               throw new Error('PLAYLIST_IMPORT_BROWSER_NAVIGATION_DENIED')
             }
           }
-          return result
+          return requestedAction === 'status'
+            ? withoutCheckpointEvidenceForStatus(result)
+            : result
         },
         checkpointPage: async (args, signal, callId) => {
           this.describeTool(runId, callId, 'checkpoint_playlist_page', args)
@@ -1524,16 +1235,16 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
     this.emit(snapshot)
     if (event.type === 'agent.settled') {
       this.clearLiveEmit(runId)
-      const browserHandoff = snapshot.attention?.kind === 'browser-handoff'
-      if (!browserHandoff) {
+      const terminal = ['completed', 'failed', 'cancelled'].includes(snapshot.phase)
+      if (terminal) {
         toolHost.disposeRun(runId)
         void Promise.allSettled([
           this.browser.release(runId, 'Playlist import Agent settled'),
-          agentExecution.releaseRun(runId)
+          agentExecution.closeRun(runId)
         ])
       }
     }
-    const status = snapshot.error?.retryable
+    const status = snapshot.error?.retryable && snapshot.error.code !== 'PAGE_CHECKPOINT_REQUIRED'
       ? 'waiting_user'
       : snapshot.phase === 'waiting_user'
       ? 'waiting_user'
@@ -1576,11 +1287,18 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
   async start(runId: string, input: PlaylistImportStartInput): Promise<void> {
     const work = this.repository().nextBrowserWork(runId)
     if (!work || work.kind !== 'list') throw new Error('PLAYLIST_IMPORT_BROWSER_WORK_MISSING')
-    await this.browser.hostAction({
-      runId,
-      command: { action: 'open', url: work.url },
-      signal: new AbortController().signal
-    })
+    const signal = new AbortController().signal
+    try {
+      await this.browser.hostAction({
+        runId,
+        command: { action: 'open', url: work.url },
+        signal
+      })
+    } catch (error) {
+      if (!isScrapeBrowserChallengeError(error)) throw error
+      await this.requestBrowserHandoff(runId, 'human_verification', signal)
+      return
+    }
     const dispatched = await agentExecution.dispatch({
       runId,
       kind: 'prompt',
@@ -1604,7 +1322,7 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
     try {
       repository.assertRunWithinBudget(runId)
     } catch (error) {
-      const code = playlistImportRecoveryFailureCode(error)
+      const code = playlistImportFailureCode(error)
       if (code !== 'LIMIT_REACHED') throw error
       const failed = repository.fail(
         runId,
@@ -1623,22 +1341,29 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
     const before = repository.snapshot(runId)
     const handoff = before?.attention?.kind === 'browser-handoff' ? before.attention : null
     if (handoff && handoff.requestId !== requestId) throw new Error('BROWSER_HANDOFF_STALE')
-    if (handoff) await this.restoreRun(runId)
+    if (handoff && (!agentExecution.hasActiveRun(runId) || !this.browser.hasSession(runId))) {
+      const expired = repository.fail(
+        runId,
+        'PLAYLIST_IMPORT_SESSION_EXPIRED',
+        '当前前台导入会话已经结束，请重新发起导入。'
+      )
+      this.emit(expired)
+      await this.finish(runId)
+      return expired
+    }
     const snapshot = repository.resumeBrowser(runId, requestId, idempotencyKey)
     this.emit(snapshot)
     if (!handoff && ['completed', 'failed', 'cancelled', 'waiting_user'].includes(snapshot.phase)) {
       return snapshot
     }
-    if (!agentExecution.hasActiveRun(runId)) await this.restoreRun(runId)
     try {
-      await this.restoreCurrentBrowserWork(runId, new AbortController().signal)
       const dispatched = await agentExecution.dispatch({
         runId,
         kind: 'follow-up',
         idempotencyKey,
         text: [
           '用户已经完成浏览器中的必要操作。',
-          '宿主已恢复并核对中断时的页面位置；先调用 browser status 或 snapshot 重新确认当前页面，再从中断的页面检查点继续。'
+          '当前前台浏览器会话仍保持在用户操作后的页面；先调用 browser status 或 snapshot 重新确认，再继续当前工作项。'
         ].join('\n')
       })
       if (!dispatched.accepted) throw new Error('PLAYLIST_IMPORT_RUNTIME_REJECTED')
@@ -1656,22 +1381,76 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
     }
   }
 
-  async recover(runId: string, retryOperationKey?: string): Promise<void> {
+  async retry(runId: string, retryOperationKey: string): Promise<void> {
     const repository = this.repository()
     const snapshot = repository.snapshot(runId)
     if (!snapshot || !['discovering-list', 'resolving-identities'].includes(snapshot.phase)) {
-      throw new Error('PLAYLIST_IMPORT_RECOVERY_PHASE_INVALID')
+      throw new Error('PLAYLIST_IMPORT_RETRY_PHASE_INVALID')
+    }
+    if (!snapshot.error?.retryable) throw new Error('PLAYLIST_IMPORT_RETRY_NOT_AVAILABLE')
+    if (!agentExecution.hasActiveRun(runId) || !this.browser.hasSession(runId)) {
+      const expired = repository.fail(
+        runId,
+        'PLAYLIST_IMPORT_SESSION_EXPIRED',
+        '当前前台导入会话已经结束，请重新发起导入。'
+      )
+      this.emit(expired)
+      await this.finish(runId)
+      return
     }
     try {
       repository.assertRunWithinBudget(runId)
-      const recovering = repository.beginOperationalRecovery(runId)
-      await this.restoreRun(runId)
-      await this.dispatchRecovery(runId, recovering.revision, retryOperationKey)
+      const dynamic = repository.openDynamicPage(runId)
+      if (snapshot.error.code === 'TOTAL_MISMATCH') {
+        repository.resetDiscoveryForTotalMismatch(runId)
+      } else if (dynamic) {
+        repository.resetDynamicPageForRetry(runId, dynamic.pageKey)
+      }
+      repository.beginSessionRetry(runId)
+      const work = repository.nextBrowserWork(runId)
+      if (work) {
+        const signal = new AbortController().signal
+        try {
+          await this.browser.hostAction({
+            runId,
+            command: { action: 'open', url: work.url },
+            signal
+          })
+        } catch (error) {
+          if (!isScrapeBrowserChallengeError(error)) throw error
+          await this.requestBrowserHandoff(runId, 'human_verification', signal)
+          return
+        }
+      }
+      const dispatched = await agentExecution.dispatch({
+        runId,
+        kind: 'follow-up',
+        idempotencyKey: `playlist-import-session-retry:${createHash('sha256').update(retryOperationKey).digest('hex')}`,
+        text: [
+          '用户要求在当前前台会话内重试。',
+          `当前唯一允许的工作项：${JSON.stringify(workPayload(work))}`,
+          '宿主已从当前未完成页面的起点重新打开工作项；重新读取并提交页面检查点，不要假设此前未封存的滚动窗口仍然有效。'
+        ].join('\n')
+      })
+      if (!dispatched.accepted) throw new Error('PLAYLIST_IMPORT_RUNTIME_REJECTED')
     } catch (error) {
-      const failure = this.persistRecoveryFailure(runId, error)
-      this.emit(failure.snapshot)
-      await this.releaseRecoveryResources(runId, failure.recoverable)
+      const failed = repository.fail(
+        runId,
+        'PLAYLIST_IMPORT_RETRY_FAILED',
+        error instanceof Error ? error.message : String(error)
+      )
+      this.emit(failed)
+      await this.finish(runId)
     }
+  }
+
+  async finish(runId: string): Promise<void> {
+    this.clearLiveEmit(runId)
+    toolHost.disposeRun(runId)
+    await Promise.allSettled([
+      this.browser.release(runId, 'Playlist import foreground session finished'),
+      agentExecution.closeRun(runId)
+    ])
   }
 
   async cancel(runId: string): Promise<void> {

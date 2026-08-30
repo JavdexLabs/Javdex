@@ -533,6 +533,73 @@ describe('PiRuntime contract', () => {
     await opened.session.dispose()
   })
 
+  it('releases the runtime after durable persistence fails during a tool call', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-pi-persistence-fault-'))
+    roots.push(root)
+    const requests: Array<{ url: string; headers: Headers; body: Record<string, unknown> }> = []
+    const notifications: RuntimeObservation[] = []
+    const input = runtimeInput(root, requests)
+    input.tools = [{
+      name: 'only_tool',
+      label: 'Only tool',
+      description: 'The only allowed tool',
+      schema: {
+        type: 'object',
+        properties: { value: { type: 'string' } },
+        required: ['value'],
+        additionalProperties: false
+      },
+      schemaHash: 'schema-hash',
+      capability: 'test.read',
+      effect: 'read',
+      executionMode: 'parallel',
+      invoke: async () => ({ ok: true, content: 'tool:ok', summary: 'tool ok' })
+    }]
+    input.model.fetch = async (request, init) => {
+      const url = typeof request === 'string' ? request : request instanceof URL ? request.href : request.url
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : {}
+      requests.push({ url, headers: new Headers(init?.headers), body })
+      return openAiToolStream()
+    }
+    let resolveFault: (() => void) | undefined
+    const fault = new Promise<void>((resolve) => { resolveFault = resolve })
+    const opened = await createPiRuntimePort().open(input, {
+      notify: (event) => {
+        notifications.push(event)
+        if (event.type === 'runtime.fault' && event.category === 'persistence-failed') resolveFault?.()
+      },
+      commit: async (event) => {
+        if (event.type === 'tool.started') throw new Error('journal write failed')
+      }
+    })
+
+    const dispatched = await opened.session.dispatch({
+      commandId: 'persistence-fault-command',
+      kind: 'prompt',
+      content: { text: 'use the tool' }
+    })
+    assert.equal(dispatched.accepted, true)
+    await Promise.race([
+      fault,
+      new Promise<never>((_, reject) => setTimeout(
+        () => reject(new Error('persistence fault notification timeout')),
+        5_000
+      ))
+    ])
+    assert.deepEqual(
+      notifications.filter((event) => event.type === 'runtime.fault'),
+      [{ type: 'runtime.fault', category: 'persistence-failed', message: 'journal write failed' }]
+    )
+
+    await Promise.race([
+      opened.session.dispose().catch(() => undefined),
+      new Promise<never>((_, reject) => setTimeout(
+        () => reject(new Error('runtime dispose deadlocked after persistence failure')),
+        1_000
+      ))
+    ])
+  })
+
   it('honors a terminating control result even when the domain tool reports failure', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-pi-tool-terminate-'))
     roots.push(root)

@@ -20,6 +20,7 @@ import { recoverPendingLocalFileDeletions } from './services/pendingLocalFileDel
 import { isSameRendererLocation } from './ipc/ipcSecurity'
 import { pluginDeveloper } from './services/pluginDevAgent/pluginDeveloper'
 import { initializeAgentPlatform } from './agent-platform/composition'
+import { agentExecution } from './agent-platform/agentExecution'
 import { modelManagement } from './agent-platform/modelManagement'
 import { libraryCurator } from './services/libraryCuratorAgent/libraryCurator'
 import { agentMetadataCollection } from './services/agentMetadata/agentMetadataCollection'
@@ -225,13 +226,17 @@ if (gotSingleInstanceLock) {
     void Promise.allSettled([
       pluginDeveloper.dispose(),
       libraryCurator.dispose(),
-      agentMetadataCollection.dispose(),
-      scrapeBrowser.dispose()
-    ]).finally(() => {
-      closeDatabase()
-      shutdownReady = true
-      app.quit()
-    })
+      agentMetadataCollection.dispose()
+    ])
+      .then(() => Promise.allSettled([
+        agentExecution.dispose(),
+        scrapeBrowser.dispose()
+      ]))
+      .finally(() => {
+        closeDatabase()
+        shutdownReady = true
+        app.quit()
+      })
   })
 }
 

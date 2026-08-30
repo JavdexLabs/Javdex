@@ -41,7 +41,11 @@ function fixture(): {
       calls.push(`resume:${runId}`)
       return new PlaylistImportRepository(database).snapshot(runId)!
     },
-    recover: async (runId) => { calls.push(`recover:${runId}`) },
+    retry: async (runId) => {
+      calls.push(`retry:${runId}`)
+      new PlaylistImportRepository(database).beginSessionRetry(runId)
+    },
+    finish: async (runId) => { calls.push(`finish:${runId}`) },
     cancel: async (runId) => { calls.push(`cancel:${runId}`) },
     discard: async (runId) => {
       calls.push(`discard:${runId}`)
@@ -52,6 +56,32 @@ function fixture(): {
 }
 
 describe('PlaylistImportModule interface', () => {
+  it('returns an initial browser handoff created while opening the source page', async () => {
+    const { database, module, driver, calls } = fixture()
+    driver.start = async (runId) => {
+      new PlaylistImportRepository(database).setBrowserHandoff({
+        runId,
+        requestId: 'initial-human-verification',
+        reason: 'human_verification',
+        prompt: '请完成人机验证'
+      })
+    }
+    try {
+      const snapshot = await module.start({
+        idempotencyKey: 'initial-browser-handoff',
+        sourceUrl: 'https://example.test/list',
+        targetLibraryId: 1,
+        destination: { kind: 'create' }
+      })
+
+      assert.equal(snapshot.phase, 'waiting_user')
+      assert.equal(snapshot.attention?.kind, 'browser-handoff')
+      assert.equal(calls.some((call) => call.startsWith('discard:')), false)
+    } finally {
+      database.close()
+    }
+  })
+
   it('persists the import job before the run driver can project bootstrap observations', async () => {
     const database = new Database(':memory:')
     database.pragma('foreign_keys = ON')
@@ -68,11 +98,13 @@ describe('PlaylistImportModule interface', () => {
         if (typeof persistJob === 'function') persistJob()
         assert.ok(
           new PlaylistImportRepository(database).snapshot(runId),
-          'runtime bootstrap observations require a persisted import job'
+          'runtime bootstrap observations require an initialized import session'
         )
       },
       start: async () => undefined,
       resume: async (runId) => new PlaylistImportRepository(database).snapshot(runId)!,
+      retry: async () => undefined,
+      finish: async () => undefined,
       cancel: async () => undefined,
       discard: async () => undefined
     }
@@ -115,6 +147,38 @@ describe('PlaylistImportModule interface', () => {
       assert.equal(module.snapshot()?.runId, first.runId)
       assert.equal(first.activities?.[0]?.kind, 'action')
       assert.equal(module.snapshot()?.activities?.[0]?.id, 'action:test')
+    } finally {
+      database.close()
+    }
+  })
+
+  it('allows only one foreground import session at a time', async () => {
+    const { database, module } = fixture()
+    try {
+      const first = await module.start({
+        idempotencyKey: 'foreground-first',
+        sourceUrl: 'https://example.test/list/1',
+        targetLibraryId: 1,
+        destination: { kind: 'create' }
+      })
+      await assert.rejects(module.start({
+        idempotencyKey: 'foreground-second',
+        sourceUrl: 'https://example.test/list/2',
+        targetLibraryId: 1,
+        destination: { kind: 'create' }
+      }), /PLAYLIST_IMPORT_ALREADY_RUNNING/)
+
+      await module.control(first.runId, {
+        kind: 'cancel',
+        idempotencyKey: 'cancel-first'
+      })
+      const second = await module.start({
+        idempotencyKey: 'foreground-second',
+        sourceUrl: 'https://example.test/list/2',
+        targetLibraryId: 1,
+        destination: { kind: 'create' }
+      })
+      assert.notEqual(second.runId, first.runId)
     } finally {
       database.close()
     }
@@ -279,8 +343,8 @@ describe('PlaylistImportModule interface', () => {
           VALUES (21, 'DIRECT-1', 'Concurrent direct match');
         END;
       `)
-      driver.recover = async (runId) => {
-        calls.push(`recover:${runId}`)
+      driver.retry = async (runId) => {
+        calls.push(`retry:${runId}`)
         repository.markRecoverableError(
           runId,
           'SOURCE_CHANGED',
@@ -302,7 +366,7 @@ describe('PlaylistImportModule interface', () => {
       assert.equal(refreshed.phase, 'resolving-identities')
       assert.equal(refreshed.error?.code, 'SOURCE_CHANGED')
       assert.equal(refreshed.error?.retryable, true)
-      assert.equal(calls.includes(`recover:${started.runId}`), true)
+      assert.equal(calls.includes(`retry:${started.runId}`), true)
       assert.equal(repository.nextBrowserWork(started.runId)?.kind, 'detail')
       assert.equal((database.prepare('SELECT COUNT(*) AS value FROM playlists').get() as { value: number }).value, 0)
     } finally {
@@ -348,21 +412,20 @@ describe('PlaylistImportModule interface', () => {
         idempotencyKey: 'retry-archived-apply'
       } as const
       const completed = await module.control(started.runId, retry)
-      const replayed = await module.control(started.runId, retry)
 
       assert.equal(completed.phase, 'completed')
       assert.equal(completed.outcome?.createdVideos, 1)
-      assert.deepEqual(replayed.outcome, completed.outcome)
+      await assert.rejects(module.control(started.runId, retry), /PLAYLIST_IMPORT_REVISION_STALE/)
       await assert.rejects(module.control(started.runId, {
         ...retry,
         expectedRevision: blocked.revision + 1
-      }), /IDEMPOTENCY_KEY_REUSED/)
+      }), /PLAYLIST_IMPORT_RETRY_NOT_AVAILABLE/)
     } finally {
       database.close()
     }
   })
 
-  it('dispatches browser recovery for a retryable discovery checkpoint', async () => {
+  it('dispatches a same-session retry for a retryable discovery checkpoint', async () => {
     const { database, module, calls } = fixture()
     try {
       const started = await module.start({
@@ -372,9 +435,10 @@ describe('PlaylistImportModule interface', () => {
         destination: { kind: 'create' }
       })
       const repository = new PlaylistImportRepository(database)
-      const stalled = repository.checkpointScrollStall(
+      const stalled = repository.markRecoverableError(
         started.runId,
-        '虚拟列表暂时没有产生新窗口。'
+        'NETWORK_TIMEOUT',
+        '读取外部清单超时。'
       )
       assert.equal(stalled.error?.retryable, true)
 
@@ -384,11 +448,45 @@ describe('PlaylistImportModule interface', () => {
         idempotencyKey: 'retry-discovery'
       } as const
       const recovered = await module.control(started.runId, retry)
-      const replayed = await module.control(started.runId, retry)
 
       assert.equal(recovered.phase, 'discovering-list')
-      assert.equal(replayed.revision, recovered.revision)
-      assert.equal(calls.filter((call) => call === `recover:${started.runId}`).length, 1)
+      await assert.rejects(module.control(started.runId, retry), /PLAYLIST_IMPORT_REVISION_STALE/)
+      assert.equal(calls.filter((call) => call === `retry:${started.runId}`).length, 1)
+    } finally {
+      database.close()
+    }
+  })
+
+  it('clears a missing page checkpoint before dispatching a same-session retry', async () => {
+    const { database, module, calls, driver } = fixture()
+    try {
+      const started = await module.start({
+        idempotencyKey: 'retry-page-checkpoint-start',
+        sourceUrl: 'https://example.test/list',
+        targetLibraryId: 1,
+        destination: { kind: 'create' }
+      })
+      const repository = new PlaylistImportRepository(database)
+      const blocked = repository.markRecoverableError(
+        started.runId,
+        'PAGE_CHECKPOINT_REQUIRED',
+        '离开当前清单页前必须先固化页面检查点。'
+      )
+      driver.retry = async (runId) => {
+        calls.push(`retry:${runId}`)
+        const recovering = new PlaylistImportRepository(database).beginSessionRetry(runId)
+        assert.equal(recovering.error, undefined)
+      }
+
+      const recovered = await module.control(started.runId, {
+        kind: 'retry',
+        expectedRevision: blocked.revision,
+        idempotencyKey: 'retry-page-checkpoint'
+      })
+
+      assert.equal(recovered.phase, 'discovering-list')
+      assert.equal(recovered.error, undefined)
+      assert.equal(calls.filter((call) => call === `retry:${started.runId}`).length, 1)
     } finally {
       database.close()
     }
@@ -407,8 +505,8 @@ describe('PlaylistImportModule interface', () => {
       const stalled = repository.checkpointScrollStall(started.runId, '等待滚动窗口。')
       let releaseRecovery!: () => void
       const recoveryGate = new Promise<void>((resolve) => { releaseRecovery = resolve })
-      driver.recover = async (runId) => {
-        calls.push(`recover:${runId}`)
+      driver.retry = async (runId) => {
+        calls.push(`retry:${runId}`)
         await recoveryGate
       }
       const command = {
@@ -423,27 +521,18 @@ describe('PlaylistImportModule interface', () => {
       const [firstResult, secondResult] = await Promise.all([first, second])
 
       assert.deepEqual(secondResult, firstResult)
-      assert.equal(calls.filter((call) => call === `recover:${started.runId}`).length, 1)
+      assert.equal(calls.filter((call) => call === `retry:${started.runId}`).length, 1)
       assert.equal((database.prepare(
         `SELECT COUNT(*) AS value FROM agent_product_journal
          WHERE run_id = ? AND event_type = 'playlist-import.retry-control'`
-      ).get(started.runId) as { value: number }).value, 1)
+      ).get(started.runId) as { value: number }).value, 0)
     } finally {
       database.close()
     }
   })
 
-  it('replays a completed discovery retry effect without dispatching recovery again after restart', async () => {
+  it('keeps discovery retry state in the foreground session instead of the durable product journal', async () => {
     const { database, module, calls, driver } = fixture()
-    const originalComplete = PlaylistImportRepository.prototype.completeRetryControl
-    let failCompletion = true
-    PlaylistImportRepository.prototype.completeRetryControl = function (...args) {
-      if (failCompletion) {
-        failCompletion = false
-        throw new Error('simulated restart before discovery retry result journal')
-      }
-      return originalComplete.apply(this, args)
-    }
     try {
       const started = await module.start({
         idempotencyKey: 'retry-discovery-restart-start',
@@ -457,9 +546,9 @@ describe('PlaylistImportModule interface', () => {
         'NETWORK_TIMEOUT',
         '读取外部清单超时。'
       )
-      driver.recover = async (runId) => {
-        calls.push(`recover:${runId}`)
-        new PlaylistImportRepository(database).beginOperationalRecovery(runId)
+      driver.retry = async (runId) => {
+        calls.push(`retry:${runId}`)
+        new PlaylistImportRepository(database).beginSessionRetry(runId)
       }
       const command = {
         kind: 'retry',
@@ -467,31 +556,22 @@ describe('PlaylistImportModule interface', () => {
         idempotencyKey: 'retry-discovery-restart'
       } as const
 
-      await assert.rejects(module.control(started.runId, command), /simulated restart/)
+      const recovered = await module.control(started.runId, command)
       assert.equal(repository.snapshot(started.runId)?.error, undefined)
-      const restartedModule = new PlaylistImportModuleImpl(() => database, driver)
-      const recovered = await restartedModule.control(started.runId, command)
-
       assert.equal(recovered.phase, 'discovering-list')
       assert.equal(recovered.error, undefined)
-      assert.equal(calls.filter((call) => call === `recover:${started.runId}`).length, 1)
+      assert.equal(calls.filter((call) => call === `retry:${started.runId}`).length, 1)
+      assert.equal((database.prepare(
+        `SELECT COUNT(*) AS value FROM agent_product_journal
+         WHERE run_id = ? AND event_type = 'playlist-import.retry-control'`
+      ).get(started.runId) as { value: number }).value, 0)
     } finally {
-      PlaylistImportRepository.prototype.completeRetryControl = originalComplete
       database.close()
     }
   })
 
-  it('finishes a reserved retry after apply succeeded but the journal result was not recorded', async () => {
+  it('applies a foreground retry atomically without reserving a durable retry result', async () => {
     const { database, module } = fixture()
-    const originalComplete = PlaylistImportRepository.prototype.completeRetryControl
-    let failCompletion = true
-    PlaylistImportRepository.prototype.completeRetryControl = function (...args) {
-      if (failCompletion) {
-        failCompletion = false
-        throw new Error('simulated crash before retry result journal')
-      }
-      return originalComplete.apply(this, args)
-    }
     try {
       const started = await module.start({
         idempotencyKey: 'retry-crash-start',
@@ -525,8 +605,6 @@ describe('PlaylistImportModule interface', () => {
         idempotencyKey: 'retry-crash-window'
       } as const
 
-      await assert.rejects(module.control(started.runId, command), /simulated crash/)
-      assert.equal(repository.snapshot(started.runId)?.phase, 'completed')
       const recovered = await module.control(started.runId, command)
 
       assert.equal(recovered.phase, 'completed')
@@ -534,12 +612,11 @@ describe('PlaylistImportModule interface', () => {
       assert.equal((database.prepare('SELECT COUNT(*) AS value FROM videos WHERE code = ?')
         .get('NEW-CRASH') as { value: number }).value, 1)
       assert.equal((database.prepare(
-        `SELECT json_extract(payload_json, '$.status') AS status
+        `SELECT COUNT(*) AS value
          FROM agent_product_journal
          WHERE run_id = ? AND event_type = 'playlist-import.retry-control'`
-      ).get(started.runId) as { status: string }).status, 'completed')
+      ).get(started.runId) as { value: number }).value, 0)
     } finally {
-      PlaylistImportRepository.prototype.completeRetryControl = originalComplete
       database.close()
     }
   })
@@ -556,6 +633,8 @@ describe('PlaylistImportModule interface', () => {
       },
       start: async () => undefined,
       resume: async () => { throw new Error('not used') },
+      retry: async () => undefined,
+      finish: async () => undefined,
       cancel: async () => undefined,
       discard: async (runId) => { calls.push(`discard:${runId}`) }
     }

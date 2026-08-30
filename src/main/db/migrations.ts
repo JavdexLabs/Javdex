@@ -16,7 +16,6 @@ import {
   MEDIA_LIBRARY_VIDEO_RESOURCES_SCHEMA_SQL,
   PENDING_LOCAL_FILE_DELETIONS_SCHEMA_SQL,
   PENDING_VIDEO_DECISIONS_SCHEMA_SQL,
-  PLAYLIST_IMPORT_SCHEMA_SQL,
   RELATED_LINKS_SCHEMA_SQL,
   SCHEMA_SQL,
   VIDEO_SOURCES_SCHEMA_SQL
@@ -1036,12 +1035,6 @@ function rebuildVideoResourcesForLibraries(
     DROP INDEX IF EXISTS idx_video_resources_primary;
     DROP INDEX IF EXISTS idx_video_resources_kind;
     DROP INDEX IF EXISTS idx_video_resources_strm_source_path;
-    DROP INDEX IF EXISTS idx_video_resources_source_identity;
-    DROP INDEX IF EXISTS idx_video_resources_library_source_identity;
-    DROP INDEX IF EXISTS idx_video_resources_library_video;
-    DROP INDEX IF EXISTS idx_video_resources_library_video_kind;
-    DROP INDEX IF EXISTS idx_video_resources_library_kind;
-    DROP INDEX IF EXISTS idx_video_resources_root;
     ALTER TABLE video_resources RENAME TO video_resources_v13;
   `)
   database.exec(MEDIA_LIBRARY_VIDEO_RESOURCES_SCHEMA_SQL)
@@ -1086,7 +1079,6 @@ function rebuildPendingScanForLibraries(
     DROP INDEX IF EXISTS idx_pending_scan_resources_group;
     DROP INDEX IF EXISTS idx_pending_scan_resources_root;
     DROP INDEX IF EXISTS idx_pending_scan_groups_updated_at;
-    DROP INDEX IF EXISTS idx_pending_scan_groups_library_updated;
     DROP TABLE IF EXISTS pending_scan_resources;
     DROP TABLE IF EXISTS pending_scan_groups;
   `)
@@ -1245,7 +1237,6 @@ function migrateToV14(database: Database.Database): void {
       'Multi-library migration count check failed; the migration was rolled back without changing the database.'
     )
   }
-  database.exec(PLAYLIST_IMPORT_SCHEMA_SQL)
 }
 
 function normalizeStoredRelatedLinks(database: Database.Database): void {

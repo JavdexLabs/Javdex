@@ -28,6 +28,34 @@ function createAgentRun(database: Database.Database, runId: string): void {
 }
 
 describe('PlaylistImportRepository', () => {
+  it('keeps all import staging in the current SQLite connection only', () => {
+    const database = new Database(':memory:')
+    try {
+      migrateDatabase(database)
+      new PlaylistImportRepository(database)
+      const names = (schema: 'main' | 'temp'): string[] => (
+        database.prepare(
+          `SELECT name FROM ${schema}.sqlite_master
+           WHERE type = 'table' AND name LIKE 'playlist_import_%' ORDER BY name`
+        ).all() as Array<{ name: string }>
+      ).map((row) => row.name)
+
+      assert.deepEqual(names('main'), [])
+      assert.deepEqual(names('temp'), [
+        'playlist_import_decisions',
+        'playlist_import_frontier',
+        'playlist_import_items',
+        'playlist_import_jobs',
+        'playlist_import_page_items',
+        'playlist_import_pages',
+        'playlist_import_scroll_batches',
+        'playlist_import_session_events'
+      ])
+    } finally {
+      database.close()
+    }
+  })
+
   it('rejects credential-bearing source and detail URLs before staging them', () => {
     assert.throws(
       () => normalizePlaylistImportUrl('https://example.test/list?access_token=secret'),
@@ -2577,7 +2605,7 @@ describe('PlaylistImportRepository', () => {
     }
   })
 
-  it('durably checkpoints overlapping virtual windows before sealing a continuous list', () => {
+  it('checkpoints overlapping virtual windows before sealing a continuous list', () => {
     const { database, repository } = setup()
     try {
       createAgentRun(database, 'run-virtual')

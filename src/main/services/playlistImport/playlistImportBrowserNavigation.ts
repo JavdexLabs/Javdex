@@ -3,9 +3,18 @@ import type {
   AgentBrowserScrollState,
   ScrapeBrowserListExtractionPlan
 } from '../../scrapers/scrapeBrowserTypes'
-import type { PlaylistImportSnapshot } from '@shared/playlistImportTypes'
 
 type TerminalAdvance = Record<string, unknown>
+
+const PLAYLIST_IMPORT_PASSIVE_BROWSER_ACTIONS = new Set([
+  'snapshot',
+  'find',
+  'html',
+  'evaluate',
+  'wait',
+  'status',
+  'read-section'
+])
 
 export function playlistImportTerminalProof(
   advance: TerminalAdvance
@@ -42,7 +51,10 @@ export function assertPlaylistImportTerminalVerified(input: {
   }
   playlistImportTerminalProof(input.advance)
   if (input.terminalVerified !== true) {
-    throw new Error('PLAYLIST_IMPORT_TERMINAL_UNPROVEN')
+    throw new Error(
+      'PLAYLIST_IMPORT_TERMINAL_UNPROVEN: selector 未满足当前终止原因的机械验证条件；' +
+      'explicit-last-page 必须命中可见的明确末页标记，不能使用缺失的下一页 selector。'
+    )
   }
 }
 
@@ -120,9 +132,9 @@ export function observePlaylistImportDynamicStability(input: {
   }
 }
 
-export function playlistImportRecoveryFailureCode(
+export function playlistImportFailureCode(
   error: unknown
-): 'LIMIT_REACHED' | 'SOURCE_CHANGED' | 'NETWORK_TIMEOUT' | 'BROWSER_SESSION_LOST' | 'RECOVERY_FAILED' {
+): 'LIMIT_REACHED' | 'SOURCE_CHANGED' | 'NETWORK_TIMEOUT' | 'BROWSER_SESSION_LOST' | 'IMPORT_FAILED' {
   const message = error instanceof Error ? error.message : String(error)
   if (message.startsWith('LIMIT_REACHED')) return 'LIMIT_REACHED'
   if (message.startsWith('SOURCE_CHANGED')) return 'SOURCE_CHANGED'
@@ -130,7 +142,7 @@ export function playlistImportRecoveryFailureCode(
     return 'BROWSER_SESSION_LOST'
   }
   if (/timeout|timed out|超时/iu.test(message)) return 'NETWORK_TIMEOUT'
-  return 'RECOVERY_FAILED'
+  return 'IMPORT_FAILED'
 }
 
 export function isPlaylistImportBrowserSessionLostMessage(message: string): boolean {
@@ -162,11 +174,8 @@ export function shouldValidatePlaylistImportBrowserLocation(
   action: string,
   result: HostedToolResult
 ): boolean {
-  return result.ok && !result.terminate && action !== 'open' && action !== 'read-section'
-}
-
-export function shouldAutoRecoverPlaylistImportRun(
-  snapshot: Pick<PlaylistImportSnapshot, 'phase' | 'attention'>
-): boolean {
-  return snapshot.phase !== 'waiting_user'
+  return result.ok &&
+    !result.terminate &&
+    action !== 'open' &&
+    !PLAYLIST_IMPORT_PASSIVE_BROWSER_ACTIONS.has(action)
 }

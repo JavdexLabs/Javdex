@@ -33,14 +33,18 @@ const extractionSchema = strictObjectSchema({
 
 const terminalWithSelectorAdvanceSchema = strictObjectSchema({
   kind: { type: 'string', enum: ['terminal'] },
-  selector: shortText(1_000),
+  selector: {
+    ...shortText(1_000),
+    description: '机械终止证明 selector。explicit-last-page 必须命中当前可见的明确末页标记，不能填写末页中不存在的下一页 selector。'
+  },
   reason: {
     type: 'string',
     enum: [
       'disabled-next',
       'explicit-last-page',
       'no-pagination-container-after-full-dom-check'
-    ]
+    ],
+    description: '不存在下一页链接且页面声明总页数或总条目数已达到时，应使用 known-total-reached。'
   }
 }, ['kind', 'reason', 'selector'])
 
@@ -136,7 +140,7 @@ export const PLAYLIST_IMPORTER_TOOL_PACK: ToolPack = {
     {
       name: 'browser',
       label: '检查当前清单或详情页',
-      description: '只读检查当前页面。导航、点击分页和滚动由清单导入宿主工具执行。',
+      description: '只读检查当前页面。status 只用于诊断，不能作为页面检查点证据；导航、点击分页和滚动由清单导入宿主工具执行。',
       schema: readOnlyBrowserSchema(),
       capability: 'browser.read',
       effect: 'network',
@@ -148,13 +152,16 @@ export const PLAYLIST_IMPORTER_TOOL_PACK: ToolPack = {
     {
       name: 'checkpoint_playlist_page',
       label: '固化当前清单页',
-      description: '提交当前清单页的完整 selector 方案；宿主从活页面全量提取并固化候选后才允许离开。',
+      description: '提交当前清单页的完整 selector 方案和当前 DOM 证据；宿主从活页面全量提取并固化候选后才允许离开。',
       schema: strictObjectSchema({
         kind: {
           type: 'string',
           enum: ['static-page', 'virtual-page-start', 'load-more-page-start']
         },
-        evidenceRef: shortText(512),
+        evidenceRef: {
+          ...shortText(512),
+          description: '必须来自当前页最近一次 snapshot、find、html 或 evaluate 输出并同时含 documentRevision/viewRevision；不得使用 status 返回的引用。'
+        },
         suggestedPlaylistName: shortText(500),
         extraction: extractionSchema,
         advance: advanceSchema,
@@ -177,7 +184,7 @@ export const PLAYLIST_IMPORTER_TOOL_PACK: ToolPack = {
     {
       name: 'advance_playlist_page',
       label: '进入下一清单窗口',
-      description: '由宿主执行已固化的下一页导航、一次“加载更多”点击或一次虚拟列表半屏滚动，并在返回前落盘新窗口。',
+      description: '由宿主执行已固化页面的继续动作。普通链接分页只打开下一页，返回后必须先检查并固化新页后才能再次调用；“加载更多”和虚拟滚动会在返回前落盘新窗口。',
       schema: strictObjectSchema({}),
       capability: 'playlist-import.stage-page',
       effect: 'write',

@@ -469,6 +469,31 @@ export class PluginDeveloper {
     }
   }
 
+  private failRunWithoutPersistence(active: ActivePluginRun, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error)
+    const firstFailedTransition = active.session.status !== 'failed'
+    this.flushStreamDeltas(active)
+    active.session.status = 'failed'
+    active.session.endedAt = Date.now()
+    active.session.failureMessage = message
+    active.summary = message
+    if (firstFailedTransition) {
+      const event: PluginDevAgentEvent = {
+        type: 'error',
+        sessionId: active.session.id,
+        step: active.session.step,
+        message
+      }
+      // Persistence already failed, so do not recurse through emitDomainEvent.
+      appendWorkLogEvent(active.session.id, event)
+      active.emit?.(event)
+      queueMicrotask(() => this.scheduleTerminalRelease(active))
+    }
+    const waiter = active.waiter
+    active.waiter = undefined
+    waiter?.resolve(toResult(active))
+  }
+
   private flushStreamDeltas(active: ActivePluginRun, turn = active.session.modelTurnCount + 1): void {
     if (active.streamFlushTimer) clearTimeout(active.streamFlushTimer)
     active.streamFlushTimer = undefined
@@ -505,6 +530,10 @@ export class PluginDeveloper {
   }
 
   private runtimeNotify(active: ActivePluginRun, event: RuntimeObservation): void {
+    if (event.type === 'runtime.fault' && event.category === 'persistence-failed') {
+      this.failRunWithoutPersistence(active, event.message)
+      return
+    }
     if (event.type === 'assistant.delta') {
       const safe = sanitizeUnicodeScalars(event.text)
       active.assistantText += safe
@@ -1608,9 +1637,9 @@ ${continuationPrompt}`
 
   async dispose(): Promise<void> {
     await Promise.allSettled([...this.releases.values()].map((release) => release.promise))
-    await agentExecution.dispose()
-    for (const runId of this.active.keys()) toolHost.disposeRun(runId)
-    this.active.clear()
+    await Promise.allSettled(
+      [...this.active.entries()].map(([runId, active]) => this.releaseRunResources(runId, active))
+    )
   }
 }
 

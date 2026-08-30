@@ -159,7 +159,11 @@ describe('V14 unreleased feature consolidation migration', () => {
         'library_unrecognized_files',
         'library_root_cleanup_jobs',
         'agent_runs',
-        'agent_metadata_drafts',
+        'agent_metadata_drafts'
+      ]) {
+        assert.equal(tableExists(database, table), true, `${table} should exist`)
+      }
+      for (const table of [
         'playlist_import_jobs',
         'playlist_import_pages',
         'playlist_import_scroll_batches',
@@ -168,7 +172,7 @@ describe('V14 unreleased feature consolidation migration', () => {
         'playlist_import_page_items',
         'playlist_import_decisions'
       ]) {
-        assert.equal(tableExists(database, table), true, `${table} should exist`)
+        assert.equal(tableExists(database, table), false, `${table} must remain session-only`)
       }
 
       const defaultLibraries = database
@@ -209,7 +213,7 @@ describe('V14 unreleased feature consolidation migration', () => {
     }
   })
 
-  it('upgrades released V13 data into the default library and creates all V14 feature tables', () => {
+  it('upgrades released V13 data while keeping playlist import sessions out of the schema', () => {
     const database = new Database(':memory:')
     try {
       createV13ReleaseFixture(database)
@@ -224,8 +228,7 @@ describe('V14 unreleased feature consolidation migration', () => {
           pendingGroups: rowCount(database, 'pending_scan_groups'),
           pendingResources: rowCount(database, 'pending_scan_resources'),
           agentRuns: rowCount(database, 'agent_runs'),
-          agentDrafts: rowCount(database, 'agent_metadata_drafts'),
-          playlistImports: rowCount(database, 'playlist_import_jobs')
+          agentDrafts: rowCount(database, 'agent_metadata_drafts')
         },
         {
           videos: 2,
@@ -233,8 +236,7 @@ describe('V14 unreleased feature consolidation migration', () => {
           pendingGroups: 1,
           pendingResources: 1,
           agentRuns: 0,
-          agentDrafts: 0,
-          playlistImports: 0
+          agentDrafts: 0
         }
       )
       assert.equal(columnNames(database, 'media_library_configs').has('default_cover_mode'), false)
@@ -257,15 +259,7 @@ describe('V14 unreleased feature consolidation migration', () => {
           }
         ]
       )
-      const playlistImportColumns = columnNames(database, 'playlist_import_jobs')
-      for (const column of [
-        'auto_create_unmatched_videos',
-        'save_detail_links',
-        'agent_suggested_playlist_name',
-        'save_source_playlist_link'
-      ]) {
-        assert.equal(playlistImportColumns.has(column), true, `${column} should exist in V14`)
-      }
+      assert.equal(tableExists(database, 'playlist_import_jobs'), false)
 
       const defaultLibrary = database
         .prepare('SELECT id FROM media_libraries WHERE is_default = 1')

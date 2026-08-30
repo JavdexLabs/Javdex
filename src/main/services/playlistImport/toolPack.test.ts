@@ -77,4 +77,27 @@ describe('PlaylistImporter ToolPack', () => {
     assert.match(schema, /"load-more-control-exhausted"/u)
     assert.match(schema, /"required":\["kind","selector","afterExhausted"\]/u)
   })
+
+  it('describes static pagination as navigation followed by a new page checkpoint', () => {
+    const advance = PLAYLIST_IMPORTER_TOOL_PACK.tools.find(
+      (tool) => tool.name === 'advance_playlist_page'
+    )
+
+    assert.match(advance?.description ?? '', /普通链接分页只打开下一页/)
+    assert.match(advance?.description ?? '', /检查并固化新页后才能再次调用/)
+    assert.doesNotMatch(advance?.description ?? '', /普通链接分页[^；。]*返回前落盘新窗口/)
+  })
+
+  it('makes checkpoint evidence eligibility and terminal selector semantics explicit', () => {
+    const browser = PLAYLIST_IMPORTER_TOOL_PACK.tools.find((tool) => tool.name === 'browser')
+    const checkpoint = PLAYLIST_IMPORTER_TOOL_PACK.tools.find(
+      (tool) => tool.name === 'checkpoint_playlist_page'
+    )
+    const schema = JSON.stringify(checkpoint?.schema ?? {})
+
+    assert.match(browser?.description ?? '', /status.*不能作为.*检查点证据/u)
+    assert.match(schema, /evidenceRef.*snapshot、find、html 或 evaluate.*不得使用 status/u)
+    assert.match(schema, /explicit-last-page.*命中.*可见.*末页标记/u)
+    assert.match(schema, /不存在下一页链接.*known-total-reached/u)
+  })
 })

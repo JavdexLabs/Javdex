@@ -173,6 +173,59 @@ describe('AgentRunStore', () => {
     }
   })
 
+  it('keeps repeated product events from the same operation in append order', () => {
+    const { db, store } = createStore()
+    try {
+      store.createRun({
+        runId: 'run-repeated-events',
+        useCase: 'test-agent',
+        resolved: resolved(),
+        productState: {}
+      })
+      const operation = store.acceptOperation({
+        runId: 'run-repeated-events',
+        commandKind: 'prompt',
+        idempotencyKey: 'read-workspace',
+        content: 'read the required files'
+      }).operation
+
+      store.appendProductEvent(
+        'run-repeated-events',
+        operation.id,
+        'plugin.tool_start',
+        { callId: 'read-skill' }
+      )
+      store.appendProductEvent(
+        'run-repeated-events',
+        operation.id,
+        'plugin.tool_start',
+        { callId: 'read-task' }
+      )
+
+      assert.deepEqual(
+        store.readProductJournal<{ callId: string }>('run-repeated-events').map((event) => ({
+          eventType: event.eventType,
+          operationId: event.operationId,
+          callId: event.payload.callId
+        })),
+        [
+          {
+            eventType: 'plugin.tool_start',
+            operationId: operation.id,
+            callId: 'read-skill'
+          },
+          {
+            eventType: 'plugin.tool_start',
+            operationId: operation.id,
+            callId: 'read-task'
+          }
+        ]
+      )
+    } finally {
+      db.close()
+    }
+  })
+
   it('does not overwrite a terminal runtime fault when the runtime subsequently settles', () => {
     const { db, store } = createStore()
     try {

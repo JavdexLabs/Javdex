@@ -689,9 +689,6 @@ CREATE TABLE IF NOT EXISTS agent_product_journal (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_product_journal_run_seq
     ON agent_product_journal(run_id, seq);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_product_journal_operation
-    ON agent_product_journal(run_id, event_type, operation_id)
-    WHERE operation_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS agent_execution_history (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -801,8 +798,21 @@ CREATE INDEX IF NOT EXISTS idx_agent_metadata_draft_resources_draft
     ON agent_metadata_draft_resources(draft_id, field, position);
 `
 
-export const PLAYLIST_IMPORT_SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS playlist_import_jobs (
+/**
+ * Foreground-only playlist import staging. TEMP tables are scoped to the current SQLite
+ * connection, so an unfinished import cannot survive an application restart.
+ */
+export const PLAYLIST_IMPORT_SESSION_SCHEMA_SQL = `
+CREATE TEMP TABLE IF NOT EXISTS playlist_import_session_events (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    operation_id TEXT,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TEMP TABLE IF NOT EXISTS playlist_import_jobs (
     run_id TEXT PRIMARY KEY,
     idempotency_key TEXT NOT NULL UNIQUE,
     input_hash TEXT NOT NULL,
@@ -835,15 +845,13 @@ CREATE TABLE IF NOT EXISTS playlist_import_jobs (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     committed_at TEXT,
-    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
-    FOREIGN KEY (resolved_playlist_id) REFERENCES playlists(id) ON DELETE SET NULL,
     CHECK(
       (destination_kind = 'create' AND requested_playlist_id IS NULL)
       OR (destination_kind = 'append' AND requested_playlist_id IS NOT NULL)
     )
 );
 
-CREATE TABLE IF NOT EXISTS playlist_import_pages (
+CREATE TEMP TABLE IF NOT EXISTS playlist_import_pages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL,
     page_key TEXT NOT NULL,
@@ -873,10 +881,7 @@ CREATE TABLE IF NOT EXISTS playlist_import_pages (
     UNIQUE (run_id, page_key),
     UNIQUE (run_id, page_order)
 );
-CREATE INDEX IF NOT EXISTS idx_playlist_import_pages_url
-    ON playlist_import_pages(run_id, normalized_page_url);
-
-CREATE TABLE IF NOT EXISTS playlist_import_scroll_batches (
+CREATE TEMP TABLE IF NOT EXISTS playlist_import_scroll_batches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     page_id INTEGER NOT NULL,
     batch_order INTEGER NOT NULL CHECK(batch_order >= 0),
@@ -902,10 +907,7 @@ CREATE TABLE IF NOT EXISTS playlist_import_scroll_batches (
     UNIQUE (page_id, batch_order),
     UNIQUE (page_id, operation_key)
 );
-CREATE INDEX IF NOT EXISTS idx_playlist_import_scroll_batches_page
-    ON playlist_import_scroll_batches(page_id, batch_order);
-
-CREATE TABLE IF NOT EXISTS playlist_import_frontier (
+CREATE TEMP TABLE IF NOT EXISTS playlist_import_frontier (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL,
     source_page_id INTEGER,
@@ -924,10 +926,7 @@ CREATE TABLE IF NOT EXISTS playlist_import_frontier (
     FOREIGN KEY (source_page_id) REFERENCES playlist_import_pages(id) ON DELETE CASCADE,
     UNIQUE (run_id, canonical_key)
 );
-CREATE INDEX IF NOT EXISTS idx_playlist_import_frontier_next
-    ON playlist_import_frontier(run_id, status, order_hint, id);
-
-CREATE TABLE IF NOT EXISTS playlist_import_items (
+CREATE TEMP TABLE IF NOT EXISTS playlist_import_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL,
     first_page_id INTEGER NOT NULL,
@@ -955,16 +954,10 @@ CREATE TABLE IF NOT EXISTS playlist_import_items (
     updated_at TEXT NOT NULL,
     FOREIGN KEY (run_id) REFERENCES playlist_import_jobs(run_id) ON DELETE CASCADE,
     FOREIGN KEY (first_page_id) REFERENCES playlist_import_pages(id) ON DELETE CASCADE,
-    FOREIGN KEY (resolved_video_id) REFERENCES videos(id) ON DELETE SET NULL,
     UNIQUE (run_id, normalized_detail_url),
     UNIQUE (run_id, source_position)
 );
-CREATE INDEX IF NOT EXISTS idx_playlist_import_items_state
-    ON playlist_import_items(run_id, state, source_position);
-CREATE INDEX IF NOT EXISTS idx_playlist_import_items_code
-    ON playlist_import_items(run_id, normalized_code);
-
-CREATE TABLE IF NOT EXISTS playlist_import_page_items (
+CREATE TEMP TABLE IF NOT EXISTS playlist_import_page_items (
     page_id INTEGER NOT NULL,
     item_id INTEGER NOT NULL,
     source_occurrence_key TEXT NOT NULL,
@@ -976,17 +969,13 @@ CREATE TABLE IF NOT EXISTS playlist_import_page_items (
     FOREIGN KEY (item_id) REFERENCES playlist_import_items(id) ON DELETE CASCADE,
     UNIQUE (page_id, page_position)
 );
-CREATE INDEX IF NOT EXISTS idx_playlist_import_page_items_item
-    ON playlist_import_page_items(item_id, page_id, page_position);
-
-CREATE TABLE IF NOT EXISTS playlist_import_decisions (
+CREATE TEMP TABLE IF NOT EXISTS playlist_import_decisions (
     item_id INTEGER PRIMARY KEY,
     expected_item_revision INTEGER NOT NULL CHECK(expected_item_revision > 0),
     choice_kind TEXT NOT NULL CHECK(choice_kind IN ('existing', 'create')),
     chosen_video_id INTEGER,
     decided_at TEXT NOT NULL,
     FOREIGN KEY (item_id) REFERENCES playlist_import_items(id) ON DELETE CASCADE,
-    FOREIGN KEY (chosen_video_id) REFERENCES videos(id) ON DELETE SET NULL,
     CHECK(
       (choice_kind = 'existing' AND chosen_video_id IS NOT NULL)
       OR (choice_kind = 'create' AND chosen_video_id IS NULL)
@@ -1287,5 +1276,4 @@ ${AGENT_PLATFORM_SCHEMA_SQL}
 
 ${AGENT_METADATA_SCHEMA_SQL}
 
-${PLAYLIST_IMPORT_SCHEMA_SQL}
 `

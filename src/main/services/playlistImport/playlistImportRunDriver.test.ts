@@ -6,7 +6,10 @@ import type {
   ScrapeBrowserListExtraction,
   ScrapeBrowserListExtractionPlan
 } from '../../scrapers/scrapeBrowserTypes'
+import { ScrapeBrowserChallengeError } from '../../scrapers/scrapeBrowserTypes'
 import type { AgentMetadataBrowserAdapter } from '../agentMetadata/browserAdapter'
+import type { AgentMetadataBrowserHandoff } from '@shared/agentMetadataTypes'
+import type { HostedToolResult, RuntimeDurableObservation } from '../../agent-platform/types'
 import { migrateDatabase } from '../../db/migrations'
 import { agentExecution } from '../../agent-platform/agentExecution'
 import { PlaylistImportRepository } from './playlistImportRepository'
@@ -37,6 +40,7 @@ class ScriptedVirtualBrowser {
   private windowIndex = 0
   private revision = 0
   private expanded = false
+  private challengeOnNextOpen = false
   readonly actions: string[] = []
   readonly evidenceByRevision = new Map<string, string>()
   private currentUrl: string
@@ -67,6 +71,18 @@ class ScriptedVirtualBrowser {
     return { displayUrl: this.currentUrl }
   }
 
+  simulateServerRedirect(url: string): void {
+    this.currentUrl = url
+  }
+
+  simulateChallengeOnOpen(): void {
+    this.challengeOnNextOpen = true
+  }
+
+  hasSession(): boolean {
+    return true
+  }
+
   observation(): { documentRevision: string; viewRevision: string } {
     return { documentRevision: '1:1', viewRevision: this.viewRevision() }
   }
@@ -85,6 +101,13 @@ class ScriptedVirtualBrowser {
   async hostAction(input: {
     command: { action: string; direction?: string; amount?: string; url?: string }
   }): Promise<AgentBrowserObservation> {
+    if (input.command.action === 'open' && this.challengeOnNextOpen) {
+      this.challengeOnNextOpen = false
+      throw new ScrapeBrowserChallengeError({
+        url: input.command.url ?? this.currentUrl,
+        title: 'Just a moment...'
+      })
+    }
     const before = this.current()
     let moved = false
     if (input.command.action === 'scroll' && input.command.direction === 'start') {
@@ -203,6 +226,46 @@ class ScriptedVirtualBrowser {
     return { evidenceRef, documentRevision: '1:1', viewRevision }
   }
 
+  async execute(input: {
+    args: Record<string, unknown>
+    onHandoff: (handoff: AgentMetadataBrowserHandoff) => void
+  }): Promise<HostedToolResult> {
+    const action = String(input.args.action ?? '')
+    if (action === 'handoff') {
+      const handoff: AgentMetadataBrowserHandoff = {
+        requestId: 'scripted-human-verification',
+        reason: 'human_verification',
+        prompt: '请完成人机验证',
+        url: this.currentUrl,
+        title: 'Just a moment...'
+      }
+      input.onHandoff(handoff)
+      return {
+        ok: true,
+        content: JSON.stringify({ code: 'USER_INPUT_REQUIRED', ...handoff }),
+        summary: '等待用户完成人机验证',
+        terminate: true,
+        recovery: { requestId: handoff.requestId, reason: handoff.reason }
+      }
+    }
+    const artifactRef = `.javdex/browser/${action}.json`
+    return {
+      ok: true,
+      content: JSON.stringify({
+        action,
+        url: this.currentUrl,
+        artifactComplete: true,
+        artifactRef
+      }),
+      summary: `browser ${action} completed`,
+      recovery: {
+        action,
+        artifactRef,
+        observation: { action, url: this.currentUrl, artifactRef }
+      }
+    }
+  }
+
   async release(): Promise<void> {}
 }
 
@@ -305,6 +368,87 @@ function virtualStartArgs(
 }
 
 describe('PlaylistImportAgentRunDriver scripted browser integration', () => {
+  it('pauses for human verification when the initial open hits a challenge', async () => {
+    const runId = 'run-driver-initial-challenge'
+    const sourceUrl = 'https://example.test/list'
+    const { database, repository, driver } = fixture(runId, sourceUrl)
+    const browser = new ScriptedVirtualBrowser(sourceUrl, [{
+      positions: [],
+      scrollTop: 0,
+      scrollHeight: 200,
+      clientHeight: 200,
+      atEnd: true
+    }])
+    browser.simulateChallengeOnOpen()
+    installScriptedDependencies(driver, repository, browser)
+    try {
+      await driver.start(runId, {
+        idempotencyKey: 'initial-challenge',
+        sourceUrl,
+        targetLibraryId: 1,
+        destination: { kind: 'create' }
+      })
+
+      const waiting = repository.snapshot(runId)!
+      assert.equal(waiting.phase, 'waiting_user')
+      assert.equal(waiting.attention?.kind, 'browser-handoff')
+      assert.equal(
+        waiting.attention?.kind === 'browser-handoff' ? waiting.attention.reason : undefined,
+        'human_verification'
+      )
+    } finally {
+      database.close()
+    }
+  })
+
+  it('pauses for human verification when host-owned detail navigation hits a challenge', async () => {
+    const runId = 'run-driver-detail-challenge'
+    const sourceUrl = 'https://example.test/list'
+    const { database, repository, driver } = fixture(runId, sourceUrl)
+    database.exec(`
+      INSERT INTO videos (id, code, title) VALUES
+        (101, 'VERIFY-101', 'First'),
+        (102, 'VERIFY-101', 'Second');
+    `)
+    repository.checkpointStaticPage({
+      runId,
+      pageKey: 'page',
+      pageOrder: 0,
+      pageUrl: sourceUrl,
+      documentRevision: '1:1',
+      viewRevision: '1:1:0',
+      evidenceRef: '.javdex/browser/list.json',
+      items: [{ code: 'VERIFY-101', detailUrl: 'https://example.test/video/verify-101' }],
+      nextPageUrls: [],
+      terminal: true
+    })
+    const browser = new ScriptedVirtualBrowser(sourceUrl, [{
+      positions: [],
+      scrollTop: 0,
+      scrollHeight: 200,
+      clientHeight: 200,
+      atEnd: true
+    }])
+    browser.simulateChallengeOnOpen()
+    installScriptedDependencies(driver, repository, browser)
+    try {
+      const handler = driver.createToolHandlers(runId).get('open_playlist_item_detail')
+      assert.ok(handler)
+      const result = await handler({
+        runId,
+        callId: 'detail-challenge',
+        args: {},
+        signal: new AbortController().signal,
+        progress: () => undefined
+      } satisfies ToolContext)
+
+      assert.equal(result.terminate, true)
+      assert.equal(repository.snapshot(runId)?.attention?.kind, 'browser-handoff')
+    } finally {
+      database.close()
+    }
+  })
+
   it('replays a committed static page checkpoint after its response is lost', async () => {
     const runId = 'run-driver-static-response-lost'
     const sourceUrl = 'https://example.test/static'
@@ -470,19 +614,19 @@ describe('PlaylistImportAgentRunDriver scripted browser integration', () => {
     })
     assert.equal(changed.error?.code, 'PAGE_CHANGED')
     let dispatches = 0
-    Object.defineProperty(driver as unknown as Record<string, unknown>, 'restoreRun', {
-      value: async () => repository.snapshot(runId)!,
-      configurable: true
-    })
-    Object.defineProperty(driver as unknown as Record<string, unknown>, 'dispatchRecovery', {
-      value: async () => {
-        await (driver as unknown as {
-          restoreCurrentBrowserWork(id: string, signal: AbortSignal): Promise<unknown>
-        }).restoreCurrentBrowserWork(runId, new AbortController().signal)
+    const restoreHasActiveRun = replaceMethod(
+      agentExecution,
+      'hasActiveRun',
+      (() => true) as typeof agentExecution.hasActiveRun
+    )
+    const restoreDispatch = replaceMethod(
+      agentExecution,
+      'dispatch',
+      (async () => {
         dispatches += 1
-      },
-      configurable: true
-    })
+        return { operationId: 'foreground-retry', accepted: true, duplicate: false }
+      }) as typeof agentExecution.dispatch
+    )
     try {
       const module = new PlaylistImportModuleImpl(() => database, driver)
       const recovered = await module.control(runId, {
@@ -497,6 +641,8 @@ describe('PlaylistImportAgentRunDriver scripted browser integration', () => {
       assert.equal(repository.nextBrowserWork(runId)?.url, sourceUrl)
       assert.equal(browser.actions.includes('open'), true)
     } finally {
+      restoreDispatch()
+      restoreHasActiveRun()
       database.close()
     }
   })
@@ -513,15 +659,20 @@ describe('PlaylistImportAgentRunDriver scripted browser integration', () => {
       atEnd: true
     }])
     installScriptedDependencies(driver, repository, browser)
-    const originalMarkEffect = PlaylistImportRepository.prototype.markRetryControlEffectCompleted
-    let failMarkEffect = true
-    PlaylistImportRepository.prototype.markRetryControlEffectCompleted = function (...args) {
-      if (failMarkEffect) {
-        failMarkEffect = false
-        throw new Error('simulated restart after recovery dispatch')
-      }
-      return originalMarkEffect.apply(this, args)
-    }
+    const restoreHasActiveRun = replaceMethod(
+      agentExecution,
+      'hasActiveRun',
+      (() => true) as typeof agentExecution.hasActiveRun
+    )
+    const recoveryDispatchKeys = new Set<string>()
+    const restoreDispatch = replaceMethod(
+      agentExecution,
+      'dispatch',
+      (async (input) => {
+        recoveryDispatchKeys.add(input.idempotencyKey)
+        return { operationId: 'foreground-total-retry', accepted: true, duplicate: false }
+      }) as typeof agentExecution.dispatch
+    )
     try {
       await invoke(driver, runId, 'checkpoint_playlist_page', virtualStartArgs({
         kind: 'terminal',
@@ -535,36 +686,19 @@ describe('PlaylistImportAgentRunDriver scripted browser integration', () => {
       assert.equal(mismatch.error?.code, 'TOTAL_MISMATCH')
       assert.ok(repository.openDynamicPage(runId))
 
-      Object.defineProperty(driver as unknown as Record<string, unknown>, 'restoreRun', {
-        value: async () => repository.snapshot(runId)!,
-        configurable: true
-      })
-      const recoveryDispatchKeys = new Set<string>()
-      Object.defineProperty(driver as unknown as Record<string, unknown>, 'dispatchRecovery', {
-        value: async (_runId: string, _revision: number, retryOperationKey?: string) => {
-          await (driver as unknown as {
-            restoreCurrentBrowserWork(id: string, signal: AbortSignal): Promise<unknown>
-          }).restoreCurrentBrowserWork(runId, new AbortController().signal)
-          assert.ok(retryOperationKey)
-          recoveryDispatchKeys.add(retryOperationKey)
-        },
-        configurable: true
-      })
       const module = new PlaylistImportModuleImpl(() => database, driver)
       const retry = {
         kind: 'retry',
         expectedRevision: mismatch.revision,
         idempotencyKey: 'retry-total-mismatch'
       } as const
-      await assert.rejects(module.control(runId, retry), /simulated restart/)
-      const restartedModule = new PlaylistImportModuleImpl(() => database, driver)
-      const recovered = await restartedModule.control(runId, retry)
+      const recovered = await module.control(runId, retry)
       assert.equal(recovered.phase, 'discovering-list')
       assert.equal(recovered.error, undefined)
       assert.equal(repository.openDynamicPage(runId), null)
       assert.equal(repository.nextBrowserWork(runId)?.url, sourceUrl)
       assert.equal(recoveryDispatchKeys.size, 1)
-      assert.deepEqual([...recoveryDispatchKeys], ['retry-total-mismatch'])
+      assert.match([...recoveryDispatchKeys][0]!, /^playlist-import-session-retry:/u)
 
       await invoke(driver, runId, 'checkpoint_playlist_page', virtualStartArgs({
         kind: 'terminal',
@@ -580,7 +714,8 @@ describe('PlaylistImportAgentRunDriver scripted browser integration', () => {
       assert.equal(completed.error, undefined)
       assert.equal(completed.outcome?.sourceItems, 1)
     } finally {
-      PlaylistImportRepository.prototype.markRetryControlEffectCompleted = originalMarkEffect
+      restoreDispatch()
+      restoreHasActiveRun()
       database.close()
     }
   })
@@ -639,6 +774,120 @@ describe('PlaylistImportAgentRunDriver scripted browser integration', () => {
         reason: 'known-total-reached'
       }, 2), 'checkpoint-after-block')
       assert.equal(repository.snapshot(runId)?.error, undefined)
+    } finally {
+      database.close()
+    }
+  })
+
+  it('keeps a missing page checkpoint agent-correctable instead of locking the tool host', async () => {
+    const runId = 'run-driver-checkpoint-correction'
+    const sourceUrl = 'https://example.test/list'
+    const { database, repository, driver } = fixture(runId, sourceUrl)
+    const browser = new ScriptedVirtualBrowser(sourceUrl, [{
+      positions: [0, 1],
+      scrollTop: 0,
+      scrollHeight: 800,
+      clientHeight: 200,
+      atEnd: false
+    }])
+    installScriptedDependencies(driver, repository, browser)
+    try {
+      await invoke(driver, runId, 'advance_playlist_page', {}, 'advance-before-checkpoint')
+      assert.equal(repository.snapshot(runId)?.error?.code, 'PAGE_CHECKPOINT_REQUIRED')
+
+      const projection = (driver as unknown as {
+        project(
+          runId: string,
+          event: RuntimeDurableObservation
+        ): { status: string }
+      }).project(runId, {
+        type: 'tool.completed',
+        result: {
+          callId: 'advance-before-checkpoint',
+          toolName: 'advance_playlist_page',
+          ok: false,
+          summary: 'page checkpoint required'
+        },
+        recovery: { codecVersion: 1, payload: '{}', contentHash: 'test' }
+      })
+      assert.equal(projection.status, 'running')
+
+      await invoke(driver, runId, 'checkpoint_playlist_page', virtualStartArgs({
+        kind: 'terminal',
+        reason: 'known-total-reached'
+      }, 2), 'corrective-checkpoint')
+      assert.equal(repository.snapshot(runId)?.error, undefined)
+    } finally {
+      database.close()
+    }
+  })
+
+  it('does not expose status artifacts as eligible page-checkpoint evidence', async () => {
+    const runId = 'run-driver-status-evidence'
+    const sourceUrl = 'https://example.test/list'
+    const { database, repository, driver } = fixture(runId, sourceUrl)
+    const browser = new ScriptedVirtualBrowser(sourceUrl, [{
+      positions: [0],
+      scrollTop: 0,
+      scrollHeight: 200,
+      clientHeight: 200,
+      atEnd: true
+    }])
+    installScriptedDependencies(driver, repository, browser)
+    try {
+      const handler = driver.createToolHandlers(runId).get('browser')
+      assert.ok(handler)
+      const result = await handler({
+        runId,
+        callId: 'status-evidence',
+        args: { action: 'status' },
+        signal: new AbortController().signal,
+        progress: () => undefined
+      } satisfies ToolContext)
+      const content = JSON.parse(result.content) as Record<string, unknown>
+
+      assert.equal(content.artifactRef, undefined)
+      assert.equal(content.checkpointEvidenceEligible, false)
+      assert.match(String(content.checkpointEvidenceHint), /snapshot.*find.*html.*evaluate/u)
+      assert.equal((result.recovery as { artifactRef?: string }).artifactRef, '.javdex/browser/status.json')
+    } finally {
+      database.close()
+    }
+  })
+
+  it('inspects an automatic login redirect but still rejects a checkpoint from it', async () => {
+    const runId = 'run-driver-login-redirect'
+    const sourceUrl = 'https://example.test/list'
+    const { database, repository, driver } = fixture(runId, sourceUrl)
+    const browser = new ScriptedVirtualBrowser(sourceUrl, [{
+      positions: [],
+      scrollTop: 0,
+      scrollHeight: 200,
+      clientHeight: 200,
+      atEnd: true
+    }])
+    browser.simulateServerRedirect('https://example.test/login')
+    installScriptedDependencies(driver, repository, browser)
+    try {
+      const handler = driver.createToolHandlers(runId).get('browser')
+      assert.ok(handler)
+      for (const action of ['snapshot', 'status']) {
+        const result = await handler({
+          runId,
+          callId: `login-${action}`,
+          args: { action },
+          signal: new AbortController().signal,
+          progress: () => undefined
+        } satisfies ToolContext)
+        assert.equal(result.ok, true)
+      }
+
+      await assert.rejects(
+        invoke(driver, runId, 'checkpoint_playlist_page', {
+          kind: 'static-page'
+        }, 'login-checkpoint'),
+        /PLAYLIST_IMPORT_BROWSER_WORK_INVALID/
+      )
     } finally {
       database.close()
     }
@@ -809,49 +1058,6 @@ describe('PlaylistImportAgentRunDriver scripted browser integration', () => {
     }
   })
 
-  it('replays only committed virtual prefixes across both crash windows before continuing', async () => {
-    const runId = 'run-driver-recovery'
-    const sourceUrl = 'https://example.test/recovery'
-    const { database, repository, driver } = fixture(runId, sourceUrl)
-    const beforeCrash = new ScriptedVirtualBrowser(sourceUrl, [
-      { positions: [0, 1], scrollTop: 0, scrollHeight: 800, clientHeight: 200, atEnd: false },
-      { positions: [1, 2], scrollTop: 300, scrollHeight: 800, clientHeight: 200, atEnd: false },
-      { positions: [2, 3], scrollTop: 600, scrollHeight: 800, clientHeight: 200, atEnd: true }
-    ])
-    installScriptedDependencies(driver, repository, beforeCrash)
-    try {
-      await invoke(driver, runId, 'checkpoint_playlist_page', virtualStartArgs({
-        kind: 'terminal',
-        reason: 'known-total-reached'
-      }, 4), 'recovery-start')
-      await invoke(driver, runId, 'advance_playlist_page', {}, 'committed-response-lost')
-      // Simulate a second scroll that changed the DOM but crashed before its checkpoint.
-      await beforeCrash.hostAction({ command: { action: 'scroll', direction: 'down' } })
-      assert.deepEqual(repository.openDynamicPage(runId)?.occurrences.map((item) => item.position), [0, 1, 2])
-
-      const recoveredBrowser = new ScriptedVirtualBrowser(sourceUrl, [
-        { positions: [0, 1], scrollTop: 0, scrollHeight: 800, clientHeight: 200, atEnd: false },
-        { positions: [1, 2], scrollTop: 300, scrollHeight: 800, clientHeight: 200, atEnd: false },
-        { positions: [2, 3], scrollTop: 600, scrollHeight: 800, clientHeight: 200, atEnd: true }
-      ])
-      installScriptedDependencies(driver, repository, recoveredBrowser)
-      await driver.replayDynamicPage(
-        runId,
-        repository.openDynamicPage(runId)!,
-        new AbortController().signal
-      )
-      assert.deepEqual(recoveredBrowser.actions.slice(0, 2), ['scroll:start', 'scroll:down:moved'])
-
-      await invoke(driver, runId, 'advance_playlist_page', {}, 'continue-after-recovery')
-      assert.deepEqual(repository.openDynamicPage(runId)?.occurrences.map((item) => item.position), [0, 1, 2, 3])
-      assert.equal((database.prepare(
-        `SELECT COUNT(*) AS value FROM playlist_import_page_items`
-      ).get() as { value: number }).value, 4)
-    } finally {
-      database.close()
-    }
-  })
-
   it('retries a stalled virtual window once, then fails when it still cannot progress', async () => {
     const runId = 'run-driver-scroll-stalled'
     const sourceUrl = 'https://example.test/stalled'
@@ -888,80 +1094,10 @@ describe('PlaylistImportAgentRunDriver scripted browser integration', () => {
     }
   })
 
-  it('keeps startup recovery transient failures recoverable at their durable checkpoint', async () => {
-    const cases = [
-      { suffix: 'timeout', error: new Error('工具执行超时'), code: 'NETWORK_TIMEOUT' },
-      {
-        suffix: 'session',
-        error: new Error('Agent 元数据浏览器会话不存在。'),
-        code: 'BROWSER_SESSION_LOST'
-      },
-      {
-        suffix: 'source',
-        error: new Error('SOURCE_CHANGED:VIRTUAL_PREFIX'),
-        code: 'SOURCE_CHANGED'
-      }
-    ] as const
-
-    for (const entry of cases) {
-      const runId = `run-driver-recovery-${entry.suffix}`
-      const sourceUrl = `https://example.test/${entry.suffix}`
-      const { database, repository, driver } = fixture(runId, sourceUrl)
-      const browser = new ScriptedVirtualBrowser(sourceUrl, [{
-        positions: [0],
-        scrollTop: 0,
-        scrollHeight: 400,
-        clientHeight: 200,
-        atEnd: false
-      }])
-      installScriptedDependencies(driver, repository, browser)
-      let shouldFail = true
-      let recoveryDispatches = 0
-      Object.defineProperty(driver as unknown as Record<string, unknown>, 'restoreRun', {
-        value: async () => {
-          if (shouldFail) throw entry.error
-          return repository.snapshot(runId)!
-        },
-        configurable: true
-      })
-      Object.defineProperty(driver as unknown as Record<string, unknown>, 'dispatchRecovery', {
-        value: async () => { recoveryDispatches += 1 },
-        configurable: true
-      })
-      const released: string[] = []
-      const closed: string[] = []
-      const restoreRelease = replaceMethod(agentExecution, 'releaseRun', (async (id) => {
-        released.push(id)
-      }) as typeof agentExecution.releaseRun)
-      const restoreClose = replaceMethod(agentExecution, 'closeRun', (async (id) => {
-        closed.push(id)
-      }) as typeof agentExecution.closeRun)
-      try {
-        await driver.recoverPending()
-        const recovered = repository.snapshot(runId)!
-        assert.equal(recovered.phase, 'discovering-list')
-        assert.equal(recovered.error?.code, entry.code)
-        assert.equal(recovered.error?.retryable, true)
-        assert.deepEqual(released, [runId])
-        assert.deepEqual(closed, [])
-
-        shouldFail = false
-        await driver.recover(runId)
-        const resumed = repository.snapshot(runId)!
-        assert.equal(resumed.phase, 'discovering-list')
-        assert.equal(resumed.error, undefined)
-        assert.equal(recoveryDispatches, 1)
-      } finally {
-        restoreClose()
-        restoreRelease()
-        database.close()
-      }
-    }
-  })
 })
 
 describe('playlistImportRecoverableToolFailure', () => {
-  it('classifies timeout, lost-session, and changed-source failures without masking other errors', () => {
+  it('keeps only same-session timeout and changed-source failures retryable', () => {
     const timeout = new AbortController()
     timeout.abort(new Error('工具执行超时'))
     assert.equal(
@@ -970,7 +1106,7 @@ describe('playlistImportRecoverableToolFailure', () => {
     )
     assert.equal(
       playlistImportRecoverableToolFailure(new Error('Agent 元数据浏览器会话不存在。'))?.code,
-      'BROWSER_SESSION_LOST'
+      undefined
     )
     assert.equal(
       playlistImportRecoverableToolFailure(new Error('SOURCE_CHANGED:VIRTUAL_PREFIX'))?.code,
@@ -978,11 +1114,11 @@ describe('playlistImportRecoverableToolFailure', () => {
     )
     assert.equal(
       playlistImportRecoverableToolFailure(new Error('Scrape browser IPC is closed'))?.code,
-      'BROWSER_SESSION_LOST'
+      undefined
     )
     assert.equal(
       playlistImportRecoverableToolFailure(new Error('Scraper helper CDP disconnected'))?.code,
-      'BROWSER_SESSION_LOST'
+      undefined
     )
     assert.equal(playlistImportRecoverableToolFailure(new Error('invalid selector')), null)
   })

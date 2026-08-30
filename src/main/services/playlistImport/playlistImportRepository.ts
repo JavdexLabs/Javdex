@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type Database from 'better-sqlite3'
+import { PLAYLIST_IMPORT_SESSION_SCHEMA_SQL } from '../../db/schema'
 import type {
   PlaylistImportDestination,
   PlaylistImportOutcome,
@@ -450,7 +451,9 @@ class PlaylistImportTotalMismatchError extends Error {
 }
 
 export class PlaylistImportRepository {
-  constructor(private readonly database: Database.Database) {}
+  constructor(private readonly database: Database.Database) {
+    this.database.exec(PLAYLIST_IMPORT_SESSION_SCHEMA_SQL)
+  }
 
   assertRunWithinBudget(runId: string, observedAt = Date.now()): void {
     const row = this.database.prepare(
@@ -555,7 +558,7 @@ export class PlaylistImportRepository {
     return this.snapshot(runId)!
   }
 
-  beginOperationalRecovery(runId: string): PlaylistImportSnapshot {
+  beginSessionRetry(runId: string): PlaylistImportSnapshot {
     const job = this.requireJob(runId)
     if (!['discovering-list', 'resolving-identities'].includes(job.phase)) {
       throw new Error('PLAYLIST_IMPORT_RECOVERY_PHASE_INVALID')
@@ -564,20 +567,10 @@ export class PlaylistImportRepository {
       `UPDATE playlist_import_jobs SET error_code = NULL, error_message = NULL,
        revision = revision + 1, updated_at = ?
        WHERE run_id = ? AND error_code IN (
-         'NETWORK_TIMEOUT', 'BROWSER_SESSION_LOST', 'SOURCE_CHANGED'
+         'NETWORK_TIMEOUT', 'BROWSER_SESSION_LOST', 'PAGE_CHECKPOINT_REQUIRED', 'SOURCE_CHANGED'
        )`
     ).run(now(), runId)
     return this.snapshot(runId)!
-  }
-
-  recoverableRunIds(): string[] {
-    return (this.database.prepare(
-      `SELECT run_id FROM playlist_import_jobs
-       WHERE phase IN (
-         'discovering-list', 'resolving-identities', 'waiting_user',
-         'ready-to-apply', 'applying'
-       ) ORDER BY updated_at, run_id`
-    ).all() as Array<{ run_id: string }>).map((row) => row.run_id)
   }
 
   findByIdempotencyKey(key: string): { runId: string; inputHash: string } | null {
@@ -587,147 +580,21 @@ export class PlaylistImportRepository {
     return row ? { runId: row.run_id, inputHash: row.input_hash } : null
   }
 
-  replayRetryControl(
-    runId: string,
-    idempotencyKey: string,
-    expectedRevision: number
-  ): PlaylistImportSnapshot | null {
-    const commandHash = hash({ expectedRevision })
+  latestRunId(): string | null {
     const row = this.database.prepare(
-      `SELECT payload_json FROM agent_product_journal
-       WHERE run_id = ? AND event_type = 'playlist-import.retry-control'
-         AND operation_id = ?`
-    ).get(runId, idempotencyKey) as { payload_json: string } | undefined
-    const replay = row
-      ? JSON.parse(row.payload_json) as {
-          commandHash: string
-          status: 'pending' | 'effect-completed' | 'completed'
-          resultSnapshot?: PlaylistImportSnapshot
-        }
-      : null
-    if (!replay) return null
-    if (replay.commandHash !== commandHash) throw new Error('IDEMPOTENCY_KEY_REUSED')
-    return replay.status === 'completed' && replay.resultSnapshot
-      ? structuredClone(replay.resultSnapshot)
-      : null
+      `SELECT run_id FROM playlist_import_jobs
+       ORDER BY updated_at DESC, rowid DESC LIMIT 1`
+    ).get() as { run_id: string } | undefined
+    return row?.run_id ?? null
   }
 
-  reserveRetryControl(
-    runId: string,
-    idempotencyKey: string,
-    expectedRevision: number
-  ):
-    | { kind: 'completed'; snapshot: PlaylistImportSnapshot }
-    | { kind: 'effect-completed'; snapshot: PlaylistImportSnapshot }
-    | { kind: 'reserved'; resumed: boolean } {
-    const commandHash = hash({ expectedRevision })
-    return this.database.transaction(() => {
-      const existing = this.database.prepare(
-        `SELECT payload_json FROM agent_product_journal
-         WHERE run_id = ? AND event_type = 'playlist-import.retry-control'
-           AND operation_id = ?`
-      ).get(runId, idempotencyKey) as { payload_json: string } | undefined
-      if (existing) {
-        const payload = JSON.parse(existing.payload_json) as {
-          commandHash: string
-          status: 'pending' | 'effect-completed' | 'completed'
-          resultSnapshot?: PlaylistImportSnapshot
-        }
-        if (payload.commandHash !== commandHash) throw new Error('IDEMPOTENCY_KEY_REUSED')
-        if (payload.status === 'completed' && payload.resultSnapshot) {
-          return { kind: 'completed' as const, snapshot: structuredClone(payload.resultSnapshot) }
-        }
-        if (payload.status === 'effect-completed' && payload.resultSnapshot) {
-          return { kind: 'effect-completed' as const, snapshot: structuredClone(payload.resultSnapshot) }
-        }
-        return { kind: 'reserved' as const, resumed: true }
-      }
-      const snapshot = this.snapshot(runId)
-      if (!snapshot) throw new Error('PLAYLIST_IMPORT_NOT_FOUND')
-      if (snapshot.revision !== expectedRevision) throw new Error('PLAYLIST_IMPORT_REVISION_STALE')
-      if (!snapshot.error?.retryable) throw new Error('PLAYLIST_IMPORT_RETRY_NOT_AVAILABLE')
-      this.database.prepare(
-        `INSERT INTO agent_product_journal (
-          run_id, operation_id, event_type, payload_json, created_at
-        ) VALUES (?, ?, 'playlist-import.retry-control', ?, ?)`
-      ).run(runId, idempotencyKey, JSON.stringify({
-        commandHash,
-        status: 'pending'
-      }), now())
-      return { kind: 'reserved' as const, resumed: false }
-    })()
-  }
-
-  markRetryControlEffectCompleted(
-    runId: string,
-    idempotencyKey: string,
-    expectedRevision: number,
-    resultSnapshot: PlaylistImportSnapshot
-  ): void {
-    const commandHash = hash({ expectedRevision })
-    const updated = this.database.prepare(
-      `UPDATE agent_product_journal SET payload_json = ?
-       WHERE run_id = ? AND event_type = 'playlist-import.retry-control'
-         AND operation_id = ?
-         AND json_extract(payload_json, '$.commandHash') = ?
-         AND json_extract(payload_json, '$.status') = 'pending'`
-    ).run(JSON.stringify({
-      commandHash,
-      status: 'effect-completed',
-      resultSnapshot
-    }), runId, idempotencyKey, commandHash)
-    if (updated.changes === 0) {
-      const replay = this.reserveRetryControl(runId, idempotencyKey, expectedRevision)
-      if (!['effect-completed', 'completed'].includes(replay.kind)) {
-        throw new Error('PLAYLIST_IMPORT_RETRY_EFFECT_NOT_RESERVED')
-      }
-    }
-  }
-
-  completeRetryControl(
-    runId: string,
-    idempotencyKey: string,
-    expectedRevision: number,
-    resultSnapshot: PlaylistImportSnapshot
-  ): void {
-    const commandHash = hash({ expectedRevision })
-    this.database.transaction(() => {
-      const row = this.database.prepare(
-        `SELECT payload_json FROM agent_product_journal
-         WHERE run_id = ? AND event_type = 'playlist-import.retry-control'
-           AND operation_id = ?`
-      ).get(runId, idempotencyKey) as { payload_json: string } | undefined
-      if (!row) throw new Error('PLAYLIST_IMPORT_RETRY_NOT_RESERVED')
-      const payload = JSON.parse(row.payload_json) as {
-        commandHash: string
-        status: 'pending' | 'effect-completed' | 'completed'
-      }
-      if (payload.commandHash !== commandHash) throw new Error('IDEMPOTENCY_KEY_REUSED')
-      if (payload.status === 'completed') return
-      this.database.prepare(
-        `UPDATE agent_product_journal SET payload_json = ?
-         WHERE run_id = ? AND event_type = 'playlist-import.retry-control'
-           AND operation_id = ?`
-      ).run(JSON.stringify({
-        commandHash,
-        status: 'completed',
-        resultSnapshot
-      }), runId, idempotencyKey)
-    })()
-  }
-
-  recordRetryControl(
-    runId: string,
-    idempotencyKey: string,
-    expectedRevision: number,
-    resultSnapshot: PlaylistImportSnapshot
-  ): void {
-    const reserved = this.reserveRetryControl(runId, idempotencyKey, expectedRevision)
-    if (reserved.kind === 'completed') return
-    if (reserved.kind === 'reserved') {
-      this.markRetryControlEffectCompleted(runId, idempotencyKey, expectedRevision, resultSnapshot)
-    }
-    this.completeRetryControl(runId, idempotencyKey, expectedRevision, resultSnapshot)
+  activeRunId(): string | null {
+    const row = this.database.prepare(
+      `SELECT run_id FROM playlist_import_jobs
+       WHERE phase NOT IN ('completed', 'failed', 'cancelled')
+       ORDER BY updated_at DESC, rowid DESC LIMIT 1`
+    ).get() as { run_id: string } | undefined
+    return row?.run_id ?? null
   }
 
   replayableStaticPageOrder(runId: string, pageUrl: string): number | null {
@@ -833,7 +700,7 @@ export class PlaylistImportRepository {
       container_contract_json: string | null
     } | undefined
     if (!page?.container_contract_json) return null
-    const persistedBatches = this.database.prepare(
+    const checkpointedBatches = this.database.prepare(
       `SELECT batch_order, operation_key, terminal_probe_count, container_fingerprint,
         ordered_occurrence_keys_json, scroll_top, scroll_height, client_height,
         at_end, accumulated_sequence_digest
@@ -851,7 +718,7 @@ export class PlaylistImportRepository {
       at_end: 0 | 1
       accumulated_sequence_digest: string
     }>
-    const batches = persistedBatches.map((batch) => ({
+    const batches = checkpointedBatches.map((batch) => ({
       batchOrder: batch.batch_order,
       operationKey: batch.operation_key,
       containerFingerprint: batch.container_fingerprint,
@@ -867,7 +734,7 @@ export class PlaylistImportRepository {
        WHERE page_id = ? ORDER BY page_position`
     ).all(page.id) as Array<{ page_position: number; source_occurrence_key: string }>)
       .map((row) => ({ position: row.page_position, key: row.source_occurrence_key }))
-    const latest = persistedBatches.at(-1)
+    const latest = checkpointedBatches.at(-1)
     return {
       pageKey: page.page_key,
       pageOrder: page.page_order,
@@ -1123,7 +990,7 @@ export class PlaylistImportRepository {
     })
     const operationKey = `${input.itemId}:${input.expectedItemRevision}`
     const replay = (this.database.prepare(
-      `SELECT payload_json FROM agent_product_journal
+      `SELECT payload_json FROM playlist_import_session_events
        WHERE run_id = ? AND event_type = 'playlist-import.detail-checkpoint'
        ORDER BY seq`
     ).all(input.runId) as Array<{ payload_json: string }>).map((row) => (
@@ -1277,7 +1144,7 @@ export class PlaylistImportRepository {
       )
       this.updateResolutionPhase(input.runId, at)
       this.database.prepare(
-        `INSERT INTO agent_product_journal (
+        `INSERT INTO playlist_import_session_events (
           run_id, operation_id, event_type, payload_json, created_at
         ) VALUES (?, NULL, 'playlist-import.detail-checkpoint', ?, ?)`
       ).run(input.runId, JSON.stringify({
@@ -1310,7 +1177,7 @@ export class PlaylistImportRepository {
       decisions: input.decisions
     })
     const replay = (this.database.prepare(
-      `SELECT payload_json FROM agent_product_journal
+      `SELECT payload_json FROM playlist_import_session_events
        WHERE run_id = ? AND event_type = 'playlist-import.identity-decisions'
        ORDER BY seq`
     ).all(input.runId) as Array<{ payload_json: string }>).map((row) => (
@@ -1366,7 +1233,7 @@ export class PlaylistImportRepository {
       }
       this.updateResolutionPhase(input.runId, at)
       this.database.prepare(
-        `INSERT INTO agent_product_journal (
+        `INSERT INTO playlist_import_session_events (
           run_id, operation_id, event_type, payload_json, created_at
         ) VALUES (?, NULL, 'playlist-import.identity-decisions', ?, ?)`
       ).run(input.runId, JSON.stringify({
@@ -1434,7 +1301,7 @@ export class PlaylistImportRepository {
         if (existing.content_hash !== contentHash) {
           if (job.error_code !== 'PAGE_CHANGED') {
             throw new PlaylistImportPageChangedError(
-              'PAGE_CHANGED: 当前清单页与已持久化检查点不一致，请重新读取当前页后重试。'
+              'PAGE_CHANGED: 当前清单页与本次 Session 检查点不一致，请重新读取当前页后重试。'
             )
           }
           this.resetStaticPageCheckpoint(job, existing)
@@ -1666,7 +1533,7 @@ export class PlaylistImportRepository {
         if (existingBatch.batch_digest !== operationContentHash) {
           if (job.error_code !== 'PAGE_CHANGED') {
             throw new PlaylistImportPageChangedError(
-              'PAGE_CHANGED: 当前动态列表批次与已持久化检查点不一致，请重新读取当前窗口后重试。'
+              'PAGE_CHANGED: 当前动态列表批次与本次 Session 检查点不一致，请重新读取当前窗口后重试。'
             )
           }
           this.resetDynamicBatchCheckpoint(job, existingBatch)
@@ -2731,7 +2598,7 @@ export class PlaylistImportRepository {
       }
       const at = now()
       this.database.prepare(
-        `INSERT INTO agent_product_journal (
+        `INSERT INTO playlist_import_session_events (
           run_id, operation_id, event_type, payload_json, created_at
         ) VALUES (?, NULL, 'playlist-import.browser-handoff', ?, ?)`
       ).run(input.runId, JSON.stringify({ ...input, resumePhase: job.phase }), at)
@@ -2753,7 +2620,7 @@ export class PlaylistImportRepository {
       throw error
     }
     const replay = (this.database.prepare(
-      `SELECT payload_json FROM agent_product_journal
+      `SELECT payload_json FROM playlist_import_session_events
        WHERE run_id = ? AND event_type = 'playlist-import.browser-resumed'
        ORDER BY seq`
     ).all(runId) as Array<{ payload_json: string }>).map((row) => (
@@ -2768,7 +2635,7 @@ export class PlaylistImportRepository {
       const handoff = this.pendingBrowserHandoff(runId)
       if (!handoff || handoff.requestId !== requestId) throw new Error('BROWSER_HANDOFF_STALE')
       const latest = this.database.prepare(
-        `SELECT payload_json FROM agent_product_journal
+        `SELECT payload_json FROM playlist_import_session_events
          WHERE run_id = ? AND event_type = 'playlist-import.browser-handoff'
          ORDER BY seq DESC LIMIT 1`
       ).get(runId) as { payload_json: string }
@@ -2778,7 +2645,7 @@ export class PlaylistImportRepository {
       }
       const at = now()
       this.database.prepare(
-        `INSERT INTO agent_product_journal (
+        `INSERT INTO playlist_import_session_events (
           run_id, operation_id, event_type, payload_json, created_at
         ) VALUES (?, NULL, 'playlist-import.browser-resumed', ?, ?)`
       ).run(runId, JSON.stringify({ requestId, idempotencyKey }), at)
@@ -3173,7 +3040,7 @@ export class PlaylistImportRepository {
     this.clearPageChangedError(job)
   }
 
-  resetDynamicPageForRecovery(runId: string, pageKey: string): PlaylistImportSnapshot {
+  resetDynamicPageForRetry(runId: string, pageKey: string): PlaylistImportSnapshot {
     this.database.transaction(() => {
       const job = this.requireJob(runId, 'discovering-list')
       if (!['PAGE_CHANGED', 'TOTAL_MISMATCH'].includes(job.error_code ?? '')) {
@@ -3259,7 +3126,7 @@ export class PlaylistImportRepository {
     { kind: 'browser-handoff' }
   > | null {
     const latest = this.database.prepare(
-      `SELECT event_type, payload_json FROM agent_product_journal
+      `SELECT event_type, payload_json FROM playlist_import_session_events
        WHERE run_id = ? AND event_type IN (
          'playlist-import.browser-handoff', 'playlist-import.browser-resumed'
        ) ORDER BY seq DESC LIMIT 1`

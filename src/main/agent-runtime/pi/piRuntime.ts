@@ -227,7 +227,9 @@ class DurableObservationQueue {
           category: 'persistence-failed',
           message: this.failed.message
         })
-        await this.abortRuntime?.()
+        // Aborting Pi can emit final tool events which enqueue behind this failed
+        // commit. Waiting here would create a cycle: abort -> enqueue -> this commit.
+        void this.abortRuntime?.().catch(() => undefined)
         throw this.failed
       }
     })

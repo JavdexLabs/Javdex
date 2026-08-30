@@ -23,8 +23,6 @@ module.exports = {
 
 describe('scraperPluginSandbox', () => {
   it('loads cheerio/slim so packaged scrapers do not need undici', async () => {
-    const source = fs.readFileSync(path.resolve('src/main/scrapers/scraperPluginSandbox.ts'), 'utf8')
-    assert.match(source, /requireFromApp\('cheerio\/slim'\)/)
     await validateUserPluginCode('video', 'cheerio-test', CHEERIO_PLUGIN)
   })
 

@@ -7,9 +7,9 @@ export interface PlaylistImportStartInput {
   sourceUrl: string
   targetLibraryId: number
   destination: PlaylistImportDestination
-  /** Defaults to true for callers and persisted jobs created before this option existed. */
+  /** Defaults to true when callers omit the foreground-session option. */
   autoCreateUnmatchedVideos?: boolean
-  /** Defaults to true for callers and persisted jobs created before this option existed. */
+  /** Defaults to true when callers omit the foreground-session option. */
   saveDetailLinks?: boolean
   /** Defaults to false; saves the imported external playlist URL on the destination playlist. */
   saveSourcePlaylistLink?: boolean

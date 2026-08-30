@@ -210,6 +210,8 @@ describe('PluginDevInstructionModule', () => {
     assert.match(browserSkill, /browser\(action="read-section", artifactRef="\.\.\.", section="\.\.\."\)/)
     assert.match(browserSkill, /nextCursor.*原样带入下一次调用/)
     assert.match(browserSkill, /section="observation".*可用分区清单/)
+    assert.match(browserSkill, /omittedInlineSections.*每个名称.*同一 artifact.*读取/)
+    assert.match(browserSkill, /BROWSER_ARTIFACT_SECTION_NOT_FOUND.*validSections.*nextAction/)
     assert.match(browserSkill, /存储、完整性校验和分页由宿主隐藏/)
     assert.doesNotMatch(browserSkill, /\$artifactTextRef|offset\/limit|read-artifact/)
     assert.match(browserSkill, /同一 viewRevision 在 `delta` 或 `unchanged` 之后不得再 snapshot/)

@@ -272,6 +272,129 @@ describe('PluginBrowserCapabilityModule', () => {
     assert.ok(pages > 1)
   })
 
+  it('keeps every omitted delta section readable from the same artifact', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-browser-delta-sections-'))
+    directories.push(directory)
+    const module = new PluginBrowserCapabilityModule()
+    const snapshot = '- textbox "search" [ref=e1]'
+    const initialFacts = {
+      text: 'before',
+      scriptSrcs: [{ href: 'https://example.test/assets/main.js' }]
+    }
+    await module.execute({
+      sessionId: 'session-delta-sections',
+      workspaceDirectory: directory,
+      action: 'open',
+      args: { url: 'https://example.test/' },
+      run: async () => ({
+        ok: true,
+        content: '',
+        structured: {
+          observation: {
+            action: 'open',
+            documentRevision: '1:1',
+            viewRevision: '1:1:0',
+            url: 'https://example.test/',
+            snapshot,
+            pageFacts: initialFacts
+          },
+          fullSnapshot: snapshot
+        }
+      })
+    })
+    const changedText = Array.from({ length: 8_000 }, (_, index) => `result-${index}`).join(' ')
+    const result = await module.execute({
+      sessionId: 'session-delta-sections',
+      workspaceDirectory: directory,
+      action: 'press',
+      args: { target: 'e1', key: 'Enter' },
+      run: async () => ({
+        ok: true,
+        content: '',
+        structured: {
+          observation: {
+            action: 'press',
+            actionSucceeded: true,
+            documentRevision: '1:1',
+            viewRevision: '1:1:0',
+            url: 'https://example.test/',
+            snapshot,
+            pageFacts: {
+              ...initialFacts,
+              text: changedText,
+              recentRequests: []
+            }
+          },
+          fullSnapshot: snapshot
+        }
+      })
+    })
+    const compact = JSON.parse(result.content) as {
+      omittedInlineSections?: string[]
+    }
+    const artifactRef = String(result.structured?.artifactRef)
+    const omitted = compact.omittedInlineSections ?? []
+
+    assert.ok(omitted.length > 0)
+    for (const section of omitted) {
+      const page = module.readSection({
+        workspaceDirectory: directory,
+        artifactRef,
+        section
+      })
+      assert.equal(page.ok, true, `omitted section ${section} must be readable`)
+    }
+  })
+
+  it('returns valid artifact sections and a catalog recovery action for an unknown section', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-browser-section-catalog-'))
+    directories.push(directory)
+    const module = new PluginBrowserCapabilityModule()
+    const observation = await module.execute({
+      sessionId: 'session-section-catalog',
+      workspaceDirectory: directory,
+      action: 'open',
+      args: { url: 'https://example.test/' },
+      run: async () => ({
+        ok: true,
+        content: '',
+        structured: {
+          observation: {
+            action: 'open',
+            documentRevision: '1:1',
+            url: 'https://example.test/',
+            snapshot: '- heading "Home" [ref=e1]',
+            pageFacts: {
+              scriptSrcs: [{ href: 'https://example.test/assets/main.js' }]
+            }
+          },
+          fullSnapshot: '- heading "Home" [ref=e1]'
+        }
+      })
+    })
+    const artifactRef = String(observation.structured?.artifactRef)
+    const result = module.readSection({
+      workspaceDirectory: directory,
+      artifactRef,
+      section: 'pageFactsDelta'
+    })
+    const error = JSON.parse(result.content) as {
+      code?: string
+      validSections?: string[]
+      nextAction?: Record<string, unknown>
+    }
+
+    assert.equal(result.ok, false)
+    assert.equal(error.code, 'BROWSER_ARTIFACT_SECTION_NOT_FOUND')
+    assert.ok(error.validSections?.includes('scriptSrcs'))
+    assert.ok(error.validSections?.includes('snapshot'))
+    assert.deepEqual(error.nextAction, {
+      action: 'read-section',
+      artifactRef,
+      section: 'observation'
+    })
+  })
+
   it('rejects read-section paths outside the browser artifact directory', () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-browser-section-path-'))
     directories.push(directory)
@@ -766,6 +889,14 @@ describe('PluginBrowserCapabilityModule', () => {
       String(result.structured?.artifactRef)
     ) as unknown as { observation: { snapshot: string } }
     assert.equal(artifact.observation.snapshot, current)
+    for (const section of compact.omittedInlineSections as string[]) {
+      const page = module.readSection({
+        workspaceDirectory: directory,
+        artifactRef: String(result.structured?.artifactRef),
+        section
+      })
+      assert.equal(page.ok, true, `omitted section ${section} must be readable`)
+    }
   })
 
   it('isolates baselines by session and resets them when a lease is released', async () => {

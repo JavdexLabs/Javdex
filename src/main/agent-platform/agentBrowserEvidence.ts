@@ -296,13 +296,23 @@ function collectPackableSections(observation: AgentBrowserObservation): Packable
     })
   }
   if (observation.pageFactsDelta) {
-    sections.push({
-      name: 'pageFactsDelta',
-      bytes: Buffer.byteLength(stableSerialize(observation.pageFactsDelta), 'utf8'),
-      apply: (target) => {
-        target.pageFactsDelta = observation.pageFactsDelta
-      }
-    })
+    for (const key of Object.keys(observation.pageFactsDelta.changed).sort()) {
+      const value = observation.pageFactsDelta.changed[key]
+      sections.push({
+        name: key,
+        bytes: Buffer.byteLength(stableSerialize(value), 'utf8'),
+        apply: (target) => {
+          target.pageFactsDelta = {
+            changed: {
+              ...target.pageFactsDelta?.changed,
+              [key]: value
+            },
+            removedKeys: target.pageFactsDelta?.removedKeys ??
+              observation.pageFactsDelta?.removedKeys ?? []
+          }
+        }
+      })
+    }
   }
   if (typeof observation.html === 'string') {
     sections.push({
@@ -351,7 +361,7 @@ function transparentObservationResult(input: {
 
   const pageFacts = isRecord(input.observation.pageFacts)
     ? input.observation.pageFacts
-    : undefined
+    : input.observation.pageFactsDelta?.changed
   const snapshot = typeof input.observation.snapshot === 'string'
     ? input.observation.snapshot
     : undefined
@@ -386,6 +396,12 @@ function transparentObservationResult(input: {
         ? { snapshotByteLength: Buffer.byteLength(snapshot, 'utf8') }
         : {}),
       nextActions: TARGETED_NEXT_ACTIONS
+    }
+    if (input.observation.pageFactsDelta) {
+      packed.pageFactsDelta = {
+        changed: {},
+        removedKeys: [...input.observation.pageFactsDelta.removedKeys]
+      }
     }
     const omitted: string[] = []
     for (const section of packable) {
@@ -650,11 +666,15 @@ interface BrowserArtifactSectionCursor {
 const BROWSER_ARTIFACT_SECTION_RESULT_BYTES = 18_000
 const BROWSER_ARTIFACT_SECTION_MAX_ENTRIES = 200
 
-function artifactSectionError(code: string, message: string): AgentBrowserEvidenceResult {
+function artifactSectionError(
+  code: string,
+  message: string,
+  details: Record<string, unknown> = {}
+): AgentBrowserEvidenceResult {
   return {
     ok: false,
-    content: JSON.stringify({ code, message }, null, 2),
-    structured: { code }
+    content: JSON.stringify({ code, message, ...details }, null, 2),
+    structured: { code, ...details }
   }
 }
 
@@ -731,13 +751,17 @@ function sectionValueSummary(section: string, value: unknown): Record<string, un
   }
 }
 
-function artifactSectionCatalog(observation: Record<string, unknown>): Array<Record<string, unknown>> {
+function artifactSectionCatalog(artifact: Record<string, unknown>): Array<Record<string, unknown>> {
+  const observation = artifact.observation as Record<string, unknown>
   const sections = new Map<string, unknown>()
   for (const key of ['snapshot', 'ariaDelta', 'pageFactsDelta', 'html', 'matches', 'value']) {
     if (Object.hasOwn(observation, key)) sections.set(key, observation[key])
   }
   if (isRecord(observation.pageFacts)) {
     for (const [key, value] of Object.entries(observation.pageFacts)) sections.set(key, value)
+  }
+  if (isRecord(artifact.sections)) {
+    for (const [key, value] of Object.entries(artifact.sections)) sections.set(key, value)
   }
   return [...sections.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
@@ -749,7 +773,10 @@ function rawArtifactSection(
   section: string
 ): unknown {
   const observation = artifact.observation as Record<string, unknown>
-  if (section === 'observation') return artifactSectionCatalog(observation)
+  if (section === 'observation') return artifactSectionCatalog(artifact)
+  if (isRecord(artifact.sections) && Object.hasOwn(artifact.sections, section)) {
+    return artifact.sections[section]
+  }
   if (Object.hasOwn(observation, section) && section !== 'pageFacts') return observation[section]
   if (isRecord(observation.pageFacts) && Object.hasOwn(observation.pageFacts, section)) {
     return observation.pageFacts[section]
@@ -935,8 +962,13 @@ export class AgentBrowserEvidenceModule {
   }
 
   readSection(input: BrowserArtifactSectionInput): AgentBrowserEvidenceResult {
+    let validSections: string[] | undefined
     try {
       const artifact = readBrowserArtifactIndex(input.workspaceDirectory, input.artifactRef)
+      validSections = [
+        'observation',
+        ...artifactSectionCatalog(artifact).map((item) => String(item.section))
+      ]
       const cursor = decodeSectionCursor(input.cursor, input.artifactRef, input.section)
       const raw = rawArtifactSection(artifact, input.section)
       const value = resolveArtifactTextReferences(path.resolve(input.workspaceDirectory), raw)
@@ -965,13 +997,24 @@ export class AgentBrowserEvidenceModule {
         BROWSER_ARTIFACT_PATH_INVALID: 'artifactRef 必须指向当前工作区 .javdex/browser 内的 artifact。',
         BROWSER_ARTIFACT_NOT_FOUND: 'browser artifact 不存在或已失效。',
         BROWSER_ARTIFACT_INVALID: 'browser artifact 格式无效。',
-        BROWSER_ARTIFACT_SECTION_NOT_FOUND: 'browser artifact 中不存在请求的 section。',
+        BROWSER_ARTIFACT_SECTION_NOT_FOUND: 'browser artifact 中不存在请求的 section；请先读取 section="observation" 获取合法分区。',
         BROWSER_ARTIFACT_CURSOR_INVALID: 'read-section cursor 无效、已过期或属于其他 section。',
         BROWSER_ARTIFACT_SECTION_ITEM_TOO_LARGE: '该 section 的单项过大；请改用 browser find 或局部 html。'
       }
+      const recovery = code === 'BROWSER_ARTIFACT_SECTION_NOT_FOUND' && validSections
+        ? {
+            validSections,
+            nextAction: {
+              action: 'read-section',
+              artifactRef: input.artifactRef,
+              section: 'observation'
+            }
+          }
+        : {}
       return artifactSectionError(
         code,
-        messages[code] ?? (error instanceof Error ? error.message : String(error))
+        messages[code] ?? (error instanceof Error ? error.message : String(error)),
+        recovery
       )
     }
   }
@@ -1010,24 +1053,6 @@ export class AgentBrowserEvidenceModule {
         !sourceCapped &&
         (!pageObservation || hasPageFacts)
     }
-    const artifact = {
-      schemaVersion: 1,
-      action: input.action,
-      args: safeArgs(input.action, input.args),
-      ok: result.ok,
-      observation: fullObservation
-    }
-    const serialized = `${JSON.stringify(artifact, null, 2)}\n`
-    const id = sha256(serialized).slice(0, 24)
-    const relativePath = path.join('.javdex', 'browser', `${id}.json`)
-    writeReadableBrowserArtifact({
-      workspaceDirectory: input.workspaceDirectory,
-      relativePath,
-      artifactId: id,
-      artifact,
-      logicalSerialized: serialized
-    })
-
     let maxBytes = browserCapabilityResultLimitBytes(input.action)
     let agentObservation: AgentBrowserObservation
     if (!pageObservation || observation.observationMode === 'pending') {
@@ -1110,6 +1135,28 @@ export class AgentBrowserEvidenceModule {
         ...(currentFacts ? { pageFacts: currentFacts } : {})
       })
     }
+
+    const supplementalSections = typeof agentObservation.ariaDelta === 'string'
+      ? { ariaDelta: agentObservation.ariaDelta }
+      : undefined
+    const artifact = {
+      schemaVersion: 1,
+      action: input.action,
+      args: safeArgs(input.action, input.args),
+      ok: result.ok,
+      observation: fullObservation,
+      ...(supplementalSections ? { sections: supplementalSections } : {})
+    }
+    const serialized = `${JSON.stringify(artifact, null, 2)}\n`
+    const id = sha256(serialized).slice(0, 24)
+    const relativePath = path.join('.javdex', 'browser', `${id}.json`)
+    writeReadableBrowserArtifact({
+      workspaceDirectory: input.workspaceDirectory,
+      relativePath,
+      artifactId: id,
+      artifact,
+      logicalSerialized: serialized
+    })
 
     const delivered = transparentObservationResult({
       observation: agentObservation,

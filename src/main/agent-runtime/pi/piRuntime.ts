@@ -737,7 +737,7 @@ class PiRuntimeSession implements RuntimeSessionPort {
       this.acceptedCommandIds.add(command.commandId)
       return { accepted: true }
     }
-    if (command.kind === 'follow-up') {
+    if (command.kind === 'follow-up' && this.session.isStreaming) {
       await this.session.followUp(text)
       this.acceptedCommandIds.add(command.commandId)
       return { accepted: true }

@@ -13,12 +13,6 @@
   flex: 1 1 auto;
 }
 
-.searchWrap .search {
-  width: 100%;
-  max-width: none;
-  padding-inline-end: 66px;
-}
-
 .search {
   box-sizing: border-box;
   min-width: 160px;
@@ -32,6 +26,12 @@
   background-position: 12px center;
   background-size: 16px;
   font-size: 14px;
+}
+
+.searchWrap .search {
+  width: 100%;
+  max-width: none;
+  padding-inline-end: 66px;
 }
 
 .search:focus {

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import buildConfig from '../electron-builder.config.mjs'
 import {
   MAC_ELECTRON_LANGUAGES,
   expectedBetterSqlitePrebuilds,
@@ -108,4 +109,25 @@ test('mac packaging selects a node-gyp compatible Python unless the caller chose
     environment: {},
     canUse: () => true
   }), {})
+})
+
+test('packaging retains the complete Cheerio runtime dependency chain', () => {
+  const files = buildConfig().files.map(String)
+  const requiredRuntimeDependencies = [
+    'cheerio',
+    'undici',
+    'parse5',
+    'parse5-htmlparser2-tree-adapter',
+    'parse5-parser-stream',
+    'encoding-sniffer',
+    'whatwg-mimetype'
+  ]
+
+  for (const dependency of requiredRuntimeDependencies) {
+    assert.equal(
+      files.some((entry) => entry === `!node_modules/${dependency}/**/*`),
+      false,
+      `${dependency} must remain available to packaged worker-thread module resolution`
+    )
+  }
 })

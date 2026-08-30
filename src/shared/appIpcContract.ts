@@ -52,6 +52,12 @@ import type {
   LibraryCuratorStartInput
 } from './libraryCuratorTypes'
 import type {
+  PlaylistImportControlCommand,
+  PlaylistImportSnapshot,
+  PlaylistImportSnapshotChangedEvent,
+  PlaylistImportStartInput
+} from './playlistImportTypes'
+import type {
   IpcContractArgs,
   IpcContractChannel,
   IpcContractResult,
@@ -348,6 +354,19 @@ export interface AppIpcContract {
   }
   [IPC.AGENT_METADATA_DISCARD]: { args: [input: AgentMetadataDiscardInput]; result: void }
 
+  [IPC.PLAYLIST_IMPORT_START]: {
+    args: [input: PlaylistImportStartInput]
+    result: PlaylistImportSnapshot
+  }
+  [IPC.PLAYLIST_IMPORT_SNAPSHOT]: {
+    args: [runId?: string]
+    result: PlaylistImportSnapshot | null
+  }
+  [IPC.PLAYLIST_IMPORT_CONTROL]: {
+    args: [runId: string, command: PlaylistImportControlCommand]
+    result: PlaylistImportSnapshot
+  }
+
   [IPC.PLAYER_PLAY]: {
     args: [libraryId: number, videoId: number]
     result: PlayResult
@@ -378,6 +397,7 @@ export interface AppIpcEventContract {
   [IPC.PLUGIN_DEV_AGENT_EVENT]: PluginDevAgentEvent
   [IPC.ASSET_CRYPTO_PROGRESS]: AssetCryptoProgress
   [IPC.AGENT_METADATA_SNAPSHOT_CHANGED]: AgentMetadataSnapshotChangedEvent
+  [IPC.PLAYLIST_IMPORT_SNAPSHOT_CHANGED]: PlaylistImportSnapshotChangedEvent
 }
 
 export type AppIpcChannel = IpcContractChannel<AppIpcContract>

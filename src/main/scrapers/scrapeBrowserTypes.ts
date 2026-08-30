@@ -60,6 +60,13 @@ export type AgentBrowserCommand =
   | { action: 'click'; target: string }
   | { action: 'fill'; target: string; text: string; submit?: boolean }
   | { action: 'press'; key: string; target?: string }
+  | {
+      action: 'scroll'
+      target?: string
+      direction: 'up' | 'down'
+      amount?: 'eighth-viewport' | 'quarter-viewport' | 'half-viewport' | 'viewport'
+    }
+  | { action: 'scroll'; target?: string; direction: 'start' }
   | { action: 'wait'; target?: string; timeoutMs?: number }
   | { action: 'status' }
 
@@ -71,9 +78,67 @@ export interface AgentBrowserPageFactSectionSummary {
   itemCount: number
 }
 
+export interface AgentBrowserScrollMetrics {
+  scrollTop: number
+  scrollHeight: number
+  clientHeight: number
+}
+
+export interface AgentBrowserScrollState {
+  containerFingerprint: string
+  before: AgentBrowserScrollMetrics
+  after: AgentBrowserScrollMetrics
+  deltaY: number
+  moved: boolean
+  atStart: boolean
+  atEnd: boolean
+  settled: boolean
+}
+
+export interface ScrapeBrowserListExtractionPlan {
+  candidateSelector: string
+  detailLinkSelector: string
+  detailLinkAttribute?: string
+  codeSelector?: string
+  codeAttribute?: string
+  codePattern?: string
+  titleSelector?: string
+  titleAttribute?: string
+  nextPageSelector?: string
+  terminalProof?: {
+    kind: 'disabled-next' | 'explicit-last-page' | 'no-pagination-container-after-full-dom-check'
+    selector: string
+  }
+  /** Host-owned action selector used only to detect and execute an incremental list expansion. */
+  loadMoreSelector?: string
+  containerSelector?: string
+  position?: { kind: 'aria-posinset' } | { kind: 'attribute'; name: string; base: 0 | 1 }
+}
+
+export interface ScrapeBrowserListExtraction {
+  url: string
+  title: string
+  documentRevision: string
+  viewRevision: string
+  items: Array<{
+    detailUrl: string
+    code?: string
+    title?: string
+    absolutePosition?: number
+    occurrenceKey?: string
+  }>
+  nextPageUrls: string[]
+  terminalVerified?: boolean
+  loadMoreAvailable?: boolean
+  containerFingerprint?: string
+  scrollState?: AgentBrowserScrollState
+}
+
 export interface AgentBrowserObservation {
   action: AgentBrowserCommand['action']
   documentRevision?: string
+  /** Changes after navigation and after an explicit scroll that can recycle visible DOM. */
+  viewRevision?: string
   observationMode?: AgentBrowserObservationMode
   /** A state-changing action completed even if its post-action observation is still pending. */
   actionSucceeded?: boolean
@@ -85,6 +150,7 @@ export interface AgentBrowserObservation {
   matches?: Array<{ ref?: string; text: string }>
   html?: string
   value?: unknown
+  scrollState?: AgentBrowserScrollState
   /** Host-collected page facts: visible labels, structured metadata, forms and content links. */
   pageFacts?: Record<string, unknown>
   pageFactsDelta?: {

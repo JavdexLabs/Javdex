@@ -1122,21 +1122,12 @@ export default function DetailPage(): JSX.Element {
         </section>
       )}
 
-      {(video.summary || (video.links?.length ?? 0) > 0) && (
+      {video.summary && (
         <section className="detail-section detail-section--summary">
-          {video.summary ? (
-            <>
-              <div className="detail-section-head">
-                <h2 className="section-title">剧情简介</h2>
-              </div>
-              <div className="summary-text">{video.summary}</div>
-            </>
-          ) : (
-            <div className="detail-section-head">
-              <h2 className="section-title">相关链接</h2>
-            </div>
-          )}
-          <RelatedLinksList links={video.links ?? []} />
+          <div className="detail-section-head">
+            <h2 className="section-title">剧情简介</h2>
+          </div>
+          <div className="summary-text">{video.summary}</div>
         </section>
       )}
 
@@ -1180,6 +1171,15 @@ export default function DetailPage(): JSX.Element {
         onRemoveResource={setRemoveResourceTarget}
         onAddResource={() => setShowResourceImport(true)}
       />
+
+      {(video.links?.length ?? 0) > 0 && (
+        <section className="detail-section detail-section--links">
+          <div className="detail-section-head">
+            <h2 className="section-title">相关链接</h2>
+          </div>
+          <RelatedLinksList links={video.links ?? []} />
+        </section>
+      )}
 
       <VideoSampleGallery
         videoId={video.id}

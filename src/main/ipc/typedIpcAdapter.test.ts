@@ -192,6 +192,43 @@ describe('typed IPC adapter', () => {
     assert.equal(schema.safeParse([{ pluginDevAgentMaxSteps: 24 }]).success, false)
   })
 
+  it('validates playlist import start and identity controls at the IPC boundary', () => {
+    const legacyStart = appIpcSchemas[IPC.PLAYLIST_IMPORT_START].safeParse([{
+      idempotencyKey: 'start-1',
+      sourceUrl: 'https://example.test/list',
+      targetLibraryId: 2,
+      destination: { kind: 'append', playlistId: 9 }
+    }])
+    assert.equal(legacyStart.success, true)
+    assert.equal(legacyStart.success && legacyStart.data[0].autoCreateUnmatchedVideos, true)
+    assert.equal(legacyStart.success && legacyStart.data[0].saveDetailLinks, true)
+    assert.equal(legacyStart.success && legacyStart.data[0].saveSourcePlaylistLink, false)
+    assert.equal(appIpcSchemas[IPC.PLAYLIST_IMPORT_START].safeParse([{
+      idempotencyKey: 'start-2',
+      sourceUrl: 'https://example.test/list',
+      targetLibraryId: 2,
+      destination: { kind: 'append', playlistId: 9 },
+      autoCreateUnmatchedVideos: false,
+      saveDetailLinks: false,
+      saveSourcePlaylistLink: true
+    }]).success, true)
+    assert.equal(appIpcSchemas[IPC.PLAYLIST_IMPORT_START].safeParse([{
+      idempotencyKey: 'start-1',
+      sourceUrl: 'https://example.test/list',
+      targetLibraryId: 2,
+      destination: { kind: 'append' }
+    }]).success, false)
+    assert.equal(appIpcSchemas[IPC.PLAYLIST_IMPORT_CONTROL].safeParse([
+      'run-1',
+      {
+        kind: 'resolve-identities',
+        expectedRevision: 4,
+        idempotencyKey: 'resolve-1',
+        decisions: [{ itemId: 8, choice: { kind: 'existing', videoId: 21 } }]
+      }
+    ]).success, true)
+  })
+
   it('requires the path-removal impact revision at the settings boundary', () => {
     const schema = appIpcSchemas[IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM]
     assert.equal(schema.safeParse([3, 8, 2, 'a'.repeat(64)]).success, true)

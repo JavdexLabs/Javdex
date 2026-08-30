@@ -24,29 +24,28 @@ function declarationsFor(
 }
 
 describe('HomePage search layout', () => {
-  it('reserves shared-control padding for the icon and keyboard shortcut', () => {
-    const searchInput = declarationsFor('.searchInput')
-    const sharedInput = declarationsFor(
-      '.text-input',
-      'src/renderer/src/styles/navigation-controls.css'
+  it('reserves shared toolbar-search padding for the icon and keyboard shortcut', () => {
+    const search = declarationsFor(
+      '.search',
+      'src/renderer/src/components/ListToolbar.module.css'
+    )
+    const wrappedSearch = declarationsFor(
+      '.searchWrap .search',
+      'src/renderer/src/components/ListToolbar.module.css'
     )
 
-    assert.equal(searchInput.get('--text-input-pad-block'), '0')
-    assert.equal(searchInput.get('--text-input-pad-inline-start'), '36px')
-    assert.equal(searchInput.get('--text-input-pad-inline-end'), '66px')
-    assert.equal(sharedInput.get('padding-block'), 'var(--text-input-pad-block, 8px)')
-    assert.equal(
-      sharedInput.get('padding-inline')?.replace(/\s+/g, ' '),
-      'var(--text-input-pad-inline-start, 12px) var(--text-input-pad-inline-end, 12px)'
-    )
+    assert.equal(search.get('padding'), '0 14px 0 36px')
+    assert.equal(wrappedSearch.get('padding-inline-end'), '66px')
   })
 
-  it('centers the search icon inside the input control', () => {
-    const declarations = declarationsFor('.searchIcon')
+  it('centers the search icon inside the shared input control', () => {
+    const declarations = declarationsFor(
+      '.search',
+      'src/renderer/src/components/ListToolbar.module.css'
+    )
 
-    assert.equal(declarations.get('position'), 'absolute')
-    assert.equal(declarations.get('top'), '50%')
-    assert.equal(declarations.get('transform'), 'translateY(-50%)')
+    assert.equal(declarations.get('background-position'), '12px center')
+    assert.equal(declarations.get('background-size'), '16px')
   })
 
   it('keeps the keyboard shortcut on the same vertical center line', () => {

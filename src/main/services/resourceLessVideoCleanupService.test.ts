@@ -114,4 +114,67 @@ describe('resourceLessVideoCleanupService', () => {
     assert.equal(fs.existsSync(path.join(tempRoot, 'media_assets', stagedPath)), false)
     assert.equal(fs.existsSync(unrelatedSourceFile), true)
   })
+
+  it('protects zero-resource videos while any playlist still references them', () => {
+    const db = getDb()
+    const protectedVideoId = Number(
+      db.prepare("INSERT INTO videos (code, title) VALUES ('KEEP-001', 'Keep')").run().lastInsertRowid
+    )
+    const playlistId = Number(
+      db.prepare("INSERT INTO playlists (name) VALUES ('Keep list')").run().lastInsertRowid
+    )
+    db.prepare(
+      'INSERT INTO playlist_video (playlist_id, video_id, position) VALUES (?, ?, 0)'
+    ).run(playlistId, protectedVideoId)
+
+    assert.equal(deleteResourceLessVideos(), 0)
+    assert.equal(
+      (db.prepare('SELECT COUNT(*) AS n FROM videos WHERE id = ?').get(protectedVideoId) as { n: number }).n,
+      1
+    )
+
+    db.prepare('DELETE FROM playlist_video WHERE playlist_id = ? AND video_id = ?')
+      .run(playlistId, protectedVideoId)
+    assert.equal(deleteResourceLessVideos(), 1)
+  })
+
+  it('counts and cleans assets only after the final guarded delete succeeds', () => {
+    const db = getDb()
+    const coverPath = 'covers/race.jpg'
+    const samplePath = 'samples/race.jpg'
+    createOwnedAsset(coverPath)
+    createOwnedAsset(samplePath)
+    const videoId = Number(db.prepare(
+      "INSERT INTO videos (code, title, cover_path) VALUES ('RACE-001', 'Race', ?)"
+    ).run(coverPath).lastInsertRowid)
+    db.prepare(
+      `INSERT INTO video_assets (video_id, type, local_path, position)
+       VALUES (?, 'sample', ?, 0)`
+    ).run(videoId, samplePath)
+    const playlistId = Number(
+      db.prepare("INSERT INTO playlists (name) VALUES ('Late protection')").run().lastInsertRowid
+    )
+    db.exec(`
+      CREATE TRIGGER protect_resource_less_video_before_delete
+      BEFORE DELETE ON videos
+      WHEN OLD.id = ${videoId}
+      BEGIN
+        INSERT INTO playlist_video (playlist_id, video_id, position)
+        VALUES (${playlistId}, OLD.id, 0);
+        SELECT RAISE(IGNORE);
+      END;
+    `)
+
+    assert.equal(deleteResourceLessVideos(), 0)
+    assert.equal(
+      (db.prepare('SELECT COUNT(*) AS n FROM videos WHERE id = ?').get(videoId) as { n: number }).n,
+      1
+    )
+    assert.equal(
+      (db.prepare('SELECT COUNT(*) AS n FROM playlist_video WHERE video_id = ?').get(videoId) as { n: number }).n,
+      1
+    )
+    assert.equal(fs.existsSync(path.join(tempRoot, 'media_assets', coverPath)), true)
+    assert.equal(fs.existsSync(path.join(tempRoot, 'media_assets', samplePath)), true)
+  })
 })

@@ -23,6 +23,7 @@ describe('PluginBrowserCapabilityModule', () => {
     assert.equal(browserCapabilityResultLimitBytes('html'), 20_000)
     assert.equal(browserCapabilityResultLimitBytes('open'), 64_000)
     assert.equal(browserCapabilityResultLimitBytes('click'), 64_000)
+    assert.equal(browserCapabilityResultLimitBytes('scroll'), 64_000)
     assert.equal(browserCapabilityResultLimitBytes('snapshot'), 64_000)
   })
 
@@ -589,6 +590,64 @@ describe('PluginBrowserCapabilityModule', () => {
       String(result.structured?.artifactRef)
     ) as unknown as { observation: { snapshot: string } }
     assert.equal(artifact.observation.snapshot, after)
+  })
+
+  it('treats a scroll view revision as a full observation and invalidates prior refs', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-browser-scroll-view-'))
+    directories.push(directory)
+    const module = new PluginBrowserCapabilityModule()
+    const execute = async (input: {
+      action: 'snapshot' | 'scroll'
+      viewRevision: string
+      snapshot: string
+    }) => module.execute({
+      sessionId: 'session-scroll-view',
+      workspaceDirectory: directory,
+      action: input.action,
+      args: input.action === 'scroll' ? { direction: 'down' } : {},
+      run: async () => ({
+        ok: true,
+        content: '',
+        structured: {
+          observation: {
+            action: input.action,
+            documentRevision: '7:3',
+            viewRevision: input.viewRevision,
+            url: 'https://example.test/list',
+            snapshot: input.snapshot,
+            pageFacts: { headings: ['list'] },
+            ...(input.action === 'scroll' ? {
+              scrollState: {
+                containerFingerprint: 'container-1',
+                before: { scrollTop: 0, scrollHeight: 3_000, clientHeight: 600 },
+                after: { scrollTop: 300, scrollHeight: 3_000, clientHeight: 600 },
+                deltaY: 300,
+                moved: true,
+                atStart: false,
+                atEnd: false,
+                settled: true
+              }
+            } : {})
+          },
+          fullSnapshot: input.snapshot
+        }
+      })
+    })
+
+    await execute({ action: 'snapshot', viewRevision: '7:3:0', snapshot: '- link "item 1" [ref=e1]' })
+    const result = await execute({
+      action: 'scroll',
+      viewRevision: '7:3:1',
+      snapshot: '- link "item 20" [ref=e1]'
+    })
+    const compact = JSON.parse(result.content) as Record<string, unknown>
+
+    assert.equal(compact.documentRevision, '7:3')
+    assert.equal(compact.viewRevision, '7:3:1')
+    assert.equal(compact.observationMode, 'full')
+    assert.equal(compact.staleRefs, true)
+    assert.match(String(compact.snapshot), /item 20/)
+    assert.equal((compact.scrollState as { moved?: boolean }).moved, true)
   })
 
   it('records a newly appeared pageFacts section after fill without throwing', async () => {

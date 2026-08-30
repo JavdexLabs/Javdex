@@ -41,7 +41,7 @@ function freshDatabase(): Database.Database {
 }
 
 describe("legacy media-library settings bootstrap", () => {
-  it("keeps native V16 config defaults when a fresh database has no legacy evidence", () => {
+  it("keeps native V14 config defaults when a fresh database has no legacy evidence", () => {
     const database = freshDatabase();
     try {
       const result = bootstrapLegacyMediaLibrary({

@@ -15,6 +15,7 @@ import { configureIpcSecurity } from './ipcSecurity'
 import { registerLibraryCuratorHandlers } from './libraryCuratorHandlers'
 import { registerAgentMetadataHandlers } from './agentMetadataHandlers'
 import { registerMediaLibraryHandlers } from './mediaLibraryHandlers'
+import { registerPlaylistImportHandlers } from './playlistImportHandlers'
 
 export function registerIpcHandlers(
   getWindow: () => BrowserWindow | null,
@@ -36,5 +37,6 @@ export function registerIpcHandlers(
   registerPluginDevHandlers(ctx)
   registerLibraryCuratorHandlers()
   registerAgentMetadataHandlers(ctx)
+  registerPlaylistImportHandlers(ctx)
   registerPlayerHandlers()
 }

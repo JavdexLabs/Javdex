@@ -5,7 +5,7 @@ import Database from 'better-sqlite3'
 import { normalizeLocalPathIdentity } from '@shared/localPathIdentity'
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
 
-const V15_SCHEMA_VERSION = 15
+const V13_SCHEMA_VERSION = 13
 
 function tableExists(database: Database.Database, table: string): boolean {
   return Boolean(
@@ -28,8 +28,8 @@ function rowCount(database: Database.Database, table: string): number {
     .count
 }
 
-/** Released V15 tables whose rows and constraints are affected by the V16 migration. */
-function createV15MultiLibraryFixture(database: Database.Database): void {
+/** Released V13 tables whose rows and constraints are affected by the V14 migration. */
+function createV13ReleaseFixture(database: Database.Database): void {
   database.exec(`
     PRAGMA foreign_keys = ON;
 
@@ -55,6 +55,17 @@ function createV15MultiLibraryFixture(database: Database.Database): void {
       is_primary INTEGER NOT NULL DEFAULT 0,
       add_time DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE video_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      video_id INTEGER NOT NULL,
+      label TEXT NOT NULL,
+      url TEXT NOT NULL,
+      normalized_url TEXT NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+      UNIQUE (video_id, normalized_url)
     );
 
     CREATE TABLE pending_scan_groups (
@@ -83,52 +94,6 @@ function createV15MultiLibraryFixture(database: Database.Database): void {
       FOREIGN KEY (group_id) REFERENCES pending_scan_groups(id) ON DELETE CASCADE
     );
 
-    CREATE TABLE agent_runs (
-      id TEXT PRIMARY KEY
-    );
-
-    CREATE TABLE agent_metadata_drafts (
-      id TEXT PRIMARY KEY,
-      run_id TEXT,
-      entity_kind TEXT NOT NULL CHECK(entity_kind IN ('video', 'actress')),
-      entity_id INTEGER NOT NULL,
-      adapter_schema_version INTEGER NOT NULL DEFAULT 1,
-      status TEXT NOT NULL CHECK(
-        status IN ('ready', 'applied', 'routed_to_pending', 'discarded', 'failed')
-      ),
-      revision INTEGER NOT NULL DEFAULT 1,
-      requested_url TEXT NOT NULL,
-      resolved_url TEXT,
-      display_url TEXT NOT NULL,
-      source_name TEXT,
-      page_title TEXT,
-      payload_json TEXT NOT NULL,
-      warnings_json TEXT NOT NULL DEFAULT '[]',
-      review_json TEXT,
-      review_token TEXT,
-      apply_idempotency_key TEXT,
-      outcome_json TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      applied_at TEXT,
-      FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE SET NULL
-    );
-
-    CREATE TABLE agent_metadata_draft_resources (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      draft_id TEXT NOT NULL,
-      field TEXT NOT NULL,
-      position INTEGER NOT NULL DEFAULT 0,
-      remote_url TEXT,
-      staged_path TEXT NOT NULL,
-      width INTEGER,
-      height INTEGER,
-      size_bytes INTEGER NOT NULL,
-      sha256 TEXT NOT NULL,
-      FOREIGN KEY (draft_id) REFERENCES agent_metadata_drafts(id) ON DELETE CASCADE,
-      UNIQUE (draft_id, field, position)
-    );
-
     INSERT INTO videos (id, code, title, add_time, updated_at) VALUES
       (7, 'ABC-001', 'Legacy local and link', '2024-01-02T03:04:05.000Z', NULL),
       (8, 'XYZ-002', 'Legacy STRM', '2024-02-03T04:05:06.000Z',
@@ -147,6 +112,14 @@ function createV15MultiLibraryFixture(database: Database.Database): void {
        'strm:/legacy/XYZ-002.strm', '/legacy/XYZ-002.strm',
        NULL, NULL, NULL, 'STRM', 1, '2024-02-03T04:05:06.000Z');
 
+    INSERT INTO video_links (video_id, label, url, normalized_url, position) VALUES
+      (7, 'www', 'https://www.example.test/video/7#detail',
+       'https://www.example.test/video/7', 0),
+      (7, 'apex', 'https://example.test/video/7',
+       'https://example.test/video/7', 1),
+      (7, 'credential', 'https://legacy:secret@secure.example.test/video/7#detail',
+       'https://legacy:secret@secure.example.test/video/7', 2);
+
     INSERT INTO pending_scan_groups (
       id, normalized_code, created_at, updated_at
     ) VALUES (
@@ -162,27 +135,11 @@ function createV15MultiLibraryFixture(database: Database.Database): void {
       '2024-04-05T06:07:08.000Z', '2024-04-06T07:08:09.000Z'
     );
 
-    INSERT INTO agent_runs (id) VALUES ('run-v15');
-    INSERT INTO agent_metadata_drafts (
-      id, run_id, entity_kind, entity_id, status, revision, requested_url,
-      display_url, payload_json, warnings_json, created_at, updated_at
-    ) VALUES (
-      'draft-v15', 'run-v15', 'video', 7, 'ready', 2,
-      'https://example.test/video/7', 'example.test/video/7',
-      '{"title":"Preserved Agent draft"}', '["preserve"]',
-      '2024-05-06T07:08:09.000Z', '2024-05-07T08:09:10.000Z'
-    );
-    INSERT INTO agent_metadata_draft_resources (
-      id, draft_id, field, position, remote_url, staged_path, size_bytes, sha256
-    ) VALUES (
-      51, 'draft-v15', 'cover', 0, 'https://example.test/cover.jpg',
-      '/staging/draft-v15-cover.jpg', 1234, 'abc123'
-    );
   `)
-  database.pragma(`user_version = ${V15_SCHEMA_VERSION}`)
+  database.pragma(`user_version = ${V13_SCHEMA_VERSION}`)
 }
 
-describe('V16 multi-library database migration', () => {
+describe('V14 unreleased feature consolidation migration', () => {
   it('creates a fresh database with one active default media library', () => {
     const database = new Database(':memory:')
     try {
@@ -190,7 +147,7 @@ describe('V16 multi-library database migration', () => {
 
       migrateDatabase(database)
 
-      assert.equal(CURRENT_SCHEMA_VERSION, 18)
+      assert.equal(CURRENT_SCHEMA_VERSION, 14)
       assert.equal(database.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       for (const table of [
         'media_libraries',
@@ -200,7 +157,16 @@ describe('V16 multi-library database migration', () => {
         'library_scan_runs',
         'media_library_scan_state',
         'library_unrecognized_files',
-        'library_root_cleanup_jobs'
+        'library_root_cleanup_jobs',
+        'agent_runs',
+        'agent_metadata_drafts',
+        'playlist_import_jobs',
+        'playlist_import_pages',
+        'playlist_import_scroll_batches',
+        'playlist_import_frontier',
+        'playlist_import_items',
+        'playlist_import_page_items',
+        'playlist_import_decisions'
       ]) {
         assert.equal(tableExists(database, table), true, `${table} should exist`)
       }
@@ -243,10 +209,10 @@ describe('V16 multi-library database migration', () => {
     }
   })
 
-  it('upgrades V15 data into the default library without losing catalog or Agent state', () => {
+  it('upgrades released V13 data into the default library and creates all V14 feature tables', () => {
     const database = new Database(':memory:')
     try {
-      createV15MultiLibraryFixture(database)
+      createV13ReleaseFixture(database)
 
       migrateDatabase(database)
 
@@ -257,18 +223,49 @@ describe('V16 multi-library database migration', () => {
           resources: rowCount(database, 'video_resources'),
           pendingGroups: rowCount(database, 'pending_scan_groups'),
           pendingResources: rowCount(database, 'pending_scan_resources'),
+          agentRuns: rowCount(database, 'agent_runs'),
           agentDrafts: rowCount(database, 'agent_metadata_drafts'),
-          agentDraftResources: rowCount(database, 'agent_metadata_draft_resources')
+          playlistImports: rowCount(database, 'playlist_import_jobs')
         },
         {
           videos: 2,
           resources: 3,
           pendingGroups: 1,
           pendingResources: 1,
-          agentDrafts: 1,
-          agentDraftResources: 1
+          agentRuns: 0,
+          agentDrafts: 0,
+          playlistImports: 0
         }
       )
+      assert.equal(columnNames(database, 'media_library_configs').has('default_cover_mode'), false)
+      assert.deepEqual(
+        database.prepare(
+          'SELECT label, url, normalized_url, position FROM video_links WHERE video_id = 7 ORDER BY position, id'
+        ).all(),
+        [
+          {
+            label: 'www',
+            url: 'https://www.example.test/video/7#detail',
+            normalized_url: 'https://example.test/video/7',
+            position: 0
+          },
+          {
+            label: 'credential',
+            url: 'https://secure.example.test/video/7#detail',
+            normalized_url: 'https://secure.example.test/video/7',
+            position: 2
+          }
+        ]
+      )
+      const playlistImportColumns = columnNames(database, 'playlist_import_jobs')
+      for (const column of [
+        'auto_create_unmatched_videos',
+        'save_detail_links',
+        'agent_suggested_playlist_name',
+        'save_source_playlist_link'
+      ]) {
+        assert.equal(playlistImportColumns.has(column), true, `${column} should exist in V14`)
+      }
 
       const defaultLibrary = database
         .prepare('SELECT id FROM media_libraries WHERE is_default = 1')
@@ -384,41 +381,38 @@ describe('V16 multi-library database migration', () => {
       assert.equal(Number.isInteger(pending.root_id), true)
       assert.equal(columnNames(database, 'pending_scan_resources').has('scan_root'), false)
 
-      assert.deepEqual(
-        database
-          .prepare(
-            `SELECT id, run_id, entity_kind, entity_id, status, revision,
-                    payload_json, warnings_json
-             FROM agent_metadata_drafts WHERE id = 'draft-v15'`
-          )
-          .get(),
-        {
-          id: 'draft-v15',
-          run_id: 'run-v15',
-          entity_kind: 'video',
-          entity_id: 7,
-          status: 'ready',
-          revision: 2,
-          payload_json: '{"title":"Preserved Agent draft"}',
-          warnings_json: '["preserve"]'
-        }
-      )
-      assert.deepEqual(
-        database
-          .prepare(
-            `SELECT id, draft_id, field, position, staged_path, size_bytes, sha256
-             FROM agent_metadata_draft_resources WHERE id = 51`
-          )
-          .get(),
-        {
-          id: 51,
-          draft_id: 'draft-v15',
-          field: 'cover',
-          position: 0,
-          staged_path: '/staging/draft-v15-cover.jpg',
-          size_bytes: 1234,
-          sha256: 'abc123'
-        }
+      assert.deepEqual(database.pragma('foreign_key_check'), [])
+    } finally {
+      database.close()
+    }
+  })
+
+  it('scopes pending path identity to each library in the final V14 schema', () => {
+    const database = new Database(':memory:')
+    try {
+      database.pragma('foreign_keys = ON')
+      migrateDatabase(database)
+      database.exec(`
+        INSERT INTO media_libraries (id, name) VALUES (2, 'Second library');
+        INSERT INTO media_library_roots (id, library_id, path, normalized_path)
+        VALUES (101, 1, '/library-one', '/library-one'),
+               (102, 2, '/library-two', '/library-two');
+        INSERT INTO pending_scan_groups (id, library_id, normalized_code)
+        VALUES (201, 1, 'SAME-001'), (202, 2, 'SAME-001');
+        INSERT INTO pending_scan_resources (
+          id, library_id, group_id, root_id, file_path, normalized_path
+        ) VALUES
+          (301, 1, 201, 101, '/library-one/SAME-001.mp4', '/shared/SAME-001.mp4'),
+          (302, 2, 202, 102, '/library-two/SAME-001.mp4', '/shared/SAME-001.mp4');
+      `)
+
+      assert.equal(rowCount(database, 'pending_scan_resources'), 2)
+      assert.throws(() =>
+        database.prepare(`
+          INSERT INTO pending_scan_resources (
+            library_id, group_id, root_id, file_path, normalized_path
+          ) VALUES (1, 201, 101, '/library-one/duplicate.mp4', '/shared/SAME-001.mp4')
+        `).run()
       )
       assert.deepEqual(database.pragma('foreign_key_check'), [])
     } finally {
@@ -539,10 +533,10 @@ describe('V16 multi-library database migration', () => {
     }
   })
 
-  it('rolls back V16 when legacy source paths normalize to the same identity', () => {
+  it('rolls back V14 when released source paths normalize to the same identity', () => {
     const database = new Database(':memory:')
     try {
-      createV15MultiLibraryFixture(database)
+      createV13ReleaseFixture(database)
       const aliasedPath = path.join('/legacy', 'nested', '..', 'ABC-001.mp4')
       assert.equal(
         normalizeLocalPathIdentity(aliasedPath),
@@ -562,7 +556,7 @@ describe('V16 multi-library database migration', () => {
         /(source[_ ]identity|源文件|源身份|重复.*路径)/i
       )
 
-      assert.equal(database.pragma('user_version', { simple: true }), V15_SCHEMA_VERSION)
+      assert.equal(database.pragma('user_version', { simple: true }), V13_SCHEMA_VERSION)
       assert.equal(tableExists(database, 'media_libraries'), false)
       assert.equal(rowCount(database, 'videos'), 2)
       assert.equal(rowCount(database, 'video_resources'), 4)

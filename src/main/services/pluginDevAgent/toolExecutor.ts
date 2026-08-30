@@ -295,6 +295,45 @@ async function executeBrowserAction(input: {
           ...(target ? { target } : {})
         }
         break
+      case 'scroll': {
+        const direction = args.direction
+        if (direction !== 'up' && direction !== 'down' && direction !== 'start') {
+          return toolError(
+            'BROWSER_SCROLL_DIRECTION_INVALID',
+            'browser action=scroll 时 direction 必须为 up、down 或 start。'
+          )
+        }
+        if (direction === 'start') {
+          if (args.amount !== undefined) {
+            return toolError(
+              'BROWSER_SCROLL_AMOUNT_INVALID',
+              'browser action=scroll 且 direction=start 时不得提供 amount。'
+            )
+          }
+          command = { action, direction, ...(target ? { target } : {}) }
+          break
+        }
+        const amount = args.amount
+        if (
+          amount !== undefined &&
+          amount !== 'eighth-viewport' &&
+          amount !== 'quarter-viewport' &&
+          amount !== 'half-viewport' &&
+          amount !== 'viewport'
+        ) {
+          return toolError(
+            'BROWSER_SCROLL_AMOUNT_INVALID',
+            'browser action=scroll 的 amount 必须为 eighth-viewport、quarter-viewport、half-viewport 或 viewport。'
+          )
+        }
+        command = {
+          action,
+          direction,
+          ...(target ? { target } : {}),
+          ...(amount ? { amount } : {})
+        }
+        break
+      }
       case 'wait':
         command = {
           action,
@@ -366,7 +405,7 @@ export async function executeTool(
     if (toolName === 'browser') {
       if (!session.workspaceDirectory) return toolError('WORKSPACE_NOT_READY', '插件工作区尚未初始化。')
       const action = typeof args.action === 'string' ? args.action : undefined
-      if (!action || !['open', 'snapshot', 'find', 'html', 'evaluate', 'click', 'fill', 'press', 'wait', 'status', 'read-section', 'handoff'].includes(action)) {
+      if (!action || !['open', 'snapshot', 'find', 'html', 'evaluate', 'click', 'fill', 'press', 'scroll', 'wait', 'status', 'read-section', 'handoff'].includes(action)) {
         return toolError('BROWSER_ACTION_INVALID', 'browser.action 无效。')
       }
       const { action: _action, ...browserArgs } = args

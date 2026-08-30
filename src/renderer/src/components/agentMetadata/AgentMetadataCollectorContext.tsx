@@ -35,10 +35,15 @@ import {
   invalidateActressLibraryQueries,
   invalidateVideoLibraryQueries
 } from '../../query/invalidateLibraryQueries'
+import {
+  AgentWorkspaceModal,
+  AgentWorkspacePane,
+  AgentWorkspacePaneBody,
+  AgentWorkspacePaneHeader
+} from '../AgentWorkspace'
 import Button from '../Button'
 import ConfirmModal from '../ConfirmModal'
 import EmptyState from '../EmptyState'
-import Modal from '../Modal'
 import SelectControl from '../SelectControl'
 import { useToast } from '../Toast'
 import { UI_ICON_SM } from '../iconDefaults'
@@ -492,13 +497,9 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
     <AgentMetadataCollectorContext.Provider value={contextValue}>
       {children}
       {visible ? (
-        <Modal
+        <AgentWorkspaceModal
           title={modalTitle}
           hint="和「修正匹配」不同：这里由你指定网页，Agent 读取后抽出资料，写入前必须预览确认。"
-          size="xl"
-          className={styles.collectorModal}
-          bodyClassName={styles.collectorBody}
-          bodyOverflow="hidden"
           busy={busy}
           dismissible={!busy}
           onCancel={close}
@@ -524,22 +525,19 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
             </>
           )}
         >
-          <div className={styles.workspace}>
-            <section className={styles.conversationPane} aria-label="Agent 运行">
+          <AgentWorkspacePane label="Agent 运行">
               {snapshot ? (
                 <AgentMetadataActivityFeed key={snapshot.runId} snapshot={snapshot} />
               ) : (
                 <>
-                  <header className={styles.paneHeader}>
-                    <span className={styles.paneIcon}><Bot {...UI_ICON_SM} aria-hidden /></span>
-                    <span className={styles.paneHeaderCopy}>
-                      <strong className={styles.paneTitle}>Agent 运行</strong>
-                      <small className={styles.paneHint}>
-                        {draft ? '已载入此前保存的采集草稿。' : `粘贴${setupSubject(target?.kind)}的详情页地址。`}
-                      </small>
-                    </span>
-                    <span className={styles.paneStatus}>{draft ? '已完成' : '待开始'}</span>
-                  </header>
+                  <AgentWorkspacePaneHeader
+                    icon={<Bot {...UI_ICON_SM} aria-hidden />}
+                    title="Agent 运行"
+                    hint={draft
+                      ? '已载入此前保存的采集草稿。'
+                      : `粘贴${setupSubject(target?.kind)}的详情页地址。`}
+                    status={draft ? '已完成' : '待开始'}
+                  />
                   {draft ? (
                     <EmptyState
                       variant="fill"
@@ -548,7 +546,7 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
                       description="当前只保留采集结果；你可以在右侧继续预览和应用。"
                     />
                   ) : (
-                    <div className={styles.setupBody}>
+                    <AgentWorkspacePaneBody variant="setup">
                       <AgentMetadataSetupIntro kind={target?.kind} />
                       <div className={styles.sourceForm}>
                         <label htmlFor="agent-metadata-source-url">外部详情页 URL</label>
@@ -567,27 +565,27 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
                           }}
                         />
                       </div>
-                    </div>
+                    </AgentWorkspacePaneBody>
                   )}
                 </>
               )}
-            </section>
+          </AgentWorkspacePane>
 
-            <section className={styles.resultPane} aria-label="结果预览">
-              <header className={styles.paneHeader}>
-                <span className={styles.paneIcon}><Database {...UI_ICON_SM} aria-hidden /></span>
-                <span className={styles.paneHeaderCopy}>
-                  <strong className={styles.paneTitle}>结果预览</strong>
-                  <small className={styles.paneHint} title={draft?.source.displayUrl}>
-                    {draft ? `来源：${draft.source.displayUrl}` : '采集完成后在这里勾选要写入的字段。'}
-                  </small>
-                </span>
-                <span className={styles.paneStatus} data-ready={Boolean(draft) || undefined}>
-                  {draft ? `${draft.payload.observedFields.length} 个字段` : collectionIsActive(snapshot) ? '采集中' : '等待结果'}
-                </span>
-              </header>
+          <AgentWorkspacePane label="结果预览">
+              <AgentWorkspacePaneHeader
+                icon={<Database {...UI_ICON_SM} aria-hidden />}
+                title="结果预览"
+                hint={draft
+                  ? `来源：${draft.source.displayUrl}`
+                  : '采集完成后在这里勾选要写入的字段。'}
+                hintTitle={draft?.source.displayUrl}
+                status={draft
+                  ? `${draft.payload.observedFields.length} 个字段`
+                  : collectionIsActive(snapshot) ? '采集中' : '等待结果'}
+                ready={Boolean(draft)}
+              />
 
-              <div className={styles.resultBody}>
+              <AgentWorkspacePaneBody variant="result">
                 {error ? <div className={styles.error} role="alert">{error}</div> : null}
 
                 {draft ? (
@@ -745,10 +743,9 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
                       : 'Agent 提交经过验证的字段后，在这里选择应用方式和要写入的内容。'}
                   />
                 )}
-              </div>
-            </section>
-          </div>
-        </Modal>
+              </AgentWorkspacePaneBody>
+          </AgentWorkspacePane>
+        </AgentWorkspaceModal>
       ) : null}
       {confirmation ? (
         <ConfirmModal

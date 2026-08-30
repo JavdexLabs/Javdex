@@ -97,4 +97,21 @@ describe('AgentConfiguration', () => {
     ])
     assert.deepEqual(profile.approvalRequiredEffects, [])
   })
+
+  it('registers playlist import as an independent least-privilege use case', () => {
+    const configuration = new AgentConfiguration({ read: snapshot })
+    const { profile, definition, workload } = configuration.getProfile(
+      'profile:playlist-importer:default'
+    )
+
+    assert.equal(definition.id, 'playlist-importer')
+    assert.equal(workload.workloadId, 'library-curator')
+    assert.deepEqual(profile.toolPackRefs, ['toolpack:playlist-importer:v1'])
+    assert.deepEqual(profile.capabilityGrants, [
+      'browser.read',
+      'playlist-import.stage-page',
+      'playlist-import.stage-identity'
+    ])
+    assert.deepEqual(profile.approvalRequiredEffects, [])
+  })
 })

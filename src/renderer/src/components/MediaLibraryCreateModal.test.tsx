@@ -116,6 +116,22 @@ describe('MediaLibraryCreateModal', () => {
     )
     assert.equal(button('下一步').props.type, 'submit')
     assert.equal(button('下一步').props.form, 'media-library-create-step-form')
+    assert.equal(renderer.root.findAllByType('legend')[0]?.children.join(''), '媒体库图标')
+    assert.equal(renderer.root.findAllByType('legend')[1]?.children.join(''), '标识颜色')
+
+    act(() => renderer?.root.findByProps({ 'aria-label': '影片' }).props.onClick())
+    assert.equal(renderer.root.findByProps({ 'aria-label': '影片' }).props['aria-pressed'], true)
+    assert.equal(renderer.root.findByProps({ 'aria-label': '媒体库' }).props['aria-pressed'], false)
+
+    act(() => renderer?.root.findByProps({ 'aria-label': '强调色：玫红' }).props.onClick())
+    assert.equal(
+      renderer.root.findByProps({ 'aria-label': '强调色：玫红' }).props['aria-pressed'],
+      true
+    )
+    assert.equal(
+      renderer.root.findByProps({ 'aria-label': '强调色：中性' }).props['aria-pressed'],
+      false
+    )
 
     act(() => submitStep())
     assert.match(renderedText(), /请输入媒体库名称后再继续/)

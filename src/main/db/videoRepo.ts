@@ -654,24 +654,33 @@ export function purgeVideo(id: number): { obsoletePaths: string[] } {
 
 export function purgeResourceLessVideos(): { deleted: number; obsoletePaths: string[] } {
   const db = getDb()
-  const candidates = db
-    .prepare(
-      `SELECT id, cover_path
-       FROM videos v
-       WHERE NOT EXISTS (
-         SELECT 1 FROM video_resources vr WHERE vr.video_id = v.id
-       )
-       ORDER BY id ASC`
-    )
-    .all() as Array<{ id: number; cover_path: string | null }>
-  if (candidates.length === 0) return { deleted: 0, obsoletePaths: [] }
-
-  const hints = candidates.map((candidate) => collectVideoLibraryCleanupHints(candidate.id))
-  const obsoletePaths = db.transaction(() => {
+  const result = db.transaction(() => {
+    // Select and delete under the same SQLite write transaction so a newly-added
+    // resource or playlist reference cannot be lost between the two steps.
+    const candidates = db
+      .prepare(
+        `SELECT id, cover_path
+         FROM videos v
+         WHERE NOT EXISTS (
+           SELECT 1 FROM video_resources vr WHERE vr.video_id = v.id
+         )
+           AND NOT EXISTS (
+             SELECT 1 FROM playlist_video pv WHERE pv.video_id = v.id
+           )
+         ORDER BY id ASC`
+      )
+      .all() as Array<{ id: number; cover_path: string | null }>
+    const hints: ReturnType<typeof collectVideoLibraryCleanupHints>[] = []
     const paths: string[] = []
+    let deleted = 0
+    const guardedDelete = db.prepare(
+      `DELETE FROM videos
+       WHERE id = ?
+         AND NOT EXISTS (SELECT 1 FROM video_resources WHERE video_id = videos.id)
+         AND NOT EXISTS (SELECT 1 FROM playlist_video WHERE video_id = videos.id)`
+    )
     for (const candidate of candidates) {
-      paths.push(
-        ...(
+      const stagedPaths = (
           db
             .prepare(
               `SELECT resource.staged_path
@@ -686,22 +695,32 @@ export function purgeResourceLessVideos(): { deleted: number; obsoletePaths: str
             )
             .all(candidate.id) as Array<{ staged_path: string }>
         ).map((row) => row.staged_path)
-      )
-      paths.push(...deleteVideoAssetRows(candidate.id))
+      const assetPaths = (db.prepare(
+        'SELECT local_path FROM video_assets WHERE video_id = ? AND local_path IS NOT NULL'
+      ).all(candidate.id) as Array<{ local_path: string }>).map((row) => row.local_path)
+      const hint = collectVideoLibraryCleanupHints(candidate.id)
+      const removed = guardedDelete.run(candidate.id)
+      if (removed.changes === 0) continue
+      deleted += 1
+      hints.push(hint)
+      paths.push(...stagedPaths, ...assetPaths)
       if (candidate.cover_path) paths.push(candidate.cover_path)
-      deleteVideo(candidate.id)
     }
-    return Array.from(new Set(paths))
+    return {
+      deleted,
+      hints,
+      obsoletePaths: Array.from(new Set(paths))
+    }
   })()
 
   try {
     runLibraryCleanup({
-      actressIds: hints.flatMap((hint) => hint.actressIds ?? [])
+      actressIds: result.hints.flatMap((hint) => hint.actressIds ?? [])
     })
   } catch (error) {
     console.error('Post-commit library cleanup failed:', error)
   }
-  return { deleted: candidates.length, obsoletePaths }
+  return { deleted: result.deleted, obsoletePaths: result.obsoletePaths }
 }
 
 export interface LocalVideoResourceRef {

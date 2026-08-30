@@ -324,7 +324,7 @@ CREATE INDEX IF NOT EXISTS idx_video_lifecycle_operations_created
     ON video_lifecycle_operations(created_at);
 `
 
-export const VIDEO_RESOURCES_V16_SCHEMA_SQL = `
+export const MEDIA_LIBRARY_VIDEO_RESOURCES_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS video_resources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     library_id INTEGER NOT NULL,
@@ -689,6 +689,9 @@ CREATE TABLE IF NOT EXISTS agent_product_journal (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_product_journal_run_seq
     ON agent_product_journal(run_id, seq);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_product_journal_operation
+    ON agent_product_journal(run_id, event_type, operation_id)
+    WHERE operation_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS agent_execution_history (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -798,6 +801,199 @@ CREATE INDEX IF NOT EXISTS idx_agent_metadata_draft_resources_draft
     ON agent_metadata_draft_resources(draft_id, field, position);
 `
 
+export const PLAYLIST_IMPORT_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS playlist_import_jobs (
+    run_id TEXT PRIMARY KEY,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    input_hash TEXT NOT NULL,
+    policy_version INTEGER NOT NULL DEFAULT 1,
+    phase TEXT NOT NULL CHECK(phase IN (
+      'discovering-list', 'resolving-identities', 'waiting_user',
+      'ready-to-apply', 'applying', 'completed', 'failed', 'cancelled'
+    )),
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+    source_url TEXT NOT NULL,
+    normalized_source_url TEXT NOT NULL,
+    source_host TEXT NOT NULL,
+    destination_kind TEXT NOT NULL CHECK(destination_kind IN ('create', 'append')),
+    requested_playlist_id INTEGER,
+    requested_playlist_name TEXT,
+    agent_suggested_playlist_name TEXT,
+    resolved_playlist_id INTEGER,
+    target_library_id INTEGER NOT NULL,
+    target_library_name_snapshot TEXT NOT NULL,
+    auto_create_unmatched_videos INTEGER NOT NULL DEFAULT 1
+        CHECK(auto_create_unmatched_videos IN (0, 1)),
+    save_detail_links INTEGER NOT NULL DEFAULT 1 CHECK(save_detail_links IN (0, 1)),
+    save_source_playlist_link INTEGER NOT NULL DEFAULT 0
+        CHECK(save_source_playlist_link IN (0, 1)),
+    counters_json TEXT NOT NULL DEFAULT '{}',
+    apply_idempotency_key TEXT,
+    outcome_json TEXT,
+    error_code TEXT,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    committed_at TEXT,
+    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+    FOREIGN KEY (resolved_playlist_id) REFERENCES playlists(id) ON DELETE SET NULL,
+    CHECK(
+      (destination_kind = 'create' AND requested_playlist_id IS NULL)
+      OR (destination_kind = 'append' AND requested_playlist_id IS NOT NULL)
+    )
+);
+
+CREATE TABLE IF NOT EXISTS playlist_import_pages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    page_key TEXT NOT NULL,
+    page_order INTEGER NOT NULL CHECK(page_order >= 0),
+    page_url TEXT NOT NULL,
+    normalized_page_url TEXT NOT NULL,
+    document_revision TEXT NOT NULL,
+    initial_view_revision TEXT NOT NULL,
+    enumeration_kind TEXT NOT NULL CHECK(enumeration_kind IN (
+      'static-dom', 'virtual-scroll', 'load-more'
+    )),
+    enumeration_status TEXT NOT NULL CHECK(enumeration_status IN ('open', 'sealed')),
+    container_contract_json TEXT,
+    position_mode TEXT CHECK(position_mode IS NULL OR position_mode IN (
+      'aria-posinset', 'attribute', 'overlap'
+    )),
+    sequence_digest TEXT,
+    content_hash TEXT,
+    evidence_ref TEXT NOT NULL,
+    advance_json TEXT,
+    observed_item_count INTEGER NOT NULL DEFAULT 0 CHECK(observed_item_count >= 0),
+    declared_total_items INTEGER,
+    declared_total_pages INTEGER,
+    checkpointed_at TEXT NOT NULL,
+    sealed_at TEXT,
+    FOREIGN KEY (run_id) REFERENCES playlist_import_jobs(run_id) ON DELETE CASCADE,
+    UNIQUE (run_id, page_key),
+    UNIQUE (run_id, page_order)
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_import_pages_url
+    ON playlist_import_pages(run_id, normalized_page_url);
+
+CREATE TABLE IF NOT EXISTS playlist_import_scroll_batches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    page_id INTEGER NOT NULL,
+    batch_order INTEGER NOT NULL CHECK(batch_order >= 0),
+    operation_key TEXT NOT NULL,
+    view_revision TEXT NOT NULL,
+    container_fingerprint TEXT NOT NULL,
+    scroll_top REAL NOT NULL,
+    scroll_height REAL NOT NULL,
+    client_height REAL NOT NULL,
+    ordered_occurrence_keys_json TEXT NOT NULL,
+    rendered_item_count INTEGER NOT NULL CHECK(rendered_item_count >= 0),
+    new_occurrence_count INTEGER NOT NULL CHECK(new_occurrence_count >= 0),
+    batch_digest TEXT NOT NULL,
+    accumulated_sequence_digest TEXT NOT NULL,
+    first_anchor_key TEXT,
+    last_anchor_key TEXT,
+    at_start INTEGER NOT NULL CHECK(at_start IN (0, 1)),
+    at_end INTEGER NOT NULL CHECK(at_end IN (0, 1)),
+    terminal_probe_count INTEGER NOT NULL DEFAULT 0 CHECK(terminal_probe_count >= 0),
+    evidence_ref TEXT NOT NULL,
+    checkpointed_at TEXT NOT NULL,
+    FOREIGN KEY (page_id) REFERENCES playlist_import_pages(id) ON DELETE CASCADE,
+    UNIQUE (page_id, batch_order),
+    UNIQUE (page_id, operation_key)
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_import_scroll_batches_page
+    ON playlist_import_scroll_batches(page_id, batch_order);
+
+CREATE TABLE IF NOT EXISTS playlist_import_frontier (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    source_page_id INTEGER,
+    kind TEXT NOT NULL CHECK(kind IN ('url', 'click', 'scroll')),
+    target_json TEXT NOT NULL,
+    canonical_key TEXT NOT NULL,
+    order_hint INTEGER,
+    status TEXT NOT NULL CHECK(status IN (
+      'pending', 'in-flight', 'checkpointed', 'no-progress', 'denied'
+    )),
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+    replay_chain_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES playlist_import_jobs(run_id) ON DELETE CASCADE,
+    FOREIGN KEY (source_page_id) REFERENCES playlist_import_pages(id) ON DELETE CASCADE,
+    UNIQUE (run_id, canonical_key)
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_import_frontier_next
+    ON playlist_import_frontier(run_id, status, order_hint, id);
+
+CREATE TABLE IF NOT EXISTS playlist_import_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    first_page_id INTEGER NOT NULL,
+    source_position INTEGER NOT NULL CHECK(source_position >= 0),
+    raw_code TEXT,
+    normalized_code TEXT,
+    title TEXT,
+    detail_url TEXT NOT NULL,
+    normalized_detail_url TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN (
+      'discovered', 'needs-detail', 'needs-user',
+      'planned-reuse', 'planned-create', 'applied', 'failed'
+    )),
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+    candidate_snapshot_json TEXT,
+    detail_identity_json TEXT,
+    detail_evidence_ref TEXT,
+    resolution_kind TEXT CHECK(resolution_kind IS NULL OR resolution_kind IN (
+      'direct-code', 'detail-url', 'source-id', 'business-identity',
+      'target-library-tiebreak', 'user-existing', 'user-create', 'create-no-match'
+    )),
+    resolved_video_id INTEGER,
+    error_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES playlist_import_jobs(run_id) ON DELETE CASCADE,
+    FOREIGN KEY (first_page_id) REFERENCES playlist_import_pages(id) ON DELETE CASCADE,
+    FOREIGN KEY (resolved_video_id) REFERENCES videos(id) ON DELETE SET NULL,
+    UNIQUE (run_id, normalized_detail_url),
+    UNIQUE (run_id, source_position)
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_import_items_state
+    ON playlist_import_items(run_id, state, source_position);
+CREATE INDEX IF NOT EXISTS idx_playlist_import_items_code
+    ON playlist_import_items(run_id, normalized_code);
+
+CREATE TABLE IF NOT EXISTS playlist_import_page_items (
+    page_id INTEGER NOT NULL,
+    item_id INTEGER NOT NULL,
+    source_occurrence_key TEXT NOT NULL,
+    source_position INTEGER NOT NULL CHECK(source_position >= 0),
+    page_position INTEGER NOT NULL CHECK(page_position >= 0),
+    raw_evidence_json TEXT NOT NULL,
+    PRIMARY KEY (page_id, source_occurrence_key),
+    FOREIGN KEY (page_id) REFERENCES playlist_import_pages(id) ON DELETE CASCADE,
+    FOREIGN KEY (item_id) REFERENCES playlist_import_items(id) ON DELETE CASCADE,
+    UNIQUE (page_id, page_position)
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_import_page_items_item
+    ON playlist_import_page_items(item_id, page_id, page_position);
+
+CREATE TABLE IF NOT EXISTS playlist_import_decisions (
+    item_id INTEGER PRIMARY KEY,
+    expected_item_revision INTEGER NOT NULL CHECK(expected_item_revision > 0),
+    choice_kind TEXT NOT NULL CHECK(choice_kind IN ('existing', 'create')),
+    chosen_video_id INTEGER,
+    decided_at TEXT NOT NULL,
+    FOREIGN KEY (item_id) REFERENCES playlist_import_items(id) ON DELETE CASCADE,
+    FOREIGN KEY (chosen_video_id) REFERENCES videos(id) ON DELETE SET NULL,
+    CHECK(
+      (choice_kind = 'existing' AND chosen_video_id IS NOT NULL)
+      OR (choice_kind = 'create' AND chosen_video_id IS NULL)
+    )
+);
+`
+
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
 
@@ -846,7 +1042,7 @@ CREATE INDEX IF NOT EXISTS idx_videos_director_id ON videos(director_id);
 
 ${MEDIA_LIBRARY_MEMBERSHIP_SCHEMA_SQL}
 
-${VIDEO_RESOURCES_V16_SCHEMA_SQL}
+${MEDIA_LIBRARY_VIDEO_RESOURCES_SCHEMA_SQL}
 
 ${PENDING_LOCAL_FILE_DELETIONS_SCHEMA_SQL}
 
@@ -1090,4 +1286,6 @@ ${RELATED_LINKS_SCHEMA_SQL}
 ${AGENT_PLATFORM_SCHEMA_SQL}
 
 ${AGENT_METADATA_SCHEMA_SQL}
+
+${PLAYLIST_IMPORT_SCHEMA_SQL}
 `

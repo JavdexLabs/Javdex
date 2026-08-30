@@ -770,7 +770,7 @@ function importLegacySettings(
 }
 
 /**
- * Move the last single-library settings snapshot into the V16 default library.
+ * Move the last single-library settings snapshot into the V14 default library.
  * The database commit is the idempotency boundary; JSON cleanup is best effort.
  */
 export function bootstrapLegacyMediaLibrary(

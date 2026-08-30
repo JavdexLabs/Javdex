@@ -299,6 +299,51 @@ const agentMetadataPlan = z.discriminatedUnion('kind', [
   }).strict()
 ])
 
+const playlistImportDestination = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('create'),
+    requestedName: text.max(500).optional()
+  }).strict(),
+  z.object({ kind: z.literal('append'), playlistId: id }).strict()
+])
+const playlistImportStart = z.object({
+  idempotencyKey: nonEmptyText.max(200),
+  sourceUrl: nonEmptyText.max(4_096),
+  targetLibraryId: id,
+  destination: playlistImportDestination,
+  autoCreateUnmatchedVideos: z.boolean().optional().default(true),
+  saveDetailLinks: z.boolean().optional().default(true),
+  saveSourcePlaylistLink: z.boolean().optional().default(false)
+}).strict()
+const playlistImportControl = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('resume-browser'),
+    requestId: nonEmptyText.max(500),
+    idempotencyKey: nonEmptyText.max(200)
+  }).strict(),
+  z.object({
+    kind: z.literal('retry'),
+    expectedRevision: revision,
+    idempotencyKey: nonEmptyText.max(200)
+  }).strict(),
+  z.object({
+    kind: z.literal('resolve-identities'),
+    expectedRevision: revision,
+    idempotencyKey: nonEmptyText.max(200),
+    decisions: z.array(z.object({
+      itemId: id,
+      choice: z.discriminatedUnion('kind', [
+        z.object({ kind: z.literal('existing'), videoId: id }).strict(),
+        z.object({ kind: z.literal('create') }).strict()
+      ])
+    }).strict()).min(1).max(500)
+  }).strict(),
+  z.object({
+    kind: z.literal('cancel'),
+    idempotencyKey: nonEmptyText.max(200)
+  }).strict()
+])
+
 const pluginPackage = z
   .object({
     schemaVersion: z.literal(1),
@@ -705,6 +750,9 @@ export const appIpcSchemas = {
   [IPC.AGENT_METADATA_DISCARD]: z.tuple([
     z.object({ draftId: nonEmptyText, expectedRevision: revision }).strict()
   ]),
+  [IPC.PLAYLIST_IMPORT_START]: z.tuple([playlistImportStart]),
+  [IPC.PLAYLIST_IMPORT_SNAPSHOT]: z.tuple([nonEmptyText.optional()]),
+  [IPC.PLAYLIST_IMPORT_CONTROL]: z.tuple([nonEmptyText, playlistImportControl]),
   [IPC.PLAYER_PLAY]: z.tuple([id, id]),
   [IPC.PLAYER_REVEAL]: z.tuple([id, id]),
   [IPC.PLAYER_OPEN_RESOURCE]: z.tuple([id, id]),

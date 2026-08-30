@@ -1,11 +1,11 @@
 import { sanitizeUnicodeScalars, truncateUnicode } from '@shared/unicodeText'
+import { AGENT_REASONING_TEXT_CHAR_LIMIT } from '@shared/agentReasoning'
 import type { AgentMetadataActivity } from '@shared/agentMetadataTypes'
 import type { RuntimeObservation } from '../../agent-platform/types'
 
 // Each entry is independently bounded below. Action noise is capped, while reasoning turns remain
 // available for the complete run so every historical thought can still be expanded by the user.
 const MAX_ACTIVITIES = 256
-const MAX_REASONING_CHARS = 6_000
 const MAX_SUMMARY_CHARS = 240
 
 function browserActionLabel(action: unknown): string {
@@ -16,6 +16,7 @@ function browserActionLabel(action: unknown): string {
     html: '提取页面标记',
     evaluate: '解析页面数据',
     click: '展开页面内容',
+    scroll: '滚动页面内容',
     wait: '等待页面加载',
     status: '检查页面状态',
     'read-section': '读取页面证据',
@@ -26,6 +27,10 @@ function browserActionLabel(action: unknown): string {
 function toolLabel(tool: string, args?: Record<string, unknown>): string {
   if (tool === 'browser') return browserActionLabel(args?.action)
   if (tool === 'submit_metadata_candidate') return '验证并保存元数据候选'
+  if (tool === 'checkpoint_playlist_page') return '固化当前清单页'
+  if (tool === 'advance_playlist_page') return '进入下一清单窗口'
+  if (tool === 'open_playlist_item_detail') return '打开待确认影片详情'
+  if (tool === 'checkpoint_playlist_detail') return '核对影片详情身份'
   return '执行 Agent 操作'
 }
 
@@ -143,7 +148,10 @@ export class AgentMetadataActivityTimeline {
       this.append(reasoning)
     }
     reasoning.charCount += Array.from(safe).length
-    const available = Math.max(0, MAX_REASONING_CHARS - Array.from(reasoning.text).length)
+    const available = Math.max(
+      0,
+      AGENT_REASONING_TEXT_CHAR_LIMIT - Array.from(reasoning.text).length
+    )
     const visible = truncateUnicode(safe, available)
     reasoning.text += visible
     if (visible !== safe) reasoning.truncated = true

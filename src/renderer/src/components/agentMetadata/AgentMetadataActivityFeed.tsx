@@ -11,21 +11,28 @@ import {
   UserRoundCheck
 } from 'lucide-react'
 import type {
-  AgentMetadataActivity,
-  AgentMetadataSnapshot
+  AgentMetadataActivity
 } from '@shared/agentMetadataTypes'
+import { AGENT_REASONING_TEXT_CHAR_LIMIT } from '@shared/agentReasoning'
 import { UI_ICON_SM } from '../iconDefaults'
 import styles from './AgentMetadataActivityFeed.module.css'
 
 type ReasoningActivity = Extract<AgentMetadataActivity, { kind: 'reasoning' }>
 type ActionActivity = Extract<AgentMetadataActivity, { kind: 'action' }>
 
+interface AgentActivitySnapshot {
+  phase: string
+  summary: string
+  activities: AgentMetadataActivity[]
+  handoff?: { prompt: string }
+}
+
 function compactText(value: string, maxLength = 96): string {
   const compact = value.replace(/\s+/gu, ' ').trim()
   return compact.length > maxLength ? `${compact.slice(0, maxLength - 1)}…` : compact
 }
 
-function phaseHint(snapshot: AgentMetadataSnapshot): string {
+function phaseHint(snapshot: AgentActivitySnapshot): string {
   if (snapshot.phase === 'preparing') return '正在校验采集结果并暂存图片。'
   if (snapshot.phase === 'waiting_user') return '已暂停，等待你完成必要的页面操作。'
   if (snapshot.phase === 'ready') return '采集已完成，可以在右侧检查结果。'
@@ -38,7 +45,7 @@ function phaseHint(snapshot: AgentMetadataSnapshot): string {
   return '正在核对身份并读取可预览的元数据。'
 }
 
-function phaseLabel(snapshot: AgentMetadataSnapshot): string {
+function phaseLabel(snapshot: AgentActivitySnapshot): string {
   if (snapshot.phase === 'collecting' || snapshot.phase === 'preparing') return '进行中'
   if (snapshot.phase === 'waiting_user') return '等待操作'
   if (snapshot.phase === 'ready') return '已完成'
@@ -63,7 +70,10 @@ function ActionIcon({ activity }: { activity: ActionActivity }): JSX.Element {
   }
   if (activity.status === 'error') return <CircleX {...UI_ICON_SM} aria-hidden />
   if (activity.tool === 'browser') return <Globe2 {...UI_ICON_SM} aria-hidden />
-  if (activity.tool === 'submit_metadata_candidate') return <Database {...UI_ICON_SM} aria-hidden />
+  if (
+    activity.tool === 'submit_metadata_candidate' ||
+    activity.tool.startsWith('checkpoint_playlist_')
+  ) return <Database {...UI_ICON_SM} aria-hidden />
   return <CheckCircle2 {...UI_ICON_SM} aria-hidden />
 }
 
@@ -135,7 +145,9 @@ function ReasoningItem({
           {activity.text || '正在生成思考内容…'}
         </div>
         {activity.truncated ? (
-          <div className={styles.reasoningNotice}>内容较长，仅保留前 6,000 个字符。</div>
+          <div className={styles.reasoningNotice}>
+            内容较长，仅保留前 {AGENT_REASONING_TEXT_CHAR_LIMIT.toLocaleString('zh-CN')} 个字符。
+          </div>
         ) : null}
       </details>
     </div>
@@ -151,9 +163,17 @@ function runningReasoningIds(activities: AgentMetadataActivity[]): Set<string> {
 }
 
 export default function AgentMetadataActivityFeed({
-  snapshot
+  snapshot,
+  live: liveOverride,
+  statusLabel,
+  statusHint,
+  handoffPrompt
 }: {
-  snapshot: AgentMetadataSnapshot
+  snapshot: AgentActivitySnapshot
+  live?: boolean
+  statusLabel?: string
+  statusHint?: string
+  handoffPrompt?: string
 }): JSX.Element {
   const logRef = useRef<HTMLDivElement | null>(null)
   const followTailRef = useRef(true)
@@ -238,7 +258,8 @@ export default function AgentMetadataActivityFeed({
     }
   }
 
-  const live = snapshot.phase === 'collecting' || snapshot.phase === 'preparing'
+  const live = liveOverride ?? (snapshot.phase === 'collecting' || snapshot.phase === 'preparing')
+  const prompt = handoffPrompt ?? snapshot.handoff?.prompt
 
   return (
     <section className={styles.feed} aria-label="Agent 运行">
@@ -251,10 +272,12 @@ export default function AgentMetadataActivityFeed({
         <span className={styles.headerCopy}>
           <span className={styles.headerTitleLine}>
             <strong className={styles.paneTitle}>Agent 运行</strong>
-            <span className={styles.phase} data-phase={snapshot.phase}>{phaseLabel(snapshot)}</span>
+            <span className={styles.phase} data-phase={snapshot.phase}>
+              {statusLabel ?? phaseLabel(snapshot)}
+            </span>
           </span>
           <span className={styles.summary}>{snapshot.summary}</span>
-          <small className={styles.hint}>{phaseHint(snapshot)}</small>
+          <small className={styles.hint}>{statusHint ?? phaseHint(snapshot)}</small>
         </span>
         <span className={styles.activityCount}>{snapshot.activities.length}</span>
       </header>
@@ -306,12 +329,12 @@ export default function AgentMetadataActivityFeed({
         ) : null}
       </div>
 
-      {snapshot.phase === 'waiting_user' && snapshot.handoff ? (
+      {snapshot.phase === 'waiting_user' && prompt ? (
         <div className={styles.handoff} role="status">
           <UserRoundCheck {...UI_ICON_SM} aria-hidden />
           <span className={styles.handoffCopy}>
             <strong className={styles.handoffTitle}>需要你完成页面操作</strong>
-            <small className={`${styles.handoffText} selectable-text`}>{snapshot.handoff.prompt}</small>
+            <small className={`${styles.handoffText} selectable-text`}>{prompt}</small>
           </span>
         </div>
       ) : null}

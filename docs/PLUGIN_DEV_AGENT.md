@@ -65,10 +65,10 @@ ToolPack `toolpack:plugin-developer:v1` 只有三个自定义工具：
 | 工具 | 用途 |
 |---|---|
 | `plugin_dry_run` | 在生产沙箱执行当前工作区插件，返回真实结果和生产投影事实 |
-| `browser` | `open/snapshot/find/html/evaluate/click/fill/press/wait/status/read-section/handoff`；artifact 分区读取不获取浏览器租约 |
+| `browser` | `open/snapshot/find/html/evaluate/click/fill/press/scroll/wait/status/read-section/handoff`；artifact 分区读取不获取浏览器租约 |
 | `ask_user` | 创建绑定 requestId 的 choice/freeform 请求 |
 
-`browser` 的输入使用按 action 区分的 schema：例如 `open` 必须有 `url`，`click` 必须有 `target`，`fill` 必须有 `target/text`，`read-section` 必须有 `artifactRef/section`，`handoff` 必须有 `reason`；各分支拒绝其他 action 的参数。
+`browser` 的输入使用按 action 区分的 schema：例如 `open` 必须有 `url`，`click` 必须有 `target`，`fill` 必须有 `target/text`；`scroll` 只允许纵向、即时、有界滚动，`up/down` 可选半屏或一屏，`start` 回到容器顶部，省略 target 时滚动文档；`read-section` 必须有 `artifactRef/section`，`handoff` 必须有 `reason`；各分支拒绝其他 action 的参数。
 
 不存在 Agent 可见的 `plugin_check`、`plugin_test`、完成或安装工具。外部 MCP server 暴露同一组 v1 工具。
 
@@ -155,11 +155,11 @@ create 模式采用两个不运行的页面级代码检查点：
 
 ## 浏览器与 helper
 
-`browser` 由独立 Electron scraper helper 承载，使用 Electron 内置 Chromium 和既有 scraper profile，不下载 Playwright 浏览器。每个新 `documentRevision` 第一次观察优先原样内联 Playwright ARIA 和全部已采集 `pageFacts`；宿主不做字段相关性打分，也不截取数组前 N 项。`pageFacts` 可含 `scriptSrcs`、`inlineScripts`、`looseInputs`；`click` / `fill` / `press` / `wait` 后另附该动作期间的 `recentRequests`（document/xhr/fetch 的 method、url、status、resourceType），宿主不标注哪条是搜索。同一文档后续返回精确 `delta`，完全没有变化时返回不超过 3 KB 的 `unchanged`。
+`browser` 由独立 Electron scraper helper 承载，使用 Electron 内置 Chromium 和既有 scraper profile，不下载 Playwright 浏览器。每个新 `viewRevision`（导航或显式滚动后）第一次观察优先原样内联 Playwright ARIA 和全部已采集 `pageFacts`；宿主不做字段相关性打分，也不截取数组前 N 项。`documentRevision` 继续表示主文档导航，`viewRevision` 额外覆盖虚拟列表滚动导致的可见 DOM 回收。`pageFacts` 可含 `scriptSrcs`、`inlineScripts`、`looseInputs`；`click` / `fill` / `press` / `scroll` / `wait` 后另附该动作期间的 `recentRequests`（document/xhr/fetch 的 method、url、status、resourceType），宿主不标注哪条是搜索。同一视图后续返回精确 `delta`，完全没有变化时返回不超过 3 KB 的 `unchanged`。`scroll` 返回容器指纹、before/after、deltaY、边界与 settled；滚动后旧 ARIA ref 一律失效，必须使用该动作 observation 的新 ref。
 
 浏览器工具保留 64 KB 页面 observation 硬上限。完整 observation 始终按内容寻址写入 browser artifact v1。超限时按完整 section 装包：`snapshot` 与每个 `pageFacts` section 都不可切开，从最大的整段开始省略，直到落入硬上限；被省略的 section 只报告 `itemCount` / `byteLength`，`nextActions` 为 `find` / `html` / `read-section`。宿主不按页面类型或字段相关性挑选 section，也不截取数组前 N 项。Pi 只需用 observation 返回的 `artifactRef` 和 section 名调用 `browser(action="read-section", ...)`；接口返回有界页面和不透明 `nextCursor`，不获取或占用浏览器租约。artifact 的索引、分片、完整性校验和路径约束由 `PluginBrowserCapabilityModule` 隐藏，不再要求 Pi 理解或原生读取存储格式。`artifactComplete` 与 `inlineComplete` 分别描述 artifact 和 Agent 当前内联结果。
 
-动作完成与动作后的观察是两个状态：`open/click/fill/press/wait` 成功后会在 3 秒内重试瞬态 snapshot。动作成功但页面仍无法观察时返回 `ok=true`、`observationMode=pending`，Pi 只补一次 `snapshot`，不得重复状态动作。动作本身报错但文档 revision 已变化时返回 `BROWSER_ACTION_UNCERTAIN`，只能用 `snapshot/status` 确认。显式 snapshot 暂时失败返回可重试的 `BROWSER_OBSERVATION_PENDING`，不会令整个 Agent run 失败。
+动作完成与动作后的观察是两个状态：`open/click/fill/press/scroll/wait` 成功后会在 3 秒内重试瞬态 snapshot。动作成功但页面仍无法观察时返回 `ok=true`、`observationMode=pending`，Pi 只补一次 `snapshot`，不得重复状态动作。动作本身报错但文档 revision 已变化时返回 `BROWSER_ACTION_UNCERTAIN`，只能用 `snapshot/status` 确认。显式 snapshot 暂时失败返回可重试的 `BROWSER_OBSERVATION_PENDING`，不会令整个 Agent run 失败。
 
 Skill 要求先在搜索页收齐生产搜索证据并写入搜索代码检查点，之后才打开一条精确详情页；首次详情 observation 是详情代码检查点的触发点。若仍有事实明确阻止编码，每次只为一个具体 blocker 做最直接操作并重新评估；只有新证据又暴露另一个具体 blocker 时才继续，不设任意总次数上限。没有新增事实、返回 `unchanged` 或只剩理论问题时停止浏览。搜索检查点后不运行 dry-run；详情解析完成且 `.javdex/dev-notes.md`、`index.js` 与 `plugin.json` 同步后才执行第一次完整 dry-run。在此之前不返回搜索页，也不会主动探索理论镜像、模糊搜索、分页、推荐或无结果分支。浏览一条详情不是允许代码只处理一条：影片插件必须实现与内置插件相同的第一页完全匹配候选合同。
 
@@ -172,7 +172,7 @@ Browser Skill 把页面文本、ARIA、HTML、脚本和网络响应都视为不�
 ## 状态、升级与审计
 
 - product state、ToolPack、instruction set、latest dry-run、browser artifact、运行验收和字段语义 registry 均为 v1；工作日志从已发布的 schema v1 升级为 schema v2。
-- 数据库从已发布的 schema v13 升级到 v14，一次性加入 Agent 平台表；不存在未发布中间版本的 run 关闭或兼容迁移。
+- Agent 平台表随 0.6.0 的统一数据库 schema v14 一次加入；数据库只从已发布的 v13 升一次，不保留未发布中间版本的 run 关闭或兼容迁移。
 - 主模型 reasoning 与回答继续流式展示并各持久化一次；正常路径不调用 verifier 模型。
 - 终态历史不会自动覆盖当前编辑器。离开开发页时关闭 helper，并清掉当前流程无法再恢复的会话（已安装、失败、取消）；`running` / `waiting_user` 保留以便回来继续。「清除会话」仍可在页内清掉包括可恢复会话在内的全部历史，并同时清空左侧未安装草稿；已经安装的插件不受影响。
 
@@ -188,7 +188,7 @@ Browser Skill 把页面文本、ARIA、HTML、脚本和网络响应都视为不�
 - 空结果、语法/导出错误、沙箱崩溃或完整目标缺失仍不能安装。
 - 第 4 次和第 10 次 dry-run 仍真实执行，且没有隐藏最终运行或模型重启。
 - 同一文档重复观察只返回事实增量；`unchanged` 后不继续相同探索。
-- 导航动作成功而 snapshot 暂不可用时只补 snapshot，不重复 click/fill/press。
+- 导航或滚动动作成功而 snapshot 暂不可用时只补 snapshot，不重复 click/fill/press/scroll。
 - ABC-123 和三上悠亜只作为参数示例；当前详情页决定真正 dry-run 目标。
 - create 按搜索页、详情页各写一个不运行的页面级代码检查点；页面级检查点不是按字段拆分实现。
 - 搜索证据齐全并固化生产候选定位后才进入详情页；详情实现完成前不返回搜索页，中间搜索检查点不 dry-run。

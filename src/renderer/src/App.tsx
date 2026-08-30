@@ -36,6 +36,7 @@ import {
   SettingsSectionOutlet
 } from './settings/SettingsRouteOutlet'
 import { AgentMetadataCollectorProvider } from './components/agentMetadata/AgentMetadataCollectorContext'
+import { PlaylistImportProvider } from './components/playlistImport/PlaylistImportContext'
 
 function FacetDetailRoute({
   kind,
@@ -58,7 +59,8 @@ function AppContent(): JSX.Element {
   return (
     <ToastProvider>
       <AvatarAutoCropBatchProvider>
-        <AgentMetadataCollectorProvider>
+        <PlaylistImportProvider>
+          <AgentMetadataCollectorProvider>
           <DisplayModeProvider>
             <AppBackgroundProvider>
               <ImagePreviewOverlayProvider previewEnabled={imagePreviewEnabled}>
@@ -205,7 +207,8 @@ function AppContent(): JSX.Element {
               </ImagePreviewOverlayProvider>
             </AppBackgroundProvider>
           </DisplayModeProvider>
-        </AgentMetadataCollectorProvider>
+          </AgentMetadataCollectorProvider>
+        </PlaylistImportProvider>
       </AvatarAutoCropBatchProvider>
     </ToastProvider>
   )

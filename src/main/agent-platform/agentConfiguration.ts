@@ -3,11 +3,12 @@ import type { AgentProfile, AgentToolEffect } from '@shared/aiConfigurationTypes
 import type { ModelWorkloadId } from '@shared/modelManagementTypes'
 import { PLUGIN_DEVELOPER_SYSTEM_PROMPT } from '../services/pluginDevAgent/pluginDevInstructions'
 import { AGENT_METADATA_COLLECTOR_SYSTEM_PROMPT } from '../services/agentMetadata/agentMetadataInstructions'
+import { PLAYLIST_IMPORTER_SYSTEM_PROMPT } from '../services/playlistImport/playlistImportInstructions'
 import { modelManagement } from './modelManagement'
 
 export interface AgentDefinition {
-  id: 'plugin-developer' | 'library-curator' | 'metadata-collector'
-  useCase: 'plugin-developer' | 'library-curator' | 'metadata-collector'
+  id: 'plugin-developer' | 'library-curator' | 'metadata-collector' | 'playlist-importer'
+  useCase: 'plugin-developer' | 'library-curator' | 'metadata-collector' | 'playlist-importer'
   systemPrompt: string
   toolPackRefs: readonly string[]
   capabilityGrants: readonly string[]
@@ -38,6 +39,18 @@ const DEFINITIONS: readonly AgentDefinition[] = [
     toolPackRefs: ['toolpack:metadata-collector:v1'],
     capabilityGrants: ['browser.read', 'metadata.stage-remote-candidate'],
     approvalRequiredEffects: []
+  },
+  {
+    id: 'playlist-importer',
+    useCase: 'playlist-importer',
+    systemPrompt: PLAYLIST_IMPORTER_SYSTEM_PROMPT,
+    toolPackRefs: ['toolpack:playlist-importer:v1'],
+    capabilityGrants: [
+      'browser.read',
+      'playlist-import.stage-page',
+      'playlist-import.stage-identity'
+    ],
+    approvalRequiredEffects: []
   }
 ]
 
@@ -45,11 +58,14 @@ function definitionIdForProfile(profileId: string): AgentDefinition['id'] {
   if (profileId.includes('plugin-developer')) return 'plugin-developer'
   if (profileId.includes('library-curator')) return 'library-curator'
   if (profileId.includes('metadata-collector')) return 'metadata-collector'
+  if (profileId.includes('playlist-importer')) return 'playlist-importer'
   throw new Error(`Agent Profile 不存在：${profileId}`)
 }
 
 function workloadIdForDefinition(definitionId: AgentDefinition['id']): ModelWorkloadId {
-  return definitionId === 'metadata-collector' ? 'library-curator' : definitionId
+  return definitionId === 'metadata-collector' || definitionId === 'playlist-importer'
+    ? 'library-curator'
+    : definitionId
 }
 
 export class AgentConfiguration {
@@ -77,7 +93,9 @@ export class AgentConfiguration {
           ? '插件开发'
           : definition.id === 'metadata-collector'
             ? '外部元数据采集'
-            : '媒体库整理',
+            : definition.id === 'playlist-importer'
+              ? '外部清单导入'
+              : '媒体库整理',
       definitionId: definition.id,
       routes: {
         primary: virtualRoute,

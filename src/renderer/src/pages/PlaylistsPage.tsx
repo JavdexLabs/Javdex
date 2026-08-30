@@ -17,6 +17,8 @@ import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import Button from '../components/Button'
+import { usePlaylistImport } from '../components/playlistImport/PlaylistImportContext'
+import { onPlaylistImportCompleted } from '../components/playlistImport/events'
 
 function playlistListCover(item: PlaylistListItem): string | null {
   return assetUrl(item.preview_cover_path)
@@ -26,6 +28,7 @@ export default function PlaylistsPage(): JSX.Element {
   const navigate = useNavigate()
   const location = useLocation()
   const toast = useToast()
+  const playlistImport = usePlaylistImport()
   const detailMatch = useMatch(ROUTE_MATCH.playlistDetailOpen)
   const detailOpen = Boolean(detailMatch)
   const activeId = detailMatch ? Number(detailMatch.params.playlistId) : null
@@ -83,6 +86,10 @@ export default function PlaylistsPage(): JSX.Element {
   useEffect(() => {
     void loadList()
   }, [loadList])
+
+  useEffect(() => onPlaylistImportCompleted(() => {
+    void loadList()
+  }), [loadList])
 
   useListSurfaceRefetch(detailOpen, () => {
     void loadList()
@@ -167,15 +174,25 @@ export default function PlaylistsPage(): JSX.Element {
             onChange: setSearchInput
           }}
           controls={
-            <Button
-              type="button"
-              variant="primary"
-
-              size="sm"
-              onClick={() => setShowCreate(true)}
-            >
-              创建清单
-            </Button>
+            <>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => playlistImport.open({
+                  destination: { kind: 'create' }
+                })}
+              >
+                导入外部清单
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={() => setShowCreate(true)}
+              >
+                创建清单
+              </Button>
+            </>
           }
           resultCount={
             <span className="count-badge count-badge--stable" aria-live="polite">

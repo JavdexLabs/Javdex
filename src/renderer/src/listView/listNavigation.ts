@@ -53,7 +53,7 @@ import {
   playlistDetailPath,
   playlistVideoDetailPath
 } from './playlistRoutes'
-import { patchSearchParams } from './listQueryParams'
+import { LIST_PARAM, patchSearchParams } from './listQueryParams'
 import { ROUTE_PATH } from './routePaths'
 import {
   canonicalizeVideoDetailSearchParams,
@@ -623,8 +623,12 @@ export function navigateToPlaylistList(
   navigate: NavigateFunction,
   location: Location
 ): void {
+  const search = new URLSearchParams(location.search)
+  const q = search.get(LIST_PARAM.q)
+  const playlistSearch = new URLSearchParams()
+  if (q?.trim()) playlistSearch.set(LIST_PARAM.q, q)
   navigate({
     pathname: ROUTE_PATH.playlists,
-    search: location.search
+    search: playlistSearch.toString()
   })
 }

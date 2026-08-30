@@ -673,6 +673,18 @@ const api = {
       cb: (event: import('../shared/agentMetadataTypes').AgentMetadataSnapshotChangedEvent) => void
     ) => onAppEvent(IPC.AGENT_METADATA_SNAPSHOT_CHANGED, cb)
   },
+  playlistImport: {
+    start: (input: import('../shared/playlistImportTypes').PlaylistImportStartInput) =>
+      invokeApp(IPC.PLAYLIST_IMPORT_START, input),
+    snapshot: (runId?: string) => invokeApp(IPC.PLAYLIST_IMPORT_SNAPSHOT, runId),
+    control: (
+      runId: string,
+      command: import('../shared/playlistImportTypes').PlaylistImportControlCommand
+    ) => invokeApp(IPC.PLAYLIST_IMPORT_CONTROL, runId, command),
+    onSnapshotChanged: (
+      cb: (event: import('../shared/playlistImportTypes').PlaylistImportSnapshotChangedEvent) => void
+    ) => onAppEvent(IPC.PLAYLIST_IMPORT_SNAPSHOT_CHANGED, cb)
+  },
   batchScrape: {
     getState: () => invokeScrape(IPC.BATCH_SCRAPE_STATE),
     pause: () => invokeScrape(IPC.BATCH_SCRAPE_PAUSE),

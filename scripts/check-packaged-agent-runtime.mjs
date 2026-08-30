@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 import { existsSync, readdirSync, statSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { extractFile, listPackage } from '@electron/asar'
 import {
   MAC_ELECTRON_LANGUAGES,
@@ -10,6 +12,10 @@ import {
 } from './packaging-runtime.mjs'
 
 const root = path.resolve(process.argv[2] ?? 'dist')
+const smokeScript = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  'smoke-packaged-agent-runtime.mjs'
+)
 
 function findAsars(directory, depth = 0) {
   if (depth > 5 || !existsSync(directory)) return []
@@ -57,6 +63,67 @@ function assertPackagedElectronLanguages(archive) {
   }
 }
 
+function packagedElectronForCurrentHost(archive) {
+  const resourcesDirectory = path.dirname(archive)
+  const appDirectory = path.dirname(resourcesDirectory)
+  const packageJson = JSON.parse(
+    extractFile(archive, path.join('package.json')).toString('utf8')
+  )
+  const productNames = [...new Set([packageJson.productName, packageJson.name, 'Javdex'])]
+    .filter((value) => typeof value === 'string' && value.trim())
+    .map((value) => value.trim())
+
+  if (process.platform === 'win32') {
+    const files = readdirSync(appDirectory)
+    for (const productName of productNames) {
+      const expected = `${productName}.exe`.toLocaleLowerCase()
+      const fileName = files.find((entry) => entry.toLocaleLowerCase() === expected)
+      if (fileName) return path.join(appDirectory, fileName)
+    }
+    return null
+  }
+
+  if (process.platform === 'darwin') {
+    const macOSDirectory = path.resolve(resourcesDirectory, '..', 'MacOS')
+    if (!existsSync(macOSDirectory)) return null
+    const files = readdirSync(macOSDirectory)
+    for (const productName of productNames) {
+      const fileName = files.find(
+        (entry) => entry.toLocaleLowerCase() === productName.toLocaleLowerCase()
+      )
+      if (fileName) return path.join(macOSDirectory, fileName)
+    }
+    return null
+  }
+
+  const files = readdirSync(appDirectory)
+  for (const productName of productNames) {
+    const expectedNames = [productName, productName.toLocaleLowerCase()]
+    const fileName = files.find((entry) =>
+      expectedNames.some((expected) => entry.toLocaleLowerCase() === expected.toLocaleLowerCase())
+    )
+    if (fileName) return path.join(appDirectory, fileName)
+  }
+  return null
+}
+
+function assertPackagedNodeModulesLoad(archive) {
+  const executable = packagedElectronForCurrentHost(archive)
+  if (!executable) return
+
+  const result = spawnSync(executable, [smokeScript, archive], {
+    encoding: 'utf8',
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+  })
+  if (result.error || result.status !== 0) {
+    const detail = [result.error?.message, result.stdout, result.stderr].filter(Boolean).join('\n')
+    throw new Error(`${archive} cannot load packaged Agent modules: ${detail}`)
+  }
+  if (!result.stdout.includes('Packaged Node module smoke passed')) {
+    throw new Error(`${archive} packaged Agent module smoke returned no success marker`)
+  }
+}
+
 const archives = findAsars(root)
 if (archives.length === 0) {
   throw new Error(`No packaged app.asar found under ${root}`)
@@ -71,7 +138,16 @@ for (const archive of archives) {
     /^\/out\/renderer\/icon-192\.png$/,
     /^\/node_modules\/playwright-core\/package\.json$/,
     /^\/node_modules\/playwright-core\/lib\/coreBundle\.js$/,
-    /^\/node_modules\/cheerio\/dist\/commonjs\/slim\.js$/
+    /^\/node_modules\/cheerio\/package\.json$/,
+    /^\/node_modules\/cheerio\/dist\/commonjs\/index\.js$/,
+    /^\/node_modules\/cheerio\/dist\/commonjs\/slim\.js$/,
+    /^\/node_modules\/undici\/package\.json$/,
+    /^\/node_modules\/undici\/index\.js$/,
+    /^\/node_modules\/parse5\/package\.json$/,
+    /^\/node_modules\/parse5-htmlparser2-tree-adapter\/package\.json$/,
+    /^\/node_modules\/parse5-parser-stream\/package\.json$/,
+    /^\/node_modules\/encoding-sniffer\/package\.json$/,
+    /^\/node_modules\/whatwg-mimetype\/package\.json$/
   ]
   for (const pattern of required) {
     if (!entries.some((entry) => pattern.test(entry))) {
@@ -104,12 +180,6 @@ for (const archive of archives) {
       entry.startsWith('/out/resources/') ||
       entry.startsWith('/node_modules/@earendil-works/pi-coding-agent/') ||
       entry.startsWith('/node_modules/playwright-core/lib/vite/') ||
-      entry.startsWith('/node_modules/undici/') ||
-      entry.startsWith('/node_modules/parse5/') ||
-      entry.startsWith('/node_modules/parse5-htmlparser2-tree-adapter/') ||
-      entry.startsWith('/node_modules/parse5-parser-stream/') ||
-      entry.startsWith('/node_modules/encoding-sniffer/') ||
-      entry.startsWith('/node_modules/whatwg-mimetype/') ||
       /^\/out\/renderer\/icon-(?:16|32|48|512)\.png$/.test(entry) ||
       /^\/out\/renderer\/assets\/icon-.*\.png$/.test(entry)
   )
@@ -140,6 +210,7 @@ for (const archive of archives) {
       `${archive} contains unexpected better-sqlite3 prebuilds: ${sqliteBinaries.join(', ')}`
     )
   }
+  assertPackagedNodeModulesLoad(archive)
   assertPackagedElectronLanguages(archive)
   const sizeMiB = (statSync(archive).size / 1024 / 1024).toFixed(1)
   console.log(`Packaged Agent runtime verified: ${archive} (${sizeMiB} MiB)`)

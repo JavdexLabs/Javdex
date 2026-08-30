@@ -70,7 +70,7 @@ URL、路径和控制字符在工具边界被拒绝。这是输入类型保护�
 
 - task、instruction set、ToolPack、product state、latest dry-run、browser artifact、runtime acceptance 和字段语义 registry 均为 v1；
 - 工作日志从已发布的 schema v1 升级为 schema v2；
-- 数据库从已发布的 schema v13 升级为 v14，一次性加入 Agent 平台表，不保留未发布中间版本的兼容迁移。
+- Agent 平台表随 0.6.0 的统一数据库 schema v14 一次加入；数据库只从已发布的 v13 升一次，不保留未发布中间版本的兼容迁移。
 
 工作区草稿、当前编辑器代码、已安装插件和其他 Agent 会话不受影响。
 

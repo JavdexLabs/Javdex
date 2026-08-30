@@ -22,6 +22,16 @@ describe('AgentMetadataActivityTimeline', () => {
     assert.equal(completed?.status, 'success')
   })
 
+  it('retains up to 64,000 reasoning characters and reports overflow', () => {
+    const timeline = new AgentMetadataActivityTimeline()
+    timeline.observe({ type: 'reasoning.delta', text: '思'.repeat(64_010) })
+
+    const reasoning = timeline.snapshot()[0]
+    assert.equal(reasoning?.kind === 'reasoning' ? reasoning.text.length : 0, 64_000)
+    assert.equal(reasoning?.kind === 'reasoning' ? reasoning.charCount : 0, 64_010)
+    assert.equal(reasoning?.kind === 'reasoning' ? reasoning.truncated : false, true)
+  })
+
   it('uses semantic browser actions while retaining safe completion summaries', () => {
     const timeline = new AgentMetadataActivityTimeline()
     timeline.observe({
@@ -60,6 +70,29 @@ describe('AgentMetadataActivityTimeline', () => {
     )
   })
 
+  it('describes playlist page checkpoints as result-producing actions', () => {
+    const timeline = new AgentMetadataActivityTimeline()
+    timeline.describeTool('page-1', 'checkpoint_playlist_page', {})
+    timeline.describeTool('scroll-1', 'advance_playlist_page', {})
+    timeline.describeTool('detail-1', 'checkpoint_playlist_detail', {})
+
+    assert.deepEqual(timeline.snapshot().map((activity) => (
+      activity.kind === 'action' ? activity.label : ''
+    )), ['固化当前清单页', '进入下一清单窗口', '核对影片详情身份'])
+  })
+
+  it('describes browser scroll without exposing tool arguments', () => {
+    const timeline = new AgentMetadataActivityTimeline()
+    timeline.describeTool('scroll-1', 'browser', {
+      action: 'scroll',
+      target: '#private-list',
+      direction: 'down'
+    })
+
+    const activity = timeline.snapshot()[0]
+    assert.equal(activity?.kind === 'action' ? activity.label : '', '滚动页面内容')
+  })
+
   it('retains earlier reasoning across browser-heavy runs', () => {
     const timeline = new AgentMetadataActivityTimeline()
     timeline.observe({ type: 'reasoning.delta', text: '最早一轮思考' })
@@ -77,4 +110,5 @@ describe('AgentMetadataActivityTimeline', () => {
     assert.equal(earliest?.kind === 'reasoning' ? earliest.text : '', '最早一轮思考')
     assert.equal(activities.length, 256)
   })
+
 })

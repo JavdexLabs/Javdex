@@ -4,7 +4,7 @@
 
 ## 基线
 
-- 起点：`af523cf`（`feat: add agent-assisted metadata collection`）；多媒体库从已提交的 Agent 元数据功能之后增量实施，数据库由 SQLite V15 升级到 V17。
+- 发布基线：v0.5.0 的 SQLite V13；0.6.0 未发布功能统一由一次 V13 → V14 迁移落地。
 - 实施前基线：`npm run typecheck`、`npm run lint`、`npm run check:css-architecture` 通过。
 - 完成时必须运行完整 `npm test`、`npm run build` 和本文列出的针对性测试。
 
@@ -14,13 +14,13 @@
 |---|---|---|---|
 | ML-001 | ✅ | 可创建、编辑、排序、归档多个媒体库 | `mediaLibraryRepo.test.ts`、`mediaLibraryHandlers.test.ts`、创建与设置 UI QA |
 | ML-002 | ✅ | 每个媒体库拥有独立根目录和扫描/刮削/显示配置 | schema 约束、MediaLibrary Module/设置状态测试、独立设置 UI QA |
-| ML-003 | ✅ | 同一全局影片可属于多个媒体库且不复制元数据 | V16 迁移、`libraryMembershipRepo.test.ts`、`homeDiscoveryRepo.test.ts` |
-| ML-004 | ✅ | 影片资源和主资源严格按媒体库隔离 | V16 外键/索引、`videoLifecycleRepo.test.ts`、Scanner 隔离测试 |
+| ML-003 | ✅ | 同一全局影片可属于多个媒体库且不复制元数据 | V14 迁移、`libraryMembershipRepo.test.ts`、`homeDiscoveryRepo.test.ts` |
+| ML-004 | ✅ | 影片资源和主资源严格按媒体库隔离 | V14 外键/索引、`videoLifecycleRepo.test.ts`、Scanner 隔离测试 |
 | ML-005 | ✅ | 扫描、重定位、清理、审计、无法识别和待确认均按库隔离 | Scanner/Coordinator/Pending/ScanRepo/Cleanup/Audit 测试 |
 | ML-006 | ✅ | `/` 是首页，展示跨库搜索、随机发现、近期添加和库状态 | Home 查询与路由测试、隔离 Electron QA |
 | ML-007 | ✅ | 全局搜索跨库去重并可按库筛选 | `homeDiscoveryRepo.test.ts`、全局搜索状态/路由测试、隔离 Electron QA |
 | ML-008 | ✅ | 每个媒体库有独立列表路由、query state、滚动与详情栈 | multi-library route、navigation memory、surface state 与 legacy redirect 测试 |
-| ML-009 | ✅ | 旧单库数据无损迁入默认媒体库 | `migrationsV16.test.ts`、`migrationsV17.test.ts`、`legacyMediaLibraryBootstrap.test.ts` |
+| ML-009 | ✅ | 旧单库数据无损迁入默认媒体库 | `migrationsV14.test.ts`、`legacyMediaLibraryBootstrap.test.ts` |
 | ML-010 | ✅ | 删除、移出、移动和路径移除不会越库或默认删除磁盘文件 | Lifecycle、RootMigration、Cleanup、IPC path guard 与影响预览测试 |
 | ML-011 | ✅ | 现有演员、分类、清单、刮削、Agent 和媒体资源功能不回归 | 1586/1586 app tests、5/5 packaging runtime、边界检查与构建 |
 | ML-012 | ✅ | UI 遵循密集、安静、稳定和无障碍规范 | lint、CSS 架构、焦点/键盘测试与隔离 Electron QA |
@@ -152,7 +152,7 @@
 
 状态：已完成。功能实现、自动化门禁、隔离 Electron QA、双轴复审和功能提交均已通过。
 
-- 实施范围：基线 `af523cf` 至本提交；数据库由 V15 升级到 V17。
+- 实施范围：v0.5.0 发布基线至本提交；数据库由 V13 一次升级到 V14。
 - 自动化测试：`npm test` 通过，其中应用测试 1586/1586、packaging runtime 5/5；迁移、Module、扫描、清理、路由、设置与扫描审计测试均包含在内。
 - 构建与静态门禁：`npm run build`、`npm run typecheck`、`npm run lint`、四项边界检查、`npm run check:css-architecture`、`npm run check:encoding` 和 `git diff --check` 均通过。
 - 性能证据：Scoped Catalog、首页和全局搜索的大数据 fixture 使用 `EXPLAIN QUERY PLAN` 验证预期索引，并验证有界分页、去重和无卡片级 N+1。

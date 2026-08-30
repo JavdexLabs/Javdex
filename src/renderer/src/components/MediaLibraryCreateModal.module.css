@@ -162,6 +162,24 @@
   min-width: 0;
 }
 
+.choiceGroup {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  gap: 10px;
+}
+
+.choiceLabel {
+  margin: 0;
+  padding: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
 .choiceGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
@@ -183,6 +201,11 @@
   font-size: 12px;
   cursor: pointer;
   gap: 7px;
+  transition:
+    border-color var(--motion-fast),
+    background var(--motion-fast),
+    color var(--motion-fast),
+    box-shadow var(--motion-fast);
 }
 
 .colorChoice {
@@ -201,8 +224,8 @@
   opacity: 0.55;
 }
 
-.iconChoice:hover:not(:disabled),
-.colorChoice:hover:not(:disabled) {
+.iconChoice:hover:not(:disabled, [aria-pressed='true']),
+.colorChoice:hover:not(:disabled, [aria-pressed='true']) {
   border-color: var(--border-strong);
   background: var(--surface-control-hover);
   color: var(--text-primary);
@@ -213,6 +236,7 @@
   border-color: var(--border-accent);
   background: var(--surface-selected);
   color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border-accent) 34%, transparent);
 }
 
 .colorChoice[data-color='blue'] {

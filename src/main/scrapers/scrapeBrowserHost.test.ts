@@ -8,6 +8,10 @@ import {
   type AgentBrowserCommand,
   type AgentBrowserObservation
 } from './scrapeBrowser'
+import type {
+  ScrapeBrowserListExtraction,
+  ScrapeBrowserListExtractionPlan
+} from './scrapeBrowserTypes'
 
 interface TestHostInternals {
   helper: { generation: number } | null
@@ -53,11 +57,16 @@ interface ActionTestInternals {
     command: AgentBrowserCommand,
     signal: AbortSignal
   ) => Promise<AgentBrowserObservation>
+  extractList: (
+    plan: ScrapeBrowserListExtractionPlan,
+    signal: AbortSignal
+  ) => Promise<ScrapeBrowserListExtraction>
 }
 
 function actionHost(input: {
   click?: (helper: { pageEpoch: number }) => Promise<void>
   evaluate?: (expression: string) => Promise<unknown>
+  scrollEvaluate?: () => Promise<unknown>
   count?: number
   snapshot: () => Promise<AgentBrowserObservation>
 }): { host: ScrapeBrowserHostModule; internals: ActionTestInternals } {
@@ -73,13 +82,15 @@ function actionHost(input: {
     click: async () => input.click?.(helperRecord),
     fill: async () => undefined,
     press: async () => undefined,
-    waitFor: async () => undefined
+    waitFor: async () => undefined,
+    evaluate: async () => input.scrollEvaluate?.()
   }
   const helperRecord = {
     generation: 7,
     fatal: false,
     pageEpoch: 1,
-    snapshotEpoch: 1,
+    viewEpoch: 0,
+    snapshotViewRevision: '7:1:0',
     page: {
       locator: (selector: string) => selector === 'body' ? body : target,
       url: () => 'https://example.test/detail',
@@ -271,7 +282,8 @@ describe('ScrapeBrowserHost leases', () => {
       generation: 3,
       fatal: false,
       pageEpoch: 2,
-      snapshotEpoch: null,
+      viewEpoch: 0,
+      snapshotViewRevision: null,
       page: {
         locator: () => ({
           count: async () => 1,
@@ -354,6 +366,91 @@ describe('ScrapeBrowserHost leases', () => {
     assert.equal(result.actionSucceeded, true)
     assert.equal(result.staleRefs, true)
     assert.notEqual(result.observationMode, 'pending')
+  })
+
+  it('returns bounded scroll metrics and invalidates refs without changing the document revision', async () => {
+    const fixture = actionHost({
+      scrollEvaluate: async () => ({
+        before: { scrollTop: 0, scrollHeight: 2_400, clientHeight: 600 },
+        after: { scrollTop: 300, scrollHeight: 2_400, clientHeight: 600 },
+        settled: true,
+        descriptor: { kind: 'element', tag: 'div', id: 'list', className: '', role: 'list' }
+      }),
+      snapshot: async () => ({
+        action: 'snapshot',
+        documentRevision: '7:1',
+        viewRevision: '7:1:1',
+        snapshot: '- link "item 20" [ref=e1]'
+      })
+    })
+
+    const result = await fixture.internals.runAgentAction(
+      { action: 'scroll', target: '#list', direction: 'down' },
+      new AbortController().signal
+    )
+
+    assert.equal(result.action, 'scroll')
+    assert.equal(result.documentRevision, '7:1')
+    assert.equal(result.viewRevision, '7:1:1')
+    assert.equal(result.staleRefs, true)
+    assert.deepEqual(result.scrollState?.before, {
+      scrollTop: 0,
+      scrollHeight: 2_400,
+      clientHeight: 600
+    })
+    assert.equal(result.scrollState?.deltaY, 300)
+    assert.equal(result.scrollState?.moved, true)
+    assert.equal(result.scrollState?.settled, true)
+  })
+
+  it('extracts a host-owned load-more availability signal with the candidate snapshot', async () => {
+    const fixture = actionHost({
+      evaluate: async () => ({
+        items: [{ detailUrl: 'https://example.test/video/1', code: 'ABC-001' }],
+        nextPageUrls: [],
+        loadMoreAvailable: true,
+        scrollMetrics: { scrollTop: 0, scrollHeight: 600, clientHeight: 600 },
+        descriptor: { kind: 'document' }
+      }),
+      snapshot: async () => ({ action: 'snapshot', documentRevision: '7:1' })
+    })
+
+    const result = await fixture.internals.extractList({
+      candidateSelector: '.item',
+      detailLinkSelector: 'a',
+      loadMoreSelector: '.load-more'
+    }, new AbortController().signal)
+
+    assert.equal(result.loadMoreAvailable, true)
+    assert.deepEqual(result.items, [
+      { detailUrl: 'https://example.test/video/1', code: 'ABC-001' }
+    ])
+    assert.equal(result.scrollState?.atEnd, true)
+    assert.equal(result.containerFingerprint?.length, 16)
+  })
+
+  it('returns the host-owned terminal proof result with the candidate snapshot', async () => {
+    const fixture = actionHost({
+      evaluate: async () => ({
+        items: [{ detailUrl: 'https://example.test/video/1' }],
+        nextPageUrls: [],
+        terminalVerified: true,
+        scrollMetrics: { scrollTop: 0, scrollHeight: 600, clientHeight: 600 },
+        descriptor: { kind: 'document' }
+      }),
+      snapshot: async () => ({ action: 'snapshot', documentRevision: '7:1' })
+    })
+
+    const result = await fixture.internals.extractList({
+      candidateSelector: '.item',
+      detailLinkSelector: 'a',
+      terminalProof: {
+        kind: 'no-pagination-container-after-full-dom-check',
+        selector: '.pagination'
+      }
+    }, new AbortController().signal)
+
+    assert.equal(result.terminalVerified, true)
   })
 
   it('returns pending after a successful action but makes explicit snapshot pending retryable', async () => {

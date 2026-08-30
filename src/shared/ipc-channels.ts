@@ -244,6 +244,12 @@ export const IPC = {
   AGENT_METADATA_DISCARD: 'agentMetadata:discard',
   AGENT_METADATA_SNAPSHOT_CHANGED: 'agentMetadata:snapshotChanged', // main -> renderer event
 
+  // External playlist import Agent
+  PLAYLIST_IMPORT_START: 'playlistImport:start',
+  PLAYLIST_IMPORT_SNAPSHOT: 'playlistImport:snapshot',
+  PLAYLIST_IMPORT_CONTROL: 'playlistImport:control',
+  PLAYLIST_IMPORT_SNAPSHOT_CHANGED: 'playlistImport:snapshotChanged', // main -> renderer event
+
   // Player
   PLAYER_PLAY: 'player:play',
   PLAYER_REVEAL: 'player:reveal',

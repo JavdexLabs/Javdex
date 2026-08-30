@@ -115,6 +115,31 @@ class FakeRuntime implements AgentRuntimePort {
 afterEach(() => setAgentPayloadCipherForTests(null))
 
 describe('AgentExecution', () => {
+  it('runs the persistence hook before the runtime can commit its bootstrap observation', async () => {
+    const { db, store } = storeHarness()
+    const runtime = new FakeRuntime()
+    const execution = new AgentExecution(store, async () => runtime)
+    const sequence: string[] = []
+    try {
+      await execution.openRun({
+        runId: 'run-bootstrap-order',
+        useCase: 'test',
+        resolved: resolved(),
+        productState: {},
+        afterPersist: () => { sequence.push('persisted') },
+        project: (event, current) => {
+          sequence.push(event.type)
+          return { state: current }
+        }
+      })
+
+      assert.deepEqual(sequence, ['persisted', 'session.saved'])
+    } finally {
+      await execution.dispose()
+      db.close()
+    }
+  })
+
   it('opens one runtime session and delegates ten operations without a loop or second queue', async () => {
     const { db, store } = storeHarness()
     const runtime = new FakeRuntime()

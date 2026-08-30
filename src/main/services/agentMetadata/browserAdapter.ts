@@ -1,6 +1,6 @@
 import { lookup } from 'node:dns/promises'
 import net from 'node:net'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
@@ -14,10 +14,76 @@ import {
   type AgentBrowserCommand,
   type ScrapeBrowserLease
 } from '../../scrapers/scrapeBrowser'
-import { AgentBrowserEvidenceModule } from '../../agent-platform/agentBrowserEvidence'
+import {
+  AgentBrowserEvidenceModule,
+  readBrowserArtifactBundle
+} from '../../agent-platform/agentBrowserEvidence'
 import type { HostedToolResult } from '../../agent-platform/types'
+import { isSensitiveUrlQueryKey } from '@shared/urlCredentialPolicy'
+import type { AgentBrowserObservation } from '../../scrapers/scrapeBrowserTypes'
+import type {
+  ScrapeBrowserListExtraction,
+  ScrapeBrowserListExtractionPlan
+} from '../../scrapers/scrapeBrowserTypes'
 
 type ReadBrowserAction = Exclude<AgentBrowserCommand['action'], 'fill' | 'press'>
+
+export interface BrowserEvidenceRevision {
+  documentRevision: string
+  viewRevision: string
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+export function assertBrowserArtifactMatchesObservation(
+  workspaceDirectory: string,
+  artifactRef: string,
+  expected: BrowserEvidenceRevision
+): void {
+  let artifact: Record<string, unknown>
+  try {
+    artifact = readBrowserArtifactBundle(workspaceDirectory, artifactRef)
+  } catch {
+    throw new Error('PLAYLIST_IMPORT_BROWSER_EVIDENCE_INVALID')
+  }
+  const observation = artifact.observation
+  if (
+    artifact.schemaVersion !== 1 ||
+    artifact.ok !== true ||
+    !isRecord(observation)
+  ) {
+    throw new Error('PLAYLIST_IMPORT_BROWSER_EVIDENCE_INVALID')
+  }
+  const transport = artifact.artifactTransport
+  if (
+    !isRecord(transport) ||
+    transport.format !== 'segmented-json-v1' ||
+    typeof transport.logicalSha256 !== 'string' ||
+    !Array.isArray(transport.parts)
+  ) {
+    throw new Error('PLAYLIST_IMPORT_BROWSER_EVIDENCE_INVALID')
+  }
+  const { artifactTransport: _transport, ...logicalArtifact } = artifact
+  const logicalSerialized = `${JSON.stringify(logicalArtifact, null, 2)}\n`
+  const logicalSha256 = createHash('sha256').update(logicalSerialized).digest('hex')
+  if (
+    transport.logicalSha256 !== logicalSha256 ||
+    path.basename(artifactRef, path.extname(artifactRef)) !== logicalSha256.slice(0, 24)
+  ) {
+    throw new Error('PLAYLIST_IMPORT_BROWSER_EVIDENCE_INVALID')
+  }
+  if (observation.evidenceIncomplete === true || observation.artifactComplete !== true) {
+    throw new Error('PLAYLIST_IMPORT_BROWSER_EVIDENCE_INCOMPLETE')
+  }
+  if (
+    observation.documentRevision !== expected.documentRevision ||
+    observation.viewRevision !== expected.viewRevision
+  ) {
+    throw new Error('PLAYLIST_IMPORT_BROWSER_EVIDENCE_STALE')
+  }
+}
 
 interface ActiveBrowserSession {
   lease: ScrapeBrowserLease
@@ -27,6 +93,10 @@ interface ActiveBrowserSession {
   workspaceDirectory: string
   finalUrl?: string
   title?: string
+  lastObservation?: Pick<
+    AgentBrowserObservation,
+    'url' | 'documentRevision' | 'viewRevision' | 'scrollState'
+  >
 }
 
 function browserError(code: string, message: string, extra: Record<string, unknown> = {}): HostedToolResult {
@@ -75,11 +145,6 @@ function isProxySyntheticDnsAddress(address: string): boolean {
   return first === 198 && (second === 18 || second === 19)
 }
 
-function isSensitiveQueryKey(key: string): boolean {
-  return /^(?:access[_-]?token|token|secret|api[_-]?key|key|auth|authorization|signature|credential|policy|expires?)$/iu
-    .test(key)
-}
-
 type LookupAddress = { address: string }
 type LookupAll = (hostname: string) => Promise<LookupAddress[]>
 
@@ -126,7 +191,7 @@ export function sanitizeAgentMetadataUrl(raw: string): string {
     url.password = ''
     url.hash = ''
     for (const key of [...url.searchParams.keys()]) {
-      if (isSensitiveQueryKey(key)) url.searchParams.delete(key)
+      if (isSensitiveUrlQueryKey(key)) url.searchParams.delete(key)
     }
     return url.toString()
   } catch {
@@ -147,6 +212,10 @@ function handoffPrompt(reason: AgentMetadataBrowserHandoff['reason']): string {
 export class AgentMetadataBrowserAdapter {
   private readonly sessions = new Map<string, ActiveBrowserSession>()
   private readonly evidence = new AgentBrowserEvidenceModule()
+
+  hasSession(runId: string): boolean {
+    return this.sessions.has(runId)
+  }
 
   async openSession(input: {
     runId: string
@@ -209,6 +278,107 @@ export class AgentMetadataBrowserAdapter {
     if (!valid) throw new Error('浏览器证据引用不存在或不属于当前采集会话。')
   }
 
+  assertCurrentEvidenceRef(
+    runId: string,
+    ref: string,
+    expected: BrowserEvidenceRevision
+  ): void {
+    const session = this.require(runId)
+    this.assertEvidenceRefs(runId, [ref])
+    assertBrowserArtifactMatchesObservation(session.workspaceDirectory, ref, expected)
+  }
+
+  observation(runId: string): ActiveBrowserSession['lastObservation'] {
+    const observation = this.require(runId).lastObservation
+    return observation ? structuredClone(observation) : undefined
+  }
+
+  async hostAction(input: {
+    runId: string
+    command: Extract<AgentBrowserCommand, { action: 'open' | 'click' | 'scroll' | 'wait' }>
+    signal: AbortSignal
+  }): Promise<AgentBrowserObservation> {
+    const session = this.require(input.runId)
+    if (input.command.action === 'open') {
+      const url = await assertAgentMetadataPublicHttpUrl(input.command.url)
+      if (normalizedHost(url.hostname) !== session.allowedHost) {
+        throw new Error('BROWSER_HOST_DENIED')
+      }
+    }
+    const observation = await this.runWithSignal(
+      session,
+      input.signal,
+      () => session.lease.agentAction(input.command)
+    )
+    if (observation.url) await this.acceptObservedUrl(session, observation.url)
+    if (observation.title) session.title = observation.title
+    session.lastObservation = {
+      ...(observation.url ? { url: observation.url } : {}),
+      ...(observation.documentRevision
+        ? { documentRevision: observation.documentRevision }
+        : {}),
+      ...(observation.viewRevision ? { viewRevision: observation.viewRevision } : {}),
+      ...(observation.scrollState ? { scrollState: structuredClone(observation.scrollState) } : {})
+    }
+    return observation
+  }
+
+  async extractList(input: {
+    runId: string
+    plan: ScrapeBrowserListExtractionPlan
+    signal: AbortSignal
+  }): Promise<ScrapeBrowserListExtraction> {
+    const session = this.require(input.runId)
+    if (!session.lease.extractList) throw new Error('PLAYLIST_IMPORT_BROWSER_ADAPTER_UNAVAILABLE')
+    const result = await this.runWithSignal(
+      session,
+      input.signal,
+      () => session.lease.extractList!(input.plan)
+    )
+    await this.acceptObservedUrl(session, result.url)
+    session.title = result.title
+    session.lastObservation = {
+      url: result.url,
+      documentRevision: result.documentRevision,
+      viewRevision: result.viewRevision,
+      ...(result.scrollState ? { scrollState: structuredClone(result.scrollState) } : {})
+    }
+    return result
+  }
+
+  async captureEvidence(input: {
+    runId: string
+    signal: AbortSignal
+  }): Promise<{ evidenceRef: string; documentRevision: string; viewRevision: string }> {
+    const result = await this.execute({
+      runId: input.runId,
+      args: { action: 'snapshot' },
+      signal: input.signal,
+      onHandoff: () => {
+        throw new Error('PLAYLIST_IMPORT_EVIDENCE_CAPTURE_HANDOFF')
+      }
+    })
+    if (!result.ok) throw new Error('PLAYLIST_IMPORT_EVIDENCE_CAPTURE_FAILED')
+    const recovery = result.recovery
+    const observation = recovery?.observation
+    const evidenceRef = typeof recovery?.artifactRef === 'string'
+      ? recovery.artifactRef
+      : undefined
+    const documentRevision = observation && typeof observation === 'object' &&
+      typeof (observation as Record<string, unknown>).documentRevision === 'string'
+      ? (observation as Record<string, unknown>).documentRevision as string
+      : undefined
+    const viewRevision = observation && typeof observation === 'object' &&
+      typeof (observation as Record<string, unknown>).viewRevision === 'string'
+      ? (observation as Record<string, unknown>).viewRevision as string
+      : undefined
+    if (!evidenceRef || !documentRevision || !viewRevision) {
+      throw new Error('PLAYLIST_IMPORT_EVIDENCE_CAPTURE_INCOMPLETE')
+    }
+    this.assertCurrentEvidenceRef(input.runId, evidenceRef, { documentRevision, viewRevision })
+    return { evidenceRef, documentRevision, viewRevision }
+  }
+
   async execute(input: {
     runId: string
     args: Record<string, unknown>
@@ -263,7 +433,7 @@ export class AgentMetadataBrowserAdapter {
         recovery: { requestId: handoff.requestId, reason: handoff.reason }
       }
     }
-    const allowed = ['open', 'snapshot', 'find', 'html', 'evaluate', 'click', 'wait', 'status']
+    const allowed = ['open', 'snapshot', 'find', 'html', 'evaluate', 'click', 'scroll', 'wait', 'status']
     if (!allowed.includes(action)) return browserError('BROWSER_ACTION_INVALID', 'browser.action 无效或不允许。')
 
     const args = { ...input.args }
@@ -304,6 +474,12 @@ export class AgentMetadataBrowserAdapter {
               () => session.lease.agentAction(commandResult.command)
             )
           )
+          session.lastObservation = {
+            url: observation.url,
+            documentRevision: observation.documentRevision,
+            viewRevision: observation.viewRevision,
+            ...(observation.scrollState ? { scrollState: structuredClone(observation.scrollState) } : {})
+          }
           if (observation.url) {
             await this.acceptObservedUrl(session, observation.url)
           }
@@ -484,6 +660,43 @@ export class AgentMetadataBrowserAdapter {
         return target
           ? { command: { action, target } }
           : { error: browserError('BROWSER_TARGET_REQUIRED', 'browser action=click 时 target 必填。') }
+      case 'scroll': {
+        const direction = args.direction
+        if (direction !== 'up' && direction !== 'down' && direction !== 'start') {
+          return { error: browserError(
+            'BROWSER_SCROLL_DIRECTION_INVALID',
+            'browser action=scroll 时 direction 必须为 up、down 或 start。'
+          ) }
+        }
+        if (direction === 'start') {
+          if (args.amount !== undefined) {
+            return { error: browserError(
+              'BROWSER_SCROLL_AMOUNT_INVALID',
+              'browser action=scroll 且 direction=start 时不得提供 amount。'
+            ) }
+          }
+          return { command: { action, direction, ...(target ? { target } : {}) } }
+        }
+        const amount = args.amount
+        if (
+          amount !== undefined &&
+          amount !== 'eighth-viewport' &&
+          amount !== 'quarter-viewport' &&
+          amount !== 'half-viewport' &&
+          amount !== 'viewport'
+        ) {
+          return { error: browserError(
+            'BROWSER_SCROLL_AMOUNT_INVALID',
+            'browser action=scroll 的 amount 必须为 eighth-viewport、quarter-viewport、half-viewport 或 viewport。'
+          ) }
+        }
+        return { command: {
+          action,
+          direction,
+          ...(target ? { target } : {}),
+          ...(amount ? { amount } : {})
+        } }
+      }
       case 'wait':
         return { command: {
           action,

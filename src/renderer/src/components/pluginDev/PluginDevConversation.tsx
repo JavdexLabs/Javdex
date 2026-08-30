@@ -8,6 +8,7 @@ import type {
   PluginDevPendingUserRequest,
   PluginDevSessionStatus
 } from '@shared/pluginDevTypes'
+import { AGENT_REASONING_TEXT_CHAR_LIMIT } from '@shared/agentReasoning'
 import { formatToolLabel, toolCategory } from './pluginDevFormat'
 import EmptyState from '../EmptyState'
 import { UI_ICON_SM } from '../iconDefaults'
@@ -72,7 +73,9 @@ function ReasoningBlock({ item }: { item: ReasoningItem }): JSX.Element {
         {item.text}
       </pre>
       {item.truncated ? (
-        <p className={styles.reasoningNotice}>内容过长，界面仅保留前 64,000 字符。</p>
+        <p className={styles.reasoningNotice}>
+          内容过长，界面仅保留前 {AGENT_REASONING_TEXT_CHAR_LIMIT.toLocaleString('zh-CN')} 字符。
+        </p>
       ) : null}
     </details>
   )

@@ -30,6 +30,7 @@ export interface OpenAgentRunInput {
   resume?: AgentRunRecord
   notify?: (event: RuntimeObservation) => void
   project?: ActiveAgentRun['project']
+  afterPersist?: () => void | Promise<void>
 }
 
 function recoveryCategory(error: unknown): 'checkpoint-corrupt' | 'checkpoint-incompatible' | 'checkpoint-migration-failed' | null {
@@ -64,6 +65,7 @@ export class AgentExecution {
         resolved: input.resolved,
         productState: input.productState
       })
+      await input.afterPersist?.()
     }
     const activeBase = {
       runId,

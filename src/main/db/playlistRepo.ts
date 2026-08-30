@@ -31,16 +31,7 @@ function playlistListSelect(extraSelect = ''): string {
   return `
     SELECT
       p.*,
-      COUNT(
-        CASE WHEN EXISTS (
-          SELECT 1
-          FROM library_video_memberships membership
-          JOIN media_libraries library ON library.id = membership.library_id
-          WHERE membership.video_id = pv.video_id
-            AND membership.is_hidden = 0
-            AND library.status = 'active'
-        ) THEN pv.video_id END
-      ) AS video_count,
+      COUNT(pv.video_id) AS video_count,
       COALESCE(
         p.cover_path,
         (
@@ -50,14 +41,6 @@ function playlistListSelect(extraSelect = ''): string {
           WHERE pv2.playlist_id = p.id
             AND v.cover_path IS NOT NULL
             AND trim(v.cover_path) != ''
-            AND EXISTS (
-              SELECT 1
-              FROM library_video_memberships membership
-              JOIN media_libraries library ON library.id = membership.library_id
-              WHERE membership.video_id = v.id
-                AND membership.is_hidden = 0
-                AND library.status = 'active'
-            )
           ORDER BY pv2.position, pv2.added_at, pv2.video_id
           LIMIT 1
         )
@@ -180,14 +163,6 @@ export function getPlaylistDetail(id: number, sort: PlaylistVideoSort = {}): Pla
        FROM playlist_video pv
        JOIN videos v ON v.id = pv.video_id
        WHERE pv.playlist_id = ?
-         AND EXISTS (
-           SELECT 1
-           FROM library_video_memberships membership
-           JOIN media_libraries library ON library.id = membership.library_id
-           WHERE membership.video_id = v.id
-             AND membership.is_hidden = 0
-             AND library.status = 'active'
-         )
        ORDER BY ${orderBy}`
     )
     .all(id) as VideoListProjectionRow[]

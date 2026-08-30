@@ -113,6 +113,7 @@ describe('MediaLibrarySettingsPage layout', () => {
     assert.match(tabs, /<SettingsSectionBlock/)
     assert.match(tabs, /settings-toggle-list settings-toggle-list--compact/)
     assert.match(tabs, /<SettingsSwitchRow/)
+    assert.match(tabs, /仍被任一清单引用的影片会保留，不会被自动清理/)
     assert.match(tabs, /archived \? '恢复媒体库' : '归档媒体库'/)
     assert.match(tabs, />\s*永久删除\s*</)
     assert.match(tabs, /styles\.scanAutoInterval/)

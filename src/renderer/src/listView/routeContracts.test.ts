@@ -29,6 +29,7 @@ import {
   navigateToVideoListSurface,
   navigateToDirectorDetail,
   navigateToOrganizationDetail,
+  navigateToPlaylistList,
   navigateToSeriesDetail,
   navigateToVideoDetail
 } from './listNavigation'
@@ -462,6 +463,20 @@ describe('primary navigation memory', () => {
 })
 
 describe('navigation helpers', () => {
+  it('removes playlist-detail resource filters when returning to the playlist list', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    navigateToPlaylistList(navigate, {
+      pathname: '/playlists/4/8',
+      search: '?q=待看&resources=web,none&sort=release_date',
+      hash: '',
+      state: null,
+      key: 'playlist'
+    } as Location)
+
+    assert.deepEqual(destinations, [{ pathname: '/playlists', search: 'q=%E5%BE%85%E7%9C%8B' }])
+  })
+
   it('keeps home, search and media-library detail stacks scoped and reversible', () => {
     const destinations: unknown[] = []
     const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction

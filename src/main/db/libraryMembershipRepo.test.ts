@@ -7,6 +7,7 @@ import {
   ensureVideoMembership,
   hasActiveVisibleVideoMembership,
   hasVideoMembership,
+  removeResourceLessMemberships,
   removeVideoMembership
 } from './libraryMembershipRepo'
 
@@ -113,6 +114,29 @@ describe('library membership repo', () => {
         .run()
       database.prepare("UPDATE media_libraries SET status = 'archived' WHERE id = 1").run()
       assert.equal(hasActiveVisibleVideoMembership(1, 14, database), false)
+    } finally {
+      database.close()
+    }
+  })
+
+  it('does not automatically remove a resource-less membership referenced by a playlist', () => {
+    const database = new Database(':memory:')
+    database.pragma('foreign_keys = ON')
+    try {
+      migrateDatabase(database)
+      database.exec(`
+        INSERT INTO videos (id, code) VALUES (15, 'MEM-015'), (16, 'MEM-016');
+        INSERT INTO playlists (id, name) VALUES (8, 'Keep');
+        INSERT INTO playlist_video (playlist_id, video_id, position) VALUES (8, 15, 0);
+      `)
+      ensureVideoMembership({ libraryId: 1, videoId: 15, addedVia: 'manual' }, database)
+      ensureVideoMembership({ libraryId: 1, videoId: 16, addedVia: 'manual' }, database)
+
+      const removed = removeResourceLessMemberships(1, database)
+
+      assert.deepEqual(removed.map((item) => item.videoId), [16])
+      assert.equal(hasVideoMembership(1, 15, database), true)
+      assert.equal(removeVideoMembership(1, 15, database), true)
     } finally {
       database.close()
     }

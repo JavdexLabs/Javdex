@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3'
 import { normalizeActressName } from './actressNameNormalization'
 import { normalizeClassificationName } from '../../shared/classificationNameNormalization'
 import { normalizeLocalPathIdentity } from '../../shared/localPathIdentity'
+import { normalizeRelatedLinkUrl } from '../../shared/relatedLinkUrl'
 import { normalizeVideoCode } from '../../shared/videoCode'
 import { buildVideoResourceSourceIdentity } from '../../shared/videoResourceIdentity'
 import {
@@ -11,17 +12,17 @@ import {
   MEDIA_LIBRARY_CORE_SCHEMA_SQL,
   MEDIA_LIBRARY_MEMBERSHIP_SCHEMA_SQL,
   MEDIA_LIBRARY_PENDING_SCAN_SCHEMA_SQL,
-  MEDIA_LIBRARY_PENDING_SCAN_RESOURCES_SCHEMA_SQL,
   MEDIA_LIBRARY_SCAN_SCHEMA_SQL,
+  MEDIA_LIBRARY_VIDEO_RESOURCES_SCHEMA_SQL,
   PENDING_LOCAL_FILE_DELETIONS_SCHEMA_SQL,
   PENDING_VIDEO_DECISIONS_SCHEMA_SQL,
+  PLAYLIST_IMPORT_SCHEMA_SQL,
   RELATED_LINKS_SCHEMA_SQL,
   SCHEMA_SQL,
-  VIDEO_RESOURCES_V16_SCHEMA_SQL,
   VIDEO_SOURCES_SCHEMA_SQL
 } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 18
+export const CURRENT_SCHEMA_VERSION = 14
 
 type Migration = {
   version: number
@@ -909,14 +910,6 @@ function migrateToV13(database: Database.Database): void {
   database.exec(RELATED_LINKS_SCHEMA_SQL)
 }
 
-function migrateToV14(database: Database.Database): void {
-  database.exec(AGENT_PLATFORM_SCHEMA_SQL)
-}
-
-function migrateToV15(database: Database.Database): void {
-  database.exec(AGENT_METADATA_SCHEMA_SQL)
-}
-
 type LegacyVideoResourceRow = {
   id: number
   video_id: number
@@ -1034,7 +1027,7 @@ function rebuildVideoResourcesForLibraries(
   sourceIdentityById: Map<number, string | null>
 ): void {
   if (!tableExists(database, 'video_resources')) {
-    database.exec(VIDEO_RESOURCES_V16_SCHEMA_SQL)
+    database.exec(MEDIA_LIBRARY_VIDEO_RESOURCES_SCHEMA_SQL)
     return
   }
   database.exec(`
@@ -1049,9 +1042,9 @@ function rebuildVideoResourcesForLibraries(
     DROP INDEX IF EXISTS idx_video_resources_library_video_kind;
     DROP INDEX IF EXISTS idx_video_resources_library_kind;
     DROP INDEX IF EXISTS idx_video_resources_root;
-    ALTER TABLE video_resources RENAME TO video_resources_v15;
+    ALTER TABLE video_resources RENAME TO video_resources_v13;
   `)
-  database.exec(VIDEO_RESOURCES_V16_SCHEMA_SQL)
+  database.exec(MEDIA_LIBRARY_VIDEO_RESOURCES_SCHEMA_SQL)
   const insertResource = database.prepare(`
     INSERT INTO video_resources (
       id, library_id, video_id, root_id, kind, locator, resource_key,
@@ -1080,7 +1073,7 @@ function rebuildVideoResourcesForLibraries(
       addTime: resource.add_time
     })
   }
-  database.exec('DROP TABLE video_resources_v15')
+  database.exec('DROP TABLE video_resources_v13')
 }
 
 function rebuildPendingScanForLibraries(
@@ -1151,7 +1144,11 @@ function rebuildPendingScanForLibraries(
   }
 }
 
-function migrateToV16(database: Database.Database): void {
+/** Single 0.6.0 migration from the released V13 schema; do not model unreleased intermediates. */
+function migrateToV14(database: Database.Database): void {
+  database.exec(AGENT_PLATFORM_SCHEMA_SQL)
+  database.exec(AGENT_METADATA_SCHEMA_SQL)
+
   const hasVideos = tableExists(database, 'videos')
   const hasResources = tableExists(database, 'video_resources')
   const hasPendingGroups = tableExists(database, 'pending_scan_groups')
@@ -1211,6 +1208,7 @@ function migrateToV16(database: Database.Database): void {
   rebuildVideoResourcesForLibraries(database, resources, sourceIdentityById)
   rebuildPendingScanForLibraries(database, groups, pendingResources, rootIdByIdentity)
   database.exec(MEDIA_LIBRARY_SCAN_SCHEMA_SQL)
+  normalizeStoredRelatedLinks(database)
 
   const migratedVideoCount = hasVideos
     ? Number(
@@ -1247,101 +1245,53 @@ function migrateToV16(database: Database.Database): void {
       'Multi-library migration count check failed; the migration was rolled back without changing the database.'
     )
   }
+  database.exec(PLAYLIST_IMPORT_SCHEMA_SQL)
 }
 
-/**
- * Pending discoveries are library-owned history. A disabled or archived library may retain the
- * same normalized path that a different active library later discovers, so path identity is only
- * unique inside one library.
- */
-function migrateToV17(database: Database.Database): void {
-  if (!tableExists(database, 'pending_scan_resources')) {
-    database.exec(MEDIA_LIBRARY_PENDING_SCAN_RESOURCES_SCHEMA_SQL)
-    return
+function normalizeStoredRelatedLinks(database: Database.Database): void {
+  for (const [table, entityColumn] of [
+    ['organization_links', 'organization_id'],
+    ['director_links', 'director_id'],
+    ['series_links', 'series_id'],
+    ['video_links', 'video_id'],
+    ['actress_links', 'actress_id'],
+    ['playlist_links', 'playlist_id']
+  ] as const) {
+    if (!tableExists(database, table)) continue
+    const rows = database.prepare(
+      `SELECT id, ${entityColumn} AS entity_id, url, position FROM ${table} ORDER BY position, id`
+    ).all() as Array<{ id: number; entity_id: number; url: string; position: number }>
+    const retained = new Map<string, { id: number; url: string; normalizedUrl: string }>()
+    for (const row of rows) {
+      let storedUrl = row.url
+      let normalizedUrl: string
+      try {
+        normalizedUrl = normalizeRelatedLinkUrl(storedUrl)
+      } catch (error) {
+        const parsed = new URL(storedUrl.trim())
+        if (
+          !['http:', 'https:'].includes(parsed.protocol) ||
+          (!parsed.username && !parsed.password)
+        ) {
+          throw error
+        }
+        // V13 accepted credential-bearing HTTP links. Remove the credentials during
+        // the V14 upgrade so a released database remains openable and no secret is retained.
+        parsed.username = ''
+        parsed.password = ''
+        storedUrl = parsed.toString()
+        normalizedUrl = normalizeRelatedLinkUrl(storedUrl)
+      }
+      const key = `${row.entity_id}:${normalizedUrl}`
+      if (retained.has(key)) {
+        database.prepare(`DELETE FROM ${table} WHERE id = ?`).run(row.id)
+      } else {
+        retained.set(key, { id: row.id, url: storedUrl, normalizedUrl })
+      }
+    }
+    const update = database.prepare(`UPDATE ${table} SET url = ?, normalized_url = ? WHERE id = ?`)
+    for (const row of retained.values()) update.run(row.url, row.normalizedUrl, row.id)
   }
-
-  database.exec(`
-    ALTER TABLE pending_scan_resources RENAME TO pending_scan_resources_v16;
-    DROP INDEX IF EXISTS idx_pending_scan_resources_group;
-    DROP INDEX IF EXISTS idx_pending_scan_resources_root;
-  `)
-  database.exec(MEDIA_LIBRARY_PENDING_SCAN_RESOURCES_SCHEMA_SQL)
-  database.exec(`
-    INSERT INTO pending_scan_resources (
-      id, library_id, group_id, root_id, file_path, normalized_path,
-      source_kind, target_kind, target_locator, target_key, size_bytes,
-      duration_seconds, file_mtime_ms, display_name, created_at, updated_at
-    )
-    SELECT
-      id, library_id, group_id, root_id, file_path, normalized_path,
-      source_kind, target_kind, target_locator, target_key, size_bytes,
-      duration_seconds, file_mtime_ms, display_name, created_at, updated_at
-    FROM pending_scan_resources_v16;
-    DROP TABLE pending_scan_resources_v16;
-  `)
-}
-
-/** Cover presentation is application-wide; library configuration no longer owns an override. */
-function migrateToV18(database: Database.Database): void {
-  if (!tableExists(database, 'media_library_configs')) {
-    database.exec(MEDIA_LIBRARY_CORE_SCHEMA_SQL)
-    return
-  }
-  if (!columnNames(database, 'media_library_configs').has('default_cover_mode')) return
-
-  database.exec(`
-    ALTER TABLE media_library_configs RENAME TO media_library_configs_v17;
-    CREATE TABLE media_library_configs (
-      library_id INTEGER PRIMARY KEY,
-      auto_scan_enabled INTEGER NOT NULL DEFAULT 0 CHECK(auto_scan_enabled IN (0, 1)),
-      auto_scan_interval_minutes INTEGER NOT NULL DEFAULT 1440
-          CHECK(auto_scan_interval_minutes BETWEEN 5 AND 10080),
-      min_import_duration_minutes INTEGER NOT NULL DEFAULT 0
-          CHECK(min_import_duration_minutes BETWEEN 0 AND 1440),
-      auto_merge_same_code_resources INTEGER NOT NULL DEFAULT 0
-          CHECK(auto_merge_same_code_resources IN (0, 1)),
-      remove_resource_less_memberships INTEGER NOT NULL DEFAULT 0
-          CHECK(remove_resource_less_memberships IN (0, 1)),
-      default_video_scraper TEXT,
-      default_sort_by TEXT NOT NULL DEFAULT 'release_date'
-          CHECK(default_sort_by IN ('add_time', 'release_date', 'rating', 'code')),
-      default_sort_dir TEXT NOT NULL DEFAULT 'desc' CHECK(default_sort_dir IN ('asc', 'desc')),
-      include_in_home_discovery INTEGER NOT NULL DEFAULT 1
-          CHECK(include_in_home_discovery IN (0, 1)),
-      revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
-      legacy_settings_imported_at TEXT,
-      FOREIGN KEY (library_id) REFERENCES media_libraries(id) ON DELETE CASCADE
-    );
-    INSERT INTO media_library_configs (
-      library_id,
-      auto_scan_enabled,
-      auto_scan_interval_minutes,
-      min_import_duration_minutes,
-      auto_merge_same_code_resources,
-      remove_resource_less_memberships,
-      default_video_scraper,
-      default_sort_by,
-      default_sort_dir,
-      include_in_home_discovery,
-      revision,
-      legacy_settings_imported_at
-    )
-    SELECT
-      library_id,
-      auto_scan_enabled,
-      auto_scan_interval_minutes,
-      min_import_duration_minutes,
-      auto_merge_same_code_resources,
-      remove_resource_less_memberships,
-      default_video_scraper,
-      default_sort_by,
-      default_sort_dir,
-      include_in_home_discovery,
-      revision,
-      legacy_settings_imported_at
-    FROM media_library_configs_v17;
-    DROP TABLE media_library_configs_v17;
-  `)
 }
 
 const MIGRATIONS: Migration[] = [
@@ -1396,22 +1346,6 @@ const MIGRATIONS: Migration[] = [
   {
     version: 14,
     migrate: migrateToV14
-  },
-  {
-    version: 15,
-    migrate: migrateToV15
-  },
-  {
-    version: 16,
-    migrate: migrateToV16
-  },
-  {
-    version: 17,
-    migrate: migrateToV17
-  },
-  {
-    version: 18,
-    migrate: migrateToV18
   }
 ]
 

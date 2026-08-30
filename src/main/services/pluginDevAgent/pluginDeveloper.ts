@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { readTestUserDataPath } from '@shared/appIdentity'
+import { AGENT_REASONING_TEXT_CHAR_LIMIT } from '@shared/agentReasoning'
 import { sanitizeUnicodeScalars, truncateUnicode } from '@shared/unicodeText'
 import type {
   PluginDevAgentEvent,
@@ -130,7 +131,6 @@ const PI_NATIVE_FILE_TOOLS = new Set<PiNativeToolName>([
   'read', 'write', 'edit', 'grep', 'find', 'ls'
 ])
 const PI_NATIVE_DRAFT_MUTATION_TOOLS = new Set<PiNativeToolName>(['write', 'edit'])
-const MAX_REASONING_DISPLAY_CHARS = 64_000
 const MODEL_STREAM_FLUSH_MS = 40
 
 function agentSessionDirectory(runId: string): string {
@@ -515,7 +515,7 @@ export class PluginDeveloper {
       const safe = sanitizeUnicodeScalars(event.text)
       const available = Math.max(
         0,
-        MAX_REASONING_DISPLAY_CHARS - Array.from(active.reasoningText).length
+        AGENT_REASONING_TEXT_CHAR_LIMIT - Array.from(active.reasoningText).length
       )
       const visible = truncateUnicode(safe, available)
       active.reasoningText += visible

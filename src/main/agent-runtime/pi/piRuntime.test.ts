@@ -602,6 +602,75 @@ describe('PiRuntime contract', () => {
     await opened.session.dispose()
   })
 
+  it('starts a new turn when a follow-up is dispatched after a terminating handoff settled', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-pi-handoff-resume-'))
+    roots.push(root)
+    const requests: Array<{ url: string; headers: Headers; body: Record<string, unknown> }> = []
+    const input = runtimeInput(root, requests)
+    input.tools = [{
+      name: 'only_tool',
+      label: 'Only tool',
+      description: 'The only allowed tool',
+      schema: {
+        type: 'object',
+        properties: { value: { type: 'string' } },
+        required: ['value'],
+        additionalProperties: false
+      },
+      schemaHash: 'schema-hash',
+      capability: 'test.read',
+      effect: 'read',
+      executionMode: 'parallel',
+      invoke: async () => ({
+        ok: true,
+        content: 'waiting for user',
+        summary: 'browser handoff',
+        terminate: true
+      })
+    }]
+    input.model.fetch = async (request, init) => {
+      const url = typeof request === 'string' ? request : request instanceof URL ? request.href : request.url
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : {}
+      requests.push({ url, headers: new Headers(init?.headers), body })
+      return requests.length === 1 ? openAiToolStream() : openAiStream('resumed')
+    }
+    let settledCount = 0
+    let resolveSettled: (() => void) | undefined
+    const opened = await createPiRuntimePort().open(input, {
+      notify: () => undefined,
+      commit: async (event) => {
+        if (event.type !== 'agent.settled') return
+        settledCount += 1
+        resolveSettled?.()
+      }
+    })
+    const waitForNextSettle = (): Promise<void> => new Promise((resolve) => {
+      resolveSettled = resolve
+    })
+
+    const firstSettled = waitForNextSettle()
+    assert.equal((await opened.session.dispatch({
+      commandId: 'handoff-command', kind: 'prompt', content: { text: 'request handoff' }
+    })).accepted, true)
+    await firstSettled
+
+    const resumedSettled = waitForNextSettle()
+    assert.equal((await opened.session.dispatch({
+      commandId: 'resume-command', kind: 'follow-up', content: { text: 'continue after login' }
+    })).accepted, true)
+    await Promise.race([
+      resumedSettled,
+      new Promise<never>((_, reject) => setTimeout(
+        () => reject(new Error('resumed agent_settled timeout')),
+        500
+      ))
+    ])
+
+    assert.equal(settledCount, 2)
+    assert.equal(requests.length, 2)
+    await opened.session.dispose()
+  })
+
   it('does not compact or inject a host recovery prompt after a length stop', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-pi-length-'))
     roots.push(root)

@@ -352,39 +352,45 @@ export default function MediaLibraryCreateModal({
                   onChange={(event) => patchDraft({ name: event.target.value })}
                 />
               </AppFormField>
-              <div className={styles.choiceGrid}>
-                {MEDIA_LIBRARY_ICONS.map((icon) => (
-                  <button
-                    key={icon}
-                    type="button"
-                    className={styles.iconChoice}
-                    aria-label={ICON_LABELS[icon]}
-                    aria-pressed={draft.icon === icon}
-                    disabled={busy}
-                    onClick={() => patchDraft({ icon })}
-                  >
-                    <NavIcon name={icon} />
-                    <span>{ICON_LABELS[icon]}</span>
-                  </button>
-                ))}
-              </div>
-              <div className={styles.choiceGrid}>
-                {MEDIA_LIBRARY_COLORS.map((color) => (
-                  <button
-                    key={color}
-                    type="button"
-                    className={styles.colorChoice}
-                    data-color={color}
-                    aria-label={`强调色：${COLOR_LABELS[color]}`}
-                    aria-pressed={draft.color === color}
-                    disabled={busy}
-                    onClick={() => patchDraft({ color })}
-                  >
-                    <span className={styles.colorDot} aria-hidden />
-                    {COLOR_LABELS[color]}
-                  </button>
-                ))}
-              </div>
+              <fieldset className={styles.choiceGroup}>
+                <legend className={styles.choiceLabel}>媒体库图标</legend>
+                <div className={styles.choiceGrid}>
+                  {MEDIA_LIBRARY_ICONS.map((icon) => (
+                    <button
+                      key={icon}
+                      type="button"
+                      className={styles.iconChoice}
+                      aria-label={ICON_LABELS[icon]}
+                      aria-pressed={draft.icon === icon}
+                      disabled={busy}
+                      onClick={() => patchDraft({ icon })}
+                    >
+                      <NavIcon name={icon} />
+                      <span>{ICON_LABELS[icon]}</span>
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+              <fieldset className={styles.choiceGroup}>
+                <legend className={styles.choiceLabel}>标识颜色</legend>
+                <div className={styles.choiceGrid}>
+                  {MEDIA_LIBRARY_COLORS.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      className={styles.colorChoice}
+                      data-color={color}
+                      aria-label={`强调色：${COLOR_LABELS[color]}`}
+                      aria-pressed={draft.color === color}
+                      disabled={busy}
+                      onClick={() => patchDraft({ color })}
+                    >
+                      <span className={styles.colorDot} aria-hidden />
+                      {COLOR_LABELS[color]}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
             </AppFormSection>
           ) : null}
 

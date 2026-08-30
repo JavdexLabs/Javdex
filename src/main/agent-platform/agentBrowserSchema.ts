@@ -45,6 +45,7 @@ export type AgentBrowserToolAction =
   | 'click'
   | 'fill'
   | 'press'
+  | 'scroll'
   | 'wait'
   | 'status'
   | 'read-section'
@@ -75,12 +76,28 @@ export function createAgentBrowserSchema(options: {
       maxLength: { type: 'number', description: '可选返回字符上限。' }
     }),
     browserActionSchema('evaluate', {
-      expression: { type: 'string', description: '在净化只读文档上执行的 JavaScript 表达式。' },
+      expression: {
+        type: 'string',
+        description: '仅在 snapshot、find 和 html 无法提供所需文本计数或聚合时使用；表达式在净化只读文档上运行并返回 JSON 兼容值。禁止计算属性访问（包括 array[index] 和 object[key]）、getAttribute、getAttributeNames、innerHTML 和 outerHTML。读取局部标记用 html，读取链接用 .href，读取数组项用 .at(n) 或解构；直接返回对象或数组，不要 JSON.stringify。'
+      },
       timeoutMs: { type: 'number' }
     }, ['expression']),
     browserActionSchema('click', {
       target: { type: 'string', description: '当前 ARIA ref 或唯一 Playwright selector。' }
     }, ['target']),
+    browserActionSchema('scroll', {
+      target: { type: 'string', description: '可选；滚动容器的当前 ARIA ref 或唯一 Playwright selector，省略时滚动文档。' },
+      direction: { type: 'string', enum: ['up', 'down'] },
+      amount: {
+        type: 'string',
+        enum: ['eighth-viewport', 'quarter-viewport', 'half-viewport', 'viewport'],
+        description: '默认 half-viewport。'
+      }
+    }, ['direction']),
+    browserActionSchema('scroll', {
+      target: { type: 'string', description: '可选；滚动容器的当前 ARIA ref 或唯一 Playwright selector，省略时滚动文档。' },
+      direction: { type: 'string', enum: ['start'] }
+    }, ['direction']),
     browserActionSchema('wait', {
       target: { type: 'string', description: '可选；等待该 ARIA ref 或唯一 Playwright selector。' },
       timeoutMs: { type: 'number', description: '可选等待时长。' }

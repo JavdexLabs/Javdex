@@ -149,6 +149,10 @@ export function removeResourceLessMemberships(
           WHERE membership.library_id = ?
             AND membership.is_pinned = 0
             AND NOT EXISTS (
+              SELECT 1 FROM playlist_video playlist_item
+               WHERE playlist_item.video_id = membership.video_id
+            )
+            AND NOT EXISTS (
               SELECT 1 FROM video_resources resource
                WHERE resource.library_id = membership.library_id
                  AND resource.video_id = membership.video_id
@@ -163,6 +167,10 @@ export function removeResourceLessMemberships(
     const remove = database.prepare(
       `DELETE FROM library_video_memberships
         WHERE library_id = ? AND video_id = ? AND is_pinned = 0
+          AND NOT EXISTS (
+            SELECT 1 FROM playlist_video playlist_item
+             WHERE playlist_item.video_id = library_video_memberships.video_id
+          )
           AND NOT EXISTS (
             SELECT 1 FROM video_resources resource
              WHERE resource.library_id = library_video_memberships.library_id

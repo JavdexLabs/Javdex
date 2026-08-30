@@ -181,7 +181,12 @@ describe('PluginDevInstructionModule', () => {
     assert.equal(pluginSkill.match(/workspace_invalid/g)?.length, 1)
 
     assert.match(browserSkill, /Required before any browser action/)
-    assert.match(browserSkill, /action 为 `open\|snapshot\|find\|html\|evaluate\|click\|fill\|press\|wait\|status\|read-section\|handoff`/)
+    assert.match(browserSkill, /action 为 `open\|snapshot\|find\|html\|evaluate\|click\|fill\|press\|scroll\|wait\|status\|read-section\|handoff`/)
+    assert.match(
+      browserSkill,
+      /direction=up\|down.*amount=eighth-viewport\|quarter-viewport\|half-viewport\|viewport/
+    )
+    assert.match(browserSkill, /虚拟列表可能复用 DOM，滚动后必须使用随 observation 返回的新 ref/)
     assert.match(browserSkill, /Playwright ARIA snapshot 与完整 `pageFacts`/)
     assert.match(browserSkill, /当前页面不是中文.*明确显示语言选择入口/)
     assert.match(browserSkill, /优先简体中文，其次繁体中文/)
@@ -207,9 +212,9 @@ describe('PluginDevInstructionModule', () => {
     assert.match(browserSkill, /section="observation".*可用分区清单/)
     assert.match(browserSkill, /存储、完整性校验和分页由宿主隐藏/)
     assert.doesNotMatch(browserSkill, /\$artifactTextRef|offset\/limit|read-artifact/)
-    assert.match(browserSkill, /同文档在 `delta` 或 `unchanged` 之后不得再 snapshot/)
+    assert.match(browserSkill, /同一 viewRevision 在 `delta` 或 `unchanged` 之后不得再 snapshot/)
     assert.match(browserSkill, /`unchanged`.*必须停止相同探索/)
-    assert.match(browserSkill, /`pending`.*只调用一次 `snapshot`.*绝不能重复 click\/fill\/press/)
+    assert.match(browserSkill, /`pending`.*只调用一次 `snapshot`.*绝不能重复 click\/fill\/press\/scroll/)
     assert.match(browserSkill, /`pageFacts\.links\.href` 是按当前页 resolve 后的绝对地址/)
     assert.match(browserSkill, /HTML 属性与它不同时另有 `rawHref`/)
     assert.match(browserSkill, /snapshot、可见控件或 `pageFacts\.localeLinks`/)
@@ -459,7 +464,7 @@ describe('PluginDevInstructionModule', () => {
       return [action?.enum?.[0], variant]
     }))
     assert.deepEqual([...byAction.keys()], [
-      'open', 'snapshot', 'find', 'html', 'evaluate', 'click', 'fill', 'press', 'wait', 'status', 'read-section', 'handoff'
+      'open', 'snapshot', 'find', 'html', 'evaluate', 'click', 'fill', 'press', 'scroll', 'wait', 'status', 'read-section', 'handoff'
     ])
     assert.deepEqual(byAction.get('open')?.required, ['action', 'url'])
     assert.deepEqual(byAction.get('click')?.required, ['action', 'target'])

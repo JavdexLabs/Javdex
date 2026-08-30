@@ -45,7 +45,9 @@ function createWorkspaceSession(
   return session
 }
 
-function installFakeBrowserLease(): () => void {
+function installFakeBrowserLease(
+  onCommand?: (command: Parameters<ScrapeBrowserLease['agentAction']>[0]) => void
+): () => void {
   const original = scrapeBrowser.acquire
   const previousUserData = process.env.JAVDEX_TEST_USER_DATA
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-tool-settings-'))
@@ -59,7 +61,10 @@ function installFakeBrowserLease(): () => void {
     fetchBuffer: async () => Buffer.alloc(0),
     fetchBufferResponse: async () => ({ statusCode: 200, body: Buffer.alloc(0) }),
     pluginAction: async () => ({}),
-    agentAction: async (command) => ({ action: command.action }),
+    agentAction: async (command) => {
+      onCommand?.(command)
+      return { action: command.action }
+    },
     presentToUser: async () => ({ url: 'https://example.test', title: 'Example' }),
     recycle: async () => undefined,
     release: async () => undefined
@@ -494,6 +499,32 @@ describe('PluginDeveloper v1 tool executor', { concurrency: false }, () => {
       })
     } finally {
       scrapeBrowser.acquire = originalAcquire
+      deleteSession(session.id)
+    }
+  })
+
+  it('maps bounded scroll arguments to the shared browser command', async () => {
+    const session = createWorkspaceSession('executor-browser-scroll')
+    const commands: Array<Parameters<ScrapeBrowserLease['agentAction']>[0]> = []
+    const restoreBrowser = installFakeBrowserLease((command) => commands.push(command))
+    try {
+      const result = await executeTool(session.id, 'browser', JSON.stringify({
+        action: 'scroll',
+        target: '.virtual-list',
+        direction: 'down',
+        amount: 'viewport'
+      }), 2)
+
+      assert.equal(result.ok, true)
+      assert.deepEqual(commands, [{
+        action: 'scroll',
+        target: '.virtual-list',
+        direction: 'down',
+        amount: 'viewport'
+      }])
+    } finally {
+      await releasePluginDeveloperBrowser(session.id)
+      restoreBrowser()
       deleteSession(session.id)
     }
   })

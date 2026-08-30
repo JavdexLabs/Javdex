@@ -18,6 +18,7 @@ export type AgentEvidenceBrowserAction =
   | 'click'
   | 'fill'
   | 'press'
+  | 'scroll'
   | 'wait'
   | 'status'
 
@@ -30,6 +31,7 @@ const BROWSER_CAPABILITY_RESULT_LIMITS: Readonly<Record<AgentEvidenceBrowserActi
   click: 64_000,
   fill: 64_000,
   press: 64_000,
+  scroll: 64_000,
   wait: 64_000,
   snapshot: 64_000
 }
@@ -134,6 +136,7 @@ function stableSerialize(value: unknown): string {
 
 interface BrowserObservationBaseline {
   documentRevision: string
+  viewRevision: string
   fullSnapshot: string
   pageFacts?: Record<string, unknown>
 }
@@ -356,10 +359,12 @@ function transparentObservationResult(input: {
   const identity: AgentBrowserObservation = {
     action: input.observation.action,
     documentRevision: input.observation.documentRevision,
+    viewRevision: input.observation.viewRevision,
     actionSucceeded: input.observation.actionSucceeded,
     url: input.observation.url,
     title: input.observation.title,
     staleRefs: input.observation.staleRefs,
+    scrollState: input.observation.scrollState,
     evidenceIncomplete: input.observation.evidenceIncomplete,
     artifactComplete: input.observation.artifactComplete
   }
@@ -433,11 +438,13 @@ function transparentObservationResult(input: {
   const minimalObservation: AgentBrowserObservation = {
     action: input.observation.action,
     documentRevision: input.observation.documentRevision,
+    viewRevision: input.observation.viewRevision,
     observationMode: 'artifact',
     actionSucceeded: input.observation.actionSucceeded,
     url: input.observation.url,
     title: input.observation.title,
     staleRefs: input.observation.staleRefs,
+    scrollState: input.observation.scrollState,
     inlineComplete: false,
     artifactComplete: input.observation.artifactComplete,
     sourceByteLength,
@@ -982,7 +989,7 @@ export class AgentBrowserEvidenceModule {
       ? structured.fullSnapshot
       : undefined
     const hasPageFacts = isRecord(observation.pageFacts)
-    const pageObservation = ['open', 'snapshot', 'click', 'fill', 'press', 'wait'].includes(input.action)
+    const pageObservation = ['open', 'snapshot', 'click', 'fill', 'press', 'scroll', 'wait'].includes(input.action)
     const sourceCapped = observation.fullSnapshotTruncated === true ||
       (observation.truncated === true && !fullSnapshot)
     const sourceEvidenceIncomplete = observation.evidenceIncomplete
@@ -1035,18 +1042,20 @@ export class AgentBrowserEvidenceModule {
       }
     } else {
       const revision = observation.documentRevision ?? `legacy:${observation.url ?? ''}`
+      const currentViewRevision = observation.viewRevision ?? revision
       const baseline = this.baselines.get(input.sessionId)
       const currentSnapshot = fullSnapshot ?? String(observation.snapshot ?? '')
       const currentFacts = hasPageFacts
         ? observation.pageFacts as Record<string, unknown>
-        : baseline?.documentRevision === revision
+        : baseline?.viewRevision === currentViewRevision
           ? baseline.pageFacts
           : undefined
-      const newDocument = !baseline || baseline.documentRevision !== revision
-      if (newDocument) {
+      const newView = !baseline || baseline.viewRevision !== currentViewRevision
+      if (newView) {
         agentObservation = {
           ...stableObservation,
           documentRevision: revision,
+          viewRevision: currentViewRevision,
           observationMode: 'full',
           ...(currentSnapshot ? { snapshot: currentSnapshot } : {}),
           ...(baseline ? { staleRefs: true } : {}),
@@ -1065,10 +1074,12 @@ export class AgentBrowserEvidenceModule {
           agentObservation = {
             action: observation.action,
             documentRevision: revision,
+            viewRevision: currentViewRevision,
             observationMode: 'unchanged',
             actionSucceeded: observation.actionSucceeded,
             url: observation.url,
             title: observation.title,
+            scrollState: observation.scrollState,
             staleRefs: false,
             evidenceIncomplete: sourceEvidenceIncomplete === true,
             artifactComplete: fullObservation.artifactComplete
@@ -1078,10 +1089,12 @@ export class AgentBrowserEvidenceModule {
           agentObservation = {
             action: observation.action,
             documentRevision: revision,
+            viewRevision: currentViewRevision,
             observationMode: 'delta',
             actionSucceeded: observation.actionSucceeded,
             url: observation.url,
             title: observation.title,
+            scrollState: observation.scrollState,
             ...(aria.value ? { ariaDelta: aria.value } : {}),
             ...(factsDelta ? { pageFactsDelta: factsDelta } : {}),
             staleRefs: false,
@@ -1092,6 +1105,7 @@ export class AgentBrowserEvidenceModule {
       }
       this.baselines.set(input.sessionId, {
         documentRevision: revision,
+        viewRevision: currentViewRevision,
         fullSnapshot: currentSnapshot,
         ...(currentFacts ? { pageFacts: currentFacts } : {})
       })

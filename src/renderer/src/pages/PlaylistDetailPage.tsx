@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
-import { Inbox, Pencil, SearchX } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Outlet, useLocation, useMatch, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Filter, Import, Inbox, Pencil, SearchX } from 'lucide-react'
 import type { SortDir } from '@shared/commonTypes'
 import type { PlaylistDetail, PlaylistUpdateInput, PlaylistVideoSortBy } from '@shared/playlistTypes'
 import type { Video } from '@shared/videoTypes'
@@ -18,6 +18,17 @@ import EmptyState from '../components/EmptyState'
 import { UI_ICON } from '../components/iconDefaults'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import RelatedLinksList from '../components/RelatedLinksList'
+import Button from '../components/Button'
+import PlaylistResourceFilterPopover from '../components/PlaylistResourceFilterPopover'
+import {
+  LIST_PARAM,
+  parseVideoResourceFilters,
+  patchSearchParams,
+  videoResourceFiltersParam
+} from '../listView/listQueryParams'
+import { matchesPlaylistResourceFilter } from './playlistResourceFilter'
+import { usePlaylistImport } from '../components/playlistImport/PlaylistImportContext'
+import { onPlaylistImportCompleted } from '../components/playlistImport/events'
 
 const PLAYLIST_VIDEO_SORT_OPTIONS: SortSwitchOption<PlaylistVideoSortBy>[] = [
   { value: 'added_at', label: '加入', title: '加入时间' },
@@ -35,7 +46,9 @@ export default function PlaylistDetailPage(): JSX.Element {
   const playlistId = Number(playlistIdParam)
   const navigate = useNavigate()
   const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
   const toast = useToast()
+  const playlistImport = usePlaylistImport()
   const videoStackOpen = Boolean(useMatch({ path: ROUTE_MATCH.playlistVideoStack, end: false }))
   const [detail, setDetail] = useState<PlaylistDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -45,11 +58,16 @@ export default function PlaylistDetailPage(): JSX.Element {
   const [removingVideoId, setRemovingVideoId] = useState<number | null>(null)
   const [videoSortBy, setVideoSortBy] = useState<PlaylistVideoSortBy>('added_at')
   const [videoSortDir, setVideoSortDir] = useState<SortDir>('desc')
+  const [resourceFilterOpen, setResourceFilterOpen] = useState(false)
+  const resourceFilterButtonRef = useRef<HTMLButtonElement>(null)
+  const previousVideoStackOpenRef = useRef(videoStackOpen)
+  const resourceFilters = parseVideoResourceFilters(searchParams.get(LIST_PARAM.resources))
 
   const dismissOverlays = useCallback(() => {
     setShowEdit(false)
     setConfirmDelete(false)
     setVideoRemoveTarget(null)
+    setResourceFilterOpen(false)
   }, [])
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
@@ -70,6 +88,40 @@ export default function PlaylistDetailPage(): JSX.Element {
   useEffect(() => {
     void loadDetail()
   }, [loadDetail])
+
+  useEffect(() => onPlaylistImportCompleted((completedPlaylistId) => {
+    if (completedPlaylistId === playlistId) void loadDetail()
+  }), [loadDetail, playlistId])
+
+  useEffect(() => {
+    const raw = searchParams.get(LIST_PARAM.resources)
+    const canonical = videoResourceFiltersParam(resourceFilters)
+    if (raw === canonical) return
+    setSearchParams(
+      (current) => patchSearchParams(current, { [LIST_PARAM.resources]: canonical }),
+      { replace: true }
+    )
+  }, [resourceFilters, searchParams, setSearchParams])
+
+  useEffect(() => {
+    const wasOpen = previousVideoStackOpenRef.current
+    previousVideoStackOpenRef.current = videoStackOpen
+    if (wasOpen && !videoStackOpen) void loadDetail()
+  }, [loadDetail, videoStackOpen])
+
+  const setResourceFilters = useCallback((filters: typeof resourceFilters): void => {
+    setSearchParams(
+      (current) => patchSearchParams(current, {
+        [LIST_PARAM.resources]: videoResourceFiltersParam(filters)
+      }),
+      { replace: true }
+    )
+  }, [setSearchParams])
+
+  const visibleVideos = useMemo(
+    () => detail?.videos.filter((video) => matchesPlaylistResourceFilter(video, resourceFilters)) ?? [],
+    [detail, resourceFilters]
+  )
 
   const updatePlaylist = async (input: PlaylistUpdateInput): Promise<void> => {
     if (!detail) return
@@ -175,6 +227,18 @@ export default function PlaylistDetailPage(): JSX.Element {
                   variant="inline"
                   actions={[
                     {
+                      key: 'import',
+                      icon: <Import {...UI_ICON} />,
+                      label: '从网页导入',
+                      onClick: () => playlistImport.open({
+                        destination: {
+                          kind: 'append',
+                          playlistId: detail.id,
+                          playlistName: detail.name
+                        }
+                      })
+                    },
+                    {
                       key: 'edit',
                       icon: <Pencil {...UI_ICON} />,
                       label: '编辑',
@@ -194,8 +258,26 @@ export default function PlaylistDetailPage(): JSX.Element {
             </div>
 
             <div className="playlist-section-head">
-              <div className="section-title">影片</div>
+              <div className="section-title">
+                影片
+                {resourceFilters.length > 0 && detail.videos.length > 0 ? (
+                  <span className="section-title-detail">
+                    匹配 {visibleVideos.length} / 共 {detail.videos.length} 部
+                  </span>
+                ) : null}
+              </div>
               <div className="playlist-section-controls">
+                <Button
+                  ref={resourceFilterButtonRef}
+                  type="button"
+                  size="sm"
+                  aria-expanded={resourceFilterOpen}
+                  aria-controls={`playlist-resource-filter-${detail.id}`}
+                  onClick={() => setResourceFilterOpen((open) => !open)}
+                >
+                  <Filter {...UI_ICON} aria-hidden />
+                  资源筛选{resourceFilters.length > 0 ? ` · ${resourceFilters.length}` : ''}
+                </Button>
                 <SortSwitch
                   label="清单影片排序"
                   options={PLAYLIST_VIDEO_SORT_OPTIONS}
@@ -207,7 +289,7 @@ export default function PlaylistDetailPage(): JSX.Element {
                     setVideoSortDir(nextSortDir)
                   }}
                 />
-                <span className="count-badge">{detail.videos.length}</span>
+                <span className="count-badge">{visibleVideos.length}</span>
               </div>
             </div>
 
@@ -218,9 +300,18 @@ export default function PlaylistDetailPage(): JSX.Element {
                 title="清单内暂无影片"
                 description="可在影片详情页通过「加入清单」添加。"
               />
+            ) : visibleVideos.length === 0 ? (
+              <EmptyState
+                variant="compact"
+                icon={<SearchX {...UI_ICON} aria-hidden />}
+                title="没有符合资源筛选的影片"
+                description="清除筛选后可查看清单中的全部影片。"
+              >
+                <Button size="sm" onClick={() => setResourceFilters([])}>清除筛选</Button>
+              </EmptyState>
             ) : (
               <div className="playlist-video-grid">
-                {detail.videos.map((video) => (
+                {visibleVideos.map((video) => (
                   <PosterCard
                     key={video.id}
                     video={video}
@@ -232,6 +323,15 @@ export default function PlaylistDetailPage(): JSX.Element {
             )}
           </div>
       </DetailScrollBody>
+
+      <PlaylistResourceFilterPopover
+        id={`playlist-resource-filter-${detail.id}`}
+        open={resourceFilterOpen}
+        anchorRef={resourceFilterButtonRef}
+        value={resourceFilters}
+        onChange={setResourceFilters}
+        onClose={() => setResourceFilterOpen(false)}
+      />
 
       {showEdit && (
         <PlaylistCreateModal

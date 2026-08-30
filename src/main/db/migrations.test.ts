@@ -1087,7 +1087,7 @@ describe('database schema', () => {
     }
   })
 
-  it('upgrades the released schema once to add the Agent platform and metadata drafts', () => {
+  it('upgrades the released schema once to add all unreleased V14 features', () => {
     const db = new Database(':memory:')
     try {
       db.exec(`
@@ -1116,7 +1116,10 @@ describe('database schema', () => {
         'agent_approvals',
         'agent_artifacts',
         'agent_metadata_drafts',
-        'agent_metadata_draft_resources'
+        'agent_metadata_draft_resources',
+        'media_libraries',
+        'library_video_memberships',
+        'playlist_import_jobs'
       ]) {
         assert.equal(tableExistsForTest(db, table), true)
       }

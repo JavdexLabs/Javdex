@@ -29,7 +29,10 @@ import {
   ScrapeBrowserObservationPendingError,
   type AgentBrowserCommand,
   type AgentBrowserObservation,
+  type AgentBrowserScrollState,
   type PluginBrowserAction,
+  type ScrapeBrowserListExtraction,
+  type ScrapeBrowserListExtractionPlan,
   type ScrapeBrowserFetchBufferOptions,
   type ScrapeBrowserFetchPageOptions,
   type ScrapeBrowserPurpose,
@@ -45,6 +48,7 @@ export {
   isScrapeBrowserObservationPendingError,
   type AgentBrowserCommand,
   type AgentBrowserObservation,
+  type AgentBrowserScrollState,
   type PluginBrowserAction,
   type ScrapeBrowserFetchBufferOptions,
   type ScrapeBrowserFetchPageOptions,
@@ -72,7 +76,8 @@ interface RunningHelper {
   cdpPort: number
   fatal: boolean
   pageEpoch: number
-  snapshotEpoch: number | null
+  viewEpoch: number
+  snapshotViewRevision: string | null
 }
 
 interface PendingRequest {
@@ -116,6 +121,8 @@ export interface ScrapeBrowserLease {
     params?: Record<string, unknown>
   ): Promise<unknown>
   agentAction(command: AgentBrowserCommand): Promise<AgentBrowserObservation>
+  /** Host-only, selector-driven full extraction. It is never exposed through Agent browser tools. */
+  extractList?(plan: ScrapeBrowserListExtractionPlan): Promise<ScrapeBrowserListExtraction>
   /** Make the helper window visible and focused for an explicit user handoff. */
   presentToUser(): Promise<ScrapeBrowserPresentation>
   recycle(): Promise<void>
@@ -299,6 +306,16 @@ function compactFind(snapshot: string, matcher: (line: string) => boolean): Arra
 
 function documentRevision(helper: Pick<RunningHelper, 'generation' | 'pageEpoch'>): string {
   return `${helper.generation}:${helper.pageEpoch}`
+}
+
+function viewRevision(
+  helper: Pick<RunningHelper, 'generation' | 'pageEpoch' | 'viewEpoch'>
+): string {
+  return `${helper.generation}:${helper.pageEpoch}:${helper.viewEpoch}`
+}
+
+function hasFreshSnapshot(helper: RunningHelper): boolean {
+  return helper.snapshotViewRevision === viewRevision(helper)
 }
 
 function isTransientObservationError(error: unknown): boolean {
@@ -530,6 +547,10 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
           throw error
         }
       },
+      extractList: async (plan) => {
+        assertCurrent()
+        return withAbort(this.extractList(plan, signal), signal)
+      },
       recycle: async () => {
         assertCurrent()
         await this.stopHelper('lease recycle')
@@ -671,13 +692,15 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         cdpPort,
         fatal: false,
         pageEpoch: 0,
-        snapshotEpoch: null
+        viewEpoch: 0,
+        snapshotViewRevision: null
       }
       this.helper = helper
       page.on('framenavigated', (frame) => {
         if (frame === page.mainFrame()) {
           helper.pageEpoch += 1
-          helper.snapshotEpoch = null
+          helper.viewEpoch = 0
+          helper.snapshotViewRevision = null
         }
       })
       page.on('close', () => this.markHelperFatal(helper, 'Scraper helper page target closed'))
@@ -834,7 +857,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
   ): Promise<AgentBrowserObservation> {
     const deadline = Date.now() + timeoutMs
     const locator = command.target
-      ? selectorForTarget(helper.page, command.target, helper.snapshotEpoch === helper.pageEpoch)
+      ? selectorForTarget(helper.page, command.target, hasFreshSnapshot(helper))
       : helper.page.locator('body')
     if (command.target) await assertUniqueTarget('snapshot', command.target, locator)
     const raw = await locator.ariaSnapshot({
@@ -866,7 +889,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
       signal.throwIfAborted()
       // ARIA remains usable if optional fact extraction fails on unusual pages.
     }
-    helper.snapshotEpoch = helper.pageEpoch
+    helper.snapshotViewRevision = viewRevision(helper)
     const compact = byteLimited(raw, DEFAULT_AGENT_RESULT_SNAPSHOT_LENGTH)
     const title = await withTimeout(
       helper.page.title(),
@@ -876,6 +899,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
     return {
       action: 'snapshot',
       documentRevision: documentRevision(helper),
+      viewRevision: viewRevision(helper),
       actionSucceeded: true,
       url: helper.page.url(),
       title,
@@ -888,12 +912,326 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
     }
   }
 
+  private async extractList(
+    plan: ScrapeBrowserListExtractionPlan,
+    signal: AbortSignal
+  ): Promise<ScrapeBrowserListExtraction> {
+    signal.throwIfAborted()
+    const helper = this.helper
+    if (!helper) throw new Error('刮削浏览器尚未启动')
+    const limited = (value: string | undefined, name: string, maxLength: number): string | undefined => {
+      const normalized = value?.trim()
+      if (!normalized) return undefined
+      if (normalized.length > maxLength) throw new Error(`${name} 过长`)
+      return normalized
+    }
+    const normalizedPlan = {
+      candidateSelector: limited(plan.candidateSelector, 'candidateSelector', 1_000)!,
+      detailLinkSelector: limited(plan.detailLinkSelector, 'detailLinkSelector', 1_000)!,
+      detailLinkAttribute: limited(plan.detailLinkAttribute, 'detailLinkAttribute', 160) ?? 'href',
+      codeSelector: limited(plan.codeSelector, 'codeSelector', 1_000),
+      codeAttribute: limited(plan.codeAttribute, 'codeAttribute', 160),
+      codePattern: limited(plan.codePattern, 'codePattern', 256),
+      titleSelector: limited(plan.titleSelector, 'titleSelector', 1_000),
+      titleAttribute: limited(plan.titleAttribute, 'titleAttribute', 160),
+      nextPageSelector: limited(plan.nextPageSelector, 'nextPageSelector', 1_000),
+      terminalProof: plan.terminalProof
+        ? {
+            kind: plan.terminalProof.kind,
+            selector: limited(plan.terminalProof.selector, 'terminalProof.selector', 1_000)!
+          }
+        : undefined,
+      loadMoreSelector: limited(plan.loadMoreSelector, 'loadMoreSelector', 1_000),
+      containerSelector: limited(plan.containerSelector, 'containerSelector', 1_000),
+      position: plan.position
+    }
+    if (!normalizedPlan.candidateSelector || !normalizedPlan.detailLinkSelector) {
+      throw new Error('清单候选与详情链接 selector 必填')
+    }
+    const extracted = await helper.page.evaluate((input) => {
+      type BrowserElement = {
+        querySelector: (selector: string) => BrowserElement | null
+        querySelectorAll: (selector: string) => Iterable<BrowserElement>
+        textContent: string | null
+        getAttribute: (name: string) => string | null
+        tagName: string
+        id: string
+        className: unknown
+        href?: string
+        scrollTop: number
+        scrollHeight: number
+        clientHeight: number
+        getBoundingClientRect: () => { width: number; height: number }
+      }
+      const browserGlobals = globalThis as unknown as {
+        document: BrowserElement & {
+          baseURI: string
+          scrollingElement: BrowserElement | null
+          documentElement: BrowserElement
+        }
+        URL: typeof URL
+        getComputedStyle: (element: BrowserElement) => { display: string; visibility: string }
+      }
+      const documentTarget = browserGlobals.document
+      const root = input.containerSelector
+        ? documentTarget.querySelector(input.containerSelector)
+        : documentTarget
+      if (!root) throw new Error(`未找到滚动容器：${input.containerSelector}`)
+      const text = (value: string | null | undefined): string | undefined => {
+        const normalized = value?.replace(/\s+/gu, ' ').trim()
+        return normalized || undefined
+      }
+      const read = (
+        candidate: BrowserElement,
+        selector: string | undefined,
+        attribute: string | undefined
+      ): string | undefined => {
+        const element = selector ? candidate.querySelector(selector) : candidate
+        if (!element) return undefined
+        if (!attribute) return text(element.textContent)
+        if (attribute === 'href' && element.href) return element.href
+        return text(element.getAttribute(attribute))
+      }
+      const pattern = input.codePattern ? new RegExp(input.codePattern, 'iu') : null
+      const items = [...root.querySelectorAll(input.candidateSelector)].map((candidate) => {
+        const rawDetailUrl = read(candidate, input.detailLinkSelector, input.detailLinkAttribute)
+        if (!rawDetailUrl) throw new Error('候选缺少详情链接')
+        const detailUrl = new browserGlobals.URL(rawDetailUrl, documentTarget.baseURI).toString()
+        const rawCode = read(candidate, input.codeSelector, input.codeAttribute)
+        const match = rawCode && pattern ? rawCode.match(pattern) : null
+        const code = text(match?.[1] ?? match?.[0] ?? rawCode)
+        const title = read(candidate, input.titleSelector, input.titleAttribute)
+        let absolutePosition: number | undefined
+        if (input.position?.kind === 'aria-posinset') {
+          const raw = candidate.getAttribute('aria-posinset')
+          if (raw != null) absolutePosition = Number(raw) - 1
+        } else if (input.position?.kind === 'attribute') {
+          const raw = candidate.getAttribute(input.position.name)
+          if (raw != null) absolutePosition = Number(raw) - input.position.base
+        }
+        return {
+          detailUrl,
+          ...(code ? { code } : {}),
+          ...(title ? { title } : {}),
+          ...(Number.isInteger(absolutePosition) && absolutePosition! >= 0
+            ? { absolutePosition, occurrenceKey: `${absolutePosition}:${detailUrl}` }
+            : {})
+        }
+      })
+      const nextPageUrls = input.nextPageSelector
+        ? [...documentTarget.querySelectorAll(input.nextPageSelector)].map((element) => {
+            const raw = element.href ?? element.getAttribute('href')
+            if (!raw) throw new Error('分页 selector 命中的元素缺少 href')
+            return new browserGlobals.URL(raw, documentTarget.baseURI).toString()
+          })
+        : []
+      const visible = (element: BrowserElement): boolean => (
+        element.getAttribute('hidden') == null &&
+        element.getAttribute('aria-hidden') !== 'true' &&
+        browserGlobals.getComputedStyle(element).display !== 'none' &&
+        browserGlobals.getComputedStyle(element).visibility !== 'hidden' &&
+        element.getBoundingClientRect().width > 0 &&
+        element.getBoundingClientRect().height > 0
+      )
+      const terminalMatches = input.terminalProof
+        ? [...documentTarget.querySelectorAll(input.terminalProof.selector)]
+        : []
+      const terminalVerified = input.terminalProof
+        ? input.terminalProof.kind === 'no-pagination-container-after-full-dom-check'
+          ? terminalMatches.length === 0
+          : input.terminalProof.kind === 'disabled-next'
+            ? terminalMatches.some((element) => (
+                visible(element) && (
+                  element.getAttribute('disabled') != null ||
+                  element.getAttribute('aria-disabled') === 'true'
+                )
+              ))
+            : terminalMatches.some(visible)
+        : undefined
+      const loadMoreAvailable = input.loadMoreSelector
+        ? [...documentTarget.querySelectorAll(input.loadMoreSelector)].some((element) => (
+            element.getAttribute('disabled') == null &&
+            element.getAttribute('aria-disabled') !== 'true' &&
+            visible(element)
+          ))
+        : undefined
+      const scroller = input.containerSelector
+        ? root
+        : documentTarget.scrollingElement ?? documentTarget.documentElement
+      return {
+        items,
+        nextPageUrls,
+        terminalVerified,
+        loadMoreAvailable,
+        scrollMetrics: {
+          scrollTop: scroller.scrollTop,
+          scrollHeight: scroller.scrollHeight,
+          clientHeight: scroller.clientHeight
+        },
+        descriptor: input.containerSelector
+          ? {
+              kind: 'element',
+              tag: scroller.tagName.toLocaleLowerCase(),
+              id: scroller.id,
+              className: typeof scroller.className === 'string'
+                ? scroller.className
+                : '',
+              role: scroller.getAttribute('role') ?? ''
+            }
+          : { kind: 'document' }
+      }
+    }, normalizedPlan)
+    signal.throwIfAborted()
+    const metrics = extracted.scrollMetrics
+    const containerFingerprint = crypto.createHash('sha256').update(JSON.stringify({
+      target: normalizedPlan.containerSelector ?? null,
+      descriptor: extracted.descriptor
+    })).digest('hex').slice(0, 16)
+    return {
+      url: helper.page.url(),
+      title: await helper.page.title(),
+      documentRevision: documentRevision(helper),
+      viewRevision: viewRevision(helper),
+      items: extracted.items,
+      nextPageUrls: [...new Set(extracted.nextPageUrls)],
+      ...(extracted.terminalVerified != null
+        ? { terminalVerified: extracted.terminalVerified }
+        : {}),
+      ...(extracted.loadMoreAvailable != null
+        ? { loadMoreAvailable: extracted.loadMoreAvailable }
+        : {}),
+      containerFingerprint,
+      scrollState: {
+        containerFingerprint,
+        before: metrics,
+        after: metrics,
+        deltaY: 0,
+        moved: false,
+        atStart: metrics.scrollTop <= 0.5,
+        atEnd: metrics.scrollTop + metrics.clientHeight >= metrics.scrollHeight - 0.5,
+        settled: true
+      }
+    }
+  }
+
+  private async scroll(
+    helper: RunningHelper,
+    command: Extract<AgentBrowserCommand, { action: 'scroll' }>,
+    signal: AbortSignal
+  ): Promise<AgentBrowserObservation> {
+    const documentTarget = command.target === undefined
+    const locator = documentTarget
+      ? helper.page.locator('html')
+      : selectorForTarget(helper.page, command.target!, hasFreshSnapshot(helper))
+    if (command.target) await assertUniqueTarget('scroll', command.target, locator)
+
+    let scrollState: AgentBrowserScrollState | undefined
+    const observation = await this.performAgentAction(helper, 'scroll', signal, async () => {
+      signal.throwIfAborted()
+      const evaluated = await locator.evaluate(
+        async (element, input) => {
+          const browserGlobals = globalThis as unknown as {
+            document: { scrollingElement: unknown; documentElement: unknown }
+            requestAnimationFrame: (callback: () => void) => number
+          }
+          const scroller = (input.documentTarget
+            ? browserGlobals.document.scrollingElement ?? browserGlobals.document.documentElement
+            : element) as unknown as {
+              scrollTop: number
+              scrollHeight: number
+              clientHeight: number
+              tagName: string
+              id: string
+              className: unknown
+              getAttribute: (name: string) => string | null
+            }
+          const read = (): { scrollTop: number; scrollHeight: number; clientHeight: number } => ({
+            scrollTop: scroller.scrollTop,
+            scrollHeight: scroller.scrollHeight,
+            clientHeight: scroller.clientHeight
+          })
+          const waitFrame = (): Promise<void> =>
+            new Promise((resolve) => browserGlobals.requestAnimationFrame(() => resolve()))
+          const before = read()
+          const maxScrollTop = Math.max(0, before.scrollHeight - before.clientHeight)
+          const stepScale = input.amount === 'viewport'
+            ? 1
+            : input.amount === 'half-viewport'
+              ? 0.5
+              : input.amount === 'quarter-viewport'
+                ? 0.25
+                : 0.125
+          const step = before.clientHeight * stepScale
+          const desired =
+            input.direction === 'start'
+              ? 0
+              : input.direction === 'down'
+                ? before.scrollTop + step
+                : before.scrollTop - step
+          scroller.scrollTop = Math.max(0, Math.min(maxScrollTop, desired))
+          await waitFrame()
+          const firstSettledSample = read()
+          await waitFrame()
+          const after = read()
+          const settled =
+            Math.abs(after.scrollTop - firstSettledSample.scrollTop) < 0.5 &&
+            after.scrollHeight === firstSettledSample.scrollHeight &&
+            after.clientHeight === firstSettledSample.clientHeight
+          return {
+            before,
+            after,
+            settled,
+            descriptor: input.documentTarget
+              ? { kind: 'document' }
+              : {
+                  kind: 'element',
+                  tag: scroller.tagName.toLocaleLowerCase(),
+                  id: scroller.id,
+                  className: typeof scroller.className === 'string' ? scroller.className : '',
+                  role: scroller.getAttribute('role') ?? ''
+                }
+          }
+        },
+        {
+          documentTarget,
+          direction: command.direction,
+          amount: command.direction === 'start' ? 'half-viewport' : command.amount ?? 'half-viewport'
+        }
+      )
+      signal.throwIfAborted()
+      const containerFingerprint = crypto
+        .createHash('sha256')
+        .update(JSON.stringify({ target: command.target ?? null, descriptor: evaluated.descriptor }))
+        .digest('hex')
+        .slice(0, 16)
+      const deltaY = evaluated.after.scrollTop - evaluated.before.scrollTop
+      scrollState = {
+        containerFingerprint,
+        before: evaluated.before,
+        after: evaluated.after,
+        deltaY,
+        moved: Math.abs(deltaY) >= 0.5,
+        atStart: evaluated.after.scrollTop <= 0.5,
+        atEnd:
+          evaluated.after.scrollTop + evaluated.after.clientHeight >=
+          evaluated.after.scrollHeight - 0.5,
+        settled: evaluated.settled
+      }
+      // A virtualized list can recycle visible nodes without navigating. Invalidate
+      // every ref from the pre-scroll snapshot even when the metrics did not move.
+      helper.viewEpoch += 1
+      helper.snapshotViewRevision = null
+    })
+    return { ...observation, ...(scrollState ? { scrollState } : {}) }
+  }
+
   private async observePage(input: {
     helper: RunningHelper
     action: AgentBrowserObservation['action']
     command?: Extract<AgentBrowserCommand, { action: 'snapshot' }>
     signal: AbortSignal
-    beforeRevision: string
+    beforeDocumentRevision: string
+    beforeViewRevision: string
     actionSucceeded?: boolean
   }): Promise<AgentBrowserObservation> {
     const deadline = Date.now() + POST_ACTION_OBSERVATION_TIMEOUT_MS
@@ -903,7 +1241,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
       const remaining = Math.max(1, deadline - Date.now())
       if (remaining <= 1 && attempt > 0) break
       try {
-        if (documentRevision(input.helper) !== input.beforeRevision) {
+        if (documentRevision(input.helper) !== input.beforeDocumentRevision) {
           await input.helper.page.waitForLoadState('domcontentloaded', {
             timeout: remaining
           })
@@ -924,7 +1262,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
           ...(input.actionSucceeded === undefined
             ? {}
             : { actionSucceeded: input.actionSucceeded }),
-          staleRefs: documentRevision(input.helper) !== input.beforeRevision
+          staleRefs: viewRevision(input.helper) !== input.beforeViewRevision
         }
       } catch (error) {
         input.signal.throwIfAborted()
@@ -944,10 +1282,11 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
     return {
       action: input.action,
       documentRevision: revision,
+      viewRevision: viewRevision(input.helper),
       observationMode: 'pending',
       actionSucceeded: true,
       url: input.helper.page.url(),
-      staleRefs: revision !== input.beforeRevision,
+      staleRefs: viewRevision(input.helper) !== input.beforeViewRevision,
       observationPendingReason: lastError instanceof Error ? lastError.message : undefined
     }
   }
@@ -958,8 +1297,15 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
     signal: AbortSignal,
     run: () => Promise<void>
   ): Promise<AgentBrowserObservation> {
-    const beforeRevision = documentRevision(helper)
-    if (action === 'click' || action === 'fill' || action === 'press' || action === 'wait') {
+    const beforeDocumentRevision = documentRevision(helper)
+    const beforeViewRevision = viewRevision(helper)
+    if (
+      action === 'click' ||
+      action === 'fill' ||
+      action === 'press' ||
+      action === 'scroll' ||
+      action === 'wait'
+    ) {
       try {
         await this.request('performAction', { action: 'beginNetworkCapture', params: {} }, signal)
       } catch {
@@ -972,7 +1318,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
       signal.throwIfAborted()
       if (error instanceof ScrapeBrowserChallengeError) throw error
       const revision = documentRevision(helper)
-      if (revision !== beforeRevision) {
+      if (revision !== beforeDocumentRevision) {
         throw new ScrapeBrowserActionUncertainError({
           url: helper.page.url(),
           documentRevision: revision,
@@ -985,7 +1331,8 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
       helper,
       action,
       signal,
-      beforeRevision,
+      beforeDocumentRevision,
+      beforeViewRevision,
       actionSucceeded: true
     })
   }
@@ -1011,13 +1358,15 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         })
       }
       case 'snapshot': {
-        const revision = documentRevision(helper)
+        const beforeDocumentRevision = documentRevision(helper)
+        const beforeViewRevision = viewRevision(helper)
         return this.observePage({
           helper,
           action: 'snapshot',
           command,
           signal,
-          beforeRevision: revision,
+          beforeDocumentRevision,
+          beforeViewRevision,
           actionSucceeded: undefined
         })
       }
@@ -1025,12 +1374,14 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         if (Boolean(command.text) === Boolean(command.regex)) {
           throw new Error('find 的 text 和 regex 必须且只能提供一个')
         }
-        const revision = documentRevision(helper)
+        const beforeDocumentRevision = documentRevision(helper)
+        const beforeViewRevision = viewRevision(helper)
         const observation = await this.observePage({
           helper,
           action: 'snapshot',
           signal,
-          beforeRevision: revision,
+          beforeDocumentRevision,
+          beforeViewRevision,
           actionSucceeded: undefined
         })
         const full = String(observation.fullSnapshot ?? observation.snapshot ?? '')
@@ -1046,6 +1397,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         return {
           action: 'find',
           documentRevision: documentRevision(helper),
+          viewRevision: viewRevision(helper),
           actionSucceeded: true,
           url: helper.page.url(),
           title: await helper.page.title(),
@@ -1054,7 +1406,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
       }
       case 'html': {
         const locator = command.target
-          ? selectorForTarget(helper.page, command.target, helper.snapshotEpoch === helper.pageEpoch)
+          ? selectorForTarget(helper.page, command.target, hasFreshSnapshot(helper))
           : helper.page.locator('body')
         if (command.target) await assertUniqueTarget('html', command.target, locator)
         const maxLength = Math.max(200, Math.min(MAX_AGENT_HTML_LENGTH, command.maxLength ?? 12_000))
@@ -1063,6 +1415,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         return {
           action: 'html',
           documentRevision: documentRevision(helper),
+          viewRevision: viewRevision(helper),
           actionSucceeded: true,
           url: helper.page.url(),
           html: limited.value,
@@ -1079,6 +1432,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         return {
           action: 'evaluate',
           documentRevision: documentRevision(helper),
+          viewRevision: viewRevision(helper),
           actionSucceeded: true,
           url: helper.page.url(),
           value
@@ -1088,7 +1442,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         const locator = selectorForTarget(
           helper.page,
           command.target,
-          helper.snapshotEpoch === helper.pageEpoch
+          hasFreshSnapshot(helper)
         )
         await assertUniqueTarget('click', command.target, locator)
         return this.performAgentAction(helper, 'click', signal, async () => {
@@ -1099,7 +1453,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         const locator = selectorForTarget(
           helper.page,
           command.target,
-          helper.snapshotEpoch === helper.pageEpoch
+          hasFreshSnapshot(helper)
         )
         await assertUniqueTarget('fill', command.target, locator)
         return this.performAgentAction(helper, 'fill', signal, async () => {
@@ -1113,7 +1467,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
             const locator = selectorForTarget(
               helper.page,
               command.target,
-              helper.snapshotEpoch === helper.pageEpoch
+              hasFreshSnapshot(helper)
             )
             await assertUniqueTarget('press', command.target, locator)
             await locator.press(command.key, { signal })
@@ -1123,6 +1477,9 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         }
         return this.performAgentAction(helper, 'press', signal, press)
       }
+      case 'scroll': {
+        return this.scroll(helper, command, signal)
+      }
       case 'wait': {
         const timeoutMs = Math.max(100, Math.min(10_000, command.timeoutMs ?? 3_000))
         return this.performAgentAction(helper, 'wait', signal, async () => {
@@ -1130,7 +1487,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
             const locator = selectorForTarget(
               helper.page,
               command.target,
-              helper.snapshotEpoch === helper.pageEpoch
+              hasFreshSnapshot(helper)
             )
             await locator.waitFor({ state: 'visible', timeout: timeoutMs })
             await assertUniqueTarget('wait', command.target, locator)

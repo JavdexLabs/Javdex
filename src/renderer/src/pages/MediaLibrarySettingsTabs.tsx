@@ -733,7 +733,7 @@ export function ScanSettingsTab({
           <div className="settings-toggle-list settings-toggle-list--compact">
             <SettingsSwitchRow
               title="扫描后自动清理无资源成员"
-              description="仅移除当前媒体库中的成员关系；不会删除媒体目录中的源文件"
+              description="仅移除当前媒体库中的成员关系，不会删除媒体目录中的源文件；仍被任一清单引用的影片会保留，不会被自动清理"
               checked={configDraft.removeResourceLessMemberships}
               disabled={formDisabled}
               onChange={(value) =>

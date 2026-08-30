@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3'
 import { normalizeClassificationName } from '../../shared/classificationNameNormalization'
+import { ensureVideoMembership } from './libraryMembershipRepo'
+import { buildVideoResourceSourceIdentity } from '../../shared/videoResourceIdentity'
 
 function ensureOrganization(
   db: Database.Database,
@@ -87,6 +89,8 @@ export function insertTestVideoWithFile(
     addTime?: string
     isPrimary?: boolean
     fileSize?: number | null
+    libraryId?: number
+    rootId?: number | null
   }
 ): { videoId: number; fileId: number } {
   const makerOrganizationId = ensureOrganization(db, opts.maker, 'maker')
@@ -114,16 +118,34 @@ export function insertTestVideoWithFile(
       opts.addTime ?? new Date().toISOString()
     )
   const videoId = Number(info.lastInsertRowid)
+  const libraryId = opts.libraryId ?? 1
+  ensureVideoMembership(
+    {
+      libraryId,
+      videoId,
+      addedVia: 'scan',
+      addedAt: opts.addTime ?? new Date().toISOString()
+    },
+    db
+  )
+  const sourceIdentity = buildVideoResourceSourceIdentity({
+    kind: 'local',
+    locator: opts.filePath
+  })
   const fileInfo = db
     .prepare(
       `INSERT INTO video_resources
-         (video_id, kind, locator, resource_key, size_bytes, is_primary, add_time)
-       VALUES (?, 'local', ?, 'local:' || ?, ?, ?, ?)`
+         (library_id, video_id, root_id, kind, locator, resource_key, source_identity,
+          size_bytes, is_primary, add_time)
+       VALUES (?, ?, ?, 'local', ?, ?, ?, ?, ?, ?)`
     )
     .run(
+      libraryId,
       videoId,
+      opts.rootId ?? null,
       opts.filePath,
-      opts.filePath,
+      sourceIdentity,
+      sourceIdentity,
       opts.fileSize ?? null,
       opts.isPrimary !== false ? 1 : 0,
       opts.addTime ?? new Date().toISOString()

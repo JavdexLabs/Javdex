@@ -4,7 +4,7 @@ import type { Actress } from '@shared/actressTypes'
 import type { VideoDetail, VideoEditInput } from '@shared/videoTypes'
 import { assetUrl } from '../api'
 import EditFieldAiTranslate from './EditFieldAiTranslate'
-import { EditFormField, EditFormSection } from './FormPrimitives'
+import { EditFormField, EditFormHint, EditFormSection } from './FormPrimitives'
 import ImageImportField from './ImageImportField'
 import Modal from './Modal'
 import { useTheme } from './ThemeProvider'
@@ -132,9 +132,7 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
     >
       <div className="entity-edit-form">
         {metadataLocked ? (
-          <p className="entity-edit-field-hint">
-            这部影片有待确认刮削结果，目前只能编辑相关链接。
-          </p>
+          <EditFormHint as="p">这部影片有待确认刮削结果，目前只能编辑相关链接。</EditFormHint>
         ) : (
           <>
         {!mediaEditorsHidden ? (
@@ -216,7 +214,11 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
 
         <EditFormSection title="出品信息">
           <div className="entity-edit-fields">
-            <EditFormField label="制作商" htmlFor="video-edit-maker">
+            <EditFormField
+              label="制作商"
+              htmlFor="video-edit-maker"
+              hint="搜索已有制作商；输入新名称会在保存时创建。"
+            >
               <OrganizationPickerField
                 id="video-edit-maker"
                 role="maker"
@@ -226,7 +228,11 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
               />
             </EditFormField>
 
-            <EditFormField label="发行商" htmlFor="video-edit-publisher">
+            <EditFormField
+              label="发行商"
+              htmlFor="video-edit-publisher"
+              hint="搜索已有发行商；输入新名称会在保存时创建。"
+            >
               <OrganizationPickerField
                 id="video-edit-publisher"
                 role="publisher"

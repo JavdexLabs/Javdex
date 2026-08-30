@@ -5,6 +5,7 @@ import type {
   StrmScanFailure,
   StrmScanFailureCode
 } from './libraryTypes'
+import { DEFAULT_MEDIA_LIBRARY_ID } from './mediaLibraryTypes'
 
 const SCAN_TRIGGERS = new Set<LibraryScanTrigger>(['manual', 'startup', 'interval', 'resume'])
 const SCAN_STATUSES = new Set<LibraryScanStatus>([
@@ -94,6 +95,20 @@ export function normalizeLibraryScanSummary(value: unknown): LibraryScanSummary 
     count(value.omittedStrmFailures) + Math.max(0, allFailureCount - strmFailures.length)
 
   return {
+    libraryId:
+      typeof value.libraryId === 'number' && Number.isSafeInteger(value.libraryId) && value.libraryId > 0
+        ? value.libraryId
+        : DEFAULT_MEDIA_LIBRARY_ID,
+    runId:
+      typeof value.runId === 'string' && value.runId.trim()
+        ? value.runId.trim()
+        : `legacy-${value.startedAt}`,
+    configRevision:
+      typeof value.configRevision === 'number' &&
+      Number.isSafeInteger(value.configRevision) &&
+      value.configRevision > 0
+        ? value.configRevision
+        : 1,
     trigger: value.trigger as LibraryScanTrigger,
     startedAt: value.startedAt,
     finishedAt: value.finishedAt,

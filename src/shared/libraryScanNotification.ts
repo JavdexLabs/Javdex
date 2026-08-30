@@ -63,7 +63,7 @@ export function buildLibraryScanNotification(
     result.deletedVideos
   if (changed === 0) return null
   return {
-    message: `扫描完成：新增 ${result.imported}，更新 ${result.relocated + result.refreshed}，移除 ${result.removed}，提升主资源 ${result.promoted}，删除影片 ${result.deletedVideos}`,
+    message: `扫描完成：新增 ${result.imported}，更新 ${result.relocated + result.refreshed}，移除 ${result.removed}，提升主资源 ${result.promoted}，移出无资源成员 ${result.deletedVideos}`,
     tone: 'success'
   }
 }

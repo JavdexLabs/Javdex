@@ -41,7 +41,7 @@ import {
   PendingUnchangedRow,
   PendingWorkspace,
   PendingWorkspacePanel
-} from './PendingDecisionParts'
+} from '../components/PendingDecisionParts'
 import type { ConflictReviewViewModel } from './useConflictReviewController'
 import styles from './PendingActressConflictPane.module.css'
 

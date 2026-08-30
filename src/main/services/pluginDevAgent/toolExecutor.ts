@@ -1,44 +1,46 @@
 import type {
-  PluginDevFieldVerification,
-  PluginDevPageInsight,
-  PluginDevDryRunCase,
-  PluginDevDryRunResult
+  PluginDevAgentEvent,
+  PluginDevBrowserInteractionReason,
+  PluginDevPendingUserRequest
 } from '@shared/pluginDevTypes'
-import type { ActressScrapeField, ScraperPluginKind, VideoScrapeField } from '@shared/scrapeTypes'
 import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
-import { scrapeBrowser } from '../../scrapers/scrapeBrowser'
 import { getSettings } from '../../settings/settingsStore'
 import {
-  dryRunPluginPackage,
-  installDevPluginPackage,
-  normalizePackageForDev,
-  replacePluginFunctionCode,
-  replacePluginSnippetCode,
-  listTopLevelFunctions
-} from '../pluginDevService'
-import { assertNoDuplicateTopLevelBindings } from '../pluginDevCodeEdit'
+  isScrapeBrowserBusyError,
+  isScrapeBrowserActionUncertainError,
+  isScrapeBrowserChallengeError,
+  isScrapeBrowserObservationPendingError,
+  scrapeBrowser,
+  type AgentBrowserCommand,
+  type ScrapeBrowserLease
+} from '../../scrapers/scrapeBrowser'
 import {
-  describeFieldsForKind,
-  getPluginDevKindProfile,
-  resolveDryRunTargetsFromArgs,
-  userRequestedSupportedFieldRemoval
+  fingerprintValue,
+  getSession,
+  invalidateExecution
+} from './sessionStore'
+import type { ToolExecutionResult } from './types'
+import {
+  isPluginExecutionCloudflareInterruption,
+  isPluginExecutionUnmatchedTargets,
+  pluginExecution,
+  pluginRunTargetFingerprint
+} from './pluginExecution'
+import {
+  pluginRunAcceptance,
+  projectPluginRunAcceptance
+} from './pluginRunAcceptance'
+import { pluginWorkspace } from './pluginWorkspace'
+import {
+  PluginDevRunTargetInputError,
+  resolveRunTargetsFromArgs,
+  runTargetLabel
 } from '@shared/pluginDevKindProfile'
 import {
-  appendCheerioDryRunHint,
-  formatPackageCodeForAgent,
-  hasSubstantialPluginCode,
-  incrementalEditPolicyText
-} from './pluginDevCodePolicy'
-import { formatPageInsightForPrompt } from '../pluginDevPageFormat'
-import {
-  collectSiteUnsupportedSupportedFields,
-  isBlockingVerificationFailure,
-  verifyDebugResultAgainstPages,
-  syncSupportedFieldsFromVerification
-} from '../pluginDevVerification'
-import { getSession, hashCode, invalidateVerification, isDryRunStaleForVerify, withBrowserLock } from './sessionStore'
-import { summarizeDryRunForAgent } from './prompts'
-import type { PluginDevAgentEvent, ToolExecutionResult } from './types'
+  pluginBrowserCapability,
+  boundedJson,
+  type PluginBrowserAction
+} from './browserCapability'
 
 function parseToolArgs(raw: string): Record<string, unknown> {
   try {
@@ -54,947 +56,685 @@ function toolError(
   message: string,
   extra: Record<string, unknown> = {}
 ): ToolExecutionResult {
-  return {
-    ok: false,
-    content: JSON.stringify({ code, message, ...extra }, null, 2)
+  return { ok: false, content: JSON.stringify({ code, message, ...extra }, null, 2) }
+}
+
+interface PluginDevBrowserLeaseState {
+  lease: ScrapeBrowserLease
+  controller: AbortController
+}
+
+const pluginDevBrowserLeases = new Map<string, PluginDevBrowserLeaseState>()
+
+async function pluginDevBrowserLease(
+  sessionId: string,
+  signal?: AbortSignal
+): Promise<PluginDevBrowserLeaseState> {
+  const existing = pluginDevBrowserLeases.get(sessionId)
+  if (existing) {
+    if (existing.controller.signal.aborted) {
+      pluginDevBrowserLeases.delete(sessionId)
+      await existing.lease.release()
+    } else {
+      return existing
+    }
+  }
+  signal?.throwIfAborted()
+  const controller = new AbortController()
+  const lease = await scrapeBrowser.acquire({
+    ownerId: `plugin-dev:${sessionId}`,
+    purpose: 'agent-browser',
+    proxyUrl: resolveScrapeProxyUrl(getSettings()),
+    signal: controller.signal
+  })
+  const state: PluginDevBrowserLeaseState = { lease, controller }
+  pluginDevBrowserLeases.set(sessionId, state)
+  return state
+}
+
+export async function releasePluginDeveloperBrowser(sessionId: string): Promise<void> {
+  pluginBrowserCapability.reset(sessionId)
+  const state = pluginDevBrowserLeases.get(sessionId)
+  if (!state) return
+  pluginDevBrowserLeases.delete(sessionId)
+  await state.lease.release()
+  state.controller.abort(new Error('PluginDeveloper operation settled'))
+}
+
+export function requiresPluginDeveloperBrowserLease(
+  request: PluginDevPendingUserRequest | undefined
+): boolean {
+  return request?.type === 'browser_interaction'
+}
+
+function browserInteractionPrompt(reason: PluginDevBrowserInteractionReason): string {
+  switch (reason) {
+    case 'human_verification':
+      return '请在已保留的浏览器窗口中完成人机验证，然后点击「我已完成，继续」。'
+    case 'login':
+      return '当前页面需要登录。请只在已保留的浏览器窗口中完成登录，然后点击「我已完成，继续」。不要在对话中发送账号、密码或验证码。'
+    case 'required_user_action':
+      return '当前页面需要你亲自在已保留的浏览器窗口中完成必要操作。完成后点击「我已完成，继续」。'
   }
 }
 
-function describeFields(kind: ScraperPluginKind, fields: string[]): string {
-  return describeFieldsForKind(
-    kind,
-    fields as VideoScrapeField[] | ActressScrapeField[]
-  )
+function createBrowserInteractionRequest(input: {
+  sessionId: string
+  step: number
+  reason: PluginDevBrowserInteractionReason
+  url?: string
+}): PluginDevPendingUserRequest {
+  return {
+    requestId: `browser-interaction:${fingerprintValue(input)}`,
+    type: 'browser_interaction',
+    reason: input.reason,
+    prompt: browserInteractionPrompt(input.reason),
+    ...(input.url ? { url: input.url } : {})
+  }
 }
 
-function dryRunResultRecords(value: unknown): Record<string, unknown>[] {
-  const values = Array.isArray(value) ? value : [value]
-  return values.filter(
-    (item): item is Record<string, unknown> =>
-      Boolean(item) && typeof item === 'object' && !Array.isArray(item)
+export async function runWithPluginDeveloperBrowser<T>(
+  sessionId: string,
+  signal: AbortSignal,
+  run: () => Promise<T>
+): Promise<T> {
+  const state = await pluginDevBrowserLease(sessionId, signal)
+  const onAbort = (): void => state.controller.abort(
+    signal.reason instanceof Error ? signal.reason : new Error('插件检查已取消')
   )
-}
-
-function verificationUrl(value: string): string {
+  signal.addEventListener('abort', onAbort, { once: true })
   try {
-    const url = new URL(value)
-    url.hash = ''
-    return url.toString()
-  } catch {
-    return value.trim()
+    return await scrapeBrowser.runWithLease(state.lease, run)
+  } finally {
+    signal.removeEventListener('abort', onAbort)
   }
 }
 
-function normalizeInsight(label: string, value: unknown): PluginDevPageInsight {
-  const input = value && typeof value === 'object' ? (value as Partial<PluginDevPageInsight>) : {}
-  return {
-    label,
-    url: typeof input.url === 'string' ? input.url : '',
-    title: typeof input.title === 'string' ? input.title : '',
-    text: typeof input.text === 'string' ? input.text : '',
-    forms: Array.isArray(input.forms) ? input.forms.slice(0, 12) : [],
-    links: Array.isArray(input.links)
-      ? input.links.slice(0, 80).map((link) => ({
-          text: typeof link.text === 'string' ? link.text : '',
-          href: typeof link.href === 'string' ? link.href : '',
-          region:
-            link.region === 'breadcrumb' || link.region === 'metadata' || link.region === 'other'
-              ? link.region
-              : undefined,
-          parentSelector:
-            typeof link.parentSelector === 'string' ? link.parentSelector : undefined
-        }))
-      : [],
-    domRegions: Array.isArray(input.domRegions) ? input.domRegions : undefined,
-    definitionLists: Array.isArray(input.definitionLists) ? input.definitionLists : undefined
-  }
-}
-
-function buildDiscoveryFromSession(session: NonNullable<ReturnType<typeof getSession>>) {
-  if (!session.lastInspectPage) return undefined
-  return { pages: [session.lastInspectPage], notes: session.pageNotes.map((n) => n.text) }
-}
-
-async function refreshVerificationPageFromBrowser(
+function pendingUserResult(
   session: NonNullable<ReturnType<typeof getSession>>,
-  label = '浏览器当前页'
-): Promise<PluginDevPageInsight | undefined> {
-  try {
-    const status = (await scrapeBrowser.performAction('status', {})) as {
-      isChallenge?: boolean
-      url?: string
-    }
-    if (status.isChallenge) return undefined
-    if (!status.url || status.url === 'about:blank') return undefined
-    const raw = await scrapeBrowser.performAction('inspect', {
-      maxTextLength: 6000,
-      maxLinks: 100
-    })
-    const page = normalizeInsight(label, raw)
-    if (page.url || page.title || page.text) {
-      session.lastInspectPage = page
-      return page
-    }
-  } catch {
-    // Browser may not be open yet; in that case verification falls back to the last explicit inspect.
+  request: PluginDevPendingUserRequest,
+  step: number,
+  events: PluginDevAgentEvent[],
+  structured: Record<string, unknown> = {}
+): ToolExecutionResult {
+  session.pendingUserRequest = request
+  session.status = 'waiting_user'
+  session.phase = 'waiting_user'
+  events.push({ type: 'user_input_required', sessionId: session.id, step, request })
+  return {
+    ok: true,
+    content: JSON.stringify({
+      code: 'USER_INPUT_REQUIRED',
+      requestId: request.requestId,
+      requestType: request.type,
+      message: request.prompt,
+      ...structured
+    }, null, 2),
+    structured: {
+      code: 'USER_INPUT_REQUIRED',
+      requestId: request.requestId,
+      requestType: request.type,
+      ...structured
+    },
+    pendingUserRequest: request,
+    waitForUser: request.prompt,
+    events
   }
-  return undefined
 }
 
-function summarizeDryRun(session: NonNullable<ReturnType<typeof getSession>>): string {
-  const r = session.lastDryRun
-  if (!r) return '尚未 dry-run'
-  if (r.cases?.length) {
-    const okCount = r.cases.filter((item) => item.ok).length
-    return `多目标 ${okCount}/${r.cases.length} 成功：${r.cases
-      .map((item) => `${item.target}=${item.ok ? 'ok' : item.error || 'failed'}`)
-      .join(' ')}`
-  }
-  if (!r.ok) return `失败：${r.error || '未知'}`
-  const records = dryRunResultRecords(r.result)
-  if (records.length === 0) return '成功但无结果'
-  const summary = getPluginDevKindProfile(session.kind).summarizeDryRunResult(records[0])
-  return records.length > 1 ? `${records.length} 个候选；首项：${summary}` : summary
-}
-
-function compactDryRunForTool(session: NonNullable<ReturnType<typeof getSession>>): string {
-  return summarizeDryRunForAgent(session.lastDryRun)
-}
-
-async function dryRunFailurePageHint(
+async function executeBrowserHandoff(input: {
   session: NonNullable<ReturnType<typeof getSession>>
-): Promise<string> {
-  if (session.lastDryRun?.ok) return ''
-  const page = await refreshVerificationPageFromBrowser(session, 'dry-run 当前页')
-  if (!page) return ''
-  return `\n\ndry-run 后验证窗口当前页：\n${formatPageInsightForPrompt(page, {
-    textLimit: 1200,
-    linkLimit: 12
-  })}`
-}
-
-function dryRunTargets(
-  session: NonNullable<ReturnType<typeof getSession>>,
-  args: Record<string, unknown>
-): string[] {
-  return resolveDryRunTargetsFromArgs(session.kind, args, session.testTargets ?? [])
-}
-
-function rememberDryRun(
-  session: NonNullable<ReturnType<typeof getSession>>,
-  dryRun: PluginDevDryRunResult
-): void {
-  const fingerprint = JSON.stringify(dryRun.cases ?? dryRun.result ?? null)
-  const prevFingerprint = JSON.stringify(session.lastDryRun?.cases ?? session.lastDryRun?.result ?? null)
-  if (session.lastDryRun && prevFingerprint === fingerprint) {
-    session.duplicateDryRunCount += 1
-  } else {
-    session.duplicateDryRunCount = 0
+  sessionId: string
+  step: number
+  reason: PluginDevBrowserInteractionReason
+  events: PluginDevAgentEvent[]
+  signal?: AbortSignal
+}): Promise<ToolExecutionResult> {
+  const { session, sessionId, step, reason, events, signal } = input
+  const state = await pluginDevBrowserLease(sessionId, signal)
+  const onAbort = (): void => state.controller.abort(
+    signal?.reason instanceof Error ? signal.reason : new Error('浏览器交接已取消')
+  )
+  signal?.addEventListener('abort', onAbort, { once: true })
+  try {
+    const presentation = await state.lease.presentToUser()
+    const request = createBrowserInteractionRequest({
+      sessionId,
+      step,
+      reason,
+      url: presentation.url
+    })
+    return pendingUserResult(session, request, step, events, {
+      reason,
+      url: presentation.url,
+      title: presentation.title
+    })
+  } finally {
+    signal?.removeEventListener('abort', onAbort)
   }
-  session.lastDryRun = dryRun
-  session.lastDryRunCodeHash = hashCode(session.package.code)
-  invalidateVerification(session)
 }
 
-async function refreshVerificationPagesForDryRun(
-  session: NonNullable<ReturnType<typeof getSession>>,
-  dryRun: PluginDevDryRunResult,
-  label: string
-): Promise<PluginDevPageInsight[]> {
-  const results = dryRunResultRecords(dryRun.result)
-  const pages: PluginDevPageInsight[] = []
-  for (const [index, result] of results.entries()) {
-    const sourceUrl =
-      typeof result.sourceUrl === 'string' && result.sourceUrl.trim()
-        ? result.sourceUrl.trim()
-        : undefined
-    if (sourceUrl) {
-      try {
-        const settings = getSettings()
-        await scrapeBrowser.setProxy(resolveScrapeProxyUrl(settings))
-        await scrapeBrowser.fetchPage(sourceUrl, {
-          readySelector: 'body',
-          timeoutMs: 45000
-        })
-      } catch {
-        // Never reuse the previous candidate page when this candidate fetch failed.
-        continue
+async function executeBrowserAction(input: {
+  session: NonNullable<ReturnType<typeof getSession>>
+  sessionId: string
+  step: number
+  action: PluginBrowserAction
+  args: Record<string, unknown>
+  events: PluginDevAgentEvent[]
+  signal?: AbortSignal
+}): Promise<ToolExecutionResult> {
+  const { session, sessionId, step, action, args, events, signal } = input
+  const state = await pluginDevBrowserLease(sessionId, signal)
+  const onAbort = (): void => state.controller.abort(
+    signal?.reason instanceof Error ? signal.reason : new Error('浏览器操作已取消')
+  )
+  signal?.addEventListener('abort', onAbort, { once: true })
+  try {
+    let command: AgentBrowserCommand
+    const target = typeof args.target === 'string' ? args.target.trim() : ''
+    switch (action) {
+      case 'open': {
+        const url = typeof args.url === 'string' ? args.url.trim() : ''
+        if (!url) return toolError('BROWSER_URL_REQUIRED', 'browser action=open 时 url 必填。')
+        command = {
+          action,
+          url,
+          ...(typeof args.readySelector === 'string' ? { readySelector: args.readySelector } : {}),
+          ...(typeof args.timeoutMs === 'number' ? { timeoutMs: Math.round(args.timeoutMs) } : {})
+        }
+        break
       }
+      case 'snapshot':
+        command = {
+          action,
+          ...(target ? { target } : {}),
+          ...(typeof args.depth === 'number' ? { depth: Math.round(args.depth) } : {}),
+          ...(typeof args.boxes === 'boolean' ? { boxes: args.boxes } : {})
+        }
+        break
+      case 'find':
+        command = {
+          action,
+          ...(typeof args.text === 'string' ? { text: args.text } : {}),
+          ...(typeof args.regex === 'string' ? { regex: args.regex } : {})
+        }
+        break
+      case 'html':
+        command = {
+          action,
+          ...(target ? { target } : {}),
+          maxLength: typeof args.maxLength === 'number'
+            ? Math.min(session.limits.maxHtmlChars, Math.round(args.maxLength))
+            : session.limits.maxHtmlChars
+        }
+        break
+      case 'evaluate':
+        command = {
+          action,
+          expression: typeof args.expression === 'string' ? args.expression : '',
+          ...(typeof args.timeoutMs === 'number' ? { timeoutMs: Math.round(args.timeoutMs) } : {})
+        }
+        break
+      case 'click':
+        if (!target) return toolError('BROWSER_TARGET_REQUIRED', 'browser action=click 时 target 必填。')
+        command = { action, target }
+        break
+      case 'fill':
+        if (!target) return toolError('BROWSER_TARGET_REQUIRED', 'browser action=fill 时 target 必填。')
+        command = {
+          action,
+          target,
+          text: typeof args.text === 'string' ? args.text : '',
+          submit: args.submit === true
+        }
+        break
+      case 'press':
+        command = {
+          action,
+          key: typeof args.key === 'string' ? args.key : 'Enter',
+          ...(target ? { target } : {})
+        }
+        break
+      case 'scroll': {
+        const direction = args.direction
+        if (direction !== 'up' && direction !== 'down' && direction !== 'start') {
+          return toolError(
+            'BROWSER_SCROLL_DIRECTION_INVALID',
+            'browser action=scroll 时 direction 必须为 up、down 或 start。'
+          )
+        }
+        if (direction === 'start') {
+          if (args.amount !== undefined) {
+            return toolError(
+              'BROWSER_SCROLL_AMOUNT_INVALID',
+              'browser action=scroll 且 direction=start 时不得提供 amount。'
+            )
+          }
+          command = { action, direction, ...(target ? { target } : {}) }
+          break
+        }
+        const amount = args.amount
+        if (
+          amount !== undefined &&
+          amount !== 'eighth-viewport' &&
+          amount !== 'quarter-viewport' &&
+          amount !== 'half-viewport' &&
+          amount !== 'viewport'
+        ) {
+          return toolError(
+            'BROWSER_SCROLL_AMOUNT_INVALID',
+            'browser action=scroll 的 amount 必须为 eighth-viewport、quarter-viewport、half-viewport 或 viewport。'
+          )
+        }
+        command = {
+          action,
+          direction,
+          ...(target ? { target } : {}),
+          ...(amount ? { amount } : {})
+        }
+        break
+      }
+      case 'wait':
+        command = {
+          action,
+          ...(target ? { target } : {}),
+          ...(typeof args.timeoutMs === 'number' ? { timeoutMs: Math.round(args.timeoutMs) } : {})
+        }
+        break
+      case 'status':
+        command = { action }
+        break
     }
     try {
-      const page = await refreshVerificationPageFromBrowser(
-        session,
-        results.length > 1 ? `${label} 候选 ${index + 1}` : label
-      )
-      if (
-        page &&
-        (!sourceUrl || verificationUrl(page.url) === verificationUrl(sourceUrl))
-      ) {
-        pages.push(page)
+      const observation = await state.lease.agentAction(command)
+      const { fullSnapshot, ...compact } = observation
+      return {
+        ok: true,
+        content: '',
+        structured: { observation: compact, ...(fullSnapshot ? { fullSnapshot } : {}) }
       }
-    } catch {
-      // A missing inspect result is handled by semantic verification's fallback path.
+    } catch (error) {
+      if (isScrapeBrowserActionUncertainError(error)) {
+        return toolError(error.code, error.message, {
+          url: error.url,
+          documentRevision: error.documentRevision,
+          staleRefs: true,
+          nextAction: 'snapshot_or_status'
+        })
+      }
+      if (isScrapeBrowserObservationPendingError(error)) {
+        return toolError(error.code, error.message, {
+          url: error.url,
+          documentRevision: error.documentRevision,
+          nextAction: 'snapshot'
+        })
+      }
+      if (!isScrapeBrowserChallengeError(error)) throw error
+      const request = createBrowserInteractionRequest({
+        sessionId,
+        step,
+        reason: 'human_verification',
+        url: error.url
+      })
+      return pendingUserResult(session, request, step, events, {
+        challengeCode: error.code,
+        reason: 'human_verification',
+        url: error.url,
+        title: error.title
+      })
     }
+  } finally {
+    signal?.removeEventListener('abort', onAbort)
   }
-  if (results.length === 0) {
-    const page = await refreshVerificationPageFromBrowser(session, label)
-    if (page) pages.push(page)
-  }
-  return pages
-}
-
-function dryRunFromCase(item: PluginDevDryRunCase): PluginDevDryRunResult {
-  return {
-    ok: item.ok,
-    result: item.result,
-    logs: item.logs,
-    error: item.error
-  }
-}
-
-function supportedFieldsPolicyForTool(session: NonNullable<ReturnType<typeof getSession>>): string {
-  const profile = getPluginDevKindProfile(session.kind)
-  if (session.mode !== 'create') {
-    return [
-      '调试已安装插件：plugin_verify 后只会自动新增 supportedFields，不会自动删除。',
-      '删除支持字段须用户明确要求（如「从支持字段移除 summary」），再调用 plugin_update_package。',
-      '测试目标缺字段时保持留空并修复解析逻辑，不要因单页缺失删除字段。'
-    ].join(' ')
-  }
-  return [
-    '首次开发（create）：plugin_verify 后会自动新增站点已支持但遗漏的字段，并移除站点不支持的字段。',
-    '站点不提供某字段时 verify 备注须含「站点无此字段」或「站点详情页模板无此字段标签」。',
-    '仅当前测试页面缺字段（如本片无系列）时不要删除 supportedFields，verify 备注用「页面无此字段」。',
-    profile.supportedFieldsMissingExample
-  ].join(' ')
-}
-
-function dryRunResultsForSync(session: NonNullable<ReturnType<typeof getSession>>): unknown[] {
-  if (session.lastDryRun?.cases?.length) {
-    return session.lastDryRun.cases.flatMap((item) => dryRunResultRecords(item.result))
-  }
-  return dryRunResultRecords(session.lastDryRun?.result)
-}
-
-function syncSupportedFieldsAfterVerification(
-  session: NonNullable<ReturnType<typeof getSession>>,
-  step: number,
-  verificationItems: Array<{ field: string; status: string; note: string }>
-): PluginDevAgentEvent[] {
-  const active = session.package.supportedFields ?? session.supportedFields
-  const sync = syncSupportedFieldsFromVerification({
-    mode: session.mode,
-    kind: session.kind,
-    supportedFields: active,
-    verificationItems: verificationItems as PluginDevFieldVerification[],
-    lastResults: dryRunResultsForSync(session)
-  })
-  if (!sync.changed) return []
-
-  session.package = normalizePackageForDev({
-    ...session.package,
-    supportedFields: sync.supportedFields
-  })
-  session.supportedFields = [...sync.supportedFields]
-  return [
-    {
-      type: 'package_updated',
-      sessionId: session.id,
-      step,
-      package: session.package
-    }
-  ]
-}
-
-function userRequestedWholeRewrite(instruction: string | undefined): boolean {
-  return /重写|重新实现|整包|推倒|从头写|整体重构/.test(instruction ?? '')
-}
-
-function canUseWholeRewrite(
-  session: NonNullable<ReturnType<typeof getSession>>,
-  args: Record<string, unknown>,
-  hadSubstantialCode: boolean
-): boolean {
-  if (!hadSubstantialCode) return true
-  if (userRequestedWholeRewrite(session.lastUserInstruction)) return true
-  return args.forceWholeRewrite === true && typeof args.forceReason === 'string' && args.forceReason.trim().length >= 6
-}
-
-function canInstallFromAgent(session: NonNullable<ReturnType<typeof getSession>>): boolean {
-  if (!session.lastDryRun?.ok) return false
-  const report = session.lastVerification
-  if (!report) return false
-  return report.items.filter((item) => isBlockingVerificationFailure(item)).length === 0
-}
-
-function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) return false
-  const set = new Set(a)
-  return b.every((item) => set.has(item))
-}
-
-function canPreserveVerificationForSupportedFieldsPatch(
-  session: NonNullable<ReturnType<typeof getSession>>,
-  args: Record<string, unknown>,
-  current: readonly string[],
-  next: readonly string[]
-): boolean {
-  const keys = Object.keys(args).filter((key) => key !== 'confirmUserRemoval')
-  if (keys.length !== 1 || keys[0] !== 'supportedFields') return false
-  if (!session.lastDryRun?.ok || !session.lastVerification) return false
-  if (isDryRunStaleForVerify(session)) return false
-  if (session.lastVerification.items.some((item) => isBlockingVerificationFailure(item))) return false
-
-  const added = next.filter((field) => !current.includes(field))
-  if (added.length > 0) return false
-
-  const removed = current.filter((field) => !next.includes(field))
-  if (removed.length === 0) return sameStringSet(current, next)
-
-  if (args.confirmUserRemoval === true || userRequestedSupportedFieldRemoval(session.lastUserInstruction)) {
-    return true
-  }
-
-  const removable = new Set(
-    collectSiteUnsupportedSupportedFields(
-      session.kind,
-      current as VideoScrapeField[] | ActressScrapeField[],
-      session.lastVerification.items
-    )
-  )
-  return removed.every((field) => removable.has(field as never))
-}
-
-function selectCodeForState(code: string, args: Record<string, unknown>): string {
-  const includeCode = args.includeCode === true
-  if (!includeCode) return ''
-  const startLine = typeof args.codeStartLine === 'number' ? Math.max(1, Math.floor(args.codeStartLine)) : 1
-  const lineCount =
-    typeof args.codeLineCount === 'number'
-      ? Math.max(1, Math.min(260, Math.floor(args.codeLineCount)))
-      : undefined
-  if (startLine === 1 && lineCount === undefined) return formatPackageCodeForAgent(code)
-  const lines = code.split(/\r?\n/)
-  const startIndex = startLine - 1
-  const selected = lines.slice(startIndex, lineCount ? startIndex + lineCount : undefined).join('\n')
-  return formatPackageCodeForAgent(selected)
-}
-
-function parserNameForKind(kind: ScraperPluginKind): string {
-  return kind === 'video' ? 'parseVideo' : 'parseActress'
 }
 
 export async function executeTool(
   sessionId: string,
   toolName: string,
   rawArgs: string,
-  step: number
+  step: number,
+  context: { signal?: AbortSignal; emit?: (event: PluginDevAgentEvent) => void } = {}
 ): Promise<ToolExecutionResult> {
   const session = getSession(sessionId)
-  if (!session) {
-    return toolError('SESSION_NOT_FOUND', '会话不存在')
-  }
-
+  if (!session) return toolError('SESSION_NOT_FOUND', '会话不存在。')
   const args = parseToolArgs(rawArgs)
   const events: PluginDevAgentEvent[] = []
 
   try {
-    switch (toolName) {
-      case 'plugin_get_state': {
-        const activeSupportedFields = session.package.supportedFields ?? session.supportedFields
-        const code = selectCodeForState(session.package.code, args)
-        const content = JSON.stringify(
-          {
-            kind: session.kind,
-            mode: session.mode,
-            siteName: session.siteName,
-            siteUrl: session.siteUrl,
-            testTarget: session.testTargets?.[0],
-            testTargets: session.testTargets ?? [],
-            supportedFields: describeFields(session.kind, activeSupportedFields),
-            supportedFieldsPolicy: supportedFieldsPolicyForTool(session),
-            package: {
-              name: session.package.name,
-              version: session.package.version,
-              supportedFields: activeSupportedFields,
-              codeLength: session.package.code.length,
-              topLevelFunctions: listTopLevelFunctions(session.package.code),
-              ...(code ? { code } : {}),
-              codeOmitted:
-                !code
-                  ? '默认省略完整 code 以节省上下文；需要读取时请传 includeCode=true，可配合 codeStartLine/codeLineCount。'
-                  : undefined,
-              incrementalEditOnly: session.incrementalEditOnly || hasSubstantialPluginCode(session.kind, session.package.code)
-            },
-            incrementalEditPolicy:
-              session.incrementalEditOnly || hasSubstantialPluginCode(session.kind, session.package.code)
-                ? incrementalEditPolicyText()
-                : undefined,
-            lastDryRunSummary: session.lastDryRun ? JSON.parse(compactDryRunForTool(session)) : null,
-            dryRunStaleForVerify: isDryRunStaleForVerify(session),
-            lastVerification: session.lastVerification,
-            pageNotes: session.pageNotes.map((n) => n.text)
-          },
-          null,
-          2
+    context.signal?.throwIfAborted()
+    if (toolName === 'browser') {
+      if (!session.workspaceDirectory) return toolError('WORKSPACE_NOT_READY', '插件工作区尚未初始化。')
+      const action = typeof args.action === 'string' ? args.action : undefined
+      if (!action || !['open', 'snapshot', 'find', 'html', 'evaluate', 'click', 'fill', 'press', 'scroll', 'wait', 'status', 'read-section', 'handoff'].includes(action)) {
+        return toolError('BROWSER_ACTION_INVALID', 'browser.action 无效。')
+      }
+      const { action: _action, ...browserArgs } = args
+      if (action === 'read-section') {
+        const artifactRef = typeof browserArgs.artifactRef === 'string'
+          ? browserArgs.artifactRef.trim()
+          : ''
+        const section = typeof browserArgs.section === 'string'
+          ? browserArgs.section.trim()
+          : ''
+        const cursor = typeof browserArgs.cursor === 'string'
+          ? browserArgs.cursor
+          : undefined
+        if (!artifactRef || !section) {
+          return toolError(
+            'BROWSER_ARTIFACT_SECTION_INPUT_INVALID',
+            'browser action=read-section 时必须提供 artifactRef 和 section。'
+          )
+        }
+        return pluginBrowserCapability.readSection({
+          workspaceDirectory: session.workspaceDirectory,
+          artifactRef,
+          section,
+          ...(cursor ? { cursor } : {})
+        })
+      }
+      if (action === 'handoff') {
+        const reason = typeof browserArgs.reason === 'string' ? browserArgs.reason : ''
+        if (!['human_verification', 'login', 'required_user_action'].includes(reason)) {
+          return toolError(
+            'BROWSER_HANDOFF_REASON_INVALID',
+            'browser action=handoff 时 reason 必须为 human_verification、login 或 required_user_action。'
+          )
+        }
+        return executeBrowserHandoff({
+          session,
+          sessionId,
+          step,
+          reason: reason as PluginDevBrowserInteractionReason,
+          events,
+          signal: context.signal
+        })
+      }
+      const browserAction = action as PluginBrowserAction
+      return await pluginBrowserCapability.execute({
+        sessionId,
+        workspaceDirectory: session.workspaceDirectory,
+        action: browserAction,
+        args: browserArgs,
+        run: () => executeBrowserAction({
+          session,
+          sessionId,
+          step,
+          action: browserAction,
+          args: browserArgs,
+          events,
+          signal: context.signal
+        })
+      })
+    }
+
+    if (toolName === 'plugin_dry_run') {
+      if (!session.workspaceDirectory) return toolError('WORKSPACE_NOT_READY', '插件工作区尚未初始化。')
+      const previousWorkspaceError = session.workspaceDraftError
+      let workspace: ReturnType<typeof pluginWorkspace.snapshot>
+      try {
+        workspace = pluginWorkspace.snapshot(session.workspaceDirectory)
+      } catch (error) {
+        const message =
+          `插件工作区当前无效：${error instanceof Error ? error.message : String(error)}。` +
+          '请修复 plugin.json 或 index.js 后重试。'
+        session.workspaceDraftError = message
+        invalidateExecution(session)
+        pluginWorkspace.updateCurrentAcceptance(session.workspaceDirectory, {
+          installReady: false,
+          reasons: ['workspace_invalid']
+        })
+        events.push({
+          type: 'workspace_status',
+          sessionId,
+          step,
+          valid: false,
+          message
+        })
+        return { ...toolError('WORKSPACE_INVALID', message), events }
+      }
+      if (previousWorkspaceError) {
+        session.workspaceDraftError = undefined
+        events.push({
+          type: 'workspace_status',
+          sessionId,
+          step,
+          valid: true,
+          message: '插件工作区已恢复为合法状态。'
+        })
+      }
+      session.package = workspace.package
+      let requested: ReturnType<typeof resolveRunTargetsFromArgs>
+      try {
+        requested = resolveRunTargetsFromArgs(session.kind, args, session.runTargets)
+      } catch (error) {
+        if (error instanceof PluginDevRunTargetInputError) {
+          return toolError(error.code, error.message)
+        }
+        throw error
+      }
+      if (requested.targets.length === 0) {
+        return toolError(
+          'RUN_TARGET_REQUIRED',
+          session.kind === 'video'
+            ? 'task.json 没有运行目标。请先从精确详情页提取番号，再用 videoCodes 调用 plugin_dry_run。'
+            : 'task.json 没有运行目标。请先从精确资料页提取演员主名，再用 actresses 调用 plugin_dry_run。'
         )
-        return { ok: true, content }
       }
-
-      case 'plugin_update_code': {
-        const rawMode = typeof args.mode === 'string' ? args.mode : ''
-        if (
-          rawMode !== 'replace_snippet' &&
-          rawMode !== 'replace_function' &&
-          rawMode !== 'replace_all'
-        ) {
-          return {
-            ...toolError(
-              'INVALID_UPDATE_MODE',
-              'mode 必须是 replace_snippet、replace_function 或 replace_all；未知 mode 不会自动按 replace_all 执行。'
-            )
-          }
-        }
-        const mode = rawMode
-        const hadSubstantialCode = hasSubstantialPluginCode(session.kind, session.package.code)
-        if (mode === 'replace_all' && !canUseWholeRewrite(session, args, hadSubstantialCode)) {
-          return toolError(
-            'INCREMENTAL_EDIT_REQUIRED',
-            '当前已有实质插件 code，默认禁止整包 replace_all。请优先使用 replace_snippet 或 replace_function 做最小修改。',
-            {
-              topLevelFunctions: listTopLevelFunctions(session.package.code),
-              escapeHatch:
-                '确需整体重构时，需用户明确要求重写，或传 forceWholeRewrite=true 并提供 forceReason 说明原因。'
-            }
-          )
-        }
-        let nextCode: string
-
-        if (mode === 'replace_snippet') {
-          const oldText = typeof args.oldText === 'string' ? args.oldText : ''
-          const newText = typeof args.newText === 'string' ? args.newText : ''
-          const nearLine = typeof args.nearLine === 'number' ? args.nearLine : undefined
-          if (!oldText) return { ok: false, content: 'replace_snippet 时 oldText 不能为空' }
-          nextCode = replacePluginSnippetCode(
-            session.package.kind,
-            session.package.code,
-            oldText,
-            newText,
-            nearLine
-          )
-        } else {
-          const code = typeof args.code === 'string' ? args.code : ''
-          if (!code.trim()) return { ok: false, content: 'code 不能为空' }
-          const functionName =
-            typeof args.functionName === 'string' ? args.functionName.trim() : undefined
-          if (mode === 'replace_function') {
-            const target = functionName || parserNameForKind(session.kind)
-            const functions = listTopLevelFunctions(session.package.code)
-            if (hadSubstantialCode && !functions.some((item) => item.name === target)) {
-              return toolError(
-                'FUNCTION_NOT_FOUND',
-                `当前已有实质 code，未找到顶层函数 ${target}，不会通过 append 新函数来伪装替换。`,
-                { topLevelFunctions: functions }
-              )
-            }
-            nextCode = replacePluginFunctionCode(
-              session.package.kind,
-              session.package.code,
-              functionName,
-              code
-            )
-          } else {
-            nextCode = code
-          }
-        }
-
-        const nextPackage = normalizePackageForDev({
-          ...session.package,
-          code: nextCode
+      const replacesUnmatchedTargets = requested.explicit &&
+        session.runTargets.length > 0 &&
+        session.lastExecution != null &&
+        pluginRunTargetFingerprint(session.lastExecution.targets) ===
+          pluginRunTargetFingerprint(session.runTargets) &&
+        isPluginExecutionUnmatchedTargets(session.lastExecution)
+      const adoptsDiscoveredTargets =
+        (requested.explicit && session.runTargets.length === 0) || replacesUnmatchedTargets
+      if (adoptsDiscoveredTargets) {
+        pluginWorkspace.updateRunTargets(session.workspaceDirectory, requested.targets)
+        session.runTargets = structuredClone(requested.targets)
+        const targetDecision = pluginRunAcceptance.evaluate({
+          package: workspace.package,
+          targets: session.runTargets,
+          execution: session.lastExecution
         })
-        if (mode === 'replace_all') {
-          assertNoDuplicateTopLevelBindings(nextPackage.code)
-        }
-        const prevHash = hashCode(session.package.code)
-        session.package = nextPackage
-        if (hasSubstantialPluginCode(session.kind, session.package.code)) {
-          session.incrementalEditOnly = true
-        }
-        const same = hashCode(session.package.code) === prevHash
-        if (!same) {
-          invalidateVerification(session)
-        }
-        events.push({
-          type: 'package_updated',
+        pluginWorkspace.updateCurrentAcceptance(
+          session.workspaceDirectory,
+          projectPluginRunAcceptance(targetDecision)
+        )
+        invalidateExecution(session)
+        const event: PluginDevAgentEvent = {
+          type: 'run_targets_updated',
           sessionId,
           step,
-          package: session.package
+          runTargets: structuredClone(session.runTargets)
+        }
+        if (context.emit) context.emit(event)
+        else events.push(event)
+      }
+      const dryRunSignal = context.signal ?? new AbortController().signal
+      const coversSessionTargets = session.runTargets.length > 0 &&
+        pluginRunTargetFingerprint(requested.targets) === pluginRunTargetFingerprint(session.runTargets)
+      const scope = requested.explicit && !adoptsDiscoveredTargets && !coversSessionTargets
+        ? 'targeted'
+        : 'all'
+      const execution = await runWithPluginDeveloperBrowser(sessionId, dryRunSignal, async () =>
+        pluginExecution.run({
+          package: workspace.package,
+          targets: requested.targets,
+          scope,
+          reportsDirectory: workspace.files.reportsDirectory,
+          signal: dryRunSignal
         })
-        const replaceAllHint =
-          mode === 'replace_all' && hadSubstantialCode
-            ? '（已按显式重写理由执行整包替换）'
-            : ''
-        const modeHint =
-          mode === 'replace_snippet'
-            ? `（replace_snippet：${typeof args.oldText === 'string' ? args.oldText.length : 0}→${typeof args.newText === 'string' ? args.newText.length : 0} 字符）`
-            : ''
+      )
+      if (isPluginExecutionCloudflareInterruption(execution)) {
+        const message = '生产运行被 Cloudflare 验证中断。请完成验证后使用“继续 Agent”。'
+        session.status = 'waiting_user'
+        session.phase = 'waiting_user'
+        events.push({ type: 'execution_updated', sessionId, step, execution })
+        events.push({ type: 'waiting_user', sessionId, step, reason: message })
         return {
           ok: true,
-          content: same
-            ? '警告：code 与更新前完全相同'
-            : `已更新 code（${session.package.code.length} 字符）${modeHint}${replaceAllHint}`,
+          content: boundedJson({
+            code: 'BROWSER_CHALLENGE_INTERRUPTED',
+            message,
+            scope: execution.scope,
+            cases: execution.cases.map((item) => ({
+              runtimeInput: item.target,
+              error: item.error,
+              logs: item.logs.slice(-20)
+            })),
+            reportPath: execution.reportPath
+          }, 32_000),
+          structured: { code: 'BROWSER_CHALLENGE_INTERRUPTED' },
+          waitForUser: message,
           events
         }
       }
-
-      case 'plugin_update_package': {
-        const currentSupportedFields = session.package.supportedFields ?? session.supportedFields
-        const nextSupportedFields = Array.isArray(args.supportedFields)
-          ? (args.supportedFields as typeof currentSupportedFields)
-          : currentSupportedFields
-        const preserveVerification = Array.isArray(args.supportedFields)
-          ? canPreserveVerificationForSupportedFieldsPatch(
-              session,
-              args,
-              currentSupportedFields,
-              nextSupportedFields
-            )
-          : false
-        if (Array.isArray(args.supportedFields)) {
-          const current = currentSupportedFields
-          const next = nextSupportedFields
-          const removed = current.filter((field) => !next.includes(field))
-          if (session.mode !== 'create' && removed.length > 0) {
-            const userRequested =
-              args.confirmUserRemoval === true ||
-              userRequestedSupportedFieldRemoval(session.lastUserInstruction)
-            if (!userRequested) {
-              return {
-                ok: false,
-                content:
-                  'DEBUG_SUPPORTED_FIELDS_REMOVE_LOCKED: 调试模式仅允许新增支持字段；删除须用户明确要求后再调用 plugin_update_package（可传 confirmUserRemoval: true）。'
-              }
-            }
-          }
-        }
-        const patch: Record<string, unknown> = { ...session.package }
-        if (typeof args.name === 'string' && args.name.trim()) patch.name = args.name.trim()
-        if (typeof args.version === 'string') patch.version = args.version
-        if (typeof args.description === 'string') patch.description = args.description
-        if (typeof args.author === 'string') patch.author = args.author
-        if (typeof args.homepage === 'string') patch.homepage = args.homepage
-        if (Array.isArray(args.supportedFields)) patch.supportedFields = args.supportedFields
-        session.package = normalizePackageForDev(patch)
-        if (Array.isArray(args.supportedFields)) {
-          session.supportedFields = [...(session.package.supportedFields ?? session.supportedFields)]
-        }
-        if (!preserveVerification) {
-          invalidateVerification(session)
-        }
-        events.push({
-          type: 'package_updated',
-          sessionId,
-          step,
-          package: session.package
-        })
-        return {
-          ok: true,
-          content: preserveVerification
-            ? '插件元数据已更新；本次仅调整 supportedFields，且上次语义验证仍有效，无需重复 plugin_verify。'
-            : '插件元数据已更新',
-          events
-        }
-      }
-
-      case 'plugin_dry_run': {
-        const profile = getPluginDevKindProfile(session.kind)
-        const targets = dryRunTargets(session, args)
-        if (targets.length === 0) {
-          return { ok: false, content: profile.dryRunMissingMessage }
-        }
-
-        const cases: PluginDevDryRunCase[] = []
-        let dryRun: PluginDevDryRunResult | undefined
-        for (const target of targets) {
-          session.testTargets = [...new Set([...(session.testTargets ?? []), target])]
-          dryRun = await dryRunPluginPackage({
-            package: session.package,
-            testTarget: target,
-            testTargets: [target]
-          })
-          cases.push({
-            target,
-            ok: dryRun.ok,
-            error: dryRun.error,
-            result: dryRun.result,
-            logs: dryRun.logs
-          })
-        }
-
-        if (!dryRun) return { ok: false, content: 'dry-run 未执行' }
-        const allOk = cases.every((item) => item.ok)
-        const aggregateDryRun: PluginDevDryRunResult =
-          cases.length > 1
-            ? {
-                ok: allOk,
-                result: dryRun.result,
-                logs: cases.flatMap((item) =>
-                  item.logs.length
-                    ? item.logs.map((line) => `[${item.target}] ${line}`)
-                    : [`[${item.target}] ${item.ok ? 'dry-run ok' : item.error || 'dry-run failed'}`]
-                ),
-                error: allOk
-                  ? undefined
-                  : `多目标 dry-run 有 ${cases.filter((item) => !item.ok).length}/${cases.length} 个失败`,
-                cases
-              }
-            : dryRun
-        rememberDryRun(session, aggregateDryRun)
-        events.push({
-          type: 'dry_run_updated',
-          sessionId,
-          step,
-          dryRun: aggregateDryRun
-        })
-        const pageHint = allOk ? '' : await dryRunFailurePageHint(session)
-        const batchContent =
-          cases.length > 1
-            ? `${JSON.stringify(
-                {
-                  ok: allOk,
-                  cases: cases.map((item) => ({
-            ...item,
-            error: appendCheerioDryRunHint(item.error)
-          })),
-                  note: getPluginDevKindProfile(session.kind).multiDryRunNote
-                },
-                null,
-                2
-              )}${pageHint}`
-            : `${compactDryRunForTool(session)}${pageHint}`
-        return {
-          ok: allOk,
-          content: batchContent,
-          structured: { summary: summarizeDryRun(session) },
-          events
-        }
-      }
-
-      case 'plugin_verify': {
-        if (!session.lastDryRun?.result) {
-          return toolError('NO_DRY_RUN', '尚未 dry-run，请先调用 plugin_dry_run 获取调试结果后再 verify。')
-        }
-        if (isDryRunStaleForVerify(session)) {
-          return toolError(
-            'STALE_DRY_RUN',
-            '插件 code 已变更但尚未重新 dry-run。请先调用 plugin_dry_run，再 plugin_verify。',
-            { hint: '若仅修改了 supportedFields，无需重新 dry-run，可直接 verify。' }
-          )
-        }
-        if (!session.lastDryRun.ok) {
-          return toolError(
-            'DRY_RUN_FAILED',
-            '最近一次 dry-run 未通过，不能进行语义 verify。请先修复 dry-run 失败并重新运行 plugin_dry_run。',
-            {
-              error: appendCheerioDryRunHint(session.lastDryRun.error),
-              cases: session.lastDryRun.cases?.map((item) => ({
-                target: item.target,
-                ok: item.ok,
-                error: appendCheerioDryRunHint(item.error)
-              }))
-            }
-          )
-        }
-        const userFeedback =
-          typeof args.userFeedback === 'string' ? args.userFeedback : undefined
-        if (session.lastDryRun.cases?.length) {
-          const reports = []
-          for (const item of session.lastDryRun.cases) {
-            const caseDryRun = dryRunFromCase(item)
-            let pages: PluginDevPageInsight[] = []
-            await withBrowserLock(sessionId, async () => {
-              pages = await refreshVerificationPagesForDryRun(
-                session,
-                caseDryRun,
-                `验证参考页 ${item.target}`
-              )
-            })
-            const report = await verifyDebugResultAgainstPages({
-              kind: session.kind,
-              lastResult: item.result,
-              discovery: pages.length > 0
-                ? { pages, notes: session.pageNotes.map((n) => n.text) }
-                : buildDiscoveryFromSession(session),
-              supportedFields: session.package.supportedFields ?? session.supportedFields,
-              userFeedback,
-              mode: session.mode,
-              testTarget: item.target,
-              testTargets: [item.target]
-            })
-            reports.push({ target: item.target, report })
-          }
-
-          const items = reports.flatMap(({ target, report }) =>
-            report.items.map((item) => ({
-              ...item,
-              field: `${target}.${item.field}`,
-              note: `[${target}] ${item.note}`
-            }))
-          )
-          const badCount = items.filter((item) => item.status !== 'ok').length
-          const referencePages = reports.map(({ target, report }) => ({
-            target,
-            url: report.referencePage?.url,
-            title: report.referencePage?.title,
-            label: report.referencePage?.label
-          }))
-          const verification = {
-            referencePages,
-            referencePage: reports.at(-1)?.report.referencePage,
-            items,
-            summary:
-              badCount === 0
-                ? `多目标语义验证通过：${reports.length}/${reports.length} 个测试目标通过。`
-                : `多目标语义验证发现 ${badCount} 项问题，覆盖 ${reports.length} 个测试目标。`
-          }
-          session.lastVerification = verification
+      events.push({ type: 'execution_updated', sessionId, step, execution })
+      const acceptanceDecision = pluginRunAcceptance.evaluate({
+        package: workspace.package,
+        targets: session.runTargets,
+        execution
+      })
+      if (scope === 'all') {
+        session.lastExecution = execution
+        session.acceptance = acceptanceDecision.outcome
+        if (acceptanceDecision.outcome) {
           events.push({
-            type: 'verification_updated',
+            type: 'acceptance_updated',
             sessionId,
             step,
-            verification
+            outcome: acceptanceDecision.outcome
           })
-          events.push(...syncSupportedFieldsAfterVerification(session, step, verification.items))
-          return { ok: true, content: JSON.stringify(verification, null, 2), events }
         }
-        let pages: PluginDevPageInsight[] = []
-        await withBrowserLock(sessionId, async () => {
-          pages = await refreshVerificationPagesForDryRun(
-            session,
-            session.lastDryRun!,
-            '验证参考页'
-          )
+        const currentAcceptance = pluginRunAcceptance.evaluate({
+          package: workspace.package,
+          targets: session.runTargets,
+          execution: session.lastExecution
         })
-        const verification = await verifyDebugResultAgainstPages({
-          kind: session.kind,
-          lastResult: session.lastDryRun?.result,
-          discovery: pages.length > 0
-            ? { pages, notes: session.pageNotes.map((note) => note.text) }
-            : buildDiscoveryFromSession(session),
-          supportedFields: session.package.supportedFields ?? session.supportedFields,
-          userFeedback,
-          mode: session.mode,
-          testTarget: session.testTargets?.[0],
-          testTargets: session.testTargets
-        })
-        session.lastVerification = verification
-        events.push({
-          type: 'verification_updated',
-          sessionId,
-          step,
-          verification
-        })
-        events.push(...syncSupportedFieldsAfterVerification(session, step, verification.items))
-        return { ok: true, content: JSON.stringify(verification, null, 2), events }
-      }
-
-      case 'plugin_install': {
-        if (!canInstallFromAgent(session)) {
-          return toolError(
-            'INSTALL_BLOCKED',
-            'Agent 安装前必须先通过 plugin_dry_run 且 plugin_verify 无阻断失败项。请先修复并验证。'
-          )
-        }
-        const descriptor = await installDevPluginPackage({
-          package: session.package,
-          overwriteUser: args.overwriteUser !== false
-        })
-        events.push({
-          type: 'plugin_installed',
-          sessionId,
-          step,
-          package: session.package,
-          descriptor
-        })
-        return {
-          ok: true,
-          content: `已安装插件：${descriptor.name}`,
-          events
-        }
-      }
-
-      case 'plugin_finish': {
-        const summary = typeof args.summary === 'string' ? args.summary : '完成'
-        const success = args.success === true
-        const finishEvents =
-          session.lastVerification?.items?.length
-            ? syncSupportedFieldsAfterVerification(session, step, session.lastVerification.items)
-            : []
-        return {
-          ok: true,
-          content: summary,
-          finish: { success, summary },
-          events: finishEvents
-        }
-      }
-
-      case 'browser_fetch_page': {
-        const url = typeof args.url === 'string' ? args.url.trim() : ''
-        if (!url) return { ok: false, content: 'url 必填' }
-        return withBrowserLock(sessionId, async () => {
-          const settings = getSettings()
-          await scrapeBrowser.setProxy(resolveScrapeProxyUrl(settings))
-          await scrapeBrowser.fetchPage(url, {
-            readySelector:
-              typeof args.readySelector === 'string' ? args.readySelector : 'body',
-            timeoutMs:
-              typeof args.timeoutMs === 'number' ? Math.round(args.timeoutMs) : 45000
-          })
-          const status = (await scrapeBrowser.performAction('status', {})) as {
-            isChallenge?: boolean
-            url?: string
-            title?: string
-          }
-          if (status.isChallenge) {
-            return {
-              ok: false,
-              content: JSON.stringify({
-                code: 'CHALLENGE',
-                message: '当前页面为 Cloudflare 挑战，请在浏览器窗口完成验证后请用户继续',
-                ...status
-              })
-            }
-          }
-          const page = await refreshVerificationPageFromBrowser(session, '验证参考页')
-          return {
-            ok: true,
-            content: JSON.stringify(
-              {
-                ...status,
-                verificationPage: page
-                  ? { url: page.url, title: page.title, textPreview: page.text.slice(0, 180) }
-                  : undefined
-              },
-              null,
-              2
-            )
-          }
+        pluginWorkspace.recordLatestDryRun(session.workspaceDirectory, {
+          schemaVersion: 1,
+          status: 'completed',
+          artifactHash: execution.artifactHash,
+          reportPath: execution.reportPath,
+          scope: execution.scope,
+          runtimeVersion: execution.runtimeVersion,
+          targetFingerprint: execution.targetFingerprint,
+          executionPassed: execution.executionPassed,
+          cases: execution.cases.map((item) => ({
+            runtimeInput: item.target,
+            runtimeAccepted: item.runtimeAccepted,
+            pluginResult: item.pluginResult,
+            effectiveResult: item.effectiveResult,
+            manifestCoverage: item.manifestCoverage,
+            unrecognizedResultKeys: item.unrecognizedResultKeys ?? [],
+            error: item.error
+          })),
+          currentAcceptance: projectPluginRunAcceptance(currentAcceptance)
         })
       }
-
-      case 'browser_html': {
-        return withBrowserLock(sessionId, async () => {
-          const result = await scrapeBrowser.performAction('htmlRegion', {
-            selector: typeof args.selector === 'string' ? args.selector : 'body',
-            maxLength:
-              typeof args.maxLength === 'number'
-                ? args.maxLength
-                : session.limits.maxHtmlChars
-          })
-          return { ok: true, content: JSON.stringify(result, null, 2) }
-        })
+      const compact = {
+        executionPassed: execution.executionPassed,
+        scope: execution.scope,
+        runtimeVersion: execution.runtimeVersion,
+        cases: execution.cases.map((item) => ({
+          runtimeInput: item.target,
+          runtimeAccepted: item.runtimeAccepted,
+          pluginResult: item.pluginResult,
+          effectiveResult: item.effectiveResult,
+          manifestCoverage: item.manifestCoverage,
+          unrecognizedResultKeys: item.unrecognizedResultKeys ?? [],
+          error: item.error,
+          logs: item.logs.slice(-20)
+        })),
+        artifactHash: execution.artifactHash,
+        targetFingerprint: execution.targetFingerprint,
+        mechanicalAcceptance: {
+          installReady: acceptanceDecision.ready,
+          reasons: acceptanceDecision.reasons
+        },
+        reportPath: execution.reportPath,
+        adoptedTargets: adoptsDiscoveredTargets
       }
-
-      case 'browser_inspect': {
-        return withBrowserLock(sessionId, async () => {
-          const raw = await scrapeBrowser.performAction('inspect', {
-            maxTextLength:
-              typeof args.maxTextLength === 'number' ? args.maxTextLength : 6000,
-            maxLinks: typeof args.maxLinks === 'number' ? args.maxLinks : 100
-          })
-          const page = normalizeInsight('浏览器当前页', raw)
-          session.lastInspectPage = page
-          return {
-            ok: true,
-            content: formatPageInsightForPrompt(page, { textLimit: 3200, linkLimit: 40 })
-          }
-        })
+      return {
+        ok: true,
+        content: boundedJson(compact, 32_000, {
+          executionPassed: execution.executionPassed,
+          targets: execution.targets.map(runTargetLabel),
+          artifactHash: execution.artifactHash,
+          mechanicalAcceptance: {
+            installReady: acceptanceDecision.ready,
+            reasons: acceptanceDecision.reasons
+          },
+          message: '完整 dry-run 结果过大；可从 execution_updated 事件或结果面板查看。'
+        }),
+        structured: {
+          executionPassed: execution.executionPassed,
+          targetCount: execution.targets.length,
+          artifactHash: execution.artifactHash,
+          mechanicalAcceptance: {
+            installReady: acceptanceDecision.ready,
+            reasons: acceptanceDecision.reasons
+          },
+          adoptedTargets: adoptsDiscoveredTargets
+        },
+        events
       }
-
-      case 'browser_evaluate': {
-        const expression = typeof args.expression === 'string' ? args.expression : ''
-        if (!expression.trim()) return { ok: false, content: 'expression 必填' }
-        return withBrowserLock(sessionId, async () => {
-          const value = await scrapeBrowser.performAction('evaluate', { expression })
-          return { ok: true, content: JSON.stringify(value, null, 2) }
-        })
-      }
-
-      case 'browser_click': {
-        const selector = typeof args.selector === 'string' ? args.selector : ''
-        if (!selector) return { ok: false, content: 'selector 必填' }
-        return withBrowserLock(sessionId, async () => {
-          await scrapeBrowser.performAction('click', { selector })
-          return { ok: true, content: `已点击 ${selector}` }
-        })
-      }
-
-      case 'browser_type': {
-        const selector = typeof args.selector === 'string' ? args.selector : ''
-        const text = typeof args.text === 'string' ? args.text : ''
-        if (!selector) return { ok: false, content: 'selector 必填' }
-        return withBrowserLock(sessionId, async () => {
-          await scrapeBrowser.performAction('type', {
-            selector,
-            text,
-            clear: args.clear === true
-          })
-          return { ok: true, content: `已向 ${selector} 输入文本` }
-        })
-      }
-
-      case 'browser_press': {
-        const key = typeof args.key === 'string' ? args.key : 'Enter'
-        return withBrowserLock(sessionId, async () => {
-          await scrapeBrowser.performAction('press', { key })
-          return { ok: true, content: `已按键 ${key}` }
-        })
-      }
-
-      case 'browser_wait': {
-        const timeoutMs =
-          typeof args.timeoutMs === 'number' ? Math.round(args.timeoutMs) : 1000
-        return withBrowserLock(sessionId, async () => {
-          await scrapeBrowser.performAction('wait', { timeoutMs })
-          return { ok: true, content: `已等待 ${timeoutMs}ms` }
-        })
-      }
-
-      case 'browser_status': {
-        return withBrowserLock(sessionId, async () => {
-          const status = await scrapeBrowser.performAction('status', {})
-          return { ok: true, content: JSON.stringify(status, null, 2) }
-        })
-      }
-
-      case 'session_note': {
-        const text = typeof args.text === 'string' ? args.text.trim() : ''
-        if (!text) return { ok: false, content: 'text 必填' }
-        session.pageNotes.push({ text, at: Date.now() })
-        return { ok: true, content: '已记录笔记' }
-      }
-
-      case 'session_request_user': {
-        const reason = typeof args.reason === 'string' ? args.reason : '需要用户操作'
-        session.status = 'waiting_user'
-        events.push({
-          type: 'waiting_user',
-          sessionId,
-          step,
-          reason
-        })
-        return {
-          ok: true,
-          content: reason,
-          waitForUser: reason,
-          events
-        }
-      }
-
-      default:
-        return { ok: false, content: `未知工具：${toolName}` }
     }
-  } catch (err) {
-    return toolError('TOOL_ERROR', err instanceof Error ? err.message : String(err))
+
+    if (toolName === 'ask_user') {
+      const question = typeof args.question === 'string' ? args.question.trim() : ''
+      if (!question) return toolError('QUESTION_REQUIRED', 'question 必填。')
+      const options = Array.isArray(args.options)
+        ? args.options.flatMap((item) => {
+            if (!item || typeof item !== 'object') return []
+            const record = item as Record<string, unknown>
+            const id = typeof record.id === 'string' ? record.id.trim() : ''
+            const label = typeof record.label === 'string' ? record.label.trim() : ''
+            if (!id || !label) return []
+            return [{
+              id,
+              label,
+              description: typeof record.description === 'string' ? record.description.trim() : undefined
+            }]
+          })
+        : []
+      const evidenceRefs = Array.isArray(args.evidenceRefs)
+        ? args.evidenceRefs.filter((ref): ref is string => typeof ref === 'string').slice(0, 12)
+        : []
+      const request: PluginDevPendingUserRequest = options.length > 0
+        ? {
+            requestId: `choice:${fingerprintValue({ sessionId, step, question, options, evidenceRefs })}`,
+            type: 'choice',
+            prompt: question,
+            options,
+            evidenceRefs
+          }
+        : {
+            requestId: `freeform:${fingerprintValue({ sessionId, step, question })}`,
+            type: 'freeform',
+            prompt: question
+          }
+      return pendingUserResult(session, request, step, events)
+    }
+
+    return toolError('UNKNOWN_TOOL', `未知工具：${toolName}`)
+  } catch (error) {
+    if (context.signal?.aborted) {
+      throw context.signal.reason instanceof Error ? context.signal.reason : new Error('工具执行已取消')
+    }
+    if (isScrapeBrowserBusyError(error)) {
+      const message = '刮削浏览器正被其他任务占用；本次 Agent operation 已终止，请稍后由用户继续，不要自动重试。'
+      session.status = 'waiting_user'
+      session.phase = 'waiting_user'
+      events.push({ type: 'waiting_user', sessionId, step, reason: message })
+      return {
+        ...toolError(error.code, message, {
+        activePurpose: error.purpose
+        }),
+        waitForUser: message,
+        events
+      }
+    }
+    return toolError('TOOL_ERROR', error instanceof Error ? error.message : String(error))
   }
 }

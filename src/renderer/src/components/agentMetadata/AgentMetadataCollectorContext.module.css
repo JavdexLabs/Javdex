@@ -1,0 +1,223 @@
+.intro,
+.steps {
+  display: grid;
+  gap: 10px;
+}
+
+.intro p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: setup-step;
+}
+
+.steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.steps li::before {
+  counter-increment: setup-step;
+  content: counter(setup-step);
+  display: grid;
+  place-items: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-selected);
+  color: var(--text-accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.stepCopy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.steps strong {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sourceForm,
+.review {
+  display: grid;
+  gap: 14px;
+}
+
+.sourceForm label,
+.choice label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sourceForm input {
+  width: 100%;
+}
+
+.controls,
+.impacts,
+.choice {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.controlHeader,
+.impactHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.controlHeader > div {
+  display: grid;
+  gap: 3px;
+}
+
+.controlHeader strong,
+.impactHeader strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.controlHeader span,
+.impactHeader span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.fields label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.fields label:has(input:checked) {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+  color: var(--text-primary);
+}
+
+.fields label > input[type='checkbox'] {
+  accent-color: var(--accent);
+}
+
+.fields em {
+  margin-left: auto;
+  color: var(--text-warning);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.warning,
+.error,
+.messages {
+  padding: 8px 10px;
+  border: 1px solid var(--border-warning);
+  border-radius: var(--radius-sm);
+  background: var(--surface-warning);
+  color: var(--text-warning);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.warning {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.error {
+  border-color: var(--border-danger);
+  background: var(--surface-danger);
+  color: var(--text-danger);
+}
+
+.messages p {
+  margin: 0;
+}
+
+.messages p + p {
+  margin-top: 4px;
+}
+
+.assets {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.assets figure {
+  flex: 0 0 112px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+}
+
+.assets img {
+  display: block;
+  width: 112px;
+  height: 76px;
+  object-fit: cover;
+}
+
+.assets figcaption {
+  padding: 4px 6px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.choice {
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 280px);
+  align-items: center;
+}
+
+@media (width <= 760px) {
+  .fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

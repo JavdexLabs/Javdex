@@ -1,61 +1,136 @@
-import { IPC } from '@shared/ipc-channels'
 import fs from 'node:fs'
+import { shell } from 'electron'
+import { IPC } from '@shared/ipc-channels'
 import type { ManualImportResult, RenameImportResult, ScanResult } from '@shared/libraryTypes'
-import { importManual, renameAndImport } from '../scanner/scanner'
-import { scanCoordinator } from '../scanner/scanCoordinator'
+import { normalizeAbsoluteLocalPath, normalizeLocalPathIdentity } from '@shared/localPathIdentity'
+import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
+import {
+  getLatestLibraryScanSnapshot,
+  libraryUnrecognizedFileExists,
+  removeLibraryUnrecognizedFile
+} from '../db/libraryScanRepo'
+import { getMediaLibraryRoot } from '../db/mediaLibraryRepo'
 import { listPendingScanGroups, resolvePendingScanGroup } from '../db/pendingScanRepo'
 import { listVideoResources } from '../db/videoRepo'
+import {
+  libraryScanAuditContainsPath,
+  readLibraryScanAudit
+} from '../scanner/libraryScanAuditStore'
+import { importManual, renameAndImport } from '../scanner/scanner'
+import { scanCoordinator } from '../scanner/scanCoordinator'
 import { maintenanceTaskGate } from '../services/maintenanceTaskGate'
 import { selectPrimaryVideoResourceCandidate } from '../services/videoResourcePromotion'
-import type { IpcContext } from './shared'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
-import { getSettings } from '../settings/settingsStore'
-import { assertConfiguredLibraryFile, assertFileNameOnly } from './ipcPathGuards'
+import { assertFileNameOnly, assertMediaLibraryRootFile } from './ipcPathGuards'
+import type { IpcContext } from './shared'
+
+function requireActiveRoot(libraryId: number, rootId: number): MediaLibraryRoot {
+  const root = getMediaLibraryRoot(libraryId, rootId)
+  if (!root || root.state !== 'active') {
+    throw new Error('媒体库根目录不存在、已停用或不属于该媒体库')
+  }
+  return root
+}
+
+function removeScopedUnrecognizedFile(libraryId: number, rootId: number, filePath: string): void {
+  removeLibraryUnrecognizedFile(libraryId, rootId, normalizeLocalPathIdentity(filePath))
+}
+
+export function registerScanLatestHandler(
+  commandAdapter: Pick<typeof appCommandAdapter, 'register'> = appCommandAdapter,
+  readLatest: typeof getLatestLibraryScanSnapshot = getLatestLibraryScanSnapshot
+): void {
+  commandAdapter.register(IPC.SCAN_LATEST_GET, (libraryId) => readLatest(libraryId))
+}
 
 export function registerScanHandlers(ctx: IpcContext): void {
   scanCoordinator.subscribe((event) => {
     const webContents = ctx.getWindow()?.webContents
     appEventAdapter.send(webContents, IPC.SCAN_STATE_CHANGED, event)
     if (event.phase === 'progress') {
-      appEventAdapter.send(webContents, IPC.SCAN_PROGRESS, event.progress)
+      appEventAdapter.send(webContents, IPC.SCAN_PROGRESS, {
+        libraryId: event.libraryId,
+        runId: event.runId,
+        progress: event.progress
+      })
     }
   })
 
-  appCommandAdapter.register(IPC.SCAN_RUN, async (folders): Promise<ScanResult> => {
-    return scanCoordinator.run({
-      folders,
-      trigger: 'manual'
-    })
-  })
+  appCommandAdapter.register(
+    IPC.SCAN_RUN,
+    async (libraryId, rootIds): Promise<ScanResult> =>
+      scanCoordinator.run({ libraryId, rootIds, trigger: 'manual' })
+  )
 
-  appCommandAdapter.register(IPC.SCAN_CANCEL, (): boolean => scanCoordinator.cancel())
-  appCommandAdapter.register(IPC.PENDING_SCAN_LIST, () => listPendingScanGroups())
-  appCommandAdapter.register(IPC.PENDING_SCAN_RESOLVE, (groupId, resolution) =>
+  appCommandAdapter.register(IPC.SCAN_CANCEL, (runId): boolean => scanCoordinator.cancel(runId))
+  registerScanLatestHandler()
+  appCommandAdapter.register(IPC.SCAN_AUDIT_GET, (libraryId) =>
+    readLibraryScanAudit(libraryId)
+  )
+  appCommandAdapter.register(IPC.SCAN_AUDIT_REVEAL_FILE, (libraryId, filePath) => {
+    let normalizedPath: string
+    try {
+      normalizedPath = normalizeAbsoluteLocalPath(filePath).normalizedPath
+    } catch {
+      return { ok: false, error: '路径不属于该媒体库最近一次扫描审计' }
+    }
+    const audit = readLibraryScanAudit(libraryId)
+    const allowed =
+      Boolean(audit && libraryScanAuditContainsPath(audit, filePath)) ||
+      libraryUnrecognizedFileExists(libraryId, normalizedPath)
+    if (!allowed) return { ok: false, error: '路径不属于该媒体库最近一次扫描审计' }
+    if (!fs.existsSync(filePath)) return { ok: false, fileMissing: true }
+    shell.showItemInFolder(filePath)
+    return { ok: true }
+  })
+  appCommandAdapter.register(IPC.PENDING_SCAN_LIST, (libraryId) =>
+    listPendingScanGroups(libraryId)
+  )
+  appCommandAdapter.register(IPC.PENDING_SCAN_RESOLVE, (libraryId, groupId, resolution) =>
     maintenanceTaskGate.runSync('resource-maintenance', () =>
-      resolvePendingScanGroup(groupId, resolution, {
-        selectFallbackPrimaryResourceId: (videoId) =>
-          selectPrimaryVideoResourceCandidate(listVideoResources(videoId), fs.existsSync)?.id ??
-          null
+      resolvePendingScanGroup(libraryId, groupId, resolution, {
+        selectFallbackPrimaryResourceId: (candidateLibraryId, videoId) =>
+          selectPrimaryVideoResourceCandidate(
+            listVideoResources(candidateLibraryId, videoId),
+            fs.existsSync
+          )?.id ?? null
       })
     )
   )
 
   appCommandAdapter.register(
     IPC.FILE_RENAME,
-    (oldPath, newName, code, target): Promise<RenameImportResult> => {
-      assertConfiguredLibraryFile(oldPath, getSettings().libraryPaths)
+    (libraryId, rootId, oldPath, newName, code, target): Promise<RenameImportResult> => {
+      const root = requireActiveRoot(libraryId, rootId)
+      assertMediaLibraryRootFile(oldPath, root)
       assertFileNameOnly(newName)
-      return maintenanceTaskGate.run('resource-maintenance', () =>
-        renameAndImport(oldPath, newName, code, target)
-      )
+      return maintenanceTaskGate.run('resource-maintenance', async () => {
+        const result = await renameAndImport({
+          libraryId,
+          rootId,
+          oldPath,
+          newName,
+          code,
+          target
+        })
+        if (result.imported) removeScopedUnrecognizedFile(libraryId, rootId, oldPath)
+        return result
+      })
     }
   )
 
   appCommandAdapter.register(
     IPC.FILE_IMPORT_MANUAL,
-    (filePath, code, target): Promise<ManualImportResult> => {
-      assertConfiguredLibraryFile(filePath, getSettings().libraryPaths)
-      return maintenanceTaskGate.run('resource-maintenance', () => importManual(filePath, code, target))
+    (libraryId, rootId, filePath, code, target): Promise<ManualImportResult> => {
+      const root = requireActiveRoot(libraryId, rootId)
+      assertMediaLibraryRootFile(filePath, root)
+      return maintenanceTaskGate.run('resource-maintenance', async () => {
+        const result = await importManual({ libraryId, rootId, filePath, code, target })
+        if (result.imported || result.skippedPath) {
+          removeScopedUnrecognizedFile(libraryId, rootId, filePath)
+        }
+        return result
+      })
     }
   )
 }

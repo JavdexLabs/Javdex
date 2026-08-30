@@ -30,10 +30,13 @@ afterEach(() => {
 function strmResource(): VideoResource {
   return {
     id: 2,
+    library_id: 1,
     video_id: 1,
+    root_id: 1,
     kind: 'direct',
     locator: 'https://cdn.example/TEST-001.mp4?token=secret',
     resource_key: 'strm:/library/TEST-001.strm',
+    source_identity: 'strm:/library/TEST-001.strm',
     strm_source_path: '/library/TEST-001.strm',
     size_bytes: 1024,
     duration_seconds: null,
@@ -50,6 +53,7 @@ describe('VideoResourceImportModal', () => {
     act(() => {
       renderer = TestRenderer.create(
         <VideoResourceImportModal
+          libraryId={1}
           fixedCode="TEST-001"
           resource={strmResource()}
           onCancel={() => undefined}

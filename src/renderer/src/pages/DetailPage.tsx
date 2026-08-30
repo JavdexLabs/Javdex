@@ -1,18 +1,20 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
-import { ListPlus, Pencil, Play, SearchCheck, SearchX } from 'lucide-react'
+import { Bot, ListPlus, Pencil, Play, SearchCheck, SearchX } from 'lucide-react'
 import type {
   LastVideoResourceRemovalMode,
   Video,
-  VideoDetail,
   VideoResource,
   VideoResourceDetail
 } from '@shared/videoTypes'
+import type { ScopedVideoDetail } from '@shared/catalogTypes'
+import type { VideoLifecycleImpact } from '@shared/videoLifecycleTypes'
 import { normalizeVideoCode } from '@shared/videoCode'
 import { api, assetUrl } from '../api'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
+import { AppFormField } from '../components/FormPrimitives'
 import SelectControl from '../components/SelectControl'
 import EditMetadataModal from '../components/EditMetadataModal'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
@@ -51,7 +53,7 @@ import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import {
   navigateBackFromVideoDetail,
   navigateToActressFromVideoDetail,
-  navigateToLibrary,
+  navigateToVideoListSurface,
   navigateToVideoDetail
 } from '../listView/listNavigation'
 import { LIST_PARAM } from '../listView/listQueryParams'
@@ -61,9 +63,25 @@ import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import { invalidateVideoLibraryQueries } from '../query/invalidateLibraryQueries'
 import { settingsPath } from '../settings/settingsRoutes'
 import VideoResourceImportModal from '../components/VideoResourceImportModal'
+import VideoResourceMoveModal from '../components/VideoResourceMoveModal'
 import DirectorScrapeChoiceModal from '../components/DirectorScrapeChoiceModal'
 import Button from '../components/Button'
+import VideoLibraryMembershipBadges from '../components/VideoLibraryMembershipBadges'
+import VideoDeleteImpact from '../components/VideoDeleteImpact'
 import { isVideoBusinessIdentityConflictError } from './videoBusinessIdentityConflict'
+import { useAgentMetadataCollector } from '../components/agentMetadata/AgentMetadataCollectorContext'
+import { ALL_CATALOG_SCOPE, mediaLibraryCatalogScope } from '../query/catalogScopes'
+import {
+  canonicalizeVideoDetailLocationSearch,
+  loadDetailWithLibraryFallback,
+  parseVideoDetailRouteContext,
+  setVideoDetailLibraryId
+} from '../listView/videoDetailContext'
+import {
+  readRecentMediaLibraryId,
+  rememberRecentMediaLibraryId
+} from '../listView/recentMediaLibrary'
+import { resolveVideoDetailDefaultScraper } from './videoDetailScraperState'
 
 interface PendingDirectorChoice {
   fields: VideoScrapeField[]
@@ -84,6 +102,9 @@ export default function DetailPage(): JSX.Element {
   const playlistActressStack = useMatch(ROUTE_MATCH.playlistActressStack)
   const actressVideoActressStack = useMatch(ROUTE_MATCH.actressActressStack)
   const pendingActressStack = useMatch(ROUTE_MATCH.pendingActressStack)
+  const homeActressStack = useMatch(ROUTE_MATCH.homeActressStack)
+  const searchActressStack = useMatch(ROUTE_MATCH.searchActressStack)
+  const mediaLibraryActressStack = useMatch(ROUTE_MATCH.mediaLibraryActressStack)
   const actressStackOpen = Boolean(
     libraryActressStack ??
       organizationActressStack ??
@@ -91,29 +112,59 @@ export default function DetailPage(): JSX.Element {
       seriesActressStack ??
       playlistActressStack ??
       actressVideoActressStack ??
-      pendingActressStack
+      pendingActressStack ??
+      homeActressStack ??
+      searchActressStack ??
+      mediaLibraryActressStack
   )
   const queryClient = useQueryClient()
   const toast = useToast()
   const toastRef = useRef(toast)
   toastRef.current = toast
+  const deletePreviewRequestRef = useRef(0)
   const { setBackground, clearBackground } = useAppBackground()
 
   const invalidateVideos = (): void => {
     invalidateVideoLibraryQueries(queryClient)
   }
 
-  const [video, setVideo] = useState<VideoDetail | null>(null)
+  const detailRouteContext = parseVideoDetailRouteContext(
+    location.pathname,
+    new URLSearchParams(location.search)
+  )
+  const requestedLibraryId = detailRouteContext?.libraryId ?? null
+  const detailRouteSource = detailRouteContext?.source ?? null
+  const requestedScope = useMemo(
+    () =>
+      requestedLibraryId == null
+        ? ALL_CATALOG_SCOPE
+        : mediaLibraryCatalogScope(requestedLibraryId),
+    [requestedLibraryId]
+  )
+  const [video, setVideo] = useState<ScopedVideoDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [scraping, setScraping] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deletePreview, setDeletePreview] = useState<VideoLifecycleImpact | null>(null)
+  const [deletePreviewLoading, setDeletePreviewLoading] = useState(false)
+  const [deletingVideo, setDeletingVideo] = useState(false)
+  const [deleteOperationId, setDeleteOperationId] = useState<string | null>(null)
+  const removePreviewRequestRef = useRef(0)
+  const [confirmRemoveFromLibrary, setConfirmRemoveFromLibrary] = useState(false)
+  const [removePreview, setRemovePreview] = useState<VideoLifecycleImpact | null>(null)
+  const [removePreviewLoading, setRemovePreviewLoading] = useState(false)
+  const [removingFromLibrary, setRemovingFromLibrary] = useState(false)
+  const [removeOperationId, setRemoveOperationId] = useState<string | null>(null)
   const [showEdit, setShowEdit] = useState(false)
   const [editIdentityConflict, setEditIdentityConflict] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const { scrapers, pluginDetails, defaultScraper } = useScraperPluginCatalog('video')
+  const [scraperSelection, setScraperSelection] = useState<{
+    libraryId: number | null
+    name: string
+  }>({ libraryId: null, name: '' })
   const [videoDetailUseFirstSampleBackground, setVideoDetailUseFirstSampleBackground] =
     useState(false)
-  const [scraperName, setScraperName] = useState<string>('')
   const [showScrapeFields, setShowScrapeFields] = useState(false)
   const [pendingDirectorChoice, setPendingDirectorChoice] =
     useState<PendingDirectorChoice | null>(null)
@@ -124,6 +175,8 @@ export default function DetailPage(): JSX.Element {
   const [showMaintenanceInfo, setShowMaintenanceInfo] = useState(false)
   const [showResourceImport, setShowResourceImport] = useState(false)
   const [editResourceTarget, setEditResourceTarget] = useState<VideoResource | null>(null)
+  const [moveResourceTarget, setMoveResourceTarget] =
+    useState<VideoResourceDetail | null>(null)
   const [correctCode, setCorrectCode] = useState('')
   const [correcting, setCorrecting] = useState(false)
   const [tallCover, setTallCover] = useState(false)
@@ -145,6 +198,11 @@ export default function DetailPage(): JSX.Element {
 
   const dismissOverlays = useCallback(() => {
     setConfirmDelete(false)
+    deletePreviewRequestRef.current += 1
+    setDeletePreview(null)
+    setDeletePreviewLoading(false)
+    setDeletingVideo(false)
+    setDeleteOperationId(null)
     setShowEdit(false)
     setEditIdentityConflict(null)
     setConfirmClear(false)
@@ -156,17 +214,27 @@ export default function DetailPage(): JSX.Element {
     setShowMaintenanceInfo(false)
     setShowResourceImport(false)
     setEditResourceTarget(null)
+    setMoveResourceTarget(null)
     closeCoverPreview()
     setRemoveResourceTarget(null)
   }, [closeCoverPreview])
 
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
 
-  useEffect(() => {
-    if (defaultScraper) {
-      setScraperName((prev) => prev || defaultScraper)
-    }
-  }, [defaultScraper])
+  const activeLibraryQuery = useQuery({
+    queryKey: ['media-libraries', 'detail', video?.activeLibraryId ?? null],
+    queryFn: () => api.mediaLibraries.get(video!.activeLibraryId),
+    enabled: video?.activeLibraryId != null
+  })
+  const detailDefaultScraper = resolveVideoDetailDefaultScraper(
+    video?.activeLibraryId ?? null,
+    activeLibraryQuery.data,
+    defaultScraper
+  )
+  const scraperName =
+    scraperSelection.libraryId === (video?.activeLibraryId ?? null) && scraperSelection.name
+      ? scraperSelection.name
+      : detailDefaultScraper
 
   useEffect(() => {
     api.settings
@@ -178,19 +246,31 @@ export default function DetailPage(): JSX.Element {
   }, [])
 
   const load = useCallback(
-    (options?: { silent?: boolean }) => {
+    async (options?: { silent?: boolean }) => {
       const silent = options?.silent ?? false
       if (!silent) setLoading(true)
-      return api.videos
-        .get(videoId)
-        .then(setVideo)
-        .catch((e) => toastRef.current.show(String(e.message ?? e), 'error'))
-        .finally(() => {
-          if (!silent) setLoading(false)
-        })
+      try {
+        const queryOwnedDetail =
+          detailRouteSource != null && detailRouteSource !== 'media-library'
+        const detail = queryOwnedDetail
+          ? await loadDetailWithLibraryFallback(
+              videoId,
+              requestedLibraryId,
+              readRecentMediaLibraryId(),
+              (scope, id) => api.videos.get(scope, id)
+            )
+          : await api.videos.get(requestedScope, videoId)
+        if (detail) rememberRecentMediaLibraryId(detail.activeLibraryId)
+        setVideo(detail)
+      } catch (error) {
+        toastRef.current.show(String((error as Error).message ?? error), 'error')
+      } finally {
+        if (!silent) setLoading(false)
+      }
     },
-    [videoId]
+    [detailRouteSource, requestedLibraryId, requestedScope, videoId]
   )
+  const agentMetadata = useAgentMetadataCollector()
 
   useListSurfaceRefetch(actressStackOpen, () => {
     void load({ silent: true })
@@ -199,6 +279,24 @@ export default function DetailPage(): JSX.Element {
   useEffect(() => {
     void load()
   }, [videoId, load])
+
+  useEffect(() => {
+    if (!detailRouteContext) return
+    const currentSearch = new URLSearchParams(location.search)
+    let nextSearch = canonicalizeVideoDetailLocationSearch(location.pathname, currentSearch)
+    if (
+      video &&
+      (detailRouteContext.source === 'home' || detailRouteContext.source === 'search') &&
+      detailRouteContext.libraryId !== video.activeLibraryId
+    ) {
+      nextSearch = setVideoDetailLibraryId(nextSearch, video.activeLibraryId)
+    }
+    if (nextSearch.toString() === currentSearch.toString()) return
+    navigate(
+      { pathname: location.pathname, search: nextSearch.toString() },
+      { replace: true, state: location.state }
+    )
+  }, [detailRouteContext, location.pathname, location.search, location.state, navigate, video])
 
   useLayoutEffect(() => {
     const scope = `video:${videoId}`
@@ -236,8 +334,9 @@ export default function DetailPage(): JSX.Element {
   }
 
   const handlePlay = async (): Promise<void> => {
+    if (!video) return
     try {
-      const res = await api.player.play(videoId)
+      const res = await api.player.play(video.activeLibraryId, videoId)
       if (res.ok) {
         toast.show('已交给系统打开', 'success')
         void load({ silent: true })
@@ -254,8 +353,9 @@ export default function DetailPage(): JSX.Element {
   }
 
   const handleOpenResource = async (resourceId: number): Promise<void> => {
+    if (!video) return
     try {
-      const result = await api.player.openResource(resourceId)
+      const result = await api.player.openResource(video.activeLibraryId, resourceId)
       if (result.ok) {
         toast.show('已交给系统打开', 'success')
       } else if (result.fileMissing) {
@@ -271,8 +371,9 @@ export default function DetailPage(): JSX.Element {
   }
 
   const handleReveal = async (): Promise<void> => {
+    if (!video) return
     try {
-      const res = await api.player.reveal(videoId)
+      const res = await api.player.reveal(video.activeLibraryId, videoId)
       if (!res.ok) toast.show(res.error ?? '打开文件夹失败', 'error')
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
@@ -280,8 +381,9 @@ export default function DetailPage(): JSX.Element {
   }
 
   const handleRevealResource = async (resourceId: number): Promise<void> => {
+    if (!video) return
     try {
-      const res = await api.player.revealResource(resourceId)
+      const res = await api.player.revealResource(video.activeLibraryId, resourceId)
       if (res.fileMissing) {
         const resource = video?.resources.find((item) => item.id === resourceId)
         if (resource?.kind === 'local' || resource?.strm_source_path) {
@@ -296,8 +398,9 @@ export default function DetailPage(): JSX.Element {
   }
 
   const handleSetPrimaryResource = async (resourceId: number): Promise<void> => {
+    if (!video) return
     try {
-      await api.videos.setPrimaryResource(videoId, resourceId)
+      await api.videos.setPrimaryResource(video.activeLibraryId, videoId, resourceId)
       toast.show('已设为主资源', 'success')
       invalidateVideos()
       void load({ silent: true })
@@ -309,10 +412,11 @@ export default function DetailPage(): JSX.Element {
   const doRemoveResource = async (
     lastResourceMode?: LastVideoResourceRemovalMode
   ): Promise<void> => {
-    if (!removeResourceTarget || removingResource) return
+    if (!video || !removeResourceTarget || removingResource) return
     setRemovingResource(true)
     try {
       const result = await api.videos.removeResource(
+        video.activeLibraryId,
         videoId,
         removeResourceTarget.id,
         lastResourceMode
@@ -344,8 +448,9 @@ export default function DetailPage(): JSX.Element {
   }
 
   const readFullResource = async (resourceId: number): Promise<VideoResource | null> => {
+    if (!video) return null
     try {
-      const resource = await api.videos.getResource(videoId, resourceId)
+      const resource = await api.videos.getResource(video.activeLibraryId, videoId, resourceId)
       if (!resource) toast.show('资源记录不存在', 'error')
       return resource
     } catch (error) {
@@ -365,10 +470,22 @@ export default function DetailPage(): JSX.Element {
     setLocalResourceLabel(fullResource.display_name ?? '')
   }
 
+  const openResourceMove = (resource: VideoResourceDetail): void => {
+    if (resource.kind === 'local' || resource.strm_source_path) {
+      toast.show(
+        '本地与 STRM 资源按来源目录管理，请到当前媒体库设置的“来源”页迁移整个根目录',
+        'info'
+      )
+      return
+    }
+    setMoveResourceTarget(resource)
+  }
+
   const saveLocalResourceLabel = async (): Promise<void> => {
-    if (!editResourceTarget || editResourceTarget.kind !== 'local') return
+    if (!video || !editResourceTarget || editResourceTarget.kind !== 'local') return
     try {
       await api.videos.updateLocalResourceLabel(
+        video.activeLibraryId,
         videoId,
         editResourceTarget.id,
         localResourceLabel
@@ -385,7 +502,11 @@ export default function DetailPage(): JSX.Element {
     if (!video) return
     try {
       const normalizedCode = normalizeVideoCode(video.code)
-      const result = await api.videos.list({ search: normalizedCode, limit: 100, offset: 0 })
+      const result = await api.videos.list(ALL_CATALOG_SCOPE, {
+        search: normalizedCode,
+        limit: 100,
+        offset: 0
+      })
       const candidates = result.items.filter(
         (candidate) =>
           candidate.id !== video.id && normalizeVideoCode(candidate.code) === normalizedCode
@@ -415,7 +536,12 @@ export default function DetailPage(): JSX.Element {
       toast.show(`影片已合并，保留 ID ${result.retainedVideoId}`, 'success')
       invalidateVideos()
       if (result.retainedVideoId === video.id) void load({ silent: true })
-      else navigateToVideoDetail(navigate, location, result.retainedVideoId, { replace: true })
+      else {
+        navigateToVideoDetail(navigate, location, result.retainedVideoId, {
+          replace: true,
+          libraryId: video.activeLibraryId
+        })
+      }
     } catch (error) {
       toast.show(String((error as Error).message), 'error')
     } finally {
@@ -424,14 +550,20 @@ export default function DetailPage(): JSX.Element {
   }
 
   const doSplitResource = async (): Promise<void> => {
-    if (!splitTarget || splitBusy) return
+    if (!video || !splitTarget || splitBusy) return
     setSplitBusy(true)
     try {
-      const result = await api.videos.splitResource(videoId, splitTarget.id)
+      const result = await api.videos.splitResource(
+        video.activeLibraryId,
+        videoId,
+        splitTarget.id
+      )
       setSplitTarget(null)
       toast.show(`资源已拆分到新影片 ID ${result.videoId}`, 'success')
       invalidateVideos()
-      navigateToVideoDetail(navigate, location, result.videoId)
+      navigateToVideoDetail(navigate, location, result.videoId, {
+        libraryId: video.activeLibraryId
+      })
     } catch (error) {
       toast.show(String((error as Error).message), 'error')
     } finally {
@@ -445,7 +577,8 @@ export default function DetailPage(): JSX.Element {
     mode?: VideoScrapeUpdateMode,
     directorSelectionId?: number
   ): Promise<void> => {
-    setScraperName(site)
+    if (!video) return
+    setScraperSelection({ libraryId: video.activeLibraryId, name: site })
     setScraping(true)
     if (directorSelectionId != null) setDirectorChoiceBusy(true)
     try {
@@ -454,7 +587,8 @@ export default function DetailPage(): JSX.Element {
         site || undefined,
         fields,
         mode,
-        directorSelectionId
+        directorSelectionId,
+        video.activeLibraryId
       )
       if (res.directorChoice) {
         setPendingDirectorChoice({ fields, site, mode, choice: res.directorChoice })
@@ -546,14 +680,137 @@ export default function DetailPage(): JSX.Element {
     }
   }
 
-  const doDelete = async (): Promise<void> => {
+  const createDeleteOperationId = (): string =>
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `delete-video-${videoId}-${Date.now()}`
+
+  const closeDeletePreview = (): void => {
+    deletePreviewRequestRef.current += 1
+    setConfirmDelete(false)
+    setDeletePreview(null)
+    setDeletePreviewLoading(false)
+    setDeleteOperationId(null)
+  }
+
+  const openDeletePreview = async (): Promise<void> => {
+    const requestId = ++deletePreviewRequestRef.current
+    setConfirmDelete(true)
+    setDeletePreview(null)
+    setDeletePreviewLoading(true)
+    setDeleteOperationId(createDeleteOperationId())
     try {
-      await api.videos.remove(videoId)
+      const impact = await api.videos.previewDeleteGlobally(videoId)
+      if (requestId !== deletePreviewRequestRef.current) return
+      setDeletePreview(impact)
+    } catch (error) {
+      if (requestId !== deletePreviewRequestRef.current) return
+      closeDeletePreview()
+      toast.show(String((error as Error).message ?? error), 'error')
+    } finally {
+      if (requestId === deletePreviewRequestRef.current) setDeletePreviewLoading(false)
+    }
+  }
+
+  const doDelete = async (): Promise<void> => {
+    if (!deletePreview || !deleteOperationId || deletingVideo) return
+    setDeletingVideo(true)
+    try {
+      await api.videos.deleteGlobally({
+        videoId,
+        operationId: deleteOperationId,
+        expectedRevision: deletePreview.revision
+      })
       toast.show('已删除影片', 'success')
       invalidateVideos()
       navigateBackFromVideoDetail(navigate, location)
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
+      const requestId = ++deletePreviewRequestRef.current
+      setDeletePreview(null)
+      setDeletePreviewLoading(true)
+      try {
+        const refreshed = await api.videos.previewDeleteGlobally(videoId)
+        if (requestId === deletePreviewRequestRef.current) {
+          setDeletePreview(refreshed)
+          setDeleteOperationId(createDeleteOperationId())
+        }
+      } catch {
+        if (requestId === deletePreviewRequestRef.current) closeDeletePreview()
+      } finally {
+        if (requestId === deletePreviewRequestRef.current) setDeletePreviewLoading(false)
+      }
+    } finally {
+      setDeletingVideo(false)
+    }
+  }
+
+  const createRemoveOperationId = (): string =>
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `remove-video-${videoId}-${Date.now()}`
+
+  const closeRemovePreview = (): void => {
+    removePreviewRequestRef.current += 1
+    setConfirmRemoveFromLibrary(false)
+    setRemovePreview(null)
+    setRemovePreviewLoading(false)
+    setRemoveOperationId(null)
+  }
+
+  const openRemovePreview = async (): Promise<void> => {
+    const libraryId = video?.activeLibraryId
+    if (libraryId == null) return
+    const requestId = ++removePreviewRequestRef.current
+    setConfirmRemoveFromLibrary(true)
+    setRemovePreview(null)
+    setRemovePreviewLoading(true)
+    setRemoveOperationId(createRemoveOperationId())
+    try {
+      const impact = await api.videos.previewRemoveFromLibrary(libraryId, videoId)
+      if (requestId !== removePreviewRequestRef.current) return
+      setRemovePreview(impact)
+    } catch (error) {
+      if (requestId !== removePreviewRequestRef.current) return
+      closeRemovePreview()
+      toast.show(String((error as Error).message ?? error), 'error')
+    } finally {
+      if (requestId === removePreviewRequestRef.current) setRemovePreviewLoading(false)
+    }
+  }
+
+  const doRemoveFromLibrary = async (): Promise<void> => {
+    const libraryId = video?.activeLibraryId
+    if (!removePreview || !removeOperationId || removingFromLibrary || libraryId == null) return
+    setRemovingFromLibrary(true)
+    try {
+      await api.videos.removeFromLibrary({
+        libraryId,
+        videoId,
+        operationId: removeOperationId,
+        expectedRevision: removePreview.revision
+      })
+      toast.show('已移出媒体库', 'success')
+      invalidateVideos()
+      navigateBackFromVideoDetail(navigate, location)
+    } catch (e) {
+      toast.show(String((e as Error).message), 'error')
+      const requestId = ++removePreviewRequestRef.current
+      setRemovePreview(null)
+      setRemovePreviewLoading(true)
+      try {
+        const refreshed = await api.videos.previewRemoveFromLibrary(libraryId, videoId)
+        if (requestId === removePreviewRequestRef.current) {
+          setRemovePreview(refreshed)
+          setRemoveOperationId(createRemoveOperationId())
+        }
+      } catch {
+        if (requestId === removePreviewRequestRef.current) closeRemovePreview()
+      } finally {
+        if (requestId === removePreviewRequestRef.current) setRemovePreviewLoading(false)
+      }
+    } finally {
+      setRemovingFromLibrary(false)
     }
   }
 
@@ -579,7 +836,10 @@ export default function DetailPage(): JSX.Element {
       setConfirmDiscardForCorrect(false)
       if (res.mergedIntoId) {
         toast.show(`番号已修正为 ${res.code}（已合并到已有记录）`, 'success')
-        navigateToVideoDetail(navigate, location, res.mergedIntoId, { replace: true })
+        navigateToVideoDetail(navigate, location, res.mergedIntoId, {
+          replace: true,
+          libraryId: video?.activeLibraryId
+        })
         return
       }
       if (res.code === res.previousCode) {
@@ -626,7 +886,15 @@ export default function DetailPage(): JSX.Element {
     removeResourceTarget?.kind === 'local' || removeResourceIsStrm
   return (
     <div className={`detail-pane${actressStackOpen ? ' detail-pane--stacked' : ''}`}>
-      <DetailScrollBody onBack={() => navigateBackFromVideoDetail(navigate, location)}>
+      <DetailScrollBody
+        onBack={() => navigateBackFromVideoDetail(navigate, location)}
+        headerContext={
+          <VideoLibraryMembershipBadges
+            activeLibraryId={video.activeLibraryId}
+            libraries={video.libraries}
+          />
+        }
+      >
         <article className="detail-hero">
           <div className="detail-title-block">
             <h1 className="detail-title">
@@ -635,9 +903,12 @@ export default function DetailPage(): JSX.Element {
                   <MetaLink
                     className="detail-code"
                     onClick={() =>
-                      navigateToLibrary(navigate, location, {
-                        [LIST_PARAM.prefix]: codeParts.prefix
-                      })
+                      navigateToVideoListSurface(
+                        navigate,
+                        location,
+                        { [LIST_PARAM.prefix]: codeParts.prefix },
+                        { libraryId: video.activeLibraryId }
+                      )
                     }
                     title={`筛选 ${codeParts.prefix} 系列`}
                   >
@@ -679,7 +950,7 @@ export default function DetailPage(): JSX.Element {
                     >
                       设置 · 概览
                     </button>
-                    一键刮削所有未刮削影片。
+                    一键刮削全局目录中的未刮削影片。
                   </span>
                 ) : null}
               </div>
@@ -743,6 +1014,15 @@ export default function DetailPage(): JSX.Element {
                     onClick: () => setShowEdit(true)
                   },
                   {
+                    key: 'agent-scrape',
+                    icon: <Bot {...UI_ICON} />,
+                    label: 'Agent 刮削',
+                    onClick: () => agentMetadata.open(
+                      { kind: 'video', id: videoId, label: video.code },
+                      () => { void load({ silent: true }) }
+                    )
+                  },
+                  {
                     key: 'scrape',
                     icon: <SearchCheck {...UI_ICON} />,
                     label: '修正匹配',
@@ -794,10 +1074,20 @@ export default function DetailPage(): JSX.Element {
                     onClick: () => setConfirmClear(true)
                   },
                   {
+                    key: 'remove-from-library',
+                    label: '移出媒体库',
+                    hidden: video.activeLibraryId == null,
+                    onClick: () => {
+                      void openRemovePreview()
+                    }
+                  },
+                  {
                     key: 'delete-video',
                     label: '删除影片',
                     danger: true,
-                    onClick: () => setConfirmDelete(true)
+                    onClick: () => {
+                      void openDeletePreview()
+                    }
                   }
                 ]}
               />
@@ -832,21 +1122,12 @@ export default function DetailPage(): JSX.Element {
         </section>
       )}
 
-      {(video.summary || (video.links?.length ?? 0) > 0) && (
+      {video.summary && (
         <section className="detail-section detail-section--summary">
-          {video.summary ? (
-            <>
-              <div className="detail-section-head">
-                <h2 className="section-title">剧情简介</h2>
-              </div>
-              <div className="summary-text">{video.summary}</div>
-            </>
-          ) : (
-            <div className="detail-section-head">
-              <h2 className="section-title">相关链接</h2>
-            </div>
-          )}
-          <RelatedLinksList links={video.links ?? []} />
+          <div className="detail-section-head">
+            <h2 className="section-title">剧情简介</h2>
+          </div>
+          <div className="summary-text">{video.summary}</div>
         </section>
       )}
 
@@ -854,11 +1135,14 @@ export default function DetailPage(): JSX.Element {
         videoId={video.id}
         tags={video.tags}
         onFilterTag={(tag) =>
-          navigateToLibrary(
+          navigateToVideoListSurface(
             navigate,
             location,
             { [LIST_PARAM.tags]: String(tag.id) },
-            { tagLabel: { id: tag.id, name: tag.name } }
+            {
+              libraryId: video.activeLibraryId,
+              tagLabel: { id: tag.id, name: tag.name }
+            }
           )
         }
         onChanged={() => {
@@ -883,9 +1167,19 @@ export default function DetailPage(): JSX.Element {
           void handleSetPrimaryResource(resourceId)
         }}
         onSplitResource={setSplitTarget}
+        onMoveResource={openResourceMove}
         onRemoveResource={setRemoveResourceTarget}
         onAddResource={() => setShowResourceImport(true)}
       />
+
+      {(video.links?.length ?? 0) > 0 && (
+        <section className="detail-section detail-section--links">
+          <div className="detail-section-head">
+            <h2 className="section-title">相关链接</h2>
+          </div>
+          <RelatedLinksList links={video.links ?? []} />
+        </section>
+      )}
 
       <VideoSampleGallery
         videoId={video.id}
@@ -1022,6 +1316,7 @@ export default function DetailPage(): JSX.Element {
 
       {showResourceImport && (
         <VideoResourceImportModal
+          libraryId={video.activeLibraryId}
           fixedCode={video.code}
           fixedVideoId={video.id}
           onCancel={() => setShowResourceImport(false)}
@@ -1033,6 +1328,20 @@ export default function DetailPage(): JSX.Element {
           }}
         />
       )}
+
+      {moveResourceTarget ? (
+        <VideoResourceMoveModal
+          sourceLibraryId={moveResourceTarget.library_id}
+          resource={moveResourceTarget}
+          onCancel={() => setMoveResourceTarget(null)}
+          onMoved={() => {
+            setMoveResourceTarget(null)
+            toast.show('资源已移动到目标媒体库', 'success')
+            invalidateVideos()
+            void load({ silent: true })
+          }}
+        />
+      ) : null}
 
       {mergeCandidates.length > 0 && (
         <Modal
@@ -1112,6 +1421,7 @@ export default function DetailPage(): JSX.Element {
 
       {editResourceTarget && editResourceTarget.kind !== 'local' && (
         <VideoResourceImportModal
+          libraryId={video.activeLibraryId}
           fixedCode={video.code}
           resource={editResourceTarget}
           onCancel={() => setEditResourceTarget(null)}
@@ -1132,8 +1442,7 @@ export default function DetailPage(): JSX.Element {
           onConfirm={() => void saveLocalResourceLabel()}
           onCancel={() => setEditResourceTarget(null)}
         >
-          <label className="settings-form-field">
-            <span className="settings-form-label">资源标签</span>
+          <AppFormField label="资源标签" hint="留空时显示文件名。">
             <input
               className="text-input form-control-full"
               value={localResourceLabel}
@@ -1141,8 +1450,7 @@ export default function DetailPage(): JSX.Element {
               placeholder="可选"
               autoFocus
             />
-            <small className="settings-form-hint">留空时显示文件名。</small>
-          </label>
+          </AppFormField>
           <div className="modal-path-text">{editResourceTarget.locator}</div>
         </Modal>
       )}
@@ -1183,32 +1491,46 @@ export default function DetailPage(): JSX.Element {
         </Modal>
       )}
 
+      {confirmRemoveFromLibrary && (
+        <Modal
+          title="移出媒体库"
+          size="lg"
+          busy={removingFromLibrary}
+          confirmText={
+            removingFromLibrary ? '移出中…' : removePreviewLoading ? '读取影响…' : '移出媒体库'
+          }
+          confirmDisabled={removePreviewLoading || !removePreview}
+          onConfirm={() => {
+            void doRemoveFromLibrary()
+          }}
+          onCancel={() => {
+            if (!removingFromLibrary) closeRemovePreview()
+          }}
+        >
+          {removePreviewLoading && !removePreview ? <p>正在读取完整影响范围…</p> : null}
+          {removePreview ? <VideoDeleteImpact impact={removePreview} /> : null}
+        </Modal>
+      )}
+
       {confirmDelete && (
         <Modal
           title="删除影片"
+          size="lg"
           danger
-          confirmText="删除"
+          busy={deletingVideo}
+          confirmText={
+            deletingVideo ? '删除中…' : deletePreviewLoading ? '读取影响…' : '永久删除'
+          }
+          confirmDisabled={deletePreviewLoading || !deletePreview}
           onConfirm={() => {
-            setConfirmDelete(false)
             void doDelete()
           }}
-          onCancel={() => setConfirmDelete(false)}
+          onCancel={() => {
+            if (!deletingVideo) closeDeletePreview()
+          }}
         >
-          确定要永久删除「{video.code}」吗？将删除全部本地视频文件、STRM 源文件、资源记录、关系、应用自有图片及所有元数据；不会访问或删除远程内容。此操作不可恢复。
-          {video.has_pending_scrape ? (
-            <div className="modal-path-hint">同时会删除这部影片的待确认刮削候选与暂存图片。</div>
-          ) : null}
-          {video.resources.some(
-            (resource) => resource.kind === 'local' || Boolean(resource.strm_source_path)
-          ) ? (
-            video.resources.filter(
-              (resource) => resource.kind === 'local' || Boolean(resource.strm_source_path)
-            ).map((resource) => (
-              <div key={resource.id} className="modal-path-text">
-                {resource.strm_source_path ?? resource.display_locator}
-              </div>
-            ))
-          ) : null}
+          {deletePreviewLoading && !deletePreview ? <p>正在读取完整影响范围…</p> : null}
+          {deletePreview ? <VideoDeleteImpact impact={deletePreview} /> : null}
         </Modal>
       )}
 
@@ -1258,16 +1580,19 @@ export default function DetailPage(): JSX.Element {
                   type="button"
                   variant="danger"
                   disabled={removingResource}
-                  onClick={() => void doRemoveResource('delete-video')}
+                  onClick={() => {
+                    setRemoveResourceTarget(null)
+                    void openDeletePreview()
+                  }}
                 >
-                  删除影片全部数据
+                  永久删除影片
                 </Button>
               </>
             ) : undefined
           }
         >
           {video.resources.length === 1
-            ? '这是影片的最后一个资源。请选择仅移除资源并保留影片元数据，或删除整部影片的全部数据。'
+            ? '这是当前媒体库中的最后一个资源。可仅移除该资源并保留影片元数据，或先查看完整影响再永久删除全局影片资料。'
             : removeResourceDeletesSource
               ? removeResourceIsStrm
                 ? '将删除磁盘上的 STRM 源文件及资源记录；不会访问或删除远程内容，影片与其它资源会保留。'
@@ -1276,13 +1601,13 @@ export default function DetailPage(): JSX.Element {
           {video.resources.length === 1 && removeResourceDeletesSource ? (
             <div className="modal-path-hint">
               {removeResourceIsStrm
-                ? '无论选择保留影片元数据还是删除整部影片，STRM 源文件都会从磁盘删除；远程内容不会被访问或删除。'
-                : '无论选择保留影片元数据还是删除整部影片，本地视频文件都会从磁盘删除。'}
+                ? '选择“保留影片元数据”会删除 STRM 源文件并保留影片资料；选择“永久删除影片”会删除影片资料和该源文件。'
+                : '选择“保留影片元数据”会删除本地视频文件并保留影片资料；选择“永久删除影片”会删除影片资料和该文件。'}
             </div>
           ) : null}
           {video.resources.length === 1 && video.has_pending_scrape ? (
             <div className="modal-path-hint">
-              选择“删除影片全部数据”还会删除待确认刮削候选与暂存图片。
+              选择“永久删除影片”还会在确认后删除待确认刮削候选与暂存图片。
             </div>
           ) : null}
           <div className="modal-path-text">

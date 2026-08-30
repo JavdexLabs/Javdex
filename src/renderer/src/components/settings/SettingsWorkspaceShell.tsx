@@ -26,14 +26,19 @@ export default function SettingsWorkspaceShell({
   activeTab,
   onNavigate,
   onTabKeyDown,
+  hrefForGroup,
+  tabsPlacement = 'shell',
   children
 }: {
   activeGroup: SettingsGroupItem
   activeTab: SettingsTab
   onNavigate: (group: SettingsGroup, tab?: SettingsTab) => void
   onTabKeyDown: KeyboardEventHandler<HTMLDivElement>
+  hrefForGroup?: (group: SettingsGroupItem) => string
+  tabsPlacement?: 'shell' | 'content'
   children: ReactNode
 }): JSX.Element {
+  const shellOwnsTabs = tabsPlacement === 'shell'
   return (
     <div className="scroll-body scroll-body--fill">
       <div className="scroll-body-inner scroll-body-inner--settings settings-overview-page">
@@ -41,9 +46,22 @@ export default function SettingsWorkspaceShell({
           {SETTINGS_GROUPS.map((group) => (
             <NavLink
               key={group.id}
-              to={settingsPath(group.id)}
+              to={hrefForGroup?.(group) ?? settingsPath(group.id)}
               className={`settings-group-tab${activeGroup.id === group.id ? ' is-active' : ''}`}
               aria-current={activeGroup.id === group.id ? 'page' : undefined}
+              onClick={(event) => {
+                if (
+                  event.button !== 0 ||
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.shiftKey ||
+                  event.altKey
+                ) {
+                  return
+                }
+                event.preventDefault()
+                onNavigate(group.id)
+              }}
             >
               {group.label}
             </NavLink>
@@ -57,7 +75,7 @@ export default function SettingsWorkspaceShell({
             role="region"
             aria-label={`${activeGroup.label}设置`}
           >
-            {activeGroup.tabs.length > 1 ? (
+            {shellOwnsTabs && activeGroup.tabs.length > 1 ? (
               <SettingsTabBar
                 group={activeGroup.id}
                 tabs={activeGroup.tabs}
@@ -70,14 +88,22 @@ export default function SettingsWorkspaceShell({
 
             <section
               className="settings-section"
-              role="tabpanel"
-              id={settingsTabPanelDomId(activeGroup.id, activeTab)}
+              role={shellOwnsTabs ? 'tabpanel' : undefined}
+              id={
+                shellOwnsTabs
+                  ? settingsTabPanelDomId(activeGroup.id, activeTab)
+                  : undefined
+              }
               aria-labelledby={
-                activeGroup.tabs.length > 1
+                shellOwnsTabs && activeGroup.tabs.length > 1
                   ? settingsTabDomId(activeGroup.id, activeTab)
                   : undefined
               }
-              aria-label={activeGroup.tabs.length === 1 ? activeGroup.label : undefined}
+              aria-label={
+                shellOwnsTabs && activeGroup.tabs.length === 1
+                  ? activeGroup.label
+                  : undefined
+              }
             >
               {children}
             </section>

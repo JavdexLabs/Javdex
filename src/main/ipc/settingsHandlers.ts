@@ -5,9 +5,7 @@ import { IPC } from '@shared/ipc-channels'
 import type { AppSettings, SettingsSnapshot } from '@shared/settingsTypes'
 import type { AssetCryptoProgress, LibraryOverviewStats } from '@shared/libraryTypes'
 import {
-  getEffectiveLlmApiKey,
   getLlmSecretMigrationError,
-  getPublicLlmProviderConfigs,
   getSettings,
   getSettingsRecoveryBackupPath,
   getSettingsRecoveryNotice,
@@ -22,29 +20,31 @@ import {
   resolveMediaAssetsRoot,
   validateMediaAssetsPath
 } from '../services/assetStoragePaths'
-import { listLlmProviderModels, testLlmModelConnection } from '../services/llmConnectionTest'
 import { testProxyConnection } from '../services/proxyConnectionTest'
 import { translateTextToChinese } from '../services/llmTextTranslate'
 import {
   confirmLibraryPathRemoval,
   previewLibraryPathRemoval
 } from '../services/libraryPathCleanupService'
-import { isSameLibraryPath } from '../scanner/libraryPathUtils'
 import type { IpcContext } from './shared'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
-import type { LlmModelDefinition } from '@shared/llmProviders'
-import { BUILT_IN_LLM_PROVIDER_BY_ID, normalizeDefaultLlmSelection } from '@shared/llmProviders'
-import {
-  deleteLlmApiKey,
-  getLlmSecretStorageState,
-  saveLlmApiKeys
-} from '../settings/llmSecretStore'
+import { getLlmSecretStorageState } from '../settings/llmSecretStore'
 import { isScraperPluginRunnable } from '../scrapers/scraperPluginService'
+import { ModelManagementError, modelManagement } from '../agent-platform/modelManagement'
 
 function toSettingsSnapshot(settings: AppSettings): SettingsSnapshot {
+  const {
+    defaultLlmProviderId: _defaultLlmProviderId,
+    defaultLlmModelId: _defaultLlmModelId,
+    llmProviderConfigs: _llmProviderConfigs,
+    customLlmProviders: _customLlmProviders,
+    llmCustomModels: _llmCustomModels,
+    pluginDevAgentMaxTurns: _pluginDevAgentMaxTurns,
+    pluginDevAgentMaxContextTokens: _pluginDevAgentMaxContextTokens,
+    ...publicSettings
+  } = settings
   return {
-    ...settings,
-    llmProviderConfigs: getPublicLlmProviderConfigs(settings),
+    ...publicSettings,
     mediaAssetsResolvedPath: resolveMediaAssetsRoot(),
     recoveryNotice: getSettingsRecoveryNotice(),
     llmSecretStorage: {
@@ -68,6 +68,21 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
       mediaAssetsPath: _ignoredPath,
       pendingLibraryPathCleanups: _ignoredCleanupQueue,
       lastLibraryScanSummary: _ignoredScanSummary,
+      unrecognizedFiles: _ignoredUnrecognizedFiles,
+      unrecognizedFilesScanFinishedAt: _ignoredUnrecognizedFilesScanFinishedAt,
+      libraryPaths: _ignoredLibraryPaths,
+      autoDeleteResourceLessVideos: _ignoredResourceLessPolicy,
+      autoScanEnabled: _ignoredAutoScan,
+      autoScanIntervalMinutes: _ignoredAutoScanInterval,
+      minScanImportDurationMinutes: _ignoredMinimumDuration,
+      autoMergeSameCodeResources: _ignoredAutoMerge,
+      defaultLlmProviderId: _ignoredDefaultLlmProviderId,
+      defaultLlmModelId: _ignoredDefaultLlmModelId,
+      llmProviderConfigs: _ignoredLlmProviderConfigs,
+      customLlmProviders: _ignoredCustomLlmProviders,
+      llmCustomModels: _ignoredLlmCustomModels,
+      pluginDevAgentMaxTurns: _ignoredPluginDevAgentMaxTurns,
+      pluginDevAgentMaxContextTokens: _ignoredPluginDevAgentMaxContextTokens,
       ...safePatch
     } = rawPatch
     if (
@@ -82,30 +97,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
     ) {
       throw new Error(`演员刮削插件「${safePatch.defaultActressScraper}」不可用`)
     }
-    let guardedPatch: Partial<AppSettings> = safePatch
-    if (safePatch.libraryPaths !== undefined) {
-      if (!Array.isArray(safePatch.libraryPaths) || safePatch.libraryPaths.some((item) => typeof item !== 'string')) {
-        throw new Error('无效的媒体库路径')
-      }
-      const current = getSettings()
-      const libraryPaths = Array.from(
-        new Set(safePatch.libraryPaths.map((item) => item.trim()).filter(Boolean))
-      )
-      const bypassedRemoval = current.libraryPaths.some(
-        (currentPath) =>
-          !libraryPaths.some((nextPath) => isSameLibraryPath(currentPath, nextPath))
-      )
-      if (bypassedRemoval) throw new Error('请通过媒体库路径的移除按钮完成此操作')
-      guardedPatch = {
-        ...safePatch,
-        libraryPaths,
-        pendingLibraryPathCleanups: current.pendingLibraryPathCleanups.filter(
-          (queuedRoot) =>
-            !libraryPaths.some((libraryPath) => isSameLibraryPath(queuedRoot, libraryPath))
-        )
-      }
-    }
-    return toSettingsSnapshot(updateSettings(guardedPatch))
+    return toSettingsSnapshot(updateSettings(safePatch))
   })
 
   appCommandAdapter.register(IPC.SETTINGS_PICK_FOLDER, async (): Promise<string[]> => {
@@ -116,103 +108,52 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
     return res.canceled ? [] : res.filePaths
   })
 
-  appCommandAdapter.register(IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW, (libraryPath) => {
-    if (typeof libraryPath !== 'string' || !libraryPath.trim()) {
-      throw new Error('无效的媒体库路径')
-    }
-    return previewLibraryPathRemoval(libraryPath)
-  })
+  appCommandAdapter.register(
+    IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW,
+    (libraryId, rootId) => previewLibraryPathRemoval({ libraryId, rootId })
+  )
 
-  appCommandAdapter.register(IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM, (libraryPath) => {
-    if (typeof libraryPath !== 'string' || !libraryPath.trim()) {
-      throw new Error('无效的媒体库路径')
-    }
-    return toSettingsSnapshot(confirmLibraryPathRemoval(libraryPath))
-  })
-
-  appCommandAdapter.register(IPC.SETTINGS_LLM_PROVIDER_CONFIG_SAVE, (input) => {
-    const providerId = input.providerId.trim()
-    const settings = getSettings()
-    const exists = BUILT_IN_LLM_PROVIDER_BY_ID.has(providerId) ||
-      settings.customLlmProviders.some((provider) => provider.id === providerId)
-    if (!exists) throw new Error('未知的模型供应商')
-    if (input.protocol !== 'openai-chat' && input.protocol !== 'anthropic-messages') {
-      throw new Error('无效的接口协议')
-    }
-    const apiKey = input.apiKey?.trim() ?? ''
-    if (input.apiKeyAction === 'replace' && !apiKey) throw new Error('请填写 API Key')
-
-    const oldApiKey = getEffectiveLlmApiKey(providerId)
-    try {
-      if (input.apiKeyAction === 'replace') saveLlmApiKeys({ [providerId]: apiKey })
-      if (input.apiKeyAction === 'clear') deleteLlmApiKey(providerId)
-      const configs = { ...settings.llmProviderConfigs }
-      configs[providerId] = {
-        ...(input.baseUrl.trim() ? { baseUrl: input.baseUrl.trim() } : {}),
-        protocol: input.protocol
-      }
-      return toSettingsSnapshot(updateSettings({ llmProviderConfigs: configs }))
-    } catch (error) {
-      try {
-        if (oldApiKey) saveLlmApiKeys({ [providerId]: oldApiKey })
-        else deleteLlmApiKey(providerId)
-      } catch {
-        // Preserve the original settings failure; the next save can repair the secret entry.
-      }
-      throw error
-    }
-  })
-
-  appCommandAdapter.register(IPC.SETTINGS_LLM_PROVIDER_DELETE, (rawProviderId) => {
-    const providerId = rawProviderId.trim()
-    const settings = getSettings()
-    if (BUILT_IN_LLM_PROVIDER_BY_ID.has(providerId)) throw new Error('内置供应商不能删除')
-    if (!settings.customLlmProviders.some((provider) => provider.id === providerId)) {
-      throw new Error('自定义供应商不存在')
-    }
-    const oldApiKey = getEffectiveLlmApiKey(providerId)
-    try {
-      deleteLlmApiKey(providerId)
-      const customLlmProviders = settings.customLlmProviders.filter(
-        (provider) => provider.id !== providerId
-      )
-      const llmProviderConfigs = { ...settings.llmProviderConfigs }
-      delete llmProviderConfigs[providerId]
-      const llmCustomModels = settings.llmCustomModels.filter(
-        (model) => model.providerId !== providerId
-      )
-      const selection = normalizeDefaultLlmSelection({
-        defaultLlmProviderId:
-          settings.defaultLlmProviderId === providerId ? '' : settings.defaultLlmProviderId,
-        defaultLlmModelId:
-          settings.defaultLlmProviderId === providerId ? '' : settings.defaultLlmModelId,
-        llmProviderConfigs: getPublicLlmProviderConfigs({
-          ...settings,
-          llmProviderConfigs,
-          customLlmProviders,
-          llmCustomModels
-        }),
-        customLlmProviders,
-        llmCustomModels
+  appCommandAdapter.register(
+    IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM,
+    (libraryId, rootId, expectedRevision, expectedImpactRevision) =>
+      confirmLibraryPathRemoval({
+        libraryId,
+        rootId,
+        expectedRevision,
+        expectedImpactRevision
       })
-      return toSettingsSnapshot(updateSettings({
-        customLlmProviders,
-        llmProviderConfigs,
-        llmCustomModels,
-        defaultLlmProviderId: selection.providerId,
-        defaultLlmModelId: selection.modelId
-      }))
+  )
+
+  appCommandAdapter.register(IPC.SETTINGS_MODEL_MANAGEMENT_GET, () => modelManagement.read())
+
+  appCommandAdapter.register(IPC.SETTINGS_MODEL_MANAGEMENT_APPLY, (input) => {
+    try {
+      return { ok: true as const, snapshot: modelManagement.apply(input) }
     } catch (error) {
-      if (oldApiKey) {
-        try {
-          saveLlmApiKeys({ [providerId]: oldApiKey })
-        } catch {
-          // Preserve the original deletion failure.
+      if (!(error instanceof ModelManagementError)) throw error
+      return {
+        ok: false as const,
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(error.usages ? { usages: error.usages } : {})
         }
       }
-      throw error
     }
   })
+
+  appCommandAdapter.register(
+    IPC.SETTINGS_MODEL_MANAGEMENT_DISCOVER_MODELS,
+    (connectionId) => modelManagement.discoverModels(
+      connectionId,
+      AbortSignal.timeout(30_000)
+    )
+  )
+
+  appCommandAdapter.register(
+    IPC.SETTINGS_MODEL_MANAGEMENT_TEST_MODEL,
+    (modelRef) => modelManagement.testModel(modelRef, AbortSignal.timeout(30_000))
+  )
 
   appCommandAdapter.register(IPC.SETTINGS_RECOVERY_REVEAL_BACKUP, (): boolean => {
     const backupPath = getSettingsRecoveryBackupPath()
@@ -220,20 +161,6 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
     shell.showItemInFolder(backupPath)
     return true
   })
-
-  appCommandAdapter.register(
-    IPC.SETTINGS_LLM_TEST_MODEL,
-    async (providerId, modelId): Promise<string> => {
-      return testLlmModelConnection(providerId, modelId)
-    }
-  )
-
-  appCommandAdapter.register(
-    IPC.SETTINGS_LLM_LIST_MODELS,
-    async (providerId): Promise<LlmModelDefinition[]> => {
-      return listLlmProviderModels(providerId)
-    }
-  )
 
   appCommandAdapter.register(
     IPC.SETTINGS_PROXY_TEST,

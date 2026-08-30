@@ -12,6 +12,10 @@ import {
   type CheckpointedBatchPolicy
 } from './checkpointedSequentialBatchQueue'
 import { resolveVideoBatchTargets } from './videoScrapeApplyService'
+import { getMediaLibrary } from '../db/mediaLibraryRepo'
+import { hasActiveVisibleVideoMembership } from '../db/libraryMembershipRepo'
+import type { PersistedBatchScrapeJob } from './batchScrapeJobStore'
+import type { QueueItemOutcome } from './sequentialBatchQueue'
 
 type ProgressListener = (progress: BatchProgress) => void
 type VideoTarget = { id: number; code: string }
@@ -40,6 +44,7 @@ function resolveVideoTargets(request: VideoBatchScrapeRequest): VideoTarget[] {
     : []
   const fieldSources = resolveVideoScrapeFieldSources(request.scraperName)
   return resolveVideoBatchTargets({
+    libraryId: request.libraryId,
     status: request.status,
     videoIds: explicitIds.length > 0 ? explicitIds : request.videoIds,
     missingFields: request.missingFields,
@@ -47,13 +52,62 @@ function resolveVideoTargets(request: VideoBatchScrapeRequest): VideoTarget[] {
   })
 }
 
-function buildStatusLabel(request: VideoBatchScrapeRequest): string {
+export function formatVideoBatchStatusLabel(
+  request: VideoBatchScrapeRequest,
+  libraryName?: string | null
+): string {
   const explicitIds = request.videoIds
     ? Array.from(new Set(request.videoIds.filter((id) => Number.isFinite(id))))
     : []
-  return explicitIds.length > 0
+  const targetLabel = explicitIds.length > 0
     ? `已选 ${explicitIds.length} 部影片`
     : (STATUS_LABEL.get(request.status) ?? String(request.status))
+  const scopeLabel = request.libraryId
+    ? `媒体库“${libraryName?.trim() || `#${request.libraryId}`}”`
+    : '全局目录'
+  return `${scopeLabel} · ${targetLabel}`
+}
+
+/** Re-check a paused scoped job before using its frozen target snapshot. */
+export function assertVideoBatchResumeScope(
+  job: PersistedBatchScrapeJob,
+  resolveTargets: typeof resolveVideoBatchTargets = resolveVideoBatchTargets
+): PersistedBatchScrapeJob {
+  const request = job.request as VideoBatchScrapeRequest
+  if (request.libraryId === undefined) return job
+
+  const remainingIds = Array.from(
+    new Set(job.targets.slice(job.nextIndex).map((target) => target.id))
+  )
+  for (let start = 0; start < remainingIds.length; start += 500) {
+    const videoIds = remainingIds.slice(start, start + 500)
+    const scopedIds = new Set(
+      resolveTargets({
+        libraryId: request.libraryId,
+        status: 'all',
+        videoIds
+      }).map((target) => target.id)
+    )
+    if (videoIds.some((videoId) => !scopedIds.has(videoId))) {
+      throw new Error('当前媒体库作用域已变化，无法继续；请终止任务后重新开始')
+    }
+  }
+  return job
+}
+
+/** Guard every frozen target immediately before a scoped scrape performs external work. */
+export function validateVideoBatchTargetScope(
+  request: VideoBatchScrapeRequest,
+  videoId: number,
+  hasMembership: typeof hasActiveVisibleVideoMembership = hasActiveVisibleVideoMembership
+): QueueItemOutcome | null {
+  if (request.libraryId === undefined) return null
+  if (hasMembership(request.libraryId, videoId)) return null
+  return {
+    status: 'failure',
+    level: 'error',
+    message: `已跳过：影片已不属于当前活动媒体库（#${request.libraryId}）`
+  }
 }
 
 export function formatVideoBatchScrapeOutcome(
@@ -100,6 +154,7 @@ const videoBatchPolicy: CheckpointedBatchPolicy<VideoTarget, VideoBatchScrapeReq
   resolveTargets: resolveVideoTargets,
   labelOf: (target) => target.code,
   restoreTarget: (item) => ({ id: item.id, code: item.label }),
+  beforeResume: (job) => assertVideoBatchResumeScope(job),
   planRun: (job, _targets, helpers) => {
     const request = job.request as VideoBatchScrapeRequest
     const fields = request.fields
@@ -108,7 +163,8 @@ const videoBatchPolicy: CheckpointedBatchPolicy<VideoTarget, VideoBatchScrapeReq
     const mode = request.mode ?? 'replace'
     const missingFields = request.missingFields ?? []
     const delayController = helpers.createDelayController()
-    const statusLabel = buildStatusLabel(request)
+    const libraryName = request.libraryId ? getMediaLibrary(request.libraryId)?.name : null
+    const statusLabel = formatVideoBatchStatusLabel(request, libraryName)
     const missingLabel =
       missingFields.length > 0 ? `缺少任一：${fieldListLabel(missingFields)}` : '不按缺失字段筛选'
 
@@ -123,6 +179,8 @@ const videoBatchPolicy: CheckpointedBatchPolicy<VideoTarget, VideoBatchScrapeReq
       getCode: (target) => target.code,
       browserRecycleInterval: 50,
       runTarget: async ({ id, code }) => {
+        const scopeFailure = validateVideoBatchTargetScope(request, id)
+        if (scopeFailure) return scopeFailure
         const itemOutcome = await scrapeVideo(id, request.scraperName, {
           closeBrowser: false,
           fields,

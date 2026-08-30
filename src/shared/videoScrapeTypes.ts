@@ -151,9 +151,14 @@ export const VIDEO_SCRAPE_UPDATE_MODE_OPTIONS: ScrapeUpdateModeOption<VideoScrap
 export type VideoBatchScrapeStatus = ScrapedStatus | 'all'
 export const VIDEO_BATCH_SCRAPE_STATUS_OPTIONS: { id: VideoBatchScrapeStatus; label: string }[] = [
   { id: 0, label: '未刮削' }, { id: 1, label: '已刮削成功' },
-  { id: 2, label: '刮削失败' }, { id: 'all', label: '库内全部' }
+  { id: 2, label: '刮削失败' }, { id: 'all', label: '全部影片' }
 ]
 export interface VideoBatchScrapeFilter {
+  /**
+   * Limits targets to visible memberships in one active media library.
+   * Omission is the legacy/global-catalog compatibility mode used by Settings and old callers.
+   */
+  libraryId?: number
   status: VideoBatchScrapeStatus
   videoIds?: number[]
   missingFields?: VideoScrapeField[]
@@ -168,7 +173,7 @@ export interface VideoBatchScrapeRequest extends VideoBatchScrapeFilter {
 export type VideoRematchScope = 'scraped' | 'failed' | 'all'
 export const VIDEO_REMATCH_SCOPE_OPTIONS: { id: VideoRematchScope; label: string }[] = [
   { id: 'scraped', label: '已刮削成功' }, { id: 'failed', label: '刮削失败' },
-  { id: 'all', label: '库内全部' }
+  { id: 'all', label: '全部影片' }
 ]
 export interface VideoRematchBatchRequest {
   scraperName?: string

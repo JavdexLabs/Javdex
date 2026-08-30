@@ -143,16 +143,21 @@ function imageUrlToJpegBlob(url: string): Promise<Blob> {
         return
       }
       ctx.drawImage(img, 0, 0, width, height)
-      canvas.toBlob(
-        (blob) => {
-          if (blob) resolve(blob)
-          else reject(new Error('Failed to encode image'))
-        },
-        'image/jpeg',
-        0.92
-      )
+      try {
+        canvas.toBlob(
+          (blob) => {
+            if (blob) resolve(blob)
+            else reject(new Error('Failed to encode image'))
+          },
+          'image/jpeg',
+          0.92
+        )
+      } catch (error) {
+        reject(error)
+      }
     }
     img.onerror = () => reject(new Error('Failed to load image'))
+    img.crossOrigin = 'anonymous'
     img.src = url
   })
 }
@@ -760,6 +765,7 @@ export default function ActressAvatarEditor({
               usesNativeCoverLayout ? (
                 <img
                   ref={imgRef}
+                  crossOrigin="anonymous"
                   src={editUrl ?? undefined}
                   alt=""
                   className="avatar-crop-preview"
@@ -769,6 +775,7 @@ export default function ActressAvatarEditor({
               ) : (
                 <img
                   ref={imgRef}
+                  crossOrigin="anonymous"
                   src={editUrl ?? undefined}
                   alt=""
                   className="avatar-crop-image"

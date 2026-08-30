@@ -310,10 +310,12 @@ describe('database schema', () => {
       ] as const) {
         db.prepare(
           `INSERT INTO video_resources (
-             id, video_id, kind, locator, resource_key, strm_source_path, display_name
-           ) VALUES (?, 41, 'direct', 'https://example.test/video.mp4', ?, ?, ?)`
+             id, library_id, video_id, kind, locator, resource_key, source_identity,
+             strm_source_path, display_name
+           ) VALUES (?, 1, 41, 'direct', 'https://example.test/video.mp4', ?, ?, ?, ?)`
         ).run(
           id,
+          `strm:${normalizeLocalPathIdentity(sourcePath)}`,
           `strm:${normalizeLocalPathIdentity(sourcePath)}`,
           sourcePath,
           path.basename(sourcePath)
@@ -324,9 +326,10 @@ describe('database schema', () => {
         () =>
           db.prepare(
             `INSERT INTO video_resources (
-               video_id, kind, locator, resource_key, strm_source_path
-             ) VALUES (41, 'web', 'https://example.test/other', ?, ?)`
+               library_id, video_id, kind, locator, resource_key, source_identity, strm_source_path
+             ) VALUES (1, 41, 'web', 'https://example.test/other', ?, ?, ?)`
           ).run(
+            `strm:${normalizeLocalPathIdentity('/library/one/ABC-001.strm')}`,
             `strm:${normalizeLocalPathIdentity('/library/one/ABC-001.strm')}`,
             '/library/one/ABC-001.strm'
           ),
@@ -335,8 +338,8 @@ describe('database schema', () => {
       assert.throws(
         () =>
           db.prepare(
-            `INSERT INTO video_resources (video_id, kind, locator, resource_key)
-             VALUES (41, 'direct', 'https://example.test/video.mp4',
+            `INSERT INTO video_resources (library_id, video_id, kind, locator, resource_key)
+             VALUES (1, 41, 'direct', 'https://example.test/video.mp4',
                      'http:https://example.test/video.mp4')`
           ).run(),
         /UNIQUE constraint failed/
@@ -680,9 +683,13 @@ describe('database schema', () => {
           .run(organizationId, organizationId, seriesId, directorId).lastInsertRowid
       )
       db.prepare(
+        `INSERT INTO library_video_memberships (library_id, video_id, discovery_key)
+         VALUES (1, ?, ?)`
+      ).run(videoId, videoId)
+      db.prepare(
         `INSERT INTO video_resources
-           (video_id, kind, locator, resource_key, size_bytes, is_primary)
-         VALUES (?, 'web', 'https://example.test/watch', 'http:v8-keep', 1234, 1)`
+           (library_id, video_id, kind, locator, resource_key, size_bytes, is_primary)
+         VALUES (1, ?, 'web', 'https://example.test/watch', 'http:v8-keep', 1234, 1)`
       ).run(videoId)
       db.prepare(
         `INSERT INTO video_assets (video_id, type, position, remote_url)
@@ -1108,6 +1115,10 @@ describe('database schema', () => {
       )
       const expectedTables = [
         'videos',
+        'media_libraries',
+        'media_library_configs',
+        'media_library_roots',
+        'library_video_memberships',
         'video_resources',
         'pending_local_file_deletions',
         'actresses',
@@ -1136,7 +1147,20 @@ describe('database schema', () => {
         'pending_video_scrape_resources',
         'video_links',
         'actress_links',
-        'playlist_links'
+        'playlist_links',
+        'agent_runs',
+        'agent_operations',
+        'agent_product_journal',
+        'agent_execution_history',
+        'agent_tool_ledger',
+        'agent_approvals',
+        'agent_artifacts',
+        'agent_metadata_drafts',
+        'agent_metadata_draft_resources',
+        'library_scan_runs',
+        'media_library_scan_state',
+        'library_unrecognized_files',
+        'library_root_cleanup_jobs'
       ]
       assert.deepEqual(
         expectedTables.map(
@@ -1148,7 +1172,8 @@ describe('database schema', () => {
         expectedTables.map(() => true)
       )
       assert.equal(indexNames(db).includes('idx_videos_release_date'), true)
-      assert.equal(indexNames(db).includes('idx_video_resources_key'), true)
+      assert.equal(indexNames(db).includes('idx_video_resources_library_source_identity'), true)
+      assert.equal(indexNames(db).includes('idx_video_resources_library_video_kind'), true)
       assert.equal(indexNames(db).includes('idx_video_tag_tag_id'), true)
       assert.equal(indexNames(db).includes('idx_videos_maker'), false)
       assert.equal(indexNames(db).includes('idx_videos_maker_organization_id'), true)
@@ -1157,6 +1182,7 @@ describe('database schema', () => {
       assert.equal(indexNames(db).includes('idx_actresses_scraped_status'), true)
       assert.equal(indexNames(db).includes('idx_videos_studio'), false)
       assert.equal(indexNames(db).includes('idx_videos_file_path'), false)
+      assert.equal(columnNamesForTest(db, 'agent_runs').has('recovery_attempted_generation'), true)
 
       db.prepare("INSERT INTO actresses (main_name) VALUES ('Default status')").run()
       const defaultStatusId = Number(

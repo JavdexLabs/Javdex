@@ -53,6 +53,7 @@ import { estimateActressBatchScrapeTargetCount } from './actressBatchScrapeTarge
 import { scrapeActress } from '../scrapers/actressScraperManager'
 import { resolveVideoScrapeFieldSources, scrapeVideo } from '../scrapers/scraperManager'
 import { getActressDetail } from '../db/actressRepo'
+import { hasActiveVisibleVideoMembership } from '../db/libraryMembershipRepo'
 import { countVideosForRematch } from '../db/videoRepo'
 import { resolveVideoBatchTargets } from './videoScrapeApplyService'
 import { videoPendingScrapeService } from './videoPendingScrapeService'
@@ -124,6 +125,7 @@ export interface ScrapeJobControllerDependencies {
     }
   ): Promise<ActressScrapeDisposition>
   getActress(id: number): ActressDetail | null
+  hasVideoInLibraryScope(libraryId: number, videoId: number): boolean
   countVideos(filter: VideoBatchScrapeFilter & Record<string, unknown>): number
   countRematches(scope: VideoRematchScope): number
   countActresses(filter: ActressBatchScrapeFilter): number
@@ -195,8 +197,15 @@ export class ScrapeJobController {
     scraperName?: string,
     fields?: VideoScrapeField[],
     mode?: VideoScrapeUpdateMode,
-    directorSelectionId?: number
+    directorSelectionId?: number,
+    libraryId?: number
   ): Promise<VideoScrapeOneResult> {
+    if (
+      libraryId !== undefined &&
+      !this.dependencies.hasVideoInLibraryScope(libraryId, videoId)
+    ) {
+      throw new Error('影片不属于当前活动媒体库，无法刮削')
+    }
     this.dependencies.assertBatchAvailable()
     const outcome = await this.dependencies.coordinator.runExclusive('影片刮削', () =>
       this.dependencies.scrapeVideo(videoId, scraperName, {
@@ -446,6 +455,7 @@ export function createDefaultScrapeJobController(
     scrapeVideo,
     scrapeActress,
     getActress: getActressDetail,
+    hasVideoInLibraryScope: hasActiveVisibleVideoMembership,
     countVideos: (filter) => resolveVideoBatchTargets(filter).length,
     countRematches: countVideosForRematch,
     countActresses: estimateActressBatchScrapeTargetCount,

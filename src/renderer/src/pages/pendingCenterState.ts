@@ -150,13 +150,18 @@ export interface PendingQueueInput {
   scanGroups: readonly PendingScanGroup[]
   scrapeItems: readonly PendingVideoScrape[]
   conflictGroups: readonly ActressNameConflictGroup[]
+  libraryNames?: ReadonlyMap<number, string>
 }
 
-function scanQueueItem(group: PendingScanGroup): PendingQueueItem {
+function scanQueueItem(
+  group: PendingScanGroup,
+  libraryNames?: ReadonlyMap<number, string>
+): PendingQueueItem {
+  const libraryName = libraryNames?.get(group.libraryId) ?? `媒体库 #${group.libraryId}`
   return {
     key: pendingItemKey('scan', group.id),
     title: group.normalizedCode,
-    meta: `${group.resources.length} 条资源`,
+    meta: `${libraryName} · ${group.resources.length} 条资源`,
     coverPath: null,
     ready: false
   }
@@ -194,7 +199,7 @@ export function buildPendingQueueSections(
   type: PendingTypeFilter
 ): PendingQueueSection[] {
   const byDomain: Record<PendingDomain, PendingQueueItem[]> = {
-    scan: input.scanGroups.map(scanQueueItem),
+    scan: input.scanGroups.map((group) => scanQueueItem(group, input.libraryNames)),
     scrape: input.scrapeItems.map(scrapeQueueItem),
     actress: input.conflictGroups.map(actressQueueItem)
   }

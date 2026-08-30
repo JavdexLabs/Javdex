@@ -1,0 +1,69 @@
+.root {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.card {
+  min-height: 0;
+  height: auto;
+  flex: 1;
+}
+
+.badges {
+  display: flex;
+  min-height: 20px;
+  min-width: 0;
+  margin-top: 7px;
+  gap: 5px;
+  overflow: hidden;
+}
+
+.badge,
+.more {
+  min-width: 0;
+  padding: 3px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--surface-elevated);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  max-width: 112px;
+  gap: 5px;
+}
+
+.badge[data-current="true"] {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+  color: var(--text-accent);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--media-library-color, var(--text-muted));
+}
+
+.name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.more {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}

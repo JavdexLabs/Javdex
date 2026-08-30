@@ -1,4 +1,5 @@
 import { getDb } from './database'
+import type Database from 'better-sqlite3'
 import {
   VIDEO_FIELD_UPDATE_KEYS,
   type Video,
@@ -34,6 +35,9 @@ import {
 } from './videoListProjection'
 import { normalizeVideoCode } from '@shared/videoCode'
 import { buildStrmResourceKey } from '@shared/strmResource'
+import { buildVideoResourceSourceIdentity } from '@shared/videoResourceIdentity'
+import { ensureVideoMembership, removeVideoMembership } from './libraryMembershipRepo'
+import { MediaLibraryRepoError } from './mediaLibraryRepo'
 import {
   mergeRelatedLinks,
   readRelatedLinks,
@@ -43,6 +47,8 @@ import {
 } from './relatedLinkStore'
 
 export interface ScannedVideoInput {
+  libraryId: number
+  rootId: number
   code: string
   locator: string
   size_bytes: number | null
@@ -52,8 +58,58 @@ export interface ScannedVideoInput {
 
 const PRIMARY_RESOURCE_ORDER = 'ORDER BY is_primary DESC, id ASC'
 
+/**
+ * Final write-boundary guard for library-owned resources. Service-level maintenance
+ * serialization prevents the normal race, while this check keeps direct repository
+ * callers and resumed async probes from committing into an archived scope.
+ *
+ * A null root remains valid for legacy/global-setting link resources and old local
+ * records that predate explicit media-library roots.
+ */
+function assertActiveResourceTarget(
+  database: Database.Database,
+  libraryId: number,
+  rootId: number | null | undefined
+): void {
+  const library = database
+    .prepare('SELECT status FROM media_libraries WHERE id = ?')
+    .get(libraryId) as { status: 'active' | 'archived' } | undefined
+  if (!library) {
+    throw new MediaLibraryRepoError('LIBRARY_NOT_FOUND', '媒体库不存在。')
+  }
+  if (library.status !== 'active') {
+    throw new MediaLibraryRepoError('LIBRARY_ARCHIVED', '已归档媒体库必须恢复后才能修改。')
+  }
+  if (rootId == null) return
+  const root = database
+    .prepare(
+      `SELECT state FROM media_library_roots
+       WHERE id = ? AND library_id = ?`
+    )
+    .get(rootId, libraryId) as { state: string } | undefined
+  if (!root || root.state !== 'active') {
+    throw new MediaLibraryRepoError(
+      'ROOT_NOT_FOUND',
+      '媒体库根目录不存在、已停用或不属于该媒体库。'
+    )
+  }
+}
+
+function assertActiveStoredResourceTarget(
+  database: Database.Database,
+  resourceId: number
+): void {
+  const resource = database
+    .prepare('SELECT library_id, root_id FROM video_resources WHERE id = ?')
+    .get(resourceId) as { library_id: number; root_id: number | null } | undefined
+  if (!resource) return
+  assertActiveResourceTarget(database, resource.library_id, resource.root_id)
+}
+
 export function insertLocalVideoResource(input: {
+  libraryId: number
   videoId: number
+  rootId?: number | null
   locator: string
   sizeBytes: number | null
   durationSeconds?: number | null
@@ -63,42 +119,72 @@ export function insertLocalVideoResource(input: {
   addTime?: string
 }): number | null {
   const db = getDb()
-  const hasResources = Boolean(
-    db.prepare('SELECT 1 FROM video_resources WHERE video_id = ? LIMIT 1').get(input.videoId)
-  )
-  const isPrimary = input.isPrimary || !hasResources ? 1 : 0
   return db.transaction(() => {
+    assertActiveResourceTarget(db, input.libraryId, input.rootId)
+    const hasResources = Boolean(
+      db
+        .prepare(
+          'SELECT 1 FROM video_resources WHERE library_id = ? AND video_id = ? LIMIT 1'
+        )
+        .get(input.libraryId, input.videoId)
+    )
+    const isPrimary = input.isPrimary || !hasResources ? 1 : 0
+    const addTime = input.addTime ?? nowIso()
+    const membershipCreated = ensureVideoMembership(
+      {
+        libraryId: input.libraryId,
+        videoId: input.videoId,
+        addedVia: 'scan',
+        addedAt: addTime
+      },
+      db
+    )
+    const sourceIdentity = buildVideoResourceSourceIdentity({
+      kind: 'local',
+      locator: input.locator
+    })
     const info = db
       .prepare(
         `INSERT OR IGNORE INTO video_resources
-           (video_id, kind, locator, resource_key, size_bytes, duration_seconds,
-            file_mtime_ms, display_name, is_primary, add_time)
-         VALUES (@videoId, 'local', @locator, 'local:' || @locator, @sizeBytes,
-                 @durationSeconds, @fileMtimeMs, @displayName, 0, @addTime)`
+           (library_id, video_id, root_id, kind, locator, resource_key, source_identity,
+            size_bytes, duration_seconds, file_mtime_ms, display_name, is_primary, add_time)
+         VALUES (@libraryId, @videoId, @rootId, 'local', @locator, 'local:' || @locator,
+                 @sourceIdentity, @sizeBytes, @durationSeconds, @fileMtimeMs,
+                 @displayName, 0, @addTime)`
       )
       .run({
+        libraryId: input.libraryId,
         videoId: input.videoId,
+        rootId: input.rootId ?? null,
         locator: input.locator,
+        sourceIdentity,
         sizeBytes: input.sizeBytes,
         durationSeconds: input.durationSeconds ?? null,
         fileMtimeMs: input.fileMtimeMs ?? null,
         displayName: input.displayName ?? null,
-        addTime: input.addTime ?? nowIso()
+        addTime
       })
-    if (info.changes === 0) return null
+    if (info.changes === 0) {
+      if (membershipCreated) removeVideoMembership(input.libraryId, input.videoId, db)
+      return null
+    }
 
     const resourceId = Number(info.lastInsertRowid)
     if (isPrimary) {
       db.prepare(
-        'UPDATE video_resources SET is_primary = CASE WHEN id = ? THEN 1 ELSE 0 END WHERE video_id = ?'
-      ).run(resourceId, input.videoId)
+        `UPDATE video_resources
+         SET is_primary = CASE WHEN id = ? THEN 1 ELSE 0 END
+         WHERE library_id = ? AND video_id = ?`
+      ).run(resourceId, input.libraryId, input.videoId)
     }
     return resourceId
   })()
 }
 
 export function insertStrmVideoResource(input: {
+  libraryId: number
   videoId: number
+  rootId?: number | null
   sourcePath: string
   kind: ExternalVideoResourceKind
   locator: string
@@ -107,42 +193,69 @@ export function insertStrmVideoResource(input: {
   addTime?: string
 }): number | null {
   const db = getDb()
-  const hasResources = Boolean(
-    db.prepare('SELECT 1 FROM video_resources WHERE video_id = ? LIMIT 1').get(input.videoId)
-  )
-  const isPrimary = input.isPrimary || !hasResources ? 1 : 0
   return db.transaction(() => {
+    assertActiveResourceTarget(db, input.libraryId, input.rootId)
+    const hasResources = Boolean(
+      db
+        .prepare(
+          'SELECT 1 FROM video_resources WHERE library_id = ? AND video_id = ? LIMIT 1'
+        )
+        .get(input.libraryId, input.videoId)
+    )
+    const isPrimary = input.isPrimary || !hasResources ? 1 : 0
+    const addTime = input.addTime ?? nowIso()
+    const membershipCreated = ensureVideoMembership(
+      {
+        libraryId: input.libraryId,
+        videoId: input.videoId,
+        addedVia: 'scan',
+        addedAt: addTime
+      },
+      db
+    )
+    const sourceIdentity = buildStrmResourceKey(input.sourcePath)
     const info = db
       .prepare(
         `INSERT OR IGNORE INTO video_resources (
-           video_id, kind, locator, resource_key, strm_source_path, size_bytes,
-           duration_seconds, file_mtime_ms, display_name, is_primary, add_time
+           library_id, video_id, root_id, kind, locator, resource_key, source_identity,
+           strm_source_path, size_bytes, duration_seconds, file_mtime_ms, display_name,
+           is_primary, add_time
          ) VALUES (
-           @videoId, @kind, @locator, @resourceKey, @sourcePath, NULL,
-           NULL, NULL, @displayName, 0, @addTime
+           @libraryId, @videoId, @rootId, @kind, @locator, @resourceKey, @sourceIdentity,
+           @sourcePath, NULL, NULL, NULL, @displayName, 0, @addTime
          )`
       )
       .run({
+        libraryId: input.libraryId,
         videoId: input.videoId,
+        rootId: input.rootId ?? null,
         kind: input.kind,
         locator: input.locator,
         resourceKey: buildStrmResourceKey(input.sourcePath),
+        sourceIdentity,
         sourcePath: input.sourcePath,
         displayName: input.displayName ?? null,
-        addTime: input.addTime ?? nowIso()
+        addTime
       })
-    if (info.changes === 0) return null
+    if (info.changes === 0) {
+      if (membershipCreated) removeVideoMembership(input.libraryId, input.videoId, db)
+      return null
+    }
     const resourceId = Number(info.lastInsertRowid)
     if (isPrimary) {
       db.prepare(
-        'UPDATE video_resources SET is_primary = CASE WHEN id = ? THEN 1 ELSE 0 END WHERE video_id = ?'
-      ).run(resourceId, input.videoId)
+        `UPDATE video_resources
+         SET is_primary = CASE WHEN id = ? THEN 1 ELSE 0 END
+         WHERE library_id = ? AND video_id = ?`
+      ).run(resourceId, input.libraryId, input.videoId)
     }
     return resourceId
   })()
 }
 
 export function insertNewScannedStrmVideo(input: {
+  libraryId: number
+  rootId: number
   code: string
   sourcePath: string
   kind: ExternalVideoResourceKind
@@ -150,14 +263,16 @@ export function insertNewScannedStrmVideo(input: {
   displayName: string
 }): number | null {
   const db = getDb()
-  if (getStrmVideoResourceBySourcePath(input.sourcePath)) return null
+  if (getStrmVideoResourceBySourcePath(input.libraryId, input.sourcePath)) return null
   return db.transaction(() => {
     const videoId = Number(
       db.prepare('INSERT INTO videos (code, scraped_status) VALUES (?, 0)').run(input.code)
         .lastInsertRowid
     )
     const resourceId = insertStrmVideoResource({
+      libraryId: input.libraryId,
       videoId,
+      rootId: input.rootId,
       sourcePath: input.sourcePath,
       kind: input.kind,
       locator: input.locator,
@@ -173,12 +288,14 @@ export function insertNewScannedStrmVideo(input: {
  * Returns the video id, or null if the path already exists.
  */
 export function insertScannedVideo(v: ScannedVideoInput): number | null {
-  if (localVideoResourceExistsByLocator(v.locator)) return null
+  if (localVideoResourceExistsByLocator(v.libraryId, v.locator)) return null
 
   const existing = getVideoByCode(v.code)
   if (existing) {
     const resourceId = insertLocalVideoResource({
+      libraryId: v.libraryId,
       videoId: existing.id,
+      rootId: v.rootId,
       locator: v.locator,
       sizeBytes: v.size_bytes,
       durationSeconds: v.duration_seconds ?? null,
@@ -193,12 +310,14 @@ export function insertScannedVideo(v: ScannedVideoInput): number | null {
 /** Create a distinct video record even when another video has the same normalized code. */
 export function insertNewScannedVideo(v: ScannedVideoInput): number | null {
   const db = getDb()
-  if (localVideoResourceExistsByLocator(v.locator)) return null
+  if (localVideoResourceExistsByLocator(v.libraryId, v.locator)) return null
   return db.transaction(() => {
     const info = db.prepare('INSERT INTO videos (code, scraped_status) VALUES (?, 0)').run(v.code)
     const videoId = Number(info.lastInsertRowid)
     const resourceId = insertLocalVideoResource({
+      libraryId: v.libraryId,
       videoId,
+      rootId: v.rootId,
       locator: v.locator,
       sizeBytes: v.size_bytes,
       durationSeconds: v.duration_seconds ?? null,
@@ -209,11 +328,18 @@ export function insertNewScannedVideo(v: ScannedVideoInput): number | null {
   })()
 }
 
-export function localVideoResourceExistsByLocator(locator: string): boolean {
+export function localVideoResourceExistsByLocator(
+  libraryId: number,
+  locator: string
+): boolean {
   const db = getDb()
+  const sourceIdentity = buildVideoResourceSourceIdentity({ kind: 'local', locator })
   const row = db
-    .prepare("SELECT 1 FROM video_resources WHERE kind = 'local' AND locator = ?")
-    .get(locator)
+    .prepare(
+      `SELECT 1 FROM video_resources
+       WHERE library_id = ? AND kind = 'local' AND source_identity = ?`
+    )
+    .get(libraryId, sourceIdentity)
   return !!row
 }
 
@@ -267,6 +393,17 @@ export function getLocalVideoResourceById(resourceId: number): LocalVideoResourc
   )
 }
 
+export function getVideoResourceInLibrary(
+  libraryId: number,
+  resourceId: number
+): VideoResource | null {
+  return (
+    (getDb()
+      .prepare('SELECT * FROM video_resources WHERE id = ? AND library_id = ?')
+      .get(resourceId, libraryId) as VideoResource | undefined) ?? null
+  )
+}
+
 export function updateLocalVideoResourceAfterProbe(
   resourceId: number,
   input: {
@@ -276,11 +413,14 @@ export function updateLocalVideoResourceAfterProbe(
   }
 ): void {
   const db = getDb()
-  db.prepare(
-    `UPDATE video_resources
-     SET duration_seconds = ?, size_bytes = ?, file_mtime_ms = ?
-     WHERE id = ? AND kind = 'local'`
-  ).run(input.durationSeconds, input.sizeBytes, input.fileMtimeMs, resourceId)
+  db.transaction(() => {
+    assertActiveStoredResourceTarget(db, resourceId)
+    db.prepare(
+      `UPDATE video_resources
+       SET duration_seconds = ?, size_bytes = ?, file_mtime_ms = ?
+       WHERE id = ? AND kind = 'local'`
+    ).run(input.durationSeconds, input.sizeBytes, input.fileMtimeMs, resourceId)
+  })()
 }
 
 export function backfillLocalVideoResourceFingerprint(
@@ -288,32 +428,41 @@ export function backfillLocalVideoResourceFingerprint(
   input: { sizeBytes: number | null; fileMtimeMs: number | null }
 ): void {
   const db = getDb()
-  db.prepare(
-    "UPDATE video_resources SET size_bytes = ?, file_mtime_ms = ? WHERE id = ? AND kind = 'local'"
-  ).run(
-    input.sizeBytes,
-    input.fileMtimeMs,
-    resourceId
-  )
+  db.transaction(() => {
+    assertActiveStoredResourceTarget(db, resourceId)
+    db.prepare(
+      "UPDATE video_resources SET size_bytes = ?, file_mtime_ms = ? WHERE id = ? AND kind = 'local'"
+    ).run(input.sizeBytes, input.fileMtimeMs, resourceId)
+  })()
 }
 
-export function getLocalVideoResourceByLocator(locator: string): LocalVideoResource | null {
+export function getLocalVideoResourceByLocator(
+  libraryId: number,
+  locator: string
+): LocalVideoResource | null {
   const db = getDb()
+  const sourceIdentity = buildVideoResourceSourceIdentity({ kind: 'local', locator })
   return (
     (db
       .prepare(
         `SELECT * FROM video_resources
-         WHERE kind = 'local' AND locator = ?`
+         WHERE library_id = ? AND kind = 'local' AND source_identity = ?`
       )
-      .get(locator) as LocalVideoResource | undefined) ?? null
+      .get(libraryId, sourceIdentity) as LocalVideoResource | undefined) ?? null
   )
 }
 
-export function getStrmVideoResourceBySourcePath(sourcePath: string): VideoResource | null {
+export function getStrmVideoResourceBySourcePath(
+  libraryId: number,
+  sourcePath: string
+): VideoResource | null {
   return (
     (getDb()
-      .prepare('SELECT * FROM video_resources WHERE resource_key = ? AND strm_source_path IS NOT NULL')
-      .get(buildStrmResourceKey(sourcePath)) as VideoResource | undefined) ?? null
+      .prepare(
+        `SELECT * FROM video_resources
+          WHERE library_id = ? AND resource_key = ? AND strm_source_path IS NOT NULL`
+      )
+      .get(libraryId, buildStrmResourceKey(sourcePath)) as VideoResource | undefined) ?? null
   )
 }
 
@@ -321,109 +470,166 @@ export function updateStrmVideoResourceTarget(
   resourceId: number,
   input: { kind: ExternalVideoResourceKind; locator: string }
 ): boolean {
-  const current = getVideoResourceById(resourceId)
-  if (!current || !current.strm_source_path) throw new Error('STRM 影片资源不存在')
-  if (current.kind === input.kind && current.locator === input.locator) return false
-  const changed = getDb()
-    .prepare(
-      `UPDATE video_resources
-       SET kind = ?, locator = ?
-       WHERE id = ? AND strm_source_path IS NOT NULL`
-    )
-    .run(input.kind, input.locator, resourceId)
-  if (changed.changes === 0) throw new Error('STRM 影片资源更新失败')
-  return true
+  const db = getDb()
+  return db.transaction(() => {
+    const current = getVideoResourceById(resourceId)
+    if (!current || !current.strm_source_path) throw new Error('STRM 影片资源不存在')
+    assertActiveResourceTarget(db, current.library_id, current.root_id)
+    if (current.kind === input.kind && current.locator === input.locator) return false
+    const changed = db
+      .prepare(
+        `UPDATE video_resources
+         SET kind = ?, locator = ?
+         WHERE id = ? AND strm_source_path IS NOT NULL`
+      )
+      .run(input.kind, input.locator, resourceId)
+    if (changed.changes === 0) throw new Error('STRM 影片资源更新失败')
+    return true
+  })()
 }
 
 export function relocateStrmVideoResource(
+  libraryId: number,
   resourceId: number,
-  input: { sourcePath: string; kind: ExternalVideoResourceKind; locator: string }
+  input: {
+    rootId: number
+    sourcePath: string
+    kind: ExternalVideoResourceKind
+    locator: string
+  }
 ): void {
-  const changed = getDb()
-    .prepare(
-      `UPDATE video_resources
-       SET kind = ?, locator = ?, resource_key = ?, strm_source_path = ?
-       WHERE id = ? AND strm_source_path IS NOT NULL`
-    )
-    .run(
-      input.kind,
-      input.locator,
-      buildStrmResourceKey(input.sourcePath),
-      input.sourcePath,
-      resourceId
-    )
-  if (changed.changes === 0) throw new Error('待重定位的 STRM 资源不存在')
+  const db = getDb()
+  db.transaction(() => {
+    assertActiveResourceTarget(db, libraryId, input.rootId)
+    const sourceIdentity = buildStrmResourceKey(input.sourcePath)
+    const changed = db
+      .prepare(
+        `UPDATE video_resources
+         SET root_id = ?, kind = ?, locator = ?, resource_key = ?, source_identity = ?,
+             strm_source_path = ?
+         WHERE id = ? AND library_id = ? AND strm_source_path IS NOT NULL`
+      )
+      .run(
+        input.rootId,
+        input.kind,
+        input.locator,
+        sourceIdentity,
+        sourceIdentity,
+        input.sourcePath,
+        resourceId,
+        libraryId
+      )
+    if (changed.changes === 0) throw new Error('待重定位的 STRM 资源不存在')
+  })()
 }
 
-export function getPreferredLocalVideoResource(videoId: number): LocalVideoResource | null {
+export function getPreferredLocalVideoResource(
+  libraryId: number,
+  videoId: number
+): LocalVideoResource | null {
   const db = getDb()
   return (
     (db
       .prepare(
         `SELECT * FROM video_resources
-         WHERE video_id = ? AND kind = 'local'
+         WHERE library_id = ? AND video_id = ? AND kind = 'local'
          ${PRIMARY_RESOURCE_ORDER} LIMIT 1`
       )
-      .get(videoId) as LocalVideoResource | undefined) ?? null
+      .get(libraryId, videoId) as LocalVideoResource | undefined) ?? null
   )
 }
 
-export function listLocalVideoResources(videoId: number): LocalVideoResource[] {
+export function listLocalVideoResources(libraryId: number, videoId: number): LocalVideoResource[] {
   const db = getDb()
   return db
     .prepare(
       `SELECT * FROM video_resources
-       WHERE video_id = ? AND kind = 'local'
+       WHERE library_id = ? AND video_id = ? AND kind = 'local'
        ${PRIMARY_RESOURCE_ORDER}`
     )
-    .all(videoId) as LocalVideoResource[]
+    .all(libraryId, videoId) as LocalVideoResource[]
 }
 
 /** Relocate the preferred local resource after a move/rename; keep metadata and relations. */
 export function relocateLocalVideoResource(
+  libraryId: number,
   id: number,
+  rootId: number,
   filePath: string,
   fileSize: number | null,
   fileDurationSeconds: number | null = null,
   fileMtimeMs: number | null = null
 ): void {
   const db = getDb()
-  const resource = getPreferredLocalVideoResource(id)
-  if (resource) {
-    db.prepare(
-      `UPDATE video_resources
-       SET locator = ?, resource_key = 'local:' || ?, size_bytes = ?, duration_seconds = ?,
-           file_mtime_ms = ?
-       WHERE id = ? AND kind = 'local'`
-    ).run(filePath, filePath, fileSize, fileDurationSeconds, fileMtimeMs, resource.id)
-    return
-  }
-  insertLocalVideoResource({
-    videoId: id,
-    locator: filePath,
-    sizeBytes: fileSize,
-    durationSeconds: fileDurationSeconds,
-    fileMtimeMs,
-    isPrimary: true
-  })
+  db.transaction(() => {
+    assertActiveResourceTarget(db, libraryId, rootId)
+    const resource = getPreferredLocalVideoResource(libraryId, id)
+    if (resource) {
+      const sourceIdentity = buildVideoResourceSourceIdentity({ kind: 'local', locator: filePath })
+      db.prepare(
+        `UPDATE video_resources
+         SET root_id = ?, locator = ?, resource_key = 'local:' || ?, source_identity = ?,
+             size_bytes = ?, duration_seconds = ?, file_mtime_ms = ?
+         WHERE id = ? AND library_id = ? AND kind = 'local'`
+      ).run(
+        rootId,
+        filePath,
+        filePath,
+        sourceIdentity,
+        fileSize,
+        fileDurationSeconds,
+        fileMtimeMs,
+        resource.id,
+        libraryId
+      )
+      return
+    }
+    insertLocalVideoResource({
+      libraryId,
+      videoId: id,
+      rootId,
+      locator: filePath,
+      sizeBytes: fileSize,
+      durationSeconds: fileDurationSeconds,
+      fileMtimeMs,
+      isPrimary: true
+    })
+  })()
 }
 
 export function relocateLocalVideoResourceById(
+  libraryId: number,
   resourceId: number,
+  rootId: number,
   filePath: string,
   fileSize: number | null,
   fileDurationSeconds: number | null = null,
   fileMtimeMs: number | null = null
 ): void {
-  const changed = getDb()
-    .prepare(
-      `UPDATE video_resources
-       SET locator = ?, resource_key = 'local:' || ?, size_bytes = ?, duration_seconds = ?,
-           file_mtime_ms = ?
-       WHERE id = ? AND kind = 'local'`
-    )
-    .run(filePath, filePath, fileSize, fileDurationSeconds, fileMtimeMs, resourceId)
-  if (changed.changes === 0) throw new Error('待重定位的本地资源不存在')
+  const db = getDb()
+  db.transaction(() => {
+    assertActiveResourceTarget(db, libraryId, rootId)
+    const sourceIdentity = buildVideoResourceSourceIdentity({ kind: 'local', locator: filePath })
+    const changed = db
+      .prepare(
+        `UPDATE video_resources
+         SET root_id = ?, locator = ?, resource_key = 'local:' || ?, source_identity = ?,
+             size_bytes = ?, duration_seconds = ?, file_mtime_ms = ?
+         WHERE id = ? AND library_id = ? AND kind = 'local'`
+      )
+      .run(
+        rootId,
+        filePath,
+        filePath,
+        sourceIdentity,
+        fileSize,
+        fileDurationSeconds,
+        fileMtimeMs,
+        resourceId,
+        libraryId
+      )
+    if (changed.changes === 0) throw new Error('待重定位的本地资源不存在')
+  })()
 }
 
 /** Remove a video record and its cover asset (files on disk are already gone). */
@@ -448,24 +654,33 @@ export function purgeVideo(id: number): { obsoletePaths: string[] } {
 
 export function purgeResourceLessVideos(): { deleted: number; obsoletePaths: string[] } {
   const db = getDb()
-  const candidates = db
-    .prepare(
-      `SELECT id, cover_path
-       FROM videos v
-       WHERE NOT EXISTS (
-         SELECT 1 FROM video_resources vr WHERE vr.video_id = v.id
-       )
-       ORDER BY id ASC`
-    )
-    .all() as Array<{ id: number; cover_path: string | null }>
-  if (candidates.length === 0) return { deleted: 0, obsoletePaths: [] }
-
-  const hints = candidates.map((candidate) => collectVideoLibraryCleanupHints(candidate.id))
-  const obsoletePaths = db.transaction(() => {
+  const result = db.transaction(() => {
+    // Select and delete under the same SQLite write transaction so a newly-added
+    // resource or playlist reference cannot be lost between the two steps.
+    const candidates = db
+      .prepare(
+        `SELECT id, cover_path
+         FROM videos v
+         WHERE NOT EXISTS (
+           SELECT 1 FROM video_resources vr WHERE vr.video_id = v.id
+         )
+           AND NOT EXISTS (
+             SELECT 1 FROM playlist_video pv WHERE pv.video_id = v.id
+           )
+         ORDER BY id ASC`
+      )
+      .all() as Array<{ id: number; cover_path: string | null }>
+    const hints: ReturnType<typeof collectVideoLibraryCleanupHints>[] = []
     const paths: string[] = []
+    let deleted = 0
+    const guardedDelete = db.prepare(
+      `DELETE FROM videos
+       WHERE id = ?
+         AND NOT EXISTS (SELECT 1 FROM video_resources WHERE video_id = videos.id)
+         AND NOT EXISTS (SELECT 1 FROM playlist_video WHERE video_id = videos.id)`
+    )
     for (const candidate of candidates) {
-      paths.push(
-        ...(
+      const stagedPaths = (
           db
             .prepare(
               `SELECT resource.staged_path
@@ -480,31 +695,43 @@ export function purgeResourceLessVideos(): { deleted: number; obsoletePaths: str
             )
             .all(candidate.id) as Array<{ staged_path: string }>
         ).map((row) => row.staged_path)
-      )
-      paths.push(...deleteVideoAssetRows(candidate.id))
+      const assetPaths = (db.prepare(
+        'SELECT local_path FROM video_assets WHERE video_id = ? AND local_path IS NOT NULL'
+      ).all(candidate.id) as Array<{ local_path: string }>).map((row) => row.local_path)
+      const hint = collectVideoLibraryCleanupHints(candidate.id)
+      const removed = guardedDelete.run(candidate.id)
+      if (removed.changes === 0) continue
+      deleted += 1
+      hints.push(hint)
+      paths.push(...stagedPaths, ...assetPaths)
       if (candidate.cover_path) paths.push(candidate.cover_path)
-      deleteVideo(candidate.id)
     }
-    return Array.from(new Set(paths))
+    return {
+      deleted,
+      hints,
+      obsoletePaths: Array.from(new Set(paths))
+    }
   })()
 
   try {
     runLibraryCleanup({
-      actressIds: hints.flatMap((hint) => hint.actressIds ?? [])
+      actressIds: result.hints.flatMap((hint) => hint.actressIds ?? [])
     })
   } catch (error) {
     console.error('Post-commit library cleanup failed:', error)
   }
-  return { deleted: candidates.length, obsoletePaths }
+  return { deleted: result.deleted, obsoletePaths: result.obsoletePaths }
 }
 
 export interface LocalVideoResourceRef {
+  library_id: number
   video_id: number
   resource_id: number
   locator: string
 }
 
 export interface StrmVideoResourceRef {
+  library_id: number
   video_id: number
   resource_id: number
   source_path: string
@@ -512,37 +739,38 @@ export interface StrmVideoResourceRef {
   locator: string
 }
 
-export function listLocalVideoResourceRefs(): LocalVideoResourceRef[] {
+export function listLocalVideoResourceRefs(libraryId: number): LocalVideoResourceRef[] {
   const db = getDb()
   return db
     .prepare(
-      "SELECT id AS resource_id, video_id, locator FROM video_resources WHERE kind = 'local'"
+      `SELECT library_id, id AS resource_id, video_id, locator
+       FROM video_resources WHERE library_id = ? AND kind = 'local'`
     )
-    .all() as LocalVideoResourceRef[]
+    .all(libraryId) as LocalVideoResourceRef[]
 }
 
 /** Resources whose lifecycle is managed by a configured local source path. */
-export function listSourceManagedVideoResourceRefs(): LocalVideoResourceRef[] {
+export function listSourceManagedVideoResourceRefs(libraryId: number): LocalVideoResourceRef[] {
   return getDb()
     .prepare(
-      `SELECT id AS resource_id, video_id,
+      `SELECT library_id, id AS resource_id, video_id,
               CASE WHEN kind = 'local' THEN locator ELSE strm_source_path END AS locator
        FROM video_resources
-       WHERE kind = 'local' OR strm_source_path IS NOT NULL
+       WHERE library_id = ? AND (kind = 'local' OR strm_source_path IS NOT NULL)
        ORDER BY id`
     )
-    .all() as LocalVideoResourceRef[]
+    .all(libraryId) as LocalVideoResourceRef[]
 }
 
-export function listStrmVideoResourceRefs(): StrmVideoResourceRef[] {
+export function listStrmVideoResourceRefs(libraryId: number): StrmVideoResourceRef[] {
   return getDb()
     .prepare(
-      `SELECT id AS resource_id, video_id, strm_source_path AS source_path, kind, locator
+      `SELECT library_id, id AS resource_id, video_id, strm_source_path AS source_path, kind, locator
        FROM video_resources
-       WHERE strm_source_path IS NOT NULL
+       WHERE library_id = ? AND strm_source_path IS NOT NULL
        ORDER BY id`
     )
-    .all() as StrmVideoResourceRef[]
+    .all(libraryId) as StrmVideoResourceRef[]
 }
 
 export function getVideoResourceById(resourceId: number): VideoResource | null {
@@ -554,37 +782,61 @@ export function getVideoResourceById(resourceId: number): VideoResource | null {
   )
 }
 
-export function listVideoResources(videoId: number): VideoResource[] {
+export function listVideoResources(libraryId: number, videoId: number): VideoResource[] {
   const db = getDb()
   return db
+    .prepare(
+      `SELECT * FROM video_resources
+       WHERE library_id = ? AND video_id = ? ${PRIMARY_RESOURCE_ORDER}`
+    )
+    .all(libraryId, videoId) as VideoResource[]
+}
+
+/** Canonical/global maintenance only. Scoped UI and playback code must use listVideoResources. */
+export function listVideoResourcesAcrossLibraries(
+  videoId: number,
+  database: Database.Database = getDb()
+): VideoResource[] {
+  return database
     .prepare(`SELECT * FROM video_resources WHERE video_id = ? ${PRIMARY_RESOURCE_ORDER}`)
     .all(videoId) as VideoResource[]
 }
 
-export function getPrimaryVideoResource(videoId: number): VideoResource | null {
+export function getPrimaryVideoResource(libraryId: number, videoId: number): VideoResource | null {
   const db = getDb()
   return (
     (db
       .prepare(
-        'SELECT * FROM video_resources WHERE video_id = ? AND is_primary = 1 ORDER BY id ASC LIMIT 1'
+        `SELECT * FROM video_resources
+         WHERE library_id = ? AND video_id = ? AND is_primary = 1
+         ORDER BY id ASC LIMIT 1`
       )
-      .get(videoId) as VideoResource | undefined) ?? null
+      .get(libraryId, videoId) as VideoResource | undefined) ?? null
   )
 }
 
-export function setPrimaryVideoResource(videoId: number, resourceId: number): void {
+export function setPrimaryVideoResource(
+  libraryId: number,
+  videoId: number,
+  resourceId: number
+): void {
   const db = getDb()
-  const resource = getVideoResourceById(resourceId)
+  const resource = getVideoResourceInLibrary(libraryId, resourceId)
   if (!resource || resource.video_id !== videoId) {
     throw new Error('资源不属于当前影片')
   }
   db.transaction(() => {
-    db.prepare('UPDATE video_resources SET is_primary = 0 WHERE video_id = ?').run(videoId)
-    db.prepare('UPDATE video_resources SET is_primary = 1 WHERE id = ?').run(resourceId)
+    db.prepare(
+      'UPDATE video_resources SET is_primary = 0 WHERE library_id = ? AND video_id = ?'
+    ).run(libraryId, videoId)
+    db.prepare(
+      'UPDATE video_resources SET is_primary = 1 WHERE id = ? AND library_id = ?'
+    ).run(resourceId, libraryId)
   })()
 }
 
 export function updateLocalVideoResourceLabel(
+  libraryId: number,
   videoId: number,
   resourceId: number,
   displayName: string | null
@@ -594,20 +846,24 @@ export function updateLocalVideoResourceLabel(
     .prepare(
       `UPDATE video_resources
        SET display_name = ?
-       WHERE id = ? AND video_id = ? AND kind = 'local'`
+       WHERE id = ? AND library_id = ? AND video_id = ? AND kind = 'local'`
     )
-    .run(displayName, resourceId, videoId)
+    .run(displayName, resourceId, libraryId, videoId)
   if (info.changes === 0) throw new Error('本地影片资源不存在')
   const resource = getVideoResourceById(resourceId)
   if (!resource) throw new Error('本地影片资源更新失败')
   return resource
 }
 
-export function removeVideoResourceRecord(resourceId: number): void {
-  getDb().prepare('DELETE FROM video_resources WHERE id = ?').run(resourceId)
+export function removeVideoResourceRecord(libraryId: number, resourceId: number): void {
+  getDb().prepare('DELETE FROM video_resources WHERE id = ? AND library_id = ?').run(
+    resourceId,
+    libraryId
+  )
 }
 
 export interface VideoResourceBatchRemovalPlan {
+  libraryId: number
   videoId: number
   resourceIds: number[]
   promotedResourceId: number | null
@@ -619,22 +875,28 @@ export function removeLocalVideoResourcesBatch(
   const db = getDb()
   return db.transaction(() => {
     const remove = db.prepare(
-      "DELETE FROM video_resources WHERE id = ? AND video_id = ? AND kind = 'local'"
+      `DELETE FROM video_resources
+       WHERE id = ? AND library_id = ? AND video_id = ? AND kind = 'local'`
     )
-    const clearPrimary = db.prepare('UPDATE video_resources SET is_primary = 0 WHERE video_id = ?')
+    const clearPrimary = db.prepare(
+      'UPDATE video_resources SET is_primary = 0 WHERE library_id = ? AND video_id = ?'
+    )
     const setPrimary = db.prepare(
-      'UPDATE video_resources SET is_primary = 1 WHERE id = ? AND video_id = ?'
+      `UPDATE video_resources SET is_primary = 1
+       WHERE id = ? AND library_id = ? AND video_id = ?`
     )
     let removed = 0
     let promoted = 0
 
     for (const plan of plans) {
       for (const resourceId of plan.resourceIds) {
-        removed += remove.run(resourceId, plan.videoId).changes
+        removed += remove.run(resourceId, plan.libraryId, plan.videoId).changes
       }
       if (plan.promotedResourceId === null) continue
-      clearPrimary.run(plan.videoId)
-      if (setPrimary.run(plan.promotedResourceId, plan.videoId).changes > 0) promoted += 1
+      clearPrimary.run(plan.libraryId, plan.videoId)
+      if (setPrimary.run(plan.promotedResourceId, plan.libraryId, plan.videoId).changes > 0) {
+        promoted += 1
+      }
     }
     return { removed, promoted }
   })()
@@ -648,27 +910,34 @@ export function removeSourceManagedVideoResourcesBatch(
     const remove = db.prepare(
       `DELETE FROM video_resources
        WHERE id = ? AND video_id = ?
+         AND library_id = ?
          AND (kind = 'local' OR strm_source_path IS NOT NULL)`
     )
-    const clearPrimary = db.prepare('UPDATE video_resources SET is_primary = 0 WHERE video_id = ?')
+    const clearPrimary = db.prepare(
+      'UPDATE video_resources SET is_primary = 0 WHERE library_id = ? AND video_id = ?'
+    )
     const setPrimary = db.prepare(
-      'UPDATE video_resources SET is_primary = 1 WHERE id = ? AND video_id = ?'
+      `UPDATE video_resources SET is_primary = 1
+       WHERE id = ? AND library_id = ? AND video_id = ?`
     )
     let removed = 0
     let promoted = 0
     for (const plan of plans) {
       for (const resourceId of plan.resourceIds) {
-        removed += remove.run(resourceId, plan.videoId).changes
+        removed += remove.run(resourceId, plan.videoId, plan.libraryId).changes
       }
       if (plan.promotedResourceId === null) continue
-      clearPrimary.run(plan.videoId)
-      if (setPrimary.run(plan.promotedResourceId, plan.videoId).changes > 0) promoted += 1
+      clearPrimary.run(plan.libraryId, plan.videoId)
+      if (setPrimary.run(plan.promotedResourceId, plan.libraryId, plan.videoId).changes > 0) {
+        promoted += 1
+      }
     }
     return { removed, promoted }
   })()
 }
 
 export function importVideoLinkResourceRecord(input: {
+  libraryId: number
   code: string
   target: { kind: 'new' } | { kind: 'existing'; videoId: number }
   kind: ExternalVideoResourceKind
@@ -684,9 +953,9 @@ export function importVideoLinkResourceRecord(input: {
         `SELECT v.code
          FROM video_resources vr
          JOIN videos v ON v.id = vr.video_id
-         WHERE vr.resource_key = ?`
+         WHERE vr.library_id = ? AND vr.resource_key = ?`
       )
-      .get(input.resourceKey) as { code: string } | undefined
+      .get(input.libraryId, input.resourceKey) as { code: string } | undefined
     if (duplicate) return { duplicateOwnerCode: duplicate.code }
 
     let video: Pick<Video, 'id' | 'code'> | null = null
@@ -702,18 +971,32 @@ export function importVideoLinkResourceRecord(input: {
       video = { id: Number(info.lastInsertRowid), code: input.code }
       createdVideo = true
     }
+    ensureVideoMembership(
+      {
+        libraryId: input.libraryId,
+        videoId: video.id,
+        addedVia: createdVideo ? 'manual' : 'shared'
+      },
+      db
+    )
     const resourceCount = (
-      db.prepare('SELECT COUNT(*) AS count FROM video_resources WHERE video_id = ?').get(video.id) as {
+      db
+        .prepare(
+          'SELECT COUNT(*) AS count FROM video_resources WHERE library_id = ? AND video_id = ?'
+        )
+        .get(input.libraryId, video.id) as {
         count: number
       }
     ).count
     const info = db
       .prepare(
         `INSERT INTO video_resources (
-           video_id, kind, locator, resource_key, size_bytes, display_name, is_primary, add_time
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+           library_id, video_id, kind, locator, resource_key, source_identity,
+           size_bytes, display_name, is_primary, add_time
+         ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`
       )
       .run(
+        input.libraryId,
         video.id,
         input.kind,
         input.locator,
@@ -723,13 +1006,14 @@ export function importVideoLinkResourceRecord(input: {
         resourceCount === 0 ? 1 : 0,
         nowIso()
       )
-    const resource = getVideoResourceById(Number(info.lastInsertRowid))
+    const resource = getVideoResourceInLibrary(input.libraryId, Number(info.lastInsertRowid))
     if (!resource) throw new Error('影片资源写入失败')
     return { videoId: video.id, resource, createdVideo }
   })()
 }
 
 export function updateVideoLinkResourceRecord(input: {
+  libraryId: number
   resourceId: number
   videoId: number
   kind: ExternalVideoResourceKind
@@ -745,15 +1029,16 @@ export function updateVideoLinkResourceRecord(input: {
         `SELECT v.code
          FROM video_resources vr
          JOIN videos v ON v.id = vr.video_id
-         WHERE vr.resource_key = ? AND vr.id != ?`
+         WHERE vr.library_id = ? AND vr.resource_key = ? AND vr.id != ?`
       )
-      .get(input.resourceKey, input.resourceId) as { code: string } | undefined
+      .get(input.libraryId, input.resourceKey, input.resourceId) as { code: string } | undefined
     if (duplicate) return { duplicateOwnerCode: duplicate.code }
     const info = db
       .prepare(
         `UPDATE video_resources
          SET kind = ?, locator = ?, resource_key = ?, display_name = ?, size_bytes = ?
-         WHERE id = ? AND video_id = ? AND kind != 'local'`
+         WHERE id = ? AND library_id = ? AND video_id = ?
+           AND kind != 'local' AND strm_source_path IS NULL`
       )
       .run(
         input.kind,
@@ -762,16 +1047,18 @@ export function updateVideoLinkResourceRecord(input: {
         input.displayName,
         input.sizeBytes,
         input.resourceId,
+        input.libraryId,
         input.videoId
       )
     if (info.changes === 0) throw new Error('影片链接资源不存在')
-    const resource = getVideoResourceById(input.resourceId)
+    const resource = getVideoResourceInLibrary(input.libraryId, input.resourceId)
     if (!resource) throw new Error('影片资源更新失败')
     return resource
   })()
 }
 
 export function updateStrmVideoResourceMetadata(input: {
+  libraryId: number
   resourceId: number
   videoId: number
   displayName: string | null
@@ -781,26 +1068,32 @@ export function updateStrmVideoResourceMetadata(input: {
     .prepare(
       `UPDATE video_resources
        SET display_name = ?, size_bytes = ?
-       WHERE id = ? AND video_id = ? AND strm_source_path IS NOT NULL`
+       WHERE id = ? AND library_id = ? AND video_id = ? AND strm_source_path IS NOT NULL`
     )
-    .run(input.displayName, input.sizeBytes, input.resourceId, input.videoId)
+    .run(input.displayName, input.sizeBytes, input.resourceId, input.libraryId, input.videoId)
   if (info.changes === 0) throw new Error('STRM 影片资源不存在')
-  const resource = getVideoResourceById(input.resourceId)
+  const resource = getVideoResourceInLibrary(input.libraryId, input.resourceId)
   if (!resource) throw new Error('STRM 影片资源更新失败')
   return resource
 }
 
-export function getVideoById(id: number): Video | null {
-  const db = getDb()
+export function getVideoById(
+  id: number,
+  database: Database.Database = getDb()
+): Video | null {
+  const db = database
   const row = db
       .prepare(`SELECT v.*${videoClassificationSelectExtras()} FROM videos v WHERE v.id = ?`)
       .get(id) as Video | undefined
   return row ? { ...row, has_pending_scrape: Boolean(row.has_pending_scrape) } : null
 }
 
-export function getVideoDetail(id: number): StoredVideoDetail | null {
-  const db = getDb()
-  const video = getVideoById(id)
+export function getVideoDetail(
+  id: number,
+  database: Database.Database = getDb()
+): StoredVideoDetail | null {
+  const db = database
+  const video = getVideoById(id, db)
   if (!video) return null
 
   const actresses = db
@@ -837,7 +1130,7 @@ export function getVideoDetail(id: number): StoredVideoDetail | null {
     )
     .all(id) as StoredVideoDetail['external_stats']
 
-  const resources = listVideoResources(id)
+  const resources = listVideoResourcesAcrossLibraries(id, db)
   const primaryResource = resources.find((resource) => Boolean(resource.is_primary))
   return {
     ...video,
@@ -1139,6 +1432,20 @@ export function replaceVideoTagsByOrigin(
   }
 }
 
+/** Read-only snapshot used by the scan audit before optional destructive cleanup. */
+export function listResourceLessVideos(): Array<Pick<Video, 'id' | 'code' | 'title'>> {
+  return getDb()
+    .prepare(
+      `SELECT id, code, title
+       FROM videos v
+       WHERE NOT EXISTS (
+         SELECT 1 FROM video_resources vr WHERE vr.video_id = v.id
+       )
+       ORDER BY id ASC`
+    )
+    .all() as Array<Pick<Video, 'id' | 'code' | 'title'>>
+}
+
 export function addManualVideoTag(videoId: number, name: string): void {
   const trimmed = name.trim()
   if (!trimmed) throw new Error('标签名称不能为空')
@@ -1415,9 +1722,48 @@ export function mergeVideoRecords(
     obsoletePaths.push(sourcePosterPath)
   }
   db.transaction(() => {
-    const retainedPrimary = getPrimaryVideoResource(retained.id)
-    if (retainedPrimary) {
-      db.prepare('UPDATE video_resources SET is_primary = 0 WHERE video_id = ?').run(source.id)
+    db.prepare(
+      `INSERT INTO library_video_memberships (
+         library_id, video_id, added_at, updated_at, added_via,
+         is_pinned, is_hidden, discovery_key
+       )
+       SELECT
+         library_id, ?, added_at, updated_at, 'shared',
+         is_pinned, is_hidden, discovery_key
+       FROM library_video_memberships
+       WHERE video_id = ?
+       ON CONFLICT(library_id, video_id) DO UPDATE SET
+         added_at = MIN(library_video_memberships.added_at, excluded.added_at),
+         updated_at = MAX(library_video_memberships.updated_at, excluded.updated_at),
+         is_pinned = MAX(library_video_memberships.is_pinned, excluded.is_pinned),
+         is_hidden = MIN(library_video_memberships.is_hidden, excluded.is_hidden)`
+    ).run(retained.id, source.id)
+
+    const affectedLibraryIds = (
+      db
+        .prepare(
+          `SELECT DISTINCT library_id
+           FROM library_video_memberships
+           WHERE video_id IN (?, ?)
+           ORDER BY library_id`
+        )
+        .all(retained.id, source.id) as Array<{ library_id: number }>
+    ).map((row) => row.library_id)
+    for (const libraryId of affectedLibraryIds) {
+      const retainedHasPrimary = Boolean(
+        db
+          .prepare(
+            `SELECT 1 FROM video_resources
+             WHERE library_id = ? AND video_id = ? AND is_primary = 1`
+          )
+          .get(libraryId, retained.id)
+      )
+      if (retainedHasPrimary) {
+        db.prepare(
+          `UPDATE video_resources SET is_primary = 0
+           WHERE library_id = ? AND video_id = ?`
+        ).run(libraryId, source.id)
+      }
     }
 
     db.prepare(
@@ -1512,25 +1858,37 @@ export function mergeVideoRecords(
       retained.id,
       source.id
     )
-    if (!retainedPrimary) {
-      const primaryAfterMove = getPrimaryVideoResource(retained.id)
-      if (!primaryAfterMove) {
-        const hasExplicitFallback =
-          options != null && 'fallbackPrimaryResourceId' in options
-        const fallbackId = hasExplicitFallback
+    for (const libraryId of affectedLibraryIds) {
+      const primaryAfterMove = getPrimaryVideoResource(libraryId, retained.id)
+      if (primaryAfterMove) continue
+      const explicitFallback =
+        options != null && 'fallbackPrimaryResourceId' in options
           ? options.fallbackPrimaryResourceId
-          : (
-              db
-                .prepare('SELECT id FROM video_resources WHERE video_id = ? ORDER BY id LIMIT 1')
-                .get(retained.id) as { id: number } | undefined
-            )?.id
-        if (fallbackId != null) {
-          const fallback = db
-            .prepare('SELECT id FROM video_resources WHERE video_id = ? AND id = ?')
-            .get(retained.id, fallbackId) as { id: number } | undefined
-          if (!fallback) throw new Error('合并主资源候选不属于参与影片')
-          db.prepare('UPDATE video_resources SET is_primary = 1 WHERE id = ?').run(fallback.id)
-        }
+          : undefined
+      const fallback =
+        explicitFallback != null
+          ? (db
+              .prepare(
+                `SELECT id FROM video_resources
+                 WHERE id = ? AND library_id = ? AND video_id = ?`
+              )
+              .get(explicitFallback, libraryId, retained.id) as { id: number } | undefined)
+          : (db
+              .prepare(
+                `SELECT id FROM video_resources
+                 WHERE library_id = ? AND video_id = ? ORDER BY id LIMIT 1`
+              )
+              .get(libraryId, retained.id) as { id: number } | undefined)
+      if (explicitFallback != null && !fallback) {
+        const belongsToAnotherLibrary = Boolean(
+          db
+            .prepare('SELECT 1 FROM video_resources WHERE id = ? AND video_id = ?')
+            .get(explicitFallback, retained.id)
+        )
+        if (!belongsToAnotherLibrary) throw new Error('合并主资源候选不属于参与影片')
+      }
+      if (fallback) {
+        db.prepare('UPDATE video_resources SET is_primary = 1 WHERE id = ?').run(fallback.id)
       }
     }
 
@@ -1593,6 +1951,7 @@ export function mergeVideoRecords(
 }
 
 export function splitVideoResourceRecord(
+  libraryId: number,
   videoId: number,
   resourceId: number
 ): VideoResourceSplitResult {
@@ -1600,17 +1959,21 @@ export function splitVideoResourceRecord(
   return db.transaction(() => {
     const video = getVideoById(videoId)
     if (!video) throw new Error('影片不存在')
-    const resource = getVideoResourceById(resourceId)
+    const resource = getVideoResourceInLibrary(libraryId, resourceId)
     if (!resource || resource.video_id !== videoId) throw new Error('资源不属于当前影片')
     if (resource.is_primary) throw new Error('请先将另一条资源设为主资源，再拆分当前主资源')
     const created = db
       .prepare('INSERT INTO videos (code, scraped_status) VALUES (?, 0)')
       .run(normalizeVideoCode(video.code))
     const createdVideoId = Number(created.lastInsertRowid)
-    db.prepare('UPDATE video_resources SET video_id = ?, is_primary = 1 WHERE id = ?').run(
-      createdVideoId,
-      resourceId
+    ensureVideoMembership(
+      { libraryId, videoId: createdVideoId, addedVia: 'shared', addedAt: resource.add_time },
+      db
     )
+    db.prepare(
+      `UPDATE video_resources SET video_id = ?, is_primary = 1
+       WHERE id = ? AND library_id = ?`
+    ).run(createdVideoId, resourceId, libraryId)
     return { videoId: createdVideoId, resourceId }
   })()
 }
@@ -1619,15 +1982,25 @@ export function mergeVideoIntoExistingCode(sourceId: number, targetId: number): 
   const db = getDb()
   const cleanupHints = collectVideoLibraryCleanupHints(sourceId)
   db.transaction(() => {
-    const targetPrimary = getPrimaryVideoResource(targetId)
-    const resources = listVideoResources(sourceId)
-    for (const resource of resources) {
-      const isPrimary = !targetPrimary && resource.is_primary ? 1 : 0
-      db.prepare('UPDATE video_resources SET video_id = ?, is_primary = ? WHERE id = ?').run(
-        targetId,
-        isPrimary,
-        resource.id
-      )
+    const libraryIds = (
+      db
+        .prepare(
+          `SELECT DISTINCT library_id FROM library_video_memberships
+           WHERE video_id = ? ORDER BY library_id`
+        )
+        .all(sourceId) as Array<{ library_id: number }>
+    ).map((row) => row.library_id)
+    for (const libraryId of libraryIds) {
+      ensureVideoMembership({ libraryId, videoId: targetId, addedVia: 'shared' }, db)
+      const targetPrimary = getPrimaryVideoResource(libraryId, targetId)
+      const resources = listVideoResources(libraryId, sourceId)
+      for (const resource of resources) {
+        const isPrimary = !targetPrimary && resource.is_primary ? 1 : 0
+        db.prepare(
+          `UPDATE video_resources SET video_id = ?, is_primary = ?
+           WHERE id = ? AND library_id = ?`
+        ).run(targetId, isPrimary, resource.id, libraryId)
+      }
     }
     deleteVideo(sourceId)
   })()
@@ -1735,6 +2108,24 @@ function buildBatchScrapeWhere(filter: VideoBatchScrapeFilter): {
     'NOT EXISTS (SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = v.id)'
   ]
   const params: unknown[] = []
+
+  if (filter.libraryId !== undefined) {
+    if (!Number.isSafeInteger(filter.libraryId) || filter.libraryId <= 0) {
+      throw new Error('媒体库 ID 必须是正整数')
+    }
+    conditions.push(
+      `EXISTS (
+        SELECT 1
+          FROM library_video_memberships membership
+          JOIN media_libraries library ON library.id = membership.library_id
+         WHERE membership.library_id = ?
+           AND membership.video_id = v.id
+           AND membership.is_hidden = 0
+           AND library.status = 'active'
+      )`
+    )
+    params.push(filter.libraryId)
+  }
 
   if (filter.videoIds) {
     const videoIds = Array.from(

@@ -18,11 +18,18 @@ function setup(): void {
 }
 
 function createVideo(code: string): number {
-  return Number(
+  const videoId = Number(
     getDb()
       .prepare("INSERT INTO videos (code, title, summary) VALUES (?, 'Keep title', 'Keep metadata')")
       .run(code).lastInsertRowid
   )
+  getDb()
+    .prepare(
+      `INSERT INTO library_video_memberships (library_id, video_id, discovery_key)
+       VALUES (1, ?, ?)`
+    )
+    .run(videoId, videoId)
+  return videoId
 }
 
 function assignOrganization(videoId: number, role: 'maker' | 'publisher', id: number): void {
@@ -32,8 +39,9 @@ function assignOrganization(videoId: number, role: 'maker' | 'publisher', id: nu
 function addResource(videoId: number, key: string): void {
   getDb()
     .prepare(
-      `INSERT INTO video_resources (video_id, kind, locator, resource_key, display_name)
-       VALUES (?, 'web', ?, ?, 'Keep resource')`
+      `INSERT INTO video_resources (
+         library_id, video_id, kind, locator, resource_key, display_name
+       ) VALUES (1, ?, 'web', ?, ?, 'Keep resource')`
     )
     .run(videoId, `https://example.com/${key}`, key)
 }

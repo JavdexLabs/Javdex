@@ -20,7 +20,8 @@ export const LIST_PARAM = {
   releaseDir: 'releaseDir',
   pendingType: 'type',
   pendingItem: 'item',
-  pendingVideoId: 'videoId'
+  pendingVideoId: 'videoId',
+  pendingLibraryId: 'lib'
 } as const
 
 export const VIDEO_RESOURCE_FILTER_ORDER: VideoResourceFilter[] = [
@@ -37,6 +38,13 @@ export const LIBRARY_DEFAULTS = {
   year: 'all' as number | 'all',
   sortBy: 'release_date' as NonNullable<VideoQuery['sortBy']>,
   sortDir: 'desc' as NonNullable<VideoQuery['sortDir']>
+}
+
+export interface LibraryListDefaults {
+  status: ScrapedStatus | 'all'
+  year: number | 'all'
+  sortBy: NonNullable<VideoQuery['sortBy']>
+  sortDir: NonNullable<VideoQuery['sortDir']>
 }
 
 export const ACTRESS_DEFAULT_GENDER: ActressGenderFilter = ACTRESS_LIST_DEFAULTS.gender
@@ -157,7 +165,8 @@ export function canonicalizeLibrarySearchParams(params: URLSearchParams): URLSea
 
 export function parseSort(
   rawSort: string | null,
-  rawDir: string | null
+  rawDir: string | null,
+  defaults: LibraryListDefaults = LIBRARY_DEFAULTS
 ): { sortBy: NonNullable<VideoQuery['sortBy']>; sortDir: NonNullable<VideoQuery['sortDir']> } {
   const sortBy =
     rawSort === 'add_time' ||
@@ -165,8 +174,8 @@ export function parseSort(
     rawSort === 'rating' ||
     rawSort === 'code'
       ? rawSort
-      : LIBRARY_DEFAULTS.sortBy
-  const sortDir = rawDir === 'asc' || rawDir === 'desc' ? rawDir : LIBRARY_DEFAULTS.sortDir
+      : defaults.sortBy
+  const sortDir = rawDir === 'asc' || rawDir === 'desc' ? rawDir : defaults.sortDir
   return { sortBy, sortDir }
 }
 
@@ -175,8 +184,15 @@ export function parseGender(raw: string | null): ActressGenderFilter {
   return ACTRESS_DEFAULT_GENDER
 }
 
-export function libraryVideoQueryFromSearchParams(params: URLSearchParams): VideoQuery {
-  const { sortBy, sortDir } = parseSort(params.get(LIST_PARAM.sort), params.get(LIST_PARAM.dir))
+export function libraryVideoQueryFromSearchParams(
+  params: URLSearchParams,
+  defaults: LibraryListDefaults = LIBRARY_DEFAULTS
+): VideoQuery {
+  const { sortBy, sortDir } = parseSort(
+    params.get(LIST_PARAM.sort),
+    params.get(LIST_PARAM.dir),
+    defaults
+  )
   const tagIds = parseTagIds(params.get(LIST_PARAM.tags))
   const codePrefix = (params.get(LIST_PARAM.prefix) ?? '').trim().toUpperCase()
   const q = (params.get(LIST_PARAM.q) ?? '').trim()
@@ -201,8 +217,11 @@ export function hashListQuery(parts: Record<string, string | number | undefined>
   return keys.map((k) => `${k}=${parts[k] ?? ''}`).join('&')
 }
 
-export function libraryQueryHash(params: URLSearchParams): string {
-  const q = libraryVideoQueryFromSearchParams(params)
+export function libraryQueryHash(
+  params: URLSearchParams,
+  defaults: LibraryListDefaults = LIBRARY_DEFAULTS
+): string {
+  const q = libraryVideoQueryFromSearchParams(params, defaults)
   return hashListQuery({
     q: q.search ?? '',
     status: q.scrapedStatus ?? 'all',
@@ -256,15 +275,18 @@ export function patchSearchParams(
   return next
 }
 
-export function isDefaultLibraryParams(params: URLSearchParams): boolean {
-  const q = libraryVideoQueryFromSearchParams(params)
+export function isDefaultLibraryParams(
+  params: URLSearchParams,
+  defaults: LibraryListDefaults = LIBRARY_DEFAULTS
+): boolean {
+  const q = libraryVideoQueryFromSearchParams(params, defaults)
   return (
     !(params.get(LIST_PARAM.q) ?? '').trim() &&
-    q.scrapedStatus === LIBRARY_DEFAULTS.status &&
+    q.scrapedStatus === defaults.status &&
     q.pendingScrape === 'all' &&
-    q.year === LIBRARY_DEFAULTS.year &&
-    q.sortBy === LIBRARY_DEFAULTS.sortBy &&
-    q.sortDir === LIBRARY_DEFAULTS.sortDir &&
+    q.year === defaults.year &&
+    q.sortBy === defaults.sortBy &&
+    q.sortDir === defaults.sortDir &&
     !q.tagIds?.length &&
     !q.codePrefix &&
     !q.resourceKinds?.length

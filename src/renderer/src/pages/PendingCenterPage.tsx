@@ -5,6 +5,7 @@ import { useMatch, useNavigate, useSearchParams } from 'react-router-dom'
 import { api, resolveMediaSrc } from '../api'
 import EmptyState from '../components/EmptyState'
 import ListToolbar from '../components/ListToolbar'
+import SelectControl from '../components/SelectControl'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import {
   WorkbenchMain,
@@ -24,7 +25,7 @@ import {
 } from '../listView/pendingRoutes'
 import { ROUTE_MATCH } from '../listView/routePaths'
 import { invalidateVideoLibraryQueries } from '../query/invalidateLibraryQueries'
-import { actressKeys } from '../query/queryKeys'
+import { actressKeys, mediaLibraryKeys } from '../query/queryKeys'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import PendingActressConflictPane from './PendingActressConflictPane'
 import PendingScanPane from './PendingScanPane'
@@ -53,11 +54,31 @@ export default function PendingCenterPage(): JSX.Element {
   const actressDetailOpen = Boolean(useMatch({ path: ROUTE_MATCH.pendingActressDetail, end: true }))
   const detailOpen = videoDetailOpen || actressDetailOpen
   const [params] = useSearchParams()
-  const { type, item: urlItem, videoId: videoFromUrl } = parsePendingCenterSearch(params)
+  const {
+    type,
+    item: urlItem,
+    videoId: videoFromUrl,
+    libraryId: requestedLibraryId
+  } = parsePendingCenterSearch(params)
+
+  const librariesQuery = useQuery({
+    queryKey: mediaLibraryKeys.activeList(),
+    queryFn: () => api.mediaLibraries.list()
+  })
+  const libraryIds = (librariesQuery.data ?? []).map((library) => library.id)
+  const selectedLibraryId =
+    requestedLibraryId != null && libraryIds.includes(requestedLibraryId)
+      ? requestedLibraryId
+      : null
+  const libraryNames = new Map(
+    (librariesQuery.data ?? []).map((library) => [library.id, library.name])
+  )
 
   const scanQuery = useQuery({
-    queryKey: ['pending-scan-groups'],
-    queryFn: () => api.scan.listPending()
+    queryKey: ['pending-scan-groups', libraryIds.join(',')],
+    queryFn: async () =>
+      (await Promise.all(libraryIds.map((libraryId) => api.scan.listPending(libraryId)))).flat(),
+    enabled: librariesQuery.isSuccess
   })
   const scrapeQuery = useQuery({
     queryKey: ['pending-video-scrapes'],
@@ -65,10 +86,14 @@ export default function PendingCenterPage(): JSX.Element {
   })
   const conflict = useConflictReviewController()
 
-  const scanGroups = scanQuery.data ?? []
+  const allScanGroups = scanQuery.data ?? []
+  const scanGroups =
+    selectedLibraryId == null
+      ? allScanGroups
+      : allScanGroups.filter((group) => group.libraryId === selectedLibraryId)
   const scrapeItems = scrapeQuery.data ?? []
   const conflictGroups = conflict.queue.groups
-  const queueInput = { scanGroups, scrapeItems, conflictGroups }
+  const queueInput = { scanGroups, scrapeItems, conflictGroups, libraryNames }
   const sections = buildPendingQueueSections(queueInput, type)
   const counts: Record<PendingTypeFilter, number> = {
     all: scanGroups.length + scrapeItems.length + conflictGroups.length,
@@ -84,14 +109,22 @@ export default function PendingCenterPage(): JSX.Element {
   const requested = deepLinked ? pendingItemKey('scrape', deepLinked.id) : urlItem
   const selected = resolvePendingSelection(sections, requested)
 
-  const loading = scanQuery.isLoading || scrapeQuery.isLoading || conflict.queue.loading
+  const loading =
+    librariesQuery.isLoading || scanQuery.isLoading || scrapeQuery.isLoading || conflict.queue.loading
   const total = pendingQueueTotal(sections)
 
   const selectItem = useCallback(
     (key: PendingItemKey, replace = false) => {
-      navigate(pendingCenterPath({ type, item: key }), { replace })
+      navigate(
+        pendingCenterPath({
+          type,
+          item: key,
+          libraryId: selectedLibraryId ?? undefined
+        }),
+        { replace }
+      )
     },
-    [navigate, type]
+    [navigate, selectedLibraryId, type]
   )
 
   // Canonicalize the URL: resolve deep links and drop selections that no longer exist.
@@ -127,7 +160,7 @@ export default function PendingCenterPage(): JSX.Element {
 
   const refetchPendingSurface = useCallback((): void => {
     void Promise.all([
-      queryClient.refetchQueries({ queryKey: ['pending-scan-groups'], exact: true }),
+      queryClient.refetchQueries({ queryKey: ['pending-scan-groups'], exact: false }),
       queryClient.refetchQueries({ queryKey: ['pending-video-scrapes'], exact: true }),
       queryClient.refetchQueries({ queryKey: actressKeys.conflicts(), exact: true }),
       queryClient.refetchQueries({ queryKey: actressKeys.conflictSummary(), exact: true })
@@ -156,13 +189,20 @@ export default function PendingCenterPage(): JSX.Element {
         <ListToolbar
           title="待确认"
           controls={
-            <div className={styles.typeFilter} role="group" aria-label="待确认类型">
+            <div className={styles.typeFilter} role="group" aria-label="待确认筛选">
               {FILTER_ORDER.map((option) => (
                 <button
                   key={option}
                   type="button"
                   aria-pressed={type === option}
-                  onClick={() => navigate(pendingCenterPath({ type: option }))}
+                  onClick={() =>
+                    navigate(
+                      pendingCenterPath({
+                        type: option,
+                        libraryId: selectedLibraryId ?? undefined
+                      })
+                    )
+                  }
                 >
                   {option === 'all' ? (
                     <ListChecks {...UI_ICON_SM} aria-hidden />
@@ -173,6 +213,24 @@ export default function PendingCenterPage(): JSX.Element {
                   <em>{counts[option]}</em>
                 </button>
               ))}
+              <SelectControl
+                className={styles.libraryFilter}
+                aria-label="按媒体库筛选扫描待确认项"
+                value={selectedLibraryId ?? ''}
+                onChange={(event) => {
+                  const nextLibraryId = event.target.value
+                    ? Number(event.target.value)
+                    : undefined
+                  navigate(pendingCenterPath({ type, libraryId: nextLibraryId }))
+                }}
+              >
+                <option value="">所有媒体库</option>
+                {(librariesQuery.data ?? []).map((library) => (
+                  <option key={library.id} value={library.id}>
+                    {library.name}
+                  </option>
+                ))}
+              </SelectControl>
             </div>
           }
           resultCount={<span className={styles.count}>{total} 项待处理</span>}
@@ -244,7 +302,11 @@ export default function PendingCenterPage(): JSX.Element {
                 </div>
               </WorkbenchRail>
               {selectedScan ? (
-                <PendingScanPane group={selectedScan} onResolved={refresh} />
+                <PendingScanPane
+                  group={selectedScan}
+                  libraryName={libraryNames.get(selectedScan.libraryId)}
+                  onResolved={refresh}
+                />
               ) : selectedScrape ? (
                 <PendingScrapePane pending={selectedScrape} onResolved={refresh} />
               ) : selected?.domain === 'actress' ? (

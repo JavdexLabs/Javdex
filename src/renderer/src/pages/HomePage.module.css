@@ -1,0 +1,195 @@
+.header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.heading {
+  flex: 0 0 auto;
+  min-width: 140px;
+}
+
+.pageTitle,
+.sectionTitle {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.pageTitle {
+  font-size: var(--title-size, 1.125rem);
+  line-height: 1.2;
+}
+
+.pageSubtitle,
+.sectionDescription {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.shortcut {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  padding: 3px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.content {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+}
+
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.section {
+  min-width: 0;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  min-height: var(--control-h-md);
+  margin-bottom: 12px;
+  gap: 16px;
+}
+
+.sectionTitle {
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.sectionDescription {
+  margin: 3px 0 0;
+  line-height: 1.4;
+}
+
+.posterGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 16px 12px;
+}
+
+.libraryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.libraryCard {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 72px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  gap: 10px;
+  transition:
+    border-color var(--motion-fast),
+    background var(--motion-fast);
+}
+
+.libraryCard:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-elevated);
+}
+
+.libraryCard:active {
+  border-color: var(--border-strong);
+  background: var(--surface-selected);
+}
+
+.libraryCard:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+}
+
+.libraryIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-md);
+  background: var(--surface-selected);
+  color: var(--media-library-color, var(--text-muted));
+}
+
+.libraryInfo {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.libraryName,
+.libraryMeta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.libraryName {
+  font-size: 13px;
+}
+
+.libraryMeta,
+.libraryStatus {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.libraryActivity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 10px;
+  gap: 8px;
+}
+
+.libraryActivity > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scanStatus[data-tone="active"] {
+  color: var(--text-accent);
+}
+
+.scanStatus[data-tone="danger"] {
+  color: var(--text-danger);
+}
+
+.rootAvailability[data-tone="warning"] {
+  color: var(--text-warning);
+}
+
+.libraryStatus {
+  flex: 0 0 auto;
+}
+
+@media (width <= 860px) {
+  .header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+}

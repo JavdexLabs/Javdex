@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
 import { insertTestVideoWithFile } from './testVideoFixtures'
-import { pruneUnusedTags } from './tagRepo'
+import { listManualTags, listTags, pruneUnusedTags } from './tagRepo'
 
 let tempRoot: string | null = null
 
@@ -37,5 +37,20 @@ describe('tagRepo.pruneUnusedTags', () => {
     assert.deepEqual(db.prepare('SELECT name FROM tags WHERE id = 1').get(), { name: 'Linked' })
     assert.equal(db.prepare('SELECT id FROM tags WHERE id = 2').get(), undefined)
     assert.equal(pruneUnusedTags(), 0)
+  })
+})
+
+describe('tagRepo active catalog projection', () => {
+  it('counts only videos that can be opened through the active visible catalog', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare("UPDATE video_tag SET origin = 'manual' WHERE video_id = 1 AND tag_id = 1").run()
+
+    assert.equal(listTags().find((tag) => tag.id === 1)?.video_count, 1)
+    assert.equal(listManualTags().find((tag) => tag.id === 1)?.video_count, 1)
+
+    db.prepare('UPDATE library_video_memberships SET is_hidden = 1 WHERE video_id = 1').run()
+    assert.equal(listTags().find((tag) => tag.id === 1)?.video_count, 0)
+    assert.equal(listManualTags().find((tag) => tag.id === 1)?.video_count, 0)
   })
 })

@@ -132,7 +132,14 @@ export function cleanupOrphanedActressScrapeStaging(options?: {
   olderThanMs?: number
 }): number {
   const referencedPaths = (
-    getDb().prepare('SELECT staged_path FROM pending_actress_scrape_resources').all() as Array<{
+    getDb().prepare(
+      `SELECT staged_path FROM pending_actress_scrape_resources
+       UNION
+       SELECT r.staged_path
+         FROM agent_metadata_draft_resources r
+         JOIN agent_metadata_drafts d ON d.id = r.draft_id
+        WHERE d.status = 'ready' AND r.field IN ('avatar', 'gallery')`
+    ).all() as Array<{
       staged_path: string
     }>
   ).map((row) => row.staged_path)
@@ -199,6 +206,14 @@ function conflictingNames(
       otherPendingQuery.get(name.normalizedName, pendingId ?? null, pendingId ?? null, actressId)
     )
   })
+}
+
+export function findActressScrapeNameConflicts(
+  actressId: number,
+  fields: ActressScrapeField[],
+  result: ActressScrapeResult
+): Array<{ name: string; normalizedName: string; type: ActressPendingNameType }> {
+  return conflictingNames(actressId, namesFromResult(fields, result))
 }
 
 function readNameClaimants(normalizedName: string): ActressConflictCurrentOwner[] {
@@ -966,6 +981,87 @@ function actressScrapeResultHasUsableValue(result: ActressScrapeResult): boolean
 }
 
 export class ActressIdentityConflictWorkflow {
+  routeStagedScrape(input: {
+    actressId: number
+    plugin: ActressScrapePluginRef
+    queryName: string
+    selectedFields: ActressScrapeField[]
+    applicableFields: ActressScrapeField[]
+    mode: ActressScrapeUpdateMode
+    result: ActressScrapeResult
+    warnings: string[]
+    resources: PendingActressScrapeResource[]
+  }): { pendingId: number; obsoleteStagedPaths: string[] } {
+    const db = getDb()
+    const actress = db
+      .prepare('SELECT revision FROM actresses WHERE id = ?')
+      .get(input.actressId) as { revision: number } | undefined
+    if (!actress) throw new Error('演员不存在')
+    const conflicts = findActressScrapeNameConflicts(
+      input.actressId,
+      input.applicableFields,
+      input.result
+    )
+    if (conflicts.length === 0) throw new Error('演员候选当前不存在名称归属冲突')
+    return db.transaction(() => {
+      const obsoleteStagedPaths = (
+        db.prepare(
+          `SELECT r.staged_path
+             FROM pending_actress_scrape_resources r
+             JOIN pending_actress_scrapes p ON p.id = r.pending_scrape_id
+            WHERE p.actress_id = ?`
+        ).all(input.actressId) as Array<{ staged_path: string }>
+      ).map((row) => row.staged_path)
+      db.prepare('DELETE FROM pending_actress_scrapes WHERE actress_id = ?').run(input.actressId)
+      const createdAt = new Date().toISOString()
+      const pendingId = Number(db.prepare(
+        `INSERT INTO pending_actress_scrapes (
+           actress_id, target_actress_revision, plugin_name, plugin_source, plugin_version,
+           query_name, selected_fields_json, applicable_fields_json, update_mode,
+           result_json, warnings_json, batch_job_id, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`
+      ).run(
+        input.actressId,
+        actress.revision,
+        input.plugin.name,
+        input.plugin.source,
+        input.plugin.version ?? null,
+        input.queryName,
+        JSON.stringify(input.selectedFields),
+        JSON.stringify(input.applicableFields),
+        input.mode,
+        JSON.stringify(input.result),
+        JSON.stringify(input.warnings),
+        createdAt
+      ).lastInsertRowid)
+      const insertConflict = db.prepare(
+        `INSERT INTO pending_actress_scrape_conflicts
+           (pending_scrape_id, normalized_name, name, name_type)
+         VALUES (?, ?, ?, ?)`
+      )
+      for (const conflict of conflicts) {
+        insertConflict.run(pendingId, conflict.normalizedName, conflict.name, conflict.type)
+      }
+      const insertResource = db.prepare(
+        `INSERT INTO pending_actress_scrape_resources
+           (pending_scrape_id, field, position, remote_url, staged_path, width, height)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      for (const resource of input.resources) {
+        insertResource.run(
+          pendingId,
+          resource.field,
+          resource.position,
+          resource.remoteUrl ?? null,
+          resource.stagedPath,
+          resource.width,
+          resource.height
+        )
+      }
+      return { pendingId, obsoleteStagedPaths }
+    })()
+  }
+
   processPreparedScrape(input: PreparedActressScrape): ActressScrapeDisposition {
     const db = getDb()
     const actress = db

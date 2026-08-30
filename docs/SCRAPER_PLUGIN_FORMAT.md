@@ -38,7 +38,7 @@
 - `schemaVersion` 必须为 `1`
 - `kind` 为 `video` 或 `actress`
 - `code` 为 CommonJS 字符串，导入时校验并写入安装目录
-- `supportedFields` 声明本插件支持的刮削字段 id（见下文）；**未声明的字段即使代码返回也会被忽略**
+- `supportedFields` 声明本插件支持的刮削字段 id（见下文），不是返回对象键。影片中 `coverUrl → cover`、`durationSeconds → duration`、`sourceUrl → source`，`actresses` 按 `gender` 对应 `actressesFemale` / `actressesMale`。演员映射独立定义；`mainName` 是运行身份键、`sourceUrl` 是可选调试键，二者都不属于演员 `supportedFields`。**未声明的字段即使代码返回也会被忽略**
 - 内置插件名称为保留名称；同名用户插件会被拒绝安装。编辑内置插件时应另存为不同名称的自定义插件
 
 ### 安装目录（导入后 / Agent 安装后）
@@ -63,7 +63,7 @@ app.getPath('userData')/scraper_plugins/{video|actress}/{plugin-name}/
 |------|------|
 | `ctx.code` | 待刮削番号 |
 | `ctx.proxyUrl` | 当前刮削代理（可能为空） |
-| `ctx.fetchPage(url, options?)` | 拉取页面 HTML；`options`: `readySelector`、`timeoutMs`、`settleWhenText`（`RegExp`）。`timeoutMs` 只计算正常页面加载时间；Cloudflare 人工验证暂停该计时，并使用独立的 3 分钟验证上限。 |
+| `ctx.fetchPage(url, options?): Promise<string>` | 拉取并直接返回页面 HTML 字符串，不返回 `{ html, url }` 对象，也不包含最终 URL。`url` 必须是绝对 `http:` / `https:`；相对路径和 `//host/...` 须先用 `ctx.helpers.absoluteUrl(href, base)` 解析，否则会抛 `Invalid URL`。`options`: `readySelector`、`timeoutMs`、`settleWhenText`（`RegExp`）。`timeoutMs` 只计算正常页面加载时间；Cloudflare 人工验证暂停该计时，并使用独立的 3 分钟验证上限。 |
 | `ctx.fetchBuffer(url, options?)` | 拉取二进制（如图片）；持久缓存选项见下文 |
 | `ctx.cheerio` | Cheerio 模块；**每个 HTML 须先 `const $ = ctx.cheerio.load(html)`**，沙箱内无全局 `$` |
 | `ctx.browser` | 见下方浏览器辅助 |
@@ -71,6 +71,17 @@ app.getPath('userData')/scraper_plugins/{video|actress}/{plugin-name}/
 | `ctx.helpers.normalizeDate(text)` | 规范为 `YYYY-MM-DD`；仅年月时归为 `YYYY-MM-01` |
 | `ctx.helpers.normalizeText(text)` | 折叠空白 |
 | `ctx.helpers.unique(values)` | 去重字符串数组 |
+
+影片沙箱不存在 `ctx.url`、`ctx.pageUrl`、`ctx.taskUrl`、`ctx.target` 或 `ctx.sourceUrl`。开发浏览器的当前 URL 也不会注入插件；插件必须从 `ctx.code` 自行定位详情页。
+
+标准 HTML 解析方式：
+
+```js
+const html = await ctx.fetchPage(ctx.helpers.absoluteUrl(href, searchUrl))
+const $ = ctx.cheerio.load(html)
+```
+
+浏览器开发 observation 的 `pageFacts.links.href` 已按当前页 resolve，供继续浏览。cheerio 读到的是 HTML 原始属性；两者不同时 observation 会另给 `rawHref`。不要把已 resolve 的 href 直接传给 `fetchPage`。
 
 ### 受信内置服务绑定
 
@@ -104,9 +115,11 @@ const imageUrl = ctx.service.publicUrl('/v1/images/primary/provider/id', {
 
 ### 共享浏览器窗口
 
-`ctx.fetchPage` 与 `ctx.browser.*` 共用主进程里唯一一个刮削窗口。`fetchPage` 已在主进程内部排队，并发调用会退化为顺序执行，因此 `Promise.all(urls.map(ctx.fetchPage))` 是安全的，只是不会真正并行、总耗时等于各页之和。
+`ctx.fetchPage` 与 `ctx.browser.*` 共用独立 Electron scraper helper 里的唯一页面。一次刮削从解析到图片下载持有同一独占租约，代理在租约建立时冻结；Cookie、Cloudflare clearance、本地存储和图片响应缓存不会被其他任务串扰。跨任务冲突立即返回 `SCRAPE_BROWSER_BUSY`，不会排队或改写当前页面。
 
-`ctx.browser.*` 不提供这个保证：一串 `click` / `type` / `snapshot` 依赖页面在调用之间保持不动，所以浏览器动作序列必须顺序 `await`，且不可与 `fetchPage` 交叉。
+租约内部的 `fetchPage` 仍按顺序执行，因此 `Promise.all(urls.map(ctx.fetchPage))` 不会让单页 target 并发导航；总耗时仍接近各页之和。helper 使用 Electron 内置 Chromium和既有 `Partitions/scraper` profile，不要求系统浏览器或 Playwright 浏览器下载。
+
+`ctx.browser.*` 保持既有返回契约，但一串 `click` / `type` / `snapshot` 仍依赖页面在调用之间保持不动，所以动作序列必须顺序 `await`，且不可与 `fetchPage` 交叉。
 
 ### `ctx.fetchBuffer` 持久缓存
 
@@ -156,7 +169,7 @@ const body = await ctx.fetchBuffer(url, {
 
 - `null` 或空数组：未匹配。
 - 单个对象：兼容旧插件的单结果形式；`code` 建议提供，省略时主进程使用本次查询番号。
-- 对象数组：搜索页存在多个精确匹配结果时返回全部候选。数组中每个对象都必须提供非空 `code`，任一项无效都会拒绝整次插件结果。
+- 对象数组：搜索结果第一页上番号规范化后完全相等的条目必须全部抓取详情；多于一条时返回全部候选。普通模糊搜索列表、标题包含、前缀匹配和第二页都不是多候选契约的触发条件。未匹配返回 `null` 或空数组，不得返回相似目标。数组中每个对象都必须提供非空 `code`，任一项无效或任一条完全匹配详情失败都会拒绝整次插件结果，不得用其余详情凑成不完整集合。
 
 候选对象除 `code` 外的字段均为可选，但须与 `supportedFields` 一致：
 
@@ -197,7 +210,7 @@ const body = await ctx.fetchBuffer(url, {
 ### 推荐抓取策略
 
 - **直连详情页**：仅当 URL 可由番号可靠推导，或搜索 URL 会跳转到详情页时使用；须用选择器与番号/标题证明命中。
-- **搜索进详情**：搜索页只用于定位详情链接；用 `ctx.helpers.absoluteUrl(href, searchUrl)` 解析链接后再抓详情页，并将 `sourceUrl` 设为详情页 URL。
+- **搜索进详情**：搜索页只用于定位第一页全部番号完全匹配的详情链接；用 `ctx.helpers.absoluteUrl(href, searchUrl)` 解析链接后再抓详情页，并将 `sourceUrl` 设为详情页 URL。规范化后与查询番号逐字符相等的条目必须全部抓取；多于一条返回数组，任一条详情失败则整次失败。不要用模糊匹配、标题包含、第一条回退或第二页补位。
 
 ## 演员插件 `parseActress(ctx)`
 
@@ -209,11 +222,15 @@ const body = await ctx.fetchBuffer(url, {
 | `ctx.aliases` | 别名数组 |
 | 其余 | 与影片相同：`proxyUrl`、`fetchPage`、`fetchBuffer`、`cheerio`、`browser`、`helpers` |
 
+演员沙箱同样不存在 `ctx.url`、`ctx.pageUrl`、`ctx.taskUrl`、`ctx.target` 或 `ctx.sourceUrl`。插件必须从 `ctx.mainName` / `ctx.aliases` 自行搜索资料页。
+
 ### `supportedFields`（actress）
 
 `avatar`、`gallery`、`birthDate`、`nameZh`、`nameEn`、`debutDate`、`heightCm`、`measurements`、`cupSize`、`bloodType`、`zodiac`、`nationality`、`profileSummary`、`aliases`
 
 （`measurements` 对应返回 `bustCm` / `waistCm` / `hipCm`。）
+
+演员结果键与字段 id 的映射为：`avatarUrl → avatar`、`galleryImageUrls → gallery`、`bustCm/waistCm/hipCm → measurements`，其余可声明结果键与字段 id 同名。`mainName` 和 `sourceUrl` 是运行/调试信息，不参与生产字段投影，也不得写入 `supportedFields`。
 
 ### 返回值
 
@@ -235,7 +252,8 @@ const body = await ctx.fetchBuffer(url, {
   nationality: 'Japan',
   profileSummary: '...',
   galleryImageUrls: ['https://...'],
-  aliases: ['...']
+  aliases: ['...'],
+  sourceUrl: 'https://...' // 可选调试来源，不是 supportedFields
 }
 ```
 
@@ -243,7 +261,7 @@ const body = await ctx.fetchBuffer(url, {
 
 - **直连资料页**：URL 可由名称/slug 可靠推导时使用。
 - **搜索进资料页**：依次尝试 `mainName` 与各 `alias`；搜索页仅用于找资料链接。
-- **动态搜索**：若结果通过 AJAX 更新而 URL 不变，用 `fetchPage` 复现对应请求，勿把未变化的 URL 当作失败。
+- **动态搜索**：若结果通过 AJAX 更新而 URL 不变，用 `fetchPage` 复现对应请求（可从站点脚本或开发浏览的 `recentRequests` 还原 method/URL），勿把未变化的 URL 当作失败。插件开发助手按四档确认搜索入口，生产实现同样优先 `fetchPage`，能直连请求时不要把浏览器点选流程写入插件。
 - **头像专用来源**：只提供头像的演员头像源应仅声明 `avatar`，不返回别名或其他资料，也不据此改变演员身份；未精确命中时返回 `null`。
 
 ## 组合刮削器

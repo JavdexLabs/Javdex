@@ -1,0 +1,69 @@
+.modal {
+  /* Size is supplied by the shared small-form Modal contract. */
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.defaultModel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+}
+
+.defaultCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.defaultCopy span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.defaultCopy strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.defaultCopy small {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.meta {
+  display: grid;
+  flex: 1;
+  gap: 8px;
+  margin: 0;
+}
+
+.meta div {
+  display: grid;
+  gap: 2px;
+}
+
+.meta dt {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.meta dd {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -25,11 +25,18 @@ function createOrganization(name: string): number {
 }
 
 function insertVideo(code: string, releaseDate?: string, coverPath?: string): number {
-  return Number(
+  const videoId = Number(
     getDb()
       .prepare('INSERT INTO videos (code, release_date, cover_path) VALUES (?, ?, ?)')
       .run(code, releaseDate ?? null, coverPath ?? null).lastInsertRowid
   )
+  getDb()
+    .prepare(
+      `INSERT INTO library_video_memberships (library_id, video_id, discovery_key)
+       VALUES (1, ?, ?)`
+    )
+    .run(videoId, videoId)
+  return videoId
 }
 
 describe('classification series query and maintenance services', () => {
@@ -220,13 +227,19 @@ describe('classification series query and maintenance services', () => {
       )
       assert.deepEqual(
         videoQueryService
-          .list({ seriesId: older, sortBy: 'release_date', sortDir: 'desc' })
+          .list(
+            { kind: 'library', libraryId: 1 },
+            { seriesId: older, sortBy: 'release_date', sortDir: 'desc' }
+          )
           .items.map((item) => item.code),
         ['SERIES-LATER', 'SERIES-EARLIER', 'SERIES-SORT']
       )
       assert.deepEqual(
         videoQueryService
-          .list({ seriesId: older, sortBy: 'release_date', sortDir: 'asc' })
+          .list(
+            { kind: 'library', libraryId: 1 },
+            { seriesId: older, sortBy: 'release_date', sortDir: 'asc' }
+          )
           .items.map((item) => item.code),
         ['SERIES-EARLIER', 'SERIES-LATER', 'SERIES-SORT']
       )

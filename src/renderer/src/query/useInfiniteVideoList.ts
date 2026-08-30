@@ -1,13 +1,13 @@
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { useEffect, useMemo } from 'react'
-import type { Video, VideoQuery } from '@shared/videoTypes'
+import type { ScopedVideo } from '@shared/catalogTypes'
+import type { CatalogScope } from '@shared/mediaLibraryTypes'
+import { VIDEO_LIST_PAGE_LIMIT_MAX, type VideoQuery } from '@shared/videoTypes'
 import { api } from '../api'
 import { videoKeys } from './queryKeys'
 
-const PAGE_SIZE = 240
-
 export interface InfiniteVideoListResult {
-  videos: Video[]
+  videos: ScopedVideo[]
   total: number
   loading: boolean
   loadingMore: boolean
@@ -18,6 +18,7 @@ export interface InfiniteVideoListResult {
 }
 
 export function useInfiniteVideoList(
+  scope: CatalogScope,
   query: VideoQuery,
   queryHash: string,
   onError: (error: unknown) => void,
@@ -26,12 +27,16 @@ export function useInfiniteVideoList(
   const stableQuery = useMemo(() => ({ ...query }), [query])
 
   const result = useInfiniteQuery({
-    queryKey: videoKeys.list(stableQuery, queryHash),
+    queryKey: videoKeys.list(scope, stableQuery, queryHash),
     enabled,
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
       const offset = typeof pageParam === 'number' ? pageParam : 0
-      return api.videos.list({ ...stableQuery, limit: PAGE_SIZE, offset })
+      return api.videos.list(scope, {
+        ...stableQuery,
+        limit: VIDEO_LIST_PAGE_LIMIT_MAX,
+        offset
+      })
     },
     getNextPageParam: (lastPage, allPages) => {
       const loaded = allPages.reduce((n, p) => n + p.items.length, 0)

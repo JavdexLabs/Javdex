@@ -6,7 +6,9 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   runUserActressPlugin,
+  runUserActressPluginWithLogs,
   setSandboxBufferFetcherForTests,
+  setSandboxPageFetcherForTests,
   validateUserPluginCode
 } from './scraperPluginSandbox'
 
@@ -20,9 +22,82 @@ module.exports = {
 `
 
 describe('scraperPluginSandbox', () => {
-  it('loads cheerio inside eval worker via app-root createRequire', async () => {
+  it('loads cheerio/slim so packaged scrapers do not need undici', async () => {
     await validateUserPluginCode('video', 'cheerio-test', CHEERIO_PLUGIN)
-    assert.ok(true)
+  })
+
+  it('terminates a non-returning plugin worker when the caller aborts', async () => {
+    const controller = new AbortController()
+    const startedAt = Date.now()
+    const pending = runUserActressPluginWithLogs(
+      'abort-test',
+      `module.exports = {
+        async parseActress() {
+          await new Promise(() => {});
+          return null;
+        }
+      };`,
+      'Test Actress',
+      [],
+      undefined,
+      controller.signal
+    )
+    const reason = new Error('test abort')
+    setTimeout(() => controller.abort(reason), 25)
+
+    await assert.rejects(pending, reason)
+    assert.ok(Date.now() - startedAt < 1_000)
+  })
+
+  it('does not report an aborted run as settled while a started host RPC is still running', async () => {
+    let markRpcStarted!: () => void
+    const rpcStarted = new Promise<void>((resolve) => {
+      markRpcStarted = resolve
+    })
+    let releaseRpc!: () => void
+    const rpcBlocked = new Promise<void>((resolve) => {
+      releaseRpc = resolve
+    })
+    setSandboxPageFetcherForTests(async () => {
+      markRpcStarted()
+      await rpcBlocked
+      return '<html><body>done</body></html>'
+    })
+
+    const controller = new AbortController()
+    const reason = new Error('test abort during RPC')
+    const pending = runUserActressPluginWithLogs(
+      'abort-rpc-test',
+      `module.exports = {
+        async parseActress(ctx) {
+          await ctx.fetchPage('https://example.test/profile');
+          return null;
+        }
+      };`,
+      'Test Actress',
+      [],
+      undefined,
+      controller.signal
+    )
+
+    try {
+      await rpcStarted
+      controller.abort(reason)
+      const earlyOutcome = await Promise.race([
+        pending.then(
+          () => 'settled',
+          () => 'settled'
+        ),
+        new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 75))
+      ])
+      assert.equal(earlyOutcome, 'pending')
+
+      releaseRpc()
+      await assert.rejects(pending, reason)
+    } finally {
+      releaseRpc()
+      setSandboxPageFetcherForTests()
+    }
   })
 
   it('serves repeated persistent fetchBuffer calls from the plugin resource cache', async () => {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Copy, FolderOpen, AlertCircle } from 'lucide-react'
 import type { ManualImportResult } from '@shared/libraryTypes'
 import type { Video, VideoResourceImportTarget } from '@shared/videoTypes'
 import { normalizeVideoCode } from '@shared/videoCode'
@@ -6,13 +7,21 @@ import { api } from '../../api'
 import { normalizeOptionalVideoCode } from '../videoResourceImportForm'
 import { useToast } from '../Toast'
 import Button from '../Button'
+import IconButton from '../IconButton'
 import SelectControl from '../SelectControl'
+import { UI_ICON_SM } from '../iconDefaults'
+import styles from './UnrecognizedRow.module.css'
+import { ALL_CATALOG_SCOPE } from '../../query/catalogScopes'
 
-/** One editable row in the "unrecognized files" list: manual import or rename on disk. */
+/** One editable resolution card in the audit list: manual import or rename on disk. */
 export default function UnrecognizedRow({
+  libraryId,
+  rootId,
   path: filePath,
   onResolved
 }: {
+  libraryId: number
+  rootId: number
   path: string
   onResolved: (oldPath: string) => void
 }): JSX.Element {
@@ -43,10 +52,13 @@ export default function UnrecognizedRow({
     let cancelled = false
     const timer = window.setTimeout(() => {
       setLoadingTargets(true)
-      void api.videos.list({ search: normalized, limit: 100, offset: 0 })
+      void api.videos
+        .list(ALL_CATALOG_SCOPE, { search: normalized, limit: 100, offset: 0 })
         .then((result) => {
           if (!cancelled) {
-            setMatchingVideos(result.items.filter((video) => normalizeVideoCode(video.code) === normalized))
+            setMatchingVideos(
+              result.items.filter((video) => normalizeVideoCode(video.code) === normalized)
+            )
           }
         })
         .catch((error) => {
@@ -88,7 +100,15 @@ export default function UnrecognizedRow({
     if (busy || !canImport) return
     setBusy('import')
     try {
-      finishImport(await api.scan.importManual(filePath, codeTrimmed, selectedTarget()))
+      finishImport(
+        await api.scan.importManual(
+          libraryId,
+          rootId,
+          filePath,
+          codeTrimmed,
+          selectedTarget()
+        )
+      )
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     } finally {
@@ -101,6 +121,8 @@ export default function UnrecognizedRow({
     setBusy('rename')
     try {
       const res = await api.scan.rename(
+        libraryId,
+        rootId,
         filePath,
         renameTrimmed,
         codeTrimmed,
@@ -119,79 +141,115 @@ export default function UnrecognizedRow({
     }
   }
 
-  return (
-    <div className="scan-unrec-row">
-      <div className="scan-unrec-head">
-        <strong className="scan-unrec-name" title={filePath}>
-          {fullName}
-        </strong>
-        <span className="scan-unrec-dir" title={filePath}>
-          {filePath}
-        </span>
-      </div>
-      <div className="scan-unrec-actions">
-        <div className="scan-unrec-edit">
-        <input
-          className="text-input scan-unrec-code-input"
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') void doManualImport()
-          }}
-          placeholder="输入番号"
-          aria-label={`${fullName} 番号`}
-        />
-        <SelectControl
-          className="scan-unrec-target-select"
-          value={targetValue}
-          onChange={(event) => setTargetValue(event.target.value)}
-          disabled={busy !== null || loadingTargets || !codeTrimmed}
-          aria-label={`${fullName} 导入目标`}
-        >
-          <option value="">{loadingTargets ? '查找中…' : '选择目标'}</option>
-          {matchingVideos.map((video) => (
-            <option key={video.id} value={`existing:${video.id}`}>
-              ID {video.id} · {video.code}{video.title ? ` · ${video.title}` : ''}
-            </option>
-          ))}
-          <option value="new">新建独立影片</option>
-        </SelectControl>
-        <Button
-          type="button"
-          variant="primary"
+  const copyPath = async (): Promise<void> => {
+    await navigator.clipboard.writeText(filePath)
+    toast.show('路径已复制', 'success')
+  }
 
-          size="sm"
-          disabled={busy !== null || !canImport}
-          onClick={() => void doManualImport()}
-        >
-          {busy === 'import' ? '处理中…' : '导入'}
-        </Button>
+  const revealFile = async (): Promise<void> => {
+    const result = await api.scan.revealAuditFile(libraryId, filePath)
+    if (!result.ok) {
+      toast.show(result.fileMissing ? '文件已不存在' : result.error || '无法打开目录', 'error')
+    }
+  }
+
+  return (
+    <div className={styles.root}>
+      <div className={styles.head}>
+        <div className={styles.titleWrap}>
+          <span className={styles.badge}>
+            <AlertCircle size={13} aria-hidden />
+            无法识别番号
+          </span>
+          <strong className={styles.name} title={fullName}>
+            {fullName}
+          </strong>
         </div>
-        <details className="scan-unrec-rename">
-        <summary>重命名文件（可选）</summary>
-        <div className="scan-unrec-edit scan-unrec-edit--rename">
-          <input
-            className="text-input scan-unrec-rename-input"
-            value={renameBase}
-            onChange={(e) => setRenameBase(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void doRename()
-            }}
-            placeholder="新文件名（需先选择上方导入目标）"
-            aria-label={`${fullName} 新文件名`}
+        <div className={styles.quickActions}>
+          <IconButton
+            size="sm"
+            className={styles.iconButton}
+            icon={<Copy {...UI_ICON_SM} />}
+            label="复制完整路径"
+            onClick={() => void copyPath()}
           />
-          {ext && <span className="scan-unrec-ext">{ext}</span>}
+          <IconButton
+            size="sm"
+            className={styles.iconButton}
+            icon={<FolderOpen {...UI_ICON_SM} />}
+            label="在文件夹中显示"
+            onClick={() => void revealFile()}
+          />
+        </div>
+      </div>
+
+      <div className={styles.path} title={filePath}>
+        {filePath}
+      </div>
+
+      <div className={styles.actions}>
+        <div className={styles.edit}>
+          <input
+            className={`text-input ${styles.codeInput}`}
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void doManualImport()
+            }}
+            placeholder="输入番号（如 ABC-123）"
+            aria-label={`${fullName} 番号`}
+          />
+          <SelectControl
+            className={styles.targetSelect}
+            value={targetValue}
+            onChange={(event) => setTargetValue(event.target.value)}
+            disabled={busy !== null || loadingTargets || !codeTrimmed}
+            aria-label={`${fullName} 导入目标`}
+          >
+            <option value="">{loadingTargets ? '查找中…' : '选择目标'}</option>
+            {matchingVideos.map((video) => (
+              <option key={video.id} value={`existing:${video.id}`}>
+                ID {video.id} · {video.code}
+                {video.title ? ` · ${video.title}` : ''}
+              </option>
+            ))}
+            <option value="new">新建独立影片</option>
+          </SelectControl>
           <Button
             type="button"
-
+            variant="primary"
             size="sm"
-            disabled={busy !== null || !canRename}
-            onClick={() => void doRename()}
+            disabled={busy !== null || !canImport}
+            onClick={() => void doManualImport()}
           >
-            {busy === 'rename' ? '处理中…' : '重命名并导入'}
+            {busy === 'import' ? '处理中…' : '导入'}
           </Button>
         </div>
-      </details>
+
+        <details className={styles.rename}>
+          <summary>重命名源文件（可选）</summary>
+          <div className={`${styles.edit} ${styles.renameEdit}`}>
+            <input
+              className={`text-input ${styles.renameInput}`}
+              value={renameBase}
+              onChange={(e) => setRenameBase(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void doRename()
+              }}
+              placeholder="新文件名（需先选择上方导入目标）"
+              aria-label={`${fullName} 新文件名`}
+            />
+            {ext && <span className={styles.extension}>{ext}</span>}
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy !== null || !canRename}
+              onClick={() => void doRename()}
+            >
+              {busy === 'rename' ? '处理中…' : '重命名并导入'}
+            </Button>
+          </div>
+        </details>
       </div>
     </div>
   )

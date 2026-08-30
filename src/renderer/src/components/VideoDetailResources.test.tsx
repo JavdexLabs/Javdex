@@ -33,7 +33,9 @@ afterEach(() => {
 function resource(overrides: Partial<VideoResourceDetail> = {}): VideoResourceDetail {
   return {
     id: 11,
+    library_id: 1,
     video_id: 1,
+    root_id: null,
     kind: 'web',
     size_bytes: null,
     duration_seconds: null,
@@ -81,10 +83,17 @@ function video(resources: VideoResourceDetail[]): VideoDetail {
   }
 }
 
-function renderResources(resources: VideoResourceDetail[]): void {
+function renderResources(
+  resources: VideoResourceDetail[],
+  onMoveResource?: (resource: VideoResourceDetail) => void
+): void {
   act(() => {
     renderer = TestRenderer.create(
-      <VideoDetailSecondaryMeta video={video(resources)} onAddResource={() => undefined} />
+      <VideoDetailSecondaryMeta
+        video={video(resources)}
+        onMoveResource={onMoveResource}
+        onAddResource={() => undefined}
+      />
     )
   })
 }
@@ -148,5 +157,33 @@ describe('video detail resource actions', () => {
     assert.match(menu, /在文件夹中显示/)
     assert.match(menu, /删除 STRM 源文件/)
     assert.doesNotMatch(menu, /编辑 STRM 文本|打开 STRM 文本/)
+  })
+
+  it('exposes the cross-library move command for both links and root-managed resources', () => {
+    const moved: VideoResourceDetail[] = []
+    const target = resource()
+    renderResources([target], (selected) => moved.push(selected))
+
+    act(() => {
+      renderer?.root.findByProps({ 'aria-label': '更多' }).props.onClick()
+    })
+    const linkMove = renderer?.root
+      .findAllByType('button')
+      .find((button) => button.children.join('') === '移动到其它媒体库')
+    assert.ok(linkMove)
+    act(() => linkMove.props.onClick())
+    assert.deepEqual(moved, [target])
+
+    const local = resource({ kind: 'local', display_locator: '/library/TEST-001.mp4' })
+    renderResources([local], (selected) => moved.push(selected))
+    act(() => {
+      renderer?.root.findByProps({ 'aria-label': '更多' }).props.onClick()
+    })
+    const localMove = renderer?.root
+      .findAllByType('button')
+      .find((button) => button.children.join('') === '移动到其它媒体库')
+    assert.ok(localMove, 'local resources keep an explicit command that can explain root migration')
+    act(() => localMove.props.onClick())
+    assert.equal(moved.at(-1), local)
   })
 })

@@ -53,6 +53,18 @@ describe('pluginDevPageFormat', () => {
     assert.match(dom, /元数据属性区/)
   })
 
+  it('formats inspect locale anchors without treating them as a language API', () => {
+    const dom = formatPageDomForPrompt({
+      ...tokyolibPage,
+      localeLinks: [
+        { text: '简体中文', href: 'https://www.tokyolib.com/cn', rawHref: '/cn' }
+      ]
+    })
+    assert.match(dom, /LOCALE_LINKS/)
+    assert.match(dom, /不是页面语言 API/)
+    assert.match(dom, /简体中文 -> https:\/\/www\.tokyolib\.com\/cn rawHref=\/cn/)
+  })
+
   it('includes link region markers', () => {
     const links = formatPageLinksForPrompt(tokyolibPage)
     assert.match(links, /region=breadcrumb/)
@@ -63,5 +75,24 @@ describe('pluginDevPageFormat', () => {
     const prompt = formatPageInsightForPrompt(tokyolibPage)
     assert.match(prompt, /DEFINITION_LISTS/)
     assert.match(prompt, /metadata 区链接优先/)
+  })
+
+  it('keeps forms and prioritized links when raw DOM regions are very large', () => {
+    const prompt = formatPageInsightForPrompt({
+      ...tokyolibPage,
+      forms: [{
+        selector: '#search',
+        method: 'get',
+        action: '/search',
+        inputs: [{ selector: '#keyword', name: 'q', type: 'text' }],
+        buttons: []
+      }],
+      links: [{ text: 'MILK-295', href: '/videos/milk-295', region: 'other' }],
+      domRegions: [{ label: '巨型主区块', selector: 'main', html: 'x'.repeat(20_000) }]
+    })
+
+    assert.match(prompt, /#keyword/)
+    assert.match(prompt, /MILK-295 -> \/videos\/milk-295/)
+    assert.ok(Array.from(prompt).length <= 12_000)
   })
 })

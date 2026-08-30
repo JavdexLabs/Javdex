@@ -25,16 +25,16 @@ export function resetLlmFetchProxyCacheForTests(): void {
 }
 
 /** Fetch for LLM provider APIs; routes through settings.llmProxyUrl when set. */
-export async function llmFetch(url: string, init?: RequestInit): Promise<Response> {
+export async function llmFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
   const dispatcher = resolveLlmDispatcher()
   if (!dispatcher) {
-    return fetch(url, init)
+    return fetch(input, init)
   }
 
   const undiciInit: UndiciRequestInit = {
     ...(init as UndiciRequestInit),
     dispatcher
   }
-  const response = await undiciFetch(url, undiciInit)
+  const response = await undiciFetch(input as string | URL, undiciInit)
   return response as unknown as Response
 }

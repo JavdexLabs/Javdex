@@ -1,8 +1,28 @@
 /** Single source of truth for route patterns used by Routes, matchers, and builders. */
 export const ROUTE_PATH = {
+  home: '/',
+  homeVideoStack: '/home/video/:videoId',
+  homeActressStack: '/home/video/:videoId/actress/:actressId',
+  search: '/search',
+  searchTree: '/search/*',
+  searchVideoStack: '/search/video/:videoId',
+  searchActressStack: '/search/video/:videoId/actress/:actressId',
+  mediaLibrary: '/libraries/:libraryId',
+  mediaLibraryTree: '/libraries/:libraryId/*',
+  mediaLibraryVideoStack: '/libraries/:libraryId/video/:videoId',
+  mediaLibraryActressStack:
+    '/libraries/:libraryId/video/:videoId/actress/:actressId',
+  /** Legacy media-library settings entry; redirects into the unified settings workspace. */
+  mediaLibrarySettings: '/libraries/:libraryId/settings/:tab',
+  /** Former named entry; redirects to the default active media library. */
+  legacyLibrary: '/library',
+  /** @deprecated `/` is now the home route. Kept until the old library shell is migrated. */
   library: '/',
+  /** @deprecated Compatibility entry for the former single-library detail stack. */
   libraryDetail: '/detail/:id',
+  /** @deprecated Compatibility entry for the former single-library detail stack. */
   libraryDetailOpen: '/detail/*',
+  /** @deprecated Compatibility entry for the former single-library detail stack. */
   libraryActressStack: '/detail/:id/actress/:actressId',
   actresses: '/actresses',
   actressTree: '/actresses/*',
@@ -40,6 +60,12 @@ export const ROUTE_PATH = {
 } as const
 
 export const ROUTE_SEGMENT = {
+  homeVideo: 'home/video/:videoId',
+  searchVideo: 'video/:videoId',
+  mediaLibraryVideo: 'video/:videoId',
+  /** Legacy media-library settings segment. */
+  mediaLibrarySettings: 'settings/:tab',
+  /** @deprecated Compatibility segment for the former single-library detail stack. */
   libraryDetail: 'detail/:id',
   detailActress: 'actress/:actressId',
   actressDetail: ':id',
@@ -57,7 +83,19 @@ export const ROUTE_SEGMENT = {
 } as const
 
 export const ROUTE_MATCH = {
+  homeVideoOpen: '/home/video/*',
+  homeVideoStack: ROUTE_PATH.homeVideoStack,
+  homeActressStack: ROUTE_PATH.homeActressStack,
+  searchVideoOpen: '/search/video/*',
+  searchVideoStack: ROUTE_PATH.searchVideoStack,
+  searchActressStack: ROUTE_PATH.searchActressStack,
+  mediaLibraryVideoOpen: '/libraries/:libraryId/video/*',
+  mediaLibraryVideoStack: ROUTE_PATH.mediaLibraryVideoStack,
+  mediaLibraryActressStack: ROUTE_PATH.mediaLibraryActressStack,
+  mediaLibrarySettings: ROUTE_PATH.mediaLibrarySettings,
+  /** @deprecated Compatibility matcher for the former single-library detail stack. */
   libraryDetailOpen: ROUTE_PATH.libraryDetailOpen,
+  /** @deprecated Compatibility matcher for the former single-library detail stack. */
   libraryActressStack: ROUTE_PATH.libraryActressStack,
   playlistDetailOpen: ROUTE_PATH.playlistDetail,
   playlistVideoStack: ROUTE_PATH.playlistVideoStack,

@@ -1,7 +1,16 @@
-import type { PluginDevAgentContextStats, PluginDevAgentPhase, PluginDevDryRunResult, PluginDevSessionStatus, PluginDevVerificationReport } from '@shared/pluginDevTypes'
+import type {
+  PluginDevAgentContextStats,
+  PluginDevAgentPhase,
+  PluginDevDryRunResult,
+  PluginExecutionArtifact,
+  PluginRunAcceptanceOutcome,
+  PluginDevPendingApproval,
+  PluginDevPendingUserRequest,
+  PluginDevSessionStatus
+} from '@shared/pluginDevTypes'
 import PluginDevConversation from './PluginDevConversation'
 import PluginDevResultPanel from './PluginDevResultPanel'
-import { agentPhaseLabel, type PluginDevAgentTab, type PluginDevConversationItem, type PluginKind } from './types'
+import { type PluginDevAgentTab, type PluginDevConversationItem, type PluginKind } from './types'
 import { WorkbenchRail, WorkbenchTabs } from '../workbench'
 
 export default function PluginDevAgentRail({
@@ -16,21 +25,30 @@ export default function PluginDevAgentRail({
   activeTool,
   conversationItems,
   dryRun,
-  verification,
+  execution,
+  acceptance,
   resultStale,
   installState,
   waitingUserReason,
+  artifactReady,
+  pendingApproval,
+  pendingUserRequest,
   feedbackText,
   busy,
   canSend,
   canCancelAgent,
+  canClearHistory,
+  clearHistoryBusy,
   canExportWorkLog,
   exportWorkLogBusy,
   onTabChange,
   onFeedbackChange,
   onSend,
   onCancelAgent,
-  onContinueChallenge,
+  onClearHistory,
+  onContinueBrowserInteraction,
+  onFieldMapping,
+  onApprovalDecision,
   onExportWorkLog
 }: {
   kind: PluginKind
@@ -44,31 +62,33 @@ export default function PluginDevAgentRail({
   activeTool: string | null
   conversationItems: PluginDevConversationItem[]
   dryRun: PluginDevDryRunResult | null
-  verification: PluginDevVerificationReport | null
+  execution: PluginExecutionArtifact | null
+  acceptance: PluginRunAcceptanceOutcome | null
   resultStale: boolean
   installState: 'not-installed' | 'dirty' | 'synced'
   waitingUserReason: string | null
+  artifactReady: boolean
+  pendingApproval: PluginDevPendingApproval | null
+  pendingUserRequest: PluginDevPendingUserRequest | null
   feedbackText: string
   busy: boolean
   canSend: boolean
   canCancelAgent: boolean
+  canClearHistory: boolean
+  clearHistoryBusy: boolean
   canExportWorkLog: boolean
   exportWorkLogBusy: boolean
   onTabChange: (tab: PluginDevAgentTab) => void
   onFeedbackChange: (value: string) => void
   onSend: () => void
   onCancelAgent: () => void
-  onContinueChallenge: () => void
+  onClearHistory: () => void
+  onContinueBrowserInteraction: () => void
+  onFieldMapping: (optionId: string) => void
+  onApprovalDecision: (decision: 'approve' | 'deny') => void
   onExportWorkLog: () => void
 }): JSX.Element {
   const running = agentStatus === 'running' && busy
-  const phaseItems: PluginDevAgentPhase[] = [
-    'discover',
-    'implement',
-    'dry_run',
-    'verify',
-    'finish'
-  ]
 
   return (
     <WorkbenchRail className="plugin-dev-rail plugin-dev-rail--agent">
@@ -92,19 +112,6 @@ export default function PluginDevAgentRail({
         onChange={onTabChange}
       />
 
-      <div className="plugin-dev-agent-flow" aria-label="Agent 流程">
-        <div className="plugin-dev-phase-track">
-          {phaseItems.map((phase) => (
-            <span
-              key={phase}
-              className={`plugin-dev-phase-chip ${agentPhase === phase ? 'is-active' : ''}`}
-            >
-              {agentPhaseLabel(phase)}
-            </span>
-          ))}
-        </div>
-      </div>
-
       <div className="plugin-dev-agent-body">
         <div
           id="plugin-dev-panel-conversation"
@@ -126,13 +133,21 @@ export default function PluginDevAgentRail({
             busy={busy}
             canSend={canSend}
             canCancelAgent={canCancelAgent}
+            canClearHistory={canClearHistory}
+            clearHistoryBusy={clearHistoryBusy}
             canExportWorkLog={canExportWorkLog}
             exportWorkLogBusy={exportWorkLogBusy}
             waitingUserReason={waitingUserReason}
+            artifactReady={artifactReady}
+            pendingApproval={pendingApproval}
+            pendingUserRequest={pendingUserRequest}
             onFeedbackChange={onFeedbackChange}
             onSend={onSend}
             onCancelAgent={onCancelAgent}
-            onContinueChallenge={onContinueChallenge}
+            onClearHistory={onClearHistory}
+            onContinueBrowserInteraction={onContinueBrowserInteraction}
+            onFieldMapping={onFieldMapping}
+            onApprovalDecision={onApprovalDecision}
             onExportWorkLog={onExportWorkLog}
           />
         </div>
@@ -146,7 +161,8 @@ export default function PluginDevAgentRail({
           <PluginDevResultPanel
             kind={kind}
             dryRun={dryRun}
-            verification={verification}
+            execution={execution}
+            acceptance={acceptance}
             stale={resultStale}
             installState={installState}
           />

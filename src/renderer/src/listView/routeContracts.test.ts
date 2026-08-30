@@ -26,8 +26,10 @@ import {
   navigateToActressFromVideoDetail,
   navigateBackFromActressDetail,
   navigateBackFromVideoDetail,
+  navigateToVideoListSurface,
   navigateToDirectorDetail,
   navigateToOrganizationDetail,
+  navigateToPlaylistList,
   navigateToSeriesDetail,
   navigateToVideoDetail
 } from './listNavigation'
@@ -59,7 +61,12 @@ import {
   playlistDetailPath,
   playlistVideoDetailPath
 } from './playlistRoutes'
-import { resolveSettingsRoute, settingsPath, settingsPluginDevPath } from '../settings/settingsRoutes'
+import {
+  SETTINGS_GROUPS,
+  resolveSettingsRoute,
+  settingsPath,
+  settingsPluginDevPath
+} from '../settings/settingsRoutes'
 import {
   parsePendingCenterSearch,
   pendingCenterPath,
@@ -139,6 +146,10 @@ describe('route builders and parsers', () => {
     assert.equal(pendingCenterPath({ type: 'all' }), '/pending')
     assert.equal(pendingCenterPath({ type: 'scan' }), '/pending?type=scan')
     assert.equal(
+      pendingCenterPath({ type: 'scan', libraryId: 7 }),
+      '/pending?type=scan&lib=7'
+    )
+    assert.equal(
       pendingCenterPath({ type: 'scrape', videoId: 42 }),
       '/pending?type=scrape&videoId=42'
     )
@@ -153,7 +164,8 @@ describe('route builders and parsers', () => {
     assert.deepEqual(parsePendingCenterSearch(new URLSearchParams('type=scrape&item=scrape:7')), {
       type: 'scrape',
       item: { domain: 'scrape', id: '7' },
-      videoId: null
+      videoId: null,
+      libraryId: null
     })
     // Actress ids are normalized names, so only the first separator splits the key.
     assert.deepEqual(parsePendingItemKey('actress:a:b'), { domain: 'actress', id: 'a:b' })
@@ -161,7 +173,14 @@ describe('route builders and parsers', () => {
     assert.deepEqual(parsePendingCenterSearch(new URLSearchParams('')), {
       type: 'all',
       item: null,
-      videoId: null
+      videoId: null,
+      libraryId: null
+    })
+    assert.deepEqual(parsePendingCenterSearch(new URLSearchParams('type=scan&lib=7')), {
+      type: 'scan',
+      item: null,
+      videoId: null,
+      libraryId: 7
     })
     assert.equal(pendingVideoDetailPath(42), '/pending/video/42')
     assert.equal(pendingVideoActressPath(42, 7), '/pending/video/42/actress/7')
@@ -222,7 +241,9 @@ describe('actress avatar filter query contract', () => {
 
   it('returns to the actress list without losing its query state', () => {
     const destinations: unknown[] = []
-    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
     const location = {
       pathname: '/actresses/12',
       search: '?q=sara&status=failed',
@@ -245,7 +266,6 @@ describe('actress avatar filter query contract', () => {
 
     assert.notEqual(actressQueryHash(withAvatar), actressQueryHash(withoutAvatar))
     assert.notEqual(actressQueryHash(withoutAvatar), actressQueryHash(withoutFaceAvatar))
-    assert.equal(actressQueryHash(new URLSearchParams()), actressQueryHash(new URLSearchParams()))
   })
 })
 
@@ -337,7 +357,11 @@ describe('actress status filter query contract', () => {
 describe('primary navigation memory', () => {
   it('restores query state per list and removes unrelated nested query keys', () => {
     clearPrimaryNavigationMemory()
-    rememberPrimaryListLocation('/detail/42', '?q=hero&status=1&resources=local,web')
+    rememberPrimaryListLocation(
+      '/libraries/2/video/42',
+      '?q=hero&status=1&resources=local,web&lib=9'
+    )
+    rememberPrimaryListLocation('/search/video/42', '?q=hero&libraries=2,7&lib=2')
     rememberPrimaryListLocation('/actresses/8', '?q=sara&gender=female')
     rememberPrimaryListLocation('/facet/director/d/21', '?q=miike&sort=rating')
     rememberPrimaryListLocation('/pending/video/42', '?type=scrape&item=scrape:7&videoId=42&q=drop')
@@ -346,9 +370,13 @@ describe('primary navigation memory', () => {
       '?q=studio&sort=updated_at&dir=asc&status=1'
     )
 
-    assert.deepEqual(primaryNavigationTarget('/'), {
-      pathname: '/',
+    assert.deepEqual(primaryNavigationTarget('/libraries/2'), {
+      pathname: '/libraries/2',
       search: '?q=hero&status=1&resources=local%2Cweb'
+    })
+    assert.deepEqual(primaryNavigationTarget('/search'), {
+      pathname: '/search',
+      search: '?q=hero&libraries=2%2C7'
     })
     assert.deepEqual(primaryNavigationTarget('/actresses'), {
       pathname: '/actresses',
@@ -371,13 +399,13 @@ describe('primary navigation memory', () => {
 
   it('persists search only when leaving a list root', () => {
     clearPrimaryNavigationMemory()
-    syncPrimaryNavigationMemory('/', '?status=1')
-    syncPrimaryNavigationMemory('/', '?status=2')
-    assert.deepEqual(primaryNavigationTarget('/'), { pathname: '/' })
+    syncPrimaryNavigationMemory('/libraries/2', '?status=1')
+    syncPrimaryNavigationMemory('/libraries/2', '?status=2')
+    assert.deepEqual(primaryNavigationTarget('/libraries/2'), { pathname: '/libraries/2' })
 
     syncPrimaryNavigationMemory('/actresses', '')
-    assert.deepEqual(primaryNavigationTarget('/'), {
-      pathname: '/',
+    assert.deepEqual(primaryNavigationTarget('/libraries/2'), {
+      pathname: '/libraries/2',
       search: '?status=2'
     })
 
@@ -387,56 +415,121 @@ describe('primary navigation memory', () => {
 
   it('forgets a root so cross-nav no longer restores it', () => {
     clearPrimaryNavigationMemory()
-    rememberPrimaryListLocation('/', '?status=1&q=hero')
-    forgetPrimaryListLocation('/')
-    assert.deepEqual(primaryNavigationTarget('/'), { pathname: '/' })
+    rememberPrimaryListLocation('/libraries/2', '?status=1&q=hero')
+    forgetPrimaryListLocation('/libraries/2')
+    assert.deepEqual(primaryNavigationTarget('/libraries/2'), { pathname: '/libraries/2' })
   })
 
   it('resolves same-section vs cross-section sidebar targets', () => {
     clearPrimaryNavigationMemory()
-    rememberPrimaryListLocation('/', '?status=1')
+    rememberPrimaryListLocation('/libraries/2', '?status=1')
 
-    assert.equal(resolvePrimaryNavTarget('/', '/', '?status=1'), null)
-    assert.deepEqual(resolvePrimaryNavTarget('/', '/detail/9', '?status=1'), {
-      pathname: '/',
+    assert.equal(resolvePrimaryNavTarget('/libraries/2', '/libraries/2', '?status=1'), null)
+    assert.deepEqual(resolvePrimaryNavTarget('/libraries/2', '/libraries/2/video/9', '?status=1'), {
+      pathname: '/libraries/2',
       search: '?status=1'
     })
-    assert.deepEqual(resolvePrimaryNavTarget('/', '/actresses', ''), {
-      pathname: '/',
+    assert.deepEqual(resolvePrimaryNavTarget('/libraries/2', '/actresses', ''), {
+      pathname: '/libraries/2',
       search: '?status=1'
     })
     assert.deepEqual(resolvePrimaryNavTarget('/actresses', '/', '?status=1'), {
       pathname: '/actresses'
     })
     assert.equal(
-      resolvePrimaryNavTarget('/pending', '/pending', '?tab=scrape&id=7'),
+      resolvePrimaryNavTarget('/pending', '/pending', '?type=scrape&item=scrape:7'),
       null
     )
     assert.deepEqual(
-      resolvePrimaryNavTarget('/pending', '/pending/video/42', '?tab=scrape&id=7'),
-      { pathname: '/pending', search: '?tab=scrape&id=7' }
+      resolvePrimaryNavTarget('/pending', '/pending/video/42', '?type=scrape&item=scrape:7'),
+      { pathname: '/pending', search: '?type=scrape&item=scrape%3A7' }
     )
   })
 
   it('builds nav link href from current search when active', () => {
     clearPrimaryNavigationMemory()
-    rememberPrimaryListLocation('/', '?status=9')
+    rememberPrimaryListLocation('/libraries/2', '?status=1')
 
-    assert.deepEqual(primaryNavLinkTo('/', '/', '?status=1'), {
-      pathname: '/',
+    assert.deepEqual(primaryNavLinkTo('/libraries/2', '/libraries/2', '?status=2'), {
+      pathname: '/libraries/2',
+      search: '?status=2'
+    })
+    assert.deepEqual(primaryNavLinkTo('/libraries/2', '/actresses', ''), {
+      pathname: '/libraries/2',
       search: '?status=1'
     })
-    assert.deepEqual(primaryNavLinkTo('/', '/actresses', ''), {
-      pathname: '/',
-      search: '?status=9'
-    })
+    assert.deepEqual(primaryNavLinkTo('/', '/actresses', ''), { pathname: '/' })
+    assert.deepEqual(primaryNavLinkTo('/', '/home/video/8', '?lib=2'), { pathname: '/' })
   })
 })
 
 describe('navigation helpers', () => {
+  it('removes playlist-detail resource filters when returning to the playlist list', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
+    navigateToPlaylistList(navigate, {
+      pathname: '/playlists/4/8',
+      search: '?q=待看&resources=web,none&sort=release_date',
+      hash: '',
+      state: null,
+      key: 'playlist'
+    } as Location)
+
+    assert.deepEqual(destinations, [{ pathname: '/playlists', search: 'q=%E5%BE%85%E7%9C%8B' }])
+  })
+
+  it('keeps home, search and media-library detail stacks scoped and reversible', () => {
+    const destinations: unknown[] = []
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
+
+    const home = {
+      pathname: '/',
+      search: '',
+      hash: '',
+      state: null,
+      key: 'home'
+    } as Location
+    navigateToVideoDetail(navigate, home, 8, { libraryId: 2 })
+    const homeVideo = { ...home, pathname: '/home/video/8', search: '?lib=2' } as Location
+    navigateToActressFromVideoDetail(navigate, homeVideo, 8, 7)
+    navigateBackFromVideoDetail(navigate, homeVideo)
+    navigateToVideoListSurface(navigate, homeVideo, { tags: '3' }, { libraryId: 2 })
+
+    const search = { ...home, pathname: '/search', search: '?q=hero&libraries=2,7' } as Location
+    navigateToVideoDetail(navigate, search, 9, { libraryId: 7 })
+    const searchVideo = {
+      ...search,
+      pathname: '/search/video/9',
+      search: '?q=hero&libraries=2,7&lib=7'
+    } as Location
+    navigateBackFromVideoDetail(navigate, searchVideo)
+
+    const library = { ...home, pathname: '/libraries/4', search: '?status=1' } as Location
+    navigateToVideoDetail(navigate, library, 10, { libraryId: 99 })
+    const libraryVideo = { ...library, pathname: '/libraries/4/video/10' } as Location
+    navigateBackFromVideoDetail(navigate, libraryVideo)
+
+    assert.deepEqual(destinations, [
+      { pathname: '/home/video/8', search: 'lib=2' },
+      { pathname: '/home/video/8/actress/7', search: '?lib=2' },
+      { pathname: '/', search: '' },
+      { pathname: '/libraries/2', search: 'tags=3' },
+      { pathname: '/search/video/9', search: 'q=hero&libraries=2%2C7&lib=7' },
+      { pathname: '/search', search: 'q=hero&libraries=2%2C7' },
+      { pathname: '/libraries/4/video/10', search: 'status=1' },
+      { pathname: '/libraries/4', search: 'status=1' }
+    ])
+  })
+
   it('closes nested actress details back to their parent video context', () => {
     const destinations: unknown[] = []
-    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
     const paths = [
       ['/detail/8/actress/7', '/detail/8'],
       ['/actresses/3/8/actress/7', '/actresses/3/8'],
@@ -464,7 +557,9 @@ describe('navigation helpers', () => {
 
   it('keeps stable series identity and release direction through its detail stack', () => {
     const destinations: unknown[] = []
-    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
     const list = {
       pathname: '/facet/series',
       search: '?q=collection&sort=updated_at&dir=asc',
@@ -496,7 +591,9 @@ describe('navigation helpers', () => {
 
   it('keeps director identity and query state through its stable detail stack', () => {
     const destinations: unknown[] = []
-    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
     const list = {
       pathname: '/facet/director',
       search: '?q=lee',
@@ -538,7 +635,9 @@ describe('navigation helpers', () => {
 
   it('keeps classification query only inside the same classification stack', () => {
     const destinations: unknown[] = []
-    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
     const search = '?q=kept&sort=updated_at&dir=asc'
 
     navigateToOrganizationDetail(
@@ -605,7 +704,9 @@ describe('navigation helpers', () => {
 
   it('keeps video and actress navigation inside the pending workbench stack', () => {
     const destinations: unknown[] = []
-    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
     const pending = {
       pathname: '/pending',
       search: '?tab=scrape&id=7&videoId=42',
@@ -631,7 +732,9 @@ describe('navigation helpers', () => {
 
   it('opens actress detail from the pending inbox and returns to it', () => {
     const destinations: unknown[] = []
-    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
     const pending = {
       pathname: '/pending',
       search: '?type=actress&item=actress%3Aname',
@@ -655,8 +758,25 @@ describe('navigation helpers', () => {
 describe('settings route contract', () => {
   it('builds canonical settings paths and resolves valid sections', () => {
     assert.equal(settingsPath('overview'), '/settings/overview/status')
+    assert.equal(settingsPath('library'), '/settings/library/sources')
     assert.equal(settingsPath('network'), '/settings/network/proxy')
+    assert.deepEqual(SETTINGS_GROUPS.slice(0, 2).map((group) => group.id), [
+      'overview',
+      'library'
+    ])
+    assert.deepEqual(SETTINGS_GROUPS[1].tabs[0], {
+      id: 'sources',
+      label: '来源与扫描'
+    })
     assert.equal(settingsPluginDevPath(), '/settings/plugin-dev')
+    assert.deepEqual(resolveSettingsRoute('/settings/library/paths'), {
+      group: SETTINGS_GROUPS[1],
+      tab: 'sources'
+    })
+    assert.deepEqual(resolveSettingsRoute('/settings/library/scan'), {
+      group: SETTINGS_GROUPS[1],
+      tab: 'sources'
+    })
     assert.deepEqual(resolveSettingsRoute('/settings/network/proxy'), {
       group: {
         id: 'network',

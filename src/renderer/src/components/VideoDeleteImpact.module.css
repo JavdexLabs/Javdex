@@ -1,0 +1,149 @@
+.root {
+  display: grid;
+  gap: 12px;
+}
+
+.lead,
+.empty,
+.pending {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.lead {
+  color: var(--text-secondary);
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  gap: 8px;
+}
+
+.metricItem {
+  display: grid;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  gap: 2px;
+}
+
+.metricTerm {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.metricValue {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.section {
+  display: grid;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  gap: 8px;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  gap: 6px;
+}
+
+.row,
+.resourceRow {
+  min-width: 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.row,
+.resourceHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.resourceList {
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.resourceRow {
+  display: grid;
+  gap: 3px;
+}
+
+.row:first-child,
+.resourceRow:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.primary {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.meta,
+.empty,
+.pending {
+  color: var(--text-muted);
+}
+
+.meta {
+  flex: 0 0 auto;
+  font-size: 11px;
+}
+
+.path {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowPath {
+  text-align: right;
+}
+
+@media (width <= 680px) {
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .row,
+  .resourceHead {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .rowPath {
+    max-width: 100%;
+    text-align: left;
+  }
+}

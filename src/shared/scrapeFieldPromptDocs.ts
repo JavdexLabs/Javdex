@@ -1,40 +1,17 @@
 import { ACTRESS_SCRAPE_FIELD_OPTIONS } from './actressScrapeTypes'
 import type { ScraperPluginKind } from './scraperPluginTypes'
 import { VIDEO_SCRAPE_FIELD_OPTIONS } from './videoScrapeTypes'
+import {
+  PLUGIN_FIELD_SEMANTICS_VERSION,
+  fieldSemanticDefinition,
+  fieldSemanticsForKind
+} from './pluginFieldSemantics'
+import { pluginResultContract } from './pluginResultContract'
 
-const VIDEO_SUPPORTED_FIELD_RETURN_MAP: Record<string, string> = {
-  title: 'title',
-  summary: 'summary',
-  cover: 'coverUrl',
-  releaseDate: 'releaseDate（YYYY-MM-DD；若来源只有年月，用 YYYY-MM-01）',
-  maker: 'maker（制作商）',
-  publisher: 'publisher（发行商）',
-  series: 'series（系列）',
-  director: 'director（导演）',
-  duration: 'durationSeconds（秒）',
-  actressesFemale: 'actresses[]，每项 gender 为 female 或未设置',
-  actressesMale: 'actresses[]，每项 gender 为 male',
-  tags: 'tags（标签数组）',
-  source: 'sourceUrl（详情页来源链接）',
-  rating: 'ratingAverage（5 分制，最多 1 位小数）、ratingCount',
-  samples: 'sampleImageUrls（样张图片 URL 数组）'
-}
-
-const ACTRESS_SUPPORTED_FIELD_RETURN_MAP: Record<string, string> = {
-  avatar: 'avatarUrl（头像）',
-  gallery: 'galleryImageUrls（写真图片 URL 数组）',
-  birthDate: 'birthDate（生日，YYYY-MM-DD）',
-  nameZh: 'nameZh（中文名）',
-  nameEn: 'nameEn（英文名）',
-  debutDate: 'debutDate（出道日期，YYYY-MM-DD）',
-  heightCm: 'heightCm（身高，厘米）',
-  measurements: 'bustCm、waistCm、hipCm（三围，厘米）',
-  cupSize: 'cupSize（罩杯，单字母 A-Z）',
-  bloodType: 'bloodType（血型）',
-  zodiac: 'zodiac（星座）',
-  nationality: 'nationality（国籍）',
-  profileSummary: 'profileSummary（个人简介）',
-  aliases: 'aliases（别名数组）'
+function contractResultKeys(kind: ScraperPluginKind, fieldId: string): string[] {
+  return pluginResultContract.describe(kind).keys
+    .filter((item) => item.fieldIds.includes(fieldId as never))
+    .map((item) => item.key)
 }
 
 function fieldOptionLabels(
@@ -45,58 +22,34 @@ function fieldOptionLabels(
 
 export function buildSupportedFieldsPromptSection(kind: ScraperPluginKind): string {
   const options = kind === 'video' ? VIDEO_SCRAPE_FIELD_OPTIONS : ACTRESS_SCRAPE_FIELD_OPTIONS
-  const returnMap =
-    kind === 'video' ? VIDEO_SUPPORTED_FIELD_RETURN_MAP : ACTRESS_SUPPORTED_FIELD_RETURN_MAP
   const lines = options.map((option) => {
-    const returnKeys = returnMap[option.id]
+    const definition = fieldSemanticDefinition(kind, option.id)
+    const returnKeys = contractResultKeys(kind, option.id).join('、') || option.id
     return `- ${option.id}（${option.label}）→ parse${
       kind === 'video' ? 'Video' : 'Actress'
-    } 返回 ${returnKeys}`
+    } 返回 ${returnKeys}；${definition?.description ?? ''}`
   })
   return `supportedFields（插件包声明字段，只能使用以下 id；未声明的字段即使代码返回也会被忽略）：
 ${lines.join('\n')}`
 }
 
-export function buildVideoReturnFieldGlossary(): string {
-  return `返回字段中文含义：
-- code：番号（必须统一为大写字母；从页面解析或与 ctx.code 比较前先做 toUpperCase 规范化）
-- title：标题
-- summary：简介
-- coverUrl：封面图 URL
-- releaseDate：发行日期（YYYY-MM-DD；若来源只有年月，用 YYYY-MM-01；不要使用 00 日）
-- maker：制作商
-- publisher：发行商
-- series：系列
-- director：导演
-- durationSeconds：时长（秒）
-- sourceUrl：详情页来源链接
-- ratingAverage：站点评分均值，必须换算为 5 分制，范围为 > 0 且 <= 5，最多保留 1 位小数；0 分或不合法评分不要返回
-- ratingCount：站点评分人数；仅在 ratingAverage 有效时返回
-- sampleImageUrls：样张图片 URL 数组
-- actresses：演员数组，每项含 name、可选 avatarUrl、可选 gender（female/male）
-- tags：标签数组`
-}
-
-export function buildActressReturnFieldGlossary(): string {
-  return `返回字段中文含义：
-- mainName：主名
-- nameZh：中文名
-- nameEn：英文名
-- avatarUrl：头像 URL
-- birthDate：生日（YYYY-MM-DD）
-- debutDate：出道日期（YYYY-MM-DD；若来源只有年月，如 2021年10月，用 2021-10-01；不要使用 00 日）
-- heightCm：身高（厘米）
-- bustCm：胸围（厘米）
-- waistCm：腰围（厘米）
-- hipCm：臀围（厘米）
-- cupSize：罩杯（单字母 A-Z）
-- bloodType：血型
-- zodiac：星座
-- nationality：国籍
-- profileSummary：个人简介
-- galleryImageUrls：写真图片 URL 数组
-- aliases：别名数组
-- sourceUrl：资料页来源链接（parseActress 应设为实际解析的资料页 URL，供调试验证打开参考页）`
+export function buildPluginFieldSemanticsPrompt(
+  kind: ScraperPluginKind,
+  supportedFields?: readonly string[]
+): string {
+  const selected = supportedFields?.length ? new Set(supportedFields) : undefined
+  const fields = fieldSemanticsForKind(kind).filter((field) => !selected || selected.has(field.id))
+  return `字段语义查询表（registry v${PLUGIN_FIELD_SEMANTICS_VERSION}，不是实现清单）：
+每项标题开头是 plugin.json.supportedFields 使用的字段 id；“返回键”是 parse 结果对象使用的键，两者不得互换。
+${fields.map((field) => [
+    `- ${field.id}（${field.title}）`,
+    `  定义：${field.description}`,
+    `  返回键：${contractResultKeys(kind, field.id).join('、')}；类型：${field.valueType}；标准化：${field.normalization}`,
+    `  强标签：${[...field.labels.canonical, ...field.labels.strong].join('、') || '无'}`,
+    `  歧义标签：${field.labels.ambiguous.join('、') || '无'}`,
+    `  强链接路径：${field.linkRoutes.strong.join('、') || '无'}；冲突字段：${field.conflictsWith.join('、') || '无'}`,
+    `  缺失策略：${field.absencePolicy === 'optional-per-page' ? '当前页未出现时留空，不代表站点不支持' : '页面观察到时必须返回'}`
+  ].join('\n')).join('\n')}`
 }
 
 /** Chinese labels for keys returned by parseVideo / dry-run result objects. */

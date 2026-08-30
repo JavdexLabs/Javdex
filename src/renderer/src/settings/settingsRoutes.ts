@@ -1,5 +1,10 @@
 import { generatePath, matchPath } from 'react-router-dom'
 import { ROUTE_PATH } from '../listView/routePaths'
+import {
+  MEDIA_LIBRARY_SETTINGS_TABS,
+  MEDIA_LIBRARY_SETTINGS_TAB_LABELS,
+  type MediaLibrarySettingsTab
+} from '../listView/mediaLibraryRoutes'
 
 export type SettingsGroup =
   | 'overview'
@@ -13,7 +18,7 @@ export type SettingsGroup =
 
 export type SettingsTab =
   | 'status'
-  | 'paths'
+  | MediaLibrarySettingsTab
   | 'video'
   | 'providers'
   | 'theme'
@@ -47,10 +52,13 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
   {
     id: 'library',
     label: '媒体库',
-    hint: '路径与扫描',
-    description: '管理扫描路径、导入影片与处理无法识别文件。',
-    defaultTab: 'paths',
-    tabs: [{ id: 'paths', label: '路径' }]
+    hint: '来源与扫描',
+    description: '管理当前媒体库的来源、扫描导入、显示方式与生命周期。',
+    defaultTab: 'sources',
+    tabs: MEDIA_LIBRARY_SETTINGS_TABS.map((id) => ({
+      id,
+      label: MEDIA_LIBRARY_SETTINGS_TAB_LABELS[id]
+    }))
   },
   {
     id: 'plugins',

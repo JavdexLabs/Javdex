@@ -5,10 +5,8 @@
 @import './media-details.css';
 @import './entity-browsing.css';
 @import './settings-overview.css';
-@import './settings-library.css';
 @import './settings-plugins.css';
 @import './plugin-development-shell.css';
-@import './settings-services.css';
 @import './plugin-development-workbench.css';
 @import './feedback-overlays.css';
 @import './entity-editors.css';

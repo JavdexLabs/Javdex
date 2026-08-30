@@ -5,16 +5,202 @@ import os from 'node:os'
 import path from 'node:path'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
-import { listLocalVideoResources, listVideoResources, listVideos } from '../db/videoRepo'
-import { importManual, renameAndImport, scanFolders } from './scanner'
-import { insertTestVideoWithFile } from '../db/testVideoFixtures'
 import {
-  listPendingScanGroups,
-  resolvePendingScanGroup,
-  upsertPendingScanResources
+  listLocalVideoResources as listLocalVideoResourcesScoped,
+  insertLocalVideoResource,
+  listVideoResources as listVideoResourcesScoped,
+  listVideos
+} from '../db/videoRepo'
+import {
+  importManual as importManualScoped,
+  renameAndImport as renameAndImportScoped,
+  scanFolders as scanFoldersScoped,
+  type ScanOptions,
+  type ScanProgressFn
+} from './scanner'
+import { insertTestVideoWithFile as insertTestVideoWithFileBase } from '../db/testVideoFixtures'
+import { ensureVideoMembership } from '../db/libraryMembershipRepo'
+import {
+  listPendingScanGroups as listPendingScanGroupsScoped,
+  resolvePendingScanGroup as resolvePendingScanGroupScoped,
+  upsertPendingScanResources as upsertPendingScanResourcesScoped,
+  type PendingScanResourceInput
 } from '../db/pendingScanRepo'
 import { selectPrimaryVideoResourceCandidate } from '../services/videoResourcePromotion'
 import { createVideoMaintenanceService } from '../services/videoMaintenanceService'
+import type {
+  LibraryScanFileAuditEntry,
+  PendingScanGroupResolution
+} from '@shared/libraryTypes'
+import type { VideoResourceImportTarget } from '@shared/videoTypes'
+import {
+  archiveMediaLibrary,
+  createMediaLibrary,
+  getMediaLibraryRoot,
+  MediaLibraryRepoError,
+  resolveMediaLibraryRootPath
+} from '../db/mediaLibraryRepo'
+import { isPathUnderRoot } from './libraryPathUtils'
+
+const TEST_LIBRARY_ID = 1
+let testRunSequence = 0
+
+function ensureTestRoot(rootPath: string): number {
+  const db = getDb()
+  const identity = resolveMediaLibraryRootPath(rootPath)
+  const existing = db
+    .prepare(
+      'SELECT id FROM media_library_roots WHERE library_id = ? AND normalized_path = ?'
+    )
+    .get(TEST_LIBRARY_ID, identity.normalizedPath) as { id: number } | undefined
+  if (existing) return existing.id
+  return Number(
+    db
+      .prepare(
+        `INSERT INTO media_library_roots (
+           library_id, path, normalized_path, real_path, normalized_real_path,
+           device_id, inode, position, state
+         ) VALUES (?, ?, ?, ?, ?, ?, ?,
+           (SELECT COUNT(*) FROM media_library_roots WHERE library_id = ?), 'active')`
+      )
+      .run(
+        TEST_LIBRARY_ID,
+        identity.path,
+        identity.normalizedPath,
+        identity.realPath,
+        identity.normalizedRealPath,
+        identity.deviceId,
+        identity.inode,
+        TEST_LIBRARY_ID
+      ).lastInsertRowid
+  )
+}
+
+function rootIdForFile(filePath: string): number {
+  const roots = getDb()
+    .prepare(
+      "SELECT id, path FROM media_library_roots WHERE library_id = ? AND state = 'active'"
+    )
+    .all(TEST_LIBRARY_ID) as Array<{ id: number; path: string }>
+  const root = roots
+    .filter((candidate) => isPathUnderRoot(filePath, candidate.path))
+    .sort((left, right) => right.path.length - left.path.length)[0]
+  return root?.id ?? ensureTestRoot(path.dirname(filePath))
+}
+
+type LegacyScanOptions = ScanOptions & { unavailableRoots?: string[] }
+
+async function scanFolders(
+  folders: string[],
+  onProgress?: ScanProgressFn,
+  options: LegacyScanOptions = {}
+) {
+  const roots = folders.map((rootPath) => {
+    const root = getMediaLibraryRoot(TEST_LIBRARY_ID, ensureTestRoot(rootPath))
+    assert.ok(root)
+    return root
+  })
+  const { unavailableRoots = [], ...scopedOptions } = options
+  return scanFoldersScoped(
+    {
+      libraryId: TEST_LIBRARY_ID,
+      runId: `scanner-test-${++testRunSequence}`,
+      roots
+    },
+    onProgress,
+    {
+      ...scopedOptions,
+      unavailableRootIds: unavailableRoots.map(ensureTestRoot),
+      autoMergeSameCodeResources: scopedOptions.autoMergeSameCodeResources ?? true
+    }
+  )
+}
+
+function insertTestVideoWithFile(
+  db: Parameters<typeof insertTestVideoWithFileBase>[0],
+  options: Parameters<typeof insertTestVideoWithFileBase>[1]
+) {
+  const missingParent = !fs.existsSync(path.dirname(options.filePath))
+  return insertTestVideoWithFileBase(db, {
+    ...options,
+    ...(missingParent ? { rootId: ensureTestRoot(path.dirname(options.filePath)) } : {})
+  })
+}
+
+function listVideoResources(videoId: number) {
+  return listVideoResourcesScoped(TEST_LIBRARY_ID, videoId)
+}
+
+function listLocalVideoResources(videoId: number) {
+  return listLocalVideoResourcesScoped(TEST_LIBRARY_ID, videoId)
+}
+
+function listPendingScanGroups() {
+  return listPendingScanGroupsScoped(TEST_LIBRARY_ID)
+}
+
+function upsertPendingScanResources(
+  code: string,
+  inputs: Array<Omit<PendingScanResourceInput, 'rootId'> & { scanRoot: string }>
+) {
+  return upsertPendingScanResourcesScoped(
+    TEST_LIBRARY_ID,
+    code,
+    inputs.map(({ scanRoot, ...input }) => ({
+      ...input,
+      rootId: ensureTestRoot(scanRoot)
+    }))
+  )
+}
+
+function resolvePendingScanGroup(
+  groupId: number,
+  resolution: Omit<PendingScanGroupResolution, 'expectedRevision'> & {
+    expectedRevision?: number
+  },
+  options?: Parameters<typeof resolvePendingScanGroupScoped>[3]
+) {
+  const group = listPendingScanGroupsScoped(TEST_LIBRARY_ID).find((item) => item.id === groupId)
+  return resolvePendingScanGroupScoped(
+    TEST_LIBRARY_ID,
+    groupId,
+    {
+      ...resolution,
+      expectedRevision: resolution.expectedRevision ?? group?.revision ?? 1
+    },
+    options
+  )
+}
+
+function importManual(
+  filePath: string,
+  code: string,
+  target: VideoResourceImportTarget
+) {
+  return importManualScoped({
+    libraryId: TEST_LIBRARY_ID,
+    rootId: rootIdForFile(filePath),
+    filePath,
+    code,
+    target
+  })
+}
+
+function renameAndImport(
+  oldPath: string,
+  newName: string,
+  code: string,
+  target: VideoResourceImportTarget
+) {
+  return renameAndImportScoped({
+    libraryId: TEST_LIBRARY_ID,
+    rootId: rootIdForFile(oldPath),
+    oldPath,
+    newName,
+    code,
+    target
+  })
+}
 
 let tempRoot: string | null = null
 
@@ -35,6 +221,422 @@ afterEach(() => {
 })
 
 describe('scanFolders', () => {
+  it('rejects an archived library atomically when manual import resumes after probing', async () => {
+    const root = makeTempRoot()
+    const libraryPath = path.join(root, 'manual-import-race')
+    fs.mkdirSync(libraryPath, { recursive: true })
+    const filePath = path.join(libraryPath, 'RACE-001.mp4')
+    fs.writeFileSync(filePath, 'video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const library = createMediaLibrary({
+      name: 'Manual import race',
+      roots: [{ path: libraryPath }]
+    })
+    const rootId = library.roots[0]?.id
+    assert.ok(rootId)
+    const videoId = Number(
+      getDb()
+        .prepare("INSERT INTO videos (code, scraped_status) VALUES ('RACE-001', 0)")
+        .run().lastInsertRowid
+    )
+    ensureVideoMembership({ libraryId: library.id, videoId, addedVia: 'manual' })
+
+    await assert.rejects(
+      importManualScoped(
+        {
+          libraryId: library.id,
+          rootId,
+          filePath,
+          code: 'RACE-001',
+          target: { kind: 'existing', videoId }
+        },
+        {
+          readDurationSeconds: async () => {
+            archiveMediaLibrary({
+              libraryId: library.id,
+              expectedRevision: library.revision
+            })
+            return 3600
+          }
+        }
+      ),
+      (error: unknown) =>
+        error instanceof MediaLibraryRepoError && error.code === 'LIBRARY_ARCHIVED'
+    )
+
+    assert.equal(
+      (getDb()
+        .prepare('SELECT COUNT(*) AS count FROM video_resources WHERE library_id = ?')
+        .get(library.id) as { count: number }).count,
+      0
+    )
+    assert.equal(
+      (getDb()
+        .prepare('SELECT COUNT(*) AS count FROM library_video_memberships WHERE library_id = ?')
+        .get(library.id) as { count: number }).count,
+      1
+    )
+  })
+
+  it('rejects manual import when the root is physically replaced while duration probing is suspended', async () => {
+    const root = makeTempRoot()
+    const libraryPath = path.join(root, 'manual-import-replaced-root')
+    const detachedOriginalPath = path.join(root, 'detached-original-root')
+    fs.mkdirSync(libraryPath, { recursive: true })
+    const filePath = path.join(libraryPath, 'RACE-002.mp4')
+    fs.writeFileSync(filePath, 'original video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const library = createMediaLibrary({
+      name: 'Manual import replaced root',
+      roots: [{ path: libraryPath }]
+    })
+    const libraryRoot = library.roots[0]
+    assert.ok(libraryRoot)
+    assert.ok(libraryRoot.inode)
+    const videoId = Number(
+      getDb()
+        .prepare("INSERT INTO videos (code, scraped_status) VALUES ('RACE-002', 0)")
+        .run().lastInsertRowid
+    )
+    ensureVideoMembership({ libraryId: library.id, videoId, addedVia: 'manual' })
+
+    let releaseProbe!: (durationSeconds: number) => void
+    const probeRelease = new Promise<number>((resolve) => {
+      releaseProbe = resolve
+    })
+    let markProbeStarted!: () => void
+    const probeStarted = new Promise<void>((resolve) => {
+      markProbeStarted = resolve
+    })
+    const importPromise = importManualScoped(
+      {
+        libraryId: library.id,
+        rootId: libraryRoot.id,
+        filePath,
+        code: 'RACE-002',
+        target: { kind: 'existing', videoId }
+      },
+      {
+        readDurationSeconds: async () => {
+          markProbeStarted()
+          return probeRelease
+        }
+      }
+    )
+
+    await probeStarted
+    fs.renameSync(libraryPath, detachedOriginalPath)
+    fs.mkdirSync(libraryPath)
+    fs.writeFileSync(filePath, 'replacement video')
+    assert.notEqual(
+      fs.statSync(libraryPath).ino.toString(),
+      libraryRoot.inode,
+      'test setup must replace the stored physical directory identity'
+    )
+    releaseProbe(3600)
+
+    const outcome = await importPromise.then(
+      (result) => ({ status: 'resolved' as const, result }),
+      (error: unknown) => ({ status: 'rejected' as const, error })
+    )
+
+    assert.deepEqual(
+      {
+        outcome: outcome.status,
+        resources: getDb()
+          .prepare(
+            `SELECT library_id, video_id, root_id, kind, locator, size_bytes,
+                    duration_seconds, file_mtime_ms
+             FROM video_resources
+             WHERE library_id = ?
+             ORDER BY id`
+          )
+          .all(library.id),
+        memberships: (getDb()
+          .prepare('SELECT COUNT(*) AS count FROM library_video_memberships WHERE library_id = ?')
+          .get(library.id) as { count: number }).count,
+        pendingGroups: (getDb()
+          .prepare('SELECT COUNT(*) AS count FROM pending_scan_groups WHERE library_id = ?')
+          .get(library.id) as { count: number }).count,
+        unrecognizedFiles: (getDb()
+          .prepare('SELECT COUNT(*) AS count FROM library_unrecognized_files WHERE library_id = ?')
+          .get(library.id) as { count: number }).count
+      },
+      {
+        outcome: 'rejected',
+        resources: [],
+        memberships: 1,
+        pendingGroups: 0,
+        unrecognizedFiles: 0
+      },
+      'a replacement root must not inherit the old root or receive any resumed import writes'
+    )
+  })
+
+  it('keeps scan state unchanged when a frozen root is physically replaced during probing', async () => {
+    const root = makeTempRoot()
+    const libraryPath = path.join(root, 'scan-replaced-root')
+    const detachedOriginalPath = path.join(root, 'detached-scan-root')
+    fs.mkdirSync(libraryPath, { recursive: true })
+    const filePath = path.join(libraryPath, 'RACE-003.mp4')
+    fs.writeFileSync(filePath, 'original scan video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const library = createMediaLibrary({
+      name: 'Scan replaced root',
+      roots: [{ path: libraryPath }]
+    })
+    const libraryRoot = library.roots[0]
+    assert.ok(libraryRoot)
+    assert.ok(libraryRoot.inode)
+
+    let releaseProbe!: (durationSeconds: number) => void
+    const probeRelease = new Promise<number>((resolve) => {
+      releaseProbe = resolve
+    })
+    let markProbeStarted!: () => void
+    const probeStarted = new Promise<void>((resolve) => {
+      markProbeStarted = resolve
+    })
+    const audit: LibraryScanFileAuditEntry[] = []
+    const scanPromise = scanFoldersScoped(
+      {
+        libraryId: library.id,
+        runId: 'replaced-root-during-probe',
+        roots: [libraryRoot]
+      },
+      undefined,
+      {
+        readDurationSeconds: async () => {
+          markProbeStarted()
+          return probeRelease
+        },
+        autoMergeSameCodeResources: true,
+        onFileResult: (entry) => audit.push(entry)
+      }
+    )
+
+    await probeStarted
+    fs.renameSync(libraryPath, detachedOriginalPath)
+    fs.mkdirSync(libraryPath)
+    fs.writeFileSync(filePath, 'replacement scan video')
+    assert.notEqual(fs.statSync(libraryPath).ino.toString(), libraryRoot.inode)
+    releaseProbe(3600)
+
+    const result = await scanPromise
+    assert.deepEqual(
+      {
+        imported: result.imported,
+        failed: result.failed,
+        pendingResources: result.pendingResources,
+        relocated: result.relocated,
+        refreshed: result.refreshed,
+        resources: (getDb()
+          .prepare('SELECT COUNT(*) AS count FROM video_resources WHERE library_id = ?')
+          .get(library.id) as { count: number }).count,
+        memberships: (getDb()
+          .prepare('SELECT COUNT(*) AS count FROM library_video_memberships WHERE library_id = ?')
+          .get(library.id) as { count: number }).count,
+        pendingGroups: (getDb()
+          .prepare('SELECT COUNT(*) AS count FROM pending_scan_groups WHERE library_id = ?')
+          .get(library.id) as { count: number }).count,
+        videos: (getDb()
+          .prepare("SELECT COUNT(*) AS count FROM videos WHERE code = 'RACE-003'")
+          .get() as { count: number }).count,
+        auditOutcome: audit[0]?.outcome
+      },
+      {
+        imported: 0,
+        failed: 1,
+        pendingResources: 0,
+        relocated: 0,
+        refreshed: 0,
+        resources: 0,
+        memberships: 0,
+        pendingGroups: 0,
+        videos: 0,
+        auditOutcome: 'processing_failure'
+      }
+    )
+  })
+
+  it('does not commit or rename a replacement-root file when rename-import resumes after probing', async () => {
+    const root = makeTempRoot()
+    const libraryPath = path.join(root, 'rename-import-replaced-root')
+    const detachedOriginalPath = path.join(root, 'detached-rename-root')
+    fs.mkdirSync(libraryPath, { recursive: true })
+    const oldPath = path.join(libraryPath, 'UNKNOWN.mp4')
+    const newName = 'RACE-004.mp4'
+    const newPath = path.join(libraryPath, newName)
+    fs.writeFileSync(oldPath, 'original rename video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const library = createMediaLibrary({
+      name: 'Rename import replaced root',
+      roots: [{ path: libraryPath }]
+    })
+    const libraryRoot = library.roots[0]
+    assert.ok(libraryRoot)
+    const videoId = Number(
+      getDb()
+        .prepare("INSERT INTO videos (code, scraped_status) VALUES ('RACE-004', 0)")
+        .run().lastInsertRowid
+    )
+    ensureVideoMembership({ libraryId: library.id, videoId, addedVia: 'manual' })
+
+    let releaseProbe!: (durationSeconds: number) => void
+    const probeRelease = new Promise<number>((resolve) => {
+      releaseProbe = resolve
+    })
+    let markProbeStarted!: () => void
+    const probeStarted = new Promise<void>((resolve) => {
+      markProbeStarted = resolve
+    })
+    const importPromise = renameAndImportScoped(
+      {
+        libraryId: library.id,
+        rootId: libraryRoot.id,
+        oldPath,
+        newName,
+        code: 'RACE-004',
+        target: { kind: 'existing', videoId }
+      },
+      {
+        readDurationSeconds: async () => {
+          markProbeStarted()
+          return probeRelease
+        }
+      }
+    )
+
+    await probeStarted
+    fs.renameSync(libraryPath, detachedOriginalPath)
+    fs.mkdirSync(libraryPath)
+    fs.writeFileSync(newPath, 'replacement rename video')
+    releaseProbe(3600)
+
+    await assert.rejects(importPromise, /无法恢复原文件名/)
+    assert.equal(fs.readFileSync(newPath, 'utf8'), 'replacement rename video')
+    assert.equal(
+      fs.readFileSync(path.join(detachedOriginalPath, newName), 'utf8'),
+      'original rename video'
+    )
+    assert.equal(fs.existsSync(path.join(detachedOriginalPath, path.basename(oldPath))), false)
+    assert.equal(
+      (getDb()
+        .prepare('SELECT COUNT(*) AS count FROM video_resources WHERE library_id = ?')
+        .get(library.id) as { count: number }).count,
+      0
+    )
+    assert.equal(
+      (getDb()
+        .prepare('SELECT COUNT(*) AS count FROM pending_scan_groups WHERE library_id = ?')
+        .get(library.id) as { count: number }).count,
+      0
+    )
+  })
+
+  it('rejects a disabled target root at the resource transaction boundary', () => {
+    const root = makeTempRoot()
+    const libraryPath = path.join(root, 'disabled-write-target')
+    fs.mkdirSync(libraryPath, { recursive: true })
+    const filePath = path.join(libraryPath, 'ROOT-001.mp4')
+    fs.writeFileSync(filePath, 'video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const library = createMediaLibrary({
+      name: 'Disabled resource target',
+      roots: [{ path: libraryPath }]
+    })
+    const rootId = library.roots[0]?.id
+    assert.ok(rootId)
+    const videoId = Number(
+      getDb()
+        .prepare("INSERT INTO videos (code, scraped_status) VALUES ('ROOT-001', 0)")
+        .run().lastInsertRowid
+    )
+    ensureVideoMembership({ libraryId: library.id, videoId, addedVia: 'manual' })
+    getDb()
+      .prepare("UPDATE media_library_roots SET state = 'disabled' WHERE id = ?")
+      .run(rootId)
+
+    assert.throws(
+      () =>
+        insertLocalVideoResource({
+          libraryId: library.id,
+          videoId,
+          rootId,
+          locator: filePath,
+          sizeBytes: 5
+        }),
+      (error: unknown) =>
+        error instanceof MediaLibraryRepoError && error.code === 'ROOT_NOT_FOUND'
+    )
+    assert.equal(
+      (getDb()
+        .prepare('SELECT COUNT(*) AS count FROM video_resources WHERE library_id = ?')
+        .get(library.id) as { count: number }).count,
+      0
+    )
+  })
+
+  it('reuses archived local and STRM source paths without crossing library ownership', async () => {
+    const root = makeTempRoot()
+    const sharedRoot = path.join(root, 'shared-library')
+    fs.mkdirSync(sharedRoot, { recursive: true })
+    fs.writeFileSync(path.join(sharedRoot, 'SCOPE-001.mp4'), 'local video')
+    fs.writeFileSync(path.join(sharedRoot, 'SCOPE-001.strm'), 'https://example.test/SCOPE-001.mp4')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+
+    const archivedLibrary = createMediaLibrary({
+      name: 'Archived source owner',
+      roots: [{ path: sharedRoot }]
+    })
+    const archivedRoot = archivedLibrary.roots[0]
+    const first = await scanFoldersScoped(
+      {
+        libraryId: archivedLibrary.id,
+        runId: 'archived-library-scan',
+        roots: [archivedRoot]
+      },
+      undefined,
+      { readDurationSeconds: async () => 3600, autoMergeSameCodeResources: true }
+    )
+    assert.equal(first.imported, 2)
+    const videoId = listVideos().items.find((video) => video.code === 'SCOPE-001')?.id
+    assert.ok(videoId)
+
+    archiveMediaLibrary({
+      libraryId: archivedLibrary.id,
+      expectedRevision: archivedLibrary.revision
+    })
+    const activeLibrary = createMediaLibrary({
+      name: 'Current source owner',
+      roots: [{ path: sharedRoot }]
+    })
+    const activeRoot = activeLibrary.roots[0]
+    const second = await scanFoldersScoped(
+      {
+        libraryId: activeLibrary.id,
+        runId: 'replacement-library-scan',
+        roots: [activeRoot]
+      },
+      undefined,
+      { readDurationSeconds: async () => 3600, autoMergeSameCodeResources: true }
+    )
+
+    assert.equal(second.imported, 2)
+    assert.equal(listVideoResourcesScoped(archivedLibrary.id, videoId).length, 2)
+    assert.equal(listVideoResourcesScoped(activeLibrary.id, videoId).length, 2)
+    assert.ok(
+      listVideoResourcesScoped(archivedLibrary.id, videoId).every(
+        (resource) => resource.library_id === archivedLibrary.id
+      )
+    )
+    assert.ok(
+      listVideoResourcesScoped(activeLibrary.id, videoId).every(
+        (resource) => resource.library_id === activeLibrary.id
+      )
+    )
+  })
+
   it('imports mixed local and STRM resources into one video and keeps the local file primary', async () => {
     const root = makeTempRoot()
     const library = path.join(root, 'library')
@@ -743,10 +1345,10 @@ describe('scanFolders', () => {
   it('imports a symbolic-link video by its link path and file name', async () => {
     const root = makeTempRoot()
     const library = path.join(root, 'library')
-    const targetDir = path.join(root, 'targets')
+    const targetDir = path.join(library, 'targets')
     fs.mkdirSync(library, { recursive: true })
     fs.mkdirSync(targetDir, { recursive: true })
-    const targetPath = path.join(targetDir, 'source.mp4')
+    const targetPath = path.join(targetDir, 'source.bin')
     const linkPath = path.join(library, 'IPX-777.mp4')
     fs.writeFileSync(targetPath, 'video')
     fs.symlinkSync(targetPath, linkPath, 'file')
@@ -810,9 +1412,10 @@ describe('scanFolders', () => {
   it('leaves missing-resource cleanup to the high-level scan coordinator', async () => {
     const root = makeTempRoot()
     const library = path.join(root, 'library')
-    const targetPath = path.join(root, 'target.mp4')
+    const targetDir = path.join(library, 'targets')
+    const targetPath = path.join(targetDir, 'target.bin')
     const linkPath = path.join(library, 'IPX-780.mp4')
-    fs.mkdirSync(library, { recursive: true })
+    fs.mkdirSync(targetDir, { recursive: true })
     fs.writeFileSync(targetPath, 'video')
     fs.symlinkSync(targetPath, linkPath, 'file')
     initDatabaseAtPath(path.join(root, 'library.db'))
@@ -836,9 +1439,11 @@ describe('scanFolders', () => {
     const library = path.join(root, 'library')
     const firstDir = path.join(library, 'first')
     const secondDir = path.join(library, 'second')
-    const targetPath = path.join(root, 'target.mp4')
+    const targetDir = path.join(library, 'targets')
+    const targetPath = path.join(targetDir, 'target.bin')
     fs.mkdirSync(firstDir, { recursive: true })
     fs.mkdirSync(secondDir, { recursive: true })
+    fs.mkdirSync(targetDir, { recursive: true })
     fs.writeFileSync(targetPath, 'video')
     fs.symlinkSync(targetPath, path.join(firstDir, 'IPX-781.mp4'), 'file')
     fs.symlinkSync(targetPath, path.join(secondDir, 'IPX-781.mp4'), 'file')
@@ -1250,7 +1855,7 @@ describe('scanFolders', () => {
     const result = await scanFolders([library], undefined, { ...scanOptions, yieldEvery: 1 })
 
     assert.equal(result.imported, 0)
-    assert.equal(result.skipped, 1)
+    assert.equal(result.skipped, 0)
     assert.equal(result.refreshed, 1)
     const row = getDb()
       .prepare("SELECT duration_seconds AS file_duration_seconds FROM video_resources WHERE kind = 'local' AND locator = ?")
@@ -1288,5 +1893,26 @@ describe('scanFolders', () => {
       .get(filePath) as { file_duration_seconds: number | null; file_mtime_ms: number | null }
     assert.equal(row.file_duration_seconds, 3661)
     assert.notEqual(row.file_mtime_ms, null)
+  })
+
+  it('emits one final audit outcome for every processed file', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    fs.writeFileSync(path.join(library, 'AUDIT-001.mp4'), 'video')
+    fs.writeFileSync(path.join(library, 'unknown-name.mp4'), 'video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const entries: LibraryScanFileAuditEntry[] = []
+
+    const result = await scanFolders([library], undefined, {
+      minImportDurationSeconds: null,
+      readDurationSeconds: async () => 3600,
+      onFileResult: (entry) => entries.push(entry)
+    })
+
+    assert.equal(entries.length, result.scannedFiles)
+    assert.deepEqual(entries.map((entry) => entry.outcome).sort(), ['added', 'unrecognized'])
+    assert.equal(entries.filter((entry) => entry.outcome === 'added').length, result.imported)
+    assert.equal(entries.filter((entry) => entry.outcome === 'unrecognized').length, result.failed)
   })
 })

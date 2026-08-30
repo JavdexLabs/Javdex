@@ -6,7 +6,8 @@ import {
   getDefaultCropTransform,
   getSavedAvatarCropTransform,
   getSmartAvatarCropTransform,
-  isDefaultCropTransform
+  isDefaultCropTransform,
+  exportAvatarCrop
 } from './avatarCrop'
 import type { AvatarFaceCandidate, NormalizedPoint } from '../avatarAutoCrop/types'
 import {
@@ -266,5 +267,45 @@ describe('renderer avatarCrop', () => {
     assert.equal(isDefaultCropTransform(1 + 1e-8, -1e-8, 1e-8), true)
     assert.equal(isDefaultCropTransform(1.01, 0, 0), false)
     assert.equal(isDefaultCropTransform(1, 0.5, 0), false)
+  })
+
+  it('does not let a tainted canvas export crash the editor', () => {
+    const originalDocument = globalThis.document
+    const securityError = new DOMException(
+      "Failed to execute 'toDataURL' on 'HTMLCanvasElement': Tainted canvases may not be exported.",
+      'SecurityError'
+    )
+    const context = {
+      save: () => undefined,
+      scale: () => undefined,
+      translate: () => undefined,
+      drawImage: () => undefined,
+      restore: () => undefined
+    }
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: {
+        createElement: () => ({
+          width: 0,
+          height: 0,
+          getContext: () => context,
+          toDataURL: () => {
+            throw securityError
+          }
+        })
+      }
+    })
+
+    try {
+      assert.equal(
+        exportAvatarCrop({ naturalWidth: 640, naturalHeight: 960 } as HTMLImageElement, 0, 0, 1),
+        ''
+      )
+    } finally {
+      Object.defineProperty(globalThis, 'document', {
+        configurable: true,
+        value: originalDocument
+      })
+    }
   })
 })

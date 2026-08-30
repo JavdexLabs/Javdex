@@ -290,69 +290,22 @@
   font-weight: 600;
 }
 
-.modal--plugin-dev-connection {
-  /* size from modal--form-sm */
-}
-
-.plugin-dev-connection-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.plugin-dev-connection-form .text-input,
-.plugin-dev-connection-form .select {
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.plugin-dev-connection-form .settings-number-stepper {
-  width: fit-content;
-  max-width: 100%;
-}
-
-.plugin-dev-connection-form .settings-number-stepper__value {
-  width: 72px;
-  min-width: 72px;
-}
-
-.plugin-dev-connection-hint {
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.plugin-dev-connection-default-llm {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--surface-control);
-}
-
-.plugin-dev-connection-default-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.settings-form-field {
+  display: grid;
   min-width: 0;
+  gap: 6px;
 }
 
-.plugin-dev-connection-default-copy span {
+.settings-form-label {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--settings-fs-secondary, 12px);
+  font-weight: var(--settings-fw-label, 600);
 }
 
-.plugin-dev-connection-default-copy strong {
-  color: var(--text-primary);
-  font-size: 13px;
-}
-
-.plugin-dev-connection-default-copy small {
-  color: var(--text-secondary);
-  font-size: 11px;
+.settings-form-hint {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption, 11px);
+  line-height: var(--settings-lh, 1.45);
 }
 
 .settings-form-row {

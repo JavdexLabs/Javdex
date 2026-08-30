@@ -36,7 +36,7 @@ export const PRIVACY_MODE_SCOPES = [
 
 export type PrivacyModeScope = (typeof PRIVACY_MODE_SCOPES)[number]
 
-export const AUTO_SCAN_INTERVAL_MINUTES = [15, 30, 60, 180, 360] as const
+export const AUTO_SCAN_INTERVAL_MINUTES = [15, 30, 60, 180, 360, 1440] as const
 
 export type AutoScanIntervalMinutes = (typeof AUTO_SCAN_INTERVAL_MINUTES)[number]
 
@@ -68,6 +68,10 @@ export interface AppSettings {
   autoScanIntervalMinutes: AutoScanIntervalMinutes
   /** Most recent scan audit record. */
   lastLibraryScanSummary: LibraryScanSummary | null
+  /** Persisted snapshot of files whose code was not recognized by the latest safe scan. */
+  unrecognizedFiles: string[]
+  /** Completion time of the safe scan that produced the actionable snapshot. */
+  unrecognizedFilesScanFinishedAt: string | null
   /** Minimum local file duration (minutes) required for scan import; 0 disables the filter. */
   minScanImportDurationMinutes: number
   /** Automatically attach scanned resources when their normalized code has one clear owner. */
@@ -132,8 +136,8 @@ export interface AppSettings {
   customLlmProviders: import('./llmProviders').CustomLlmProviderDefinition[]
   /** User-added models keyed by provider id. */
   llmCustomModels: import('./llmProviders').LlmCustomModelDefinition[]
-  /** Max agent ReAct steps; 0 means unlimited. */
-  pluginDevAgentMaxSteps: number
+  /** Max Pi model turns per plugin-development operation; 0 means unlimited. */
+  pluginDevAgentMaxTurns: number
   /** Max estimated input context tokens for plugin development agent. */
   pluginDevAgentMaxContextTokens: number
 }
@@ -149,8 +153,28 @@ export interface LlmSecretStorageState {
   migrationError?: string
 }
 
-export type SettingsSnapshot = Omit<AppSettings, 'llmProviderConfigs'> & {
-  llmProviderConfigs: Record<string, import('./llmProviders').LlmProviderPublicConfig>
+type LegacyLlmSettingsKey =
+  | 'defaultLlmProviderId'
+  | 'defaultLlmModelId'
+  | 'llmProviderConfigs'
+  | 'customLlmProviders'
+  | 'llmCustomModels'
+  | 'pluginDevAgentMaxTurns'
+  | 'pluginDevAgentMaxContextTokens'
+
+export type LegacyMediaLibrarySettingsKey =
+  | 'libraryPaths'
+  | 'pendingLibraryPathCleanups'
+  | 'autoDeleteResourceLessVideos'
+  | 'autoScanEnabled'
+  | 'autoScanIntervalMinutes'
+  | 'lastLibraryScanSummary'
+  | 'unrecognizedFiles'
+  | 'unrecognizedFilesScanFinishedAt'
+  | 'minScanImportDurationMinutes'
+  | 'autoMergeSameCodeResources'
+
+export type SettingsSnapshot = Omit<AppSettings, LegacyLlmSettingsKey> & {
   mediaAssetsResolvedPath: string
   recoveryNotice: SettingsRecoveryNotice | null
   llmSecretStorage: LlmSecretStorageState
@@ -161,10 +185,19 @@ export type RendererSettingsPatch = Partial<
     AppSettings,
     | 'assetEncryption'
     | 'lastLibraryScanSummary'
+    | 'unrecognizedFiles'
+    | 'unrecognizedFilesScanFinishedAt'
     | 'llmProviderConfigs'
+    | 'defaultLlmProviderId'
+    | 'defaultLlmModelId'
+    | 'customLlmProviders'
+    | 'llmCustomModels'
+    | 'pluginDevAgentMaxTurns'
+    | 'pluginDevAgentMaxContextTokens'
     | 'mediaAssetsPath'
     | 'pendingLibraryPathCleanups'
     | 'scraperServiceConfigs'
+    | LegacyMediaLibrarySettingsKey
   >
 >
 
@@ -179,7 +212,7 @@ export function normalizeMinScanImportDurationMinutes(value: unknown): number {
   return Math.min(600, Math.round(parsed))
 }
 
-export function normalizePluginDevAgentMaxSteps(value: unknown): number {
+export function normalizePluginDevAgentMaxTurns(value: unknown): number {
   const parsed =
     typeof value === 'number'
       ? value
@@ -208,6 +241,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoScanEnabled: false,
   autoScanIntervalMinutes: 60,
   lastLibraryScanSummary: null,
+  unrecognizedFiles: [],
+  unrecognizedFilesScanFinishedAt: null,
   minScanImportDurationMinutes: 30,
   autoMergeSameCodeResources: true,
   proxyUrl: '',
@@ -247,7 +282,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   llmProviderConfigs: {},
   customLlmProviders: [],
   llmCustomModels: [],
-  pluginDevAgentMaxSteps: 0,
+  pluginDevAgentMaxTurns: 0,
   pluginDevAgentMaxContextTokens: 128000
 }
 

@@ -4,9 +4,11 @@ import { isVideoFile, parseCode } from './codeParser'
 import {
   backfillLocalVideoResourceFingerprint,
   getVideoByCode,
+  getVideoById,
   getLocalVideoResourceByLocator,
   getStrmVideoResourceBySourcePath,
   getPreferredLocalVideoResource,
+  getVideoResourceInLibrary,
   insertLocalVideoResource,
   insertNewScannedStrmVideo,
   insertNewScannedVideo,
@@ -14,7 +16,6 @@ import {
   listStrmVideoResourceRefs,
   listVideosByCode,
   listVideoResources,
-  localVideoResourceExistsByLocator,
   relocateLocalVideoResource,
   relocateLocalVideoResourceById,
   relocateStrmVideoResource,
@@ -25,6 +26,7 @@ import {
 } from '../db/videoRepo'
 import type {
   ManualImportResult,
+  LibraryScanFileAuditEntry,
   RenameImportResult,
   ScanProgress,
   ScanResult,
@@ -33,18 +35,17 @@ import type {
 import type { ScannedVideoInput, StrmVideoResourceRef } from '../db/videoRepo'
 import type {
   LocalVideoResource,
+  VideoResource,
   VideoResourceImportTarget
 } from '@shared/videoTypes'
+import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
 import {
   isBelowMinImportDuration,
   readLocalVideoDurationSeconds,
-  resolveMinScanImportDurationSeconds,
   shouldProbeLocalVideoResourceDuration,
   shouldRefreshLocalVideoResourceDuration,
   type VideoFileFingerprint
 } from './videoDuration'
-import { getSettings } from '../settings/settingsStore'
-import { isPathUnderRoot } from './libraryPathUtils'
 import { normalizeVideoCode } from '@shared/videoCode'
 import {
   pendingScanResourceExists,
@@ -60,8 +61,26 @@ import {
 import { normalizeExternalVideoResource } from '@shared/videoResourceLinks'
 import { normalizeLocalPathIdentity } from '@shared/localPathIdentity'
 import { selectDefaultPendingScanPrimary } from '@shared/pendingScanPrimary'
+import { sanitizeLibraryScanError } from '@shared/libraryScanSummary'
+import {
+  authorizeMediaLibraryRoot,
+  authorizeMediaLibraryRootFile
+} from '../services/mediaLibraryRootFileGuard'
 
 export type ScanProgressFn = (progress: ScanProgress) => void
+
+type ScanFileAuditWithoutRoot = LibraryScanFileAuditEntry extends infer Entry
+  ? Entry extends LibraryScanFileAuditEntry
+    ? Omit<Entry, 'rootId'>
+    : never
+  : never
+
+export interface ScanFoldersRequest {
+  libraryId: number
+  runId: string
+  /** Accessible roots selected from the coordinator's immutable run snapshot. */
+  roots: readonly Readonly<MediaLibraryRoot>[]
+}
 
 export interface ScanOptions {
   yieldEvery?: number
@@ -70,14 +89,16 @@ export interface ScanOptions {
   readDurationSeconds?: (filePath: string) => Promise<number | null>
   /** Minimum seconds required to import during scan; null disables the filter. */
   minImportDurationSeconds?: number | null
-  /** Missing resources below these temporarily unavailable roots must not be relocated. */
-  unavailableRoots?: string[]
+  /** Missing resources owned by these temporarily unavailable roots must not be relocated. */
+  unavailableRootIds?: readonly number[]
   /** Override directory reads (tests). Read failures abort cleanup-safe scans. */
   readDirectory?: (dir: string) => Promise<fs.Dirent[]>
   /** Override local resource inspection (tests). */
   inspectPath?: (filePath: string) => 'present' | 'missing' | 'unknown'
   /** Override same-code resource auto-assignment (tests). */
   autoMergeSameCodeResources?: boolean
+  /** Receives exactly one final audit outcome for every processed file. */
+  onFileResult?: (entry: LibraryScanFileAuditEntry) => void
 }
 
 const DEFAULT_YIELD_EVERY = 50
@@ -164,17 +185,19 @@ function targetKeyForStrmResource(resource: StrmVideoResourceRef): string | null
 }
 
 function findStrmRelocationCandidate(
+  libraryId: number,
   sourcePath: string,
   targetKey: string,
-  unavailableRoots: string[],
+  unavailableRootIds: ReadonlySet<number>,
   inspectPath: (filePath: string) => 'present' | 'missing' | 'unknown'
 ): StrmVideoResourceRef | null {
   const sourceName = path.basename(sourcePath)
-  const candidates = listStrmVideoResourceRefs()
+  const candidates = listStrmVideoResourceRefs(libraryId)
     .filter((resource) => {
       const oldSourcePath = resource.source_path
       if (path.basename(oldSourcePath) !== sourceName) return false
-      if (unavailableRoots.some((root) => isPathUnderRoot(oldSourcePath, root))) return false
+      const record = getVideoResourceInLibrary(libraryId, resource.resource_id)
+      if (!record?.root_id || unavailableRootIds.has(record.root_id)) return false
       if (inspectPath(oldSourcePath) !== 'missing') return false
       return targetKeyForStrmResource(resource) === targetKey
     })
@@ -206,12 +229,16 @@ async function resolveImportDurationSeconds(
 }
 
 function buildScannedVideoImport(
+  libraryId: number,
+  rootId: number,
   code: string,
   file: string,
   fileDurationSeconds: number | null,
   fingerprint: VideoFileFingerprint | null
 ): ScannedVideoInput {
   return {
+    libraryId,
+    rootId,
     code,
     locator: file,
     size_bytes: fingerprint?.file_size ?? null,
@@ -220,29 +247,22 @@ function buildScannedVideoImport(
   }
 }
 
-function scanRootForFile(file: string, folders: string[]): string {
-  return (
-    [...folders]
-      .filter((folder) => isPathUnderRoot(file, folder))
-      .sort((left, right) => right.length - left.length)[0] ?? path.dirname(file)
-  )
-}
-
 function findRelocationCandidate(
+  libraryId: number,
   videos: Array<{ id: number }>,
   file: string,
   sizeBytes: number | null,
-  unavailableRoots: string[],
+  unavailableRootIds: ReadonlySet<number>,
   inspectPath: (filePath: string) => 'present' | 'missing' | 'unknown'
 ): LocalVideoResource | null {
   if (sizeBytes == null) return null
   const newName = path.basename(file)
   const localResources = videos.flatMap((video) =>
-    listVideoResources(video.id)
+    listVideoResources(libraryId, video.id)
       .filter((resource): resource is LocalVideoResource => resource.kind === 'local')
   )
   const auditable = localResources.filter(
-    (resource) => !unavailableRoots.some((root) => isPathUnderRoot(resource.locator, root))
+    (resource) => resource.root_id != null && !unavailableRootIds.has(resource.root_id)
   )
   const missing = auditable.filter((resource) => inspectPath(resource.locator) === 'missing')
   const matches = missing.filter((resource) => {
@@ -252,8 +272,16 @@ function findRelocationCandidate(
   return matches.length === 1 ? matches[0] : null
 }
 
-function resolveRefreshTarget(file: string): LocalVideoResource | null {
-  const existingResource = getLocalVideoResourceByLocator(file)
+function localResourceInLibrary(libraryId: number, file: string): LocalVideoResource | null {
+  return getLocalVideoResourceByLocator(libraryId, file)
+}
+
+function strmResourceInLibrary(libraryId: number, file: string): VideoResource | null {
+  return getStrmVideoResourceBySourcePath(libraryId, file)
+}
+
+function resolveRefreshTarget(libraryId: number, file: string): LocalVideoResource | null {
+  const existingResource = localResourceInLibrary(libraryId, file)
   if (existingResource) return existingResource
 
   const base = path.basename(file, path.extname(file))
@@ -261,23 +289,26 @@ function resolveRefreshTarget(file: string): LocalVideoResource | null {
   if (!code) return null
   const video = getVideoByCode(code)
   if (!video) return null
-  const localResource = getPreferredLocalVideoResource(video.id)
+  const localResource = getPreferredLocalVideoResource(libraryId, video.id)
   if (localResource && samePath(localResource.locator, file)) return localResource
   return null
 }
 
 async function refreshScannedFileDuration(
+  libraryId: number,
   file: string,
-  readDurationSeconds: DurationReader
+  readDurationSeconds: DurationReader,
+  authorizeWrite: () => void
 ): Promise<boolean> {
   const fingerprint = statFileFingerprint(file)
   if (!fingerprint) return false
 
-  const record = resolveRefreshTarget(file)
+  const record = resolveRefreshTarget(libraryId, file)
   if (!record) return false
 
   if (!shouldProbeLocalVideoResourceDuration(record, fingerprint)) {
     if (record.file_mtime_ms == null) {
+      authorizeWrite()
       backfillLocalVideoResourceFingerprint(record.id, {
         sizeBytes: fingerprint.file_size,
         fileMtimeMs: fingerprint.file_mtime_ms
@@ -288,6 +319,7 @@ async function refreshScannedFileDuration(
   }
 
   const fileDurationSeconds = await readDurationSeconds(file)
+  authorizeWrite()
   if (fileDurationSeconds == null || fileDurationSeconds <= 0) return false
 
   const nextDuration = shouldRefreshLocalVideoResourceDuration(
@@ -311,11 +343,36 @@ async function refreshScannedFileDuration(
  * distinguish accessible folders from offline folders.
  */
 export async function scanFolders(
-  folders: string[],
+  request: ScanFoldersRequest,
   onProgress?: ScanProgressFn,
   options: ScanOptions = {}
 ): Promise<ScanResult> {
+  if (!Number.isSafeInteger(request.libraryId) || request.libraryId <= 0) {
+    throw new Error('媒体库 ID 无效')
+  }
+  if (!request.runId.trim()) throw new Error('扫描运行 ID 不能为空')
+  const roots = request.roots.map((root) => ({ ...root }))
+  if (
+    roots.some(
+      (root) =>
+        !Number.isSafeInteger(root.id) ||
+        root.id <= 0 ||
+        root.libraryId !== request.libraryId ||
+        !path.isAbsolute(root.path) ||
+        root.state !== 'active'
+    ) ||
+    new Set(roots.map((root) => root.id)).size !== roots.length
+  ) {
+    throw new Error('扫描根目录快照无效')
+  }
+  const libraryId = request.libraryId
+  for (const root of roots) {
+    authorizeMediaLibraryRoot(libraryId, root.id, root)
+  }
+  const unavailableRootIds = new Set(options.unavailableRootIds ?? [])
   const result: ScanResult = {
+    libraryId,
+    runId: request.runId,
     scannedFiles: 0,
     imported: 0,
     skipped: 0,
@@ -335,32 +392,31 @@ export async function scanFolders(
     omittedStrmFailures: 0
   }
 
-  const filePaths: string[] = []
+  const files: Array<{ filePath: string; root: Readonly<MediaLibraryRoot> }> = []
   const readDirectory =
     options.readDirectory ??
     ((dir: string) => fs.promises.readdir(dir, { withFileTypes: true }))
   const inspectPath = options.inspectPath ?? inspectScannedResourcePath
-  for (const folder of folders) {
+  for (const root of roots) {
     if (options.signal?.aborted) {
       result.cancelled = true
       return result
     }
-    await collectScannableFiles(folder, filePaths, options.signal, readDirectory)
+    const rootFiles: string[] = []
+    await collectScannableFiles(root.path, rootFiles, options.signal, readDirectory)
+    files.push(...rootFiles.map((filePath) => ({ filePath, root })))
   }
   const yieldEvery = Math.max(1, options.yieldEvery ?? DEFAULT_YIELD_EVERY)
   const readDurationSeconds = options.readDurationSeconds ?? readLocalVideoDurationSeconds
   const minImportDurationSeconds =
-    options.minImportDurationSeconds !== undefined
-      ? options.minImportDurationSeconds
-      : resolveMinScanImportDurationSeconds(getSettings().minScanImportDurationMinutes)
-  const autoMergeSameCodeResources =
-    options.autoMergeSameCodeResources ?? getSettings().autoMergeSameCodeResources
+    options.minImportDurationSeconds !== undefined ? options.minImportDurationSeconds : null
+  const autoMergeSameCodeResources = options.autoMergeSameCodeResources ?? false
   const newFileCounts = new Map<string, number>()
-  for (const file of filePaths) {
+  for (const { filePath: file } of files) {
     if (
-      localVideoResourceExistsByLocator(file) ||
-      getStrmVideoResourceBySourcePath(file) ||
-      pendingScanResourceExists(file)
+      getLocalVideoResourceByLocator(libraryId, file) ||
+      getStrmVideoResourceBySourcePath(libraryId, file) ||
+      pendingScanResourceExists(libraryId, file)
     ) {
       continue
     }
@@ -370,7 +426,7 @@ export async function scanFolders(
   }
   if (!autoMergeSameCodeResources) {
     let checkedStrmFiles = 0
-    for (const file of filePaths) {
+    for (const { filePath: file } of files) {
       if (options.signal?.aborted) {
         result.cancelled = true
         return result
@@ -379,9 +435,9 @@ export async function scanFolders(
       const code = parseCode(path.basename(file, path.extname(file)))
       if (!code || (newFileCounts.get(code) ?? 0) <= 1) continue
       if (
-        localVideoResourceExistsByLocator(file) ||
-        getStrmVideoResourceBySourcePath(file) ||
-        pendingScanResourceExists(file) ||
+        getLocalVideoResourceByLocator(libraryId, file) ||
+        getStrmVideoResourceBySourcePath(libraryId, file) ||
+        pendingScanResourceExists(libraryId, file) ||
         listVideosByCode(code).length > 0
       ) {
         continue
@@ -395,6 +451,10 @@ export async function scanFolders(
   }
   const pendingGroupIds = new Set<number>()
   const primarySelectionVideoIds = new Set<number>()
+  const videoIdentity = (videoId: number): { videoId: number; videoCode: string } => ({
+    videoId,
+    videoCode: getVideoById(videoId)?.code ?? ''
+  })
 
   const recordStrmFailure = (failure: StrmScanFailure): void => {
     result.failed += 1
@@ -402,7 +462,13 @@ export async function scanFolders(
     else result.omittedStrmFailures += 1
   }
 
-  for (const file of filePaths) {
+  for (const { filePath: file, root } of files) {
+    const rootId = root.id
+    const authorizeFileWrite = (): void => {
+      authorizeMediaLibraryRootFile(libraryId, rootId, file, root)
+    }
+    const recordFile = (entry: ScanFileAuditWithoutRoot): void =>
+      options.onFileResult?.({ ...entry, rootId } as LibraryScanFileAuditEntry)
     if (options.signal?.aborted) {
       result.cancelled = true
       break
@@ -413,20 +479,30 @@ export async function scanFolders(
       if (isStrmFile(file)) {
         const prepared = readStrmTarget(file)
         if (options.signal?.aborted) {
+          result.scannedFiles -= 1
           result.cancelled = true
           break
         }
         if (!prepared.ok) {
-          removePendingScanResource(file)
+          authorizeFileWrite()
+          removePendingScanResource(libraryId, file)
           recordStrmFailure(prepared.failure)
+          recordFile({
+            filePath: file,
+            sourceKind: 'strm',
+            outcome: 'strm_failure',
+            failureCode: prepared.failure.code,
+            message: prepared.failure.message
+          })
           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
           await maybeYield(result.scannedFiles, yieldEvery)
           continue
         }
 
         const target = prepared.target
-        const existingResource = getStrmVideoResourceBySourcePath(file)
+        const existingResource = strmResourceInLibrary(libraryId, file)
         if (existingResource) {
+          authorizeFileWrite()
           if (
             updateStrmVideoResourceTarget(existingResource.id, {
               kind: target.kind,
@@ -434,8 +510,26 @@ export async function scanFolders(
             })
           ) {
             result.refreshed += 1
+            recordFile({
+              filePath: file,
+              sourceKind: 'strm',
+              outcome: 'updated',
+              updateKind: 'strm_target_synced',
+              ...videoIdentity(existingResource.video_id),
+              resourceId: existingResource.id,
+              resourceKind: target.kind
+            })
           } else {
             result.skipped += 1
+            recordFile({
+              filePath: file,
+              sourceKind: 'strm',
+              outcome: 'skipped',
+              skipReason: 'unchanged',
+              ...videoIdentity(existingResource.video_id),
+              resourceId: existingResource.id,
+              resourceKind: existingResource.kind
+            })
           }
           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
           await maybeYield(result.scannedFiles, yieldEvery)
@@ -443,12 +537,14 @@ export async function scanFolders(
         }
 
         const code = parseCode(path.basename(file, path.extname(file)))
-        if (pendingScanResourceExists(file)) {
+        if (pendingScanResourceExists(libraryId, file)) {
+          let groupId: number | null = null
           if (code) {
-            const pending = upsertPendingScanResources(code, [
+            authorizeFileWrite()
+            const pending = upsertPendingScanResources(libraryId, code, [
               {
+                rootId,
                 filePath: file,
-                scanRoot: scanRootForFile(file, folders),
                 sourceKind: 'strm',
                 targetKind: target.kind,
                 targetLocator: target.locator,
@@ -460,25 +556,46 @@ export async function scanFolders(
               }
             ])
             pendingGroupIds.add(pending.groupId)
+            groupId = pending.groupId
           }
+          recordFile({
+            filePath: file,
+            sourceKind: 'strm',
+            outcome: 'pending',
+            normalizedCode: code ? normalizeVideoCode(code) : null,
+            groupId,
+            addedToQueue: false
+          })
           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
           await maybeYield(result.scannedFiles, yieldEvery)
           continue
         }
 
         const relocation = findStrmRelocationCandidate(
+          libraryId,
           file,
           target.targetKey,
-          options.unavailableRoots ?? [],
+          unavailableRootIds,
           inspectPath
         )
         if (relocation) {
-          relocateStrmVideoResource(relocation.resource_id, {
+          authorizeFileWrite()
+          relocateStrmVideoResource(libraryId, relocation.resource_id, {
+            rootId,
             sourcePath: file,
             kind: target.kind,
             locator: target.locator
           })
           result.relocated += 1
+          recordFile({
+            filePath: file,
+            sourceKind: 'strm',
+            outcome: 'updated',
+            updateKind: 'relocated',
+            ...videoIdentity(relocation.video_id),
+            resourceId: relocation.resource_id,
+            resourceKind: target.kind
+          })
           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
           await maybeYield(result.scannedFiles, yieldEvery)
           continue
@@ -487,6 +604,7 @@ export async function scanFolders(
         if (!code) {
           result.failed += 1
           result.unrecognizedFiles.push(file)
+          recordFile({ filePath: file, sourceKind: 'strm', outcome: 'unrecognized' })
           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
           await maybeYield(result.scannedFiles, yieldEvery)
           continue
@@ -498,10 +616,11 @@ export async function scanFolders(
           ? existingVideos.length > 1
           : existingVideos.length > 0 || (newFileCounts.get(code) ?? 0) > 1
         if (mustConfirm) {
-          const pending = upsertPendingScanResources(code, [
+          authorizeFileWrite()
+          const pending = upsertPendingScanResources(libraryId, code, [
             {
+              rootId,
               filePath: file,
-              scanRoot: scanRootForFile(file, folders),
               sourceKind: 'strm',
               targetKind: target.kind,
               targetLocator: target.locator,
@@ -514,15 +633,27 @@ export async function scanFolders(
           ])
           pendingGroupIds.add(pending.groupId)
           result.pendingResources += pending.addedResources
+          recordFile({
+            filePath: file,
+            sourceKind: 'strm',
+            outcome: 'pending',
+            normalizedCode: normalizeVideoCode(code),
+            groupId: pending.groupId,
+            addedToQueue: pending.addedResources > 0
+          })
           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
           await maybeYield(result.scannedFiles, yieldEvery)
           continue
         }
 
         if (existingVideos.length === 1) {
-          const needsPrimarySelection = listVideoResources(existingVideos[0].id).length === 0
+          const needsPrimarySelection =
+            listVideoResources(libraryId, existingVideos[0].id).length === 0
+          authorizeFileWrite()
           const resourceId = insertStrmVideoResource({
+            libraryId,
             videoId: existingVideos[0].id,
+            rootId,
             sourcePath: file,
             kind: target.kind,
             locator: target.locator,
@@ -533,8 +664,30 @@ export async function scanFolders(
             result.imported += 1
             if (needsPrimarySelection) primarySelectionVideoIds.add(existingVideos[0].id)
           }
+          recordFile(
+            resourceId == null
+              ? {
+                  filePath: file,
+                  sourceKind: 'strm',
+                  outcome: 'skipped',
+                  skipReason: 'duplicate'
+                }
+              : {
+                  filePath: file,
+                  sourceKind: 'strm',
+                  outcome: 'added',
+                  videoId: existingVideos[0].id,
+                  videoCode: existingVideos[0].code,
+                  resourceId,
+                  resourceKind: target.kind,
+                  createdVideo: false
+                }
+          )
         } else {
+          authorizeFileWrite()
           const videoId = insertNewScannedStrmVideo({
+            libraryId,
+            rootId,
             code,
             sourcePath: file,
             kind: target.kind,
@@ -547,31 +700,88 @@ export async function scanFolders(
             result.newCodes.push(code)
             primarySelectionVideoIds.add(videoId)
           }
+          const resource = videoId == null ? null : strmResourceInLibrary(libraryId, file)
+          recordFile(
+            videoId == null || !resource
+              ? {
+                  filePath: file,
+                  sourceKind: 'strm',
+                  outcome: 'skipped',
+                  skipReason: 'duplicate'
+                }
+              : {
+                  filePath: file,
+                  sourceKind: 'strm',
+                  outcome: 'added',
+                  videoId,
+                  videoCode: code,
+                  resourceId: resource.id,
+                  resourceKind: resource.kind,
+                  createdVideo: true
+                }
+          )
         }
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
       }
 
-      if (localVideoResourceExistsByLocator(file)) {
-        if (await refreshScannedFileDuration(file, readDurationSeconds)) {
+      const registeredResource = getLocalVideoResourceByLocator(libraryId, file)
+      if (registeredResource) {
+        const existingResource = localResourceInLibrary(libraryId, file)
+        const refreshed = existingResource
+          ? await refreshScannedFileDuration(
+              libraryId,
+              file,
+              readDurationSeconds,
+              authorizeFileWrite
+            )
+          : false
+        if (refreshed) {
           result.refreshed += 1
+          if (existingResource) {
+            recordFile({
+              filePath: file,
+              sourceKind: 'local',
+              outcome: 'updated',
+              updateKind: 'metadata_refreshed',
+              ...videoIdentity(existingResource.video_id),
+              resourceId: existingResource.id,
+              resourceKind: 'local'
+            })
+          }
+        } else {
+          result.skipped += 1
+          recordFile({
+            filePath: file,
+            sourceKind: 'local',
+            outcome: 'skipped',
+            skipReason: 'unchanged',
+            ...(existingResource
+              ? {
+                  ...videoIdentity(existingResource.video_id),
+                  resourceId: existingResource.id,
+                  resourceKind: 'local' as const
+                }
+              : {})
+          })
         }
-        result.skipped += 1
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
       }
 
-      if (pendingScanResourceExists(file)) {
+      if (pendingScanResourceExists(libraryId, file)) {
         const code = parseCode(path.basename(file, path.extname(file)))
+        let groupId: number | null = null
         if (code) {
-          const fingerprint = statFileFingerprint(file)
           const fileDurationSeconds = await readDurationSeconds(file)
-          const pending = upsertPendingScanResources(code, [
+          authorizeFileWrite()
+          const fingerprint = statFileFingerprint(file)
+          const pending = upsertPendingScanResources(libraryId, code, [
             {
+              rootId,
               filePath: file,
-              scanRoot: scanRootForFile(file, folders),
               sizeBytes: fingerprint?.file_size ?? null,
               durationSeconds: fileDurationSeconds,
               fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
@@ -579,7 +789,16 @@ export async function scanFolders(
             }
           ])
           pendingGroupIds.add(pending.groupId)
+          groupId = pending.groupId
         }
+        recordFile({
+          filePath: file,
+          sourceKind: 'local',
+          outcome: 'pending',
+          normalizedCode: code ? normalizeVideoCode(code) : null,
+          groupId,
+          addedToQueue: false
+        })
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
@@ -588,9 +807,16 @@ export async function scanFolders(
       let probedDuration: number | null | undefined = undefined
       if (minImportDurationSeconds != null) {
         probedDuration = await readDurationSeconds(file)
+        authorizeFileWrite()
         if (isBelowMinImportDuration(probedDuration, minImportDurationSeconds)) {
           result.skipped += 1
           result.skippedShort += 1
+          recordFile({
+            filePath: file,
+            sourceKind: 'local',
+            outcome: 'skipped',
+            skipReason: 'below_min_duration'
+          })
           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
           await maybeYield(result.scannedFiles, yieldEvery)
           continue
@@ -602,34 +828,49 @@ export async function scanFolders(
       if (!code) {
         result.failed += 1
         result.unrecognizedFiles.push(file)
+        recordFile({ filePath: file, sourceKind: 'local', outcome: 'unrecognized' })
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
       }
 
-      const fingerprint = statFileFingerprint(file)
       const existingVideos = listVideosByCode(code)
       const fileDurationSeconds = await resolveImportDurationSeconds(
         file,
         readDurationSeconds,
         probedDuration
       )
+      authorizeFileWrite()
+      const fingerprint = statFileFingerprint(file)
       const relocation = findRelocationCandidate(
+        libraryId,
         existingVideos,
         file,
         fingerprint?.file_size ?? null,
-        options.unavailableRoots ?? [],
+        unavailableRootIds,
         inspectPath
       )
       if (relocation) {
+        authorizeFileWrite()
         relocateLocalVideoResourceById(
+          libraryId,
           relocation.id,
+          rootId,
           file,
           fingerprint?.file_size ?? null,
           fileDurationSeconds,
           fingerprint?.file_mtime_ms ?? null
         )
         result.relocated += 1
+        recordFile({
+          filePath: file,
+          sourceKind: 'local',
+          outcome: 'updated',
+          updateKind: 'relocated',
+          ...videoIdentity(relocation.video_id),
+          resourceId: relocation.id,
+          resourceKind: 'local'
+        })
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
@@ -639,10 +880,11 @@ export async function scanFolders(
         ? existingVideos.length > 1
         : existingVideos.length > 0 || (newFileCounts.get(code) ?? 0) > 1
       if (mustConfirm) {
-        const pending = upsertPendingScanResources(code, [
+        authorizeFileWrite()
+        const pending = upsertPendingScanResources(libraryId, code, [
           {
+            rootId,
             filePath: file,
-            scanRoot: scanRootForFile(file, folders),
             sizeBytes: fingerprint?.file_size ?? null,
             durationSeconds: fileDurationSeconds,
             fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
@@ -651,15 +893,27 @@ export async function scanFolders(
         ])
         pendingGroupIds.add(pending.groupId)
         result.pendingResources += pending.addedResources
+        recordFile({
+          filePath: file,
+          sourceKind: 'local',
+          outcome: 'pending',
+          normalizedCode: normalizeVideoCode(code),
+          groupId: pending.groupId,
+          addedToQueue: pending.addedResources > 0
+        })
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
       }
 
       if (existingVideos.length === 1) {
-        const needsPrimarySelection = listVideoResources(existingVideos[0].id).length === 0
+        const needsPrimarySelection =
+          listVideoResources(libraryId, existingVideos[0].id).length === 0
+        authorizeFileWrite()
         const resourceId = insertLocalVideoResource({
+          libraryId,
           videoId: existingVideos[0].id,
+          rootId,
           locator: file,
           sizeBytes: fingerprint?.file_size ?? null,
           durationSeconds: fileDurationSeconds,
@@ -669,22 +923,69 @@ export async function scanFolders(
           result.imported += 1
           if (needsPrimarySelection) primarySelectionVideoIds.add(existingVideos[0].id)
         } else result.skipped += 1
+        recordFile(
+          resourceId == null
+            ? {
+                filePath: file,
+                sourceKind: 'local',
+                outcome: 'skipped',
+                skipReason: 'duplicate'
+              }
+            : {
+                filePath: file,
+                sourceKind: 'local',
+                outcome: 'added',
+                videoId: existingVideos[0].id,
+                videoCode: existingVideos[0].code,
+                resourceId,
+                resourceKind: 'local',
+                createdVideo: false
+              }
+        )
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
       }
 
+      authorizeFileWrite()
       const id = insertScannedVideo(
-        buildScannedVideoImport(code, file, fileDurationSeconds, fingerprint)
+        buildScannedVideoImport(libraryId, rootId, code, file, fileDurationSeconds, fingerprint)
       )
       if (id !== null) {
         result.imported += 1
         result.newCodes.push(code)
         primarySelectionVideoIds.add(id)
-      } else result.skipped += 1
+        const resource = localResourceInLibrary(libraryId, file)
+        if (resource) {
+          recordFile({
+            filePath: file,
+            sourceKind: 'local',
+            outcome: 'added',
+            videoId: id,
+            videoCode: code,
+            resourceId: resource.id,
+            resourceKind: 'local',
+            createdVideo: true
+          })
+        }
+      } else {
+        result.skipped += 1
+        recordFile({
+          filePath: file,
+          sourceKind: 'local',
+          outcome: 'skipped',
+          skipReason: 'duplicate'
+        })
+      }
     } catch (err) {
       console.error('Scan error for', file, err)
       result.failed += 1
+      recordFile({
+        filePath: file,
+        sourceKind: isStrmFile(file) ? 'strm' : 'local',
+        outcome: 'processing_failure',
+        message: sanitizeLibraryScanError(err)
+      })
     }
 
     onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
@@ -694,7 +995,7 @@ export async function scanFolders(
   result.pendingGroups = pendingGroupIds.size
 
   for (const videoId of primarySelectionVideoIds) {
-    const candidates = listVideoResources(videoId).map((resource) => ({
+    const candidates = listVideoResources(libraryId, videoId).map((resource) => ({
       resource,
       filePath: resource.strm_source_path ?? resource.locator,
       sourceKind: resource.strm_source_path ? ('strm' as const) : ('local' as const),
@@ -703,7 +1004,19 @@ export async function scanFolders(
       sizeBytes: resource.size_bytes
     }))
     const primary = selectDefaultPendingScanPrimary(candidates, normalizeLocalPathIdentity)
-    if (primary) setPrimaryVideoResource(videoId, primary.resource.id)
+    if (primary) {
+      if (primary.resource.root_id != null) {
+        const root = roots.find((candidate) => candidate.id === primary.resource.root_id)
+        if (!root) throw new Error('主资源候选不属于本次扫描根目录快照')
+        authorizeMediaLibraryRootFile(
+          libraryId,
+          root.id,
+          primary.filePath,
+          root
+        )
+      }
+      setPrimaryVideoResource(libraryId, videoId, primary.resource.id)
+    }
   }
 
   return result
@@ -711,25 +1024,60 @@ export async function scanFolders(
 
 const ILLEGAL_NAME_CHARS = /[\\/:*?"<>|]/
 
+export interface RenameAndImportRequest {
+  libraryId: number
+  rootId: number
+  oldPath: string
+  newName: string
+  code: string
+  target: VideoResourceImportTarget
+}
+
+export interface ManualImportRequest {
+  libraryId: number
+  rootId: number
+  filePath: string
+  code: string
+  target: VideoResourceImportTarget
+}
+
+export interface ManualImportOptions {
+  /** Test seam for deterministically exercising the probe-to-commit race. */
+  readDurationSeconds?: (filePath: string) => Promise<number | null>
+  /** Frozen by rename-and-import so the physical operation and import share one authority. */
+  expectedRoot?: Readonly<MediaLibraryRoot>
+}
+
+export type RenameAndImportOptions = Pick<ManualImportOptions, 'readDurationSeconds'>
+
+function assertManagedImportPath(
+  libraryId: number,
+  rootId: number,
+  filePath: string,
+  expectedRoot?: Readonly<MediaLibraryRoot>
+): MediaLibraryRoot {
+  return authorizeMediaLibraryRootFile(libraryId, rootId, filePath, expectedRoot)
+}
+
 /**
  * Rename a file on disk (keeping its original extension unless the new name
  * already carries one), then import it using the user's explicit code and target.
  * Used to fix up files the scanner couldn't recognize.
  */
 export async function renameAndImport(
-  oldPath: string,
-  newNameRaw: string,
-  codeRaw: string,
-  target: VideoResourceImportTarget
+  input: RenameAndImportRequest,
+  options: RenameAndImportOptions = {}
 ): Promise<RenameImportResult> {
+  const { libraryId, rootId, oldPath, target } = input
   if (!fs.existsSync(oldPath)) throw new Error('原文件不存在或已被移动')
+  const expectedRoot = assertManagedImportPath(libraryId, rootId, oldPath)
 
-  const newName = newNameRaw.trim()
+  const newName = input.newName.trim()
   if (!newName) throw new Error('文件名不能为空')
   if (ILLEGAL_NAME_CHARS.test(newName)) {
     throw new Error('文件名包含非法字符： \\ / : * ? " < > |')
   }
-  const code = normalizeVideoCode(codeRaw)
+  const code = normalizeVideoCode(input.code)
   if (
     target.kind === 'existing' &&
     !listVideosByCode(code).some((video) => video.id === target.videoId)
@@ -749,15 +1097,26 @@ export async function renameAndImport(
   }
 
   if (!sameFile) {
+    assertManagedImportPath(libraryId, rootId, oldPath, expectedRoot)
     fs.renameSync(oldPath, newPath)
   }
 
   try {
-    const result = await importManual(newPath, code, target)
+    const result = await importManual(
+      {
+        libraryId,
+        rootId,
+        filePath: newPath,
+        code,
+        target
+      },
+      { ...options, expectedRoot }
+    )
     return { newPath, newName: path.basename(newPath), imported: result.imported, code }
   } catch (error) {
     if (!sameFile && fs.existsSync(newPath) && !fs.existsSync(oldPath)) {
       try {
+        assertManagedImportPath(libraryId, rootId, newPath, expectedRoot)
         fs.renameSync(newPath, oldPath)
       } catch {
         throw new Error(`导入失败且无法恢复原文件名：${error instanceof Error ? error.message : String(error)}`)
@@ -772,24 +1131,33 @@ export async function renameAndImport(
  * validate code format beyond the shared trim-and-uppercase identity rule.
  */
 export async function importManual(
-  filePath: string,
-  codeRaw: string,
-  target: VideoResourceImportTarget
+  input: ManualImportRequest,
+  options: ManualImportOptions = {}
 ): Promise<ManualImportResult> {
+  const { libraryId, rootId, filePath, target } = input
   if (!fs.existsSync(filePath)) throw new Error('原文件不存在或已被移动')
+  const expectedRoot = assertManagedImportPath(
+    libraryId,
+    rootId,
+    filePath,
+    options.expectedRoot
+  )
 
-  const code = normalizeVideoCode(codeRaw)
+  const code = normalizeVideoCode(input.code)
 
   if (isStrmFile(filePath)) {
     const parsed = readStrmFile(filePath)
-    if (getStrmVideoResourceBySourcePath(filePath)) {
+    if (getStrmVideoResourceBySourcePath(libraryId, filePath)) {
       return { code, imported: false, skippedPath: true }
     }
     if (target.kind === 'existing') {
       const existing = listVideosByCode(code).find((video) => video.id === target.videoId)
       if (!existing) throw new Error('所选影片不存在或番号已经变化')
+      assertManagedImportPath(libraryId, rootId, filePath, expectedRoot)
       const resourceId = insertStrmVideoResource({
+        libraryId,
         videoId: existing.id,
+        rootId,
         sourcePath: filePath,
         kind: parsed.kind,
         locator: parsed.locator,
@@ -797,7 +1165,10 @@ export async function importManual(
       })
       return { code, imported: resourceId !== null }
     }
+    assertManagedImportPath(libraryId, rootId, filePath, expectedRoot)
     const videoId = insertNewScannedStrmVideo({
+      libraryId,
+      rootId,
       code,
       sourcePath: filePath,
       kind: parsed.kind,
@@ -807,19 +1178,25 @@ export async function importManual(
     return { code, imported: videoId !== null }
   }
 
-  if (localVideoResourceExistsByLocator(filePath)) {
+  if (getLocalVideoResourceByLocator(libraryId, filePath)) {
     return { code, imported: false, skippedPath: true }
   }
 
+  const fileDurationSeconds = await (
+    options.readDurationSeconds ?? readLocalVideoDurationSeconds
+  )(filePath)
+  assertManagedImportPath(libraryId, rootId, filePath, expectedRoot)
   const fingerprint = statFileFingerprint(filePath)
-  const fileDurationSeconds = await readLocalVideoDurationSeconds(filePath)
   if (target.kind === 'existing') {
     const existing = listVideosByCode(code).find((video) => video.id === target.videoId)
     if (!existing) throw new Error('所选影片不存在或番号已经变化')
-    const localResource = getPreferredLocalVideoResource(existing.id)
+    const localResource = getPreferredLocalVideoResource(libraryId, existing.id)
     if (localResource && !fs.existsSync(localResource.locator)) {
+      assertManagedImportPath(libraryId, rootId, filePath, expectedRoot)
       relocateLocalVideoResource(
+        libraryId,
         existing.id,
+        rootId,
         filePath,
         fingerprint?.file_size ?? null,
         fileDurationSeconds,
@@ -827,9 +1204,12 @@ export async function importManual(
       )
       return { code, imported: true, relocated: true }
     }
-    if (!localVideoResourceExistsByLocator(filePath)) {
+    if (!getLocalVideoResourceByLocator(libraryId, filePath)) {
+      assertManagedImportPath(libraryId, rootId, filePath, expectedRoot)
       const resourceId = insertLocalVideoResource({
+        libraryId,
         videoId: existing.id,
+        rootId,
         locator: filePath,
         sizeBytes: fingerprint?.file_size ?? null,
         durationSeconds: fileDurationSeconds,
@@ -840,8 +1220,16 @@ export async function importManual(
     return { code, imported: false, skippedPath: false }
   }
 
+  assertManagedImportPath(libraryId, rootId, filePath, expectedRoot)
   const id = insertNewScannedVideo(
-    buildScannedVideoImport(code, filePath, fileDurationSeconds, fingerprint)
+    buildScannedVideoImport(
+      libraryId,
+      rootId,
+      code,
+      filePath,
+      fileDurationSeconds,
+      fingerprint
+    )
   )
   return { code, imported: id !== null }
 }

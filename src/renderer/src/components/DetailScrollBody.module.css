@@ -1,0 +1,15 @@
+.header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  margin-bottom: 12px;
+  gap: 8px;
+}
+
+.headerContext {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  overflow: hidden;
+}

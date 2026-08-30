@@ -1,30 +1,5 @@
-import fs from 'node:fs'
 import path from 'node:path'
-import { isPathUnderRoot } from '../scanner/libraryPathUtils'
-
-export function assertConfiguredLibraryFile(filePath: string, libraryPaths: string[]): void {
-  if (!path.isAbsolute(filePath)) {
-    throw new Error('只能操作已配置媒体库目录内的文件')
-  }
-
-  let resolvedFilePath: string
-  try {
-    resolvedFilePath = fs.realpathSync.native(filePath)
-  } catch {
-    throw new Error('只能操作已配置媒体库目录内的文件')
-  }
-
-  const isInsideConfiguredRoot = libraryPaths.some((libraryPath) => {
-    try {
-      return isPathUnderRoot(resolvedFilePath, fs.realpathSync.native(libraryPath))
-    } catch {
-      return false
-    }
-  })
-  if (!isInsideConfiguredRoot) {
-    throw new Error('只能操作已配置媒体库目录内的文件')
-  }
-}
+export { assertMediaLibraryRootFile } from '../services/mediaLibraryRootFileGuard'
 
 export function assertFileNameOnly(fileName: string): void {
   if (fileName !== path.basename(fileName) || fileName === '.' || fileName === '..') {

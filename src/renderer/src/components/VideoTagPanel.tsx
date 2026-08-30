@@ -4,6 +4,7 @@ import type { VideoTag } from '@shared/videoTypes'
 import { api } from '../api'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import Modal from './Modal'
+import { AppFormField } from './FormPrimitives'
 import { useToast } from './Toast'
 import { Plus, SearchX, Tags, X } from 'lucide-react'
 import IconButton from './IconButton'
@@ -170,24 +171,23 @@ export default function VideoTagPanel({
         >
           <div className="video-tag-add-modal-body">
             <div className="video-tag-add-modal-field">
-              <label className="settings-form-label" htmlFor={`video-tag-add-input-${videoId}`}>
-                标签名称
-              </label>
-              <input
-                ref={inputRef}
-                id={`video-tag-add-input-${videoId}`}
-                className="text-input video-tag-add-modal-input"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder="输入自定义标签名称"
-                disabled={busy}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    void addTagByName(draft)
-                  }
-                }}
-              />
+              <AppFormField label="标签名称">
+                <input
+                  ref={inputRef}
+                  id={`video-tag-add-input-${videoId}`}
+                  className="text-input video-tag-add-modal-input"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder="输入自定义标签名称"
+                  disabled={busy}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void addTagByName(draft)
+                    }
+                  }}
+                />
+              </AppFormField>
             </div>
 
             <section className="video-tag-add-modal-catalog" aria-label="已有自定义标签">

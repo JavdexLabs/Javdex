@@ -1,9 +1,19 @@
 import type Database from 'better-sqlite3'
 import { normalizeActressName } from './actressNameNormalization'
 import { normalizeClassificationName } from '../../shared/classificationNameNormalization'
+import { normalizeLocalPathIdentity } from '../../shared/localPathIdentity'
+import { normalizeRelatedLinkUrl } from '../../shared/relatedLinkUrl'
 import { normalizeVideoCode } from '../../shared/videoCode'
+import { buildVideoResourceSourceIdentity } from '../../shared/videoResourceIdentity'
 import {
   CLASSIFICATION_V8_SCHEMA_SQL,
+  AGENT_METADATA_SCHEMA_SQL,
+  AGENT_PLATFORM_SCHEMA_SQL,
+  MEDIA_LIBRARY_CORE_SCHEMA_SQL,
+  MEDIA_LIBRARY_MEMBERSHIP_SCHEMA_SQL,
+  MEDIA_LIBRARY_PENDING_SCAN_SCHEMA_SQL,
+  MEDIA_LIBRARY_SCAN_SCHEMA_SQL,
+  MEDIA_LIBRARY_VIDEO_RESOURCES_SCHEMA_SQL,
   PENDING_LOCAL_FILE_DELETIONS_SCHEMA_SQL,
   PENDING_VIDEO_DECISIONS_SCHEMA_SQL,
   RELATED_LINKS_SCHEMA_SQL,
@@ -11,7 +21,7 @@ import {
   VIDEO_SOURCES_SCHEMA_SQL
 } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 13
+export const CURRENT_SCHEMA_VERSION = 14
 
 type Migration = {
   version: number
@@ -899,6 +909,382 @@ function migrateToV13(database: Database.Database): void {
   database.exec(RELATED_LINKS_SCHEMA_SQL)
 }
 
+type LegacyVideoResourceRow = {
+  id: number
+  video_id: number
+  kind: 'local' | 'direct' | 'web' | 'magnet' | 'ed2k'
+  locator: string
+  resource_key: string
+  strm_source_path: string | null
+  size_bytes: number | null
+  duration_seconds: number | null
+  file_mtime_ms: number | null
+  display_name: string | null
+  is_primary: number
+  add_time: string | null
+}
+
+type LegacyPendingScanGroupRow = {
+  id: number
+  normalized_code: string
+  created_at: string
+  updated_at: string
+}
+
+type LegacyPendingScanResourceRow = {
+  id: number
+  group_id: number
+  file_path: string
+  normalized_path: string
+  scan_root: string
+  source_kind: 'local' | 'strm'
+  target_kind: 'direct' | 'web' | 'magnet' | 'ed2k' | null
+  target_locator: string | null
+  target_key: string | null
+  size_bytes: number | null
+  duration_seconds: number | null
+  file_mtime_ms: number | null
+  display_name: string | null
+  created_at: string
+  updated_at: string
+}
+
+function assertLegacyResourceIdentities(resources: LegacyVideoResourceRow[]): Map<number, string | null> {
+  const identities = new Map<number, string | null>()
+  const ownerByIdentity = new Map<string, number>()
+  const primaryByVideo = new Map<number, number>()
+
+  for (const resource of resources) {
+    if (resource.kind === 'local' && resource.locator.trim().length === 0) {
+      throw new Error(`Cannot migrate local video resource ${resource.id}: locator is empty.`)
+    }
+    if (resource.strm_source_path !== null && resource.strm_source_path.trim().length === 0) {
+      throw new Error(`Cannot migrate STRM video resource ${resource.id}: source path is empty.`)
+    }
+    const identity = buildVideoResourceSourceIdentity({
+      kind: resource.kind,
+      locator: resource.locator,
+      strmSourcePath: resource.strm_source_path
+    })
+    identities.set(resource.id, identity)
+    if (identity) {
+      const existingId = ownerByIdentity.get(identity)
+      if (existingId !== undefined) {
+        throw new Error(
+          `Cannot migrate video resources ${existingId} and ${resource.id}: both resolve to source identity ${identity}. Remove the duplicate source before retrying.`
+        )
+      }
+      ownerByIdentity.set(identity, resource.id)
+    }
+    if (resource.is_primary === 1) {
+      const existingPrimary = primaryByVideo.get(resource.video_id)
+      if (existingPrimary !== undefined) {
+        throw new Error(
+          `Cannot migrate video ${resource.video_id}: resources ${existingPrimary} and ${resource.id} are both primary.`
+        )
+      }
+      primaryByVideo.set(resource.video_id, resource.id)
+    }
+  }
+  return identities
+}
+
+function createLegacyPendingRoots(
+  database: Database.Database,
+  resources: LegacyPendingScanResourceRow[]
+): Map<string, number> {
+  const rootIdByIdentity = new Map<string, number>()
+  const insertRoot = database.prepare(`
+    INSERT OR IGNORE INTO media_library_roots (
+      library_id, path, normalized_path, position, state
+    ) VALUES (1, ?, ?, ?, 'disabled')
+  `)
+  const getRoot = database.prepare(
+    'SELECT id FROM media_library_roots WHERE normalized_path = ?'
+  )
+
+  for (const resource of resources) {
+    const path = resource.scan_root.trim()
+    if (!path) {
+      throw new Error(`Cannot migrate pending scan resource ${resource.id}: scan root is empty.`)
+    }
+    const identity = normalizeLocalPathIdentity(path)
+    if (rootIdByIdentity.has(identity)) continue
+    insertRoot.run(path, identity, rootIdByIdentity.size)
+    const row = getRoot.get(identity) as { id: number } | undefined
+    if (!row) {
+      throw new Error(`Cannot migrate pending scan root ${path}: root record was not created.`)
+    }
+    rootIdByIdentity.set(identity, row.id)
+  }
+  return rootIdByIdentity
+}
+
+function rebuildVideoResourcesForLibraries(
+  database: Database.Database,
+  resources: LegacyVideoResourceRow[],
+  sourceIdentityById: Map<number, string | null>
+): void {
+  if (!tableExists(database, 'video_resources')) {
+    database.exec(MEDIA_LIBRARY_VIDEO_RESOURCES_SCHEMA_SQL)
+    return
+  }
+  database.exec(`
+    DROP INDEX IF EXISTS idx_video_resources_video_id;
+    DROP INDEX IF EXISTS idx_video_resources_key;
+    DROP INDEX IF EXISTS idx_video_resources_primary;
+    DROP INDEX IF EXISTS idx_video_resources_kind;
+    DROP INDEX IF EXISTS idx_video_resources_strm_source_path;
+    ALTER TABLE video_resources RENAME TO video_resources_v13;
+  `)
+  database.exec(MEDIA_LIBRARY_VIDEO_RESOURCES_SCHEMA_SQL)
+  const insertResource = database.prepare(`
+    INSERT INTO video_resources (
+      id, library_id, video_id, root_id, kind, locator, resource_key,
+      source_identity, strm_source_path, size_bytes, duration_seconds,
+      file_mtime_ms, display_name, is_primary, add_time
+    ) VALUES (
+      @id, 1, @videoId, NULL, @kind, @locator, @resourceKey,
+      @sourceIdentity, @strmSourcePath, @sizeBytes, @durationSeconds,
+      @fileMtimeMs, @displayName, @isPrimary, @addTime
+    )
+  `)
+  for (const resource of resources) {
+    insertResource.run({
+      id: resource.id,
+      videoId: resource.video_id,
+      kind: resource.kind,
+      locator: resource.locator,
+      resourceKey: resource.resource_key,
+      sourceIdentity: sourceIdentityById.get(resource.id) ?? null,
+      strmSourcePath: resource.strm_source_path,
+      sizeBytes: resource.size_bytes,
+      durationSeconds: resource.duration_seconds,
+      fileMtimeMs: resource.file_mtime_ms,
+      displayName: resource.display_name,
+      isPrimary: resource.is_primary,
+      addTime: resource.add_time
+    })
+  }
+  database.exec('DROP TABLE video_resources_v13')
+}
+
+function rebuildPendingScanForLibraries(
+  database: Database.Database,
+  groups: LegacyPendingScanGroupRow[],
+  resources: LegacyPendingScanResourceRow[],
+  rootIdByIdentity: Map<string, number>
+): void {
+  database.exec(`
+    DROP INDEX IF EXISTS idx_pending_scan_resources_group;
+    DROP INDEX IF EXISTS idx_pending_scan_resources_root;
+    DROP INDEX IF EXISTS idx_pending_scan_groups_updated_at;
+    DROP TABLE IF EXISTS pending_scan_resources;
+    DROP TABLE IF EXISTS pending_scan_groups;
+  `)
+  database.exec(MEDIA_LIBRARY_PENDING_SCAN_SCHEMA_SQL)
+
+  const insertGroup = database.prepare(`
+    INSERT INTO pending_scan_groups (
+      id, library_id, normalized_code, revision, created_at, updated_at
+    ) VALUES (@id, 1, @normalizedCode, 1, @createdAt, @updatedAt)
+  `)
+  for (const group of groups) {
+    insertGroup.run({
+      id: group.id,
+      normalizedCode: group.normalized_code,
+      createdAt: group.created_at,
+      updatedAt: group.updated_at
+    })
+  }
+
+  const insertResource = database.prepare(`
+    INSERT INTO pending_scan_resources (
+      id, library_id, group_id, root_id, file_path, normalized_path,
+      source_kind, target_kind, target_locator, target_key, size_bytes,
+      duration_seconds, file_mtime_ms, display_name, created_at, updated_at
+    ) VALUES (
+      @id, 1, @groupId, @rootId, @filePath, @normalizedPath,
+      @sourceKind, @targetKind, @targetLocator, @targetKey, @sizeBytes,
+      @durationSeconds, @fileMtimeMs, @displayName, @createdAt, @updatedAt
+    )
+  `)
+  for (const resource of resources) {
+    const rootId = rootIdByIdentity.get(normalizeLocalPathIdentity(resource.scan_root.trim()))
+    if (rootId === undefined) {
+      throw new Error(
+        `Cannot migrate pending scan resource ${resource.id}: its root was not created.`
+      )
+    }
+    insertResource.run({
+      id: resource.id,
+      groupId: resource.group_id,
+      rootId,
+      filePath: resource.file_path,
+      normalizedPath: resource.normalized_path,
+      sourceKind: resource.source_kind,
+      targetKind: resource.target_kind,
+      targetLocator: resource.target_locator,
+      targetKey: resource.target_key,
+      sizeBytes: resource.size_bytes,
+      durationSeconds: resource.duration_seconds,
+      fileMtimeMs: resource.file_mtime_ms,
+      displayName: resource.display_name,
+      createdAt: resource.created_at,
+      updatedAt: resource.updated_at
+    })
+  }
+}
+
+/** Single 0.6.0 migration from the released V13 schema; do not model unreleased intermediates. */
+function migrateToV14(database: Database.Database): void {
+  database.exec(AGENT_PLATFORM_SCHEMA_SQL)
+  database.exec(AGENT_METADATA_SCHEMA_SQL)
+
+  const hasVideos = tableExists(database, 'videos')
+  const hasResources = tableExists(database, 'video_resources')
+  const hasPendingGroups = tableExists(database, 'pending_scan_groups')
+  const hasPendingResources = tableExists(database, 'pending_scan_resources')
+  const videoCount = hasVideos
+    ? Number(
+        (database.prepare('SELECT COUNT(*) AS count FROM videos').get() as { count: number }).count
+      )
+    : 0
+  const resources = hasResources
+    ? (database
+        .prepare('SELECT * FROM video_resources ORDER BY id')
+        .all() as LegacyVideoResourceRow[])
+    : []
+  const groups = hasPendingGroups
+    ? (database
+        .prepare('SELECT * FROM pending_scan_groups ORDER BY id')
+        .all() as LegacyPendingScanGroupRow[])
+    : []
+  const pendingResources = hasPendingResources
+    ? (database
+        .prepare('SELECT * FROM pending_scan_resources ORDER BY id')
+        .all() as LegacyPendingScanResourceRow[])
+    : []
+  const sourceIdentityById = assertLegacyResourceIdentities(resources)
+
+  database.exec(MEDIA_LIBRARY_CORE_SCHEMA_SQL)
+  const rootIdByIdentity = createLegacyPendingRoots(database, pendingResources)
+  database.exec(MEDIA_LIBRARY_MEMBERSHIP_SCHEMA_SQL)
+  if (hasVideos) {
+    const videoColumns = columnNames(database, 'videos')
+    const addedAt = videoColumns.has('add_time')
+      ? 'COALESCE(add_time, CURRENT_TIMESTAMP)'
+      : 'CURRENT_TIMESTAMP'
+    const updatedAt = videoColumns.has('updated_at')
+      ? videoColumns.has('add_time')
+        ? 'COALESCE(updated_at, add_time, CURRENT_TIMESTAMP)'
+        : 'COALESCE(updated_at, CURRENT_TIMESTAMP)'
+      : addedAt
+    database.exec(`
+      INSERT OR IGNORE INTO library_video_memberships (
+        library_id, video_id, added_at, updated_at, added_via,
+        is_pinned, is_hidden, discovery_key
+      )
+      SELECT
+        1,
+        id,
+        ${addedAt},
+        ${updatedAt},
+        'shared',
+        0,
+        0,
+        ((id * 1103515245 + 12345) & 2147483647)
+      FROM videos
+    `)
+  }
+  rebuildVideoResourcesForLibraries(database, resources, sourceIdentityById)
+  rebuildPendingScanForLibraries(database, groups, pendingResources, rootIdByIdentity)
+  database.exec(MEDIA_LIBRARY_SCAN_SCHEMA_SQL)
+  normalizeStoredRelatedLinks(database)
+
+  const migratedVideoCount = hasVideos
+    ? Number(
+        (
+          database
+            .prepare(
+              'SELECT COUNT(*) AS count FROM library_video_memberships WHERE library_id = 1'
+            )
+            .get() as { count: number }
+        ).count
+      )
+    : 0
+  const migratedResourceCount = Number(
+    (database.prepare('SELECT COUNT(*) AS count FROM video_resources').get() as { count: number })
+      .count
+  )
+  const migratedGroupCount = Number(
+    (database.prepare('SELECT COUNT(*) AS count FROM pending_scan_groups').get() as {
+      count: number
+    }).count
+  )
+  const migratedPendingResourceCount = Number(
+    (database.prepare('SELECT COUNT(*) AS count FROM pending_scan_resources').get() as {
+      count: number
+    }).count
+  )
+  if (
+    migratedVideoCount !== videoCount ||
+    migratedResourceCount !== resources.length ||
+    migratedGroupCount !== groups.length ||
+    migratedPendingResourceCount !== pendingResources.length
+  ) {
+    throw new Error(
+      'Multi-library migration count check failed; the migration was rolled back without changing the database.'
+    )
+  }
+}
+
+function normalizeStoredRelatedLinks(database: Database.Database): void {
+  for (const [table, entityColumn] of [
+    ['organization_links', 'organization_id'],
+    ['director_links', 'director_id'],
+    ['series_links', 'series_id'],
+    ['video_links', 'video_id'],
+    ['actress_links', 'actress_id'],
+    ['playlist_links', 'playlist_id']
+  ] as const) {
+    if (!tableExists(database, table)) continue
+    const rows = database.prepare(
+      `SELECT id, ${entityColumn} AS entity_id, url, position FROM ${table} ORDER BY position, id`
+    ).all() as Array<{ id: number; entity_id: number; url: string; position: number }>
+    const retained = new Map<string, { id: number; url: string; normalizedUrl: string }>()
+    for (const row of rows) {
+      let storedUrl = row.url
+      let normalizedUrl: string
+      try {
+        normalizedUrl = normalizeRelatedLinkUrl(storedUrl)
+      } catch (error) {
+        const parsed = new URL(storedUrl.trim())
+        if (
+          !['http:', 'https:'].includes(parsed.protocol) ||
+          (!parsed.username && !parsed.password)
+        ) {
+          throw error
+        }
+        // V13 accepted credential-bearing HTTP links. Remove the credentials during
+        // the V14 upgrade so a released database remains openable and no secret is retained.
+        parsed.username = ''
+        parsed.password = ''
+        storedUrl = parsed.toString()
+        normalizedUrl = normalizeRelatedLinkUrl(storedUrl)
+      }
+      const key = `${row.entity_id}:${normalizedUrl}`
+      if (retained.has(key)) {
+        database.prepare(`DELETE FROM ${table} WHERE id = ?`).run(row.id)
+      } else {
+        retained.set(key, { id: row.id, url: storedUrl, normalizedUrl })
+      }
+    }
+    const update = database.prepare(`UPDATE ${table} SET url = ?, normalized_url = ? WHERE id = ?`)
+    for (const row of retained.values()) update.run(row.url, row.normalizedUrl, row.id)
+  }
+}
+
 const MIGRATIONS: Migration[] = [
   {
     version: 2,
@@ -947,6 +1333,10 @@ const MIGRATIONS: Migration[] = [
   {
     version: 13,
     migrate: migrateToV13
+  },
+  {
+    version: 14,
+    migrate: migrateToV14
   }
 ]
 

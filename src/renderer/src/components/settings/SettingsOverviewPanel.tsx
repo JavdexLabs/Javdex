@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   Brain,
   Bot,
@@ -13,12 +13,9 @@ import {
   UserRound
 } from 'lucide-react'
 import type { SettingsSnapshot, ThemeId } from '@shared/settingsTypes'
+import type { ModelManagementSnapshot } from '@shared/modelManagementTypes'
 import type { BatchProgress } from '@shared/batchScrapeTypes'
-import {
-  findLlmProviderViewModel,
-  listModelsForProvider,
-  normalizeDefaultLlmSelection
-} from '@shared/llmProviders'
+import { api } from '../../api'
 import { UI_ICON_SM } from '../iconDefaults'
 import { useToast } from '../Toast'
 import { useLibraryOverviewStats } from '../../hooks/useLibraryOverviewStats'
@@ -90,10 +87,13 @@ interface SettingsOverviewPanelProps {
   videoBatchPct: number
   actressPct: number
   actressConflictGroupCount: number
-  unrecognizedCount: number
+  mediaLibraryCount: number
+  mediaLibraryRootCount: number
+  mediaLibrariesLoading: boolean
+  mediaLibrariesError: boolean
   statsRefreshKey?: number
   onNavigate: (group: SettingsGroup, tab?: SettingsTab) => void
-  onNavigateLibraryUnrecognized: () => void
+  onOpenMediaLibrarySettings: () => void
   onOpenAgentTool: (toolId: SettingsOverviewAgentToolId) => void
   onStartVideoBatchDefault: () => void
   onStartActressBatchDefault: () => void
@@ -361,10 +361,13 @@ export default function SettingsOverviewPanel({
   videoBatchPct,
   actressPct,
   actressConflictGroupCount,
-  unrecognizedCount,
+  mediaLibraryCount,
+  mediaLibraryRootCount,
+  mediaLibrariesLoading,
+  mediaLibrariesError,
   statsRefreshKey = 0,
   onNavigate,
-  onNavigateLibraryUnrecognized,
+  onOpenMediaLibrarySettings,
   onOpenAgentTool,
   onStartVideoBatchDefault,
   onStartActressBatchDefault,
@@ -383,20 +386,26 @@ export default function SettingsOverviewPanel({
 }: SettingsOverviewPanelProps): JSX.Element {
   const toast = useToast()
   const { stats, isLoading: statsLoading } = useLibraryOverviewStats(statsRefreshKey)
+  const [modelManagement, setModelManagement] = useState<ModelManagementSnapshot | null>(null)
+  const [modelManagementError, setModelManagementError] = useState<string | null>(null)
 
-  const defaultLlmSelection = useMemo(() => normalizeDefaultLlmSelection(settings), [settings])
-  const defaultLlmProvider = useMemo(
-    () =>
-      defaultLlmSelection.providerId
-        ? findLlmProviderViewModel(settings, defaultLlmSelection.providerId)
-        : null,
-    [defaultLlmSelection.providerId, settings]
-  )
-  const defaultLlmModel = useMemo(() => {
-    if (!defaultLlmSelection.providerId) return null
-    const models = listModelsForProvider(defaultLlmSelection.providerId, settings.llmCustomModels)
-    return models.find((item) => item.id === defaultLlmSelection.modelId) ?? null
-  }, [defaultLlmSelection.modelId, defaultLlmSelection.providerId, settings.llmCustomModels])
+  useEffect(() => {
+    let cancelled = false
+    void api.settings.getModelManagement()
+      .then((snapshot) => {
+        if (cancelled) return
+        setModelManagement(snapshot)
+        setModelManagementError(null)
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setModelManagementError((error as Error).message)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  const defaultModel = modelManagement?.assignments.find(
+    (assignment) => assignment.workloadId === 'app-default'
+  )?.resolution
 
   const videoTotal = stats?.videos.total ?? 0
   const actressFemaleTotal = stats?.actresses.female ?? 0
@@ -507,27 +516,25 @@ export default function SettingsOverviewPanel({
           <SettingsStatusCard
             icon={FolderOpen}
             label="媒体库"
-            value={`${settings.libraryPaths.length} 个路径`}
-            detail={
-              statsLoading
-                ? '统计加载中…'
-                : settings.libraryPaths.length > 0
-                  ? `${formatCount(videoTotal)} 部影片`
-                  : '点击添加文件夹'
+            value={
+              mediaLibrariesError
+                ? '读取失败'
+                : mediaLibrariesLoading
+                  ? '读取中…'
+                  : `${mediaLibraryCount} 个媒体库`
             }
-            attention={settings.libraryPaths.length === 0}
-            onClick={() => onNavigate('library')}
+            detail={
+              mediaLibrariesError
+                ? '无法读取独立媒体库状态'
+                : mediaLibrariesLoading
+                ? '正在读取独立媒体库配置'
+                : mediaLibraryRootCount > 0
+                  ? `${mediaLibraryRootCount} 个来源目录 · ${formatCount(videoTotal)} 部影片`
+                  : '前往独立媒体库设置来源目录'
+            }
+            attention={mediaLibrariesError || (!mediaLibrariesLoading && mediaLibraryRootCount === 0)}
+            onClick={onOpenMediaLibrarySettings}
           />
-          {unrecognizedCount > 0 && (
-            <SettingsStatusCard
-              icon={FolderOpen}
-              label="无法识别"
-              value={`${unrecognizedCount} 个文件`}
-              detail="需手动填写番号"
-              attention
-              onClick={onNavigateLibraryUnrecognized}
-            />
-          )}
           <SettingsStatusCard
             icon={Clapperboard}
             label="影片刮削"
@@ -563,14 +570,10 @@ export default function SettingsOverviewPanel({
           <SettingsStatusCard
             icon={Brain}
             label="默认 LLM"
-            value={defaultLlmProvider?.name ?? '未配置'}
-            detail={
-              defaultLlmProvider
-                ? defaultLlmModel?.name ?? defaultLlmSelection.modelId ?? '未选择模型'
-                : '未配置供应商'
-            }
+            value={defaultModel?.providerName ?? '未配置'}
+            detail={defaultModel?.modelName ?? modelManagementError ?? defaultModel?.reason ?? '未选择模型'}
             emphasizeValue
-            attention={!defaultLlmProvider || defaultLlmProvider.status !== 'ready'}
+            attention={defaultModel?.ready !== true}
             onClick={() => onNavigate('models')}
           />
           <SettingsStatusCard
@@ -640,7 +643,7 @@ export default function SettingsOverviewPanel({
               </Button>
             </div>
             <small>
-              {settings.defaultScraper || '未设置插件'} · 未刮削项 · 空字段补齐 · 全字段
+              全局目录 · {settings.defaultScraper || '未设置插件'} · 未刮削项 · 空字段补齐 · 全字段
             </small>
           </div>
 

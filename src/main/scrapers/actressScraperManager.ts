@@ -19,7 +19,7 @@ import {
   type PreparedActressScrapeResource
 } from '../services/actressIdentityConflictWorkflow'
 import { getSettings } from '../settings/settingsStore'
-import { scrapeBrowser } from './scrapeBrowser'
+import { isScrapeBrowserBusyError, scrapeBrowser } from './scrapeBrowser'
 import { buildPluginRegistry, runCompositeFieldGroups } from './compositeScrapeRun'
 import {
   findCompositeScraper,
@@ -29,6 +29,7 @@ import {
   loadUserActressScrapers
 } from './scraperPluginService'
 import { normalizeActressScrapeResult } from './scraperResultValidation'
+import { projectActressScrapeResult } from './actressScrapeFieldProjection'
 
 function buildRegistry(): Map<string, BaseActressScraper> {
   return buildPluginRegistry(loadUserActressScrapers, loadBundledActressScrapers)
@@ -90,32 +91,6 @@ export interface ScrapeActressOptions {
   }
 }
 
-function pickActressFields(
-  result: ActressScrapeResult,
-  fields: Set<ActressScrapeField>
-): ActressScrapeResult {
-  const out: ActressScrapeResult = {}
-  if (fields.has('avatar')) out.avatarUrl = result.avatarUrl
-  if (fields.has('gallery')) out.galleryImageUrls = result.galleryImageUrls
-  if (fields.has('birthDate')) out.birthDate = result.birthDate
-  if (fields.has('nameZh')) out.nameZh = result.nameZh
-  if (fields.has('nameEn')) out.nameEn = result.nameEn
-  if (fields.has('debutDate')) out.debutDate = result.debutDate
-  if (fields.has('heightCm')) out.heightCm = result.heightCm
-  if (fields.has('measurements')) {
-    out.bustCm = result.bustCm
-    out.waistCm = result.waistCm
-    out.hipCm = result.hipCm
-  }
-  if (fields.has('cupSize')) out.cupSize = result.cupSize
-  if (fields.has('bloodType')) out.bloodType = result.bloodType
-  if (fields.has('zodiac')) out.zodiac = result.zodiac
-  if (fields.has('nationality')) out.nationality = result.nationality
-  if (fields.has('profileSummary')) out.profileSummary = result.profileSummary
-  if (fields.has('aliases')) out.aliases = result.aliases
-  return out
-}
-
 function mergeActressResults(
   base: ActressScrapeResult | null,
   next: ActressScrapeResult
@@ -157,7 +132,7 @@ async function scrapeCompositeActress(
         : await scraper.parseTask(queryName, aliases, proxyUrl)
       return normalizeActressScrapeResult(rawResult)
     },
-    pick: (result, pluginFields) => pickActressFields(result, new Set(pluginFields)),
+    pick: (result, pluginFields) => projectActressScrapeResult(result, new Set(pluginFields)),
     merge: mergeActressResults
   })
 }
@@ -343,7 +318,7 @@ export async function scrapeActress(
       ...(options?.batchJobId ? { batchJobId: options.batchJobId } : {})
     })
   } catch (err) {
-    recordActressScrapeFailure(actressId)
+    if (!isScrapeBrowserBusyError(err)) recordActressScrapeFailure(actressId)
     return { status: 'failure', ok: false, error: (err as Error).message }
   } finally {
     if (options?.closeBrowser !== false) {

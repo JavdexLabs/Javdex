@@ -1,0 +1,94 @@
+.stack {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.assignmentCard {
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  margin-bottom: 12px;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.sectionHint {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.gridTwo {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.singleField {
+  max-width: 640px;
+}
+
+.field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.controlInput {
+  width: 100%;
+  height: var(--control-h-md);
+  min-width: 0;
+  padding: 0 var(--control-pad-x);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.controlInput:disabled {
+  color: var(--text-muted);
+  opacity: 0.72;
+}
+
+.controlInput:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
+  box-shadow: var(--focus-ring);
+}
+
+.inlineInputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+@media (width <= 720px) {
+  .gridTwo {
+    grid-template-columns: 1fr;
+  }
+
+  .cardHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

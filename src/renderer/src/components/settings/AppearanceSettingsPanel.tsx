@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, RectangleHorizontal, RectangleVertical } from 'lucide-react'
-import { PRIVACY_MODE_SCOPES, type AppSettings, type CoverDisplayMode, type PrivacyModeScope, type ThemeId } from '@shared/settingsTypes'
+import {
+  PRIVACY_MODE_SCOPES,
+  type CoverDisplayMode,
+  type PrivacyModeScope,
+  type SettingsSnapshot,
+  type ThemeId
+} from '@shared/settingsTypes'
 import {
   MAX_AVATAR_FACE_RATIO,
   MIN_AVATAR_FACE_RATIO,
@@ -82,9 +88,22 @@ const PRIVACY_SCOPE_OPTIONS: Array<{
 ]
 
 type AvatarCompositionDraft = Pick<
-  AppSettings,
+  SettingsSnapshot,
   'avatarFaceRatio' | 'avatarCenteringMode' | 'avatarPreserveFullHead'
 >
+
+type AppearanceSettingsPatch = Partial<Pick<
+  SettingsSnapshot,
+  | 'videoDetailUseFirstSampleBackground'
+  | 'actressDetailUseFirstGalleryBackground'
+  | 'showVideoResourceTypeBadges'
+  | 'coverDisplayMode'
+  | 'privacyModeEnabled'
+  | 'privacyModeScopes'
+  | 'avatarFaceRatio'
+  | 'avatarCenteringMode'
+  | 'avatarPreserveFullHead'
+>>
 
 function clonePrivacySettings(settings: PrivacyModeSettings): PrivacyModeSettings {
   return {
@@ -101,7 +120,7 @@ function privacySettingsEqual(a: PrivacyModeSettings, b: PrivacyModeSettings): b
   )
 }
 
-function avatarCompositionDraftFromSettings(settings: AppSettings): AvatarCompositionDraft {
+function avatarCompositionDraftFromSettings(settings: SettingsSnapshot): AvatarCompositionDraft {
   return {
     avatarFaceRatio: settings.avatarFaceRatio,
     avatarCenteringMode: settings.avatarCenteringMode,
@@ -246,10 +265,10 @@ export default function AppearanceSettingsPanel({
   onOpenAvatarBatchDetails,
   scrapeBatchActive
 }: {
-  settings: AppSettings
+  settings: SettingsSnapshot
   theme: ThemeId
   onThemeChange: (theme: ThemeId) => void
-  onPatchSettings: (patch: Partial<AppSettings>) => boolean | void | Promise<boolean | void>
+  onPatchSettings: (patch: AppearanceSettingsPatch) => boolean | void | Promise<boolean | void>
   onOpenAvatarBatchDetails: () => void
   scrapeBatchActive: boolean
 }): JSX.Element {
@@ -460,7 +479,7 @@ export default function AppearanceSettingsPanel({
             <span className="settings-cover-mode-copy">
               <span className="settings-cover-mode-title">封面比例</span>
               <span className="settings-cover-mode-description">
-                媒体库影片卡片使用竖版海报或横板封面
+                所有媒体库的影片卡片统一使用竖版海报或横版封面
               </span>
             </span>
             <div className="mode-toggle" title="封面显示方式" role="group" aria-label="封面显示方式">
@@ -480,7 +499,7 @@ export default function AppearanceSettingsPanel({
                 onClick={() => void changeCoverDisplayMode('landscape')}
               >
                 <RectangleHorizontal {...UI_ICON_SM} aria-hidden />
-                <span>横板</span>
+                <span>横版</span>
               </button>
             </div>
           </div>

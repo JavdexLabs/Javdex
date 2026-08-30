@@ -1,11 +1,17 @@
 import {
   Clapperboard,
   CircleAlert,
+  Cloud,
+  Film,
+  Folder,
+  HardDrive,
+  House,
   LayoutGrid,
   List,
   ListVideo,
   Send,
   Settings,
+  Star,
   UserRound,
   Video,
   type LucideIcon
@@ -13,7 +19,13 @@ import {
 import { NAV_ICON } from './iconDefaults'
 
 const ICONS = {
+  home: House,
   library: LayoutGrid,
+  film: Film,
+  folder: Folder,
+  'hard-drive': HardDrive,
+  cloud: Cloud,
+  star: Star,
   actress: UserRound,
   director: Clapperboard,
   maker: Video,

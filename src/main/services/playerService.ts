@@ -3,15 +3,17 @@ import fs from 'node:fs'
 import {
   getPrimaryVideoResource,
   getVideoById,
-  getVideoResourceById
+  getVideoResourceInLibrary
 } from '../db/videoRepo'
+import { getMediaLibrary } from '../db/mediaLibraryRepo'
 import type { PlayResult } from '@shared/libraryTypes'
 import type { VideoResource } from '@shared/videoTypes'
 
 interface PlayerServiceDependencies {
+  getMediaLibrary: typeof getMediaLibrary
   getVideoById: typeof getVideoById
   getPrimaryVideoResource: typeof getPrimaryVideoResource
-  getVideoResourceById: typeof getVideoResourceById
+  getVideoResourceInLibrary: typeof getVideoResourceInLibrary
   fileExists: (filePath: string) => boolean
   openPath: (filePath: string) => Promise<string>
   openExternal: (url: string) => Promise<void>
@@ -19,23 +21,33 @@ interface PlayerServiceDependencies {
 }
 
 export interface PlayerService {
-  playVideo(videoId: number): Promise<PlayResult>
-  openResource(resourceId: number): Promise<PlayResult>
-  revealVideo(videoId: number): PlayResult
-  revealResource(resourceId: number): PlayResult
+  playVideo(libraryId: number, videoId: number): Promise<PlayResult>
+  openResource(libraryId: number, resourceId: number): Promise<PlayResult>
+  revealVideo(libraryId: number, videoId: number): PlayResult
+  revealResource(libraryId: number, resourceId: number): PlayResult
 }
 
 export function createPlayerService(
   dependencies: Partial<PlayerServiceDependencies> = {}
 ): PlayerService {
+  const readMediaLibrary = dependencies.getMediaLibrary ?? getMediaLibrary
   const readVideo = dependencies.getVideoById ?? getVideoById
   const readPrimaryResource = dependencies.getPrimaryVideoResource ?? getPrimaryVideoResource
-  const readResource = dependencies.getVideoResourceById ?? getVideoResourceById
+  const readResource = dependencies.getVideoResourceInLibrary ?? getVideoResourceInLibrary
   const fileExists = dependencies.fileExists ?? fs.existsSync
   const openPath = dependencies.openPath ?? ((filePath) => shell.openPath(filePath))
   const openExternal = dependencies.openExternal ?? ((url) => shell.openExternal(url))
   const showItemInFolder =
     dependencies.showItemInFolder ?? ((filePath) => shell.showItemInFolder(filePath))
+
+  function requireActiveMediaLibrary(libraryId: number): PlayResult | null {
+    const library = readMediaLibrary(libraryId)
+    if (!library) return { ok: false, error: '媒体库不存在' }
+    if (library.status !== 'active') {
+      return { ok: false, error: '已归档媒体库必须恢复后才能播放或定位资源' }
+    }
+    return null
+  }
 
   async function openResource(resource: VideoResource): Promise<PlayResult> {
     if (resource.kind === 'local') {
@@ -66,23 +78,31 @@ export function createPlayerService(
   }
 
   return {
-    async playVideo(videoId): Promise<PlayResult> {
+    async playVideo(libraryId, videoId): Promise<PlayResult> {
+      const libraryError = requireActiveMediaLibrary(libraryId)
+      if (libraryError) return libraryError
       if (!readVideo(videoId)) return { ok: false, error: '视频记录不存在' }
-      const resource = readPrimaryResource(videoId)
+      const resource = readPrimaryResource(libraryId, videoId)
       if (!resource) return { ok: false, error: '影片没有可打开的资源' }
       return openResource(resource)
     },
-    async openResource(resourceId): Promise<PlayResult> {
-      const resource = readResource(resourceId)
+    async openResource(libraryId, resourceId): Promise<PlayResult> {
+      const libraryError = requireActiveMediaLibrary(libraryId)
+      if (libraryError) return libraryError
+      const resource = readResource(libraryId, resourceId)
       if (!resource) return { ok: false, error: '资源记录不存在' }
       return openResource(resource)
     },
-    revealVideo(videoId): PlayResult {
+    revealVideo(libraryId, videoId): PlayResult {
+      const libraryError = requireActiveMediaLibrary(libraryId)
+      if (libraryError) return libraryError
       if (!readVideo(videoId)) return { ok: false, error: '视频记录不存在' }
-      return revealResource(readPrimaryResource(videoId))
+      return revealResource(readPrimaryResource(libraryId, videoId))
     },
-    revealResource(resourceId): PlayResult {
-      return revealResource(readResource(resourceId))
+    revealResource(libraryId, resourceId): PlayResult {
+      const libraryError = requireActiveMediaLibrary(libraryId)
+      if (libraryError) return libraryError
+      return revealResource(readResource(libraryId, resourceId))
     }
   }
 }

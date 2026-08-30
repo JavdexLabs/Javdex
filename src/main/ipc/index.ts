@@ -12,6 +12,10 @@ import { registerVideoHandlers } from './videoHandlers'
 import { registerUpdateHandlers } from './updateHandlers'
 import type { IpcContext } from './shared'
 import { configureIpcSecurity } from './ipcSecurity'
+import { registerLibraryCuratorHandlers } from './libraryCuratorHandlers'
+import { registerAgentMetadataHandlers } from './agentMetadataHandlers'
+import { registerMediaLibraryHandlers } from './mediaLibraryHandlers'
+import { registerPlaylistImportHandlers } from './playlistImportHandlers'
 
 export function registerIpcHandlers(
   getWindow: () => BrowserWindow | null,
@@ -21,6 +25,7 @@ export function registerIpcHandlers(
   configureIpcSecurity({ getWindow, isTrustedUrl })
 
   registerSettingsHandlers(ctx)
+  registerMediaLibraryHandlers()
   registerUpdateHandlers(ctx)
   registerAssetHandlers()
   registerScanHandlers(ctx)
@@ -30,5 +35,8 @@ export function registerIpcHandlers(
   registerFacetHandlers()
   registerScrapeHandlers(ctx)
   registerPluginDevHandlers(ctx)
+  registerLibraryCuratorHandlers()
+  registerAgentMetadataHandlers(ctx)
+  registerPlaylistImportHandlers(ctx)
   registerPlayerHandlers()
 }

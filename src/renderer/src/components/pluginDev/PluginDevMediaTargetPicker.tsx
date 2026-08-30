@@ -3,6 +3,7 @@ import { SearchX } from 'lucide-react'
 import type { ActressListItem } from '@shared/actressTypes'
 import type { Video } from '@shared/videoTypes'
 import { api, resolveMediaSrc } from '../../api'
+import { ALL_CATALOG_SCOPE } from '../../query/catalogScopes'
 import { useDebounce } from '../../hooks/useDebounce'
 import Modal from '../Modal'
 import ActressName from '../ActressName'
@@ -72,7 +73,7 @@ export default function PluginDevMediaTargetPicker({
         return
       }
 
-      const result = await api.videos.list({
+      const result = await api.videos.list(ALL_CATALOG_SCOPE, {
         search: debouncedSearch.trim() || undefined,
         sortBy: 'add_time',
         sortDir: 'desc',

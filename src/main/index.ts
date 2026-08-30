@@ -1,183 +1,27 @@
-import { app, BrowserWindow, powerMonitor, protocol } from 'electron'
-import path from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { APP_DISPLAY_NAME } from '@shared/appIdentity'
-import { applyAppIcons, resolveWindowIcon } from './appIcon'
-import { configureAppIdentity } from './appPaths'
-import fs from 'node:fs'
-import { initDatabaseAtPath, closeDatabase } from './db/database'
-import { mediaAssetStore } from './services/mediaAssetStore'
-import { registerIpcHandlers } from './ipc'
-import { scrapeBrowser } from './scrapers/scrapeBrowser'
-import { migrateUserPluginsAwayFromBuiltInNames } from './scrapers/scraperPluginService'
-import { resolveMediaAssetPath, toStoredAssetPath } from './services/mediaProtocol'
-import { checkForLatestRelease, shouldRunAutomaticCheck } from './services/appReleaseService'
-import { cleanupOrphanedActressScrapeStaging } from './services/actressIdentityConflictWorkflow'
-import { cleanupOrphanedVideoScrapeStaging } from './services/videoPendingScrapeService'
-import { automaticScanScheduler } from './services/automaticScanScheduler'
-import { recoverPendingLocalFileDeletions } from './services/pendingLocalFileDeletionService'
-import { isSameRendererLocation } from './ipc/ipcSecurity'
+import { app } from 'electron'
+import { SCRAPE_BROWSER_HELPER_FLAG } from './scrapers/scrapeBrowserProtocol'
 
-let mainWindow: BrowserWindow | null = null
+const SCRAPE_BROWSER_SMOKE_FLAG = '--javdex-scraper-helper-smoke'
 
-// Register the custom asset scheme as privileged BEFORE app is ready so the
-// renderer can load downloaded covers/avatars via media://covers/xxx.jpg
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: 'media',
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      stream: true,
-      corsEnabled: true
-    }
-  }
-])
-
-configureAppIdentity()
-
-function focusMainWindow(): void {
-  const win = mainWindow
-  if (!win || win.isDestroyed()) return
-  if (win.isMinimized()) win.restore()
-  if (!win.isVisible()) win.show()
-  win.focus()
-}
-
-const gotSingleInstanceLock = app.requestSingleInstanceLock()
-if (!gotSingleInstanceLock) {
-  app.quit()
-} else {
-  app.on('second-instance', () => {
-    focusMainWindow()
-  })
-}
-
-function resolveRendererEntryUrl(): string {
-  return (
-    process.env['ELECTRON_RENDERER_URL'] ??
-    pathToFileURL(path.join(__dirname, '../renderer/index.html')).toString()
-  )
-}
-
-function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
-  const icon = resolveWindowIcon()
-  mainWindow = new BrowserWindow({
-    width: 1380,
-    height: 880,
-    minWidth: 1000,
-    minHeight: 640,
-    backgroundColor: '#101014',
-    show: false,
-    autoHideMenuBar: true,
-    title: APP_DISPLAY_NAME,
-    ...(icon ? { icon } : {}),
-    webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true
-    }
-  })
-
-  mainWindow.on('ready-to-show', () => mainWindow?.show())
-
-  mainWindow.webContents.on('will-navigate', (event, url) => {
-    if (!isSameRendererLocation(url, rendererEntryUrl)) event.preventDefault()
-  })
-  mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-
-  // electron-vite injects this env var in dev for HMR.
-  const devUrl = process.env['ELECTRON_RENDERER_URL']
-  if (devUrl) {
-    void mainWindow.loadURL(devUrl)
-  } else {
-    void mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
-  }
-
-  mainWindow.on('closed', () => {
-    // Tear down the verification window alongside the main window.
-    scrapeBrowser.close()
-    mainWindow = null
-  })
-}
-
-/** Serve files from the media_assets directory through the media:// scheme. */
-function registerAssetProtocol(): void {
-  protocol.handle('media', (request) => {
-    const root = mediaAssetStore.rootPath()
-    const abs = resolveMediaAssetPath(request.url, root)
-
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-      'Access-Control-Allow-Headers': '*'
-    }
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: corsHeaders })
-    }
-    if (!abs) {
-      return new Response('Forbidden', { status: 403, headers: corsHeaders })
-    }
-    try {
-      const relPosix = toStoredAssetPath(abs, root)
-      const { body, mime } = mediaAssetStore.readForServe(relPosix)
-      return new Response(body, {
-        headers: { 'Content-Type': mime, ...corsHeaders }
-      })
-    } catch {
-      return new Response('Not Found', { status: 404, headers: corsHeaders })
-    }
-  })
-}
-
-if (gotSingleInstanceLock) {
-  void app.whenReady().then(() => {
-    applyAppIcons()
-    const databaseDir = path.join(app.getPath('userData'), 'data')
-    fs.mkdirSync(databaseDir, { recursive: true })
-    initDatabaseAtPath(path.join(databaseDir, 'library.db'))
-    recoverPendingLocalFileDeletions()
-    mediaAssetStore.ensureReady()
-    cleanupOrphanedActressScrapeStaging()
-    cleanupOrphanedVideoScrapeStaging()
-    migrateUserPluginsAwayFromBuiltInNames()
-    registerAssetProtocol()
-    const rendererEntryUrl = resolveRendererEntryUrl()
-    createWindow(rendererEntryUrl)
-    registerIpcHandlers(
-      () => mainWindow,
-      (url) => isSameRendererLocation(url, rendererEntryUrl)
-    )
-    automaticScanScheduler.start()
-    powerMonitor.on('resume', handleSystemResume)
-    setTimeout(() => {
-      if (shouldRunAutomaticCheck()) void checkForLatestRelease()
-    }, 15_000)
-
-    app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow()
-      else focusMainWindow()
-    })
-  })
-
-  app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
-      closeDatabase()
+if (process.argv.includes(SCRAPE_BROWSER_HELPER_FLAG)) {
+  void import('./scrapers/scrapeBrowserHelperEntry')
+    .then(({ startScrapeBrowserHelper }) => startScrapeBrowserHelper())
+    .catch((error) => {
+      // Never log the helper token, profile path, pipe or CDP endpoint.
+      const name = error instanceof Error ? error.name : 'Error'
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`[scraper-helper] ${name}: ${message}`)
+      process.exitCode = 1
       app.quit()
-    }
-  })
-
-  app.on('before-quit', () => {
-    automaticScanScheduler.stop()
-    powerMonitor.off('resume', handleSystemResume)
-    scrapeBrowser.close()
-    closeDatabase()
-  })
-}
-
-function handleSystemResume(): void {
-  automaticScanScheduler.handleResume()
+    })
+} else if (process.argv.includes(SCRAPE_BROWSER_SMOKE_FLAG)) {
+  void import('./scrapers/scrapeBrowserSmokeEntry')
+    .then(({ runScrapeBrowserSmoke }) => runScrapeBrowserSmoke())
+    .catch((error) => {
+      console.error(`[scraper-helper-smoke] ${error instanceof Error ? error.message : String(error)}`)
+      process.exitCode = 1
+      app.quit()
+    })
+} else {
+  void import('./appMain')
 }

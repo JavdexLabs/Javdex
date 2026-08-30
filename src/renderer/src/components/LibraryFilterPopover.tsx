@@ -4,9 +4,8 @@ import type { ScrapedStatus } from '@shared/commonTypes'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 import SelectControl from './SelectControl'
 import TagFilter from './TagFilter'
-import { VIDEO_RESOURCE_FILTER_ORDER } from '../listView/listQueryParams'
-import { VIDEO_RESOURCE_FILTER_LABELS } from './videoResourcePresentation'
 import Button from './Button'
+import VideoResourceFilterFieldset from './VideoResourceFilterFieldset'
 
 export interface LibraryFilterState {
   status: ScrapedStatus | 'all'
@@ -18,12 +17,6 @@ export interface LibraryFilterState {
   tagIds: number[]
   resourceKinds: VideoResourceFilter[]
 }
-
-const RESOURCE_FILTER_OPTIONS: Array<{ value: VideoResourceFilter; label: string }> =
-  VIDEO_RESOURCE_FILTER_ORDER.map((value) => ({
-    value,
-    label: VIDEO_RESOURCE_FILTER_LABELS[value]
-  }))
 
 interface Props {
   open: boolean
@@ -147,31 +140,10 @@ export default function LibraryFilterPopover({
         </label>
       </div>
 
-      <fieldset className="library-resource-filter">
-        <legend className="library-filter-field-label">资源类型</legend>
-        <div className="library-resource-filter-grid">
-          {RESOURCE_FILTER_OPTIONS.map((option) => {
-            const checked = state.resourceKinds.includes(option.value)
-            return (
-              <label key={option.value} className="library-resource-filter-option">
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={(event) =>
-                    onChange({
-                      resourceKinds: event.target.checked
-                        ? [...state.resourceKinds, option.value]
-                        : state.resourceKinds.filter((kind) => kind !== option.value)
-                    })
-                  }
-                />
-                <span>{option.label}</span>
-              </label>
-            )
-          })}
-        </div>
-        <span className="library-resource-filter-hint">多选条件满足任一即可</span>
-      </fieldset>
+      <VideoResourceFilterFieldset
+        value={state.resourceKinds}
+        onChange={(resourceKinds) => onChange({ resourceKinds })}
+      />
 
       <div className="library-filter-popover-tags">
         <div className="library-filter-tags-head">

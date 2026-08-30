@@ -1,8 +1,12 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { DEFAULT_SETTINGS, type AppSettings } from '@shared/settingsTypes'
-import type { LibraryScanSummary, LibraryScanTrigger, ScanResult } from '@shared/libraryTypes'
-import { AutomaticScanScheduler } from './automaticScanScheduler'
+import type { LibraryScanTrigger, ScanResult } from '@shared/libraryTypes'
+import type { MediaLibraryAutomaticScanState } from '@shared/mediaLibraryTypes'
+import {
+  AUTOMATIC_SCAN_RESUME_DELAY_MS,
+  AUTOMATIC_SCAN_STARTUP_DELAY_MS,
+  AutomaticScanScheduler
+} from './automaticScanScheduler'
 
 interface ScheduledTask {
   id: number
@@ -26,15 +30,34 @@ class FakeTimers {
   }
 
   async runNext(delay?: number): Promise<void> {
-    const index = delay === undefined ? 0 : this.tasks.findIndex((task) => task.delay === delay)
+    const index =
+      delay === undefined ? 0 : this.tasks.findIndex((task) => task.delay === delay)
     assert.notEqual(index, -1, `missing timer with delay ${delay}`)
     const [task] = this.tasks.splice(index, 1)
     await task.callback()
   }
 }
 
-function scanResult(): ScanResult {
+function library(
+  libraryId: number,
+  patch: Partial<MediaLibraryAutomaticScanState> = {}
+): MediaLibraryAutomaticScanState {
   return {
+    libraryId,
+    position: libraryId,
+    enabled: true,
+    intervalMinutes: 60,
+    activeRootCount: 1,
+    pendingCleanupJobCount: 0,
+    lastFinishedAt: '2026-08-10T00:00:00.000Z',
+    ...patch
+  }
+}
+
+function result(libraryId: number): ScanResult {
+  return {
+    libraryId,
+    runId: `run-${libraryId}`,
     scannedFiles: 0,
     imported: 0,
     skipped: 0,
@@ -55,243 +78,209 @@ function scanResult(): ScanResult {
   }
 }
 
-function summary(
-  finishedAt: string,
-  status: LibraryScanSummary['status'] = 'success'
-): LibraryScanSummary {
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void
   return {
-    trigger: 'manual',
-    startedAt: finishedAt,
-    finishedAt,
-    status,
-    scannedFiles: 0,
-    resourcesAdded: 0,
-    resourcesUpdated: 0,
-    resourcesRemoved: 0,
-    primaryResourcesPromoted: 0,
-    videosDeleted: 0,
-    skippedFiles: 0,
-    failedFiles: 0,
-    pendingScanGroups: 0,
-    pendingScanResources: 0,
-    offlineFolders: [],
-    errorSummary: null
+    promise: new Promise<void>((done) => {
+      resolve = done
+    }),
+    resolve: () => resolve()
   }
 }
 
-function settings(patch: Partial<AppSettings> = {}): AppSettings {
+function createHarness(
+  initial: MediaLibraryAutomaticScanState[],
+  onRun?: (libraryId: number, trigger: LibraryScanTrigger) => Promise<ScanResult>
+) {
+  const timers = new FakeTimers()
+  let now = Date.parse('2026-08-10T02:00:00.000Z')
+  let libraries = initial
+  let busy = false
+  const calls: Array<[number, LibraryScanTrigger]> = []
+  const scheduler = new AutomaticScanScheduler({
+    listLibraries: () => libraries,
+    now: () => now,
+    setTimer: timers.set,
+    clearTimer: timers.clear,
+    isMaintenanceBusy: () => busy,
+    runScan: async (libraryId, trigger) => {
+      calls.push([libraryId, trigger])
+      return onRun ? onRun(libraryId, trigger) : result(libraryId)
+    }
+  })
   return {
-    ...DEFAULT_SETTINGS,
-    libraryPaths: ['/library'],
-    ...patch
+    scheduler,
+    timers,
+    calls,
+    setNow(value: number) {
+      now = value
+    },
+    setLibraries(value: MediaLibraryAutomaticScanState[]) {
+      libraries = value
+    },
+    setBusy(value: boolean) {
+      busy = value
+    }
   }
 }
 
 describe('AutomaticScanScheduler', () => {
-  it('checks about 30 seconds after startup and runs a due full scan with startup source', async () => {
-    const timers = new FakeTimers()
-    const now = Date.parse('2026-08-10T02:00:00.000Z')
-    let current = settings({
-      autoScanEnabled: true,
-      autoScanIntervalMinutes: 60,
-      lastLibraryScanSummary: summary('2026-08-10T00:59:00.000Z')
-    })
-    const triggers: LibraryScanTrigger[] = []
-    const scheduler = new AutomaticScanScheduler({
-      getSettings: () => current,
-      now: () => now,
-      setTimer: timers.set,
-      clearTimer: timers.clear,
-      isMaintenanceBusy: () => false,
-      runScan: async (trigger) => {
-        triggers.push(trigger)
-        current = { ...current, lastLibraryScanSummary: summary(new Date(now).toISOString()) }
-        return scanResult()
-      }
-    })
-
-    scheduler.start()
-    assert.equal(timers.tasks[0]?.delay, 30_000)
-    assert.deepEqual(triggers, [])
-    await timers.runNext(30_000)
-
-    assert.deepEqual(triggers, ['startup'])
-    scheduler.stop()
+  it('runs every due library in stable order from independent persisted state', async () => {
+    const harness = createHarness([
+      library(2, { position: 2 }),
+      library(1, { position: 1 }),
+      library(3, { position: 3, lastFinishedAt: '2026-08-10T01:30:00.000Z' })
+    ])
+    harness.scheduler.start()
+    assert.equal(harness.timers.tasks[0]?.delay, AUTOMATIC_SCAN_STARTUP_DELAY_MS)
+    await harness.timers.runNext(AUTOMATIC_SCAN_STARTUP_DELAY_MS)
+    assert.deepEqual(harness.calls, [
+      [1, 'startup'],
+      [2, 'startup']
+    ])
+    harness.scheduler.stop()
   })
 
-  it('does not scan immediately when enabled and waits for the selected interval', async () => {
-    const timers = new FakeTimers()
-    let now = Date.parse('2026-08-10T02:00:00.000Z')
-    let current = settings({ autoScanEnabled: false, autoScanIntervalMinutes: 60 })
-    const triggers: LibraryScanTrigger[] = []
-    const scheduler = new AutomaticScanScheduler({
-      getSettings: () => current,
-      now: () => now,
-      setTimer: timers.set,
-      clearTimer: timers.clear,
-      isMaintenanceBusy: () => false,
-      runScan: async (trigger) => {
-        triggers.push(trigger)
-        current = { ...current, lastLibraryScanSummary: summary(new Date(now).toISOString()) }
-        return scanResult()
-      }
-    })
+  it('runs an already-enabled library with no scan history after the startup delay', async () => {
+    const harness = createHarness([library(1, { lastFinishedAt: null })])
 
-    scheduler.start()
-    await timers.runNext(30_000)
-    current = { ...current, autoScanEnabled: true }
-    await timers.runNext()
-    assert.deepEqual(triggers, [])
+    harness.scheduler.start()
+    await harness.timers.runNext(AUTOMATIC_SCAN_STARTUP_DELAY_MS)
 
-    now += 59 * 60_000
-    await timers.runNext()
-    assert.deepEqual(triggers, [])
-
-    now += 2 * 60_000
-    await timers.runNext()
-    assert.deepEqual(triggers, ['interval'])
-    scheduler.stop()
+    assert.deepEqual(harness.calls, [[1, 'startup']])
+    harness.scheduler.stop()
   })
 
-  it('uses a completed-with-errors scan as the start of the next interval', async () => {
-    const timers = new FakeTimers()
-    const now = Date.parse('2026-08-10T02:00:00.000Z')
-    const current = settings({
-      autoScanEnabled: true,
-      autoScanIntervalMinutes: 60,
-      lastLibraryScanSummary: summary(
-        '2026-08-10T01:30:00.000Z',
-        'completed_with_errors'
-      )
-    })
-    const triggers: LibraryScanTrigger[] = []
-    const scheduler = new AutomaticScanScheduler({
-      getSettings: () => current,
-      now: () => now,
-      setTimer: timers.set,
-      clearTimer: timers.clear,
-      isMaintenanceBusy: () => false,
-      runScan: async (trigger) => {
-        triggers.push(trigger)
-        return scanResult()
-      }
-    })
+  it('calculates each library due time from its own interval and last finished time', async () => {
+    const harness = createHarness([
+      library(1, {
+        intervalMinutes: 60,
+        lastFinishedAt: '2026-08-10T01:30:00.000Z'
+      }),
+      library(2, {
+        intervalMinutes: 15,
+        lastFinishedAt: '2026-08-10T01:30:00.000Z'
+      })
+    ])
 
-    scheduler.start()
-    await timers.runNext(30_000)
+    harness.scheduler.start()
+    await harness.timers.runNext(AUTOMATIC_SCAN_STARTUP_DELAY_MS)
 
-    assert.deepEqual(triggers, [])
-    scheduler.stop()
+    assert.deepEqual(harness.calls, [[2, 'startup']])
+    harness.scheduler.stop()
   })
 
-  it('waits briefly after resume and uses the resume source only when due', async () => {
-    const timers = new FakeTimers()
-    const now = Date.parse('2026-08-10T02:00:00.000Z')
-    let current = settings({
-      autoScanEnabled: true,
-      autoScanIntervalMinutes: 30,
-      lastLibraryScanSummary: summary('2026-08-10T01:00:00.000Z')
-    })
-    const triggers: LibraryScanTrigger[] = []
-    const scheduler = new AutomaticScanScheduler({
-      getSettings: () => current,
-      now: () => now,
-      setTimer: timers.set,
-      clearTimer: timers.clear,
-      isMaintenanceBusy: () => false,
-      runScan: async (trigger) => {
-        triggers.push(trigger)
-        current = { ...current, lastLibraryScanSummary: summary(new Date(now).toISOString()) }
-        return scanResult()
-      }
-    })
-
-    scheduler.start()
-    scheduler.handleResume()
-    assert.equal(timers.tasks.some((task) => task.delay === 3_000), true)
-    await timers.runNext(3_000)
-
-    assert.deepEqual(triggers, ['resume'])
-    scheduler.stop()
+  it('waits one full interval after a library is newly enabled', async () => {
+    const start = Date.parse('2026-08-10T02:00:00.000Z')
+    const harness = createHarness([library(1, { enabled: false, lastFinishedAt: null })])
+    harness.scheduler.start()
+    await harness.timers.runNext(AUTOMATIC_SCAN_STARTUP_DELAY_MS)
+    harness.setLibraries([library(1, { enabled: true, lastFinishedAt: null })])
+    await harness.timers.runNext()
+    assert.deepEqual(harness.calls, [])
+    harness.setNow(start + 61 * 60_000)
+    await harness.timers.runNext()
+    assert.deepEqual(harness.calls, [[1, 'interval']])
+    harness.scheduler.stop()
   })
 
-  it('does not scan after resume when the selected interval is not due', async () => {
-    const timers = new FakeTimers()
-    const now = Date.parse('2026-08-10T02:00:00.000Z')
-    const current = settings({
-      autoScanEnabled: true,
-      autoScanIntervalMinutes: 60,
-      lastLibraryScanSummary: summary('2026-08-10T01:30:00.000Z')
-    })
-    const triggers: LibraryScanTrigger[] = []
-    const scheduler = new AutomaticScanScheduler({
-      getSettings: () => current,
-      now: () => now,
-      setTimer: timers.set,
-      clearTimer: timers.clear,
-      isMaintenanceBusy: () => false,
-      runScan: async (trigger) => {
-        triggers.push(trigger)
-        return scanResult()
-      }
-    })
-
-    scheduler.start()
-    scheduler.handleResume()
-    await timers.runNext(3_000)
-
-    assert.deepEqual(triggers, [])
-    scheduler.stop()
+  it('skips disabled, rootless and not-yet-due libraries', async () => {
+    const harness = createHarness([
+      library(1, { enabled: false }),
+      library(2, { activeRootCount: 0 }),
+      library(3, { lastFinishedAt: '2026-08-10T01:30:00.000Z' })
+    ])
+    harness.scheduler.start()
+    await harness.timers.runNext(AUTOMATIC_SCAN_STARTUP_DELAY_MS)
+    assert.deepEqual(harness.calls, [])
+    harness.scheduler.stop()
   })
 
-  it('skips a busy due trigger without queueing and retries on the next check', async () => {
-    const timers = new FakeTimers()
-    const now = Date.parse('2026-08-10T02:00:00.000Z')
-    const current = settings({
-      autoScanEnabled: true,
-      autoScanIntervalMinutes: 15,
-      lastLibraryScanSummary: summary('2026-08-10T01:00:00.000Z')
-    })
-    let busy = true
-    const triggers: LibraryScanTrigger[] = []
-    const scheduler = new AutomaticScanScheduler({
-      getSettings: () => current,
-      now: () => now,
-      setTimer: timers.set,
-      clearTimer: timers.clear,
-      isMaintenanceBusy: () => busy,
-      runScan: async (trigger) => {
-        triggers.push(trigger)
-        return scanResult()
-      }
-    })
+  it('runs a due rootless library when it still has deferred cleanup work', async () => {
+    const harness = createHarness([
+      library(1, { activeRootCount: 0, pendingCleanupJobCount: 1 }),
+      library(2, { activeRootCount: 0, pendingCleanupJobCount: 0 })
+    ])
 
-    scheduler.start()
-    await timers.runNext(30_000)
-    assert.deepEqual(triggers, [])
+    harness.scheduler.start()
+    await harness.timers.runNext(AUTOMATIC_SCAN_STARTUP_DELAY_MS)
 
-    busy = false
-    await timers.runNext()
-    assert.deepEqual(triggers, ['interval'])
-    scheduler.stop()
+    assert.deepEqual(harness.calls, [[1, 'startup']])
+    harness.scheduler.stop()
   })
 
-  it('clears startup, interval, and resume checks when stopped', async () => {
-    const timers = new FakeTimers()
-    const scheduler = new AutomaticScanScheduler({
-      getSettings: () => settings({ autoScanEnabled: false }),
-      now: Date.now,
-      setTimer: timers.set,
-      clearTimer: timers.clear,
-      isMaintenanceBusy: () => false,
-      runScan: async () => scanResult()
+  it('defers while maintenance is busy and rechecks on the next poll', async () => {
+    const harness = createHarness([library(1)])
+    harness.setBusy(true)
+    harness.scheduler.start()
+    await harness.timers.runNext(AUTOMATIC_SCAN_STARTUP_DELAY_MS)
+    assert.deepEqual(harness.calls, [])
+    harness.setBusy(false)
+    await harness.timers.runNext()
+    assert.deepEqual(harness.calls, [[1, 'interval']])
+    harness.scheduler.stop()
+  })
+
+  it('isolates one library failure and continues the serial due queue', async () => {
+    const harness = createHarness([library(1), library(2)], async (libraryId) => {
+      if (libraryId === 1) throw new Error('first library failed')
+      return result(libraryId)
     })
 
-    scheduler.start()
-    scheduler.handleResume()
-    assert.equal(timers.tasks.length, 2)
-    scheduler.stop()
+    harness.scheduler.start()
+    await harness.timers.runNext(AUTOMATIC_SCAN_STARTUP_DELAY_MS)
 
-    assert.equal(timers.tasks.length, 0)
+    assert.deepEqual(harness.calls, [
+      [1, 'startup'],
+      [2, 'startup']
+    ])
+    assert.ok(harness.timers.tasks.some((task) => task.delay === 60_000))
+    harness.scheduler.stop()
+  })
+
+  it('keeps startup, resume, and every due library globally serial', async () => {
+    const firstBlocked = deferred()
+    const firstStarted = deferred()
+    let activeRuns = 0
+    let maximumActiveRuns = 0
+    const harness = createHarness([library(1), library(2)], async (libraryId) => {
+      activeRuns += 1
+      maximumActiveRuns = Math.max(maximumActiveRuns, activeRuns)
+      if (libraryId === 1) {
+        firstStarted.resolve()
+        await firstBlocked.promise
+      }
+      activeRuns -= 1
+      return result(libraryId)
+    })
+
+    harness.scheduler.start()
+    const startupRun = harness.timers.runNext(AUTOMATIC_SCAN_STARTUP_DELAY_MS)
+    await firstStarted.promise
+    harness.scheduler.handleResume()
+    await harness.timers.runNext(AUTOMATIC_SCAN_RESUME_DELAY_MS)
+    assert.deepEqual(harness.calls, [[1, 'startup']])
+
+    firstBlocked.resolve()
+    await startupRun
+    assert.deepEqual(harness.calls, [
+      [1, 'startup'],
+      [2, 'startup']
+    ])
+    assert.equal(maximumActiveRuns, 1)
+    harness.scheduler.stop()
+  })
+
+  it('uses the resume delay and clears all scheduled work on stop', async () => {
+    const harness = createHarness([library(1)])
+    harness.scheduler.start()
+    harness.scheduler.handleResume()
+    assert.ok(
+      harness.timers.tasks.some((task) => task.delay === AUTOMATIC_SCAN_RESUME_DELAY_MS)
+    )
+    await harness.timers.runNext(AUTOMATIC_SCAN_RESUME_DELAY_MS)
+    assert.deepEqual(harness.calls, [[1, 'resume']])
+    harness.scheduler.stop()
+    assert.deepEqual(harness.timers.tasks, [])
   })
 })

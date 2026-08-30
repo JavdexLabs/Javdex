@@ -7,7 +7,6 @@ export type CoverMode = CoverDisplayMode
 interface DisplayModeCtx {
   mode: CoverMode
   setMode: (m: CoverMode) => void
-  toggle: () => void
   showResourceTypeBadges: boolean
   syncResourceTypeBadges: (show: boolean) => void
 }
@@ -17,7 +16,6 @@ const LEGACY_STORAGE_KEY = 'coverDisplayMode'
 const Ctx = createContext<DisplayModeCtx>({
   mode: 'portrait',
   setMode: () => {},
-  toggle: () => {},
   showResourceTypeBadges: false,
   syncResourceTypeBadges: () => {}
 })
@@ -33,7 +31,9 @@ function readLegacyCoverMode(): CoverMode | null {
 }
 
 export function DisplayModeProvider({ children }: { children: ReactNode }): JSX.Element {
-  const [mode, setModeState] = useState<CoverMode>(() => readLegacyCoverMode() ?? 'portrait')
+  const [applicationMode, setApplicationMode] = useState<CoverMode>(
+    () => readLegacyCoverMode() ?? 'portrait'
+  )
   const [showResourceTypeBadges, setShowResourceTypeBadges] = useState(false)
 
   useEffect(() => {
@@ -50,16 +50,16 @@ export function DisplayModeProvider({ children }: { children: ReactNode }): JSX.
             const next = await api.settings.update({ coverDisplayMode: legacy })
             if (!active) return
             localStorage.removeItem(LEGACY_STORAGE_KEY)
-            setModeState(normalizeCoverDisplayMode(next.coverDisplayMode))
+            setApplicationMode(normalizeCoverDisplayMode(next.coverDisplayMode))
             return
           } catch {
             if (!active) return
-            setModeState(legacy)
+            setApplicationMode(legacy)
             return
           }
         }
         localStorage.removeItem(LEGACY_STORAGE_KEY)
-        setModeState(fromSettings)
+        setApplicationMode(fromSettings)
       })
       .catch(() => {
         if (!active) return
@@ -71,11 +71,7 @@ export function DisplayModeProvider({ children }: { children: ReactNode }): JSX.
   }, [])
 
   const setMode = useCallback((m: CoverMode) => {
-    setModeState(m)
-  }, [])
-
-  const toggle = useCallback(() => {
-    setModeState((previous) => (previous === 'portrait' ? 'landscape' : 'portrait'))
+    setApplicationMode(m)
   }, [])
 
   const syncResourceTypeBadges = useCallback((show: boolean): void => {
@@ -83,12 +79,17 @@ export function DisplayModeProvider({ children }: { children: ReactNode }): JSX.
   }, [])
 
   useEffect(() => {
-    document.documentElement.dataset.coverMode = mode
-  }, [mode])
+    document.documentElement.dataset.coverMode = applicationMode
+  }, [applicationMode])
 
   return (
     <Ctx.Provider
-      value={{ mode, setMode, toggle, showResourceTypeBadges, syncResourceTypeBadges }}
+      value={{
+        mode: applicationMode,
+        setMode,
+        showResourceTypeBadges,
+        syncResourceTypeBadges
+      }}
     >
       {children}
     </Ctx.Provider>

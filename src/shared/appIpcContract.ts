@@ -1,17 +1,26 @@
 import { IPC } from './ipc-channels'
-import type { LlmModelDefinition } from './llmProviders'
+import type {
+  ModelCandidate,
+  ModelManagementApplyInput,
+  ModelManagementApplyResult,
+  ModelManagementSnapshot,
+  ModelTestResult
+} from './modelManagementTypes'
 import type {
   AssetCryptoProgress,
   LibraryOverviewStats,
   LibraryPathRemovalPreview,
+  LibraryScanAudit,
   LibraryScanEvent,
+  LibraryScanLatestSnapshot,
+  LibraryScanProgressEvent,
   ManualImportResult,
+  PendingLibraryPathCleanup,
   PendingScanGroup,
   PendingScanGroupResolution,
   PendingScanGroupResolutionResult,
   PlayResult,
   RenameImportResult,
-  ScanProgress,
   ScanResult
 } from './libraryTypes'
 import type { TagListItem, SortDir } from './commonTypes'
@@ -26,18 +35,28 @@ import type {
 import type {
   PluginDevAgentEvent,
   PluginDevAgentMessageInput,
+  PluginDevAgentSnapshot,
   PluginDevAgentSessionResult,
   PluginDevAgentStartInput,
   PluginDevDryRunInput,
   PluginDevDryRunResult,
-  PluginDevInstallInput,
-  PluginDevVerificationReport,
-  PluginDevVerifyInput
+  PluginDevInstallInput
 } from './pluginDevTypes'
 import type { ScraperPluginDescriptor } from './scraperPluginTypes'
 import type { RendererSettingsPatch, SettingsSnapshot } from './settingsTypes'
 import type { VideoResourceImportTarget } from './videoTypes'
-import type { LlmProviderConfigSaveInput } from './llmProviders'
+import type {
+  LibraryCuratorMessageInput,
+  LibraryCuratorResult,
+  LibraryCuratorSnapshot,
+  LibraryCuratorStartInput
+} from './libraryCuratorTypes'
+import type {
+  PlaylistImportControlCommand,
+  PlaylistImportSnapshot,
+  PlaylistImportSnapshotChangedEvent,
+  PlaylistImportStartInput
+} from './playlistImportTypes'
 import type {
   IpcContractArgs,
   IpcContractChannel,
@@ -86,6 +105,19 @@ import type {
   SeriesProfileInput,
   SeriesUpdateInput
 } from './classificationTypes'
+import type {
+  AgentMetadataApplyInput,
+  AgentMetadataApplyOutcome,
+  AgentMetadataDiscardInput,
+  AgentMetadataDraft,
+  AgentMetadataPlanInput,
+  AgentMetadataResumeInput,
+  AgentMetadataReview,
+  AgentMetadataSnapshot,
+  AgentMetadataSnapshotChangedEvent,
+  AgentMetadataStartInput,
+  AgentMetadataTarget
+} from './agentMetadataTypes'
 
 export interface RemoteImagePreviewResult {
   mimeType: string
@@ -97,19 +129,30 @@ export interface AppIpcContract {
   [IPC.SETTINGS_UPDATE]: { args: [patch: RendererSettingsPatch]; result: SettingsSnapshot }
   [IPC.SETTINGS_PICK_FOLDER]: { args: []; result: string[] }
   [IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW]: {
-    args: [path: string]
+    args: [libraryId: number, rootId: number]
     result: LibraryPathRemovalPreview
   }
-  [IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM]: { args: [path: string]; result: SettingsSnapshot }
-  [IPC.SETTINGS_LLM_TEST_MODEL]: { args: [providerId: string, modelId: string]; result: string }
-  [IPC.SETTINGS_LLM_LIST_MODELS]: { args: [providerId: string]; result: LlmModelDefinition[] }
-  [IPC.SETTINGS_LLM_PROVIDER_CONFIG_SAVE]: {
-    args: [input: LlmProviderConfigSaveInput]
-    result: SettingsSnapshot
+  [IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM]: {
+    args: [
+      libraryId: number,
+      rootId: number,
+      expectedRevision: number,
+      expectedImpactRevision: string
+    ]
+    result: PendingLibraryPathCleanup
   }
-  [IPC.SETTINGS_LLM_PROVIDER_DELETE]: {
-    args: [providerId: string]
-    result: SettingsSnapshot
+  [IPC.SETTINGS_MODEL_MANAGEMENT_GET]: { args: []; result: ModelManagementSnapshot }
+  [IPC.SETTINGS_MODEL_MANAGEMENT_APPLY]: {
+    args: [input: ModelManagementApplyInput]
+    result: ModelManagementApplyResult
+  }
+  [IPC.SETTINGS_MODEL_MANAGEMENT_DISCOVER_MODELS]: {
+    args: [connectionId: string]
+    result: ModelCandidate[]
+  }
+  [IPC.SETTINGS_MODEL_MANAGEMENT_TEST_MODEL]: {
+    args: [modelRef: string]
+    result: ModelTestResult
   }
   [IPC.SETTINGS_RECOVERY_REVEAL_BACKUP]: { args: []; result: boolean }
   [IPC.SETTINGS_PROXY_TEST]: { args: [kind: 'scrape' | 'llm', proxyUrl: string]; result: string }
@@ -122,19 +165,50 @@ export interface AppIpcContract {
   [IPC.EXTERNAL_LINK_OPEN]: { args: [url: string]; result: boolean }
   [IPC.APP_UPDATE_IGNORE_VERSION]: { args: [version: string]; result: UpdateCheckState }
 
-  [IPC.SCAN_RUN]: { args: [folders?: string[]]; result: ScanResult }
-  [IPC.SCAN_CANCEL]: { args: []; result: boolean }
+  [IPC.SCAN_RUN]: {
+    args: [libraryId: number, rootIds?: number[]]
+    result: ScanResult
+  }
+  [IPC.SCAN_CANCEL]: { args: [runId: string]; result: boolean }
+  [IPC.SCAN_LATEST_GET]: {
+    args: [libraryId: number]
+    result: LibraryScanLatestSnapshot
+  }
+  [IPC.SCAN_AUDIT_GET]: {
+    args: [libraryId: number]
+    result: LibraryScanAudit | null
+  }
+  [IPC.SCAN_AUDIT_REVEAL_FILE]: {
+    args: [libraryId: number, filePath: string]
+    result: PlayResult
+  }
   [IPC.FILE_RENAME]: {
-    args: [oldPath: string, newName: string, code: string, target: VideoResourceImportTarget]
+    args: [
+      libraryId: number,
+      rootId: number,
+      oldPath: string,
+      newName: string,
+      code: string,
+      target: VideoResourceImportTarget
+    ]
     result: RenameImportResult
   }
   [IPC.FILE_IMPORT_MANUAL]: {
-    args: [filePath: string, code: string, target: VideoResourceImportTarget]
+    args: [
+      libraryId: number,
+      rootId: number,
+      filePath: string,
+      code: string,
+      target: VideoResourceImportTarget
+    ]
     result: ManualImportResult
   }
-  [IPC.PENDING_SCAN_LIST]: { args: []; result: PendingScanGroup[] }
+  [IPC.PENDING_SCAN_LIST]: {
+    args: [libraryId: number]
+    result: PendingScanGroup[]
+  }
   [IPC.PENDING_SCAN_RESOLVE]: {
-    args: [groupId: number, resolution: PendingScanGroupResolution]
+    args: [libraryId: number, groupId: number, resolution: PendingScanGroupResolution]
     result: PendingScanGroupResolutionResult
   }
 
@@ -227,21 +301,88 @@ export interface AppIpcContract {
     result: PluginDevAgentSessionResult
   }
   [IPC.PLUGIN_DEV_AGENT_CANCEL]: { args: [sessionId: string]; result: void }
+  [IPC.PLUGIN_DEV_AGENT_RELEASE_BROWSER]: { args: [sessionId: string]; result: void }
+  [IPC.PLUGIN_DEV_AGENT_SNAPSHOT]: {
+    args: [sessionId?: string]
+    result: PluginDevAgentSnapshot | null
+  }
+  [IPC.PLUGIN_DEV_AGENT_CLEAR_HISTORY]: { args: []; result: number }
+  [IPC.PLUGIN_DEV_AGENT_DISCARD_UNRECOVERABLE]: { args: []; result: number }
   [IPC.PLUGIN_DEV_AGENT_EXPORT_WORK_LOG]: { args: [sessionId: string]; result: string | null }
   [IPC.PLUGIN_DEV_DRY_RUN]: { args: [input: PluginDevDryRunInput]; result: PluginDevDryRunResult }
-  [IPC.PLUGIN_DEV_VERIFY]: {
-    args: [input: PluginDevVerifyInput]
-    result: PluginDevVerificationReport
-  }
   [IPC.PLUGIN_DEV_INSTALL]: {
     args: [input: PluginDevInstallInput]
     result: ScraperPluginDescriptor
   }
+  [IPC.LIBRARY_CURATOR_START]: {
+    args: [input?: LibraryCuratorStartInput]
+    result: LibraryCuratorResult
+  }
+  [IPC.LIBRARY_CURATOR_MESSAGE]: {
+    args: [input: LibraryCuratorMessageInput]
+    result: LibraryCuratorResult
+  }
+  [IPC.LIBRARY_CURATOR_CANCEL]: { args: [runId: string]; result: void }
+  [IPC.LIBRARY_CURATOR_SNAPSHOT]: {
+    args: [runId?: string]
+    result: LibraryCuratorSnapshot | null
+  }
+  [IPC.AGENT_METADATA_START]: {
+    args: [input: AgentMetadataStartInput]
+    result: AgentMetadataSnapshot
+  }
+  [IPC.AGENT_METADATA_RESUME]: {
+    args: [input: AgentMetadataResumeInput]
+    result: AgentMetadataSnapshot
+  }
+  [IPC.AGENT_METADATA_CANCEL]: { args: [runId: string]; result: void }
+  [IPC.AGENT_METADATA_SNAPSHOT]: {
+    args: [runId: string]
+    result: AgentMetadataSnapshot | null
+  }
+  [IPC.AGENT_METADATA_FIND_READY]: {
+    args: [target: AgentMetadataTarget]
+    result: AgentMetadataDraft | null
+  }
+  [IPC.AGENT_METADATA_PLAN]: {
+    args: [input: AgentMetadataPlanInput]
+    result: AgentMetadataReview
+  }
+  [IPC.AGENT_METADATA_APPLY]: {
+    args: [input: AgentMetadataApplyInput]
+    result: AgentMetadataApplyOutcome
+  }
+  [IPC.AGENT_METADATA_DISCARD]: { args: [input: AgentMetadataDiscardInput]; result: void }
 
-  [IPC.PLAYER_PLAY]: { args: [videoId: number]; result: PlayResult }
-  [IPC.PLAYER_REVEAL]: { args: [videoId: number]; result: PlayResult }
-  [IPC.PLAYER_OPEN_RESOURCE]: { args: [resourceId: number]; result: PlayResult }
-  [IPC.PLAYER_REVEAL_RESOURCE]: { args: [resourceId: number]; result: PlayResult }
+  [IPC.PLAYLIST_IMPORT_START]: {
+    args: [input: PlaylistImportStartInput]
+    result: PlaylistImportSnapshot
+  }
+  [IPC.PLAYLIST_IMPORT_SNAPSHOT]: {
+    args: [runId?: string]
+    result: PlaylistImportSnapshot | null
+  }
+  [IPC.PLAYLIST_IMPORT_CONTROL]: {
+    args: [runId: string, command: PlaylistImportControlCommand]
+    result: PlaylistImportSnapshot
+  }
+
+  [IPC.PLAYER_PLAY]: {
+    args: [libraryId: number, videoId: number]
+    result: PlayResult
+  }
+  [IPC.PLAYER_REVEAL]: {
+    args: [libraryId: number, videoId: number]
+    result: PlayResult
+  }
+  [IPC.PLAYER_OPEN_RESOURCE]: {
+    args: [libraryId: number, resourceId: number]
+    result: PlayResult
+  }
+  [IPC.PLAYER_REVEAL_RESOURCE]: {
+    args: [libraryId: number, resourceId: number]
+    result: PlayResult
+  }
 
   [IPC.ASSET_CRYPTO_SET]: { args: [enabled: boolean]; result: SettingsSnapshot }
   [IPC.ASSET_STORAGE_RELOCATE]: { args: [targetPath?: string | null]; result: SettingsSnapshot }
@@ -251,10 +392,12 @@ export interface AppIpcContract {
 
 export interface AppIpcEventContract {
   [IPC.APP_UPDATE_STATE_CHANGED]: UpdateCheckState
-  [IPC.SCAN_PROGRESS]: ScanProgress
+  [IPC.SCAN_PROGRESS]: LibraryScanProgressEvent
   [IPC.SCAN_STATE_CHANGED]: LibraryScanEvent
   [IPC.PLUGIN_DEV_AGENT_EVENT]: PluginDevAgentEvent
   [IPC.ASSET_CRYPTO_PROGRESS]: AssetCryptoProgress
+  [IPC.AGENT_METADATA_SNAPSHOT_CHANGED]: AgentMetadataSnapshotChangedEvent
+  [IPC.PLAYLIST_IMPORT_SNAPSHOT_CHANGED]: PlaylistImportSnapshotChangedEvent
 }
 
 export type AppIpcChannel = IpcContractChannel<AppIpcContract>

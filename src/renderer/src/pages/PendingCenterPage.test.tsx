@@ -167,10 +167,7 @@ describe('PendingCenterPage scrape resolution', () => {
     await act(async () => {
       renderer = TestRenderer.create(
         <QueryClientProvider client={queryClient!}>
-          <MemoryRouter
-            initialEntries={['/pending?type=scrape']}
-            future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-          >
+          <MemoryRouter initialEntries={['/pending?type=scrape']}>
             <PendingCenterPage />
           </MemoryRouter>
         </QueryClientProvider>

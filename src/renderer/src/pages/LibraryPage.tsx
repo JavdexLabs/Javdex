@@ -1,13 +1,16 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMatch, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ChevronDown,
+  Archive,
   Film,
+  FolderMinus,
   Link2,
   ListPlus,
   SearchCheck,
   SearchX,
+  Settings,
   Trash2
 } from 'lucide-react'
 import type {
@@ -16,6 +19,8 @@ import type {
   VideoEditInput,
   VideoQuery
 } from '@shared/videoTypes'
+import type { VideoLifecycleImpact } from '@shared/videoLifecycleTypes'
+import type { LibraryListDefaults } from '../listView/listQueryParams'
 import type {
   VideoDirectorChoiceRequired,
   VideoScrapeField,
@@ -35,6 +40,7 @@ import AddToPlaylistModal from '../components/AddToPlaylistModal'
 import AddVideosToPlaylistModal from '../components/AddVideosToPlaylistModal'
 import EditMetadataModal from '../components/EditMetadataModal'
 import Modal from '../components/Modal'
+import VideoDeleteImpact from '../components/VideoDeleteImpact'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
 import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
 import {
@@ -52,22 +58,26 @@ import {
   patchSearchParams,
   videoResourceFiltersParam
 } from '../listView/listQueryParams'
-import { ROUTE_MATCH, ROUTE_PATH } from '../listView/routePaths'
+import { ROUTE_MATCH } from '../listView/routePaths'
+import { mediaLibraryPath, mediaLibrarySettingsPath } from '../listView/mediaLibraryRoutes'
 import { pendingCenterPath } from '../listView/pendingRoutes'
 import { forgetPrimaryListLocation } from '../listView/primaryNavigationMemory'
 import { useDismissOverlaysOnNavigate } from '../hooks/useDismissOverlaysOnNavigate'
 import { useScraperPluginCatalog } from '../hooks/useScraperPluginCatalog'
 import { useInfiniteVideoList } from '../query/useInfiniteVideoList'
+import { mediaLibraryCatalogScope } from '../query/catalogScopes'
+import { mediaLibraryKeys, videoKeys } from '../query/queryKeys'
 import { invalidateVideoLibraryQueries } from '../query/invalidateLibraryQueries'
-import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
 import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
 import ListMaintenanceBanner from '../components/ListMaintenanceBanner'
+import { mediaLibraryIdentityStyle } from '../components/mediaLibraryIdentity'
 import EmptyState from '../components/EmptyState'
 import ListSurface from '../components/ListSurface'
 import SelectionToolbar from '../components/SelectionToolbar'
 import { VIDEO_RESOURCE_FILTER_LABELS } from '../components/videoResourcePresentation'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { startDefaultUnscrapedVideoBatch } from '../utils/defaultBatchScrape'
+import { withVideoBatchRequestScope } from '../utils/videoBatchScope'
 import VideoResourceImportModal from '../components/VideoResourceImportModal'
 import DirectorScrapeChoiceModal from '../components/DirectorScrapeChoiceModal'
 import {
@@ -76,6 +86,10 @@ import {
   MAINTENANCE_HINT_KEYS
 } from '../utils/maintenanceHints'
 import Button from '../components/Button'
+import { NavIcon } from '../components/NavIcons'
+import styles from './LibraryPage.module.css'
+import { mediaLibrarySurfaceMode } from './mediaLibrarySurfaceState'
+import { rememberRecentMediaLibraryId } from '../listView/recentMediaLibrary'
 
 const STATUS_LABELS: Record<string, string> = {
   all: '全部',
@@ -109,15 +123,16 @@ interface PendingDirectorChoice extends SingleScrapeRequest {
   choice: VideoDirectorChoiceRequired
 }
 
-export default function LibraryPage(): JSX.Element {
+export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.Element {
   const queryClient = useQueryClient()
   const toast = useToast()
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
   const navigate = useNavigate()
   const filterBtnRef = useRef<HTMLButtonElement>(null)
+  const removalPreviewRequestRef = useRef(0)
   const [filterOpen, setFilterOpen] = useState(false)
-  const detailOpen = Boolean(useMatch({ path: ROUTE_MATCH.libraryDetailOpen, end: false }))
+  const detailOpen = Boolean(useMatch({ path: ROUTE_MATCH.mediaLibraryVideoOpen, end: false }))
   const [playlistTarget, setPlaylistTarget] = useState<Video | null>(null)
   const [showBulkPlaylist, setShowBulkPlaylist] = useState(false)
   const [editingVideo, setEditingVideo] = useState<VideoDetail | null>(null)
@@ -130,9 +145,41 @@ export default function LibraryPage(): JSX.Element {
   const [deleteTarget, setDeleteTarget] = useState<Video | null>(null)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [removalPreviewLoading, setRemovalPreviewLoading] = useState(false)
+  const [removalImpacts, setRemovalImpacts] = useState<Map<number, VideoLifecycleImpact>>(
+    new Map()
+  )
+  const membershipPreviewRequestRef = useRef(0)
+  const [membershipTarget, setMembershipTarget] = useState<Video | null>(null)
+  const [confirmBulkRemove, setConfirmBulkRemove] = useState(false)
+  const [removingMembership, setRemovingMembership] = useState(false)
+  const [membershipPreviewLoading, setMembershipPreviewLoading] = useState(false)
+  const [membershipImpacts, setMembershipImpacts] = useState<Map<number, VideoLifecycleImpact>>(
+    new Map()
+  )
   const [showResourceImport, setShowResourceImport] = useState(false)
   const { scrapers, pluginDetails, defaultScraper } = useScraperPluginCatalog('video')
   const [scraperName, setScraperName] = useState('')
+  const scope = useMemo(() => mediaLibraryCatalogScope(libraryId), [libraryId])
+  const libraryQuery = useQuery({
+    queryKey: mediaLibraryKeys.detail(libraryId),
+    queryFn: () => api.mediaLibraries.get(libraryId)
+  })
+  const library = libraryQuery.data ?? null
+  const surfaceMode = mediaLibrarySurfaceMode(library)
+  useEffect(() => {
+    if (library?.status === 'active') rememberRecentMediaLibraryId(library.id)
+  }, [library?.id, library?.status])
+  const libraryDefaults = useMemo<LibraryListDefaults>(
+    () => ({
+      status: 'all',
+      year: 'all',
+      sortBy: library?.config.defaultSortBy ?? LIBRARY_DEFAULTS.sortBy,
+      sortDir: library?.config.defaultSortDir ?? LIBRARY_DEFAULTS.sortDir
+    }),
+    [library?.config.defaultSortBy, library?.config.defaultSortDir]
+  )
+  const effectiveDefaultScraper = library?.config.defaultVideoScraper || defaultScraper
 
   const dismissOverlays = useCallback(() => {
     setFilterOpen(false)
@@ -146,6 +193,14 @@ export default function LibraryPage(): JSX.Element {
     setShowBulkScrape(false)
     setDeleteTarget(null)
     setConfirmBulkDelete(false)
+    removalPreviewRequestRef.current += 1
+    setRemovalPreviewLoading(false)
+    setRemovalImpacts(new Map())
+    setMembershipTarget(null)
+    setConfirmBulkRemove(false)
+    membershipPreviewRequestRef.current += 1
+    setMembershipPreviewLoading(false)
+    setMembershipImpacts(new Map())
     setShowResourceImport(false)
   }, [])
 
@@ -174,17 +229,22 @@ export default function LibraryPage(): JSX.Element {
     )
   }, [debouncedQ, urlQ, setSearchParams])
 
-  const queryHash = useMemo(() => libraryQueryHash(searchParams), [searchParams])
-  const scrollMemoryKey = `library:${queryHash}`
+  const queryHash = useMemo(
+    () => libraryQueryHash(searchParams, libraryDefaults),
+    [searchParams, libraryDefaults]
+  )
+  const scopedQueryHash = `${libraryId}:${queryHash}`
+  const scrollMemoryKey = `library:${libraryId}:${queryHash}`
 
   const query = useMemo<VideoQuery>(
-    () => libraryVideoQueryFromSearchParams(searchParams),
-    [searchParams]
+    () => libraryVideoQueryFromSearchParams(searchParams, libraryDefaults),
+    [searchParams, libraryDefaults]
   )
 
   const { sortBy, sortDir } = parseSort(
     searchParams.get(LIST_PARAM.sort),
-    searchParams.get(LIST_PARAM.dir)
+    searchParams.get(LIST_PARAM.dir),
+    libraryDefaults
   )
   const status = parseScrapedStatus(searchParams.get(LIST_PARAM.status))
   const pendingScrape = parseVideoPendingScrape(searchParams.get(LIST_PARAM.pending))
@@ -217,9 +277,10 @@ export default function LibraryPage(): JSX.Element {
   }, [])
 
   useEffect(() => {
-    api.videos.years().then(setYears).catch(() => {})
+    if (surfaceMode !== 'active') return
+    api.videos.years(scope).then(setYears).catch(() => {})
     refreshTagNames()
-  }, [refreshTagNames])
+  }, [refreshTagNames, scope, surfaceMode])
 
   useEffect(() => {
     const tagLabels = (location.state as { tagLabels?: Record<number, string> } | null)?.tagLabels
@@ -244,10 +305,10 @@ export default function LibraryPage(): JSX.Element {
   }, [detailOpen, refreshTagNames])
 
   useEffect(() => {
-    if (defaultScraper) {
-      setScraperName((prev) => prev || defaultScraper)
+    if (effectiveDefaultScraper) {
+      setScraperName((prev) => prev || effectiveDefaultScraper)
     }
-  }, [defaultScraper])
+  }, [effectiveDefaultScraper])
 
   const filterState: LibraryFilterState = {
     status,
@@ -286,7 +347,7 @@ export default function LibraryPage(): JSX.Element {
   }
 
   const resetFilters = (): void => {
-    forgetPrimaryListLocation(ROUTE_PATH.library)
+    forgetPrimaryListLocation(mediaLibraryPath(libraryId))
     setSearchParams(
       (prev) =>
         patchSearchParams(prev, {
@@ -304,7 +365,7 @@ export default function LibraryPage(): JSX.Element {
   }
 
   const hasNonDefaultSort =
-    sortBy !== LIBRARY_DEFAULTS.sortBy || sortDir !== LIBRARY_DEFAULTS.sortDir
+    sortBy !== libraryDefaults.sortBy || sortDir !== libraryDefaults.sortDir
   const hasAppliedFilters =
     status !== 'all' ||
     pendingScrape !== 'all' ||
@@ -320,13 +381,19 @@ export default function LibraryPage(): JSX.Element {
   )
 
   const { videos, total, loading, loadingMore, hasMore, loadMore, isFetching, refetchSilent } =
-    useInfiniteVideoList(query, queryHash, handlePageError)
+    useInfiniteVideoList(scope, query, scopedQueryHash, handlePageError, surfaceMode === 'active')
 
-  const { stats: overviewStats, refetch: refetchOverviewStats } = useLibraryOverviewStats()
+  const unscrapedQuery = useQuery({
+    queryKey: videoKeys.list(scope, { scrapedStatus: 0, limit: 1 }, 'unscraped-count'),
+    queryFn: () => api.videos.list(scope, { scrapedStatus: 0, limit: 1, offset: 0 }),
+    enabled: surfaceMode === 'active',
+    staleTime: 5_000
+  })
+  const refetchUnscraped = unscrapedQuery.refetch
   const refetchLibrarySurface = useCallback(() => {
     refetchSilent()
-    refetchOverviewStats()
-  }, [refetchSilent, refetchOverviewStats])
+    void refetchUnscraped()
+  }, [refetchSilent, refetchUnscraped])
 
   useListSurfaceRefetch(detailOpen, refetchLibrarySurface)
 
@@ -336,7 +403,7 @@ export default function LibraryPage(): JSX.Element {
     selectionMode,
     toggleSelection: toggleVideoSelection,
     clearSelection
-  } = useRangeSelection(videos, queryHash)
+  } = useRangeSelection(videos, scopedQueryHash)
 
   const selectedVideos = useMemo(
     () => videos.filter((video) => selectedIds.has(video.id)),
@@ -347,7 +414,7 @@ export default function LibraryPage(): JSX.Element {
     isMaintenanceHintDismissed(MAINTENANCE_HINT_KEYS.videoBanner)
   )
   const { videoBatchActive } = useBatchScrapeActivity()
-  const unscrapedCount = overviewStats?.videos.unscraped ?? 0
+  const unscrapedCount = unscrapedQuery.data?.total ?? 0
   const showUnscrapedBanner =
     !unscrapedBannerHidden && !selectionMode && status !== 0 && unscrapedCount > 0
 
@@ -357,13 +424,13 @@ export default function LibraryPage(): JSX.Element {
   }
 
   const startUnscrapedBatch = async (): Promise<void> => {
-    if (!defaultScraper) {
+    if (!effectiveDefaultScraper) {
       toast.show('请先在设置中配置默认影片刮削插件', 'error')
       return
     }
     try {
-      await startDefaultUnscrapedVideoBatch(defaultScraper)
-      toast.show('已开始批量刮削', 'success')
+      await startDefaultUnscrapedVideoBatch(effectiveDefaultScraper, libraryId)
+      toast.show(`已开始“${library?.name ?? `媒体库 #${libraryId}`}”批量刮削`, 'success')
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     }
@@ -373,7 +440,7 @@ export default function LibraryPage(): JSX.Element {
     if (editLoadingId !== null) return
     setEditLoadingId(video.id)
     try {
-      const detail = await api.videos.get(video.id)
+      const detail = await api.videos.get(scope, video.id)
       if (!detail) {
         toast.show('未找到该影片', 'error')
         return
@@ -411,7 +478,8 @@ export default function LibraryPage(): JSX.Element {
         request.site || undefined,
         request.fields,
         request.mode,
-        directorSelectionId
+        directorSelectionId,
+        libraryId
       )
       if (res.directorChoice) {
         setPendingDirectorChoice({ ...request, choice: res.directorChoice })
@@ -483,28 +551,79 @@ export default function LibraryPage(): JSX.Element {
     setShowBulkScrape(false)
     setScraperName(site)
     try {
-      await api.scrape.videoBatchStart({
-        status: 'all',
-        videoIds,
-        fields,
-        scraperName: site || undefined,
-        mode
-      })
-      toast.show(`已开始批量刮削 ${videoIds.length} 部影片`, 'success')
+      await api.scrape.videoBatchStart(
+        withVideoBatchRequestScope(
+          { kind: 'library', libraryId },
+          {
+            status: 'all',
+            videoIds,
+            fields,
+            scraperName: site || undefined,
+            mode
+          }
+        )
+      )
+      toast.show(
+        `已开始“${library?.name ?? `媒体库 #${libraryId}`}”批量刮削 ${videoIds.length} 部影片`,
+        'success'
+      )
       clearSelection()
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     }
   }
 
+  const loadDeletePreviews = async (targets: Video[]): Promise<void> => {
+    const requestId = ++removalPreviewRequestRef.current
+    setRemovalPreviewLoading(true)
+    setRemovalImpacts(new Map())
+    try {
+      const impacts = await Promise.all(
+        targets.map((video) => api.videos.previewDeleteGlobally(video.id))
+      )
+      if (requestId !== removalPreviewRequestRef.current) return
+      setRemovalImpacts(new Map(impacts.map((impact) => [impact.videoId, impact])))
+    } catch (error) {
+      if (requestId !== removalPreviewRequestRef.current) return
+      setDeleteTarget(null)
+      setConfirmBulkDelete(false)
+      toast.show(String((error as Error).message ?? error), 'error')
+    } finally {
+      if (requestId === removalPreviewRequestRef.current) setRemovalPreviewLoading(false)
+    }
+  }
+
+  const openSingleRemoval = (video: Video): void => {
+    setDeleteTarget(video)
+    void loadDeletePreviews([video])
+  }
+
+  const openBulkRemoval = (): void => {
+    setConfirmBulkDelete(true)
+    void loadDeletePreviews(selectedVideos)
+  }
+
   const deleteVideos = async (targets: Video[]): Promise<void> => {
     if (deleting || targets.length === 0) return
+    if (targets.some((video) => !removalImpacts.has(video.id))) {
+      toast.show('删除影响预览尚未就绪，请稍后重试', 'error')
+      return
+    }
     setDeleting(true)
     let deleted = 0
     let failed = 0
     for (const video of targets) {
       try {
-        await api.videos.remove(video.id)
+        const impact = removalImpacts.get(video.id)
+        if (!impact) throw new Error('缺少删除影响预览')
+        await api.videos.deleteGlobally({
+          videoId: video.id,
+          operationId:
+            typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+              ? crypto.randomUUID()
+              : `delete-${video.id}-${Date.now()}`,
+          expectedRevision: impact.revision
+        })
         deleted += 1
       } catch {
         failed += 1
@@ -513,6 +632,7 @@ export default function LibraryPage(): JSX.Element {
     setDeleting(false)
     setDeleteTarget(null)
     setConfirmBulkDelete(false)
+    setRemovalImpacts(new Map())
     if (targets.length > 1) clearSelection()
     if (deleted > 0) {
       invalidateVideoLibraryQueries(queryClient)
@@ -524,6 +644,81 @@ export default function LibraryPage(): JSX.Element {
       toast.show(`已删除 ${deleted} 部，${failed} 部失败`, 'error')
     } else {
       toast.show(targets.length > 1 ? `已删除 ${deleted} 部影片` : '已删除影片', 'success')
+    }
+  }
+
+  const loadMembershipPreviews = async (targets: Video[]): Promise<void> => {
+    const requestId = ++membershipPreviewRequestRef.current
+    setMembershipPreviewLoading(true)
+    setMembershipImpacts(new Map())
+    try {
+      const impacts = await Promise.all(
+        targets.map((video) => api.videos.previewRemoveFromLibrary(libraryId, video.id))
+      )
+      if (requestId !== membershipPreviewRequestRef.current) return
+      setMembershipImpacts(new Map(impacts.map((impact) => [impact.videoId, impact])))
+    } catch (error) {
+      if (requestId !== membershipPreviewRequestRef.current) return
+      setMembershipTarget(null)
+      setConfirmBulkRemove(false)
+      toast.show(String((error as Error).message ?? error), 'error')
+    } finally {
+      if (requestId === membershipPreviewRequestRef.current) setMembershipPreviewLoading(false)
+    }
+  }
+
+  const openSingleMembershipRemoval = (video: Video): void => {
+    setMembershipTarget(video)
+    void loadMembershipPreviews([video])
+  }
+
+  const openBulkMembershipRemoval = (): void => {
+    setConfirmBulkRemove(true)
+    void loadMembershipPreviews(selectedVideos)
+  }
+
+  const removeVideosFromLibrary = async (targets: Video[]): Promise<void> => {
+    if (removingMembership || targets.length === 0) return
+    if (targets.some((video) => !membershipImpacts.has(video.id))) {
+      toast.show('移出影响预览尚未就绪，请稍后重试', 'error')
+      return
+    }
+    setRemovingMembership(true)
+    let removed = 0
+    let failed = 0
+    for (const video of targets) {
+      try {
+        const impact = membershipImpacts.get(video.id)
+        if (!impact) throw new Error('缺少移出影响预览')
+        await api.videos.removeFromLibrary({
+          libraryId,
+          videoId: video.id,
+          operationId:
+            typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+              ? crypto.randomUUID()
+              : `remove-${libraryId}-${video.id}-${Date.now()}`,
+          expectedRevision: impact.revision
+        })
+        removed += 1
+      } catch {
+        failed += 1
+      }
+    }
+    setRemovingMembership(false)
+    setMembershipTarget(null)
+    setConfirmBulkRemove(false)
+    setMembershipImpacts(new Map())
+    if (targets.length > 1) clearSelection()
+    if (removed > 0) {
+      invalidateVideoLibraryQueries(queryClient)
+      refetchLibrarySurface()
+    } else {
+      refetchSilent()
+    }
+    if (failed > 0) {
+      toast.show(`已移出 ${removed} 部，${failed} 部失败`, 'error')
+    } else {
+      toast.show(targets.length > 1 ? `已移出 ${removed} 部影片` : '已移出媒体库', 'success')
     }
   }
 
@@ -562,8 +757,8 @@ export default function LibraryPage(): JSX.Element {
       label: `${SORT_LABELS[sortBy]}${sortDir === 'asc' ? ' ↑' : ' ↓'}`,
       onRemove: () =>
         patchParams({
-          [LIST_PARAM.sort]: LIBRARY_DEFAULTS.sortBy,
-          [LIST_PARAM.dir]: LIBRARY_DEFAULTS.sortDir
+          [LIST_PARAM.sort]: libraryDefaults.sortBy,
+          [LIST_PARAM.dir]: libraryDefaults.sortDir
         })
     })
   }
@@ -583,6 +778,56 @@ export default function LibraryPage(): JSX.Element {
     })
   }
   const emptyDueToFilter = Boolean(debouncedQ.trim()) || hasAppliedFilters
+
+  if (surfaceMode === 'archived' && library) {
+    return (
+      <div className="list-page">
+        <div className="topbar library-header">
+          <ListToolbar
+            leading={
+              <div
+                className={styles.identity}
+                style={mediaLibraryIdentityStyle(library.color)}
+                title={library.name}
+              >
+                <span className={styles.identityIcon} aria-hidden>
+                  <NavIcon name={library.icon} />
+                </span>
+                <span className={styles.identityName}>{library.name}</span>
+              </div>
+            }
+            title="已归档媒体库"
+            controls={
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => navigate(mediaLibrarySettingsPath(libraryId, 'danger'))}
+              >
+                <Settings {...UI_ICON_SM} aria-hidden />
+                恢复设置
+              </Button>
+            }
+          />
+        </div>
+        <ListSurface variant="fill" withInner={false}>
+          <div className="scroll-body-inner">
+            <EmptyState
+              icon={<Archive {...UI_ICON_SM} aria-hidden />}
+              title="该媒体库已归档"
+              description="归档期间不会扫描、导入或刮削，也不会显示可写的影片列表。恢复后原有目录、成员和资源会重新可用。"
+            >
+              <Button
+                size="sm"
+                onClick={() => navigate(mediaLibrarySettingsPath(libraryId, 'danger'))}
+              >
+                前往恢复媒体库
+              </Button>
+            </EmptyState>
+          </div>
+        </ListSurface>
+      </div>
+    )
+  }
 
   return (
     <div className="list-page">
@@ -605,16 +850,36 @@ export default function LibraryPage(): JSX.Element {
                 onClick: () => setShowBulkScrape(true)
               },
               {
+                key: 'remove',
+                label: '移出媒体库',
+                icon: <FolderMinus {...UI_ICON_SM} aria-hidden />,
+                onClick: openBulkMembershipRemoval
+              },
+              {
                 key: 'delete',
                 label: '删除影片',
                 icon: <Trash2 {...UI_ICON_SM} aria-hidden />,
                 danger: true,
-                onClick: () => setConfirmBulkDelete(true)
+                onClick: openBulkRemoval
               }
             ]}
           />
         ) : (
           <ListToolbar
+            leading={
+              library ? (
+                <div
+                  className={styles.identity}
+                  style={mediaLibraryIdentityStyle(library.color)}
+                  title={library.name}
+                >
+                  <span className={styles.identityIcon} aria-hidden>
+                    <NavIcon name={library.icon} />
+                  </span>
+                  <span className={styles.identityName}>{library.name}</span>
+                </div>
+              ) : undefined
+            }
             search={{
               value: searchInput,
               placeholder: '搜索番号、标题或演员（含别名）…',
@@ -675,6 +940,15 @@ export default function LibraryPage(): JSX.Element {
                   <Link2 {...UI_ICON_SM} aria-hidden />
                   导入链接
                 </Button>
+
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => navigate(mediaLibrarySettingsPath(libraryId, 'sources'))}
+                >
+                  <Settings {...UI_ICON_SM} aria-hidden />
+                  设置
+                </Button>
               </>
             }
             resultCount={
@@ -700,19 +974,19 @@ export default function LibraryPage(): JSX.Element {
             title={`${unscrapedCount} 部影片未刮削`}
             detail={
               videoBatchActive
-                ? '批量刮削任务进行中，完成后将自动更新列表。'
-                : '可筛选查看后批量补齐元数据与封面。'
+                ? '影片批量刮削任务进行中，任务范围可在设置的任务详情中查看。'
+                : '可筛选查看后，为当前媒体库批量补齐元数据与封面。'
             }
             secondaryLabel="查看未刮削"
             primaryLabel={videoBatchActive ? '刮削进行中…' : '一键刮削'}
             onSecondary={() => patchFilters({ status: 0 })}
             onPrimary={() => void startUnscrapedBatch()}
             onDismiss={dismissUnscrapedBanner}
-            primaryDisabled={videoBatchActive || !defaultScraper}
+            primaryDisabled={videoBatchActive || !effectiveDefaultScraper}
             primaryDisabledReason={
               videoBatchActive
                 ? '批量刮削任务进行中'
-                : !defaultScraper
+                : !effectiveDefaultScraper
                   ? '请先在设置中配置默认影片刮削插件'
                   : undefined
             }
@@ -721,9 +995,25 @@ export default function LibraryPage(): JSX.Element {
       </div>
 
       <ListSurface variant="fill" withInner={false}>
-        {loading ? (
+        {libraryQuery.isLoading || loading ? (
           <div className="scroll-body-inner">
             <EmptyState loading title="加载中…" />
+          </div>
+        ) : libraryQuery.isError || !library ? (
+          <div className="scroll-body-inner">
+            <EmptyState
+              icon={<Film {...UI_ICON_SM} aria-hidden />}
+              title="无法打开媒体库"
+              description={
+                libraryQuery.isError ? '读取媒体库配置失败，请稍后重试。' : '该媒体库不存在或已被归档。'
+              }
+            >
+              {libraryQuery.isError ? (
+                <Button size="sm" onClick={() => void libraryQuery.refetch()}>
+                  重新加载
+                </Button>
+              ) : null}
+            </EmptyState>
           </div>
         ) : videos.length === 0 ? (
           <div className="scroll-body-inner">
@@ -739,7 +1029,9 @@ export default function LibraryPage(): JSX.Element {
               description={
                 emptyDueToFilter
                   ? '调整搜索或筛选条件后再试。'
-                  : '请前往「设置」添加媒体库路径并扫描导入。'
+                  : library.rootCount > 0
+                    ? '扫描媒体库来源后，影片会显示在这里。'
+                    : '请先在媒体库设置中添加来源目录。'
               }
             />
           </div>
@@ -747,6 +1039,7 @@ export default function LibraryPage(): JSX.Element {
           <VirtualPosterGrid
             scrollMemoryKey={scrollMemoryKey}
             videos={videos}
+            detailLibraryId={libraryId}
             hasMore={hasMore}
             loadingMore={loadingMore}
             onLoadMore={loadMore}
@@ -761,7 +1054,9 @@ export default function LibraryPage(): JSX.Element {
             onMarkScrapeSuccess={(video) => {
               void markScrapeSuccess(video)
             }}
-            onDelete={setDeleteTarget}
+            onDelete={openSingleRemoval}
+            deleteLabel="删除影片"
+            onRemoveFromLibrary={openSingleMembershipRemoval}
           />
         )}
       </ListSurface>
@@ -776,6 +1071,7 @@ export default function LibraryPage(): JSX.Element {
 
       {showResourceImport && (
         <VideoResourceImportModal
+          libraryId={libraryId}
           onCancel={() => setShowResourceImport(false)}
           onImported={(result) => {
             setShowResourceImport(false)
@@ -838,7 +1134,7 @@ export default function LibraryPage(): JSX.Element {
       {showBulkScrape && (
         <ScrapeFieldsModal
           title="批量刮削元数据"
-          hint={`先确定站点与更新方式，再勾选要写入的字段。将只处理已选择的 ${selectedCount} 部影片。`}
+          hint={`先确定站点与更新方式，再勾选要写入的字段。只处理当前媒体库中已选择的 ${selectedCount} 部影片。`}
           options={VIDEO_SCRAPE_FIELD_OPTIONS}
           scrapers={scrapers}
           pluginDetails={pluginDetails}
@@ -857,22 +1153,85 @@ export default function LibraryPage(): JSX.Element {
       {deleteTarget && (
         <Modal
           title="删除影片"
+          size="lg"
           danger
-          confirmText={deleting ? '删除中…' : '删除'}
+          confirmText={deleting ? '删除中…' : removalPreviewLoading ? '读取影响…' : '永久删除'}
+          confirmDisabled={removalPreviewLoading || !removalImpacts.has(deleteTarget.id)}
+          busy={deleting}
           onConfirm={() => {
             if (!deleting) void deleteVideos([deleteTarget])
           }}
           onCancel={() => {
-            if (!deleting) setDeleteTarget(null)
+            if (!deleting) {
+              removalPreviewRequestRef.current += 1
+              setDeleteTarget(null)
+              setRemovalImpacts(new Map())
+            }
           }}
         >
-          确定要永久删除「{deleteTarget.code}」吗？将删除全部影片资源、应用自有图片及所有元数据；本地视频文件与 STRM 源文件会同时从磁盘删除，但不会访问或删除远程内容。此操作不可恢复。
-          {deleteTarget.has_pending_scrape ? (
-            <div className="modal-path-hint">同时会删除待确认刮削候选与暂存图片。</div>
+          {removalPreviewLoading && !removalImpacts.get(deleteTarget.id) ? (
+            <p>正在读取完整影响范围…</p>
           ) : null}
-          {(deleteTarget.resource_count ?? 0) > 0 ? (
-            <div className="modal-path-hint">共关联 {deleteTarget.resource_count} 个影片资源</div>
+          {removalImpacts.get(deleteTarget.id) ? (
+            <VideoDeleteImpact impact={removalImpacts.get(deleteTarget.id)!} />
           ) : null}
+        </Modal>
+      )}
+
+      {membershipTarget && (
+        <Modal
+          title="移出媒体库"
+          size="lg"
+          confirmText={
+            removingMembership ? '移出中…' : membershipPreviewLoading ? '读取影响…' : '移出媒体库'
+          }
+          confirmDisabled={
+            membershipPreviewLoading || !membershipImpacts.has(membershipTarget.id)
+          }
+          busy={removingMembership}
+          onConfirm={() => {
+            if (!removingMembership) void removeVideosFromLibrary([membershipTarget])
+          }}
+          onCancel={() => {
+            if (!removingMembership) {
+              membershipPreviewRequestRef.current += 1
+              setMembershipTarget(null)
+              setMembershipImpacts(new Map())
+            }
+          }}
+        >
+          {membershipPreviewLoading && !membershipImpacts.get(membershipTarget.id) ? (
+            <p>正在读取完整影响范围…</p>
+          ) : null}
+          {membershipImpacts.get(membershipTarget.id) ? (
+            <VideoDeleteImpact impact={membershipImpacts.get(membershipTarget.id)!} />
+          ) : null}
+        </Modal>
+      )}
+
+      {confirmBulkRemove && (
+        <Modal
+          title="批量移出媒体库"
+          confirmText={
+            removingMembership ? '移出中…' : membershipPreviewLoading ? '读取影响…' : '移出媒体库'
+          }
+          confirmDisabled={
+            membershipPreviewLoading ||
+            selectedVideos.some((video) => !membershipImpacts.has(video.id))
+          }
+          busy={removingMembership}
+          onConfirm={() => {
+            if (!removingMembership) void removeVideosFromLibrary(selectedVideos)
+          }}
+          onCancel={() => {
+            if (!removingMembership) {
+              membershipPreviewRequestRef.current += 1
+              setConfirmBulkRemove(false)
+              setMembershipImpacts(new Map())
+            }
+          }}
+        >
+          确定要从当前媒体库移出已选择的 {selectedCount} 部影片吗？只会移除本库成员和本库资源，不会删除全局影片或磁盘文件。
         </Modal>
       )}
 
@@ -880,17 +1239,37 @@ export default function LibraryPage(): JSX.Element {
         <Modal
           title="批量删除影片"
           danger
-          confirmText={deleting ? '删除中…' : '删除'}
+          confirmText={deleting ? '删除中…' : removalPreviewLoading ? '读取影响…' : '永久删除'}
+          confirmDisabled={
+            removalPreviewLoading || selectedVideos.some((video) => !removalImpacts.has(video.id))
+          }
+          busy={deleting}
           onConfirm={() => {
             if (!deleting) void deleteVideos(selectedVideos)
           }}
           onCancel={() => {
-            if (!deleting) setConfirmBulkDelete(false)
+            if (!deleting) {
+              removalPreviewRequestRef.current += 1
+              setConfirmBulkDelete(false)
+              setRemovalImpacts(new Map())
+            }
           }}
         >
-          确定要永久删除已选择的 {selectedCount} 部影片吗？将删除全部影片资源、应用自有图片及所有元数据；本地视频文件与 STRM 源文件会同时从磁盘删除，但不会访问或删除远程内容。此操作不可恢复。
-          {selectedVideos.some((video) => video.has_pending_scrape) ? (
-            <div className="modal-path-hint">其中含待确认刮削影片；对应候选与暂存图片也会删除。</div>
+          确定要永久删除已选择的 {selectedCount} 部影片吗？会删除全局影片资料、各媒体库中的成员关系，以及本地视频 / STRM 源文件。
+          {removalImpacts.size > 0 ? (
+            <div className="modal-path-hint">
+              将删除{' '}
+              {[...removalImpacts.values()].reduce(
+                (totalResources, impact) => totalResources + impact.sourcePaths.length,
+                0
+              )}{' '}
+              个本地或 STRM 源文件，并移除{' '}
+              {[...removalImpacts.values()].reduce(
+                (totalResources, impact) => totalResources + impact.resourceIds.length,
+                0
+              )}{' '}
+              条资源记录
+            </div>
           ) : null}
         </Modal>
       )}

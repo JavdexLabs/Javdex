@@ -3,10 +3,11 @@ import { APP_DISPLAY_NAME } from '@shared/appIdentity'
 import { api } from '../../api'
 import { UI_ICON_MD, UI_ICON_SM } from '../iconDefaults'
 import AppUpdatePanel from './AppUpdatePanel'
-import appLogoUrl from '../../../../../resources/icon.png'
 import Button from '../Button'
 import styles from './AboutSettingsPanel.module.css'
 import { SettingsCard } from './SettingsPrimitives'
+
+const appLogoUrl = `${import.meta.env.BASE_URL}icon-192.png`
 
 const PROJECT_FACTS = [
   { label: '运行方式', value: '桌面应用' },

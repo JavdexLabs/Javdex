@@ -383,6 +383,45 @@ describe('actressRepo.listActresses', () => {
     assert.equal(sorted[0]?.video_count, 2)
     assert.equal(sorted.find((a) => a.main_name === 'Missing Female')?.video_count, 1)
   })
+
+  it('projects only videos that remain reachable through an active visible library membership', () => {
+    setupDb()
+    const db = getDb()
+    db.prepare("INSERT INTO media_libraries (id, name) VALUES (2, 'Archive candidate')").run()
+    const active = insertTestVideoWithFile(db, {
+      code: 'VISIBLE-001',
+      filePath: 'visible.mp4'
+    })
+    const archived = insertTestVideoWithFile(db, {
+      code: 'ARCHIVED-001',
+      filePath: 'archived.mp4',
+      libraryId: 2
+    })
+    const orphaned = insertTestVideoWithFile(db, {
+      code: 'ORPHANED-001',
+      filePath: 'orphaned.mp4'
+    })
+    const hidden = insertTestVideoWithFile(db, {
+      code: 'HIDDEN-001',
+      filePath: 'hidden.mp4'
+    })
+    for (const videoId of [active.videoId, archived.videoId, orphaned.videoId, hidden.videoId]) {
+      db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, 1)').run(videoId)
+    }
+    db.prepare("UPDATE media_libraries SET status = 'archived' WHERE id = 2").run()
+    db.prepare(
+      'DELETE FROM library_video_memberships WHERE library_id = 1 AND video_id = ?'
+    ).run(orphaned.videoId)
+    db.prepare(
+      'UPDATE library_video_memberships SET is_hidden = 1 WHERE library_id = 1 AND video_id = ?'
+    ).run(hidden.videoId)
+
+    assert.deepEqual(getActressDetail(1)?.videos.map((video) => video.code), ['VISIBLE-001'])
+    assert.equal(
+      listActresses(undefined, 'all').find((actress) => actress.id === 1)?.video_count,
+      1
+    )
+  })
 })
 
 describe('actressRepo.listActressPage', () => {

@@ -1,0 +1,44 @@
+.popover {
+  display: flex;
+  flex-direction: column;
+  width: min(380px, calc(100vw - 48px));
+  max-height: min(calc(100vh - 96px), calc(100dvh - 96px));
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-overlay);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-elevated);
+}
+
+.head {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.body {
+  min-height: 0;
+  padding-inline-end: var(--scrollbar-safe-pad);
+  flex: 0 1 auto;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  background: var(--surface-elevated);
+}

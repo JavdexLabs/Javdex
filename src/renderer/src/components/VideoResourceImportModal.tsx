@@ -21,8 +21,10 @@ import {
 } from './videoResourceImportForm'
 import { VIDEO_RESOURCE_KIND_LABELS } from './videoResourcePresentation'
 import Button from './Button'
+import { mediaLibraryCatalogScope } from '../query/catalogScopes'
 
 export default function VideoResourceImportModal({
+  libraryId,
   fixedCode,
   fixedVideoId,
   resource,
@@ -30,6 +32,7 @@ export default function VideoResourceImportModal({
   onImported,
   onUpdated
 }: {
+  libraryId: number
   fixedCode?: string
   fixedVideoId?: number
   resource?: VideoResource
@@ -75,7 +78,11 @@ export default function VideoResourceImportModal({
     const timer = window.setTimeout(() => {
       setLoadingTargets(true)
       void api.videos
-        .list({ search: normalized, limit: 100, offset: 0 })
+        .list(mediaLibraryCatalogScope(libraryId), {
+          search: normalized,
+          limit: 100,
+          offset: 0
+        })
         .then((result) => {
           if (cancelled) return
           setMatchingVideos(
@@ -93,7 +100,7 @@ export default function VideoResourceImportModal({
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [code, fixedVideoId, resource])
+  }, [code, fixedVideoId, libraryId, resource])
 
   const invalidateLinkCheck = (): void => {
     checkRequestRef.current += 1
@@ -139,12 +146,17 @@ export default function VideoResourceImportModal({
     setSaving(true)
     try {
       if (resource) {
-        const updated = await api.videos.updateLinkResource(resource.video_id, resource.id, {
-          url: input.url,
-          kind: input.kind,
-          displayName: input.displayName,
-          sizeBytes: input.sizeBytes
-        })
+        const updated = await api.videos.updateLinkResource(
+          libraryId,
+          resource.video_id,
+          resource.id,
+          {
+            url: input.url,
+            kind: input.kind,
+            displayName: input.displayName,
+            sizeBytes: input.sizeBytes
+          }
+        )
         onUpdated?.(updated)
       } else {
         let target: VideoResourceImportTarget
@@ -155,7 +167,9 @@ export default function VideoResourceImportModal({
         } else {
           throw new Error('请选择资源要归入的影片，或明确新建影片')
         }
-        onImported?.(await api.videos.importLinkResource({ ...input, target }))
+        onImported?.(
+          await api.videos.importLinkResource({ ...input, libraryId, target })
+        )
       }
     } catch (reason) {
       setError(String((reason as Error).message ?? reason))

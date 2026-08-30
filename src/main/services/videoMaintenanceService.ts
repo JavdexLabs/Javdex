@@ -25,13 +25,14 @@ import {
   editVideoRecord,
   getVideoById,
   getVideoResourceById,
+  getVideoResourceInLibrary,
   importVideoLinkResourceRecord,
   updateVideoLinkResourceRecord,
   updateStrmVideoResourceMetadata,
   listVideoResources,
+  listVideoResourcesAcrossLibraries,
   markScrapeSucceeded,
   mergeVideoRecords,
-  purgeVideo,
   removeManualVideoTag,
   removeVideoResourceRecord,
   renameVideoCode,
@@ -60,13 +61,14 @@ import {
 } from '../db/pendingLocalFileDeletionRepo'
 import { inspectWritableLocalPath } from './localFileAvailability'
 import { deletePendingVideoScrapeForVideo } from '../db/pendingVideoScrapeRepo'
+import { getMediaLibrary, getMediaLibraryRoot } from '../db/mediaLibraryRepo'
+import { assertMediaLibraryRootDeletionTarget } from './mediaLibraryRootFileGuard'
 
 export interface VideoMaintenanceService {
   update(id: number, fields: VideoFieldUpdateInput): boolean
   edit(id: number, input: VideoEditInput): boolean
   clearMetadata(id: number): boolean
   markScrapeSucceeded(id: number): boolean
-  delete(id: number): boolean
   setRating(id: number, rating: number): boolean
   correctImport(id: number, code: string, discardPendingScrape?: boolean): CorrectImportResult
   importSample(id: number, input: VideoSampleImportInput): Promise<VideoAsset>
@@ -77,19 +79,27 @@ export interface VideoMaintenanceService {
   importLinkResource(input: VideoLinkResourceImportInput): VideoResourceImportResult
   checkLinkResource(url: string): Promise<VideoResourceLinkCheckResult>
   updateLinkResource(
+    libraryId: number,
     videoId: number,
     resourceId: number,
     input: VideoLinkResourceUpdateInput
   ): VideoResource
-  updateLocalResourceLabel(videoId: number, resourceId: number, label: string | null): VideoResource
-  setPrimaryResource(videoId: number, resourceId: number): boolean
+  updateLocalResourceLabel(
+    libraryId: number,
+    videoId: number,
+    resourceId: number,
+    label: string | null
+  ): VideoResource
+  setPrimaryResource(libraryId: number, videoId: number, resourceId: number): boolean
   removeResource(
+    libraryId: number,
     videoId: number,
     resourceId: number,
     lastResourceMode?: LastVideoResourceRemovalMode
   ): VideoResourceRemovalResult
   mergeVideos(input: VideoMergeInput): VideoMergeResult
-  splitResource(videoId: number, resourceId: number): VideoResourceSplitResult
+  splitResource(libraryId: number, videoId: number, resourceId: number): VideoResourceSplitResult
+  runWithManagedSourceFileDeletion<T>(resources: readonly VideoResource[], work: () => T): T
 }
 
 interface VideoMaintenanceServiceDependencies {
@@ -104,7 +114,6 @@ interface VideoMaintenanceServiceDependencies {
   splitVideoResourceRecord: typeof splitVideoResourceRecord
   hasPendingVideoScrape: typeof hasPendingVideoScrape
   deletePendingVideoScrapeForVideo: typeof deletePendingVideoScrapeForVideo
-  purgeVideo: typeof purgeVideo
   addVideoSampleAsset: typeof addVideoSampleAsset
   deleteVideoSampleAsset: typeof deleteVideoSampleAsset
   setVideoPosterPath: typeof setVideoPosterPath
@@ -115,7 +124,9 @@ interface VideoMaintenanceServiceDependencies {
   updateVideoLinkResourceRecord: typeof updateVideoLinkResourceRecord
   updateStrmVideoResourceMetadata: typeof updateStrmVideoResourceMetadata
   getVideoResourceById: typeof getVideoResourceById
+  getVideoResourceInLibrary: typeof getVideoResourceInLibrary
   listVideoResources: typeof listVideoResources
+  listVideoResourcesAcrossLibraries: typeof listVideoResourcesAcrossLibraries
   setPrimaryVideoResource: typeof setPrimaryVideoResource
   updateLocalVideoResourceLabel: typeof updateLocalVideoResourceLabel
   removeVideoResourceRecord: typeof removeVideoResourceRecord
@@ -136,6 +147,8 @@ interface VideoMaintenanceServiceDependencies {
   markLocalFileDeletionsCommitted: typeof markLocalFileDeletionsCommitted
   removePendingLocalFileDeletions: typeof removePendingLocalFileDeletions
   withResourceMaintenance: <T>(work: () => T) => T
+  getMediaLibrary: typeof getMediaLibrary
+  getMediaLibraryRoot: typeof getMediaLibraryRoot
   assignVideoOrganization: typeof classificationMaintenanceService.assignVideoOrganization
   assignVideoDirector: typeof classificationMaintenanceService.assignVideoDirector
   assignVideoSeries: typeof classificationMaintenanceService.assignVideoSeries
@@ -157,7 +170,6 @@ export function createVideoMaintenanceService(
     dependencies.hasPendingVideoScrape ?? hasPendingVideoScrape
   const deletePendingScrapeForVideo =
     dependencies.deletePendingVideoScrapeForVideo ?? deletePendingVideoScrapeForVideo
-  const purgeVideoRecord = dependencies.purgeVideo ?? purgeVideo
   const addSampleAsset = dependencies.addVideoSampleAsset ?? addVideoSampleAsset
   const deleteSampleAsset = dependencies.deleteVideoSampleAsset ?? deleteVideoSampleAsset
   const writePoster = dependencies.setVideoPosterPath ?? setVideoPosterPath
@@ -170,8 +182,11 @@ export function createVideoMaintenanceService(
     dependencies.updateVideoLinkResourceRecord ?? updateVideoLinkResourceRecord
   const updateStrmResourceMetadata =
     dependencies.updateStrmVideoResourceMetadata ?? updateStrmVideoResourceMetadata
-  const readVideoResourceById = dependencies.getVideoResourceById ?? getVideoResourceById
+  const readVideoResourceInLibrary =
+    dependencies.getVideoResourceInLibrary ?? getVideoResourceInLibrary
   const readVideoResources = dependencies.listVideoResources ?? listVideoResources
+  const readVideoResourcesAcrossLibraries =
+    dependencies.listVideoResourcesAcrossLibraries ?? listVideoResourcesAcrossLibraries
   const writePrimaryResource = dependencies.setPrimaryVideoResource ?? setPrimaryVideoResource
   const writeLocalResourceLabel =
     dependencies.updateLocalVideoResourceLabel ?? updateLocalVideoResourceLabel
@@ -211,6 +226,8 @@ export function createVideoMaintenanceService(
   const withResourceMaintenance =
     dependencies.withResourceMaintenance ??
     (<T>(work: () => T): T => maintenanceTaskGate.runSync('resource-maintenance', work))
+  const readMediaLibrary = dependencies.getMediaLibrary ?? getMediaLibrary
+  const readMediaLibraryRoot = dependencies.getMediaLibraryRoot ?? getMediaLibraryRoot
   const assignVideoOrganization =
     dependencies.assignVideoOrganization ?? classificationMaintenanceService.assignVideoOrganization
   const assignVideoDirector =
@@ -275,10 +292,14 @@ export function createVideoMaintenanceService(
     }
   }
 
-  const stageLocalFiles = (filePaths: string[]): StagedLocalFile[] => {
+  const stageLocalFiles = (
+    filePaths: string[],
+    assertDeletionAllowed: (filePath: string) => void
+  ): StagedLocalFile[] => {
     const staged: StagedLocalFile[] = []
     try {
       for (const originalPath of new Set(filePaths)) {
+        assertDeletionAllowed(originalPath)
         const existing = readPendingFileDeletion(originalPath)
         if (existing) {
           if (existing.state === 'committed') {
@@ -329,6 +350,7 @@ export function createVideoMaintenanceService(
         const stagedPath = `${originalPath}.javdex-delete-${randomUUID()}`
         preparePendingFileDeletion(originalPath, stagedPath, originalInspection.deviceId)
         staged.push({ originalPath, stagedPath, deviceId: originalInspection.deviceId })
+        assertDeletionAllowed(originalPath)
         renameSync(originalPath, stagedPath)
       }
       return staged
@@ -353,9 +375,13 @@ export function createVideoMaintenanceService(
     }
   }
 
-  const finalizeStagedLocalFiles = (files: StagedLocalFile[]): void => {
+  const finalizeStagedLocalFiles = (
+    files: StagedLocalFile[],
+    assertDeletionAllowed: (filePath: string) => void
+  ): void => {
     for (const file of files) {
       try {
+        assertDeletionAllowed(file.stagedPath)
         unlinkSync(file.stagedPath)
       } catch (error) {
         console.error('Staged video file remains queued for deletion:', file.stagedPath, error)
@@ -369,15 +395,19 @@ export function createVideoMaintenanceService(
     }
   }
 
-  const withStagedLocalFileDeletion = <T>(filePaths: string[], databaseChange: () => T): T => {
-    const staged = stageLocalFiles(filePaths)
+  const withStagedLocalFileDeletion = <T>(
+    filePaths: string[],
+    assertDeletionAllowed: (filePath: string) => void,
+    databaseChange: () => T
+  ): T => {
+    const staged = stageLocalFiles(filePaths, assertDeletionAllowed)
     try {
       const result = runDatabaseTransaction(() => {
         const value = databaseChange()
         markPendingFileDeletionsCommitted(staged.map((file) => file.stagedPath))
         return value
       })
-      finalizeStagedLocalFiles(staged)
+      finalizeStagedLocalFiles(staged, assertDeletionAllowed)
       return result
     } catch (error) {
       const recoveryErrors: string[] = []
@@ -402,44 +432,31 @@ export function createVideoMaintenanceService(
     }
   }
 
-  const deleteWholeVideo = (id: number): boolean => {
-    if (!readVideoById(id)) throw new Error('影片不存在')
-    let pendingStagedPaths: string[] = []
-    runInCoordinatedChange(() => {
-      const resources = readVideoResources(id)
-      const result = withStagedLocalFileDeletion(
-        resources.flatMap((resource) => {
-          if (resource.kind === 'local') return [resource.locator]
-          return resource.strm_source_path ? [resource.strm_source_path] : []
-        }),
-        () => {
-          const pending = deletePendingScrapeForVideo(id)
-          pendingStagedPaths = pending?.stagedPaths ?? []
-          return purgeVideoRecord(id)
-        }
-      )
-      for (const assetPath of result.obsoletePaths) deleteBestEffort(assetPath)
-    })
-    cleanupVideoScrapeStagingPaths(pendingStagedPaths)
-    return true
+  const requireActiveMediaLibrary = (libraryId: number): void => {
+    const library = readMediaLibrary(libraryId)
+    if (!library) throw new Error('媒体库不存在')
+    if (library.status !== 'active') {
+      throw new Error('已归档媒体库必须恢复后才能修改资源')
+    }
   }
 
   const removeResource = (
+    libraryId: number,
     videoId: number,
     resourceId: number,
     lastResourceMode?: LastVideoResourceRemovalMode
   ): VideoResourceRemovalResult => {
+    requireActiveMediaLibrary(libraryId)
     if (!readVideoById(videoId)) throw new Error('影片不存在')
-    const resource = readVideoResourceById(resourceId)
+    const resource = readVideoResourceInLibrary(libraryId, resourceId)
     if (!resource || resource.video_id !== videoId) throw new Error('资源不属于当前影片')
-    const resources = readVideoResources(videoId)
+    const resources = readVideoResources(libraryId, videoId)
     if (resources.length === 1) {
       if (!lastResourceMode) {
         throw new Error('正在移除最后一个资源，请选择保留影片元数据或删除影片')
       }
-      if (lastResourceMode === 'delete-video') {
-        deleteWholeVideo(videoId)
-        return { videoDeleted: true, promotedResourceId: null }
+      if (lastResourceMode !== 'retain-video') {
+        throw new Error('全局删除必须先预览影响并通过影片生命周期命令确认')
       }
     }
 
@@ -451,15 +468,26 @@ export function createVideoMaintenanceService(
           : resource.strm_source_path
             ? [resource.strm_source_path]
             : []
-      withStagedLocalFileDeletion(sourcePaths, () => {
-        removeResourceRecord(resourceId)
+      const root =
+        sourcePaths.length === 0 || resource.root_id == null
+          ? null
+          : readMediaLibraryRoot(libraryId, resource.root_id)
+      if (sourcePaths.length > 0 && !root) {
+        throw new Error('影片源文件缺少有效的媒体库根目录归属，无法安全删除')
+      }
+      const assertDeletionAllowed = (filePath: string): void => {
+        if (!root) throw new Error('影片源文件缺少有效的媒体库根目录归属，无法安全删除')
+        assertMediaLibraryRootDeletionTarget(filePath, root)
+      }
+      withStagedLocalFileDeletion(sourcePaths, assertDeletionAllowed, () => {
+        removeResourceRecord(libraryId, resourceId)
         if (resource.is_primary) {
           const candidate = selectPrimaryVideoResourceCandidate(
             resources.filter((item) => item.id !== resourceId),
             fileExists
           )
           if (candidate) {
-            writePrimaryResource(videoId, candidate.id)
+            writePrimaryResource(libraryId, videoId, candidate.id)
             promotedResourceId = candidate.id
           }
         }
@@ -526,9 +554,6 @@ export function createVideoMaintenanceService(
       assertMetadataUnlocked(id)
       recordScrapeSucceeded(id)
       return true
-    },
-    delete(id): boolean {
-      return withResourceMaintenance(() => deleteWholeVideo(id))
     },
     setRating(id, ratingValue): boolean {
       assertMetadataUnlocked(id)
@@ -618,6 +643,7 @@ export function createVideoMaintenanceService(
     },
     importLinkResource(input): VideoResourceImportResult {
       return withResourceMaintenance(() => {
+        requireActiveMediaLibrary(input.libraryId)
         const code = normalizeVideoCode(input.code)
         const normalized = normalizeExternalVideoResource(input.url, input.kind)
         const displayName = input.displayName?.trim() || normalized.suggestedDisplayName
@@ -626,6 +652,7 @@ export function createVideoMaintenanceService(
           throw new Error('文件大小必须是大于 0 的整数字节数')
         }
         const result = importLinkResourceRecord({
+          libraryId: input.libraryId,
           code,
           target: input.target,
           kind: normalized.kind,
@@ -643,15 +670,16 @@ export function createVideoMaintenanceService(
     checkLinkResource(url): Promise<VideoResourceLinkCheckResult> {
       return checkLinkResource(url)
     },
-    updateLinkResource(videoId, resourceId, input): VideoResource {
+    updateLinkResource(libraryId, videoId, resourceId, input): VideoResource {
       return withResourceMaintenance(() => {
+        requireActiveMediaLibrary(libraryId)
         if (!readVideoById(videoId)) throw new Error('影片不存在')
         const normalized = normalizeExternalVideoResource(input.url, input.kind)
         const sizeBytes = input.sizeBytes ?? null
         if (sizeBytes != null && (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0)) {
           throw new Error('文件大小必须是大于 0 的整数字节数')
         }
-        const existing = readVideoResourceById(resourceId)
+        const existing = readVideoResourceInLibrary(libraryId, resourceId)
         if (!existing || existing.video_id !== videoId || existing.kind === 'local') {
           throw new Error('影片链接资源不存在')
         }
@@ -660,6 +688,7 @@ export function createVideoMaintenanceService(
             throw new Error('STRM 资源目标与类型由源文件管理，只读不可修改')
           }
           return updateStrmResourceMetadata({
+            libraryId,
             resourceId,
             videoId,
             displayName: input.displayName?.trim() || null,
@@ -667,6 +696,7 @@ export function createVideoMaintenanceService(
           })
         }
         const result = updateLinkResourceRecord({
+          libraryId,
           resourceId,
           videoId,
           kind: normalized.kind,
@@ -681,29 +711,36 @@ export function createVideoMaintenanceService(
         return result
       })
     },
-    updateLocalResourceLabel(videoId, resourceId, label): VideoResource {
+    updateLocalResourceLabel(libraryId, videoId, resourceId, label): VideoResource {
       return withResourceMaintenance(() => {
+        requireActiveMediaLibrary(libraryId)
         if (!readVideoById(videoId)) throw new Error('影片不存在')
-        return writeLocalResourceLabel(videoId, resourceId, label?.trim() || null)
+        return writeLocalResourceLabel(
+          libraryId,
+          videoId,
+          resourceId,
+          label?.trim() || null
+        )
       })
     },
-    setPrimaryResource(videoId, resourceId): boolean {
+    setPrimaryResource(libraryId, videoId, resourceId): boolean {
       return withResourceMaintenance(() => {
+        requireActiveMediaLibrary(libraryId)
         if (!readVideoById(videoId)) throw new Error('影片不存在')
-        writePrimaryResource(videoId, resourceId)
+        writePrimaryResource(libraryId, videoId, resourceId)
         return true
       })
     },
-    removeResource(videoId, resourceId, lastResourceMode): VideoResourceRemovalResult {
+    removeResource(libraryId, videoId, resourceId, lastResourceMode): VideoResourceRemovalResult {
       return withResourceMaintenance(() =>
-        removeResource(videoId, resourceId, lastResourceMode)
+        removeResource(libraryId, videoId, resourceId, lastResourceMode)
       )
     },
     mergeVideos(input): VideoMergeResult {
       return withResourceMaintenance(() => {
         const resources = [
-          ...readVideoResources(input.retainedVideoId),
-          ...readVideoResources(input.sourceVideoId)
+          ...readVideoResourcesAcrossLibraries(input.retainedVideoId),
+          ...readVideoResourcesAcrossLibraries(input.sourceVideoId)
         ]
         const hasPrimary = resources.some((resource) => Boolean(resource.is_primary))
         const fallbackPrimaryResourceId = hasPrimary
@@ -719,8 +756,46 @@ export function createVideoMaintenanceService(
         }
       })
     },
-    splitResource(videoId, resourceId): VideoResourceSplitResult {
-      return withResourceMaintenance(() => splitResourceRecord(videoId, resourceId))
+    splitResource(libraryId, videoId, resourceId): VideoResourceSplitResult {
+      return withResourceMaintenance(() => {
+        requireActiveMediaLibrary(libraryId)
+        return splitResourceRecord(libraryId, videoId, resourceId)
+      })
+    },
+    runWithManagedSourceFileDeletion(resources, work) {
+      const rootsByOriginalPath = new Map<string, NonNullable<ReturnType<typeof readMediaLibraryRoot>>>()
+      const filePaths: string[] = []
+      for (const resource of resources) {
+        const filePath =
+          resource.kind === 'local' ? resource.locator : resource.strm_source_path
+        if (!filePath) continue
+        if (resource.root_id == null) {
+          continue
+        }
+        requireActiveMediaLibrary(resource.library_id)
+        const root = readMediaLibraryRoot(resource.library_id, resource.root_id)
+        if (!root) {
+          throw new Error('影片源文件缺少有效的媒体库根目录归属，无法安全删除')
+        }
+        assertMediaLibraryRootDeletionTarget(filePath, root)
+        if (!rootsByOriginalPath.has(filePath)) {
+          rootsByOriginalPath.set(filePath, root)
+          filePaths.push(filePath)
+        }
+      }
+      const rootForPath = (filePath: string) => {
+        const exact = rootsByOriginalPath.get(filePath)
+        if (exact) return exact
+        for (const [original, root] of rootsByOriginalPath) {
+          if (filePath.startsWith(`${original}.javdex-delete-`)) return root
+        }
+        throw new Error('影片源文件缺少有效的媒体库根目录归属，无法安全删除')
+      }
+      return withStagedLocalFileDeletion(
+        filePaths,
+        (filePath) => assertMediaLibraryRootDeletionTarget(filePath, rootForPath(filePath)),
+        work
+      )
     }
   }
 }

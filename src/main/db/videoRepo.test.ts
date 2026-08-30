@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { DEFAULT_MEDIA_LIBRARY_ID } from '../../shared/mediaLibraryTypes'
+import { buildVideoResourceSourceIdentity } from '../../shared/videoResourceIdentity'
 import { closeDatabase, getDb, initDatabaseAtPath } from './database'
 import { insertTestVideoWithFile } from './testVideoFixtures'
 import { addAlias, upsertActressFromScrape } from './actressRepo'
@@ -191,8 +193,8 @@ describe('videoRepo.listVideos', () => {
     const db = getDb()
     db.prepare(
       `INSERT INTO video_resources
-         (video_id, kind, locator, resource_key, is_primary, add_time)
-       VALUES (1, 'direct', 'https://cdn.example.test/IPX-535.mp4', 'http:ipx-direct', 0, '2024-02-01')`
+         (library_id, video_id, kind, locator, resource_key, is_primary, add_time)
+       VALUES (1, 1, 'direct', 'https://cdn.example.test/IPX-535.mp4', 'http:ipx-direct', 0, '2024-02-01')`
     ).run()
     db.prepare(
       `INSERT INTO videos (code, scraped_status, add_time)
@@ -217,11 +219,11 @@ describe('videoRepo.listVideos', () => {
     db.prepare('UPDATE video_resources SET is_primary = 0 WHERE video_id = 1').run()
     db.prepare(
       `INSERT INTO video_resources
-         (video_id, kind, locator, resource_key, is_primary, add_time)
+         (library_id, video_id, kind, locator, resource_key, is_primary, add_time)
        VALUES
-         (1, 'direct', 'https://cdn.example.test/one.mp4', 'http:one', 0, '2024-02-01'),
-         (1, 'web', 'https://example.test/watch/1', 'http:web-one', 1, '2024-03-01'),
-         (1, 'direct', 'https://cdn.example.test/two.mp4', 'http:two', 0, '2024-04-01')`
+         (1, 1, 'direct', 'https://cdn.example.test/one.mp4', 'http:one', 0, '2024-02-01'),
+         (1, 1, 'web', 'https://example.test/watch/1', 'http:web-one', 1, '2024-03-01'),
+         (1, 1, 'direct', 'https://cdn.example.test/two.mp4', 'http:two', 0, '2024-04-01')`
     ).run()
 
     const [video] = listVideos({ search: 'IPX-535' }).items
@@ -336,13 +338,14 @@ describe('videoRepo.setPrimaryVideoResource', () => {
     )
 
     const resourceId = insertLocalVideoResource({
+      libraryId: DEFAULT_MEDIA_LIBRARY_ID,
       videoId,
       locator: 'first.mp4',
       sizeBytes: 1024
     })
 
     assert.ok(resourceId)
-    assert.equal(getPrimaryVideoResource(videoId)?.id, resourceId)
+    assert.equal(getPrimaryVideoResource(DEFAULT_MEDIA_LIBRARY_ID, videoId)?.id, resourceId)
   })
 
   it('keeps the current primary when a requested primary insert is a duplicate', () => {
@@ -350,6 +353,7 @@ describe('videoRepo.setPrimaryVideoResource', () => {
 
     assert.equal(
       insertLocalVideoResource({
+        libraryId: DEFAULT_MEDIA_LIBRARY_ID,
         videoId: 1,
         locator: 'a.mp4',
         sizeBytes: 1024,
@@ -357,7 +361,7 @@ describe('videoRepo.setPrimaryVideoResource', () => {
       }),
       null
     )
-    assert.equal(getPrimaryVideoResource(1)?.locator, 'a.mp4')
+    assert.equal(getPrimaryVideoResource(DEFAULT_MEDIA_LIBRARY_ID, 1)?.locator, 'a.mp4')
   })
 
   it('marks one resource as primary and clears the previous primary', () => {
@@ -366,13 +370,22 @@ describe('videoRepo.setPrimaryVideoResource', () => {
     const info = db
       .prepare(
         `INSERT INTO video_resources
-           (video_id, kind, locator, resource_key, size_bytes, is_primary, add_time)
-         VALUES (?, 'local', ?, 'local:' || ?, ?, 0, ?)`
+           (library_id, video_id, kind, locator, resource_key, source_identity,
+            size_bytes, is_primary, add_time)
+         VALUES (?, ?, 'local', ?, ?, ?, ?, 0, ?)`
       )
-      .run(1, 'alt.mp4', 'alt.mp4', 2048, '2024-01-05')
+      .run(
+        DEFAULT_MEDIA_LIBRARY_ID,
+        1,
+        'alt.mp4',
+        buildVideoResourceSourceIdentity({ kind: 'local', locator: 'alt.mp4' }),
+        buildVideoResourceSourceIdentity({ kind: 'local', locator: 'alt.mp4' }),
+        2048,
+        '2024-01-05'
+      )
     const altResourceId = Number(info.lastInsertRowid)
 
-    setPrimaryVideoResource(1, altResourceId)
+    setPrimaryVideoResource(DEFAULT_MEDIA_LIBRARY_ID, 1, altResourceId)
 
     const files = db
       .prepare('SELECT id, is_primary FROM video_resources WHERE video_id = 1 ORDER BY id')
@@ -381,7 +394,7 @@ describe('videoRepo.setPrimaryVideoResource', () => {
       { id: 1, is_primary: 0 },
       { id: altResourceId, is_primary: 1 }
     ])
-    assert.equal(getPrimaryVideoResource(1)?.id, altResourceId)
+    assert.equal(getPrimaryVideoResource(DEFAULT_MEDIA_LIBRARY_ID, 1)?.id, altResourceId)
   })
 })
 

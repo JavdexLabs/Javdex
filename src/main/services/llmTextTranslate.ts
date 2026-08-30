@@ -1,4 +1,5 @@
-import { resolveActiveLlmRequestConfig, type ResolvedLlmModelRequestConfig } from './llmClient'
+import type { ResolvedLlmModelRequestConfig } from './llmClient'
+import { modelManagement } from '../agent-platform/modelManagement'
 import { llmFetch } from '../utils/llmFetch'
 
 const TRANSLATE_TIMEOUT_MS = 60_000
@@ -37,7 +38,7 @@ export async function translateTextToChinese(text: string): Promise<string> {
   const trimmed = text.trim()
   if (!trimmed) throw new Error('没有可翻译的内容')
 
-  const config = resolveActiveLlmRequestConfig()
+  const config = await resolveDefaultTranslationConfig()
   const raw =
     config.protocol === 'anthropic-messages'
       ? await requestAnthropicTranslate(trimmed, config)
@@ -46,6 +47,33 @@ export async function translateTextToChinese(text: string): Promise<string> {
   const normalized = normalizeTranslationOutput(raw)
   if (!normalized) throw new Error('模型未返回有效译文')
   return normalized
+}
+
+async function resolveDefaultTranslationConfig(): Promise<ResolvedLlmModelRequestConfig> {
+  const access = modelManagement.resolve('app-default')
+  const lease = await access.getCredentialLease()
+  try {
+    const anthropic = access.model.api === 'anthropic-messages'
+    const root = access.model.baseUrl.replace(/\/+$/, '')
+    const anthropicRoot = root.endsWith('/v1') ? root : `${root}/v1`
+    return {
+      providerId: access.model.providerId,
+      providerName: access.model.providerId,
+      protocol: anthropic ? 'anthropic-messages' : 'openai-chat',
+      apiKey: lease.resolve(),
+      baseUrl: root,
+      local: access.model.providerId === 'ollama' || access.model.providerId === 'lmstudio',
+      modelId: access.model.modelId,
+      chatCompletionsUrl: anthropic ? undefined : `${root}/chat/completions`,
+      openAiModelsUrl: anthropic ? undefined : `${root}/models`,
+      messagesUrl: anthropic ? `${anthropicRoot}/messages` : undefined,
+      anthropicModelsUrl: anthropic ? `${anthropicRoot}/models` : undefined,
+      maxTokens: access.preset.maxTokens,
+      timeoutMs: access.preset.timeoutMs
+    }
+  } finally {
+    lease.revoke()
+  }
 }
 
 async function requestOpenAiTranslate(

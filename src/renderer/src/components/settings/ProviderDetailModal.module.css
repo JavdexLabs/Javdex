@@ -1,0 +1,170 @@
+.modalBody {
+  min-height: 0;
+  max-height: min(660px, calc(100vh - 110px));
+  scrollbar-gutter: stable;
+}
+
+.modalStack,
+.modelRows,
+.discoveredList {
+  display: flex;
+  flex-direction: column;
+}
+
+.modalStack {
+  gap: 12px;
+}
+
+.modelRows,
+.discoveredList {
+  gap: 6px;
+}
+
+.modalSection,
+.dangerZone {
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+}
+
+.modalSectionHeader,
+.dangerZone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.modalSectionHeader {
+  margin-bottom: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.gridTwo {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.controlInput {
+  width: 100%;
+  height: var(--control-h-md);
+  min-width: 0;
+  padding: 0 var(--control-pad-x);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.controlInput:disabled {
+  color: var(--text-muted);
+  opacity: 0.72;
+}
+
+.controlInput:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
+  box-shadow: var(--focus-ring);
+}
+
+.modalActions,
+.inlineConfirm {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.modalActions {
+  margin-top: 10px;
+}
+
+.modelRow,
+.discoveredRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px auto auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+}
+
+.rowIdentity,
+.dangerCopy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metaText,
+.dangerHint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.manualModel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.discoveredList {
+  max-height: 240px;
+  margin-top: 10px;
+  padding-inline-end: var(--scrollbar-safe-pad);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.discoveredRow {
+  grid-template-columns: minmax(0, 1fr) 130px auto;
+}
+
+.dangerZone {
+  border-color: var(--border-danger);
+  background: var(--surface-danger);
+}
+
+@media (width <= 720px) {
+  .gridTwo {
+    grid-template-columns: 1fr;
+  }
+
+  .dangerZone {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .manualModel {
+    grid-template-columns: 1fr;
+  }
+}

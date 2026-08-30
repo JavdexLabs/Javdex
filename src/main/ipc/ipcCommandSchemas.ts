@@ -1,10 +1,13 @@
 import { z } from 'zod'
 import { IPC } from '@shared/ipc-channels'
 import type { ActressIpcContract } from '@shared/actressIpcContract'
+import { ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/actressScrapeTypes'
 import type { AppIpcContract } from '@shared/appIpcContract'
 import type { ScrapeIpcContract } from '@shared/scrapeIpcContract'
 import type { VideoIpcContract } from '@shared/videoIpcContract'
+import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import type { IpcArgsSchemaMap } from './typedIpcAdapter'
+import { positiveSafeInteger, videoQueryIpcSchema } from './videoQueryIpcSchema'
 
 const id = z.number().int().positive()
 const revision = z.number().int().nonnegative()
@@ -22,13 +25,95 @@ const sortDirection = z.enum(['asc', 'desc'])
 const organizationRole = z.enum(['maker', 'publisher'])
 const pluginKind = z.enum(['video', 'actress'])
 const scrapeFields = z.array(text)
+const videoScrapeField = z.enum([
+  'title',
+  'summary',
+  'cover',
+  'releaseDate',
+  'maker',
+  'publisher',
+  'series',
+  'director',
+  'duration',
+  'actressesFemale',
+  'actressesMale',
+  'tags',
+  'source',
+  'rating',
+  'samples'
+])
+const videoScrapeFields = z
+  .array(videoScrapeField)
+  .max(16)
+  .refine((values) => new Set(values).size === values.length, '影片刮削字段不能重复')
+const videoBatchScrapeStatus = z.union([
+  z.literal(0),
+  z.literal(1),
+  z.literal(2),
+  z.literal('all')
+])
+const videoBatchScrapeFilter = z
+  .object({
+    libraryId: id.optional(),
+    status: videoBatchScrapeStatus,
+    videoIds: z
+      .array(id)
+      .max(10_000)
+      .refine((values) => new Set(values).size === values.length, '影片 ID 不能重复')
+      .optional(),
+    missingFields: videoScrapeFields.optional(),
+    sourceName: text.optional(),
+    ratingSourceName: text.optional(),
+    scraperName: text.optional()
+  })
+  .strict()
+const videoBatchScrapeRequest = videoBatchScrapeFilter
+  .extend({
+    fields: videoScrapeFields.min(1),
+    mode: z.enum(['replace', 'fillEmpty', 'replaceIfPresent']).optional()
+  })
+  .strict()
 const videoResourceImportTarget = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('new') }).strict(),
   z.object({ kind: z.literal('existing'), videoId: id }).strict()
 ])
+const pendingScanResolution = z
+  .object({
+    expectedRevision: id,
+    assignments: z
+      .array(
+        z
+          .object({
+            resourceId: id,
+            target: z.discriminatedUnion('kind', [
+              z.object({ kind: z.literal('existing'), videoId: id }).strict(),
+              z.object({ kind: z.literal('new'), groupKey: nonEmptyText.max(200) }).strict()
+            ])
+          })
+          .strict()
+      )
+      .min(1)
+      .max(1_000),
+    primaryResourceIds: z.record(nonEmptyText.max(200), id).optional()
+  })
+  .strict()
+const catalogScope = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('library'), libraryId: positiveSafeInteger }).strict(),
+  z
+    .object({
+      kind: z.literal('all'),
+      libraryIds: z
+        .array(positiveSafeInteger)
+        .max(500)
+        .refine((values) => new Set(values).size === values.length, '媒体库 ID 不能重复')
+        .optional()
+    })
+    .strict()
+])
 
 const videoLinkImport = z
   .object({
+    libraryId: id,
     code: nonEmptyText,
     target: videoResourceImportTarget,
     url: nonEmptyText,
@@ -38,7 +123,12 @@ const videoLinkImport = z
   })
   .strict()
 
-const videoLinkUpdate = videoLinkImport.omit({ code: true, target: true })
+const videoLinkUpdate = videoLinkImport.omit({ libraryId: true, code: true, target: true })
+
+const lifecycleCommit = {
+  operationId: nonEmptyText.max(200),
+  expectedRevision: nonEmptyText
+}
 
 const mediaImageImport = z.discriminatedUnion('source', [
   z.object({ source: z.literal('file'), sourcePath: nonEmptyText, remoteUrl: nullableText.optional() }),
@@ -59,18 +149,6 @@ const replacementMainName = z
 
 const settingsPatch = z
   .object({
-    libraryPaths: stringArray.optional(),
-    autoDeleteResourceLessVideos: z.boolean().optional(),
-    autoMergeSameCodeResources: z.boolean().optional(),
-    autoScanEnabled: z.boolean().optional(),
-    autoScanIntervalMinutes: z.union([
-      z.literal(15),
-      z.literal(30),
-      z.literal(60),
-      z.literal(180),
-      z.literal(360)
-    ]).optional(),
-    minScanImportDurationMinutes: finiteNumber.nonnegative().optional(),
     proxyUrl: text.optional(),
     proxyUrlEnabled: z.boolean().optional(),
     llmProxyUrl: text.optional(),
@@ -99,25 +177,94 @@ const settingsPatch = z
     showVideoResourceTypeBadges: z.boolean().optional(),
     coverDisplayMode: z.enum(['portrait', 'landscape']).optional(),
     scraperPluginDelays: object.optional(),
-    compositeScrapers: object.optional(),
-    defaultLlmProviderId: text.optional(),
-    defaultLlmModelId: text.optional(),
-    customLlmProviders: z.array(object).optional(),
-    llmCustomModels: z.array(object).optional(),
-    pluginDevAgentMaxSteps: finiteNumber.nonnegative().optional(),
-    pluginDevAgentMaxContextTokens: finiteNumber.positive().optional()
+    compositeScrapers: object.optional()
   })
   .strict()
 
-const llmProviderConfig = z
-  .object({
-    providerId: nonEmptyText,
-    baseUrl: text,
-    protocol: z.enum(['openai-chat', 'anthropic-messages']),
-    apiKeyAction: z.enum(['keep', 'replace', 'clear']),
-    apiKey: text.optional()
-  })
-  .strict()
+const workloadRuntime = z.object({
+  thinkingLevel: z.enum(['minimal', 'low', 'medium', 'high']),
+  maxTokens: z.number().int().nonnegative(),
+  timeoutMs: z.number().int().positive(),
+  cacheRetention: z.enum(['none', 'short', 'long'])
+}).strict()
+const workloadCompaction = z.object({
+  enabled: z.boolean(),
+  reserveTokens: z.number().int().nonnegative(),
+  keepRecentTokens: z.number().int().nonnegative()
+}).strict()
+const workloadLimits = z.object({
+  maxTurns: z.number().int().nonnegative(),
+  maxContextTokens: z.number().int().positive()
+}).strict()
+const workloadSelection = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('inherit-default') }).strict(),
+  z.object({ mode: z.literal('explicit'), modelRef: nonEmptyText }).strict()
+])
+const capabilityState = z.union([z.boolean(), z.literal('unknown')])
+const probeEvidence = z.object({
+  source: z.enum(['probe', 'manual', 'migration']),
+  checkedAt: nonEmptyText,
+  note: text.optional()
+}).strict()
+const modelOverride = z.object({
+  contextWindow: z.number().int().positive().optional(),
+  maxTokens: z.number().int().positive().optional(),
+  capabilities: z.object({
+    tools: capabilityState.optional(),
+    vision: capabilityState.optional(),
+    reasoning: capabilityState.optional()
+  }).strict().optional(),
+  cache: z.object({
+    supportsPromptCache: capabilityState.optional(),
+    supportsLongCacheRetention: z.boolean().optional(),
+    cacheControlFormat: z.literal('anthropic').optional(),
+    sessionAffinityFormat: z.enum(['openai', 'openai-nosession', 'openrouter']).optional(),
+    sendSessionAffinityHeaders: z.boolean().optional(),
+    evidence: probeEvidence
+  }).strict().optional()
+}).strict()
+const saveConnection = z.object({
+  providerId: nonEmptyText,
+  name: nonEmptyText,
+  source: z.enum(['builtin', 'custom']),
+  protocol: z.enum(['openai-chat', 'anthropic-messages']),
+  baseUrl: nonEmptyText,
+  local: z.boolean().optional(),
+  agentCompatible: z.boolean().optional(),
+  enabled: z.boolean().optional(),
+  apiKeyAction: z.enum(['keep', 'replace', 'clear']),
+  apiKey: text.optional()
+}).strict()
+const modelManagementCommand = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('set-default-model'), modelRef: nonEmptyText }).strict(),
+  z.object({
+    type: z.literal('set-workload-assignment'),
+    workloadId: z.enum(['plugin-developer', 'library-curator']),
+    model: workloadSelection,
+    runtime: workloadRuntime,
+    compaction: workloadCompaction,
+    limits: workloadLimits
+  }).strict(),
+  z.object({ type: z.literal('save-connection'), connection: saveConnection }).strict(),
+  z.object({ type: z.literal('remove-connection'), connectionId: nonEmptyText }).strict(),
+  z.object({
+    type: z.literal('add-model'),
+    connectionId: nonEmptyText,
+    modelId: nonEmptyText,
+    name: nonEmptyText
+  }).strict(),
+  z.object({ type: z.literal('remove-model'), modelRef: nonEmptyText }).strict(),
+  z.object({
+    type: z.literal('set-model-override'),
+    modelRef: nonEmptyText,
+    patch: modelOverride
+  }).strict(),
+  z.object({ type: z.literal('reset-model-override'), modelRef: nonEmptyText }).strict()
+])
+const modelManagementApply = z.object({
+  expectedRevision: nonEmptyText,
+  command: modelManagementCommand
+}).strict()
 
 const classificationEntity = z
   .object({ kind: z.enum(['organization', 'director', 'series']), id })
@@ -127,6 +274,74 @@ const classificationImage = z.discriminatedUnion('source', [
   z.object({ source: z.literal('file'), sourcePath: nonEmptyText }).strict(),
   z.object({ source: z.literal('url'), remoteUrl: nonEmptyText }).strict(),
   z.object({ source: z.literal('video-cover'), videoId: id }).strict()
+])
+
+const agentMetadataTarget = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('video'), id }).strict(),
+  z.object({ kind: z.literal('actress'), id }).strict()
+])
+const agentMetadataPlan = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('video'),
+    draftId: nonEmptyText,
+    expectedRevision: revision,
+    fields: z.array(z.enum(ALL_VIDEO_SCRAPE_FIELDS)).max(ALL_VIDEO_SCRAPE_FIELDS.length),
+    mode: z.enum(['replace', 'fillEmpty', 'replaceIfPresent']),
+    directorSelectionId: id.optional()
+  }).strict(),
+  z.object({
+    kind: z.literal('actress'),
+    draftId: nonEmptyText,
+    expectedRevision: revision,
+    fields: z.array(z.enum(ALL_ACTRESS_SCRAPE_FIELDS)).max(ALL_ACTRESS_SCRAPE_FIELDS.length),
+    mode: z.enum(['replace', 'fillEmpty', 'replaceIfPresent']),
+    identityConfirmed: z.boolean().optional()
+  }).strict()
+])
+
+const playlistImportDestination = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('create'),
+    requestedName: text.max(500).optional()
+  }).strict(),
+  z.object({ kind: z.literal('append'), playlistId: id }).strict()
+])
+const playlistImportStart = z.object({
+  idempotencyKey: nonEmptyText.max(200),
+  sourceUrl: nonEmptyText.max(4_096),
+  targetLibraryId: id,
+  destination: playlistImportDestination,
+  autoCreateUnmatchedVideos: z.boolean().optional().default(true),
+  saveDetailLinks: z.boolean().optional().default(true),
+  saveSourcePlaylistLink: z.boolean().optional().default(false)
+}).strict()
+const playlistImportControl = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('resume-browser'),
+    requestId: nonEmptyText.max(500),
+    idempotencyKey: nonEmptyText.max(200)
+  }).strict(),
+  z.object({
+    kind: z.literal('retry'),
+    expectedRevision: revision,
+    idempotencyKey: nonEmptyText.max(200)
+  }).strict(),
+  z.object({
+    kind: z.literal('resolve-identities'),
+    expectedRevision: revision,
+    idempotencyKey: nonEmptyText.max(200),
+    decisions: z.array(z.object({
+      itemId: id,
+      choice: z.discriminatedUnion('kind', [
+        z.object({ kind: z.literal('existing'), videoId: id }).strict(),
+        z.object({ kind: z.literal('create') }).strict()
+      ])
+    }).strict()).min(1).max(500)
+  }).strict(),
+  z.object({
+    kind: z.literal('cancel'),
+    idempotencyKey: nonEmptyText.max(200)
+  }).strict()
 ])
 
 const pluginPackage = z
@@ -144,36 +359,60 @@ const pluginPackage = z
   .strict()
 
 export const videoIpcSchemas = {
-  [IPC.VIDEO_LIST]: z.tuple([object.optional()]),
-  [IPC.VIDEO_GET]: z.tuple([id]),
+  [IPC.VIDEO_LIST]: z.tuple([catalogScope, videoQueryIpcSchema.optional()]),
+  [IPC.VIDEO_GET]: z.tuple([catalogScope, positiveSafeInteger]),
   [IPC.VIDEO_UPDATE]: z.tuple([id, object]),
   [IPC.VIDEO_EDIT]: z.tuple([id, object]),
   [IPC.VIDEO_CLEAR_META]: z.tuple([id]),
   [IPC.VIDEO_MARK_SCRAPE_SUCCESS]: z.tuple([id]),
-  [IPC.VIDEO_DELETE]: z.tuple([id]),
   [IPC.VIDEO_SET_RATING]: z.tuple([id, finiteNumber.min(0).max(5)]),
   [IPC.VIDEO_CORRECT_IMPORT]: z.tuple([id, nonEmptyText, z.boolean().optional()]),
-  [IPC.VIDEO_YEARS]: noArgs,
+  [IPC.VIDEO_YEARS]: z.tuple([catalogScope]),
   [IPC.VIDEO_SAMPLE_IMPORT]: z.tuple([id, mediaImageImport]),
   [IPC.VIDEO_SAMPLE_DELETE]: z.tuple([id, id]),
   [IPC.VIDEO_POSTER_SET]: z.tuple([id, nullableText]),
   [IPC.VIDEO_MANUAL_TAG_ADD]: z.tuple([id, nonEmptyText]),
   [IPC.VIDEO_MANUAL_TAG_REMOVE]: z.tuple([id, id]),
   [IPC.VIDEO_RESOURCE_IMPORT]: z.tuple([videoLinkImport]),
-  [IPC.VIDEO_RESOURCE_GET]: z.tuple([id, id]),
+  [IPC.VIDEO_RESOURCE_GET]: z.tuple([id, id, id]),
   [IPC.VIDEO_RESOURCE_CHECK]: z.tuple([nonEmptyText]),
-  [IPC.VIDEO_RESOURCE_UPDATE]: z.tuple([id, id, videoLinkUpdate]),
-  [IPC.VIDEO_RESOURCE_UPDATE_LOCAL_LABEL]: z.tuple([id, id, nullableText]),
-  [IPC.VIDEO_RESOURCE_SET_PRIMARY]: z.tuple([id, id]),
+  [IPC.VIDEO_RESOURCE_UPDATE]: z.tuple([id, id, id, videoLinkUpdate]),
+  [IPC.VIDEO_RESOURCE_UPDATE_LOCAL_LABEL]: z.tuple([id, id, id, nullableText]),
+  [IPC.VIDEO_RESOURCE_SET_PRIMARY]: z.tuple([id, id, id]),
   [IPC.VIDEO_RESOURCE_REMOVE]: z.tuple([
     id,
     id,
-    z.enum(['retain-video', 'delete-video']).optional()
+    id,
+    z.literal('retain-video').optional()
+  ]),
+  [IPC.VIDEO_REMOVE_FROM_LIBRARY_PREVIEW]: z.tuple([id, id]),
+  [IPC.VIDEO_REMOVE_FROM_LIBRARY]: z.tuple([
+    z.object({
+      ...lifecycleCommit,
+      libraryId: id,
+      videoId: id
+    }).strict()
+  ]),
+  [IPC.VIDEO_RESOURCE_MOVE_PREVIEW]: z.tuple([id, id, id]),
+  [IPC.VIDEO_RESOURCE_MOVE]: z.tuple([
+    z.object({
+      ...lifecycleCommit,
+      sourceLibraryId: id,
+      targetLibraryId: id,
+      resourceId: id
+    }).strict()
+  ]),
+  [IPC.VIDEO_DELETE_GLOBAL_PREVIEW]: z.tuple([id]),
+  [IPC.VIDEO_DELETE_GLOBAL]: z.tuple([
+    z.object({
+      ...lifecycleCommit,
+      videoId: id
+    }).strict()
   ]),
   [IPC.VIDEO_MERGE]: z.tuple([
     z.object({ retainedVideoId: id, sourceVideoId: id }).strict()
   ]),
-  [IPC.VIDEO_RESOURCE_SPLIT]: z.tuple([id, id])
+  [IPC.VIDEO_RESOURCE_SPLIT]: z.tuple([id, id, id])
 } satisfies IpcArgsSchemaMap<VideoIpcContract>
 
 export const actressIpcSchemas = {
@@ -256,8 +495,9 @@ export const scrapeIpcSchemas = {
   [IPC.SCRAPE_ONE]: z.tuple([
     id,
     optionalText,
-    scrapeFields.optional(),
-    text.optional(),
+    videoScrapeFields.optional(),
+    z.enum(['replace', 'fillEmpty', 'replaceIfPresent']).optional(),
+    id.optional(),
     id.optional()
   ]),
   [IPC.PENDING_VIDEO_SCRAPE_LIST]: noArgs,
@@ -272,8 +512,8 @@ export const scrapeIpcSchemas = {
   [IPC.PENDING_VIDEO_SCRAPE_DISCARD]: z.tuple([id]),
   [IPC.SCRAPE_BATCH_START]: z.tuple([optionalText]),
   [IPC.SCRAPE_BATCH_CANCEL]: noArgs,
-  [IPC.SCRAPE_VIDEO_BATCH_COUNT]: z.tuple([object]),
-  [IPC.SCRAPE_VIDEO_BATCH_START]: z.tuple([object]),
+  [IPC.SCRAPE_VIDEO_BATCH_COUNT]: z.tuple([videoBatchScrapeFilter]),
+  [IPC.SCRAPE_VIDEO_BATCH_START]: z.tuple([videoBatchScrapeRequest]),
   [IPC.SCRAPE_VIDEO_BATCH_CANCEL]: noArgs,
   [IPC.SCRAPE_REMATCH_COUNT]: z.tuple([z.enum(['scraped', 'failed', 'all'])]),
   [IPC.SCRAPE_REMATCH_BATCH_START]: z.tuple([object]),
@@ -330,12 +570,17 @@ export const appIpcSchemas = {
   [IPC.SETTINGS_GET]: noArgs,
   [IPC.SETTINGS_UPDATE]: z.tuple([settingsPatch]),
   [IPC.SETTINGS_PICK_FOLDER]: noArgs,
-  [IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW]: z.tuple([nonEmptyText]),
-  [IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM]: z.tuple([nonEmptyText]),
-  [IPC.SETTINGS_LLM_TEST_MODEL]: z.tuple([nonEmptyText, nonEmptyText]),
-  [IPC.SETTINGS_LLM_LIST_MODELS]: z.tuple([nonEmptyText]),
-  [IPC.SETTINGS_LLM_PROVIDER_CONFIG_SAVE]: z.tuple([llmProviderConfig]),
-  [IPC.SETTINGS_LLM_PROVIDER_DELETE]: z.tuple([nonEmptyText]),
+  [IPC.SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW]: z.tuple([id, id]),
+  [IPC.SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM]: z.tuple([
+    id,
+    id,
+    id,
+    z.string().regex(/^[a-f0-9]{64}$/)
+  ]),
+  [IPC.SETTINGS_MODEL_MANAGEMENT_GET]: noArgs,
+  [IPC.SETTINGS_MODEL_MANAGEMENT_APPLY]: z.tuple([modelManagementApply]),
+  [IPC.SETTINGS_MODEL_MANAGEMENT_DISCOVER_MODELS]: z.tuple([nonEmptyText]),
+  [IPC.SETTINGS_MODEL_MANAGEMENT_TEST_MODEL]: z.tuple([nonEmptyText]),
   [IPC.SETTINGS_RECOVERY_REVEAL_BACKUP]: noArgs,
   [IPC.SETTINGS_PROXY_TEST]: z.tuple([z.enum(['scrape', 'llm']), text]),
   [IPC.SETTINGS_OVERVIEW_STATS]: noArgs,
@@ -345,17 +590,35 @@ export const appIpcSchemas = {
   [IPC.APP_UPDATE_OPEN_PROJECT_PAGE]: z.tuple([z.enum(['project', 'releases', 'license'])]),
   [IPC.EXTERNAL_LINK_OPEN]: z.tuple([nonEmptyText]),
   [IPC.APP_UPDATE_IGNORE_VERSION]: z.tuple([nonEmptyText]),
-  [IPC.SCAN_RUN]: z.tuple([stringArray.optional()]),
-  [IPC.SCAN_CANCEL]: noArgs,
+  [IPC.SCAN_RUN]: z.tuple([
+    id,
+    z
+      .array(id)
+      .max(64)
+      .refine((values) => new Set(values).size === values.length, '根目录 ID 不能重复')
+      .optional()
+  ]),
+  [IPC.SCAN_CANCEL]: z.tuple([nonEmptyText]),
+  [IPC.SCAN_LATEST_GET]: z.tuple([id]),
+  [IPC.SCAN_AUDIT_GET]: z.tuple([id]),
+  [IPC.SCAN_AUDIT_REVEAL_FILE]: z.tuple([id, nonEmptyText]),
   [IPC.FILE_RENAME]: z.tuple([
+    id,
+    id,
     nonEmptyText,
     nonEmptyText,
     nonEmptyText,
     videoResourceImportTarget
   ]),
-  [IPC.FILE_IMPORT_MANUAL]: z.tuple([nonEmptyText, nonEmptyText, videoResourceImportTarget]),
-  [IPC.PENDING_SCAN_LIST]: noArgs,
-  [IPC.PENDING_SCAN_RESOLVE]: z.tuple([id, object]),
+  [IPC.FILE_IMPORT_MANUAL]: z.tuple([
+    id,
+    id,
+    nonEmptyText,
+    nonEmptyText,
+    videoResourceImportTarget
+  ]),
+  [IPC.PENDING_SCAN_LIST]: z.tuple([id]),
+  [IPC.PENDING_SCAN_RESOLVE]: z.tuple([id, id, pendingScanResolution]),
   [IPC.PLAYLIST_LIST]: noArgs,
   [IPC.PLAYLIST_GET]: z.tuple([
     id,
@@ -404,9 +667,38 @@ export const appIpcSchemas = {
   ]),
   [IPC.PLUGIN_DEV_AGENT_START]: z.tuple([object]),
   [IPC.PLUGIN_DEV_AGENT_MESSAGE]: z.tuple([
-    z.object({ sessionId: nonEmptyText, text, lastDryRun: object.optional() }).strict()
+    z.object({
+      sessionId: nonEmptyText,
+      text,
+      continuationKind: z.enum(['resume', 'user_feedback']).optional(),
+      approvalDecision: z.object({
+        requestId: nonEmptyText,
+        decision: z.enum(['approve', 'deny'])
+      }).strict().optional(),
+      userResponse: z.discriminatedUnion('type', [
+        z.object({
+          requestId: nonEmptyText,
+          type: z.literal('browser_interaction'),
+          action: z.literal('completed')
+        }).strict(),
+        z.object({
+          requestId: nonEmptyText,
+          type: z.literal('freeform'),
+          text: nonEmptyText
+        }).strict(),
+        z.object({
+          requestId: nonEmptyText,
+          type: z.literal('choice'),
+          optionId: nonEmptyText
+        }).strict()
+      ]).optional()
+    }).strict()
   ]),
   [IPC.PLUGIN_DEV_AGENT_CANCEL]: z.tuple([nonEmptyText]),
+  [IPC.PLUGIN_DEV_AGENT_RELEASE_BROWSER]: z.tuple([nonEmptyText]),
+  [IPC.PLUGIN_DEV_AGENT_SNAPSHOT]: z.tuple([nonEmptyText.optional()]),
+  [IPC.PLUGIN_DEV_AGENT_CLEAR_HISTORY]: z.tuple([]),
+  [IPC.PLUGIN_DEV_AGENT_DISCARD_UNRECOVERABLE]: z.tuple([]),
   [IPC.PLUGIN_DEV_AGENT_EXPORT_WORK_LOG]: z.tuple([nonEmptyText]),
   [IPC.PLUGIN_DEV_DRY_RUN]: z.tuple([
     z.object({
@@ -415,14 +707,56 @@ export const appIpcSchemas = {
       testTargets: stringArray.optional()
     }).strict()
   ]),
-  [IPC.PLUGIN_DEV_VERIFY]: z.tuple([object]),
   [IPC.PLUGIN_DEV_INSTALL]: z.tuple([
-    z.object({ package: pluginPackage, overwriteUser: z.boolean().optional() }).strict()
+    z.object({
+      package: pluginPackage,
+      overwriteUser: z.boolean().optional(),
+      sessionId: nonEmptyText.optional()
+    }).strict()
   ]),
-  [IPC.PLAYER_PLAY]: z.tuple([id]),
-  [IPC.PLAYER_REVEAL]: z.tuple([id]),
-  [IPC.PLAYER_OPEN_RESOURCE]: z.tuple([id]),
-  [IPC.PLAYER_REVEAL_RESOURCE]: z.tuple([id]),
+  [IPC.LIBRARY_CURATOR_START]: z.tuple([
+    z.object({ prompt: text.optional() }).strict().optional()
+  ]),
+  [IPC.LIBRARY_CURATOR_MESSAGE]: z.tuple([
+    z.object({ runId: nonEmptyText, text: nonEmptyText }).strict()
+  ]),
+  [IPC.LIBRARY_CURATOR_CANCEL]: z.tuple([nonEmptyText]),
+  [IPC.LIBRARY_CURATOR_SNAPSHOT]: z.tuple([nonEmptyText.optional()]),
+  [IPC.AGENT_METADATA_START]: z.tuple([
+    z.object({
+      target: agentMetadataTarget,
+      sourceUrl: nonEmptyText.max(4_096),
+      idempotencyKey: nonEmptyText.max(200)
+    }).strict()
+  ]),
+  [IPC.AGENT_METADATA_RESUME]: z.tuple([
+    z.object({
+      runId: nonEmptyText,
+      requestId: nonEmptyText,
+      idempotencyKey: nonEmptyText.max(200)
+    }).strict()
+  ]),
+  [IPC.AGENT_METADATA_CANCEL]: z.tuple([nonEmptyText]),
+  [IPC.AGENT_METADATA_SNAPSHOT]: z.tuple([nonEmptyText]),
+  [IPC.AGENT_METADATA_FIND_READY]: z.tuple([agentMetadataTarget]),
+  [IPC.AGENT_METADATA_PLAN]: z.tuple([agentMetadataPlan]),
+  [IPC.AGENT_METADATA_APPLY]: z.tuple([
+    z.object({
+      draftId: nonEmptyText,
+      reviewToken: nonEmptyText,
+      idempotencyKey: nonEmptyText.max(200)
+    }).strict()
+  ]),
+  [IPC.AGENT_METADATA_DISCARD]: z.tuple([
+    z.object({ draftId: nonEmptyText, expectedRevision: revision }).strict()
+  ]),
+  [IPC.PLAYLIST_IMPORT_START]: z.tuple([playlistImportStart]),
+  [IPC.PLAYLIST_IMPORT_SNAPSHOT]: z.tuple([nonEmptyText.optional()]),
+  [IPC.PLAYLIST_IMPORT_CONTROL]: z.tuple([nonEmptyText, playlistImportControl]),
+  [IPC.PLAYER_PLAY]: z.tuple([id, id]),
+  [IPC.PLAYER_REVEAL]: z.tuple([id, id]),
+  [IPC.PLAYER_OPEN_RESOURCE]: z.tuple([id, id]),
+  [IPC.PLAYER_REVEAL_RESOURCE]: z.tuple([id, id]),
   [IPC.ASSET_CRYPTO_SET]: z.tuple([z.boolean()]),
   [IPC.ASSET_STORAGE_RELOCATE]: z.tuple([nullableText.optional()]),
   [IPC.ASSET_FETCH_REMOTE_IMAGE]: z.tuple([nonEmptyText]),

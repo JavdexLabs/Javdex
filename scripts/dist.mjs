@@ -13,6 +13,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolveNodeGypPythonEnvironment } from './packaging-runtime.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const manifestPath = join(root, 'build', 'packaging.targets.json')
@@ -133,7 +134,14 @@ function main() {
 
   console.log(`> npx ${builderArgs.join(' ')}`)
   console.log(`> ELECTRON_BUILDER_TARGETS=${targetConfig}`)
-  run('npx', builderArgs, { ELECTRON_BUILDER_TARGETS: targetConfig })
+  const pythonEnvironment = resolveNodeGypPythonEnvironment()
+  if (pythonEnvironment.PYTHON) {
+    console.log(`> PYTHON=${pythonEnvironment.PYTHON} (node-gyp compatible)`)
+  }
+  run('npx', builderArgs, {
+    ELECTRON_BUILDER_TARGETS: targetConfig,
+    ...pythonEnvironment
+  })
 }
 
 function readPackageVersion() {

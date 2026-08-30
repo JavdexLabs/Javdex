@@ -2,16 +2,35 @@
 // the preload bridge and the main-process handler registry.
 
 export const IPC = {
+  // Named media libraries and cross-library home discovery
+  MEDIA_LIBRARY_LIST: 'mediaLibrary:list',
+  MEDIA_LIBRARY_GET: 'mediaLibrary:get',
+  MEDIA_LIBRARY_CREATE: 'mediaLibrary:create',
+  MEDIA_LIBRARY_UPDATE: 'mediaLibrary:update',
+  MEDIA_LIBRARY_CONFIG_UPDATE: 'mediaLibrary:updateConfig',
+  MEDIA_LIBRARY_ROOT_ADD: 'mediaLibrary:addRoot',
+  MEDIA_LIBRARY_ROOT_UPDATE: 'mediaLibrary:updateRoot',
+  MEDIA_LIBRARY_ROOT_REMOVE: 'mediaLibrary:removeRoot',
+  MEDIA_LIBRARY_ROOT_REMOVE_CANCEL: 'mediaLibrary:cancelRootRemoval',
+  MEDIA_LIBRARY_ROOT_MIGRATE_PREVIEW: 'mediaLibrary:previewRootMigration',
+  MEDIA_LIBRARY_ROOT_MIGRATE: 'mediaLibrary:migrateRoot',
+  MEDIA_LIBRARY_ARCHIVE: 'mediaLibrary:archive',
+  MEDIA_LIBRARY_RESTORE: 'mediaLibrary:restore',
+  MEDIA_LIBRARY_DELETE_PREVIEW: 'mediaLibrary:previewDelete',
+  MEDIA_LIBRARY_DELETE: 'mediaLibrary:delete',
+  HOME_LOAD: 'home:load',
+  HOME_SEARCH: 'home:search',
+
   // Settings
   SETTINGS_GET: 'settings:get',
   SETTINGS_UPDATE: 'settings:update',
   SETTINGS_PICK_FOLDER: 'settings:pickFolder',
   SETTINGS_LIBRARY_PATH_REMOVE_PREVIEW: 'settings:libraryPathRemovePreview',
   SETTINGS_LIBRARY_PATH_REMOVE_CONFIRM: 'settings:libraryPathRemoveConfirm',
-  SETTINGS_LLM_TEST_MODEL: 'settings:llmTestModel',
-  SETTINGS_LLM_LIST_MODELS: 'settings:llmListModels',
-  SETTINGS_LLM_PROVIDER_CONFIG_SAVE: 'settings:llmProviderConfigSave',
-  SETTINGS_LLM_PROVIDER_DELETE: 'settings:llmProviderDelete',
+  SETTINGS_MODEL_MANAGEMENT_GET: 'settings:modelManagementGet',
+  SETTINGS_MODEL_MANAGEMENT_APPLY: 'settings:modelManagementApply',
+  SETTINGS_MODEL_MANAGEMENT_DISCOVER_MODELS: 'settings:modelManagementDiscoverModels',
+  SETTINGS_MODEL_MANAGEMENT_TEST_MODEL: 'settings:modelManagementTestModel',
   SETTINGS_RECOVERY_REVEAL_BACKUP: 'settings:recoveryRevealBackup',
   SETTINGS_PROXY_TEST: 'settings:proxyTest',
   SETTINGS_OVERVIEW_STATS: 'settings:overviewStats',
@@ -30,6 +49,9 @@ export const IPC = {
   // Scan / import
   SCAN_RUN: 'scan:run',
   SCAN_CANCEL: 'scan:cancel',
+  SCAN_LATEST_GET: 'scan:getLatest',
+  SCAN_AUDIT_GET: 'scan:auditGet',
+  SCAN_AUDIT_REVEAL_FILE: 'scan:auditRevealFile',
   SCAN_PROGRESS: 'scan:progress', // main -> renderer event
   SCAN_STATE_CHANGED: 'scan:stateChanged', // main -> renderer event
   FILE_RENAME: 'file:rename',
@@ -44,7 +66,6 @@ export const IPC = {
   VIDEO_EDIT: 'video:edit',
   VIDEO_CLEAR_META: 'video:clearMeta',
   VIDEO_MARK_SCRAPE_SUCCESS: 'video:markScrapeSuccess',
-  VIDEO_DELETE: 'video:delete',
   VIDEO_SET_RATING: 'video:setRating',
   VIDEO_CORRECT_IMPORT: 'video:correctImport',
   VIDEO_YEARS: 'video:years',
@@ -60,6 +81,12 @@ export const IPC = {
   VIDEO_RESOURCE_UPDATE_LOCAL_LABEL: 'video:resourceUpdateLocalLabel',
   VIDEO_RESOURCE_SET_PRIMARY: 'video:resourceSetPrimary',
   VIDEO_RESOURCE_REMOVE: 'video:resourceRemove',
+  VIDEO_REMOVE_FROM_LIBRARY_PREVIEW: 'video:removeFromLibraryPreview',
+  VIDEO_REMOVE_FROM_LIBRARY: 'video:removeFromLibrary',
+  VIDEO_RESOURCE_MOVE_PREVIEW: 'video:resourceMovePreview',
+  VIDEO_RESOURCE_MOVE: 'video:resourceMove',
+  VIDEO_DELETE_GLOBAL_PREVIEW: 'video:deleteGlobalPreview',
+  VIDEO_DELETE_GLOBAL: 'video:deleteGlobal',
   VIDEO_MERGE: 'video:merge',
   VIDEO_RESOURCE_SPLIT: 'video:resourceSplit',
 
@@ -191,11 +218,37 @@ export const IPC = {
   PLUGIN_DEV_AGENT_START: 'pluginDev:agentStart',
   PLUGIN_DEV_AGENT_MESSAGE: 'pluginDev:agentMessage',
   PLUGIN_DEV_AGENT_CANCEL: 'pluginDev:agentCancel',
+  PLUGIN_DEV_AGENT_RELEASE_BROWSER: 'pluginDev:agentReleaseBrowser',
+  PLUGIN_DEV_AGENT_SNAPSHOT: 'pluginDev:agentSnapshot',
+  PLUGIN_DEV_AGENT_CLEAR_HISTORY: 'pluginDev:agentClearHistory',
+  PLUGIN_DEV_AGENT_DISCARD_UNRECOVERABLE: 'pluginDev:agentDiscardUnrecoverable',
   PLUGIN_DEV_AGENT_EVENT: 'pluginDev:agentEvent', // main -> renderer event
   PLUGIN_DEV_AGENT_EXPORT_WORK_LOG: 'pluginDev:agentExportWorkLog',
   PLUGIN_DEV_DRY_RUN: 'pluginDev:dryRun',
-  PLUGIN_DEV_VERIFY: 'pluginDev:verify',
   PLUGIN_DEV_INSTALL: 'pluginDev:install',
+
+  // Read-only library curator Agent
+  LIBRARY_CURATOR_START: 'libraryCurator:start',
+  LIBRARY_CURATOR_MESSAGE: 'libraryCurator:message',
+  LIBRARY_CURATOR_CANCEL: 'libraryCurator:cancel',
+  LIBRARY_CURATOR_SNAPSHOT: 'libraryCurator:snapshot',
+
+  // External detail-page metadata collection Agent
+  AGENT_METADATA_START: 'agentMetadata:start',
+  AGENT_METADATA_RESUME: 'agentMetadata:resume',
+  AGENT_METADATA_CANCEL: 'agentMetadata:cancel',
+  AGENT_METADATA_SNAPSHOT: 'agentMetadata:snapshot',
+  AGENT_METADATA_FIND_READY: 'agentMetadata:findReady',
+  AGENT_METADATA_PLAN: 'agentMetadata:plan',
+  AGENT_METADATA_APPLY: 'agentMetadata:apply',
+  AGENT_METADATA_DISCARD: 'agentMetadata:discard',
+  AGENT_METADATA_SNAPSHOT_CHANGED: 'agentMetadata:snapshotChanged', // main -> renderer event
+
+  // External playlist import Agent
+  PLAYLIST_IMPORT_START: 'playlistImport:start',
+  PLAYLIST_IMPORT_SNAPSHOT: 'playlistImport:snapshot',
+  PLAYLIST_IMPORT_CONTROL: 'playlistImport:control',
+  PLAYLIST_IMPORT_SNAPSHOT_CHANGED: 'playlistImport:snapshotChanged', // main -> renderer event
 
   // Player
   PLAYER_PLAY: 'player:play',

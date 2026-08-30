@@ -2,10 +2,8 @@ import { IPC } from './ipc-channels'
 import type {
   CorrectImportResult,
   VideoAsset,
-  VideoDetail,
   VideoEditInput,
   VideoFieldUpdateInput,
-  VideoListResult,
   VideoLinkResourceImportInput,
   VideoLinkResourceUpdateInput,
   VideoQuery,
@@ -19,6 +17,15 @@ import type {
   VideoMergeResult,
   VideoResourceSplitResult
 } from './videoTypes'
+import type { CatalogScope } from './mediaLibraryTypes'
+import type { ScopedVideoDetail, ScopedVideoListResult } from './catalogTypes'
+import type {
+  DeleteVideoGloballyInput,
+  MoveVideoResourceInput,
+  RemoveVideoFromLibraryInput,
+  VideoLifecycleImpact,
+  VideoLifecycleResult
+} from './videoLifecycleTypes'
 import type {
   IpcContractArgs,
   IpcContractChannel,
@@ -26,19 +33,21 @@ import type {
 } from './typedIpcContract'
 
 export interface VideoIpcContract {
-  [IPC.VIDEO_LIST]: { args: [query?: VideoQuery]; result: VideoListResult }
-  [IPC.VIDEO_GET]: { args: [id: number]; result: VideoDetail | null }
+  [IPC.VIDEO_LIST]: {
+    args: [scope: CatalogScope, query?: VideoQuery]
+    result: ScopedVideoListResult
+  }
+  [IPC.VIDEO_GET]: { args: [scope: CatalogScope, id: number]; result: ScopedVideoDetail | null }
   [IPC.VIDEO_UPDATE]: { args: [id: number, fields: VideoFieldUpdateInput]; result: boolean }
   [IPC.VIDEO_EDIT]: { args: [id: number, input: VideoEditInput]; result: boolean }
   [IPC.VIDEO_CLEAR_META]: { args: [id: number]; result: boolean }
   [IPC.VIDEO_MARK_SCRAPE_SUCCESS]: { args: [id: number]; result: boolean }
-  [IPC.VIDEO_DELETE]: { args: [id: number]; result: boolean }
   [IPC.VIDEO_SET_RATING]: { args: [id: number, rating: number]; result: boolean }
   [IPC.VIDEO_CORRECT_IMPORT]: {
     args: [id: number, code: string, discardPendingScrape?: boolean]
     result: CorrectImportResult
   }
-  [IPC.VIDEO_YEARS]: { args: []; result: number[] }
+  [IPC.VIDEO_YEARS]: { args: [scope: CatalogScope]; result: number[] }
   [IPC.VIDEO_SAMPLE_IMPORT]: {
     args: [id: number, input: VideoSampleImportInput]
     result: VideoAsset
@@ -55,7 +64,7 @@ export interface VideoIpcContract {
     result: VideoResourceImportResult
   }
   [IPC.VIDEO_RESOURCE_GET]: {
-    args: [videoId: number, resourceId: number]
+    args: [libraryId: number, videoId: number, resourceId: number]
     result: VideoResource | null
   }
   [IPC.VIDEO_RESOURCE_CHECK]: {
@@ -63,31 +72,61 @@ export interface VideoIpcContract {
     result: VideoResourceLinkCheckResult
   }
   [IPC.VIDEO_RESOURCE_UPDATE]: {
-    args: [videoId: number, resourceId: number, input: VideoLinkResourceUpdateInput]
+    args: [
+      libraryId: number,
+      videoId: number,
+      resourceId: number,
+      input: VideoLinkResourceUpdateInput
+    ]
     result: VideoResource
   }
   [IPC.VIDEO_RESOURCE_UPDATE_LOCAL_LABEL]: {
-    args: [videoId: number, resourceId: number, label: string | null]
+    args: [libraryId: number, videoId: number, resourceId: number, label: string | null]
     result: VideoResource
   }
   [IPC.VIDEO_RESOURCE_SET_PRIMARY]: {
-    args: [videoId: number, resourceId: number]
+    args: [libraryId: number, videoId: number, resourceId: number]
     result: boolean
   }
   [IPC.VIDEO_RESOURCE_REMOVE]: {
     args: [
+      libraryId: number,
       videoId: number,
       resourceId: number,
       lastResourceMode?: LastVideoResourceRemovalMode
     ]
     result: VideoResourceRemovalResult
   }
+  [IPC.VIDEO_REMOVE_FROM_LIBRARY_PREVIEW]: {
+    args: [libraryId: number, videoId: number]
+    result: VideoLifecycleImpact
+  }
+  [IPC.VIDEO_REMOVE_FROM_LIBRARY]: {
+    args: [input: RemoveVideoFromLibraryInput]
+    result: VideoLifecycleResult
+  }
+  [IPC.VIDEO_RESOURCE_MOVE_PREVIEW]: {
+    args: [sourceLibraryId: number, targetLibraryId: number, resourceId: number]
+    result: VideoLifecycleImpact
+  }
+  [IPC.VIDEO_RESOURCE_MOVE]: {
+    args: [input: MoveVideoResourceInput]
+    result: VideoLifecycleResult
+  }
+  [IPC.VIDEO_DELETE_GLOBAL_PREVIEW]: {
+    args: [videoId: number]
+    result: VideoLifecycleImpact
+  }
+  [IPC.VIDEO_DELETE_GLOBAL]: {
+    args: [input: DeleteVideoGloballyInput]
+    result: VideoLifecycleResult
+  }
   [IPC.VIDEO_MERGE]: {
     args: [input: VideoMergeInput]
     result: VideoMergeResult
   }
   [IPC.VIDEO_RESOURCE_SPLIT]: {
-    args: [videoId: number, resourceId: number]
+    args: [libraryId: number, videoId: number, resourceId: number]
     result: VideoResourceSplitResult
   }
 }

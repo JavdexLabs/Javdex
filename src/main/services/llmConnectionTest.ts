@@ -1,9 +1,4 @@
-import {
-  resolveLlmProviderRequestConfig,
-  resolveLlmRequestConfig,
-  type ResolvedLlmModelRequestConfig,
-  type ResolvedLlmRequestConfig
-} from './llmClient'
+import type { ResolvedLlmModelRequestConfig, ResolvedLlmRequestConfig } from './llmClient'
 import { llmFetch } from '../utils/llmFetch'
 import { inferLlmModelKind, type LlmModelDefinition } from '@shared/llmProviders'
 
@@ -44,21 +39,24 @@ class RetryableProbeError extends Error {
   }
 }
 
-export async function testLlmModelConnection(providerId: string, modelId: string): Promise<string> {
-  if (inferLlmModelKind({ id: modelId, name: modelId }) !== 'chat') {
+export async function testResolvedLlmModelConnection(
+  config: ResolvedLlmModelRequestConfig
+): Promise<string> {
+  if (inferLlmModelKind({ id: config.modelId, name: config.modelId }) !== 'chat') {
     throw new Error('这是嵌入模型，不支持测试生成；请选择聊天/生成模型')
   }
-  const config = resolveLlmRequestConfig(providerId, modelId)
   if (config.protocol === 'anthropic-messages') {
     return pingAnthropic(config)
   }
   return pingOpenAiCompatible(config)
 }
 
-export async function listLlmProviderModels(providerId: string): Promise<LlmModelDefinition[]> {
-  const config = resolveLlmProviderRequestConfig(providerId)
-  if (config.protocol === 'anthropic-messages') return listAnthropicModels(config)
-  return listOpenAiCompatibleModels(config)
+export async function listResolvedLlmProviderModels(
+  config: ResolvedLlmRequestConfig,
+  signal?: AbortSignal
+): Promise<LlmModelDefinition[]> {
+  if (config.protocol === 'anthropic-messages') return listAnthropicModels(config, signal)
+  return listOpenAiCompatibleModels(config, signal)
 }
 
 async function pingOpenAiCompatible(config: ResolvedLlmModelRequestConfig): Promise<string> {
@@ -91,7 +89,7 @@ async function requestOpenAiProbe(config: ResolvedLlmModelRequestConfig): Promis
         max_tokens: TEST_MAX_TOKENS,
         stream: false
       }),
-      signal: AbortSignal.timeout(TEST_TIMEOUT_MS)
+      signal: config.signal ?? AbortSignal.timeout(TEST_TIMEOUT_MS)
     })
   } catch (err) {
     throw wrapNetworkError(err)
@@ -148,7 +146,7 @@ async function requestAnthropicProbe(config: ResolvedLlmModelRequestConfig): Pro
         temperature: 0,
         messages: [{ role: 'user', content: TEST_PROMPT }]
       }),
-      signal: AbortSignal.timeout(TEST_TIMEOUT_MS)
+      signal: config.signal ?? AbortSignal.timeout(TEST_TIMEOUT_MS)
     })
   } catch (err) {
     throw wrapNetworkError(err)
@@ -198,7 +196,10 @@ async function runProbeWithRetries(requestProbe: () => Promise<string>): Promise
   )
 }
 
-async function listOpenAiCompatibleModels(config: ResolvedLlmRequestConfig): Promise<LlmModelDefinition[]> {
+async function listOpenAiCompatibleModels(
+  config: ResolvedLlmRequestConfig,
+  signal?: AbortSignal
+): Promise<LlmModelDefinition[]> {
   if (!config.openAiModelsUrl) throw new Error('OpenAI 模型列表端点未配置')
 
   let response: Response
@@ -209,7 +210,7 @@ async function listOpenAiCompatibleModels(config: ResolvedLlmRequestConfig): Pro
         ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
         'Content-Type': 'application/json'
       },
-      signal: AbortSignal.timeout(TEST_TIMEOUT_MS)
+      signal: signal ?? AbortSignal.timeout(TEST_TIMEOUT_MS)
     })
   } catch (err) {
     throw wrapNetworkError(err)
@@ -230,7 +231,10 @@ async function listOpenAiCompatibleModels(config: ResolvedLlmRequestConfig): Pro
   return normalizeModelList(payload.data)
 }
 
-async function listAnthropicModels(config: ResolvedLlmRequestConfig): Promise<LlmModelDefinition[]> {
+async function listAnthropicModels(
+  config: ResolvedLlmRequestConfig,
+  signal?: AbortSignal
+): Promise<LlmModelDefinition[]> {
   if (!config.anthropicModelsUrl) throw new Error('Anthropic 模型列表端点未配置')
   if (!config.apiKey.trim()) {
     throw new Error(`请先在设置 → 模型中为「${config.providerName}」填写 API Key`)
@@ -245,7 +249,7 @@ async function listAnthropicModels(config: ResolvedLlmRequestConfig): Promise<Ll
         'anthropic-version': '2023-06-01',
         'Content-Type': 'application/json'
       },
-      signal: AbortSignal.timeout(TEST_TIMEOUT_MS)
+      signal: signal ?? AbortSignal.timeout(TEST_TIMEOUT_MS)
     })
   } catch (err) {
     throw wrapNetworkError(err)

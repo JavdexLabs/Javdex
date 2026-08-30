@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
-import { Inbox, Pencil, SearchCheck, SearchX } from 'lucide-react'
+import { Bot, Inbox, Pencil, SearchCheck, SearchX } from 'lucide-react'
 import { navigateBackFromActressDetail } from '../listView/listNavigation'
 import { invalidateActressLibraryQueries } from '../query/invalidateLibraryQueries'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
@@ -40,6 +40,7 @@ import type { ActressEditInput } from '@shared/actressTypes'
 import type { ActressScrapeField, ActressScrapeUpdateMode } from '@shared/actressScrapeTypes'
 import { resolveActressDetailDisplayBackgroundPath } from '@shared/detailDisplayBackground'
 import { ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS } from '@shared/actressScrapeTypes'
+import { useAgentMetadataCollector } from '../components/agentMetadata/AgentMetadataCollectorContext'
 
 export default function ActressDetailPage(): JSX.Element {
   const { id, actressId: actressIdParam } = useParams()
@@ -114,6 +115,7 @@ export default function ActressDetailPage(): JSX.Element {
     },
     [actressId]
   )
+  const agentMetadata = useAgentMetadataCollector()
 
   useEffect(() => {
     void load()
@@ -315,6 +317,15 @@ export default function ActressDetailPage(): JSX.Element {
           icon: <Pencil {...UI_ICON} />,
           label: '编辑',
           onClick: () => setShowEdit(true)
+        },
+        {
+          key: 'agent-scrape',
+          icon: <Bot {...UI_ICON} />,
+          label: 'Agent 刮削',
+          onClick: () => agentMetadata.open(
+            { kind: 'actress', id: actressId, label: actress.main_name },
+            () => { void load({ silent: true }) }
+          )
         },
         {
           key: 'scrape',

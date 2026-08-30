@@ -101,21 +101,6 @@ function recovery(kind: 'message' | 'tool-result', value: unknown): RuntimeRecov
   return { codecVersion: RECOVERY_CODEC_VERSION, payload, contentHash: sha256(payload) }
 }
 
-function textFromContent(content: unknown): string {
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return ''
-  return content
-    .map((item) => {
-      if (!item || typeof item !== 'object') return ''
-      const record = item as Record<string, unknown>
-      if (record.type === 'text' || record.type === 'thinking') return typeof record.text === 'string' ? record.text : ''
-      if (record.type === 'toolCall') return `[tool:${String(record.name ?? '')}]`
-      return ''
-    })
-    .filter(Boolean)
-    .join('\n')
-}
-
 function messageAudit(message: unknown): MessageAuditView {
   const record = message && typeof message === 'object' ? message as Record<string, unknown> : {}
   const rawRole = typeof record.role === 'string' ? record.role : 'other'
@@ -655,7 +640,7 @@ class PiRuntimeSession implements RuntimeSessionPort {
               callId: event.toolCallId,
               toolName: event.toolName,
               ok: !event.isError,
-              summary: truncateUnicode(textFromContent((event.result as { content?: unknown })?.content), 240)
+              summary: event.isError ? 'Pi 原生工具执行失败' : 'Pi 原生工具执行完成'
             },
             recovery: frame
           })

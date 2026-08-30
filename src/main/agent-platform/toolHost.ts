@@ -74,6 +74,24 @@ function digest(value: unknown): string {
   return createHash('sha256').update(canonical(value)).digest('hex')
 }
 
+function resultAudit(result: HostedToolResult): Record<string, unknown> {
+  return {
+    ok: result.ok,
+    summaryHash: digest(result.summary),
+    summaryChars: [...result.summary].length,
+    terminate: result.terminate === true
+  }
+}
+
+function errorAudit(error: unknown): Record<string, unknown> {
+  const message = error instanceof Error ? error.message : String(error)
+  return {
+    errorName: error instanceof Error ? error.name : 'Error',
+    messageHash: digest(message),
+    messageChars: [...message].length
+  }
+}
+
 function schemaHash(declaration: ToolDeclaration): string {
   return digest({
     name: declaration.name,
@@ -290,7 +308,7 @@ export class ToolHost {
         })
         if (controller.signal.aborted) throw abortError(controller.signal)
         this.store.completeToolCall(callId, result.ok ? 'completed' : 'failed', {
-          ...result,
+          ...resultAudit(result),
           args: declaration.redact(args)
         })
         return result
@@ -299,7 +317,7 @@ export class ToolHost {
       const status = controller.signal.aborted
         ? declaration.effect === 'read' ? 'interrupted' : 'uncertain'
         : 'failed'
-      this.store.completeToolCall(callId, status, { message: (error as Error).message })
+      this.store.completeToolCall(callId, status, errorAudit(error))
       throw error
     } finally {
       clearTimeout(timeout)

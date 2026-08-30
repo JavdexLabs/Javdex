@@ -167,6 +167,70 @@ describe('AgentExecution', () => {
     }
   })
 
+  it('authorizes and records Pi native tools without persisting their output', async () => {
+    const { db, store } = storeHarness()
+    const runtime = new FakeRuntime()
+    const execution = new AgentExecution(store, async () => runtime)
+    const configuration = resolved()
+    configuration.profile.capabilityGrants = ['plugin.workspace.read', 'plugin.write']
+    configuration.resources = {
+      nativeTools: ['read', 'write'],
+      skillNames: []
+    }
+    setAgentPayloadCipherForTests({
+      encrypt: (value) => Buffer.from([...value].reverse().join(''), 'utf8'),
+      decrypt: (value) => [...value.toString('utf8')].reverse().join('')
+    })
+    try {
+      await execution.openRun({
+        runId: 'run-native-tools', useCase: 'test', resolved: configuration, productState: {}
+      })
+      await runtime.observer!.commit({
+        type: 'tool.started',
+        call: { callId: 'native-read', toolName: 'read', argsDigest: 'read-digest' }
+      })
+      const payload = JSON.stringify({ kind: 'tool-result', value: 'private file content' })
+      await runtime.observer!.commit({
+        type: 'tool.completed',
+        result: { callId: 'native-read', toolName: 'read', ok: true, summary: 'private file content' },
+        recovery: {
+          codecVersion: 1,
+          payload,
+          contentHash: createHash('sha256').update(payload).digest('hex')
+        }
+      })
+
+      const row = db.prepare(
+        'SELECT effect, status, result_json FROM agent_tool_ledger WHERE call_id = ?'
+      ).get('native-read') as { effect: string; status: string; result_json: string }
+      assert.equal(row.effect, 'read')
+      assert.equal(row.status, 'completed')
+      assert.doesNotMatch(row.result_json, /private file content/)
+      assert.match(row.result_json, /summaryHash/)
+    } finally {
+      await execution.dispose()
+      db.close()
+    }
+  })
+
+  it('fails closed when a Pi native tool lacks a frozen capability grant', async () => {
+    const { db, store } = storeHarness()
+    const runtime = new FakeRuntime()
+    const execution = new AgentExecution(store, async () => runtime)
+    const configuration = resolved()
+    configuration.resources = { nativeTools: ['write'], skillNames: [] }
+    try {
+      await assert.rejects(() => execution.openRun({
+        runId: 'run-native-denied', useCase: 'test', resolved: configuration, productState: {}
+      }), /未授权 Pi 原生工具能力/)
+      assert.equal(runtime.openCount, 0)
+      assert.equal(store.getRun('run-native-denied'), null)
+    } finally {
+      await execution.dispose()
+      db.close()
+    }
+  })
+
   it('restores a normal checkpoint without reading ExecutionHistory', async () => {
     const { db, store } = storeHarness()
     const firstRuntime = new FakeRuntime()

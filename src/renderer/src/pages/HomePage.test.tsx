@@ -123,10 +123,7 @@ describe('HomePage', () => {
     await act(async () => {
       renderer = TestRenderer.create(
         <QueryClientProvider client={queryClient!}>
-          <MemoryRouter
-            initialEntries={['/']}
-            future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-          >
+          <MemoryRouter initialEntries={['/']}>
             <LocationProbe />
             <HomePage />
           </MemoryRouter>
@@ -170,10 +167,7 @@ describe('HomePage', () => {
       await act(async () => {
         renderer = TestRenderer.create(
           <QueryClientProvider client={queryClient!}>
-            <MemoryRouter
-              initialEntries={['/']}
-              future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-            >
+            <MemoryRouter initialEntries={['/']}>
               <HomePage />
             </MemoryRouter>
           </QueryClientProvider>

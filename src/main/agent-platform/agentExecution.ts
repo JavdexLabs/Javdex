@@ -1,13 +1,52 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import type { AgentToolEffect } from '@shared/aiConfigurationTypes'
 import { createPiRuntimePort } from '../agent-runtime/createPiRuntimePort'
 import { AgentRunStore, agentRunStore, type AgentRunRecord } from './agentRunStore'
 import type {
   AgentRuntimePort,
+  PiNativeToolName,
   ResolvedRunConfiguration,
   RuntimeDurableObservation,
   RuntimeObservation,
   RuntimeSessionPort
 } from './types'
+
+interface NativeToolPolicy {
+  capability: string
+  effect: AgentToolEffect
+}
+
+const NATIVE_TOOL_POLICIES: Record<PiNativeToolName, NativeToolPolicy> = {
+  read: { capability: 'plugin.workspace.read', effect: 'read' },
+  grep: { capability: 'plugin.workspace.read', effect: 'read' },
+  find: { capability: 'plugin.workspace.read', effect: 'read' },
+  ls: { capability: 'plugin.workspace.read', effect: 'read' },
+  write: { capability: 'plugin.write', effect: 'write' },
+  edit: { capability: 'plugin.write', effect: 'write' },
+  bash: { capability: 'plugin.shell', effect: 'write' }
+}
+
+function validateNativeToolPolicy(resolved: ResolvedRunConfiguration): Set<PiNativeToolName> {
+  const nativeTools = new Set(resolved.resources?.nativeTools ?? [])
+  for (const toolName of nativeTools) {
+    const policy = NATIVE_TOOL_POLICIES[toolName]
+    if (!resolved.profile.capabilityGrants.includes(policy.capability)) {
+      throw new Error(`Profile 未授权 Pi 原生工具能力：${policy.capability}`)
+    }
+    if (resolved.profile.approvalRequiredEffects.includes(policy.effect)) {
+      throw new Error(`Pi 原生工具 ${toolName} 缺少可持久审批通道，拒绝启用`)
+    }
+  }
+  return nativeTools
+}
+
+function nativeToolResultAudit(result: { ok: boolean; summary: string }): Record<string, unknown> {
+  return {
+    ok: result.ok,
+    summaryHash: createHash('sha256').update(result.summary).digest('hex'),
+    summaryChars: [...result.summary].length
+  }
+}
 
 interface ActiveAgentRun {
   runId: string
@@ -58,6 +97,7 @@ export class AgentExecution {
   async openRun(input: OpenAgentRunInput): Promise<{ runId: string; source: 'created' | 'restored' | 'rebuilt' }> {
     const runId = input.resume?.id ?? input.runId ?? randomUUID()
     if (this.active.has(runId)) return { runId, source: 'restored' }
+    const nativeTools = validateNativeToolPolicy(input.resolved)
     if (!input.resume) {
       this.store.createRun({
         runId,
@@ -87,7 +127,26 @@ export class AgentExecution {
         input.notify?.(event)
       },
       commit: async (event: RuntimeDurableObservation): Promise<void> => {
+        if (event.type === 'tool.started' && nativeTools.has(event.call.toolName as PiNativeToolName)) {
+          const toolName = event.call.toolName as PiNativeToolName
+          const created = this.store.beginToolCall({
+            callId: event.call.callId,
+            runId,
+            operationId: this.store.getRun(runId)?.activeOperationId,
+            toolName,
+            argsDigest: event.call.argsDigest,
+            effect: NATIVE_TOOL_POLICIES[toolName].effect
+          })
+          if (!created) throw new Error(`Pi 原生工具调用 ${event.call.callId} 已存在`)
+        }
         this.store.commitRuntimeObservation(runId, event)
+        if (event.type === 'tool.completed' && nativeTools.has(event.result.toolName as PiNativeToolName)) {
+          this.store.completeToolCall(
+            event.result.callId,
+            event.result.ok ? 'completed' : 'failed',
+            nativeToolResultAudit(event.result)
+          )
+        }
         const active = this.active.get(runId)
         if (event.type === 'agent.settled') {
           const settledAt = Date.now()

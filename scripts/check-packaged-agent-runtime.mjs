@@ -6,6 +6,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { extractFile, listPackage } from '@electron/asar'
 import {
+  isPackagedExecutableHostCompatible,
   MAC_ELECTRON_LANGUAGES,
   PORTABLE_ELECTRON_LANGUAGES,
   macElectronLocaleNames
@@ -110,6 +111,10 @@ function packagedElectronForCurrentHost(archive) {
 function assertPackagedNodeModulesLoad(archive) {
   const executable = packagedElectronForCurrentHost(archive)
   if (!executable) return
+  if (!isPackagedExecutableHostCompatible(executable)) {
+    console.log(`Skipped cross-architecture runtime smoke: ${executable}`)
+    return
+  }
 
   const result = spawnSync(executable, [smokeScript, archive], {
     encoding: 'utf8',

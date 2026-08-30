@@ -67,6 +67,7 @@ describe('AgentConfiguration', () => {
     assert.deepEqual(profile.toolPackRefs, ['toolpack:plugin-developer:v1'])
     assert.deepEqual(profile.capabilityGrants, [
       'plugin.test',
+      'plugin.workspace.read',
       'plugin.write',
       'browser.read',
       'browser.interact'

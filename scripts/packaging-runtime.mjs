@@ -34,6 +34,31 @@ export function resolveNodeGypPythonEnvironment(input = {}) {
   return selected ? { PYTHON: selected, npm_config_python: selected } : {}
 }
 
+/**
+ * A release job may produce both Intel and Apple Silicon apps on one macOS runner.
+ * Static archive checks apply to both, but only a host-compatible executable can run
+ * the ELECTRON_RUN_AS_NODE smoke without Rosetta or cross-architecture emulation.
+ */
+export function isPackagedExecutableHostCompatible(executable, input = {}) {
+  const platformName = input.platformName ?? process.platform
+  if (platformName !== 'darwin') return true
+
+  const hostArch = input.hostArch ?? process.arch
+  const expected = hostArch === 'x64' ? 'x86_64' : hostArch === 'arm64' ? 'arm64' : null
+  if (!expected) throw new Error(`Unsupported macOS host architecture: ${hostArch}`)
+
+  const inspect = input.inspect ?? ((target) => spawnSync('lipo', ['-archs', target], {
+    encoding: 'utf8',
+    timeout: 5_000
+  }))
+  const result = inspect(executable)
+  if (result.error || result.status !== 0) {
+    const detail = [result.error?.message, result.stdout, result.stderr].filter(Boolean).join('\n')
+    throw new Error(`Cannot inspect packaged executable architecture: ${detail}`)
+  }
+  return String(result.stdout).trim().split(/\s+/).includes(expected)
+}
+
 export function macElectronLocaleNames(languages = MAC_ELECTRON_LANGUAGES) {
   return new Set(
     languages.flatMap((language) => [

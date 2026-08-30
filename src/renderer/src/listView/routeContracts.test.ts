@@ -241,7 +241,9 @@ describe('actress avatar filter query contract', () => {
 
   it('returns to the actress list without losing its query state', () => {
     const destinations: unknown[] = []
-    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
     const location = {
       pathname: '/actresses/12',
       search: '?q=sara&status=failed',
@@ -464,7 +466,9 @@ describe('primary navigation memory', () => {
 describe('navigation helpers', () => {
   it('removes playlist-detail resource filters when returning to the playlist list', () => {
     const destinations: unknown[] = []
-    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
     navigateToPlaylistList(navigate, {
       pathname: '/playlists/4/8',
       search: '?q=待看&resources=web,none&sort=release_date',
@@ -478,7 +482,9 @@ describe('navigation helpers', () => {
 
   it('keeps home, search and media-library detail stacks scoped and reversible', () => {
     const destinations: unknown[] = []
-    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
 
     const home = {
       pathname: '/',
@@ -521,7 +527,9 @@ describe('navigation helpers', () => {
 
   it('closes nested actress details back to their parent video context', () => {
     const destinations: unknown[] = []
-    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
     const paths = [
       ['/detail/8/actress/7', '/detail/8'],
       ['/actresses/3/8/actress/7', '/actresses/3/8'],
@@ -549,7 +557,9 @@ describe('navigation helpers', () => {
 
   it('keeps stable series identity and release direction through its detail stack', () => {
     const destinations: unknown[] = []
-    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
     const list = {
       pathname: '/facet/series',
       search: '?q=collection&sort=updated_at&dir=asc',
@@ -581,7 +591,9 @@ describe('navigation helpers', () => {
 
   it('keeps director identity and query state through its stable detail stack', () => {
     const destinations: unknown[] = []
-    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
     const list = {
       pathname: '/facet/director',
       search: '?q=lee',
@@ -623,7 +635,9 @@ describe('navigation helpers', () => {
 
   it('keeps classification query only inside the same classification stack', () => {
     const destinations: unknown[] = []
-    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
     const search = '?q=kept&sort=updated_at&dir=asc'
 
     navigateToOrganizationDetail(
@@ -690,7 +704,9 @@ describe('navigation helpers', () => {
 
   it('keeps video and actress navigation inside the pending workbench stack', () => {
     const destinations: unknown[] = []
-    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
     const pending = {
       pathname: '/pending',
       search: '?tab=scrape&id=7&videoId=42',
@@ -716,7 +732,9 @@ describe('navigation helpers', () => {
 
   it('opens actress detail from the pending inbox and returns to it', () => {
     const destinations: unknown[] = []
-    const navigate = ((to: unknown) => destinations.push(to)) as NavigateFunction
+    const navigate = ((to: unknown) => {
+      destinations.push(to)
+    }) as NavigateFunction
     const pending = {
       pathname: '/pending',
       search: '?type=actress&item=actress%3Aname',

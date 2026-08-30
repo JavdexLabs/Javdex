@@ -402,7 +402,12 @@ export class AgentRunStore {
     const db = this.database()
     const at = now()
     db.transaction(() => {
-      this.appendProductEvent(runId, undefined, `runtime.${event.type}`, event)
+      const auditEvent = event.type === 'message.completed'
+        ? { type: event.type, audit: event.audit }
+        : event.type === 'tool.completed'
+          ? { type: event.type, result: event.result }
+          : event
+      this.appendProductEvent(runId, undefined, `runtime.${event.type}`, auditEvent)
       if (event.type === 'message.completed' || event.type === 'tool.completed') {
         const recovery = event.recovery
         const plaintext = json(recovery)

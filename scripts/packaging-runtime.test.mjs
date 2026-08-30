@@ -7,6 +7,7 @@ import buildConfig from '../electron-builder.config.mjs'
 import {
   MAC_ELECTRON_LANGUAGES,
   expectedBetterSqlitePrebuilds,
+  isPackagedExecutableHostCompatible,
   pruneBetterSqlitePrebuilds,
   pruneBetterSqliteBuildFiles,
   pruneElectronFrameworkLocales,
@@ -111,6 +112,28 @@ test('mac packaging selects a node-gyp compatible Python unless the caller chose
   }), {})
 })
 
+test('packaged runtime smoke runs only for a host-compatible macOS executable', () => {
+  const inspect = () => ({ status: 0, stdout: 'x86_64 arm64\n' })
+  assert.equal(isPackagedExecutableHostCompatible('/app', {
+    platformName: 'darwin', hostArch: 'arm64', inspect
+  }), true)
+  assert.equal(isPackagedExecutableHostCompatible('/app', {
+    platformName: 'darwin', hostArch: 'x64', inspect
+  }), true)
+  assert.equal(isPackagedExecutableHostCompatible('/app', {
+    platformName: 'darwin', hostArch: 'arm64',
+    inspect: () => ({ status: 0, stdout: 'x86_64\n' })
+  }), false)
+  assert.equal(isPackagedExecutableHostCompatible('/app', {
+    platformName: 'linux', hostArch: 'arm64',
+    inspect: () => { throw new Error('must not inspect non-macOS executables') }
+  }), true)
+  assert.throws(() => isPackagedExecutableHostCompatible('/app', {
+    platformName: 'darwin', hostArch: 'arm64',
+    inspect: () => ({ status: 1, stdout: '', stderr: 'bad binary' })
+  }), /bad binary/)
+})
+
 test('packaging retains the complete Cheerio runtime dependency chain', () => {
   const files = buildConfig().files.map(String)
   const requiredRuntimeDependencies = [
@@ -130,4 +153,10 @@ test('packaging retains the complete Cheerio runtime dependency chain', () => {
       `${dependency} must remain available to packaged worker-thread module resolution`
     )
   }
+})
+
+test('mac packaging explicitly enables ad-hoc signing before invoking its custom signer', () => {
+  const mac = buildConfig().mac
+  assert.equal(mac.identity, '-')
+  assert.equal(typeof mac.sign, 'function')
 })

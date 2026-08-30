@@ -166,6 +166,43 @@ describe('ToolHost', () => {
     }
   })
 
+  it('stores only bounded hashes for tool output and errors', async () => {
+    const { db, store, host } = harness()
+    try {
+      const tools = host.registerRun({
+        runId: 'run', profile: profile(), status: () => store.getRun('run')!.status,
+        operationId: () => undefined,
+        handlers: new Map([['test_tool', async ({ args }) => {
+          if (args.fail) throw new Error('secret failure payload')
+          return {
+            ok: true,
+            content: 'secret page snapshot',
+            summary: 'secret result summary',
+            detail: 'secret detail',
+            recovery: { secret: 'recovery payload' }
+          }
+        }]])
+      })
+
+      await tools[0]!.invoke({
+        runId: 'run', callId: 'safe-result', args: { secret: 'value' },
+        signal: new AbortController().signal, progress: () => undefined
+      })
+      await assert.rejects(() => tools[0]!.invoke({
+        runId: 'run', callId: 'safe-error', args: { fail: true },
+        signal: new AbortController().signal, progress: () => undefined
+      }), /secret failure payload/)
+
+      const rows = db.prepare(
+        "SELECT call_id, result_json FROM agent_tool_ledger WHERE call_id IN ('safe-result', 'safe-error') ORDER BY call_id"
+      ).all() as Array<{ call_id: string; result_json: string }>
+      const stored = rows.map((row) => row.result_json).join('\n')
+      assert.doesNotMatch(stored, /secret page snapshot|secret result summary|secret detail|recovery payload|secret failure payload/)
+      assert.match(stored, /summaryHash/)
+      assert.match(stored, /messageHash/)
+    } finally { db.close() }
+  })
+
   it('approves only the selected request when multiple approvals are pending', async () => {
     setAgentPayloadCipherForTests({
       encrypt: (value) => Buffer.from(value, 'utf8'),

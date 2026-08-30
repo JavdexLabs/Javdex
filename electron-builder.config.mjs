@@ -82,6 +82,7 @@ const base = {
   },
   mac: {
     icon: 'build/icon.icns',
+    identity: '-',
     electronLanguages: MAC_ELECTRON_LANGUAGES,
     category: 'public.app-category.entertainment',
     artifactName: '${productName}-${version}-${arch}.${ext}',

@@ -138,6 +138,14 @@ describe('AgentRunStore', () => {
       })
       const ciphertext = (db.prepare('SELECT recovery_ciphertext AS value FROM agent_execution_history').get() as { value: Buffer }).value
       assert.doesNotMatch(ciphertext.toString('utf8'), /private/)
+      const journal = db.prepare(
+        "SELECT payload_json AS value FROM agent_product_journal WHERE event_type = 'runtime.message.completed'"
+      ).get() as { value: string }
+      assert.doesNotMatch(journal.value, /recovery|payload|"content"/)
+      assert.deepEqual(JSON.parse(journal.value), {
+        type: 'message.completed',
+        audit: { role: 'user', textPreview: 'private', contentHash: 'audit-hash' }
+      })
       assert.equal(store.readExecutionHistory('run-2')[0]?.recovery.payload, payload)
       db.prepare("UPDATE agent_execution_history SET content_hash = 'damaged'").run()
       assert.throws(() => store.readExecutionHistory('run-2'), /完整性校验失败/)

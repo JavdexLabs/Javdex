@@ -26,7 +26,7 @@ import type {
   ScrapeBrowserListExtractionPlan
 } from '../../scrapers/scrapeBrowserTypes'
 
-type ReadBrowserAction = Exclude<AgentBrowserCommand['action'], 'fill' | 'press'>
+type ExecutableBrowserAction = AgentBrowserCommand['action']
 
 export interface BrowserEvidenceRevision {
   documentRevision: string
@@ -308,7 +308,7 @@ export class AgentMetadataBrowserAdapter {
     const observation = await this.runWithSignal(
       session,
       input.signal,
-      () => session.lease.agentAction(input.command)
+      () => session.lease.agentAction(input.command, this.navigationPolicy(session))
     )
     if (observation.url) await this.acceptObservedUrl(session, observation.url)
     if (observation.title) session.title = observation.title
@@ -433,8 +433,11 @@ export class AgentMetadataBrowserAdapter {
         recovery: { requestId: handoff.requestId, reason: handoff.reason }
       }
     }
-    const allowed = ['open', 'snapshot', 'find', 'html', 'evaluate', 'click', 'scroll', 'wait', 'status']
-    if (!allowed.includes(action)) return browserError('BROWSER_ACTION_INVALID', 'browser.action 无效或不允许。')
+    const allowed = new Set<string>([
+      'open', 'snapshot', 'find', 'html', 'evaluate', 'click', 'fill', 'press',
+      'scroll', 'wait', 'status'
+    ])
+    if (!allowed.has(action)) return browserError('BROWSER_ACTION_INVALID', 'browser.action 无效或不允许。')
 
     const args = { ...input.args }
     delete args.action
@@ -457,13 +460,13 @@ export class AgentMetadataBrowserAdapter {
       }
     }
 
-    const commandResult = this.command(action as ReadBrowserAction, args)
+    const commandResult = this.command(action as ExecutableBrowserAction, args)
     if ('error' in commandResult) return commandResult.error
     try {
       const result = await this.evidence.execute({
         sessionId: input.runId,
         workspaceDirectory: session.workspaceDirectory,
-        action: action as ReadBrowserAction,
+        action: action as ExecutableBrowserAction,
         args,
         run: async () => {
           const observation = await this.runWithSignal(
@@ -471,7 +474,10 @@ export class AgentMetadataBrowserAdapter {
             input.signal,
             () => scrapeBrowser.runWithLease(
               session.lease,
-              () => session.lease.agentAction(commandResult.command)
+              () => session.lease.agentAction(
+                commandResult.command,
+                this.navigationPolicy(session)
+              )
             )
           )
           session.lastObservation = {
@@ -603,6 +609,26 @@ export class AgentMetadataBrowserAdapter {
     session.finalUrl = rawUrl
   }
 
+  private navigationPolicy(session: ActiveBrowserSession): {
+    allowMainFrameNavigation(url: string): boolean
+  } {
+    return {
+      allowMainFrameNavigation: (rawUrl) => {
+        try {
+          const url = new URL(rawUrl)
+          return (
+            ['http:', 'https:'].includes(url.protocol) &&
+            !url.username &&
+            !url.password &&
+            normalizedHost(url.hostname) === session.allowedHost
+          )
+        } catch {
+          return false
+        }
+      }
+    }
+  }
+
   private async runWithSignal<T>(
     session: ActiveBrowserSession,
     signal: AbortSignal | undefined,
@@ -619,7 +645,7 @@ export class AgentMetadataBrowserAdapter {
   }
 
   private command(
-    action: ReadBrowserAction,
+    action: ExecutableBrowserAction,
     args: Record<string, unknown>
   ): { command: AgentBrowserCommand } | { error: HostedToolResult } {
     const target = typeof args.target === 'string' ? args.target.trim() : ''
@@ -660,6 +686,26 @@ export class AgentMetadataBrowserAdapter {
         return target
           ? { command: { action, target } }
           : { error: browserError('BROWSER_TARGET_REQUIRED', 'browser action=click 时 target 必填。') }
+      case 'fill':
+        return target && typeof args.text === 'string'
+          ? { command: {
+              action,
+              target,
+              text: args.text,
+              ...(typeof args.submit === 'boolean' ? { submit: args.submit } : {})
+            } }
+          : { error: browserError(
+              target ? 'BROWSER_TEXT_REQUIRED' : 'BROWSER_TARGET_REQUIRED',
+              target
+                ? 'browser action=fill 时 text 必填。'
+                : 'browser action=fill 时 target 必填。'
+            ) }
+      case 'press':
+        return { command: {
+          action,
+          key: typeof args.key === 'string' && args.key.trim() ? args.key : 'Enter',
+          ...(target ? { target } : {})
+        } }
       case 'scroll': {
         const direction = args.direction
         if (direction !== 'up' && direction !== 'down' && direction !== 'start') {

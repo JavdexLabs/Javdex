@@ -231,7 +231,10 @@ class ScriptedVirtualBrowser {
     onHandoff: (handoff: AgentMetadataBrowserHandoff) => void
   }): Promise<HostedToolResult> {
     const action = String(input.args.action ?? '')
-    if (action === 'handoff') {
+    if (action === 'open' && this.challengeOnNextOpen) {
+      this.challengeOnNextOpen = false
+      const url = String(input.args.url ?? '')
+      if (url) this.currentUrl = url
       const handoff: AgentMetadataBrowserHandoff = {
         requestId: 'scripted-human-verification',
         reason: 'human_verification',
@@ -247,6 +250,29 @@ class ScriptedVirtualBrowser {
         terminate: true,
         recovery: { requestId: handoff.requestId, reason: handoff.reason }
       }
+    }
+    if (action === 'handoff') {
+      const reason = String(input.args.reason ?? 'required_user_action') as AgentMetadataBrowserHandoff['reason']
+      const handoff: AgentMetadataBrowserHandoff = {
+        requestId: 'scripted-human-verification',
+        reason,
+        prompt: '请完成人机验证',
+        url: this.currentUrl,
+        title: 'Just a moment...'
+      }
+      input.onHandoff(handoff)
+      return {
+        ok: true,
+        content: JSON.stringify({ code: 'USER_INPUT_REQUIRED', ...handoff }),
+        summary: '等待用户完成人机验证',
+        terminate: true,
+        recovery: { requestId: handoff.requestId, reason: handoff.reason }
+      }
+    }
+    if (action === 'open') {
+      const url = String(input.args.url ?? '')
+      if (url) this.currentUrl = url
+      this.actions.push('open')
     }
     const artifactRef = `.javdex/browser/${action}.json`
     return {
@@ -291,6 +317,7 @@ function fixture(runId: string, sourceUrl: string): {
     targetLibraryId: 1,
     destination: { kind: 'create', requestedName: 'Scripted import' }
   })
+  repository.claimNextListBrowserWork(runId)
   return { database, repository, driver: new PlaylistImportAgentRunDriver() }
 }
 
@@ -330,10 +357,10 @@ async function invoke(
   name: string,
   args: Record<string, unknown>,
   callId: string
-): Promise<void> {
+): Promise<HostedToolResult> {
   const handler = driver.createToolHandlers(runId).get(name)
   assert.ok(handler)
-  await handler({
+  return handler({
     runId,
     callId,
     args,
@@ -368,8 +395,47 @@ function virtualStartArgs(
 }
 
 describe('PlaylistImportAgentRunDriver scripted browser integration', () => {
-  it('pauses for human verification when the initial open hits a challenge', async () => {
-    const runId = 'run-driver-initial-challenge'
+  it('dispatches the conversation before the agent opens the frozen source page', async () => {
+    const runId = 'run-driver-agent-owned-initial-open'
+    const sourceUrl = 'https://example.test/list'
+    const { database, repository, driver } = fixture(runId, sourceUrl)
+    const browser = new ScriptedVirtualBrowser(sourceUrl, [{
+      positions: [],
+      scrollTop: 0,
+      scrollHeight: 200,
+      clientHeight: 200,
+      atEnd: true
+    }])
+    installScriptedDependencies(driver, repository, browser)
+    let prompt = ''
+    const restoreDispatch = replaceMethod(
+      agentExecution,
+      'dispatch',
+      (async (input) => {
+        prompt = input.text
+        return { operationId: 'agent-owned-initial-open', accepted: true, duplicate: false }
+      }) as typeof agentExecution.dispatch
+    )
+    try {
+      await driver.start(runId, {
+        idempotencyKey: 'agent-owned-initial-open',
+        sourceUrl,
+        targetLibraryId: 1,
+        destination: { kind: 'create' }
+      })
+
+      assert.deepEqual(browser.actions, [])
+      assert.match(prompt, /browser open/u)
+      assert.match(prompt, /https:\/\/example\.test\/list/u)
+      assert.doesNotMatch(prompt, /宿主已打开/u)
+    } finally {
+      restoreDispatch()
+      database.close()
+    }
+  })
+
+  it('hands an initial challenge to the user through the agent browser tool', async () => {
+    const runId = 'run-driver-agent-owned-initial-challenge'
     const sourceUrl = 'https://example.test/list'
     const { database, repository, driver } = fixture(runId, sourceUrl)
     const browser = new ScriptedVirtualBrowser(sourceUrl, [{
@@ -381,20 +447,201 @@ describe('PlaylistImportAgentRunDriver scripted browser integration', () => {
     }])
     browser.simulateChallengeOnOpen()
     installScriptedDependencies(driver, repository, browser)
+    const restoreDispatch = replaceMethod(
+      agentExecution,
+      'dispatch',
+      (async () => ({
+        operationId: 'agent-owned-initial-challenge',
+        accepted: true,
+        duplicate: false
+      })) as typeof agentExecution.dispatch
+    )
     try {
       await driver.start(runId, {
-        idempotencyKey: 'initial-challenge',
+        idempotencyKey: 'agent-owned-initial-challenge',
         sourceUrl,
         targetLibraryId: 1,
         destination: { kind: 'create' }
       })
+      assert.deepEqual(browser.actions, [])
 
+      const result = await invoke(
+        driver,
+        runId,
+        'browser',
+        { action: 'open', url: sourceUrl },
+        'agent-open-initial-challenge'
+      )
+
+      assert.equal(result.ok, true)
+      assert.equal(result.terminate, true)
       const waiting = repository.snapshot(runId)!
       assert.equal(waiting.phase, 'waiting_user')
       assert.equal(waiting.attention?.kind, 'browser-handoff')
       assert.equal(
         waiting.attention?.kind === 'browser-handoff' ? waiting.attention.reason : undefined,
         'human_verification'
+      )
+    } finally {
+      restoreDispatch()
+      database.close()
+    }
+  })
+
+  it('requires the domain advance tool to claim a pending page before checkpointing it', async () => {
+    const runId = 'run-driver-frontier-claim'
+    const sourceUrl = 'https://example.test/list?page=1'
+    const nextUrl = 'https://example.test/list?page=2'
+    const { database, repository, driver } = fixture(runId, sourceUrl)
+    repository.checkpointStaticPage({
+      runId,
+      pageKey: 'page-1',
+      pageOrder: 0,
+      pageUrl: sourceUrl,
+      documentRevision: '1:1',
+      viewRevision: '1:1:0',
+      evidenceRef: '.javdex/browser/page-1.json',
+      items: [{ code: 'PAGE-1', detailUrl: 'https://example.test/video/page-1' }],
+      nextPageUrls: [nextUrl],
+      terminal: false
+    })
+    const browser = new ScriptedVirtualBrowser(sourceUrl, [{
+      positions: [0],
+      scrollTop: 0,
+      scrollHeight: 200,
+      clientHeight: 200,
+      atEnd: true
+    }])
+    installScriptedDependencies(driver, repository, browser)
+    try {
+      await invoke(driver, runId, 'browser', { action: 'open', url: nextUrl }, 'open-pending')
+      const evidence = await browser.captureEvidence()
+
+      await assert.rejects(
+        invoke(driver, runId, 'checkpoint_playlist_page', {
+          kind: 'static-page',
+          evidenceRef: evidence.evidenceRef,
+          extraction: {
+            candidateSelector: '.item',
+            detailLinkSelector: 'a',
+            codeSelector: '.code'
+          },
+          advance: { kind: 'terminal', reason: 'known-total-reached' },
+          declaredTotalPages: 2
+        }, 'checkpoint-unclaimed-page'),
+        /PLAYLIST_IMPORT_BROWSER_WORK_INVALID/
+      )
+
+      await invoke(driver, runId, 'advance_playlist_page', {}, 'claim-pending-page')
+      await assert.doesNotReject(
+        invoke(driver, runId, 'checkpoint_playlist_page', {
+          kind: 'static-page',
+          evidenceRef: evidence.evidenceRef,
+          extraction: {
+            candidateSelector: '.item',
+            detailLinkSelector: 'a',
+            codeSelector: '.code'
+          },
+          advance: { kind: 'terminal', reason: 'known-total-reached' },
+          declaredTotalPages: 2
+        }, 'checkpoint-claimed-page')
+      )
+    } finally {
+      database.close()
+    }
+  })
+
+  it('lets the agent choose how to return to frozen work after a handoff', async () => {
+    const runId = 'run-driver-login-return'
+    const sourceUrl = 'https://example.test/users/list_detail?id=frozen'
+    const { database, repository, driver } = fixture(runId, sourceUrl)
+    const browser = new ScriptedVirtualBrowser(sourceUrl, [{
+      positions: [],
+      scrollTop: 0,
+      scrollHeight: 200,
+      clientHeight: 200,
+      atEnd: true
+    }])
+    browser.simulateServerRedirect('https://example.test/')
+    installScriptedDependencies(driver, repository, browser)
+    repository.setBrowserHandoff({
+      runId,
+      requestId: 'login-return',
+      reason: 'login',
+      prompt: '请完成登录'
+    })
+    const restoreHasActiveRun = replaceMethod(
+      agentExecution,
+      'hasActiveRun',
+      (() => true) as typeof agentExecution.hasActiveRun
+    )
+    let followUp = ''
+    const restoreDispatch = replaceMethod(
+      agentExecution,
+      'dispatch',
+      (async (input) => {
+        followUp = input.text
+        return { operationId: 'login-return', accepted: true, duplicate: false }
+      }) as typeof agentExecution.dispatch
+    )
+    try {
+      await driver.resume(runId, 'login-return', 'resume-login-return')
+
+      assert.deepEqual(browser.actions, [])
+      assert.equal(browser.source().displayUrl, 'https://example.test/')
+      assert.match(followUp, /由你根据当前页面事实决定下一步/u)
+      assert.doesNotMatch(followUp, /restore_playlist_work/u)
+      assert.match(followUp, /users\/list_detail\?id=frozen/u)
+
+      const result = await invoke(
+        driver,
+        runId,
+        'browser',
+        { action: 'open', url: sourceUrl },
+        'agent-open-login-return'
+      )
+
+      assert.equal(result.ok, true)
+      assert.deepEqual(browser.actions, ['open'])
+      assert.equal(browser.source().displayUrl, sourceUrl)
+    } finally {
+      restoreDispatch()
+      restoreHasActiveRun()
+      database.close()
+    }
+  })
+
+  it('lets the agent hand a login page to the user immediately', async () => {
+    const runId = 'run-driver-login-handoff'
+    const sourceUrl = 'https://example.test/list'
+    const { database, repository, driver } = fixture(runId, sourceUrl)
+    const browser = new ScriptedVirtualBrowser(sourceUrl, [{
+      positions: [],
+      scrollTop: 0,
+      scrollHeight: 200,
+      clientHeight: 200,
+      atEnd: true
+    }])
+    browser.simulateServerRedirect('https://example.test/login')
+    installScriptedDependencies(driver, repository, browser)
+    try {
+      const result = await invoke(
+        driver,
+        runId,
+        'browser',
+        { action: 'handoff', reason: 'login' },
+        'login-handoff'
+      )
+
+      assert.equal(result.ok, true)
+      assert.equal(result.terminate, true)
+      const attention = repository.snapshot(runId)?.attention
+      assert.equal(attention?.kind, 'browser-handoff')
+      assert.equal(
+        attention?.kind === 'browser-handoff'
+          ? attention.reason
+          : undefined,
+        'login'
       )
     } finally {
       database.close()

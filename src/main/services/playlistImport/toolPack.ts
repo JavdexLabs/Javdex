@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import {
   createAgentBrowserSchema,
   strictObjectSchema,
@@ -8,15 +9,80 @@ import type { ToolHandler, ToolPack } from '../../agent-platform/toolHost'
 
 const shortText = (maxLength: number): Record<string, unknown> => ({ type: 'string', maxLength })
 
-function readOnlyBrowserSchema(): ReturnType<typeof createAgentBrowserSchema> {
-  const schema = createAgentBrowserSchema()
-  const denied = new Set(['open', 'click', 'scroll'])
-  return {
-    ...schema,
-    oneOf: schema.oneOf?.filter((actionSchema) => {
-      const action = actionSchema.properties?.action as { enum?: unknown[] } | undefined
-      return !denied.has(String(action?.enum?.[0] ?? ''))
-    })
+function auditDigest(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 16)
+}
+
+function redactBrowserArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const action = typeof args.action === 'string' ? args.action : 'unknown'
+  const target = typeof args.target === 'string' ? args.target : ''
+  const withTarget = target ? { targetDigest: auditDigest(target) } : {}
+  switch (action) {
+    case 'open': {
+      try {
+        const url = new URL(String(args.url ?? ''))
+        return { action, url: `${url.origin}${url.pathname}` }
+      } catch {
+        return { action, url: '[invalid-url]' }
+      }
+    }
+    case 'find': {
+      const queryKind = typeof args.regex === 'string' ? 'regex' : 'text'
+      const query = queryKind === 'regex' ? String(args.regex) : String(args.text ?? '')
+      return {
+        action,
+        queryKind,
+        queryLength: query.length,
+        ...(query ? { queryDigest: auditDigest(query) } : {})
+      }
+    }
+    case 'evaluate': {
+      const expression = String(args.expression ?? '')
+      return {
+        action,
+        expressionDigest: auditDigest(expression),
+        expressionLength: expression.length
+      }
+    }
+    case 'fill': {
+      const text = String(args.text ?? '')
+      return { action, ...withTarget, textLength: text.length, submit: args.submit === true }
+    }
+    case 'press':
+      return { action, ...withTarget, key: String(args.key ?? 'Enter') }
+    case 'scroll':
+      return {
+        action,
+        ...withTarget,
+        direction: args.direction,
+        ...(args.amount ? { amount: args.amount } : {})
+      }
+    case 'snapshot':
+      return {
+        action,
+        ...withTarget,
+        ...(typeof args.depth === 'number' ? { depth: args.depth } : {}),
+        ...(typeof args.boxes === 'boolean' ? { boxes: args.boxes } : {})
+      }
+    case 'html':
+      return {
+        action,
+        ...withTarget,
+        ...(typeof args.maxLength === 'number' ? { maxLength: args.maxLength } : {})
+      }
+    case 'click':
+    case 'wait':
+      return {
+        action,
+        ...withTarget,
+        ...(typeof args.timeoutMs === 'number' ? { timeoutMs: args.timeoutMs } : {})
+      }
+    case 'read-section':
+      return { action, section: args.section }
+    case 'handoff':
+      return { action, reason: args.reason }
+    default:
+      return { action }
   }
 }
 
@@ -139,15 +205,15 @@ export const PLAYLIST_IMPORTER_TOOL_PACK: ToolPack = {
   tools: [
     {
       name: 'browser',
-      label: '检查当前清单或详情页',
-      description: '只读检查当前页面。status 只用于诊断，不能作为页面检查点证据；导航、点击分页和滚动由清单导入宿主工具执行。',
-      schema: readOnlyBrowserSchema(),
-      capability: 'browser.read',
+      label: '操作当前清单或详情页',
+      description: '检查并操作当前同站点页面。由 Agent 根据页面事实决定导航、交互或 handoff；status 只用于诊断，不能作为页面检查点证据。清单分页和虚拟窗口的完整固化仍使用清单领域工具。',
+      schema: createAgentBrowserSchema({ allowInputActions: true }),
+      capability: 'browser.interact',
       effect: 'network',
       executionMode: 'sequential',
       timeoutMs: 45_000,
       resourceKey: () => 'playlist-import-browser',
-      redact: (args) => ({ action: args.action })
+      redact: redactBrowserArgs
     },
     {
       name: 'checkpoint_playlist_page',

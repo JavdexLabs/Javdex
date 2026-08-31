@@ -55,7 +55,8 @@ interface ActionTestInternals {
   ) => Promise<AgentBrowserObservation>
   runAgentAction: (
     command: AgentBrowserCommand,
-    signal: AbortSignal
+    signal: AbortSignal,
+    navigationPolicy?: { allowMainFrameNavigation(url: string): boolean }
   ) => Promise<AgentBrowserObservation>
   extractList: (
     plan: ScrapeBrowserListExtractionPlan,
@@ -65,6 +66,7 @@ interface ActionTestInternals {
 
 function actionHost(input: {
   click?: (helper: { pageEpoch: number }) => Promise<void>
+  navigationUrl?: string
   evaluate?: (expression: string) => Promise<unknown>
   scrollEvaluate?: () => Promise<unknown>
   count?: number
@@ -77,9 +79,34 @@ function actionHost(input: {
     waitFor: async () => undefined,
     ariaSnapshot: async () => '- document'
   }
+  const mainFrame = {}
+  let routeHandler: ((route: {
+    request(): {
+      isNavigationRequest(): boolean
+      frame(): object
+      url(): string
+    }
+    abort(): Promise<void>
+    continue(): Promise<void>
+  }) => Promise<void>) | undefined
   const target = {
     count: async () => input.count ?? 1,
-    click: async () => input.click?.(helperRecord),
+    click: async () => {
+      if (input.navigationUrl && routeHandler) {
+        let aborted = false
+        await routeHandler({
+          request: () => ({
+            isNavigationRequest: () => true,
+            frame: () => mainFrame,
+            url: () => input.navigationUrl!
+          }),
+          abort: async () => { aborted = true },
+          continue: async () => undefined
+        })
+        if (aborted) throw new Error('net::ERR_BLOCKED_BY_CLIENT')
+      }
+      await input.click?.(helperRecord)
+    },
     fill: async () => undefined,
     press: async () => undefined,
     waitFor: async () => undefined,
@@ -98,6 +125,13 @@ function actionHost(input: {
       evaluate: async (expression: string) => input.evaluate?.(expression),
       waitForLoadState: async () => undefined,
       waitForTimeout: async () => undefined,
+      mainFrame: () => mainFrame,
+      route: async (_pattern: string, handler: typeof routeHandler) => {
+        routeHandler = handler
+      },
+      unroute: async (_pattern: string, handler: typeof routeHandler) => {
+        if (routeHandler === handler) routeHandler = undefined
+      },
       keyboard: { press: async () => undefined }
     }
   } as unknown as { pageEpoch: number }
@@ -366,6 +400,25 @@ describe('ScrapeBrowserHost leases', () => {
     assert.equal(result.actionSucceeded, true)
     assert.equal(result.staleRefs, true)
     assert.notEqual(result.observationMode, 'pending')
+  })
+
+  it('blocks a disallowed main-frame navigation before an agent action sends it', async () => {
+    let clicked = false
+    const { internals } = actionHost({
+      navigationUrl: 'https://outside.test/escape',
+      click: async () => { clicked = true },
+      snapshot: async () => ({ action: 'snapshot', snapshot: '- document' })
+    })
+
+    await assert.rejects(
+      internals.runAgentAction(
+        { action: 'click', target: '#outside' },
+        new AbortController().signal,
+        { allowMainFrameNavigation: (url) => new URL(url).hostname === 'example.test' }
+      ),
+      /BROWSER_HOST_DENIED/
+    )
+    assert.equal(clicked, false)
   })
 
   it('returns bounded scroll metrics and invalidates refs without changing the document revision', async () => {

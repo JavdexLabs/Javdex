@@ -46,8 +46,7 @@ import {
   playlistImportFailureCode,
   playlistImportVirtualAdvanceDecision,
   playlistImportTerminalProof,
-  shouldValidatePlaylistImportAdvanceAtCheckpoint,
-  shouldValidatePlaylistImportBrowserLocation
+  shouldValidatePlaylistImportAdvanceAtCheckpoint
 } from './playlistImportBrowserNavigation'
 import { createPlaylistImporterToolHandlers } from './toolPack'
 
@@ -443,7 +442,10 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
     runId: string,
     expectedKind: PlaylistImportBrowserWork['kind']
   ): PlaylistImportBrowserWork {
-    const work = this.repository().nextBrowserWork(runId)
+    const repository = this.repository()
+    const work = expectedKind === 'list'
+      ? repository.inFlightListBrowserWork(runId)
+      : repository.nextBrowserWork(runId)
     if (!work || (expectedKind && work.kind !== expectedKind)) {
       throw new Error('PLAYLIST_IMPORT_BROWSER_WORK_INVALID')
     }
@@ -607,9 +609,6 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
           const requestedAction = stringArg(args, 'action')!
           const work = this.repository().nextBrowserWork(runId)
           if (!work) throw new Error('PLAYLIST_IMPORT_BROWSER_WORK_MISSING')
-          if (['open', 'click', 'scroll'].includes(requestedAction)) {
-            throw new Error('PLAYLIST_IMPORT_BROWSER_NAVIGATION_DENIED')
-          }
           const result = await this.browser.execute({
             runId,
             args,
@@ -628,12 +627,6 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
               )
             }
           }
-          if (shouldValidatePlaylistImportBrowserLocation(requestedAction, result)) {
-            const observed = this.currentUrl(runId)
-            if (observed !== comparableUrl(work.url)) {
-              throw new Error('PLAYLIST_IMPORT_BROWSER_NAVIGATION_DENIED')
-            }
-          }
           return requestedAction === 'status'
             ? withoutCheckpointEvidenceForStatus(result)
             : result
@@ -642,7 +635,7 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
           this.describeTool(runId, callId, 'checkpoint_playlist_page', args)
           signal.throwIfAborted()
           const repository = this.repository()
-          const currentWork = repository.nextBrowserWork(runId)
+          const currentWork = repository.inFlightListBrowserWork(runId)
           const currentPageUrl = this.currentUrl(runId)
           const pageOrder = currentWork?.kind === 'list' &&
             currentPageUrl === comparableUrl(currentWork.url)
@@ -812,20 +805,22 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
           const repository = this.repository()
           const dynamic = repository.openDynamicPage(runId)
           if (!dynamic) {
-            const work = repository.nextBrowserWork(runId)
-            if (!work || work.kind !== 'list') throw new Error('PLAYLIST_IMPORT_BROWSER_WORK_INVALID')
-            if (this.currentUrl(runId) === comparableUrl(work.url)) {
+            const activeWork = repository.inFlightListBrowserWork(runId)
+            if (activeWork && this.currentUrl(runId) === comparableUrl(activeWork.url)) {
               return this.result(runId, repository.markRecoverableError(
                 runId,
                 'PAGE_CHECKPOINT_REQUIRED',
                 '离开当前清单页前必须先固化页面检查点。'
               ))
             }
-            await this.browser.hostAction({
-              runId,
-              command: { action: 'open', url: work.url },
-              signal
-            })
+            const work = activeWork ?? repository.claimNextListBrowserWork(runId)
+            if (this.currentUrl(runId) !== comparableUrl(work.url)) {
+              await this.browser.hostAction({
+                runId,
+                command: { action: 'open', url: work.url },
+                signal
+              })
+            }
             return this.result(runId, repository.snapshot(runId)!)
           }
           if (this.currentUrl(runId) !== comparableUrl(dynamic.pageUrl)) {
@@ -1285,20 +1280,7 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
   }
 
   async start(runId: string, input: PlaylistImportStartInput): Promise<void> {
-    const work = this.repository().nextBrowserWork(runId)
-    if (!work || work.kind !== 'list') throw new Error('PLAYLIST_IMPORT_BROWSER_WORK_MISSING')
-    const signal = new AbortController().signal
-    try {
-      await this.browser.hostAction({
-        runId,
-        command: { action: 'open', url: work.url },
-        signal
-      })
-    } catch (error) {
-      if (!isScrapeBrowserChallengeError(error)) throw error
-      await this.requestBrowserHandoff(runId, 'human_verification', signal)
-      return
-    }
+    const work = this.repository().claimNextListBrowserWork(runId)
     const dispatched = await agentExecution.dispatch({
       runId,
       kind: 'prompt',
@@ -1307,7 +1289,7 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
         `用户已冻结外部清单：${input.sourceUrl}`,
         playlistNameInstruction(input),
         `当前唯一允许的工作项：${JSON.stringify(workPayload(work))}`,
-        '宿主已打开该 URL。先用只读 browser 完整检查当前清单页；离开前必须提交 selector 页面检查点。'
+        '请先用 browser open 打开上述唯一工作项，再根据页面事实决定导航、交互或 handoff；确认进入目标清单页后，离开前必须提交 selector 页面检查点。'
       ].join('\n')
     })
     if (!dispatched.accepted) throw new Error('PLAYLIST_IMPORT_RUNTIME_REJECTED')
@@ -1357,13 +1339,15 @@ export class PlaylistImportAgentRunDriver implements PlaylistImportRunDriver {
       return snapshot
     }
     try {
+      const work = repository.nextBrowserWork(runId)
       const dispatched = await agentExecution.dispatch({
         runId,
         kind: 'follow-up',
         idempotencyKey,
         text: [
           '用户已经完成浏览器中的必要操作。',
-          '当前前台浏览器会话仍保持在用户操作后的页面；先调用 browser status 或 snapshot 重新确认，再继续当前工作项。'
+          `当前唯一允许的工作项：${JSON.stringify(workPayload(work))}`,
+          '当前前台浏览器会话仍保持在用户操作后的页面；先检查当前位置，由你根据当前页面事实决定下一步。需要再次登录、验证或其他用户操作时立即 handoff；可以自行使用 browser 返回上述工作项。'
         ].join('\n')
       })
       if (!dispatched.accepted) throw new Error('PLAYLIST_IMPORT_RUNTIME_REJECTED')

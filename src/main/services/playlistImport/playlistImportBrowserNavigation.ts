@@ -1,20 +1,9 @@
-import type { HostedToolResult } from '../../agent-platform/types'
 import type {
   AgentBrowserScrollState,
   ScrapeBrowserListExtractionPlan
 } from '../../scrapers/scrapeBrowserTypes'
 
 type TerminalAdvance = Record<string, unknown>
-
-const PLAYLIST_IMPORT_PASSIVE_BROWSER_ACTIONS = new Set([
-  'snapshot',
-  'find',
-  'html',
-  'evaluate',
-  'wait',
-  'status',
-  'read-section'
-])
 
 export function playlistImportTerminalProof(
   advance: TerminalAdvance
@@ -168,14 +157,4 @@ export function assertPlaylistImportVirtualStart(
   errorCode = 'VIRTUAL_LIST_START_UNPROVEN'
 ): void {
   if (!scrollState?.atStart || !scrollState.settled) throw new Error(errorCode)
-}
-
-export function shouldValidatePlaylistImportBrowserLocation(
-  action: string,
-  result: HostedToolResult
-): boolean {
-  return result.ok &&
-    !result.terminate &&
-    action !== 'open' &&
-    !PLAYLIST_IMPORT_PASSIVE_BROWSER_ACTIONS.has(action)
 }

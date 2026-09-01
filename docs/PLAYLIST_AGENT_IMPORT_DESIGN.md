@@ -1,9 +1,9 @@
 # 外部清单 Agent 导入设计与实施计划
 
-- 状态：Implemented / release verification in progress
+- 状态：Implemented / released in 0.6.0 / hardened in 0.6.1
 - 日期：2026-08-30
 - 方案：新建/追加统一入口
-- 数据库版本：V14（0.6.0 未发布功能基于 v0.5.0 的 V13 一次升级）
+- 数据库版本：V14（首次随 0.6.0 从已发布的 V13 升级；0.6.1 不新增迁移）
 
 当前已完成共享 browser scroll/viewRevision、Session 内导入暂存与匹配仓储、清单引用保护、
 跨媒体库清单投影、清单详情资源筛选、生产 Agent 运行驱动、IPC/preload、统一导入弹窗和
@@ -21,7 +21,7 @@ Javdex 新增一个独立的“外部清单导入”Agent 定义和一个深的 
 
 两个入口使用同一份任务类型、状态机、Agent 工具包、当前连接 TEMP 暂存和最终应用事务。UI 不负责循环分页、匹配影片或逐条写入。
 
-V1 同时扩展共享 Agent browser：增加受控纵向 `scroll`、滚动 metrics、独立 `viewRevision` 和滚动后旧 ref 失效。通用 browser 只负责移动一个可验证窗口；虚拟列表的回顶、连续性、终点判断和逐窗口 Session 检查点全部封装在 `PlaylistImportBrowserAdapter`，不让模型自己循环滚动。当前未封存页重试时从该页顶部重新读取，不重放软件退出前的滚动链。
+V1 同时扩展共享 Agent browser：增加受控纵向 `scroll`、滚动 metrics、独立 `viewRevision` 和滚动后旧 ref 失效。通用 browser 是 Agent 的页面控制面，可以打开来源、关闭遮挡、完成同站点导航、输入与滚动，也可以在 handoff 后自行返回冻结工作项；这些动作不认领或推进导入 frontier。清单 selector 提取、虚拟列表的回顶、连续性、终点判断和逐窗口 Session 检查点仍由 `PlaylistImportAgentRunDriver` 的领域工具封装，Agent 不直接提交像素、批次号或滚动 token。当前未封存页重试时从该页顶部重新读取，不重放软件退出前的滚动链。
 
 核心流程固定为：
 
@@ -346,10 +346,12 @@ export interface PlaylistImportSnapshot {
 
 首版可把 `playlist-importer` 的模型角色映射到现有 `library-curator` workload，避免增加一套模型设置；定义、产品状态和工具授权仍保持独立。
 
+启动边界与 Agent 刮削保持一致：宿主只创建浏览器 Session、Agent run 和冻结工作项，然后立即分发首轮对话；首轮 prompt 要求 Agent 用通用 `browser open` 打开冻结来源 URL。来源页的网络导航、重定向识别、登录和人机验证不进入 `start` IPC 的临界路径，也不由清单领域预判。这样配置页在 runtime 接受首轮对话后即可切换到对话，后续页面处置统一由 Agent 根据 browser observation 决定；selector 检查点、frontier 和最终 apply 仍由宿主状态机约束。
+
 建议授权：
 
 ```text
-browser.read
+browser.interact
 playlist-import.stage-page
 playlist-import.stage-identity
 ```
@@ -392,7 +394,7 @@ ready-to-apply → applying → completed
 
 Agent 不获得 `video_create`、`playlist_add_video` 或任意 SQL 工具。生产 ToolPack 提供：
 
-1. `browser`：只读 snapshot/find/html/evaluate/wait/status/read-section/handoff；共享 browser Interface 新增 `scroll`，但本 ToolPack 不允许绕过导入状态机直接调用。
+1. `browser`：提供 snapshot/find/html/evaluate/wait/status/read-section/open/click/fill/press/scroll/handoff。Agent 根据当前页面事实决定同站点导航、页面交互和用户 handoff；浏览器 Adapter 负责站点边界、动作参数和会话预算。
 2. `checkpoint_playlist_page`：提交 selector 合同；宿主完整固化普通页，或初始化一个加载更多/虚拟滚动逻辑页。
 3. `advance_playlist_page`：只允许从已固化状态进入已记录的下一页、点击“加载更多”，或执行一次“滚动、等待、提取、落盘”原子步骤。
 4. `open_playlist_item_detail`：只允许打开一个已暂存且需要详情消歧的 URL。
@@ -472,7 +474,7 @@ type CheckpointPageInput =
     })
 ```
 
-`PlaylistImportBrowserAdapter` 在当前只读文档上执行 selector，不能只相信模型手工抄写的候选数组：
+`PlaylistImportAgentRunDriver` 通过当前 browser lease 在活文档上执行冻结 selector，不能只相信模型手工抄写的候选数组：
 
 - 枚举全部候选容器。
 - 每个容器必须得到一个合法详情 URL。
@@ -486,7 +488,9 @@ type CheckpointPageInput =
 
 这是页面级检查点，不是按字段渐进提交：一次普通清单页 checkpoint 固化当前稳定 DOM 中的全部候选和分页证据；虚拟页从首窗口开始，以宿主原子步骤固化每个渲染窗口的位置/重叠证据和滚动状态，最终再 seal 整个逻辑页；一次详情页 identity checkpoint 固化当前页面全部明确身份事实。不得把番号、标题、发行商、日期拆成多次提交后再回页补齐。
 
-静态页 checkpoint 直接封存当前逻辑页。加载更多页和虚拟页 start 会在当前连接的 TEMP Session 中留下唯一 open dynamic page；每次 `advance_playlist_page` 只读取该 Session 状态并原子写入下一批，加载按钮消失或虚拟列表连续两次稳定到达底部时自动 seal。Agent 不接收可伪造的 page/scroll token，也不能指定 URL、selector、像素或批次号；这些值只来自冻结合同和宿主状态。发现阶段禁用普通 browser open/click/scroll 状态动作，从机制上保证“先固化当前页面或渲染窗口，再离开”。
+静态页 checkpoint 直接封存当前逻辑页。加载更多页和虚拟页 start 会在当前连接的 TEMP Session 中留下唯一 open dynamic page；每次 `advance_playlist_page` 只读取该 Session 状态并原子写入下一批，加载按钮消失或虚拟列表连续两次稳定到达底部时自动 seal。Agent 不接收可伪造的 page/scroll token、像素或批次号；这些值只来自冻结合同和宿主状态。
+
+通用 browser 是 Agent 的页面控制面：Agent 可以根据页面事实关闭遮挡、完成安全的同站点导航、识别登录或验证页并立即 handoff，也可以在用户完成操作后自行返回冻结工作项。宿主不再维护登录页、验证页、首页等站点语义分支，也不提供专用“恢复工作项”工具。不可逆的业务边界仍由领域工具掌握：开始任务时首个清单工作项被认领为 `in-flight`；后续 pending 页面即使已由通用 browser 打开，也必须先由 `advance_playlist_page` 按 frontier 原子认领，才能提交 selector checkpoint。清单候选只能由当前冻结工作项上的有效证据和 selector checkpoint 固化，动态分页只能由 `advance_playlist_page` 原子推进，详情身份和最终写入继续由状态机校验。因此 Agent 可以自由处理页面，但不能凭通用 browser 输出绕过完整性与原子提交规则。
 
 ### 7.2 分页 frontier
 
@@ -1183,7 +1187,7 @@ interface BrowserScrollState {
 
 浏览器必须把导航身份与渲染窗口身份分开：`documentRevision` 仍只随主 frame 导航变化；新增宿主单调 `viewRevision`，每次受控 scroll 后生成新值。ARIA ref 绑定 `viewRevision`，滚动一开始就让上一窗口 ref fail closed，post-action snapshot 返回的新 ref 才可使用。Evidence baseline 也按 `viewRevision` 生成 full/delta/unchanged，不能在同一 document revision 下硬编码 `staleRefs: false`。滚动是否取得业务进展由 metrics 和候选 digest 判断，不能用 revision 代替。
 
-通用 observation 仍会截断链接集合和 HTML，因此不能把 observation 返回的链接数当作大清单完整性证明；V1 依靠 `PlaylistImportBrowserAdapter` 的冻结 selector，在每次受控滚动的同一宿主操作中从活页面同步提取 metrics 与当前窗口全部候选并立即暂存。清单 ToolPack 只开放只读 browser 动作；Agent 不能直接调用共享 `scroll` 绕过该 Adapter。
+通用 observation 仍会截断链接集合和 HTML，因此不能把 observation 返回的链接数当作大清单完整性证明；V1 依靠 `PlaylistImportAgentRunDriver` 的冻结 selector，在每次受控滚动的同一宿主操作中从活页面同步提取 metrics 与当前窗口全部候选并立即暂存。ToolPack 虽允许 Agent 使用通用 `scroll` 处理页面交互和恢复，但该动作不会认领或推进导入 frontier，也不会固化候选；清单分页、加载更多和虚拟枚举必须使用 `advance_playlist_page`，后续 checkpoint 会按当前 `in-flight` 冻结工作项与 revision fail closed。
 
 V1 支持：
 
@@ -1214,98 +1218,16 @@ V1 明确不支持：
 3. 增加 click 前的通用主 frame navigation policy，而不只由本功能 Adapter 防守。
 4. 如高频站点确有需要，再增加第一个确定性站点 Adapter；届时才引入生产 Adapter 选择 seam。
 
-## 17. 代码落点
+## 17. 主要实现落点
 
-### 17.1 新增文件
+- 决策记录：`docs/adr/0025-import-external-playlists-with-global-catalog-reuse.md`。
+- 共享合同：`src/shared/playlistImportTypes.ts`、IPC schema 与 preload 合同。
+- 领域与 Session：`src/main/services/playlistImport/playlistImportModule.ts`、`playlistImportRepository.ts`、`playlistImportRunDriver.ts`。
+- Agent 合同：`src/main/services/playlistImport/playlistImportInstructions.ts`、`toolPack.ts`、`playlistImportBrowserNavigation.ts`。
+- 共享 browser：`src/main/services/agentMetadata/browserAdapter.ts` 负责 session、URL policy、证据和通用页面动作；`src/main/scrapers/scrapeBrowser.ts` 在主 frame request 发出前执行导航 policy。
+- renderer：`src/renderer/src/components/playlistImport/PlaylistImportContext.tsx`、`PlaylistImportIdentityReview.tsx` 与 `events.ts`；入口位于清单页和清单详情页。
 
-```text
-docs/adr/0025-external-playlist-import-matching-policy.md
-src/shared/playlistImportTypes.ts
-src/main/agent-platform/agentBrowserSchema.test.ts
-src/main/agent-platform/agentBrowserEvidence.test.ts
-src/main/scrapers/scrapeBrowserScroll.test.ts
-src/main/db/playlistImportRepo.ts
-src/main/db/playlistImportRepo.test.ts
-src/main/services/playlistImportAgent/playlistImporter.ts
-src/main/services/playlistImportAgent/playlistImporter.test.ts
-src/main/services/playlistImportAgent/playlistImportInstructions.ts
-src/main/services/playlistImportAgent/toolPack.ts
-src/main/services/playlistImportAgent/toolPack.test.ts
-src/main/services/playlistImportAgent/browserAdapter.ts
-src/main/services/playlistImportAgent/browserAdapter.test.ts
-src/main/services/agentMetadata/toolPack.test.ts
-src/main/ipc/playlistImportHandlers.ts
-src/main/ipc/playlistImportHandlers.test.ts
-src/renderer/src/components/playlistImport/PlaylistImportProvider.tsx
-src/renderer/src/components/playlistImport/PlaylistImportProvider.test.tsx
-src/renderer/src/components/playlistImport/PlaylistImportModal.tsx
-src/renderer/src/components/playlistImport/PlaylistImportModal.test.tsx
-src/renderer/src/components/playlistImport/PlaylistImportModal.module.css
-src/renderer/src/components/playlistImport/PlaylistImportProgress.tsx
-src/renderer/src/components/VideoResourceFilterFieldset.tsx
-src/renderer/src/components/VideoResourceFilterFieldset.module.css
-src/renderer/src/components/PlaylistResourceFilterPopover.tsx
-src/renderer/src/components/PlaylistResourceFilterPopover.module.css
-src/renderer/src/pages/PlaylistDetailPage.test.tsx
-src/renderer/src/listView/listNavigation.test.ts
-src/renderer/src/listView/primaryNavigationMemory.test.ts
-```
-
-### 17.2 修改文件
-
-```text
-CONTEXT.md
-docs/PLUGIN_DEV_AGENT.md
-src/main/db/schema.ts
-src/main/db/migrations.ts
-src/main/db/relatedLinkStore.ts
-src/main/db/playlistRepo.ts
-src/main/db/playlistRepo.test.ts
-src/main/db/libraryMembershipRepo.ts
-src/main/db/libraryMembershipRepo.test.ts
-src/main/db/videoRepo.ts
-src/main/db/videoRepo.test.ts
-src/main/services/resourceLessVideoCleanupService.test.ts
-src/main/scanner/scanCoordinator.test.ts
-src/main/agent-platform/agentConfiguration.ts
-src/main/agent-platform/composition.ts
-src/main/agent-platform/agentBrowserSchema.ts
-src/main/agent-platform/agentBrowserEvidence.ts
-src/main/scrapers/scrapeBrowserTypes.ts
-src/main/scrapers/scrapeBrowser.ts
-src/main/scrapers/scrapeBrowserHost.test.ts
-src/main/scrapers/scrapeBrowserActionNetwork.test.ts
-src/main/scrapers/scrapeBrowserSmokeEntry.ts
-src/main/services/agentMetadata/toolPack.ts
-src/main/services/agentMetadata/browserAdapter.ts
-src/main/services/agentMetadata/browserAdapter.test.ts
-src/main/services/agentMetadata/activityTimeline.ts
-src/main/services/agentMetadata/activityTimeline.test.ts
-src/main/services/pluginDevAgent/toolExecutor.ts
-src/main/services/pluginDevAgent/toolExecutor.test.ts
-src/main/services/pluginDevAgent/browserCapability.ts
-src/main/services/pluginDevAgent/browserCapability.test.ts
-src/main/services/pluginDevAgent/pluginDevInstructions.ts
-src/main/services/pluginDevAgent/prompts.test.ts
-src/main/appMain.ts
-src/main/ipc/index.ts
-src/main/ipc/ipcCommandSchemas.ts
-src/shared/ipc-channels.ts
-src/shared/appIpcContract.ts
-src/preload/index.ts
-src/renderer/src/App.tsx
-src/renderer/src/components/LibraryFilterPopover.tsx
-src/renderer/src/pages/PlaylistsPage.tsx
-src/renderer/src/pages/PlaylistDetailPage.tsx
-src/renderer/src/listView/listQueryParams.ts
-src/renderer/src/listView/listQueryParams.test.ts
-src/renderer/src/listView/listNavigation.ts
-src/renderer/src/listView/routeContracts.test.ts
-src/renderer/src/styles/navigation-controls.css
-src/renderer/src/query/invalidateLibraryQueries.ts
-```
-
-共享 `scroll` 只进入 Agent browser 命令、宿主 observation/evidence 以及 Metadata/PluginDev 两个 Adapter；不要把它加入 `PluginBrowserAction` 或生产插件 `ctx.browser`，后者不属于本需求。`PlaylistImportBrowserAdapter` 在共享滚动原语之上封装回顶、半 viewport 步长、连续性和批次事务，Agent 看不到像素与循环细节。
+共享 `scroll` 进入 Agent browser 命令和宿主 observation/evidence；`playlist-importer` 复用 `AgentMetadataBrowserAdapter` 获得独立 session 与同站点 URL policy，PluginDev 仍使用自己的 browser capability。不要把该命令加入 `PluginBrowserAction` 或生产插件 `ctx.browser`，后者不属于本需求。清单领域工具在共享滚动原语之上封装回顶、半 viewport 步长、连续性和批次事务，Agent 看不到像素与循环细节。
 
 资源筛选沿用已有 `VideoResourceFilter`、URL parser/serializer 和 `Video.resource_kinds` 投影，不修改 playlist IPC/preload Interface。把 `LibraryFilterPopover` 内现有资源 checkbox 抽成 `VideoResourceFilterFieldset`，由媒体库筛选和新的 `PlaylistResourceFilterPopover` 共同使用；新样式进入同名 CSS Module，并删除迁出的 legacy 全局规则，避免两处资源顺序、文案和 OR 提示漂移。playlist popover 使用 `FloatingLayer`，防止被详情滚动容器裁剪。
 
@@ -1405,7 +1327,7 @@ src/renderer/src/query/invalidateLibraryQueries.ts
 6. scroll observation 仍生成完整 artifact，超限走既有 64 KiB fallback；同 document 的新 view 不得被错误压成 `unchanged + staleRefs:false`。
 7. 滚动期间 XHR/fetch 进入脱敏 recentRequests；abort、observation pending 或意外导航不自动重放 scroll。
 8. Metadata 和 PluginDev Adapter 都映射共享 scroll 并保持 URL policy；生产 `PluginBrowserAction/ctx.browser` 不出现 scroll。
-9. Agent 必须先 checkpoint 普通页或虚拟首窗口再 advance；发现阶段直接调用公共 browser scroll 被拒绝。
+9. 通用 browser scroll 可用于页面交互和恢复，但不能认领或推进 frontier，也不能创建页面检查点；pending 页面必须先由 `advance_playlist_page` 原子认领为 `in-flight`，否则 checkpoint 被拒绝。
 10. 虚拟页首次枚举强制回顶并确认 `atStart`，不能继承浏览器历史位置。
 11. 每个 scroll advance 都在一次宿主操作内完成“上一批已提交校验 → 半 viewport 滚动 → settle → 同步读取 metrics/候选 → 连续性校验 → 事务落盘”；返回前不能发生下一次滚动。
 12. 只保留 8 个 DOM 节点的 100 条虚拟列表仍得到全部 occurrence，证明不依赖最终 DOM。
@@ -1427,6 +1349,7 @@ src/renderer/src/query/invalidateLibraryQueries.ts
 28. 详情阶段只允许打开已冻结的待处理 item URL。
 29. 点击分页前校验目标，未经授权的导航请求不能先发出再事后拒绝。
 30. 真正无终点、无法连续对齐或无法证明终点的列表命中 `LIMIT_REACHED/UNSUPPORTED_PAGINATION`，不得完成。
+31. 启动首轮对话分发前宿主不打开来源页；Agent 通过通用 `browser open` 加载冻结工作项，challenge 仍经同一 browser handoff 进入等待用户状态。
 
 ### 19.3 IPC/UI 测试
 
@@ -1470,6 +1393,7 @@ src/renderer/src/query/invalidateLibraryQueries.ts
 - [ ] 清单列表页可以从外部 URL 新建清单。
 - [ ] 清单详情页可以向当前清单追加，也能切换到新建。
 - [ ] 两个入口共用同一 Module、IPC、modal 和任务状态。
+- [ ] 开始导入只等待浏览器 Session、Agent run 和首轮对话被接受，不等待来源页导航；来源页由 Agent 使用通用 browser 打开。
 - [ ] 任务开始前显式选择目标媒体库，开始后不可改变。
 - [ ] 每个清单页先固化完整候选和分页证据，再允许离开。
 - [ ] 共享 Agent browser 提供受控纵向 scroll、滚动 metrics 和独立 view revision，滚动后旧 ARIA ref fail closed。

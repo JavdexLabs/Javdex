@@ -56,7 +56,7 @@ function fixture(): {
 }
 
 describe('PlaylistImportModule interface', () => {
-  it('returns an initial browser handoff created while opening the source page', async () => {
+  it('returns an initial browser handoff projected during the first agent dispatch', async () => {
     const { database, module, driver, calls } = fixture()
     driver.start = async (runId) => {
       new PlaylistImportRepository(database).setBrowserHandoff({

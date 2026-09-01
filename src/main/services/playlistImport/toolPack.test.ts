@@ -21,22 +21,43 @@ describe('PlaylistImporter ToolPack', () => {
     assert.deepEqual(
       [...new Set(PLAYLIST_IMPORTER_TOOL_PACK.tools.map((tool) => tool.capability))].sort(),
       [
-        'browser.read',
+        'browser.interact',
         'playlist-import.stage-identity',
         'playlist-import.stage-page'
       ]
     )
   })
 
-  it('keeps state-changing navigation behind host-owned import tools', () => {
+  it('lets the agent inspect and operate the same-site browser', () => {
     const browser = PLAYLIST_IMPORTER_TOOL_PACK.tools.find((tool) => tool.name === 'browser')
     const browserSchema = JSON.stringify(browser?.schema)
 
-    assert.doesNotMatch(browserSchema, /"open"/u)
-    assert.doesNotMatch(browserSchema, /"click"/u)
-    assert.doesNotMatch(browserSchema, /"scroll"/u)
-    assert.match(browserSchema, /"snapshot"/u)
-    assert.match(browserSchema, /"handoff"/u)
+    for (const action of [
+      'open', 'snapshot', 'click', 'fill', 'press', 'scroll', 'status', 'handoff'
+    ]) {
+      assert.match(browserSchema, new RegExp(`"${action}"`, 'u'))
+    }
+    assert.equal(browser?.capability, 'browser.interact')
+    assert.deepEqual(
+      browser?.redact({ action: 'fill', target: 'ref:search', text: 'private value' }),
+      {
+        action: 'fill',
+        targetDigest: 'c46ed2fbcb388077',
+        textLength: 13,
+        submit: false
+      }
+    )
+    assert.deepEqual(
+      browser?.redact({
+        action: 'open',
+        url: 'https://example.test/list?id=visible&token=secret#fragment'
+      }),
+      { action: 'open', url: 'https://example.test/list' }
+    )
+    assert.deepEqual(
+      browser?.redact({ action: 'evaluate', expression: '() => document.body.innerText' }),
+      { action: 'evaluate', expressionDigest: 'f78372562103e498', expressionLength: 29 }
+    )
   })
 
   it('binds every declaration to a production handler', () => {

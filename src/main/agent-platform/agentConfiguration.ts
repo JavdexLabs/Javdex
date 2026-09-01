@@ -52,7 +52,7 @@ const DEFINITIONS: readonly AgentDefinition[] = [
     systemPrompt: PLAYLIST_IMPORTER_SYSTEM_PROMPT,
     toolPackRefs: ['toolpack:playlist-importer:v1'],
     capabilityGrants: [
-      'browser.read',
+      'browser.interact',
       'playlist-import.stage-page',
       'playlist-import.stage-identity'
     ],

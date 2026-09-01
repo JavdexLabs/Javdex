@@ -624,12 +624,12 @@ export class PlaylistImportRepository {
       const row = this.database.prepare(
         `SELECT target_json, order_hint FROM playlist_import_frontier
          WHERE run_id = ? AND status IN ('pending', 'in-flight')
-         ORDER BY order_hint, id LIMIT 1`
+         ORDER BY CASE status WHEN 'in-flight' THEN 0 ELSE 1 END, order_hint, id LIMIT 1`
       ).get(runId) as { target_json: string; order_hint: number } | undefined
       if (!row) return null
       const target = JSON.parse(row.target_json) as { url?: unknown }
       if (typeof target.url !== 'string') throw new Error('PLAYLIST_IMPORT_FRONTIER_CORRUPT')
-      return { kind: 'list', pageOrder: row.order_hint, url: target.url }
+      return { kind: 'list' as const, pageOrder: row.order_hint, url: target.url }
     }
     if (job.phase === 'resolving-identities') {
       const row = this.database.prepare(
@@ -678,6 +678,47 @@ export class PlaylistImportRepository {
       }
     }
     return null
+  }
+
+  inFlightListBrowserWork(runId: string): Extract<PlaylistImportBrowserWork, { kind: 'list' }> | null {
+    const job = this.requireJob(runId)
+    if (job.phase !== 'discovering-list') return null
+    const row = this.database.prepare(
+      `SELECT target_json, order_hint FROM playlist_import_frontier
+       WHERE run_id = ? AND status = 'in-flight'
+       ORDER BY order_hint, id LIMIT 1`
+    ).get(runId) as { target_json: string; order_hint: number } | undefined
+    if (!row) return null
+    const target = JSON.parse(row.target_json) as { url?: unknown }
+    if (typeof target.url !== 'string') throw new Error('PLAYLIST_IMPORT_FRONTIER_CORRUPT')
+    return { kind: 'list' as const, pageOrder: row.order_hint, url: target.url }
+  }
+
+  claimNextListBrowserWork(runId: string): Extract<PlaylistImportBrowserWork, { kind: 'list' }> {
+    return this.database.transaction(() => {
+      this.requireJob(runId, 'discovering-list')
+      const row = this.database.prepare(
+        `SELECT id, target_json, order_hint, status FROM playlist_import_frontier
+         WHERE run_id = ? AND status IN ('pending', 'in-flight')
+         ORDER BY CASE status WHEN 'in-flight' THEN 0 ELSE 1 END, order_hint, id LIMIT 1`
+      ).get(runId) as {
+        id: number
+        target_json: string
+        order_hint: number
+        status: 'pending' | 'in-flight'
+      } | undefined
+      if (!row) throw new Error('PLAYLIST_IMPORT_BROWSER_WORK_MISSING')
+      if (row.status === 'pending') {
+        const claimed = this.database.prepare(
+          `UPDATE playlist_import_frontier SET status = 'in-flight', updated_at = ?
+           WHERE id = ? AND run_id = ? AND status = 'pending'`
+        ).run(now(), row.id, runId)
+        if (claimed.changes !== 1) throw new Error('PLAYLIST_IMPORT_FRONTIER_STALE')
+      }
+      const target = JSON.parse(row.target_json) as { url?: unknown }
+      if (typeof target.url !== 'string') throw new Error('PLAYLIST_IMPORT_FRONTIER_CORRUPT')
+      return { kind: 'list' as const, pageOrder: row.order_hint, url: target.url }
+    })()
   }
 
   openDynamicPage(runId: string): PlaylistImportOpenDynamicPage | null {

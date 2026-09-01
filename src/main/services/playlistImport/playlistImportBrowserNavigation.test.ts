@@ -8,40 +8,10 @@ import {
   playlistImportFailureCode,
   playlistImportVirtualAdvanceDecision,
   playlistImportTerminalProof,
-  shouldValidatePlaylistImportAdvanceAtCheckpoint,
-  shouldValidatePlaylistImportBrowserLocation
+  shouldValidatePlaylistImportAdvanceAtCheckpoint
 } from './playlistImportBrowserNavigation'
 
 describe('playlist import browser navigation guard', () => {
-  it('does not overwrite a terminating handoff result after a login redirect', () => {
-    assert.equal(shouldValidatePlaylistImportBrowserLocation('handoff', {
-      ok: true,
-      content: '{"code":"USER_INPUT_REQUIRED"}',
-      summary: '等待用户完成浏览器操作',
-      terminate: true
-    }), false)
-  })
-
-  it('allows passive observation after a same-site redirect but still guards navigation', () => {
-    for (const action of ['snapshot', 'find', 'html', 'evaluate', 'wait', 'status', 'read-section']) {
-      assert.equal(shouldValidatePlaylistImportBrowserLocation(action, {
-        ok: true,
-        content: '{}',
-        summary: `浏览器 ${action} 完成`
-      }), false)
-    }
-    assert.equal(shouldValidatePlaylistImportBrowserLocation('click', {
-      ok: true,
-      content: '{}',
-      summary: '浏览器 click 完成'
-    }), true)
-    assert.equal(shouldValidatePlaylistImportBrowserLocation('open', {
-      ok: true,
-      content: '{}',
-      summary: '浏览器 open 完成'
-    }), false)
-  })
-
   it('requires DOM-backed terminal reasons to carry a selector and pass host verification', () => {
     assert.deepEqual(playlistImportTerminalProof({
       kind: 'terminal',

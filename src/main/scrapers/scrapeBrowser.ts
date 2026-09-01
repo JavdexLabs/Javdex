@@ -8,7 +8,7 @@ import path from 'node:path'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createRequire } from 'node:module'
 import { APP_PACKAGE_NAME, readTestUserDataPath } from '@shared/appIdentity'
-import type { Browser, Locator, Page } from 'playwright-core'
+import type { Browser, Locator, Page, Route } from 'playwright-core'
 import {
   SCRAPE_BROWSER_HELPER_ENV,
   SCRAPE_BROWSER_HELPER_FLAG,
@@ -107,6 +107,10 @@ export interface ScrapeBrowserPresentation {
   title: string
 }
 
+export interface AgentBrowserNavigationPolicy {
+  allowMainFrameNavigation(url: string): boolean
+}
+
 export interface ScrapeBrowserLease {
   readonly ownerId: string
   readonly purpose: ScrapeBrowserPurpose
@@ -120,7 +124,10 @@ export interface ScrapeBrowserLease {
     action: PluginBrowserAction,
     params?: Record<string, unknown>
   ): Promise<unknown>
-  agentAction(command: AgentBrowserCommand): Promise<AgentBrowserObservation>
+  agentAction(
+    command: AgentBrowserCommand,
+    navigationPolicy?: AgentBrowserNavigationPolicy
+  ): Promise<AgentBrowserObservation>
   /** Host-only, selector-driven full extraction. It is never exposed through Agent browser tools. */
   extractList?(plan: ScrapeBrowserListExtractionPlan): Promise<ScrapeBrowserListExtraction>
   /** Make the helper window visible and focused for an explicit user handoff. */
@@ -538,10 +545,10 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
           title: typeof status.title === 'string' ? status.title : ''
         }
       },
-      agentAction: async (command) => {
+      agentAction: async (command, navigationPolicy) => {
         assertCurrent()
         try {
-          return await withAbort(this.runAgentAction(command, signal), signal)
+          return await withAbort(this.runAgentAction(command, signal, navigationPolicy), signal)
         } catch (error) {
           if (signal.aborted) await this.stopHelper('agent action aborted')
           throw error
@@ -1339,10 +1346,45 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
 
   private async runAgentAction(
     command: AgentBrowserCommand,
-    signal: AbortSignal
+    signal: AbortSignal,
+    navigationPolicy?: AgentBrowserNavigationPolicy
   ): Promise<AgentBrowserObservation> {
     const helper = this.helper
     if (!helper || helper.fatal) throw new Error('Scraper helper 不可用')
+    if (!navigationPolicy) return this.executeAgentAction(helper, command, signal)
+
+    let deniedNavigation = false
+    const guard = async (route: Route): Promise<void> => {
+      const request = route.request()
+      if (
+        request.isNavigationRequest() &&
+        request.frame() === helper.page.mainFrame() &&
+        !navigationPolicy.allowMainFrameNavigation(request.url())
+      ) {
+        deniedNavigation = true
+        await route.abort('blockedbyclient')
+        return
+      }
+      await route.continue()
+    }
+    await helper.page.route('**/*', guard)
+    try {
+      const result = await this.executeAgentAction(helper, command, signal)
+      if (deniedNavigation) throw new Error('BROWSER_HOST_DENIED')
+      return result
+    } catch (error) {
+      if (deniedNavigation) throw new Error('BROWSER_HOST_DENIED')
+      throw error
+    } finally {
+      await helper.page.unroute('**/*', guard)
+    }
+  }
+
+  private async executeAgentAction(
+    helper: RunningHelper,
+    command: AgentBrowserCommand,
+    signal: AbortSignal
+  ): Promise<AgentBrowserObservation> {
     switch (command.action) {
       case 'open': {
         return this.performAgentAction(helper, 'open', signal, async () => {

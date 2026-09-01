@@ -109,7 +109,7 @@ describe('AgentConfiguration', () => {
     assert.equal(workload.workloadId, 'library-curator')
     assert.deepEqual(profile.toolPackRefs, ['toolpack:playlist-importer:v1'])
     assert.deepEqual(profile.capabilityGrants, [
-      'browser.read',
+      'browser.interact',
       'playlist-import.stage-page',
       'playlist-import.stage-identity'
     ])

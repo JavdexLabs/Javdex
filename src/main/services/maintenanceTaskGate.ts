@@ -1,4 +1,4 @@
-export type MaintenanceTaskKind = 'scan' | 'resource-maintenance'
+export type MaintenanceTaskKind = 'scan' | 'resource-maintenance' | 'nfo-export'
 
 export interface MaintenanceTaskLease {
   kind: MaintenanceTaskKind

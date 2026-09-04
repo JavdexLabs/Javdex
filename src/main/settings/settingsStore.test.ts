@@ -104,6 +104,30 @@ describe('settingsStore video card preferences', () => {
   })
 })
 
+describe('settingsStore NFO export preferences', () => {
+  it('uses safe defaults and normalizes remembered selections without persisting overwrite', () => {
+    writeSettings({
+      nfoExportPreferences: {
+        libraryIds: [2, 2, -1, 3.5, 4],
+        profileId: 'unknown',
+        includeCover: false,
+        includeFanart: true,
+        includeSamples: true,
+        includeActorAvatars: true,
+        collisionPolicy: 'replace'
+      }
+    })
+    const preferences = getSettings().nfoExportPreferences
+    assert.deepEqual(preferences.libraryIds, [2, 4])
+    assert.equal(preferences.profileId, 'portable-v1')
+    assert.equal(preferences.includeCover, false)
+    assert.equal('collisionPolicy' in preferences, false)
+
+    writeSettings({})
+    assert.deepEqual(getSettings().nfoExportPreferences, DEFAULT_SETTINGS.nfoExportPreferences)
+  })
+})
+
 describe('settingsStore plugin developer model-turn budget', () => {
   it('retires the old implicit step limit instead of carrying 24 into the new setting', () => {
     writeSettings({ pluginDevAgentMaxSteps: 24 })

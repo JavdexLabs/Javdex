@@ -6,6 +6,10 @@ import {
   DEFAULT_SCRAPER_SERVICE_CONFIGS,
   type ScraperServiceConfigs
 } from './scraperServiceTypes'
+import {
+  DEFAULT_NFO_EXPORT_PREFERENCES,
+  type NfoExportPreferences
+} from './nfoExportTypes'
 
 /** UI color theme id (maps to CSS variables on html[data-theme]). */
 export type ThemeId = 'graphite' | 'warm' | 'slate' | 'light'
@@ -140,6 +144,8 @@ export interface AppSettings {
   pluginDevAgentMaxTurns: number
   /** Max estimated input context tokens for plugin development agent. */
   pluginDevAgentMaxContextTokens: number
+  /** Remembered foreground NFO export selections; collision policy is intentionally one-shot. */
+  nfoExportPreferences: NfoExportPreferences
 }
 
 export interface SettingsRecoveryNotice {
@@ -197,6 +203,7 @@ export type RendererSettingsPatch = Partial<
     | 'mediaAssetsPath'
     | 'pendingLibraryPathCleanups'
     | 'scraperServiceConfigs'
+    | 'nfoExportPreferences'
     | LegacyMediaLibrarySettingsKey
   >
 >
@@ -283,7 +290,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   customLlmProviders: [],
   llmCustomModels: [],
   pluginDevAgentMaxTurns: 0,
-  pluginDevAgentMaxContextTokens: 128000
+  pluginDevAgentMaxContextTokens: 128000,
+  nfoExportPreferences: { ...DEFAULT_NFO_EXPORT_PREFERENCES }
 }
 
 export function resolveScrapeProxyUrl(

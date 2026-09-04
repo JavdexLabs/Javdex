@@ -1,6 +1,6 @@
 # NFO 导入与导出执行计划
 
-> 状态：产品决策已闭合；里程碑 1、2 已实现，里程碑 3 待实施
+> 状态：三个里程碑均已实现并验收
 >
 > 依据：[NFO 导入、导出兼容性调研](./NFO_IMPORT_EXPORT_RESEARCH.md)
 
@@ -8,9 +8,9 @@
 
 - [x] 里程碑 1：影片元数据来源基础
 - [x] 里程碑 2：本地 NFO 一次性导入（数据库 schema 15）
-- [ ] 里程碑 3：NFO 前台导出
+- [x] 里程碑 3：NFO 前台导出
 
-里程碑 2 已按本计划接入内置 `local-nfo` 来源、首次发现扫描预检、身份待确认、既有影片候选流程、扫描审计 schema 2 和媒体库级默认开启开关。实现不保存 NFO 路径、摘要、时间戳或同步关联；普通 `.avscraper` 包格式未变化。
+里程碑 2 已按本计划接入内置 `local-nfo` 来源、首次发现扫描预检、身份待确认、既有影片候选流程、扫描审计 schema 2 和媒体库级默认开启开关。实现不保存 NFO 路径、摘要、时间戳或同步关联；普通 `.avscraper` 包格式未变化。里程碑 3 已交付五个 profile、不可变 plan、前台阻塞执行、逐项报告和设置偏好；Jellyfin、Emby、Plex NFO Agent、Stash 与 Serviio 有固定版本消费端证据，Infuse、VidHub、Nova 与 Zidoo 按已确认决策只保留公开格式合同，不要求专有客户端或设备端 smoke。
 
 ## 已确认决策
 
@@ -189,7 +189,7 @@ V1 公开提供五个 profile：
 4. `plex-nfo-1.43.1+`：只兼容 Plex 官方 NFO Agent，并在 UI 明确要求 PMS 1.43.1+；默认 Plex Movie Agent 不受支持。
 5. `infuse-current`：使用 Infuse 所需的同名封面和本地 metadata 规则。
 
-VidHub、Nova、Zidoo、Stash nfoSceneParser 与 Serviio 作为“通用 / Kodi”的固定版本兼容验证对象，不增加独立 UI profile。profile 只有在字段或图片命名确实不同且通过 golden/smoke test 时才能独立存在。
+Stash nfoSceneParser 与 Serviio 作为“通用 / Kodi”的固定版本消费端验证对象，不增加独立 UI profile。Infuse、VidHub、Nova 与 Zidoo 属于专有客户端或设备端消费者，只保留基于公开文档/解析器的格式合同，不纳入 V1 实机验收门槛。profile 只有在字段或图片命名确实不同且通过 golden 格式合同时才能独立存在；纳入实机验收的消费者还必须通过对应 smoke。
 
 ### 22. 一次性导出，不建立关联
 
@@ -531,8 +531,8 @@ type MetadataAssetRef =
 1. `portable-v1`：先打通 plan/apply、通用 XML 与图片布局。
 2. `jellyfin-current`、`emby-kodi-conservative`。
 3. `plex-nfo-1.43.1+`，明确 UI 警示只支持官方 NFO Agent。
-4. `infuse-current`。
-5. 用通用输出记录 VidHub、Nova、Zidoo、Stash nfoSceneParser、Serviio 的固定版本 smoke 结果，不新增 profile。
+4. `infuse-current`，以公开本地 metadata 合同和 golden 验收，不要求专有客户端 smoke。
+5. 用通用输出记录 Stash nfoSceneParser 与 Serviio 的固定版本 smoke 结果；VidHub、Nova 与 Zidoo 只记录公开格式合同，不新增 profile。
 
 ### 36.6 重点文件
 
@@ -551,7 +551,8 @@ type MetadataAssetRef =
 - plan 无写入；skip/replace/stale、只读目录、磁盘写入失败、图片解密/转换失败、终止、进程退出与 gate lease 释放均有测试。
 - 多媒体库、多资源、同番号不同目录、同目录冲突、STRM、本地链接跳过、样张和演员头像均有集成测试。
 - modal 无法通过 Esc、遮罩或导航绕过；终止后保留已完成文件并展示逐项报告。
-- Jellyfin、Emby、Plex NFO Agent、Infuse 的固定版本 smoke 证据写入兼容性文档，未验证不得宣称支持。
+- Jellyfin、Emby、Plex NFO Agent、Stash nfoSceneParser 与 Serviio 的固定版本消费端证据写入兼容性文档。
+- Infuse、VidHub、Nova 与 Zidoo 不要求专有客户端或设备端 smoke；兼容性文档必须明确其证据仅为公开格式合同，不得写成实机验证通过。
 - `npm test`、`npm run build`、代码检视全部通过后单独提交并验收。
 
 ## 37. 测试资产与测试矩阵
@@ -610,7 +611,7 @@ type MetadataAssetRef =
 
 - 里程碑 1 可作为纯内部重构发布。
 - 里程碑 2 首次引入 V15；发布说明必须写明默认开启的一次性导入、无 NFO 为常态、不会覆盖已刮削影片。
-- 里程碑 3 只有在五个 profile 的 golden 与声明的 consumer smoke 完成后才能公开全部 profile；未完成的 profile 保持不可选，不以“实验性支持”绕过门槛。
+- 里程碑 3 只有在五个 profile 的 golden、Jellyfin/Emby/Plex NFO Agent 的服务器 smoke 和 Stash/Serviio 的通用输出消费端验证完成后才能公开全部 profile。Infuse、VidHub、Nova 与 Zidoo 的专有客户端或设备端 smoke 不属于发布门槛，但对外证据必须标为格式合同。
 
 ### 39.3 失败回滚
 
@@ -627,10 +628,10 @@ type MetadataAssetRef =
 - 本地 NFO 导入是一次性、默认开启、无 NFO 无噪音、已刮削影片不被覆盖。
 - 多身份与多候选都由既有待确认中心承载，不生成半成品正式记录。
 - 导出只从设置 → 存储发起，先计划后执行，阻塞前台、可明确终止、无后台与无同步关系。
-- 五个 profile 只有在固定版本证据通过后标记兼容。
+- 五个 profile 的证据等级必须如实标注：纳入 smoke 的消费者需有固定版本读回证据；Infuse、VidHub、Nova 与 Zidoo 只声明公开格式合同。
 - V1 完全不包含 Agent 能力。
 - 项目全量测试、生产构建、边界检查与文档一致性检视通过。
 
 ## 待确认决策
 
-- 无。产品范围与执行边界已经闭合；下一步只需确认本计划，然后从里程碑 1 开始实施。
+- 无。产品范围、执行边界与三个里程碑均已闭合。

@@ -8,19 +8,22 @@ import {
 } from './SettingsPrimitives'
 import Button from '../Button'
 import styles from './StorageSettingsPanel.module.css'
+import NfoExportPanel from './NfoExportPanel'
 
 export default function StorageSettingsPanel({
   settings,
   storageBusy,
   onPickMediaAssetsPath,
   onResetMediaAssetsPath,
-  onToggleAssetEncryption
+  onToggleAssetEncryption,
+  onExportBlockingChange
 }: {
   settings: SettingsSnapshot
   storageBusy: boolean
   onPickMediaAssetsPath: () => void
   onResetMediaAssetsPath: () => void
   onToggleAssetEncryption: (checked: boolean) => void
+  onExportBlockingChange: (blocking: boolean) => void
 }): JSX.Element {
   const resolvedPath = settings.mediaAssetsResolvedPath ?? settings.mediaAssetsPath
   const usingDefault = !settings.mediaAssetsPath.trim()
@@ -28,6 +31,7 @@ export default function StorageSettingsPanel({
   const assetKinds = ['封面', '头像', '样张', '演员写真', '清单封面']
 
   return (
+    <>
     <SettingsCard
       className={styles.root}
       title="资源存储"
@@ -134,5 +138,7 @@ export default function StorageSettingsPanel({
         </div>
       </div>
     </SettingsCard>
+    <NfoExportPanel disabled={storageBusy} onBlockingChange={onExportBlockingChange} />
+    </>
   )
 }

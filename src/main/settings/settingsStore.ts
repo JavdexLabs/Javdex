@@ -26,6 +26,11 @@ import { normalizeAvatarCenteringMode } from '@shared/avatarCentering'
 import { normalizeLibraryScanSummary } from '@shared/libraryScanSummary'
 import { normalizeScraperServiceConfigs } from '@shared/scraperServiceTypes'
 import {
+  DEFAULT_NFO_EXPORT_PREFERENCES,
+  NFO_EXPORT_PROFILE_IDS,
+  type NfoExportPreferences
+} from '@shared/nfoExportTypes'
+import {
   getLlmApiKey,
   hasLlmApiKey,
   resetLlmSecretStoreForTests,
@@ -422,12 +427,32 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
     pluginDevAgentMaxContextTokens: normalizePluginDevAgentMaxContextTokens(
       parsed.pluginDevAgentMaxContextTokens
     ),
+    nfoExportPreferences: normalizeNfoExportPreferences(parsed.nfoExportPreferences),
     scraperPluginDelays: normalizeDelaySettings(parsed.scraperPluginDelays),
     scraperServiceConfigs,
     compositeScrapers: {
       video: normalizeCompositeScrapers(parsed.compositeScrapers?.video, 'video'),
       actress: normalizeCompositeScrapers(parsed.compositeScrapers?.actress, 'actress')
     }
+  }
+}
+
+function normalizeNfoExportPreferences(value: unknown): NfoExportPreferences {
+  const input = value && typeof value === 'object'
+    ? (value as Partial<NfoExportPreferences>)
+    : {}
+  const profileId = NFO_EXPORT_PROFILE_IDS.includes(input.profileId as NfoExportPreferences['profileId'])
+    ? (input.profileId as NfoExportPreferences['profileId'])
+    : DEFAULT_NFO_EXPORT_PREFERENCES.profileId
+  return {
+    libraryIds: Array.isArray(input.libraryIds)
+      ? Array.from(new Set(input.libraryIds.filter((id): id is number => Number.isInteger(id) && id > 0)))
+      : [],
+    profileId,
+    includeCover: normalizeBooleanSetting(input.includeCover, true),
+    includeFanart: normalizeBooleanSetting(input.includeFanart, true),
+    includeSamples: normalizeBooleanSetting(input.includeSamples, false),
+    includeActorAvatars: normalizeBooleanSetting(input.includeActorAvatars, false)
   }
 }
 

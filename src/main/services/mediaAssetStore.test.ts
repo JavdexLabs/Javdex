@@ -442,6 +442,32 @@ describe('MediaAssetStore', () => {
     await relocation
   })
 
+  it('keeps relocation exclusive with a stable read lease', async () => {
+    setup()
+    const store = new MediaAssetStore()
+    const lease = store.acquireStableReadLease()
+    await assert.rejects(
+      () => store.runExclusiveRelocation(async () => undefined),
+      /已有媒体资源任务/
+    )
+    lease.release()
+    lease.release()
+    await assert.doesNotReject(() => store.runExclusiveRelocation(async () => undefined))
+
+    let releaseRelocation!: () => void
+    let relocationStarted!: () => void
+    const gate = new Promise<void>((resolve) => { releaseRelocation = resolve })
+    const started = new Promise<void>((resolve) => { relocationStarted = resolve })
+    const relocation = store.runExclusiveRelocation(async () => {
+      relocationStarted()
+      await gate
+    })
+    await started
+    assert.throws(() => store.acquireStableReadLease(), /维护正在进行/)
+    releaseRelocation()
+    await relocation
+  })
+
   it('keeps caller registrations off an un-awaited nested async coordinated change', async () => {
     setup()
     let nestedPath = ''

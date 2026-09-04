@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<movie>
+  <uniqueid type="num" default="true">ABP-123</uniqueid>
+  <id>ABP-123</id>
+  <num>ABP-123</num>
+  <title>Title &amp; More</title>
+  <originaltitle>Original</originaltitle>
+  <plot>Plot &lt;safe&gt;</plot>
+  <premiered>2025-01-02</premiered>
+  <studio>Maker</studio>
+  <publisher>Publisher</publisher>
+  <set>
+    <name>Series</name>
+  </set>
+  <director>Director</director>
+  <runtime>90</runtime>
+  <uniqueid type="imdb">tt123</uniqueid>
+  <ratings>
+    <rating name="imdb" max="5" default="true">
+      <value>4.25</value>
+      <votes>20</votes>
+    </rating>
+    <rating name="javdb" max="5">
+      <value>4.5</value>
+      <votes>10</votes>
+    </rating>
+  </ratings>
+  <tag>Action</tag>
+  <tag>Drama</tag>
+  <actor>
+    <name>Alice</name>
+    <gender>female</gender>
+    <thumb>.actors/Alice.jpg</thumb>
+  </actor>
+  <thumb aspect="poster">ABP-123-poster.jpg</thumb>
+  <fanart>
+    <thumb>ABP-123-fanart.png</thumb>
+    <thumb>extrafanart/ABP-123-001.jpg</thumb>
+  </fanart>
+</movie>

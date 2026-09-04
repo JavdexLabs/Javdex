@@ -1,0 +1,270 @@
+.root {
+  display: grid;
+  gap: 12px;
+}
+
+.form,
+.preview {
+  display: grid;
+  gap: 12px;
+}
+
+.fieldset {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.fieldLabel,
+.controlLabel {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption, 11px);
+  font-weight: 700;
+}
+
+.libraryGrid,
+.toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.checkRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-body, 13px);
+}
+
+.optionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.control {
+  display: grid;
+  gap: 6px;
+}
+
+.select {
+  min-height: var(--control-h-sm);
+  padding: 0 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  color: var(--text-primary);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.actionButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.muted,
+.warning,
+.error {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: 1.5;
+}
+
+.warning {
+  color: var(--text-warning);
+}
+
+.error {
+  color: var(--text-danger);
+}
+
+.preview {
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-control) 50%, transparent);
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
+  gap: 6px;
+}
+
+.summaryItem {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel);
+}
+
+.summaryLabel {
+  color: var(--text-muted);
+}
+
+.summaryValue {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.warningList {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-warning);
+  font-size: 12px;
+}
+
+.fileSummary {
+  min-height: 24px;
+  padding-block: 3px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.fileTable {
+  max-height: 260px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  margin-top: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.fileRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px 110px;
+  gap: 8px;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.fileRowLast {
+  border-bottom: 0;
+}
+
+.fileName {
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.fileMeta {
+  color: var(--text-muted);
+  font: inherit;
+}
+
+.backdrop {
+  position: fixed;
+  z-index: var(--z-modal, 1000);
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--modal-viewport-inset);
+  background: var(--modal-backdrop);
+}
+
+.modal {
+  width: min(680px, 100%);
+  max-height: calc(100vh - 2 * var(--modal-viewport-inset));
+  overflow: auto;
+  scrollbar-gutter: stable;
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-elevated);
+}
+
+.modalHeader {
+  display: flex;
+  gap: 10px;
+}
+
+.modalTitle,
+.modalText {
+  margin: 0;
+}
+
+.modalTitle {
+  color: var(--text-primary);
+  font-size: 16px;
+}
+
+.modalText {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.modalIcon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  color: var(--text-accent);
+}
+
+.modalProgress {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.progressCopy,
+.reportSummary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.progressName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reportSummary {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+@media (width <= 900px) {
+  .summaryGrid {
+    grid-template-columns: repeat(4, minmax(52px, 1fr));
+  }
+}
+
+@media (width <= 620px) {
+  .optionGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .fileRow {
+    grid-template-columns: minmax(0, 1fr) 82px;
+  }
+
+  .fileDisposition {
+    grid-column: 2;
+  }
+}

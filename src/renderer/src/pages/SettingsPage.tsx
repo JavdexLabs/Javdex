@@ -223,6 +223,7 @@ export default function SettingsPage(): JSX.Element {
     reset: resetActressBatchScopeCount
   } = useLatestAsyncLabel('- 位演员')
   const [storageBusy, setStorageBusy] = useState(false)
+  const [nfoExportBlocking, setNfoExportBlocking] = useState(false)
   const { stats: overviewStats } = useLibraryOverviewStats(
     0,
     activeGroup.id === 'overview' && location.pathname !== settingsPluginDevPath()
@@ -916,10 +917,11 @@ export default function SettingsPage(): JSX.Element {
               {activeGroup.id === 'storage' && activeTab === 'assets' && (
                 <StorageSettingsPanel
                   settings={settings}
-                  storageBusy={storageBusy}
+                  storageBusy={storageBusy || nfoExportBlocking}
                   onPickMediaAssetsPath={() => void relocateMediaAssets()}
                   onResetMediaAssetsPath={() => void relocateMediaAssets(null)}
                   onToggleAssetEncryption={(checked) => void toggleAssetEncryption(checked)}
+                  onExportBlockingChange={setNfoExportBlocking}
                 />
               )}
 

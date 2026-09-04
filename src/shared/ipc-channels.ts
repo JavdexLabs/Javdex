@@ -35,6 +35,16 @@ export const IPC = {
   SETTINGS_PROXY_TEST: 'settings:proxyTest',
   SETTINGS_OVERVIEW_STATS: 'settings:overviewStats',
 
+  // One-shot foreground NFO export
+  NFO_EXPORT_GET_OPTIONS: 'nfoExport:getOptions',
+  NFO_EXPORT_UPDATE_PREFERENCES: 'nfoExport:updatePreferences',
+  NFO_EXPORT_PLAN: 'nfoExport:plan',
+  NFO_EXPORT_DISCARD_PLAN: 'nfoExport:discardPlan',
+  NFO_EXPORT_START: 'nfoExport:start',
+  NFO_EXPORT_TERMINATE: 'nfoExport:terminate',
+  NFO_EXPORT_PROGRESS: 'nfoExport:progress',
+  NFO_EXPORT_STATE: 'nfoExport:state',
+
   // External links
   EXTERNAL_LINK_OPEN: 'externalLink:open',
 

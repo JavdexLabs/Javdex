@@ -113,8 +113,30 @@ export function MediaLibrarySettingsContent({
     () => new Set((pendingGroupsQuery.data ?? []).map((group) => group.id)),
     [pendingGroupsQuery.data]
   )
+  const pendingIdentitiesQuery = useQuery({
+    queryKey: ['pending-resource-identities', libraryId],
+    queryFn: () => api.scan.listPendingResourceIdentities(libraryId)
+  })
+  const pendingResourceIdentityIds = useMemo(
+    () => new Set((pendingIdentitiesQuery.data ?? []).map((identity) => identity.id)),
+    [pendingIdentitiesQuery.data]
+  )
+  const pendingScrapesQuery = useQuery({
+    queryKey: ['pending-video-scrapes'],
+    queryFn: () => api.scrape.listPending()
+  })
+  const pendingVideoScrapeIds = useMemo(
+    () => new Set((pendingScrapesQuery.data ?? []).map((pending) => pending.id)),
+    [pendingScrapesQuery.data]
+  )
   const scan = useMediaLibraryScanController(libraryId, {
-    onSettled: () => libraryQuery.refetch().then(() => undefined)
+    onSettled: () =>
+      Promise.all([
+        libraryQuery.refetch(),
+        pendingGroupsQuery.refetch(),
+        pendingIdentitiesQuery.refetch(),
+        pendingScrapesQuery.refetch()
+      ]).then(() => undefined)
   })
   const library = libraryQuery.data ?? null
   const [identityDraft, setIdentityDraft] =
@@ -667,6 +689,8 @@ export function MediaLibrarySettingsContent({
               scan={scan}
               latestScanSummary={latestScanSummary}
               pendingScanGroupIds={pendingScanGroupIds}
+              pendingResourceIdentityIds={pendingResourceIdentityIds}
+              pendingVideoScrapeIds={pendingVideoScrapeIds}
               selectedScanMetric={selectedScanMetric}
               setSelectedScanMetric={setSelectedScanMetric}
               configDraft={configDraft}

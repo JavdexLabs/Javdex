@@ -46,6 +46,11 @@ interface LegacyCoordinatorDependencies {
   runCleanupTransaction?: <T>(operation: () => T) => T
   getMinImportDurationMinutes?: () => number
   getAutoMergeSameCodeResources?: () => boolean
+  getAutoImportLocalNfo?: () => boolean
+  reconcilePendingResourceIdentities?: (
+    roots: string[],
+    inspectPath: (filePath: string) => 'present' | 'missing' | 'unknown'
+  ) => { removed: number }
   shouldAutoDeleteResourceLessVideos?: () => boolean
   deleteResourceLessVideos?: () => number
   listResourceLessVideos?: () => Array<Pick<Video, 'id' | 'code' | 'title'>>
@@ -106,6 +111,7 @@ function createTestScanCoordinator(
         ...DEFAULT_MEDIA_LIBRARY_CONFIG,
         minImportDurationMinutes: dependencies.getMinImportDurationMinutes?.() ?? 0,
         autoMergeSameCodeResources: dependencies.getAutoMergeSameCodeResources?.() ?? false,
+        autoImportLocalNfo: dependencies.getAutoImportLocalNfo?.() ?? true,
         removeResourceLessMemberships: Boolean(
           dependencies.shouldAutoDeleteResourceLessVideos?.()
         )
@@ -172,6 +178,14 @@ function createTestScanCoordinator(
         }),
         inspectPath
       ) ?? { removedResources: 0, removedGroups: 0 },
+    reconcilePendingResourceIdentities: (_libraryId, rootIds, inspectPath) =>
+      dependencies.reconcilePendingResourceIdentities?.(
+        rootIds.flatMap((rootId: number) => {
+          const rootPath = rootPathById(rootId)
+          return rootPath ? [rootPath] : []
+        }),
+        inspectPath
+      ) ?? { removed: 0 },
     recoverPendingPathCleanups: () =>
       dependencies.recoverPendingPathCleanups?.() ?? { recovered: 0, waiting: 0 },
     listPendingPathCleanups: () =>
@@ -389,11 +403,28 @@ describe('ScanCoordinator', () => {
       scanFolders: async (_folders, _progress, options) => {
         assert.equal(options?.minImportDurationSeconds, 30 * 60)
         assert.equal(options?.autoMergeSameCodeResources, true)
+        assert.equal(options?.autoImportLocalNfo, true)
         return emptyScanResult()
       }
     })
 
     await coordinator.run()
+  })
+
+  it('reconciles resource identity pending rows only under roots proven safe after traversal', async () => {
+    const reconciled: string[][] = []
+    const coordinator = createTestScanCoordinator({
+      getConfiguredFolders: () => ['/online', '/offline'],
+      inspectFolder: async (folder) => folder === '/online',
+      scanFolders: async () => emptyScanResult(),
+      reconcilePendingResourceIdentities: (roots) => {
+        reconciled.push(roots)
+        return { removed: 0 }
+      }
+    })
+
+    await coordinator.run()
+    assert.deepEqual(reconciled, [['/online']])
   })
 
   it('preserves offline roots and removes only missing local resources under accessible roots', async () => {

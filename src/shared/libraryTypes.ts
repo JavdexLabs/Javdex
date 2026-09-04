@@ -105,10 +105,31 @@ export type LibraryScanMetricKey =
   | 'pendingScanGroups'
   | 'pendingScanResources'
 
+export type LibraryScanNfoDisposition =
+  | 'imported'
+  | 'skipped'
+  | 'warning'
+  | 'pending-candidate'
+  | 'identity-conflict'
+
+export interface LibraryScanNfoWarning {
+  code: string
+  message: string
+}
+
+export interface LibraryScanNfoAudit {
+  disposition: LibraryScanNfoDisposition
+  warnings?: LibraryScanNfoWarning[]
+  pendingScrapeId?: number
+  pendingIdentityId?: number
+}
+
 interface LibraryScanFileAuditBase {
   rootId: number
   filePath: string
   sourceKind: 'local' | 'strm'
+  /** Secondary NFO outcome; the file keeps exactly one primary scan outcome. */
+  nfo?: LibraryScanNfoAudit
 }
 
 export type LibraryScanFileAuditEntry =
@@ -179,7 +200,7 @@ export interface LibraryScanPendingGroupAuditEntry {
 }
 
 export interface LibraryScanAudit {
-  schemaVersion: 1
+  schemaVersion: 1 | 2
   libraryId: number
   runId: string
   configRevision: number
@@ -286,6 +307,36 @@ export interface PendingScanGroupResolutionResult {
   assignedResources: number
   existingVideoIds: number[]
   createdVideoIds: number[]
+}
+
+export interface PendingResourceIdentity {
+  id: number
+  libraryId: number
+  rootId: number
+  sourceKind: 'local' | 'strm'
+  targetKind: import('./videoTypes').ExternalVideoResourceKind | null
+  /** Masked STRM target display; complete target snapshots remain main-process only. */
+  targetDisplay: string | null
+  displayName: string
+  filenameCode: string
+  nfoCode: string
+  revision: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type PendingResourceIdentityChoice = 'filename' | 'nfo' | 'discard'
+
+export interface PendingResourceIdentityResolution {
+  expectedRevision: number
+  choice: PendingResourceIdentityChoice
+}
+
+export interface PendingResourceIdentityResolutionResult {
+  status: 'assigned' | 'pending' | 'discarded'
+  videoId?: number
+  pendingGroupId?: number
+  warnings: string[]
 }
 
 export interface ScanProgress {

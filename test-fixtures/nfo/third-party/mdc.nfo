@@ -1,0 +1,9 @@
+<movie>
+  <num>MDC-001</num>
+  <title>MDC minimal</title>
+  <plot>Minimal plot</plot>
+  <maker>Maker</maker>
+  <label>Publisher</label>
+  <release>2026-09-05</release>
+  <runtime>90</runtime>
+</movie>

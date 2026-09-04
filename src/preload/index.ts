@@ -81,7 +81,11 @@ import type {
   VideoScrapeUpdateMode
 } from '../shared/scrapeTypes'
 import type { PendingVideoScrapeConfirmInput } from '../shared/videoScrapeTypes'
-import type { LibraryScanEvent, PendingScanGroupResolution } from '../shared/libraryTypes'
+import type {
+  LibraryScanEvent,
+  PendingResourceIdentityResolution,
+  PendingScanGroupResolution
+} from '../shared/libraryTypes'
 import type { BatchProgress } from '../shared/batchScrapeTypes'
 import type { RendererSettingsPatch } from '../shared/settingsTypes'
 import type { ModelManagementApplyInput } from '../shared/modelManagementTypes'
@@ -294,6 +298,19 @@ const api = {
       groupId: number,
       resolution: PendingScanGroupResolution
     ) => invokeApp(IPC.PENDING_SCAN_RESOLVE, libraryId, groupId, resolution),
+    listPendingResourceIdentities: (libraryId: number) =>
+      invokeApp(IPC.PENDING_RESOURCE_IDENTITY_LIST, libraryId),
+    resolvePendingResourceIdentity: (
+      libraryId: number,
+      identityId: number,
+      resolution: PendingResourceIdentityResolution
+    ) =>
+      invokeApp(
+        IPC.PENDING_RESOURCE_IDENTITY_RESOLVE,
+        libraryId,
+        identityId,
+        resolution
+      ),
     onProgress: (cb: (event: LibraryScanProgressEvent) => void) =>
       onAppEvent(IPC.SCAN_PROGRESS, cb),
     onStateChanged: (cb: (event: LibraryScanEvent) => void) =>

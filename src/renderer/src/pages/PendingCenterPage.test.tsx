@@ -10,6 +10,10 @@ import type {
   PendingVideoScrapeConfirmInput,
   PendingVideoScrapeResolutionResult
 } from '@shared/videoScrapeTypes'
+import type {
+  PendingResourceIdentity,
+  PendingResourceIdentityResolution
+} from '@shared/libraryTypes'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
@@ -80,17 +84,49 @@ let renderer: TestRenderer.ReactTestRenderer | null = null
 let queryClient: QueryClient | null = null
 let confirmationInputs: PendingVideoScrapeConfirmInput[] = []
 let resolved = false
+let identityMode = false
+let identityResolved = false
+let identityResolutionInputs: PendingResourceIdentityResolution[] = []
+
+const identity: PendingResourceIdentity = {
+  id: 4,
+  libraryId: 1,
+  rootId: 1,
+  sourceKind: 'local',
+  targetKind: null,
+  targetDisplay: null,
+  displayName: 'FILE-001.mp4',
+  filenameCode: 'FILE-001',
+  nfoCode: 'NFO-002',
+  revision: 3,
+  createdAt: '2026-09-05T00:00:00.000Z',
+  updatedAt: '2026-09-05T00:00:00.000Z'
+}
 
 const fakeApi = {
+  mediaLibraries: {
+    list: async () => [{ id: 1, name: '测试媒体库' }]
+  },
   scan: {
-    listPending: async () => []
+    listPending: async () => [],
+    listPendingResourceIdentities: async () =>
+      identityMode && !identityResolved ? [identity] : [],
+    resolvePendingResourceIdentity: async (
+      _libraryId: number,
+      _identityId: number,
+      resolution: PendingResourceIdentityResolution
+    ) => {
+      identityResolutionInputs.push(resolution)
+      identityResolved = true
+      return { status: 'assigned' as const, videoId: 22, warnings: [] }
+    }
   },
   actressScrape: {
     listConflicts: async () => [],
     conflictSummary: async () => ({ groupCount: 0, conflictGroupCount: 0, applicableGroupCount: 0 })
   },
   scrape: {
-    listPending: async () => (resolved ? [] : [pending]),
+    listPending: async () => (identityMode || resolved ? [] : [pending]),
     discardPending: async () => true,
     confirmPending: async (input: PendingVideoScrapeConfirmInput) => {
       confirmationInputs.push(input)
@@ -158,6 +194,9 @@ afterEach(async () => {
   queryClient = null
   confirmationInputs = []
   resolved = false
+  identityMode = false
+  identityResolved = false
+  identityResolutionInputs = []
 })
 
 describe('PendingCenterPage scrape resolution', () => {
@@ -218,6 +257,38 @@ describe('PendingCenterPage scrape resolution', () => {
         directorSelectionId: 70,
         mergeRetainedVideoId: 10
       }
+    ])
+  })
+
+  it('offers only the two persisted resource identities or discard', async () => {
+    identityMode = true
+    const PendingCenterPage = (await import('./PendingCenterPage')).default
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    await act(async () => {
+      renderer = TestRenderer.create(
+        <QueryClientProvider client={queryClient!}>
+          <MemoryRouter initialEntries={['/pending?type=scan']}>
+            <PendingCenterPage />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      Boolean(renderer && nodeText(renderer.root).includes('FILE-001 ↔ NFO-002'))
+    )
+
+    assert.equal(renderer?.root.findAllByType('input').length, 0)
+    assert.ok(button('采用文件名番号'))
+    assert.ok(button('丢弃待办'))
+    await act(async () => {
+      button('采用 NFO 番号').props.onClick()
+      await Promise.resolve()
+    })
+    await waitFor(() => identityResolutionInputs.length === 1)
+    assert.deepEqual(identityResolutionInputs, [
+      { expectedRevision: 3, choice: 'nfo' }
     ])
   })
 })

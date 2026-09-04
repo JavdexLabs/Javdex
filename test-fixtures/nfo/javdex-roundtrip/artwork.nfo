@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<movie>
+  <uniqueid type="num" default="true">ART-003</uniqueid>
+  <thumb aspect="poster">cover.jpg</thumb>
+  <thumb aspect="poster">poster.jpg</thumb>
+  <fanart>
+    <thumb>fanart-1.jpg</thumb>
+    <thumb>fanart-2.jpg</thumb>
+  </fanart>
+</movie>

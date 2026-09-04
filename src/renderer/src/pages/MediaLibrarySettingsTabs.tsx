@@ -49,7 +49,10 @@ import {
   type MediaLibraryIdentityDraft
 } from '../mediaLibrarySettingsState'
 import { mediaLibraryVideoDetailPath } from '../listView/mediaLibraryRoutes'
-import { pendingCenterPath, pendingItemKey } from '../listView/pendingRoutes'
+import {
+  pendingCenterPath,
+  type PendingItemKey
+} from '../listView/pendingRoutes'
 import styles from './MediaLibrarySettingsPage.module.css'
 import { api } from '../api'
 
@@ -126,12 +129,25 @@ type UpdateConfigImmediately = <Key extends keyof MediaLibraryConfigValues>(
 
 type ScanController = ReturnType<typeof useMediaLibraryScanController>
 
+export function scanAuditPendingCenterPath(
+  libraryId: number,
+  target: PendingItemKey
+): string {
+  return pendingCenterPath({
+    type: target.domain,
+    item: target,
+    ...(target.domain === 'scan' ? { libraryId } : {})
+  })
+}
+
 function ScanHistorySummary({
   summary,
   audit,
   selected,
   unrecognized,
   currentPendingGroupIds,
+  currentPendingIdentityIds,
+  currentPendingScrapeIds,
   onSelect,
   onResolvedUnrecognized,
   onOpenPending,
@@ -142,9 +158,11 @@ function ScanHistorySummary({
   selected: LibraryScanMetricKey | null
   unrecognized: LibraryScanLatestSnapshot['unrecognized']
   currentPendingGroupIds: Set<number>
+  currentPendingIdentityIds: Set<number>
+  currentPendingScrapeIds: Set<number>
   onSelect: (key: LibraryScanMetricKey | null) => void
   onResolvedUnrecognized: (path: string) => void
-  onOpenPending: (groupId?: number) => void
+  onOpenPending: (target: PendingItemKey) => void
   onOpenVideo: (videoId: number) => void
 }): JSX.Element {
   return (
@@ -173,6 +191,8 @@ function ScanHistorySummary({
         selected={selected}
         unrecognized={unrecognized}
         currentPendingGroupIds={currentPendingGroupIds}
+        currentPendingIdentityIds={currentPendingIdentityIds}
+        currentPendingScrapeIds={currentPendingScrapeIds}
         onSelect={onSelect}
         onResolvedUnrecognized={onResolvedUnrecognized}
         onOpenPending={onOpenPending}
@@ -504,6 +524,8 @@ export function ScanSettingsTab({
   scan,
   latestScanSummary,
   pendingScanGroupIds,
+  pendingResourceIdentityIds,
+  pendingVideoScrapeIds,
   selectedScanMetric,
   setSelectedScanMetric,
   configDraft,
@@ -516,6 +538,8 @@ export function ScanSettingsTab({
   scan: ScanController
   latestScanSummary: LibraryScanSummary | null
   pendingScanGroupIds: Set<number>
+  pendingResourceIdentityIds: Set<number>
+  pendingVideoScrapeIds: Set<number>
   selectedScanMetric: LibraryScanMetricKey | null
   setSelectedScanMetric: Dispatch<SetStateAction<LibraryScanMetricKey | null>>
   configDraft: MediaLibraryConfigValues
@@ -629,6 +653,8 @@ export function ScanSettingsTab({
               selected={selectedScanMetric}
               unrecognized={scan.latest?.unrecognized ?? []}
               currentPendingGroupIds={pendingScanGroupIds}
+              currentPendingIdentityIds={pendingResourceIdentityIds}
+              currentPendingScrapeIds={pendingVideoScrapeIds}
               onSelect={setSelectedScanMetric}
               onResolvedUnrecognized={() => {
                 void scan.refreshLatest()
@@ -636,16 +662,8 @@ export function ScanSettingsTab({
               onOpenVideo={(videoId) =>
                 navigate(mediaLibraryVideoDetailPath(libraryId, videoId))
               }
-              onOpenPending={(groupId) =>
-                navigate(
-                  pendingCenterPath({
-                    type: 'scan',
-                    libraryId,
-                    item: groupId
-                      ? pendingItemKey('scan', groupId)
-                      : undefined
-                  })
-                )
+              onOpenPending={(target) =>
+                navigate(scanAuditPendingCenterPath(libraryId, target))
               }
             />
           ) : (
@@ -678,6 +696,23 @@ export function ScanSettingsTab({
               disabled={formDisabled}
               onChange={(value) =>
                 void updateConfigImmediately('autoMergeSameCodeResources', value)
+              }
+            />
+          </div>
+        </SettingsSectionBlock>
+        <SettingsSectionBlock
+          className={styles.scanSettingsBlock}
+          title="本地元数据"
+          hint="只在资源首次发现时读取；不会持续同步相邻文件。"
+        >
+          <div className="settings-toggle-list settings-toggle-list--compact">
+            <SettingsSwitchRow
+              title="自动导入本地 NFO"
+              description="扫描时读取影片旁的 NFO。仅用于尚未刮削成功的影片；已刮削成功的影片会自动跳过。"
+              checked={configDraft.autoImportLocalNfo}
+              disabled={formDisabled}
+              onChange={(value) =>
+                void updateConfigImmediately('autoImportLocalNfo', value)
               }
             />
           </div>

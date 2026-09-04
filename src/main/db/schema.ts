@@ -246,6 +246,8 @@ CREATE TABLE IF NOT EXISTS media_library_configs (
         CHECK(auto_merge_same_code_resources IN (0, 1)),
     remove_resource_less_memberships INTEGER NOT NULL DEFAULT 0
         CHECK(remove_resource_less_memberships IN (0, 1)),
+    auto_import_local_nfo INTEGER NOT NULL DEFAULT 1
+        CHECK(auto_import_local_nfo IN (0, 1)),
     default_video_scraper TEXT,
     default_sort_by TEXT NOT NULL DEFAULT 'release_date'
         CHECK(default_sort_by IN ('add_time', 'release_date', 'rating', 'code')),
@@ -414,6 +416,41 @@ CREATE INDEX IF NOT EXISTS idx_pending_scan_groups_library_updated
     ON pending_scan_groups(library_id, updated_at, id);
 
 ${MEDIA_LIBRARY_PENDING_SCAN_RESOURCES_SCHEMA_SQL}
+`
+
+export const PENDING_RESOURCE_IDENTITIES_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS pending_resource_identities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    library_id INTEGER NOT NULL,
+    root_id INTEGER NOT NULL,
+    file_path TEXT NOT NULL CHECK(length(trim(file_path)) > 0),
+    normalized_path TEXT NOT NULL CHECK(length(normalized_path) > 0),
+    source_kind TEXT NOT NULL CHECK(source_kind IN ('local', 'strm')),
+    target_kind TEXT CHECK(target_kind IN ('direct', 'web', 'magnet', 'ed2k')),
+    target_locator TEXT,
+    target_key TEXT,
+    filename_code TEXT NOT NULL CHECK(length(filename_code) > 0),
+    nfo_code TEXT NOT NULL CHECK(length(nfo_code) > 0),
+    size_bytes INTEGER,
+    file_mtime_ms INTEGER,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (library_id) REFERENCES media_libraries(id) ON DELETE CASCADE,
+    FOREIGN KEY (root_id, library_id)
+        REFERENCES media_library_roots(id, library_id) ON DELETE CASCADE,
+    UNIQUE (library_id, normalized_path),
+    CHECK(
+      (source_kind = 'local' AND target_kind IS NULL AND target_locator IS NULL AND target_key IS NULL)
+      OR
+      (source_kind = 'strm' AND target_kind IS NOT NULL AND target_locator IS NOT NULL
+        AND target_key IS NOT NULL)
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_pending_resource_identities_library_updated
+    ON pending_resource_identities(library_id, updated_at, id);
+CREATE INDEX IF NOT EXISTS idx_pending_resource_identities_root
+    ON pending_resource_identities(library_id, root_id, normalized_path);
 `
 
 export const MEDIA_LIBRARY_SCAN_SCHEMA_SQL = `
@@ -1265,6 +1302,8 @@ CREATE INDEX IF NOT EXISTS idx_actress_gallery_assets_actress_id
     ON actress_gallery_assets(actress_id);
 
 ${MEDIA_LIBRARY_PENDING_SCAN_SCHEMA_SQL}
+
+${PENDING_RESOURCE_IDENTITIES_SCHEMA_SQL}
 
 ${PENDING_VIDEO_SCRAPES_SCHEMA_SQL}
 

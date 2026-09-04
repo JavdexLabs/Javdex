@@ -321,6 +321,19 @@ describe('libraryPathCleanupService', () => {
         path.join(library.path, 'unknown.bin'),
         path.join(library.path, 'unknown.bin')
       )
+    database
+      .prepare(
+        `INSERT INTO pending_resource_identities (
+           library_id, root_id, file_path, normalized_path, source_kind,
+           filename_code, nfo_code, revision
+         ) VALUES (?, ?, ?, ?, 'local', 'FILE-001', 'NFO-002', 1)`
+      )
+      .run(
+        library.libraryId,
+        library.rootId,
+        path.join(library.path, 'identity.mp4'),
+        path.join(library.path, 'identity.mp4')
+      )
     updateMediaLibraryRoot({
       libraryId: library.libraryId,
       rootId: library.rootId,
@@ -333,7 +346,7 @@ describe('libraryPathCleanupService', () => {
       rootId: library.rootId
     })
     assert.equal(preview.localResourceCount, 1)
-    assert.equal(preview.pendingScanResourceCount, 1)
+    assert.equal(preview.pendingScanResourceCount, 2)
     assert.equal(preview.unrecognizedFileCount, 1)
     const cleanup = confirmLibraryPathRemoval({
       libraryId: library.libraryId,
@@ -347,6 +360,13 @@ describe('libraryPathCleanupService', () => {
     assert.equal(
       database
         .prepare('SELECT COUNT(*) FROM pending_scan_resources WHERE root_id = ?')
+        .pluck()
+        .get(library.rootId),
+      0
+    )
+    assert.equal(
+      database
+        .prepare('SELECT COUNT(*) FROM pending_resource_identities WHERE root_id = ?')
         .pluck()
         .get(library.rootId),
       0

@@ -268,6 +268,22 @@ function assertNoTargetDataConflicts(
       '目标媒体库已存在同路径的待处理扫描资源。'
     )
   }
+  const duplicatePendingIdentity = database
+    .prepare(
+      `SELECT moving.normalized_path
+         FROM pending_resource_identities moving
+         JOIN pending_resource_identities target
+           ON target.library_id = ? AND target.normalized_path = moving.normalized_path
+        WHERE moving.library_id = ? AND moving.root_id = ?
+        LIMIT 1`
+    )
+    .get(targetLibraryId, sourceLibraryId, rootId)
+  if (duplicatePendingIdentity) {
+    throw new MediaLibraryRepoError(
+      'VALIDATION_FAILED',
+      '目标媒体库已存在同路径的资源身份待办。'
+    )
+  }
 }
 
 function readCounts(
@@ -301,9 +317,13 @@ function readCounts(
                  AND (remaining.root_id IS NULL OR remaining.root_id != @rootId)
             )) AS source_memberships_becoming_resource_less,
         (SELECT COUNT(DISTINCT group_id) FROM pending_scan_resources
+          WHERE library_id = @sourceLibraryId AND root_id = @rootId) +
+        (SELECT COUNT(*) FROM pending_resource_identities
           WHERE library_id = @sourceLibraryId AND root_id = @rootId)
           AS pending_scan_group_count,
         (SELECT COUNT(*) FROM pending_scan_resources
+          WHERE library_id = @sourceLibraryId AND root_id = @rootId) +
+        (SELECT COUNT(*) FROM pending_resource_identities
           WHERE library_id = @sourceLibraryId AND root_id = @rootId)
           AS pending_scan_resource_count,
         (SELECT COUNT(DISTINCT source_group.id)
@@ -347,6 +367,8 @@ function readImpactRevision(
     `SELECT * FROM pending_scan_groups
       WHERE library_id IN (@sourceLibraryId, @targetLibraryId) ORDER BY library_id, id`,
     `SELECT * FROM pending_scan_resources
+      WHERE library_id IN (@sourceLibraryId, @targetLibraryId) ORDER BY library_id, id`,
+    `SELECT * FROM pending_resource_identities
       WHERE library_id IN (@sourceLibraryId, @targetLibraryId) ORDER BY library_id, id`,
     `SELECT * FROM library_unrecognized_files
       WHERE library_id IN (@sourceLibraryId, @targetLibraryId)
@@ -582,6 +604,23 @@ function moveUnrecognizedFiles(
   return count
 }
 
+function movePendingResourceIdentities(
+  database: Database.Database,
+  sourceLibraryId: number,
+  targetLibraryId: number,
+  sourceRootId: number,
+  targetRootId: number,
+  timestamp: string
+): number {
+  return database
+    .prepare(
+      `UPDATE pending_resource_identities
+          SET library_id = ?, root_id = ?, revision = revision + 1, updated_at = ?
+        WHERE library_id = ? AND root_id = ?`
+    )
+    .run(targetLibraryId, targetRootId, timestamp, sourceLibraryId, sourceRootId).changes
+}
+
 function moveHistoricalCleanupJobs(
   database: Database.Database,
   sourceLibraryId: number,
@@ -729,6 +768,13 @@ export function createMediaLibraryRootMigrationRepo(
         }
 
         const movedPendingScanResourceCount = movePendingScanResources(
+          database,
+          input.sourceLibraryId,
+          input.targetLibraryId,
+          input.rootId,
+          targetRootId,
+          timestamp
+        ) + movePendingResourceIdentities(
           database,
           input.sourceLibraryId,
           input.targetLibraryId,

@@ -24,12 +24,49 @@ function hasText(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0
 }
 
+function isNfoAudit(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  if (
+    !['imported', 'skipped', 'warning', 'pending-candidate', 'identity-conflict'].includes(
+      String(value.disposition)
+    )
+  ) {
+    return false
+  }
+  if (
+    value.pendingScrapeId != null &&
+    (!Number.isSafeInteger(value.pendingScrapeId) || Number(value.pendingScrapeId) <= 0)
+  ) {
+    return false
+  }
+  if (
+    value.pendingIdentityId != null &&
+    (!Number.isSafeInteger(value.pendingIdentityId) || Number(value.pendingIdentityId) <= 0)
+  ) {
+    return false
+  }
+  return (
+    value.warnings == null ||
+    (Array.isArray(value.warnings) &&
+      value.warnings.length <= 20 &&
+      value.warnings.every(
+        (warning) =>
+          isRecord(warning) &&
+          hasText(warning.code) &&
+          warning.code.length <= 64 &&
+          hasText(warning.message) &&
+          warning.message.length <= 500
+      ))
+  )
+}
+
 function isFileEntry(value: unknown): value is LibraryScanFileAuditEntry {
   if (!isRecord(value) || !Number.isSafeInteger(value.rootId) || Number(value.rootId) <= 0) {
     return false
   }
   if (!hasText(value.filePath)) return false
   if (value.sourceKind !== 'local' && value.sourceKind !== 'strm') return false
+  if (value.nfo != null && !isNfoAudit(value.nfo)) return false
   return [
     'added',
     'updated',
@@ -52,7 +89,7 @@ function isResourceEntry(value: unknown): value is LibraryScanResourceAuditEntry
 }
 
 function normalizeAudit(value: unknown): LibraryScanAudit | null {
-  if (!isRecord(value) || value.schemaVersion !== 1) return null
+  if (!isRecord(value) || (value.schemaVersion !== 1 && value.schemaVersion !== 2)) return null
   if (!Number.isSafeInteger(value.libraryId) || Number(value.libraryId) <= 0) return null
   if (!hasText(value.runId)) return null
   if (!Number.isSafeInteger(value.configRevision) || Number(value.configRevision) < 0) return null

@@ -27,6 +27,7 @@ import {
 import type {
   ManualImportResult,
   LibraryScanFileAuditEntry,
+  LibraryScanNfoAudit,
   RenameImportResult,
   ScanProgress,
   ScanResult,
@@ -66,6 +67,18 @@ import {
   authorizeMediaLibraryRoot,
   authorizeMediaLibraryRootFile
 } from '../services/mediaLibraryRootFileGuard'
+import {
+  pendingResourceIdentityExists,
+  upsertPendingResourceIdentity
+} from '../db/pendingResourceIdentityRepo'
+import {
+  localNfoScanService,
+  type LocalNfoScanService
+} from '../services/localNfoScanService'
+import type {
+  LocalNfoAnchor,
+  LocalNfoIdentityInspection
+} from '../metadata-sources'
 
 export type ScanProgressFn = (progress: ScanProgress) => void
 
@@ -97,11 +110,41 @@ export interface ScanOptions {
   inspectPath?: (filePath: string) => 'present' | 'missing' | 'unknown'
   /** Override same-code resource auto-assignment (tests). */
   autoMergeSameCodeResources?: boolean
+  /** Read local NFO only while a resource is being discovered for the first time. */
+  autoImportLocalNfo?: boolean
+  /** Override the built-in local NFO source (tests). */
+  localNfoService?: LocalNfoScanService
   /** Receives exactly one final audit outcome for every processed file. */
   onFileResult?: (entry: LibraryScanFileAuditEntry) => void
 }
 
 const DEFAULT_YIELD_EVERY = 50
+
+interface LocalNfoPreflight {
+  anchor: LocalNfoAnchor
+  filenameCode: string | null
+  nfoCode: string | null
+  effectiveCode: string | null
+  identityConflict: boolean
+  inspection: LocalNfoIdentityInspection
+}
+
+interface LocalNfoVideoBatch {
+  code: string
+  anchors: LocalNfoAnchor[]
+}
+
+function safeNfoWarnings(warnings: readonly string[]): NonNullable<LibraryScanNfoAudit['warnings']> {
+  const seen = new Set<string>()
+  return warnings.flatMap((warning) => {
+    const message = sanitizeLibraryScanError(warning)
+      .replace(/(?:[A-Za-z]:[\\/]|\/)[^\s，。；]+/gu, '[本地路径已隐藏]')
+      .slice(0, 500)
+    if (!message || seen.has(message)) return []
+    seen.add(message)
+    return [{ code: 'nfo-warning', message }]
+  }).slice(0, 20)
+}
 
 function inspectScannedResourcePath(filePath: string): 'present' | 'missing' | 'unknown' {
   try {
@@ -411,16 +454,89 @@ export async function scanFolders(
   const minImportDurationSeconds =
     options.minImportDurationSeconds !== undefined ? options.minImportDurationSeconds : null
   const autoMergeSameCodeResources = options.autoMergeSameCodeResources ?? false
+  const autoImportLocalNfo = options.autoImportLocalNfo ?? false
+  const nfoService = options.localNfoService ?? localNfoScanService
+  const directoryVideoCodes = new Map<string, Array<string | null>>()
+  for (const { filePath } of files) {
+    const directory = path.dirname(filePath)
+    const codes = directoryVideoCodes.get(directory) ?? []
+    codes.push(parseCode(path.basename(filePath, path.extname(filePath))))
+    directoryVideoCodes.set(directory, codes)
+  }
+  const nfoPreflightByFile = new Map<string, LocalNfoPreflight>()
+  if (autoImportLocalNfo) {
+    let inspectedNfoFiles = 0
+    for (const { filePath, root } of files) {
+      if (options.signal?.aborted) {
+        result.cancelled = true
+        return result
+      }
+      if (
+        getLocalVideoResourceByLocator(libraryId, filePath) ||
+        getStrmVideoResourceBySourcePath(libraryId, filePath) ||
+        pendingScanResourceExists(libraryId, filePath) ||
+        pendingResourceIdentityExists(libraryId, filePath)
+      ) {
+        continue
+      }
+      const filenameCode = parseCode(path.basename(filePath, path.extname(filePath)))
+      const anchor: LocalNfoAnchor = {
+        root,
+        anchorPath: filePath,
+        directoryVideoCodes: [...(directoryVideoCodes.get(path.dirname(filePath)) ?? [])]
+      }
+      let inspection: LocalNfoIdentityInspection
+      try {
+        inspection = nfoService.inspectIdentity(anchor)
+      } catch (error) {
+        inspection = {
+          status: 'warning',
+          code: null,
+          warnings: [sanitizeLibraryScanError(error)]
+        }
+      }
+      inspectedNfoFiles += 1
+      if (inspection.status !== 'missing') {
+        let nfoCode: string | null = null
+        try {
+          nfoCode = inspection.code ? normalizeVideoCode(inspection.code) : null
+        } catch {
+          inspection = {
+            status: 'warning',
+            code: null,
+            warnings: [...inspection.warnings, 'NFO 番号无效，已忽略']
+          }
+        }
+        const identityConflict = Boolean(
+          filenameCode && nfoCode && normalizeVideoCode(filenameCode) !== nfoCode
+        )
+        nfoPreflightByFile.set(filePath, {
+          anchor,
+          filenameCode,
+          nfoCode,
+          effectiveCode: identityConflict ? null : (nfoCode ?? filenameCode),
+          identityConflict,
+          inspection
+        })
+      }
+      await maybeYield(inspectedNfoFiles, Math.min(yieldEvery, 10))
+    }
+  }
+  const codeForNewFile = (filePath: string): string | null => {
+    const preflight = nfoPreflightByFile.get(filePath)
+    return preflight ? preflight.effectiveCode : parseCode(path.basename(filePath, path.extname(filePath)))
+  }
   const newFileCounts = new Map<string, number>()
   for (const { filePath: file } of files) {
     if (
       getLocalVideoResourceByLocator(libraryId, file) ||
       getStrmVideoResourceBySourcePath(libraryId, file) ||
-      pendingScanResourceExists(libraryId, file)
+      pendingScanResourceExists(libraryId, file) ||
+      pendingResourceIdentityExists(libraryId, file)
     ) {
       continue
     }
-    const code = parseCode(path.basename(file, path.extname(file)))
+    const code = codeForNewFile(file)
     if (!code) continue
     newFileCounts.set(code, (newFileCounts.get(code) ?? 0) + 1)
   }
@@ -432,12 +548,13 @@ export async function scanFolders(
         return result
       }
       if (!isStrmFile(file)) continue
-      const code = parseCode(path.basename(file, path.extname(file)))
+      const code = codeForNewFile(file)
       if (!code || (newFileCounts.get(code) ?? 0) <= 1) continue
       if (
         getLocalVideoResourceByLocator(libraryId, file) ||
         getStrmVideoResourceBySourcePath(libraryId, file) ||
         pendingScanResourceExists(libraryId, file) ||
+        pendingResourceIdentityExists(libraryId, file) ||
         listVideosByCode(code).length > 0
       ) {
         continue
@@ -451,6 +568,15 @@ export async function scanFolders(
   }
   const pendingGroupIds = new Set<number>()
   const primarySelectionVideoIds = new Set<number>()
+  const auditEntriesByFile = new Map<string, LibraryScanFileAuditEntry>()
+  const nfoBatchesByVideo = new Map<number, LocalNfoVideoBatch>()
+  const queueNfoCandidate = (videoId: number, code: string, filePath: string): void => {
+    const preflight = nfoPreflightByFile.get(filePath)
+    if (!preflight || preflight.identityConflict || preflight.inspection.status !== 'found') return
+    const batch = nfoBatchesByVideo.get(videoId)
+    if (batch) batch.anchors.push(preflight.anchor)
+    else nfoBatchesByVideo.set(videoId, { code, anchors: [preflight.anchor] })
+  }
   const videoIdentity = (videoId: number): { videoId: number; videoCode: string } => ({
     videoId,
     videoCode: getVideoById(videoId)?.code ?? ''
@@ -467,8 +593,21 @@ export async function scanFolders(
     const authorizeFileWrite = (): void => {
       authorizeMediaLibraryRootFile(libraryId, rootId, file, root)
     }
-    const recordFile = (entry: ScanFileAuditWithoutRoot): void =>
-      options.onFileResult?.({ ...entry, rootId } as LibraryScanFileAuditEntry)
+    const recordFile = (entry: ScanFileAuditWithoutRoot): void => {
+      const fullEntry = { ...entry, rootId } as LibraryScanFileAuditEntry
+      const preflight = nfoPreflightByFile.get(file)
+      if (
+        preflight &&
+        !preflight.identityConflict &&
+        preflight.inspection.warnings.length > 0
+      ) {
+        fullEntry.nfo = {
+          disposition: 'warning',
+          warnings: safeNfoWarnings(preflight.inspection.warnings)
+        }
+      }
+      auditEntriesByFile.set(file, fullEntry)
+    }
     if (options.signal?.aborted) {
       result.cancelled = true
       break
@@ -536,7 +675,58 @@ export async function scanFolders(
           continue
         }
 
-        const code = parseCode(path.basename(file, path.extname(file)))
+        const code = codeForNewFile(file)
+        if (pendingResourceIdentityExists(libraryId, file)) {
+          recordFile({
+            filePath: file,
+            sourceKind: 'strm',
+            outcome: 'pending',
+            normalizedCode: null,
+            groupId: null,
+            addedToQueue: false,
+            nfo: { disposition: 'identity-conflict' }
+          })
+          onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+          await maybeYield(result.scannedFiles, yieldEvery)
+          continue
+        }
+        const nfoPreflight = nfoPreflightByFile.get(file)
+        if (nfoPreflight?.identityConflict && nfoPreflight.filenameCode && nfoPreflight.nfoCode) {
+          authorizeFileWrite()
+          const fingerprint = statFileFingerprint(file)
+          const pendingIdentity = upsertPendingResourceIdentity({
+            libraryId,
+            rootId,
+            filePath: file,
+            sourceKind: 'strm',
+            targetKind: target.kind,
+            targetLocator: target.locator,
+            targetKey: target.targetKey,
+            filenameCode: nfoPreflight.filenameCode,
+            nfoCode: nfoPreflight.nfoCode,
+            sizeBytes: fingerprint?.file_size ?? null,
+            fileMtimeMs: fingerprint?.file_mtime_ms ?? null
+          })
+          result.pendingResources += 1
+          recordFile({
+            filePath: file,
+            sourceKind: 'strm',
+            outcome: 'pending',
+            normalizedCode: null,
+            groupId: null,
+            addedToQueue: true,
+            nfo: {
+              disposition: 'identity-conflict',
+              pendingIdentityId: pendingIdentity.id,
+              ...(nfoPreflight.inspection.warnings.length > 0
+                ? { warnings: safeNfoWarnings(nfoPreflight.inspection.warnings) }
+                : {})
+            }
+          })
+          onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+          await maybeYield(result.scannedFiles, yieldEvery)
+          continue
+        }
         if (pendingScanResourceExists(libraryId, file)) {
           let groupId: number | null = null
           if (code) {
@@ -663,6 +853,7 @@ export async function scanFolders(
           else {
             result.imported += 1
             if (needsPrimarySelection) primarySelectionVideoIds.add(existingVideos[0].id)
+            queueNfoCandidate(existingVideos[0].id, existingVideos[0].code, file)
           }
           recordFile(
             resourceId == null
@@ -699,6 +890,7 @@ export async function scanFolders(
             result.imported += 1
             result.newCodes.push(code)
             primarySelectionVideoIds.add(videoId)
+            queueNfoCandidate(videoId, code, file)
           }
           const resource = videoId == null ? null : strmResourceInLibrary(libraryId, file)
           recordFile(
@@ -771,6 +963,21 @@ export async function scanFolders(
         continue
       }
 
+      if (pendingResourceIdentityExists(libraryId, file)) {
+        recordFile({
+          filePath: file,
+          sourceKind: 'local',
+          outcome: 'pending',
+          normalizedCode: null,
+          groupId: null,
+          addedToQueue: false,
+          nfo: { disposition: 'identity-conflict' }
+        })
+        onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+        await maybeYield(result.scannedFiles, yieldEvery)
+        continue
+      }
+
       if (pendingScanResourceExists(libraryId, file)) {
         const code = parseCode(path.basename(file, path.extname(file)))
         let groupId: number | null = null
@@ -823,8 +1030,42 @@ export async function scanFolders(
         }
       }
 
-      const base = path.basename(file, path.extname(file))
-      const code = parseCode(base)
+      const nfoPreflight = nfoPreflightByFile.get(file)
+      if (nfoPreflight?.identityConflict && nfoPreflight.filenameCode && nfoPreflight.nfoCode) {
+        authorizeFileWrite()
+        const fingerprint = statFileFingerprint(file)
+        const pendingIdentity = upsertPendingResourceIdentity({
+          libraryId,
+          rootId,
+          filePath: file,
+          sourceKind: 'local',
+          filenameCode: nfoPreflight.filenameCode,
+          nfoCode: nfoPreflight.nfoCode,
+          sizeBytes: fingerprint?.file_size ?? null,
+          fileMtimeMs: fingerprint?.file_mtime_ms ?? null
+        })
+        result.pendingResources += 1
+        recordFile({
+          filePath: file,
+          sourceKind: 'local',
+          outcome: 'pending',
+          normalizedCode: null,
+          groupId: null,
+          addedToQueue: true,
+          nfo: {
+            disposition: 'identity-conflict',
+            pendingIdentityId: pendingIdentity.id,
+            ...(nfoPreflight.inspection.warnings.length > 0
+              ? { warnings: safeNfoWarnings(nfoPreflight.inspection.warnings) }
+              : {})
+          }
+        })
+        onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
+        await maybeYield(result.scannedFiles, yieldEvery)
+        continue
+      }
+
+      const code = codeForNewFile(file)
       if (!code) {
         result.failed += 1
         result.unrecognizedFiles.push(file)
@@ -922,6 +1163,7 @@ export async function scanFolders(
         if (resourceId != null) {
           result.imported += 1
           if (needsPrimarySelection) primarySelectionVideoIds.add(existingVideos[0].id)
+          queueNfoCandidate(existingVideos[0].id, existingVideos[0].code, file)
         } else result.skipped += 1
         recordFile(
           resourceId == null
@@ -955,6 +1197,7 @@ export async function scanFolders(
         result.imported += 1
         result.newCodes.push(code)
         primarySelectionVideoIds.add(id)
+        queueNfoCandidate(id, code, file)
         const resource = localResourceInLibrary(libraryId, file)
         if (resource) {
           recordFile({
@@ -992,6 +1235,37 @@ export async function scanFolders(
     await maybeYield(result.scannedFiles, yieldEvery)
   }
 
+  for (const [videoId, batch] of nfoBatchesByVideo) {
+    let nfo: LibraryScanNfoAudit
+    try {
+      const applied = await nfoService.apply(videoId, batch.code, batch.anchors)
+      nfo = {
+        disposition: applied.disposition === 'none' ? 'skipped' : applied.disposition,
+        ...(applied.warnings.length > 0 ? { warnings: safeNfoWarnings(applied.warnings) } : {}),
+        ...(applied.pendingScrapeId != null
+          ? { pendingScrapeId: applied.pendingScrapeId }
+          : {})
+      }
+    } catch (error) {
+      nfo = {
+        disposition: 'warning',
+        warnings: safeNfoWarnings([sanitizeLibraryScanError(error)])
+      }
+    }
+    for (const anchor of batch.anchors) {
+      const auditEntry = auditEntriesByFile.get(anchor.anchorPath)
+      if (!auditEntry) continue
+      const warnings = safeNfoWarnings([
+        ...(auditEntry.nfo?.warnings?.map((warning) => warning.message) ?? []),
+        ...(nfo.warnings?.map((warning) => warning.message) ?? [])
+      ])
+      auditEntry.nfo = {
+        ...nfo,
+        ...(warnings.length > 0 ? { warnings } : {})
+      }
+    }
+  }
+
   result.pendingGroups = pendingGroupIds.size
 
   for (const videoId of primarySelectionVideoIds) {
@@ -1017,6 +1291,10 @@ export async function scanFolders(
       }
       setPrimaryVideoResource(libraryId, videoId, primary.resource.id)
     }
+  }
+
+  for (const entry of auditEntriesByFile.values()) {
+    options.onFileResult?.(entry)
   }
 
   return result

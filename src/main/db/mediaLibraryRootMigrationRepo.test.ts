@@ -76,6 +76,14 @@ function createFixture(): Database.Database {
       (304, 3, 202, 21, '/target/pending-x.mp4',
        '/target/pending-x.mp4', 'local', 400);
 
+    INSERT INTO pending_resource_identities (
+      id, library_id, root_id, file_path, normalized_path, source_kind,
+      filename_code, nfo_code, size_bytes, file_mtime_ms, revision
+    ) VALUES (
+      401, 2, 11, '/source/move/identity.mp4', '/source/move/identity.mp4',
+      'local', 'FILE-001', 'NFO-002', 500, 1000, 1
+    );
+
     INSERT INTO library_scan_runs (
       id, library_id, config_revision, trigger, status, started_at, finished_at
     ) VALUES (
@@ -131,8 +139,8 @@ describe('media-library root migration repo', () => {
           videoCount: 2,
           targetMembershipsToCreate: 1,
           sourceMembershipsBecomingResourceLess: 1,
-          pendingScanGroupCount: 2,
-          pendingScanResourceCount: 2,
+          pendingScanGroupCount: 3,
+          pendingScanResourceCount: 3,
           targetPendingGroupsToMerge: 1,
           unrecognizedFileCount: 1,
           sourcePrimaryResourcesToPromote: 1,
@@ -155,7 +163,16 @@ describe('media-library root migration repo', () => {
       assert.equal(result.targetRoot.state, 'active')
       assert.equal(result.movedResourceCount, 2)
       assert.equal(result.createdMembershipCount, 1)
-      assert.equal(result.movedPendingScanResourceCount, 2)
+      assert.equal(result.movedPendingScanResourceCount, 3)
+      assert.deepEqual(
+        database
+          .prepare(
+            `SELECT library_id, root_id, revision
+               FROM pending_resource_identities WHERE id = 401`
+          )
+          .get(),
+        { library_id: 3, root_id: result.targetRoot.id, revision: 2 }
+      )
       assert.equal(result.movedUnrecognizedFileCount, 1)
       assert.deepEqual(result.promotedSourceResourceIds, [1002])
       assert.equal(result.sourceFilesPreserved, true)
@@ -434,8 +451,11 @@ describe('media-library root migration repo', () => {
       assert.equal(
         scalar(
           database,
-          `SELECT COUNT(*) AS value FROM pending_scan_resources
-            WHERE library_id = 2 AND root_id = 11`
+          `SELECT
+             (SELECT COUNT(*) FROM pending_scan_resources
+               WHERE library_id = 2 AND root_id = 11) +
+             (SELECT COUNT(*) FROM pending_resource_identities
+               WHERE library_id = 2 AND root_id = 11) AS value`
         ),
         preview.pendingScanResourceCount + 1
       )

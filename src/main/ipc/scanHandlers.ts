@@ -11,6 +11,7 @@ import {
 } from '../db/libraryScanRepo'
 import { getMediaLibraryRoot } from '../db/mediaLibraryRepo'
 import { listPendingScanGroups, resolvePendingScanGroup } from '../db/pendingScanRepo'
+import { listPendingResourceIdentities } from '../db/pendingResourceIdentityRepo'
 import { listVideoResources } from '../db/videoRepo'
 import {
   libraryScanAuditContainsPath,
@@ -20,6 +21,7 @@ import { importManual, renameAndImport } from '../scanner/scanner'
 import { scanCoordinator } from '../scanner/scanCoordinator'
 import { maintenanceTaskGate } from '../services/maintenanceTaskGate'
 import { selectPrimaryVideoResourceCandidate } from '../services/videoResourcePromotion'
+import { resolvePendingResourceIdentity } from '../services/pendingResourceIdentityService'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 import { assertFileNameOnly, assertMediaLibraryRootFile } from './ipcPathGuards'
 import type { IpcContext } from './shared'
@@ -96,6 +98,16 @@ export function registerScanHandlers(ctx: IpcContext): void {
           )?.id ?? null
       })
     )
+  )
+  appCommandAdapter.register(IPC.PENDING_RESOURCE_IDENTITY_LIST, (libraryId) =>
+    listPendingResourceIdentities(libraryId)
+  )
+  appCommandAdapter.register(
+    IPC.PENDING_RESOURCE_IDENTITY_RESOLVE,
+    (libraryId, identityId, resolution) =>
+      maintenanceTaskGate.run('resource-maintenance', () =>
+        resolvePendingResourceIdentity(libraryId, identityId, resolution)
+      )
   )
 
   appCommandAdapter.register(

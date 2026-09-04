@@ -285,7 +285,7 @@ export function getLatestLibraryScanSnapshot(libraryId: number): LibraryScanLate
       latestRun?.audit_json,
       libraryId,
       (candidate) =>
-        candidate.schemaVersion === 1 &&
+        (candidate.schemaVersion === 1 || candidate.schemaVersion === 2) &&
         typeof candidate.runId === 'string' &&
         Array.isArray(candidate.files)
     )

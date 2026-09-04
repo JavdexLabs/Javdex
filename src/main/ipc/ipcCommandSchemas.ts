@@ -97,6 +97,12 @@ const pendingScanResolution = z
     primaryResourceIds: z.record(nonEmptyText.max(200), id).optional()
   })
   .strict()
+const pendingResourceIdentityResolution = z
+  .object({
+    expectedRevision: id,
+    choice: z.enum(['filename', 'nfo', 'discard'])
+  })
+  .strict()
 const catalogScope = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('library'), libraryId: positiveSafeInteger }).strict(),
   z
@@ -619,6 +625,12 @@ export const appIpcSchemas = {
   ]),
   [IPC.PENDING_SCAN_LIST]: z.tuple([id]),
   [IPC.PENDING_SCAN_RESOLVE]: z.tuple([id, id, pendingScanResolution]),
+  [IPC.PENDING_RESOURCE_IDENTITY_LIST]: z.tuple([id]),
+  [IPC.PENDING_RESOURCE_IDENTITY_RESOLVE]: z.tuple([
+    id,
+    id,
+    pendingResourceIdentityResolution
+  ]),
   [IPC.PLAYLIST_LIST]: noArgs,
   [IPC.PLAYLIST_GET]: z.tuple([
     id,

@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
+import { LOCAL_NFO_SOURCE_NAME } from '@shared/videoMetadataSourceConstants'
 import { resetSettingsCacheForTests, updateSettings } from '../settings/settingsStore'
 import { setScraperServiceSecretCipherForTests } from '../settings/scraperServiceSecretStore'
 import { createCompositeScraper } from './scraperPluginService'
@@ -39,6 +40,18 @@ afterEach(() => {
 })
 
 describe('scraperManager plugin availability gates', () => {
+  it('publishes the built-in local NFO source as runnable but not editable or exportable', () => {
+    const descriptor = listScraperPlugins().find(
+      (plugin) => plugin.name === LOCAL_NFO_SOURCE_NAME
+    )
+
+    assert.equal(descriptor?.source, 'builtin')
+    assert.equal(descriptor?.configured, true)
+    assert.equal(descriptor?.editable, false)
+    assert.equal(descriptor?.exportable, false)
+    assert.equal(listScraperNames().filter((name) => name === descriptor?.name).length, 1)
+  })
+
   it('lists MetaTube for configuration but excludes it from executable names until configured', () => {
     const descriptor = listScraperPlugins().find((plugin) => plugin.name === 'MetaTube')
     assert.equal(descriptor?.configured, false)

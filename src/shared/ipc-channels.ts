@@ -58,6 +58,8 @@ export const IPC = {
   FILE_IMPORT_MANUAL: 'file:importManual',
   PENDING_SCAN_LIST: 'pendingScan:list',
   PENDING_SCAN_RESOLVE: 'pendingScan:resolve',
+  PENDING_RESOURCE_IDENTITY_LIST: 'pendingResourceIdentity:list',
+  PENDING_RESOURCE_IDENTITY_RESOLVE: 'pendingResourceIdentity:resolve',
 
   // Videos
   VIDEO_LIST: 'video:list',

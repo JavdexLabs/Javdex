@@ -1,6 +1,7 @@
 import type { ActressNameConflictGroup } from '@shared/actressConflictTypes'
 import type {
   PendingScanGroup,
+  PendingResourceIdentity,
   PendingScanResource,
   PendingScanResourceTarget
 } from '@shared/libraryTypes'
@@ -148,6 +149,7 @@ export interface PendingQueueSection {
 
 export interface PendingQueueInput {
   scanGroups: readonly PendingScanGroup[]
+  resourceIdentities?: readonly PendingResourceIdentity[]
   scrapeItems: readonly PendingVideoScrape[]
   conflictGroups: readonly ActressNameConflictGroup[]
   libraryNames?: ReadonlyMap<number, string>
@@ -162,6 +164,20 @@ function scanQueueItem(
     key: pendingItemKey('scan', group.id),
     title: group.normalizedCode,
     meta: `${libraryName} · ${group.resources.length} 条资源`,
+    coverPath: null,
+    ready: false
+  }
+}
+
+function resourceIdentityQueueItem(
+  identity: PendingResourceIdentity,
+  libraryNames?: ReadonlyMap<number, string>
+): PendingQueueItem {
+  const libraryName = libraryNames?.get(identity.libraryId) ?? `媒体库 #${identity.libraryId}`
+  return {
+    key: pendingItemKey('scan', `identity-${identity.id}`),
+    title: `${identity.filenameCode} ↔ ${identity.nfoCode}`,
+    meta: `${libraryName} · ${identity.displayName}`,
     coverPath: null,
     ready: false
   }
@@ -199,7 +215,12 @@ export function buildPendingQueueSections(
   type: PendingTypeFilter
 ): PendingQueueSection[] {
   const byDomain: Record<PendingDomain, PendingQueueItem[]> = {
-    scan: input.scanGroups.map((group) => scanQueueItem(group, input.libraryNames)),
+    scan: [
+      ...input.scanGroups.map((group) => scanQueueItem(group, input.libraryNames)),
+      ...(input.resourceIdentities ?? []).map((identity) =>
+        resourceIdentityQueueItem(identity, input.libraryNames)
+      )
+    ],
     scrape: input.scrapeItems.map(scrapeQueueItem),
     actress: input.conflictGroups.map(actressQueueItem)
   }

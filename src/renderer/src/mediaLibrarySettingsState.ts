@@ -62,6 +62,7 @@ export const MEDIA_LIBRARY_CONFIG_KEYS = [
   'autoScanIntervalMinutes',
   'minImportDurationMinutes',
   'autoMergeSameCodeResources',
+  'autoImportLocalNfo',
   'removeResourceLessMemberships',
   'defaultVideoScraper',
   'defaultSortBy',

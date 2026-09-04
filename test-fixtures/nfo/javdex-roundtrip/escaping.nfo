@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<movie>
+  <uniqueid type="num" default="true">ESC-005</uniqueid>
+  <title>A &amp; B &lt;C&gt; &quot;D&quot; &apos;E&apos;</title>
+  <plot>Line one &amp; line two</plot>
+</movie>

@@ -68,6 +68,7 @@ export interface MediaLibraryConfig {
   autoScanIntervalMinutes: number
   minImportDurationMinutes: number
   autoMergeSameCodeResources: boolean
+  autoImportLocalNfo: boolean
   removeResourceLessMemberships: boolean
   defaultVideoScraper: string | null
   defaultSortBy: MediaLibraryDefaultSortBy
@@ -83,6 +84,7 @@ export const DEFAULT_MEDIA_LIBRARY_CONFIG: Readonly<MediaLibraryConfigValues> = 
   autoScanIntervalMinutes: 1440,
   minImportDurationMinutes: 30,
   autoMergeSameCodeResources: true,
+  autoImportLocalNfo: true,
   removeResourceLessMemberships: false,
   defaultVideoScraper: null,
   defaultSortBy: 'release_date',
@@ -229,6 +231,7 @@ export interface MediaLibraryConfigPatch {
   autoScanIntervalMinutes?: number
   minImportDurationMinutes?: number
   autoMergeSameCodeResources?: boolean
+  autoImportLocalNfo?: boolean
   removeResourceLessMemberships?: boolean
   defaultVideoScraper?: string | null
   defaultSortBy?: MediaLibraryDefaultSortBy

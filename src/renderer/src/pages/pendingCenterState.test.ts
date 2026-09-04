@@ -131,4 +131,40 @@ describe('pending center resolution state', () => {
 
     assert.equal(sections[0]?.items[0]?.meta, 'NAS 媒体库 · 0 条资源')
   })
+
+  it('shows resource identity conflicts in the scan queue without exposing a local path', () => {
+    const sections = buildPendingQueueSections(
+      {
+        scanGroups: [],
+        resourceIdentities: [
+          {
+            id: 4,
+            libraryId: 7,
+            rootId: 2,
+            sourceKind: 'local',
+            targetKind: null,
+            targetDisplay: null,
+            displayName: 'FILE-001.mp4',
+            filenameCode: 'FILE-001',
+            nfoCode: 'NFO-002',
+            revision: 1,
+            createdAt: '2026-09-05T00:00:00.000Z',
+            updatedAt: '2026-09-05T00:00:00.000Z'
+          }
+        ],
+        scrapeItems: [],
+        conflictGroups: [],
+        libraryNames: new Map([[7, 'NAS 媒体库']])
+      },
+      'scan'
+    )
+
+    assert.deepEqual(sections[0]?.items[0], {
+      key: { domain: 'scan', id: 'identity-4' },
+      title: 'FILE-001 ↔ NFO-002',
+      meta: 'NAS 媒体库 · FILE-001.mp4',
+      coverPath: null,
+      ready: false
+    })
+  })
 })

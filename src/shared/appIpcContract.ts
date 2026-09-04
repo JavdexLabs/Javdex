@@ -16,6 +16,9 @@ import type {
   LibraryScanProgressEvent,
   ManualImportResult,
   PendingLibraryPathCleanup,
+  PendingResourceIdentity,
+  PendingResourceIdentityResolution,
+  PendingResourceIdentityResolutionResult,
   PendingScanGroup,
   PendingScanGroupResolution,
   PendingScanGroupResolutionResult,
@@ -210,6 +213,14 @@ export interface AppIpcContract {
   [IPC.PENDING_SCAN_RESOLVE]: {
     args: [libraryId: number, groupId: number, resolution: PendingScanGroupResolution]
     result: PendingScanGroupResolutionResult
+  }
+  [IPC.PENDING_RESOURCE_IDENTITY_LIST]: {
+    args: [libraryId: number]
+    result: PendingResourceIdentity[]
+  }
+  [IPC.PENDING_RESOURCE_IDENTITY_RESOLVE]: {
+    args: [libraryId: number, identityId: number, resolution: PendingResourceIdentityResolution]
+    result: PendingResourceIdentityResolutionResult
   }
 
   [IPC.PLAYLIST_LIST]: { args: []; result: PlaylistListItem[] }

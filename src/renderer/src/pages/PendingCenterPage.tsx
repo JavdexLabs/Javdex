@@ -29,6 +29,7 @@ import { actressKeys, mediaLibraryKeys } from '../query/queryKeys'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import PendingActressConflictPane from './PendingActressConflictPane'
 import PendingScanPane from './PendingScanPane'
+import PendingResourceIdentityPane from './PendingResourceIdentityPane'
 import PendingScrapePane from './PendingScrapePane'
 import styles from './PendingCenterPage.module.css'
 import {
@@ -80,6 +81,16 @@ export default function PendingCenterPage(): JSX.Element {
       (await Promise.all(libraryIds.map((libraryId) => api.scan.listPending(libraryId)))).flat(),
     enabled: librariesQuery.isSuccess
   })
+  const identityQuery = useQuery({
+    queryKey: ['pending-resource-identities', libraryIds.join(',')],
+    queryFn: async () =>
+      (
+        await Promise.all(
+          libraryIds.map((libraryId) => api.scan.listPendingResourceIdentities(libraryId))
+        )
+      ).flat(),
+    enabled: librariesQuery.isSuccess
+  })
   const scrapeQuery = useQuery({
     queryKey: ['pending-video-scrapes'],
     queryFn: () => api.scrape.listPending()
@@ -91,13 +102,25 @@ export default function PendingCenterPage(): JSX.Element {
     selectedLibraryId == null
       ? allScanGroups
       : allScanGroups.filter((group) => group.libraryId === selectedLibraryId)
+  const allResourceIdentities = identityQuery.data ?? []
+  const resourceIdentities =
+    selectedLibraryId == null
+      ? allResourceIdentities
+      : allResourceIdentities.filter((identity) => identity.libraryId === selectedLibraryId)
   const scrapeItems = scrapeQuery.data ?? []
   const conflictGroups = conflict.queue.groups
-  const queueInput = { scanGroups, scrapeItems, conflictGroups, libraryNames }
+  const queueInput = {
+    scanGroups,
+    resourceIdentities,
+    scrapeItems,
+    conflictGroups,
+    libraryNames
+  }
   const sections = buildPendingQueueSections(queueInput, type)
   const counts: Record<PendingTypeFilter, number> = {
-    all: scanGroups.length + scrapeItems.length + conflictGroups.length,
-    scan: scanGroups.length,
+    all:
+      scanGroups.length + resourceIdentities.length + scrapeItems.length + conflictGroups.length,
+    scan: scanGroups.length + resourceIdentities.length,
     scrape: scrapeItems.length,
     actress: conflictGroups.length
   }
@@ -110,7 +133,11 @@ export default function PendingCenterPage(): JSX.Element {
   const selected = resolvePendingSelection(sections, requested)
 
   const loading =
-    librariesQuery.isLoading || scanQuery.isLoading || scrapeQuery.isLoading || conflict.queue.loading
+    librariesQuery.isLoading ||
+    scanQuery.isLoading ||
+    identityQuery.isLoading ||
+    scrapeQuery.isLoading ||
+    conflict.queue.loading
   const total = pendingQueueTotal(sections)
 
   const selectItem = useCallback(
@@ -161,6 +188,7 @@ export default function PendingCenterPage(): JSX.Element {
   const refetchPendingSurface = useCallback((): void => {
     void Promise.all([
       queryClient.refetchQueries({ queryKey: ['pending-scan-groups'], exact: false }),
+      queryClient.refetchQueries({ queryKey: ['pending-resource-identities'], exact: false }),
       queryClient.refetchQueries({ queryKey: ['pending-video-scrapes'], exact: true }),
       queryClient.refetchQueries({ queryKey: actressKeys.conflicts(), exact: true }),
       queryClient.refetchQueries({ queryKey: actressKeys.conflictSummary(), exact: true })
@@ -181,6 +209,12 @@ export default function PendingCenterPage(): JSX.Element {
   const selectedScrape =
     selected?.domain === 'scrape'
       ? scrapeItems.find((entry) => String(entry.id) === selected.id) ?? null
+      : null
+  const selectedIdentity =
+    selected?.domain === 'scan' && selected.id.startsWith('identity-')
+      ? resourceIdentities.find(
+          (identity) => `identity-${identity.id}` === selected.id
+        ) ?? null
       : null
 
   return (
@@ -301,7 +335,13 @@ export default function PendingCenterPage(): JSX.Element {
                   ))}
                 </div>
               </WorkbenchRail>
-              {selectedScan ? (
+              {selectedIdentity ? (
+                <PendingResourceIdentityPane
+                  identity={selectedIdentity}
+                  libraryName={libraryNames.get(selectedIdentity.libraryId)}
+                  onResolved={refresh}
+                />
+              ) : selectedScan ? (
                 <PendingScanPane
                   group={selectedScan}
                   libraryName={libraryNames.get(selectedScan.libraryId)}

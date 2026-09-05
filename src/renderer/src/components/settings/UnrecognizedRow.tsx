@@ -40,7 +40,7 @@ export default function UnrecognizedRow({
   const codeTrimmed = code.trim()
   const renameTrimmed = renameBase.trim()
   const canImport = codeTrimmed.length > 0 && targetValue.length > 0
-  const canRename = renameTrimmed.length > 0 && renameTrimmed !== baseName && canImport
+  const canRename = renameTrimmed.length > 0 && renameTrimmed !== baseName
 
   useEffect(() => {
     const normalized = normalizeOptionalVideoCode(code)
@@ -124,16 +124,18 @@ export default function UnrecognizedRow({
         libraryId,
         rootId,
         filePath,
-        renameTrimmed,
-        codeTrimmed,
-        selectedTarget()
+        renameTrimmed
       )
       if (res.imported) {
         toast.show(`已重命名并导入：${res.code}`, 'success')
         onResolved(filePath)
+      } else if (res.outcome === 'pending') {
+        toast.show('已重命名，识别结果已进入待确认。', 'info')
       } else {
-        toast.show(`已重命名，但未能导入番号 ${res.code}`, 'info')
+        const reason = res.message || (res.outcome === 'unrecognized' ? '仍无法识别番号' : '本次未导入')
+        toast.show(`已重命名：${res.newName}；${reason}，已更新待处理项。`, 'info')
       }
+      if (!res.imported) onResolved(filePath)
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     } finally {
@@ -227,7 +229,7 @@ export default function UnrecognizedRow({
         </div>
 
         <details className={styles.rename}>
-          <summary>重命名源文件（可选）</summary>
+          <summary>重命名源文件并重新识别</summary>
           <div className={`${styles.edit} ${styles.renameEdit}`}>
             <input
               className={`text-input ${styles.renameInput}`}
@@ -236,7 +238,7 @@ export default function UnrecognizedRow({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') void doRename()
               }}
-              placeholder="新文件名（需先选择上方导入目标）"
+              placeholder="输入新文件名，按扫描规则重新识别"
               aria-label={`${fullName} 新文件名`}
             />
             {ext && <span className={styles.extension}>{ext}</span>}

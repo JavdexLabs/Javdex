@@ -89,7 +89,7 @@ describe('NFO export foreground modal', () => {
     assert.equal(dialog.props['aria-modal'], 'true')
     const buttons = renderer!.root.findAllByType('button')
     assert.equal(buttons.length, 1)
-    assert.match(String(buttons[0].props.children), /终止/u)
+    assert.match(instanceText(buttons[0]), /停止/u)
     await act(async () => { await buttons[0].props.onClick() })
     assert.equal(terminations, 1)
   })
@@ -119,13 +119,13 @@ describe('NFO export foreground modal', () => {
     const { default: NfoExportPanel } = await import('./NfoExportPanel')
     let stateListener: ((event: NfoExportStateEvent) => void) | null = null
     let planned = 0
+    const discarded: string[] = []
     let blocking = false
     mockApi.nfoExport = {
       getOptions: async () => ({
         libraries: [{ id: 1, name: 'Main' }],
         profiles: [{
-          id: 'portable-v1', label: '通用 / Kodi', description: 'Portable',
-          supportsSampleReferences: true
+          id: 'portable-v1', label: '通用 / Kodi', description: 'Portable'
         }],
         preferences: {
           libraryIds: [1], profileId: 'portable-v1', includeCover: true,
@@ -137,7 +137,7 @@ describe('NFO export foreground modal', () => {
         planned += 1
         return returnedPlan()
       },
-      discardPlan: async () => undefined,
+      discardPlan: async (id: string) => { discarded.push(id) },
       start: async () => ({ taskId: 'task' }),
       terminate: async () => undefined,
       onProgress: () => () => undefined,
@@ -156,11 +156,18 @@ describe('NFO export foreground modal', () => {
     })
     const buttonByText = (pattern: RegExp) => renderer!.root.findAllByType('button')
       .find((button) => pattern.test(instanceText(button)))!
-    await act(async () => { await buttonByText(/生成计划/u).props.onClick() })
+    await act(async () => { await buttonByText(/预览导出/u).props.onClick() })
     assert.equal(planned, 1)
     assert.ok(renderer!.root.findByProps({ 'aria-label': 'NFO 导出计划预览' }))
 
-    await act(async () => { await buttonByText(/执行 2 个写入项/u).props.onClick() })
+    const cover = renderer!.root.findAllByType('input')[1]
+    await act(async () => { cover.props.onChange({ target: { checked: false } }) })
+    assert.deepEqual(discarded, [returnedPlan().planId])
+    assert.equal(renderer!.root.findAllByProps({ 'aria-label': 'NFO 导出计划预览' }).length, 0)
+    assert.match(instanceText(renderer!.root), /设置已更改，请重新预览/u)
+    await act(async () => { await buttonByText(/预览导出/u).props.onClick() })
+
+    await act(async () => { await buttonByText(/导出 2 个文件/u).props.onClick() })
     assert.equal(blocking, true)
     await act(async () => {
       stateListener?.({
@@ -182,8 +189,7 @@ describe('NFO export foreground modal', () => {
       getOptions: async () => ({
         libraries: [{ id: 1, name: 'Main' }],
         profiles: [{
-          id: 'portable-v1', label: '通用 / Kodi', description: 'Portable',
-          supportsSampleReferences: true
+          id: 'portable-v1', label: '通用 / Kodi', description: 'Portable'
         }],
         preferences: {
           libraryIds: [1], profileId: 'portable-v1', includeCover: true,
@@ -205,7 +211,7 @@ describe('NFO export foreground modal', () => {
       await Promise.resolve()
     })
     const generate = renderer!.root.findAllByType('button').find((button) =>
-      instanceText(button).includes('生成计划')
+      instanceText(button).includes('预览导出')
     )!
     act(() => { generate.props.onClick() })
     act(() => { renderer!.unmount() })
@@ -230,8 +236,7 @@ describe('NFO export foreground modal', () => {
       getOptions: async () => ({
         libraries: [{ id: 1, name: 'Main' }],
         profiles: [{
-          id: 'portable-v1', label: '通用 / Kodi', description: 'Portable',
-          supportsSampleReferences: true
+          id: 'portable-v1', label: '通用 / Kodi', description: 'Portable'
         }],
         preferences: {
           libraryIds: [1], profileId: 'portable-v1', includeCover: true,
@@ -255,10 +260,10 @@ describe('NFO export foreground modal', () => {
     const buttonByText = (pattern: RegExp) => renderer!.root.findAllByType('button')
       .find((button) => pattern.test(instanceText(button)))!
     await act(async () => {
-      buttonByText(/生成计划/u).props.onClick()
+      buttonByText(/预览导出/u).props.onClick()
       await new Promise<void>((resolve) => setImmediate(resolve))
     })
-    act(() => { buttonByText(/执行 2 个写入项/u).props.onClick() })
+    act(() => { buttonByText(/导出 2 个文件/u).props.onClick() })
     act(() => { renderer!.unmount() })
     renderer = null
     await act(async () => {
@@ -268,5 +273,69 @@ describe('NFO export foreground modal', () => {
     })
 
     assert.deepEqual(terminated, ['late-task'])
+  })
+})
+
+describe('NFO export preview details', () => {
+  it('counts only new and replaced artwork in the writing breakdown', async () => {
+    const { PlanPreview } = await import('./NfoExportPanel')
+    const preview = returnedPlan()
+    preview.files = [
+      { ...preview.files[0], action: 'skip-existing' },
+      { ...preview.files[0], id: 'sample1', kind: 'sample', action: 'create' },
+      { ...preview.files[0], id: 'sample2', kind: 'sample', action: 'replace' },
+      { ...preview.files[0], id: 'sample3', kind: 'sample', action: 'skip-existing' },
+      { ...preview.files[0], id: 'cover', kind: 'cover', action: 'unavailable' }
+    ]
+    Object.assign(preview.summary, { fileCount: 5, createCount: 1, replaceCount: 1, skipCount: 2, unavailableCount: 1, sampleCount: 3 })
+    act(() => { renderer = TestRenderer.create(<PlanPreview preview={preview} />) })
+    assert.equal(instanceText(renderer!.root.findByProps({ 'aria-label': '本次写入组成' })), '本次写入：样张备份 2')
+    preview.files = preview.files.map((file) => ({ ...file, action: 'skip-existing' }))
+    Object.assign(preview.summary, { createCount: 0, replaceCount: 0, skipCount: 5, unavailableCount: 0 })
+    act(() => { renderer!.update(<PlanPreview preview={preview} />) })
+    assert.match(instanceText(renderer!.root), /无需写入.*已有文件已保留/u)
+    assert.equal(renderer!.root.findAllByProps({ 'aria-label': '本次写入组成' }).length, 0)
+  })
+
+  it('distinguishes stopped, partial and empty reports and exposes stop errors in the dialog', async () => {
+    const { ExportProgressModal } = await import('./NfoExportPanel')
+    const state = { ...running(), error: '连接暂时不可用' }
+    act(() => { renderer = TestRenderer.create(<ExportProgressModal modal={state} onTerminate={async () => undefined} onClose={() => undefined} />) })
+    assert.equal(instanceText(renderer!.root.findByProps({ role: 'alert' })), state.error)
+    assert.match(instanceText(renderer!.root), /重试停止/u)
+    for (const [terminated, writtenCount, failedCount, title] of [
+      [true, 1, 0, '已停止导出'], [false, 1, 1, '部分导出完成'],
+      [false, 0, 1, '未写入文件'], [false, 1, 0, '导出完成']
+    ] as const) {
+      const modal = { ...running(), report: { taskId: 'task', startedAt: '', finishedAt: '', terminated, writtenCount, failedCount, skippedCount: 0, items: [] } }
+      act(() => { renderer!.update(<ExportProgressModal modal={modal} onTerminate={async () => undefined} onClose={() => undefined} />) })
+      assert.equal(instanceText(renderer!.root.findByType('h3')), title)
+      assert.equal(instanceText(renderer!.root).includes('前往目标软件刷新'), writtenCount > 0)
+    }
+  })
+
+  it('mounts only the opened page of a large warning list and keeps every warning reachable', async () => {
+    const { PlanPreview } = await import('./NfoExportPanel')
+    const preview = returnedPlan()
+    preview.warnings = Array.from({ length: 749 }, (_, index) => `提示 ${index + 1}`)
+    preview.summary.warningCount = preview.warnings.length
+    act(() => { renderer = TestRenderer.create(<PlanPreview preview={preview} />) })
+    assert.equal(renderer!.root.findAllByType('li').length, 0)
+    assert.equal(instanceText(renderer!.root).includes(preview.files[0].displayName), false)
+    const details = renderer!.root.findAllByType('details')[0]
+    act(() => { details.props.onToggle({ currentTarget: { open: true } }) })
+    assert.equal(renderer!.root.findAllByType('li').length, 50)
+    const visited: string[] = []
+    for (let page = 0; page < 15; page += 1) {
+      visited.push(...renderer!.root.findAllByType('li').map(instanceText))
+      const next = renderer!.root.findAllByType('button').find((button) => instanceText(button) === '下一页')!
+      assert.equal(next.props.disabled, page === 14)
+      if (page < 14) act(() => { next.props.onClick() })
+    }
+    assert.deepEqual(visited, preview.warnings)
+    act(() => { details.props.onToggle({ currentTarget: { open: false } }) })
+    assert.equal(renderer!.root.findAllByType('li').length, 0)
+    act(() => { renderer!.root.findAllByType('details')[1].props.onToggle({ currentTarget: { open: true } }) })
+    assert.match(instanceText(renderer!.root), /ABC-001 \/ ABC-001.nfoNFO新建/u)
   })
 })

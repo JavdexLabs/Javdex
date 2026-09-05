@@ -68,6 +68,7 @@ import {
   authorizeMediaLibraryRootFile
 } from '../services/mediaLibraryRootFileGuard'
 import {
+  getPendingResourceIdentityByPath,
   pendingResourceIdentityExists,
   upsertPendingResourceIdentity
 } from '../db/pendingResourceIdentityRepo'
@@ -79,8 +80,36 @@ import type {
   LocalNfoAnchor,
   LocalNfoIdentityInspection
 } from '../metadata-sources'
+import { indexNfoSidecars } from '../nfo/nfoSidecarLocator'
+import { getMediaLibraryConfig } from '../db/mediaLibraryRepo'
 
 export type ScanProgressFn = (progress: ScanProgress) => void
+
+/** Rescanning refreshes file evidence without choosing either pending identity. */
+function refreshPendingIdentity(
+  libraryId: number,
+  root: Readonly<MediaLibraryRoot>,
+  filePath: string,
+  target?: ParsedStrmTarget
+): boolean {
+  const pending = getPendingResourceIdentityByPath(libraryId, filePath)
+  if (!pending) return false
+  authorizeMediaLibraryRootFile(libraryId, root.id, filePath, root)
+  const fingerprint = statFileFingerprint(filePath)
+  if (!fingerprint) throw new Error('待确认资源无法读取，保留原身份待办。')
+  if (pending.sizeBytes !== fingerprint.file_size ||
+    pending.fileMtimeMs !== fingerprint.file_mtime_ms ||
+    (target && (pending.targetKind !== target.kind || pending.targetLocator !== target.locator ||
+      pending.targetKey !== target.targetKey))) {
+    upsertPendingResourceIdentity({
+      ...pending,
+      sizeBytes: fingerprint.file_size,
+      fileMtimeMs: fingerprint.file_mtime_ms,
+      ...(target ? { targetKind: target.kind, targetLocator: target.locator, targetKey: target.targetKey } : {})
+    })
+  }
+  return true
+}
 
 type ScanFileAuditWithoutRoot = LibraryScanFileAuditEntry extends infer Entry
   ? Entry extends LibraryScanFileAuditEntry
@@ -93,6 +122,8 @@ export interface ScanFoldersRequest {
   runId: string
   /** Accessible roots selected from the coordinator's immutable run snapshot. */
   roots: readonly Readonly<MediaLibraryRoot>[]
+  /** Restrict discovery to these files, e.g. after a rename; never scans other resources. */
+  filePaths?: readonly string[]
 }
 
 export interface ScanOptions {
@@ -436,6 +467,8 @@ export async function scanFolders(
   }
 
   const files: Array<{ filePath: string; root: Readonly<MediaLibraryRoot> }> = []
+  const directorySidecars = new Map<string, ReadonlyMap<string, string>>()
+  const directoryVideoCodes = new Map<string, Array<string | null>>()
   const readDirectory =
     options.readDirectory ??
     ((dir: string) => fs.promises.readdir(dir, { withFileTypes: true }))
@@ -446,7 +479,28 @@ export async function scanFolders(
       return result
     }
     const rootFiles: string[] = []
-    await collectScannableFiles(root.path, rootFiles, options.signal, readDirectory)
+    const readIndexedDirectory = async (directory: string): Promise<fs.Dirent[]> => {
+      const entries = await readDirectory(directory)
+      directorySidecars.set(directory, indexNfoSidecars(entries.map((entry) => entry.name)))
+      if (request.filePaths) {
+        directoryVideoCodes.set(directory, entries
+          .filter((entry) => entry.isFile() && (isVideoFile(entry.name) || isStrmFile(entry.name)))
+          .map((entry) => parseCode(path.basename(entry.name, path.extname(entry.name)))))
+      }
+      return entries
+    }
+    if (request.filePaths) {
+      // Targeted discovery uses one frozen root and still indexes siblings for NFO ownership.
+      if (roots.length !== 1) throw new Error('单文件重新识别必须指定唯一根目录')
+      for (const filePath of request.filePaths) {
+        authorizeMediaLibraryRootFile(libraryId, root.id, filePath, root)
+        rootFiles.push(filePath)
+        const directory = path.dirname(filePath)
+        if (!directorySidecars.has(directory)) await readIndexedDirectory(directory)
+      }
+    } else {
+      await collectScannableFiles(root.path, rootFiles, options.signal, readIndexedDirectory)
+    }
     files.push(...rootFiles.map((filePath) => ({ filePath, root })))
   }
   const yieldEvery = Math.max(1, options.yieldEvery ?? DEFAULT_YIELD_EVERY)
@@ -456,8 +510,8 @@ export async function scanFolders(
   const autoMergeSameCodeResources = options.autoMergeSameCodeResources ?? false
   const autoImportLocalNfo = options.autoImportLocalNfo ?? false
   const nfoService = options.localNfoService ?? localNfoScanService
-  const directoryVideoCodes = new Map<string, Array<string | null>>()
   for (const { filePath } of files) {
+    if (request.filePaths) break
     const directory = path.dirname(filePath)
     const codes = directoryVideoCodes.get(directory) ?? []
     codes.push(parseCode(path.basename(filePath, path.extname(filePath))))
@@ -483,7 +537,8 @@ export async function scanFolders(
       const anchor: LocalNfoAnchor = {
         root,
         anchorPath: filePath,
-        directoryVideoCodes: [...(directoryVideoCodes.get(path.dirname(filePath)) ?? [])]
+        directoryVideoCodes: directoryVideoCodes.get(path.dirname(filePath)) ?? [],
+        directorySidecars: directorySidecars.get(path.dirname(filePath))
       }
       let inspection: LocalNfoIdentityInspection
       try {
@@ -676,7 +731,7 @@ export async function scanFolders(
         }
 
         const code = codeForNewFile(file)
-        if (pendingResourceIdentityExists(libraryId, file)) {
+        if (refreshPendingIdentity(libraryId, root, file, target)) {
           recordFile({
             filePath: file,
             sourceKind: 'strm',
@@ -963,7 +1018,7 @@ export async function scanFolders(
         continue
       }
 
-      if (pendingResourceIdentityExists(libraryId, file)) {
+      if (refreshPendingIdentity(libraryId, root, file)) {
         recordFile({
           filePath: file,
           sourceKind: 'local',
@@ -1307,8 +1362,6 @@ export interface RenameAndImportRequest {
   rootId: number
   oldPath: string
   newName: string
-  code: string
-  target: VideoResourceImportTarget
 }
 
 export interface ManualImportRequest {
@@ -1339,30 +1392,24 @@ function assertManagedImportPath(
 
 /**
  * Rename a file on disk (keeping its original extension unless the new name
- * already carries one), then import it using the user's explicit code and target.
+ * already carries one), then rediscover it using the library's ordinary scan rules.
  * Used to fix up files the scanner couldn't recognize.
  */
 export async function renameAndImport(
   input: RenameAndImportRequest,
   options: RenameAndImportOptions = {}
 ): Promise<RenameImportResult> {
-  const { libraryId, rootId, oldPath, target } = input
+  const { libraryId, rootId, oldPath } = input
   if (!fs.existsSync(oldPath)) throw new Error('原文件不存在或已被移动')
   const expectedRoot = assertManagedImportPath(libraryId, rootId, oldPath)
+  const config = getMediaLibraryConfig(libraryId)
+  if (!config) throw new Error('媒体库配置不存在')
 
   const newName = input.newName.trim()
   if (!newName) throw new Error('文件名不能为空')
   if (ILLEGAL_NAME_CHARS.test(newName)) {
     throw new Error('文件名包含非法字符： \\ / : * ? " < > |')
   }
-  const code = normalizeVideoCode(input.code)
-  if (
-    target.kind === 'existing' &&
-    !listVideosByCode(code).some((video) => video.id === target.videoId)
-  ) {
-    throw new Error('所选影片不存在或番号已经变化')
-  }
-
   const dir = path.dirname(oldPath)
   const originalExt = path.extname(oldPath)
   // Keep the original extension unless the user already typed one.
@@ -1379,29 +1426,38 @@ export async function renameAndImport(
     fs.renameSync(oldPath, newPath)
   }
 
-  try {
-    const result = await importManual(
-      {
-        libraryId,
-        rootId,
-        filePath: newPath,
-        code,
-        target
-      },
-      { ...options, expectedRoot }
-    )
-    return { newPath, newName: path.basename(newPath), imported: result.imported, code }
-  } catch (error) {
-    if (!sameFile && fs.existsSync(newPath) && !fs.existsSync(oldPath)) {
-      try {
-        assertManagedImportPath(libraryId, rootId, newPath, expectedRoot)
-        fs.renameSync(newPath, oldPath)
-      } catch {
-        throw new Error(`导入失败且无法恢复原文件名：${error instanceof Error ? error.message : String(error)}`)
-      }
-    }
-    throw error
+  // Renaming is the requested operation. A failed recognition must not undo it.
+  const response: RenameImportResult = {
+    newPath, newName: path.basename(newPath), imported: false,
+    code: parseCode(path.basename(newPath, path.extname(newPath))), outcome: 'failed'
   }
+  const entries: LibraryScanFileAuditEntry[] = []
+  try {
+    const result = await scanFolders({
+      libraryId, runId: `rename:${rootId}`, roots: [expectedRoot], filePaths: [newPath]
+    }, undefined, {
+      ...options,
+      autoMergeSameCodeResources: config.autoMergeSameCodeResources,
+      autoImportLocalNfo: config.autoImportLocalNfo,
+      minImportDurationSeconds: config.minImportDurationMinutes * 60,
+      onFileResult: (entry) => entries.push(entry)
+    })
+    const entry = entries[0]
+    if (entry && 'videoCode' in entry) response.code = entry.videoCode ?? response.code
+    if (entry?.outcome === 'pending') response.code = entry.normalizedCode
+    response.imported = result.imported > 0 || result.relocated > 0 || result.refreshed > 0
+    response.outcome = response.imported ? 'imported'
+      : entry?.outcome === 'pending' ? 'pending'
+        : result.unrecognizedFiles.length > 0 ? 'unrecognized'
+          : result.failed > 0 ? 'failed' : 'skipped'
+    if (entry && 'message' in entry) response.message = entry.message
+    if (entry?.outcome === 'skipped' && entry.skipReason === 'below_min_duration') {
+      response.message = '低于媒体库设置的导入最小时长'
+    }
+  } catch (error) {
+    response.message = sanitizeLibraryScanError(error)
+  }
+  return response
 }
 
 /**

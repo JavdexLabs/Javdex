@@ -9,6 +9,9 @@ export const NFO_EXPORT_PROFILE_IDS = [
 export type NfoExportProfileId = (typeof NFO_EXPORT_PROFILE_IDS)[number]
 export type NfoExportCollisionPolicy = 'skip' | 'replace'
 
+/** File attachments, deliberately outside consumer artwork directories. */
+export const NFO_SAMPLE_BACKUP_DIRECTORY = 'javdex-samples'
+
 export interface NfoExportPreferences {
   libraryIds: number[]
   profileId: NfoExportProfileId
@@ -37,7 +40,6 @@ export interface NfoExportProfileOption {
   label: string
   description: string
   warning?: string
-  supportsSampleReferences: boolean
 }
 
 export interface NfoExportOptions {
@@ -53,6 +55,7 @@ export interface NfoExportPlanRequest extends NfoExportPreferences {
 export type NfoExportFileKind =
   | 'nfo'
   | 'cover'
+  | 'landscape'
   | 'fanart'
   | 'sample'
   | 'actor-avatar'

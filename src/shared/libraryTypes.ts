@@ -380,7 +380,7 @@ export type LibraryScanEvent =
       error: string
     }
 
-/** Outcome of renaming an unrecognized file and importing it into an explicit target. */
+/** Outcome of renaming a file and rediscovering it with the library's scan settings. */
 export interface RenameImportResult {
   /** New absolute path after rename. */
   newPath: string
@@ -388,8 +388,10 @@ export interface RenameImportResult {
   newName: string
   /** Whether the renamed file parsed into a code and was imported. */
   imported: boolean
-  /** Normalized user-supplied code used for the explicit import. */
-  code: string
+  /** Code recognized from the renamed file or local NFO. */
+  code: string | null
+  outcome: 'imported' | 'pending' | 'unrecognized' | 'skipped' | 'failed'
+  message?: string
 }
 
 /** Outcome of manual import with a user-supplied code (no format validation). */

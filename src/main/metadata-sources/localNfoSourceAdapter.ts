@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { NFO_SAMPLE_BACKUP_DIRECTORY } from '@shared/nfoExportTypes'
 import type { ActressGender } from '@shared/actressTypes'
 import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
 import type { ScrapeResult, VideoScrapeField } from '@shared/videoScrapeTypes'
@@ -16,7 +17,7 @@ import { isStrmFile } from '../scanner/strmParser'
 import { authorizeMediaLibraryRootFile } from '../services/mediaLibraryRootFileGuard'
 import { createNfoFileStore, type NfoFileStore } from '../nfo/nfoFileStore'
 import { parseNfoArtifact, type NormalizedNfoArtifact } from '../nfo/nfoArtifactCodec'
-import { locateNfoSidecar } from '../nfo/nfoSidecarLocator'
+import { locateNfoSidecar, sameLogicalCode } from '../nfo/nfoSidecarLocator'
 import { projectVideoScrapeResult } from '../scrapers/videoScrapeFieldProjection'
 import type {
   MetadataAssetRef,
@@ -47,7 +48,8 @@ export const LOCAL_NFO_SUPPORTED_FIELDS = [
 export interface LocalNfoAnchor {
   root: Readonly<MediaLibraryRoot>
   anchorPath: string
-  directoryVideoCodes: Array<string | null>
+  directoryVideoCodes: readonly (string | null)[]
+  directorySidecars?: ReadonlyMap<string, string>
 }
 
 export interface LocalNfoSourceAdapterOptions {
@@ -157,12 +159,20 @@ function filesByStem(directory: string, stems: string[]): string[] {
     .map((entry) => path.join(directory, entry.name))
 }
 
-function extraFanartFiles(directory: string): string[] {
-  const target = path.join(directory, 'extrafanart')
+function sampleDirectoryFiles(directory: string, subdirectory: string, stem: string, singleVideoDirectory: boolean): string[] {
+  const target = path.join(directory, subdirectory)
   try {
     return fs
       .readdirSync(target)
       .filter((name) => IMAGE_EXTENSIONS.has(path.extname(name).toLowerCase()))
+      .filter((name) => {
+        const prefix = `${stem.toLowerCase()}-`
+        const basename = path.parse(name).name.toLowerCase()
+        if (subdirectory === NFO_SAMPLE_BACKUP_DIRECTORY) {
+          return basename.startsWith(prefix) && /^\d+$/u.test(basename.slice(prefix.length))
+        }
+        return singleVideoDirectory || basename.startsWith(prefix)
+      })
       .sort(naturalOrder.compare)
       .map((name) => path.join(target, name))
   } catch {
@@ -181,6 +191,7 @@ function collectLocalAssets(input: {
   actors: NormalizedNfoArtifact['actors']
   anchorPath: string
   root: Readonly<MediaLibraryRoot>
+  directoryVideoCodes: readonly (string | null)[]
   fileStore: NfoFileStore
   selectedFields: ReadonlySet<VideoScrapeField>
 }): { assets: MetadataAssetRef[]; warnings: string[] } {
@@ -189,6 +200,7 @@ function collectLocalAssets(input: {
   const warnings: string[] = []
   const seenPhysical = new Set<string>()
   const assets: MetadataAssetRef[] = []
+  const singleVideoDirectory = sameLogicalCode(input.directoryVideoCodes)
 
   const add = (
     field: Extract<MetadataAssetRef, { kind: 'managed-root-file' }>['field'],
@@ -216,7 +228,8 @@ function collectLocalAssets(input: {
   if (input.selectedFields.has('cover')) {
     const coverCandidates = [
       ...input.model.coverReferences.map((reference) => referencePath(directory, reference)),
-      ...filesByStem(directory, [`${stem}-poster`, 'poster', 'folder', 'cover'])
+      ...filesByStem(directory, [`${stem}-poster`,
+        ...(singleVideoDirectory ? ['poster', 'folder', 'cover'] : [])])
     ]
     for (const candidate of coverCandidates) {
       if (add('cover', 0, candidate)) break
@@ -224,15 +237,17 @@ function collectLocalAssets(input: {
   }
 
   if (input.selectedFields.has('samples')) {
-    const sampleCandidates = [
-      ...input.model.sampleReferences.map((reference) => referencePath(directory, reference)),
-      ...filesByStem(directory, [
-        `${stem}-fanart`,
-        'fanart',
-        'backdrop',
-        'background'
-      ]),
-      ...extraFanartFiles(directory)
+    const backupFiles = sampleDirectoryFiles(directory, NFO_SAMPLE_BACKUP_DIRECTORY, stem, false)
+    const hasReferences = input.model.sampleReferences.length > 0
+    // New backups contain only samples. Do not mix their background or legacy copies back in.
+    const sampleCandidates = backupFiles.length > 0 ? backupFiles : [
+      ...(hasReferences
+        ? input.model.sampleReferences.map((reference) => referencePath(directory, reference))
+        : filesByStem(directory, [`${stem}-fanart`,
+            ...(singleVideoDirectory ? ['fanart', 'backdrop', 'background'] : [])])),
+      // Plex/Infuse reference the background but leave exported samples out of XML.
+      // Supplement explicit references only with files owned by this exact video stem.
+      ...sampleDirectoryFiles(directory, 'extrafanart', stem, singleVideoDirectory && !hasReferences)
     ]
     let position = 0
     for (const candidate of sampleCandidates) {
@@ -268,7 +283,7 @@ export class LocalNfoSourceAdapter implements VideoMetadataSource {
     name: LOCAL_NFO_SOURCE_NAME,
     kind: 'local-nfo',
     origin: 'host',
-    version: '1',
+    version: '1.0.0',
     supportedFields: [...LOCAL_NFO_SUPPORTED_FIELDS]
   }
 
@@ -287,6 +302,7 @@ export class LocalNfoSourceAdapter implements VideoMetadataSource {
       anchorPath: anchor.anchorPath,
       root: anchor.root,
       directoryVideoCodes: anchor.directoryVideoCodes,
+      directorySidecars: anchor.directorySidecars,
       fileStore: this.options.fileStore
     })
     const warnings = located.warnings.map((warning) => warning.message)
@@ -333,6 +349,7 @@ export class LocalNfoSourceAdapter implements VideoMetadataSource {
         anchorPath: anchor.anchorPath,
         root: anchor.root,
         directoryVideoCodes: anchor.directoryVideoCodes,
+        directorySidecars: anchor.directorySidecars,
         fileStore: this.options.fileStore
       })
       warnings.push(...located.warnings.map((warning) => warning.message))
@@ -394,6 +411,7 @@ export class LocalNfoSourceAdapter implements VideoMetadataSource {
         actors: projectedActors,
         anchorPath: anchor.anchorPath,
         root: anchor.root,
+        directoryVideoCodes: anchor.directoryVideoCodes,
         fileStore: this.options.fileStore,
         selectedFields
       })

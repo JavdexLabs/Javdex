@@ -4,9 +4,13 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
+import { resolveMediaLibraryRootIdentity } from '@shared/mediaLibraryRootPath'
 import type { NfoExportPlanRequest } from '@shared/nfoExportTypes'
 import { NfoExportModule } from './nfoExportModule'
 import type { NfoExportRepository, NfoExportResourceSnapshot } from './nfoExportRepository'
+import { LocalNfoSourceAdapter } from '../../metadata-sources'
+import { createNfoFileStore } from '../nfoFileStore'
+import { assertMediaLibraryRootFile } from '../../services/mediaLibraryRootFileGuard'
 
 const JPEG_1X1 = Buffer.from(
   'ffd8ffe000104a4649460000010101004800480000ffdb004300080606070605080707070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d1a1c1c20242e2720222c231c1c2837292c30313434341f27393d38323c2e333432ffc0000b080001000101011100ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191082242b1c11552d1f0243362728292a35363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffda0008010100003f007b941100ffd9',
@@ -95,16 +99,106 @@ function moduleWith(
     },
     authorizeAnchor: (_libraryId, _rootId, _filePath, expectedRoot) => expectedRoot!,
     now: () => new Date('2026-09-05T00:00:00.000Z'),
+    // Native codecs are exercised in the real Electron artwork integration test.
+    decodeCoverImage: () => ({
+      isEmpty: () => false,
+      getSize: () => ({ width: 1, height: 1 }),
+      toJPEG: () => JPEG_1X1
+    }) as unknown as Electron.NativeImage,
     ...overrides
   })
 }
 
-describe('NfoExportModule', () => {
+describe('NfoExportModule', async () => {
+  it('inspects each plan anchor once and reuses the returned canonical directory', async () => {
+    const fixture = setup()
+    const current = { value: snapshot(fixture.anchor, fixture.root) }
+    let inspections = 0
+    const module = moduleWith(current, {
+      createPlanAnchorInspector: () => (_libraryId, _rootId, filePath, root) => {
+        inspections += 1
+        return { root: root!, realPath: root!.realPath!, fileRealPath: filePath, stat: fs.statSync(filePath) }
+      }
+    })
+
+    await module.plan(request)
+    assert.equal(inspections, 1)
+  })
+
+  it('reads selected images linearly and isolates assets that fail or change after planning', async () => {
+    const fixture = setup()
+    const current = { value: {
+      ...snapshot(fixture.anchor, fixture.root),
+      samples: Array.from({ length: 50 }, (_, index) => `samples/${index}.jpg`)
+    } }
+    let reads = 0
+    let applying = false
+    const module = moduleWith(current, {
+      assetStore: {
+        readBytes: (storedPath) => {
+          reads += 1
+          if (applying && storedPath === current.value.coverPath) throw new Error('image unavailable')
+          if (applying && storedPath === current.value.samples[0]) return Buffer.from('changed image')
+          return JPEG_1X1
+        },
+        detectImageExtension: () => '.jpg'
+      }
+    })
+    const plan = await module.plan({ ...request, includeSamples: true })
+    assert.ok(reads <= 51, `planning read ${reads} images for 51 assets`)
+    reads = 0
+    applying = true
+    const report = await module.apply(plan, 'linear', { isTerminated: () => false }, () => undefined)
+    assert.equal(report.items.find((item) => item.kind === 'nfo')?.disposition, 'written')
+    assert.equal(report.items.find((item) => item.kind === 'cover')?.disposition, 'failed')
+    assert.equal(report.items.filter((item) => item.disposition === 'stale-plan').length, 1)
+    assert.equal(report.writtenCount, 50)
+    assert.ok(reads <= 51, `execution read ${reads} images for 51 assets`)
+  })
+
+  it('shares identical actor avatars across videos and removes references to conflicting content', async () => {
+    const fixture = setup()
+    const otherAnchor = path.join(tempRoot!, 'OTHER-001.mp4')
+    fs.writeFileSync(otherAnchor, 'video')
+    const first = {
+      ...snapshot(fixture.anchor, fixture.root),
+      actors: [{ name: 'Alice', avatarPath: 'avatars/alice.jpg', actressRevision: 1 }]
+    }
+    const second = { ...first, resourceId: 11, videoId: 21, code: 'OTHER-001', anchorPath: otherAnchor }
+    const snapshots = [first, second]
+    const module = moduleWith({ value: first }, {
+      repository: {
+        listActiveLibraries: () => [],
+        listResourceSnapshots: () => snapshots,
+        getResourceSnapshot: (id) => snapshots.find((item) => item.resourceId === id) ?? null
+      },
+      assetStore: {
+        readBytes: (storedPath) => Buffer.from(storedPath),
+        detectImageExtension: () => '.jpg'
+      }
+    })
+    const options = { ...request, includeCover: false, includeActorAvatars: true, collisionPolicy: 'replace' as const }
+    const shared = await module.plan(options)
+    assert.equal(shared.preview.summary.conflictCount, 0)
+    assert.equal(shared.preview.files.filter((file) => file.kind === 'actor-avatar').length, 1)
+    const report = await module.apply(shared, 'shared-avatar', { isTerminated: () => false }, () => undefined)
+    assert.equal(report.writtenCount, 3)
+    assert.equal(fs.readFileSync(path.join(tempRoot!, '.actors', 'Alice.jpg'), 'utf8'), 'avatars/alice.jpg')
+
+    second.actors = [{ name: 'Alice', avatarPath: 'avatars/different.jpg', actressRevision: 1 }]
+    const conflict = await module.plan(options)
+    assert.equal(conflict.preview.summary.conflictCount, 1)
+    await module.apply(conflict, 'conflicting-avatar', { isTerminated: () => false }, () => undefined)
+    for (const anchor of [fixture.anchor, otherAnchor]) {
+      assert.doesNotMatch(fs.readFileSync(anchor.replace(/\.mp4$/u, '.nfo'), 'utf8'), /<thumb>\.actors\//u)
+    }
+  })
+
   it('plans without writing and applies an exact-stem NFO plus portable cover', async () => {
     const fixture = setup()
     const current = { value: snapshot(fixture.anchor, fixture.root) }
     const module = moduleWith(current)
-    const plan = module.plan(request)
+    const plan = await module.plan(request)
 
     assert.equal(fs.existsSync(path.join(tempRoot!, 'ABP-123.nfo')), false)
     assert.equal(fs.existsSync(path.join(tempRoot!, 'ABP-123-poster.jpg')), false)
@@ -125,10 +219,10 @@ describe('NfoExportModule', () => {
     const current = { value: snapshot(fixture.anchor, fixture.root) }
     fs.writeFileSync(path.join(tempRoot!, 'ABP-123.nfo'), 'existing')
     const module = moduleWith(current)
-    const skipped = module.plan(request)
+    const skipped = await module.plan(request)
     assert.equal(skipped.preview.files.find((file) => file.kind === 'nfo')?.action, 'skip-existing')
 
-    const replacement = module.plan({ ...request, collisionPolicy: 'replace' })
+    const replacement = await module.plan({ ...request, collisionPolicy: 'replace' })
     fs.writeFileSync(path.join(tempRoot!, 'ABP-123.nfo'), 'changed after plan')
     const report = await module.apply(replacement, 'task-2', { isTerminated: () => false }, () => undefined)
     const nfo = report.items.find((item) => item.kind === 'nfo')
@@ -140,14 +234,14 @@ describe('NfoExportModule', () => {
     const fixture = setup()
     const current = { value: snapshot(fixture.anchor, fixture.root) }
     const module = moduleWith(current)
-    const plan = module.plan(request)
+    const plan = await module.plan(request)
     current.value = { ...current.value, title: 'Changed' }
     const report = await module.apply(plan, 'task-3', { isTerminated: () => false }, () => undefined)
     assert.equal(report.items.every((item) => item.disposition === 'stale-plan'), true)
     assert.equal(fs.existsSync(path.join(tempRoot!, 'ABP-123.nfo')), false)
   })
 
-  it('exports a local STRM source anchor and counts resources without anchors separately', () => {
+  it('exports a local STRM source anchor and counts resources without anchors separately', async () => {
     const fixture = setup()
     const withAnchor = { ...snapshot(fixture.anchor, fixture.root), kind: 'direct' }
     const withoutAnchor = { ...snapshot(fixture.anchor, fixture.root), resourceId: 11, anchorPath: null, rootId: null, root: null }
@@ -162,7 +256,7 @@ describe('NfoExportModule', () => {
       authorizeAnchor: (_a, _b, _c, root) => root!,
       now: () => new Date('2026-09-05T00:00:00.000Z')
     })
-    const plan = module.plan(request)
+    const plan = await module.plan(request)
     assert.equal(plan.preview.summary.resourceCount, 1)
     assert.equal(plan.preview.summary.skippedNoAnchorCount, 1)
   })
@@ -171,7 +265,7 @@ describe('NfoExportModule', () => {
     const fixture = setup()
     const current = { value: snapshot(fixture.anchor, fixture.root) }
     const module = moduleWith(current)
-    const plan = module.plan(request)
+    const plan = await module.plan(request)
     let terminated = false
     const report = await module.apply(
       plan,
@@ -195,12 +289,12 @@ describe('NfoExportModule', () => {
         readBytes: () => JPEG_1X1,
         detectImageExtension: () => '.webp'
       },
-      encodeImage: () => { throw new Error('decode failed') }
+        decodeCoverImage: () => { throw new Error('decode failed') }
     })
-    const plan = module.plan(request)
-    const report = await module.apply(plan, 'task-5', { isTerminated: () => false }, () => undefined)
-    assert.equal(report.items.find((item) => item.kind === 'nfo')?.disposition, 'written')
-    assert.equal(report.items.find((item) => item.kind === 'cover')?.disposition, 'failed')
+    const plan = await module.plan(request)
+      const report = await module.apply(plan, 'task-5', { isTerminated: () => false }, () => undefined)
+      assert.equal(report.items.find((item) => item.kind === 'nfo')?.disposition, 'written')
+      assert.equal(report.items.find((item) => item.kind === 'cover')?.disposition, 'unavailable')
   })
 
   it('reports an atomic write failure per item and continues later files', async () => {
@@ -214,27 +308,42 @@ describe('NfoExportModule', () => {
         fs.writeFileSync(targetPath, bytes)
       }
     })
-    const report = await module.apply(module.plan(request), 'task-6', { isTerminated: () => false }, () => undefined)
+    const report = await module.apply(await module.plan(request), 'task-6', { isTerminated: () => false }, () => undefined)
     assert.equal(report.items[0].disposition, 'failed')
     assert.equal(report.items[1].disposition, 'written')
   })
 
-  it('plans samples and actor avatars with stable portable paths and references', async () => {
+  it('exports samples as separate attachments and reads them back without background images', async () => {
     const fixture = setup()
+    Object.assign(fixture.root, resolveMediaLibraryRootIdentity(fixture.root.path))
     const current = { value: {
       ...snapshot(fixture.anchor, fixture.root),
+      posterPath: 'background.jpg',
       samples: ['samples/first.jpg', 'samples/second.jpg'],
-      actors: [{ name: 'Alice / A', gender: 'female' as const, avatarPath: 'avatars/alice.jpg', actressRevision: 2 }]
+      actors: [{ name: 'Alice Smith', gender: 'female' as const, avatarPath: 'avatars/alice.jpg', actressRevision: 2 }]
     } }
     const module = moduleWith(current)
-    const plan = module.plan({ ...request, includeSamples: true, includeActorAvatars: true })
+    const plan = await module.plan({ ...request, includeSamples: true, includeActorAvatars: true })
     assert.equal(plan.preview.summary.sampleCount, 2)
-    assert.equal(plan.preview.files.some((file) => file.displayName.endsWith('extrafanart/ABP-123-001.jpg')), true)
-    assert.equal(plan.preview.files.some((file) => file.displayName.endsWith('.actors/Alice _ A.jpg')), true)
+    assert.equal(plan.preview.files.some((file) => file.displayName.endsWith(path.join('javdex-samples', 'ABP-123-001.jpg'))), true)
+    assert.equal(plan.preview.files.some((file) => file.displayName.endsWith(path.join('.actors', 'Alice_Smith.jpg'))), true)
     await module.apply(plan, 'task-7', { isTerminated: () => false }, () => undefined)
     const nfo = fs.readFileSync(path.join(tempRoot!, 'ABP-123.nfo'), 'utf8')
-    assert.match(nfo, /extrafanart\/ABP-123-002.jpg/u)
-    assert.match(nfo, /\.actors\/Alice _ A.jpg/u)
+    assert.doesNotMatch(nfo, /extrafanart|javdex-samples|ABP-123-002.jpg/u)
+    assert.match(nfo, /<thumb>ABP-123-fanart.jpg<\/thumb>/u)
+    assert.match(nfo, /<name>Alice Smith<\/name>/u)
+    assert.match(nfo, /\.actors\/Alice_Smith.jpg/u)
+    const source = new LocalNfoSourceAdapter({
+      listAnchors: () => [{ root: fixture.root, anchorPath: fixture.anchor, directoryVideoCodes: ['ABP-123'] }],
+      fileStore: createNfoFileStore({ authorize: assertMediaLibraryRootFile }),
+      findExistingActorGender: () => null
+    })
+    const collected = await source.collect({ target: { kind: 'video', videoId: 20, code: 'ABP-123' }, fields: ['samples', 'actressesFemale'] })
+    assert.equal(collected.candidates.length, 1, JSON.stringify(collected.warnings))
+    assert.deepEqual(collected.candidates[0]?.assets.filter((asset) => asset.field === 'samples').map((asset) =>
+      asset.kind === 'managed-root-file' ? asset.filename : null), ['ABP-123-001.jpg', 'ABP-123-002.jpg'])
+    assert.deepEqual(collected.candidates[0]?.assets.filter((asset) => asset.field === 'actressAvatar').map((asset) =>
+      asset.kind === 'managed-root-file' ? asset.filename : null), ['Alice_Smith.jpg'])
   })
 
   it('marks colliding sanitized actor avatar targets and omits ambiguous NFO references', async () => {
@@ -252,7 +361,7 @@ describe('NfoExportModule', () => {
         detectImageExtension: () => '.jpg'
       }
     })
-    const plan = module.plan({ ...request, includeActorAvatars: true })
+    const plan = await module.plan({ ...request, includeActorAvatars: true })
 
     assert.equal(plan.preview.files.some((file) =>
       file.kind === 'actor-avatar' && file.action === 'conflict'), true)
@@ -261,7 +370,7 @@ describe('NfoExportModule', () => {
     assert.doesNotMatch(fs.readFileSync(path.join(tempRoot!, 'ABP-123.nfo'), 'utf8'), /<thumb>\.actors\//u)
   })
 
-  it('treats case and Unicode-normalization-equivalent actor targets as collisions', () => {
+  it('treats case, Unicode and space-to-underscore actor targets as collisions', async () => {
     const fixture = setup()
     const current = { value: {
       ...snapshot(fixture.anchor, fixture.root),
@@ -269,10 +378,12 @@ describe('NfoExportModule', () => {
         { name: 'Alice', avatarPath: 'avatars/one.jpg', actressRevision: 1 },
         { name: 'alice', avatarPath: 'avatars/two.jpg', actressRevision: 1 },
         { name: 'Cafe\u0301', avatarPath: 'avatars/three.jpg', actressRevision: 1 },
-        { name: 'Café', avatarPath: 'avatars/four.jpg', actressRevision: 1 }
+        { name: 'Café', avatarPath: 'avatars/four.jpg', actressRevision: 1 },
+        { name: 'Alice Smith', avatarPath: 'avatars/five.jpg', actressRevision: 1 },
+        { name: 'Alice_Smith', avatarPath: 'avatars/six.jpg', actressRevision: 1 }
       ]
     } }
-    const plan = moduleWith(current, {
+    const plan = await moduleWith(current, {
       assetStore: {
         readBytes: (storedPath) => Buffer.from(storedPath, 'utf8'),
         detectImageExtension: () => '.jpg'
@@ -280,19 +391,19 @@ describe('NfoExportModule', () => {
     }).plan({ ...request, includeActorAvatars: true })
 
     assert.equal(plan.preview.files.filter((file) =>
-      file.kind === 'actor-avatar' && file.action === 'conflict').length, 2)
+      file.kind === 'actor-avatar' && file.action === 'conflict').length, 3)
     assert.equal(plan.preview.warnings.some((warning) => warning.includes('演员头像目标发生碰撞')), true)
   })
 
-  it('makes Windows device actor names portable before planning their target', () => {
+  it('makes Windows device actor names portable before planning their target', async () => {
     const fixture = setup()
     const current = { value: {
       ...snapshot(fixture.anchor, fixture.root),
       actors: [{ name: 'CON', avatarPath: 'avatars/con.jpg', actressRevision: 1 }]
     } }
-    const plan = moduleWith(current).plan({ ...request, includeActorAvatars: true })
+    const plan = await moduleWith(current).plan({ ...request, includeActorAvatars: true })
     assert.equal(plan.preview.files.some((file) =>
-      file.kind === 'actor-avatar' && file.displayName.endsWith('.actors/_CON.jpg')), true)
+      file.kind === 'actor-avatar' && file.displayName.endsWith(path.join('.actors', '_CON.jpg'))), true)
   })
 
   it('keeps unreadable selected images as unavailable plan items without blocking NFO', async () => {
@@ -304,14 +415,14 @@ describe('NfoExportModule', () => {
         detectImageExtension: () => null
       }
     })
-    const plan = module.plan(request)
+    const plan = await module.plan(request)
     assert.equal(plan.preview.summary.unavailableCount, 1)
     const report = await module.apply(plan, 'task-8', { isTerminated: () => false }, () => undefined)
     assert.equal(report.items.find((item) => item.kind === 'nfo')?.disposition, 'written')
     assert.equal(report.items.find((item) => item.kind === 'cover')?.disposition, 'unavailable')
   })
 
-  it('warns about requested missing artwork, avatars, and populated fields omitted by a profile', () => {
+  it('warns about requested missing artwork, avatars, and populated fields omitted by a profile', async () => {
     const fixture = setup()
     const current = { value: {
       ...snapshot(fixture.anchor, fixture.root),
@@ -322,7 +433,7 @@ describe('NfoExportModule', () => {
       actors: [{ name: 'Alice', gender: 'female' as const, actressRevision: 1 }]
     } }
     const module = moduleWith(current)
-    const plan = module.plan({
+    const plan = await module.plan({
       ...request,
       profileId: 'infuse-current',
       includeActorAvatars: true
@@ -338,13 +449,13 @@ describe('NfoExportModule', () => {
     const fixture = setup()
     const current = { value: snapshot(fixture.anchor, fixture.root) }
     const module = moduleWith(current)
-    const plan = module.plan({ ...request, profileId: 'infuse-current' })
+    const plan = await module.plan({ ...request, profileId: 'infuse-current' })
     assert.equal(plan.preview.files.some((file) => file.displayName.endsWith('ABP-123.jpg')), true)
     await module.apply(plan, 'task-9', { isTerminated: () => false }, () => undefined)
     assert.match(fs.readFileSync(path.join(tempRoot!, 'ABP-123.nfo'), 'utf8'), /<thumb aspect="poster">ABP-123.jpg<\/thumb>/u)
   })
 
-  it('plans each physical resource, deduplicates identical targets, and warns only on same-directory identity collisions', () => {
+  it('plans each physical resource, deduplicates identical targets, and warns only on same-directory identity collisions', async () => {
     const fixture = setup()
     const secondDirectory = path.join(tempRoot!, 'second')
     fs.mkdirSync(secondDirectory)
@@ -365,19 +476,23 @@ describe('NfoExportModule', () => {
       authorizeAnchor: (_a, _b, _c, root) => root!,
       now: () => new Date('2026-09-05T00:00:00.000Z')
     })
-    const plan = module.plan(request)
+    const plan = await module.plan(request)
     assert.equal(plan.preview.summary.resourceCount, 3)
     assert.equal(plan.preview.summary.videoCount, 1)
     assert.equal(plan.preview.files.length, 4)
     assert.equal(plan.preview.warnings.some((warning) => /相同规范化番号/u.test(warning)), false)
 
     list = [first, { ...first, resourceId: 13, videoId: 21 }]
-    const conflict = module.plan(request)
+    const conflict = await module.plan(request)
     assert.equal(conflict.preview.summary.conflictCount, 2)
     assert.equal(conflict.preview.warnings.some((warning) => /相同规范化番号/u.test(warning)), true)
   })
 
   it('reports real read-only directory failures without leaving temporary files', async (context) => {
+    if (process.platform === 'win32') {
+      context.skip('Windows directory permissions require ACLs, not POSIX mode bits')
+      return
+    }
     if (typeof process.getuid === 'function' && process.getuid() === 0) {
       context.skip('root can write through read-only mode bits')
       return
@@ -385,7 +500,7 @@ describe('NfoExportModule', () => {
     const fixture = setup()
     const current = { value: snapshot(fixture.anchor, fixture.root) }
     const module = moduleWith(current)
-    const plan = module.plan(request)
+    const plan = await module.plan(request)
     fs.chmodSync(tempRoot!, 0o555)
     let dispositions: string[] = []
     try {
@@ -403,8 +518,8 @@ describe('NfoExportModule', () => {
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-nfo-export-outside-'))
     const current = { value: { ...snapshot(fixture.anchor, fixture.root), samples: ['samples/one.jpg'] } }
     const module = moduleWith(current)
-    const plan = module.plan({ ...request, includeSamples: true })
-    fs.symlinkSync(outside, path.join(tempRoot!, 'extrafanart'), 'dir')
+    const plan = await module.plan({ ...request, includeSamples: true })
+    fs.symlinkSync(outside, path.join(tempRoot!, 'javdex-samples'), 'dir')
     try {
       const report = await module.apply(plan, 'task-11', { isTerminated: () => false }, () => undefined)
       assert.equal(report.items.find((item) => item.kind === 'sample')?.disposition, 'stale-plan')
@@ -414,14 +529,14 @@ describe('NfoExportModule', () => {
     }
   })
 
-  it('does not fingerprint a nested export target through a pre-existing symlink', () => {
+  it('does not fingerprint a nested export target through a pre-existing symlink', async () => {
     const fixture = setup()
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-nfo-export-outside-'))
     const current = { value: { ...snapshot(fixture.anchor, fixture.root), samples: ['samples/one.jpg'] } }
     fs.writeFileSync(path.join(outside, 'ABP-123-001.jpg'), 'outside')
-    fs.symlinkSync(outside, path.join(tempRoot!, 'extrafanart'), 'dir')
+    fs.symlinkSync(outside, path.join(tempRoot!, 'javdex-samples'), 'dir')
     try {
-      const plan = moduleWith(current).plan({ ...request, includeSamples: true })
+      const plan = await moduleWith(current).plan({ ...request, includeSamples: true })
       assert.equal(plan.preview.files.find((file) => file.kind === 'sample')?.action, 'conflict')
       assert.equal(fs.readFileSync(path.join(outside, 'ABP-123-001.jpg'), 'utf8'), 'outside')
     } finally {
@@ -433,11 +548,11 @@ describe('NfoExportModule', () => {
     const fixture = setup()
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-nfo-export-outside-'))
     const current = { value: { ...snapshot(fixture.anchor, fixture.root), samples: ['samples/one.jpg'] } }
-    const nested = path.join(tempRoot!, 'extrafanart')
+    const nested = path.join(tempRoot!, 'javdex-samples')
     fs.mkdirSync(nested)
     fs.writeFileSync(path.join(nested, 'ABP-123-001.jpg'), JPEG_1X1)
     const module = moduleWith(current)
-    const plan = module.plan({ ...request, includeSamples: true })
+    const plan = await module.plan({ ...request, includeSamples: true })
     fs.rmSync(nested, { recursive: true })
     fs.writeFileSync(path.join(outside, 'ABP-123-001.jpg'), JPEG_1X1)
     fs.symlinkSync(outside, nested, 'dir')
@@ -458,13 +573,13 @@ describe('NfoExportModule', () => {
     const current = { value: snapshot(fixture.anchor, fixture.root) }
     const module = moduleWith(current)
     const nfoOnly = { ...request, includeCover: false, includeFanart: false }
-    await module.apply(module.plan(nfoOnly), 'task-mode-create', { isTerminated: () => false }, () => undefined)
+    await module.apply(await module.plan(nfoOnly), 'task-mode-create', { isTerminated: () => false }, () => undefined)
     const target = path.join(tempRoot!, 'ABP-123.nfo')
     assert.equal(fs.statSync(target).mode & 0o777, 0o666 & ~process.umask())
 
     fs.chmodSync(target, 0o640)
     await module.apply(
-      module.plan({ ...nfoOnly, collisionPolicy: 'replace' }),
+      await module.plan({ ...nfoOnly, collisionPolicy: 'replace' }),
       'task-mode-replace',
       { isTerminated: () => false },
       () => undefined

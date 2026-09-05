@@ -26,12 +26,40 @@ function emptyPlan(): InternalNfoExportPlan {
   }
 }
 
-describe('NfoExportTaskController', () => {
+describe('NfoExportTaskController', async () => {
+  it('keeps planning leases until an asynchronous plan settles, including disposal and failures', async () => {
+    const releases: string[] = []
+    let finish!: (plan: InternalNfoExportPlan) => void
+    const controller = new NfoExportTaskController(
+      { plan: () => new Promise((resolve) => { finish = resolve }), apply: async () => { throw new Error('unused') } },
+      { tryAcquire: () => ({ kind: 'nfo-export', release: () => releases.push('gate') }) },
+      { acquireStableReadLease: () => ({ release: () => releases.push('assets') }) }
+    )
+    const pending = controller.plan(request)
+    assert.equal(controller.hasActivePlanOrTask, true)
+    await assert.rejects(controller.plan(request), /正在生成预览/u)
+    const disposed = controller.dispose()
+    assert.deepEqual([...releases], [])
+    finish(emptyPlan())
+    await pending
+    await disposed
+    assert.deepEqual([...releases].sort(), ['assets', 'gate'])
+    assert.equal(controller.hasActivePlanOrTask, false)
+
+    const failing = new NfoExportTaskController(
+      { plan: async () => { throw new Error('planning failed') }, apply: async () => { throw new Error('unused') } },
+      { tryAcquire: () => ({ kind: 'nfo-export', release: () => releases.push('gate') }) },
+      { acquireStableReadLease: () => ({ release: () => releases.push('assets') }) }
+    )
+    await assert.rejects(failing.plan(request), /planning failed/u)
+    assert.equal(releases.length, 4)
+  })
+
   it('holds both leases from plan through apply and releases them at terminal state', async () => {
     const releases: string[] = []
     let finish!: (report: NfoExportReport) => void
     const module = {
-      plan: () => emptyPlan(),
+      plan: async () => emptyPlan(),
       apply: () => new Promise<NfoExportReport>((resolve) => { finish = resolve })
     }
     const controller = new NfoExportTaskController(
@@ -39,7 +67,7 @@ describe('NfoExportTaskController', () => {
       { tryAcquire: () => ({ kind: 'nfo-export', release: () => releases.push('gate') }) },
       { acquireStableReadLease: () => ({ release: () => releases.push('assets') }) }
     )
-    const preview = controller.plan(request)
+    const preview = await controller.plan(request)
     assert.deepEqual(releases, [])
     assert.equal(controller.hasActivePlanOrTask, true)
     assert.equal(controller.isForegroundBlocking, false)
@@ -55,15 +83,15 @@ describe('NfoExportTaskController', () => {
     assert.deepEqual(releases.sort(), ['assets', 'gate'])
   })
 
-  it('releases leases when a plan is discarded or planning fails', () => {
+  it('releases leases when a plan is discarded or planning fails', async () => {
     const releases: string[] = []
     const lease = (name: string) => ({ release: () => releases.push(name) })
     const controller = new NfoExportTaskController(
-      { plan: () => emptyPlan(), apply: async () => { throw new Error('unused') } },
+      { plan: async () => emptyPlan(), apply: async () => { throw new Error('unused') } },
       { tryAcquire: () => ({ kind: 'nfo-export', ...lease('gate') }) },
       { acquireStableReadLease: () => lease('assets') }
     )
-    controller.discardPlan(controller.plan(request).planId)
+    controller.discardPlan((await controller.plan(request)).planId)
     assert.deepEqual(releases.sort(), ['assets', 'gate'])
   })
 
@@ -71,7 +99,7 @@ describe('NfoExportTaskController', () => {
     const releases: string[] = []
     const controller = new NfoExportTaskController(
       {
-        plan: () => emptyPlan(),
+        plan: async () => emptyPlan(),
         apply: async (_plan, taskId, signal) => {
           while (!signal.isTerminated()) await new Promise<void>((resolve) => setImmediate(resolve))
           return {
@@ -83,20 +111,20 @@ describe('NfoExportTaskController', () => {
       { tryAcquire: () => ({ kind: 'nfo-export', release: () => releases.push('gate') }) },
       { acquireStableReadLease: () => ({ release: () => releases.push('assets') }) }
     )
-    const plan = controller.plan(request)
+    const plan = await controller.plan(request)
     controller.start(plan.planId)
     await controller.dispose()
     assert.deepEqual(releases.sort(), ['assets', 'gate'])
   })
 
-  it('does not acquire an asset lease when another maintenance task owns the gate', () => {
+  it('does not acquire an asset lease when another maintenance task owns the gate', async () => {
     let assetLeases = 0
     const controller = new NfoExportTaskController(
-      { plan: () => emptyPlan(), apply: async () => { throw new Error('unused') } },
+      { plan: async () => emptyPlan(), apply: async () => { throw new Error('unused') } },
       { tryAcquire: () => null },
       { acquireStableReadLease: () => { assetLeases += 1; return { release: () => undefined } } }
     )
-    assert.throws(() => controller.plan(request), /已有扫描或资源维护任务/u)
+    await assert.rejects(() => controller.plan(request), /已有扫描或资源维护任务/u)
     assert.equal(assetLeases, 0)
   })
 })

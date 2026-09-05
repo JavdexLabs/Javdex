@@ -309,18 +309,14 @@ const api = {
       libraryId: number,
       rootId: number,
       oldPath: string,
-      newName: string,
-      code: string,
-      target: VideoResourceImportTarget
+      newName: string
     ) =>
       invokeApp(
         IPC.FILE_RENAME,
         libraryId,
         rootId,
         oldPath,
-        newName,
-        code,
-        target
+        newName
       ),
     importManual: (
       libraryId: number,

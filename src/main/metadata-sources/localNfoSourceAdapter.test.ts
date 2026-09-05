@@ -7,6 +7,8 @@ import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
 import { normalizeLocalPathIdentity } from '@shared/localPathIdentity'
 import { assertMediaLibraryRootFile } from '../services/mediaLibraryRootFileGuard'
 import { createNfoFileStore } from '../nfo/nfoFileStore'
+import { renderNfoExportDocument } from '../nfo/export/nfoExportProfiles'
+import { NFO_EXPORT_PROFILE_IDS } from '@shared/nfoExportTypes'
 import {
   LocalNfoSourceAdapter,
   type LocalNfoAnchor
@@ -24,7 +26,7 @@ function makeRoot(): { directory: string; root: MediaLibraryRoot } {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-local-nfo-'))
   temporaryDirectories.push(directory)
   const realPath = fs.realpathSync.native(directory)
-  const stat = fs.statSync(realPath)
+  const stat = fs.statSync(realPath, { bigint: true })
   return {
     directory,
     root: {
@@ -54,6 +56,55 @@ function anchor(root: MediaLibraryRoot, anchorPath: string): LocalNfoAnchor {
 }
 
 describe('LocalNfoSourceAdapter', () => {
+  for (const profileId of NFO_EXPORT_PROFILE_IDS) {
+    it(`reads its own exported samples with a separate background (${profileId})`, async () => {
+      const { directory, root } = makeRoot()
+      const video = path.join(directory, 'ABC-001.mp4')
+      write(video)
+      write(path.join(directory, 'ABC-001-fanart.jpg'), 'background')
+      write(path.join(directory, 'javdex-samples', 'ABC-001-001.jpg'), 'own sample')
+      write(path.join(directory, 'javdex-samples', 'OTHER-002-001.jpg'), 'other sample')
+      write(path.join(directory, 'javdex-samples', 'ABC-001-CD2-001.jpg'), 'other resource sample')
+      write(path.join(directory, 'extrafanart', 'ABC-001-999.jpg'), 'legacy sample')
+      write(path.join(directory, 'ABC-001.nfo'), renderNfoExportDocument(profileId, {
+        code: 'ABC-001', tags: [], actors: [], ratings: [], identities: [],
+        fanartReference: 'ABC-001-fanart.jpg'
+      }))
+      const source = new LocalNfoSourceAdapter({
+        listAnchors: () => [{ root, anchorPath: video, directoryVideoCodes: ['ABC-001', 'OTHER-002'] }],
+        fileStore: createNfoFileStore({ authorize: assertMediaLibraryRootFile }),
+        findExistingActorGender: () => null
+      })
+      const result = await source.collect({ target: { kind: 'video', videoId: 1, code: 'ABC-001' }, fields: ['samples'] })
+      assert.deepEqual(result.candidates[0]?.assets.map((asset) =>
+        asset.kind === 'managed-root-file' ? asset.filename : null), ['ABC-001-001.jpg'])
+    })
+  }
+
+  it('keeps explicit and discovered samples scoped to their video in a shared directory', async () => {
+    const { directory, root } = makeRoot()
+    const video = path.join(directory, 'ABC-001.mp4')
+    write(video)
+    write(path.join(directory, 'OTHER-002.mp4'))
+    write(path.join(directory, 'extrafanart', 'ABC-001-001.jpg'), 'own sample')
+    write(path.join(directory, 'extrafanart', 'OTHER-002-001.jpg'), 'other sample')
+    write(path.join(directory, 'fanart.jpg'), 'ambiguous background')
+    const nfo = path.join(directory, 'ABC-001.nfo')
+    const source = new LocalNfoSourceAdapter({
+      listAnchors: () => [{ root, anchorPath: video, directoryVideoCodes: ['ABC-001', 'OTHER-002'] }],
+      fileStore: createNfoFileStore({ authorize: assertMediaLibraryRootFile }),
+      findExistingActorGender: () => null
+    })
+    for (const reference of ['<fanart><thumb>extrafanart/ABC-001-001.jpg</thumb></fanart>', '']) {
+      write(nfo, `<movie><num>ABC-001</num><title>Own video</title>${reference}</movie>`)
+      const result = await source.collect({
+        target: { kind: 'video', videoId: 1, code: 'ABC-001' }, fields: ['samples']
+      })
+      assert.deepEqual(result.candidates[0]?.assets.map((asset) =>
+        asset.kind === 'managed-root-file' ? asset.filename : null), ['ABC-001-001.jpg'])
+    }
+  })
+
   it('collects one candidate per physical NFO with local asset capabilities and no paths', async () => {
     const { directory, root } = makeRoot()
     const firstVideo = path.join(directory, 'ABC-001.mp4')
@@ -90,6 +141,7 @@ describe('LocalNfoSourceAdapter', () => {
 
     assert.equal(source.descriptor.id, 'local-nfo')
     assert.equal(source.descriptor.name, '本地 NFO（内置）')
+    assert.equal(source.descriptor.version, '1.0.0')
     assert.equal(collected.candidates.length, 1)
     const candidate = collected.candidates[0]
     assert.equal(candidate.result.title, 'Local title')
@@ -180,6 +232,31 @@ describe('LocalNfoSourceAdapter', () => {
       ]),
       [['actressAvatar', 0, 'Bob.jpg']]
     )
+  })
+
+  it('reads legacy and Kodi actor filenames and follows explicit references for repeated spaces', async () => {
+    for (const [name, filename, reference] of [
+      ['Alice Smith', 'Alice Smith.jpg', ''],
+      ['Alice Smith', 'Alice_Smith.jpg', ''],
+      ['Alice  Smith', 'Alice__Smith.jpg', '<thumb>.actors/Alice__Smith.jpg</thumb>']
+    ]) {
+      const { directory, root } = makeRoot()
+      const video = path.join(directory, 'ABC-001.mp4')
+      write(video)
+      write(path.join(directory, 'ABC-001.nfo'),
+        `<movie><num>ABC-001</num><actor><name>${name}</name><gender>female</gender>${reference}</actor></movie>`)
+      write(path.join(directory, '.actors', filename), 'avatar')
+      const source = new LocalNfoSourceAdapter({
+        listAnchors: () => [anchor(root, video)],
+        fileStore: createNfoFileStore({ authorize: assertMediaLibraryRootFile }),
+        findExistingActorGender: () => null
+      })
+      const collected = await source.collect({
+        target: { kind: 'video', videoId: 1, code: 'ABC-001' }, fields: ['actressesFemale']
+      })
+      assert.deepEqual(collected.candidates[0]?.assets.map((asset) =>
+        asset.kind === 'managed-root-file' ? asset.filename : null), [filename])
+    }
   })
 
   it('treats no sidecar as a quiet no-match and excludes mismatched NFO identity', async () => {

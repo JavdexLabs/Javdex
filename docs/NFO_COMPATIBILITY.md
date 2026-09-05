@@ -8,13 +8,33 @@
 
 | Profile | 基线 | XML 策略 | 图片布局 |
 |---|---|---|---|
-| `portable-v1` | Kodi 通用电影 NFO 子集 | `uniqueid/id/num`、常用影片字段、`tag`、演员及可选本地图片引用 | `<stem>-poster`、`<stem>-fanart`、`extrafanart/<stem>-NNN` |
+| `portable-v1` | Kodi 通用电影 NFO 子集 | `uniqueid/id/num`、常用影片字段、`tag`、演员及可选本地图片引用 | `<stem>-poster`、`<stem>-fanart`；可选样张文件 `javdex-samples/<stem>-NNN` |
 | `jellyfin-current` | Jellyfin Server 10.11.11 | Kodi 电影字段，标签写为 `genre`，保留结构化 ratings 与站点身份 | 通用布局 |
 | `emby-kodi-conservative` | Emby Server 4.9.5.0；`NfoMetadata` commit `965f6029` | 只写 Emby/Kodi 都有稳定证据的保守子集；不写 ratings 和额外站点身份 | 通用布局 |
 | `plex-nfo-1.43.1+` | Plex Media Server 1.43.1+ 官方 NFO Agent | 官方表列出的 Kodi/XBMC 字段、set、identity 与 IMDb/TMDb/TVDb ratings；其它评分来源不写入并在计划中提示 | 通用布局；样张仍可复制但不写 NFO 引用 |
 | `infuse-current` | Infuse 8.5.3 | 收窄的常用本地 metadata 字段 | 封面 `<stem>.<ext>`，背景 `<stem>-fanart.<ext>`；样张不写 NFO 引用 |
 
 Plex profile 只面向官方 NFO Agent，不支持默认 Plex Movie Agent；使用该 Agent 的库不能使用 Plex 的观看状态与评分同步。Infuse 必须启用本地 metadata，UPnP/DLNA 连接不支持本地覆盖。
+
+## 演员头像
+
+选项默认关闭，演员名单始终导出。勾选后，将当前演员头像保存到 `.actors/<演员名>.<ext>`，文件名中的普通空格替换为下划线，继续处理文件名非法字符；例如 `Alice Smith` 写为 `Alice_Smith.jpg`。NFO 姓名保持原文，`actor/thumb` 指向实际文件。归一化后同名冲突按既有机制拦截，相关头像不写入且不引用；同目录相同头像去重，跨影片目录会保存副本。
+
+该布局面向 Javdex 回读和 Kodi / Emby 本地演员头像。Emby 旧库可能需要完整元数据刷新；Plex、Infuse、Jellyfin 对当前本地相对路径的兼容性尚未实机验证，不能承诺显示。依据见 [头像研究](NFO_ACTOR_ARTWORK_RESEARCH.md)。Javdex 保留原文件名和下划线文件名的导入兼容，优先读取 NFO 明确引用；新导出不自动删除此前含空格的头像文件。
+
+## 附带样张文件（备份/迁移）
+
+所有 profile 的样张选项默认关闭，勾选后将文件写入 `javdex-samples/<stem>-NNN.<ext>`。NFO 不引用样张，`fanart` 仅引用独立详情背景；不承诺播放器样张画廊。独立目录避免像旧 `extrafanart` 一样被播放器自动当成共享背景读取。
+
+Javdex 导入时优先按影片文件名前缀读取此目录中的样张，保持自然编号顺序，不混入背景或旧目录副本。无新备份样张时继续兼容旧 `extrafanart` 和 NFO 图片引用。新导出不会迁移或删除旧文件；若播放器仍显示旧样张背景，需要自行检查以前的 `extrafanart` 文件及旧 NFO/图片缓存。此次是图片附件功能，不是完整资料库备份或同步。
+
+## 封面导出更新（2026-09-05）
+
+勾选影片封面后，JPEG/PNG 横图先校正 EXIF 方向，再从右侧裁剪最大整数 2:3 海报，完整原图以 `<stem>-landscape.<ext>` 保留。已有竖图保留原比例，只导出海报；正方形保留并提示。PNG 海报继续使用 PNG，JPEG 使用 JPEG；不放大、不拉伸，不修改数据库或原资产。详情背景仍独立使用 `fanart`。
+
+通用/Kodi、Jellyfin 和 Emby profile 增加 `aspect="landscape"` 引用；Plex 与 Infuse 沿用其 poster 合同，保留的完整横图不代表消费者一定独立展示。Kodi 推荐 16:9 landscape，而封套保留原比例。当前 Electron 43.4.1 的 nativeImage 实测不能解码 WebP：与损坏图片一样在规划阶段标为不可用，不写错误 poster 引用；未来运行时能解码时沿用 JPEG 转码。裁剪失败但横图可读取时仍保留横图。
+
+本次通过合成图片的真实 Electron 编解码、八种 EXIF 方向、加密资产、不可变计划与 XML golden 回归验证。下方消费端 smoke 属于此前版本，**未重新验证此次新增双图在消费端的显示效果**。旧横版 poster 需显式选择覆盖并刷新消费者图片缓存；默认跳过不会更新它。
 
 ## 固定版本消费端 smoke
 
@@ -45,7 +65,7 @@ Jellyfin、Emby、Plex 与 Serviio 的扫描都关闭网络 metadata provider，
 
 - `nfoExportProfiles.test.ts` 固定五份完整 XML golden，并对每份输出做独立 XML 解析和 Javdex importer round-trip。
 - `nfoExportModule.test.ts` 固定 exact-stem NFO、通用/Infuse 图片名、样张、演员头像和 NFO 相对引用的目录合同。
-- `nfoConsumerFormatContract.test.ts` 以固定的公开格式合同验证 Jellyfin、Emby、Plex NFO Agent、Infuse 和 Nova 所需字段/命名；它不是消费端 smoke。
+- 各消费端公开格式所需字段和命名统一由 `nfoExportProfiles.test.ts` 的完整 golden 与 profile 差异断言约束，不再另设重复的输出子集测试；这些检查不是消费端 smoke。
 - 通用 profile 以 VidHub 的同名 NFO/传统图片约定、Nova 6.4.37 的 Kodi parser 子集、Stash CommunityScripts `nfoSceneParser` 的 Kodi Movie 映射、Zidoo 的 Kodi NFO 约定和 Serviio XBMC NFO 约定为格式目标。
 
 上述自动化是可重复的格式合同验证，不冒充各消费端 UI 的端到端测试；只有“固定版本消费端 smoke”一节明确标为“通过”的真实消费端导入才构成固定版本 smoke 证据。具体客户端的扫描缓存、库设置和 UI 展示仍由对应产品版本决定。

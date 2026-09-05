@@ -26,6 +26,7 @@ interface RunningTask {
 export class NfoExportTaskController {
   private held: HeldPlan | null = null
   private running: RunningTask | null = null
+  private planning: Promise<NfoExportPlanPreview> | null = null
   private listeners = new Set<(event: NfoExportProgressEvent | NfoExportStateEvent) => void>()
 
   constructor(
@@ -44,24 +45,30 @@ export class NfoExportTaskController {
   }
 
   get hasActivePlanOrTask(): boolean {
-    return this.held != null || this.running != null
+    return this.held != null || this.running != null || this.planning != null
   }
 
-  plan(request: NfoExportPlanRequest): NfoExportPlanPreview {
+  async plan(request: NfoExportPlanRequest): Promise<NfoExportPlanPreview> {
     if (this.running) throw new Error('NFO 导出正在执行')
+    if (this.planning) throw new Error('NFO 导出正在生成预览')
     this.releaseHeldPlan()
     const maintenanceLease = this.gate.tryAcquire('nfo-export')
     if (!maintenanceLease) throw new Error('已有扫描或资源维护任务正在运行')
     let assetLease: { release(): void } | null = null
     try {
       assetLease = this.assets.acquireStableReadLease()
-      const plan = this.module.plan(request)
-      this.held = { plan, maintenanceLease, assetLease }
-      return plan.preview
+      const heldAssetLease = assetLease
+      this.planning = this.module.plan(request).then((plan) => {
+        this.held = { plan, maintenanceLease, assetLease: heldAssetLease }
+        return plan.preview
+      })
+      return await this.planning
     } catch (error) {
       assetLease?.release()
       maintenanceLease.release()
       throw error
+    } finally {
+      this.planning = null
     }
   }
 
@@ -137,6 +144,8 @@ export class NfoExportTaskController {
   }
 
   async dispose(): Promise<void> {
+    // Planning also owns both leases while yielding between image decodes.
+    await this.planning?.catch(() => undefined)
     if (this.running) {
       this.running.terminated = true
       await this.running.promise

@@ -57,6 +57,7 @@ import type { AssetFetcher, DownloadedImageAsset, StoredAssetPathRewrite } from 
 import { mimeFromExt } from './assetCrypto'
 
 export type { StoredAssetPathRewrite }
+export { readImageOrientationFromBuffer } from './mediaAssetStore/imageOrientation'
 
 /** Stable media-asset layout directories under the media root. */
 export type MediaAssetSubdir =

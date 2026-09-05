@@ -32,8 +32,8 @@ const document: NfoExportVideoDocument = {
   ],
   identities: [{ source: 'imdb', code: 'tt123' }, { source: 'unregistered-site', code: 'private' }],
   coverReference: 'ABP-123-poster.jpg',
-  fanartReference: 'ABP-123-fanart.png',
-  sampleReferences: ['extrafanart/ABP-123-001.jpg']
+  landscapeReference: 'ABP-123-landscape.jpg',
+  fanartReference: 'ABP-123-fanart.png'
 }
 
 describe('NFO export profiles', () => {
@@ -49,7 +49,7 @@ describe('NFO export profiles', () => {
       const fixture = fs.readFileSync(
         path.join(path.dirname(fileURLToPath(import.meta.url)), '__fixtures__', `${profileId}.nfo`),
         'utf8'
-      ).replace(/\n+$/u, '\n')
+      ).replace(/\r\n/gu, '\n').replace(/\n+$/u, '\n')
       assert.equal(rendered, fixture, `${profileId} golden output changed`)
       const roundTrip = parseNfoArtifact(Buffer.from(rendered))
       assert.equal(roundTrip.model.code, document.code)
@@ -57,13 +57,17 @@ describe('NFO export profiles', () => {
     }
   })
 
-  it('applies profile-specific conservative fields and sample references', () => {
+  it('applies profile-specific conservative fields and keeps background separate from samples', () => {
     const portable = renderNfoExportDocument('portable-v1', document).toString('utf8')
     const plex = renderNfoExportDocument('plex-nfo-1.43.1+', document).toString('utf8')
     const infuse = renderNfoExportDocument('infuse-current', document).toString('utf8')
     assert.match(portable, /<gender>female<\/gender>/u)
-    assert.match(portable, /extrafanart\/ABP-123-001.jpg/u)
+    assert.match(portable, /<thumb>ABP-123-fanart.png<\/thumb>/u)
+    assert.doesNotMatch(portable, /extrafanart|javdex-samples/u)
     assert.doesNotMatch(plex, /extrafanart/u)
+    assert.match(portable, /<thumb aspect="landscape">ABP-123-landscape.jpg<\/thumb>/u)
+    assert.doesNotMatch(plex, /landscape/u)
+    assert.doesNotMatch(infuse, /landscape/u)
     assert.match(plex, /<rating name="imdb"/u)
     assert.doesNotMatch(plex, /<rating name="javdb"/u)
     assert.doesNotMatch(infuse, /<ratings>/u)

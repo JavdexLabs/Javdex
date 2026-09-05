@@ -283,6 +283,13 @@ export function upsertPendingResourceIdentity(
 }
 
 export function pendingResourceIdentityExists(libraryId: number, filePath: string): boolean {
+  return getPendingResourceIdentityByPath(libraryId, filePath) !== null
+}
+
+export function getPendingResourceIdentityByPath(
+  libraryId: number,
+  filePath: string
+): PendingResourceIdentityRecord | null {
   const database = getDb()
   requireLibrary(database, libraryId)
   let normalizedPath: string
@@ -291,13 +298,10 @@ export function pendingResourceIdentityExists(libraryId: number, filePath: strin
   } catch {
     validationError('待确认资源路径必须是绝对路径。')
   }
-  return Boolean(
-    database
-      .prepare(
-        'SELECT 1 FROM pending_resource_identities WHERE library_id = ? AND normalized_path = ?'
-      )
-      .get(libraryId, normalizedPath)
-  )
+  const row = database
+    .prepare('SELECT * FROM pending_resource_identities WHERE library_id = ? AND normalized_path = ?')
+    .get(libraryId, normalizedPath) as Row | undefined
+  return row ? rowToRecord(row) : null
 }
 
 export function listPendingResourceIdentities(libraryId: number): PendingResourceIdentity[] {

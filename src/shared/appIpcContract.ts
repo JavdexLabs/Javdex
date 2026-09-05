@@ -190,9 +190,7 @@ export interface AppIpcContract {
       libraryId: number,
       rootId: number,
       oldPath: string,
-      newName: string,
-      code: string,
-      target: VideoResourceImportTarget
+      newName: string
     ]
     result: RenameImportResult
   }

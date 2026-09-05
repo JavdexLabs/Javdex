@@ -27,23 +27,24 @@ export interface LocateNfoSidecarInput {
   anchorPath: string
   root: Readonly<MediaLibraryRoot>
   /** Filename-derived identities for every video/STRM anchor in this directory. */
-  directoryVideoCodes: Array<string | null>
+  directoryVideoCodes: readonly (string | null)[]
+  /** Reuse directory entries collected by the current scan; never cache across scans. */
+  directorySidecars?: ReadonlyMap<string, string>
   fileStore: NfoFileStore
 }
 
-function findCaseInsensitiveFile(directory: string, targetName: string): string | null {
-  let names: string[]
-  try {
-    names = fs.readdirSync(directory)
-  } catch {
-    return null
+export function indexNfoSidecars(names: Iterable<string>): ReadonlyMap<string, string> {
+  const files = new Map<string, string>()
+  for (const name of names) {
+    if (path.extname(name).toLowerCase() === '.nfo') files.set(name, name)
   }
-  const exact = names.find((name) => name === targetName)
-  const matched = exact ?? names.find((name) => name.toLowerCase() === targetName.toLowerCase())
-  return matched ? path.join(directory, matched) : null
+  for (const name of [...files.keys()]) {
+    if (!files.has(name.toLowerCase())) files.set(name.toLowerCase(), name)
+  }
+  return files
 }
 
-function sameLogicalCode(values: Array<string | null>): boolean {
+export function sameLogicalCode(values: readonly (string | null)[]): boolean {
   if (values.length === 1) return true
   const normalized = values.map((value) => {
     if (!value) return null
@@ -71,8 +72,16 @@ function issue(
 export function locateNfoSidecar(input: LocateNfoSidecarInput): NfoSidecarLocation {
   const directory = path.dirname(input.anchorPath)
   const stem = path.basename(input.anchorPath, path.extname(input.anchorPath))
-  const exactPath = findCaseInsensitiveFile(directory, `${stem}.nfo`)
-  const moviePath = findCaseInsensitiveFile(directory, 'movie.nfo')
+  let sidecars = input.directorySidecars
+  if (!sidecars) {
+    try { sidecars = indexNfoSidecars(fs.readdirSync(directory)) } catch { sidecars = new Map() }
+  }
+  const find = (name: string): string | null => {
+    const matched = sidecars.get(name) ?? sidecars.get(name.toLowerCase())
+    return matched ? path.join(directory, matched) : null
+  }
+  const exactPath = find(`${stem}.nfo`)
+  const moviePath = find('movie.nfo')
 
   if (exactPath) {
     const exact = issue(input.fileStore, input.root, exactPath)

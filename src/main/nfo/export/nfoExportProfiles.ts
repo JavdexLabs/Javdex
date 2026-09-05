@@ -35,8 +35,8 @@ export interface NfoExportVideoDocument {
   ratings: NfoExportRating[]
   identities: NfoExportIdentity[]
   coverReference?: string
+  landscapeReference?: string
   fanartReference?: string
-  sampleReferences: string[]
 }
 
 interface ProfileDefinition extends NfoExportProfileOption {
@@ -55,7 +55,6 @@ const definitions: readonly ProfileDefinition[] = [
     id: 'portable-v1',
     label: '通用 / Kodi',
     description: '稳定的 Kodi 电影 NFO 子集，也用于 VidHub、Nova、Zidoo、Stash 与 Serviio。',
-    supportsSampleReferences: true,
     includeOriginalTitle: true,
     includePublisher: true,
     includeRatings: true,
@@ -66,9 +65,8 @@ const definitions: readonly ProfileDefinition[] = [
   },
   {
     id: 'jellyfin-current',
-    label: 'Jellyfin（当前稳定版）',
+    label: 'Jellyfin',
     description: 'Jellyfin 可读取的 Kodi NFO 字段与本地图片命名。',
-    supportsSampleReferences: true,
     includeOriginalTitle: true,
     includePublisher: false,
     includeRatings: true,
@@ -81,7 +79,6 @@ const definitions: readonly ProfileDefinition[] = [
     id: 'emby-kodi-conservative',
     label: 'Emby / Kodi 保守子集',
     description: '只写入 Emby 与 Kodi 都稳定接受的常用电影字段。',
-    supportsSampleReferences: true,
     includeOriginalTitle: true,
     includePublisher: false,
     includeRatings: false,
@@ -95,7 +92,6 @@ const definitions: readonly ProfileDefinition[] = [
     label: 'Plex NFO Agent（1.43.1+）',
     description: '面向 Plex 官方 NFO Agent 的本地电影元数据。',
     warning: '需要 PMS 1.43.1+ 和官方 NFO Agent；默认 Plex Movie Agent 不读取此 profile。',
-    supportsSampleReferences: false,
     includeOriginalTitle: true,
     includePublisher: false,
     includeRatings: true,
@@ -113,10 +109,9 @@ const definitions: readonly ProfileDefinition[] = [
   },
   {
     id: 'infuse-current',
-    label: 'Infuse（当前版）',
+    label: 'Infuse',
     description: 'Infuse 本地 metadata 子集；封面使用与影片同名的图片。',
     warning: 'Infuse 需启用本地 metadata；UPnP 库不读取这些旁路文件。',
-    supportsSampleReferences: false,
     includeOriginalTitle: false,
     includePublisher: false,
     includeRatings: false,
@@ -283,13 +278,12 @@ export function renderNfoExportDocument(
   if (document.coverReference) {
     lines.push(`  <thumb aspect="poster">${xml(document.coverReference)}</thumb>`)
   }
-  const fanart = uniqueSorted([
-    ...(document.fanartReference ? [document.fanartReference] : []),
-    ...(profile.supportsSampleReferences ? document.sampleReferences : [])
-  ])
-  if (fanart.length > 0) {
+  if (document.landscapeReference && ['portable-v1', 'jellyfin-current', 'emby-kodi-conservative'].includes(profileId)) {
+    lines.push(`  <thumb aspect="landscape">${xml(document.landscapeReference)}</thumb>`)
+  }
+  if (document.fanartReference) {
     lines.push('  <fanart>')
-    for (const reference of fanart) lines.push(element('thumb', reference, '    '))
+    lines.push(element('thumb', document.fanartReference, '    '))
     lines.push('  </fanart>')
   }
   lines.push('</movie>', '')

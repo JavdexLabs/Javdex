@@ -343,3 +343,16 @@ export function removeLibraryUnrecognizedFile(
       .run(libraryId, rootId, normalizedPath).changes > 0
   )
 }
+
+/** Keep the editable pending row attached to the successfully renamed file. */
+export function renameLibraryUnrecognizedFile(
+  libraryId: number,
+  rootId: number,
+  oldNormalizedPath: string,
+  file: Pick<LibraryUnrecognizedFileInput, 'filePath' | 'normalizedPath'>
+): void {
+  getDb().prepare(`UPDATE library_unrecognized_files
+    SET file_path = ?, normalized_path = ?
+    WHERE library_id = ? AND root_id = ? AND normalized_path = ?`)
+    .run(file.filePath, file.normalizedPath, libraryId, rootId, oldNormalizedPath)
+}

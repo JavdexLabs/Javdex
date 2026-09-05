@@ -26,25 +26,10 @@ function requirePatch<T extends z.ZodRawShape>(schema: z.ZodObject<T>): z.ZodTyp
   return schema.refine((value) => Object.keys(value).length > 0, 'patch 至少包含一个字段')
 }
 
-const mediaLibraryConfigPatch = requirePatch(
-  z
-    .object({
-      autoScanEnabled: z.boolean().optional(),
-      autoScanIntervalMinutes: z.number().int().min(5).max(10_080).optional(),
-      minImportDurationMinutes: z.number().int().min(0).max(1_440).optional(),
-      autoMergeSameCodeResources: z.boolean().optional(),
-      removeResourceLessMemberships: z.boolean().optional(),
-      defaultVideoScraper: scraperName.nullable().optional(),
-      defaultSortBy: z.enum(MEDIA_LIBRARY_DEFAULT_SORTS).optional(),
-      defaultSortDir: z.enum(MEDIA_LIBRARY_SORT_DIRECTIONS).optional(),
-      includeInHomeDiscovery: z.boolean().optional()
-    })
-    .strict()
-)
-
-const mediaLibraryConfigPatchForCreate = z
+const mediaLibraryConfigSchema = z
   .object({
     autoScanEnabled: z.boolean().optional(),
+    autoImportLocalNfo: z.boolean().optional(),
     autoScanIntervalMinutes: z.number().int().min(5).max(10_080).optional(),
     minImportDurationMinutes: z.number().int().min(0).max(1_440).optional(),
     autoMergeSameCodeResources: z.boolean().optional(),
@@ -55,6 +40,8 @@ const mediaLibraryConfigPatchForCreate = z
     includeInHomeDiscovery: z.boolean().optional()
   })
   .strict()
+
+const mediaLibraryConfigPatch = requirePatch(mediaLibraryConfigSchema)
 
 const createRoot = z
   .object({
@@ -110,7 +97,7 @@ export const mediaLibraryIpcSchemas = {
         icon: z.enum(MEDIA_LIBRARY_ICONS).optional(),
         color: z.enum(MEDIA_LIBRARY_COLORS).optional(),
         position: nonNegativeSafeInteger.optional(),
-        config: mediaLibraryConfigPatchForCreate.optional(),
+        config: mediaLibraryConfigSchema.optional(),
         roots: z.array(createRoot).max(64).optional()
       })
       .strict()

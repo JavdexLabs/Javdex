@@ -612,9 +612,7 @@ export const appIpcSchemas = {
     id,
     id,
     nonEmptyText,
-    nonEmptyText,
-    nonEmptyText,
-    videoResourceImportTarget
+    nonEmptyText
   ]),
   [IPC.FILE_IMPORT_MANUAL]: z.tuple([
     id,

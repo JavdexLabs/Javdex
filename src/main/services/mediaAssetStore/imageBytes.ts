@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import { nativeImage } from 'electron'
 import type { ImageDimensions } from './types'
+import { readImageOrientationFromBuffer } from './imageOrientation'
 
 /** Content fingerprint for image bytes (first 16 hex of sha256). */
 export function avatarSourceFingerprint(data: Buffer): string {
@@ -64,53 +65,6 @@ function readNativeImageSize(img: Electron.NativeImage): ImageDimensions | null 
   return { width, height }
 }
 
-function readJpegExifOrientation(data: Buffer): number | null {
-  if (data.length < 4 || data[0] !== 0xff || data[1] !== 0xd8) return null
-
-  let offset = 2
-  while (offset + 4 < data.length) {
-    if (data[offset] !== 0xff) {
-      offset += 1
-      continue
-    }
-    const marker = data[offset + 1]
-    if (marker === 0xd9) break
-    const segmentLength = data.readUInt16BE(offset + 2)
-    if (segmentLength < 2 || offset + 2 + segmentLength > data.length) break
-
-    if (marker === 0xe1 && segmentLength >= 8) {
-      const exifHeader = data.toString('ascii', offset + 4, offset + 10)
-      if (exifHeader === 'Exif\0\0') {
-        const tiffStart = offset + 10
-        if (tiffStart + 8 <= data.length) {
-          const littleEndian = data[tiffStart] === 0x49 && data[tiffStart + 1] === 0x49
-          const readU16 = littleEndian
-            ? (pos: number) => data.readUInt16LE(pos)
-            : (pos: number) => data.readUInt16BE(pos)
-          const readU32 = littleEndian
-            ? (pos: number) => data.readUInt32LE(pos)
-            : (pos: number) => data.readUInt32BE(pos)
-          const ifd0Offset = tiffStart + readU32(tiffStart + 4)
-          if (ifd0Offset + 2 <= data.length) {
-            const entryCount = readU16(ifd0Offset)
-            for (let i = 0; i < entryCount; i++) {
-              const entry = ifd0Offset + 2 + i * 12
-              if (entry + 12 > data.length) break
-              if (readU16(entry) === 0x0112) {
-                return readU16(entry + 8)
-              }
-            }
-          }
-        }
-      }
-    }
-
-    offset += 2 + segmentLength
-  }
-
-  return null
-}
-
 function applyExifOrientation(
   width: number,
   height: number,
@@ -138,7 +92,7 @@ function readImageDimensionsFromBufferFallback(data: Buffer): ImageDimensions | 
   }
 
   if (data.length >= 4 && data[0] === 0xff && data[1] === 0xd8) {
-    const orientation = readJpegExifOrientation(data)
+    const orientation = readImageOrientationFromBuffer(data)
     let offset = 2
     while (offset + 9 < data.length) {
       if (data[offset] !== 0xff) {

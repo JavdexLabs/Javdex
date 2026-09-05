@@ -19,8 +19,8 @@
     <thumb>.actors/Alice.jpg</thumb>
   </actor>
   <thumb aspect="poster">ABP-123-poster.jpg</thumb>
+  <thumb aspect="landscape">ABP-123-landscape.jpg</thumb>
   <fanart>
     <thumb>ABP-123-fanart.png</thumb>
-    <thumb>extrafanart/ABP-123-001.jpg</thumb>
   </fanart>
 </movie>

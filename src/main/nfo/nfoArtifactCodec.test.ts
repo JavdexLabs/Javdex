@@ -41,7 +41,7 @@ describe('NFO artifact codec', () => {
       const golden = fs.readFileSync(path.join(directory, fixture))
       const first = parseNfoArtifact(golden).model
       const rendered = renderNfoArtifact(first)
-      assert.equal(rendered.toString('utf8'), golden.toString('utf8'), fixture)
+      assert.equal(rendered.toString('utf8'), golden.toString('utf8').replace(/\r\n/gu, '\n'), fixture)
       assert.equal(rendered.toString('utf8').includes('\r'), false)
       const second = parseNfoArtifact(rendered).model
       assert.deepEqual(second, first)

@@ -90,7 +90,7 @@ function localNfoPluginDescriptor(): ScraperPluginDescriptor {
   return {
     kind: 'video',
     name: LOCAL_NFO_SOURCE_NAME,
-    version: '1',
+    version: '1.0.0',
     description: '读取影片资源旁经过安全校验的本地 NFO；不会持续同步。',
     author: 'Javdex',
     source: 'builtin',

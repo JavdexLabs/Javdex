@@ -500,6 +500,16 @@ export default function MediaLibraryCreateModal({
                 />
               </AppFormSection>
 
+              <AppFormSection title="本地元数据" hint="只在资源首次发现时读取；不会持续同步相邻文件。">
+                <ToggleField
+                  title="自动导入本地 NFO"
+                  description="扫描时读取影片旁的 NFO。仅用于尚未刮削成功的影片；已刮削成功的影片会自动跳过。"
+                  checked={draft.config.autoImportLocalNfo}
+                  disabled={busy}
+                  onChange={(value) => patchConfig('autoImportLocalNfo', value)}
+                />
+              </AppFormSection>
+
               <AppFormSection title="刮削与列表默认值" hint="创建后仍可在媒体库设置中调整。">
                 <div className={styles.fieldGrid}>
                   <AppFormField label="默认影片刮削器">

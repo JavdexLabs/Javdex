@@ -2,6 +2,7 @@ import { nativeImage } from 'electron'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { NFO_SAMPLE_BACKUP_DIRECTORY } from '@shared/nfoExportTypes'
 import type {
   NfoExportFileKind,
   NfoExportPlanAction,
@@ -11,7 +12,10 @@ import type {
   NfoExportReport,
   NfoExportReportItem
 } from '@shared/nfoExportTypes'
-import { authorizeMediaLibraryRootFile } from '../../services/mediaLibraryRootFileGuard'
+import {
+  authorizeMediaLibraryRootFile,
+  createAuthorizedMediaLibraryRootFileInspector
+} from '../../services/mediaLibraryRootFileGuard'
 import { mediaAssetStore, type MediaAssetStore } from '../../services/mediaAssetStore'
 import {
   coverBasename,
@@ -26,6 +30,7 @@ import {
   type NfoExportResourceSnapshot
 } from './nfoExportRepository'
 import { sanitizeNfoExportMessage } from './nfoExportSafety'
+import { prepareCoverArtwork, renderCoverArtwork, type CoverArtworkRecipe, type CoverImageDecoder } from './nfoCoverArtwork'
 
 interface FileFingerprint {
   state: 'missing' | 'file' | 'conflict'
@@ -43,7 +48,7 @@ interface InternalPlanFile extends NfoExportPlanFile {
   targetDirectoryRealPath: string
   snapshotHash: string
   expectedTarget: FileFingerprint
-  content: { type: 'nfo'; bytes: Buffer } | { type: 'asset'; storedPath: string; sourceHash: string }
+  content: { type: 'nfo'; bytes: Buffer } | { type: 'asset'; storedPath: string; sourceHash: string; artwork?: CoverArtworkRecipe }
   convertToJpeg: boolean
 }
 
@@ -65,6 +70,7 @@ interface PlannedAsset {
   bytes: number
   actorName?: string
   warning?: string
+  artwork?: CoverArtworkRecipe
 }
 
 interface UnavailableAsset {
@@ -73,14 +79,17 @@ interface UnavailableAsset {
   targetDirectory: string
   targetBasename: string
   warning: string
+  extension?: string
 }
 
 export interface NfoExportModuleDependencies {
   repository: NfoExportRepository
   assetStore: Pick<MediaAssetStore, 'readBytes' | 'detectImageExtension'>
   authorizeAnchor: typeof authorizeMediaLibraryRootFile
+  createPlanAnchorInspector?: () => ReturnType<typeof createAuthorizedMediaLibraryRootFileInspector>
   now(): Date
   encodeImage?(bytes: Buffer, convertToJpeg: boolean): Buffer
+  decodeCoverImage?: CoverImageDecoder
   writeAtomically?(targetPath: string, bytes: Buffer): void
 }
 
@@ -88,6 +97,7 @@ const defaultDependencies: NfoExportModuleDependencies = {
   repository: nfoExportRepository,
   assetStore: mediaAssetStore,
   authorizeAnchor: authorizeMediaLibraryRootFile,
+  createPlanAnchorInspector: createAuthorizedMediaLibraryRootFileInspector,
   now: () => new Date()
 }
 
@@ -113,7 +123,7 @@ function digestFile(targetPath: string): string {
   return hash.digest('hex')
 }
 
-function targetFingerprint(targetPath: string): FileFingerprint {
+function targetFingerprint(targetPath: string, expectedParentRealPath?: string): FileFingerprint {
   let stat: fs.Stats
   try {
     stat = fs.lstatSync(targetPath)
@@ -122,11 +132,18 @@ function targetFingerprint(targetPath: string): FileFingerprint {
     throw error
   }
   if (!stat.isFile() || stat.isSymbolicLink()) return { state: 'conflict' }
+  let readPath = targetPath
+  if (expectedParentRealPath) {
+    readPath = fs.realpathSync.native(targetPath)
+    if (path.dirname(readPath) !== expectedParentRealPath) {
+      throw new Error('导出目标越过媒体目录')
+    }
+  }
   return {
     state: 'file',
     size: stat.size,
     mtimeMs: stat.mtimeMs,
-    hash: digestFile(targetPath),
+    hash: digestFile(readPath),
     mode: stat.mode & 0o777
   }
 }
@@ -143,7 +160,8 @@ function samePlannedContent(
   if (left.type !== right.type) return false
   if (left.type === 'nfo' && right.type === 'nfo') return left.bytes.equals(right.bytes)
   return left.type === 'asset' && right.type === 'asset' &&
-    left.storedPath === right.storedPath && left.sourceHash === right.sourceHash
+    left.storedPath === right.storedPath && left.sourceHash === right.sourceHash &&
+    JSON.stringify(left.artwork) === JSON.stringify(right.artwork)
 }
 
 function actionFor(fingerprint: FileFingerprint, replace: boolean): NfoExportPlanAction {
@@ -153,7 +171,8 @@ function actionFor(fingerprint: FileFingerprint, replace: boolean): NfoExportPla
 }
 
 function safeFilename(value: string): string {
-  let cleaned = value.normalize('NFC').replace(/[\\/:*?"<>|\u0000-\u001F]/gu, '_').trim()
+  // Kodi matches .actors filenames against actor names with ordinary spaces replaced.
+  let cleaned = value.normalize('NFC').replace(/[\\/:*?"<>|\u0000-\u001F]/gu, '_').trim().replace(/ /gu, '_')
   cleaned = cleaned.replace(/[. ]+$/gu, '_').slice(0, 120)
   if (!cleaned) return 'unnamed'
   if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$/iu.test(cleaned)) {
@@ -164,6 +183,68 @@ function safeFilename(value: string): string {
 
 function canonicalTargetName(value: string): string {
   return value.normalize('NFC').toLowerCase()
+}
+
+interface PlannedTargetParent {
+  readonly exists: boolean
+  readonly realPath: string
+}
+
+/**
+ * Inspect a target using the canonical media directory returned by the anchor inspection.
+ * Direct targets need no additional directory lookup; supported child directories are
+ * resolved once and then shared by every image planned beneath them.
+ */
+function planTargetFingerprint(
+  targetPath: string,
+  anchorDirectoryPath: string,
+  anchorDirectoryRealPath: string,
+  parents: Map<string, PlannedTargetParent>
+): FileFingerprint {
+  const parent = path.dirname(targetPath)
+  if (parent === anchorDirectoryPath) {
+    return targetFingerprint(
+      path.join(anchorDirectoryRealPath, path.basename(targetPath)),
+      anchorDirectoryRealPath
+    )
+  }
+  if (path.dirname(parent) !== anchorDirectoryPath ||
+    !['.actors', NFO_SAMPLE_BACKUP_DIRECTORY].includes(path.basename(parent))) {
+    throw new Error('导出子目录不安全')
+  }
+
+  const cacheKey = `${anchorDirectoryRealPath}\0${canonicalTargetName(path.basename(parent))}`
+  let inspected = parents.get(cacheKey)
+  if (!inspected) {
+    let stat: fs.Stats | null = null
+    try {
+      stat = fs.lstatSync(parent)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    if (!stat) {
+      inspected = {
+        exists: false,
+        realPath: path.join(anchorDirectoryRealPath, path.basename(parent))
+      }
+    } else {
+      if (!stat.isDirectory() || stat.isSymbolicLink()) {
+        throw new Error('导出子目录发生冲突')
+      }
+      const realPath = fs.realpathSync.native(parent)
+      if (path.dirname(realPath) !== anchorDirectoryRealPath) {
+        throw new Error('导出目标越过媒体目录')
+      }
+      inspected = { exists: true, realPath }
+    }
+    parents.set(cacheKey, inspected)
+  }
+
+  if (!inspected.exists) return { state: 'missing' }
+  return targetFingerprint(
+    path.join(inspected.realPath, path.basename(targetPath)),
+    inspected.realPath
+  )
 }
 
 function assetExtension(
@@ -224,34 +305,10 @@ function snapshotPayload(snapshot: NfoExportResourceSnapshot): object {
   }
 }
 
-function readSelectedAssetHashes(
-  snapshot: NfoExportResourceSnapshot,
-  request: NfoExportPlanRequest,
-  store: NfoExportModuleDependencies['assetStore']
-): string[] {
-  const paths = [
-    ...(request.includeCover && snapshot.coverPath ? [snapshot.coverPath] : []),
-    ...(request.includeFanart && snapshot.posterPath ? [snapshot.posterPath] : []),
-    ...(request.includeSamples ? snapshot.samples : []),
-    ...(request.includeActorAvatars
-      ? snapshot.actors.flatMap((actor) => actor.avatarPath ? [actor.avatarPath] : [])
-      : [])
-  ]
-  return paths.map((storedPath) => {
-    try {
-      return `${storedPath}:${digest(store.readBytes(storedPath))}`
-    } catch {
-      return `${storedPath}:unavailable`
-    }
-  })
-}
-
-function snapshotHash(
-  snapshot: NfoExportResourceSnapshot,
-  request: NfoExportPlanRequest,
-  store: NfoExportModuleDependencies['assetStore']
-): string {
-  const anchor = snapshot.anchorPath ? fs.statSync(snapshot.anchorPath) : null
+// Metadata and anchor changes invalidate the resource. Image bytes are checked
+// against each asset item's sourceHash so one failed image cannot invalidate siblings.
+function snapshotHash(snapshot: NfoExportResourceSnapshot, inspectedAnchor?: fs.Stats): string {
+  const anchor = inspectedAnchor ?? (snapshot.anchorPath ? fs.statSync(snapshot.anchorPath) : null)
   return digest(JSON.stringify({
     snapshot: snapshotPayload(snapshot),
     anchor: anchor && {
@@ -259,8 +316,7 @@ function snapshotHash(
       ino: String(anchor.ino),
       size: anchor.size,
       mtimeMs: anchor.mtimeMs
-    },
-    assets: readSelectedAssetHashes(snapshot, request, store)
+    }
   }))
 }
 
@@ -324,50 +380,68 @@ function makeDocument(
     ratings: snapshot.ratings,
     identities: snapshot.identities,
     coverReference: cover?.relativeReference,
-    fanartReference: fanart?.relativeReference,
-    sampleReferences: assets
-      .filter((asset) => asset.kind === 'sample')
-      .map((asset) => asset.relativeReference)
+    landscapeReference: assets.find((asset) => asset.kind === 'landscape')?.relativeReference,
+    fanartReference: fanart?.relativeReference
   }
 }
 
 export class NfoExportModule {
   constructor(private readonly deps: NfoExportModuleDependencies = defaultDependencies) {}
 
-  plan(request: NfoExportPlanRequest): InternalNfoExportPlan {
+  async plan(request: NfoExportPlanRequest): Promise<InternalNfoExportPlan> {
     const profile = getNfoExportProfile(request.profileId)
     const files: InternalPlanFile[] = []
     const warnings: string[] = []
     const plannedTargets = new Map<string, InternalPlanFile>()
+    const preparedCovers = new Map<string, ReturnType<typeof prepareCoverArtwork>>()
+    const documents = new Map<InternalPlanFile, {
+      snapshot: NfoExportResourceSnapshot
+      assets: PlannedAsset[]
+      collidingActorBasenames: Set<string>
+    }>()
     const snapshots = this.deps.repository.listResourceSnapshots(request.libraryIds)
     let skippedNoAnchorCount = 0
     let sampleCount = 0
     let resourceCount = 0
     const exportedVideoIds = new Set<number>()
     const targetVideoCodes = new Map<string, Map<string, number>>()
+    const inspectPlanAnchor = this.deps.createPlanAnchorInspector?.()
+    const plannedTargetParents = new Map<string, { exists: boolean; realPath: string }>()
 
     for (const snapshot of snapshots) {
+      await new Promise<void>((resolve) => setImmediate(resolve))
       if (!snapshot.anchorPath || snapshot.rootId == null || !snapshot.root) {
         skippedNoAnchorCount += 1
         continue
       }
+      let anchorStat: fs.Stats
+      let targetDirectoryRealPath: string
       try {
-        this.deps.authorizeAnchor(snapshot.libraryId, snapshot.rootId, snapshot.anchorPath, snapshot.root)
+        if (inspectPlanAnchor) {
+          const inspected = inspectPlanAnchor(
+            snapshot.libraryId, snapshot.rootId, snapshot.anchorPath, snapshot.root
+          )
+          anchorStat = inspected.stat
+          targetDirectoryRealPath = path.dirname(inspected.fileRealPath)
+        } else {
+          this.deps.authorizeAnchor(snapshot.libraryId, snapshot.rootId, snapshot.anchorPath, snapshot.root)
+          const anchorRealPath = fs.realpathSync.native(snapshot.anchorPath)
+          anchorStat = fs.statSync(anchorRealPath)
+          targetDirectoryRealPath = path.dirname(anchorRealPath)
+        }
       } catch {
         warnings.push(`${snapshot.code}：本地资源锚点已不可用，已跳过。`)
         continue
       }
-      const anchorStat = fs.statSync(snapshot.anchorPath)
       if (!anchorStat.isFile()) {
         warnings.push(`${snapshot.code}：本地资源锚点不是普通文件，已跳过。`)
         continue
       }
       const targetDirectory = path.dirname(snapshot.anchorPath)
-      const targetDirectoryRealPath = fs.realpathSync(targetDirectory)
       const stem = path.parse(snapshot.anchorPath).name
       let sourceSnapshotHash: string
       try {
-        sourceSnapshotHash = snapshotHash(snapshot, request, this.deps.assetStore)
+        sourceSnapshotHash = snapshotHash(snapshot, anchorStat)
       } catch {
         warnings.push(`${snapshot.code}：本地资源锚点在规划期间发生变化，已跳过。`)
         continue
@@ -398,20 +472,49 @@ export class NfoExportModule {
           unavailableAssets.push({ kind, storedPath, targetDirectory: directory, targetBasename: basename, warning })
         }
       }
-      if (request.includeCover) addAsset('cover', snapshot.coverPath, targetDirectory, coverBasename(request.profileId, stem))
+      if (request.includeCover && snapshot.coverPath) {
+        const basename = coverBasename(request.profileId, stem)
+        try {
+          const source = this.deps.assetStore.readBytes(snapshot.coverPath)
+          const extension = this.deps.assetStore.detectImageExtension(source)?.toLowerCase() ?? ''
+          const sourceHash = digest(source)
+          const artwork = preparedCovers.get(sourceHash) ?? prepareCoverArtwork(source, extension, this.deps.decodeCoverImage)
+          preparedCovers.set(sourceHash, artwork)
+          for (const item of artwork) {
+            const targetBasename = item.kind === 'cover' ? basename : `${stem}-landscape`
+            if (!item.recipe) {
+              const warning = `${snapshot.code}：${item.warning}`
+              unavailableAssets.push({ kind: item.kind, storedPath: snapshot.coverPath, targetDirectory, targetBasename, extension: item.extension, warning })
+              warnings.push(warning)
+              continue
+            }
+            assets.push({
+              kind: item.kind, storedPath: snapshot.coverPath, sourceHash,
+              extension: item.extension, convertToJpeg: false, artwork: item.recipe,
+              targetDirectory, targetBasename, relativeReference: `${targetBasename}${item.extension}`,
+              bytes: item.bytes
+            })
+            if (item.warning) warnings.push(`${snapshot.code}：${item.warning}`)
+            if (['.jpg', '.jpeg', '.png'].some((ext) => ext !== item.extension && fs.existsSync(path.join(targetDirectory, `${targetBasename}${ext}`)))) {
+              warnings.push(`${snapshot.code}：${targetBasename} 存在其他扩展名的图片，播放器可能优先使用旧图；请手动检查。`)
+            }
+          }
+        } catch (error) {
+          const warning = `${snapshot.code}：封面不可用（${sanitizeNfoExportMessage(error)}），不会写入或引用海报。`
+          warnings.push(warning)
+          unavailableAssets.push({ kind: 'cover', storedPath: snapshot.coverPath, targetDirectory, targetBasename: basename, warning })
+        }
+      }
       if (request.includeFanart) {
         if (!snapshot.posterPath) warnings.push(`${snapshot.code}：没有可导出的 fanart。`)
         addAsset('fanart', snapshot.posterPath, targetDirectory, `${stem}-fanart`)
       }
       if (request.includeSamples) {
         snapshot.samples.forEach((storedPath, index) => {
-          addAsset('sample', storedPath, path.join(targetDirectory, 'extrafanart'),
-            `${stem}-${String(index + 1).padStart(3, '0')}`, 'extrafanart')
+          addAsset('sample', storedPath, path.join(targetDirectory, NFO_SAMPLE_BACKUP_DIRECTORY),
+            `${stem}-${String(index + 1).padStart(3, '0')}`, NFO_SAMPLE_BACKUP_DIRECTORY)
         })
         sampleCount += assets.filter((asset) => asset.kind === 'sample').length
-        if (!profile.supportsSampleReferences && assets.some((asset) => asset.kind === 'sample')) {
-          warnings.push(`${snapshot.code}：所选 profile 不引用本地样张；文件仍会复制。`)
-        }
       }
       if (request.includeActorAvatars) {
         const missingAvatarCount = snapshot.actors.filter((actor) => !actor.avatarPath).length
@@ -461,12 +564,12 @@ export class NfoExportModule {
         kind: asset.kind,
         targetPath: path.join(asset.targetDirectory, `${asset.targetBasename}${asset.extension}`),
         bytes: asset.bytes,
-        content: { type: 'asset' as const, storedPath: asset.storedPath, sourceHash: asset.sourceHash },
+        content: { type: 'asset' as const, storedPath: asset.storedPath, sourceHash: asset.sourceHash, ...(asset.artwork ? { artwork: asset.artwork } : {}) },
         convertToJpeg: asset.convertToJpeg,
         forceConflict: asset.kind === 'actor-avatar' && collidingActorBasenames.has(asset.targetBasename)
       })), ...unavailableAssets.map((asset) => ({
         kind: asset.kind,
-        targetPath: path.join(asset.targetDirectory, `${asset.targetBasename}.jpg`),
+        targetPath: path.join(asset.targetDirectory, `${asset.targetBasename}${asset.extension ?? '.jpg'}`),
         bytes: 0,
         content: { type: 'asset' as const, storedPath: asset.storedPath, sourceHash: '' },
         convertToJpeg: false,
@@ -480,7 +583,8 @@ export class NfoExportModule {
         )}`
         const existingPlan = plannedTargets.get(key)
         if (existingPlan) {
-          if (existingPlan.videoId !== snapshot.videoId ||
+          if (descriptor.forceConflict ||
+            (existingPlan.videoId !== snapshot.videoId && descriptor.kind !== 'actor-avatar') ||
             !samePlannedContent(existingPlan.content, descriptor.content)) {
             existingPlan.action = 'conflict'
             warnings.push(`${snapshot.code}：不同内容计划写入同一目标，已标为冲突。`)
@@ -489,8 +593,12 @@ export class NfoExportModule {
         }
         let existing: FileFingerprint
         try {
-          validateSafeTargetParent(descriptor.targetPath, targetDirectory, targetDirectoryRealPath, false)
-          existing = targetFingerprint(descriptor.targetPath)
+          existing = planTargetFingerprint(
+            descriptor.targetPath,
+            targetDirectory,
+            targetDirectoryRealPath,
+            plannedTargetParents
+          )
         } catch {
           existing = { state: 'conflict' }
           warnings.push(`${snapshot.code}：导出目标目录不安全，已标为冲突。`)
@@ -519,8 +627,13 @@ export class NfoExportModule {
         if ('warning' in descriptor && typeof descriptor.warning === 'string') {
           file.warning = descriptor.warning
         }
+        if (file.kind === 'cover' && file.action === 'skip-existing') {
+          file.warning = `${snapshot.code}：已有海报将保留；要更新为本次导出的封面，请选择覆盖后重新预览。`
+          warnings.push(file.warning)
+        }
         plannedTargets.set(key, file)
         files.push(file)
+        if (file.kind === 'nfo') documents.set(file, { snapshot, assets, collidingActorBasenames })
       }
       const physicalDirectoryKey = targetDirectoryRealPath
       const codes = targetVideoCodes.get(physicalDirectoryKey) ?? new Map<string, number>()
@@ -531,6 +644,21 @@ export class NfoExportModule {
       }
       codes.set(normalizedCode, snapshot.videoId)
       targetVideoCodes.set(physicalDirectoryKey, codes)
+    }
+    // A later resource can introduce an artwork collision in a shared directory.
+    // Finalize references only after every target has been classified.
+    for (const [file, document] of documents) {
+      const assets = document.assets.filter((asset) => {
+        const key = `${file.targetDirectoryRealPath}\0${canonicalTargetName(
+          path.relative(file.targetDirectoryPath,
+            path.join(asset.targetDirectory, `${asset.targetBasename}${asset.extension}`))
+        )}`
+        return plannedTargets.get(key)?.action !== 'conflict'
+      })
+      const bytes = renderNfoExportDocument(request.profileId,
+        makeDocument(document.snapshot, assets, document.collidingActorBasenames))
+      file.content = { type: 'nfo', bytes }
+      file.bytes = bytes.byteLength
     }
     if (profile.warning) warnings.unshift(profile.warning)
     const count = (action: NfoExportPlanAction): number => files.filter((file) => file.action === action).length
@@ -606,7 +734,7 @@ export class NfoExportModule {
         this.deps.authorizeAnchor(current.libraryId, current.rootId, current.anchorPath, current.root)
         const currentDir = fs.realpathSync(path.dirname(current.anchorPath))
         if (currentDir !== file.targetDirectoryRealPath ||
-          snapshotHash(current, plan.preview.request, this.deps.assetStore) !== file.snapshotHash) {
+          snapshotHash(current) !== file.snapshotHash) {
           items.push({ ...base, disposition: 'stale-plan', message: '来源或目标在计划后发生变化' })
           completed += 1
           onProgress(completed, plan.files.length)
@@ -643,6 +771,7 @@ export class NfoExportModule {
           : (() => {
               const source = this.deps.assetStore.readBytes(file.content.storedPath)
               if (digest(source) !== file.content.sourceHash) throw new Error('图片来源已变化')
+              if (file.content.artwork) return renderCoverArtwork(source, file.content.artwork, this.deps.decodeCoverImage)
               return (this.deps.encodeImage ?? imageBytesForWrite)(source, file.convertToJpeg)
             })()
         validateSafeTargetParent(
@@ -735,7 +864,7 @@ function validateSafeTargetParent(
     }
     if (!stat) {
       if (path.dirname(parent) !== anchorDirectoryPath ||
-        !['.actors', 'extrafanart'].includes(path.basename(parent))) {
+        !['.actors', NFO_SAMPLE_BACKUP_DIRECTORY].includes(path.basename(parent))) {
         throw new Error('导出子目录不安全')
       }
       if (createMissing) fs.mkdirSync(parent)

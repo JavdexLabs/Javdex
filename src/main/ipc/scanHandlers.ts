@@ -7,7 +7,8 @@ import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
 import {
   getLatestLibraryScanSnapshot,
   libraryUnrecognizedFileExists,
-  removeLibraryUnrecognizedFile
+  removeLibraryUnrecognizedFile,
+  renameLibraryUnrecognizedFile
 } from '../db/libraryScanRepo'
 import { getMediaLibraryRoot } from '../db/mediaLibraryRepo'
 import { listPendingScanGroups, resolvePendingScanGroup } from '../db/pendingScanRepo'
@@ -112,7 +113,7 @@ export function registerScanHandlers(ctx: IpcContext): void {
 
   appCommandAdapter.register(
     IPC.FILE_RENAME,
-    (libraryId, rootId, oldPath, newName, code, target): Promise<RenameImportResult> => {
+    (libraryId, rootId, oldPath, newName): Promise<RenameImportResult> => {
       const root = requireActiveRoot(libraryId, rootId)
       assertMediaLibraryRootFile(oldPath, root)
       assertFileNameOnly(newName)
@@ -121,11 +122,16 @@ export function registerScanHandlers(ctx: IpcContext): void {
           libraryId,
           rootId,
           oldPath,
-          newName,
-          code,
-          target
+          newName
         })
-        if (result.imported) removeScopedUnrecognizedFile(libraryId, rootId, oldPath)
+        if (result.outcome === 'imported' || result.outcome === 'pending') {
+          removeScopedUnrecognizedFile(libraryId, rootId, oldPath)
+        } else {
+          renameLibraryUnrecognizedFile(libraryId, rootId, normalizeLocalPathIdentity(oldPath), {
+            filePath: result.newPath,
+            normalizedPath: normalizeLocalPathIdentity(result.newPath)
+          })
+        }
         return result
       })
     }

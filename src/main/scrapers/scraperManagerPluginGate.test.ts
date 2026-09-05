@@ -46,6 +46,7 @@ describe('scraperManager plugin availability gates', () => {
     )
 
     assert.equal(descriptor?.source, 'builtin')
+    assert.equal(descriptor?.version, '1.0.0')
     assert.equal(descriptor?.configured, true)
     assert.equal(descriptor?.editable, false)
     assert.equal(descriptor?.exportable, false)

@@ -13,7 +13,8 @@ import {
   finishLibraryScanRun,
   getLatestLibraryScanSnapshot,
   INTERRUPTED_LIBRARY_SCAN_ERROR,
-  recoverInterruptedLibraryScanRuns
+  recoverInterruptedLibraryScanRuns,
+  renameLibraryUnrecognizedFile
 } from './libraryScanRepo'
 
 let tempRoot = ''
@@ -105,6 +106,22 @@ function persistSuccessfulRun(input: {
 }
 
 describe('libraryScanRepo latest snapshot', () => {
+  it('updates the pending path after a rename without rewriting the original scan audit', () => {
+    const directory = path.join(tempRoot, 'library')
+    fs.mkdirSync(directory)
+    const library = createMediaLibrary({ name: 'A', roots: [{ path: directory }] })
+    const rootId = library.roots[0].id
+    const oldPath = path.join(directory, 'unknown.mp4')
+    const newPath = path.join(directory, 'still-unknown.mp4')
+    persistSuccessfulRun({ libraryId: library.id, rootId, runId: 'rename-test', filePath: oldPath })
+    renameLibraryUnrecognizedFile(library.id, rootId, normalizeLocalPathIdentity(oldPath), {
+      filePath: newPath, normalizedPath: normalizeLocalPathIdentity(newPath)
+    })
+    const latest = getLatestLibraryScanSnapshot(library.id)
+    assert.deepEqual(latest.unrecognized, [{ rootId, filePath: newPath }])
+    assert.equal(latest.audit?.files[0].filePath, oldPath)
+  })
+
   it('returns summary, audit, and unrecognized files only from the requested library', () => {
     const rootA = path.join(tempRoot, 'library-a')
     const rootB = path.join(tempRoot, 'library-b')

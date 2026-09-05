@@ -14,6 +14,10 @@ function formatPluginVersion(plugin: ScraperPluginDescriptor): string | null {
   return plugin.version || null
 }
 
+function formatPluginName(plugin: ScraperPluginDescriptor): string {
+  return plugin.source === 'builtin' ? plugin.name.replace(/（内置）$/u, '') : plugin.name
+}
+
 export default function PluginCard({
   plugin,
   allFieldCount,
@@ -52,6 +56,7 @@ export default function PluginCard({
       : `间隔 ${Math.round(defaultPluginDelay(plugin.delay).minMs / 1000)}–${Math.round(defaultPluginDelay(plugin.delay).maxMs / 1000)}s`
   const coverage = allFieldCount > 0 ? plugin.supportedFields.length / allFieldCount : 0
   const coveragePct = Math.round(coverage * 100)
+  const displayName = formatPluginName(plugin)
   const versionLabel = formatPluginVersion(plugin)
   const summaryLabel = plugin.description || plugin.homepage || ''
   const sourceLabel =
@@ -69,12 +74,12 @@ export default function PluginCard({
           menuOpen ? ' plugin-card--menu-open' : ''
         }`}
         role="listitem"
-        aria-label={`${plugin.name}${isDefault ? '，默认插件' : ''}${plugin.configured === false ? '，待配置' : ''}`}
+        aria-label={`${displayName}${isDefault ? '，默认插件' : ''}${plugin.configured === false ? '，待配置' : ''}`}
       >
         <div className="plugin-card-body">
           <div className="plugin-card-title-row">
-            <h4 className="plugin-card-name" title={plugin.name}>
-              {plugin.name}
+            <h4 className="plugin-card-name" title={displayName}>
+              {displayName}
             </h4>
             {isDefault ? (
               <span className="plugin-card-default-tag">默认</span>

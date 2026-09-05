@@ -38,7 +38,7 @@ export function createNfoFileStore(options: {
     issue(root, filePath) {
       options.authorize(filePath, root)
       const resolved = fs.realpathSync.native(filePath)
-      const stat = fs.statSync(resolved)
+      const stat = fs.statSync(resolved, { bigint: true })
       if (!stat.isFile()) throw new Error('媒体库根目录内目标不是文件')
       const capability = Object.freeze({}) as ManagedRootFileCapability
       const deviceId = String(stat.dev)
@@ -60,7 +60,7 @@ export function createNfoFileStore(options: {
       const record = requireRecord(capability)
       const descriptor = fs.openSync(record.filePath, 'r')
       try {
-        const stat = fs.fstatSync(descriptor)
+        const stat = fs.fstatSync(descriptor, { bigint: true })
         if (String(stat.dev) !== record.deviceId || String(stat.ino) !== record.inode) {
           throw new Error('媒体库根目录内文件在读取前已经发生变化')
         }

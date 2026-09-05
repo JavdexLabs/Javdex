@@ -21,7 +21,7 @@ function makeRoot(): { directory: string; root: MediaLibraryRoot } {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-nfo-locator-'))
   temporaryDirectories.push(directory)
   const realPath = fs.realpathSync.native(directory)
-  const stat = fs.statSync(realPath)
+  const stat = fs.statSync(realPath, { bigint: true })
   return {
     directory,
     root: {

@@ -732,7 +732,7 @@ export class NfoExportModule {
           continue
         }
         this.deps.authorizeAnchor(current.libraryId, current.rootId, current.anchorPath, current.root)
-        const currentDir = fs.realpathSync(path.dirname(current.anchorPath))
+        const currentDir = fs.realpathSync.native(path.dirname(current.anchorPath))
         if (currentDir !== file.targetDirectoryRealPath ||
           snapshotHash(current) !== file.snapshotHash) {
           items.push({ ...base, disposition: 'stale-plan', message: '来源或目标在计划后发生变化' })

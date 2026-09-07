@@ -2,132 +2,1047 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Javdex 是一款本地优先、插件驱动的桌面媒体库管理器，支持 Windows、macOS 和 Linux。"
+      content="Javdex，把影片文件和资源链接整理成自己的影片资料库。多媒体库、元数据刮削、演员与清单、NFO 导入导出。MIT 开源，支持 Windows、macOS 和 Linux。"
     />
-    <meta name="theme-color" content="#111313" />
+    <meta name="theme-color" content="#f8faff" />
     <meta property="og:type" content="website" />
-    <meta property="og:locale" content="zh_CN" />
-    <meta property="og:site_name" content="Javdex" />
-    <meta property="og:title" content="Javdex · 把媒体库留在本地" />
+    <meta property="og:title" content="Javdex · 从文件夹，到资料库" />
     <meta
       property="og:description"
-      content="扫描、整理、刮削和维护本地媒体库。支持 Windows、macOS 与 Linux。"
+      content="扫描、补齐资料、浏览与收藏。本地优先的开源影片管理工具。"
     />
     <meta
       property="og:image"
-      content="https://javdexlabs.github.io/Javdex/assets/screenshots/library.png"
+      content="https://javdexlabs.github.io/Javdex/assets/screenshots/library.webp"
     />
     <link rel="canonical" href="https://javdexlabs.github.io/Javdex/" />
     <link rel="icon" href="./assets/icon.png" />
     <link rel="stylesheet" href="./styles.css" />
-    <title>Javdex · 本地媒体库管理器</title>
+    <title>Javdex · 从文件夹，到资料库</title>
   </head>
-  <body>
-    <a class="skip-link" href="#main">跳到主要内容</a>
-    <svg class="icon-sprite" aria-hidden="true">
+  <body id="top">
+    <a class="skip-link" href="#main">跳到主要内容</a
+    ><svg class="icon-sprite" aria-hidden="true">
       <symbol id="icon-arrow-down" viewBox="0 0 24 24">
-        <path d="M12 3v14" />
-        <path d="m7 12 5 5 5-5" />
-        <path d="M5 21h14" />
+        <path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5" />
       </symbol>
       <symbol id="icon-arrow-up-right" viewBox="0 0 24 24">
-        <path d="M7 17 17 7" />
-        <path d="M7 7h10v10" />
+        <path d="m7 17 10-10M7 7h10v10" />
       </symbol>
       <symbol id="icon-info" viewBox="0 0 24 24">
         <circle cx="12" cy="12" r="9" />
-        <path d="M12 11v5" />
-        <path d="M12 8h.01" />
-      </symbol>
-      <symbol id="icon-close" viewBox="0 0 24 24">
-        <path d="m6 6 12 12" />
-        <path d="M18 6 6 18" />
+        <path d="M12 11v6m0-10v1" />
       </symbol>
     </svg>
-
-    <div class="hero-surface" id="top">
-      <header class="site-header">
-        <a class="brand" href="#top" aria-label="Javdex 首页">
-          <img src="./assets/icon.png" alt="" width="36" height="36" />
-          <span>JAVDEX</span>
-        </a>
-        <nav class="site-nav" aria-label="主导航">
-          <a href="#product">产品</a>
-          <a href="#features">功能</a>
-          <a href="#download">下载</a>
-        </nav>
-        <a
-          class="header-link"
-          href="https://github.com/JavdexLabs/Javdex"
-          target="_blank"
-          rel="noreferrer"
+    <header class="site-header">
+      <div class="header-inner wrap">
+        <a class="brand" href="#top" aria-label="Javdex 首页"
+          ><img src="./assets/icon.png" alt="" width="36" height="36" /><span
+            >Javdex</span
+          ></a
         >
-          GitHub
-          <svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-up-right"></use></svg>
-        </a>
-      </header>
-
-      <section class="hero" aria-labelledby="hero-title">
+        <nav aria-label="主导航">
+          <a href="#product">产品</a><a href="#workflow">开始使用</a
+          ><a href="#nfo">资料迁移</a>
+        </nav>
+        <div class="header-actions">
+          <a
+            class="source-link"
+            href="https://github.com/JavdexLabs/Javdex"
+            target="_blank"
+            rel="noreferrer"
+            ><svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="lucide lucide-code-xml ui-icon"
+              aria-hidden="true"
+            >
+              <path d="m18 16 4-4-4-4"></path>
+              <path d="m6 8-4 4 4 4"></path>
+              <path d="m14.5 4-5 16"></path></svg
+            ><span>GitHub</span></a
+          ><a class="button compact" href="#download"
+            >下载应用
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="lucide lucide-download ui-icon"
+              aria-hidden="true"
+            >
+              <path d="M12 15V3"></path>
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <path d="m7 10 5 5 5-5"></path></svg
+          ></a>
+        </div>
+      </div>
+    </header>
+    <main id="main">
+      <section class="hero wrap">
         <div class="hero-copy reveal">
-          <p class="overline">
-            <span aria-hidden="true"></span>
-            本地优先 · 开源桌面应用
-            <b data-release-version>读取版本中</b>
-          </p>
-          <h1 id="hero-title">你的媒体库，<br /><em>只属于你。</em></h1>
+          <a
+            class="eyebrow-pill"
+            href="https://github.com/JavdexLabs/Javdex/blob/main/LICENSE"
+            target="_blank"
+            rel="noreferrer"
+            ><svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="lucide lucide-braces ui-icon"
+              aria-hidden="true"
+            >
+              <path
+                d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"
+              ></path>
+              <path
+                d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"
+              ></path>
+            </svg>
+            MIT 开源 · 本地优先
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="lucide lucide-arrow-up-right ui-icon"
+              aria-hidden="true"
+            >
+              <path d="M7 7h10v10"></path>
+              <path d="M7 17 17 7"></path></svg
+          ></a>
+          <h1>从一个文件夹，<br />到一整个<span>资料库。</span></h1>
           <p class="hero-lead">
-            从散落的本地文件，到清晰、可搜索、可维护的资料库。Javdex 将扫描、刮削与资产管理放进一个安静的桌面工作区。
+            把影片、人物与收藏放在一起。<br />扫描本地文件，补齐资料，<br />在清晰有序的工作台上，重新发现你的收藏。
           </p>
           <div class="hero-actions">
-            <a class="button button-primary" href="#download">
-              下载最新版
-              <svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-down"></use></svg>
-            </a>
+            <a class="button" href="#download"
+              >下载 Javdex
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="lucide lucide-download ui-icon"
+                aria-hidden="true"
+              >
+                <path d="M12 15V3"></path>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <path d="m7 10 5 5 5-5"></path></svg></a
+            ><a class="text-link" href="#workflow"
+              >了解如何开始
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="lucide lucide-arrow-right ui-icon"
+                aria-hidden="true"
+              >
+                <path d="M5 12h14"></path>
+                <path d="m12 5 7 7-7 7"></path></svg
+            ></a>
+          </div>
+          <div class="hero-platforms">
+            <span
+              ><img src="./assets/platforms/windows.svg" alt="" />Windows</span
+            ><span><img src="./assets/platforms/apple.svg" alt="" />macOS</span
+            ><span><img src="./assets/platforms/linux.svg" alt="" />Linux</span>
+          </div>
+        </div>
+        <div class="hero-visual reveal">
+          <div class="visual-orbit" aria-hidden="true"></div>
+          <div class="hero-window">
+            <div class="window-heading">
+              <span><span class="status-dot"></span>你的影片资料库</span
+              ><span>Javdex</span>
+            </div>
+            <button
+              class="screen-button"
+              type="button"
+              data-lightbox-src="./assets/screenshots/library.webp"
+              data-lightbox-alt="Javdex 媒体库 · 竖版封面浏览"
+              aria-label="放大Javdex 媒体库 · 竖版封面浏览"
+            >
+              <img
+                src="./assets/screenshots/library.webp"
+                alt="Javdex 媒体库 · 竖版封面浏览"
+                width="1440"
+                height="920"
+                loading="lazy"
+              /><span class="zoom-cue"
+                ><svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="lucide lucide-expand ui-icon"
+                  aria-hidden="true"
+                >
+                  <path d="m15 15 6 6"></path>
+                  <path d="m15 9 6-6"></path>
+                  <path d="M21 16v5h-5"></path>
+                  <path d="M21 8V3h-5"></path>
+                  <path d="M3 16v5h5"></path>
+                  <path d="m3 21 6-6"></path>
+                  <path d="M3 8V3h5"></path>
+                  <path d="M9 9 3 3"></path></svg
+              ></span>
+            </button>
+          </div>
+          <div class="hero-caption">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="lucide lucide-monitor ui-icon"
+              aria-hidden="true"
+            >
+              <rect width="20" height="14" x="2" y="3" rx="2"></rect>
+              <line x1="8" x2="16" y1="21" y2="21"></line>
+              <line x1="12" x2="12" y1="17" y2="21"></line>
+            </svg>
+            当前软件实机截图 <span>·</span> 虚构演示资料
+          </div>
+        </div>
+      </section>
+      <div class="value-strip wrap">
+        <span
+          ><svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="lucide lucide-folder-closed ui-icon"
+            aria-hidden="true"
+          >
+            <path
+              d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
+            ></path>
+            <path d="M2 10h20"></path>
+          </svg>
+          多媒体库</span
+        ><span
+          ><svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="lucide lucide-scan-search ui-icon"
+            aria-hidden="true"
+          >
+            <path d="M3 7V5a2 2 0 0 1 2-2h2"></path>
+            <path d="M17 3h2a2 2 0 0 1 2 2v2"></path>
+            <path d="M21 17v2a2 2 0 0 1-2 2h-2"></path>
+            <path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="m16 16-1.9-1.9"></path>
+          </svg>
+          插件刮削</span
+        ><span
+          ><svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="lucide lucide-list-video ui-icon"
+            aria-hidden="true"
+          >
+            <path d="M21 5H3"></path>
+            <path d="M10 12H3"></path>
+            <path d="M10 19H3"></path>
+            <path
+              d="M15 12.003a1 1 0 0 1 1.517-.859l4.997 2.997a1 1 0 0 1 0 1.718l-4.997 2.997a1 1 0 0 1-1.517-.86z"
+            ></path>
+          </svg>
+          跨库清单</span
+        ><span
+          ><svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="lucide lucide-file-input ui-icon"
+            aria-hidden="true"
+          >
+            <path
+              d="M4 11V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-1"
+            ></path>
+            <path d="M14 2v5a1 1 0 0 0 1 1h5"></path>
+            <path d="M2 15h10"></path>
+            <path d="m9 18 3-3-3-3"></path>
+          </svg>
+          NFO 导入导出</span
+        ><a href="https://github.com/JavdexLabs/Javdex/blob/main/LICENSE"
+          >MIT License
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="lucide lucide-arrow-up-right ui-icon"
+            aria-hidden="true"
+          >
+            <path d="M7 7h10v10"></path>
+            <path d="M7 17 17 7"></path></svg
+        ></a>
+      </div>
+      <section id="product" class="section wrap">
+        <div class="section-heading reveal">
+          <div>
+            <p class="section-kicker">A PLACE FOR YOUR COLLECTION</p>
+            <h2>每一份收藏，<br />都有清晰的脉络。</h2>
+          </div>
+          <p>
+            影片资料、演员与资源关联在一起。<br />找到一部作品，也能沿着它继续探索。
+          </p>
+        </div>
+        <div class="showcase reveal">
+          <div class="showcase-toolbar">
+            <div class="tab-group" role="tablist" aria-label="软件界面">
+              <button
+                type="button"
+                role="tab"
+                aria-selected="true"
+                id="view-0"
+                aria-controls="product-panel"
+                data-view="0"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="lucide lucide-panels-top-left ui-icon"
+                  aria-hidden="true"
+                >
+                  <rect width="18" height="18" x="3" y="3" rx="2"></rect>
+                  <path d="M3 9h18"></path>
+                  <path d="M9 21V9"></path>
+                </svg>
+                媒体库</button
+              ><button
+                type="button"
+                role="tab"
+                aria-selected="false"
+                tabindex="-1"
+                id="view-1"
+                aria-controls="product-panel"
+                data-view="1"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="lucide lucide-clapperboard ui-icon"
+                  aria-hidden="true"
+                >
+                  <path d="m12.296 3.464 3.02 3.956"></path>
+                  <path
+                    d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3z"
+                  ></path>
+                  <path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                  <path d="m6.18 5.276 3.1 3.899"></path>
+                </svg>
+                影片详情</button
+              ><button
+                type="button"
+                role="tab"
+                aria-selected="false"
+                tabindex="-1"
+                id="view-2"
+                aria-controls="product-panel"
+                data-view="2"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="lucide lucide-list-video ui-icon"
+                  aria-hidden="true"
+                >
+                  <path d="M21 5H3"></path>
+                  <path d="M10 12H3"></path>
+                  <path d="M10 19H3"></path>
+                  <path
+                    d="M15 12.003a1 1 0 0 1 1.517-.859l4.997 2.997a1 1 0 0 1 0 1.718l-4.997 2.997a1 1 0 0 1-1.517-.86z"
+                  ></path>
+                </svg>
+                主题清单
+              </button>
+            </div>
+            <span class="showcase-hint"
+              >点击截图，查看细节
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="lucide lucide-expand ui-icon"
+                aria-hidden="true"
+              >
+                <path d="m15 15 6 6"></path>
+                <path d="m15 9 6-6"></path>
+                <path d="M21 16v5h-5"></path>
+                <path d="M21 8V3h-5"></path>
+                <path d="M3 16v5h5"></path>
+                <path d="m3 21 6-6"></path>
+                <path d="M3 8V3h5"></path>
+                <path d="M9 9 3 3"></path></svg
+            ></span>
+          </div>
+          <div id="product-panel" role="tabpanel" aria-labelledby="view-0">
+            <button
+              class="screen-button product-screen"
+              type="button"
+              data-lightbox-src="./assets/screenshots/library.webp"
+              data-lightbox-alt="Javdex 媒体库 · 搜索、筛选与排序"
+              aria-label="放大Javdex 媒体库 · 搜索、筛选与排序"
+            >
+              <img
+                src="./assets/screenshots/library.webp"
+                alt="Javdex 媒体库 · 搜索、筛选与排序"
+                width="1440"
+                height="920"
+                loading="lazy"
+              /><span class="zoom-cue"
+                ><svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="lucide lucide-expand ui-icon"
+                  aria-hidden="true"
+                >
+                  <path d="m15 15 6 6"></path>
+                  <path d="m15 9 6-6"></path>
+                  <path d="M21 16v5h-5"></path>
+                  <path d="M21 8V3h-5"></path>
+                  <path d="M3 16v5h5"></path>
+                  <path d="m3 21 6-6"></path>
+                  <path d="M3 8V3h5"></path>
+                  <path d="M9 9 3 3"></path></svg
+              ></span>
+            </button>
+          </div>
+          <div class="showcase-caption">
+            <strong data-view-title>多媒体库，按你的方式组织。</strong>
+            <p data-view-copy>
+              独立设置来源目录，搜索番号、标题与演员，组合筛选与排序。横版封面与竖版展示可以在外观设置中切换。
+            </p>
+          </div>
+        </div>
+        <p class="image-note">
+          界面取自当前软件；影片、人物、封面与背景均为专门制作的演示资料。
+        </p>
+        <div class="feature-grid">
+          <article class="feature reveal">
+            <span class="feature-icon"
+              ><svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="lucide lucide-folder-open ui-icon"
+                aria-hidden="true"
+              >
+                <path
+                  d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"
+                ></path></svg
+            ></span>
+            <h3>分散的文件，统一的入口</h3>
+            <p>
+              每个媒体库独立管理来源目录与扫描策略。本地视频、STRM
+              和手动添加的链接，都能关联到影片资料。
+            </p>
+          </article>
+          <article class="feature reveal">
+            <span class="feature-icon"
+              ><svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="lucide lucide-scan-search ui-icon"
+                aria-hidden="true"
+              >
+                <path d="M3 7V5a2 2 0 0 1 2-2h2"></path>
+                <path d="M17 3h2a2 2 0 0 1 2 2v2"></path>
+                <path d="M21 17v2a2 2 0 0 1-2 2h-2"></path>
+                <path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="m16 16-1.9-1.9"></path></svg
+            ></span>
+            <h3>从番号，到完整资料</h3>
+            <p>
+              通过刮削来源获取标题、封面、演员与简介。按字段组合来源，单部处理或批量更新，也能随时手动修正。
+            </p>
+          </article>
+          <article class="feature reveal">
+            <span class="feature-icon"
+              ><svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="lucide lucide-users-round ui-icon"
+                aria-hidden="true"
+              >
+                <path d="M18 21a8 8 0 0 0-16 0"></path>
+                <circle cx="10" cy="8" r="5"></circle>
+                <path d="M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3"></path></svg
+            ></span>
+            <h3>沿着人物，继续探索</h3>
+            <p>
+              演员的别名、简介、写真与出演作品集中呈现。从导演、制作商、发行商与系列继续浏览。
+            </p>
+          </article>
+          <article class="feature reveal">
+            <span class="feature-icon"
+              ><svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="lucide lucide-list-video ui-icon"
+                aria-hidden="true"
+              >
+                <path d="M21 5H3"></path>
+                <path d="M10 12H3"></path>
+                <path d="M10 19H3"></path>
+                <path
+                  d="M15 12.003a1 1 0 0 1 1.517-.859l4.997 2.997a1 1 0 0 1 0 1.718l-4.997 2.997a1 1 0 0 1-1.517-.86z"
+                ></path></svg
+            ></span>
+            <h3>用清单，留下你的线索</h3>
+            <p>
+              跨媒体库收录影片，整理专题与待看作品。也可以借助 AI
+              导入网页清单，匹配已有影片。
+            </p>
+          </article>
+          <article class="feature reveal">
+            <span class="feature-icon"
+              ><svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="lucide lucide-sparkles ui-icon"
+                aria-hidden="true"
+              >
+                <path
+                  d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"
+                ></path>
+                <path d="M20 2v4"></path>
+                <path d="M22 4h-4"></path>
+                <circle cx="4" cy="20" r="2"></circle></svg
+            ></span>
+            <h3>采集资料，多一个帮手</h3>
+            <p>
+              在影片或演员详情选择 Agent
+              刮削，粘贴详情页地址。预览采集草稿、选择字段后再应用。需配置可用
+              AI 模型。
+            </p>
+          </article>
+          <article class="feature reveal">
+            <span class="feature-icon"
+              ><svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="lucide lucide-circle-check ui-icon"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="m9 12 2 2 4-4"></path></svg
+            ></span>
+            <h3>有疑问，先确认</h3>
+            <p>
+              扫描归属、资源身份、刮削候选和演员名称冲突，集中在“待确认”核对，让每一次关联都有依据。
+            </p>
+          </article>
+        </div>
+      </section>
+      <section id="workflow" class="workflow-section section">
+        <div class="wrap">
+          <div class="section-heading reveal">
+            <div>
+              <p class="section-kicker">START WITH WHAT YOU HAVE</p>
+              <h2>第一座资料库，<br />从熟悉的目录开始。</h2>
+            </div>
+            <p>
+              跟着软件里的真实步骤，完成创建与资料整理。<br />先看看界面，再开始动手。
+            </p>
+          </div>
+          <div class="workflow reveal">
+            <div class="workflow-tabs" role="tablist" aria-label="开始使用步骤">
+              <button
+                type="button"
+                id="step-0"
+                role="tab"
+                aria-controls="workflow-panel"
+                aria-selected="true"
+                tabindex="0"
+                data-step="0"
+              >
+                <span>01</span>基本信息</button
+              ><button
+                type="button"
+                id="step-1"
+                role="tab"
+                aria-controls="workflow-panel"
+                aria-selected="false"
+                tabindex="-1"
+                data-step="1"
+              >
+                <span>02</span>根目录</button
+              ><button
+                type="button"
+                id="step-2"
+                role="tab"
+                aria-controls="workflow-panel"
+                aria-selected="false"
+                tabindex="-1"
+                data-step="2"
+              >
+                <span>03</span>扫描配置</button
+              ><button
+                type="button"
+                id="step-3"
+                role="tab"
+                aria-controls="workflow-panel"
+                aria-selected="false"
+                tabindex="-1"
+                data-step="3"
+              >
+                <span>04</span>首次扫描</button
+              ><button
+                type="button"
+                id="step-4"
+                role="tab"
+                aria-controls="workflow-panel"
+                aria-selected="false"
+                tabindex="-1"
+                data-step="4"
+              >
+                <span>05</span>刮削来源</button
+              ><button
+                type="button"
+                id="step-5"
+                role="tab"
+                aria-controls="workflow-panel"
+                aria-selected="false"
+                tabindex="-1"
+                data-step="5"
+              >
+                <span>06</span>浏览整理
+              </button>
+            </div>
+            <div
+              class="workflow-body"
+              id="workflow-panel"
+              role="tabpanel"
+              aria-labelledby="step-0"
+            >
+              <div class="workflow-copy">
+                <p class="workflow-location" data-step-location>
+                  设置 / 媒体库 / 新建媒体库
+                </p>
+                <span class="step-count" data-step-count>01 / 06</span>
+                <h3 data-step-title>给你的收藏，一个名字。</h3>
+                <p data-step-copy>
+                  在“设置 →
+                  媒体库”新建媒体库。填写名称，选择图标和标识颜色，方便在侧栏辨认。
+                </p>
+                <p class="workflow-tip" data-step-tip>
+                  也可以从侧栏“媒体库”旁的加号进入同一个创建向导。
+                </p>
+                <button class="text-link" type="button" data-next>
+                  下一步
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="24"
+                    height="24"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    class="lucide lucide-arrow-right ui-icon"
+                    aria-hidden="true"
+                  >
+                    <path d="M5 12h14"></path>
+                    <path d="m12 5 7 7-7 7"></path>
+                  </svg>
+                </button>
+              </div>
+              <div class="workflow-image">
+                <button
+                  class="screen-button step-screen"
+                  type="button"
+                  data-lightbox-src="./assets/screenshots/create-1.webp"
+                  data-lightbox-alt="新建媒体库 · 基本信息"
+                  aria-label="放大新建媒体库 · 基本信息"
+                >
+                  <img
+                    src="./assets/screenshots/create-1.webp"
+                    alt="新建媒体库 · 基本信息"
+                    width="1440"
+                    height="920"
+                    loading="lazy"
+                  /><span class="zoom-cue"
+                    ><svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="24"
+                      height="24"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      class="lucide lucide-expand ui-icon"
+                      aria-hidden="true"
+                    >
+                      <path d="m15 15 6 6"></path>
+                      <path d="m15 9 6-6"></path>
+                      <path d="M21 16v5h-5"></path>
+                      <path d="M21 8V3h-5"></path>
+                      <path d="M3 16v5h5"></path>
+                      <path d="m3 21 6-6"></path>
+                      <path d="M3 8V3h5"></path>
+                      <path d="M9 9 3 3"></path></svg
+                  ></span>
+                </button>
+              </div>
+            </div>
+            <div class="workflow-foot">
+              <span
+                ><svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="lucide lucide-mouse-pointer2 lucide-mouse-pointer-2 ui-icon"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z"
+                  ></path>
+                </svg>
+                点击步骤浏览操作说明</span
+              ><span>前四步对应软件的“新建媒体库”向导</span>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section id="nfo" class="section wrap">
+        <div class="nfo-panel reveal">
+          <div class="nfo-copy">
+            <p class="section-kicker">YOUR METADATA, STILL YOURS</p>
+            <h2>已经整理好的，<br />接着用。</h2>
+            <p>
+              扫描时读取影片旁的 NFO
+              与本地图片，保留已有整理成果。也能预览后导出资料，交给其他媒体软件继续使用。
+            </p>
+            <div class="compat-row">
+              <span>导入来源</span
+              ><strong>MDC · MDCx · Javinizer · JavSP</strong>
+            </div>
+            <div class="compat-row">
+              <span>导出目标</span
+              ><strong
+                >Kodi · Jellyfin · Emby<br />Plex NFO Agent · Infuse</strong
+              >
+            </div>
             <a
-              class="button button-ghost"
-              href="https://github.com/JavdexLabs/Javdex"
+              class="text-link"
+              href="https://github.com/JavdexLabs/Javdex/blob/main/docs/NFO_COMPATIBILITY.md"
               target="_blank"
               rel="noreferrer"
+              >查看兼容范围
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="lucide lucide-arrow-up-right ui-icon"
+                aria-hidden="true"
+              >
+                <path d="M7 7h10v10"></path>
+                <path d="M7 17 17 7"></path></svg
+            ></a>
+          </div>
+          <div class="nfo-visual">
+            <div class="nfo-visual-heading">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="lucide lucide-file-output ui-icon"
+                aria-hidden="true"
+              >
+                <path
+                  d="M4.226 20.925A2 2 0 0 0 6 22h12a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v3.127"
+                ></path>
+                <path d="M14 2v5a1 1 0 0 0 1 1h5"></path>
+                <path d="m5 11-3 3"></path>
+                <path d="m5 17-3-3h10"></path>
+              </svg>
+              预览在先，导出在后
+            </div>
+            <button
+              class="screen-button"
+              type="button"
+              data-lightbox-src="./assets/screenshots/nfo.webp"
+              data-lightbox-alt="设置 · 导出影片资料"
+              aria-label="放大设置 · 导出影片资料"
             >
-              查看源代码
-            </a>
+              <img
+                src="./assets/screenshots/nfo.webp"
+                alt="设置 · 导出影片资料"
+                width="1440"
+                height="920"
+                loading="lazy"
+              /><span class="zoom-cue"
+                ><svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="lucide lucide-expand ui-icon"
+                  aria-hidden="true"
+                >
+                  <path d="m15 15 6 6"></path>
+                  <path d="m15 9 6-6"></path>
+                  <path d="M21 16v5h-5"></path>
+                  <path d="M21 8V3h-5"></path>
+                  <path d="M3 16v5h5"></path>
+                  <path d="m3 21 6-6"></path>
+                  <path d="M3 8V3h5"></path>
+                  <path d="M9 9 3 3"></path></svg
+              ></span>
+            </button>
+            <p>设置 → 存储与导出 → 导出影片资料</p>
           </div>
         </div>
-
-        <div class="hero-stage reveal reveal-delay-1">
-          <div class="stage-meta" aria-hidden="true">
-            <span>DESKTOP / LOCAL FIRST</span>
-            <span>WINDOWS · MACOS · LINUX</span>
-          </div>
-          <button
-            class="hero-screen"
-            type="button"
-            data-lightbox-src="./assets/screenshots/library.png"
-            data-lightbox-alt="Javdex 媒体库网格与筛选界面"
-            aria-label="放大媒体库界面截图"
-          >
-            <img
-              src="./assets/screenshots/library.png"
-              alt="Javdex 媒体库界面，展示本地影片网格、搜索和筛选工具"
-              width="1600"
-              height="1020"
-            />
-          </button>
-        </div>
-
-        <ul class="hero-facts reveal reveal-delay-2" aria-label="产品特点">
-          <li><b>01</b><span>数据存储在本地</span></li>
-          <li><b>02</b><span>插件化元数据刮削</span></li>
-          <li><b>03</b><span>MIT 开源</span></li>
-        </ul>
+        <p class="image-note">
+          导入基于固定版本格式样例验证；导出需按目标软件配置。均为一次性资料交换，不持续同步，也不等于完整备份。
+        </p>
       </section>
-    </div>
-
-    <main id="main">
-      <section class="download-section section-shell" aria-labelledby="download-title">
+      <section class="local-section wrap reveal">
+        <span class="local-icon"
+          ><svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="lucide lucide-hard-drive ui-icon"
+            aria-hidden="true"
+          >
+            <path d="M10 16h.01"></path>
+            <path
+              d="M2.212 11.577a2 2 0 0 0-.212.896V18a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5.527a2 2 0 0 0-.212-.896L18.55 5.11A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"
+            ></path>
+            <path d="M21.946 12.013H2.054"></path>
+            <path d="M6 16h.01"></path></svg
+        ></span>
+        <div>
+          <p class="section-kicker">LOCAL BY DEFAULT</p>
+          <h2>收藏在本地，整理由你掌握。</h2>
+          <p>
+            数据库、设置和下载的图片默认保存在设备中。按需迁移图片目录、启用图片加密，或用隐私模式保护界面显示。
+          </p>
+          <small
+            >联网刮削与 AI
+            会访问相应服务；图片加密仅覆盖图片文件，隐私模式仅改变显示。</small
+          >
+        </div>
+        <a
+          class="text-link"
+          href="https://github.com/JavdexLabs/Javdex/blob/main/docs/USER_GUIDE.md"
+          target="_blank"
+          rel="noreferrer"
+          >使用指南
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="lucide lucide-arrow-up-right ui-icon"
+            aria-hidden="true"
+          >
+            <path d="M7 7h10v10"></path>
+            <path d="M7 17 17 7"></path></svg
+        ></a>
+      </section>
+      <section
+        class="download-section section-shell"
+        aria-labelledby="download-title"
+      >
         <div class="section-heading reveal" id="download">
           <p class="section-kicker">DOWNLOAD</p>
           <div>
@@ -136,7 +1051,9 @@
               最新正式版 <strong data-release-version>最新版</strong>
               <span data-release-date></span>
             </p>
-            <p class="download-intro">不确定时，选择带有“推荐”标记的版本。不同格式功能相同，仅安装方式不同。</p>
+            <p class="download-intro">
+              不确定时，选择带有“推荐”标记的版本。不同格式功能相同，仅安装方式不同。
+            </p>
           </div>
         </div>
 
@@ -144,14 +1061,23 @@
           <article class="platform-row reveal" data-platform-card="windows">
             <div class="platform-name">
               <span class="platform-glyph" aria-hidden="true">
-                <img src="./assets/platforms/windows.svg" alt="" width="20" height="20" />
+                <img
+                  src="./assets/platforms/windows.svg"
+                  alt=""
+                  width="20"
+                  height="20"
+                />
               </span>
               <div>
                 <h3>Windows</h3>
                 <p class="platform-spec">Windows 10 / 11 · 64 位（x64）</p>
-                <p class="platform-guidance">大多数用户选择 EXE；需要免安装时选择 ZIP。</p>
+                <p class="platform-guidance">
+                  大多数用户选择 EXE；需要免安装时选择 ZIP。
+                </p>
               </div>
-              <span class="recommendation" data-recommended-badge hidden>当前设备</span>
+              <span class="recommendation" data-recommended-badge hidden
+                >当前设备</span
+              >
             </div>
             <div class="platform-downloads">
               <a
@@ -160,8 +1086,12 @@
                 href="https://github.com/JavdexLabs/Javdex/releases/latest"
               >
                 <span class="download-copy">
-                  <span class="download-label"><b>EXE 安装版</b><em>推荐</em></span>
-                  <span class="download-purpose">按向导安装，创建快捷方式与卸载项</span>
+                  <span class="download-label"
+                    ><b>EXE 安装版</b><em>推荐</em></span
+                  >
+                  <span class="download-purpose"
+                    >按向导安装，创建快捷方式与卸载项</span
+                  >
                   <small data-download-meta>读取安装包信息…</small>
                 </span>
                 <span class="download-action-icon" aria-hidden="true">
@@ -174,7 +1104,10 @@
                 href="https://github.com/JavdexLabs/Javdex/releases/latest"
               >
                 <span class="download-copy">
-                  <span class="download-label"><b>ZIP 免安装版</b><em class="badge-neutral">解压即用</em></span>
+                  <span class="download-label"
+                    ><b>ZIP 免安装版</b
+                    ><em class="badge-neutral">解压即用</em></span
+                  >
                   <span class="download-purpose">无需安装，解压后直接运行</span>
                   <small data-download-meta>读取压缩包信息…</small>
                 </span>
@@ -188,14 +1121,23 @@
           <article class="platform-row reveal" data-platform-card="macos">
             <div class="platform-name">
               <span class="platform-glyph" aria-hidden="true">
-                <img src="./assets/platforms/apple.svg" alt="" width="19" height="22" />
+                <img
+                  src="./assets/platforms/apple.svg"
+                  alt=""
+                  width="19"
+                  height="22"
+                />
               </span>
               <div>
                 <h3>macOS</h3>
                 <p class="platform-spec">macOS 11+ · DMG</p>
-                <p class="platform-guidance">打开“Apple 菜单 → 关于本机”，查看芯片或处理器。</p>
+                <p class="platform-guidance">
+                  打开“Apple 菜单 → 关于本机”，查看芯片或处理器。
+                </p>
               </div>
-              <span class="recommendation" data-recommended-badge hidden>当前设备</span>
+              <span class="recommendation" data-recommended-badge hidden
+                >当前设备</span
+              >
             </div>
             <div class="platform-downloads">
               <a
@@ -204,8 +1146,12 @@
                 href="https://github.com/JavdexLabs/Javdex/releases/latest"
               >
                 <span class="download-copy">
-                  <span class="download-label"><b>Apple Silicon</b><em>新款 Mac</em></span>
-                  <span class="download-purpose">适用于芯片显示 Apple M 系列的 Mac</span>
+                  <span class="download-label"
+                    ><b>Apple Silicon</b><em>新款 Mac</em></span
+                  >
+                  <span class="download-purpose"
+                    >适用于芯片显示 Apple M 系列的 Mac</span
+                  >
                   <small data-download-meta>读取 DMG 信息…</small>
                 </span>
                 <span class="download-action-icon" aria-hidden="true">
@@ -218,8 +1164,13 @@
                 href="https://github.com/JavdexLabs/Javdex/releases/latest"
               >
                 <span class="download-copy">
-                  <span class="download-label"><b>Intel Mac</b><em class="badge-neutral">旧款 Mac</em></span>
-                  <span class="download-purpose">适用于处理器名称显示 Intel 的 Mac</span>
+                  <span class="download-label"
+                    ><b>Intel Mac</b
+                    ><em class="badge-neutral">旧款 Mac</em></span
+                  >
+                  <span class="download-purpose"
+                    >适用于处理器名称显示 Intel 的 Mac</span
+                  >
                   <small data-download-meta>读取 DMG 信息…</small>
                 </span>
                 <span class="download-action-icon" aria-hidden="true">
@@ -232,14 +1183,23 @@
           <article class="platform-row reveal" data-platform-card="linux">
             <div class="platform-name">
               <span class="platform-glyph" aria-hidden="true">
-                <img src="./assets/platforms/linux.svg" alt="" width="20" height="23" />
+                <img
+                  src="./assets/platforms/linux.svg"
+                  alt=""
+                  width="20"
+                  height="23"
+                />
               </span>
               <div>
                 <h3>Linux</h3>
                 <p class="platform-spec">64 位（x86_64）</p>
-                <p class="platform-guidance">Ubuntu / Debian / Mint 选择 DEB，其它发行版选择 AppImage。</p>
+                <p class="platform-guidance">
+                  Ubuntu / Debian / Mint 选择 DEB，其它发行版选择 AppImage。
+                </p>
               </div>
-              <span class="recommendation" data-recommended-badge hidden>当前设备</span>
+              <span class="recommendation" data-recommended-badge hidden
+                >当前设备</span
+              >
             </div>
             <div class="platform-downloads">
               <a
@@ -248,8 +1208,12 @@
                 href="https://github.com/JavdexLabs/Javdex/releases/latest"
               >
                 <span class="download-copy">
-                  <span class="download-label"><b>AppImage 通用版</b><em>多数发行版</em></span>
-                  <span class="download-purpose">无需安装，赋予执行权限后直接运行</span>
+                  <span class="download-label"
+                    ><b>AppImage 通用版</b><em>多数发行版</em></span
+                  >
+                  <span class="download-purpose"
+                    >无需安装，赋予执行权限后直接运行</span
+                  >
                   <small data-download-meta>读取 AppImage 信息…</small>
                 </span>
                 <span class="download-action-icon" aria-hidden="true">
@@ -262,8 +1226,13 @@
                 href="https://github.com/JavdexLabs/Javdex/releases/latest"
               >
                 <span class="download-copy">
-                  <span class="download-label"><b>DEB 软件包</b><em class="badge-neutral">系统集成</em></span>
-                  <span class="download-purpose">适用于 Ubuntu、Debian 与 Linux Mint</span>
+                  <span class="download-label"
+                    ><b>DEB 软件包</b
+                    ><em class="badge-neutral">系统集成</em></span
+                  >
+                  <span class="download-purpose"
+                    >适用于 Ubuntu、Debian 与 Linux Mint</span
+                  >
                   <small data-download-meta>读取 DEB 信息…</small>
                 </span>
                 <span class="download-action-icon" aria-hidden="true">
@@ -275,14 +1244,18 @@
         </div>
 
         <div class="download-meta reveal">
-          <p data-release-status aria-live="polite">正在读取 GitHub 最新正式版…</p>
+          <p data-release-status aria-live="polite">
+            正在读取 GitHub 最新正式版…
+          </p>
           <a
             href="https://github.com/JavdexLabs/Javdex/releases/latest"
             target="_blank"
             rel="noreferrer"
           >
             更新说明与全部文件
-            <svg class="ui-icon" aria-hidden="true"><use href="#icon-arrow-up-right"></use></svg>
+            <svg class="ui-icon" aria-hidden="true">
+              <use href="#icon-arrow-up-right"></use>
+            </svg>
           </a>
         </div>
 
@@ -292,164 +1265,233 @@
           </span>
           <p>
             <b id="signing-title">首次启动说明</b>
-            当前安装包尚未进行商业代码签名，系统可能显示“未知发布者”。请仅从本项目 GitHub Release 下载，并按系统提示确认打开。
+            当前安装包尚未进行商业代码签名，系统可能显示“未知发布者”。请仅从本项目
+            GitHub Release 下载，并按系统提示确认打开。
           </p>
         </aside>
       </section>
-
-      <section class="product-section" aria-labelledby="product-title">
-        <div class="section-shell">
-          <div class="product-intro reveal" id="product">
-            <p class="section-kicker">THE WORKSPACE</p>
-            <h2 id="product-title">复杂的资料，<br />保持清晰。</h2>
-            <p>为大型本地媒体库设计。高密度信息始终在视线内，日常维护不被多余界面打断。</p>
-          </div>
-
-          <article class="product-story reveal">
-            <button
-              class="story-screen"
-              type="button"
-              data-lightbox-src="./assets/screenshots/library.png"
-              data-lightbox-alt="媒体库网格与筛选界面"
-            >
-              <img
-                src="./assets/screenshots/library.png"
-                alt="媒体库网格与筛选界面"
-                width="1600"
-                height="1020"
-                loading="lazy"
-              />
-            </button>
-            <div class="story-copy">
-              <span>01 / LIBRARY</span>
-              <h3>浏览，不必翻找。</h3>
-              <p>搜索、筛选、排序与多种浏览维度聚合在同一工作区，让数千条记录仍然易于定位。</p>
-            </div>
-          </article>
-
-          <article class="product-story product-story-reverse reveal">
-            <button
-              class="story-screen"
-              type="button"
-              data-lightbox-src="./assets/screenshots/video-detail.png"
-              data-lightbox-alt="影片详情与元数据界面"
-            >
-              <img
-                src="./assets/screenshots/video-detail.png"
-                alt="影片详情、评分、演员和文件信息界面"
-                width="1600"
-                height="1020"
-                loading="lazy"
-              />
-            </button>
-            <div class="story-copy">
-              <span>02 / DETAIL</span>
-              <h3>每项资料，都有来处。</h3>
-              <p>封面、样张、演员、评分、标签与本地文件集中呈现，也可以随时手动修正。</p>
-            </div>
-          </article>
-
-          <article class="product-story reveal">
-            <button
-              class="story-screen"
-              type="button"
-              data-lightbox-src="./assets/screenshots/actor.png"
-              data-lightbox-alt="演员资料与关联作品界面"
-            >
-              <img
-                src="./assets/screenshots/actor.png"
-                alt="演员资料、写真与关联作品界面"
-                width="1600"
-                height="1020"
-                loading="lazy"
-              />
-            </button>
-            <div class="story-copy">
-              <span>03 / PEOPLE</span>
-              <h3>从作品，连接到人物。</h3>
-              <p>维护头像、写真、别名与关联作品，让媒体库不再只是一组互不相关的文件。</p>
-            </div>
-          </article>
+      <section class="faq-section section wrap">
+        <div>
+          <p class="section-kicker">A FEW THINGS TO KNOW</p>
+          <h2>开始之前。</h2>
+          <p>关于使用方式的一些说明。</p>
         </div>
-      </section>
-
-      <section class="features-section section-shell" aria-labelledby="features-title">
-        <div class="features-heading reveal" id="features">
-          <p class="section-kicker">CAPABILITIES</p>
-          <h2 id="features-title">从扫描开始，<br />在本地完成。</h2>
+        <div class="faq-list">
+          <details>
+            <summary>
+              需要配置 AI 才能使用吗？<svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="lucide lucide-plus ui-icon"
+                aria-hidden="true"
+              >
+                <path d="M5 12h14"></path>
+                <path d="M12 5v14"></path>
+              </svg>
+            </summary>
+            <p>
+              扫描、浏览、手动整理和普通插件刮削无需 AI。Agent
+              刮削、外部清单导入和插件开发助手需要自行配置可用模型服务。
+            </p>
+          </details>
+          <details>
+            <summary>
+              可以直接播放影片吗？<svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="lucide lucide-plus ui-icon"
+                aria-hidden="true"
+              >
+                <path d="M5 12h14"></path>
+                <path d="M12 5v14"></path>
+              </svg>
+            </summary>
+            <p>
+              在影片详情点击播放，会优先打开所选主资源；播放文件、浏览网页或处理资源链接由系统默认应用完成。Javdex
+              不提供或下载影片内容。
+            </p>
+          </details>
+          <details>
+            <summary>
+              已有 NFO 会在每次扫描时同步吗？<svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="lucide lucide-plus ui-icon"
+                aria-hidden="true"
+              >
+                <path d="M5 12h14"></path>
+                <path d="M12 5v14"></path>
+              </svg>
+            </summary>
+            <p>
+              不会。自动导入本地 NFO
+              在首次发现资源时尝试读取相邻资料，为尚未刮削成功的影片补齐空字段；已有正式资源不会在每次扫描时重复导入。
+            </p>
+          </details>
+          <details>
+            <summary>
+              数据保存在哪里？<svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="lucide lucide-plus ui-icon"
+                aria-hidden="true"
+              >
+                <path d="M5 12h14"></path>
+                <path d="M12 5v14"></path>
+              </svg>
+            </summary>
+            <p>
+              数据库、设置和下载的图片默认保存在本机。图片目录可以迁移，图片加密仅覆盖图片文件。联网刮削和
+              AI 会访问对应网站或你配置的模型服务。
+            </p>
+          </details>
+          <details>
+            <summary>
+              如何更新应用？<svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="lucide lucide-plus ui-icon"
+                aria-hidden="true"
+              >
+                <path d="M5 12h14"></path>
+                <path d="M12 5v14"></path>
+              </svg>
+            </summary>
+            <p>
+              在设置的“关于”页面检查版本，再下载并安装新版。应用程序与资料目录分开，更新前请先退出应用。
+            </p>
+          </details>
         </div>
-        <div class="feature-list">
-          <article class="feature-item reveal"><span>01</span><h3>目录扫描</h3><p>递归识别本地视频与复杂文件名，快速建立索引。</p></article>
-          <article class="feature-item reveal reveal-delay-1"><span>02</span><h3>插件刮削</h3><p>按字段组合插件，获取元数据与图片资产。</p></article>
-          <article class="feature-item reveal reveal-delay-2"><span>03</span><h3>批量任务</h3><p>可暂停、恢复或取消，并自由选择更新策略。</p></article>
-          <article class="feature-item reveal"><span>04</span><h3>人物资料</h3><p>管理头像、写真、别名以及关联作品。</p></article>
-          <article class="feature-item reveal reveal-delay-1"><span>05</span><h3>本地资产</h3><p>SQLite 与图片留在设备中，支持图片加密。</p></article>
-          <article class="feature-item reveal reveal-delay-2"><span>06</span><h3>开放扩展</h3><p>内置插件开发助手，并提供可选 MCP 服务。</p></article>
-        </div>
-      </section>
-
-      <section class="local-section">
-        <div class="local-inner section-shell reveal">
-          <div>
-            <p class="section-kicker">LOCAL, BY DEFAULT</p>
-            <h2>没有云端账户。<br />没有媒体上传。</h2>
-          </div>
-          <div class="local-copy">
-            <p>Javdex 不提供任何媒体内容，也不内置在线播放服务。数据库、图片和设置默认保存在你的设备上，播放交给系统默认播放器。</p>
-            <ul aria-label="本地工作流程">
-              <li><span>1</span>选择目录</li>
-              <li><span>2</span>建立索引</li>
-              <li><span>3</span>完善资料</li>
-              <li><span>4</span>本地播放</li>
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      <section class="final-cta section-shell reveal">
-        <img src="./assets/icon.png" alt="" width="72" height="72" loading="lazy" />
-        <p class="section-kicker">JAVDEX</p>
-        <h2>从一个文件夹开始。</h2>
-        <p>建立属于自己的本地媒体索引。</p>
-        <a class="button button-dark" href="#download">
-          选择安装包
-          <svg class="ui-icon ui-icon-up" aria-hidden="true"><use href="#icon-arrow-down"></use></svg>
-        </a>
       </section>
     </main>
-
-    <footer class="site-footer">
-      <a class="brand brand-footer" href="#top">
-        <img src="./assets/icon.png" alt="" width="32" height="32" loading="lazy" />
-        <span>JAVDEX</span>
-      </a>
-      <p>本地优先的开源媒体库管理器。</p>
+    <footer class="site-footer wrap">
+      <a class="brand" href="#top"
+        ><img src="./assets/icon.png" alt="" width="32" height="32" />Javdex</a
+      >
+      <p>你的影片，你的资料库。</p>
       <div>
-        <a href="https://github.com/JavdexLabs/Javdex">GitHub</a>
-        <a href="https://github.com/JavdexLabs/Javdex/releases/latest">Releases</a>
-        <a href="https://github.com/JavdexLabs/Javdex/blob/main/LICENSE">MIT License</a>
+        <a
+          href="https://github.com/JavdexLabs/Javdex"
+          target="_blank"
+          rel="noreferrer"
+          >GitHub
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="lucide lucide-arrow-up-right ui-icon"
+            aria-hidden="true"
+          >
+            <path d="M7 7h10v10"></path>
+            <path d="M7 17 17 7"></path></svg></a
+        ><a
+          href="https://github.com/JavdexLabs/Javdex/issues"
+          target="_blank"
+          rel="noreferrer"
+          >反馈建议
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="lucide lucide-arrow-up-right ui-icon"
+            aria-hidden="true"
+          >
+            <path d="M7 7h10v10"></path>
+            <path d="M7 17 17 7"></path></svg></a
+        ><a
+          href="https://github.com/JavdexLabs/Javdex/blob/main/LICENSE"
+          target="_blank"
+          rel="noreferrer"
+          >MIT License
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="lucide lucide-arrow-up-right ui-icon"
+            aria-hidden="true"
+          >
+            <path d="M7 7h10v10"></path>
+            <path d="M7 17 17 7"></path></svg
+        ></a>
       </div>
     </footer>
-
     <dialog class="lightbox" aria-label="软件截图预览">
-      <button class="lightbox-close" type="button" aria-label="关闭截图预览">
-        <svg class="ui-icon" aria-hidden="true"><use href="#icon-close"></use></svg>
-      </button>
-      <img src="" alt="" />
-      <p></p>
+      <div class="lightbox-toolbar">
+        <p></p>
+        <button class="lightbox-close" type="button" aria-label="关闭截图预览">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="lucide lucide-x ui-icon"
+            aria-hidden="true"
+          >
+            <path d="M18 6 6 18"></path>
+            <path d="m6 6 12 12"></path>
+          </svg>
+        </button>
+      </div>
+      <img alt="" /><span>当前软件实机截图 · 虚构演示资料</span>
     </dialog>
-
-    <script type="application/ld+json">
-      {
-        "@context": "https://schema.org",
-        "@type": "SoftwareApplication",
-        "name": "Javdex",
-        "applicationCategory": "MultimediaApplication",
-        "operatingSystem": "Windows, macOS, Linux",
-        "license": "https://github.com/JavdexLabs/Javdex/blob/main/LICENSE",
-        "downloadUrl": "https://github.com/JavdexLabs/Javdex/releases/latest"
-      }
-    </script>
     <script src="./app.js" defer></script>
   </body>
 </html>

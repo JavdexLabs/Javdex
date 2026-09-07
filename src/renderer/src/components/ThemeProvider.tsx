@@ -9,11 +9,7 @@ import {
 } from 'react'
 import { PRIVACY_MODE_SCOPES, type ThemeId } from '@shared/settingsTypes'
 import { api } from '../api'
-import {
-  applyPrivacyMode,
-  readCachedPrivacyMode,
-  type PrivacyModeSettings
-} from '../privacyMode'
+import { applyPrivacyMode, readCachedPrivacyMode, type PrivacyModeSettings } from '../privacyMode'
 import { applyTheme, normalizeTheme } from '../theme'
 
 interface ThemeCtx {
@@ -45,27 +41,52 @@ export function ThemeProvider({ children }: { children: ReactNode }): JSX.Elemen
     () => readCachedPrivacyMode() ?? DEFAULT_PRIVACY_MODE
   )
   const privacyRevisionRef = useRef(0)
+  const themeRevisionRef = useRef(0)
+  const savedThemeRef = useRef<ThemeId>('graphite')
+  const themeQueueRef = useRef(Promise.resolve())
 
   useEffect(() => {
     const privacyRevision = privacyRevisionRef.current
-    api.settings
+    const themeRevision = themeRevisionRef.current
+    themeQueueRef.current = api.settings
       .get()
       .then((s) => {
         const t = normalizeTheme(s.theme)
-        applyTheme(t)
+        savedThemeRef.current = t
+        if (themeRevision === themeRevisionRef.current) {
+          applyTheme(t)
+          setThemeState(t)
+        }
         if (privacyRevision === privacyRevisionRef.current) {
           applyPrivacyMode(s)
           setPrivacyModeState(s)
         }
-        setThemeState(t)
       })
-      .catch(() => applyTheme('graphite'))
+      .catch(() => {
+        if (themeRevision === themeRevisionRef.current) applyTheme('graphite')
+      })
   }, [])
 
   const setTheme = useCallback(async (next: ThemeId) => {
+    const revision = ++themeRevisionRef.current
     applyTheme(next)
     setThemeState(next)
-    await api.settings.update({ theme: next })
+    const operation = themeQueueRef.current
+      .catch(() => {})
+      .then(async () => {
+        try {
+          await api.settings.update({ theme: next })
+          savedThemeRef.current = next
+        } catch (error) {
+          if (revision === themeRevisionRef.current) {
+            applyTheme(savedThemeRef.current)
+            setThemeState(savedThemeRef.current)
+          }
+          throw error
+        }
+      })
+    themeQueueRef.current = operation.catch(() => {})
+    await operation
   }, [])
 
   const syncPrivacyMode = useCallback((settings: PrivacyModeSettings) => {

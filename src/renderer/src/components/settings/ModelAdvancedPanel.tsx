@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import Switch from '../Switch'
+import { useMemo, useState } from 'react'
 import type { ModelCapabilityState } from '@shared/aiConfigurationTypes'
 import type {
   ManagedModelView,
@@ -6,6 +7,9 @@ import type {
   ModelManagementSnapshot
 } from '@shared/modelManagementTypes'
 import Button from '../Button'
+import SettingsFormActions from './SettingsFormActions'
+import { useSettingsDraft } from '../../settings/useSettingsDraft'
+import { useSettingsFormGuard } from '../../settings/SettingsLeaveGuard'
 import SelectControl from '../SelectControl'
 import type { ApplyModelManagementCommand } from './ModelSettingsPanel'
 import styles from './ModelAdvancedPanel.module.css'
@@ -34,33 +38,20 @@ function ModelOverrideCard({
   busy: boolean
   apply: ApplyModelManagementCommand
 }): JSX.Element {
-  const [contextWindow, setContextWindow] = useState(model.effective.contextWindow)
-  const [maxTokens, setMaxTokens] = useState(model.effective.maxTokens)
-  const [tools, setTools] = useState<ModelCapabilityState>(model.effective.capabilities.tools)
-  const [reasoning, setReasoning] = useState<ModelCapabilityState>(model.effective.capabilities.reasoning)
-  const [promptCache, setPromptCache] = useState<ModelCapabilityState>(
-    model.effective.cache.supportsPromptCache
-  )
-  const [longCache, setLongCache] = useState(model.effective.cache.supportsLongCacheRetention)
-
-  useEffect(() => {
-    setContextWindow(model.effective.contextWindow)
-    setMaxTokens(model.effective.maxTokens)
-    setTools(model.effective.capabilities.tools)
-    setReasoning(model.effective.capabilities.reasoning)
-    setPromptCache(model.effective.cache.supportsPromptCache)
-    setLongCache(model.effective.cache.supportsLongCacheRetention)
-  }, [model])
-
-  const dirty =
-    contextWindow !== model.effective.contextWindow ||
-    maxTokens !== model.effective.maxTokens ||
-    tools !== model.effective.capabilities.tools ||
-    reasoning !== model.effective.capabilities.reasoning ||
-    promptCache !== model.effective.cache.supportsPromptCache ||
-    longCache !== model.effective.cache.supportsLongCacheRetention
-
-  const save = (): void => {
+  const form = useSettingsDraft({
+    contextWindow: model.effective.contextWindow,
+    maxTokens: model.effective.maxTokens,
+    tools: model.effective.capabilities.tools,
+    reasoning: model.effective.capabilities.reasoning,
+    promptCache: model.effective.cache.supportsPromptCache,
+    longCache: model.effective.cache.supportsLongCacheRetention
+  })
+  const { contextWindow, maxTokens, tools, reasoning, promptCache, longCache } = form.draft
+  const update = <K extends keyof typeof form.draft>(key: K, value: (typeof form.draft)[K]): void =>
+    form.setDraft((current) => ({ ...current, [key]: value }))
+  const [saving, setSaving] = useState(false)
+  const save = async (): Promise<boolean> => {
+    setSaving(true)
     const patch: ManualModelOverrides = {
       contextWindow,
       maxTokens,
@@ -75,80 +66,130 @@ function ModelOverrideCard({
         }
       }
     }
-    void apply(
-      { type: 'set-model-override', modelRef: model.id, patch },
-      `${model.name} 的人工覆盖已保存`
-    )
+    try {
+      const ok = await apply(
+        { type: 'set-model-override', modelRef: model.id, patch },
+        `${model.name} 的人工覆盖已保存`
+      )
+      if (ok) form.accept(form.draft)
+      return ok
+    } finally {
+      setSaving(false)
+    }
   }
+  useSettingsFormGuard({
+    label: model.name,
+    dirty: form.dirty,
+    busy: saving,
+    save,
+    discard: form.reset
+  })
 
   return (
     <section className={styles.advancedCard}>
       <header className={styles.cardHeader}>
         <div className={styles.modelTitle}>
-          <h3 className={`${styles.sectionTitle} ${styles.truncate}`} title={model.name}>{model.name}</h3>
-          <p className={`${styles.sectionHint} ${styles.truncate}`} title={model.modelId}>{modelConnectionName(snapshot, model.connectionId)} · {model.modelId}</p>
+          <h3 className={`${styles.sectionTitle} ${styles.truncate}`} title={model.name}>
+            {model.name}
+          </h3>
+          <p className={`${styles.sectionHint} ${styles.truncate}`} title={model.modelId}>
+            {modelConnectionName(snapshot, model.connectionId)} · {model.modelId}
+          </p>
         </div>
         <div className={styles.cardActions}>
           {model.hasManualOverrides ? (
             <Button
               size="sm"
               disabled={busy}
-              onClick={() => void apply(
-                { type: 'reset-model-override', modelRef: model.id },
-                `${model.name} 已恢复 baseline`
-              )}
+              onClick={() =>
+                void apply(
+                  { type: 'reset-model-override', modelRef: model.id },
+                  `${model.name} 已恢复自动识别值`
+                )
+              }
             >
-              恢复 baseline
+              恢复自动识别值
             </Button>
           ) : null}
-          <Button size="sm" variant="primary" disabled={!dirty || busy} onClick={save}>
-            {busy ? '保存中…' : dirty ? '保存' : '已保存'}
-          </Button>
+          <SettingsFormActions placement="header"
+            dirty={form.dirty}
+            saving={saving}
+            disabled={busy}
+            conflict={form.conflict}
+            onSave={() => void save()}
+            onCancel={form.reset}
+          />
         </div>
       </header>
 
       <div className={styles.baselineMeta}>
-        <span>Baseline：{model.baseline.cache.evidence.source}</span>
+        <span>能力来源：{model.baseline.cache.evidence.source}</span>
         <span>{new Date(model.baseline.cache.evidence.checkedAt).toLocaleString()}</span>
-        {model.hasManualOverrides ? <strong className={styles.overrideBadge}>已人工覆盖</strong> : null}
+        {model.hasManualOverrides ? (
+          <strong className={styles.overrideBadge}>已人工覆盖</strong>
+        ) : null}
       </div>
 
       <div className={styles.advancedGrid}>
         <label className={styles.field}>
           <span>上下文窗口</span>
-          <input className={styles.controlInput} type="number" min="1" value={contextWindow} onChange={(event) => setContextWindow(Number(event.target.value))} />
+          <input
+            className={styles.controlInput}
+            type="number"
+            min="1"
+            value={contextWindow}
+            onChange={(event) => update('contextWindow', Number(event.target.value))}
+          />
         </label>
         <label className={styles.field}>
           <span>模型最大输出</span>
-          <input className={styles.controlInput} type="number" min="1" value={maxTokens} onChange={(event) => setMaxTokens(Number(event.target.value))} />
+          <input
+            className={styles.controlInput}
+            type="number"
+            min="1"
+            value={maxTokens}
+            onChange={(event) => update('maxTokens', Number(event.target.value))}
+          />
         </label>
         <label className={styles.field}>
           <span>工具调用</span>
-          <SelectControl value={String(tools)} onChange={(event) => setTools(capabilityValue(event.target.value))}>
+          <SelectControl
+            value={String(tools)}
+            onChange={(event) => update('tools', capabilityValue(event.target.value))}
+          >
             <option value="true">支持</option>
             <option value="false">不支持</option>
             <option value="unknown">未知</option>
           </SelectControl>
         </label>
         <label className={styles.field}>
-          <span>Reasoning</span>
-          <SelectControl value={String(reasoning)} onChange={(event) => setReasoning(capabilityValue(event.target.value))}>
+          <span>推理</span>
+          <SelectControl
+            value={String(reasoning)}
+            onChange={(event) => update('reasoning', capabilityValue(event.target.value))}
+          >
             <option value="true">支持</option>
             <option value="false">不支持</option>
             <option value="unknown">未知</option>
           </SelectControl>
         </label>
         <label className={styles.field}>
-          <span>Prompt cache</span>
-          <SelectControl value={String(promptCache)} onChange={(event) => setPromptCache(capabilityValue(event.target.value))}>
+          <span>提示缓存</span>
+          <SelectControl
+            value={String(promptCache)}
+            onChange={(event) => update('promptCache', capabilityValue(event.target.value))}
+          >
             <option value="true">支持</option>
             <option value="false">不支持</option>
             <option value="unknown">未知</option>
           </SelectControl>
         </label>
         <label className={styles.field}>
-          <span>Long cache</span>
-          <SelectControl value={longCache ? 'true' : 'false'} onChange={(event) => setLongCache(event.target.value === 'true')}>
+          <span>长期缓存</span>
+          <SelectControl
+            value={longCache ? 'true' : 'false'}
+            onChange={(event) => update('longCache', event.target.value === 'true')}
+          >
             <option value="true">支持</option>
             <option value="false">不支持</option>
           </SelectControl>
@@ -156,10 +197,30 @@ function ModelOverrideCard({
       </div>
 
       <dl className={styles.baselineSummary}>
-        <div className={styles.baselineItem}><dt className={styles.baselineLabel}>Tools baseline</dt><dd className={styles.baselineValue}>{capabilityLabel(model.baseline.capabilities.tools)}</dd></div>
-        <div className={styles.baselineItem}><dt className={styles.baselineLabel}>Reasoning baseline</dt><dd className={styles.baselineValue}>{capabilityLabel(model.baseline.capabilities.reasoning)}</dd></div>
-        <div className={styles.baselineItem}><dt className={styles.baselineLabel}>Prompt cache baseline</dt><dd className={styles.baselineValue}>{capabilityLabel(model.baseline.cache.supportsPromptCache)}</dd></div>
-        <div className={styles.baselineItem}><dt className={styles.baselineLabel}>Long cache baseline</dt><dd className={styles.baselineValue}>{model.baseline.cache.supportsLongCacheRetention ? '支持' : '不支持'}</dd></div>
+        <div className={styles.baselineItem}>
+          <dt className={styles.baselineLabel}>工具调用</dt>
+          <dd className={styles.baselineValue}>
+            {capabilityLabel(model.baseline.capabilities.tools)}
+          </dd>
+        </div>
+        <div className={styles.baselineItem}>
+          <dt className={styles.baselineLabel}>推理能力</dt>
+          <dd className={styles.baselineValue}>
+            {capabilityLabel(model.baseline.capabilities.reasoning)}
+          </dd>
+        </div>
+        <div className={styles.baselineItem}>
+          <dt className={styles.baselineLabel}>提示缓存</dt>
+          <dd className={styles.baselineValue}>
+            {capabilityLabel(model.baseline.cache.supportsPromptCache)}
+          </dd>
+        </div>
+        <div className={styles.baselineItem}>
+          <dt className={styles.baselineLabel}>长期缓存</dt>
+          <dd className={styles.baselineValue}>
+            {model.baseline.cache.supportsLongCacheRetention ? '支持' : '不支持'}
+          </dd>
+        </div>
       </dl>
     </section>
   )
@@ -179,7 +240,9 @@ export default function ModelAdvancedPanel({
     () => new Set(snapshot.assignments.flatMap((item) => item.resolution.modelRef ?? [])),
     [snapshot.assignments]
   )
-  const models = showAll ? snapshot.models : snapshot.models.filter((model) => referenced.has(model.id))
+  const models = showAll
+    ? snapshot.models
+    : snapshot.models.filter((model) => referenced.has(model.id))
 
   return (
     <div className={styles.stack}>
@@ -187,16 +250,24 @@ export default function ModelAdvancedPanel({
         <header className={styles.cardHeader}>
           <div>
             <h3 className={styles.sectionTitle}>模型能力与上限</h3>
-            <p className={styles.sectionHint}>默认仅显示三个用途实际引用的模型；人工覆盖会优先于 baseline。</p>
+            <p className={styles.sectionHint}>
+              默认仅显示三个用途实际引用的模型；人工覆盖会优先于自动识别值。
+            </p>
           </div>
           <label className={styles.toggleLabel}>
-            <input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />
+            <Switch checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />
             <span>显示全部模型</span>
           </label>
         </header>
       </section>
       {models.map((model) => (
-        <ModelOverrideCard key={model.id} snapshot={snapshot} model={model} busy={busy} apply={apply} />
+        <ModelOverrideCard
+          key={model.id}
+          snapshot={snapshot}
+          model={model}
+          busy={busy}
+          apply={apply}
+        />
       ))}
       {models.length === 0 ? <div className={styles.empty}>当前没有可编辑的生成模型</div> : null}
     </div>

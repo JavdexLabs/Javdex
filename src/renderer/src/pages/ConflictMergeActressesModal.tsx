@@ -1,3 +1,4 @@
+import Checkbox from '../components/Checkbox'
 import { useMemo, useState } from 'react'
 import { resolveMediaSrc } from '../api'
 import ActressAvatar from '../components/ActressAvatar'
@@ -127,8 +128,7 @@ export default function ConflictMergeActressesModal({
                 key={actor.actressId}
                 className={`conflict-merge-option${selected ? ' is-selected' : ''}`}
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={selected}
                   disabled={busy}
                   onChange={() => toggleActor(actor.actressId)}

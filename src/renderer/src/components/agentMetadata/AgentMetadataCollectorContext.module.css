@@ -135,10 +135,6 @@
   color: var(--text-primary);
 }
 
-.fields label > input[type='checkbox'] {
-  accent-color: var(--accent);
-}
-
 .fields em {
   margin-left: auto;
   color: var(--text-warning);

@@ -31,7 +31,6 @@ import {
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
 import { useToast } from '../components/Toast'
 import { useTheme } from '../components/ThemeProvider'
-import { useLibraryOverviewStats } from '../hooks/useLibraryOverviewStats'
 import { useBatchScrapeActivity } from '../hooks/useBatchScrapeActivity'
 import { useAvatarAutoCropBatch } from '../contexts/AvatarAutoCropBatchContext'
 import { pendingCenterPath } from '../listView/pendingRoutes'
@@ -43,8 +42,6 @@ import {
   rememberMediaLibrarySettingsLibraryId,
   type MediaLibrarySettingsTab
 } from '../listView/mediaLibraryRoutes'
-import { ROUTE_PATH } from '../listView/routePaths'
-import useNetworkSettingsController from '../hooks/useNetworkSettingsController'
 import useLatestAsyncLabel from '../hooks/useLatestAsyncLabel'
 import useScraperPluginSettingsController from '../hooks/useScraperPluginSettingsController'
 import {
@@ -59,6 +56,7 @@ import { THEME_OPTIONS } from '../theme'
 import type { ThemeId } from '@shared/settingsTypes'
 import type { UpdateCheckState } from '@shared/updateTypes'
 import Button from '../components/Button'
+import MediaLibraryCreateModal from '../components/MediaLibraryCreateModal'
 import {
   withVideoBatchFilterScope,
   withVideoBatchRequestScope
@@ -138,19 +136,6 @@ export default function SettingsPage(): JSX.Element {
     openPluginDev,
     setSettings
   })
-  const {
-    proxySaving,
-    proxyTesting,
-    proxyToggleBusy,
-    setScrapeProxyDraft,
-    setLlmProxyDraft,
-    toggleScrapeProxyEnabled,
-    toggleLlmProxyEnabled,
-    saveScrapeProxyUrl,
-    saveLlmProxyUrl,
-    testScrapeProxy,
-    testLlmProxy
-  } = useNetworkSettingsController(settings, setSettings)
   const mediaLibrariesQuery = useQuery({
     queryKey: mediaLibraryKeys.activeList(),
     queryFn: () => api.mediaLibraries.list(),
@@ -222,12 +207,10 @@ export default function SettingsPage(): JSX.Element {
     refresh: refreshActressBatchScopeCount,
     reset: resetActressBatchScopeCount
   } = useLatestAsyncLabel('- 位演员')
+  const [createLibraryOpen, setCreateLibraryOpen] = useState(false)
   const [storageBusy, setStorageBusy] = useState(false)
+  const [storageAction, setStorageAction] = useState<{ kind: 'crypto'; enabled: boolean } | { kind: 'relocate'; target: string | null } | null>(null)
   const [nfoExportBlocking, setNfoExportBlocking] = useState(false)
-  const { stats: overviewStats } = useLibraryOverviewStats(
-    0,
-    activeGroup.id === 'overview' && location.pathname !== settingsPluginDevPath()
-  )
   const actressConflictSummaryQuery = useQuery({
     queryKey: actressKeys.conflictSummary(),
     queryFn: () => api.actressScrape.conflictSummary(),
@@ -402,8 +385,12 @@ export default function SettingsPage(): JSX.Element {
   }
 
   const changeTheme = async (id: ThemeId): Promise<void> => {
-    await setTheme(id)
-    setSettings((s) => (s ? { ...s, theme: id } : s))
+    try {
+      await setTheme(id)
+      setSettings((s) => (s ? { ...s, theme: id } : s))
+    } catch (error) {
+      toast.show(`主题未保存：${(error as Error).message}`, 'error')
+    }
   }
 
   const patchAppearanceSettings = async (
@@ -425,7 +412,10 @@ export default function SettingsPage(): JSX.Element {
     if (!settings) return false
     try {
       const next = await api.settings.update(patch)
-      setSettings(next)
+      const savedPatch = Object.fromEntries(
+        Object.keys(patch).map((key) => [key, next[key as keyof typeof patch]])
+      )
+      setSettings((current) => current ? { ...current, ...savedPatch } : next)
       if (patch.privacyModeEnabled !== undefined || patch.privacyModeScopes !== undefined) {
         syncPrivacyMode(next)
       }
@@ -438,34 +428,32 @@ export default function SettingsPage(): JSX.Element {
 
   const toggleAssetEncryption = async (enabled: boolean): Promise<void> => {
     if (!settings || storageBusy || settings.assetEncryption === enabled) return
-    const msg = enabled
-      ? '将加密全库封面、头像、样张与清单封面（.enc），处理期间应用暂时不可用。继续？'
-      : '将解密全库封面、头像、样张与清单封面，处理期间应用暂时不可用。继续？'
-    if (!window.confirm(msg)) return
-    setStorageBusy(true)
-    try {
-      const next = await api.assetCrypto.setEnabled(enabled)
-      setSettings(next)
-      toast.show(enabled ? '图片加密已开启' : '图片加密已关闭', 'success')
-    } catch (e) {
-      toast.show(String((e as Error).message), 'error')
-    } finally {
-      setStorageBusy(false)
-    }
+    setStorageAction({ kind: 'crypto', enabled })
   }
 
   const relocateMediaAssets = async (targetPath?: string | null): Promise<void> => {
     if (!settings || storageBusy) return
-    const msg =
-      targetPath === null
-        ? '将把全部媒体资源迁移回默认目录，处理期间应用暂时不可用。继续？'
-        : '将把全部媒体资源迁移到新目录（含加密与未加密文件），处理期间应用暂时不可用。继续？'
-    if (!window.confirm(msg)) return
+    try {
+      const target = targetPath === undefined ? (await api.settings.pickFolder())[0] : targetPath
+      if (target === undefined) return
+      if (target === settings.mediaAssetsResolvedPath || (target === null && !settings.mediaAssetsPath)) {
+        toast.show('已在使用该目录', 'info')
+        return
+      }
+      setStorageAction({ kind: 'relocate', target })
+    } catch (error) { toast.show((error as Error).message, 'error') }
+  }
+
+  const runStorageAction = async (): Promise<void> => {
+    if (!storageAction || storageBusy) return
     setStorageBusy(true)
     try {
-      const next = await api.assetStorage.relocate(targetPath)
-      setSettings(next)
-      toast.show('媒体资源目录已更新', 'success')
+      const next = storageAction.kind === 'crypto'
+        ? await api.assetCrypto.setEnabled(storageAction.enabled)
+        : await api.assetStorage.relocate(storageAction.target)
+      setSettings((current) => current ? { ...current, assetEncryption: next.assetEncryption, mediaAssetsPath: next.mediaAssetsPath, mediaAssetsResolvedPath: next.mediaAssetsResolvedPath } : next)
+      toast.show(storageAction.kind === 'crypto' ? (storageAction.enabled ? '图片加密已开启' : '图片加密已关闭') : next.mediaAssetsResolvedPath === settings.mediaAssetsResolvedPath ? '目录未改变' : '图片资源目录已更新', 'success')
+      setStorageAction(null)
     } catch (e) {
       toast.show(String((e as Error).message), 'error')
     } finally {
@@ -682,7 +670,7 @@ export default function SettingsPage(): JSX.Element {
     null
   const openMediaLibrarySettings = (): void => {
     if (!overviewMediaLibrarySettingsTarget) {
-      navigate(ROUTE_PATH.home)
+      setCreateLibraryOpen(true)
       return
     }
     navigate(mediaLibrarySettingsPath(overviewMediaLibrarySettingsTarget.id, 'sources'))
@@ -749,30 +737,7 @@ export default function SettingsPage(): JSX.Element {
           }
         ]
       : []),
-    ...(overviewStats && overviewStats.videos.unscraped > 0
-      ? [
-          {
-            tone: 'info' as const,
-            title: `${overviewStats.videos.unscraped} 部影片尚未刮削`,
-            body: '使用默认刮削插件批量补齐元数据与封面。',
-            action: startVideoBatchDefault,
-            actionLabel: '一键刮削',
-            actionPrimary: true
-          }
-        ]
-      : []),
-    ...(overviewStats && overviewStats.actresses.unscraped > 0
-      ? [
-          {
-            tone: 'info' as const,
-            title: `${overviewStats.actresses.unscraped} 位女优资料未完善`,
-            body: '刮削演员资料可补全头像、简介与身体数据。',
-            action: startActressBatchDefault,
-            actionLabel: '一键刮削',
-            actionPrimary: true
-          }
-        ]
-      : [])
+
   ]
 
   const pluginDevPage = (
@@ -859,6 +824,7 @@ export default function SettingsPage(): JSX.Element {
                   </EmptyState>
                 ) : selectedSettingsLibrary ? (
                   <MediaLibrarySettingsContent
+                    key={selectedSettingsLibrary.id}
                     libraryId={selectedSettingsLibrary.id}
                     tab={activeMediaLibrarySettingsTab}
                     libraries={mediaLibrarySettingsLibraries}
@@ -873,12 +839,13 @@ export default function SettingsPage(): JSX.Element {
                 ) : (
                   <EmptyState
                     title="尚未配置媒体库"
-                    description="请通过侧栏媒体库区域新建媒体库。"
-                  />
+                    description="创建媒体库并添加影片所在的文件夹，然后扫描导入。"
+                  ><Button variant="primary" onClick={() => setCreateLibraryOpen(true)}>新建媒体库</Button></EmptyState>
                 ))}
 
               {activeGroup.id === 'plugins' && (
                 <PluginsSettingsPanel
+                  kind={activeTab === 'actress' ? 'actress' : 'video'}
                   videoUserPlugins={videoUserPlugins}
                   actressUserPlugins={actressUserPlugins}
                   videoCompositePlugins={videoCompositePlugins}
@@ -914,8 +881,9 @@ export default function SettingsPage(): JSX.Element {
                 />
               )}
 
-              {activeGroup.id === 'storage' && activeTab === 'assets' && (
+              {activeGroup.id === 'storage' && (
                 <StorageSettingsPanel
+                  tab={activeTab === 'export' ? 'export' : 'assets'}
                   settings={settings}
                   storageBusy={storageBusy || nfoExportBlocking}
                   onPickMediaAssetsPath={() => void relocateMediaAssets()}
@@ -925,35 +893,40 @@ export default function SettingsPage(): JSX.Element {
                 />
               )}
 
-              {activeGroup.id === 'models' && activeTab === 'providers' && (
-                <ModelSettingsPanel settings={settings} />
+              {activeGroup.id === 'models' && (
+                <ModelSettingsPanel settings={settings} activeTab={activeTab === 'advanced' ? 'advanced' : activeTab === 'providers' ? 'providers' : 'usage'} />
               )}
 
               {activeGroup.id === 'network' && activeTab === 'proxy' && settings && (
                 <NetworkSettingsPanel
-                  scrapeProxySaved={settings.proxyUrl}
-                  scrapeProxyEnabled={settings.proxyUrlEnabled}
-                  scrapeProxyToggleBusy={proxyToggleBusy === 'scrape'}
-                  scrapeProxySaving={proxySaving === 'scrape'}
-                  scrapeProxyTesting={proxyTesting === 'scrape'}
-                  llmProxySaved={settings.llmProxyUrl}
-                  llmProxyEnabled={settings.llmProxyUrlEnabled}
-                  llmProxyToggleBusy={proxyToggleBusy === 'llm'}
-                  llmProxySaving={proxySaving === 'llm'}
-                  llmProxyTesting={proxyTesting === 'llm'}
-                  onScrapeProxyDraftChange={setScrapeProxyDraft}
-                  onLlmProxyDraftChange={setLlmProxyDraft}
-                  onScrapeProxyEnabledChange={(enabled) => void toggleScrapeProxyEnabled(enabled)}
-                  onLlmProxyEnabledChange={(enabled) => void toggleLlmProxyEnabled(enabled)}
-                  onSaveScrapeProxy={saveScrapeProxyUrl}
-                  onSaveLlmProxy={saveLlmProxyUrl}
-                  onTestScrapeProxy={(value) => testScrapeProxy(value)}
-                  onTestLlmProxy={(value) => testLlmProxy(value)}
+                  settings={settings}
+                  onSaved={(patch) => setSettings((current) => current ? { ...current, ...patch } : current)}
                 />
               )}
 
               {activeGroup.id === 'about' && activeTab === 'info' && <AboutSettingsPanel />}
       </SettingsWorkspaceShell>
+
+      {createLibraryOpen ? <MediaLibraryCreateModal onCancel={() => setCreateLibraryOpen(false)} onCreated={(library, scanAfterCreate) => {
+        setCreateLibraryOpen(false)
+        void queryClient.invalidateQueries({ queryKey: ['media-libraries'] })
+        navigate(mediaLibrarySettingsPath(library.id, 'sources'))
+        if (scanAfterCreate) void api.scan.run(library.id).then(() => queryClient.invalidateQueries({ queryKey: ['media-libraries'] })).catch((error) => toast.show((error as Error).message, 'error'))
+      }} /> : null}
+
+      {storageAction ? <ConfirmModal
+        title={storageAction.kind === 'crypto' ? (storageAction.enabled ? '启用图片加密' : '关闭图片加密') : '迁移图片资源'}
+        confirmText="开始处理"
+        busy={storageBusy}
+        onCancel={() => setStorageAction(null)}
+        onConfirm={() => void runStorageAction()}
+      >
+        {storageAction.kind === 'relocate' ? <>
+          <p className="copyable-text">当前目录：{settings.mediaAssetsResolvedPath}</p>
+          <p className="copyable-text">目标目录：{storageAction.target ?? '应用默认图片目录'}</p>
+        </> : null}
+        <p>将处理全库封面、头像、样张、写真与清单封面。处理期间应用暂时锁定，完成后恢复；影片源文件不受影响。</p>
+      </ConfirmModal> : null}
 
       {batchDetailScope && (
         <Modal

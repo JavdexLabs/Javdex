@@ -17,8 +17,8 @@
   box-sizing: border-box;
   min-width: 160px;
   max-width: min(420px, 48vw);
-  height: var(--toolbar-control-h);
-  min-height: var(--toolbar-control-h);
+  height: var(--toolbar-control-h, var(--control-h-md));
+  min-height: var(--toolbar-control-h, var(--control-h-md));
   padding: 0 14px 0 36px;
   flex: 1 1 auto;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23888888' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85zm-5.242 1.156a5 5 0 1 1 0-10 5 5 0 0 1 0 10z'/%3E%3C/svg%3E");
@@ -63,4 +63,50 @@
   align-items: center;
   flex-shrink: 0;
   gap: 8px;
+}
+
+.end > :last-child:not(.controls) {
+  margin-left: auto;
+}
+
+/* Only the toolbar controls, not buttons inside an anchored filter panel. */
+.controls > [data-ui='button'],
+.controls > div > [data-ui='button'] {
+  box-sizing: border-box;
+  height: var(--toolbar-control-h, var(--control-h-md));
+  min-height: var(--toolbar-control-h, var(--control-h-md));
+  padding-block: 0;
+  white-space: nowrap;
+}
+
+.controls > [data-ui='icon-button'] {
+  width: var(--toolbar-control-h, var(--control-h-md));
+  height: var(--toolbar-control-h, var(--control-h-md));
+  min-height: var(--toolbar-control-h, var(--control-h-md));
+}
+
+@media (width <= 1120px) {
+  .root {
+    flex-wrap: wrap;
+  }
+
+  .search,
+  .searchWrap {
+    max-width: none;
+    flex-basis: 100%;
+  }
+
+  .end {
+    width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .controls {
+    min-width: 0;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+  }
 }

@@ -105,27 +105,27 @@ export default function PendingScanPane({
   return (
     <PendingWorkspace
       eyebrow={`扫描资源 · ${libraryName ?? `媒体库 #${group.libraryId}`}`}
-      title={`「${group.normalizedCode}」的 ${group.resources.length} 条资源属于哪部影片？`}
-      description="扫描到同一番号的多份文件，无法自动判断归属。每条资源必须恰好分配一次。"
+      title={`${group.normalizedCode} · 确认资源归属`}
+      description={`同一番号下有 ${group.resources.length} 份资源需要确认，请选择各自所属的影片。`}
       status={complete ? '可确认' : '待确认'}
       statusTone={complete ? 'ok' : 'waiting'}
       confirm={
         <PendingConfirmBar
           summary={
             complete
-              ? `将建立 ${summary.length} 组归属`
+              ? `${group.resources.length} 条资源将归入 ${summary.length} 部影片`
               : `还有 ${group.resources.length - assigned} 条资源未分配`
           }
-          scope="仅写入本组资源的归属，不合并任何现有影片"
+          scope="将资源添加到所选影片，源文件保留在原位置"
         >
-          <Button variant="primary" size="sm" disabled={!complete || busy} onClick={() => void resolve()}>
+          <Button variant="primary" disabled={!complete || busy} onClick={() => void resolve()}>
             {busy ? '提交中…' : '确认全部分配'}
           </Button>
         </PendingConfirmBar>
       }
     >
       <PendingWorkspacePanel>
-        <PendingStep step={1} title="为每条资源选择归属" hint="选择只生成预览，不会立即写入">
+        <PendingStep step={1} title="为每条资源选择归属" hint="选择相同的新建影片，会将资源归入同一部影片">
           <div className={styles.resources}>
             {group.resources.map((resource) => {
               const isStrm = resource.sourceKind === 'strm'
@@ -202,7 +202,7 @@ export default function PendingScanPane({
                       ))}
                       {newGroupKeys.map((key) => (
                         <option key={key} value={`new:${key}`}>
-                          新影片分组 {key}
+                          新建影片 {key}
                         </option>
                       ))}
                     </SelectControl>
@@ -231,7 +231,7 @@ export default function PendingScanPane({
 
         <PendingStep
           step={2}
-          title="查看确认后的影响"
+          title="确认后的影响"
           hint={`${assigned} / ${group.resources.length} 条资源已分配`}
         >
           <PendingImpactPanel>

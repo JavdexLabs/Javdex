@@ -1,3 +1,4 @@
+import Checkbox from './Checkbox'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
@@ -34,8 +35,7 @@ function TagOptionList({
       ) : (
         filtered.map((t) => (
           <label key={t.id} className="tag-option">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={selected.includes(t.id)}
               onChange={() => onToggle(t.id)}
             />

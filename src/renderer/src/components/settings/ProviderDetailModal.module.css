@@ -12,7 +12,7 @@
 }
 
 .modalStack {
-  gap: 12px;
+  gap: var(--settings-gap, 12px);
 }
 
 .modelRows,
@@ -39,17 +39,22 @@
 .modalSectionHeader {
   margin-bottom: 10px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--settings-fs-secondary, 12px);
 }
 
 .sectionTitle {
   margin: 0;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: var(--settings-fs-title, 14px);
+  font-weight: var(--settings-fw-label, 600);
 }
 
 .gridTwo {
   display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px 12px;
 }
@@ -60,7 +65,7 @@
   flex-direction: column;
   gap: 5px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--settings-fs-secondary, 12px);
 }
 
 .controlInput {
@@ -91,7 +96,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--settings-gap-sm, 8px);
 }
 
 .modalActions {
@@ -103,7 +108,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 72px auto auto;
   align-items: center;
-  gap: 8px;
+  gap: var(--settings-gap-sm, 8px);
   min-height: 42px;
   padding: 5px 8px;
   border: 1px solid var(--border-subtle);
@@ -127,13 +132,13 @@
 .metaText,
 .dangerHint {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--settings-fs-secondary, 12px);
 }
 
 .manualModel {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: var(--settings-gap-sm, 8px);
   margin-top: 10px;
 }
 

@@ -11,13 +11,11 @@ import PluginCard from '../PluginCard'
 import { PluginConfigModal } from './PluginConfigModals'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
-let confirmAnswer = true
 Object.defineProperty(globalThis, 'window', {
   configurable: true,
   value: {
     addEventListener() {},
     removeEventListener() {},
-    confirm: () => confirmAnswer
   }
 })
 Object.defineProperty(globalThis, 'document', {
@@ -105,7 +103,6 @@ function renderEditor(
 afterEach(() => {
   renderer?.unmount()
   renderer = null
-  confirmAnswer = true
 })
 
 describe('MetaTube plugin settings', () => {
@@ -127,7 +124,7 @@ describe('MetaTube plugin settings', () => {
     })
 
     assert.match(text(), /待配置/)
-    assert.equal(button('设为默认').props.disabled, true)
+    assert.equal(button('设为全局默认').props.disabled, true)
     assert.equal(button('配置服务端').props.disabled, false)
     assert.equal(
       renderer?.root.findAllByType('button').some((item) => item.props['aria-label'] === '更多操作'),
@@ -161,12 +158,10 @@ describe('MetaTube plugin settings', () => {
       serviceInput('服务端未启用 Token 时留空').props.onChange({ target: { value: 'draft-token' } })
     })
 
-    confirmAnswer = false
     act(() => button('保存').props.onClick())
     assert.equal(saved.length, 0)
-
-    confirmAnswer = true
-    act(() => button('保存').props.onClick())
+    assert.match(text(), /通过 HTTP 保存服务连接/)
+    act(() => button('仍要保存').props.onClick())
     assert.deepEqual(saved[0]?.tokenUpdate, { mode: 'set', value: 'draft-token' })
     assert.equal(saved[0]?.acknowledgeInsecureHttp, true)
     assert.match(text(), /HTTP 可能暴露查询番号和访问令牌/)

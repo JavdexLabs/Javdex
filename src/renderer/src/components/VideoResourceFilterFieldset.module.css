@@ -62,13 +62,6 @@
   color: var(--text-primary);
 }
 
-.option input {
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  accent-color: var(--accent);
-}
-
 .option span {
   min-width: 0;
   overflow: hidden;

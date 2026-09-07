@@ -1,6 +1,6 @@
 /* ---- Top bar / search / filters ---- */
 .topbar {
-  --toolbar-control-h: 36px;
+  --toolbar-control-h: var(--control-h-md);
   padding: 16px 24px 12px;
   border-bottom: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--surface-base) 92%, var(--surface-panel));
@@ -31,7 +31,6 @@
   font-size: 12px;
 }
 
-.topbar-toolbar .btn-sm,
 .topbar-toolbar .select {
   height: var(--toolbar-control-h);
   min-height: var(--toolbar-control-h);
@@ -96,13 +95,6 @@
   gap: 8px;
   flex-shrink: 0;
 }
-.selection-toolbar-actions .btn-sm {
-  height: 28px;
-  min-height: 28px;
-  padding-top: 0;
-  padding-bottom: 0;
-  gap: 6px;
-}
 .selection-toolbar-clear.icon-btn {
   --icon-glyph-size: 15px;
   flex-shrink: 0;
@@ -120,24 +112,12 @@
   color: var(--text-primary);
 }
 
-.topbar .search-row .mode-toggle {
-  flex-shrink: 0;
-  height: var(--toolbar-control-h);
-}
-.topbar .search-row .mode-toggle button {
-  height: 100%;
-  padding: 0 12px;
-  font-size: 12px;
-}
 .mode-toggle button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   min-width: 0;
-}
-.topbar .search-row .btn-sm {
-  flex-shrink: 0;
 }
 
 .search-input {
@@ -162,93 +142,6 @@
 
 input[type='search']::-webkit-search-cancel-button {
   cursor: pointer;
-}
-
-.filter-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-top: 12px;
-  flex-wrap: nowrap;
-  --filter-control-h: 28px;
-}
-.filter-row-left {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
-  min-width: 0;
-}
-.filter-row-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-  margin-left: auto;
-  padding-top: 0;
-}
-.filter-row-right .count-badge {
-  margin-left: 0;
-  white-space: nowrap;
-}
-
-.filter-tag-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-top: 10px;
-  width: 100%;
-  --filter-control-h: 28px;
-}
-.filter-tag-row > .filter-label {
-  flex-shrink: 0;
-  margin-right: 0;
-  align-self: flex-start;
-}
-
-/* Unified height for filter-bar controls (selects, buttons, toggles). */
-.topbar .filter-row .select,
-.topbar .filter-row .btn,
-.topbar .filter-tag-row .tag-filter-add .btn {
-  height: var(--filter-control-h);
-  min-height: var(--filter-control-h);
-  box-sizing: border-box;
-  padding-top: 0;
-  padding-bottom: 0;
-  display: inline-flex;
-  align-items: center;
-  line-height: 1;
-  font-size: 12px;
-}
-.topbar .filter-row .select {
-  padding-left: 10px;
-  padding-right: 26px;
-}
-.topbar .filter-row .btn {
-  padding-left: 10px;
-  padding-right: 10px;
-}
-.topbar .filter-row .mode-toggle {
-  height: var(--filter-control-h);
-  flex-shrink: 0;
-  border-radius: 8px;
-}
-.topbar .filter-row .mode-toggle button {
-  height: 100%;
-  padding: 0 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  line-height: 1;
-}
-.topbar .filter-label,
-.topbar .filter-tag-row > .filter-label {
-  height: var(--filter-control-h);
-  line-height: var(--filter-control-h);
-  display: inline-flex;
-  align-items: center;
 }
 
 .select,
@@ -564,7 +457,7 @@ textarea.text-input {
 .sort-switch {
   display: inline-flex;
   align-items: center;
-  height: var(--toolbar-control-h);
+  height: var(--toolbar-control-h, var(--control-h-md));
   flex-shrink: 0;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -627,7 +520,7 @@ textarea.text-input {
 }
 
 .sort-switch--compact {
-  height: var(--control-h-sm);
+  height: var(--toolbar-control-h, var(--control-h-sm));
 }
 
 .sort-switch--compact .sort-switch-field {

@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import type { ScraperPluginDescriptor } from '@shared/scraperPluginTypes'
 import FloatingLayer from './FloatingLayer'
 import IconButton from './IconButton'
-import { Ellipsis, Pencil } from 'lucide-react'
+import { Ellipsis } from 'lucide-react'
 import { UI_ICON_MD } from './iconDefaults'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { defaultPluginDelay, pluginSourceLabel } from '../settings/settingsDisplay'
@@ -70,19 +70,19 @@ export default function PluginCard({
   return (
     <>
       <article
-        className={`plugin-card plugin-card--${plugin.source}${isDefault ? ' plugin-card--default' : ''}${
+        className={`${styles.card} plugin-card plugin-card--${plugin.source}${isDefault ? ' plugin-card--default' : ''}${
           menuOpen ? ' plugin-card--menu-open' : ''
         }`}
         role="listitem"
         aria-label={`${displayName}${isDefault ? '，默认插件' : ''}${plugin.configured === false ? '，待配置' : ''}`}
       >
-        <div className="plugin-card-body">
-          <div className="plugin-card-title-row">
+        <div className={`plugin-card-body ${styles.body}`}>
+          <div className={`plugin-card-title-row ${styles.titleRow}`}>
             <h4 className="plugin-card-name" title={displayName}>
               {displayName}
             </h4>
             {isDefault ? (
-              <span className="plugin-card-default-tag">默认</span>
+              <span className="plugin-card-default-tag">全局默认</span>
             ) : (
               <button
                 type="button"
@@ -94,34 +94,27 @@ export default function PluginCard({
                   onSetDefault()
                 }}
               >
-                设为默认
+                设为全局默认
               </button>
             )}
           </div>
-          <div className="plugin-card-tags">
+          <div className={`plugin-card-tags ${styles.tags}`}>
             {sourceLabel && (
               <span className={`plugin-source-badge plugin-source-badge--${plugin.source}`}>
                 {sourceLabel}
               </span>
             )}
-            {versionLabel && <span className="plugin-version">{versionLabel}</span>}
+            {versionLabel && <span className={`plugin-version ${styles.version}`}>{versionLabel}</span>}
             {plugin.requiresConfiguration && (
               <span
                 className={styles.availability}
                 data-configured={plugin.configured !== false}
+                title={plugin.configurationLabel || plugin.disabledReason}
               >
                 {plugin.configured === false ? '待配置' : '可用'}
               </span>
             )}
           </div>
-          {plugin.requiresConfiguration && (
-            <div
-              className={styles.configurationLabel}
-              title={plugin.configurationLabel || plugin.disabledReason}
-            >
-              {plugin.configurationLabel || plugin.disabledReason || '待配置'}
-            </div>
-          )}
           <div className="plugin-card-meta">
             <span>{delayLabel}</span>
             <span className="plugin-card-field-count">
@@ -145,7 +138,7 @@ export default function PluginCard({
             />
           </div>
         </div>
-        <div className="plugin-card-actions">
+        <div className={`plugin-card-actions ${styles.actions}`}>
           {plugin.requiresConfiguration && plugin.configured === false ? (
             <Button
               type="button"
@@ -160,16 +153,9 @@ export default function PluginCard({
               配置服务端
             </Button>
           ) : (
-            <IconButton
-              className="plugin-card-icon-action"
-              icon={<Pencil {...UI_ICON_MD} />}
-              label="编辑"
-              disabled={actionsDisabled}
-              onClick={(e) => {
-                e.stopPropagation()
-                activateEdit()
-              }}
-            />
+            <Button type="button" size="sm" disabled={actionsDisabled} onClick={(event) => { event.stopPropagation(); activateEdit() }}>
+              配置
+            </Button>
           )}
           {showMoreMenu && (
             <span ref={menuBtnRef} className="plugin-card-menu-anchor">

@@ -20,13 +20,13 @@ import {
   type CreateMediaLibraryDraft
 } from '../mediaLibrarySettingsState'
 import Button from './Button'
-import { AppFormField, AppFormSection } from './FormPrimitives'
+import { AppFormChoiceGroup, AppFormField, AppFormSection } from './FormPrimitives'
 import IconButton from './IconButton'
 import { UI_ICON_SM } from './iconDefaults'
 import Modal from './Modal'
 import { NavIcon } from './NavIcons'
 import SelectControl from './SelectControl'
-import Switch from './Switch'
+import SettingsSwitchRow from './SettingsSwitchRow'
 import { useToast } from './Toast'
 import styles from './MediaLibraryCreateModal.module.css'
 
@@ -58,35 +58,6 @@ function stepForCreateError(message: string): CreateStep {
   if (/根目录|路径|来源/.test(message)) return 1
   if (/扫描|周期|时长|刮削|排序/.test(message)) return 2
   return 3
-}
-
-function ToggleField({
-  title,
-  description,
-  checked,
-  disabled,
-  onChange
-}: {
-  title: string
-  description: string
-  checked: boolean
-  disabled?: boolean
-  onChange: (value: boolean) => void
-}): JSX.Element {
-  return (
-    <label className={styles.toggleField}>
-      <span className={styles.toggleCopy}>
-        <strong className={styles.toggleTitle}>{title}</strong>
-        <span className={styles.toggleDescription}>{description}</span>
-      </span>
-      <Switch
-        aria-label={title}
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-    </label>
-  )
 }
 
 export default function MediaLibraryCreateModal({
@@ -352,8 +323,7 @@ export default function MediaLibraryCreateModal({
                   onChange={(event) => patchDraft({ name: event.target.value })}
                 />
               </AppFormField>
-              <fieldset className={styles.choiceGroup}>
-                <legend className={styles.choiceLabel}>媒体库图标</legend>
+              <AppFormChoiceGroup label="媒体库图标" disabled={busy}>
                 <div className={styles.choiceGrid}>
                   {MEDIA_LIBRARY_ICONS.map((icon) => (
                     <button
@@ -370,9 +340,8 @@ export default function MediaLibraryCreateModal({
                     </button>
                   ))}
                 </div>
-              </fieldset>
-              <fieldset className={styles.choiceGroup}>
-                <legend className={styles.choiceLabel}>标识颜色</legend>
+              </AppFormChoiceGroup>
+              <AppFormChoiceGroup label="标识颜色" disabled={busy}>
                 <div className={styles.choiceGrid}>
                   {MEDIA_LIBRARY_COLORS.map((color) => (
                     <button
@@ -390,7 +359,7 @@ export default function MediaLibraryCreateModal({
                     </button>
                   ))}
                 </div>
-              </fieldset>
+              </AppFormChoiceGroup>
             </AppFormSection>
           ) : null}
 
@@ -477,21 +446,21 @@ export default function MediaLibraryCreateModal({
                     />
                   </AppFormField>
                 </div>
-                <ToggleField
+                <SettingsSwitchRow
                   title="自动扫描"
                   description="按周期扫描当前库的启用目录。"
                   checked={draft.config.autoScanEnabled}
                   disabled={busy}
                   onChange={(value) => patchConfig('autoScanEnabled', value)}
                 />
-                <ToggleField
+                <SettingsSwitchRow
                   title="同番号自动合并资源"
                   description="扫描到同番号文件时直接加入现有影片成员。"
                   checked={draft.config.autoMergeSameCodeResources}
                   disabled={busy}
                   onChange={(value) => patchConfig('autoMergeSameCodeResources', value)}
                 />
-                <ToggleField
+                <SettingsSwitchRow
                   title="清理无资源成员"
                   description="安全清理后移除当前库内不再拥有资源的影片成员。"
                   checked={draft.config.removeResourceLessMemberships}
@@ -501,7 +470,7 @@ export default function MediaLibraryCreateModal({
               </AppFormSection>
 
               <AppFormSection title="本地元数据" hint="只在资源首次发现时读取；不会持续同步相邻文件。">
-                <ToggleField
+                <SettingsSwitchRow
                   title="自动导入本地 NFO"
                   description="扫描时读取影片旁的 NFO。仅用于尚未刮削成功的影片；已刮削成功的影片会自动跳过。"
                   checked={draft.config.autoImportLocalNfo}
@@ -569,7 +538,7 @@ export default function MediaLibraryCreateModal({
                     </SelectControl>
                   </AppFormField>
                 </div>
-                <ToggleField
+                <SettingsSwitchRow
                   title="参与首页发现"
                   description="加入随机推荐与近期添加。"
                   checked={draft.config.includeInHomeDiscovery}
@@ -608,7 +577,7 @@ export default function MediaLibraryCreateModal({
                   </dd>
                 </div>
               </dl>
-              <ToggleField
+              <SettingsSwitchRow
                 title="创建后立即扫描"
                 description={
                   draft.roots.length > 0

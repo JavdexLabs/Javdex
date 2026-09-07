@@ -1,6 +1,6 @@
 # NFO 导出兼容性
 
-本文记录 Javdex 一次性 NFO 导出的公开 profile、固定验证基线和已知边界。导出入口仅位于“设置 → 存储”；它生成当前资料的旁路文件快照，不建立同步关系。
+本文记录 Javdex 一次性 NFO 导出的公开 profile、固定验证基线和已知边界。导出入口位于“设置 → 存储与导出 → 导出影片资料”；它生成当前资料的旁路文件快照，不建立同步关系。操作步骤见 [使用指南](USER_GUIDE.md#利用本地-nfo-导入与导出资料)。
 
 > 发布状态：五个 profile 的 XML golden 与格式合同自动化已经通过；Jellyfin、Emby、Plex NFO Agent、Stash 与 Serviio 的固定版本消费端 smoke 已完成。按产品决策，Infuse、VidHub、Nova 与 Zidoo 不要求专有客户端或设备端 smoke，其证据等级明确标为公开格式合同。
 

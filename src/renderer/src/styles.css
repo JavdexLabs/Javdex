@@ -195,6 +195,11 @@
   --classification-merge-text-sm: 12px;
   --classification-merge-text-md: 13px;
   --focus-outline: 2px solid var(--accent);
+  --form-label-gap: 8px;
+  --form-field-gap: 12px;
+  --form-section-gap: 16px;
+  --form-actions-gap: 16px;
+  --choice-control-size: 16px;
   --focus-ring: 0 0 0 3px var(--accent-soft);
   --privacy-glass-background: color-mix(in srgb, var(--surface-base) 42%, transparent);
   --privacy-image-filter: blur(16px) saturate(0.48);
@@ -378,6 +383,8 @@ textarea,
   padding: 14px 12px 18px;
 }
 .app-shell--with-background .sidebar {
+  --surface-sidebar-group: transparent;
+
   background: color-mix(in srgb, var(--surface-panel) 68%, transparent);
   border-right-color: color-mix(in srgb, var(--border-subtle) 72%, transparent);
 }

@@ -1,0 +1,8 @@
+.actions > [data-ui='button'] {
+  box-sizing: border-box;
+  height: calc(var(--toolbar-control-h, var(--control-h-md)) - 8px);
+  min-height: calc(var(--toolbar-control-h, var(--control-h-md)) - 8px);
+  padding-block: 0;
+  gap: 6px;
+  white-space: nowrap;
+}

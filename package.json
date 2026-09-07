@@ -1,6 +1,6 @@
 {
   "name": "Javdex",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Javdex — local JAV library manager",
   "main": "./out/main/index.js",
   "author": "Javdex",
@@ -37,7 +37,8 @@
     "lint:css": "stylelint \"src/renderer/src/**/*.module.css\" --allow-empty-input",
     "lint": "npm run lint:ts && npm run lint:css",
     "check:css-architecture": "node scripts/check-css-architecture.mjs",
-    "pretest": "npm run check:actress-boundaries && npm run check:media-asset-store-boundaries && npm run check:metadata-source-boundaries && npm run check:classification-entity-boundaries && npm run check:agent-platform-boundaries && npm run lint && npm run check:css-architecture",
+    "check:ui-controls": "node scripts/check-ui-controls.mjs",
+    "pretest": "npm run check:actress-boundaries && npm run check:media-asset-store-boundaries && npm run check:metadata-source-boundaries && npm run check:classification-entity-boundaries && npm run check:agent-platform-boundaries && npm run lint && npm run check:css-architecture && npm run check:ui-controls",
     "test": "npm run typecheck && npm run test:packaging && node scripts/run-electron-tests.mjs",
     "mcp:plugin-dev": "tsx src/mcp/javdex-plugin-dev-server.ts",
     "rebuild": "electron-rebuild -f -w better-sqlite3",

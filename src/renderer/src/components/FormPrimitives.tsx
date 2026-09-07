@@ -22,6 +22,20 @@ export function AppFormField({
   )
 }
 
+/** Labelled choices with consistent spacing between the legend and controls. */
+export function AppFormChoiceGroup({ label, children, disabled }: {
+  label: string
+  children: ReactNode
+  disabled?: boolean
+}): JSX.Element {
+  return (
+    <fieldset className={styles.choiceGroup} disabled={disabled}>
+      <legend className={styles.choiceLegend}>{label}</legend>
+      <div className={styles.choiceContent}>{children}</div>
+    </fieldset>
+  )
+}
+
 /** Section block inside form modals (matches plugin config panels). */
 export function AppFormSection({
   title,

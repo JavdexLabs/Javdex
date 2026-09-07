@@ -1,3 +1,4 @@
+import Checkbox from './Checkbox'
 import { useState } from 'react'
 import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
 import type {
@@ -97,8 +98,7 @@ export default function OrganizationEditModal({
             </EditFormField>
             {isEditing && draft.mainName.trim() !== organization?.mainName ? (
               <label className="check-row entity-edit-field--full">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={draft.keepPreviousMainName}
                   onChange={(event) =>
                     setDraft({ ...draft, keepPreviousMainName: event.target.checked })

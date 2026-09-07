@@ -538,15 +538,15 @@ export default function PendingActressConflictPane({
       eyebrow={isConflict ? '演员名称冲突' : '资料等待应用'}
       title={
         isConflict
-          ? `「${selectedGroup.displayName}」应该属于哪位演员？`
-          : `「${selectedGroup.displayName}」的冲突已消失`
+          ? `${selectedGroup.displayName} · 确认名称归属`
+          : `${selectedGroup.displayName} · 应用演员资料`
       }
       description={
         isConflict
           ? selectedCandidate
             ? `${selectedCandidate.plugin.name} 为「${selectedCandidate.actressMainName}」返回了名称「${selectedGroup.displayName}」；当前该名称归属于「${selectedGroup.currentOwner?.mainName ?? '暂无演员'}」，请结合来源资料确认。`
             : '多位演员保存了同一个名称，请确认最终归属，或选择其他处理方式。'
-          : '名称冲突已消失，资料仍未写入。请选择来源查看影响后明确应用或丢弃。'
+          : '名称冲突已解除，请核对资料后应用。'
       }
       status={isConflict ? '待确认' : '可应用'}
       statusTone={isConflict ? 'waiting' : 'ok'}
@@ -582,24 +582,48 @@ export default function PendingActressConflictPane({
                 : '请选择一份待确认资料'
           }
           scope={CONFLICT_ACTION_SCOPE_LABEL[isConflict ? 'assignOwnership' : 'applyPending']}
+          secondary={
+            isConflict || selectedCandidate ? (
+              <PendingSecondaryActions>
+                {selectedCandidate ? (
+                  <Button
+                    variant="ghost"
+                    disabled={resolving}
+                    onClick={() => detail.requestDiscard(selectedCandidate)}
+                  >
+                    <Trash2 {...UI_ICON_SM} aria-hidden />
+                    {isConflict ? '丢弃这份错误匹配' : '丢弃这份结果'}
+                  </Button>
+                ) : null}
+                {isConflict ? (
+                  <>
+                    <Button
+                      variant="ghost"
+                      disabled={!editSourceName || resolving}
+                      onClick={detail.openEditName}
+                    >
+                      <Pencil {...UI_ICON_SM} aria-hidden />修改返回名称
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      disabled={mergeActors.length < 2 || resolving}
+                      onClick={detail.openMerge}
+                    >
+                      <GitMerge {...UI_ICON_SM} aria-hidden />合并演员档案
+                    </Button>
+                    <Button variant="ghost" disabled={resolving} onClick={detail.openIllegalName}>
+                      <Ban {...UI_ICON_SM} aria-hidden />这不是演员名称
+                    </Button>
+                  </>
+                ) : null}
+              </PendingSecondaryActions>
+            ) : null
+          }
         >
-          {selectedCandidate ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={resolving}
-              onClick={() => detail.requestDiscard(selectedCandidate)}
-            >
-              <Trash2 {...UI_ICON_SM} aria-hidden />
-              {isConflict ? '丢弃这份错误匹配' : '丢弃这份结果'}
-            </Button>
-          ) : null}
           {isConflict ? (
             <Button
               type="button"
               variant="primary"
-              size="sm"
               disabled={resolving || !proposedOwner}
               onClick={detail.confirmOwnership}
             >
@@ -609,7 +633,6 @@ export default function PendingActressConflictPane({
             <Button
               type="button"
               variant="primary"
-              size="sm"
               disabled={resolving || !selectedCandidate}
               onClick={detail.applySelectedPending}
             >
@@ -617,40 +640,6 @@ export default function PendingActressConflictPane({
             </Button>
           )}
         </PendingConfirmBar>
-      }
-      secondary={
-        isConflict ? (
-          <PendingSecondaryActions>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={!editSourceName || resolving}
-              onClick={detail.openEditName}
-            >
-              <Pencil {...UI_ICON_SM} aria-hidden />修改本条返回名称
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={mergeActors.length < 2 || resolving}
-              onClick={detail.openMerge}
-            >
-              <GitMerge {...UI_ICON_SM} aria-hidden />合并演员档案
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="conflict-workbench-illegal"
-              disabled={resolving}
-              onClick={detail.openIllegalName}
-            >
-              <Ban {...UI_ICON_SM} aria-hidden />这不是演员名称
-            </Button>
-          </PendingSecondaryActions>
-        ) : null
       }
       overlays={overlays}
     >
@@ -721,8 +710,8 @@ export default function PendingActressConflictPane({
 
         <PendingStep
           step={isConflict ? 2 : 1}
-          title="选择冲突来源"
-          hint="只影响详情、改名和错误匹配丢弃"
+          title="核对来源资料"
+          hint="选择要查看或修正的来源资料"
         >
           <div className="conflict-workbench-source-list" role="group" aria-label="冲突来源">
             {selectedGroup.candidates.map((candidate) => {
@@ -787,7 +776,7 @@ export default function PendingActressConflictPane({
 
         <PendingStep
           step={isConflict ? 3 : 2}
-          title="查看确认后的影响"
+          title="确认后的影响"
           hint={`${unlockableCount} 份资料可在本次处理后应用`}
         >
           {isConflict && proposedOwner ? (

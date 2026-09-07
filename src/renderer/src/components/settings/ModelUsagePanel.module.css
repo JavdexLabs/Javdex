@@ -2,11 +2,35 @@
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--settings-gap, 12px);
+}
+
+.inheritedModel {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-h-md);
+  color: var(--text-primary);
+}
+
+.advanced {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--settings-gap, 12px);
+}
+
+.advanced summary {
+  min-height: var(--control-h-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.advanced summary span {
+  margin-left: var(--settings-gap-sm, 8px);
+  color: var(--text-muted);
 }
 
 .assignmentCard {
-  padding: 14px;
+  padding: var(--settings-card-pad-y, 16px) var(--settings-card-pad-x, 18px);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-panel);
@@ -16,7 +40,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--settings-gap, 12px);
   min-width: 0;
   margin-bottom: 12px;
 }
@@ -24,13 +48,14 @@
 .sectionTitle {
   margin: 0;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: var(--settings-fs-title, 14px);
+  font-weight: var(--settings-fw-label, 600);
 }
 
 .sectionHint {
   margin: 3px 0 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--settings-fs-secondary, 12px);
   line-height: 1.4;
 }
 
@@ -50,7 +75,7 @@
   flex-direction: column;
   gap: 5px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--settings-fs-secondary, 12px);
 }
 
 .controlInput {

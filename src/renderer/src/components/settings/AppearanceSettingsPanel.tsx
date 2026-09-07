@@ -1,3 +1,4 @@
+import Switch from '../Switch'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, RectangleHorizontal, RectangleVertical } from 'lucide-react'
 import {
@@ -33,9 +34,13 @@ import { UI_ICON_SM } from '../iconDefaults'
 import { SettingsCard, SettingsHeaderSwitch } from './SettingsPrimitives'
 import { useDisplayMode } from '../DisplayModeContext'
 import Button from '../Button'
-import Switch from '../Switch'
+import styles from './AppearanceSettingsPanel.module.css'
+import SettingsFormActions from './SettingsFormActions'
+import { useSettingsDraft } from '../../settings/useSettingsDraft'
+import { useSettingsFormGuard } from '../../settings/SettingsLeaveGuard'
 
-const AVATAR_COMPOSITION_PREVIEW_SIZE = 172
+// Keep in sync with --avatar-composition-preview-size in the panel CSS module.
+const AVATAR_COMPOSITION_PREVIEW_SIZE = 128
 
 const CENTERING_MODE_OPTIONS: Array<{
   id: AvatarCenteringMode
@@ -276,14 +281,13 @@ export default function AppearanceSettingsPanel({
   const { syncPrivacyMode } = useTheme()
   const { mode, setMode, syncResourceTypeBadges } = useDisplayMode()
   const avatarAutoCropBatch = useAvatarAutoCropBatch()
-  const [isEditingAvatarComposition, setIsEditingAvatarComposition] = useState(false)
   const [isSavingAvatarComposition, setIsSavingAvatarComposition] = useState(false)
   const [isCountingBatchAvatars, setIsCountingBatchAvatars] = useState(false)
   const [privacyScopesExpanded, setPrivacyScopesExpanded] = useState(false)
   const [batchConfirmCount, setBatchConfirmCount] = useState<number | null>(null)
-  const [avatarCompositionDraft, setAvatarCompositionDraft] = useState<AvatarCompositionDraft>(() =>
-    avatarCompositionDraftFromSettings(settings)
-  )
+  const avatarForm = useSettingsDraft(avatarCompositionDraftFromSettings(settings))
+  const { draft: avatarCompositionDraft, setDraft: setAvatarCompositionDraft } = avatarForm
+  const isEditingAvatarComposition = avatarForm.dirty
   const [privacyDraft, setPrivacyDraft] = useState<PrivacyModeSettings>(() =>
     clonePrivacySettings(settings)
   )
@@ -291,12 +295,6 @@ export default function AppearanceSettingsPanel({
   const lastPersistedPrivacyRef = useRef(clonePrivacySettings(settings))
   const privacyPersistQueueRef = useRef(Promise.resolve())
   const privacyPersistPendingRef = useRef(0)
-
-  useEffect(() => {
-    if (!isEditingAvatarComposition) {
-      setAvatarCompositionDraft(avatarCompositionDraftFromSettings(settings))
-    }
-  }, [isEditingAvatarComposition, settings])
 
   useEffect(() => {
     if (privacyPersistPendingRef.current > 0) return
@@ -307,25 +305,11 @@ export default function AppearanceSettingsPanel({
     setPrivacyDraft(incoming)
   }, [settings])
 
-  useEffect(() => {
-    if (!privacyDraft.privacyModeEnabled) setPrivacyScopesExpanded(false)
-  }, [privacyDraft.privacyModeEnabled])
-
   const updateAvatarCompositionDraft = (patch: Partial<AvatarCompositionDraft>): void => {
     setAvatarCompositionDraft((current) => ({ ...current, ...patch }))
   }
 
-  const startAvatarCompositionEdit = (): void => {
-    setAvatarCompositionDraft(avatarCompositionDraftFromSettings(settings))
-    setIsEditingAvatarComposition(true)
-  }
-
-  const cancelAvatarCompositionEdit = (): void => {
-    setAvatarCompositionDraft(avatarCompositionDraftFromSettings(settings))
-    setIsEditingAvatarComposition(false)
-  }
-
-  const saveAvatarComposition = async (): Promise<void> => {
+  const saveAvatarComposition = async (): Promise<boolean> => {
     const nextDraft = {
       ...avatarCompositionDraft,
       avatarFaceRatio: normalizeAvatarFaceRatio(avatarCompositionDraft.avatarFaceRatio)
@@ -333,12 +317,15 @@ export default function AppearanceSettingsPanel({
     setIsSavingAvatarComposition(true)
     try {
       const saved = await onPatchSettings(nextDraft)
-      if (saved === false) return
-      setIsEditingAvatarComposition(false)
+      if (saved === false) return false
+      avatarForm.accept(nextDraft, avatarCompositionDraft)
+      return true
     } finally {
       setIsSavingAvatarComposition(false)
     }
   }
+
+  useSettingsFormGuard({ label: '智能头像构图', dirty: avatarForm.dirty, busy: isSavingAvatarComposition, save: saveAvatarComposition, discard: avatarForm.reset })
 
   const draftFacePercent = Math.round(avatarCompositionDraft.avatarFaceRatio * 100)
   const batchRunning =
@@ -451,12 +438,25 @@ export default function AppearanceSettingsPanel({
   return (
     <>
       <SettingsCard title="主题" hint="界面配色，立即生效。">
-        <div className="theme-grid">
+        <div className="theme-grid" role="radiogroup" aria-label="界面主题">
           {THEME_OPTIONS.map((option) => (
             <button
               key={option.id}
               type="button"
               className={`theme-option theme-option--${option.id}${theme === option.id ? ' active' : ''}`}
+              role="radio"
+              aria-checked={theme === option.id}
+              tabIndex={theme === option.id ? 0 : -1}
+              onKeyDown={(event) => {
+                const direction = ['ArrowRight', 'ArrowDown'].includes(event.key) ? 1 : ['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 0
+                if (!direction) return
+                event.preventDefault()
+                const index = THEME_OPTIONS.findIndex((item) => item.id === option.id)
+                const next = (index + direction + THEME_OPTIONS.length) % THEME_OPTIONS.length
+                onThemeChange(THEME_OPTIONS[next].id)
+                const buttons = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('button')
+                buttons?.[next]?.focus()
+              }}
               onClick={() => onThemeChange(option.id)}
             >
               <span className={`theme-swatch theme-swatch-${option.id}`} />
@@ -507,50 +507,12 @@ export default function AppearanceSettingsPanel({
       </SettingsCard>
 
       <SettingsCard
+        className={styles.compositionCard}
         title="智能头像构图"
-        hint={
-          isEditingAvatarComposition
-            ? '设置手动、批量和刮削自动构图使用的居中位置、画面松紧与头部完整性；保存后生效。'
-            : '决定手动、批量和刮削自动构图的画面效果；修改设置不会立即重裁已有头像。'
-        }
-        actions={
-          isEditingAvatarComposition ? (
-            <>
-              <Button
-                type="button"
-                variant="ghost"
-
-                size="sm"
-                disabled={isSavingAvatarComposition}
-                onClick={cancelAvatarCompositionEdit}
-              >
-                取消
-              </Button>
-              <Button
-                type="button"
-                variant="primary"
-
-                size="sm"
-                disabled={isSavingAvatarComposition}
-                onClick={() => void saveAvatarComposition()}
-              >
-                {isSavingAvatarComposition ? '保存中…' : '保存'}
-              </Button>
-            </>
-          ) : (
-            <Button
-              type="button"
-              variant="ghost"
-
-              size="sm"
-              onClick={startAvatarCompositionEdit}
-            >
-              编辑
-            </Button>
-          )
-        }
+        hint="预览构图效果，保存后用于后续处理；已有头像保持不变。"
+        actions={<SettingsFormActions placement="header" dirty={avatarForm.dirty} saving={isSavingAvatarComposition} conflict={avatarForm.conflict} onCancel={avatarForm.reset} onSave={() => void saveAvatarComposition()} />}
       >
-        <div className="avatar-composition-layout">
+        <div className={styles.layout}>
           <AvatarCompositionPreview
             centeringMode={avatarCompositionDraft.avatarCenteringMode}
             faceRatio={avatarCompositionDraft.avatarFaceRatio}
@@ -558,14 +520,12 @@ export default function AppearanceSettingsPanel({
           />
 
           <div
-            className={`avatar-composition-controls${
-              isEditingAvatarComposition ? ' is-editing' : ' is-readonly'
-            }`}
+            className={styles.controls}
           >
-            <div className="avatar-composition-control-row">
-              <span className="avatar-composition-control-label">居中基准</span>
+            <div className={styles.row}>
+              <span className={styles.label}>居中基准</span>
               <div
-                className="avatar-composition-segmented avatar-composition-segmented--centering"
+                className={styles.segmented}
                 role="group"
                 aria-label="智能构图居中基准"
               >
@@ -576,8 +536,7 @@ export default function AppearanceSettingsPanel({
                       key={option.id}
                       type="button"
                       aria-pressed={active}
-                      className={active ? 'active' : undefined}
-                      disabled={!isEditingAvatarComposition || isSavingAvatarComposition}
+                      disabled={isSavingAvatarComposition}
                       onClick={() =>
                         updateAvatarCompositionDraft({ avatarCenteringMode: option.id })
                       }
@@ -589,17 +548,17 @@ export default function AppearanceSettingsPanel({
               </div>
             </div>
 
-            <div className="avatar-composition-control-row">
-              <span className="avatar-composition-control-label">构图范围</span>
-              <div className="avatar-face-ratio-control">
-                <div className="avatar-face-ratio-slider-wrap">
+            <div className={styles.row}>
+              <span className={styles.label}>构图范围</span>
+              <div className={styles.ratio}>
+                <div className={styles.slider}>
                   <input
                     type="range"
                     min={Math.round(MIN_AVATAR_FACE_RATIO * 100)}
                     max={Math.round(MAX_AVATAR_FACE_RATIO * 100)}
                     step={1}
                     value={draftFacePercent}
-                    disabled={!isEditingAvatarComposition || isSavingAvatarComposition}
+                    disabled={isSavingAvatarComposition}
                     aria-label="智能头像构图范围"
                     aria-valuetext={
                       draftFacePercent <= 57
@@ -616,7 +575,7 @@ export default function AppearanceSettingsPanel({
                       })
                     }
                   />
-                  <span className="avatar-face-ratio-range" aria-hidden="true">
+                  <span className={styles.rangeLabels} aria-hidden="true">
                     <span>更宽松</span>
                     <span>更紧凑</span>
                   </span>
@@ -624,13 +583,14 @@ export default function AppearanceSettingsPanel({
               </div>
             </div>
 
-            <div className="avatar-composition-control-row">
-              <span className="avatar-composition-control-label">完整头部</span>
-              <label className="avatar-head-protection-control">
-                <span>必要时缩小画面，避免发顶或下巴被裁切</span>
+            <div className={styles.row}>
+              <span className={styles.label}>完整头部</span>
+              <label className={styles.protection}>
+                <span>避免发顶或下巴被裁切</span>
                 <Switch
+                  aria-label="保留完整头部"
                   checked={avatarCompositionDraft.avatarPreserveFullHead}
-                  disabled={!isEditingAvatarComposition || isSavingAvatarComposition}
+                  disabled={isSavingAvatarComposition}
                   onChange={(event) =>
                     updateAvatarCompositionDraft({
                       avatarPreserveFullHead: event.target.checked
@@ -773,7 +733,6 @@ export default function AppearanceSettingsPanel({
           />
         }
       >
-        {privacyDraft.privacyModeEnabled ? (
           <div
             className={`privacy-mode-disclosure${
               privacyScopesExpanded ? ' is-expanded' : ''
@@ -812,7 +771,6 @@ export default function AppearanceSettingsPanel({
               </div>
             ) : null}
           </div>
-        ) : null}
       </SettingsCard>
     </>
   )

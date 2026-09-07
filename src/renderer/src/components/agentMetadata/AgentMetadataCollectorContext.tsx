@@ -1,3 +1,4 @@
+import Checkbox from '../Checkbox'
 import {
   createContext,
   useCallback,
@@ -617,8 +618,7 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
                           .filter((option) => draft.payload.observedFields.includes(option.id as never))
                           .map((option) => (
                             <label key={option.id}>
-                              <input
-                                type="checkbox"
+                              <Checkbox
                                 checked={selectedFields.includes(option.id)}
                                 disabled={busy}
                                 onChange={(event) => changeFields(option.id, event.target.checked)}
@@ -677,9 +677,8 @@ export function AgentMetadataCollectorProvider({ children }: { children: ReactNo
                           页面名称与库内名称不一致，请在核对图片与资料后确认身份。
                         </label>
                         <label>
-                          <input
+                          <Checkbox
                             id="agent-metadata-identity-confirmed"
-                            type="checkbox"
                             checked={identityConfirmed}
                             disabled={busy}
                             onChange={(event) => {

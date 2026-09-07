@@ -54,7 +54,7 @@ export interface ParsedNfoArtifact {
 
 const renderOrder = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 
-function assertRenderableField(value: string): string {
+export function normalizeNfoField(value: string): string {
   const normalized = value
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/gu, '\uFFFD')
     .replace(/\r\n?/gu, '\n')
@@ -65,8 +65,8 @@ function assertRenderableField(value: string): string {
   return normalized
 }
 
-function escapeXml(value: string): string {
-  return assertRenderableField(value)
+export function escapeNfoXml(value: string): string {
+  return normalizeNfoField(value)
     .replace(/&/gu, '&amp;')
     .replace(/</gu, '&lt;')
     .replace(/>/gu, '&gt;')
@@ -74,64 +74,64 @@ function escapeXml(value: string): string {
     .replace(/'/gu, '&apos;')
 }
 
-function renderElement(name: string, value: string, indent = '  '): string {
-  return `${indent}<${name}>${escapeXml(value)}</${name}>`
+export function renderNfoElement(name: string, value: string, indent = '  '): string {
+  return `${indent}<${name}>${escapeNfoXml(value)}</${name}>`
 }
 
 /** Stable Javdex interchange rendering; profile-specific export remains outside the codec. */
 export function renderNfoArtifact(model: NormalizedNfoArtifact): Buffer {
   const lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<movie>']
   if (model.code) {
-    lines.push(`  <uniqueid type="num" default="true">${escapeXml(model.code)}</uniqueid>`)
+    lines.push(`  <uniqueid type="num" default="true">${escapeNfoXml(model.code)}</uniqueid>`)
   }
-  if (model.title) lines.push(renderElement('title', model.title))
-  if (model.summary) lines.push(renderElement('plot', model.summary))
-  if (model.releaseDate) lines.push(renderElement('premiered', model.releaseDate))
-  if (model.maker) lines.push(renderElement('studio', model.maker))
-  if (model.publisher) lines.push(renderElement('publisher', model.publisher))
+  if (model.title) lines.push(renderNfoElement('title', model.title))
+  if (model.summary) lines.push(renderNfoElement('plot', model.summary))
+  if (model.releaseDate) lines.push(renderNfoElement('premiered', model.releaseDate))
+  if (model.maker) lines.push(renderNfoElement('studio', model.maker))
+  if (model.publisher) lines.push(renderNfoElement('publisher', model.publisher))
   if (model.series) {
     lines.push('  <set>')
-    lines.push(renderElement('name', model.series, '    '))
+    lines.push(renderNfoElement('name', model.series, '    '))
     lines.push('  </set>')
   }
-  if (model.director) lines.push(renderElement('director', model.director))
+  if (model.director) lines.push(renderNfoElement('director', model.director))
   if (model.durationSeconds != null && model.durationSeconds > 0) {
     const minutes = Math.round((model.durationSeconds / 60) * 100) / 100
-    lines.push(renderElement('runtime', String(minutes)))
+    lines.push(renderNfoElement('runtime', String(minutes)))
   }
   if (model.ratingAverage != null) {
     lines.push('  <ratings>')
     lines.push('    <rating name="javdex" max="5" default="true">')
-    lines.push(renderElement('value', String(model.ratingAverage), '      '))
+    lines.push(renderNfoElement('value', String(model.ratingAverage), '      '))
     if (model.ratingCount != null) {
-      lines.push(renderElement('votes', String(model.ratingCount), '      '))
+      lines.push(renderNfoElement('votes', String(model.ratingCount), '      '))
     }
     lines.push('    </rating>')
     lines.push('  </ratings>')
   }
   for (const tag of stableUnique([...model.tags]).sort(renderOrder.compare)) {
-    lines.push(renderElement('tag', tag))
+    lines.push(renderNfoElement('tag', tag))
   }
   for (const actor of [...model.actors].sort((left, right) =>
     renderOrder.compare(left.name, right.name)
   )) {
     lines.push('  <actor>')
-    lines.push(renderElement('name', actor.name, '    '))
+    lines.push(renderNfoElement('name', actor.name, '    '))
     if (actor.declaredGender) {
-      lines.push(renderElement('gender', actor.declaredGender, '    '))
+      lines.push(renderNfoElement('gender', actor.declaredGender, '    '))
     }
     for (const reference of stableUnique([...actor.thumbReferences]).sort(renderOrder.compare)) {
-      lines.push(renderElement('thumb', reference, '    '))
+      lines.push(renderNfoElement('thumb', reference, '    '))
     }
     lines.push('  </actor>')
   }
   for (const reference of stableUnique([...model.coverReferences]).sort(renderOrder.compare)) {
-    lines.push(`  <thumb aspect="poster">${escapeXml(reference)}</thumb>`)
+    lines.push(`  <thumb aspect="poster">${escapeNfoXml(reference)}</thumb>`)
   }
   const samples = stableUnique([...model.sampleReferences]).sort(renderOrder.compare)
   if (samples.length > 0) {
     lines.push('  <fanart>')
-    for (const reference of samples) lines.push(renderElement('thumb', reference, '    '))
+    for (const reference of samples) lines.push(renderNfoElement('thumb', reference, '    '))
     lines.push('  </fanart>')
   }
   lines.push('</movie>', '')

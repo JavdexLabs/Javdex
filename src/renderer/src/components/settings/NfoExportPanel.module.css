@@ -17,7 +17,7 @@
 }
 
 .fieldLabel {
-  padding: 0 0 6px;
+  padding: 0 0 var(--form-label-gap);
   color: var(--text-muted);
   font-size: var(--settings-fs-secondary, 12px);
   font-weight: var(--settings-fw-label, 600);
@@ -56,7 +56,7 @@
   width: 16px;
   height: 16px;
   margin: 0;
-  accent-color: var(--accent);
+  accent-color: var(--text-accent);
   cursor: pointer;
 }
 
@@ -368,7 +368,7 @@
 
 .modalProgress {
   width: 100%;
-  accent-color: var(--accent);
+  accent-color: var(--text-accent);
 }
 
 .progressCopy,

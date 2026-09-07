@@ -1,6 +1,12 @@
 import type { ActressGender } from '@shared/actressTypes'
 import type { NfoExportProfileId, NfoExportProfileOption } from '@shared/nfoExportTypes'
-import { MAX_NFO_BYTES, MAX_NFO_FIELD_BYTES, NfoArtifactError } from '../nfoArtifactCodec'
+import {
+  MAX_NFO_BYTES,
+  NfoArtifactError,
+  escapeNfoXml,
+  normalizeNfoField,
+  renderNfoElement
+} from '../nfoArtifactCodec'
 
 export interface NfoExportActor {
   name: string
@@ -188,32 +194,8 @@ function representedRatings(
   return Array.from(bySource.values()).sort((a, b) => a.source.localeCompare(b.source, 'en'))
 }
 
-function clean(value: string): string {
-  const normalized = value
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/gu, '\uFFFD')
-    .replace(/\r\n?/gu, '\n')
-    .trim()
-  if (Buffer.byteLength(normalized, 'utf8') > MAX_NFO_FIELD_BYTES) {
-    throw new NfoArtifactError('field-too-large')
-  }
-  return normalized
-}
-
-function xml(value: string): string {
-  return clean(value)
-    .replace(/&/gu, '&amp;')
-    .replace(/</gu, '&lt;')
-    .replace(/>/gu, '&gt;')
-    .replace(/"/gu, '&quot;')
-    .replace(/'/gu, '&apos;')
-}
-
-function element(name: string, value: string, indent = '  '): string {
-  return `${indent}<${name}>${xml(value)}</${name}>`
-}
-
 function uniqueSorted(values: readonly string[]): string[] {
-  return Array.from(new Set(values.map(clean).filter(Boolean))).sort((a, b) =>
+  return Array.from(new Set(values.map(normalizeNfoField).filter(Boolean))).sort((a, b) =>
     a.localeCompare(b, 'en', { numeric: true, sensitivity: 'base' })
   )
 }
@@ -224,25 +206,25 @@ export function renderNfoExportDocument(
 ): Buffer {
   const profile = definitionFor(profileId)
   const lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<movie>']
-  lines.push(`  <uniqueid type="num" default="true">${xml(document.code)}</uniqueid>`)
-  lines.push(element('id', document.code))
-  if (profile.includeNum) lines.push(element('num', document.code))
-  lines.push(element('title', document.title || document.code))
+  lines.push(`  <uniqueid type="num" default="true">${escapeNfoXml(document.code)}</uniqueid>`)
+  lines.push(renderNfoElement('id', document.code))
+  if (profile.includeNum) lines.push(renderNfoElement('num', document.code))
+  lines.push(renderNfoElement('title', document.title || document.code))
   if (profile.includeOriginalTitle && document.originalTitle) {
-    lines.push(element('originaltitle', document.originalTitle))
+    lines.push(renderNfoElement('originaltitle', document.originalTitle))
   }
-  if (document.summary) lines.push(element('plot', document.summary))
-  if (document.releaseDate) lines.push(element('premiered', document.releaseDate))
-  if (document.maker) lines.push(element('studio', document.maker))
+  if (document.summary) lines.push(renderNfoElement('plot', document.summary))
+  if (document.releaseDate) lines.push(renderNfoElement('premiered', document.releaseDate))
+  if (document.maker) lines.push(renderNfoElement('studio', document.maker))
   if (profile.includePublisher && document.publisher) {
-    lines.push(element('publisher', document.publisher))
+    lines.push(renderNfoElement('publisher', document.publisher))
   }
   if (document.series) {
-    lines.push('  <set>', element('name', document.series, '    '), '  </set>')
+    lines.push('  <set>', renderNfoElement('name', document.series, '    '), '  </set>')
   }
-  if (document.director) lines.push(element('director', document.director))
+  if (document.director) lines.push(renderNfoElement('director', document.director))
   if (document.durationSeconds != null && document.durationSeconds > 0) {
-    lines.push(element('runtime', String(Math.round(document.durationSeconds / 60))))
+    lines.push(renderNfoElement('runtime', String(Math.round(document.durationSeconds / 60))))
   }
   if (profile.includeExternalIdentities) {
     for (const identity of document.identities
@@ -250,7 +232,7 @@ export function renderNfoExportDocument(
       .sort((a, b) =>
       `${a.source}:${a.code}`.localeCompare(`${b.source}:${b.code}`, 'en')
     )) {
-      lines.push(`  <uniqueid type="${xml(identity.source.trim().toLowerCase())}">${xml(identity.code)}</uniqueid>`)
+      lines.push(`  <uniqueid type="${escapeNfoXml(identity.source.trim().toLowerCase())}">${escapeNfoXml(identity.code)}</uniqueid>`)
     }
   }
   if (profile.includeRatings) {
@@ -258,32 +240,32 @@ export function renderNfoExportDocument(
     if (ratings.length > 0) {
       lines.push('  <ratings>')
       ratings.forEach((rating, index) => {
-        lines.push(`    <rating name="${xml(rating.source)}" max="5"${index === 0 ? ' default="true"' : ''}>`)
-        lines.push(element('value', String(rating.average), '      '))
-        if (rating.count != null) lines.push(element('votes', String(rating.count), '      '))
+        lines.push(`    <rating name="${escapeNfoXml(rating.source)}" max="5"${index === 0 ? ' default="true"' : ''}>`)
+        lines.push(renderNfoElement('value', String(rating.average), '      '))
+        if (rating.count != null) lines.push(renderNfoElement('votes', String(rating.count), '      '))
         lines.push('    </rating>')
       })
       lines.push('  </ratings>')
     }
   }
   for (const tag of uniqueSorted(document.tags)) {
-    lines.push(element(profile.tagsAsGenre ? 'genre' : 'tag', tag))
+    lines.push(renderNfoElement(profile.tagsAsGenre ? 'genre' : 'tag', tag))
   }
   for (const actor of [...document.actors].sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
-    lines.push('  <actor>', element('name', actor.name, '    '))
-    if (profile.includeActorGender && actor.gender) lines.push(element('gender', actor.gender, '    '))
-    if (actor.thumbReference) lines.push(element('thumb', actor.thumbReference, '    '))
+    lines.push('  <actor>', renderNfoElement('name', actor.name, '    '))
+    if (profile.includeActorGender && actor.gender) lines.push(renderNfoElement('gender', actor.gender, '    '))
+    if (actor.thumbReference) lines.push(renderNfoElement('thumb', actor.thumbReference, '    '))
     lines.push('  </actor>')
   }
   if (document.coverReference) {
-    lines.push(`  <thumb aspect="poster">${xml(document.coverReference)}</thumb>`)
+    lines.push(`  <thumb aspect="poster">${escapeNfoXml(document.coverReference)}</thumb>`)
   }
   if (document.landscapeReference && ['portable-v1', 'jellyfin-current', 'emby-kodi-conservative'].includes(profileId)) {
-    lines.push(`  <thumb aspect="landscape">${xml(document.landscapeReference)}</thumb>`)
+    lines.push(`  <thumb aspect="landscape">${escapeNfoXml(document.landscapeReference)}</thumb>`)
   }
   if (document.fanartReference) {
     lines.push('  <fanart>')
-    lines.push(element('thumb', document.fanartReference, '    '))
+    lines.push(renderNfoElement('thumb', document.fanartReference, '    '))
     lines.push('  </fanart>')
   }
   lines.push('</movie>', '')

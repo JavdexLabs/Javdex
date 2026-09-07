@@ -601,7 +601,8 @@ function toBundledDescriptor(manifest: StoredPluginManifest): ScraperPluginDescr
     removable: false,
     exportable: !requiresConfiguration,
     editable: !requiresConfiguration,
-    debuggable: !requiresConfiguration,
+    // Gfriends is an avatar index integration, not a website scraper for the development assistant.
+    debuggable: !requiresConfiguration && !(manifest.kind === 'actress' && manifest.name === 'Gfriends'),
     requiresConfiguration,
     configured,
     configurationLabel,

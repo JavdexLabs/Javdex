@@ -1,3 +1,4 @@
+import Checkbox from '../Checkbox'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { FileOutput, LoaderCircle, OctagonX } from 'lucide-react'
@@ -34,6 +35,10 @@ export default function NfoExportPanel({
   disabled: boolean
   onBlockingChange: (blocking: boolean) => void
 }): JSX.Element {
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const [preferenceError, setPreferenceError] = useState<string | null>(null)
+  const preferenceQueue = useRef(Promise.resolve())
+  const preferenceRevision = useRef(0)
   const [options, setOptions] = useState<NfoExportOptions | null>(null)
   const [draft, setDraft] = useState<NfoExportPreferences | null>(null)
   const [collisionPolicy, setCollisionPolicy] = useState<NfoExportCollisionPolicy>('skip')
@@ -56,6 +61,7 @@ export default function NfoExportPanel({
 
   useEffect(() => {
     let disposed = false
+    setError(null)
     void api.nfoExport.getOptions().then((value) => {
       if (disposed) return
       setOptions(value)
@@ -64,7 +70,7 @@ export default function NfoExportPanel({
       if (!disposed) setError((reason as Error).message)
     })
     return () => { disposed = true }
-  }, [])
+  }, [loadAttempt])
 
   useEffect(() => {
     previewRef.current = preview
@@ -161,8 +167,14 @@ export default function NfoExportPanel({
     invalidatePreview()
     setDraft(next)
     setError(null)
-    void api.nfoExport.updatePreferences(next).catch((reason: unknown) => {
-      setError((reason as Error).message)
+    const revision = ++preferenceRevision.current
+    preferenceQueue.current = preferenceQueue.current.catch(() => {}).then(async () => {
+      try {
+        await api.nfoExport.updatePreferences(next)
+        if (revision === preferenceRevision.current) setPreferenceError(null)
+      } catch (reason) {
+        if (revision === preferenceRevision.current) setPreferenceError(`未记住下次默认选项：${(reason as Error).message}。当前选择仍可用于本次预览。`)
+      }
     })
   }
 
@@ -253,20 +265,21 @@ export default function NfoExportPanel({
         actions={<SettingsStatusPill status={preview ? 'info' : 'muted'}>{preview ? '已预览' : previewChanged ? '待重新预览' : '待预览'}</SettingsStatusPill>}
       >
         {!options || !draft ? (
-          <p className={error ? styles.error : styles.muted} role={error ? 'alert' : undefined}>
-            {error || '正在读取媒体库与兼容格式…'}
-          </p>
+          <div>
+            <p className={error ? styles.error : styles.muted} role={error ? 'alert' : undefined}>{error || '正在读取媒体库与兼容格式…'}</p>
+            {error ? <Button size="sm" onClick={() => setLoadAttempt((value) => value + 1)}>重新读取</Button> : null}
+          </div>
         ) : (
           <div className={styles.form} aria-busy={busy}>
             <p className={styles.muted}>一次性导出，不自动同步。</p>
+            {preferenceError ? <p className={styles.error} role="status">{preferenceError}</p> : null}
             <fieldset className={styles.fieldset} disabled={disabled || busy}>
               <legend className={styles.fieldLabel}>媒体库</legend>
               <div className={styles.libraryGrid}>
                 {options.libraries.length === 0 ? <span className={styles.muted}>暂无可用媒体库</span> : null}
                 {options.libraries.map((library) => (
                   <label key={library.id} className={styles.checkRow}>
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={draft.libraryIds.includes(library.id)}
                       onChange={(event) => updateDraft({
                         libraryIds: event.target.checked
@@ -317,8 +330,7 @@ export default function NfoExportPanel({
                   ['includeFanart', '详情背景']
                 ] as const).map(([key, label]) => (
                   <label key={key} className={styles.checkRow}>
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={draft[key]}
                       onChange={(event) => updateDraft({ [key]: event.target.checked })}
                     />
@@ -336,7 +348,7 @@ export default function NfoExportPanel({
                   ['includeActorAvatars', '演员头像', '供 Javdex 回读及 Kodi / Emby 本地头像使用。']
                 ] as const).map(([key, label, hint]) => (
                   <label key={key} className={styles.checkRow}>
-                    <input type="checkbox" checked={draft[key]} onChange={(event) => updateDraft({ [key]: event.target.checked })} />
+                    <Checkbox checked={draft[key]} onChange={(event) => updateDraft({ [key]: event.target.checked })} />
                     <span>{label}<small className={styles.optionHint}>{hint}</small></span>
                   </label>
                 ))}

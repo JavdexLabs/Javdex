@@ -107,7 +107,7 @@ export function summarizePendingScanAssignments(
       label:
         target.kind === 'existing'
           ? `现有影片 #${target.videoId}`
-          : `新影片分组 ${target.groupKey}`,
+          : `新建影片 ${target.groupKey}`,
       groupKey: target.kind === 'new' ? target.groupKey : null,
       items: []
     }

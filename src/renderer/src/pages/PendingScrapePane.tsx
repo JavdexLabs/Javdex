@@ -263,7 +263,7 @@ export default function PendingScrapePane({
       {mergeConflictId != null ? (
         <Modal
           title="合并并应用候选"
-          hint={`所选候选与影片 #${mergeConflictId} 的业务身份相同。请选择要保留的永久内部 ID。`}
+          hint={`所选候选与影片 #${mergeConflictId} 指向同一部影片，请选择要保留的影片记录。`}
           size="sm"
           hideCancel
           onCancel={() => setMergeConflictId(null)}
@@ -285,7 +285,7 @@ export default function PendingScrapePane({
             </>
           }
         >
-          <p>两部影片的资源和关系将原子收敛，随后应用当前候选；任一步失败都不会部分提交。</p>
+          <p>两部影片的资源和关联信息将合并到保留的记录，并应用所选候选。</p>
         </Modal>
       ) : null}
 
@@ -325,12 +325,8 @@ export default function PendingScrapePane({
   return (
     <PendingWorkspace
       eyebrow="影片刮削"
-      title={
-        pending.sources.length > 1
-          ? `${videoLabel} 的 ${pending.sources.length} 个来源各应采用哪个候选？`
-          : `${videoLabel} 应采用哪个候选？`
-      }
-      description="插件返回了多个精确匹配，或候选与其他影片的业务身份重合。关闭页面不会丢弃候选。"
+      title={`${videoLabel} · 选择刮削结果`}
+      description="刮削结果需要核对，请为每个来源选择要采用的候选。"
       status={complete ? '可应用' : '待确认'}
       statusTone={complete ? 'ok' : 'waiting'}
       alert={
@@ -350,26 +346,25 @@ export default function PendingScrapePane({
               : `还有 ${pending.sources.length - chosenCount} 个来源未选择候选`
           }
           scope={`按原选字段与「${mode?.label ?? pending.updateMode}」写入本影片`}
+          secondary={
+            <PendingSecondaryActions>
+              <Button
+                variant="ghost"
+                disabled={busy}
+                onClick={() => navigateToVideoDetail(navigate, location, pending.videoId)}
+              >
+                查看影片
+              </Button>
+              <Button variant="ghost" disabled={busy} onClick={() => setDiscardOpen(true)}>
+                <Trash2 {...UI_ICON_SM} aria-hidden />丢弃全部候选
+              </Button>
+            </PendingSecondaryActions>
+          }
         >
-          <Button variant="primary" size="sm" disabled={!complete || busy} onClick={() => void confirm()}>
+          <Button variant="primary" disabled={!complete || busy} onClick={() => void confirm()}>
             {busy ? '处理中…' : '应用所选候选'}
           </Button>
         </PendingConfirmBar>
-      }
-      secondary={
-        <PendingSecondaryActions>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigateToVideoDetail(navigate, location, pending.videoId)}
-          >
-            查看影片
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => setDiscardOpen(true)}>
-            <Trash2 {...UI_ICON_SM} aria-hidden />
-            丢弃全部候选
-          </Button>
-        </PendingSecondaryActions>
       }
       overlays={overlays}
     >
@@ -520,7 +515,7 @@ export default function PendingScrapePane({
 
         <PendingStep
           step={2}
-          title="查看确认后的影响"
+          title="确认后的影响"
           hint={`原选字段：${fieldSummary(pending.selectedFields) || '无'}`}
         >
           <PendingMeta>

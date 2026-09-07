@@ -4,6 +4,7 @@ import { useEscapeKey } from '../hooks/useEscapeKey'
 import IconButton from './IconButton'
 import { UI_ICON } from './iconDefaults'
 import Button from './Button'
+import styles from './DetailActionBar.module.css'
 
 export type DetailBarAction = {
   key: string
@@ -80,7 +81,7 @@ export default function DetailActionBar({
 
   return (
     <div
-      className={`detail-actions detail-actions--${variant}${className ? ` ${className}` : ''}`}
+      className={`${styles.root} detail-actions detail-actions--${variant}${className ? ` ${className}` : ''}`}
       role="toolbar"
       aria-label={ariaLabel}
     >

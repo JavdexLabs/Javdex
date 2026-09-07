@@ -7,10 +7,12 @@ import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
 import {
   getLatestLibraryScanSnapshot,
   libraryUnrecognizedFileExists,
-  removeLibraryUnrecognizedFile
+  removeLibraryUnrecognizedFile,
+  renameLibraryUnrecognizedFile
 } from '../db/libraryScanRepo'
 import { getMediaLibraryRoot } from '../db/mediaLibraryRepo'
 import { listPendingScanGroups, resolvePendingScanGroup } from '../db/pendingScanRepo'
+import { listPendingResourceIdentities } from '../db/pendingResourceIdentityRepo'
 import { listVideoResources } from '../db/videoRepo'
 import {
   libraryScanAuditContainsPath,
@@ -20,6 +22,7 @@ import { importManual, renameAndImport } from '../scanner/scanner'
 import { scanCoordinator } from '../scanner/scanCoordinator'
 import { maintenanceTaskGate } from '../services/maintenanceTaskGate'
 import { selectPrimaryVideoResourceCandidate } from '../services/videoResourcePromotion'
+import { resolvePendingResourceIdentity } from '../services/pendingResourceIdentityService'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 import { assertFileNameOnly, assertMediaLibraryRootFile } from './ipcPathGuards'
 import type { IpcContext } from './shared'
@@ -97,10 +100,20 @@ export function registerScanHandlers(ctx: IpcContext): void {
       })
     )
   )
+  appCommandAdapter.register(IPC.PENDING_RESOURCE_IDENTITY_LIST, (libraryId) =>
+    listPendingResourceIdentities(libraryId)
+  )
+  appCommandAdapter.register(
+    IPC.PENDING_RESOURCE_IDENTITY_RESOLVE,
+    (libraryId, identityId, resolution) =>
+      maintenanceTaskGate.run('resource-maintenance', () =>
+        resolvePendingResourceIdentity(libraryId, identityId, resolution)
+      )
+  )
 
   appCommandAdapter.register(
     IPC.FILE_RENAME,
-    (libraryId, rootId, oldPath, newName, code, target): Promise<RenameImportResult> => {
+    (libraryId, rootId, oldPath, newName): Promise<RenameImportResult> => {
       const root = requireActiveRoot(libraryId, rootId)
       assertMediaLibraryRootFile(oldPath, root)
       assertFileNameOnly(newName)
@@ -109,11 +122,16 @@ export function registerScanHandlers(ctx: IpcContext): void {
           libraryId,
           rootId,
           oldPath,
-          newName,
-          code,
-          target
+          newName
         })
-        if (result.imported) removeScopedUnrecognizedFile(libraryId, rootId, oldPath)
+        if (result.outcome === 'imported' || result.outcome === 'pending') {
+          removeScopedUnrecognizedFile(libraryId, rootId, oldPath)
+        } else {
+          renameLibraryUnrecognizedFile(libraryId, rootId, normalizeLocalPathIdentity(oldPath), {
+            filePath: result.newPath,
+            normalizedPath: normalizeLocalPathIdentity(result.newPath)
+          })
+        }
         return result
       })
     }

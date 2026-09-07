@@ -1,3 +1,4 @@
+import Checkbox from './Checkbox'
 import type { VideoResourceFilter } from '@shared/videoTypes'
 import { VIDEO_RESOURCE_FILTER_ORDER } from '../listView/listQueryParams'
 import { VIDEO_RESOURCE_FILTER_LABELS } from './videoResourcePresentation'
@@ -21,8 +22,7 @@ export default function VideoResourceFilterFieldset({
           const checked = value.includes(kind)
           return (
             <label key={kind} className={styles.option} data-selected={checked}>
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={checked}
                 onChange={(event) =>
                   onChange(

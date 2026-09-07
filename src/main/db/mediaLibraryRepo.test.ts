@@ -157,6 +157,7 @@ describe('mediaLibraryRepo', () => {
         autoScanIntervalMinutes: 60,
         minImportDurationMinutes: 12,
         autoMergeSameCodeResources: true,
+        autoImportLocalNfo: false,
         defaultVideoScraper: '  JavDB  ',
         defaultSortBy: 'rating',
         defaultSortDir: 'asc',
@@ -173,6 +174,7 @@ describe('mediaLibraryRepo', () => {
     assert.equal(detail.config.libraryId, detail.id)
     assert.equal(detail.config.revision, 1)
     assert.equal(detail.config.autoScanEnabled, true)
+    assert.equal(detail.config.autoImportLocalNfo, false)
     assert.equal(detail.config.defaultVideoScraper, 'JavDB')
     assert.equal(detail.config.defaultSortBy, 'rating')
     assert.equal(detail.config.defaultSortDir, 'asc')
@@ -216,12 +218,25 @@ describe('mediaLibraryRepo', () => {
     insert.run(library.id, 'PENDING-A')
     insert.run(library.id, 'PENDING-B')
     insert.run(DEFAULT_MEDIA_LIBRARY_ID, 'PENDING-DEFAULT')
+    getDb()
+      .prepare(
+        `INSERT INTO pending_resource_identities (
+           library_id, root_id, file_path, normalized_path, source_kind,
+           filename_code, nfo_code, revision
+         ) VALUES (?, ?, ?, ?, 'local', 'FILE-001', 'NFO-002', 1)`
+      )
+      .run(
+        library.id,
+        library.roots[0].id,
+        path.join(library.roots[0].path, 'FILE-001.mp4'),
+        normalizeLocalPathIdentity(path.join(library.roots[0].path, 'FILE-001.mp4'))
+      )
 
     const byId = new Map(listMediaLibraries().map((item) => [item.id, item]))
     assert.equal(byId.get(library.id)?.rootCount, 2)
-    assert.equal(byId.get(library.id)?.pendingScanGroupCount, 2)
+    assert.equal(byId.get(library.id)?.pendingScanGroupCount, 3)
     assert.equal(byId.get(DEFAULT_MEDIA_LIBRARY_ID)?.pendingScanGroupCount, 1)
-    assert.equal(getMediaLibraryDetail(library.id)?.pendingScanGroupCount, 2)
+    assert.equal(getMediaLibraryDetail(library.id)?.pendingScanGroupCount, 3)
   })
 
   it('keeps library and config revisions independent and rejects stale writes', () => {
@@ -229,14 +244,16 @@ describe('mediaLibraryRepo', () => {
     const created = createMediaLibrary({ name: 'Library' })
     assert.equal(created.config.minImportDurationMinutes, 30)
     assert.equal(created.config.autoMergeSameCodeResources, true)
+    assert.equal(created.config.autoImportLocalNfo, true)
 
     const config = updateMediaLibraryConfig({
       libraryId: created.id,
       expectedRevision: created.config.revision,
-      patch: { autoScanEnabled: true, defaultSortBy: 'code' }
+      patch: { autoScanEnabled: true, autoImportLocalNfo: false, defaultSortBy: 'code' }
     })
     assert.equal(config.revision, 2)
     assert.equal(config.autoScanEnabled, true)
+    assert.equal(config.autoImportLocalNfo, false)
     assert.equal(config.defaultSortBy, 'code')
     assert.equal(getMediaLibrary(created.id)?.revision, 1)
 
@@ -1218,6 +1235,21 @@ describe('mediaLibraryRepo', () => {
       )
     database
       .prepare(
+        `INSERT INTO pending_resource_identities (
+           library_id, root_id, file_path, normalized_path, source_kind,
+           filename_code, nfo_code, revision, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 'local', 'FILE-001', 'NFO-002', 1, ?, ?)`
+      )
+      .run(
+        library.id,
+        rootId,
+        path.join(rootPath, 'identity.mp4'),
+        normalizeLocalPathIdentity(path.join(rootPath, 'identity.mp4')),
+        timestamp,
+        timestamp
+      )
+    database
+      .prepare(
         `INSERT INTO library_unrecognized_files (
            library_id, root_id, file_path, normalized_path, reason, scan_run_id, last_seen_at
          ) VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -1265,8 +1297,8 @@ describe('mediaLibraryRepo', () => {
       membershipCount: 2,
       resourceCount: 2,
       exclusiveVideoCount: 1,
-      pendingScanGroupCount: 1,
-      pendingScanResourceCount: 1,
+      pendingScanGroupCount: 2,
+      pendingScanResourceCount: 2,
       scanRunCount: 1,
       activeScanRunCount: 0,
       unrecognizedFileCount: 1,

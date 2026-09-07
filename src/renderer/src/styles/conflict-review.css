@@ -123,7 +123,7 @@
 
 .conflict-merge-actor-copy small {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .conflict-merge-name-options {
@@ -212,6 +212,7 @@
 }
 
 .conflict-workbench-owner.is-selected {
+  background: var(--surface-selected);
   border-color: var(--border-accent);
 }
 
@@ -257,7 +258,7 @@
 .conflict-workbench-source-list small,
 .conflict-workbench-owner-search small {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .conflict-workbench-source-list {
@@ -295,7 +296,7 @@
 
 .conflict-workbench-source-list > button > em {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 12px;
   font-style: normal;
   white-space: nowrap;
 }
@@ -311,7 +312,7 @@
   border-radius: var(--radius-md);
   background: var(--surface-control);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .conflict-workbench-name-impact {
@@ -370,7 +371,7 @@
 
 .conflict-workbench-source-heading span {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .conflict-workbench-meta-grid,
@@ -392,7 +393,7 @@
   grid-template-columns: 76px minmax(0, 1fr);
   gap: 8px;
   border-bottom: 1px solid var(--border-subtle);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .conflict-workbench-meta-grid > div:nth-child(odd),
@@ -436,7 +437,7 @@
   border-radius: var(--radius-md);
   background: var(--surface-warning);
   color: var(--text-warning);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .conflict-workbench-warning p {
@@ -501,7 +502,7 @@
   grid-template-columns: 116px minmax(0, 1fr);
   gap: 8px;
   border-top: 1px solid var(--border-subtle);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .conflict-workbench-edit-field {
@@ -509,7 +510,7 @@
   display: grid;
   gap: 6px;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .conflict-workbench-edit-field .text-input[aria-invalid='true'] {
@@ -525,7 +526,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-control);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .conflict-workbench-edit-inspection span,

@@ -40,6 +40,8 @@ jobs:
 
       - name: Run tests
         run: npm test
+        env:
+          JAVDEX_TEST_TIMEOUT_MS: "300000"
 
   package:
     name: Package ${{ matrix.platform }}

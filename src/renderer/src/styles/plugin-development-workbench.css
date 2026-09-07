@@ -1393,32 +1393,6 @@
   opacity: 0.72;
 }
 
-.composite-field-map {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 6px;
-}
-
-.composite-field-row {
-  display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-  min-height: 32px;
-  padding: 4px 6px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--surface-elevated);
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.composite-field-row > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .scrape-field-option--disabled {
   color: var(--text-muted);
   cursor: not-allowed;

@@ -3,7 +3,7 @@
   padding: 4px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--surface-control) 72%, transparent);
+  background: var(--surface-sidebar-group, color-mix(in srgb, var(--surface-control) 72%, transparent));
   transition:
     border-color var(--motion-fast),
     background var(--motion-fast);
@@ -11,7 +11,7 @@
 
 .group[data-active="true"] {
   border-color: var(--border-strong);
-  background: var(--surface-control);
+  background: var(--surface-sidebar-group, var(--surface-control));
 }
 
 .list {
@@ -66,24 +66,6 @@
 
 .icon {
   color: var(--media-library-color, var(--text-muted));
-}
-
-.archivedLabel {
-  padding: 8px 8px 4px;
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
-.archivedItem {
-  opacity: 0.72;
-}
-
-.archivedItem:hover,
-.archivedItem:focus-visible,
-.archivedItem:global(.active) {
-  opacity: 1;
 }
 
 .status,

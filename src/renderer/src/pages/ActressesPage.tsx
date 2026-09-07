@@ -57,6 +57,7 @@ import {
   uncachedActressFaceScanIdentity
 } from '../actressFaceFilter/cache'
 import { useActressFaceScan, previousAvatarAfterFaceScan } from '../actressFaceFilter/useActressFaceScan'
+import { isActressFaceScanFailed } from '../actressFaceFilter/scanQueue'
 import { useAvatarAutoCropBatch } from '../contexts/AvatarAutoCropBatchContext'
 import { useInfiniteActressList } from '../query/useInfiniteActressList'
 import VirtualActressGrid from '../components/VirtualActressGrid'
@@ -249,7 +250,7 @@ export default function ActressesPage(): JSX.Element {
         return
       }
 
-      if (summary.total === 0 && summary.failed > 0) {
+      if (isActressFaceScanFailed(summary)) {
         patchParams({ [LIST_PARAM.avatar]: actressAvatarParam(previousAvatar) })
         toast.show(`人脸识别失败：${summary.failures[0]?.message ?? '无法读取头像'}`, 'error')
         return

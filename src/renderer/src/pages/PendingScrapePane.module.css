@@ -43,12 +43,12 @@
 
 .subjectFile {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .subjectFacts {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .subjectTitle,
@@ -71,10 +71,7 @@
 }
 
 .source {
-  padding: 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-elevated);
+  padding: 0;
 }
 
 .sourceHeader {
@@ -94,7 +91,7 @@
 .sourceIdentity > span,
 .sourceHeader small {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .candidateGrid {
@@ -175,7 +172,7 @@
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr);
   gap: 7px;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .candidateRow > span {
@@ -236,4 +233,9 @@
 
 .directorOption small {
   color: var(--text-muted);
+}
+
+.source + .source {
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
 }

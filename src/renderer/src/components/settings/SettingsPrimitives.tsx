@@ -1,5 +1,5 @@
 import type { AriaAttributes, KeyboardEventHandler, ReactNode, RefObject } from 'react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Minus, Plus } from 'lucide-react'
 import type { SettingsGroup, SettingsTab, SettingsTabItem } from '../../settings/settingsRoutes'
 import { settingsTabDomId, settingsTabPanelDomId } from '../../settings/settingsRoutes'
@@ -246,15 +246,21 @@ export function SettingsNumberStepper({
   onChange: (value: number) => void
 }): JSX.Element {
   const [draft, setDraft] = useState(String(value))
-  const [focused, setFocused] = useState(false)
+  const focused = useRef(false)
+  const errorId = useId()
+  const [invalid, setInvalid] = useState(false)
   const valueRef = useRef(value)
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const holdIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const holdValueRef = useRef(value)
   valueRef.current = value
 
   useEffect(() => {
-    if (!focused) setDraft(String(value))
-  }, [focused, value])
+    if (!focused.current) {
+      setDraft(String(value))
+      setInvalid(false)
+    }
+  }, [value])
 
   useEffect(() => {
     return () => {
@@ -266,6 +272,7 @@ export function SettingsNumberStepper({
   const commit = (next: number): void => {
     const clamped = clampNumber(Math.round(next), min, max)
     setDraft(String(clamped))
+    setInvalid(false)
     if (clamped !== valueRef.current) onChange(clamped)
   }
 
@@ -274,6 +281,7 @@ export function SettingsNumberStepper({
   }
 
   const stopHold = (): void => {
+    const wasHolding = holdTimerRef.current !== null || holdIntervalRef.current !== null
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current)
       holdTimerRef.current = null
@@ -282,14 +290,19 @@ export function SettingsNumberStepper({
       clearInterval(holdIntervalRef.current)
       holdIntervalRef.current = null
     }
+    if (wasHolding) commit(holdValueRef.current)
   }
 
   const startHold = (direction: 1 | -1): void => {
     if (disabled) return
-    nudge(direction)
     stopHold()
+    holdValueRef.current = clampNumber(valueRef.current + direction * step, min, max)
+    setDraft(String(holdValueRef.current))
     holdTimerRef.current = setTimeout(() => {
-      holdIntervalRef.current = setInterval(() => nudge(direction), 60)
+      holdIntervalRef.current = setInterval(() => {
+        holdValueRef.current = clampNumber(holdValueRef.current + direction * step, min, max)
+        setDraft(String(holdValueRef.current))
+      }, 60)
     }, 380)
   }
 
@@ -297,78 +310,104 @@ export function SettingsNumberStepper({
   const atMax = value >= max
 
   return (
-    <div
-      className={`${styles.numberStepper}${disabled ? ` ${styles.numberStepperDisabled}` : ''} settings-number-stepper`}
-      role="group"
-      aria-label={ariaLabel}
-    >
-      <button
-        type="button"
-        className={styles.stepperButton}
-        aria-label="减少"
-        disabled={disabled || atMin}
-        onPointerDown={(e) => {
-          if (e.button !== 0) return
-          e.preventDefault()
-          startHold(-1)
-        }}
-        onPointerUp={stopHold}
-        onPointerCancel={stopHold}
-        onPointerLeave={stopHold}
-      >
-        <Minus {...UI_ICON_SM} aria-hidden />
-      </button>
-      <input
-        className={`${styles.stepperValue} settings-number-stepper__value`}
-        type="text"
-        inputMode="numeric"
-        disabled={disabled}
-        value={draft}
+    <div className={styles.stepperField}>
+      <div
+        className={`${styles.numberStepper}${disabled ? ` ${styles.numberStepperDisabled}` : ''} settings-number-stepper`}
+        role="group"
         aria-label={ariaLabel}
-        onFocus={() => setFocused(true)}
-        onChange={(e) => {
-          const raw = e.target.value.trim()
-          setDraft(raw)
-          if (raw === '' || raw === '-') return
-          const parsed = Number(raw)
-          if (!Number.isFinite(parsed)) return
-          commit(parsed)
-        }}
-        onBlur={() => {
-          setFocused(false)
-          const parsed = Number(draft)
-          commit(Number.isFinite(parsed) ? parsed : value)
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowUp') {
-            e.preventDefault()
-            nudge(1)
-          } else if (e.key === 'ArrowDown') {
-            e.preventDefault()
-            nudge(-1)
-          } else if (e.key === 'Enter') {
-            e.currentTarget.blur()
-          }
-        }}
-      />
-      <button
-        type="button"
-        className={styles.stepperButton}
-        aria-label="增加"
-        disabled={disabled || atMax}
-        onPointerDown={(e) => {
-          if (e.button !== 0) return
-          e.preventDefault()
-          startHold(1)
-        }}
-        onPointerUp={stopHold}
-        onPointerCancel={stopHold}
-        onPointerLeave={stopHold}
       >
-        <Plus {...UI_ICON_SM} aria-hidden />
-      </button>
-      {unit ? (
-        <span className={`${styles.stepperUnit} settings-number-stepper__unit`}>{unit}</span>
+        <button
+          type="button"
+          className={styles.stepperButton}
+          aria-label="减少"
+          disabled={disabled || atMin}
+          onPointerDown={(e) => {
+            if (e.button !== 0) return
+            e.preventDefault()
+            startHold(-1)
+          }}
+          onPointerUp={stopHold}
+          onPointerCancel={stopHold}
+          onPointerLeave={stopHold}
+          onClick={(event) => {
+            if (event.detail === 0) nudge(-1)
+          }}
+        >
+          <Minus {...UI_ICON_SM} aria-hidden />
+        </button>
+        <input
+          className={`${styles.stepperValue} settings-number-stepper__value`}
+          type="text"
+          inputMode="numeric"
+          disabled={disabled}
+          value={draft}
+          aria-label={ariaLabel}
+          aria-invalid={invalid || undefined}
+          aria-describedby={invalid ? errorId : undefined}
+          title={invalid ? `请输入 ${min}–${max} 之间的整数` : undefined}
+          onFocus={() => {
+            focused.current = true
+          }}
+          onChange={(e) => {
+            setDraft(e.target.value)
+            setInvalid(false)
+          }}
+          onBlur={() => {
+            focused.current = false
+            if (!draft.trim()) {
+              setDraft(String(value))
+              return
+            }
+            const parsed = Number(draft)
+            if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+              setInvalid(true)
+              return
+            }
+            commit(parsed)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowUp') {
+              e.preventDefault()
+              nudge(1)
+            } else if (e.key === 'ArrowDown') {
+              e.preventDefault()
+              nudge(-1)
+            } else if (e.key === 'Enter') {
+              e.currentTarget.blur()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              setDraft(String(value))
+              setInvalid(false)
+            }
+          }}
+        />
+        <button
+          type="button"
+          className={styles.stepperButton}
+          aria-label="增加"
+          disabled={disabled || atMax}
+          onPointerDown={(e) => {
+            if (e.button !== 0) return
+            e.preventDefault()
+            startHold(1)
+          }}
+          onPointerUp={stopHold}
+          onPointerCancel={stopHold}
+          onPointerLeave={stopHold}
+          onClick={(event) => {
+            if (event.detail === 0) nudge(1)
+          }}
+        >
+          <Plus {...UI_ICON_SM} aria-hidden />
+        </button>
+        {unit ? (
+          <span className={`${styles.stepperUnit} settings-number-stepper__unit`}>{unit}</span>
+        ) : null}
+      </div>
+      {invalid ? (
+        <span id={errorId} className={styles.stepperError} role="alert">
+          请输入 {min}–{max} 之间的整数
+        </span>
       ) : null}
     </div>
   )

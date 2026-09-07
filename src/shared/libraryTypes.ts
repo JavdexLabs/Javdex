@@ -105,10 +105,31 @@ export type LibraryScanMetricKey =
   | 'pendingScanGroups'
   | 'pendingScanResources'
 
+export type LibraryScanNfoDisposition =
+  | 'imported'
+  | 'skipped'
+  | 'warning'
+  | 'pending-candidate'
+  | 'identity-conflict'
+
+export interface LibraryScanNfoWarning {
+  code: string
+  message: string
+}
+
+export interface LibraryScanNfoAudit {
+  disposition: LibraryScanNfoDisposition
+  warnings?: LibraryScanNfoWarning[]
+  pendingScrapeId?: number
+  pendingIdentityId?: number
+}
+
 interface LibraryScanFileAuditBase {
   rootId: number
   filePath: string
   sourceKind: 'local' | 'strm'
+  /** Secondary NFO outcome; the file keeps exactly one primary scan outcome. */
+  nfo?: LibraryScanNfoAudit
 }
 
 export type LibraryScanFileAuditEntry =
@@ -179,7 +200,7 @@ export interface LibraryScanPendingGroupAuditEntry {
 }
 
 export interface LibraryScanAudit {
-  schemaVersion: 1
+  schemaVersion: 1 | 2
   libraryId: number
   runId: string
   configRevision: number
@@ -288,6 +309,36 @@ export interface PendingScanGroupResolutionResult {
   createdVideoIds: number[]
 }
 
+export interface PendingResourceIdentity {
+  id: number
+  libraryId: number
+  rootId: number
+  sourceKind: 'local' | 'strm'
+  targetKind: import('./videoTypes').ExternalVideoResourceKind | null
+  /** Masked STRM target display; complete target snapshots remain main-process only. */
+  targetDisplay: string | null
+  displayName: string
+  filenameCode: string
+  nfoCode: string
+  revision: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type PendingResourceIdentityChoice = 'filename' | 'nfo' | 'discard'
+
+export interface PendingResourceIdentityResolution {
+  expectedRevision: number
+  choice: PendingResourceIdentityChoice
+}
+
+export interface PendingResourceIdentityResolutionResult {
+  status: 'assigned' | 'pending' | 'discarded'
+  videoId?: number
+  pendingGroupId?: number
+  warnings: string[]
+}
+
 export interface ScanProgress {
   scanned: number
   imported: number
@@ -329,7 +380,7 @@ export type LibraryScanEvent =
       error: string
     }
 
-/** Outcome of renaming an unrecognized file and importing it into an explicit target. */
+/** Outcome of renaming a file and rediscovering it with the library's scan settings. */
 export interface RenameImportResult {
   /** New absolute path after rename. */
   newPath: string
@@ -337,8 +388,10 @@ export interface RenameImportResult {
   newName: string
   /** Whether the renamed file parsed into a code and was imported. */
   imported: boolean
-  /** Normalized user-supplied code used for the explicit import. */
-  code: string
+  /** Code recognized from the renamed file or local NFO. */
+  code: string | null
+  outcome: 'imported' | 'pending' | 'unrecognized' | 'skipped' | 'failed'
+  message?: string
 }
 
 /** Outcome of manual import with a user-supplied code (no format validation). */

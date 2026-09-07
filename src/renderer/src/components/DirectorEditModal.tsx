@@ -1,3 +1,4 @@
+import Checkbox from './Checkbox'
 import { useState } from 'react'
 import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
 import type { DirectorDetail, DirectorUpdateInput } from '@shared/classificationTypes'
@@ -79,8 +80,7 @@ export default function DirectorEditModal({ director, onCancel, onSave }: Props)
             </EditFormField>
             {director && draft.mainName.trim() !== director.mainName ? (
               <label className="check-row entity-edit-field--full">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={draft.keepPreviousMainName}
                   onChange={(e) =>
                     setDraft({

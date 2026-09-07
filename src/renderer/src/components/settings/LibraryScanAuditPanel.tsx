@@ -15,6 +15,7 @@ import SelectControl from '../SelectControl'
 import { SettingsEmptyPanel, SettingsStatusPill } from './SettingsPrimitives'
 import UnrecognizedRow from './UnrecognizedRow'
 import { api } from '../../api'
+import { pendingItemKey, type PendingItemKey } from '../../listView/pendingRoutes'
 import { useToast } from '../Toast'
 import styles from './LibraryScanAuditPanel.module.css'
 import {
@@ -45,6 +46,7 @@ type ViewItem = {
   groupId?: number
   status?: string
   requiresAttention?: boolean
+  pendingTarget?: PendingItemKey
   isUnrecognizedPending?: boolean
 }
 
@@ -55,30 +57,44 @@ function auditItemAnchor(item: ViewItem): string {
 }
 
 function fileDetail(entry: LibraryScanFileAuditEntry): string {
-  switch (entry.outcome) {
-    case 'added':
-      return entry.createdVideo ? '新建影片并添加资源' : '挂载到已有影片'
-    case 'updated':
-      return {
-        relocated: '路径已重定位',
-        metadata_refreshed: '文件信息已刷新',
-        strm_target_synced: 'STRM 目标已同步'
-      }[entry.updateKind]
-    case 'pending':
-      return `${entry.normalizedCode || '番号未知'} · ${
-        entry.sourceKind === 'strm' ? 'STRM' : '本地文件'
-      } · ${entry.addedToQueue ? '已加入待确认队列' : '仍在待确认队列'}`
-    case 'skipped':
-      return { unchanged: '未变化', below_min_duration: '低于最短时长', duplicate: '重复资源' }[
-        entry.skipReason
-      ]
-    case 'unrecognized':
-      return '文件名未识别出番号'
-    case 'strm_failure':
-      return entry.message
-    case 'processing_failure':
-      return entry.message
-  }
+  const primary = (() => {
+    switch (entry.outcome) {
+      case 'added':
+        return entry.createdVideo ? '新建影片并添加资源' : '挂载到已有影片'
+      case 'updated':
+        return {
+          relocated: '路径已重定位',
+          metadata_refreshed: '文件信息已刷新',
+          strm_target_synced: 'STRM 目标已同步'
+        }[entry.updateKind]
+      case 'pending':
+        return `${entry.normalizedCode || '番号未知'} · ${
+          entry.sourceKind === 'strm' ? 'STRM' : '本地文件'
+        } · ${entry.addedToQueue ? '已加入待确认队列' : '仍在待确认队列'}`
+      case 'skipped':
+        return {
+          unchanged: '未变化',
+          below_min_duration: '低于最短时长',
+          duplicate: '重复资源'
+        }[entry.skipReason]
+      case 'unrecognized':
+        return '文件名未识别出番号'
+      case 'strm_failure':
+        return entry.message
+      case 'processing_failure':
+        return entry.message
+    }
+  })()
+  if (!entry.nfo) return primary
+  const nfoLabel = {
+    imported: 'NFO 已导入',
+    skipped: 'NFO 已跳过',
+    warning: 'NFO 警告',
+    'pending-candidate': 'NFO 候选待确认',
+    'identity-conflict': 'NFO 身份冲突'
+  }[entry.nfo.disposition]
+  const warnings = entry.nfo.warnings?.map((warning) => warning.message).join('；')
+  return `${primary} · ${nfoLabel}${warnings ? ` · ${warnings}` : ''}`
 }
 
 function fileView(entry: LibraryScanFileAuditEntry, index: number): ViewItem {
@@ -92,6 +108,35 @@ function fileView(entry: LibraryScanFileAuditEntry, index: number): ViewItem {
     videoId: 'videoId' in entry ? entry.videoId : undefined,
     groupId: entry.outcome === 'pending' ? entry.groupId ?? undefined : undefined
   }
+}
+
+function isAttentionFile(entry: LibraryScanFileAuditEntry): boolean {
+  return (
+    ['unrecognized', 'strm_failure', 'processing_failure'].includes(entry.outcome) ||
+    entry.nfo?.disposition === 'warning' ||
+    entry.nfo?.disposition === 'identity-conflict' ||
+    entry.nfo?.disposition === 'pending-candidate'
+  )
+}
+
+function isCurrentNfoPending(
+  entry: LibraryScanFileAuditEntry,
+  currentPendingIdentityIds: ReadonlySet<number>,
+  currentPendingScrapeIds: ReadonlySet<number>
+): boolean {
+  if (entry.nfo?.disposition === 'identity-conflict') {
+    return (
+      entry.nfo.pendingIdentityId != null &&
+      currentPendingIdentityIds.has(entry.nfo.pendingIdentityId)
+    )
+  }
+  if (entry.nfo?.disposition === 'pending-candidate') {
+    return (
+      entry.nfo.pendingScrapeId != null &&
+      currentPendingScrapeIds.has(entry.nfo.pendingScrapeId)
+    )
+  }
+  return false
 }
 
 function resourceView(entry: LibraryScanResourceAuditEntry, index: number): ViewItem {
@@ -134,6 +179,7 @@ function AuditRowContent({
   style,
   activeTab,
   onOpenAttention,
+  onOpenPending,
   onResolvedUnrecognized
 }: {
   libraryId: number
@@ -141,6 +187,7 @@ function AuditRowContent({
   style?: React.CSSProperties
   activeTab: ScanAuditTab
   onOpenAttention: (item: ViewItem) => void
+  onOpenPending: (target: PendingItemKey) => void
   onResolvedUnrecognized: (path: string) => void
 }): JSX.Element {
   const toast = useToast()
@@ -219,9 +266,13 @@ function AuditRowContent({
               查看影片
             </Button>
           ) : null}
-          {activeTab !== 'all' && item.groupId ? (
-            <Button type="button" size="sm" data-group-id={item.groupId}>
-              处理归属
+          {activeTab !== 'all' && item.pendingTarget ? (
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => onOpenPending(item.pendingTarget!)}
+            >
+              处理待办
             </Button>
           ) : null}
           {item.path ? (
@@ -257,6 +308,7 @@ function AuditRow({
   items: ViewItem[]
   activeTab: ScanAuditTab
   onOpenAttention: (item: ViewItem) => void
+  onOpenPending: (target: PendingItemKey) => void
   onResolvedUnrecognized: (path: string) => void
 }>): JSX.Element {
   return (
@@ -266,6 +318,7 @@ function AuditRow({
       style={style}
       activeTab={data.activeTab}
       onOpenAttention={data.onOpenAttention}
+      onOpenPending={data.onOpenPending}
       onResolvedUnrecognized={data.onResolvedUnrecognized}
     />
   )
@@ -277,6 +330,8 @@ export default function LibraryScanAuditPanel({
   selected,
   unrecognized,
   currentPendingGroupIds,
+  currentPendingIdentityIds,
+  currentPendingScrapeIds,
   onSelect,
   onResolvedUnrecognized,
   onOpenVideo,
@@ -287,10 +342,12 @@ export default function LibraryScanAuditPanel({
   selected: LibraryScanMetricKey | null
   unrecognized: LibraryScanLatestSnapshot['unrecognized']
   currentPendingGroupIds: Set<number>
+  currentPendingIdentityIds: Set<number>
+  currentPendingScrapeIds: Set<number>
   onSelect: (key: LibraryScanMetricKey | null) => void
   onResolvedUnrecognized: (path: string) => void
   onOpenVideo: (videoId: number) => void
-  onOpenPending: (groupId?: number) => void
+  onOpenPending: (target: PendingItemKey) => void
 }): JSX.Element {
   const [activeTab, setActiveTab] = useState<ScanAuditTab>('failed')
   const [search, setSearch] = useState('')
@@ -326,7 +383,9 @@ export default function LibraryScanAuditPanel({
   ).length
 
   const totalFailed =
-    summary.failedFiles + summary.pendingScanGroups + extraCachedUnrecognizedCount
+    (matchedAudit?.files.filter(isAttentionFile).length ?? 0) +
+    (matchedAudit?.pendingGroups.length ?? 0) +
+    extraCachedUnrecognizedCount
   const totalAddedUpdated = summary.resourcesAdded + summary.resourcesUpdated
   const totalChanges =
     summary.resourcesRemoved + summary.primaryResourcesPromoted + summary.videosDeleted
@@ -362,9 +421,7 @@ export default function LibraryScanAuditPanel({
   const items = useMemo((): ViewItem[] => {
     if (activeTab === 'failed') {
       const failedFileEntries =
-        matchedAudit?.files.filter((entry) =>
-          ['unrecognized', 'strm_failure', 'processing_failure'].includes(entry.outcome)
-        ) ?? []
+        matchedAudit?.files.filter(isAttentionFile) ?? []
       const fileItems: ViewItem[] = failedFileEntries.map((entry, index) => {
         const item = fileView(entry, index)
         if (entry.outcome === 'unrecognized') {
@@ -372,6 +429,24 @@ export default function LibraryScanAuditPanel({
           item.isUnrecognizedPending = isPending
           item.status = isPending ? '待处理' : '已处理'
           item.requiresAttention = isPending
+        }
+        if (
+          entry.nfo?.disposition === 'identity-conflict' ||
+          entry.nfo?.disposition === 'pending-candidate'
+        ) {
+          const pending = isCurrentNfoPending(
+            entry,
+            currentPendingIdentityIds,
+            currentPendingScrapeIds
+          )
+          item.status = pending ? '待处理' : '已处理'
+          item.requiresAttention = pending
+          if (pending) {
+            item.pendingTarget =
+              entry.nfo.disposition === 'identity-conflict'
+                ? pendingItemKey('scan', `identity-${entry.nfo.pendingIdentityId}`)
+                : pendingItemKey('scrape', entry.nfo.pendingScrapeId!)
+          }
         }
         return item
       })
@@ -381,6 +456,9 @@ export default function LibraryScanAuditPanel({
         title: `待确认归属 · ${entry.normalizedCode}`,
         detail: `${entry.resourceCount} 个扫描资源`,
         groupId: currentPendingGroupIds.has(entry.groupId) ? entry.groupId : undefined,
+        pendingTarget: currentPendingGroupIds.has(entry.groupId)
+          ? pendingItemKey('scan', entry.groupId)
+          : undefined,
         status: currentPendingGroupIds.has(entry.groupId) ? '待处理' : '已处理',
         requiresAttention: currentPendingGroupIds.has(entry.groupId)
       }))
@@ -449,10 +527,30 @@ export default function LibraryScanAuditPanel({
     }
     return allFiles.map((entry, index) => {
       const item = fileView(entry, index)
-      if (entry.outcome === 'pending') {
-        const pending = entry.groupId != null && currentPendingGroupIds.has(entry.groupId)
+      if (
+        entry.nfo?.disposition === 'identity-conflict' ||
+        entry.nfo?.disposition === 'pending-candidate'
+      ) {
+        const pending = isCurrentNfoPending(
+          entry,
+          currentPendingIdentityIds,
+          currentPendingScrapeIds
+        )
         item.status = pending ? '待处理' : '已处理'
         item.requiresAttention = pending
+        if (pending) {
+          item.pendingTarget =
+            entry.nfo.disposition === 'identity-conflict'
+              ? pendingItemKey('scan', `identity-${entry.nfo.pendingIdentityId}`)
+              : pendingItemKey('scrape', entry.nfo.pendingScrapeId!)
+        }
+        if (!pending) item.groupId = undefined
+      } else if (entry.outcome === 'pending') {
+        const pending =
+          entry.groupId != null && currentPendingGroupIds.has(entry.groupId)
+        item.status = pending ? '待处理' : '已处理'
+        item.requiresAttention = pending
+        if (pending) item.pendingTarget = pendingItemKey('scan', entry.groupId!)
         if (!pending) item.groupId = undefined
       } else if (entry.outcome === 'unrecognized') {
         const pending = cachedUnrecognizedPaths.has(entry.filePath)
@@ -466,6 +564,8 @@ export default function LibraryScanAuditPanel({
     cachedUnrecognizedPaths,
     changesFilter,
     currentPendingGroupIds,
+    currentPendingIdentityIds,
+    currentPendingScrapeIds,
     matchedAudit,
     outcome,
     unrecognized
@@ -661,13 +761,11 @@ export default function LibraryScanAuditPanel({
                 className={styles.list}
                 onClick={(event) => {
                   const target = (event.target as HTMLElement).closest<HTMLElement>(
-                    '[data-video-id], [data-group-id]'
+                    '[data-video-id]'
                   )
                   if (!target) return
                   const videoId = Number(target.dataset.videoId)
-                  const groupId = Number(target.dataset.groupId)
                   if (Number.isInteger(videoId) && videoId > 0) onOpenVideo(videoId)
-                  else if (Number.isInteger(groupId) && groupId > 0) onOpenPending(groupId)
                 }}
               >
                 {shouldVirtualize ? (
@@ -683,6 +781,7 @@ export default function LibraryScanAuditPanel({
                       items: filtered,
                       activeTab,
                       onOpenAttention: handleOpenAttention,
+                      onOpenPending,
                       onResolvedUnrecognized
                     }}
                   >
@@ -696,6 +795,7 @@ export default function LibraryScanAuditPanel({
                       item={item}
                       activeTab={activeTab}
                       onOpenAttention={handleOpenAttention}
+                      onOpenPending={onOpenPending}
                       onResolvedUnrecognized={onResolvedUnrecognized}
                     />
                   ))

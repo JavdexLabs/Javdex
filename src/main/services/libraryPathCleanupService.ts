@@ -170,6 +170,13 @@ function rootRemovalImpactRevision(scope: LibraryRootScope): string {
       .all(parameters),
     database
       .prepare(
+        `SELECT * FROM pending_resource_identities
+          WHERE library_id = @libraryId AND root_id = @rootId
+          ORDER BY id`
+      )
+      .all(parameters),
+    database
+      .prepare(
         `SELECT pending_group.*
            FROM pending_scan_groups pending_group
           WHERE pending_group.library_id = @libraryId
@@ -571,7 +578,10 @@ export function previewLibraryPathRemoval(scope: LibraryRootScope): LibraryPathR
     .prepare(
       `SELECT
          (SELECT COUNT(*) FROM pending_scan_resources
-           WHERE library_id = @libraryId AND root_id = @rootId) AS pending_scan_resource_count,
+           WHERE library_id = @libraryId AND root_id = @rootId) +
+         (SELECT COUNT(*) FROM pending_resource_identities
+           WHERE library_id = @libraryId AND root_id = @rootId)
+           AS pending_scan_resource_count,
          (SELECT COUNT(*) FROM library_unrecognized_files
            WHERE library_id = @libraryId AND root_id = @rootId) AS unrecognized_file_count,
          (SELECT COUNT(*) FROM library_root_cleanup_jobs
@@ -727,6 +737,9 @@ function applyPendingLibraryPathCleanupsInTransaction(
   for (const job of jobs) {
     database
       .prepare('DELETE FROM pending_scan_resources WHERE library_id = ? AND root_id = ?')
+      .run(job.library_id, job.root_id)
+    database
+      .prepare('DELETE FROM pending_resource_identities WHERE library_id = ? AND root_id = ?')
       .run(job.library_id, job.root_id)
     database
       .prepare('DELETE FROM library_unrecognized_files WHERE library_id = ? AND root_id = ?')

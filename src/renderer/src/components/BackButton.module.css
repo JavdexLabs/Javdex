@@ -64,6 +64,7 @@
 }
 
 .inline {
+  height: var(--toolbar-control-h, var(--control-h-sm));
   flex-shrink: 0;
   margin-bottom: 0;
 }

@@ -3,13 +3,19 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { upsertActressFromScrape } from '../db/actressRepo'
+import {
+  findActressByNameOrAlias,
+  getActressDetail,
+  upsertActressFromScrape
+} from '../db/actressRepo'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { insertTestVideoWithFile } from '../db/testVideoFixtures'
+import { createMediaLibrary } from '../db/mediaLibraryRepo'
 import { getPendingVideoScrapeForVideo } from '../db/pendingVideoScrapeRepo'
 import { classificationMaintenanceService } from '../services/classificationMaintenanceService'
 import { resetAssetKeyCacheForTests } from '../services/assetCrypto'
-import { resetSettingsCacheForTests } from '../settings/settingsStore'
+import { resetSettingsCacheForTests, updateSettings } from '../settings/settingsStore'
+import { LOCAL_NFO_SOURCE_NAME } from '@shared/videoMetadataSourceConstants'
 import {
   cleanupOrphanedVideoScrapeStaging,
   videoPendingScrapeService
@@ -59,6 +65,187 @@ afterEach(() => {
 })
 
 describe('scraperManager.scrapeVideo', () => {
+  it('uses the built-in local NFO source for manual, composite, and default runs without network fallback', async () => {
+    assert.ok(tempRoot)
+    const mediaDirectory = path.join(tempRoot, 'nfo-media')
+    fs.mkdirSync(mediaDirectory)
+    const library = createMediaLibrary({
+      name: 'Local NFO',
+      roots: [{ path: mediaDirectory }]
+    })
+    const videoPath = path.join(mediaDirectory, 'LOCAL-001.mp4')
+    fs.writeFileSync(videoPath, 'video')
+    fs.writeFileSync(
+      path.join(mediaDirectory, 'LOCAL-001.nfo'),
+      '<movie><num>LOCAL-001</num><title>Local title</title></movie>'
+    )
+    fs.writeFileSync(path.join(mediaDirectory, 'LOCAL-001-poster.jpg'), MINIMAL_JPEG)
+    const { videoId } = insertTestVideoWithFile(getDb(), {
+      code: 'LOCAL-001',
+      filePath: videoPath,
+      libraryId: library.id,
+      rootId: library.roots[0].id,
+      scrapedStatus: 0
+    })
+
+    const manual = await scrapeVideo(videoId, LOCAL_NFO_SOURCE_NAME, {
+      fields: ['title', 'cover'],
+      mode: 'replace',
+      closeBrowser: false
+    })
+    assert.equal(manual.ok, true)
+    assert.equal(manual.skipped, false)
+    const afterManual = getDb()
+      .prepare('SELECT title, cover_path, scraped_status FROM videos WHERE id = ?')
+      .get(videoId) as { title: string; cover_path: string; scraped_status: number }
+    assert.equal(afterManual.title, 'Local title')
+    assert.equal(afterManual.scraped_status, 1)
+    assert.ok(afterManual.cover_path)
+    assert.equal(fs.existsSync(path.join(tempRoot, 'media_assets', afterManual.cover_path)), true)
+
+    createCompositeScraper('video', {
+      name: 'Local NFO composite',
+      fieldPluginMap: { title: LOCAL_NFO_SOURCE_NAME }
+    })
+    getDb().prepare('UPDATE videos SET title = NULL, scraped_status = 0 WHERE id = ?').run(videoId)
+    const composite = await scrapeVideo(videoId, 'Local NFO composite', {
+      fields: ['title'],
+      mode: 'fillEmpty',
+      closeBrowser: false
+    })
+    assert.equal(composite.ok, true)
+    assert.equal(
+      (getDb().prepare('SELECT title FROM videos WHERE id = ?').get(videoId) as { title: string })
+        .title,
+      'Local title'
+    )
+
+    updateSettings({ defaultScraper: LOCAL_NFO_SOURCE_NAME })
+    getDb().prepare('UPDATE videos SET title = NULL, scraped_status = 0 WHERE id = ?').run(videoId)
+    const defaultRun = await scrapeVideo(videoId, undefined, {
+      fields: ['title'],
+      mode: 'fillEmpty',
+      closeBrowser: false
+    })
+    assert.equal(defaultRun.ok, true)
+    assert.equal(defaultRun.result?.title, 'Local title')
+  })
+
+  it('treats a missing local NFO as a normal no-match without marking scrape failure', async () => {
+    const outcome = await scrapeVideo(1, LOCAL_NFO_SOURCE_NAME, {
+      fields: ['title'],
+      mode: 'replace',
+      closeBrowser: false
+    })
+
+    assert.deepEqual(outcome, { ok: true, skipped: true, warnings: [] })
+    assert.deepEqual(
+      getDb().prepare('SELECT scraped_status, last_scraped_at FROM videos WHERE id = 1').get(),
+      { scraped_status: 0, last_scraped_at: null }
+    )
+  })
+
+  it('uses only the effective composite field sources to classify a quiet local NFO no-match', async () => {
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'video',
+      name: 'Unused Web Source',
+      version: '1.0.0',
+      description: 'Must not run when its field was not requested',
+      supportedFields: ['summary'],
+      code: `module.exports = { async parseVideo() { throw new Error('unexpected web call') } };`
+    })
+    createCompositeScraper('video', {
+      name: 'Effective local-only composite',
+      fieldPluginMap: {
+        title: LOCAL_NFO_SOURCE_NAME,
+        summary: 'Unused Web Source'
+      }
+    })
+
+    const outcome = await scrapeVideo(1, 'Effective local-only composite', {
+      fields: ['title'],
+      mode: 'replace',
+      closeBrowser: false
+    })
+
+    assert.deepEqual(outcome, { ok: true, skipped: true, warnings: [] })
+    assert.deepEqual(
+      getDb().prepare('SELECT scraped_status, last_scraped_at FROM videos WHERE id = 1').get(),
+      { scraped_status: 0, last_scraped_at: null }
+    )
+  })
+
+  it('delivers actress avatars to the merged cast positions across local and web composite sources', async () => {
+    assert.ok(tempRoot)
+    const mediaDirectory = path.join(tempRoot, 'composite-cast-media')
+    fs.mkdirSync(mediaDirectory)
+    const library = createMediaLibrary({
+      name: 'Composite cast',
+      roots: [{ path: mediaDirectory }]
+    })
+    const videoPath = path.join(mediaDirectory, 'CAST-001.mp4')
+    fs.writeFileSync(videoPath, 'video')
+    fs.writeFileSync(
+      path.join(mediaDirectory, 'CAST-001.nfo'),
+      `<movie><num>CAST-001</num><actor><name>Local Actress</name><gender>female</gender>
+       <thumb>.actors/Local Actress.jpg</thumb></actor></movie>`
+    )
+    fs.mkdirSync(path.join(mediaDirectory, '.actors'))
+    fs.writeFileSync(path.join(mediaDirectory, '.actors', 'Local Actress.jpg'), MINIMAL_JPEG)
+    const { videoId } = insertTestVideoWithFile(getDb(), {
+      code: 'CAST-001',
+      filePath: videoPath,
+      libraryId: library.id,
+      rootId: library.roots[0].id,
+      scrapedStatus: 0
+    })
+    await installScraperPluginPackage({
+      schemaVersion: 1,
+      kind: 'video',
+      name: 'Male Cast Source',
+      version: '1.0.0',
+      supportedFields: ['actressesMale'],
+      code: `module.exports = { async parseVideo(ctx) { return {
+        code: ctx.code,
+        actresses: [{ name: 'Web Actor', gender: 'male', avatarUrl: 'https://avatar.example/male.jpg' }]
+      }; } };`
+    })
+    createCompositeScraper('video', {
+      name: 'Local and web cast composite',
+      fieldPluginMap: {
+        actressesFemale: LOCAL_NFO_SOURCE_NAME,
+        actressesMale: 'Male Cast Source'
+      }
+    })
+    const originalFetchBuffer = scrapeBrowser.fetchBuffer
+    scrapeBrowser.fetchBuffer = async () => MINIMAL_JPEG
+
+    try {
+      const outcome = await scrapeVideo(videoId, 'Local and web cast composite', {
+        fields: ['actressesFemale', 'actressesMale'],
+        mode: 'replace',
+        closeBrowser: false
+      })
+
+      assert.equal(outcome.ok, true)
+      const localActressId = findActressByNameOrAlias('Local Actress')
+      const webActorId = findActressByNameOrAlias('Web Actor')
+      assert.ok(localActressId)
+      assert.ok(webActorId)
+      assert.equal(getActressDetail(localActressId)?.gender, 'female')
+      assert.equal(getActressDetail(webActorId)?.gender, 'male')
+      assert.ok(getActressDetail(localActressId)?.avatar_path)
+      assert.ok(getActressDetail(webActorId)?.avatar_path)
+      assert.notEqual(
+        getActressDetail(localActressId)?.avatar_path,
+        getActressDetail(webActorId)?.avatar_path
+      )
+    } finally {
+      scrapeBrowser.fetchBuffer = originalFetchBuffer
+    }
+  })
+
   it('persists exact multi-candidate results without selecting or applying one by default', async () => {
     await installScraperPluginPackage({
       schemaVersion: 1,

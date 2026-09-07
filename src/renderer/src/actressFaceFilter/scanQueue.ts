@@ -45,6 +45,10 @@ export type ActressFaceDetector = (
   target: ActressFaceScanTarget
 ) => Promise<ActressFaceScanStatus>
 
+export function isActressFaceScanFailed(summary: ActressFaceScanSummary): boolean {
+  return !summary.cancelled && summary.failed > 0 && summary.hasFace + summary.withoutFace === 0
+}
+
 export async function scanActressFaceTargets(
   targets: ActressFaceScanTarget[],
   cache: ActressFaceScanCache,

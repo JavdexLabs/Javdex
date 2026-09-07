@@ -1,0 +1,107 @@
+# Javdex 开发指南
+
+[返回产品介绍](../README.md) · [使用指南](USER_GUIDE.md) · [版本与发布](VERSIONING_AND_RELEASE.md)
+
+本文面向从源码运行、修改或打包 Javdex 的开发者。安装和日常操作见使用指南。
+
+## 环境与本地启动
+
+使用 Node.js 22、npm，以及 Windows、macOS 或 Linux。CI 使用 Node.js 22；依赖版本以仓库锁文件为准。
+
+```bash
+git clone https://github.com/JavdexLabs/Javdex.git
+cd Javdex
+npm ci
+npm run dev
+```
+
+`npm ci` 安装锁定版本，并通过 `electron-rebuild` 为 Electron 重新编译 `better-sqlite3` 原生模块。如原生模块构建失败，按安装日志补齐当前系统的编译环境后重试。
+
+开发启动使用应用的用户数据目录，测试隔离机制见 [appIdentity.ts](../src/shared/appIdentity.ts) 与相关测试。调试数据库、扫描或删除行为前，使用测试资料与独立测试目录。
+
+## 检查与构建
+
+```bash
+npm run typecheck       # 主进程与渲染端类型检查
+npm run lint            # TypeScript 与 CSS 检查
+npm run check:encoding  # 检查可疑编码字符
+npm test                # 完整检查与测试
+npm run build           # 生产构建与运行时资源校验
+npm start               # 预览生产构建
+```
+
+`npm test` 会先运行架构边界、lint、CSS 架构和 UI 控件检查，再执行类型检查、打包运行时测试及 Electron 测试。测试具体入口见 [package.json](../package.json)。
+
+需要运行特定 Electron 测试文件时：
+
+```bash
+node scripts/run-electron-tests.mjs src/main/nfo/nfoArtifactCodec.test.ts
+```
+
+`npm run build` 生成 `out/`，并校验人脸检测资源与 Pi 运行时。生产构建通过不等于各平台安装包已完成验证。
+
+## 打包与发布
+
+```bash
+npm run packaging:list       # 查看启用目标和构建平台
+npm run packaging:configure  # 交互选择目标
+npm run dist                 # 构建配置中全部启用的目标
+npm run dist:win             # Windows 目标
+npm run dist:mac             # macOS 目标
+npm run dist:linux           # Linux 目标
+```
+
+目标开关和架构位于 [packaging.targets.json](../build/packaging.targets.json)，基础构建配置位于 [electron-builder.config.mjs](../electron-builder.config.mjs)。本地通常选择对应平台命令；不带平台参数的 `npm run dist` 会尝试全部启用目标，不会自动筛选当前操作系统。请在目标要求的平台构建，指定 `dist:mac` 等命令不会提供跨平台编译环境。安装包输出到 `dist/`。
+
+版本号、标签、数据库升级说明、Release 工作流和发布验证统一遵循 [版本与发布规范](VERSIONING_AND_RELEASE.md)。
+
+## 官网开发
+
+官网源码位于 `website/`，图片使用 `docs/images/` 中的资源。
+
+```bash
+npm run pages:build          # 读取最新正式 Release，生成下载信息
+npm run pages:preview        # 构建并本地预览
+npm run pages:build:offline  # 离线构建，用于本地检查页面
+```
+
+生成目录为 `dist-pages/`。离线构建不代表线上最新下载信息已经验证。
+
+自动部署条件见 [Pages 工作流](../.github/workflows/pages.yml)：包括 `main` 上指定官网相关路径的变更、正式 Release 发布及成功结束的 Release 工作流。部署使用默认分支内容。
+
+README 介绍产品与首次使用，官网承接展示和下载；两者复用图片时，应说明演示数据与截图版本，避免将旧截图标成当前界面。
+
+## 代码结构与实现边界
+
+Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要目录如下：
+
+| 目录 | 职责 |
+|---|---|
+| `src/main` | 数据库、扫描、刮削、图片资产、AI 工作流与应用生命周期 |
+| `src/preload` | 通过 `contextBridge` 暴露受控 IPC API |
+| `src/renderer` | React 页面、组件、交互与查询状态 |
+| `src/shared` | 跨进程类型和 IPC 通道 |
+| `src/mcp` | 插件开发 MCP 服务 |
+
+渲染进程不直接访问 Node.js、数据库或文件系统，相关操作通过主进程处理。图片通过应用的 `media://` 协议读取，主进程负责资产路径解析和解密。
+
+插件在 Worker 沙箱中执行，通过受控 `ctx` API 访问宿主能力。内置插件开发助手支持页面探测、生成代码、试运行与验证，也可通过可选 MCP 服务接入外部工具。插件产物规范与助手实现分别查阅下表中的文档。
+
+## 按任务查阅文档
+
+先阅读根目录 [AGENTS.md](../AGENTS.md) 的仓库约定，再按实际改动选择文档，无需通读全部设计与研究资料。
+
+| 工作区域 | 文档 |
+|---|---|
+| 领域术语与数据归属 | [领域上下文](../CONTEXT.md)、[多媒体库设计](MULTI_LIBRARY_DESIGN.md) |
+| UI、样式和交互 | [UI 设计规范](UI_DESIGN_GUIDELINES.md)、[组件契约](UI_COMPONENT_CONTRACTS.md) |
+| 路由、筛选、返回栈 | [路由设计](ROUTING_DESIGN.md) |
+| 刮削插件与沙箱 API | [刮削插件规范](SCRAPER_PLUGIN_FORMAT.md) |
+| 插件开发助手与 MCP | [插件开发 Agent](PLUGIN_DEV_AGENT.md) |
+| NFO 导出格式与验证范围 | [NFO 兼容性](NFO_COMPATIBILITY.md) |
+| 数据库结构与迁移 | [schema.ts](../src/main/db/schema.ts)、[migrations.ts](../src/main/db/migrations.ts) |
+| Issue、PRD 与分类标签 | [Issue 约定](agents/issue-tracker.md)、[标签约定](agents/triage-labels.md) |
+| 版本与发布 | [发布规范](VERSIONING_AND_RELEASE.md)、[更新日志](../CHANGELOG.md) |
+| 第三方集成与许可 | [第三方说明](THIRD_PARTY_NOTICES.md)、[MIT License](../LICENSE) |
+
+提交改动时说明解决的问题、最终行为和验证结果。用户可见的功能与入口变化应同步更新使用指南；README 保持产品概览，版本细节记录在更新日志，实现约束留在对应设计文档。

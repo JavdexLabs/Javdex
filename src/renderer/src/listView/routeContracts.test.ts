@@ -782,7 +782,6 @@ describe('settings route contract', () => {
         id: 'network',
         label: '网络',
         hint: '代理连接',
-        description: '刮削与 LLM 请求的 HTTP/HTTPS 代理设置。',
         defaultTab: 'proxy',
         tabs: [{ id: 'proxy', label: '代理' }]
       },

@@ -35,6 +35,16 @@ export const IPC = {
   SETTINGS_PROXY_TEST: 'settings:proxyTest',
   SETTINGS_OVERVIEW_STATS: 'settings:overviewStats',
 
+  // One-shot foreground NFO export
+  NFO_EXPORT_GET_OPTIONS: 'nfoExport:getOptions',
+  NFO_EXPORT_UPDATE_PREFERENCES: 'nfoExport:updatePreferences',
+  NFO_EXPORT_PLAN: 'nfoExport:plan',
+  NFO_EXPORT_DISCARD_PLAN: 'nfoExport:discardPlan',
+  NFO_EXPORT_START: 'nfoExport:start',
+  NFO_EXPORT_TERMINATE: 'nfoExport:terminate',
+  NFO_EXPORT_PROGRESS: 'nfoExport:progress',
+  NFO_EXPORT_STATE: 'nfoExport:state',
+
   // External links
   EXTERNAL_LINK_OPEN: 'externalLink:open',
 
@@ -58,6 +68,8 @@ export const IPC = {
   FILE_IMPORT_MANUAL: 'file:importManual',
   PENDING_SCAN_LIST: 'pendingScan:list',
   PENDING_SCAN_RESOLVE: 'pendingScan:resolve',
+  PENDING_RESOURCE_IDENTITY_LIST: 'pendingResourceIdentity:list',
+  PENDING_RESOURCE_IDENTITY_RESOLVE: 'pendingResourceIdentity:resolve',
 
   // Videos
   VIDEO_LIST: 'video:list',

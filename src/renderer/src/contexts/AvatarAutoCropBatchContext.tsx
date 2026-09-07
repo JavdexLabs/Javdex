@@ -14,7 +14,7 @@ import type { ActressAvatarAutoCropOutcome, ActressAvatarAutoCropRequest, Actres
 import type { ActressListItem } from '@shared/actressTypes'
 import type { BatchLogEntry } from '@shared/batchScrapeTypes'
 import { api, assetUrl } from '../api'
-import { createAvatarAnalysisBitmap } from '../avatarAutoCrop/image'
+import { createAvatarAnalysisBitmap, loadAvatarAnalysisImage } from '../avatarAutoCrop/image'
 import { notifyAvatarAutoCropSaved } from '../avatarAutoCrop/events'
 import { analyzeAvatarBitmap } from '../avatarAutoCrop/service'
 import { useToast } from '../components/Toast'
@@ -82,17 +82,6 @@ function avatarTargets(items: ActressListItem[]): ActressAvatarAutoCropTarget[] 
     .map((item) => ({ actressId: item.id, mainName: item.main_name }))
 }
 
-function loadImage(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image()
-    image.onload = () => {
-      if (image.naturalWidth > 0 && image.naturalHeight > 0) resolve(image)
-      else reject(new Error('头像原图尺寸无效'))
-    }
-    image.onerror = () => reject(new Error('无法读取头像原图'))
-    image.src = url
-  })
-}
 
 async function smartCropAvatar(
   target: ActressAvatarAutoCropTarget,
@@ -102,7 +91,7 @@ async function smartCropAvatar(
   const sourceUrl = assetUrl(sourceInfo?.assetPath)
   if (!sourceInfo || !sourceUrl) return 'skipped'
 
-  const image = await loadImage(sourceUrl)
+  const image = await loadAvatarAnalysisImage(sourceUrl)
   const bitmap = await createAvatarAnalysisBitmap(image)
   const analysis = await analyzeAvatarBitmap(
     bitmap,

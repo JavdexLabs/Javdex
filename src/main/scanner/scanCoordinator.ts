@@ -42,6 +42,7 @@ import {
   type LibraryUnrecognizedFileInput
 } from '../db/libraryScanRepo'
 import { listPendingScanGroups, reconcilePendingScanResources } from '../db/pendingScanRepo'
+import { reconcilePendingResourceIdentities } from '../db/pendingResourceIdentityRepo'
 import { maintenanceTaskGate, type MaintenanceTaskGate } from '../services/maintenanceTaskGate'
 import {
   authorizeMediaLibraryRoot,
@@ -106,6 +107,7 @@ export interface ScanCoordinatorDependencies {
   setPrimaryResource: (libraryId: number, videoId: number, resourceId: number) => void
   inspectPath: (filePath: string) => LocalPathState
   reconcilePendingScanResources: typeof reconcilePendingScanResources
+  reconcilePendingResourceIdentities: typeof reconcilePendingResourceIdentities
   recoverPendingPathCleanups: (libraryId: number) => RecoverLegacyLibraryPathCleanupResult
   listPendingPathCleanups: (libraryId: number) => PendingLibraryPathCleanup[]
   applyPendingPathCleanups: (
@@ -298,6 +300,7 @@ export class ScanCoordinator {
             snapshot.config.minImportDurationMinutes
           ),
           autoMergeSameCodeResources: snapshot.config.autoMergeSameCodeResources,
+          autoImportLocalNfo: snapshot.config.autoImportLocalNfo,
           onFileResult: (entry) => auditState.files.push(entry)
         }
       )
@@ -381,6 +384,11 @@ export class ScanCoordinator {
           return state
         }
         this.dependencies.reconcilePendingScanResources(
+          request.libraryId,
+          [...safeRootIds],
+          inspectAuthorizedPendingPath
+        )
+        this.dependencies.reconcilePendingResourceIdentities(
           request.libraryId,
           [...safeRootIds],
           inspectAuthorizedPendingPath
@@ -619,7 +627,7 @@ export class ScanCoordinator {
       errorSummary
     }
     const audit: LibraryScanAudit = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       libraryId: snapshot.libraryId,
       runId,
       configRevision: snapshot.configRevision,
@@ -757,6 +765,8 @@ export function createScanCoordinator(
     inspectPath: dependencies.inspectPath ?? inspectLocalPath,
     reconcilePendingScanResources:
       dependencies.reconcilePendingScanResources ?? reconcilePendingScanResources,
+    reconcilePendingResourceIdentities:
+      dependencies.reconcilePendingResourceIdentities ?? reconcilePendingResourceIdentities,
     recoverPendingPathCleanups:
       dependencies.recoverPendingPathCleanups ?? recoverLegacyLibraryPathCleanups,
     listPendingPathCleanups:

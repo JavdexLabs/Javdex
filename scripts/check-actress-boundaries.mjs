@@ -57,6 +57,7 @@ const contractFiles = [
   'src/shared/videoIpcContract.ts',
   'src/shared/scrapeIpcContract.ts',
   'src/shared/mediaLibraryIpcContract.ts',
+  'src/shared/nfoExportIpcContract.ts',
   'src/shared/appIpcContract.ts'
 ]
 const contractSources = contractFiles.map((file) => readFileSync(file, 'utf8'))

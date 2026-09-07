@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { ActressScrapeResult, ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS, expandActressScrapeFields, ScraperPluginDescriptor, ScraperPluginKind, ScraperPluginPackage, type ActressScrapeField, type CompositeScraperInput, type ScraperPluginDelay, type ScraperPluginUpdateInput, type VideoScrapeField, type ScraperPluginPackageExport, type ScraperPluginPackageImport } from '@shared/scrapeTypes'
 import type { VideoPluginScrapeResult } from '@shared/videoScrapeTypes'
 import type { ScraperServiceId } from '@shared/scraperServiceTypes'
+import { LOCAL_NFO_SOURCE_NAME } from '@shared/videoMetadataSourceConstants'
 import type { BaseScraper } from './BaseScraper'
 import type { BaseActressScraper } from './BaseActressScraper'
 import {
@@ -600,7 +601,8 @@ function toBundledDescriptor(manifest: StoredPluginManifest): ScraperPluginDescr
     removable: false,
     exportable: !requiresConfiguration,
     editable: !requiresConfiguration,
-    debuggable: !requiresConfiguration,
+    // Gfriends is an avatar index integration, not a website scraper for the development assistant.
+    debuggable: !requiresConfiguration && !(manifest.kind === 'actress' && manifest.name === 'Gfriends'),
     requiresConfiguration,
     configured,
     configurationLabel,
@@ -667,6 +669,7 @@ function normalizePackage(pkg: ScraperPluginPackageImport): ScraperPluginPackage
 
 function isReservedBuiltInPluginName(kind: ScraperPluginKind, name: string): boolean {
   return (
+    (kind === 'video' && name === LOCAL_NFO_SOURCE_NAME) ||
     isBuiltInScraperName(kind, name) ||
     RETIRED_PLUGIN_NAMES[kind]?.includes(name) === true ||
     Boolean(findBundledPluginRecord(kind, name))
@@ -724,10 +727,18 @@ function compositeDescriptor(definition: {
   const standalone = standalonePluginDescriptors(definition.kind)
   const unavailable = Array.from(new Set(Object.values(definition.fieldPluginMap)))
     .filter((name): name is string => Boolean(name))
-    .find((name) => standalone.find((plugin) => plugin.name === name)?.configured === false)
+    .find((name) =>
+      definition.kind === 'video' && name === LOCAL_NFO_SOURCE_NAME
+        ? false
+        : standalone.find((plugin) => plugin.name === name)?.configured === false
+    )
   const missing = Array.from(new Set(Object.values(definition.fieldPluginMap)))
     .filter((name): name is string => Boolean(name))
-    .find((name) => !standalone.some((plugin) => plugin.name === name))
+    .find(
+      (name) =>
+        !(definition.kind === 'video' && name === LOCAL_NFO_SOURCE_NAME) &&
+        !standalone.some((plugin) => plugin.name === name)
+    )
   const configured = !unavailable && !missing
   return {
     kind: definition.kind,
@@ -763,6 +774,7 @@ function assertCompositeSourcesRunnable(
   const standalone = standalonePluginDescriptors(kind)
   for (const pluginName of new Set(Object.values(fieldPluginMap))) {
     if (!pluginName) continue
+    if (kind === 'video' && pluginName === LOCAL_NFO_SOURCE_NAME) continue
     const descriptor = standalone.find((plugin) => plugin.name === pluginName)
     if (!descriptor) throw new Error(`组合字段源「${pluginName}」不存在`)
     if (descriptor.configured === false) {
@@ -787,6 +799,7 @@ export function listMergedPluginDescriptors(kind: ScraperPluginKind): ScraperPlu
 }
 
 export function isScraperPluginRunnable(kind: ScraperPluginKind, name: string): boolean {
+  if (kind === 'video' && name === LOCAL_NFO_SOURCE_NAME) return true
   const descriptor = listMergedPluginDescriptors(kind).find((plugin) => plugin.name === name)
   return Boolean(descriptor && descriptor.configured !== false)
 }

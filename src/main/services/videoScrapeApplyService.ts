@@ -10,6 +10,10 @@ import type {
   VideoScrapeField,
   VideoScrapeUpdateMode
 } from '@shared/videoScrapeTypes'
+import type {
+  VideoMetadataCandidate,
+  VideoMetadataCandidateStager
+} from '../metadata-sources'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import { findActressByNameOrAlias, upsertActressFromScrape } from '../db/actressRepo'
 import { getDb } from '../db/database'
@@ -1030,14 +1034,14 @@ export const videoScrapeApplyBridge = {
 export interface VideoScrapeDeliverInput {
   videoId: number
   code: string
-  result: ScrapeResult
+  candidate: VideoMetadataCandidate
+  candidateStager: VideoMetadataCandidateStager
   selectedFields: VideoScrapeField[]
   fieldsToApply: VideoScrapeField[]
   mode: VideoScrapeUpdateMode
   sourceName?: string
   ratingSourceName?: string
   classificationOptions?: VideoClassificationResolutionOptions
-  fetcher: (url: string) => Promise<Buffer>
   /** Runs in the same database transaction after a successful application. */
   afterSuccessfulApply?: () => void
 }
@@ -1067,7 +1071,7 @@ export interface VideoScrapeApplyService {
   ): VideoScrapeApplicationPlan
   plan: typeof planVideoScrapeResult
   apply: typeof applyScrapeResult
-  deliverParsedResult(input: VideoScrapeDeliverInput): Promise<VideoScrapeDeliverOutcome>
+  deliverCandidate(input: VideoScrapeDeliverInput): Promise<VideoScrapeDeliverOutcome>
 }
 
 interface VideoScrapeApplyServiceDependencies {
@@ -1076,9 +1080,6 @@ interface VideoScrapeApplyServiceDependencies {
   plan: typeof planVideoScrapeResult
   apply: typeof applyScrapeResult
   coordinateDatabaseChange: typeof mediaAssetStore.coordinateDatabaseChange
-  downloadCover: typeof mediaAssetStore.downloadCover
-  downloadAvatar: typeof mediaAssetStore.downloadAvatar
-  downloadSamples: typeof mediaAssetStore.downloadSamples
   deleteBestEffort: typeof mediaAssetStore.deleteBestEffort
   findActressByNameOrAlias: typeof findActressByNameOrAlias
   adoptDownloadedAvatarIfMissing: typeof adoptDownloadedAvatarIfMissing
@@ -1098,12 +1099,6 @@ export function createVideoScrapeApplyService(
   const coordinateDatabaseChange =
     dependencies.coordinateDatabaseChange ??
     mediaAssetStore.coordinateDatabaseChange.bind(mediaAssetStore)
-  const downloadCover =
-    dependencies.downloadCover ?? mediaAssetStore.downloadCover.bind(mediaAssetStore)
-  const downloadAvatar =
-    dependencies.downloadAvatar ?? mediaAssetStore.downloadAvatar.bind(mediaAssetStore)
-  const downloadSamples =
-    dependencies.downloadSamples ?? mediaAssetStore.downloadSamples.bind(mediaAssetStore)
   const deleteBestEffort =
     dependencies.deleteBestEffort ?? mediaAssetStore.deleteBestEffort.bind(mediaAssetStore)
   const findActress = dependencies.findActressByNameOrAlias ?? findActressByNameOrAlias
@@ -1130,49 +1125,15 @@ export function createVideoScrapeApplyService(
     },
     plan,
     apply: (...args) => apply(...args),
-    async deliverParsedResult(input): Promise<VideoScrapeDeliverOutcome> {
-      const selected = new Set(input.selectedFields)
-      const downloads = await coordinateDatabaseChange(async () => {
-        let coverRel: string | null = null
-        let sampleRels: Array<string | null> = []
-        const avatarMap = new Map<string, string | null>()
-
-        if (selected.has('cover') && input.result.coverUrl) {
-          coverRel = await downloadCover(
-            input.result.code || input.code,
-            input.result.coverUrl,
-            input.fetcher
-          )
-        }
-
-        const wantsFemale = selected.has('actressesFemale')
-        const wantsMale = selected.has('actressesMale')
-        if (wantsFemale || wantsMale) {
-          for (const a of input.result.actresses ?? []) {
-            const gender = a.gender ?? 'female'
-            if (gender === 'female' && !wantsFemale) continue
-            if (gender === 'male' && !wantsMale) continue
-            if (a.avatarUrl) {
-              const rel = await downloadAvatar(a.name, a.avatarUrl, input.fetcher)
-              avatarMap.set(a.name, rel)
-            }
-          }
-        }
-
-        if (selected.has('samples') && input.result.sampleImageUrls?.length) {
-          sampleRels = await downloadSamples(
-            input.result.code || input.code,
-            input.result.sampleImageUrls,
-            input.fetcher
-          )
-          if (sampleRels.some((assetPath) => !assetPath)) {
-            for (const assetPath of sampleRels) deleteBestEffort(assetPath)
-            sampleRels = input.result.sampleImageUrls.map(() => null)
-          }
-        }
-
-        return { coverRel, sampleRels, avatarMap }
-      })
+    async deliverCandidate(input): Promise<VideoScrapeDeliverOutcome> {
+      const result = input.candidate.result
+      const downloads = await coordinateDatabaseChange(() =>
+        input.candidateStager.deliverForApply(
+          input.candidate,
+          input.selectedFields,
+          input.code
+        )
+      )
 
       const downloadedPaths = [
         downloads.coverRel,
@@ -1186,7 +1147,7 @@ export function createVideoScrapeApplyService(
           getDb().transaction(() => {
             const applied = apply(
               input.videoId,
-              input.result,
+              result,
               downloads.coverRel,
               downloads.avatarMap,
               downloads.sampleRels,

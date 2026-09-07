@@ -11,7 +11,7 @@ function declarationsFor(selector: string): Map<string, string> {
 }
 
 describe('MediaLibraryNav name style', () => {
-  it('keeps active and archived library names on one ellipsized line', () => {
+  it('keeps visible library names on one ellipsized line', () => {
     const declarations = declarationsFor('.name')
 
     assert.equal(declarations.get('overflow'), 'hidden')
@@ -22,7 +22,8 @@ describe('MediaLibraryNav name style', () => {
       path.resolve('src/renderer/src/components/MediaLibraryNav.tsx'),
       'utf8'
     )
-    assert.equal(component.match(/className=\{`nav-label \$\{styles\.name\}`\}/g)?.length, 2)
+    assert.equal(component.match(/className=\{`nav-label \$\{styles\.name\}`\}/g)?.length, 1)
+    assert.doesNotMatch(component, /已归档/)
   })
 
   it('presents media libraries as one compact navigation surface', () => {

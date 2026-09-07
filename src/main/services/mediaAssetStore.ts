@@ -57,6 +57,7 @@ import type { AssetFetcher, DownloadedImageAsset, StoredAssetPathRewrite } from 
 import { mimeFromExt } from './assetCrypto'
 
 export type { StoredAssetPathRewrite }
+export { readImageOrientationFromBuffer } from './mediaAssetStore/imageOrientation'
 
 /** Stable media-asset layout directories under the media root. */
 export type MediaAssetSubdir =
@@ -99,6 +100,7 @@ export class MediaAssetStore {
   private readonly changeStorage = new AsyncLocalStorage<CoordinatedChange>()
   private readonly exclusiveMutationStorage = new AsyncLocalStorage<boolean>()
   private activeMutationCount = 0
+  private activeStableReadCount = 0
   private relocationActive = false
 
   private assertMutationAllowed(): void {
@@ -119,7 +121,7 @@ export class MediaAssetStore {
   }
 
   async runExclusiveRelocation<T>(work: () => Promise<T>): Promise<T> {
-    if (this.relocationActive || this.activeMutationCount > 0) {
+    if (this.relocationActive || this.activeMutationCount > 0 || this.activeStableReadCount > 0) {
       throw new Error('已有媒体资源任务正在运行，请稍后重试')
     }
     this.relocationActive = true
@@ -127,6 +129,21 @@ export class MediaAssetStore {
       return await this.exclusiveMutationStorage.run(true, work)
     } finally {
       this.relocationActive = false
+    }
+  }
+
+  acquireStableReadLease(): { release(): void } {
+    if (this.relocationActive) {
+      throw new Error('媒体资源维护正在进行，请稍后重试')
+    }
+    this.activeStableReadCount += 1
+    let released = false
+    return {
+      release: () => {
+        if (released) return
+        released = true
+        this.activeStableReadCount -= 1
+      }
     }
   }
 

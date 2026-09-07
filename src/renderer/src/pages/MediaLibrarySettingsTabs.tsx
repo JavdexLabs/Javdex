@@ -8,7 +8,6 @@ import {
   FolderPlus,
   Play,
   RefreshCw,
-  Save,
   SlidersHorizontal,
   Square,
   Trash2
@@ -28,12 +27,11 @@ import {
   type MediaLibraryRoot
 } from '@shared/mediaLibraryTypes'
 import Button from '../components/Button'
-import { AppFormField, AppFormSection } from '../components/FormPrimitives'
+import { AppFormChoiceGroup, AppFormField, AppFormSection } from '../components/FormPrimitives'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { NavIcon } from '../components/NavIcons'
 import SelectControl from '../components/SelectControl'
 import SettingsSwitchRow from '../components/SettingsSwitchRow'
-import Switch from '../components/Switch'
 import LibraryScanAuditPanel from '../components/settings/LibraryScanAuditPanel'
 import {
   SettingsEmptyPanel,
@@ -49,7 +47,10 @@ import {
   type MediaLibraryIdentityDraft
 } from '../mediaLibrarySettingsState'
 import { mediaLibraryVideoDetailPath } from '../listView/mediaLibraryRoutes'
-import { pendingCenterPath, pendingItemKey } from '../listView/pendingRoutes'
+import {
+  pendingCenterPath,
+  type PendingItemKey
+} from '../listView/pendingRoutes'
 import styles from './MediaLibrarySettingsPage.module.css'
 import { api } from '../api'
 
@@ -99,16 +100,6 @@ const ROOT_STATUS_LABELS: Record<MediaLibraryRoot['state'], string> = {
   archived: '已归档'
 }
 
-const SCRAPING_CONFIG_KEYS = [
-  'defaultVideoScraper'
-] as const satisfies readonly MediaLibraryConfigKey[]
-
-const DISPLAY_CONFIG_KEYS = [
-  'defaultSortBy',
-  'defaultSortDir',
-  'includeInHomeDiscovery'
-] as const satisfies readonly MediaLibraryConfigKey[]
-
 type SaveConfig = (
   keys: readonly MediaLibraryConfigKey[],
   successMessage: string
@@ -126,12 +117,25 @@ type UpdateConfigImmediately = <Key extends keyof MediaLibraryConfigValues>(
 
 type ScanController = ReturnType<typeof useMediaLibraryScanController>
 
+export function scanAuditPendingCenterPath(
+  libraryId: number,
+  target: PendingItemKey
+): string {
+  return pendingCenterPath({
+    type: target.domain,
+    item: target,
+    ...(target.domain === 'scan' ? { libraryId } : {})
+  })
+}
+
 function ScanHistorySummary({
   summary,
   audit,
   selected,
   unrecognized,
   currentPendingGroupIds,
+  currentPendingIdentityIds,
+  currentPendingScrapeIds,
   onSelect,
   onResolvedUnrecognized,
   onOpenPending,
@@ -142,9 +146,11 @@ function ScanHistorySummary({
   selected: LibraryScanMetricKey | null
   unrecognized: LibraryScanLatestSnapshot['unrecognized']
   currentPendingGroupIds: Set<number>
+  currentPendingIdentityIds: Set<number>
+  currentPendingScrapeIds: Set<number>
   onSelect: (key: LibraryScanMetricKey | null) => void
   onResolvedUnrecognized: (path: string) => void
-  onOpenPending: (groupId?: number) => void
+  onOpenPending: (target: PendingItemKey) => void
   onOpenVideo: (videoId: number) => void
 }): JSX.Element {
   return (
@@ -173,6 +179,8 @@ function ScanHistorySummary({
         selected={selected}
         unrecognized={unrecognized}
         currentPendingGroupIds={currentPendingGroupIds}
+        currentPendingIdentityIds={currentPendingIdentityIds}
+        currentPendingScrapeIds={currentPendingScrapeIds}
         onSelect={onSelect}
         onResolvedUnrecognized={onResolvedUnrecognized}
         onOpenPending={onOpenPending}
@@ -230,35 +238,6 @@ function ScanHistorySummary({
         </div>
       ) : null}
     </div>
-  )
-}
-
-function ToggleRow({
-  title,
-  description,
-  checked,
-  disabled,
-  onChange
-}: {
-  title: string
-  description: string
-  checked: boolean
-  disabled?: boolean
-  onChange: (checked: boolean) => void
-}): JSX.Element {
-  return (
-    <label className={styles.toggleRow}>
-      <span className={styles.toggleCopy}>
-        <strong className={styles.toggleTitle}>{title}</strong>
-        <span className={styles.toggleDescription}>{description}</span>
-      </span>
-      <Switch
-        aria-label={title}
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-    </label>
   )
 }
 
@@ -320,8 +299,7 @@ export function OverviewSettingsTab({
           />
         </AppFormField>
 
-        <div className={styles.choiceGroup}>
-          <span className={styles.fieldLabel}>图标</span>
+        <AppFormChoiceGroup label="图标" disabled={formDisabled}>
           <div className={styles.iconChoices}>
             {MEDIA_LIBRARY_ICONS.map((icon) => (
               <button
@@ -342,10 +320,9 @@ export function OverviewSettingsTab({
               </button>
             ))}
           </div>
-        </div>
+        </AppFormChoiceGroup>
 
-        <div className={styles.choiceGroup}>
-          <span className={styles.fieldLabel}>标识色</span>
+        <AppFormChoiceGroup label="标识色" disabled={formDisabled}>
           <div className={styles.colorChoices}>
             {MEDIA_LIBRARY_COLORS.map((color) => (
               <button
@@ -366,19 +343,9 @@ export function OverviewSettingsTab({
               </button>
             ))}
           </div>
-        </div>
+        </AppFormChoiceGroup>
       </AppFormSection>
-      <div className={styles.saveRow}>
-        <Button
-          type="submit"
-          size="sm"
-          variant="primary"
-          disabled={formDisabled}
-        >
-          <Save {...UI_ICON_SM} aria-hidden />
-          保存媒体库身份
-        </Button>
-      </div>
+
     </form>
   )
 }
@@ -504,6 +471,8 @@ export function ScanSettingsTab({
   scan,
   latestScanSummary,
   pendingScanGroupIds,
+  pendingResourceIdentityIds,
+  pendingVideoScrapeIds,
   selectedScanMetric,
   setSelectedScanMetric,
   configDraft,
@@ -516,6 +485,8 @@ export function ScanSettingsTab({
   scan: ScanController
   latestScanSummary: LibraryScanSummary | null
   pendingScanGroupIds: Set<number>
+  pendingResourceIdentityIds: Set<number>
+  pendingVideoScrapeIds: Set<number>
   selectedScanMetric: LibraryScanMetricKey | null
   setSelectedScanMetric: Dispatch<SetStateAction<LibraryScanMetricKey | null>>
   configDraft: MediaLibraryConfigValues
@@ -629,6 +600,8 @@ export function ScanSettingsTab({
               selected={selectedScanMetric}
               unrecognized={scan.latest?.unrecognized ?? []}
               currentPendingGroupIds={pendingScanGroupIds}
+              currentPendingIdentityIds={pendingResourceIdentityIds}
+              currentPendingScrapeIds={pendingVideoScrapeIds}
               onSelect={setSelectedScanMetric}
               onResolvedUnrecognized={() => {
                 void scan.refreshLatest()
@@ -636,16 +609,8 @@ export function ScanSettingsTab({
               onOpenVideo={(videoId) =>
                 navigate(mediaLibraryVideoDetailPath(libraryId, videoId))
               }
-              onOpenPending={(groupId) =>
-                navigate(
-                  pendingCenterPath({
-                    type: 'scan',
-                    libraryId,
-                    item: groupId
-                      ? pendingItemKey('scan', groupId)
-                      : undefined
-                  })
-                )
+              onOpenPending={(target) =>
+                navigate(scanAuditPendingCenterPath(libraryId, target))
               }
             />
           ) : (
@@ -678,6 +643,23 @@ export function ScanSettingsTab({
               disabled={formDisabled}
               onChange={(value) =>
                 void updateConfigImmediately('autoMergeSameCodeResources', value)
+              }
+            />
+          </div>
+        </SettingsSectionBlock>
+        <SettingsSectionBlock
+          className={styles.scanSettingsBlock}
+          title="本地元数据"
+          hint="只在资源首次发现时读取；不会持续同步相邻文件。"
+        >
+          <div className="settings-toggle-list settings-toggle-list--compact">
+            <SettingsSwitchRow
+              title="自动导入本地 NFO"
+              description="扫描时读取影片旁的 NFO。仅用于尚未刮削成功的影片；已刮削成功的影片会自动跳过。"
+              checked={configDraft.autoImportLocalNfo}
+              disabled={formDisabled}
+              onChange={(value) =>
+                void updateConfigImmediately('autoImportLocalNfo', value)
               }
             />
           </div>
@@ -774,14 +756,13 @@ export function ScrapingSettingsTab({
   formDisabled,
   defaultScraper,
   scraperOptions,
-  saveConfig
 }: {
   configDraft: MediaLibraryConfigValues
   updateConfigDraft: UpdateConfigDraft
   formDisabled: boolean
   defaultScraper: string | null
   scraperOptions: string[]
-  saveConfig: SaveConfig
+  saveConfig?: SaveConfig
 }): JSX.Element {
   return (
     <div className={styles.sectionStack}>
@@ -811,19 +792,7 @@ export function ScrapingSettingsTab({
           </SelectControl>
         </AppFormField>
       </AppFormSection>
-      <div className={styles.saveRow}>
-        <Button
-          size="sm"
-          variant="primary"
-          disabled={formDisabled}
-          onClick={() =>
-            void saveConfig(SCRAPING_CONFIG_KEYS, '刮削设置已保存')
-          }
-        >
-          <Save {...UI_ICON_SM} aria-hidden />
-          保存刮削设置
-        </Button>
-      </div>
+
     </div>
   )
 }
@@ -832,12 +801,11 @@ export function DisplaySettingsTab({
   configDraft,
   updateConfigDraft,
   formDisabled,
-  saveConfig
 }: {
   configDraft: MediaLibraryConfigValues
   updateConfigDraft: UpdateConfigDraft
   formDisabled: boolean
-  saveConfig: SaveConfig
+  saveConfig?: SaveConfig
 }): JSX.Element {
   return (
     <div className={styles.sectionStack}>
@@ -891,7 +859,7 @@ export function DisplaySettingsTab({
         </div>
       </AppFormSection>
       <AppFormSection title="首页发现">
-        <ToggleRow
+        <SettingsSwitchRow
           title="参与随机推荐和近期添加"
           description="关闭后，当前媒体库不会出现在首页影片发现结果中。"
           checked={configDraft.includeInHomeDiscovery}
@@ -901,17 +869,7 @@ export function DisplaySettingsTab({
           }
         />
       </AppFormSection>
-      <div className={styles.saveRow}>
-        <Button
-          size="sm"
-          variant="primary"
-          disabled={formDisabled}
-          onClick={() => void saveConfig(DISPLAY_CONFIG_KEYS, '显示设置已保存')}
-        >
-          <Save {...UI_ICON_SM} aria-hidden />
-          保存显示设置
-        </Button>
-      </div>
+
     </div>
   )
 }

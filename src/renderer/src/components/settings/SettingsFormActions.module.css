@@ -1,0 +1,31 @@
+.root {
+  display: grid;
+  min-width: 0;
+  padding-block-start: var(--form-actions-gap, 16px);
+  gap: var(--settings-gap-sm, 8px);
+}
+
+.root[data-placement='header'] {
+  padding-block-start: 0;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--settings-gap-sm, 8px);
+}
+
+.status {
+  margin-right: auto;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+.error {
+  margin: 0;
+  color: var(--text-danger);
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+}

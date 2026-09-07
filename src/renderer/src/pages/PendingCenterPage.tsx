@@ -4,14 +4,14 @@ import { CircleAlert, ListChecks, ScanSearch, UsersRound } from 'lucide-react'
 import { useMatch, useNavigate, useSearchParams } from 'react-router-dom'
 import { api, resolveMediaSrc } from '../api'
 import EmptyState from '../components/EmptyState'
-import ListToolbar from '../components/ListToolbar'
+import Button from '../components/Button'
 import SelectControl from '../components/SelectControl'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import {
   WorkbenchMain,
   WorkbenchRail,
-  WorkbenchRailHeader,
-  WorkbenchShell
+  WorkbenchShell,
+  WorkbenchTabs
 } from '../components/workbench'
 import {
   formatPendingItemKey,
@@ -29,6 +29,7 @@ import { actressKeys, mediaLibraryKeys } from '../query/queryKeys'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import PendingActressConflictPane from './PendingActressConflictPane'
 import PendingScanPane from './PendingScanPane'
+import PendingResourceIdentityPane from './PendingResourceIdentityPane'
 import PendingScrapePane from './PendingScrapePane'
 import styles from './PendingCenterPage.module.css'
 import {
@@ -67,7 +68,7 @@ export default function PendingCenterPage(): JSX.Element {
   })
   const libraryIds = (librariesQuery.data ?? []).map((library) => library.id)
   const selectedLibraryId =
-    requestedLibraryId != null && libraryIds.includes(requestedLibraryId)
+    type === 'scan' && requestedLibraryId != null && libraryIds.includes(requestedLibraryId)
       ? requestedLibraryId
       : null
   const libraryNames = new Map(
@@ -78,6 +79,16 @@ export default function PendingCenterPage(): JSX.Element {
     queryKey: ['pending-scan-groups', libraryIds.join(',')],
     queryFn: async () =>
       (await Promise.all(libraryIds.map((libraryId) => api.scan.listPending(libraryId)))).flat(),
+    enabled: librariesQuery.isSuccess
+  })
+  const identityQuery = useQuery({
+    queryKey: ['pending-resource-identities', libraryIds.join(',')],
+    queryFn: async () =>
+      (
+        await Promise.all(
+          libraryIds.map((libraryId) => api.scan.listPendingResourceIdentities(libraryId))
+        )
+      ).flat(),
     enabled: librariesQuery.isSuccess
   })
   const scrapeQuery = useQuery({
@@ -91,13 +102,25 @@ export default function PendingCenterPage(): JSX.Element {
     selectedLibraryId == null
       ? allScanGroups
       : allScanGroups.filter((group) => group.libraryId === selectedLibraryId)
+  const allResourceIdentities = identityQuery.data ?? []
+  const resourceIdentities =
+    selectedLibraryId == null
+      ? allResourceIdentities
+      : allResourceIdentities.filter((identity) => identity.libraryId === selectedLibraryId)
   const scrapeItems = scrapeQuery.data ?? []
   const conflictGroups = conflict.queue.groups
-  const queueInput = { scanGroups, scrapeItems, conflictGroups, libraryNames }
+  const queueInput = {
+    scanGroups,
+    resourceIdentities,
+    scrapeItems,
+    conflictGroups,
+    libraryNames
+  }
   const sections = buildPendingQueueSections(queueInput, type)
   const counts: Record<PendingTypeFilter, number> = {
-    all: scanGroups.length + scrapeItems.length + conflictGroups.length,
-    scan: scanGroups.length,
+    all:
+      scanGroups.length + resourceIdentities.length + scrapeItems.length + conflictGroups.length,
+    scan: scanGroups.length + resourceIdentities.length,
     scrape: scrapeItems.length,
     actress: conflictGroups.length
   }
@@ -110,7 +133,11 @@ export default function PendingCenterPage(): JSX.Element {
   const selected = resolvePendingSelection(sections, requested)
 
   const loading =
-    librariesQuery.isLoading || scanQuery.isLoading || scrapeQuery.isLoading || conflict.queue.loading
+    librariesQuery.isLoading ||
+    scanQuery.isLoading ||
+    identityQuery.isLoading ||
+    scrapeQuery.isLoading ||
+    conflict.queue.loading
   const total = pendingQueueTotal(sections)
 
   const selectItem = useCallback(
@@ -161,6 +188,7 @@ export default function PendingCenterPage(): JSX.Element {
   const refetchPendingSurface = useCallback((): void => {
     void Promise.all([
       queryClient.refetchQueries({ queryKey: ['pending-scan-groups'], exact: false }),
+      queryClient.refetchQueries({ queryKey: ['pending-resource-identities'], exact: false }),
       queryClient.refetchQueries({ queryKey: ['pending-video-scrapes'], exact: true }),
       queryClient.refetchQueries({ queryKey: actressKeys.conflicts(), exact: true }),
       queryClient.refetchQueries({ queryKey: actressKeys.conflictSummary(), exact: true })
@@ -182,61 +210,68 @@ export default function PendingCenterPage(): JSX.Element {
     selected?.domain === 'scrape'
       ? scrapeItems.find((entry) => String(entry.id) === selected.id) ?? null
       : null
+  const selectedIdentity =
+    selected?.domain === 'scan' && selected.id.startsWith('identity-')
+      ? resourceIdentities.find(
+          (identity) => `identity-${identity.id}` === selected.id
+        ) ?? null
+      : null
 
   return (
     <div className={`list-page ${styles.page}`}>
-      <header className={`topbar ${styles.topbar}`}>
-        <ListToolbar
-          title="待确认"
-          controls={
-            <div className={styles.typeFilter} role="group" aria-label="待确认筛选">
-              {FILTER_ORDER.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  aria-pressed={type === option}
-                  onClick={() =>
-                    navigate(
-                      pendingCenterPath({
-                        type: option,
-                        libraryId: selectedLibraryId ?? undefined
-                      })
-                    )
-                  }
-                >
-                  {option === 'all' ? (
-                    <ListChecks {...UI_ICON_SM} aria-hidden />
-                  ) : (
-                    DOMAIN_ICON[option]
-                  )}
+      <header className={styles.topbar}>
+        <div className={styles.titleRow}>
+          <h1 className={styles.title}>待确认</h1>
+          <span className={styles.count}>{loading ? '读取中…' : `${total} 项待处理`}</span>
+        </div>
+        <div className={styles.filterRow}>
+          <WorkbenchTabs
+            id="pending-types"
+            label="待确认分类"
+            value={type}
+            className={styles.typeFilter}
+            items={FILTER_ORDER.map((option) => ({
+              id: option,
+              panelId: 'pending-results',
+              label: (
+                <span className={styles.tabLabel}>
+                  {option === 'all' ? <ListChecks {...UI_ICON_SM} aria-hidden /> : DOMAIN_ICON[option]}
                   {option === 'all' ? '全部' : PENDING_DOMAIN_LABEL[option]}
-                  <em>{counts[option]}</em>
-                </button>
-              ))}
+                  {!loading && counts[option] > 0 ? <em className={styles.tabCount}>{counts[option]}</em> : null}
+                </span>
+              )
+            }))}
+            onChange={(option) => navigate(pendingCenterPath({
+              type: option,
+              libraryId: option === 'scan' ? selectedLibraryId ?? undefined : undefined
+            }))}
+          />
+          {type === 'scan' ? (
+            <div className={styles.libraryFilter}>
               <SelectControl
-                className={styles.libraryFilter}
                 aria-label="按媒体库筛选扫描待确认项"
                 value={selectedLibraryId ?? ''}
                 onChange={(event) => {
-                  const nextLibraryId = event.target.value
-                    ? Number(event.target.value)
-                    : undefined
+                  const nextLibraryId = event.target.value ? Number(event.target.value) : undefined
                   navigate(pendingCenterPath({ type, libraryId: nextLibraryId }))
                 }}
               >
                 <option value="">所有媒体库</option>
                 {(librariesQuery.data ?? []).map((library) => (
-                  <option key={library.id} value={library.id}>
-                    {library.name}
-                  </option>
+                  <option key={library.id} value={library.id}>{library.name}</option>
                 ))}
               </SelectControl>
             </div>
-          }
-          resultCount={<span className={styles.count}>{total} 项待处理</span>}
-        />
+          ) : null}
+        </div>
       </header>
-      <div className="scroll-body scroll-body--fill">
+      <div
+        className="scroll-body scroll-body--fill"
+        id="pending-results"
+        role="tabpanel"
+        aria-labelledby={`pending-types-${type}`}
+        tabIndex={0}
+      >
         <WorkbenchShell className={styles.shell}>
           {loading ? (
             <EmptyState variant="fill" loading title="正在读取待确认项…" />
@@ -244,17 +279,27 @@ export default function PendingCenterPage(): JSX.Element {
             <div className={styles.complete}>
               <EmptyState
                 variant="fill"
-                title={type === 'all' ? '没有待确认项' : `没有${PENDING_DOMAIN_LABEL[type]}待确认项`}
-                description="新的扫描歧义、刮削候选或演员名称冲突会自动出现在这里。"
-              />
+                title={type === 'scan' && selectedLibraryId != null
+                  ? '此媒体库没有扫描待确认项'
+                  : type === 'all' ? '没有待确认项' : `没有${PENDING_DOMAIN_LABEL[type]}待确认项`}
+                description={type === 'scan'
+                  ? '扫描中需要确认的番号或资源归属会显示在这里。'
+                  : type === 'scrape'
+                    ? '刮削中需要你选择的影片候选会显示在这里。'
+                    : type === 'actress'
+                      ? '需要核对的演员名称冲突会显示在这里。'
+                      : '扫描和刮削中需要你确认的结果会自动出现在这里。'}
+              >
+                {type === 'scan' && selectedLibraryId != null ? (
+                  <Button size="sm" onClick={() => navigate(pendingCenterPath({ type: 'scan' }))}>
+                    查看所有媒体库
+                  </Button>
+                ) : null}
+              </EmptyState>
             </div>
           ) : (
             <WorkbenchMain className={styles.main}>
               <WorkbenchRail aria-label="待确认队列">
-                <WorkbenchRailHeader>
-                  <span>待处理</span>
-                  <span>{total} 项</span>
-                </WorkbenchRailHeader>
                 <div className={styles.railList}>
                   {sections.map((section) => (
                     <section className={styles.railSection} key={section.domain}>
@@ -301,7 +346,14 @@ export default function PendingCenterPage(): JSX.Element {
                   ))}
                 </div>
               </WorkbenchRail>
-              {selectedScan ? (
+              {selectedIdentity ? (
+                <PendingResourceIdentityPane
+                  key={`${selectedIdentity.id}:${selectedIdentity.revision}`}
+                  identity={selectedIdentity}
+                  libraryName={libraryNames.get(selectedIdentity.libraryId)}
+                  onResolved={refresh}
+                />
+              ) : selectedScan ? (
                 <PendingScanPane
                   group={selectedScan}
                   libraryName={libraryNames.get(selectedScan.libraryId)}

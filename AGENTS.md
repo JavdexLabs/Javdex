@@ -31,7 +31,7 @@
 - **`SCRAPER_PLUGIN_FORMAT.md`** — 插件包格式与沙箱 API（产物规范）。
 - **`PLUGIN_DEV_AGENT.md`** — 开发助手工作流与工具说明（生产工具）。
 
-产品功能与版本说明见根目录 `README.md`、`CHANGELOG.md`。
+产品概览见根目录 `README.md`，日常操作见 `docs/USER_GUIDE.md`，版本变化见 `CHANGELOG.md`。开发环境与技术文档索引见 `docs/DEVELOPMENT.md`，MetaTube 用户配置见 `docs/METATUBE_SETUP.md`。新增功能时按文档职责更新，避免把实现细节堆入 README。
 
 ## Agent skills
 

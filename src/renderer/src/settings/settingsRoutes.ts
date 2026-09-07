@@ -7,14 +7,7 @@ import {
 } from '../listView/mediaLibraryRoutes'
 
 export type SettingsGroup =
-  | 'overview'
-  | 'library'
-  | 'plugins'
-  | 'models'
-  | 'appearance'
-  | 'storage'
-  | 'network'
-  | 'about'
+  'overview' | 'library' | 'plugins' | 'models' | 'appearance' | 'storage' | 'network' | 'about'
 
 export type SettingsTab =
   | 'status'
@@ -25,6 +18,10 @@ export type SettingsTab =
   | 'assets'
   | 'proxy'
   | 'info'
+  | 'usage'
+  | 'advanced'
+  | 'actress'
+  | 'export'
 
 export interface SettingsTabItem {
   id: SettingsTab
@@ -35,7 +32,6 @@ export interface SettingsGroupItem {
   id: SettingsGroup
   label: string
   hint: string
-  description: string
   defaultTab: SettingsTab
   tabs: SettingsTabItem[]
 }
@@ -45,7 +41,6 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
     id: 'overview',
     label: '概览',
     hint: '关键状态',
-    description: '库状态、默认配置与连接一览。',
     defaultTab: 'status',
     tabs: [{ id: 'status', label: '状态' }]
   },
@@ -53,7 +48,6 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
     id: 'library',
     label: '媒体库',
     hint: '来源与扫描',
-    description: '管理当前媒体库的来源、扫描导入、显示方式与生命周期。',
     defaultTab: 'sources',
     tabs: MEDIA_LIBRARY_SETTINGS_TABS.map((id) => ({
       id,
@@ -62,41 +56,46 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
   },
   {
     id: 'plugins',
-    label: '刮削插件',
+    label: '刮削来源',
     hint: '管理与默认来源',
-    description: '管理刮削插件、设置默认来源与开发调试。',
     defaultTab: 'video',
-    tabs: [{ id: 'video', label: '刮削插件' }]
+    tabs: [
+      { id: 'video', label: '影片' },
+      { id: 'actress', label: '演员' }
+    ]
   },
   {
     id: 'models',
-    label: '模型',
+    label: 'AI 模型',
     hint: 'LLM 供应商',
-    description: '配置默认 LLM 与模型供应商。',
-    defaultTab: 'providers',
-    tabs: [{ id: 'providers', label: '模型' }]
+    defaultTab: 'usage',
+    tabs: [
+      { id: 'usage', label: '用途与运行' },
+      { id: 'providers', label: '提供商与模型' },
+      { id: 'advanced', label: '高级' }
+    ]
   },
   {
     id: 'appearance',
-    label: '外观',
+    label: '外观与隐私',
     hint: '主题配色',
-    description: '界面主题与配色，修改后立即生效。',
     defaultTab: 'theme',
     tabs: [{ id: 'theme', label: '主题' }]
   },
   {
     id: 'storage',
-    label: '存储',
+    label: '存储与导出',
     hint: '资源路径',
-    description: '媒体资源保存位置与图片加密设置。',
     defaultTab: 'assets',
-    tabs: [{ id: 'assets', label: '存储' }]
+    tabs: [
+      { id: 'assets', label: '图片资源' },
+      { id: 'export', label: '导出影片资料' }
+    ]
   },
   {
     id: 'network',
     label: '网络',
     hint: '代理连接',
-    description: '刮削与 LLM 请求的 HTTP/HTTPS 代理设置。',
     defaultTab: 'proxy',
     tabs: [{ id: 'proxy', label: '代理' }]
   },
@@ -104,7 +103,6 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
     id: 'about',
     label: '关于',
     hint: '版本与项目信息',
-    description: '查看应用信息、版本更新、项目主页与开源许可。',
     defaultTab: 'info',
     tabs: [{ id: 'info', label: '关于 Javdex' }]
   }
@@ -112,7 +110,10 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
 
 export const SETTINGS_GROUP_BY_ID = new Map(SETTINGS_GROUPS.map((group) => [group.id, group]))
 
-export function resolveSettingsRoute(pathname: string): { group: SettingsGroupItem; tab: SettingsTab } {
+export function resolveSettingsRoute(pathname: string): {
+  group: SettingsGroupItem
+  tab: SettingsTab
+} {
   const match = matchPath({ path: ROUTE_PATH.settingsGroup, end: true }, pathname)
   const groupId = match?.params.group as SettingsGroup | undefined
   const group = (groupId && SETTINGS_GROUP_BY_ID.get(groupId)) || SETTINGS_GROUPS[0]

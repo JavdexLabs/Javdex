@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<movie>
+  <uniqueid type="num" default="true">CAST-002</uniqueid>
+  <tag>Drama</tag>
+  <tag>Feature</tag>
+  <actor>
+    <name>Alice</name>
+    <gender>female</gender>
+    <thumb>.actors/Alice.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Bob</name>
+    <gender>male</gender>
+  </actor>
+</movie>

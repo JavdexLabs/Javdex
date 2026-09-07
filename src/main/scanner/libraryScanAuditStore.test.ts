@@ -64,4 +64,36 @@ describe('libraryScanAuditStore', () => {
     fs.writeFileSync(path.join(tempRoot, 'library-scan-audit-1.json'), '{"schemaVersion":1}')
     assert.equal(readLibraryScanAudit(1), null)
   })
+
+  it('reads schema 2 NFO dispositions while retaining schema 1 compatibility', () => {
+    const value: LibraryScanAudit = {
+      ...audit(),
+      schemaVersion: 2,
+      files: [
+        {
+          rootId: 1,
+          filePath: 'D:\\Media\\NFO-001.mp4',
+          sourceKind: 'local',
+          outcome: 'added',
+          videoId: 10,
+          videoCode: 'NFO-001',
+          resourceId: 20,
+          resourceKind: 'local',
+          createdVideo: true,
+          nfo: {
+            disposition: 'warning',
+            warnings: [{ code: 'nfo-warning', message: '远程图片已忽略' }]
+          }
+        }
+      ]
+    }
+    writeLibraryScanAudit(value)
+    assert.deepEqual(readLibraryScanAudit(1), value)
+
+    fs.writeFileSync(
+      path.join(tempRoot, 'library-scan-audit-2.json'),
+      JSON.stringify({ ...value, libraryId: 2, files: [{ ...value.files[0], nfo: { disposition: 'bad' } }] })
+    )
+    assert.equal(readLibraryScanAudit(2), null)
+  })
 })

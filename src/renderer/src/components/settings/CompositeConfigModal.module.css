@@ -1,0 +1,137 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--settings-gap, 12px);
+  scrollbar-gutter: stable;
+}
+
+.identity {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--settings-gap, 12px);
+}
+
+.field {
+  display: grid;
+  gap: var(--settings-gap-sm, 8px);
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+.field input {
+  min-width: 0;
+  height: var(--control-h-sm);
+}
+
+.field small {
+  margin-left: 4px;
+  color: var(--text-muted);
+  font: inherit;
+}
+
+.quickStart {
+  padding: var(--settings-gap, 12px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+}
+
+.quickStart h4,
+.sectionHead h4 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--settings-fs-body, 13px);
+  font-weight: var(--settings-fw-label, 600);
+}
+
+.quickStart p {
+  margin: var(--settings-gap-sm, 8px) 0 0;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+.applyRow {
+  display: flex;
+  gap: var(--settings-gap-sm, 8px);
+  margin-top: var(--settings-gap-sm, 8px);
+}
+
+.applyRow > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.applyRow > button {
+  flex-shrink: 0;
+}
+
+.applyStatus {
+  display: flex;
+  gap: var(--settings-gap-sm, 8px);
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--control-h-sm);
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+.applyStatus button {
+  flex-shrink: 0;
+}
+
+.sectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--settings-gap-sm, 8px);
+  margin-bottom: var(--settings-gap-sm, 8px);
+}
+
+.sectionHead span {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+.mapping {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--settings-card-pad-x, 18px);
+}
+
+.mappingRow {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--settings-gap-sm, 8px);
+  padding: 6px 0;
+  min-width: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+.footerHint {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+.error {
+  margin: 0;
+  color: var(--text-danger);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+@media (width < 600px) {
+  .identity,
+  .mapping {
+    grid-template-columns: 1fr;
+  }
+
+  .footerHint {
+    display: none;
+  }
+}

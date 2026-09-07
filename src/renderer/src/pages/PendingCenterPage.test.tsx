@@ -4,12 +4,17 @@ import React from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import TestRenderer, { act } from 'react-test-renderer'
+import { pendingCenterPath } from '../listView/pendingRoutes'
 import type { ElectronApi } from '../../../preload/index'
 import type {
   PendingVideoScrape,
   PendingVideoScrapeConfirmInput,
   PendingVideoScrapeResolutionResult
 } from '@shared/videoScrapeTypes'
+import type {
+  PendingResourceIdentity,
+  PendingResourceIdentityResolution
+} from '@shared/libraryTypes'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
@@ -80,17 +85,49 @@ let renderer: TestRenderer.ReactTestRenderer | null = null
 let queryClient: QueryClient | null = null
 let confirmationInputs: PendingVideoScrapeConfirmInput[] = []
 let resolved = false
+let identityMode = false
+let identityResolved = false
+let identityResolutionInputs: PendingResourceIdentityResolution[] = []
+
+const identity: PendingResourceIdentity = {
+  id: 4,
+  libraryId: 1,
+  rootId: 1,
+  sourceKind: 'local',
+  targetKind: null,
+  targetDisplay: null,
+  displayName: 'FILE-001.mp4',
+  filenameCode: 'FILE-001',
+  nfoCode: 'NFO-002',
+  revision: 3,
+  createdAt: '2026-09-05T00:00:00.000Z',
+  updatedAt: '2026-09-05T00:00:00.000Z'
+}
 
 const fakeApi = {
+  mediaLibraries: {
+    list: async () => [{ id: 1, name: '测试媒体库' }]
+  },
   scan: {
-    listPending: async () => []
+    listPending: async () => [],
+    listPendingResourceIdentities: async () =>
+      identityMode && !identityResolved ? [identity] : [],
+    resolvePendingResourceIdentity: async (
+      _libraryId: number,
+      _identityId: number,
+      resolution: PendingResourceIdentityResolution
+    ) => {
+      identityResolutionInputs.push(resolution)
+      identityResolved = true
+      return { status: 'assigned' as const, videoId: 22, warnings: [] }
+    }
   },
   actressScrape: {
     listConflicts: async () => [],
     conflictSummary: async () => ({ groupCount: 0, conflictGroupCount: 0, applicableGroupCount: 0 })
   },
   scrape: {
-    listPending: async () => (resolved ? [] : [pending]),
+    listPending: async () => (identityMode || resolved ? [] : [pending]),
     discardPending: async () => true,
     confirmPending: async (input: PendingVideoScrapeConfirmInput) => {
       confirmationInputs.push(input)
@@ -158,6 +195,9 @@ afterEach(async () => {
   queryClient = null
   confirmationInputs = []
   resolved = false
+  identityMode = false
+  identityResolved = false
+  identityResolutionInputs = []
 })
 
 describe('PendingCenterPage scrape resolution', () => {
@@ -219,5 +259,88 @@ describe('PendingCenterPage scrape resolution', () => {
         mergeRetainedVideoId: 10
       }
     ])
+  })
+
+  it('previews either persisted identity and submits only after explicit confirmation', async () => {
+    identityMode = true
+    const PendingCenterPage = (await import('./PendingCenterPage')).default
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    await act(async () => {
+      renderer = TestRenderer.create(
+        <QueryClientProvider client={queryClient!}>
+          <MemoryRouter initialEntries={['/pending?type=scan']}>
+            <PendingCenterPage />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      Boolean(renderer && nodeText(renderer.root).includes('FILE-001 ↔ NFO-002'))
+    )
+
+    const choices = renderer!.root.findAllByProps({ name: 'resource-identity' }).filter((node) => node.type === 'input')
+    assert.equal(choices.length, 2)
+    assert.ok(choices.every((node) => node.props.type === 'radio' && !node.props.checked))
+    assert.equal(button('确认番号').props.disabled, true)
+    await act(async () => choices[0].props.onChange())
+    assert.ok(nodeText(renderer!.root).includes('将采用 FILE-001'))
+    await act(async () => choices[1].props.onChange())
+    assert.ok(nodeText(renderer!.root).includes('将采用 NFO-002'))
+    assert.deepEqual(identityResolutionInputs, [])
+    assert.equal(button('确认番号').props.disabled, false)
+    await act(async () => {
+      button('确认番号').props.onClick()
+      await Promise.resolve()
+    })
+    await waitFor(() => identityResolutionInputs.length === 1)
+    assert.deepEqual(identityResolutionInputs, [
+      { expectedRevision: 3, choice: 'nfo' }
+    ])
+  })
+
+  it('shows the library filter only for scan decisions', async () => {
+    identityMode = true
+    const PendingCenterPage = (await import('./PendingCenterPage')).default
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    await act(async () => {
+      renderer = TestRenderer.create(
+        <QueryClientProvider client={queryClient!}>
+          <MemoryRouter initialEntries={[pendingCenterPath({ type: 'scan', libraryId: 1 })]}>
+            <PendingCenterPage />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+    await waitFor(() => Boolean(renderer && nodeText(renderer.root).includes('FILE-001 ↔ NFO-002')))
+    const filters = (): TestRenderer.ReactTestInstance[] => renderer!.root.findAllByProps({ 'aria-label': '按媒体库筛选扫描待确认项' })
+    assert.ok(filters().length > 0)
+    await act(async () => button('全部1').props.onClick())
+    assert.equal(filters().length, 0)
+    await act(async () => button('影片刮削').props.onClick())
+    assert.equal(filters().length, 0)
+  })
+
+  it('clears the library filter from the scoped empty state and keeps the scan tab selected', async () => {
+    identityMode = true
+    identityResolved = true
+    const PendingCenterPage = (await import('./PendingCenterPage')).default
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    await act(async () => {
+      renderer = TestRenderer.create(
+        <QueryClientProvider client={queryClient!}>
+          <MemoryRouter initialEntries={[pendingCenterPath({ type: 'scan', libraryId: 1 })]}>
+            <PendingCenterPage />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+    await waitFor(() => Boolean(renderer && nodeText(renderer.root).includes('此媒体库没有扫描待确认项')))
+    await act(async () => button('查看所有媒体库').props.onClick())
+    assert.ok(nodeText(renderer!.root).includes('没有扫描资源待确认项'))
+    assert.equal(button('扫描资源').props['aria-selected'], true)
+    assert.equal(renderer!.root.findByProps({ role: 'tabpanel' }).props['aria-labelledby'], 'pending-types-scan')
+    assert.equal(button('所有媒体库').props['aria-label'], '按媒体库筛选扫描待确认项')
   })
 })

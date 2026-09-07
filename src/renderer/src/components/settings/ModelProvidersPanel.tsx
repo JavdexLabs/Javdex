@@ -29,6 +29,8 @@ export default function ModelProvidersPanel({
     )
   }, [query, snapshot.connections])
   const configured = filtered.filter((item) => item.status === 'ready' || item.source === 'custom')
+  const configuredCount = snapshot.connections.filter((item) => item.status === 'ready' || item.source === 'custom').length
+  const expanded = showAvailable || configuredCount === 0 || Boolean(query.trim())
   const available = filtered.filter((item) => item.source === 'builtin' && item.status !== 'ready')
 
   return (
@@ -44,7 +46,7 @@ export default function ModelProvidersPanel({
               className={`${styles.controlInput} ${styles.searchInput}`}
               type="search"
               value={query}
-              placeholder="搜索提供商…"
+              aria-label="搜索提供商" placeholder="搜索提供商…"
               onChange={(event) => setQuery(event.target.value)}
             />
             <Button size="sm" variant="primary" onClick={() => setTargetProviderId('new')}>
@@ -73,7 +75,7 @@ export default function ModelProvidersPanel({
               </span>
             </button>
           ))}
-          {configured.length === 0 ? <div className={styles.empty}>尚无已配置提供商</div> : null}
+          {configured.length === 0 ? <div className={styles.empty}>先选择下方提供商，或添加自定义提供商，然后配置地址和密钥。</div> : null}
         </div>
       </section>
 
@@ -82,13 +84,13 @@ export default function ModelProvidersPanel({
           <button
             type="button"
             className={styles.disclosure}
-            aria-expanded={showAvailable}
+            aria-expanded={expanded}
             onClick={() => setShowAvailable((value) => !value)}
           >
             <span>可添加提供商</span>
-            <span>{available.length} 个 · {showAvailable ? '收起' : '展开'}</span>
+            <span>{available.length} 个 · {expanded ? '收起' : '展开'}</span>
           </button>
-          {showAvailable ? (
+          {expanded ? (
             <div className={styles.availableGrid}>
               {available.map((connection) => (
                 <button

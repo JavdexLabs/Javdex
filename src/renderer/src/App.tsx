@@ -37,6 +37,7 @@ import {
 } from './settings/SettingsRouteOutlet'
 import { AgentMetadataCollectorProvider } from './components/agentMetadata/AgentMetadataCollectorContext'
 import { PlaylistImportProvider } from './components/playlistImport/PlaylistImportContext'
+import SettingsLeaveGuard from './settings/SettingsLeaveGuard'
 
 function FacetDetailRoute({
   kind,
@@ -65,6 +66,7 @@ function AppContent(): JSX.Element {
             <AppBackgroundProvider>
               <ImagePreviewOverlayProvider previewEnabled={imagePreviewEnabled}>
                 <PluginDevLeaveGuardProvider>
+                  <SettingsLeaveGuard>
                   <Layout>
                   <ResetListStateOnReload />
                   <Routes>
@@ -203,6 +205,7 @@ function AppContent(): JSX.Element {
                     <Route path="*" element={<Navigate to={ROUTE_PATH.home} replace />} />
                   </Routes>
                   </Layout>
+                  </SettingsLeaveGuard>
                 </PluginDevLeaveGuardProvider>
               </ImagePreviewOverlayProvider>
             </AppBackgroundProvider>

@@ -1,5 +1,19 @@
 import type { ScraperPluginDescriptor } from '@shared/scraperPluginTypes'
 import type {
+  MetadataAssetRef,
+  MetadataCandidateBatch,
+  VideoMetadataCandidate,
+  VideoMetadataSource
+} from '../metadata-sources'
+import {
+  createDefaultLocalNfoSourceAdapter,
+  getDefaultNfoFileStore,
+  LOCAL_NFO_SUPPORTED_FIELDS,
+  VideoMetadataSourceRegistry,
+  WebScraperSourceAdapter
+} from '../metadata-sources'
+import { createVideoMetadataCandidateStager } from '../metadata-sources/videoMetadataCandidateStager'
+import type {
   ScrapeResult,
   VideoClassificationResolutionOutcome,
   VideoDirectorChoiceRequired,
@@ -7,10 +21,13 @@ import type {
   VideoScrapeUpdateMode
 } from '@shared/videoScrapeTypes'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
+import {
+  LOCAL_NFO_SOURCE_ID,
+  LOCAL_NFO_SOURCE_NAME
+} from '@shared/videoMetadataSourceConstants'
 import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import { getVideoById, markScrapeFailed } from '../db/videoRepo'
 import {
-  type PendingVideoScrapeCandidateInput,
   deletePendingVideoScrape,
   getPendingVideoScrapeForVideo,
   replacePendingVideoScrape
@@ -23,7 +40,6 @@ import {
 import { getSettings } from '../settings/settingsStore'
 import { isScrapeBrowserBusyError, scrapeBrowser } from './scrapeBrowser'
 import { mediaAssetStore } from '../services/mediaAssetStore'
-import { normalizeVideoCode } from '@shared/videoCode'
 
 /** Registry imports — see file bottom for registration. */
 import type { BaseScraper } from './BaseScraper'
@@ -35,7 +51,6 @@ import {
   loadBundledVideoScrapers,
   loadUserVideoScrapers
 } from './scraperPluginService'
-import { normalizeVideoScrapeCandidates } from './scraperResultValidation'
 import {
   mergeVideoScrapeResults,
   projectVideoScrapeResult
@@ -43,6 +58,58 @@ import {
 
 function buildRegistry(): Map<string, BaseScraper> {
   return buildPluginRegistry(loadUserVideoScrapers, loadBundledVideoScrapers)
+}
+
+function buildSourceRegistry(
+  proxyUrl: string,
+  delayController?: ScrapeVideoOptions['delayController']
+): VideoMetadataSourceRegistry {
+  const scrapers = buildRegistry()
+  const descriptors = listMergedPluginDescriptors('video')
+  const sources: VideoMetadataSource[] = []
+  for (const descriptor of descriptors) {
+    if (descriptor.source === 'composite' || descriptor.configured === false) continue
+    const scraper = scrapers.get(descriptor.name)
+    if (!scraper) continue
+    sources.push(
+      new WebScraperSourceAdapter({
+        scraper,
+        plugin: descriptor,
+        proxyUrl,
+        runWithDelay: delayController
+          ? (pluginName, task) => delayController.run('video', pluginName, task)
+          : undefined
+      })
+    )
+  }
+  sources.push(createDefaultLocalNfoSourceAdapter(getDefaultNfoFileStore()))
+  return new VideoMetadataSourceRegistry(sources)
+}
+
+function localNfoPluginDescriptor(): ScraperPluginDescriptor {
+  return {
+    kind: 'video',
+    name: LOCAL_NFO_SOURCE_NAME,
+    version: '1.0.0',
+    description: '读取影片资源旁经过安全校验的本地 NFO；不会持续同步。',
+    author: 'Javdex',
+    source: 'builtin',
+    removable: false,
+    exportable: false,
+    editable: false,
+    debuggable: false,
+    configured: true,
+    supportedFields: [...LOCAL_NFO_SUPPORTED_FIELDS]
+  }
+}
+
+function sourceForName(
+  registry: VideoMetadataSourceRegistry,
+  name: string
+): VideoMetadataSource {
+  return name === LOCAL_NFO_SOURCE_NAME || name === LOCAL_NFO_SOURCE_ID
+    ? registry.require(LOCAL_NFO_SOURCE_ID)
+    : registry.requireLegacyPlugin(name)
 }
 
 export function listScraperNames(): string[] {
@@ -55,15 +122,25 @@ export function listScraperNames(): string[] {
     ...[...buildRegistry().keys()].filter((name) => runnable.has(name)),
     ...listCompositePluginDescriptors('video')
       .filter((plugin) => plugin.configured !== false)
-      .map((plugin) => plugin.name)
+      .map((plugin) => plugin.name),
+    LOCAL_NFO_SOURCE_NAME
   ]
 }
 
 export function listScraperPlugins(): ScraperPluginDescriptor[] {
-  return listMergedPluginDescriptors('video')
+  return [...listMergedPluginDescriptors('video'), localNfoPluginDescriptor()]
+}
+
+/** Main-process source catalog; renderer-facing plugin APIs remain unchanged in milestone 1. */
+export function listVideoMetadataSources() {
+  const settings = getSettings()
+  return buildSourceRegistry(resolveScrapeProxyUrl(settings)).list()
 }
 
 function assertVideoScraperRunnable(name: string): ScraperPluginDescriptor {
+  if (name === LOCAL_NFO_SOURCE_NAME || name === LOCAL_NFO_SOURCE_ID) {
+    return localNfoPluginDescriptor()
+  }
   const descriptor = listMergedPluginDescriptors('video').find((plugin) => plugin.name === name)
   if (!descriptor) throw new Error(`影片刮削插件「${name}」不存在`)
   if (descriptor.configured === false) {
@@ -106,193 +183,54 @@ export interface ScrapeVideoOptions {
   }
 }
 
-function normalizeCandidateSourceUrl(sourceUrl: string | undefined): string | null {
-  if (!sourceUrl) return null
-  try {
-    const rawUrl = sourceUrl.trim()
-    const parsed = new URL(rawUrl)
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
-    const rawAuthority = rawUrl.match(/^https?:\/\/[^/?#]*/i)?.[0]
-    const hasExplicitPath = rawAuthority
-      ? rawUrl.slice(rawAuthority.length).startsWith('/')
-      : true
-    parsed.hash = ''
-    const normalized = parsed.toString()
-    if (!hasExplicitPath && parsed.pathname === '/') {
-      const normalizedAuthority = normalized.match(/^https?:\/\/[^/?#]*/i)?.[0]
-      if (normalizedAuthority) return `${normalizedAuthority}${parsed.search}`
-    }
-    return normalized
-  } catch {
-    return null
-  }
-}
-
-function collectExactVideoCandidates(
-  rawResult: unknown,
-  videoCode: string,
-  supportedFields: Set<VideoScrapeField>
-): { candidates: ScrapeResult[]; warnings: string[] } {
-  const normalizedCode = normalizeVideoCode(videoCode)
-  const warnings: string[] = []
-  const seenUrls = new Set<string>()
-  const candidates: ScrapeResult[] = []
-  const trustedRawResult = pickDeclaredRawVideoFields(rawResult, supportedFields)
-  for (const candidate of normalizeVideoScrapeCandidates(trustedRawResult, videoCode)) {
-    let candidateCode: string
-    try {
-      candidateCode = normalizeVideoCode(candidate.code)
-    } catch {
-      warnings.push('插件返回了无效番号候选，已排除')
-      continue
-    }
-    if (candidateCode !== normalizedCode) {
-      warnings.push(`插件返回的候选番号 ${candidate.code} 与 ${normalizedCode} 不完全匹配，已排除`)
-      continue
-    }
-    const normalizedUrl = normalizeCandidateSourceUrl(candidate.sourceUrl)
-    if (normalizedUrl && seenUrls.has(normalizedUrl)) continue
-    if (normalizedUrl) seenUrls.add(normalizedUrl)
-    candidates.push(projectVideoScrapeResult(candidate, supportedFields, normalizedCode))
-  }
-  return { candidates, warnings }
-}
-
-function pickDeclaredRawVideoFields(
-  value: unknown,
-  supportedFields: Set<VideoScrapeField>
-): unknown {
-  if (Array.isArray(value)) {
-    return value.map((candidate) => pickDeclaredRawVideoFields(candidate, supportedFields))
-  }
-  if (!value || typeof value !== 'object') return value
-  const source = value as Record<string, unknown>
-  const result: Record<string, unknown> = { code: source.code }
-  const copy = (field: VideoScrapeField, ...keys: string[]): void => {
-    if (!supportedFields.has(field)) return
-    for (const key of keys) result[key] = source[key]
-  }
-  copy('title', 'title')
-  copy('summary', 'summary')
-  copy('cover', 'coverUrl')
-  copy('releaseDate', 'releaseDate')
-  copy('maker', 'maker')
-  copy('publisher', 'publisher')
-  copy('series', 'series')
-  copy('director', 'director')
-  copy('duration', 'durationSeconds')
-  if (supportedFields.has('actressesFemale') || supportedFields.has('actressesMale')) {
-    result.actresses = source.actresses
-  }
-  copy('tags', 'tags')
-  copy('source', 'sourceUrl')
-  copy('rating', 'ratingAverage', 'ratingCount')
-  copy('samples', 'sampleImageUrls')
-  return result
-}
-
-async function fetchUsableImage(url: string): Promise<Buffer | null> {
-  try {
-    const data = await scrapeBrowser.fetchBuffer(url)
-    return mediaAssetStore.isUsableImageBuffer(data) ? data : null
-  } catch {
-    return null
-  }
-}
-
-async function stageVideoCandidates(
-  candidates: ScrapeResult[],
-  supportedFields: Set<VideoScrapeField>
-): Promise<{ candidates: PendingVideoScrapeCandidateInput[]; warnings: string[] }> {
-  const warnings: string[] = []
-  const stagedCandidates: PendingVideoScrapeCandidateInput[] = []
-  for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
-    const result = candidates[candidateIndex]
-    const resources: Parameters<typeof mediaAssetStore.stageVideoScrapeImages>[0] = []
-    if (supportedFields.has('cover') && result.coverUrl) {
-      const data = await fetchUsableImage(result.coverUrl)
-      if (data) {
-        resources.push({ field: 'cover', position: 0, remoteUrl: result.coverUrl, data })
-      } else {
-        warnings.push(`候选 ${candidateIndex + 1} 的封面暂存失败`)
-      }
-    }
-    if (supportedFields.has('samples') && result.sampleImageUrls?.length) {
-      const sampleBuffers = await Promise.all(result.sampleImageUrls.map(fetchUsableImage))
-      if (sampleBuffers.every((data): data is Buffer => data !== null)) {
-        sampleBuffers.forEach((data, position) => {
-          resources.push({
-            field: 'samples',
-            position,
-            remoteUrl: result.sampleImageUrls?.[position] ?? '',
-            data
-          })
-        })
-      } else {
-        warnings.push(`候选 ${candidateIndex + 1} 的样张暂存不完整，已放弃整组样张`)
-      }
-    }
-    const wantsFemale = supportedFields.has('actressesFemale')
-    const wantsMale = supportedFields.has('actressesMale')
-    if (wantsFemale || wantsMale) {
-      for (let position = 0; position < (result.actresses?.length ?? 0); position++) {
-        const actress = result.actresses?.[position]
-        if (!actress?.avatarUrl) continue
-        const gender = actress.gender ?? 'female'
-        if ((gender === 'female' && !wantsFemale) || (gender === 'male' && !wantsMale)) continue
-        const data = await fetchUsableImage(actress.avatarUrl)
-        if (data) {
-          resources.push({
-            field: 'actressAvatar',
-            position,
-            remoteUrl: actress.avatarUrl,
-            data
-          })
-        } else {
-          warnings.push(`候选 ${candidateIndex + 1} 的演员「${actress.name}」头像暂存失败`)
-        }
-      }
-    }
-    const staged = mediaAssetStore.stageVideoScrapeImages(resources)
-    stagedCandidates.push({
-      result,
-      sourceUrl: result.sourceUrl ?? null,
-      normalizedSourceUrl: normalizeCandidateSourceUrl(result.sourceUrl),
-      resources: staged.map((resource) => ({
-        field: resource.field,
-        position: resource.position,
-        remoteUrl: resource.remoteUrl,
-        stagedPath: resource.stagedPath,
-        width: resource.width,
-        height: resource.height,
-        sizeBytes: resource.sizeBytes
-      }))
-    })
-  }
-  return { candidates: stagedCandidates, warnings }
-}
-
 interface CompositeVideoCandidateSource {
   pluginName: string
   descriptor: ScraperPluginDescriptor | undefined
   selectedFields: VideoScrapeField[]
   supportedFields: Set<VideoScrapeField>
-  candidates: ScrapeResult[]
+  candidates: VideoMetadataCandidate[]
 }
 
 interface CompositeVideoOutcome {
   result: ScrapeResult | null
+  assets: MetadataAssetRef[]
   matchedFields: VideoScrapeField[]
   sources: CompositeVideoCandidateSource[]
   warnings: string[]
+  quietNoMatch: boolean
+}
+
+function projectCompositeCandidateAssets(
+  candidate: VideoMetadataCandidate,
+  selectedFields: ReadonlySet<VideoScrapeField>,
+  actressOffset: number
+): MetadataAssetRef[] {
+  const actressPositions = new Map<number, number>()
+  let projectedPosition = actressOffset
+  for (const [position, actress] of (candidate.result.actresses ?? []).entries()) {
+    const gender = actress.gender ?? 'female'
+    const selected =
+      (gender === 'female' && selectedFields.has('actressesFemale')) ||
+      (gender === 'male' && selectedFields.has('actressesMale'))
+    if (!selected) continue
+    actressPositions.set(position, projectedPosition)
+    projectedPosition += 1
+  }
+
+  return candidate.assets.flatMap((asset): MetadataAssetRef[] => {
+    if (asset.field === 'cover') return selectedFields.has('cover') ? [asset] : []
+    if (asset.field === 'samples') return selectedFields.has('samples') ? [asset] : []
+    const position = actressPositions.get(asset.position)
+    return position == null ? [] : [{ ...asset, position }]
+  })
 }
 
 async function scrapeCompositeVideo(
+  videoId: number,
   videoCode: string,
   compositeName: string,
   effectiveFields: VideoScrapeField[],
-  proxy: string,
-  delayController?: ScrapeVideoOptions['delayController']
+  sourceRegistry: VideoMetadataSourceRegistry
 ): Promise<CompositeVideoOutcome | null> {
   const composite = findCompositeScraper('video', compositeName)
   if (!composite) return null
@@ -302,34 +240,43 @@ async function scrapeCompositeVideo(
     if (!pluginName) continue
     grouped.set(pluginName, [...(grouped.get(pluginName) ?? []), field])
   }
-  const descriptors = listMergedPluginDescriptors('video')
+  const descriptors = listScraperPlugins()
+  const quietNoMatch =
+    grouped.size > 0 &&
+    [...grouped.keys()].every(
+      (name) => name === LOCAL_NFO_SOURCE_NAME || name === LOCAL_NFO_SOURCE_ID
+    )
   const sources: CompositeVideoCandidateSource[] = []
   const warnings: string[] = []
   let merged: ScrapeResult | null = null
+  const assets: MetadataAssetRef[] = []
   const matchedFields: VideoScrapeField[] = []
   for (const [pluginName, selectedFields] of grouped) {
-    const scraper = getScraper(pluginName)
+    assertVideoScraperRunnable(pluginName)
+    const source = sourceForName(sourceRegistry, pluginName)
     const descriptor = descriptors.find((item) => item.name === pluginName)
-    const supportedFields = new Set<VideoScrapeField>(
-      (descriptor?.supportedFields ?? ALL_VIDEO_SCRAPE_FIELDS).filter(
-        (field): field is VideoScrapeField =>
-          (ALL_VIDEO_SCRAPE_FIELDS as readonly string[]).includes(field)
-      )
-    )
-    const rawResult = delayController
-      ? await delayController.run('video', pluginName, () => scraper.parseTask(videoCode, proxy))
-      : await scraper.parseTask(videoCode, proxy)
-    const collected = collectExactVideoCandidates(rawResult, videoCode, supportedFields)
+    const supportedFields = new Set(source.descriptor.supportedFields)
+    const collected = await source.collect({
+      target: { kind: 'video', videoId, code: videoCode },
+      fields: selectedFields
+    })
     warnings.push(...collected.warnings.map((warning) => `字段源「${pluginName}」：${warning}`))
     if (collected.candidates.length === 0) continue
     sources.push({ pluginName, descriptor, selectedFields, supportedFields, candidates: collected.candidates })
-    matchedFields.push(...selectedFields)
-    merged = mergeVideoScrapeResults(
-      merged,
-      projectVideoScrapeResult(collected.candidates[0], new Set(selectedFields), videoCode)
+    const selected = new Set(selectedFields)
+    const candidate = collected.candidates[0]
+    const projected = projectVideoScrapeResult(candidate.result, selected, videoCode)
+    assets.push(
+      ...projectCompositeCandidateAssets(
+        candidate,
+        selected,
+        merged?.actresses?.length ?? 0
+      )
     )
+    matchedFields.push(...selectedFields)
+    merged = mergeVideoScrapeResults(merged, projected)
   }
-  return { result: merged, matchedFields, sources, warnings }
+  return { result: merged, assets, matchedFields, sources, warnings, quietNoMatch }
 }
 
 function resolveVideoFieldSourceNames(
@@ -355,6 +302,9 @@ export function resolveVideoScrapeFieldSources(scraperName?: string): {
   const settings = getSettings()
   const resolvedName = scraperName || settings.defaultScraper
   assertVideoScraperRunnable(resolvedName)
+  if (resolvedName === LOCAL_NFO_SOURCE_NAME || resolvedName === LOCAL_NFO_SOURCE_ID) {
+    return { sourceName: LOCAL_NFO_SOURCE_NAME, ratingSourceName: LOCAL_NFO_SOURCE_NAME }
+  }
   const composite = findCompositeScraper('video', resolvedName)
   const scraper = composite ? null : getScraper(scraperName)
   return resolveVideoFieldSourceNames(scraper, scraperName, settings.defaultScraper)
@@ -389,11 +339,12 @@ export async function scrapeVideo(
     supportedFields.has(field)
   )
   const proxy = resolveScrapeProxyUrl(settings)
-  const scraper = findCompositeScraper('video', scraperName || settings.defaultScraper)
+  const sourceRegistry = buildSourceRegistry(proxy, options?.delayController)
+  const source = findCompositeScraper('video', scraperName || settings.defaultScraper)
     ? null
-    : getScraper(scraperName)
+    : sourceForName(sourceRegistry, resolvedScraperName)
   const { sourceName, ratingSourceName } = resolveVideoFieldSourceNames(
-    scraper,
+    source ? { scraperName: source.descriptor.name } : null,
     scraperName,
     settings.defaultScraper
   )
@@ -410,30 +361,45 @@ export async function scrapeVideo(
   }
 
   try {
-    const compositeOutcome = scraper
+    const compositeOutcome = source
       ? null
       : await scrapeCompositeVideo(
+          videoId,
           video.code,
           scraperName || settings.defaultScraper,
           effective,
-          proxy,
-          options?.delayController
+          sourceRegistry
         )
-    const pluginRawResult = scraper
-      ? options?.delayController
-        ? await options.delayController.run('video', scraper.scraperName, () =>
-            scraper.parseTask(video.code, proxy)
-          )
-        : await scraper.parseTask(video.code, proxy)
-      : null
-    const collected = scraper
-      ? collectExactVideoCandidates(pluginRawResult, video.code, supportedFields)
+    const collected: MetadataCandidateBatch = source
+      ? await source.collect({
+          target: { kind: 'video', videoId, code: video.code },
+          fields: effective
+        })
       : {
-          candidates: compositeOutcome?.result ? [compositeOutcome.result] : [],
+          candidates: compositeOutcome?.result
+            ? [
+                {
+                  result: compositeOutcome.result,
+                  assets: compositeOutcome.assets,
+                  evidence: {
+                    kind: 'web-scraper',
+                    sourceId: `composite:${encodeURIComponent(resolvedScraperName)}`,
+                    sourceName: resolvedScraperName
+                  }
+                }
+              ]
+            : [],
           warnings: compositeOutcome?.warnings ?? []
         }
-    const result = scraper ? collected.candidates[0] : compositeOutcome?.result
+    const candidate = collected.candidates[0]
+    const result = candidate?.result
     if (!result) {
+      if (
+        source?.descriptor.kind === 'local-nfo' ||
+        compositeOutcome?.quietNoMatch
+      ) {
+        return { ok: true, skipped: true, warnings: collected.warnings }
+      }
       markScrapeFailed(videoId)
       return {
         ok: false,
@@ -442,7 +408,7 @@ export async function scrapeVideo(
       }
     }
 
-    const hasAmbiguousSource = scraper
+    const hasAmbiguousSource = source
       ? collected.candidates.length > 1
       : compositeOutcome?.sources.some((source) => source.candidates.length > 1) ?? false
     const fieldsToApply = compositeOutcome?.matchedFields ?? requested
@@ -463,7 +429,12 @@ export async function scrapeVideo(
             `候选会与影片 ID ${identityConflictVideoId} 的业务身份冲突，请选择合并或放弃`
           ]
       const persisted = await mediaAssetStore.coordinateDatabaseChange(async () => {
-        const stagedSources = scraper
+        const candidateStager = createVideoMetadataCandidateStager({
+          fetchRemote: (url) => scrapeBrowser.fetchBuffer(url),
+          readManagedRootFile: async (capability) =>
+            getDefaultNfoFileStore().readBytes(capability, 64 * 1024 * 1024)
+        })
+        const stagedSources = source
           ? [
               {
                 pluginName: resolvedScraperName,
@@ -472,7 +443,7 @@ export async function scrapeVideo(
                 pluginConfig: { supportedFields: [...supportedFields] },
                 sourceName,
                 selectedFields: effective,
-                staged: await stageVideoCandidates(collected.candidates, supportedFields)
+                staged: await candidateStager.stageForPending(collected.candidates)
               }
             ]
           : await Promise.all(
@@ -483,7 +454,7 @@ export async function scrapeVideo(
                 pluginConfig: { supportedFields: [...source.supportedFields] },
                 sourceName: source.pluginName,
                 selectedFields: source.selectedFields,
-                staged: await stageVideoCandidates(source.candidates, source.supportedFields)
+                staged: await candidateStager.stageForPending(source.candidates)
               }))
             )
         return replacePendingVideoScrape({
@@ -546,17 +517,22 @@ export async function scrapeVideo(
     }
     const previousPending = getPendingVideoScrapeForVideo(videoId)
     let replacedPendingStagedPaths: string[] = []
-    const delivery = await videoScrapeApplyService.deliverParsedResult({
+    const candidateStager = createVideoMetadataCandidateStager({
+      fetchRemote: (url) => scrapeBrowser.fetchBuffer(url),
+      readManagedRootFile: async (capability) =>
+        getDefaultNfoFileStore().readBytes(capability, 64 * 1024 * 1024)
+    })
+    const delivery = await videoScrapeApplyService.deliverCandidate({
       videoId,
       code: video.code,
-      result,
+      candidate,
+      candidateStager,
       selectedFields: effective,
       fieldsToApply,
       mode,
       sourceName,
       ratingSourceName,
       classificationOptions,
-      fetcher: (url) => scrapeBrowser.fetchBuffer(url),
       afterSuccessfulApply: previousPending
         ? () => {
             const deleted = deletePendingVideoScrape(previousPending.id)

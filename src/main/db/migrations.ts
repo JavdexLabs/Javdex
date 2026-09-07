@@ -14,6 +14,7 @@ import {
   MEDIA_LIBRARY_PENDING_SCAN_SCHEMA_SQL,
   MEDIA_LIBRARY_SCAN_SCHEMA_SQL,
   MEDIA_LIBRARY_VIDEO_RESOURCES_SCHEMA_SQL,
+  PENDING_RESOURCE_IDENTITIES_SCHEMA_SQL,
   PENDING_LOCAL_FILE_DELETIONS_SCHEMA_SQL,
   PENDING_VIDEO_DECISIONS_SCHEMA_SQL,
   RELATED_LINKS_SCHEMA_SQL,
@@ -21,7 +22,7 @@ import {
   VIDEO_SOURCES_SCHEMA_SQL
 } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 14
+export const CURRENT_SCHEMA_VERSION = 15
 
 type Migration = {
   version: number
@@ -1239,6 +1240,33 @@ function migrateToV14(database: Database.Database): void {
   }
 }
 
+function migrateToV15(database: Database.Database): void {
+  const existing = (
+    database.prepare('PRAGMA table_info(media_library_configs)').all() as Array<{
+      name: string
+      type: string
+      notnull: 0 | 1
+      dflt_value: string | null
+    }>
+  ).find((column) => column.name === 'auto_import_local_nfo')
+  if (existing) {
+    if (
+      existing.type.toUpperCase() !== 'INTEGER' ||
+      existing.notnull !== 1 ||
+      existing.dflt_value !== '1'
+    ) {
+      throw new Error('duplicate column name: auto_import_local_nfo')
+    }
+  } else {
+    database.exec(`
+      ALTER TABLE media_library_configs
+        ADD COLUMN auto_import_local_nfo INTEGER NOT NULL DEFAULT 1
+        CHECK(auto_import_local_nfo IN (0, 1));
+    `)
+  }
+  database.exec(PENDING_RESOURCE_IDENTITIES_SCHEMA_SQL)
+}
+
 function normalizeStoredRelatedLinks(database: Database.Database): void {
   for (const [table, entityColumn] of [
     ['organization_links', 'organization_id'],
@@ -1337,6 +1365,10 @@ const MIGRATIONS: Migration[] = [
   {
     version: 14,
     migrate: migrateToV14
+  },
+  {
+    version: 15,
+    migrate: migrateToV15
   }
 ]
 

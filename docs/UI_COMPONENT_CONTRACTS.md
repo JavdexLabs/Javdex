@@ -21,6 +21,7 @@
 - 结果数右对齐，并使用固定宽度策略避免刷新时跳动。
 - 搜索输入保持常驻；复杂筛选放进 popover。
 - toolbar 控件默认高度为 `--control-h-md` 或页面定义的 `--toolbar-control-h`。
+- `ListToolbar` 统一搜索、筛选、文本按钮和排序组的外框高度（默认 36px）；紧凑排序在顶栏中也跟随此高度。文本按钮通过 `data-ui="button"` 匹配，不依赖已经移除的 `.btn-sm` 类。筛选浮层内部控件独立保留自己的尺寸。
 
 推荐使用 `ListToolbar` 组合工具栏内容。页面只提供业务控件，不重复写 toolbar 结构。
 
@@ -107,10 +108,14 @@
 
 待确认收件箱在此之上再收敛决定流程。三类领域（扫描资源、影片刮削、演员名称冲突）共用 `PendingDecisionParts` 的原语：
 
-- `PendingWorkspace`：提出问题（eyebrow + 标题 + 说明 + 状态），并按 `alert` / `tabs` / `confirm` / `secondary` / `overlays` 插槽组织外框。modal 走 `overlays`，避免被工作区的 `overflow: hidden` 裁掉。
+- `PendingWorkspace`：展示对象、待办动作、原因与状态，并按 `alert` / `tabs` / `confirm` / `overlays` 插槽组织外框。modal 走 `overlays`，避免被工作区的 `overflow: hidden` 裁掉。
 - `PendingStep`：分步引导。每个领域的顺序都是“先选择，再预览影响”。
 - `PendingImpact*`：影响预览。值变化用 `PendingImpactRow`（旧值 → 新值 + 动作），只有归属或写入目标时用 `PendingImpactPair`。
-- `PendingConfirmBar`：底部常驻确认条，必须同时说明本次改动的摘要与作用范围。
+- `PendingConfirmBar`：底部只保留一条常驻确认栏，同时说明本次改动的摘要与作用范围。低频操作通过 `secondary` 插槽中的 `PendingSecondaryActions` 收进“更多处理”浮层，主操作保留在右侧。
+- 番号冲突使用 `PendingChoice` 展示具体番号和来源；先选择、再预览、最后显式确认，不通过多个并列按钮直接提交。
+- 媒体库筛选仅在扫描分类显示并生效，切换到其他分类时清除该筛选。
+- 待确认页顶部采用局部两行布局：标题与当前结果数一行，`WorkbenchTabs` 分类与媒体库筛选一行。筛选使用独立定宽容器，不放入分类项内部；窄容器下筛选整体换行、分类单行横向滚动。该工作区不套用列表搜索工具栏的左右分隔结构。
+- 分类数量为零时隐藏徽标；空状态文案对应当前分类和媒体库范围，指定媒体库无结果时提供“查看所有媒体库”。
 
 新增待确认领域时扩展这些原语，不要在单个 pane 内复制工作区骨架或影响预览布局。
 
@@ -125,6 +130,20 @@
 - 选中、就绪这类状态优先用 `aria-*` 或 `data-*` 属性选择器表达，不新增全局 `.is-*`。
 
 ## Migration Checklist
+
+### Settings forms
+
+- 功能启用/关闭统一使用 `Switch` / `SettingsSwitchRow`，多项勾选使用 `Checkbox`。控件形态不决定保存时机；需一起提交的字段使用草稿和 `SettingsFormActions`，Switch 也在保存后生效。迁移、加解密等任务使用动作按钮和 `ConfirmModal`。
+- 图标、颜色等带标题的选项组使用 `AppFormChoiceGroup`；标签与内容间距由组件维护，禁止依赖 fieldset 外层 gap。
+- `SettingsFormActions` 默认用于内容底部并保留 16px 间距，标题旁的操作必须指定 `placement="header"`。页面不额外补偿操作栏的顶部间距。
+- `useSettingsDraft` 保留未提交输入，只同步未编辑的字段。服务器刷新与本地修改同一字段时展示冲突提示；规范化保存值使用 `accept(saved, submitted)`，保留保存期间继续输入的内容。
+- 草稿表单通过 `useSettingsFormGuard` 登记 dirty、busy、保存和放弃处理。分类、子页签、作用域切换及返回操作统一提供继续编辑、放弃、保存后离开；组件内关闭弹窗也使用此入口。
+- 保存状态属于实际提交组；串行保存的互斥与版本号由命令入口的 ref 管理，不用过时渲染闭包里的 busy 值阻止后续组。
+- 测试连接说明使用的是当前草稿还是已保存值。代理测试使用当前输入；模型测试使用已保存连接，连接有草稿时要求先保存。
+- `SettingsWorkspaceShell` 只负责分类导航、子页签和内容面板，不重复显示分类大标题、简介或笼统的“全局设置”。子页签数据统一来自 `settingsRoutes.ts`；保留面板的无障碍名称与页签关联。
+- 内容卡片标题负责分组；具体媒体库名称、切换器、状态与操作保留。作用范围、生效时机及操作提示紧邻对应设置或按钮，不再集中放在页面顶部。
+
+### General
 
 新建或重构页面时，按下面清单检查：
 

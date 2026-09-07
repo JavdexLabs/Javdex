@@ -32,6 +32,7 @@ const library: MediaLibraryDetail = {
     autoScanIntervalMinutes: 60,
     minImportDurationMinutes: 0,
     autoMergeSameCodeResources: false,
+    autoImportLocalNfo: true,
     removeResourceLessMemberships: false,
     defaultVideoScraper: null,
     defaultSortBy: 'release_date',

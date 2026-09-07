@@ -1,3 +1,4 @@
+import Checkbox from './Checkbox'
 import { useDeferredValue, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
@@ -106,8 +107,7 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
             </EditFormField>
             {series && draft.mainName.trim() !== series.mainName ? (
               <label className="check-row entity-edit-field--full">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={draft.keepPreviousMainName}
                   onChange={(event) =>
                     setDraft({ ...draft, keepPreviousMainName: event.target.checked })

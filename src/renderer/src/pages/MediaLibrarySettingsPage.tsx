@@ -15,6 +15,9 @@ import {
   type MediaLibrarySummary
 } from '@shared/mediaLibraryTypes'
 import { api } from '../api'
+import { useSettingsDraft } from '../settings/useSettingsDraft'
+import { useSettingsFormGuard } from '../settings/SettingsLeaveGuard'
+import SettingsFormActions from '../components/settings/SettingsFormActions'
 import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
 import { NavIcon } from '../components/NavIcons'
@@ -113,16 +116,39 @@ export function MediaLibrarySettingsContent({
     () => new Set((pendingGroupsQuery.data ?? []).map((group) => group.id)),
     [pendingGroupsQuery.data]
   )
+  const pendingIdentitiesQuery = useQuery({
+    queryKey: ['pending-resource-identities', libraryId],
+    queryFn: () => api.scan.listPendingResourceIdentities(libraryId)
+  })
+  const pendingResourceIdentityIds = useMemo(
+    () => new Set((pendingIdentitiesQuery.data ?? []).map((identity) => identity.id)),
+    [pendingIdentitiesQuery.data]
+  )
+  const pendingScrapesQuery = useQuery({
+    queryKey: ['pending-video-scrapes'],
+    queryFn: () => api.scrape.listPending()
+  })
+  const pendingVideoScrapeIds = useMemo(
+    () => new Set((pendingScrapesQuery.data ?? []).map((pending) => pending.id)),
+    [pendingScrapesQuery.data]
+  )
   const scan = useMediaLibraryScanController(libraryId, {
-    onSettled: () => libraryQuery.refetch().then(() => undefined)
+    onSettled: () =>
+      Promise.all([
+        libraryQuery.refetch(),
+        pendingGroupsQuery.refetch(),
+        pendingIdentitiesQuery.refetch(),
+        pendingScrapesQuery.refetch()
+      ]).then(() => undefined)
   })
   const library = libraryQuery.data ?? null
-  const [identityDraft, setIdentityDraft] =
-    useState<MediaLibraryIdentityDraft | null>(null)
-  const [configDraft, setConfigDraft] =
-    useState<MediaLibraryConfigValues | null>(null)
+  const identityForm = useSettingsDraft<MediaLibraryIdentityDraft | null>(library ? identityDraftFromLibrary(library) : null)
+  const configForm = useSettingsDraft<MediaLibraryConfigValues | null>(library ? configDraftFromLibrary(library.config) : null)
+  const { draft: identityDraft, setDraft: setIdentityDraft } = identityForm
+  const { draft: configDraft, setDraft: setConfigDraft } = configForm
   const immediateConfigMutationPendingRef = useRef(false)
   const [busy, setBusy] = useState<MediaLibrarySettingsBusyAction>(null)
+  const mutationBusyRef = useRef(false)
   const [rootRemoval, setRootRemoval] = useState<RootRemovalState | null>(null)
   const [rootMigration, setRootMigration] = useState<RootMigrationState | null>(
     null
@@ -141,12 +167,6 @@ export function MediaLibrarySettingsContent({
     setSelectedScanMetric(null)
   }, [libraryId])
 
-  useEffect(() => {
-    if (!library) return
-    setIdentityDraft(identityDraftFromLibrary(library))
-    setConfigDraft(configDraftFromLibrary(library.config))
-  }, [library])
-
   const refreshSurfaces = async (): Promise<void> => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['media-libraries'] }),
@@ -161,7 +181,8 @@ export function MediaLibrarySettingsContent({
     successMessage: string,
     operation: () => Promise<unknown>
   ): Promise<boolean> => {
-    if (busy) return false
+    if (mutationBusyRef.current) return false
+    mutationBusyRef.current = true
     setBusy(action)
     try {
       await operation()
@@ -172,6 +193,7 @@ export function MediaLibrarySettingsContent({
       toast.show(messageFromError(error), 'error')
       return false
     } finally {
+      mutationBusyRef.current = false
       setBusy(null)
     }
   }
@@ -185,15 +207,15 @@ export function MediaLibrarySettingsContent({
     )
   }
 
-  const saveIdentity = async (): Promise<void> => {
-    if (!library || !identityDraft) return
+  const saveIdentity = async (): Promise<boolean> => {
+    if (!library || !identityDraft) return false
     try {
       const patch = buildMediaLibraryIdentityPatch(library, identityDraft)
       if (!patch) {
         toast.show('常规设置没有变化', 'info')
-        return
+        return true
       }
-      await runMutation('identity', '媒体库常规设置已保存', () =>
+      return await runMutation('identity', '媒体库常规设置已保存', () =>
         api.mediaLibraries.update({
           libraryId,
           expectedRevision: library.revision,
@@ -202,14 +224,15 @@ export function MediaLibrarySettingsContent({
       )
     } catch (error) {
       toast.show(messageFromError(error), 'error')
+      return false
     }
   }
 
   const saveConfig = async (
     keys: readonly MediaLibraryConfigKey[],
     successMessage: string
-  ): Promise<void> => {
-    if (!library || !configDraft) return
+  ): Promise<boolean> => {
+    if (!library || !configDraft) return false
     try {
       const patch = buildMediaLibraryConfigPatch(
         library.config,
@@ -218,9 +241,9 @@ export function MediaLibrarySettingsContent({
       )
       if (!patch) {
         toast.show('当前设置没有变化', 'info')
-        return
+        return true
       }
-      await runMutation('config', successMessage, () =>
+      return await runMutation('config', successMessage, () =>
         api.mediaLibraries.updateConfig({
           libraryId,
           expectedRevision: library.config.revision,
@@ -229,8 +252,12 @@ export function MediaLibrarySettingsContent({
       )
     } catch (error) {
       toast.show(messageFromError(error), 'error')
+      return false
     }
   }
+
+  useSettingsFormGuard({ label: '媒体库基本信息', dirty: identityForm.dirty, busy: busy === 'identity', save: saveIdentity, discard: identityForm.reset })
+  useSettingsFormGuard({ label: '媒体库规则', dirty: configForm.dirty, busy: busy === 'config', save: () => saveConfig(Object.keys(configDraft ?? {}) as MediaLibraryConfigKey[], '媒体库规则已保存'), discard: configForm.reset })
 
   const addRoots = async (): Promise<void> => {
     if (!library || busy) return
@@ -657,7 +684,7 @@ export function MediaLibrarySettingsContent({
               identityDraft={identityDraft}
               setIdentityDraft={setIdentityDraft}
               formDisabled={formDisabled}
-              saveIdentity={saveIdentity}
+              saveIdentity={async () => { await saveIdentity() }}
             />
           ) : null}
           {tab === 'sources' ? (
@@ -667,6 +694,8 @@ export function MediaLibrarySettingsContent({
               scan={scan}
               latestScanSummary={latestScanSummary}
               pendingScanGroupIds={pendingScanGroupIds}
+              pendingResourceIdentityIds={pendingResourceIdentityIds}
+              pendingVideoScrapeIds={pendingVideoScrapeIds}
               selectedScanMetric={selectedScanMetric}
               setSelectedScanMetric={setSelectedScanMetric}
               configDraft={configDraft}
@@ -687,7 +716,7 @@ export function MediaLibrarySettingsContent({
               formDisabled={formDisabled}
               defaultScraper={defaultScraper}
               scraperOptions={scraperOptions}
-              saveConfig={saveConfig}
+              saveConfig={async (keys, message) => { await saveConfig(keys, message) }}
             />
           ) : null}
           {tab === 'display' ? (
@@ -695,7 +724,7 @@ export function MediaLibrarySettingsContent({
               configDraft={configDraft}
               updateConfigDraft={updateConfigDraft}
               formDisabled={formDisabled}
-              saveConfig={saveConfig}
+              saveConfig={async (keys, message) => { await saveConfig(keys, message) }}
             />
           ) : null}
           {tab === 'danger' ? (
@@ -707,6 +736,11 @@ export function MediaLibrarySettingsContent({
               restoreLibrary={restoreLibrary}
               openDeleteConfirmation={openDeleteConfirmation}
             />
+          ) : null}
+          {!['sources', 'danger'].includes(tab) ? (
+            <SettingsFormActions dirty={identityForm.dirty || configForm.dirty} saving={busy === 'config' || busy === 'identity'} disabled={formDisabled} conflict={identityForm.conflict || configForm.conflict}
+              onSave={() => void (async () => { if (identityForm.dirty && !await saveIdentity()) return; if (configForm.dirty) await saveConfig(Object.keys(configDraft) as MediaLibraryConfigKey[], '媒体库规则已保存') })()}
+              onCancel={() => { identityForm.reset(); configForm.reset() }} />
           ) : null}
         </section>
       </div>

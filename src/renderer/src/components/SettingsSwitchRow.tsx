@@ -26,6 +26,7 @@ export default function SettingsSwitchRow({
         {description ? <span className={styles.description}>{description}</span> : null}
       </span>
       <Switch
+        aria-label={title}
         checked={checked}
         disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}

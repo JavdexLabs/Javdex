@@ -11,6 +11,23 @@ import { isPathUnderRoot } from '../scanner/libraryPathUtils'
 
 const MANAGED_ROOT_FILE_ERROR = '只能操作身份有效的启用媒体库根目录内文件'
 
+export interface AuthorizedMediaLibraryRoot {
+  readonly root: MediaLibraryRoot
+  readonly realPath: string
+}
+
+export interface AuthorizedMediaLibraryRootFile extends AuthorizedMediaLibraryRoot {
+  readonly fileRealPath: string
+  readonly stat: fs.Stats
+}
+
+export type AuthorizedMediaLibraryRootFileInspector = (
+  libraryId: number,
+  rootId: number,
+  filePath: string,
+  expectedRoot?: Readonly<MediaLibraryRoot>
+) => AuthorizedMediaLibraryRootFile
+
 function rejectManagedRootFile(): never {
   throw new Error(MANAGED_ROOT_FILE_ERROR)
 }
@@ -93,6 +110,54 @@ function assertRootFile(
     ) {
       rejectManagedRootFile()
     }
+  }
+}
+
+function authorizeRootInspection(
+  libraryId: number,
+  rootId: number,
+  expectedRoot?: Readonly<MediaLibraryRoot>
+): AuthorizedMediaLibraryRoot {
+  const root = requireActivePersistedRoot(libraryId, rootId)
+  return {
+    root,
+    realPath: requireCurrentRootIdentity(root, expectedRoot ?? root)
+  }
+}
+
+function inspectAuthorizedRootFile(
+  filePath: string,
+  authorization: AuthorizedMediaLibraryRoot
+): AuthorizedMediaLibraryRootFile {
+  if (!path.isAbsolute(filePath)) rejectManagedRootFile()
+  try {
+    const fileRealPath = fs.realpathSync.native(filePath)
+    const stat = fs.statSync(fileRealPath)
+    if (!stat.isFile() || !isPathUnderRoot(fileRealPath, authorization.realPath)) {
+      rejectManagedRootFile()
+    }
+    return { ...authorization, fileRealPath, stat }
+  } catch {
+    rejectManagedRootFile()
+  }
+}
+
+/**
+ * Create a plan-scoped inspector. Root identity is authorized once per root while every
+ * source file still receives its own canonical-path and regular-file check.
+ */
+export function createAuthorizedMediaLibraryRootFileInspector(): AuthorizedMediaLibraryRootFileInspector {
+  const roots = new Map<string, AuthorizedMediaLibraryRoot>()
+  return (libraryId, rootId, filePath, expectedRoot) => {
+    const key = `${libraryId}:${rootId}`
+    let authorization = roots.get(key)
+    if (!authorization) {
+      authorization = authorizeRootInspection(libraryId, rootId, expectedRoot)
+      roots.set(key, authorization)
+    } else if (expectedRoot && !hasSamePersistedIdentity(authorization.root, expectedRoot)) {
+      rejectManagedRootFile()
+    }
+    return inspectAuthorizedRootFile(filePath, authorization)
   }
 }
 

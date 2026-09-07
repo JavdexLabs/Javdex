@@ -7,7 +7,6 @@ import { api } from '../api'
 import { clearListScrollForPrimaryNav } from '../listView/listViewMemory'
 import {
   mediaLibraryPath,
-  mediaLibrarySettingsPath,
   parseActiveMediaLibraryId,
   rememberMediaLibrarySettingsLibraryId
 } from '../listView/mediaLibraryRoutes'
@@ -47,9 +46,6 @@ export default function MediaLibraryNav(): JSX.Element {
   })
   const activeLibraries = (librariesQuery.data ?? []).filter(
     (library) => library.status === 'active'
-  )
-  const archivedLibraries = (librariesQuery.data ?? []).filter(
-    (library) => library.status === 'archived'
   )
 
   const handleCreated = (library: { id: number; name: string }, scanAfterCreate: boolean): void => {
@@ -92,7 +88,7 @@ export default function MediaLibraryNav(): JSX.Element {
     <>
       <div
         className={styles.group}
-        data-active={activeLibraryId ? true : undefined}
+        data-active={activeLibraries.some((library) => library.id === activeLibraryId) || undefined}
         role="group"
         aria-label="媒体库"
       >
@@ -126,7 +122,7 @@ export default function MediaLibraryNav(): JSX.Element {
             >
               读取失败，重试
             </button>
-          ) : (librariesQuery.data ?? []).length === 0 ? (
+          ) : activeLibraries.length === 0 ? (
             <div className={styles.status}>暂无媒体库</div>
           ) : (
             <>
@@ -157,37 +153,6 @@ export default function MediaLibraryNav(): JSX.Element {
                           aria-label={`${library.pendingRemovalRootCount} 个来源待移除`}
                         />
                       ) : null}
-                    </NavLink>
-                  </div>
-                )
-              })}
-              {archivedLibraries.length > 0 ? (
-                <div className={styles.archivedLabel}>已归档</div>
-              ) : null}
-              {archivedLibraries.map((library) => {
-                const to = mediaLibrarySettingsPath(library.id, 'danger')
-                const active = activeLibraryId === library.id
-                return (
-                  <div className="nav-item-row" key={library.id}>
-                    <NavLink
-                      to={to}
-                      draggable={false}
-                      onClick={(event) => {
-                        event.preventDefault()
-                        const go = (): void => navigate(to)
-                        if (location.pathname === ROUTE_PATH.settingsPluginDev) requestLeave(go)
-                        else go()
-                      }}
-                      className={`nav-item ${styles.item} ${styles.archivedItem}${active ? ' active' : ''}`}
-                      title={`${library.name}（已归档）`}
-                    >
-                      <span
-                        className={`nav-icon ${styles.icon}`}
-                        style={mediaLibraryIdentityStyle(library.color)}
-                      >
-                        <NavIcon name={library.icon} />
-                      </span>
-                      <span className={`nav-label ${styles.name}`}>{library.name}</span>
                     </NavLink>
                   </div>
                 )

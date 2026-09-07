@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<movie>
+  <uniqueid type="num" default="true">META-001</uniqueid>
+  <title>Metadata</title>
+  <plot>Stable summary</plot>
+  <premiered>2026-09-05</premiered>
+  <studio>Maker</studio>
+  <publisher>Publisher</publisher>
+  <set>
+    <name>Series</name>
+  </set>
+  <director>Director</director>
+  <runtime>90</runtime>
+</movie>

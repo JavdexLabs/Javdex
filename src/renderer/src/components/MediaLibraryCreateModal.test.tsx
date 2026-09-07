@@ -152,6 +152,11 @@ describe('MediaLibraryCreateModal', () => {
 
     act(() => submitStep())
     assert.match(renderedText(), /扫描行为/)
+    assert.match(renderedText(), /本地元数据/)
+    assert.equal(
+      renderer.root.findByProps({ 'aria-label': '自动导入本地 NFO' }).props.checked,
+      true
+    )
     const interval = renderer.root.findByProps({ min: 5, max: 10_080 })
     act(() => interval.props.onChange({ target: { value: '1' } }))
     act(() => submitStep())
@@ -206,6 +211,10 @@ describe('MediaLibraryCreateModal', () => {
     assert.equal(renderer.root.findAllByProps({ title: '/media/b' }).length, 1)
 
     act(() => submitStep())
+    act(() => {
+      renderer?.root.findByProps({ 'aria-label': '自动导入本地 NFO' })
+        .props.onChange({ target: { checked: false } })
+    })
     act(() => submitStep())
     const firstScan = renderer.root.findByProps({ 'aria-label': '创建后立即扫描' })
     assert.equal(firstScan.props.disabled, false)
@@ -237,6 +246,7 @@ describe('MediaLibraryCreateModal', () => {
       { path: '/media/b', state: 'active' }
     ])
     assert.equal(createInput?.config?.autoScanIntervalMinutes, 1440)
+    assert.equal(createInput?.config?.autoImportLocalNfo, false)
     assert.equal(createdScanAfterCreate, true)
   })
 })

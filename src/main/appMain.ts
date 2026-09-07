@@ -27,6 +27,8 @@ import { agentMetadataCollection } from './services/agentMetadata/agentMetadataC
 import { resolveMainWindowAssetPaths } from './mainWindowPaths'
 import { bootstrapLegacyMediaLibrary } from './services/legacyMediaLibraryBootstrap'
 import { getSettings, updateSettings } from './settings/settingsStore'
+import { nfoExportTaskController } from './nfo/export/nfoExportTaskController'
+import { bindNfoExportWindowGuard } from './nfo/export/nfoExportWindowGuard'
 
 let mainWindow: BrowserWindow | null = null
 let shutdownInProgress = false
@@ -102,6 +104,7 @@ function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
   })
   mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  bindNfoExportWindowGuard(mainWindow, nfoExportTaskController, () => shutdownInProgress)
 
   // electron-vite injects this env var in dev for HMR.
   const devUrl = process.env['ELECTRON_RENDERER_URL']
@@ -226,7 +229,8 @@ if (gotSingleInstanceLock) {
     void Promise.allSettled([
       pluginDeveloper.dispose(),
       libraryCurator.dispose(),
-      agentMetadataCollection.dispose()
+      agentMetadataCollection.dispose(),
+      nfoExportTaskController.dispose()
     ])
       .then(() => Promise.allSettled([
         agentExecution.dispose(),

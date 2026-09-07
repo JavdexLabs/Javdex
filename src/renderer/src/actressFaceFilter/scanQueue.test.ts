@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  isActressFaceScanFailed,
   scanActressFaceTargets,
   type ActressFaceScanProgress,
   type ActressFaceScanTarget
@@ -14,6 +15,17 @@ const targets: ActressFaceScanTarget[] = [
 ]
 
 describe('actress face scan queue', () => {
+  it('reports total detection failure without confusing partial or empty results with failure', async () => {
+    const result = await scanActressFaceTargets(targets, new Map(), async () => {
+      throw new Error('Non-origin-clean ImageBitmap cannot be transferred')
+    }, () => false, () => {})
+    assert.equal(result.failed, 3)
+    assert.equal(isActressFaceScanFailed(result), true)
+    assert.equal(isActressFaceScanFailed({ ...result, hasFace: 1 }), false)
+    assert.equal(isActressFaceScanFailed({ ...result, withoutFace: 1 }), false)
+    assert.equal(isActressFaceScanFailed({ ...result, failed: 0, total: 0 }), false)
+    assert.equal(isActressFaceScanFailed({ ...result, cancelled: true }), false)
+  })
   it('reuses cached face statuses and does not invoke detection for them', async () => {
     const cache: ActressFaceScanCache = new Map([
       [1, { fingerprint: 'a', status: 'without-face' }]

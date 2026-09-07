@@ -1,7 +1,7 @@
 .formField {
   display: grid;
   min-width: 0;
-  gap: 6px;
+  gap: var(--form-label-gap);
 }
 
 .formLabel {
@@ -16,9 +16,30 @@
   line-height: var(--settings-lh, 1.45);
 }
 
+.choiceGroup {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.choiceLegend {
+  padding: 0 0 var(--form-label-gap);
+  color: var(--text-secondary);
+  font-size: var(--settings-fs-secondary, 12px);
+  font-weight: var(--settings-fw-label, 600);
+  line-height: var(--settings-lh, 1.45);
+}
+
+.choiceContent {
+  display: grid;
+  min-width: 0;
+  gap: var(--form-label-gap);
+}
+
 .formSection {
   display: grid;
-  gap: 10px;
+  gap: var(--form-field-gap);
 }
 
 .formSection + .formSection {

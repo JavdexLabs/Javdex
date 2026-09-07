@@ -7,6 +7,7 @@ import type {
   LibraryScanLatestSnapshot,
   LibraryScanSummary
 } from '@shared/libraryTypes'
+import type { PendingItemKey } from '../../listView/pendingRoutes'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 Object.defineProperty(globalThis, 'window', {
@@ -76,11 +77,17 @@ function audit(files: LibraryScanAudit['files']): LibraryScanAudit {
 async function renderPanel({
   scanSummary,
   scanAudit,
-  unrecognized = []
+  unrecognized = [],
+  currentPendingIdentityIds = new Set(),
+  currentPendingScrapeIds = new Set(),
+  onOpenPending = () => undefined
 }: {
   scanSummary: LibraryScanSummary
   scanAudit: LibraryScanAudit | null
   unrecognized?: LibraryScanLatestSnapshot['unrecognized']
+  currentPendingIdentityIds?: Set<number>
+  currentPendingScrapeIds?: Set<number>
+  onOpenPending?: (target: PendingItemKey) => void
 }): Promise<void> {
   const { default: LibraryScanAuditPanel } = await import('./LibraryScanAuditPanel')
   act(() => {
@@ -91,10 +98,12 @@ async function renderPanel({
         selected={null}
         unrecognized={unrecognized}
         currentPendingGroupIds={new Set()}
+        currentPendingIdentityIds={currentPendingIdentityIds}
+        currentPendingScrapeIds={currentPendingScrapeIds}
         onSelect={() => undefined}
         onResolvedUnrecognized={() => undefined}
         onOpenVideo={() => undefined}
-        onOpenPending={() => undefined}
+        onOpenPending={onOpenPending}
       />
     )
   })
@@ -170,5 +179,153 @@ describe('LibraryScanAuditPanel', () => {
 
     const output = JSON.stringify(renderer?.toJSON())
     assert.match(output, /处理/)
+  })
+
+  it('shows an NFO identity conflict as a secondary scan disposition and opens the pending center', async () => {
+    let opened: PendingItemKey | null = null
+    await renderPanel({
+      scanSummary: summary({ scannedFiles: 1, pendingScanResources: 1 }),
+      scanAudit: {
+        ...audit([
+          {
+            outcome: 'pending',
+            rootId: 1,
+            sourceKind: 'local',
+            filePath: 'D:\\Media\\FILE-001.mp4',
+            normalizedCode: null,
+            groupId: null,
+            addedToQueue: true,
+            nfo: {
+              disposition: 'identity-conflict',
+              pendingIdentityId: 4
+            }
+          }
+        ]),
+        schemaVersion: 2
+      },
+      currentPendingIdentityIds: new Set([4]),
+      onOpenPending: (target) => {
+        opened = target
+      }
+    })
+
+    const output = JSON.stringify(renderer?.toJSON())
+    assert.match(output, /NFO 身份冲突/)
+    const process = renderer!.root
+      .findAllByType('button')
+      .find((candidate) => candidate.children.includes('处理待办'))
+    assert.ok(process)
+    act(() => process.props.onClick())
+    assert.deepEqual(opened, { domain: 'scan', id: 'identity-4' })
+  })
+
+  it('routes a current NFO candidate to its scrape pending item', async () => {
+    let opened: PendingItemKey | null = null
+    await renderPanel({
+      scanSummary: summary({ scannedFiles: 1, pendingScanResources: 1 }),
+      scanAudit: {
+        ...audit([
+          {
+            outcome: 'added',
+            rootId: 1,
+            sourceKind: 'local',
+            filePath: 'D:\\Media\\FILE-003.mp4',
+            videoId: 3,
+            videoCode: 'FILE-003',
+            resourceId: 3,
+            resourceKind: 'local',
+            createdVideo: true,
+            nfo: {
+              disposition: 'pending-candidate',
+              pendingScrapeId: 8
+            }
+          }
+        ]),
+        schemaVersion: 2
+      },
+      currentPendingScrapeIds: new Set([8]),
+      onOpenPending: (target) => {
+        opened = target
+      }
+    })
+
+    const process = renderer!.root
+      .findAllByType('button')
+      .find((candidate) => candidate.children.includes('处理待办'))
+    assert.ok(process)
+    act(() => process.props.onClick())
+    assert.deepEqual(opened, { domain: 'scrape', id: '8' })
+  })
+
+  it('shows historical NFO pending dispositions as resolved when their current rows are gone', async () => {
+    await renderPanel({
+      scanSummary: summary({ scannedFiles: 1, pendingScanResources: 1 }),
+      scanAudit: {
+        ...audit([
+          {
+            outcome: 'added',
+            rootId: 1,
+            sourceKind: 'local',
+            filePath: 'D:\\Media\\FILE-002.mp4',
+            videoId: 2,
+            videoCode: 'FILE-002',
+            resourceId: 2,
+            resourceKind: 'local',
+            createdVideo: true,
+            nfo: {
+              disposition: 'pending-candidate',
+              pendingScrapeId: 8
+            }
+          }
+        ]),
+        schemaVersion: 2
+      }
+    })
+
+    const output = JSON.stringify(renderer?.toJSON())
+    assert.match(output, /NFO 候选待确认/)
+    assert.match(output, /已处理/)
+    assert.equal(
+      renderer!.root
+        .findAllByType('button')
+        .some((candidate) => candidate.children.includes('处理待办')),
+      false
+    )
+  })
+
+  it('keeps the attention badge equal to the visible list when only an NFO warning exists', async () => {
+    await renderPanel({
+      scanSummary: summary({ scannedFiles: 1 }),
+      scanAudit: {
+        ...audit([
+          {
+            outcome: 'added',
+            rootId: 1,
+            sourceKind: 'local',
+            filePath: 'D:\\Media\\WARN-001.mp4',
+            videoId: 3,
+            videoCode: 'WARN-001',
+            resourceId: 3,
+            resourceKind: 'local',
+            createdVideo: true,
+            nfo: {
+              disposition: 'warning',
+              warnings: [{ code: 'nfo-warning', message: '远程图片已忽略' }]
+            }
+          }
+        ]),
+        schemaVersion: 2
+      }
+    })
+
+    const output = JSON.stringify(renderer?.toJSON())
+    assert.match(output, /异常与待办.*1/s)
+    assert.equal(
+      renderer!.root
+        .findAllByProps({ 'data-status': 'muted' })
+        .some((pill) => pill.children.join('') === '1 项'),
+      true
+    )
+    assert.match(output, /远程图片已忽略/)
   })
 })

@@ -26,6 +26,11 @@ export function normalizeAbsoluteLocalPath(filePath: string): {
   return { path: resolvedPath, normalizedPath: normalizeLocalPathIdentity(resolvedPath) }
 }
 
+/** Project only the final path component for safe UI display outside filesystem-owning layers. */
+export function localPathBasename(filePath: string): string {
+  return path.basename(filePath)
+}
+
 /** Both arguments must already use normalizeLocalPathIdentity. */
 export function isNormalizedLocalPathUnderRoot(
   normalizedPath: string,

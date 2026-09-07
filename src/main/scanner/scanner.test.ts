@@ -41,6 +41,16 @@ import {
   resolveMediaLibraryRootPath
 } from '../db/mediaLibraryRepo'
 import { isPathUnderRoot } from './libraryPathUtils'
+import { listPendingResourceIdentities } from '../db/pendingResourceIdentityRepo'
+import { resolvePendingResourceIdentity } from '../services/pendingResourceIdentityService'
+import type {
+  LocalNfoScanApplyResult,
+  LocalNfoScanService
+} from '../services/localNfoScanService'
+import type {
+  LocalNfoAnchor,
+  LocalNfoIdentityInspection
+} from '../metadata-sources'
 
 const TEST_LIBRARY_ID = 1
 let testRunSequence = 0
@@ -188,17 +198,13 @@ function importManual(
 
 function renameAndImport(
   oldPath: string,
-  newName: string,
-  code: string,
-  target: VideoResourceImportTarget
+  newName: string
 ) {
   return renameAndImportScoped({
     libraryId: TEST_LIBRARY_ID,
     rootId: rootIdForFile(oldPath),
     oldPath,
-    newName,
-    code,
-    target
+    newName
   })
 }
 
@@ -221,6 +227,22 @@ afterEach(() => {
 })
 
 describe('scanFolders', () => {
+  function fakeLocalNfoService(input: {
+    inspect: (anchor: LocalNfoAnchor) => LocalNfoIdentityInspection
+    apply?: (
+      videoId: number,
+      code: string,
+      anchors: readonly LocalNfoAnchor[]
+    ) => Promise<LocalNfoScanApplyResult>
+  }): LocalNfoScanService {
+    return {
+      inspectIdentity: input.inspect,
+      apply:
+        input.apply ??
+        (async () => ({ disposition: 'none' as const, warnings: [] }))
+    }
+  }
+
   it('rejects an archived library atomically when manual import resumes after probing', async () => {
     const root = makeTempRoot()
     const libraryPath = path.join(root, 'manual-import-race')
@@ -495,9 +517,7 @@ describe('scanFolders', () => {
         libraryId: library.id,
         rootId: libraryRoot.id,
         oldPath,
-        newName,
-        code: 'RACE-004',
-        target: { kind: 'existing', videoId }
+        newName
       },
       {
         readDurationSeconds: async () => {
@@ -513,7 +533,7 @@ describe('scanFolders', () => {
     fs.writeFileSync(newPath, 'replacement rename video')
     releaseProbe(3600)
 
-    await assert.rejects(importPromise, /无法恢复原文件名/)
+    assert.equal((await importPromise).outcome, 'failed')
     assert.equal(fs.readFileSync(newPath, 'utf8'), 'replacement rename video')
     assert.equal(
       fs.readFileSync(path.join(detachedOriginalPath, newName), 'utf8'),
@@ -1620,7 +1640,53 @@ describe('scanFolders', () => {
     )
   })
 
-  it('renames and imports only after an explicit target is supplied', async () => {
+  it('keeps an unrecognized rename and only rediscovers the renamed file', async () => {
+    const root = makeTempRoot()
+    const directory = path.join(root, 'library')
+    fs.mkdirSync(directory)
+    const oldPath = path.join(directory, 'unknown.mp4')
+    fs.writeFileSync(oldPath, 'video')
+    fs.writeFileSync(path.join(directory, 'IPX-999.mp4'), 'unrelated video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+
+    const unrecognized = await renameAndImport(oldPath, 'still-unknown')
+    assert.equal(unrecognized.outcome, 'unrecognized')
+    assert.equal(unrecognized.code, null)
+    assert.equal(fs.existsSync(oldPath), false)
+    assert.equal(fs.existsSync(unrecognized.newPath), true)
+    assert.equal(listVideos({}).total, 0)
+
+    const recognized = await renameAndImport(unrecognized.newPath, 'LOMD-007')
+    assert.equal(recognized.outcome, 'imported')
+    assert.equal(recognized.code, 'LOMD-007')
+    assert.deepEqual(listVideos({}).items.map((video) => video.code), ['LOMD-007'])
+  })
+
+  it('uses the scan same-code pending flow when automatic merging is disabled', async () => {
+    const root = makeTempRoot()
+    const directory = path.join(root, 'library')
+    fs.mkdirSync(directory)
+    const oldPath = path.join(directory, 'unknown.mp4')
+    fs.writeFileSync(oldPath, 'video')
+    fs.writeFileSync(path.join(directory, 'IPX-900.mp4'), 'existing video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const library = createMediaLibrary({ name: '待确认', roots: [{ path: directory }],
+      config: { autoMergeSameCodeResources: false, minImportDurationMinutes: 0 } })
+    await scanFoldersScoped({ libraryId: library.id, runId: 'before-rename', roots: library.roots })
+
+    const result = await renameAndImportScoped({
+      libraryId: library.id, rootId: library.roots[0].id, oldPath, newName: 'IPX-900-extra'
+    })
+    assert.equal(result.outcome, 'pending')
+    assert.equal(result.imported, false)
+    assert.equal(fs.existsSync(result.newPath), true)
+    const groups = listPendingScanGroupsScoped(library.id)
+    assert.equal(groups.length, 1)
+    assert.equal(groups[0].resources[0].filePath, result.newPath)
+    assert.equal(listVideos({}).total, 1)
+  })
+
+  it('renames and discovers the code without a manual code or target', async () => {
     const root = makeTempRoot()
     const library = path.join(root, 'library')
     fs.mkdirSync(library, { recursive: true })
@@ -1632,18 +1698,14 @@ describe('scanFolders', () => {
       filePath: path.join(root, 'existing.mp4')
     })
 
-    const result = await renameAndImport(
-      oldPath,
-      'IPX-900-extra',
-      ' ipx-900 ',
-      { kind: 'existing', videoId: existing.videoId }
-    )
+    const result = await renameAndImport(oldPath, 'IPX-900-extra')
 
     const renamedPath = path.join(library, 'IPX-900-extra.mp4')
     assert.deepEqual(result, {
       newPath: renamedPath,
       newName: 'IPX-900-extra.mp4',
       imported: true,
+      outcome: 'imported',
       code: 'IPX-900'
     })
     assert.equal(fs.existsSync(oldPath), false)
@@ -1665,12 +1727,7 @@ describe('scanFolders', () => {
     const scan = await scanFolders([library], undefined, { minImportDurationSeconds: null })
     assert.deepEqual(scan.unrecognizedFiles, [sourcePath])
 
-    const imported = await renameAndImport(
-      sourcePath,
-      'MANUAL-001.strm',
-      'manual-001',
-      { kind: 'new' }
-    )
+    const imported = await renameAndImport(sourcePath, 'MANUAL-001.strm')
     const newPath = path.join(library, 'MANUAL-001.strm')
     const video = listVideos({}).items[0]
     const resource = listVideoResources(video.id)[0]
@@ -1705,6 +1762,418 @@ describe('scanFolders', () => {
     const videos = listVideos({ limit: 10, offset: 0 })
     assert.equal(videos.total, 1)
     assert.equal(videos.items[0].code, 'IPX-535')
+  })
+
+  it('reuses scanned directory entries when checking a directory without NFO files', async (context) => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library)
+    for (let index = 1; index <= 30; index += 1) {
+      fs.writeFileSync(path.join(library, `FILE-${String(index).padStart(3, '0')}.mp4`), 'video')
+    }
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const originalRead = fs.readdirSync
+    let synchronousReads = 0
+    context.mock.method(fs, 'readdirSync', (...args: unknown[]) => {
+      if (args[0] === library) synchronousReads += 1
+      return Reflect.apply(originalRead, fs, args)
+    })
+    const result = await scanFolders([library], undefined, {
+      autoImportLocalNfo: true, readDurationSeconds: async () => null
+    })
+    assert.equal(result.imported, 30)
+    assert.equal(synchronousReads, 0, 'sidecar lookup must reuse the collected directory index')
+  })
+
+  for (const sourceKind of ['local', 'strm'] as const) {
+    it(`refreshes a changed ${sourceKind} identity snapshot on rescan before user confirmation`, async () => {
+      const root = makeTempRoot()
+      const library = path.join(root, 'library')
+      fs.mkdirSync(library)
+      const filePath = path.join(library, sourceKind === 'local' ? 'FILE-001.mp4' : 'FILE-001.strm')
+      fs.writeFileSync(filePath, sourceKind === 'local' ? 'video' : 'https://example.test/old.mp4')
+      initDatabaseAtPath(path.join(root, 'library.db'))
+      const service = fakeLocalNfoService({ inspect: () => ({ status: 'found', code: 'NFO-999', warnings: [] }) })
+      const options = { autoImportLocalNfo: true, localNfoService: service, readDurationSeconds: async () => null }
+      await scanFolders([library], undefined, options)
+      const previous = listPendingResourceIdentities(TEST_LIBRARY_ID)[0]
+      assert.ok(previous)
+      const newContent = sourceKind === 'local' ? 'changed video bytes' : 'https://example.test/changed-target.mp4'
+      fs.writeFileSync(filePath, newContent)
+      await assert.rejects(resolvePendingResourceIdentity(TEST_LIBRARY_ID, previous.id, {
+        expectedRevision: previous.revision, choice: 'nfo'
+      }, { nfoService: service }), /重新扫描/u)
+
+      await scanFolders([library], undefined, options)
+      assert.equal(listVideos({}).total, 0, 'rescan must keep the identity decision pending')
+      const refreshed = listPendingResourceIdentities(TEST_LIBRARY_ID)[0]
+      assert.equal(refreshed.id, previous.id)
+      assert.ok(refreshed.revision > previous.revision)
+      const result = await resolvePendingResourceIdentity(TEST_LIBRARY_ID, refreshed.id, {
+        expectedRevision: refreshed.revision, choice: 'nfo'
+      }, { nfoService: service, readDurationSeconds: async () => null })
+      assert.equal(result.status, 'assigned')
+      assert.equal(listPendingResourceIdentities(TEST_LIBRARY_ID).length, 0)
+      if (result.status === 'assigned') {
+        assert.ok(result.videoId)
+        assert.equal(listVideoResources(result.videoId)[0].locator, sourceKind === 'local' ? filePath : newContent)
+      }
+    })
+  }
+
+  it('uses NFO identity only for newly discovered resources when automatic import is enabled', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const existingPath = path.join(library, 'EXIST-001.mp4')
+    const disabledPath = path.join(library, 'disabled-name.mp4')
+    fs.writeFileSync(existingPath, 'existing video')
+    fs.writeFileSync(disabledPath, 'disabled video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    await scanFolders([library], undefined, { minImportDurationSeconds: null })
+
+    let inspected = 0
+    const service = fakeLocalNfoService({
+      inspect: () => {
+        inspected += 1
+        return { status: 'found', code: 'NFO-001', warnings: [] }
+      }
+    })
+    await scanFolders([library], undefined, {
+      autoImportLocalNfo: false,
+      localNfoService: service,
+      minImportDurationSeconds: null
+    })
+    assert.equal(inspected, 0)
+
+    fs.rmSync(disabledPath)
+    const enabledPath = path.join(library, 'enabled-name.mp4')
+    fs.writeFileSync(enabledPath, 'enabled video')
+    const result = await scanFolders([library], undefined, {
+      autoImportLocalNfo: true,
+      localNfoService: service,
+      minImportDurationSeconds: null
+    })
+
+    assert.equal(inspected, 1, 'the already registered resource must not trigger NFO I/O')
+    assert.equal(result.imported, 1)
+    assert.equal(listVideos({ search: 'NFO-001' }).total, 1)
+    assert.equal(listVideos({ search: 'EXIST-001' }).total, 1)
+    assert.equal(enabledPath.endsWith('enabled-name.mp4'), true)
+  })
+
+  it('aggregates first-discovery NFO candidates once per video after all resources are assigned', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    fs.writeFileSync(path.join(library, 'part-one.mp4'), 'first')
+    fs.writeFileSync(path.join(library, 'part-two.mp4'), 'second')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+
+    const applied: Array<{ videoId: number; code: string; anchors: string[] }> = []
+    const service = fakeLocalNfoService({
+      inspect: () => ({ status: 'found', code: 'NFO-200', warnings: [] }),
+      apply: async (videoId, code, anchors) => {
+        applied.push({ videoId, code, anchors: anchors.map((anchor) => anchor.anchorPath) })
+        return { disposition: 'imported', warnings: [] }
+      }
+    })
+    const audit: LibraryScanFileAuditEntry[] = []
+    const result = await scanFolders([library], undefined, {
+      autoImportLocalNfo: true,
+      localNfoService: service,
+      minImportDurationSeconds: null,
+      onFileResult: (entry) => audit.push(structuredClone(entry))
+    })
+
+    assert.equal(result.imported, 2)
+    assert.equal(listVideos({ search: 'NFO-200' }).total, 1)
+    assert.equal(applied.length, 1)
+    assert.equal(applied[0]?.code, 'NFO-200')
+    assert.equal(applied[0]?.anchors.length, 2)
+    assert.equal(audit.length, 2)
+    assert.equal(audit.every((entry) => entry.nfo?.disposition === 'imported'), true)
+  })
+
+  it('does not count an existing pending resource identity as a new same-code file', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const conflictedPath = path.join(library, 'SAME-001-CD1.mp4')
+    fs.writeFileSync(conflictedPath, 'first video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const service = fakeLocalNfoService({
+      inspect: (candidate) =>
+        candidate.anchorPath === conflictedPath
+          ? { status: 'found', code: 'OTHER-999', warnings: [] }
+          : { status: 'missing', code: null, warnings: [] }
+    })
+
+    await scanFolders([library], undefined, {
+      autoImportLocalNfo: true,
+      autoMergeSameCodeResources: false,
+      localNfoService: service,
+      minImportDurationSeconds: null
+    })
+    fs.writeFileSync(path.join(library, 'SAME-001-CD2.mp4'), 'second video')
+    const second = await scanFolders([library], undefined, {
+      autoImportLocalNfo: true,
+      autoMergeSameCodeResources: false,
+      localNfoService: service,
+      minImportDurationSeconds: null
+    })
+
+    assert.equal(second.imported, 1)
+    assert.equal(second.pendingGroups, 0)
+    assert.equal(listVideos({ search: 'SAME-001' }).total, 1)
+    assert.equal(listPendingResourceIdentities(TEST_LIBRARY_ID).length, 1)
+  })
+
+  it('keeps distinct local NFO candidates in the existing confirmation workflow', async () => {
+    const root = makeTempRoot()
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const libraryRoot = path.join(root, 'multi-nfo-library')
+    fs.mkdirSync(libraryRoot)
+    const library = createMediaLibrary({ name: 'Multi NFO', roots: [{ path: libraryRoot }] })
+    for (const [part, title] of [
+      ['CD1', 'Candidate one'],
+      ['CD2', 'Candidate two']
+    ]) {
+      fs.writeFileSync(path.join(libraryRoot, `MULTI-001-${part}.mp4`), `video-${part}`)
+      fs.writeFileSync(
+        path.join(libraryRoot, `MULTI-001-${part}.nfo`),
+        `<movie><num>MULTI-001</num><title>${title}</title></movie>`
+      )
+    }
+    const audit: LibraryScanFileAuditEntry[] = []
+
+    const result = await scanFoldersScoped(
+      { libraryId: library.id, runId: 'multi-nfo', roots: library.roots },
+      undefined,
+      {
+        autoImportLocalNfo: true,
+        autoMergeSameCodeResources: true,
+        minImportDurationSeconds: null,
+        readDurationSeconds: async () => 3600,
+        onFileResult: (entry) => audit.push(entry)
+      }
+    )
+
+    assert.equal(result.imported, 2)
+    const video = listVideos({ search: 'MULTI-001' }).items[0]
+    assert.ok(video)
+    assert.equal(video.title, null)
+    assert.equal(listVideoResourcesScoped(library.id, video.id).length, 2)
+    assert.deepEqual(
+      getDb()
+        .prepare(
+          `SELECT json_extract(result_json, '$.title') AS title
+             FROM pending_video_scrape_candidates
+            ORDER BY position`
+        )
+        .all(),
+      [{ title: 'Candidate one' }, { title: 'Candidate two' }]
+    )
+    assert.equal(audit.every((entry) => entry.nfo?.disposition === 'pending-candidate'), true)
+  })
+
+  it('persists a filename/NFO identity conflict without creating formal library records', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const filePath = path.join(library, 'FILE-001.mp4')
+    fs.writeFileSync(filePath, 'video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const audit: LibraryScanFileAuditEntry[] = []
+
+    const result = await scanFolders([library], undefined, {
+      autoImportLocalNfo: true,
+      localNfoService: fakeLocalNfoService({
+        inspect: () => ({ status: 'found', code: 'NFO-999', warnings: [] })
+      }),
+      minImportDurationSeconds: null,
+      onFileResult: (entry) => audit.push(entry)
+    })
+
+    assert.equal(result.imported, 0)
+    assert.equal(result.pendingResources, 1)
+    assert.equal(listVideos({}).total, 0)
+    assert.equal(
+      (getDb().prepare('SELECT COUNT(*) AS count FROM video_resources').get() as { count: number })
+        .count,
+      0
+    )
+    assert.deepEqual(
+      listPendingResourceIdentities(TEST_LIBRARY_ID).map((identity) => ({
+        displayName: identity.displayName,
+        filenameCode: identity.filenameCode,
+        nfoCode: identity.nfoCode
+      })),
+      [{ displayName: path.basename(filePath), filenameCode: 'FILE-001', nfoCode: 'NFO-999' }]
+    )
+    assert.equal(audit[0]?.outcome, 'pending')
+    assert.equal(audit[0]?.nfo?.disposition, 'identity-conflict')
+  })
+
+  it('persists only a masked STRM target projection for an NFO identity conflict', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    const filePath = path.join(library, 'FILE-001.strm')
+    fs.writeFileSync(filePath, 'https://example.test/video.mp4?token=secret')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+
+    const result = await scanFolders([library], undefined, {
+      autoImportLocalNfo: true,
+      localNfoService: fakeLocalNfoService({
+        inspect: () => ({ status: 'found', code: 'NFO-999', warnings: [] })
+      }),
+      minImportDurationSeconds: null
+    })
+    const [visible] = listPendingResourceIdentities(TEST_LIBRARY_ID)
+
+    assert.equal(result.pendingResources, 1)
+    assert.equal(listVideos({}).total, 0)
+    assert.equal(visible.sourceKind, 'strm')
+    assert.match(visible.targetDisplay ?? '', /example\.test/u)
+    assert.equal(JSON.stringify(visible).includes('token=secret'), false)
+    assert.equal(JSON.stringify(visible).includes(filePath), false)
+  })
+
+  it('keeps a valid filename import when its NFO is invalid and records only a secondary warning', async () => {
+    const root = makeTempRoot()
+    const library = path.join(root, 'library')
+    fs.mkdirSync(library, { recursive: true })
+    fs.writeFileSync(path.join(library, 'SAFE-001.mp4'), 'video')
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const audit: LibraryScanFileAuditEntry[] = []
+
+    const result = await scanFolders([library], undefined, {
+      autoImportLocalNfo: true,
+      localNfoService: fakeLocalNfoService({
+        inspect: () => ({ status: 'warning', code: null, warnings: ['NFO XML 不安全，已忽略'] })
+      }),
+      minImportDurationSeconds: null,
+      onFileResult: (entry) => audit.push(entry)
+    })
+
+    assert.equal(result.imported, 1)
+    assert.equal(result.failed, 0)
+    assert.equal(listVideos({ search: 'SAFE-001' }).total, 1)
+    assert.equal(audit[0]?.outcome, 'added')
+    assert.equal(audit[0]?.nfo?.disposition, 'warning')
+    assert.deepEqual(audit[0]?.nfo?.warnings?.map((warning) => warning.code), ['nfo-warning'])
+  })
+
+  it('uses NFO identity across libraries but never overwrites a globally scraped-success video', async () => {
+    const root = makeTempRoot()
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const firstRoot = path.join(root, 'first-library')
+    const secondRoot = path.join(root, 'second-library')
+    fs.mkdirSync(firstRoot)
+    fs.mkdirSync(secondRoot)
+    const firstLibrary = createMediaLibrary({ name: 'First', roots: [{ path: firstRoot }] })
+    const secondLibrary = createMediaLibrary({ name: 'Second', roots: [{ path: secondRoot }] })
+    const firstPath = path.join(firstRoot, 'GLOBAL-001.mp4')
+    fs.writeFileSync(firstPath, 'first video')
+    const { videoId } = insertTestVideoWithFileBase(getDb(), {
+      code: 'GLOBAL-001',
+      title: 'Preserved global title',
+      filePath: firstPath,
+      libraryId: firstLibrary.id,
+      rootId: firstLibrary.roots[0].id,
+      scrapedStatus: 1
+    })
+    const secondPath = path.join(secondRoot, 'unknown-name.mp4')
+    fs.writeFileSync(secondPath, 'second video')
+    fs.writeFileSync(
+      path.join(secondRoot, 'unknown-name.nfo'),
+      '<movie><num>GLOBAL-001</num><title>Must not overwrite</title></movie>'
+    )
+    const audit: LibraryScanFileAuditEntry[] = []
+
+    const result = await scanFoldersScoped(
+      {
+        libraryId: secondLibrary.id,
+        runId: 'global-status-one',
+        roots: secondLibrary.roots
+      },
+      undefined,
+      {
+        autoImportLocalNfo: true,
+        autoMergeSameCodeResources: true,
+        minImportDurationSeconds: null,
+        readDurationSeconds: async () => 3600,
+        onFileResult: (entry) => audit.push(entry)
+      }
+    )
+
+    assert.equal(result.imported, 1)
+    assert.deepEqual(
+      getDb().prepare('SELECT title, scraped_status FROM videos WHERE id = ?').get(videoId),
+      { title: 'Preserved global title', scraped_status: 1 }
+    )
+    assert.equal(listVideoResourcesScoped(secondLibrary.id, videoId).length, 1)
+    assert.equal(audit[0]?.nfo?.disposition, 'skipped')
+  })
+
+  it('applies local NFO with fill-empty semantics for new and failed videos', async () => {
+    const root = makeTempRoot()
+    initDatabaseAtPath(path.join(root, 'library.db'))
+    const libraryRoot = path.join(root, 'nfo-status-library')
+    fs.mkdirSync(libraryRoot)
+    const library = createMediaLibrary({ name: 'NFO status', roots: [{ path: libraryRoot }] })
+    const newPath = path.join(libraryRoot, 'ZERO-001.mp4')
+    const failedPath = path.join(libraryRoot, 'FAIL-002.mp4')
+    fs.writeFileSync(newPath, 'new video')
+    fs.writeFileSync(failedPath, 'failed video')
+    fs.writeFileSync(
+      path.join(libraryRoot, 'ZERO-001.nfo'),
+      '<movie><num>ZERO-001</num><title>New NFO title</title></movie>'
+    )
+    fs.writeFileSync(
+      path.join(libraryRoot, 'FAIL-002.nfo'),
+      '<movie><num>FAIL-002</num><title>Overwrite attempt</title><plot>Filled summary</plot></movie>'
+    )
+    const failedVideoId = Number(
+      getDb()
+        .prepare(
+          `INSERT INTO videos (code, title, summary, scraped_status)
+           VALUES ('FAIL-002', 'Keep manual title', NULL, 2)`
+        )
+        .run().lastInsertRowid
+    )
+
+    const result = await scanFoldersScoped(
+      { libraryId: library.id, runId: 'status-zero-two', roots: library.roots },
+      undefined,
+      {
+        autoImportLocalNfo: true,
+        autoMergeSameCodeResources: true,
+        minImportDurationSeconds: null,
+        readDurationSeconds: async () => 3600
+      }
+    )
+
+    assert.equal(result.imported, 2)
+    assert.deepEqual(
+      getDb()
+        .prepare(
+          `SELECT code, title, summary, scraped_status
+             FROM videos WHERE code IN ('ZERO-001', 'FAIL-002') ORDER BY code`
+        )
+        .all(),
+      [
+        {
+          code: 'FAIL-002',
+          title: 'Keep manual title',
+          summary: 'Filled summary',
+          scraped_status: 1
+        },
+        { code: 'ZERO-001', title: 'New NFO title', summary: null, scraped_status: 1 }
+      ]
+    )
+    assert.equal(listVideoResourcesScoped(library.id, failedVideoId).length, 1)
   })
 
   it('reattaches a scanned file to an existing no-resource video without replacing metadata', async () => {

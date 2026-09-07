@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<movie>
+  <uniqueid type="num" default="true">RATE-004</uniqueid>
+  <ratings>
+    <rating name="javdex" max="5" default="true">
+      <value>4.2</value>
+      <votes>12</votes>
+    </rating>
+  </ratings>
+</movie>

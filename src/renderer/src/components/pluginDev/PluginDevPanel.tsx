@@ -281,7 +281,7 @@ export default function PluginDevPanel({
       (connection) => connection.providerId === frozenModel.providerId
     )?.name ?? frozenModel.providerId
     : pluginModelAssignment?.resolution.providerName ?? '未配置'
-  const llmReason = modelManagementError ?? (
+  const llmReason = llmReady ? null : modelManagementError ?? (
     modelManagement?.validationErrors[0] ??
     pluginModelAssignment?.resolution.reason ??
     '插件开发用途尚未配置可用模型。'

@@ -7,11 +7,11 @@
 <h1 align="center">Javdex</h1>
 
 <p align="center">
-  <strong>把本地媒体整理成清晰、可搜索、可维护的资料库。</strong>
+  <strong>把影片文件和资源链接，整理成自己的影片资料库。</strong>
 </p>
 
 <p align="center">
-  本地优先 · 插件驱动 · Windows / macOS / Linux
+  本地优先 · 多媒体库 · Windows / macOS / Linux
 </p>
 
 <p align="center">
@@ -20,198 +20,122 @@
   <a href="https://javdexlabs.github.io/Javdex/"><img alt="Website" src="https://img.shields.io/badge/website-javdexlabs.github.io-367766"></a>
 </p>
 
-<h3 align="center">
-  <a href="https://javdexlabs.github.io/Javdex/">访问官网</a>
-  &nbsp;·&nbsp;
+<p align="center">
   <a href="https://github.com/JavdexLabs/Javdex/releases/latest">下载最新版</a>
   &nbsp;·&nbsp;
+  <a href="docs/USER_GUIDE.md">使用指南</a>
+  &nbsp;·&nbsp;
   <a href="CHANGELOG.md">更新日志</a>
-</h3>
-
-<br>
-
-<p align="center">
-  <a href="https://javdexlabs.github.io/Javdex/">
-    <img src="docs/images/library.png" alt="Javdex 媒体库界面" width="1200">
-  </a>
+  &nbsp;·&nbsp;
+  <a href="https://javdexlabs.github.io/Javdex/">访问官网</a>
 </p>
 
+Javdex 是一款以番号为核心的本地影片管理工具。扫描目录、补齐封面与资料，按演员、厂商和系列浏览，也可以创建清单、导入网页收藏，并通过 NFO 与其他媒体软件交换资料。
+
 <p align="center">
-  <sub>媒体库、搜索、筛选与多种浏览维度集中在一个安静的桌面工作区。</sub>
+  <img src="docs/images/library.webp" alt="媒体库演示：竖版封面浏览、搜索、筛选与排序" width="1200">
 </p>
 
-## 获取 Javdex
+<p align="center"><sub>本页配图截取自当前软件，影片、人物与图片均为虚构演示资料。</sub></p>
 
-推荐前往 **[Javdex 官网](https://javdexlabs.github.io/Javdex/)**。官网会说明不同平台和安装包格式的区别，并提供最新正式版下载入口。
+## 整理与浏览媒体库
 
-也可以直接访问 **[GitHub Releases](https://github.com/JavdexLabs/Javdex/releases/latest)**，查看更新说明和全部安装文件。
+让分散在不同目录里的影片，有一个统一的浏览入口。
 
-| 平台 | 提供格式 |
+- **按需要分库**：创建多个媒体库，各自设置来源目录、扫描周期和默认刮削来源；首页汇总近期添加、随机发现与跨库搜索。
+- **统一管理资源**：扫描本地视频与 STRM 文件，也可添加直链、网页、Magnet 和 ED2K 链接；同一影片可关联多个资源，并选择优先打开的主资源。
+- **快速找到影片**：搜索番号、标题或演员，组合筛选与排序，按演员、标签、制作商、发行商、导演和系列继续浏览。
+
+## 补齐影片资料
+
+把只有文件名的影片，整理成有封面、简介和关联资料的条目。自动获取这些信息的过程，在应用中称为“刮削”。
+
+- 获取标题、简介、发行日期、评分、演员、标签、封面与样张；支持单部处理和批量刮削，批量任务可暂停、恢复或取消。
+- 按字段选择资料来源，例如标题和简介使用一个插件，图片使用另一个插件；更新时可选择需要处理的字段及更新方式。
+- 随时手动编辑资料、添加相关网页链接，或记录自己的评分。
+
+<p align="center">
+  <img src="docs/images/video-detail.webp" alt="影片详情演示：封面、独立主题背景、评分、演员、简介和关联资源" width="1000" loading="lazy">
+</p>
+
+可导入更多刮削插件，也可使用开发助手辅助创建和调试插件。内置 MetaTube 来源需要连接自己的服务，配置方式见 [MetaTube 指南](docs/METATUBE_SETUP.md)。
+
+## 从作品找到演员与系列
+
+演员、厂商、导演和系列都有自己的资料与关联作品，方便沿着感兴趣的人物和分类继续探索。
+
+- 维护演员头像、别名、简介与写真，在演员详情中浏览出演作品。
+- 在本地识别人脸并调整头像构图，支持批量处理，也能筛选未检测到人脸的头像进行检查。
+- 维护分类资料、别名和系列层级，合并重复的演员或分类记录。
+
+## 用清单整理收藏
+
+清单可以跨媒体库收录影片，用来整理专题、收藏或之后想看的作品。
+
+- 自己创建清单、维护封面和相关链接，把不同媒体库的影片放在一起。
+- 借助 AI 从网页导入外部清单，匹配资料库中的已有影片；遇到同番号的多个候选时，由你核对选择。
+- 尚未收录的条目可按选项创建为无资源影片，先保存资料，之后再添加资源。清单导入不会下载影片。
+
+## AI 辅助采集，疑问集中确认
+
+在影片或演员详情中使用“Agent 刮削”，粘贴详情页地址，让 AI 从网页提取资料；预览结果、选择字段后再应用。
+
+扫描归属不明、文件名与 NFO 番号冲突、刮削出现多个候选或演员名称冲突时，可到“待确认”集中处理。需要整理已有记录时，也可以合并同番号影片或拆分关联资源。
+
+AI 采集、外部清单导入和插件开发助手需要先配置可用模型服务。普通扫描、浏览和插件刮削不要求配置 AI 模型。
+
+## 让已有资料继续用起来
+
+扫描首次发现资源时，可读取影片旁的本地 NFO，利用已有资料和图片建库；已刮削成功的影片不会被自动覆盖。
+
+已覆盖 **Movie_Data_Capture（MDC）、MDCx、Javinizer 和 JavSP** 的常见 NFO 字段与本地图片命名约定，方便利用这些工具整理过的资料。兼容范围基于固定版本的格式样例验证，详见 [使用指南中的导入说明](docs/USER_GUIDE.md#导入已有资料)。
+
+也可以导出影片资料、封面和可选图片附件，供 Kodi、Jellyfin、Emby、Plex NFO Agent 或 Infuse 使用。导出前可预览文件，默认跳过已有文件。
+
+NFO 导入与导出是一次性操作，不会持续同步，也不等于完整资料库备份。不同软件的设置要求与图片支持范围见 [NFO 兼容性说明](docs/NFO_COMPATIBILITY.md)。
+
+## 本地存储与个性化显示
+
+- **资料留在本机**：数据库、设置和下载的图片默认保存在设备中；可在设置中迁移图片目录或启用图片加密。
+- **按场景保护显示**：隐私模式可遮盖封面、样张和写真，替换演员头像，并按需关闭图片预览。
+- **按喜好调整界面**：选择主题、横竖封面显示和详情背景，调整头像构图。
+
+本地优先指资料的保存方式。联网刮削会访问对应来源，AI 功能会把任务所需内容发送给配置的模型服务；本地人脸检测无需上传图片。图片加密仅覆盖图片文件，隐私模式仅改变界面显示。
+
+## 下载与开始使用
+
+从 [官网](https://javdexlabs.github.io/Javdex/) 或 [GitHub Releases](https://github.com/JavdexLabs/Javdex/releases/latest) 下载对应平台的安装包。
+
+| 平台 | 安装包 |
 |---|---|
-| Windows 10 / 11（x64） | EXE 安装版、ZIP 免安装版 |
-| macOS 11+ | Apple Silicon DMG、Intel DMG |
+| Windows（x64） | EXE 安装版、ZIP 免安装版 |
+| macOS | Apple Silicon DMG、Intel DMG |
 | Linux（x86_64） | AppImage、DEB |
 
-> [!IMPORTANT]
-> 当前安装包尚未进行商业代码签名，系统可能提示“未知发布者”。请只从项目官网或 GitHub Releases 下载。当前版本不提供自动升级，更新时需要重新下载安装包。
+首次使用：
 
-## 为什么选择 Javdex
+1. **创建媒体库**：在“设置 → 媒体库”新建媒体库，选择影片所在目录。
+2. **扫描影片**：创建时选择立即扫描，或在媒体库设置中手动启动扫描。
+3. **补齐资料**：在“设置 → 刮削来源”选择可用来源，再对影片执行单部或批量刮削。
+4. **开始整理**：浏览影片和演员、加入清单；有待确认项时，核对后再完成关联。
 
-- **本地优先**：SQLite 数据库、设置与图片资产默认保存在设备中。
-- **快速建库**：递归扫描本地目录，或按番号手动导入直链、网页、Magnet 与 ED2K 资源。
-- **插件化元数据**：按字段组合影片与人物插件，获取结构化资料和图片资产。
-- **高效维护**：支持搜索、资源类型筛选、分类、清单、批量任务和多资源关联。
-- **人物资料**：维护头像、写真、别名与关联作品，并可在本地完成头像构图。
-- **开放扩展**：内置插件开发助手，并提供可选 MCP 服务接入外部开发工具。
+安装与更新方式、链接导入和各项功能的具体步骤见 [使用指南](docs/USER_GUIDE.md)。
 
-## 本地意味着什么
+> 当前安装包尚未进行商业代码签名，系统可能显示发布者或安全提示。请从项目官网或 GitHub Releases 下载。应用可检查版本，但更新需要重新下载安装包。
 
-Javdex 围绕本地文件和你手动添加的资源链接建立索引。数据库、下载的图片和应用设置由你掌控；打开影片资源时交给系统默认应用，本地人脸检测也不需要上传图片。
+## 帮助与参与开发
 
-Javdex 不提供、不托管、不分发任何媒体内容，也不内置在线播放服务。
-
-默认数据位置：
-
-```text
-userData/
-  data/library.db
-  scraper-service-secrets.json
-  media_assets/
-    covers/
-    avatars/
-    actress_gallery/
-    samples/
-    playlist_covers/
-```
-
-图片资产可选择加密存储，并通过应用的 `media://` 协议读取。
-
-## 核心能力
-
-### 媒体库
-
-- 创建多个命名媒体库；每个媒体库独立管理来源目录、扫描策略、默认刮削器和显示偏好
-- 首页集中展示跨库搜索、随机发现、近期添加和各媒体库状态
-- 扫描本地目录并识别常见视频格式，支持定时自动扫描
-- 解析编号，并统一管理本地文件、HTTP 直链、网页、Magnet 与 ED2K 资源
-- 按资源类型筛选，支持多资源关联、主资源切换与本地路径迁移
-- 按人物、标签、制作方、发行方、系列与导演浏览
-- 支持搜索、组合筛选、排序、清单与批量选择
-
-### 元数据与图片
-
-- 插件化获取标题、简介、日期、评分、标签与关联资料
-- 本地保存封面、海报、样张、头像与写真
-- 支持单项刮削、批量刮削、重匹配和字段级更新策略
-- 批量任务可暂停、恢复或取消
-
-### 插件开发
-
-- 视频与人物两类插件，可按字段组合数据来源
-- Worker 沙箱隔离插件代码，仅暴露受控 `ctx` API
-- 内置 ReAct 风格开发助手，支持页面探测、代码生成、dry-run 与语义验证
-- 可选 MCP 服务连接 IDE 或其它开发工具
-
-插件格式和运行时 API 见 [刮削插件规范](docs/SCRAPER_PLUGIN_FORMAT.md)，开发助手工作流见 [插件开发 Agent 文档](docs/PLUGIN_DEV_AGENT.md)。
-
-### MetaTube 内置影片插件
-
-MetaTube 用于连接你自行部署的 `metatube-server`，Javdex 不提供公共服务端，也不随安装包分发 Go 服务端、数据库或服务进程。首次安装时该插件会显示为“待配置”；在 **设置 → 刮削插件 → MetaTube** 保存 HTTP(S) 服务地址后才可设为默认源或加入组合。
-
-- 可选 Bearer Token 由主进程通过系统凭证保护能力保存，不会传入插件 Worker、普通设置、URL、日志或插件导出包。
-- 远程 HTTP 会显示隐私风险；HTTP 与 Token 同时使用时必须明确确认，建议非本机服务使用 HTTPS。
-- 查询番号和服务返回的数据会发送给你配置的服务端；是否进一步访问上游站点由该 MetaTube Server 的配置和 Provider 决定。
-- MetaTube 返回的 `actors` 全部按女性演员导入；`label` 近似映射为 Javdex 的发行方。
-- 封面和样张使用 MetaTube 原生公开 `/v1/images` 路由，图片 URL 不携带 Token；首版不支持在额外反向代理层为这些图片单独加鉴权。
-
-验收基线为 MetaTube Server v1.4.0，但运行时按 `/v1` 接口契约判断兼容性，不按版本号硬性拦截。MetaTube 项目及许可说明见 [第三方说明](docs/THIRD_PARTY_NOTICES.md)。
-
-## 开发
-
-### 环境要求
-
-- Node.js 22（推荐使用与 CI 相同的版本）
-- npm
-- Windows、macOS 或 Linux
-
-`better-sqlite3` 是原生模块，安装依赖后会通过 `electron-rebuild` 针对 Electron 重新编译。
-
-### 本地启动
-
-```bash
-git clone https://github.com/JavdexLabs/Javdex.git
-cd Javdex
-npm install
-npm run dev
-```
-
-### 检查与构建
-
-```bash
-npm test             # 类型检查与单元测试
-npm run build        # 生产构建
-npm start            # 预览生产构建
-```
-
-### 打包
-
-```bash
-npm run packaging:list       # 查看打包目标
-npm run packaging:configure  # 交互配置目标
-npm run dist                 # 构建当前启用目标
-npm run dist:win             # Windows
-npm run dist:mac             # macOS
-npm run dist:linux           # Linux
-```
-
-打包目标配置位于 [`build/packaging.targets.json`](build/packaging.targets.json)。
-
-### 官网
-
-```bash
-npm run pages:build
-npm run pages:preview
-```
-
-Pages 构建会读取最新正式版 GitHub Release，并生成各平台下载链接。合并官网改动到 `main` 或成功发布新版后，GitHub Actions 会自动重新部署官网。
-
-## 技术概览
-
-Javdex 基于 Electron、React、TypeScript、Vite 和 `better-sqlite3` 构建。
-
-- `src/main`：数据库、扫描、刮削、资产、LLM 与应用生命周期
-- `src/preload`：通过 `contextBridge` 暴露安全 IPC API
-- `src/renderer`：React 页面、组件与查询状态
-- `src/shared`：跨进程类型和 IPC 通道
-- `src/mcp`：插件开发 MCP 服务
-
-渲染进程不直接访问 Node.js、数据库或文件系统，相关操作统一由主进程处理。
-
-## 文档
-
-| 文档 | 内容 |
+| 我想…… | 查看 |
 |---|---|
-| [版本与发布](docs/VERSIONING_AND_RELEASE.md) | 版本号、标签与 Release 流程 |
-| [刮削插件规范](docs/SCRAPER_PLUGIN_FORMAT.md) | 插件包格式与沙箱 API |
-| [插件开发 Agent](docs/PLUGIN_DEV_AGENT.md) | 开发助手与 MCP 工作流 |
-| [第三方说明](docs/THIRD_PARTY_NOTICES.md) | 第三方项目、许可与集成边界 |
-| [UI 设计规范](docs/UI_DESIGN_GUIDELINES.md) | 视觉原则与语义 token |
-| [路由设计](docs/ROUTING_DESIGN.md) | 页面路由、查询状态与返回栈 |
-| [多媒体库设计](docs/MULTI_LIBRARY_DESIGN.md) | 多库领域模型、数据隔离、首页与生命周期设计 |
-| [更新日志](CHANGELOG.md) | 版本变更记录 |
+| 开始使用、管理资源或排查操作问题 | [使用指南](docs/USER_GUIDE.md) |
+| 连接自己的 MetaTube 服务 | [MetaTube 配置指南](docs/METATUBE_SETUP.md) |
+| 了解 NFO 对其他软件的支持范围 | [NFO 兼容性说明](docs/NFO_COMPATIBILITY.md) |
+| 从源码运行、开发插件或参与贡献 | [开发指南](docs/DEVELOPMENT.md) |
+| 查看版本变化 | [更新日志](CHANGELOG.md) |
 
-## 反馈
+发现问题或有功能建议，欢迎 [提交 Issue](https://github.com/JavdexLabs/Javdex/issues/new)；已有计划和讨论见 [Issues](https://github.com/JavdexLabs/Javdex/issues)。
 
-- 发现问题：[提交 Issue](https://github.com/JavdexLabs/Javdex/issues/new)
-- 查看计划：[现有 Issues](https://github.com/JavdexLabs/Javdex/issues)
-- 获取版本：[GitHub Releases](https://github.com/JavdexLabs/Javdex/releases/latest)
-
-## 使用边界
-
-- Javdex 仅用于管理用户本地已有的媒体文件。
-- 刮削插件仅用于获取公开网页上的元数据信息。
-- 请遵守所在地法律法规及目标网站的使用条款。
-- 项目名称、插件名称和站点名称仅用于功能说明，不代表与第三方存在从属或合作关系。
+Javdex 管理你已有的影片文件、手动添加的资源链接和影片资料，不提供、托管或分发媒体内容；播放或打开链接由系统默认应用处理。使用第三方来源时，请遵守所在地法律法规及目标网站条款。第三方项目与许可见 [第三方说明](docs/THIRD_PARTY_NOTICES.md)。
 
 ## License
 

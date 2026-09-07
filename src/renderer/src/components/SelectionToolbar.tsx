@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import Button from './Button'
 import IconButton from './IconButton'
 import { UI_ICON_SM } from './iconDefaults'
+import styles from './SelectionToolbar.module.css'
 
 export type SelectionToolbarAction = {
   key: string
@@ -31,7 +32,7 @@ export default function SelectionToolbar({
   return (
     <div className="selection-toolbar" role="toolbar" aria-label={'\u591a\u9009\u64cd\u4f5c'}>
       <div className="selection-toolbar-count">{countLabel}</div>
-      <div className="selection-toolbar-actions">
+      <div className={`${styles.actions} selection-toolbar-actions`}>
         {actions.map((action) => (
           <Button
             key={action.key}

@@ -1,0 +1,12 @@
+.root > [data-ui='button'],
+.root[role='toolbar'] [data-ui='icon-button'] {
+  box-sizing: border-box;
+  height: var(--control-h-md);
+  min-height: var(--control-h-md);
+  padding-block: 0;
+}
+
+.root[role='toolbar'] [data-ui='icon-button'] {
+  width: var(--control-h-md);
+  min-width: var(--control-h-md);
+}

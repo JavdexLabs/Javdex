@@ -10,6 +10,48 @@
   overflow: hidden;
 }
 
+.choice {
+  min-height: 68px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+  cursor: pointer;
+}
+
+.choice:hover {
+  background: var(--surface-control-hover);
+}
+
+.choice[data-selected='true'] {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+}
+
+.choice:focus-within {
+  outline: var(--focus-outline);
+  box-shadow: var(--focus-ring);
+}
+
+.choice > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.choice strong {
+  color: var(--text-primary);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
 .question {
   flex-shrink: 0;
   min-height: 76px;
@@ -28,7 +70,7 @@
 .question > div > span,
 .stepTitle > div > span {
   color: var(--text-accent);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
 }
@@ -41,7 +83,8 @@
 
 .question h2 {
   margin-top: 2px;
-  font-size: 18px;
+  font-size: 16px;
+  overflow-wrap: anywhere;
 }
 
 .question p {
@@ -68,7 +111,7 @@
   border-bottom: 1px solid var(--border-warning);
   background: var(--surface-warning);
   color: var(--text-warning);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .alertInline {
@@ -122,7 +165,7 @@
 
 .stepTitle small {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 12px;
   text-align: right;
 }
 
@@ -130,12 +173,9 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px 16px;
-  padding: 8px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-control);
+  padding: 6px 0;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* Impact preview shared by scan, scrape and actress conflicts. */
@@ -152,7 +192,7 @@
   gap: 8px;
   border-top: 1px solid var(--border-subtle);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .impactRow > span:nth-child(2),
@@ -173,7 +213,7 @@
 
 .impactRow strong {
   color: var(--text-accent);
-  font-size: 10px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -185,7 +225,7 @@
   margin: 0;
   padding: 8px 10px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .impactCard,
@@ -204,7 +244,7 @@
   justify-content: space-between;
   gap: 10px;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -235,7 +275,7 @@
   justify-content: space-between;
   gap: 10px;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -247,7 +287,7 @@
   gap: 8px;
   border-top: 1px solid var(--border-subtle);
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .unchangedReason {
@@ -266,7 +306,7 @@
   background: var(--surface-elevated);
 }
 
-.confirm > div {
+.confirmActions {
   min-width: 0;
   display: flex;
   align-items: center;
@@ -274,38 +314,76 @@
 }
 
 .confirmSummary {
+  min-width: 0;
+  display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
 }
 
 .confirmHeadline {
+  overflow-wrap: anywhere;
   color: var(--text-primary);
   font-size: 12px;
 }
 
 .confirmScope {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .secondary {
-  flex-shrink: 0;
-  min-height: 38px;
-  padding: 5px 10px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 5px;
-  border-top: 1px solid var(--border-subtle);
-  background: var(--surface-panel);
+  min-width: 180px;
+  max-width: min(320px, calc(100vw - 24px));
+  max-height: min(360px, calc(100vh - 24px));
+  padding: 5px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-elevated);
 }
 
-.secondaryLabel {
-  margin-right: auto;
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 700;
+.secondary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.secondary button {
+  justify-content: flex-start;
+  white-space: normal;
+  text-align: left;
+}
+
+.workspace :where(input)[type='radio'] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin: 0;
+  accent-color: var(--text-accent);
+  appearance: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface-control);
+  cursor: pointer;
+}
+
+.workspace :where(input)[type='radio']:checked {
+  border-color: var(--border-accent);
+  background: var(--text-accent);
+  box-shadow: inset 0 0 0 3px var(--surface-control);
+}
+
+.workspace :where(input)[type='radio']:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+}
+
+.workspace :where(input)[type='radio']:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 @media (width <= 1100px) {
@@ -330,8 +408,13 @@
     grid-column: auto;
   }
 
-  .confirm,
-  .secondary {
+  .confirmActions {
+    margin-left: auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .confirm {
     align-items: flex-start;
     flex-wrap: wrap;
   }

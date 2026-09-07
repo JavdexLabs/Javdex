@@ -42,6 +42,13 @@ import type {
   UpdateMediaLibraryInput,
   UpdateMediaLibraryRootInput
 } from '../shared/mediaLibraryIpcContract'
+import type {
+  NfoExportIpcArgs,
+  NfoExportIpcChannel,
+  NfoExportIpcEvent,
+  NfoExportIpcEventChannel,
+  NfoExportIpcResult
+} from '../shared/nfoExportIpcContract'
 import type { GlobalSearchInput, HomeDiscoveryInput } from '../shared/catalogTypes'
 import type { CatalogScope, CreateMediaLibraryInput } from '../shared/mediaLibraryTypes'
 import type { MigrateMediaLibraryRootInput } from '../shared/mediaLibraryTypes'
@@ -81,7 +88,11 @@ import type {
   VideoScrapeUpdateMode
 } from '../shared/scrapeTypes'
 import type { PendingVideoScrapeConfirmInput } from '../shared/videoScrapeTypes'
-import type { LibraryScanEvent, PendingScanGroupResolution } from '../shared/libraryTypes'
+import type {
+  LibraryScanEvent,
+  PendingResourceIdentityResolution,
+  PendingScanGroupResolution
+} from '../shared/libraryTypes'
 import type { BatchProgress } from '../shared/batchScrapeTypes'
 import type { RendererSettingsPatch } from '../shared/settingsTypes'
 import type { ModelManagementApplyInput } from '../shared/modelManagementTypes'
@@ -155,6 +166,22 @@ function invokeApp<Channel extends AppIpcChannel>(
   return invoke<AppIpcResult<Channel>>(channel, ...args)
 }
 
+function invokeNfoExport<Channel extends NfoExportIpcChannel>(
+  channel: Channel,
+  ...args: NfoExportIpcArgs<Channel>
+): Promise<NfoExportIpcResult<Channel>> {
+  return invoke<NfoExportIpcResult<Channel>>(channel, ...args)
+}
+
+function onNfoExportEvent<Channel extends NfoExportIpcEventChannel>(
+  channel: Channel,
+  callback: (payload: NfoExportIpcEvent<Channel>) => void
+): () => void {
+  const listener = (_event: unknown, payload: NfoExportIpcEvent<Channel>): void => callback(payload)
+  ipcRenderer.on(channel, listener)
+  return () => ipcRenderer.removeListener(channel, listener)
+}
+
 function onAppEvent<Channel extends AppIpcEventChannel>(
   channel: Channel,
   callback: (payload: AppIpcEvent<Channel>) => void
@@ -174,6 +201,20 @@ function onScrapeEvent<Channel extends ScrapeIpcEventChannel>(
 }
 
 const api = {
+  nfoExport: {
+    getOptions: () => invokeNfoExport(IPC.NFO_EXPORT_GET_OPTIONS),
+    updatePreferences: (preferences: import('../shared/nfoExportTypes').NfoExportPreferences) =>
+      invokeNfoExport(IPC.NFO_EXPORT_UPDATE_PREFERENCES, preferences),
+    plan: (request: import('../shared/nfoExportTypes').NfoExportPlanRequest) =>
+      invokeNfoExport(IPC.NFO_EXPORT_PLAN, request),
+    discardPlan: (planId: string) => invokeNfoExport(IPC.NFO_EXPORT_DISCARD_PLAN, planId),
+    start: (planId: string) => invokeNfoExport(IPC.NFO_EXPORT_START, planId),
+    terminate: (taskId: string) => invokeNfoExport(IPC.NFO_EXPORT_TERMINATE, taskId),
+    onProgress: (callback: (event: import('../shared/nfoExportTypes').NfoExportProgressEvent) => void) =>
+      onNfoExportEvent(IPC.NFO_EXPORT_PROGRESS, callback),
+    onState: (callback: (event: import('../shared/nfoExportTypes').NfoExportStateEvent) => void) =>
+      onNfoExportEvent(IPC.NFO_EXPORT_STATE, callback)
+  },
   mediaLibraries: {
     list: (input?: MediaLibraryListInput) =>
       invokeMediaLibrary(IPC.MEDIA_LIBRARY_LIST, input),
@@ -268,18 +309,14 @@ const api = {
       libraryId: number,
       rootId: number,
       oldPath: string,
-      newName: string,
-      code: string,
-      target: VideoResourceImportTarget
+      newName: string
     ) =>
       invokeApp(
         IPC.FILE_RENAME,
         libraryId,
         rootId,
         oldPath,
-        newName,
-        code,
-        target
+        newName
       ),
     importManual: (
       libraryId: number,
@@ -294,6 +331,19 @@ const api = {
       groupId: number,
       resolution: PendingScanGroupResolution
     ) => invokeApp(IPC.PENDING_SCAN_RESOLVE, libraryId, groupId, resolution),
+    listPendingResourceIdentities: (libraryId: number) =>
+      invokeApp(IPC.PENDING_RESOURCE_IDENTITY_LIST, libraryId),
+    resolvePendingResourceIdentity: (
+      libraryId: number,
+      identityId: number,
+      resolution: PendingResourceIdentityResolution
+    ) =>
+      invokeApp(
+        IPC.PENDING_RESOURCE_IDENTITY_RESOLVE,
+        libraryId,
+        identityId,
+        resolution
+      ),
     onProgress: (cb: (event: LibraryScanProgressEvent) => void) =>
       onAppEvent(IPC.SCAN_PROGRESS, cb),
     onStateChanged: (cb: (event: LibraryScanEvent) => void) =>

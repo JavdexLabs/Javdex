@@ -188,6 +188,7 @@ describe('plugin dev Agent UI state', () => {
 
     assert.deepEqual(listPluginDevSelectablePlugins([
       descriptor({ name: 'MetaTube', source: 'builtin', debuggable: false }),
+      { ...descriptor({ name: 'Gfriends', source: 'builtin', debuggable: false }), kind: 'actress' },
       descriptor({ name: 'JavDB', source: 'builtin', debuggable: true }),
       descriptor({ name: 'Custom', source: 'user', debuggable: true }),
       descriptor({ name: 'Composite', source: 'composite', debuggable: false })

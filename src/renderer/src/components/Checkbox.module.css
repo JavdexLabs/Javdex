@@ -1,0 +1,18 @@
+.input {
+  flex: 0 0 auto;
+  width: var(--choice-control-size);
+  height: var(--choice-control-size);
+  margin: 0;
+  accent-color: var(--text-accent);
+  cursor: pointer;
+}
+
+.input:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+}
+
+.input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}

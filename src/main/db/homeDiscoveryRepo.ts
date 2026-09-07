@@ -94,14 +94,18 @@ function enrichLibraryStatuses(
          WHERE library_id IN (${ids})
          GROUP BY library_id
        ), pending_group_counts AS (
-         SELECT library_id, COUNT(*) AS pending_scan_group_count
-         FROM pending_scan_groups
-         WHERE library_id IN (${ids})
+         SELECT library_id, COUNT(*) AS pending_scan_group_count FROM (
+           SELECT library_id FROM pending_scan_groups WHERE library_id IN (${ids})
+           UNION ALL
+           SELECT library_id FROM pending_resource_identities WHERE library_id IN (${ids})
+         )
          GROUP BY library_id
        ), pending_resource_counts AS (
-         SELECT library_id, COUNT(*) AS pending_scan_resource_count
-         FROM pending_scan_resources
-         WHERE library_id IN (${ids})
+         SELECT library_id, COUNT(*) AS pending_scan_resource_count FROM (
+           SELECT library_id FROM pending_scan_resources WHERE library_id IN (${ids})
+           UNION ALL
+           SELECT library_id FROM pending_resource_identities WHERE library_id IN (${ids})
+         )
          GROUP BY library_id
        ), unrecognized_counts AS (
          SELECT library_id, COUNT(*) AS unrecognized_file_count

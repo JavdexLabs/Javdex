@@ -300,7 +300,7 @@ export function MediaLibrarySettingsDialogs({
           <div className={styles.confirmBody}>
             <p className={styles.confirmText}>
               归档“{library.name}
-              ”后，自动扫描会暂停，侧栏只在已归档区域保留入口。
+              ”后，自动扫描会暂停，并从侧栏隐藏；可在媒体库设置中恢复。
             </p>
             <p className={styles.confirmText}>
               影片元数据和来源目录不会被删除，稍后可以恢复。

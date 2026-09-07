@@ -4,6 +4,8 @@
 
 ## MetaTube
 
+连接与使用步骤见 [MetaTube 配置指南](METATUBE_SETUP.md)。
+
 - 上游项目：[`metatube-community/metatube-sdk-go`](https://github.com/metatube-community/metatube-sdk-go)
 - 许可：Apache License 2.0
 - Javdex 集成：内置影片插件仅作为用户自建 `metatube-server` 的 REST 客户端。Javdex 不嵌入、下载、启动或分发 MetaTube Go 服务端、Provider 模块或数据库。

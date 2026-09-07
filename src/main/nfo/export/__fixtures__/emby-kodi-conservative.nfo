@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<movie>
+  <uniqueid type="num" default="true">ABP-123</uniqueid>
+  <id>ABP-123</id>
+  <title>Title &amp; More</title>
+  <originaltitle>Original</originaltitle>
+  <plot>Plot &lt;safe&gt;</plot>
+  <premiered>2025-01-02</premiered>
+  <studio>Maker</studio>
+  <set>
+    <name>Series</name>
+  </set>
+  <director>Director</director>
+  <runtime>90</runtime>
+  <genre>Action</genre>
+  <genre>Drama</genre>
+  <actor>
+    <name>Alice</name>
+    <thumb>.actors/Alice.jpg</thumb>
+  </actor>
+  <thumb aspect="poster">ABP-123-poster.jpg</thumb>
+  <thumb aspect="landscape">ABP-123-landscape.jpg</thumb>
+  <fanart>
+    <thumb>ABP-123-fanart.png</thumb>
+  </fanart>
+</movie>

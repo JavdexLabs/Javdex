@@ -28,6 +28,19 @@
 
 ## Component Rules
 
+### Form spacing and controls
+
+- 启用/关闭某个功能统一使用 `Switch`；带标题和说明的设置行使用 `SettingsSwitchRow`。多项勾选（字段、文件、媒体库、导出内容）及本次操作的确认项使用 `Checkbox`。不要在业务组件内另写裸 `input[type=checkbox]` 或开关外观。
+- 控件形态与生效时机分开：需要保存的 Switch 只修改草稿，组内显示保存状态与操作栏；即时设置才直接保存。创建向导中的选项在创建时生效。
+- 标签至控件使用 `--form-label-gap`（8px），同组字段使用 `--form-field-gap`（12px），分组使用 `--form-section-gap`（16px），内容至底部操作栏至少 `--form-actions-gap`（16px）。间距由共享组件负责，页面不要再叠加补偿 margin。
+- `fieldset/legend` 不能仅依赖外层 grid/flex 的 gap；一组选择项使用 `AppFormChoiceGroup`，由 legend 的底部留白保证标题与内容分离。
+- 底部保存栏使用 `SettingsFormActions` 默认 footer；位于卡片标题右侧的使用 `placement="header"`，不继承底部留白。错误、冲突提示与按钮之间保留 8px。
+- Checkbox 可见方框统一 16px，点击范围由外层 label 提供，至少 24px；Switch 保持共享组件尺寸，页面不得通过宽高覆盖成另一种控件。
+- `npm run check:ui-controls` 检查业务组件中的裸复选框和自制开关；合入前同时完成 CSS Module 检查及常用/窄窗口视觉验证。
+
+### Other components
+
+- Settings navigation: 分类标签负责定位，内容标题负责分组；内容区不再重复分类名称与概括性简介。有子页签时紧接导航，无子页签时直接展示内容。作用范围和生效提示放在对应操作旁，保留具体对象名称及无障碍关联。
 - Toolbar: normal browsing mode keeps search on the left, global actions on the right, and the result count stable and right aligned. Contextual card-selection mode may temporarily replace this row with `SelectionToolbar`.
 - Filter popover: grouped fields, short labels, reset/apply actions at the bottom, selected filters mirrored as removable chips.
 - Cards: 8px radius maximum for repeated media/facet cards, hover may change border/elevation but must not resize layout.

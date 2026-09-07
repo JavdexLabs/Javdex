@@ -6,6 +6,7 @@ import SelectControl from '../SelectControl'
 import { SettingsCard, SettingsEmptyPanel, SettingsSectionBlock } from './SettingsPrimitives'
 import type { PluginKind } from './PluginConfigModals'
 import Button from '../Button'
+import styles from './PluginsSettingsPanel.module.css'
 
 export interface PluginDeleteTarget {
   kind: PluginKind
@@ -108,6 +109,7 @@ function PluginEmptyState({
 }
 
 export default function PluginsSettingsPanel({
+  kind,
   videoUserPlugins,
   actressUserPlugins,
   videoCompositePlugins,
@@ -124,6 +126,7 @@ export default function PluginsSettingsPanel({
   onSetDefault,
   onCreateComposite
 }: {
+  kind: PluginKind
   videoUserPlugins: ScraperPluginDescriptor[]
   actressUserPlugins: ScraperPluginDescriptor[]
   videoCompositePlugins: ScraperPluginDescriptor[]
@@ -232,8 +235,8 @@ export default function PluginsSettingsPanel({
   return (
     <SettingsCard
       className="plugins-page"
-      title="刮削插件"
-      hint="管理影片 / 演员刮削来源，默认插件用于自动刮削。"
+      title="全局刮削来源"
+      hint="当前库可单独指定影片来源；未指定时跟随这里的全局默认。"
       actions={
         <>
           <Button type="button" size="sm" onClick={onOpenDev}>
@@ -280,7 +283,15 @@ export default function PluginsSettingsPanel({
         )}
       </div>
 
-      <SettingsSectionBlock
+      <div className={styles.compositeEntry}>
+        <div>
+          <strong>按字段组合来源</strong>
+          <p>{kind === 'video' ? '例如封面用一个插件，标题和评分用另一个，保存为一个组合插件。' : '例如头像用一个插件，生日和简介用另一个，保存为一个组合插件。'}</p>
+        </div>
+        <Button size="sm" disabled={pluginBusy !== null} onClick={() => onCreateComposite(kind)}>创建组合插件</Button>
+      </div>
+
+      {kind === 'video' ? <SettingsSectionBlock
         title={
           <>
             影片插件
@@ -288,29 +299,19 @@ export default function PluginsSettingsPanel({
           </>
         }
         hint={`默认 ${defaultVideoPluginName} · ${bestCoverageLabel(videoPlugins, ALL_VIDEO_SCRAPE_FIELDS.length)}`}
-        actions={
-          <Button
-            type="button"
 
-            size="sm"
-            disabled={pluginBusy !== null}
-            onClick={() => onCreateComposite('video')}
-          >
-            新增组合
-          </Button>
-        }
       >
         {renderPluginGrid('video', filteredVideoPlugins, ALL_VIDEO_SCRAPE_FIELDS.length, {
-          scroll: true,
+          scroll: false,
           showEmptyActions: true,
           emptyHint: '暂无影片插件，可导入或使用开发助手创建',
           filteredEmptyHint: '没有符合筛选的影片插件',
           defaultPluginName: defaultVideoPluginName
         })}
-      </SettingsSectionBlock>
+      </SettingsSectionBlock> : null}
 
-      <SettingsSectionBlock
-        className="settings-section-divider"
+      {kind === 'actress' ? <SettingsSectionBlock
+
         title={
           <>
             演员插件
@@ -318,26 +319,16 @@ export default function PluginsSettingsPanel({
           </>
         }
         hint={`默认 ${defaultActressPluginName} · ${bestCoverageLabel(actressPlugins, ALL_ACTRESS_SCRAPE_FIELDS.length)}`}
-        actions={
-          <Button
-            type="button"
 
-            size="sm"
-            disabled={pluginBusy !== null}
-            onClick={() => onCreateComposite('actress')}
-          >
-            新增组合
-          </Button>
-        }
       >
         {renderPluginGrid('actress', filteredActressPlugins, ALL_ACTRESS_SCRAPE_FIELDS.length, {
-          scroll: true,
+          scroll: false,
           showEmptyActions: true,
           emptyHint: '暂无演员插件，可导入或使用开发助手创建',
           filteredEmptyHint: '没有符合筛选的演员插件',
           defaultPluginName: defaultActressPluginName
         })}
-      </SettingsSectionBlock>
+      </SettingsSectionBlock> : null}
     </SettingsCard>
   )
 }

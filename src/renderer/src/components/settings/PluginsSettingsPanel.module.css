@@ -1,0 +1,26 @@
+.compositeEntry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--settings-gap, 12px);
+  padding: var(--settings-gap, 12px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+}
+
+.compositeEntry strong {
+  color: var(--text-primary);
+  font-size: var(--settings-fs-body, 13px);
+  font-weight: var(--settings-fw-label, 600);
+}
+
+.compositeEntry p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+.compositeEntry button {
+  flex-shrink: 0;
+}

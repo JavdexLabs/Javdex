@@ -147,7 +147,7 @@ describe('V14 unreleased feature consolidation migration', () => {
 
       migrateDatabase(database)
 
-      assert.equal(CURRENT_SCHEMA_VERSION, 14)
+      assert.equal(CURRENT_SCHEMA_VERSION, 15)
       assert.equal(database.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       for (const table of [
         'media_libraries',

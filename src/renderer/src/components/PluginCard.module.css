@@ -1,5 +1,32 @@
+.card .body {
+  display: grid;
+  grid-template-rows: repeat(2, calc(var(--control-h-sm) - 8px)) 17px 17px 3px;
+  align-content: start;
+}
+
+.card .titleRow {
+  align-items: center;
+}
+
+.card .tags {
+  flex-wrap: nowrap;
+}
+
+.tags .version {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card .actions {
+  justify-content: flex-start;
+}
+
 .availability {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   min-height: 18px;
   padding: 0 6px;
@@ -12,13 +39,4 @@
 .availability[data-configured='true'] {
   border-color: var(--border-accent);
   color: var(--text-accent);
-}
-
-.configurationLabel {
-  overflow: hidden;
-  margin-top: 6px;
-  color: var(--text-muted);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }

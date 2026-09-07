@@ -1,3 +1,4 @@
+import Checkbox from './Checkbox'
 import {
   formatActressScrapeMatchNameLabel,
   type ActressScrapeMatchNameOption
@@ -386,8 +387,7 @@ export default function ScrapeFieldsModal<
                   supported && !supported.has(opt.id) ? ' scrape-field-option--disabled' : ''
                 }`}
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   disabled={Boolean(supported && !supported.has(opt.id))}
                   checked={selectedSet.has(opt.id)}
                   onChange={() => onToggle(opt.id)}
@@ -414,8 +414,7 @@ export default function ScrapeFieldsModal<
                   missingSelected.has(opt.id) ? ' is-selected' : ''
                 }${supported && !supported.has(opt.id) ? ' is-disabled' : ''}`}
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   disabled={Boolean(supported && !supported.has(opt.id))}
                   checked={missingSelected.has(opt.id)}
                   onChange={() => toggleMissing(opt.id)}

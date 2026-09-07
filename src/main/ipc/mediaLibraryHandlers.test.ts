@@ -12,6 +12,7 @@ import type {
 } from '@shared/mediaLibraryTypes'
 import type { GlobalSearchResult, HomeSnapshot } from '@shared/catalogTypes'
 import { IPC, type IpcChannel } from '@shared/ipc-channels'
+import { DEFAULT_MEDIA_LIBRARY_CONFIG } from '@shared/mediaLibraryTypes'
 import { MediaLibraryRepoError } from '../db/mediaLibraryRepo'
 import { createMediaLibraryCommandAdapter } from './mediaLibraryContractAdapter'
 import {
@@ -164,6 +165,31 @@ function createDependencies(calls: string[]): MediaLibraryHandlerDependencies {
 }
 
 describe('media-library IPC schemas', () => {
+  it('accepts the complete default config sent by the create wizard, including local NFO import', () => {
+    for (const autoImportLocalNfo of [true, false]) {
+      const input = {
+        name: '下载临时', roots: [],
+        config: { ...DEFAULT_MEDIA_LIBRARY_CONFIG, autoImportLocalNfo }
+      }
+      assert.deepEqual(mediaLibraryIpcSchemas[IPC.MEDIA_LIBRARY_CREATE].parse([input]), [input])
+    }
+  })
+
+  it('accepts boolean local NFO settings on update and rejects malformed values on both paths', () => {
+    for (const autoImportLocalNfo of [true, false]) {
+      const input = { libraryId: 3, expectedRevision: 2, patch: { autoImportLocalNfo } }
+      assert.deepEqual(mediaLibraryIpcSchemas[IPC.MEDIA_LIBRARY_CONFIG_UPDATE].parse([input]), [input])
+    }
+    for (const autoImportLocalNfo of ['true', 1, null]) {
+      assert.equal(mediaLibraryIpcSchemas[IPC.MEDIA_LIBRARY_CREATE].safeParse([
+        { name: '下载临时', config: { autoImportLocalNfo } }
+      ]).success, false)
+      assert.equal(mediaLibraryIpcSchemas[IPC.MEDIA_LIBRARY_CONFIG_UPDATE].safeParse([
+        { libraryId: 3, expectedRevision: 2, patch: { autoImportLocalNfo } }
+      ]).success, false)
+    }
+  })
+
   it('accepts exact management commands and rejects loose object shapes', () => {
     assert.equal(mediaLibraryIpcSchemas[IPC.MEDIA_LIBRARY_LIST].safeParse([]).success, true)
     assert.equal(

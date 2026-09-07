@@ -16,6 +16,7 @@ import { registerLibraryCuratorHandlers } from './libraryCuratorHandlers'
 import { registerAgentMetadataHandlers } from './agentMetadataHandlers'
 import { registerMediaLibraryHandlers } from './mediaLibraryHandlers'
 import { registerPlaylistImportHandlers } from './playlistImportHandlers'
+import { registerNfoExportHandlers } from './nfoExportHandlers'
 
 export function registerIpcHandlers(
   getWindow: () => BrowserWindow | null,
@@ -25,6 +26,7 @@ export function registerIpcHandlers(
   configureIpcSecurity({ getWindow, isTrustedUrl })
 
   registerSettingsHandlers(ctx)
+  registerNfoExportHandlers(ctx)
   registerMediaLibraryHandlers()
   registerUpdateHandlers(ctx)
   registerAssetHandlers()

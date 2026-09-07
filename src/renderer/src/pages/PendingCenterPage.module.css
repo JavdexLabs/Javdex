@@ -4,67 +4,91 @@
 }
 
 .topbar {
-  background: var(--surface-panel);
+  display: grid;
+  flex: 0 0 auto;
+  gap: var(--form-field-gap);
+  padding: 16px 24px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-base);
+  container-type: inline-size;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 12px;
+}
+
+.title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.filterRow {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 12px;
 }
 
 .typeFilter {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.libraryFilter {
-  width: 150px;
-  min-width: 110px;
+  flex: 1 1 auto;
+  padding: 3px;
+  border: 0;
+  background: transparent;
+  scrollbar-width: thin;
 }
 
 .typeFilter > button {
-  min-height: var(--control-h-sm);
-  padding: 0 10px;
+  min-height: var(--control-h-md);
+}
+
+.tabLabel {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-  transition:
-    background var(--motion-fast),
-    border-color var(--motion-fast),
-    color var(--motion-fast);
 }
 
-.typeFilter > button:hover {
-  border-color: var(--border-strong);
-  background: var(--surface-control-hover);
-  color: var(--text-primary);
-}
-
-.typeFilter > button:focus-visible {
-  outline: var(--focus-outline);
-  outline-offset: 1px;
-  box-shadow: var(--focus-ring);
-}
-
-.typeFilter > button[aria-pressed='true'] {
-  border-color: var(--border-accent);
-  background: var(--surface-selected);
-  color: var(--text-primary);
-}
-
-.typeFilter em {
-  padding: 0 5px;
+.tabCount {
   min-width: 18px;
+  padding: 0 5px;
   border-radius: var(--radius-pill);
   background: var(--surface-control);
-  color: var(--text-muted);
-  font-size: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
   font-style: normal;
   font-variant-numeric: tabular-nums;
   text-align: center;
+}
+
+.libraryFilter {
+  flex: 0 0 180px;
+  min-width: 0;
+}
+
+.libraryFilter button {
+  height: var(--control-h-md);
+  min-height: var(--control-h-md);
+  font-size: 12px;
+}
+
+@container (width < 760px) {
+  .filterRow {
+    flex-wrap: wrap;
+  }
+
+  .typeFilter {
+    flex-basis: 100%;
+  }
+
+  .libraryFilter {
+    margin-left: auto;
+  }
 }
 
 .count {
@@ -120,7 +144,7 @@
   justify-content: space-between;
   gap: 8px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -190,12 +214,12 @@
 }
 
 .railTitle {
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .railMeta {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 /* A quiet dot marks queue entries that already have everything they need. */

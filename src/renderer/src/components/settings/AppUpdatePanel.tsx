@@ -40,12 +40,14 @@ function hasReleaseNotes(notes: string): boolean {
 
 export default function AppUpdatePanel(): JSX.Element {
   const [state, setState] = useState<UpdateCheckState | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     let active = true
     void api.appUpdate.getState().then((next) => {
       if (active) setState(next)
-    })
+    }).catch((reason) => { if (active) setError((reason as Error).message) })
     const unsubscribe = api.appUpdate.onStateChanged((next) => setState(next))
     return () => {
       active = false
@@ -53,7 +55,7 @@ export default function AppUpdatePanel(): JSX.Element {
     }
   }, [])
 
-  const checking = state?.status === 'checking'
+  const checking = busy || state?.status === 'checking'
   const available = state?.status === 'available'
   const ignored = Boolean(
     available && state?.latestRelease?.version === state?.ignoredVersion
@@ -72,7 +74,11 @@ export default function AppUpdatePanel(): JSX.Element {
   }, [available, checking, ignored, state])
 
   const runCheck = async (): Promise<void> => {
-    setState(await api.appUpdate.check())
+    setBusy(true)
+    setError(null)
+    try { setState(await api.appUpdate.check()) }
+    catch (reason) { setError((reason as Error).message) }
+    finally { setBusy(false) }
   }
 
   return (
@@ -80,7 +86,7 @@ export default function AppUpdatePanel(): JSX.Element {
       <div className="settings-overview-panel-head app-update-panel-head">
         <div>
           <h3 id="app-update-title">版本更新</h3>
-          <p>{statusText}</p>
+          <p role={error ? 'alert' : 'status'}>{error || statusText}</p>
         </div>
         <Button type="button" size="sm" disabled={checking} onClick={() => void runCheck()}>
           <RefreshCw {...UI_ICON_SM} className={checking ? 'is-spinning' : undefined} aria-hidden />
@@ -105,7 +111,7 @@ export default function AppUpdatePanel(): JSX.Element {
                 type="button"
 
                 size="sm"
-                onClick={() => void api.appUpdate.ignoreVersion(state.latestRelease!.version)}
+                onClick={() => void api.appUpdate.ignoreVersion(state.latestRelease!.version).catch((reason) => setError((reason as Error).message))}
               >
                 暂不提醒
               </Button>
@@ -116,7 +122,7 @@ export default function AppUpdatePanel(): JSX.Element {
 
               size="sm"
               title="在浏览器中打开 GitHub Release 下载页面"
-              onClick={() => void api.appUpdate.openRelease()}
+              onClick={() => void api.appUpdate.openRelease().catch((reason) => setError((reason as Error).message))}
             >
               前往下载
               <ExternalLink {...UI_ICON_SM} aria-hidden />
@@ -124,7 +130,7 @@ export default function AppUpdatePanel(): JSX.Element {
           </div>
           {hasReleaseNotes(state.latestRelease.releaseNotes) ? (
             <details className="app-update-release-notes">
-              <summary>查看 Release Log</summary>
+              <summary>查看更新说明</summary>
               <div className="app-update-markdown selectable-text">
                 <ReactMarkdown
                   components={{

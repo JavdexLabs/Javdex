@@ -133,6 +133,8 @@ describe('scraperPluginService', () => {
     const gfriends = builtInDescriptor('actress', 'Gfriends')
     assert.deepEqual(gfriends.supportedFields, ['avatar'])
     assert.deepEqual(gfriends.delay, { minMs: 0, maxMs: 0 })
+    assert.equal(gfriends.debuggable, false)
+    assert.equal(builtInDescriptor('actress', 'Xslist').debuggable, true)
   })
 
   it('drops unknown actress supported field ids from packages', async () => {

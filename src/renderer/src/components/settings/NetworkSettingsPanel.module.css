@@ -1,130 +1,109 @@
-.card :global([class~='settings-card-head']) {
-  align-items: flex-start;
+.card {
+  container-type: inline-size;
 }
 
-.proxyList {
+.form {
   display: grid;
-  gap: 10px;
+  align-items: start;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: var(--settings-gap, 12px);
 }
 
-.proxyRow {
+.field {
   display: grid;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--surface-control) 44%, transparent);
-  transition:
-    border-color var(--motion-fast),
-    background var(--motion-fast);
-}
-
-.enabled {
-  border-color: color-mix(in srgb, var(--accent) 28%, var(--border-subtle));
-  background: color-mix(in srgb, var(--accent) 5%, var(--surface-control));
-}
-
-.missing {
-  border-color: color-mix(in srgb, var(--warning) 42%, var(--border-subtle));
-}
-
-.rowHead {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-}
-
-.rowCopy {
   min-width: 0;
-  display: grid;
-  gap: 4px;
-}
-
-.titleLine {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex-wrap: wrap;
-}
-
-.titleLine h4 {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: var(--settings-fs-title, 14px);
-  font-weight: var(--settings-fw-title, 700);
-  line-height: var(--settings-lh-tight, 1.35);
-}
-
-.rowCopy p {
-  margin: 0;
-  color: var(--text-muted);
+  gap: var(--settings-gap-sm, 8px);
+  color: var(--text-secondary);
   font-size: var(--settings-fs-secondary, 12px);
+}
+
+.addressRow {
+  display: flex;
+  gap: var(--settings-gap-sm, 8px);
+  min-width: 0;
+}
+
+.addressRow input {
+  flex: 1;
+  min-width: 0;
+  height: var(--control-h-sm);
+}
+
+.testButton {
+  flex: 0 0 auto;
+  min-width: 88px;
+  height: var(--control-h-sm);
+}
+
+.testHint {
+  color: var(--text-muted);
+  font-size: var(--settings-fs-caption, 11px);
   line-height: var(--settings-lh, 1.45);
 }
 
-.proxyRow :global([class~='settings-form-field--inline']) {
-  grid-template-columns: 48px minmax(0, 1fr);
-  align-items: start;
-  gap: 8px 10px;
-}
-
-.proxyRow :global([class~='settings-form-label']) {
-  min-height: var(--control-h-sm);
-  display: inline-flex;
+.feedback {
+  display: flex;
   align-items: center;
-  color: var(--text-muted);
-}
-
-.proxyRow :global([class~='settings-inline-url-field']) {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 8px;
-}
-
-.proxyRow :global([class~='settings-inline-url-field__footer']) {
-  margin-top: 0;
-}
-
-.proxyRow :global([class~='settings-inline-url-field__footer'] [class~='btn']) {
-  min-width: 92px;
+  gap: var(--settings-gap-sm, 8px);
   height: var(--control-h-sm);
+  margin-top: var(--settings-gap-sm, 8px);
+  color: var(--text-muted);
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+.feedback > svg {
+  flex-shrink: 0;
+}
+
+.feedback[data-tone='error'] {
+  color: var(--text-danger);
+}
+
+.feedback[data-tone='success'] {
+  color: var(--text-success);
+}
+
+.feedbackText {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.proxyRow :global([class~='settings-form-hint']) {
-  grid-column: 2;
-  margin-top: -2px;
-  color: var(--warning);
+.detailsButton,
+.detailsHidden {
+  flex-shrink: 0;
 }
 
-@media (width <= 820px) {
-  .rowHead,
-  .proxyRow :global([class~='settings-inline-url-field']) {
-    grid-template-columns: 1fr;
-  }
+.detailsHidden {
+  visibility: hidden;
+}
 
-  .rowHead :global([class~='settings-header-switch']) {
-    justify-self: start;
-  }
+.detailText {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
 
-  .proxyRow :global([class~='settings-inline-url-field__footer']) {
-    justify-content: stretch;
-  }
+.spinning {
+  animation: spin 1s linear infinite;
+}
 
-  .proxyRow :global([class~='settings-inline-url-field__footer'] [class~='btn']) {
-    width: 100%;
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
-@media (width <= 560px) {
-  .proxyRow :global([class~='settings-form-field--inline']) {
-    grid-template-columns: 1fr;
+@media (prefers-reduced-motion: reduce) {
+  .spinning {
+    animation: none;
   }
+}
 
-  .proxyRow :global([class~='settings-form-field--inline'] [class~='settings-form-hint']) {
-    grid-column: 1;
+@container (width < 480px) {
+  .form {
+    grid-template-columns: 1fr;
   }
 }

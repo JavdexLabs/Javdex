@@ -60,6 +60,7 @@ interface MediaLibraryConfigRow {
   auto_scan_interval_minutes: number
   min_import_duration_minutes: number
   auto_merge_same_code_resources: 0 | 1
+  auto_import_local_nfo: 0 | 1
   remove_resource_less_memberships: 0 | 1
   default_video_scraper: string | null
   default_sort_by: MediaLibraryConfig['defaultSortBy']
@@ -98,6 +99,7 @@ interface MediaLibrarySummaryRow {
   auto_scan_interval_minutes: number
   min_import_duration_minutes: number
   auto_merge_same_code_resources: 0 | 1
+  auto_import_local_nfo: 0 | 1
   remove_resource_less_memberships: 0 | 1
   default_video_scraper: string | null
   default_sort_by: MediaLibraryConfig['defaultSortBy']
@@ -153,6 +155,7 @@ const SUMMARY_SELECT_SQL = `
     config.auto_scan_interval_minutes,
     config.min_import_duration_minutes,
     config.auto_merge_same_code_resources,
+    config.auto_import_local_nfo,
     config.remove_resource_less_memberships,
     config.default_video_scraper,
     config.default_sort_by,
@@ -176,7 +179,10 @@ const SUMMARY_SELECT_SQL = `
       AS pending_cleanup_job_count,
     (SELECT COUNT(*)
        FROM pending_scan_groups pending_group
-      WHERE pending_group.library_id = library.id)
+      WHERE pending_group.library_id = library.id) +
+    (SELECT COUNT(*)
+       FROM pending_resource_identities pending_identity
+      WHERE pending_identity.library_id = library.id)
       AS pending_scan_group_count,
     COALESCE(SUM(CASE WHEN root.state = 'disabled' THEN 1 ELSE 0 END), 0)
       AS disabled_root_count,
@@ -271,6 +277,12 @@ function normalizeConfigPatch(input: MediaLibraryConfigPatch): MediaLibraryConfi
     }
     patch.autoMergeSameCodeResources = input.autoMergeSameCodeResources
   }
+  if (input.autoImportLocalNfo !== undefined) {
+    if (typeof input.autoImportLocalNfo !== 'boolean') {
+      validationError('本地 NFO 自动导入开关必须是布尔值。')
+    }
+    patch.autoImportLocalNfo = input.autoImportLocalNfo
+  }
   if (input.removeResourceLessMemberships !== undefined) {
     if (typeof input.removeResourceLessMemberships !== 'boolean') {
       validationError('无资源成员清理开关必须是布尔值。')
@@ -360,6 +372,7 @@ function hydrateConfig(row: MediaLibraryConfigRow): MediaLibraryConfig {
     autoScanIntervalMinutes: row.auto_scan_interval_minutes,
     minImportDurationMinutes: row.min_import_duration_minutes,
     autoMergeSameCodeResources: Boolean(row.auto_merge_same_code_resources),
+    autoImportLocalNfo: Boolean(row.auto_import_local_nfo),
     removeResourceLessMemberships: Boolean(row.remove_resource_less_memberships),
     defaultVideoScraper: row.default_video_scraper,
     defaultSortBy: row.default_sort_by,
@@ -404,6 +417,7 @@ function hydrateSummary(row: MediaLibrarySummaryRow): MediaLibrarySummary {
       auto_scan_interval_minutes: row.auto_scan_interval_minutes,
       min_import_duration_minutes: row.min_import_duration_minutes,
       auto_merge_same_code_resources: row.auto_merge_same_code_resources,
+      auto_import_local_nfo: row.auto_import_local_nfo,
       remove_resource_less_memberships: row.remove_resource_less_memberships,
       default_video_scraper: row.default_video_scraper,
       default_sort_by: row.default_sort_by,
@@ -523,6 +537,8 @@ function assertRootPathHasNoOwnedData(
            WHERE library_id = @libraryId AND root_id = @rootId) AS resource_count,
          (SELECT COUNT(*) FROM pending_scan_resources
            WHERE library_id = @libraryId AND root_id = @rootId) AS pending_resource_count,
+         (SELECT COUNT(*) FROM pending_resource_identities
+           WHERE library_id = @libraryId AND root_id = @rootId) AS pending_identity_count,
          (SELECT COUNT(*) FROM library_unrecognized_files
            WHERE library_id = @libraryId AND root_id = @rootId) AS unrecognized_file_count,
          (SELECT COUNT(*) FROM library_root_cleanup_jobs
@@ -531,12 +547,14 @@ function assertRootPathHasNoOwnedData(
     .get({ libraryId, rootId }) as {
     resource_count: number
     pending_resource_count: number
+    pending_identity_count: number
     unrecognized_file_count: number
     cleanup_job_count: number
   }
   if (
     owned.resource_count > 0 ||
     owned.pending_resource_count > 0 ||
+    owned.pending_identity_count > 0 ||
     owned.unrecognized_file_count > 0 ||
     owned.cleanup_job_count > 0
   ) {
@@ -558,6 +576,8 @@ function rootHasContinuityOwnedData(
          EXISTS(SELECT 1 FROM video_resources
            WHERE library_id = @libraryId AND root_id = @rootId) OR
          EXISTS(SELECT 1 FROM pending_scan_resources
+           WHERE library_id = @libraryId AND root_id = @rootId) OR
+         EXISTS(SELECT 1 FROM pending_resource_identities
            WHERE library_id = @libraryId AND root_id = @rootId) OR
          EXISTS(SELECT 1 FROM library_unrecognized_files
            WHERE library_id = @libraryId AND root_id = @rootId)
@@ -695,6 +715,7 @@ function insertConfig(
          auto_scan_interval_minutes,
          min_import_duration_minutes,
          auto_merge_same_code_resources,
+         auto_import_local_nfo,
          remove_resource_less_memberships,
          default_video_scraper,
          default_sort_by,
@@ -707,6 +728,7 @@ function insertConfig(
          @autoScanIntervalMinutes,
          @minImportDurationMinutes,
          @autoMergeSameCodeResources,
+         @autoImportLocalNfo,
          @removeResourceLessMemberships,
          @defaultVideoScraper,
          @defaultSortBy,
@@ -721,6 +743,7 @@ function insertConfig(
       autoScanIntervalMinutes: values.autoScanIntervalMinutes,
       minImportDurationMinutes: values.minImportDurationMinutes,
       autoMergeSameCodeResources: values.autoMergeSameCodeResources ? 1 : 0,
+      autoImportLocalNfo: values.autoImportLocalNfo ? 1 : 0,
       removeResourceLessMemberships: values.removeResourceLessMemberships ? 1 : 0,
       defaultVideoScraper: values.defaultVideoScraper,
       defaultSortBy: values.defaultSortBy,
@@ -1070,6 +1093,8 @@ export function updateMediaLibraryConfig(input: {
         patch.minImportDurationMinutes ?? currentRow.min_import_duration_minutes,
       autoMergeSameCodeResources:
         patch.autoMergeSameCodeResources ?? Boolean(currentRow.auto_merge_same_code_resources),
+      autoImportLocalNfo:
+        patch.autoImportLocalNfo ?? Boolean(currentRow.auto_import_local_nfo),
       removeResourceLessMemberships:
         patch.removeResourceLessMemberships ??
         Boolean(currentRow.remove_resource_less_memberships),
@@ -1089,6 +1114,7 @@ export function updateMediaLibraryConfig(input: {
                 auto_scan_interval_minutes = @autoScanIntervalMinutes,
                 min_import_duration_minutes = @minImportDurationMinutes,
                 auto_merge_same_code_resources = @autoMergeSameCodeResources,
+                auto_import_local_nfo = @autoImportLocalNfo,
                 remove_resource_less_memberships = @removeResourceLessMemberships,
                 default_video_scraper = @defaultVideoScraper,
                 default_sort_by = @defaultSortBy,
@@ -1104,6 +1130,7 @@ export function updateMediaLibraryConfig(input: {
         autoScanIntervalMinutes: next.autoScanIntervalMinutes,
         minImportDurationMinutes: next.minImportDurationMinutes,
         autoMergeSameCodeResources: next.autoMergeSameCodeResources ? 1 : 0,
+        autoImportLocalNfo: next.autoImportLocalNfo ? 1 : 0,
         removeResourceLessMemberships: next.removeResourceLessMemberships ? 1 : 0,
         defaultVideoScraper: next.defaultVideoScraper,
         defaultSortBy: next.defaultSortBy,
@@ -1364,6 +1391,8 @@ export function deleteMediaLibraryRoot(input: {
                WHERE library_id = @libraryId AND root_id = @rootId) +
              (SELECT COUNT(*) FROM pending_scan_resources
                WHERE library_id = @libraryId AND root_id = @rootId) +
+             (SELECT COUNT(*) FROM pending_resource_identities
+               WHERE library_id = @libraryId AND root_id = @rootId) +
              (SELECT COUNT(*) FROM library_unrecognized_files
                WHERE library_id = @libraryId AND root_id = @rootId) +
              (SELECT COUNT(*) FROM library_root_cleanup_jobs
@@ -1440,9 +1469,11 @@ function readMediaLibraryDeletionCounts(
                WHERE other.video_id = membership.video_id
                  AND other.library_id <> @libraryId
             )) AS exclusive_video_count,
-        (SELECT COUNT(*) FROM pending_scan_groups WHERE library_id = @libraryId)
+        (SELECT COUNT(*) FROM pending_scan_groups WHERE library_id = @libraryId) +
+        (SELECT COUNT(*) FROM pending_resource_identities WHERE library_id = @libraryId)
           AS pending_scan_group_count,
-        (SELECT COUNT(*) FROM pending_scan_resources WHERE library_id = @libraryId)
+        (SELECT COUNT(*) FROM pending_scan_resources WHERE library_id = @libraryId) +
+        (SELECT COUNT(*) FROM pending_resource_identities WHERE library_id = @libraryId)
           AS pending_scan_resource_count,
         (SELECT COUNT(*) FROM library_scan_runs WHERE library_id = @libraryId)
           AS scan_run_count,
@@ -1505,6 +1536,11 @@ function readMediaLibraryDeletionImpactRevision(
     pendingScanResources: database
       .prepare(
         'SELECT * FROM pending_scan_resources WHERE library_id = @libraryId ORDER BY id'
+      )
+      .all(params),
+    pendingResourceIdentities: database
+      .prepare(
+        'SELECT * FROM pending_resource_identities WHERE library_id = @libraryId ORDER BY id'
       )
       .all(params),
     scanRuns: database
@@ -1789,6 +1825,9 @@ export function deleteMediaLibrary(input: {
         .run(input.libraryId)
       database
         .prepare('DELETE FROM pending_scan_resources WHERE library_id = ?')
+        .run(input.libraryId)
+      database
+        .prepare('DELETE FROM pending_resource_identities WHERE library_id = ?')
         .run(input.libraryId)
       database.prepare('DELETE FROM video_resources WHERE library_id = ?').run(input.libraryId)
       database

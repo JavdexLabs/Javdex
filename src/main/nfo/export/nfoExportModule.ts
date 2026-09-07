@@ -40,12 +40,17 @@ interface FileFingerprint {
   mode?: number
 }
 
+interface DirectoryIdentity {
+  readonly device: string
+  readonly inode: string
+}
+
 interface InternalPlanFile extends NfoExportPlanFile {
   resourceId: number
   videoId: number
   targetPath: string
   targetDirectoryPath: string
-  targetDirectoryRealPath: string
+  targetDirectoryIdentity: DirectoryIdentity
   snapshotHash: string
   expectedTarget: FileFingerprint
   content: { type: 'nfo'; bytes: Buffer } | { type: 'asset'; storedPath: string; sourceHash: string; artwork?: CoverArtworkRecipe }
@@ -123,7 +128,21 @@ function digestFile(targetPath: string): string {
   return hash.digest('hex')
 }
 
-function targetFingerprint(targetPath: string, expectedParentRealPath?: string): FileFingerprint {
+function directoryIdentity(directoryPath: string): DirectoryIdentity {
+  const stat = fs.statSync(directoryPath, { bigint: true })
+  if (!stat.isDirectory()) throw new Error('导出目标目录不可用')
+  return { device: stat.dev.toString(), inode: stat.ino.toString() }
+}
+
+function directoryIdentityKey(identity: DirectoryIdentity): string {
+  return `${identity.device}:${identity.inode}`
+}
+
+function sameDirectoryIdentity(left: DirectoryIdentity, right: DirectoryIdentity): boolean {
+  return left.device === right.device && left.inode === right.inode
+}
+
+function targetFingerprint(targetPath: string, expectedParentIdentity?: DirectoryIdentity): FileFingerprint {
   let stat: fs.Stats
   try {
     stat = fs.lstatSync(targetPath)
@@ -133,9 +152,9 @@ function targetFingerprint(targetPath: string, expectedParentRealPath?: string):
   }
   if (!stat.isFile() || stat.isSymbolicLink()) return { state: 'conflict' }
   let readPath = targetPath
-  if (expectedParentRealPath) {
+  if (expectedParentIdentity) {
     readPath = fs.realpathSync.native(targetPath)
-    if (path.dirname(readPath) !== expectedParentRealPath) {
+    if (!sameDirectoryIdentity(directoryIdentity(path.dirname(readPath)), expectedParentIdentity)) {
       throw new Error('导出目标越过媒体目录')
     }
   }
@@ -185,10 +204,9 @@ function canonicalTargetName(value: string): string {
   return value.normalize('NFC').toLowerCase()
 }
 
-interface PlannedTargetParent {
-  readonly exists: boolean
-  readonly realPath: string
-}
+type PlannedTargetParent =
+  | { readonly exists: false; readonly realPath: string }
+  | { readonly exists: true; readonly realPath: string; readonly identity: DirectoryIdentity }
 
 /**
  * Inspect a target using the canonical media directory returned by the anchor inspection.
@@ -199,13 +217,14 @@ function planTargetFingerprint(
   targetPath: string,
   anchorDirectoryPath: string,
   anchorDirectoryRealPath: string,
+  anchorDirectoryIdentity: DirectoryIdentity,
   parents: Map<string, PlannedTargetParent>
 ): FileFingerprint {
   const parent = path.dirname(targetPath)
   if (parent === anchorDirectoryPath) {
     return targetFingerprint(
       path.join(anchorDirectoryRealPath, path.basename(targetPath)),
-      anchorDirectoryRealPath
+      anchorDirectoryIdentity
     )
   }
   if (path.dirname(parent) !== anchorDirectoryPath ||
@@ -213,7 +232,7 @@ function planTargetFingerprint(
     throw new Error('导出子目录不安全')
   }
 
-  const cacheKey = `${anchorDirectoryRealPath}\0${canonicalTargetName(path.basename(parent))}`
+  const cacheKey = `${directoryIdentityKey(anchorDirectoryIdentity)}\0${canonicalTargetName(path.basename(parent))}`
   let inspected = parents.get(cacheKey)
   if (!inspected) {
     let stat: fs.Stats | null = null
@@ -232,10 +251,10 @@ function planTargetFingerprint(
         throw new Error('导出子目录发生冲突')
       }
       const realPath = fs.realpathSync.native(parent)
-      if (path.dirname(realPath) !== anchorDirectoryRealPath) {
+      if (!sameDirectoryIdentity(directoryIdentity(path.dirname(realPath)), anchorDirectoryIdentity)) {
         throw new Error('导出目标越过媒体目录')
       }
-      inspected = { exists: true, realPath }
+      inspected = { exists: true, realPath, identity: directoryIdentity(realPath) }
     }
     parents.set(cacheKey, inspected)
   }
@@ -243,7 +262,7 @@ function planTargetFingerprint(
   if (!inspected.exists) return { state: 'missing' }
   return targetFingerprint(
     path.join(inspected.realPath, path.basename(targetPath)),
-    inspected.realPath
+    inspected.identity
   )
 }
 
@@ -406,7 +425,7 @@ export class NfoExportModule {
     const exportedVideoIds = new Set<number>()
     const targetVideoCodes = new Map<string, Map<string, number>>()
     const inspectPlanAnchor = this.deps.createPlanAnchorInspector?.()
-    const plannedTargetParents = new Map<string, { exists: boolean; realPath: string }>()
+    const plannedTargetParents = new Map<string, PlannedTargetParent>()
 
     for (const snapshot of snapshots) {
       await new Promise<void>((resolve) => setImmediate(resolve))
@@ -416,6 +435,7 @@ export class NfoExportModule {
       }
       let anchorStat: fs.Stats
       let targetDirectoryRealPath: string
+      let targetDirectoryIdentity: DirectoryIdentity
       try {
         if (inspectPlanAnchor) {
           const inspected = inspectPlanAnchor(
@@ -429,6 +449,7 @@ export class NfoExportModule {
           anchorStat = fs.statSync(anchorRealPath)
           targetDirectoryRealPath = path.dirname(anchorRealPath)
         }
+        targetDirectoryIdentity = directoryIdentity(targetDirectoryRealPath)
       } catch {
         warnings.push(`${snapshot.code}：本地资源锚点已不可用，已跳过。`)
         continue
@@ -578,7 +599,7 @@ export class NfoExportModule {
       }))]
 
       for (const descriptor of descriptors) {
-        const key = `${targetDirectoryRealPath}\0${canonicalTargetName(
+        const key = `${directoryIdentityKey(targetDirectoryIdentity)}\0${canonicalTargetName(
           path.relative(targetDirectory, descriptor.targetPath)
         )}`
         const existingPlan = plannedTargets.get(key)
@@ -597,6 +618,7 @@ export class NfoExportModule {
             descriptor.targetPath,
             targetDirectory,
             targetDirectoryRealPath,
+            targetDirectoryIdentity,
             plannedTargetParents
           )
         } catch {
@@ -610,7 +632,7 @@ export class NfoExportModule {
           kind: descriptor.kind,
           targetPath: descriptor.targetPath,
           targetDirectoryPath: targetDirectory,
-          targetDirectoryRealPath,
+          targetDirectoryIdentity,
           displayName: `${snapshot.code} / ${path.relative(targetDirectory, descriptor.targetPath)}`,
           videoCode: snapshot.code,
           action: 'unavailable' in descriptor && descriptor.unavailable
@@ -635,7 +657,7 @@ export class NfoExportModule {
         files.push(file)
         if (file.kind === 'nfo') documents.set(file, { snapshot, assets, collidingActorBasenames })
       }
-      const physicalDirectoryKey = targetDirectoryRealPath
+      const physicalDirectoryKey = directoryIdentityKey(targetDirectoryIdentity)
       const codes = targetVideoCodes.get(physicalDirectoryKey) ?? new Map<string, number>()
       const normalizedCode = snapshot.code.trim().toUpperCase()
       const existingVideoId = codes.get(normalizedCode)
@@ -649,7 +671,7 @@ export class NfoExportModule {
     // Finalize references only after every target has been classified.
     for (const [file, document] of documents) {
       const assets = document.assets.filter((asset) => {
-        const key = `${file.targetDirectoryRealPath}\0${canonicalTargetName(
+        const key = `${directoryIdentityKey(file.targetDirectoryIdentity)}\0${canonicalTargetName(
           path.relative(file.targetDirectoryPath,
             path.join(asset.targetDirectory, `${asset.targetBasename}${asset.extension}`))
         )}`
@@ -663,8 +685,8 @@ export class NfoExportModule {
     if (profile.warning) warnings.unshift(profile.warning)
     const count = (action: NfoExportPlanAction): number => files.filter((file) => file.action === action).length
     const publicFiles = files.map(({ resourceId: _a, videoId: _b, targetPath: _c, targetDirectoryPath: _d,
-      targetDirectoryRealPath: _e, snapshotHash: _f, expectedTarget: _g, content: _h,
-      convertToJpeg: _i, ...file }) =>
+      targetDirectoryIdentity: _e, snapshotHash: _f, expectedTarget: _g,
+      content: _h, convertToJpeg: _i, ...file }) =>
       Object.freeze(file)
     )
     const preview: NfoExportPlanPreview = {
@@ -692,6 +714,7 @@ export class NfoExportModule {
     for (const file of files) {
       Object.freeze(file.content)
       Object.freeze(file.expectedTarget)
+      Object.freeze(file.targetDirectoryIdentity)
       Object.freeze(file)
     }
     Object.freeze(preview)
@@ -735,7 +758,8 @@ export class NfoExportModule {
         const currentAnchorRealPath = fs.realpathSync.native(current.anchorPath)
         const currentDir = path.dirname(currentAnchorRealPath)
         const currentAnchorStat = fs.statSync(currentAnchorRealPath)
-        const staleReason = currentDir !== file.targetDirectoryRealPath
+        const currentDirectoryIdentity = directoryIdentity(currentDir)
+        const staleReason = !sameDirectoryIdentity(currentDirectoryIdentity, file.targetDirectoryIdentity)
           ? '导出目标目录在计划后发生变化'
           : snapshotHash(current, currentAnchorStat) !== file.snapshotHash
             ? '来源资源在计划后发生变化'
@@ -749,7 +773,7 @@ export class NfoExportModule {
         }
         try {
           validateSafeTargetParent(
-            file.targetPath, file.targetDirectoryPath, file.targetDirectoryRealPath, false
+            file.targetPath, file.targetDirectoryPath, file.targetDirectoryIdentity, false
           )
         } catch {
           items.push({ ...base, disposition: 'stale-plan', message: '导出目标目录在计划后发生变化' })
@@ -781,7 +805,7 @@ export class NfoExportModule {
               return (this.deps.encodeImage ?? imageBytesForWrite)(source, file.convertToJpeg)
             })()
         validateSafeTargetParent(
-          file.targetPath, file.targetDirectoryPath, file.targetDirectoryRealPath, true
+          file.targetPath, file.targetDirectoryPath, file.targetDirectoryIdentity, true
         )
         ;(this.deps.writeAtomically ?? atomicWrite)(file.targetPath, bytes)
         items.push({ ...base, disposition: 'written' })
@@ -853,11 +877,12 @@ function atomicWrite(targetPath: string, bytes: Buffer): void {
 function validateSafeTargetParent(
   targetPath: string,
   anchorDirectoryPath: string,
-  anchorDirectoryRealPath: string,
+  anchorDirectoryIdentity: DirectoryIdentity,
   createMissing: boolean
 ): void {
   const parent = path.dirname(targetPath)
-  if (fs.realpathSync(anchorDirectoryPath) !== anchorDirectoryRealPath) {
+  const currentAnchorDirectory = fs.realpathSync.native(anchorDirectoryPath)
+  if (!sameDirectoryIdentity(directoryIdentity(currentAnchorDirectory), anchorDirectoryIdentity)) {
     throw new Error('媒体目录已变化')
   }
   if (parent !== anchorDirectoryPath) {
@@ -877,8 +902,9 @@ function validateSafeTargetParent(
       else return
     }
   }
-  const realParent = fs.realpathSync(parent)
-  if (realParent !== anchorDirectoryRealPath && path.dirname(realParent) !== anchorDirectoryRealPath) {
+  const realParent = fs.realpathSync.native(parent)
+  if (parent !== anchorDirectoryPath &&
+    !sameDirectoryIdentity(directoryIdentity(path.dirname(realParent)), anchorDirectoryIdentity)) {
     throw new Error('导出目标越过媒体目录')
   }
 }

@@ -125,6 +125,26 @@ describe('NfoExportModule', async () => {
     assert.equal(inspections, 1)
   })
 
+  it('accepts alternate Windows path spellings for the same physical export directory', {
+    skip: process.platform !== 'win32' ? 'Windows path aliases are case-insensitive' : false
+  }, async () => {
+    const fixture = setup()
+    const current = { value: snapshot(fixture.anchor, fixture.root) }
+    const module = moduleWith(current, {
+      createPlanAnchorInspector: () => (_libraryId, _rootId, filePath, root) => ({
+        root: root!,
+        realPath: root!.realPath!,
+        fileRealPath: filePath.toUpperCase(),
+        stat: fs.statSync(filePath)
+      })
+    })
+
+    const plan = await module.plan(request)
+    const report = await module.apply(plan, 'windows-path-alias', { isTerminated: () => false }, () => undefined)
+
+    assert.equal(report.items.find((item) => item.kind === 'nfo')?.disposition, 'written')
+  })
+
   it('reads selected images linearly and isolates assets that fail or change after planning', async () => {
     const fixture = setup()
     const current = { value: {

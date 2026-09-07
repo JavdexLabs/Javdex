@@ -735,9 +735,13 @@ export class NfoExportModule {
         const currentAnchorRealPath = fs.realpathSync.native(current.anchorPath)
         const currentDir = path.dirname(currentAnchorRealPath)
         const currentAnchorStat = fs.statSync(currentAnchorRealPath)
-        if (currentDir !== file.targetDirectoryRealPath ||
-          snapshotHash(current, currentAnchorStat) !== file.snapshotHash) {
-          items.push({ ...base, disposition: 'stale-plan', message: '来源或目标在计划后发生变化' })
+        const staleReason = currentDir !== file.targetDirectoryRealPath
+          ? '导出目标目录在计划后发生变化'
+          : snapshotHash(current, currentAnchorStat) !== file.snapshotHash
+            ? '来源资源在计划后发生变化'
+            : null
+        if (staleReason) {
+          items.push({ ...base, disposition: 'stale-plan', message: staleReason })
           completed += 1
           onProgress(completed, plan.files.length)
           await new Promise<void>((resolve) => setImmediate(resolve))

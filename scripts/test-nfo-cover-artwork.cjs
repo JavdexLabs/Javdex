@@ -129,7 +129,8 @@ async function run() {
   const plan = await module.plan(request)
   assert.equal(Object.isFrozen(plan.files.find(file => file.kind === 'cover').content.artwork.crop), true)
   assert.equal(plan.preview.summary.fileCount, 3)
-  assert.equal((await apply(plan)).writtenCount, 3)
+  const initialReport = await apply(plan)
+  assert.equal(initialReport.writtenCount, 3, JSON.stringify(initialReport.items))
   const outputs = ['TEST-001.nfo', 'TEST-001-poster.png', 'TEST-001-landscape.png']
   assert.equal(outputs.reduce((total, name) => total + fs.statSync(path.join(rootPath, name)).size, 0), plan.preview.summary.estimatedBytes)
   assert.match(fs.readFileSync(path.join(rootPath, outputs[0]), 'utf8'), /aspect="landscape">TEST-001-landscape.png/)

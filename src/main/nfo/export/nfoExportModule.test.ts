@@ -149,7 +149,7 @@ describe('NfoExportModule', async () => {
     reads = 0
     applying = true
     const report = await module.apply(plan, 'linear', { isTerminated: () => false }, () => undefined)
-    assert.equal(report.items.find((item) => item.kind === 'nfo')?.disposition, 'written')
+    assert.equal(report.items.find((item) => item.kind === 'nfo')?.disposition, 'written', JSON.stringify(report.items))
     assert.equal(report.items.find((item) => item.kind === 'cover')?.disposition, 'failed')
     assert.equal(report.items.filter((item) => item.disposition === 'stale-plan').length, 1)
     assert.equal(report.writtenCount, 50)

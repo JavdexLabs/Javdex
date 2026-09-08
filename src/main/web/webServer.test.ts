@@ -18,6 +18,7 @@ describe('Web authentication and streaming', () => {
   let sessionCookie: string
   let passwordHash: string
   const catalog: WebCatalogReader = {
+    home: () => ({ discovery: [], recent: [] }),
     collections: () => ({ libraries: [], playlists: [] }),
     browse: () => ({ items: [], total: 0, page: 1, pageSize: 36 }),
     detail: () => {
@@ -38,6 +39,13 @@ describe('Web authentication and streaming', () => {
     })
   before(async () => {
     fs.writeFileSync(movie, bytes)
+    fs.mkdirSync(path.join(directory, 'assets'))
+    for (const size of [32, 128]) {
+      fs.copyFileSync(
+        path.resolve(`build/icon-${size}.png`),
+        path.join(directory, 'assets', `icon-${size}-test.png`)
+      )
+    }
     fs.writeFileSync(
       path.join(directory, 'index.html'),
       '<!doctype html><title>Login</title>'
@@ -72,7 +80,9 @@ describe('Web authentication and streaming', () => {
       '/api/session',
       '/api/videos',
       '/api/collections',
+      '/api/home',
       '/api/videos/1/images/cover',
+      '/api/videos/1/images/actress-1',
       '/api/videos/1/media/1'
     ]) {
       const result = await fetch(base + route)
@@ -81,6 +91,24 @@ describe('Web authentication and streaming', () => {
       assert.doesNotMatch(await result.text(), /password|token|locator/)
     }
     assert.equal((await fetch(base + '/')).status, 200)
+  })
+  it('serves brand and favicon PNGs without login with the correct MIME and bytes', async () => {
+    for (const size of [32, 128]) {
+      const url = `${base}/assets/icon-${size}-test.png`
+      const expected = fs.readFileSync(path.resolve(`build/icon-${size}.png`))
+      const response = await fetch(url)
+      assert.equal(response.status, 200)
+      assert.equal(response.headers.get('content-type'), 'image/png')
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), expected)
+      const head = await fetch(url, { method: 'HEAD' })
+      assert.equal(head.status, 200)
+      assert.equal(head.headers.get('content-type'), 'image/png')
+      assert.equal(Number(head.headers.get('content-length')), expected.length)
+      assert.equal(await head.text(), '')
+    }
+    for (const route of ['/assets/index.js.map', '/build/icon-32.png', '/assets/nested/icon.png']) {
+      assert.equal((await fetch(base + route)).status, 404)
+    }
   })
   it('rejects bad credentials; issues HttpOnly SameSite cookies on login', async () => {
     assert.equal((await login('not the password')).status, 401)

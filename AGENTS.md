@@ -13,6 +13,7 @@
 | 你在改什么 | 必读 | 可选 |
 |------------|------|------|
 | UI、布局、样式、交互、无障碍 | [`docs/UI_DESIGN_GUIDELINES.md`](docs/UI_DESIGN_GUIDELINES.md) | [`docs/UI_COMPONENT_CONTRACTS.md`](docs/UI_COMPONENT_CONTRACTS.md) |
+| 局域网 Web 页面、移动端交互 | [`docs/MOBILE_WEB_GUIDELINES.md`](docs/MOBILE_WEB_GUIDELINES.md) | — |
 | 列表/详情页、路由、URL 筛选、返回栈 | [`docs/ROUTING_DESIGN.md`](docs/ROUTING_DESIGN.md) | `UI_COMPONENT_CONTRACTS.md`（若动 toolbar/筛选） |
 | 刮削插件、`bundled-plugins`、沙箱 `ctx`、导入包 | [`docs/SCRAPER_PLUGIN_FORMAT.md`](docs/SCRAPER_PLUGIN_FORMAT.md) | — |
 | 插件开发 Agent、`PluginDevPanel`、MCP、`pluginDevAgent/*` | [`docs/PLUGIN_DEV_AGENT.md`](docs/PLUGIN_DEV_AGENT.md) | `SCRAPER_PLUGIN_FORMAT.md` |

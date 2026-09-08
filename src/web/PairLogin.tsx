@@ -133,13 +133,15 @@ export default function PairLogin({
           </button>
         </>
       ) : (
-        <div role="status">
+        <div>
           <p>在桌面输入此码，核对设备后批准</p>
           <strong className="pair-code">
             {pair.code.slice(0, 3)} {pair.code.slice(3)}
           </strong>
+          <p className="muted" role="status">
+            {pair.state === 'approved' ? '已批准，正在连接' : remaining === 0 ? '配对码已过期' : '等待桌面批准'}
+          </p>
           <p className="muted">
-            {pair.state === 'approved' ? '已批准，正在连接' : '等待桌面批准'} ·
             剩余 {remaining} 秒
           </p>
           <button

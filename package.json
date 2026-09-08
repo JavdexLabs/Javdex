@@ -44,6 +44,7 @@
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "web:build": "vite build --config vite.web.config.ts",
+    "web:check:mobile": "npm run web:build && node scripts/check-mobile-web.mjs",
     "web:dev": "vite build --config vite.web.config.ts --watch"
   },
   "dependencies": {
@@ -60,6 +61,7 @@
     "socks": "2.8.9",
     "strtok3": "^10.3.5",
     "undici": "^7.28.0",
+    "yet-another-react-lightbox": "^3.32.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {

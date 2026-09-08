@@ -40,6 +40,7 @@ export interface WebBrowse {
 }
 export interface WebResource {
   id: number
+  isPrimary: boolean
   name: string
   kind: string
   mime: string | null
@@ -52,7 +53,7 @@ export interface WebDetail extends WebVideo {
   publisher: string | null
   series: string | null
   director: string | null
-  actresses: { id: number; name: string }[]
+  actresses: { id: number; name: string; avatar: string | null; gender: 'female' | 'male' | null }[]
   tags: { id: number; name: string }[]
   images: string[]
   resources: WebResource[]

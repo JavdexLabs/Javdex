@@ -409,12 +409,16 @@ export class WebServer {
         json(response, 200, this.options.catalog.collections())
         return
       }
+      if (url.pathname === '/api/home') {
+        json(response, 200, this.options.catalog.home(url.searchParams.get('seed') ?? 'web'))
+        return
+      }
       if (url.pathname === '/api/videos') {
         json(response, 200, this.options.catalog.browse(url.searchParams))
         return
       }
       const match =
-        /^\/api\/videos\/([1-9]\d{0,9})(?:\/(images|media)\/(cover|[1-9]\d{0,9}))?$/.exec(
+        /^\/api\/videos\/([1-9]\d{0,9})(?:\/(images|media)\/(cover|actress-[1-9]\d{0,9}|[1-9]\d{0,9}))?$/.exec(
           url.pathname
         )
       if (!match) throw new WebError(404, '页面不存在')
@@ -441,13 +445,15 @@ export class WebServer {
     }
     const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1)
     // Vite output only. No source tree, arbitrary paths, maps, or Electron renderer assets.
-    if (file !== 'index.html' && !/^assets\/[\w.-]+\.(js|css)$/.test(file))
+    if (file !== 'index.html' && !/^assets\/[\w.-]+\.(js|css|png)$/.test(file))
       throw new WebError(404, '页面不存在')
     const mime = file.endsWith('.js')
       ? 'text/javascript; charset=utf-8'
       : file.endsWith('.css')
         ? 'text/css; charset=utf-8'
-        : 'text/html; charset=utf-8'
+        : file.endsWith('.png')
+          ? 'image/png'
+          : 'text/html; charset=utf-8'
     await sendFile(
       request,
       response,

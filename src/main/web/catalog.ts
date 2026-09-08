@@ -8,6 +8,7 @@ import type {
 } from '@shared/webTypes'
 import type { Video } from '@shared/videoTypes'
 import { getVideoDetail } from '../db/videoRepo'
+import { createHomeDiscoveryRepo } from '../db/homeDiscoveryRepo'
 import { createAuthorizedMediaLibraryRootFileInspector } from '../services/mediaLibraryRootFileGuard'
 import { mediaAssetStore } from '../services/mediaAssetStore'
 import { VIDEO_MIMES, WebError } from './http'
@@ -34,10 +35,7 @@ function card(video: Video): WebVideo {
     id: video.id,
     code: video.code,
     title: video.title || video.code,
-    cover:
-      video.poster_path || video.cover_path
-        ? `/api/videos/${video.id}/images/cover`
-        : null,
+    cover: video.cover_path ? `/api/videos/${video.id}/images/cover` : null,
     releaseDate: video.release_date,
     duration: video.duration_seconds,
     rating: video.rating
@@ -59,6 +57,11 @@ function externalTarget(locator: string): string | null {
 }
 export class WebCatalog {
   constructor(private readonly db: Database.Database) {}
+  home(seed: string): { discovery: WebVideo[]; recent: WebVideo[] } {
+    if (!seed || seed.length > 100) throw new WebError(400, '随机批次参数无效')
+    const snapshot = createHomeDiscoveryRepo({ database: this.db }).load({ seed })
+    return { discovery: snapshot.discovery.map(card), recent: snapshot.recent.map(card) }
+  }
   collections(): { libraries: WebCollection[]; playlists: WebCollection[] } {
     return {
       libraries: this.db
@@ -169,7 +172,12 @@ export class WebCatalog {
       publisher: video.publisher,
       series: video.series,
       director: video.director,
-      actresses: video.actresses.map((a) => ({ id: a.id, name: a.main_name })),
+      actresses: video.actresses.map((a) => ({
+        id: a.id,
+        name: a.main_name,
+        gender: a.gender,
+        avatar: a.avatar_path ? `/api/videos/${id}/images/actress-${a.id}` : null
+      })),
       tags: video.tags.map((t) => ({ id: t.id, name: t.name })),
       images: video.assets
         .filter((a) => a.type === 'sample' && a.local_path)
@@ -195,6 +203,7 @@ export class WebCatalog {
             : Boolean(target)
         return {
           id: r.id,
+          isPrimary: Boolean(r.is_primary),
           name: r.display_name || `资源 ${index + 1}`,
           kind: r.kind,
           mime,
@@ -212,8 +221,10 @@ export class WebCatalog {
     const video = this.visibleDetail(id)
     const rel =
       key === 'cover'
-        ? video.poster_path || video.cover_path
-        : video.assets.find((a) => String(a.id) === key && a.type === 'sample')
+        ? video.cover_path
+        : key.startsWith('actress-')
+          ? video.actresses.find((a) => `actress-${a.id}` === key)?.avatar_path
+          : video.assets.find((a) => String(a.id) === key && a.type === 'sample')
             ?.local_path
     if (!rel) throw new WebError(404, '图片不存在')
     const image = mediaAssetStore.readForServe(rel)
@@ -244,5 +255,5 @@ export class WebCatalog {
 }
 export type WebCatalogReader = Pick<
   WebCatalog,
-  'collections' | 'browse' | 'detail' | 'image' | 'media'
+  'collections' | 'browse' | 'detail' | 'image' | 'media' | 'home'
 >

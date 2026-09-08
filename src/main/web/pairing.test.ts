@@ -64,7 +64,8 @@ describe('Remembered browser lifecycle', () => {
       const temporary = sessions.create(false, 'guest')
       assert.ok(!fs.readFileSync(file, 'utf8').includes(remembered))
       assert.ok(!fs.readFileSync(file, 'utf8').includes(temporary))
-      assert.equal(fs.statSync(file).mode & 0o777, 0o600)
+      // Windows stat mode does not represent POSIX owner/group permissions.
+      if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600)
       sessions.suspend()
       sessions = new WebSessions(() => now, file)
       assert.equal(sessions.check(remembered), true)
@@ -104,6 +105,7 @@ describe('Pairing HTTP boundary', () => {
       passwordHash: await hashPassword('test password 123'),
       staticRoot: dir,
       catalog: {
+        home: () => ({ discovery: [], recent: [] }),
         collections: () => ({ libraries: [], playlists: [] }),
         browse: () => ({ items: [], total: 0, page: 1, pageSize: 36 }),
         detail: () => {
@@ -237,7 +239,7 @@ describe('Device record recovery', () => {
       assert.throws(() => new WebSessions(Date.now, file))
       const sessions = WebSessions.reset(file)
       assert.equal(sessions.count(), 0)
-      assert.equal(fs.statSync(file).mode & 0o777, 0o600)
+      if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600)
       const token = sessions.create(true, 'recovered')
       assert.equal(new WebSessions(Date.now, file).check(token), true)
     } finally {
@@ -279,6 +281,7 @@ describe('Per-device streaming revocation', () => {
       passwordHash: '',
       staticRoot: dir,
       catalog: {
+        home: () => ({ discovery: [], recent: [] }),
         collections: () => ({ libraries: [], playlists: [] }),
         browse: () => ({ items: [], total: 0, page: 1, pageSize: 36 }),
         detail: () => {
@@ -308,7 +311,8 @@ describe('Per-device streaming revocation', () => {
       assert.equal(sessions.check(second), true)
     } finally {
       await server.stop()
-      fs.rmSync(dir, { recursive: true, force: true })
+      // Let pending stream close callbacks release Windows file handles.
+      await fs.promises.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
     }
   })
 })

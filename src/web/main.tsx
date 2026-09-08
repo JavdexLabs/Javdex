@@ -336,7 +336,6 @@ function Detail({
                   }
                 }}
                 data-keyboard-exit="detail-back"
-                aria-describedby="player-keyboard-help"
                 playsInline
                 autoPlay={playRequested}
                 preload="metadata"
@@ -352,7 +351,6 @@ function Detail({
               <p className="muted player-caption">
                 {resource.name} · 原始画质 · 浏览器原生播放
               </p>
-              <p id="player-keyboard-help" className="keyboard-help">左右调整进度，上下移动页面焦点，Esc 返回页面控件；全屏时先退出全屏。</p>
               </>}
             </div>
           )}

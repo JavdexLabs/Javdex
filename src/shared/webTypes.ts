@@ -12,6 +12,8 @@ export interface WebAccessStatus {
   username: string
   hasPassword: boolean
   urls: string[]
+  devices: WebDevice[]
+  pairingUntil: number
   sessions: number
   error: string | null
 }
@@ -53,4 +55,12 @@ export interface WebDetail extends WebVideo {
   tags: { id: number; name: string }[]
   images: string[]
   resources: WebResource[]
+}
+
+export interface WebDevice {
+  id: string
+  name: string
+  remember: boolean
+  created: number
+  touched: number
 }

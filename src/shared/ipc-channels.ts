@@ -22,6 +22,10 @@ export const IPC = {
   HOME_SEARCH: 'home:search',
 
   // Settings
+  WEB_ACCESS_PAIR_OPEN: 'webAccess:pairOpen',
+  WEB_ACCESS_PAIR_INSPECT: 'webAccess:pairInspect',
+  WEB_ACCESS_PAIR_DECIDE: 'webAccess:pairDecide',
+  WEB_ACCESS_DEVICE_REMOVE: 'webAccess:deviceRemove',
   WEB_ACCESS_STATUS: 'webAccess:status',
   WEB_ACCESS_APPLY: 'webAccess:apply',
   WEB_ACCESS_REVOKE: 'webAccess:revoke',

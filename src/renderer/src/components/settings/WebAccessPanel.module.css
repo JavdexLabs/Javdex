@@ -56,3 +56,9 @@
   flex-wrap: wrap;
   gap: var(--form-label-gap);
 }
+
+.deviceCopy {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}

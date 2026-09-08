@@ -8,6 +8,7 @@ import Button from '../Button'
 import { SettingsCard } from './SettingsPrimitives'
 import SettingsFormActions from './SettingsFormActions'
 import styles from './WebAccessPanel.module.css'
+import WebDevices from './WebDevices'
 
 export default function WebAccessPanel(): JSX.Element {
   const [status, setStatus] = useState<WebAccessStatus | null>(null)
@@ -196,7 +197,7 @@ function WebAccessForm({
             刷新状态
           </Button>
           <Button
-            disabled={!status.running || saving}
+            disabled={saving}
             onClick={() =>
               void api.webAccess
                 .revoke()
@@ -212,6 +213,7 @@ function WebAccessForm({
             </Button>
           )}
         </div>
+        <WebDevices status={status} onChange={onChange} />
         <SettingsFormActions
           dirty={form.dirty}
           saving={saving}

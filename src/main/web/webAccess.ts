@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { WebAccessInput, WebAccessStatus } from '@shared/webTypes'
 import { getDb } from '../db/database'
-import { hashPassword } from './auth'
+import { hashPassword, WebSessions } from './auth'
 import { WebCatalog } from './catalog'
 import { localAddresses, WebServer } from './server'
 
@@ -24,6 +24,13 @@ class WebAccess {
   private server: WebServer | null = null
   private error: string | null = null
   private busy = false
+  private sessions: WebSessions | null = null
+  private store(): WebSessions {
+    return (this.sessions ??= new WebSessions(
+      Date.now,
+      path.join(app.getPath('userData'), 'web-devices.json')
+    ))
+  }
   private file(): string {
     return path.join(app.getPath('userData'), 'web-access.json')
   }
@@ -37,7 +44,9 @@ class WebAccess {
       urls: this.server
         ? localAddresses().map((host) => `http://${host}:${this.config.port}`)
         : [],
-      sessions: this.server?.sessionCount ?? 0,
+      sessions: this.sessions?.count() ?? 0,
+      devices: this.sessions?.list() ?? [],
+      pairingUntil: this.server?.pairing.enabledUntil ?? 0,
       error: this.error
     }
   }
@@ -47,6 +56,7 @@ class WebAccess {
       throw new Error('Web 页面未构建，请先运行 npm run web:build')
     const server = new WebServer({
       ...this.config,
+      sessions: this.store(),
       staticRoot,
       catalog: new WebCatalog(getDb())
     })
@@ -61,6 +71,7 @@ class WebAccess {
   }
   async initialize(): Promise<void> {
     try {
+      this.store()
       if (!fs.existsSync(this.file())) return
       const saved = JSON.parse(
         fs.readFileSync(this.file(), 'utf8')
@@ -107,12 +118,19 @@ class WebAccess {
         username: input.username,
         passwordHash
       }
+      // Revoke before publishing new credentials, so a crash cannot revive old devices.
+      await this.stop()
+      if (
+        input.password ||
+        config.username !== this.config.username ||
+        !config.enabled
+      )
+        this.store().clear()
       const temporary = `${this.file()}.tmp`
       fs.writeFileSync(temporary, JSON.stringify(config, null, 2), {
         mode: 0o600
       })
       fs.renameSync(temporary, this.file())
-      await this.stop()
       this.config = config
       this.error = null
       if (config.enabled) {
@@ -128,7 +146,27 @@ class WebAccess {
     }
   }
   revoke(): WebAccessStatus {
-    this.server?.revokeSessions()
+    if (this.server) this.server.revokeSessions()
+    else this.store().clear()
+    return this.status()
+  }
+  openPairing(): WebAccessStatus {
+    if (!this.server) throw new Error('请先启动 Web 服务')
+    this.server.pairing.open()
+    return this.status()
+  }
+  inspectPair(code: string) {
+    if (!this.server) throw new Error('Web 服务未运行')
+    return this.server.pairing.inspect(code)
+  }
+  decidePair(code: string, approve: boolean): WebAccessStatus {
+    if (!this.server) throw new Error('Web 服务未运行')
+    this.server.pairing.decide(code, approve)
+    return this.status()
+  }
+  removeDevice(id: string): WebAccessStatus {
+    if (this.server) this.server.removeDevice(id)
+    else this.store().remove(id)
     return this.status()
   }
   async stop(): Promise<void> {

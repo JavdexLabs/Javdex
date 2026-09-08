@@ -8,7 +8,7 @@ import { networkInterfaces } from 'node:os'
 import { isIP } from 'node:net'
 import path from 'node:path'
 import type { WebCatalogReader } from './catalog'
-import { LoginLimiter, verifyPassword, WebSessions } from './auth'
+import { LoginLimiter, verifyPassword, WebSessions, WebPairing } from './auth'
 import { json, readJson, sendFile, WebError } from './http'
 
 const COOKIE = 'javdex_web_session'
@@ -50,13 +50,16 @@ function token(request: IncomingMessage): string {
     .find((value) => value.startsWith(`${COOKIE}=`))
   return match?.slice(COOKIE.length + 1) ?? ''
 }
-function cookie(value: string, expire = false): string {
+function cookie(value: string, expire = false, remember = false): string {
   // Direct LAN HTTP cannot use Secure; HTTPS termination is deliberately not trusted implicitly.
-  return `${COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${expire ? 0 : 7 * 86400}`
+  return `${COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/${expire || remember ? `; Max-Age=${expire ? 0 : 7 * 86400}` : ''}`
 }
 export class WebServer {
   private server: Server | null = null
-  private sessions = new WebSessions()
+  private epoch = 0
+  readonly pairing = new WebPairing()
+  private sessions: WebSessions
+  private pairLimiter = new LoginLimiter()
   private limiter = new LoginLimiter()
   constructor(
     private readonly options: {
@@ -64,12 +67,24 @@ export class WebServer {
       passwordHash: string
       staticRoot: string
       catalog: WebCatalogReader
+      sessions?: WebSessions
     }
-  ) {}
+  ) {
+    this.sessions = options.sessions ?? new WebSessions()
+  }
   get sessionCount(): number {
     return this.sessions.count()
   }
+  get devices() {
+    return this.sessions.list()
+  }
+  removeDevice(id: string): void {
+    this.sessions.remove(id)
+    this.server?.closeAllConnections()
+  }
   revokeSessions(): void {
+    this.epoch++
+    this.pairing.clear()
     this.sessions.clear()
     this.server?.closeAllConnections()
   }
@@ -111,19 +126,30 @@ export class WebServer {
     return (server.address() as { port: number }).port
   }
   async stop(): Promise<void> {
-    this.sessions.clear()
+    this.epoch++
+    this.pairing.clear()
     const server = this.server
     this.server = null
-    if (!server) return
-    await new Promise<void>((resolve) => {
-      server.close(() => resolve())
-      server.closeAllConnections()
-    })
+    try {
+      this.sessions.suspend()
+    } finally {
+      if (server)
+        await new Promise<void>((resolve) => {
+          server.close(() => resolve())
+          server.closeAllConnections()
+        })
+    }
   }
+
   private async handle(
     request: IncomingMessage,
     response: ServerResponse
   ): Promise<void> {
+    const epoch = this.epoch
+    const ensureActive = (): void => {
+      if (epoch !== this.epoch || !this.server)
+        throw new WebError(503, '服务已切换，请重新登录')
+    }
     response.setHeader('Cache-Control', 'no-store')
     response.setHeader('X-Content-Type-Options', 'nosniff')
     response.setHeader('Referrer-Policy', 'no-referrer')
@@ -160,6 +186,73 @@ export class WebServer {
         request.headers['x-javdex-client'] !== 'web'
       )
         throw new WebError(403, '请求来源无效')
+      if (url.pathname === '/api/pair/start') {
+        const release = this.pairLimiter.enter(
+          request.socket.remoteAddress ?? ''
+        )
+        if (!release) throw new WebError(429, '配对请求过于频繁，请稍后重试')
+        try {
+          const body = await readJson(request)
+          ensureActive()
+          const name = `${String(body.name || '浏览器').slice(0, 50)} · ${request.socket.remoteAddress}`
+          const pair = this.pairing.create(body.remember === true, name)
+          response.setHeader(
+            'Set-Cookie',
+            `javdex_pair=${pair.secret}; HttpOnly; SameSite=Strict; Path=/api/pair; Max-Age=300`
+          )
+          json(response, 200, { code: pair.code, expires: pair.expires })
+        } catch (error) {
+          throw new WebError(400, (error as Error).message)
+        } finally {
+          release()
+        }
+        return
+      }
+      if (
+        url.pathname === '/api/pair/poll' ||
+        url.pathname === '/api/pair/cancel'
+      ) {
+        await readJson(request)
+        ensureActive()
+        const secret =
+          request.headers.cookie
+            ?.split(';')
+            .map((x) => x.trim())
+            .find((x) => x.startsWith('javdex_pair='))
+            ?.slice(12) ?? ''
+        if (url.pathname === '/api/pair/cancel') {
+          this.pairing.cancel(secret)
+          response.setHeader(
+            'Set-Cookie',
+            'javdex_pair=; HttpOnly; SameSite=Strict; Path=/api/pair; Max-Age=0'
+          )
+          json(response, 200, { cancelled: true })
+          return
+        }
+        try {
+          const paired = this.pairing.poll(secret)
+          if (!paired) {
+            json(response, 200, { authenticated: false })
+            return
+          }
+          this.sessions.revoke(token(request))
+          response.setHeader('Set-Cookie', [
+            cookie(
+              this.sessions.create(paired.remember, paired.name),
+              false,
+              paired.remember
+            ),
+            'javdex_pair=; HttpOnly; SameSite=Strict; Path=/api/pair; Max-Age=0'
+          ])
+          json(response, 200, {
+            authenticated: true,
+            username: this.options.username
+          })
+        } catch (error) {
+          throw new WebError(400, (error as Error).message)
+        }
+        return
+      }
       if (url.pathname === '/api/login') {
         const release = this.limiter.enter(request.socket.remoteAddress ?? '')
         if (!release) {
@@ -168,6 +261,7 @@ export class WebServer {
         }
         try {
           const body = await readJson(request)
+          ensureActive()
           if (
             typeof body.username !== 'string' ||
             typeof body.password !== 'string' ||
@@ -178,10 +272,23 @@ export class WebServer {
             body.password,
             this.options.passwordHash
           )
+          ensureActive()
           if (!valid || body.username !== this.options.username)
             throw new WebError(401, '账号或密码错误')
           this.sessions.revoke(token(request))
-          response.setHeader('Set-Cookie', cookie(this.sessions.create()))
+          response.setHeader(
+            'Set-Cookie',
+            cookie(
+              this.sessions.create(
+                body.remember === true,
+                String(
+                  body.name || request.headers['user-agent'] || '浏览器'
+                ).slice(0, 80)
+              ),
+              false,
+              body.remember === true
+            )
+          )
           json(response, 200, {
             authenticated: true,
             username: this.options.username

@@ -34,6 +34,8 @@ import {
   useWebLocation
 } from './navigation'
 import './styles.css'
+import PairLogin from './PairLogin'
+import Checkbox from '../renderer/src/components/Checkbox'
 
 type Session = { authenticated: boolean; username: string }
 type Collections = { libraries: WebCollection[]; playlists: WebCollection[] }
@@ -80,6 +82,8 @@ function Login({
 }: {
   onLogin: (session: Session) => void
 }): JSX.Element {
+  const [mode, setMode] = useState<'pair' | 'password'>('pair')
+  const [remember, setRemember] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
@@ -91,7 +95,8 @@ function Login({
       onLogin(
         await post<Session>('/api/login', {
           username: data.get('username'),
-          password: data.get('password')
+          password: data.get('password'),
+          remember
         })
       )
     } catch (reason) {
@@ -116,7 +121,11 @@ function Login({
           随处可看。
         </h1>
         <p className="muted">登录以浏览这台电脑的媒体库。</p>
-        <form onSubmit={(event) => void submit(event)}>
+        <div className="login-tabs">
+          <button aria-pressed={mode === 'pair'} onClick={() => setMode('pair')}>与桌面配对</button>
+          <button aria-pressed={mode === 'password'} onClick={() => setMode('password')}>密码登录</button>
+        </div>
+        {mode === 'pair' ? <PairLogin onLogin={onLogin} /> : <form onSubmit={(event) => void submit(event)}>
           <label>
             访问账号
             <input
@@ -139,6 +148,7 @@ function Login({
               maxLength={128}
             />
           </label>
+          <label className="remember-device"><Checkbox checked={remember} onChange={e => setRemember(e.target.checked)} />记住此设备（闲置 24 小时 / 最长 7 天）</label>
           {error && (
             <p role="alert" className="error">
               {error}
@@ -148,7 +158,7 @@ function Login({
             {busy ? '正在登录…' : '进入媒体库'}
             <ChevronRight aria-hidden="true" />
           </button>
-        </form>
+        </form>}
         <p className="login-foot">
           <ShieldCheck aria-hidden="true" />
           账号由桌面端设置 · 仅供浏览与播放

@@ -23,6 +23,7 @@
   --border-strong: #596460;
   --focus-outline: 3px solid #a3ebc9;
   --control-h-md: 44px;
+  --choice-control-size: 16px;
   --space-page: clamp(16px, 2.8vw, 56px);
   --sidebar-width: 216px;
   --header-height: 76px;
@@ -93,7 +94,7 @@ nav,
 img {
   user-select: none;
 }
-input {
+input:not([type="checkbox"]) {
   min-width: 0;
   min-height: var(--control-h-md);
   border: 1px solid var(--border-strong);
@@ -631,7 +632,7 @@ h2 {
   font-size: 13px;
   color: var(--text-secondary);
 }
-.login-card input {
+.login-card input:not([type="checkbox"]) {
   width: 100%;
   background: var(--surface-panel);
   min-height: 48px;
@@ -843,3 +844,11 @@ h2 {
     scroll-behavior: auto !important;
   }
 }
+
+.login-tabs { display: flex; gap: 8px; margin-block: 16px; }
+.login-tabs button { flex: 1; }
+.login-tabs button[aria-pressed="true"] { border-color: var(--text-accent); }
+.pair-login { display: grid; gap: 12px; }
+.pair-login label { display: grid; gap: 8px; }
+.login-card label.remember-device { display: flex; align-items: center; gap: 8px; }
+.pair-code { display: block; font-size: clamp(2rem, 8vw, 3.5rem); letter-spacing: .12em; font-variant-numeric: tabular-nums; user-select: text; }

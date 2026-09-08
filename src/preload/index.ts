@@ -268,6 +268,10 @@ const api = {
       onAppEvent(IPC.APP_UPDATE_STATE_CHANGED, cb)
   },
   webAccess: {
+    deviceRemove: (id: string) => invokeApp(IPC.WEB_ACCESS_DEVICE_REMOVE, id),
+    pairDecide: (code: string, approve: boolean) => invokeApp(IPC.WEB_ACCESS_PAIR_DECIDE, code, approve),
+    pairInspect: (code: string) => invokeApp(IPC.WEB_ACCESS_PAIR_INSPECT, code),
+    pairOpen: () => invokeApp(IPC.WEB_ACCESS_PAIR_OPEN),
     status: () => invokeApp(IPC.WEB_ACCESS_STATUS),
     apply: (input: WebAccessInput) => invokeApp(IPC.WEB_ACCESS_APPLY, input),
     revoke: () => invokeApp(IPC.WEB_ACCESS_REVOKE)

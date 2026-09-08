@@ -59,6 +59,10 @@ function toSettingsSnapshot(settings: AppSettings): SettingsSnapshot {
 }
 
 export function registerSettingsHandlers(ctx: IpcContext): void {
+  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_OPEN, () => webAccess.openPairing())
+  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_INSPECT, (code) => webAccess.inspectPair(code))
+  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_DECIDE, (code, approve) => webAccess.decidePair(code, approve))
+  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_REMOVE, (id) => webAccess.removeDevice(id))
   appCommandAdapter.register(IPC.WEB_ACCESS_STATUS, () => webAccess.status())
   appCommandAdapter.register(IPC.WEB_ACCESS_APPLY, (input) => webAccess.apply(input))
   appCommandAdapter.register(IPC.WEB_ACCESS_REVOKE, () => webAccess.revoke())

@@ -7,6 +7,7 @@ import {
 import { networkInterfaces } from 'node:os'
 import { isIP } from 'node:net'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import type { WebCatalogReader } from './catalog'
 import { LoginLimiter, verifyPassword, WebSessions, WebPairing } from './auth'
 import { json, readJson, sendFile, WebError } from './http'
@@ -57,6 +58,36 @@ function cookie(value: string, expire = false, remember = false): string {
 export class WebServer {
   private server: Server | null = null
   private epoch = 0
+  private responses = new Map<string, Set<ServerResponse>>()
+  // Brief delivery cache: retries receive the same session, never a second authorization.
+  private deliveries = new Map<
+    string,
+    { token: string; remember: boolean; expires: number }
+  >()
+  private deliveryKey(secret: string): string {
+    return createHash('sha256').update(secret).digest('hex')
+  }
+  private pruneDeliveries(): void {
+    for (const [key, item] of this.deliveries)
+      if (item.expires <= Date.now()) this.deliveries.delete(key)
+  }
+  private closeDevice(id: string | undefined): void {
+    if (id)
+      for (const response of this.responses.get(id) ?? []) response.destroy()
+  }
+  private track(tokenValue: string, response: ServerResponse): void {
+    const id = this.sessions.idFor(tokenValue)
+    if (!id) return
+    const pending = this.responses.get(id) ?? new Set<ServerResponse>()
+    pending.add(response)
+    this.responses.set(id, pending)
+    const done = (): void => {
+      pending.delete(response)
+      if (!pending.size) this.responses.delete(id)
+    }
+    response.once('close', done)
+    response.once('finish', done)
+  }
   readonly pairing = new WebPairing()
   private sessions: WebSessions
   private pairLimiter = new LoginLimiter()
@@ -80,12 +111,13 @@ export class WebServer {
   }
   removeDevice(id: string): void {
     this.sessions.remove(id)
-    this.server?.closeAllConnections()
+    this.closeDevice(id)
   }
   revokeSessions(): void {
-    this.epoch++
-    this.pairing.clear()
     this.sessions.clear()
+    this.epoch++
+    this.deliveries.clear()
+    this.pairing.clear()
     this.server?.closeAllConnections()
   }
   async start(port: number, host = '0.0.0.0'): Promise<number> {
@@ -127,6 +159,7 @@ export class WebServer {
   }
   async stop(): Promise<void> {
     this.epoch++
+    this.deliveries.clear()
     this.pairing.clear()
     const server = this.server
     this.server = null
@@ -186,6 +219,7 @@ export class WebServer {
         request.headers['x-javdex-client'] !== 'web'
       )
         throw new WebError(403, '请求来源无效')
+      this.pruneDeliveries()
       if (url.pathname === '/api/pair/start') {
         const release = this.pairLimiter.enter(
           request.socket.remoteAddress ?? ''
@@ -200,7 +234,10 @@ export class WebServer {
             'Set-Cookie',
             `javdex_pair=${pair.secret}; HttpOnly; SameSite=Strict; Path=/api/pair; Max-Age=300`
           )
-          json(response, 200, { code: pair.code, expires: pair.expires })
+          json(response, 200, {
+            ...this.pairing.status(pair.secret),
+            expires: pair.expires
+          })
         } catch (error) {
           throw new WebError(400, (error as Error).message)
         } finally {
@@ -210,7 +247,8 @@ export class WebServer {
       }
       if (
         url.pathname === '/api/pair/poll' ||
-        url.pathname === '/api/pair/cancel'
+        url.pathname === '/api/pair/cancel' ||
+        url.pathname === '/api/pair/status'
       ) {
         await readJson(request)
         ensureActive()
@@ -220,7 +258,15 @@ export class WebServer {
             .map((x) => x.trim())
             .find((x) => x.startsWith('javdex_pair='))
             ?.slice(12) ?? ''
+        const key = this.deliveryKey(secret)
+        const delivered = this.deliveries.get(key)
         if (url.pathname === '/api/pair/cancel') {
+          if (delivered) {
+            const id = this.sessions.idFor(delivered.token)
+            this.sessions.revoke(delivered.token)
+            this.closeDevice(id)
+            this.deliveries.delete(key)
+          }
           this.pairing.cancel(secret)
           response.setHeader(
             'Set-Cookie',
@@ -230,26 +276,64 @@ export class WebServer {
           return
         }
         try {
-          const paired = this.pairing.poll(secret)
-          if (!paired) {
-            json(response, 200, { authenticated: false })
+          if (delivered) {
+            if (!this.sessions.check(delivered.token))
+              throw new WebError(410, '授权已撤销，请重新配对')
+            response.setHeader(
+              'Set-Cookie',
+              cookie(delivered.token, false, delivered.remember)
+            )
+            json(response, 200, {
+              authenticated: true,
+              username: this.options.username
+            })
             return
           }
-          this.sessions.revoke(token(request))
-          response.setHeader('Set-Cookie', [
-            cookie(
-              this.sessions.create(paired.remember, paired.name),
-              false,
-              paired.remember
-            ),
-            'javdex_pair=; HttpOnly; SameSite=Strict; Path=/api/pair; Max-Age=0'
-          ])
+          if (url.pathname === '/api/pair/status') {
+            json(response, 200, this.pairing.status(secret))
+            return
+          }
+          const state = this.pairing.status(secret)
+          let value = ''
+          const paired = this.pairing.poll(secret, (row) => {
+            value = this.sessions.create(row.remember, row.name)
+          })
+          if (!paired) {
+            json(response, 200, { ...state, authenticated: false })
+            return
+          }
+          // Keep only for the bounded response-delivery window; revoke invalidates retries.
+          const delivery = {
+            token: value,
+            remember: paired.remember,
+            expires: Math.min(paired.expires, Date.now() + 60_000)
+          }
+          this.deliveries.set(key, delivery)
+          setTimeout(
+            () => {
+              if (this.deliveries.get(key) === delivery)
+                this.deliveries.delete(key)
+            },
+            Math.max(0, delivery.expires - Date.now())
+          ).unref()
+          this.pairing.connected(paired.code, paired.name)
+          response.setHeader(
+            'Set-Cookie',
+            cookie(value, false, paired.remember)
+          )
           json(response, 200, {
             authenticated: true,
             username: this.options.username
           })
         } catch (error) {
-          throw new WebError(400, (error as Error).message)
+          if (error instanceof WebError) throw error
+          if ((error as Error).message.startsWith('设备记录保存失败'))
+            throw new WebError(503, (error as Error).message)
+          if ((error as Error).message === '请稍后查询配对结果') {
+            response.setHeader('Retry-After', '5')
+            throw new WebError(429, '请稍后查询配对结果')
+          }
+          throw new WebError(410, (error as Error).message)
         }
         return
       }
@@ -299,7 +383,9 @@ export class WebServer {
         return
       }
       if (url.pathname === '/api/logout') {
+        const id = this.sessions.idFor(token(request))
         this.sessions.revoke(token(request))
+        this.closeDevice(id)
         response.setHeader('Set-Cookie', cookie('', true))
         json(response, 200, { authenticated: false })
         return
@@ -311,6 +397,7 @@ export class WebServer {
     if (url.pathname.startsWith('/api/')) {
       if (!this.sessions.check(token(request)))
         throw new WebError(401, '请先登录')
+      this.track(token(request), response)
       if (url.pathname === '/api/session') {
         json(response, 200, {
           authenticated: true,

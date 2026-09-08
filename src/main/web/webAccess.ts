@@ -46,6 +46,7 @@ class WebAccess {
         : [],
       sessions: this.sessions?.count() ?? 0,
       devices: this.sessions?.list() ?? [],
+      pairingActivity: this.server?.pairing.activity() ?? [],
       pairingUntil: this.server?.pairing.enabledUntil ?? 0,
       error: this.error
     }
@@ -71,7 +72,6 @@ class WebAccess {
   }
   async initialize(): Promise<void> {
     try {
-      this.store()
       if (!fs.existsSync(this.file())) return
       const saved = JSON.parse(
         fs.readFileSync(this.file(), 'utf8')
@@ -91,6 +91,7 @@ class WebAccess {
       if (saved.enabled && !saved.passwordHash)
         throw new Error('启用 Web 访问前请设置密码')
       this.config = saved
+      this.store()
       if (this.config.enabled) await this.listen()
     } catch (error) {
       this.error = (error as Error).message
@@ -168,6 +169,25 @@ class WebAccess {
     if (this.server) this.server.removeDevice(id)
     else this.store().remove(id)
     return this.status()
+  }
+  renameDevice(id: string, name: string): WebAccessStatus {
+    this.store().rename(id, name)
+    return this.status()
+  }
+  async resetDevices(): Promise<WebAccessStatus> {
+    if (this.busy) throw new Error('Web 服务正在切换，请稍后重试')
+    this.busy = true
+    try {
+      await this.stop()
+      this.sessions = WebSessions.reset(
+        path.join(app.getPath('userData'), 'web-devices.json')
+      )
+      this.error = null
+      if (this.config.enabled) await this.listen()
+      return this.status()
+    } finally {
+      this.busy = false
+    }
   }
   async stop(): Promise<void> {
     const server = this.server

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import type { WebAccessStatus } from '@shared/webTypes'
 import { api } from '../../api'
 import Button from '../Button'
+import ConfirmModal from '../ConfirmModal'
 import styles from './WebAccessPanel.module.css'
 
 function AddressCode({ url }: { url: string }): JSX.Element {
@@ -42,6 +43,14 @@ export default function WebDevices({
   onChange: (value: WebAccessStatus) => void
 }): JSX.Element {
   const [code, setCode] = useState('')
+  const [confirm, setConfirm] = useState<{
+    kind: 'revoke' | 'rename' | 'reset' | 'all'
+    id?: string
+    name?: string
+  } | null>(null)
+  const [newName, setNewName] = useState('')
+  const lock = useRef(false)
+  const revision = useRef(0)
   const [candidate, setCandidate] = useState<{
     code: string
     name: string
@@ -56,7 +65,9 @@ export default function WebDevices({
     return () => clearInterval(timer)
   }, [])
   const run = async (action: () => Promise<void>): Promise<void> => {
-    if (busy) return
+    if (lock.current) return
+    lock.current = true
+    revision.current++
     setBusy(true)
     setError('')
     try {
@@ -65,8 +76,31 @@ export default function WebDevices({
       setError((reason as Error).message)
     } finally {
       setBusy(false)
+      lock.current = false
     }
   }
+  useEffect(() => {
+    let alive = true
+    let timer: ReturnType<typeof setTimeout>
+    const refresh = async (): Promise<void> => {
+      const current = revision.current
+      if (!lock.current) {
+        try {
+          const next = await api.webAccess.status()
+          if (alive && !lock.current && current === revision.current)
+            onChange(next)
+        } catch {
+          /* Keep the last snapshot; the next poll retries. */
+        }
+      }
+      if (alive) timer = setTimeout(() => void refresh(), 2000)
+    }
+    timer = setTimeout(() => void refresh(), 2000)
+    return () => {
+      alive = false
+      clearTimeout(timer)
+    }
+  }, [onChange])
   const urls = status.urls.filter((url) => !url.includes('127.0.0.1'))
   return (
     <section className={styles.status} aria-label="浏览器设备">
@@ -164,12 +198,18 @@ export default function WebDevices({
           </details>
         </>
       )}
+      {status.pairingActivity.map((item) => (
+        <p key={item.code} role="status">
+          {item.name} · {item.code} ·{' '}
+          {item.state === 'connected' ? '已连接' : '已批准，等待连接'}
+        </p>
+      ))}
       <strong>已登录设备</strong>
       <p>
         记住的设备跨应用重启保留，闲置 24 小时或授权满 7
-        天后失效。撤销会断开当前 Web 连接，其他设备可重新连接。
+        天后失效。撤销只会断开该设备的连接。
       </p>
-      {status.devices.length === 0 && <p>暂无有效设备，请在登录后刷新状态。</p>}
+      {status.devices.length === 0 && <p>暂无有效设备，登录后会自动更新。</p>}
       {status.devices.map((device) => (
         <div key={device.id} className={styles.address}>
           <div className={styles.deviceCopy}>
@@ -177,21 +217,114 @@ export default function WebDevices({
             <p>
               {device.remember ? '已记住' : '临时登录'} · 最近访问{' '}
               {new Date(device.touched).toLocaleString()}
+              <br />
+              到期时间 {new Date(device.expires).toLocaleString()}
             </p>
           </div>
           <Button
             disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                onChange(await api.webAccess.deviceRemove(device.id))
-              })
-            }
+            onClick={() => {
+              setNewName(device.name)
+              setConfirm({ kind: 'rename', id: device.id, name: device.name })
+            }}
+          >
+            重命名
+          </Button>
+          <Button
+            variant="danger"
+            disabled={busy}
+            onClick={() => {
+              setError('')
+              setConfirm({ kind: 'revoke', id: device.id, name: device.name })
+            }}
           >
             撤销
           </Button>
         </div>
       ))}
-      {error && <p role="alert">{error}</p>}
+      <div className={styles.actions}>
+        <Button
+          variant="danger"
+          disabled={busy}
+          onClick={() => {
+            setError('')
+            setConfirm({ kind: 'all' })
+          }}
+        >
+          退出所有浏览器会话
+        </Button>
+        {status.error && !status.running && (
+          <Button
+            variant="danger"
+            disabled={busy}
+            onClick={() => {
+              setError('')
+              setConfirm({ kind: 'reset' })
+            }}
+          >
+            重置浏览器授权
+          </Button>
+        )}
+      </div>
+      {confirm && (
+        <ConfirmModal
+          title={
+            confirm.kind === 'rename'
+              ? '重命名设备'
+              : confirm.kind === 'reset'
+                ? '重置浏览器授权'
+                : confirm.kind === 'all'
+                  ? '退出所有浏览器会话'
+                  : '撤销设备授权'
+          }
+          danger={confirm.kind !== 'rename'}
+          busy={busy}
+          closeDisabled={busy}
+          confirmText={confirm.kind === 'rename' ? '保存' : '确认'}
+          confirmDisabled={confirm.kind === 'rename' && !newName.trim()}
+          onCancel={() => {
+            if (!lock.current) setConfirm(null)
+          }}
+          onConfirm={() =>
+            void run(async () => {
+              const next =
+                confirm.kind === 'rename'
+                  ? await api.webAccess.deviceRename(
+                      confirm.id!,
+                      newName.trim()
+                    )
+                  : confirm.kind === 'revoke'
+                    ? await api.webAccess.deviceRemove(confirm.id!)
+                    : confirm.kind === 'reset'
+                      ? await api.webAccess.deviceReset()
+                      : await api.webAccess.revoke()
+              onChange(next)
+              setConfirm(null)
+            })
+          }
+        >
+          {confirm.kind === 'rename' ? (
+            <label className={styles.field}>
+              设备名称
+              <input
+                className="text-input"
+                value={newName}
+                maxLength={80}
+                disabled={busy}
+                onChange={(e) => setNewName(e.target.value)}
+              />
+            </label>
+          ) : (
+            <p>
+              {confirm.kind === 'revoke'
+                ? `将退出“${confirm.name}”并停止它的播放。其他设备不受影响。`
+                : '所有浏览器需要重新登录或配对，当前播放连接会关闭。账号、密码和媒体库保持不变。'}
+            </p>
+          )}
+          {error && <p role="alert">{error}</p>}
+        </ConfirmModal>
+      )}
+      {!confirm && error && <p role="alert">{error}</p>}
     </section>
   )
 }

@@ -196,17 +196,6 @@ function WebAccessForm({
           >
             刷新状态
           </Button>
-          <Button
-            disabled={saving}
-            onClick={() =>
-              void api.webAccess
-                .revoke()
-                .then(onChange)
-                .catch((e) => setError(e.message))
-            }
-          >
-            退出所有浏览器会话
-          </Button>
           {status.enabled && !status.running && (
             <Button disabled={saving} onClick={() => void save()}>
               重试启动

@@ -133,6 +133,8 @@ export interface AppIpcContract {
   [IPC.WEB_ACCESS_PAIR_INSPECT]: { args: [string]; result: { name: string; expires: number; remember: boolean } }
   [IPC.WEB_ACCESS_PAIR_DECIDE]: { args: [string, boolean]; result: WebAccessStatus }
   [IPC.WEB_ACCESS_DEVICE_REMOVE]: { args: [string]; result: WebAccessStatus }
+  [IPC.WEB_ACCESS_DEVICE_RENAME]: { args: [string, string]; result: WebAccessStatus }
+  [IPC.WEB_ACCESS_DEVICE_RESET]: { args: []; result: WebAccessStatus }
   [IPC.WEB_ACCESS_STATUS]: { args: []; result: WebAccessStatus }
   [IPC.WEB_ACCESS_APPLY]: { args: [WebAccessInput]; result: WebAccessStatus }
   [IPC.WEB_ACCESS_REVOKE]: { args: []; result: WebAccessStatus }

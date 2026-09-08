@@ -6,7 +6,7 @@ import {
 } from 'node:crypto'
 import fs from 'node:fs'
 import { randomInt } from 'node:crypto'
-import type { WebDevice } from '../../shared/webTypes'
+import type { WebDevice, WebPairState } from '../../shared/webTypes'
 import { promisify } from 'node:util'
 
 const scrypt = promisify(derive)
@@ -33,7 +33,7 @@ export async function verifyPassword(
   return timingSafeEqual(key, Buffer.from(expected, 'hex'))
 }
 
-interface SessionEntry extends WebDevice {
+interface SessionEntry extends Omit<WebDevice, 'expires'> {
   digest: string
 }
 /** Persistent records contain hashes only; unremembered sessions never reach disk. */
@@ -41,17 +41,20 @@ export class WebSessions {
   private sessions = new Map<string, SessionEntry>()
   constructor(
     private readonly now = Date.now,
-    private readonly file?: string
+    private readonly file?: string,
+    load = true
   ) {
-    if (file && fs.existsSync(file)) {
+    if (load && file && fs.existsSync(file)) {
       const rows: unknown = JSON.parse(fs.readFileSync(file, 'utf8'))
-      if (!Array.isArray(rows)) throw new Error('设备记录无效')
+      if (!Array.isArray(rows) || rows.length > 100)
+        throw new Error('设备记录无效')
       for (const row of rows) {
         if (
           !row ||
           typeof row.digest !== 'string' ||
           !/^[a-f0-9]{64}$/.test(row.digest) ||
           typeof row.id !== 'string' ||
+          !/^[a-f0-9]{32}$/.test(row.id) ||
           typeof row.name !== 'string' ||
           row.name.length > 80 ||
           row.remember !== true ||
@@ -64,15 +67,41 @@ export class WebSessions {
       this.prune()
     }
   }
-  private save(): void {
+  private save(rows = this.sessions): void {
     if (!this.file) return
-    fs.writeFileSync(
-      `${this.file}.tmp`,
-      JSON.stringify([...this.sessions.values()].filter((x) => x.remember)),
-      { mode: 0o600 }
-    )
-    fs.renameSync(`${this.file}.tmp`, this.file)
+    const temporary = `${this.file}.${randomBytes(8).toString('hex')}.tmp`
+    try {
+      fs.writeFileSync(
+        temporary,
+        JSON.stringify([...rows.values()].filter((x) => x.remember)),
+        { mode: 0o600, flag: 'wx' }
+      )
+      fs.renameSync(temporary, this.file)
+    } catch {
+      throw new Error(
+        '设备记录保存失败，操作未生效。请检查磁盘空间和目录权限后重试。'
+      )
+    } finally {
+      try {
+        fs.rmSync(temporary, { force: true })
+      } catch {
+        /* Preserve the original write result. */
+      }
+    }
   }
+  private commit(update: (rows: Map<string, SessionEntry>) => void): void {
+    const next = new Map(this.sessions)
+    update(next)
+    this.save(next)
+    this.sessions = next
+  }
+  static reset(file: string): WebSessions {
+    // Write an empty snapshot without parsing the damaged record.
+    const store = new WebSessions(Date.now, file, false)
+    store.save()
+    return new WebSessions(Date.now, file)
+  }
+
   private prune(): void {
     for (const [key, row] of this.sessions) {
       if (
@@ -88,20 +117,16 @@ export class WebSessions {
       throw new Error('设备数量已达上限，请先撤销旧设备')
     const token = randomBytes(32).toString('base64url')
     const key = digest(token)
-    this.sessions.set(key, {
-      digest: key,
-      id: randomBytes(16).toString('hex'),
-      name: name.slice(0, 80),
-      remember,
-      created: this.now(),
-      touched: this.now()
-    })
-    try {
-      this.save()
-    } catch (error) {
-      this.sessions.delete(key)
-      throw error
-    }
+    this.commit((rows) =>
+      rows.set(key, {
+        digest: key,
+        id: randomBytes(16).toString('hex'),
+        name: name.slice(0, 80),
+        remember,
+        created: this.now(),
+        touched: this.now()
+      })
+    )
     return token
   }
   check(token: string): boolean {
@@ -110,28 +135,42 @@ export class WebSessions {
     if (!row) return false
     // Persist activity at minute granularity, without extending absolute lifetime.
     if (this.now() - row.touched >= 60_000) {
-      row.touched = this.now()
-      this.save()
+      this.commit((rows) =>
+        rows.set(digest(token), { ...row, touched: this.now() })
+      )
     }
     return true
   }
+  idFor(token: string): string | undefined {
+    this.prune()
+    return this.sessions.get(digest(token))?.id
+  }
   revoke(token: string): void {
-    this.sessions.delete(digest(token))
-    this.save()
+    this.commit((rows) => {
+      rows.delete(digest(token))
+    })
   }
   remove(id: string): void {
-    for (const [key, row] of this.sessions)
-      if (row.id === id) this.sessions.delete(key)
-    this.save()
+    this.commit((rows) => {
+      for (const [key, row] of rows) if (row.id === id) rows.delete(key)
+    })
+  }
+  rename(id: string, name: string): void {
+    const clean = name.trim()
+    if (!clean || clean.length > 80) throw new Error('设备名称需为 1–80 个字符')
+    this.commit((rows) => {
+      const found = [...rows.entries()].find(([, row]) => row.id === id)
+      if (!found) throw new Error('设备已失效，请刷新列表')
+      rows.set(found[0], { ...found[1], name: clean })
+    })
   }
   clear(): void {
-    this.sessions.clear()
-    this.save()
+    this.commit((rows) => rows.clear())
   }
   suspend(): void {
-    for (const [key, row] of this.sessions)
-      if (!row.remember) this.sessions.delete(key)
-    this.save()
+    this.commit((rows) => {
+      for (const [key, row] of rows) if (!row.remember) rows.delete(key)
+    })
   }
   list(): WebDevice[] {
     this.prune()
@@ -141,7 +180,8 @@ export class WebSessions {
         name,
         remember,
         created,
-        touched
+        touched,
+        expires: Math.min(created + LIFETIME_MS, touched + IDLE_MS)
       })
     )
   }
@@ -162,6 +202,10 @@ interface PairRequest {
 export class WebPairing {
   private requests = new Map<string, PairRequest>()
   private until = 0
+  private outcomes = new Map<
+    string,
+    { name: string; state: 'connected'; expires: number }
+  >()
   constructor(private readonly now = Date.now) {}
   open(): void {
     this.until = this.now() + 5 * 60_000
@@ -171,9 +215,12 @@ export class WebPairing {
   }
   clear(): void {
     this.requests.clear()
+    this.outcomes.clear()
     this.until = 0
   }
   private prune(): void {
+    for (const [code, row] of this.outcomes)
+      if (row.expires <= this.now()) this.outcomes.delete(code)
     for (const [key, row] of this.requests)
       if (row.expires <= this.now()) this.requests.delete(key)
   }
@@ -201,6 +248,44 @@ export class WebPairing {
     })
     return { code, secret, expires }
   }
+  status(secret: string): WebPairState {
+    this.prune()
+    const row = this.requests.get(digest(secret))
+    if (!row) throw new Error('配对已结束，请重新发起')
+    return {
+      code: row.code,
+      remainingMs: row.expires - this.now(),
+      state: row.approved ? 'approved' : 'pending'
+    }
+  }
+  activity(): {
+    code: string
+    name: string
+    state: 'approved' | 'connected'
+  }[] {
+    this.prune()
+    return [
+      ...[...this.requests.values()]
+        .filter((x) => x.approved)
+        .map((x) => ({
+          code: x.code,
+          name: x.name,
+          state: 'approved' as const
+        })),
+      ...[...this.outcomes].map(([code, row]) => ({
+        code,
+        name: row.name,
+        state: row.state
+      }))
+    ]
+  }
+  connected(code: string, name: string): void {
+    this.outcomes.set(code, {
+      name,
+      state: 'connected',
+      expires: this.now() + 60_000
+    })
+  }
   cancel(secret: string): void {
     this.requests.delete(digest(secret))
   }
@@ -219,13 +304,17 @@ export class WebPairing {
       row.expires = Math.min(row.expires, this.now() + 60_000)
     }
   }
-  poll(secret: string): PairRequest | null {
+  poll(
+    secret: string,
+    commit?: (row: PairRequest) => void
+  ): PairRequest | null {
     this.prune()
     const row = this.requests.get(digest(secret))
     if (!row) throw new Error('配对已结束，请重新发起')
     if (row.nextPoll > this.now()) throw new Error('请稍后查询配对结果')
     row.nextPoll = this.now() + 5000
     if (!row.approved) return null
+    commit?.(row)
     this.requests.delete(row.secret)
     return row
   }

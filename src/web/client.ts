@@ -23,10 +23,34 @@ export async function api<T>(
   }
   return response.json() as Promise<T>
 }
-export function post<T>(url: string, body = {}): Promise<T> {
-  return api<T>(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  })
+export async function post<T>(
+  url: string,
+  body = {},
+  options: RequestInit = {}
+): Promise<T> {
+  const controller = new AbortController()
+  const abort = (): void => controller.abort()
+  const parent = options.signal
+  let timedOut = false
+  if (parent?.aborted) abort()
+  parent?.addEventListener('abort', abort, { once: true })
+  const timer = setTimeout(() => {
+    timedOut = true
+    abort()
+  }, 15_000)
+  try {
+    return await api<T>(url, {
+      ...options,
+      signal: controller.signal,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+  } catch (error) {
+    if (timedOut) throw new Error('连接超时，请重试')
+    throw error
+  } finally {
+    clearTimeout(timer)
+    parent?.removeEventListener('abort', abort)
+  }
 }

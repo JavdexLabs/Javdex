@@ -268,6 +268,8 @@ const api = {
       onAppEvent(IPC.APP_UPDATE_STATE_CHANGED, cb)
   },
   webAccess: {
+    deviceReset: () => invokeApp(IPC.WEB_ACCESS_DEVICE_RESET),
+    deviceRename: (id: string, name: string) => invokeApp(IPC.WEB_ACCESS_DEVICE_RENAME, id, name),
     deviceRemove: (id: string) => invokeApp(IPC.WEB_ACCESS_DEVICE_REMOVE, id),
     pairDecide: (code: string, approve: boolean) => invokeApp(IPC.WEB_ACCESS_PAIR_DECIDE, code, approve),
     pairInspect: (code: string) => invokeApp(IPC.WEB_ACCESS_PAIR_INSPECT, code),

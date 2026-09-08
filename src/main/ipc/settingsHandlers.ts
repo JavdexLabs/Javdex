@@ -63,6 +63,8 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
   appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_INSPECT, (code) => webAccess.inspectPair(code))
   appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_DECIDE, (code, approve) => webAccess.decidePair(code, approve))
   appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_REMOVE, (id) => webAccess.removeDevice(id))
+  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_RENAME, (id, name) => webAccess.renameDevice(id, name))
+  appCommandAdapter.register(IPC.WEB_ACCESS_DEVICE_RESET, () => webAccess.resetDevices())
   appCommandAdapter.register(IPC.WEB_ACCESS_STATUS, () => webAccess.status())
   appCommandAdapter.register(IPC.WEB_ACCESS_APPLY, (input) => webAccess.apply(input))
   appCommandAdapter.register(IPC.WEB_ACCESS_REVOKE, () => webAccess.revoke())

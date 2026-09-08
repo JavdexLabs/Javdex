@@ -14,6 +14,7 @@ export interface WebAccessStatus {
   urls: string[]
   devices: WebDevice[]
   pairingUntil: number
+  pairingActivity: { code: string; name: string; state: 'approved' | 'connected' }[]
   sessions: number
   error: string | null
 }
@@ -63,4 +64,11 @@ export interface WebDevice {
   remember: boolean
   created: number
   touched: number
+  expires: number
+}
+
+export interface WebPairState {
+  code: string
+  remainingMs: number
+  state: 'pending' | 'approved'
 }

@@ -1,3 +1,4 @@
+import { setCloseToTrayEnabled } from '../appTray'
 import { webAccess } from '../web/webAccess'
 import { dialog, shell } from 'electron'
 import fs from 'node:fs'
@@ -101,7 +102,14 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
     ) {
       throw new Error(`演员刮削插件「${safePatch.defaultActressScraper}」不可用`)
     }
-    return toSettingsSnapshot(updateSettings(safePatch))
+    const previousCloseToTray = getSettings().closeToTray
+    if (safePatch.closeToTray !== undefined) setCloseToTrayEnabled(safePatch.closeToTray)
+    try {
+      return toSettingsSnapshot(updateSettings(safePatch))
+    } catch (error) {
+      if (safePatch.closeToTray !== undefined) setCloseToTrayEnabled(previousCloseToTray)
+      throw error
+    }
   })
 
   appCommandAdapter.register(IPC.SETTINGS_PICK_FOLDER, async (): Promise<string[]> => {

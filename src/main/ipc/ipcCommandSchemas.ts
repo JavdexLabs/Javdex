@@ -155,6 +155,7 @@ const replacementMainName = z
 
 const settingsPatch = z
   .object({
+    closeToTray: z.boolean().optional(),
     proxyUrl: text.optional(),
     proxyUrlEnabled: z.boolean().optional(),
     llmProxyUrl: text.optional(),

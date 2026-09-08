@@ -402,6 +402,7 @@ export default function SettingsPage(): JSX.Element {
         | 'actressDetailUseFirstGalleryBackground'
         | 'showVideoResourceTypeBadges'
         | 'coverDisplayMode'
+        | 'closeToTray'
         | 'privacyModeEnabled'
         | 'privacyModeScopes'
         | 'avatarFaceRatio'

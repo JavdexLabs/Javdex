@@ -1,0 +1,271 @@
+import { after, before, describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { request } from 'node:http'
+import { hashPassword, LoginLimiter, verifyPassword, WebSessions } from './auth'
+import { parseRange } from './http'
+import { isLocalPeer, WebServer } from './server'
+import type { WebCatalogReader } from './catalog'
+
+describe('Web authentication and streaming', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-web-'))
+  const movie = path.join(directory, 'movie.mp4')
+  const bytes = Buffer.from('0123456789abcdef')
+  let server: WebServer
+  let base: string
+  let sessionCookie: string
+  let passwordHash: string
+  const catalog: WebCatalogReader = {
+    collections: () => ({ libraries: [], playlists: [] }),
+    browse: () => ({ items: [], total: 0, page: 1, pageSize: 36 }),
+    detail: () => {
+      throw new Error('not found')
+    },
+    image: () => ({ body: Buffer.from('image'), mime: 'image/png' }),
+    media: () => ({ file: movie, stat: fs.statSync(movie), mime: 'video/mp4' })
+  }
+  const login = (password = 'correct horse battery'): Promise<Response> =>
+    fetch(`${base}/api/login`, {
+      method: 'POST',
+      headers: {
+        Origin: base,
+        'Content-Type': 'application/json',
+        'X-Javdex-Client': 'web'
+      },
+      body: JSON.stringify({ username: 'viewer', password })
+    })
+  before(async () => {
+    fs.writeFileSync(movie, bytes)
+    fs.writeFileSync(
+      path.join(directory, 'index.html'),
+      '<!doctype html><title>Login</title>'
+    )
+    passwordHash = await hashPassword('correct horse battery')
+    server = new WebServer({
+      username: 'viewer',
+      passwordHash,
+      staticRoot: directory,
+      catalog
+    })
+    base = `http://127.0.0.1:${await server.start(0, '127.0.0.1')}`
+    const response = await login()
+    sessionCookie = response.headers.get('set-cookie')!.split(';')[0]
+    assert.equal(response.status, 200)
+  })
+  after(async () => {
+    await server.stop()
+    fs.rmSync(directory, { recursive: true, force: true })
+  })
+  it('stores salted password hashes and enforces minimum length', async () => {
+    assert.equal(await verifyPassword('wrong password', passwordHash), false)
+    assert.equal(
+      await verifyPassword('correct horse battery', passwordHash),
+      true
+    )
+    assert.notEqual(await hashPassword('correct horse battery'), passwordHash)
+    await assert.rejects(hashPassword('short'))
+  })
+  it('requires a session for catalog, artwork, and video, with no credential data in failures', async () => {
+    for (const route of [
+      '/api/session',
+      '/api/videos',
+      '/api/collections',
+      '/api/videos/1/images/cover',
+      '/api/videos/1/media/1'
+    ]) {
+      const result = await fetch(base + route)
+      assert.equal(result.status, 401, route)
+      assert.equal(result.headers.get('cache-control'), 'no-store')
+      assert.doesNotMatch(await result.text(), /password|token|locator/)
+    }
+    assert.equal((await fetch(base + '/')).status, 200)
+  })
+  it('rejects bad credentials; issues HttpOnly SameSite cookies on login', async () => {
+    assert.equal((await login('not the password')).status, 401)
+    const response = await login()
+    assert.match(
+      response.headers.get('set-cookie')!,
+      /HttpOnly; SameSite=Strict/
+    )
+    const cookie = response.headers.get('set-cookie')!.split(';')[0]
+    const session = await fetch(base + '/api/session', {
+      headers: { Cookie: cookie }
+    })
+    assert.deepEqual(await session.json(), {
+      authenticated: true,
+      username: 'viewer'
+    })
+  })
+  it('blocks cross-origin, missing-origin POSTs, DNS rebinding, and desktop mutation routes', async () => {
+    const crossSiteHeaders: Record<string, string>[] = [
+      { Origin: 'https://evil.example' },
+      { 'Sec-Fetch-Site': 'cross-site' }
+    ]
+    for (const headers of crossSiteHeaders) {
+      assert.equal(
+        (
+          await fetch(base + '/api/videos', {
+            headers: { Cookie: sessionCookie, ...headers }
+          })
+        ).status,
+        403
+      )
+    }
+    assert.equal(
+      (await fetch(base + '/api/login', { method: 'POST' })).status,
+      403
+    )
+    assert.equal(
+      (
+        await fetch(base + '/api/videos/1', {
+          method: 'DELETE',
+          headers: { Cookie: sessionCookie }
+        })
+      ).status,
+      405
+    )
+    assert.equal(
+      (
+        await fetch(base + '/api/settings', {
+          method: 'POST',
+          headers: {
+            Cookie: sessionCookie,
+            Origin: base,
+            'X-Javdex-Client': 'web'
+          }
+        })
+      ).status,
+      405
+    )
+    const status = await new Promise<number | undefined>((resolve, reject) => {
+      const req = request(
+        base + '/',
+        { headers: { Host: 'evil.example' } },
+        (res) => {
+          res.resume()
+          resolve(res.statusCode)
+        }
+      )
+      req.on('error', reject)
+      req.end()
+    })
+    assert.equal(status, 403)
+    assert.equal(
+      (
+        await fetch(base + '/package.json', {
+          headers: { Cookie: sessionCookie }
+        })
+      ).status,
+      404
+    )
+    assert.equal(
+      (await fetch(base + '/assets/../../web-access.json')).status,
+      404
+    )
+  })
+  it('streams byte ranges, suffixes and HEAD; rejects invalid or multiple ranges', async () => {
+    const media = base + '/api/videos/1/media/1'
+    const part = await fetch(media, {
+      headers: { Cookie: sessionCookie, Range: 'bytes=3-7' }
+    })
+    assert.equal(part.status, 206)
+    assert.equal(part.headers.get('content-range'), 'bytes 3-7/16')
+    assert.equal(await part.text(), '34567')
+    const suffix = await fetch(media, {
+      headers: { Cookie: sessionCookie, Range: 'bytes=-3' }
+    })
+    assert.equal(await suffix.text(), 'def')
+    const head = await fetch(media, {
+      method: 'HEAD',
+      headers: { Cookie: sessionCookie }
+    })
+    assert.equal(head.headers.get('content-length'), '16')
+    assert.equal(await head.text(), '')
+    for (const range of ['bytes=20-', 'bytes=0-1,3-4', 'bytes=-0']) {
+      const result = await fetch(media, {
+        headers: { Cookie: sessionCookie, Range: range }
+      })
+      assert.equal(result.status, 416)
+      assert.equal(result.headers.get('content-range'), 'bytes */16')
+    }
+  })
+  it('logout invalidates the cookie; desktop revocation invalidates all browsers', async () => {
+    const fresh = await login()
+    const cookie = fresh.headers.get('set-cookie')!.split(';')[0]
+    assert.equal(
+      (
+        await fetch(base + '/api/logout', {
+          method: 'POST',
+          headers: { Cookie: cookie, Origin: base, 'X-Javdex-Client': 'web' }
+        })
+      ).status,
+      200
+    )
+    assert.equal(
+      (await fetch(base + '/api/session', { headers: { Cookie: cookie } }))
+        .status,
+      401
+    )
+    server.revokeSessions()
+    // Revocation deliberately closes existing sockets, including fetch's idle pool.
+    // Use a fresh connection to test the old cookie rather than race that close.
+    const revokedStatus = await new Promise<number | undefined>((resolve, reject) => {
+      const req = request(base + '/api/session', { agent: false, headers: { Cookie: sessionCookie } }, res => {
+        res.resume()
+        resolve(res.statusCode)
+      })
+      req.on('error', reject)
+      req.end()
+    })
+    assert.equal(revokedStatus, 401)
+  })
+})
+
+describe('Session lifetimes and request limits', () => {
+  it('expires idle and absolute sessions and limits attempts', () => {
+    let now = 0
+    const sessions = new WebSessions(() => now)
+    const idle = sessions.create()
+    now += 24 * 60 * 60_000
+    assert.equal(sessions.check(idle), false)
+    const active = sessions.create()
+    for (let day = 0; day < 14; day++) {
+      now += 12 * 60 * 60_000
+      assert.equal(sessions.check(active), day < 13)
+    }
+    const limiter = new LoginLimiter(() => now)
+    for (let i = 0; i < 8; i++) {
+      const release = limiter.enter('peer')
+      assert.ok(release)
+      release()
+    }
+    assert.equal(limiter.enter('peer'), null)
+    now += 15 * 60_000
+    assert.ok(limiter.enter('peer'))
+  })
+  it('accepts only local peer ranges and handles byte-range edge cases', () => {
+    for (const ip of [
+      '127.0.0.1',
+      '192.168.1.4',
+      '10.1.2.3',
+      '172.16.1.1',
+      '::ffff:192.168.2.1',
+      '::1',
+      'fd00::1'
+    ])
+      assert.ok(isLocalPeer(ip), ip)
+    for (const ip of [
+      '8.8.8.8',
+      '172.32.1.1',
+      '192.169.0.1',
+      'example.com',
+      '2001:4860::1'
+    ])
+      assert.equal(isLocalPeer(ip), false)
+    assert.deepEqual(parseRange('bytes=0-999', 10), { start: 0, end: 9 })
+    assert.throws(() => parseRange('bytes=0-', 0))
+    assert.equal(parseRange(undefined, 0), null)
+  })
+})

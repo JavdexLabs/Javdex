@@ -17,6 +17,7 @@ export type SettingsTab =
   | 'theme'
   | 'assets'
   | 'proxy'
+  | 'web'
   | 'info'
   | 'usage'
   | 'advanced'
@@ -97,7 +98,7 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
     label: '网络',
     hint: '代理连接',
     defaultTab: 'proxy',
-    tabs: [{ id: 'proxy', label: '代理' }]
+    tabs: [{ id: 'proxy', label: '代理' }, { id: 'web', label: '局域网访问' }]
   },
   {
     id: 'about',

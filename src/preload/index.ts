@@ -1,3 +1,4 @@
+import type { WebAccessInput } from '../shared/webTypes'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../shared/ipc-channels'
 import type { UpdateCheckState } from '../shared/updateTypes'
@@ -265,6 +266,11 @@ const api = {
       invokeApp(IPC.APP_UPDATE_IGNORE_VERSION, version),
     onStateChanged: (cb: (state: UpdateCheckState) => void) =>
       onAppEvent(IPC.APP_UPDATE_STATE_CHANGED, cb)
+  },
+  webAccess: {
+    status: () => invokeApp(IPC.WEB_ACCESS_STATUS),
+    apply: (input: WebAccessInput) => invokeApp(IPC.WEB_ACCESS_APPLY, input),
+    revoke: () => invokeApp(IPC.WEB_ACCESS_REVOKE)
   },
   settings: {
     get: () => invokeApp(IPC.SETTINGS_GET),

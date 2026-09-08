@@ -1,3 +1,4 @@
+import WebAccessPanel from '../components/settings/WebAccessPanel'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
@@ -903,6 +904,8 @@ export default function SettingsPage(): JSX.Element {
                   onSaved={(patch) => setSettings((current) => current ? { ...current, ...patch } : current)}
                 />
               )}
+
+              {activeGroup.id === 'network' && activeTab === 'web' && <WebAccessPanel />}
 
               {activeGroup.id === 'about' && activeTab === 'info' && <AboutSettingsPanel />}
       </SettingsWorkspaceShell>

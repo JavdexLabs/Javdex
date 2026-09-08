@@ -1,3 +1,4 @@
+import type { WebAccessInput, WebAccessStatus } from './webTypes'
 import { IPC } from './ipc-channels'
 import type {
   ModelCandidate,
@@ -128,6 +129,9 @@ export interface RemoteImagePreviewResult {
 }
 
 export interface AppIpcContract {
+  [IPC.WEB_ACCESS_STATUS]: { args: []; result: WebAccessStatus }
+  [IPC.WEB_ACCESS_APPLY]: { args: [WebAccessInput]; result: WebAccessStatus }
+  [IPC.WEB_ACCESS_REVOKE]: { args: []; result: WebAccessStatus }
   [IPC.SETTINGS_GET]: { args: []; result: SettingsSnapshot }
   [IPC.SETTINGS_UPDATE]: { args: [patch: RendererSettingsPatch]; result: SettingsSnapshot }
   [IPC.SETTINGS_PICK_FOLDER]: { args: []; result: string[] }

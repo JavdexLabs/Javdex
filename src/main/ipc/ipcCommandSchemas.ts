@@ -573,6 +573,12 @@ const listQuery = object
 const mergeInput = z.object({ sourceId: id, targetId: id }).passthrough()
 
 export const appIpcSchemas = {
+  [IPC.WEB_ACCESS_STATUS]: noArgs,
+  [IPC.WEB_ACCESS_REVOKE]: noArgs,
+  [IPC.WEB_ACCESS_APPLY]: z.tuple([z.object({
+    enabled: z.boolean(), port: z.number().int().min(1024).max(65535),
+    username: z.string().regex(/^[\w.-]{1,64}$/), password: z.string().min(12).max(128).optional()
+  }).strict()]),
   [IPC.SETTINGS_GET]: noArgs,
   [IPC.SETTINGS_UPDATE]: z.tuple([settingsPatch]),
   [IPC.SETTINGS_PICK_FOLDER]: noArgs,

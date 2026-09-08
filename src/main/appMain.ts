@@ -1,3 +1,4 @@
+import { webAccess } from './web/webAccess'
 import { app, BrowserWindow, powerMonitor, protocol } from 'electron'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -201,6 +202,7 @@ if (gotSingleInstanceLock) {
       () => mainWindow,
       (url) => isSameRendererLocation(url, rendererEntryUrl)
     )
+    await webAccess.initialize()
     automaticScanScheduler.start()
     powerMonitor.on('resume', handleSystemResume)
     setTimeout(() => {
@@ -227,6 +229,7 @@ if (gotSingleInstanceLock) {
     automaticScanScheduler.stop()
     powerMonitor.off('resume', handleSystemResume)
     void Promise.allSettled([
+      webAccess.stop(),
       pluginDeveloper.dispose(),
       libraryCurator.dispose(),
       agentMetadataCollection.dispose(),

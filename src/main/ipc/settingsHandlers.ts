@@ -1,3 +1,4 @@
+import { webAccess } from '../web/webAccess'
 import { dialog, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -57,6 +58,9 @@ function toSettingsSnapshot(settings: AppSettings): SettingsSnapshot {
 }
 
 export function registerSettingsHandlers(ctx: IpcContext): void {
+  appCommandAdapter.register(IPC.WEB_ACCESS_STATUS, () => webAccess.status())
+  appCommandAdapter.register(IPC.WEB_ACCESS_APPLY, (input) => webAccess.apply(input))
+  appCommandAdapter.register(IPC.WEB_ACCESS_REVOKE, () => webAccess.revoke())
   appCommandAdapter.register(IPC.SETTINGS_GET, (): SettingsSnapshot => toSettingsSnapshot(getSettings()))
 
   appCommandAdapter.register(IPC.SETTINGS_OVERVIEW_STATS, (): LibraryOverviewStats => getLibraryOverviewStats())

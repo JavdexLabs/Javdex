@@ -60,6 +60,8 @@ export function normalizePrivacyModeScopes(value: unknown): PrivacyModeScope[] {
 }
 
 export interface AppSettings {
+  /** Hide the main window on close; explicit application quit still exits. */
+  closeToTray: boolean
   /** Folders to scan for media files. */
   libraryPaths: string[]
   /** Internal queue: roots whose local resource records are removed after the next successful scan. */
@@ -242,6 +244,7 @@ export function normalizePluginDevAgentMaxContextTokens(value: unknown): number 
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  closeToTray: false,
   libraryPaths: [],
   pendingLibraryPathCleanups: [],
   autoDeleteResourceLessVideos: false,

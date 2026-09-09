@@ -760,6 +760,8 @@ describe('settings route contract', () => {
     assert.equal(settingsPath('overview'), '/settings/overview/status')
     assert.equal(settingsPath('library'), '/settings/library/sources')
     assert.equal(settingsPath('network'), '/settings/network/proxy')
+    assert.equal(settingsPath('network', 'web'), '/settings/network/web')
+    assert.equal(resolveSettingsRoute('/settings/network/web').tab, 'web')
     assert.deepEqual(SETTINGS_GROUPS.slice(0, 2).map((group) => group.id), [
       'overview',
       'library'
@@ -783,7 +785,7 @@ describe('settings route contract', () => {
         label: '网络',
         hint: '代理连接',
         defaultTab: 'proxy',
-        tabs: [{ id: 'proxy', label: '代理' }]
+        tabs: [{ id: 'proxy', label: '代理' }, { id: 'web', label: '局域网访问' }]
       },
       tab: 'proxy'
     })

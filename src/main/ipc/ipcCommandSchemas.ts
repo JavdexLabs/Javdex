@@ -155,6 +155,7 @@ const replacementMainName = z
 
 const settingsPatch = z
   .object({
+    closeToTray: z.boolean().optional(),
     proxyUrl: text.optional(),
     proxyUrlEnabled: z.boolean().optional(),
     llmProxyUrl: text.optional(),
@@ -573,6 +574,18 @@ const listQuery = object
 const mergeInput = z.object({ sourceId: id, targetId: id }).passthrough()
 
 export const appIpcSchemas = {
+  [IPC.WEB_ACCESS_PAIR_OPEN]: noArgs,
+  [IPC.WEB_ACCESS_PAIR_INSPECT]: z.tuple([z.string().regex(/^\d{6}$/)]),
+  [IPC.WEB_ACCESS_PAIR_DECIDE]: z.tuple([z.string().regex(/^\d{6}$/), z.boolean()]),
+  [IPC.WEB_ACCESS_DEVICE_REMOVE]: z.tuple([z.string().regex(/^[a-f0-9]{32}$/)]),
+  [IPC.WEB_ACCESS_DEVICE_RENAME]: z.tuple([z.string().regex(/^[a-f0-9]{32}$/), z.string().trim().min(1).max(80)]),
+  [IPC.WEB_ACCESS_DEVICE_RESET]: noArgs,
+  [IPC.WEB_ACCESS_STATUS]: noArgs,
+  [IPC.WEB_ACCESS_REVOKE]: noArgs,
+  [IPC.WEB_ACCESS_APPLY]: z.tuple([z.object({
+    enabled: z.boolean(), port: z.number().int().min(1024).max(65535),
+    username: z.string().regex(/^[\w.-]{1,64}$/), password: z.string().min(12).max(128).optional()
+  }).strict()]),
   [IPC.SETTINGS_GET]: noArgs,
   [IPC.SETTINGS_UPDATE]: z.tuple([settingsPatch]),
   [IPC.SETTINGS_PICK_FOLDER]: noArgs,

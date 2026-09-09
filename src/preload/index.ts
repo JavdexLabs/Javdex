@@ -1,3 +1,4 @@
+import type { WebAccessInput } from '../shared/webTypes'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../shared/ipc-channels'
 import type { UpdateCheckState } from '../shared/updateTypes'
@@ -265,6 +266,17 @@ const api = {
       invokeApp(IPC.APP_UPDATE_IGNORE_VERSION, version),
     onStateChanged: (cb: (state: UpdateCheckState) => void) =>
       onAppEvent(IPC.APP_UPDATE_STATE_CHANGED, cb)
+  },
+  webAccess: {
+    deviceReset: () => invokeApp(IPC.WEB_ACCESS_DEVICE_RESET),
+    deviceRename: (id: string, name: string) => invokeApp(IPC.WEB_ACCESS_DEVICE_RENAME, id, name),
+    deviceRemove: (id: string) => invokeApp(IPC.WEB_ACCESS_DEVICE_REMOVE, id),
+    pairDecide: (code: string, approve: boolean) => invokeApp(IPC.WEB_ACCESS_PAIR_DECIDE, code, approve),
+    pairInspect: (code: string) => invokeApp(IPC.WEB_ACCESS_PAIR_INSPECT, code),
+    pairOpen: () => invokeApp(IPC.WEB_ACCESS_PAIR_OPEN),
+    status: () => invokeApp(IPC.WEB_ACCESS_STATUS),
+    apply: (input: WebAccessInput) => invokeApp(IPC.WEB_ACCESS_APPLY, input),
+    revoke: () => invokeApp(IPC.WEB_ACCESS_REVOKE)
   },
   settings: {
     get: () => invokeApp(IPC.SETTINGS_GET),

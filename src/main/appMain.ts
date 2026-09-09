@@ -1,3 +1,5 @@
+import { destroyAppTray, hasAppTray, initializeAppTray, setCloseToTrayEnabled } from './appTray'
+import { webAccess } from './web/webAccess'
 import { app, BrowserWindow, powerMonitor, protocol } from 'electron'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -105,6 +107,12 @@ function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
   mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   bindNfoExportWindowGuard(mainWindow, nfoExportTaskController, () => shutdownInProgress)
+  const window = mainWindow
+  window.on('close', (event) => {
+    if (event.defaultPrevented || shutdownInProgress || !getSettings().closeToTray || !hasAppTray()) return
+    event.preventDefault()
+    window.hide()
+  })
 
   // electron-vite injects this env var in dev for HMR.
   const devUrl = process.env['ELECTRON_RENDERER_URL']
@@ -197,10 +205,21 @@ if (gotSingleInstanceLock) {
     registerAssetProtocol()
     const rendererEntryUrl = resolveRendererEntryUrl()
     createWindow(rendererEntryUrl)
+    initializeAppTray(() => {
+      if (!mainWindow || mainWindow.isDestroyed()) createWindow(rendererEntryUrl)
+      else focusMainWindow()
+    })
+    try {
+      setCloseToTrayEnabled(getSettings().closeToTray)
+    } catch (error) {
+      // Leave normal close behavior available when the platform cannot create a tray.
+      console.error(`[tray] ${(error as Error).message}`)
+    }
     registerIpcHandlers(
       () => mainWindow,
       (url) => isSameRendererLocation(url, rendererEntryUrl)
     )
+    await webAccess.initialize()
     automaticScanScheduler.start()
     powerMonitor.on('resume', handleSystemResume)
     setTimeout(() => {
@@ -227,6 +246,7 @@ if (gotSingleInstanceLock) {
     automaticScanScheduler.stop()
     powerMonitor.off('resume', handleSystemResume)
     void Promise.allSettled([
+      webAccess.stop(),
       pluginDeveloper.dispose(),
       libraryCurator.dispose(),
       agentMetadataCollection.dispose(),
@@ -237,6 +257,7 @@ if (gotSingleInstanceLock) {
         scrapeBrowser.dispose()
       ]))
       .finally(() => {
+        destroyAppTray()
         closeDatabase()
         shutdownReady = true
         app.quit()

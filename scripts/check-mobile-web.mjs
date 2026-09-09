@@ -143,7 +143,9 @@ try {
     assert.equal(await page.evaluate(() => scrollY), homeScroll)
     assert.deepEqual(await page.locator('.home-sections .video-card').evaluateAll(cards => cards.map(card => card.getAttribute('href'))), homeCards)
     await page.getByRole('link', { name: '查看全部', exact: true }).click()
-    await page.locator('.video-card:visible').last().waitFor()
+    await page.waitForURL('**/*sort=recent')
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    await page.locator('[data-browse-results] .video-card').last().waitFor()
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
     await checkControlFocus(page.locator('.year-filter input'))
     if (touch) {

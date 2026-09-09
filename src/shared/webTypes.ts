@@ -40,6 +40,7 @@ export interface WebBrowse {
 }
 export interface WebResource {
   id: number
+  libraryId: number
   isPrimary: boolean
   name: string
   kind: string

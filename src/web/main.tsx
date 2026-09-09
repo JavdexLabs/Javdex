@@ -252,8 +252,8 @@ function Detail({
   }
   const selected = query.has('play')
     ? Number(query.get('play'))
-    : (video?.resources.find((r) => r.isPrimary && r.playable)?.id ??
-      video?.resources.find((r) => r.playable)?.id)
+    : video?.resources.find((r) => r.isPrimary &&
+      (!query.has('library') || r.libraryId === Number(query.get('library'))))?.id
   const base = new URLSearchParams(query)
   base.delete('play')
   const back = (): void => navigate('/browse', base)
@@ -361,7 +361,9 @@ function Detail({
               <img className="player-fallback-cover" src={video.cover} alt={`${video.title} · 封面`} />
             </button>}
             <div className="player-error" role={playError ? 'alert' : 'status'}>
-              <p>{playError || '暂无可在浏览器中播放的资源。'}</p>
+              <p>{playError || (video.resources.some((r) => r.playable)
+                ? '当前未加载可播放的主资源，请在下方选择播放资源。'
+                : '暂无可在浏览器中播放的资源。')}</p>
               {playError && resource && <button onClick={() => {
                 setPlayError('')
                 player.current?.load()

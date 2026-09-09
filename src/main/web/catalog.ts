@@ -203,6 +203,7 @@ export class WebCatalog {
             : Boolean(target)
         return {
           id: r.id,
+          libraryId: r.library_id,
           isPrimary: Boolean(r.is_primary),
           name: r.display_name?.trim() || (r.kind === 'local' ? r.locator.split(/[\\/]/).pop() : null) || `资源 ${index + 1}`,
           kind: r.kind,

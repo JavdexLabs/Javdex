@@ -26,6 +26,9 @@ let browser
 async function checkControlFocus(locator) {
   const before = await locator.boundingBox()
   await locator.focus()
+  await locator.page().waitForFunction(element =>
+    getComputedStyle(element).borderTopColor === 'rgb(143, 210, 179)',
+  await locator.elementHandle(), { timeout: 5000 })
   const style = await locator.evaluate(el => {
     const css = getComputedStyle(el)
     return { outline: css.outlineStyle, border: css.borderTopColor, ring: css.boxShadow,
@@ -116,13 +119,13 @@ try {
       assert.equal(await page.locator('#web-search').evaluate(el => document.activeElement === el), true)
     }
     await page.keyboard.type('sample')
-    await page.keyboard.press('Home')
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+ArrowLeft' : 'Home')
     await page.keyboard.press('ArrowLeft')
     assert.equal(await page.locator('#web-search').evaluate(el => document.activeElement === el && el.selectionStart === 0), true)
-    await page.keyboard.press('End')
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+ArrowRight' : 'End')
     await page.keyboard.press('ArrowRight')
     assert.equal(await page.locator('#web-search').evaluate(el => document.activeElement === el && el.selectionStart === 6), true)
-    await page.keyboard.press('Control+A')
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A')
     await page.keyboard.press('Backspace')
     await page.keyboard.press('ArrowRight')
     assert.equal(await page.locator('.search-submit').evaluate(el => document.activeElement === el), false)
@@ -179,8 +182,10 @@ try {
       assert.equal(await page.locator('[data-scope="playlist:3"]').evaluate(el => document.activeElement === el), true)
       await page.keyboard.press('Enter')
       await page.waitForURL('**/*playlist=3')
+      await page.waitForFunction(() => document.querySelector('[data-scope="playlist:3"]')?.getAttribute('aria-pressed') === 'true')
       await tabTo(page, '.mobile-collection > button', 'Shift+Tab')
       await page.keyboard.press('Enter')
+      await page.waitForFunction(() => document.activeElement?.getAttribute('data-scope') === 'playlist:3')
       for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowUp')
       await page.keyboard.press('Enter')
       await page.waitForURL('**/#/browse')
@@ -202,6 +207,9 @@ try {
       await page.locator('[data-scope="all"]').click()
       await page.waitForURL('**/#/browse')
       await page.getByRole('link', { name: '查看全部', exact: true }).click()
+      await page.waitForURL('**/*sort=recent')
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+      await page.locator('[data-browse-results] .video-card').first().waitFor()
     } else {
       assert.equal(await page.locator('.sidebar').isVisible(), true)
       const sidebarFoot = await page.locator('.sidebar-foot').boundingBox()
@@ -272,6 +280,8 @@ try {
     if (touch) assert.equal(await search.evaluate(el => document.activeElement === el), false)
     await page.getByRole('button', { name: '清除搜索' }).click()
     await page.waitForURL('**/*sort=recent')
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    await page.locator('[data-browse-results] .video-card').nth(16).waitFor()
     for (const back of ['button', 'history']) {
       const card = page.locator('.video-card:visible').nth(16)
       await card.scrollIntoViewIfNeeded()

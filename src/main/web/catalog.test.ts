@@ -60,6 +60,7 @@ describe('Web read-only catalog scope', () => {
     assert.equal(catalog.collections().libraries.length, 1)
     assert.equal(catalog.collections().libraries[0].count, 1)
     const detail = catalog.detail(visible.videoId)
+    assert.equal(detail.resources[0].libraryId, 1)
     assert.doesNotMatch(
       JSON.stringify(detail),
       /private|locator|root_id|source_identity|cover_path/

@@ -204,6 +204,46 @@ describe('Pairing HTTP boundary', () => {
 })
 
 describe('Device record recovery', () => {
+  it('keeps valid sessions usable during activity write failures and retries persistence', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'web-activity-fault-'))
+    const file = path.join(dir, 'devices.json')
+    let now = 0
+    try {
+      const sessions = new WebSessions(() => now, file)
+      const remembered = sessions.create(true, 'TV')
+      const temporary = sessions.create(false, 'guest')
+      const failure = mock.method(fs, 'renameSync', () => { throw new Error('ENOSPC') })
+      const warning = mock.method(console, 'warn', () => {})
+      try {
+        now = 60_001
+        assert.equal(sessions.check(remembered), true)
+        assert.equal(sessions.check(temporary), true)
+        assert.equal(sessions.check('invalid'), false)
+        assert.ok(sessions.list().every(row => row.touched === now))
+        assert.equal(JSON.parse(fs.readFileSync(file, 'utf8'))[0].touched, 0)
+        // Keep temporary idle expiry based on real activity even while storage is unavailable.
+        for (let hour = 0; hour < 25; hour++) {
+          now += 60 * 60_000
+          assert.equal(sessions.check(temporary), true)
+        }
+        assert.throws(() => sessions.revoke(remembered), /操作未生效/)
+      } finally {
+        failure.mock.restore()
+        warning.mock.restore()
+      }
+      now += 60_001
+      assert.equal(sessions.check(remembered), true)
+      assert.equal(JSON.parse(fs.readFileSync(file, 'utf8'))[0].touched, now)
+      assert.equal(new WebSessions(() => now, file).check(remembered), true)
+      assert.equal(new WebSessions(() => now, file).check(temporary), false)
+      now = 7 * 24 * 60 * 60_000
+      assert.equal(sessions.check(temporary), false)
+      sessions.revoke(remembered)
+      assert.equal(sessions.check(remembered), false)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
   it('keeps disk and memory consistent after failed revoke, clear, rename and create', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'web-write-fault-'))
     const file = path.join(dir, 'devices.json')

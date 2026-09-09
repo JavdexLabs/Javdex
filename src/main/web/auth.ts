@@ -133,11 +133,15 @@ export class WebSessions {
     this.prune()
     const row = this.sessions.get(digest(token))
     if (!row) return false
-    // Persist activity at minute granularity, without extending absolute lifetime.
+    // Activity is advisory: a failed timestamp write must not invalidate a credential.
+    // Update memory first so idle expiry and write throttling still follow real use.
     if (this.now() - row.touched >= 60_000) {
-      this.commit((rows) =>
-        rows.set(digest(token), { ...row, touched: this.now() })
-      )
+      this.sessions.set(digest(token), { ...row, touched: this.now() })
+      try {
+        this.save()
+      } catch {
+        console.warn('[web] 设备活动时间保存失败，保留当前授权并在后续活动时重试。')
+      }
     }
     return true
   }

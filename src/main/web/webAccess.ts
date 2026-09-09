@@ -19,7 +19,7 @@ const defaults: StoredAccess = {
   username: 'viewer',
   passwordHash: ''
 }
-class WebAccess {
+export class WebAccess {
   private config = { ...defaults }
   private server: WebServer | null = null
   private error: string | null = null
@@ -59,7 +59,13 @@ class WebAccess {
       ...this.config,
       sessions: this.store(),
       staticRoot,
-      catalog: new WebCatalog(getDb())
+      catalog: new WebCatalog(getDb()),
+      onError: (message) => {
+        if (this.server === server) {
+          this.server = null
+          this.error = message
+        }
+      }
     })
     try {
       await server.start(this.config.port)
@@ -119,19 +125,30 @@ class WebAccess {
         username: input.username,
         passwordHash
       }
-      // Revoke before publishing new credentials, so a crash cannot revive old devices.
-      await this.stop()
-      if (
-        input.password ||
-        config.username !== this.config.username ||
-        !config.enabled
-      )
-        this.store().clear()
+      const wasRunning = this.server !== null
       const temporary = `${this.file()}.tmp`
-      fs.writeFileSync(temporary, JSON.stringify(config, null, 2), {
-        mode: 0o600
-      })
-      fs.renameSync(temporary, this.file())
+      try {
+        // Stage the new configuration before interrupting the current service.
+        fs.writeFileSync(temporary, JSON.stringify(config, null, 2), { mode: 0o600 })
+        await this.stop()
+        // Revoke before publishing new credentials. Never restore revoked tokens.
+        if (input.password || config.username !== this.config.username) this.store().clear()
+        fs.renameSync(temporary, this.file())
+      } catch (reason) {
+        const message = (reason as Error).message
+        if (wasRunning && !this.server) {
+          try {
+            await this.listen()
+            this.error = null
+          } catch (recovery) {
+            this.error = `恢复原服务失败：${(recovery as Error).message}`
+            throw new Error(`保存失败：${message}；${this.error}`)
+          }
+        }
+        throw new Error(`保存失败，原配置未更改：${message}`)
+      } finally {
+        try { fs.rmSync(temporary, { force: true }) } catch { /* Preserve the save error. */ }
+      }
       this.config = config
       this.error = null
       if (config.enabled) {

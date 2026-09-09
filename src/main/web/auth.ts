@@ -105,8 +105,8 @@ export class WebSessions {
   private prune(): void {
     for (const [key, row] of this.sessions) {
       if (
-        this.now() - row.touched >= IDLE_MS ||
-        this.now() - row.created >= LIFETIME_MS
+        !row.remember && (this.now() - row.touched >= IDLE_MS ||
+        this.now() - row.created >= LIFETIME_MS)
       )
         this.sessions.delete(key)
     }
@@ -140,6 +140,9 @@ export class WebSessions {
       )
     }
     return true
+  }
+  isRemembered(token: string): boolean {
+    return this.sessions.get(digest(token))?.remember === true
   }
   idFor(token: string): string | undefined {
     this.prune()
@@ -181,7 +184,7 @@ export class WebSessions {
         remember,
         created,
         touched,
-        expires: Math.min(created + LIFETIME_MS, touched + IDLE_MS)
+        expires: remember ? null : Math.min(created + LIFETIME_MS, touched + IDLE_MS)
       })
     )
   }

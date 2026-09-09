@@ -121,8 +121,7 @@ export default function PairLogin({
             记住此设备
           </label>
           <p className="muted">
-            记住后重启应用仍可登录；闲置 24 小时或授权满 7
-            天后失效。仅在自己的设备上使用。
+            记住后长期有效，退出登录、撤销授权或修改密码后失效。仅在自己的设备上使用。
           </p>
           <button
             className="primary"

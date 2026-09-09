@@ -219,6 +219,13 @@ describe('Web authentication and streaming', () => {
       assert.equal(result.headers.get('content-range'), 'bytes */16')
     }
   })
+  it('downloads authenticated resources as attachments', async () => {
+    const response = await fetch(base + '/api/videos/1/media/1?download=1', { headers: { Cookie: sessionCookie } })
+    assert.equal(response.status, 200)
+    assert.match(response.headers.get('content-disposition') ?? '', /^attachment; filename\*=UTF-8''/)
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes)
+    assert.equal((await fetch(base + '/api/videos/1/media/1?download=1')).status, 401)
+  })
   it('logout invalidates the cookie; desktop revocation invalidates all browsers', async () => {
     const fresh = await login()
     const cookie = fresh.headers.get('set-cookie')!.split(';')[0]

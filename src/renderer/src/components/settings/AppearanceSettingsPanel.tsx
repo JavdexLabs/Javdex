@@ -438,14 +438,6 @@ export default function AppearanceSettingsPanel({
 
   return (
     <>
-      <SettingsCard title="窗口行为">
-        <SettingsSwitchRow
-          title="关闭窗口后最小化到系统托盘"
-          description="关闭窗口时继续运行，局域网访问和后台任务不受影响；从托盘菜单选择“退出 Javdex”可完全退出。立即生效。"
-          checked={settings.closeToTray}
-          onChange={(checked) => onPatchSettings({ closeToTray: checked })}
-        />
-      </SettingsCard>
       <SettingsCard title="主题" hint="界面配色，立即生效。">
         <div className="theme-grid" role="radiogroup" aria-label="界面主题">
           {THEME_OPTIONS.map((option) => (
@@ -780,6 +772,17 @@ export default function AppearanceSettingsPanel({
               </div>
             ) : null}
           </div>
+      </SettingsCard>
+
+      <SettingsCard title="窗口行为" hint="关闭窗口时的运行方式，立即生效。">
+        <div className="settings-toggle-list">
+          <SettingsSwitchRow
+            title="关闭窗口后最小化到系统托盘"
+            description="关闭窗口时继续运行，局域网访问和后台任务不受影响；从托盘菜单选择“退出 Javdex”可完全退出。"
+            checked={settings.closeToTray}
+            onChange={(checked) => onPatchSettings({ closeToTray: checked })}
+          />
+        </div>
       </SettingsCard>
     </>
   )

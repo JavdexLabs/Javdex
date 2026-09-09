@@ -53,7 +53,7 @@ function token(request: IncomingMessage): string {
 }
 function cookie(value: string, expire = false, remember = false): string {
   // Direct LAN HTTP cannot use Secure; HTTPS termination is deliberately not trusted implicitly.
-  return `${COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/${expire || remember ? `; Max-Age=${expire ? 0 : 7 * 86400}` : ''}`
+  return `${COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/${expire || remember ? `; Max-Age=${expire ? 0 : 365 * 86400}` : ''}`
 }
 export class WebServer {
   private server: Server | null = null
@@ -98,6 +98,7 @@ export class WebServer {
       passwordHash: string
       staticRoot: string
       catalog: WebCatalogReader
+      onError?: (message: string) => void
       sessions?: WebSessions
     }
   ) {
@@ -153,7 +154,11 @@ export class WebServer {
     this.server = server
     // Runtime socket failures must not crash the desktop application.
     server.on('error', () => {
-      this.sessions.clear()
+      // A network failure must not revoke remembered devices or throw from this event.
+      this.options.onError?.('Web 服务运行异常，请重试启动')
+      void this.stop().catch(() => {
+        this.options.onError?.('Web 服务已停止，设备状态保存失败，请检查磁盘权限后重试')
+      })
     })
     return (server.address() as { port: number }).port
   }
@@ -399,6 +404,7 @@ export class WebServer {
         throw new WebError(401, '请先登录')
       this.track(token(request), response)
       if (url.pathname === '/api/session') {
+        if (this.sessions.isRemembered(token(request))) response.setHeader('Set-Cookie', cookie(token(request), false, true))
         json(response, 200, {
           authenticated: true,
           username: this.options.username
@@ -434,12 +440,14 @@ export class WebServer {
         response.end(method === 'HEAD' ? undefined : image.body)
         return
       }
-      const media = this.options.catalog.media(id, Number(match[3]))
+      const download = url.searchParams.get('download') === '1'
+      const media = this.options.catalog.media(id, Number(match[3]), download)
       if ('redirect' in media) {
         response.writeHead(302, { Location: media.redirect! })
         response.end()
         return
       }
+      if (download) response.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(media.file)).replace(/'/g, '%27')}`)
       await sendFile(request, response, media.file, media.mime, media.stat)
       return
     }

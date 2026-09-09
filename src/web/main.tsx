@@ -42,6 +42,7 @@ import {
 } from './navigation'
 import './styles.css'
 import PairLogin from './PairLogin'
+import ResourceList from './ResourceCard'
 import appIcon from '../../build/icon-128.png'
 import Checkbox from '../renderer/src/components/Checkbox'
 
@@ -153,7 +154,7 @@ function Login({
               maxLength={128}
             />
           </label>
-          <label className="remember-device"><Checkbox checked={remember} onChange={e => setRemember(e.target.checked)} />记住此设备（闲置 24 小时 / 最长 7 天）</label>
+          <label className="remember-device"><Checkbox checked={remember} onChange={e => setRemember(e.target.checked)} />记住此设备（长期有效）</label>
           {error && (
             <p role="alert" className="error">
               {error}
@@ -383,29 +384,7 @@ function Detail({
               <section className="resource-section" aria-label="可用资源">
                 <h2>选择播放资源</h2>
                 {video.resources.length ? (
-                  <div className="resources" data-navigation-group>
-                    {video.resources.map((r) => (
-                      <button
-                        key={r.id}
-                        className={r.id === selected ? 'primary' : ''}
-                        disabled={!r.playable}
-                        title={r.reason ?? undefined}
-                        onClick={() => select(r.id)}
-                      >
-                        <Play aria-hidden="true" />
-                        <span>
-                          {r.name}
-                          <small>
-                            {r.playable
-                              ? r.kind === 'local'
-                                ? '本地视频'
-                                : '直连视频'
-                              : r.reason}
-                          </small>
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+                  <ResourceList resources={video.resources} selected={selected} play={select} />
                 ) : (
                   <p className="muted">暂无可播放资源。</p>
                 )}
@@ -592,6 +571,7 @@ function LibraryApp({
   const [logoutError, setLogoutError] = useState('')
   const collectionDialog = useRef<HTMLDialogElement>(null)
   const previousQuery = useRef<string | null>(null)
+  const pointerScopeChange = useRef(false)
   const pendingFocus = useRef(false)
   const pendingFocusTarget = useRef<HTMLElement | null>(null)
   const focusWhileLoading = (): void => {
@@ -653,6 +633,13 @@ function LibraryApp({
     const changed = previousQuery.current !== null && previousQuery.current !== queryKey
     previousQuery.current = queryKey
     if (!changed || detailId) return
+    if (pointerScopeChange.current) {
+      pointerScopeChange.current = false
+      pendingFocus.current = false
+      document.querySelector<HTMLElement>('.mobile-collection > button')?.focus({ preventScroll: true })
+      window.scrollTo(0, 0)
+      return
+    }
     pendingFocus.current = Boolean(queryKey)
     if (queryKey) focusWhileLoading()
     else focusBrowseControl()
@@ -666,7 +653,7 @@ function LibraryApp({
     const target = document.querySelector<HTMLElement>(error
       ? '[data-browse-results] [role="alert"] button'
       : '[data-browse-results] .video-card')
-    ;(target ?? document.getElementById('web-search'))?.focus()
+    ;(target ?? document.getElementById('web-search'))?.focus({ preventScroll: true })
   }, [loadedQuery, queryKey, error, result, detailId])
   useEffect(() => {
     setSearch(new URLSearchParams(queryKey).get('q') ?? '')
@@ -842,18 +829,21 @@ function LibraryApp({
             {group.entries.map(entry => <button key={entry.value} type="button"
               data-scope={entry.value}
               aria-pressed={entry.value === (currentLibrary ? `library:${currentLibrary.id}` : currentPlaylist ? `playlist:${currentPlaylist.id}` : 'all')}
-              onClick={() => {
+              onClick={event => {
+                const currentScope = currentLibrary ? `library:${currentLibrary.id}` : currentPlaylist ? `playlist:${currentPlaylist.id}` : 'all'
                 collectionDialog.current?.close()
+                if (entry.value === currentScope) return
+                pointerScopeChange.current = event.detail > 0
                 const [kind, value] = entry.value.split(':')
                 const next = new URLSearchParams()
                 if (kind !== 'all') next.set(kind, value)
                 navigate('/browse', next)
-                window.scrollTo(0, 0)
               }}>{entry.name}</button>)}
           </section>)}
         </div>
       </dialog>
       <nav className="sidebar" data-navigation-region="sidebar" aria-label="浏览导航">
+        <div className="sidebar-scroll">
         <a
           className={
             !query.get('library') && !query.get('playlist') ? 'nav-active' : ''
@@ -895,6 +885,7 @@ function LibraryApp({
             <small>{p.count}</small>
           </a>
         ))}
+        </div>
         <div className="sidebar-foot">
           <ShieldCheck aria-hidden="true" />
           <span>

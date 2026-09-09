@@ -43,6 +43,12 @@ export interface WebResource {
   isPrimary: boolean
   name: string
   kind: string
+  format: string | null
+  sizeBytes: number | null
+  durationSeconds: number | null
+  libraryName: string | null
+  downloadUrl: string | null
+  link: string | null
   mime: string | null
   playable: boolean
   reason: string | null
@@ -65,7 +71,7 @@ export interface WebDevice {
   remember: boolean
   created: number
   touched: number
-  expires: number
+  expires: number | null
 }
 
 export interface WebPairState {

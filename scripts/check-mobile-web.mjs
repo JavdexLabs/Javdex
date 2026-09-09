@@ -55,7 +55,7 @@ try {
     cover: null, releaseDate: '2026', duration: 120, rating: 0
   }))
   for (const [width, height, touch] of [[320, 844, true], [390, 844, true], [844, 390, true], [1280, 800, false]]) {
-    const page = await browser.newPage({ viewport: { width, height }, isMobile: touch, hasTouch: touch })
+    const page = await browser.newPage({ viewport: { width, height }, isMobile: touch, hasTouch: touch, acceptDownloads: true })
     await page.route('**/preview-fixture-*', route => {
       if (route.request().url().endsWith('broken')) return route.fulfill({ status: 404, body: '' })
       const portrait = route.request().url().endsWith('portrait')
@@ -83,7 +83,9 @@ try {
             { id: 3, name: '未知演员', gender: null, avatar: 'data:image/png;base64,broken' }
           ], tags: [], cover: '/preview-fixture-cover', images: ['/preview-fixture-landscape', '/preview-fixture-portrait', '/preview-fixture-broken'], resources: [
             { id: 1, name: '主资源', kind: 'local', mime: 'video/mp4', isPrimary: true, playable: true, reason: null },
-            { id: 2, name: '其他资源', kind: 'local', mime: null, isPrimary: false, playable: false, reason: '浏览器不支持此格式' }
+            { id: 2, name: '其他资源', kind: 'local', mime: null, isPrimary: false, playable: false, reason: '浏览器不支持此格式', downloadUrl: '/api/videos/17/media/2?download=1' },
+            { id: 3, name: '网页资源', kind: 'web', isPrimary: false, playable: false, reason: '请在新窗口打开', link: 'https://example.com/watch?id=17' },
+            { id: 4, name: '备用链接', kind: 'web', isPrimary: false, playable: false, reason: null, link: 'https://example.com/alternate' }
           ] }
       return route.fulfill({ json })
     })
@@ -182,9 +184,35 @@ try {
       for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowUp')
       await page.keyboard.press('Enter')
       await page.waitForURL('**/#/browse')
+      await page.locator('.mobile-collection > button').click()
+      const scopeLoaded = page.waitForResponse(response => response.url().includes('/api/videos?playlist=3'))
+      await page.locator('[data-scope="playlist:3"]').click()
+      await scopeLoaded
+      await page.locator('[data-browse-results] .video-card').first().waitFor()
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+      assert.equal(await page.evaluate(() => scrollY), 0, 'pointer scope change stays at the top after loading')
+      assert.equal(await page.locator('.mobile-collection > button').evaluate(el => el === document.activeElement), true)
+      await page.locator('.mobile-collection > button').click()
+      const unchangedScope = page.url()
+      const unchangedScroll = await page.evaluate(() => scrollY)
+      await page.locator('[data-scope="playlist:3"]').click()
+      assert.equal(page.url(), unchangedScope)
+      assert.equal(await page.evaluate(() => scrollY), unchangedScroll)
+      await page.locator('.mobile-collection > button').click()
+      await page.locator('[data-scope="all"]').click()
+      await page.waitForURL('**/#/browse')
       await page.getByRole('link', { name: '查看全部', exact: true }).click()
     } else {
       assert.equal(await page.locator('.sidebar').isVisible(), true)
+      const sidebarFoot = await page.locator('.sidebar-foot').boundingBox()
+      assert.ok(sidebarFoot.y >= 0 && sidebarFoot.y + sidebarFoot.height <= height)
+      await page.locator('.sidebar a').last().focus()
+      const scrolledFoot = await page.locator('.sidebar-foot').boundingBox()
+      assert.equal(scrolledFoot.y, sidebarFoot.y, 'sidebar footer stays fixed while links scroll')
+      assert.ok(await page.locator('.sidebar-scroll').evaluate(el => el.scrollTop > 0))
+      const lastNav = await page.locator('.sidebar a').last().boundingBox()
+      assert.ok(lastNav.y + lastNav.height <= scrolledFoot.y, 'last navigation entry is not covered')
+      await page.locator('.sidebar a').first().focus()
       for (const key of ['ArrowUp', 'ArrowDown']) {
         // Every card, including left-edge cards and scrolled rows, stays in its column.
         const cards = page.locator('[data-browse-results] .video-card')
@@ -369,7 +397,43 @@ try {
       assert.match(await page.locator('.cast-grid').innerText(), /性别未知/)
       assert.equal(await page.locator('.cast-member').first().getAttribute('href'), '#/browse?actress=1&label=%E7%A4%BA%E4%BE%8B%E5%A5%B3%E6%BC%94%E5%91%98')
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
-      assert.equal(await page.getByText('浏览器不支持此格式', { exact: true }).isVisible(), true)
+      assert.equal(await page.getByText('仅下载', { exact: true }).isVisible(), true)
+      const downloadCard = page.getByRole('article', { name: '其他资源', exact: true })
+      assert.equal(await downloadCard.getByRole('link', { name: '下载', exact: true }).getAttribute('href'), '/api/videos/17/media/2?download=1')
+      const linkCard = page.getByRole('article', { name: '网页资源', exact: true })
+      assert.equal(await linkCard.getByRole('link', { name: '打开链接', exact: true }).getAttribute('href'), 'https://example.com/watch?id=17')
+      assert.equal(await linkCard.getByRole('link', { name: '打开链接', exact: true }).getAttribute('rel'), 'noopener noreferrer')
+      if (back === 'button') {
+        const resourceSizes = await page.locator('.resource-card').evaluateAll(cards => cards.map(card => {
+          const box = card.getBoundingClientRect()
+          return [box.width, box.height]
+        }))
+        assert.ok(resourceSizes.every(size => size[0] === resourceSizes[0][0] && size[1] === resourceSizes[0][1]), 'resource cards have equal dimensions')
+        assert.equal(resourceSizes[0][1], 80, 'resource cards stay compact')
+        // Force the path used by ordinary non-secure LAN HTTP origins.
+        await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined }))
+        await linkCard.getByRole('button', { name: '复制链接', exact: true }).click()
+        await page.getByText('链接已复制', { exact: true }).waitFor()
+        await page.getByRole('article', { name: '备用链接', exact: true }).getByRole('button', { name: '复制链接', exact: true }).click()
+        assert.equal(await page.locator('.resource-toast').count(), 1, 'one shared feedback across resources')
+        const afterCopy = await page.locator('.resource-card').evaluateAll(cards => cards.map(card => {
+          const box = card.getBoundingClientRect()
+          return [box.width, box.height]
+        }))
+        assert.deepEqual(afterCopy, resourceSizes, 'copy feedback never changes card dimensions')
+        await page.evaluate(() => { document.execCommand = () => false })
+        await linkCard.getByRole('button', { name: '复制链接', exact: true }).click()
+        await page.getByRole('textbox', { name: '复制失败，请手动复制链接' }).waitFor()
+        assert.equal(await linkCard.evaluate(card => card.getBoundingClientRect().height), resourceSizes[0][1], 'manual copy fallback keeps card height')
+      }
+      await downloadCard.getByRole('button', { name: '查看资源说明 其他资源' }).click()
+      await page.getByText('浏览器不支持此格式', { exact: true }).waitFor()
+      assert.equal(await page.locator('.resource-toast').count(), 1)
+      await page.getByRole('button', { name: '关闭资源提示', exact: true }).click()
+      for (const action of await page.locator('.resource-actions > *').all()) {
+        const box = await action.boundingBox()
+        assert.ok(box.height >= 48 && box.width >= 48)
+      }
       if (back === 'button') await page.getByRole('button', { name: '返回浏览' }).click()
       else await page.goBack()
       await page.locator('.video-card:visible').first().waitFor({ state: 'visible' })

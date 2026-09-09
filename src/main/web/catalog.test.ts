@@ -67,6 +67,21 @@ describe('Web read-only catalog scope', () => {
     assert.equal(detail.resources[0].playable, false)
     assert.throws(() => catalog.media(visible.videoId, visible.fileId))
   })
+  it('describes local resources without exposing their directory', () => {
+    const { videoId, fileId } = insertTestVideoWithFile(db, {
+      code: 'RESOURCE', filePath: '/private/library/sample-CD1.mp4'
+    })
+    db.prepare('UPDATE video_resources SET size_bytes = ?, duration_seconds = ? WHERE id = ?')
+      .run(3 * 1024 ** 3, 3600, fileId)
+    const resource = catalog.detail(videoId).resources[0]
+    assert.equal(resource.name, 'sample-CD1.mp4')
+    assert.equal(resource.format, 'MP4')
+    assert.equal(resource.sizeBytes, 3 * 1024 ** 3)
+    assert.equal(resource.durationSeconds, 3600)
+    assert.doesNotMatch(JSON.stringify(resource), /private|locator/)
+    db.prepare('UPDATE video_resources SET display_name = ? WHERE id = ?').run('自定义版本', fileId)
+    assert.equal(catalog.detail(videoId).resources[0].name, '自定义版本')
+  })
   it('uses the cover rather than the background for browse, detail and image requests', (t) => {
     const { videoId } = insertTestVideoWithFile(db, {
       code: 'ARTWORK',
@@ -152,6 +167,33 @@ describe('Web read-only catalog scope', () => {
     assert.throws(() => catalog.image(videoId, `actress-${actorId}`))
     assert.equal(read.mock.callCount(), 1)
   })
+  it('downloads non-playable files and exposes only supported external links', () => {
+    const root = addMediaLibraryRoot({ libraryId: 1, expectedRevision: 1, root: { path: directory } })
+    const file = path.join(directory, 'sample.avi')
+    fs.writeFileSync(file, 'download bytes')
+    const record = insertTestVideoWithFile(db, { code: 'DOWNLOAD', filePath: file, rootId: root.id })
+    const resource = catalog.detail(record.videoId).resources[0]
+    assert.equal(resource.playable, false)
+    assert.equal(resource.downloadUrl, `/api/videos/${record.videoId}/media/${record.fileId}?download=1`)
+    assert.throws(() => catalog.media(record.videoId, record.fileId))
+    const download = catalog.media(record.videoId, record.fileId, true)
+    assert.ok('file' in download)
+    assert.equal(download.mime, 'application/octet-stream')
+    const original = db.prepare('SELECT source_identity FROM video_resources WHERE id = ?').get(record.fileId) as { source_identity: string }
+    for (const [kind, locator, expected] of [
+      ['web', 'https://example.com/watch?id=1', 'https://example.com/watch?id=1'],
+      ['magnet', 'magnet:?xt=urn:btih:abcdef', 'magnet:?xt=urn:btih:abcdef'],
+      ['web', 'javascript:alert(1)', null],
+      ['direct', 'https://user:password@example.com/video', null]
+    ]) {
+      db.prepare('UPDATE video_resources SET kind = ?, locator = ?, source_identity = NULL, root_id = NULL WHERE id = ?').run(kind, locator, record.fileId)
+      assert.equal(catalog.detail(record.videoId).resources[0].link, expected)
+      assert.equal(catalog.detail(record.videoId).resources[0].downloadUrl, null)
+    }
+    db.prepare("UPDATE video_resources SET kind = 'local', locator = ?, source_identity = ?, root_id = ? WHERE id = ?").run(file, original.source_identity, root.id, record.fileId)
+    db.prepare('UPDATE library_video_memberships SET is_hidden = 1 WHERE video_id = ?').run(record.videoId)
+    assert.throws(() => catalog.media(record.videoId, record.fileId, true))
+  })
   it('resolves only authorized files and refuses symlink escapes and disabled roots', () => {
     const mediaRoot = path.join(directory, 'media')
     fs.mkdirSync(mediaRoot)
@@ -186,5 +228,6 @@ describe('Web read-only catalog scope', () => {
       "UPDATE media_library_roots SET state = 'disabled' WHERE id = ?"
     ).run(root.id)
     assert.throws(() => catalog.media(record.videoId, record.fileId))
+    assert.throws(() => catalog.media(record.videoId, record.fileId, true))
   })
 })

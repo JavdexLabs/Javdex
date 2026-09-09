@@ -258,9 +258,18 @@ h2 {
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+.sidebar-scroll {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
   gap: 5px;
   overflow-y: auto;
   scrollbar-gutter: stable;
+  overscroll-behavior-y: contain;
+  padding: 2px;
 }
 .sidebar a {
   display: flex;
@@ -299,11 +308,12 @@ h2 {
 }
 .sidebar-foot {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 10px;
   color: var(--text-muted);
   margin: auto 14px 0;
-  padding-top: 32px;
+  padding-top: 16px;
   font-size: 12px;
 }
 .sidebar-foot small {
@@ -575,8 +585,9 @@ h2 {
   font-size: 14px;
 }
 .resources {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  align-items: start;
   gap: 10px;
 }
 .resources button {
@@ -589,7 +600,7 @@ h2 {
 }
 .resources small {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   opacity: 0.75;
   margin-top: 3px;
 }
@@ -708,6 +719,35 @@ h2 {
 .skip:focus {
   top: 12px;
 }
+.resource-card { min-width: 0; height: 80px; display: flex; align-items: center; gap: 4px; padding: 6px; border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--surface-elevated); }
+.resource-card.resource-selected { background: var(--surface-selected); border-color: var(--text-accent); }
+.resources .resource-heading { display: flex; flex: 1; min-width: 0; height: 64px; padding: 6px; gap: 8px; align-items: center; border: 1px solid transparent; border-radius: var(--radius); background: transparent; color: inherit; }
+.resource-heading > svg { flex-shrink: 0; width: 20px; height: 20px; }
+.resources .resource-heading:focus-visible { border-color: var(--text-accent); }
+.resource-actions { display: flex; flex-shrink: 0; gap: 0; }
+.resource-actions:empty { display: none; }
+.resource-actions button, .resource-actions a {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 48px; min-width: 48px; padding: 8px; border: 1px solid transparent;
+  border-radius: var(--radius); background: transparent; color: var(--text-secondary); font-size: 13px;
+}
+.resource-actions svg { width: 16px; height: 16px; }
+.resource-actions a:focus-visible { outline: none; border-color: var(--text-accent); box-shadow: var(--focus-ring); }
+.resource-toast { position: fixed; z-index: 100; bottom: max(24px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 32px); display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 16px; border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--surface-elevated); color: var(--text-primary); font-size: 12px; box-shadow: 0 4px 20px #0004; }
+.resource-copy-fallback { width: 240px; max-width: 100%; min-width: 0; min-height: 48px; user-select: text; }
+.resource-toast button { width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; }
+@media (hover: hover) and (pointer: fine) {
+  .resource-actions a:hover, .resource-actions button:hover { background: var(--surface-control-hover); color: var(--text-primary); }
+}
+.resource-actions a:active, .resource-actions button:active { background: var(--surface-selected); }
+.resource-info { flex: 1; min-width: 0; }
+.resource-name { display: block; font-size: 14px; }
+.resource-name, .resource-info small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.resource-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; min-width: 0; }
+.resource-meta small { flex: 0 1 auto; min-width: 0; margin: 0; }
+.resource-primary, .resource-availability { flex-shrink: 0; white-space: nowrap; font-size: 12px; color: var(--text-secondary); }
+.resource-primary { color: var(--text-accent); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 0 3px; }
+@media (max-width: 760px) { .resources { grid-template-columns: minmax(0, 1fr); } }
 .player-fallback { margin-bottom: 32px; }
 .player-fallback-cover {
   display: block;

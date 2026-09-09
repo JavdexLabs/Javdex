@@ -5,7 +5,8 @@
 
 .fields {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: 120px minmax(160px, 280px) minmax(220px, 1fr);
+  align-items: start;
   gap: var(--form-field-gap);
 }
 
@@ -21,6 +22,7 @@
 }
 
 .hint {
+  margin: 0;
   color: var(--text-muted);
   line-height: 1.6;
 }
@@ -61,4 +63,240 @@
   min-width: 0;
   flex: 1;
   overflow-wrap: anywhere;
+}
+
+.fieldHint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.state::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
+.state[data-running="true"] {
+  color: var(--text-accent);
+}
+
+.addressSelect {
+  flex: 1;
+  min-width: 180px;
+  max-width: 480px;
+}
+
+.help {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.helpTrigger {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.helpText {
+  margin-top: var(--form-label-gap);
+  line-height: 1.6;
+}
+
+.qr {
+  text-align: center;
+  display: grid;
+  gap: var(--form-section-gap);
+}
+
+.qrImage {
+  width: 180px;
+  height: 180px;
+}
+
+.pairInput {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: var(--form-field-gap);
+}
+
+.codeInput {
+  width: 180px;
+  letter-spacing: 0.25em;
+  font-variant-numeric: tabular-nums;
+}
+
+.candidate {
+  display: grid;
+  gap: var(--form-label-gap);
+  padding: var(--form-section-gap);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-control);
+}
+
+.deviceList {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.deviceList:empty {
+  display: none;
+}
+
+.deviceRow {
+  display: flex;
+  align-items: center;
+  gap: var(--form-label-gap);
+  padding: 12px 14px;
+  background: var(--surface-control);
+}
+
+.deviceRow + .deviceRow {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.deviceTitle {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.deviceName {
+  font-weight: 500;
+}
+
+.badge {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.deviceMeta {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.deviceFooter {
+  display: flex;
+  gap: var(--form-label-gap);
+  flex-wrap: wrap;
+  margin-top: var(--form-section-gap);
+}
+
+@media (width <= 900px) {
+  .fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .deviceRow {
+    flex-wrap: wrap;
+  }
+
+  .deviceCopy {
+    flex-basis: 100%;
+  }
+}
+
+.accessBody {
+  display: grid;
+  grid-template-rows: 40px 48px;
+  gap: 8px;
+}
+
+.stableRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.accessFeedback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.inlineFeedback {
+  min-width: 0;
+  max-height: 100%;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.pairBody {
+  display: grid;
+  grid-template-rows: 36px 68px 36px;
+  gap: 8px;
+}
+
+.pairSlot {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  min-width: 0;
+}
+
+.pairSlot[data-confirming="true"] {
+  align-items: center;
+}
+
+.pairIdentity {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  max-width: 420px;
+}
+
+.singleLine {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+@media (width <= 700px) {
+  .accessBody {
+    grid-template-rows: 80px 64px;
+  }
+
+  .stableRow {
+    flex-wrap: wrap;
+    align-content: center;
+    gap: 8px;
+  }
+
+  .pairBody {
+    grid-template-rows: 68px 108px 48px;
+  }
+
+  .pairSlot {
+    flex-wrap: wrap;
+    align-content: center;
+  }
+
+  .pairIdentity {
+    flex-basis: 100%;
+  }
 }

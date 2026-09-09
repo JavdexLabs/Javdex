@@ -41,11 +41,11 @@ function card(video: Video): WebVideo {
     rating: video.rating
   }
 }
-function externalTarget(locator: string): string | null {
+function externalTarget(locator: string, protocols = ['http:', 'https:']): string | null {
   try {
     const url = new URL(locator)
     if (
-      !['http:', 'https:'].includes(url.protocol) ||
+      !protocols.includes(url.protocol) ||
       url.username ||
       url.password
     )
@@ -204,8 +204,15 @@ export class WebCatalog {
         return {
           id: r.id,
           isPrimary: Boolean(r.is_primary),
-          name: r.display_name || `资源 ${index + 1}`,
+          name: r.display_name?.trim() || (r.kind === 'local' ? r.locator.split(/[\\/]/).pop() : null) || `资源 ${index + 1}`,
           kind: r.kind,
+          downloadUrl: r.kind === 'local' && r.root_id !== null ? `/api/videos/${id}/media/${r.id}?download=1` : null,
+          link: r.kind === 'local' ? null : externalTarget(r.locator,
+            r.kind === 'magnet' ? ['magnet:'] : r.kind === 'ed2k' ? ['ed2k:'] : ['http:', 'https:']),
+          format: r.kind === 'local' ? path.extname(r.locator).slice(1).toUpperCase() || null : null,
+          sizeBytes: r.size_bytes,
+          durationSeconds: r.duration_seconds,
+          libraryName: (this.db.prepare('SELECT name FROM media_libraries WHERE id = ?').get(r.library_id) as { name: string } | undefined)?.name ?? null,
           mime,
           playable,
           reason: playable
@@ -232,18 +239,18 @@ export class WebCatalog {
       throw new WebError(404, '图片格式不可用')
     return image
   }
-  media(id: number, resourceId: number) {
+  media(id: number, resourceId: number, download = false) {
     const resource = this.visibleDetail(id).resources.find(
       (r) => r.id === resourceId
     )
     if (!resource) throw new WebError(404, '资源不存在')
-    if (resource.kind === 'direct') {
+    if (resource.kind === 'direct' && !download) {
       const target = externalTarget(resource.locator)
       if (target) return { redirect: target } as const
     }
     if (resource.kind !== 'local' || resource.root_id === null)
       throw new WebError(415, '此资源不支持网页播放')
-    const mime = VIDEO_MIMES[path.extname(resource.locator).toLowerCase()]
+    const mime = download ? 'application/octet-stream' : VIDEO_MIMES[path.extname(resource.locator).toLowerCase()]
     if (!mime) throw new WebError(415, '此文件格式不支持原生播放')
     const checked = createAuthorizedMediaLibraryRootFileInspector()(
       resource.library_id,

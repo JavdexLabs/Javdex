@@ -54,7 +54,7 @@ describe('Desktop-approved browser pairing', () => {
   })
 })
 describe('Remembered browser lifecycle', () => {
-  it('persists only remembered hashes, retains deadlines over restart and revokes individual devices', () => {
+  it('persists only remembered hashes, retains authorization over restart and revokes individual devices', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'web-device-'))
     try {
       const file = path.join(dir, 'devices.json')
@@ -73,7 +73,7 @@ describe('Remembered browser lifecycle', () => {
       for (let halfDay = 1; halfDay <= 14; halfDay++) {
         now += 12 * 60 * 60_000
         sessions = new WebSessions(() => now, file)
-        assert.equal(sessions.check(remembered), halfDay < 14)
+        assert.equal(sessions.check(remembered), true)
       }
       const a = sessions.create(true, 'A')
       const b = sessions.create(true, 'B')
@@ -85,7 +85,11 @@ describe('Remembered browser lifecycle', () => {
       sessions = new WebSessions(() => now, file)
       assert.equal(sessions.check(b), false)
       const idle = sessions.create(true, 'idle')
-      now += 24 * 60 * 60_000
+      now += 3650 * 24 * 60 * 60_000
+      const restored = new WebSessions(() => now, file)
+      assert.equal(restored.check(idle), true)
+      assert.equal(restored.list().find(x => x.name === 'idle')!.expires, null)
+      restored.clear()
       assert.equal(new WebSessions(() => now, file).check(idle), false)
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
@@ -165,7 +169,10 @@ describe('Pairing HTTP boundary', () => {
         ((await paired.json()) as { authenticated: boolean }).authenticated,
         true
       )
+      assert.match(paired.headers.get('set-cookie')!, /Max-Age=31536000/)
       const session = paired.headers.get('set-cookie')!.split(';')[0]
+      const refreshed = await fetch(base + '/api/session', { headers: { Cookie: session } })
+      assert.match(refreshed.headers.get('set-cookie')!, /Max-Age=31536000/)
       const retry = await post('/api/pair/poll', {}, cookie)
       assert.equal(retry.status, 200)
       assert.equal(retry.headers.get('set-cookie')!.split(';')[0], session)

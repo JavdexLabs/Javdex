@@ -1,0 +1,64 @@
+import { beforeEach, afterEach, it } from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import type Database from 'better-sqlite3'
+import type { ScanResult } from '@shared/libraryTypes'
+import { initDatabaseAtPath, closeDatabase, openReadOnlyDatabaseAtPath } from '/Users/nut/Project/JavdexLabs/Javdex/src/main/db/database'
+import { createMediaLibrary } from '/Users/nut/Project/JavdexLabs/Javdex/src/main/db/mediaLibraryRepo'
+import { removeResourceLessMemberships, removeResourceLessMembershipsWithAudit } from '/Users/nut/Project/JavdexLabs/Javdex/src/main/db/libraryMembershipRepo'
+import { readScanAuditSource } from '/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditSource'
+import { resetSettingsCacheForTests } from '/Users/nut/Project/JavdexLabs/Javdex/src/main/settings/settingsStore'
+import { createScanCoordinator } from '/tmp/javdex-cleanup-atomic-baseline.ts'
+
+let db:Database.Database,directory:string,libraryId:number,previousUserData:string|undefined
+const count=260
+beforeEach(()=>{
+  previousUserData=process.env.JAVDEX_TEST_USER_DATA
+  directory=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-membership-entries-'));process.env.JAVDEX_TEST_USER_DATA=directory
+  db=initDatabaseAtPath(path.join(directory,'catalog.db'))
+  const media=path.join(directory,'media');fs.mkdirSync(media)
+  libraryId=createMediaLibrary({name:'Membership cleanup',roots:[{path:media}]}).id
+  db.prepare('UPDATE media_library_configs SET remove_resource_less_memberships=1 WHERE library_id=?').run(libraryId)
+  const video=db.prepare('INSERT INTO videos(id,code,title) VALUES(?,?,?)')
+  const membership=db.prepare('INSERT INTO library_video_memberships(library_id,video_id,discovery_key,is_pinned) VALUES(?,?,?,?)')
+  db.transaction(()=>{
+    for(let id=1;id<=count+1;id++){
+      video.run(id,`MEM-${id}`,`原始标题 ${id}`)
+      membership.run(libraryId,id,id,id===count+1?1:0)
+      membership.run(1,id,id,0) // Shared global videos retain an independent library membership.
+    }
+  })()
+})
+afterEach(()=>{
+  closeDatabase();resetSettingsCacheForTests()
+  if(previousUserData===undefined)delete process.env.JAVDEX_TEST_USER_DATA
+  else process.env.JAVDEX_TEST_USER_DATA=previousUserData
+  fs.rmSync(directory,{recursive:true,force:true})
+})
+function empty(scope:{libraryId:number;runId:string}):ScanResult{return {...scope,scannedFiles:0,imported:0,skipped:0,skippedShort:0,failed:0,pendingGroups:0,pendingResources:0,
+  relocated:0,refreshed:0,removed:0,promoted:0,deletedVideos:0,offlineFolders:[],newCodes:[],unrecognizedFiles:[],strmFailures:[],omittedStrmFailures:0}}
+function memberships(connection=db){return connection.prepare('SELECT * FROM library_video_memberships ORDER BY library_id,video_id').all()}
+function audit(runId:string){return JSON.parse(readScanAuditSource(db,{libraryId,runId},'body')!.body)}
+function expected(){return Array.from({length:count},(_,index)=>({videoId:index+1,videoCode:`MEM-${index+1}`,videoTitle:`原始标题 ${index+1}`,reason:'resource_less'}))}
+
+it('RED: main event loop runs between first cleanup mutation and final cleanup audit',async()=>{
+  let callbacks=0, beats=0, beatsAtLast=-1
+  let immediate: ReturnType<typeof setImmediate>|undefined
+  const coordinator=createScanCoordinator({createRunId:()=> 'responsiveness-red',scanFolders:async scope=>empty(scope),
+    recordCleanupAudit:()=>{
+      callbacks++
+      if(callbacks===1) immediate=setImmediate(()=>{beats++; assert.equal(db.inTransaction,false)})
+      if(callbacks===count) beatsAtLast=beats
+    }
+  })
+  try {
+    await coordinator.run({libraryId})
+    assert.equal(callbacks,count)
+    assert.equal(db.inTransaction,false)
+    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM library_video_memberships WHERE library_id=? AND is_pinned=0').get(libraryId) as {n:number}).n,0)
+    assert.equal(audit('responsiveness-red').deletedVideos.length,count)
+    assert.ok(beatsAtLast>0,`no main-thread turn during ${callbacks} real cleanup/audit writes (beatsAtLast=${beatsAtLast})`)
+  } finally { if(immediate)clearImmediate(immediate) }
+})

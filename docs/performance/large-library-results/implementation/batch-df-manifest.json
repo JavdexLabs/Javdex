@@ -1,0 +1,177 @@
+{
+  "batch": "DF",
+  "date": "2026-09-11",
+  "branch": "codex/large-library-performance",
+  "baselineCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "scope": "High-frequency catalog caches, typed read worker entrypoints, cooperative scan cleanup and shutdown drain.",
+  "sourceSnapshot": "Cumulative selected-source diff relative to HEAD, including previously accepted uncommitted edits. Not a standalone DF-only patch or a complete workspace snapshot. No commits created.",
+  "sourcePaths": [
+    "src/main/db/revisionReadCache.ts",
+    "src/main/db/revisionReadCache.test.ts",
+    "src/main/db/scopedVideoCatalogRepo.ts",
+    "src/main/db/scopedVideoCatalogRepo.test.ts",
+    "src/main/db/homeDiscoveryRepo.ts",
+    "src/main/db/homeDiscoveryRepo.test.ts",
+    "src/main/db/mediaLibraryRepo.ts",
+    "src/main/services/catalogReadWorkerClient.ts",
+    "src/main/services/catalogReadWorkerClient.test.ts",
+    "src/main/services/catalogReadWorker.ts",
+    "src/main/services/catalogHighFrequencyWorker.integration.test.ts",
+    "src/main/services/videoQueryService.ts",
+    "src/main/services/videoQueryService.test.ts",
+    "src/main/ipc/videoHandlers.ts",
+    "src/main/ipc/mediaLibraryHandlers.ts",
+    "src/main/web/catalog.ts",
+    "src/main/web/catalogQueryReader.ts",
+    "src/main/web/catalogQueryReader.test.ts",
+    "src/main/web/catalogQueryRequest.ts",
+    "src/main/web/catalogWorkerAdapter.ts",
+    "src/main/web/catalogWorkerHttp.test.ts",
+    "src/main/web/server.ts",
+    "src/main/web/webAccess.ts",
+    "src/main/scanner/scanCoordinator.ts",
+    "src/main/scanner/scanCleanupPages.ts",
+    "src/main/scanner/scanCooperativeCleanup.test.ts",
+    "src/main/scanner/scanCooperativeCleanupRecovery.test.ts",
+    "src/main/scanner/scanCleanupAudit.test.ts",
+    "src/main/scanner/scanMembershipCleanupEntries.test.ts",
+    "src/main/db/libraryMembershipRepo.ts",
+    "src/main/db/pendingScanRepo.ts",
+    "src/main/db/pendingResourceIdentityRepo.ts",
+    "src/main/services/libraryPathCleanupService.ts",
+    "src/main/services/libraryPathCleanupPages.test.ts",
+    "src/main/appMain.ts",
+    "scripts/performance/catalog-browse-worker-benchmark.ts",
+    "scripts/performance/scan-cleanup-cooperative-benchmark.ts"
+  ],
+  "validation": {
+    "full": "npm test: exit 0; 2850 passed, 1 skipped, 0 failed (2851 tests), plus boundaries/lint/types/packaging",
+    "build": "npm run build: exit 0",
+    "focused": "Cache32, worker95, query seam72, cleanup82, recovery3; overlapping suites, do not sum.",
+    "probes": "Both permanent scripts completed exit0; 100000-video catalog and10000/100000 membership cleanup, 3 local warm samples."
+  },
+  "caveats": [
+    "Synthetic temporary catalogs only, no user data; macOS arm64, not Windows/HDD/p95/cold storage or full renderer IPC.",
+    "Cleanup atomic red fixture uses the retained atomic compatibility path in current source, not a frozen old checkout.",
+    "Temporary fixture text retains original absolute import paths; adapt repository path to rerun elsewhere.",
+    "Cleanup timer measurements include a 10ms post-run drain and scheduling, not precise SQL latency.",
+    "Resource-page probe times pagination only, without filesystem checks, deletes, audit or finalization."
+  ],
+  "artifacts": [
+    {
+      "path": "batch-df-full.log",
+      "bytes": 305226,
+      "sha256": "cb7da0ae26cb71188149ab87fa3469a9612fb2b2ba172ed11697bd7dafff26d7"
+    },
+    {
+      "path": "batch-df-build.log",
+      "bytes": 4513,
+      "sha256": "b9f458fdb32083a1a99a3916c10b52dc8fee3b36c5d7cb3d04412c1d23ca4c9f"
+    },
+    {
+      "path": "batch-df-cache-target.log",
+      "bytes": 3266,
+      "sha256": "339e8d69dc0cc4a20058f5bf4df6bf1f5db7cbe5a79023e7e90d557747171094"
+    },
+    {
+      "path": "batch-df-worker-target.log",
+      "bytes": 9661,
+      "sha256": "eeba6a9c064536a2dd9bedddfe239c9e9af301e5f2a0d6c97515941f6d1091e0"
+    },
+    {
+      "path": "batch-df-query-seam-target.log",
+      "bytes": 12419,
+      "sha256": "83f99d97a7a5ba6dc8d6ced80e32afea4b810c81bdcf6ede1e4a811230a91af4"
+    },
+    {
+      "path": "batch-df-cleanup-target.log",
+      "bytes": 8343,
+      "sha256": "a4f56f7ef69ffe8f58df648fc55ff48ca2c67bf18981edca42d92544a5f79582"
+    },
+    {
+      "path": "batch-df-cleanup-recovery.log",
+      "bytes": 473,
+      "sha256": "a717b19edd7bd44a4b332240ee960e150fd6d317240432d96d5bd992bed4d178"
+    },
+    {
+      "path": "batch-df-browse-100000.json",
+      "bytes": 5963,
+      "sha256": "64014d4e63ceaf34bbbabe225e61c424513b7f182383bd8595a2dc3e4d72deb7"
+    },
+    {
+      "path": "batch-df-browse-benchmark.log",
+      "bytes": 3999,
+      "sha256": "fdf65787ee628e572c58b39f05a8f40950b4f4a9bab66869206e0742d3109019"
+    },
+    {
+      "path": "batch-df-cleanup-10000.json",
+      "bytes": 2030,
+      "sha256": "109caca26d06e4f24295789614710f43ea9a236e25c3cf027f767adfb83a89e0"
+    },
+    {
+      "path": "batch-df-cleanup-10000.log",
+      "bytes": 1718,
+      "sha256": "3c68e33d11703bc6e17897d9839e354bbf7091167efcdcafea3b7ffd4fd75b9c"
+    },
+    {
+      "path": "batch-df-cleanup-100000.json",
+      "bytes": 2034,
+      "sha256": "9533837d1f6ba7203e1cd82d391a81d1d86dcc86e2b1de12df432011ae21e3a5"
+    },
+    {
+      "path": "batch-df-cleanup-100000.log",
+      "bytes": 1724,
+      "sha256": "2a0ba5bf40ebc4187a6d659b35840b8a00df3eee959f1c8573a1e1db3fe9f3c1"
+    },
+    {
+      "path": "batch-df-cleanup-resource-pages.log",
+      "bytes": 788,
+      "sha256": "5da076886c417160c3bfcc39a9105b6d0c6be4a8c4ecdac41bbda2081f4884b6"
+    },
+    {
+      "path": "batch-df-cleanup-resource-pages.fixture.txt",
+      "bytes": 5091,
+      "sha256": "ced56bfb301be45996480c4970f3318dfb6b577093c211265349138ebb4aed02"
+    },
+    {
+      "path": "batch-df-cache-red.log",
+      "bytes": 1954,
+      "sha256": "45c8e65af8e7872fe87af6efc223766fcfbedfb6f11e287657d5571b902f51d4"
+    },
+    {
+      "path": "batch-df-cache-red.fixture.txt",
+      "bytes": 3059,
+      "sha256": "b67a2b417983ce4118c721644bbacff3f5a3f24cead2c84ff67f684483b808a4"
+    },
+    {
+      "path": "batch-df-entrypoint-red.log",
+      "bytes": 1940,
+      "sha256": "90d31dedae8093fa5e63656f44467300585c2da6bafbd231cdd4f7759c09950d"
+    },
+    {
+      "path": "batch-df-entrypoint-red.fixture.txt",
+      "bytes": 5383,
+      "sha256": "a51cb97b798e420aa33fec40ba067bed337acbf43d34d55b4087b640a96de738"
+    },
+    {
+      "path": "batch-df-cleanup-atomic-red.log",
+      "bytes": 919,
+      "sha256": "d9beebaf1976a674112e80875c0fd636f080eb947b60335f8b65ecf73d681d50"
+    },
+    {
+      "path": "batch-df-cleanup-atomic-red.fixture.txt",
+      "bytes": 4141,
+      "sha256": "2692a5458799a3ddc0c5330b807af392413eb2fb17d3c59b8f9a3a8155f6c94f"
+    },
+    {
+      "path": "batch-df-boundary-error.log",
+      "bytes": 497,
+      "sha256": "0c703c4d5f50842ba88e874b8f737870bc298484aedcdb90968499d02ff87676"
+    },
+    {
+      "path": "batch-df-source.patch",
+      "bytes": 281909,
+      "sha256": "fcea0934d3cc7f00e473a48376f8501cede5fbaac3c582648aa91d3c3c7b2474"
+    }
+  ]
+}

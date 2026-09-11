@@ -1,0 +1,992 @@
+diff --git a/src/main/services/classificationImagePage.ts b/src/main/services/classificationImagePage.ts
+new file mode 100644
+index 0000000..be1b62a
+--- /dev/null
++++ b/src/main/services/classificationImagePage.ts
+@@ -0,0 +1,31 @@
++import type { ClassificationEntityRef, ClassificationImageCandidate, ClassificationListPage, ClassificationPageQuery } from '@shared/classificationTypes'
++import type Database from 'better-sqlite3'
++import { getDb } from '../db/database'
++
++/** Preserve the original all-video cover eligibility and date ordering. */
++export function createClassificationImagePageReader(connection: () => Database.Database) {
++  return function listClassificationImagePage(entity: ClassificationEntityRef, query: ClassificationPageQuery = {}): ClassificationListPage<ClassificationImageCandidate> {
++    if (!Number.isSafeInteger(entity.id) || entity.id <= 0) throw new Error('分类实体参数无效')
++    const limit = query.limit ?? 60, offset = query.offset ?? 0
++    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('Invalid image candidate page limit')
++    if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid image candidate page offset')
++    const predicate = entity.kind === 'organization' ? '(v.maker_organization_id = ? OR v.publisher_organization_id = ?)'
++      : entity.kind === 'director' ? 'v.director_id = ?' : entity.kind === 'series' ? 'v.series_id = ?' : null
++    if (!predicate) throw new Error('分类实体参数无效')
++    const parameters = entity.kind === 'organization' ? [entity.id,entity.id] : [entity.id]
++    const where = `${predicate} AND v.cover_path IS NOT NULL AND trim(v.cover_path) != ''`
++    const db = connection()
++    return db.transaction(() => {
++      const total = (db.prepare(`SELECT COUNT(*) AS n FROM videos v WHERE ${where}`).get(...parameters) as {n:number}).n
++      const items = db.prepare(`SELECT v.id AS videoId, v.code, v.title, v.cover_path AS coverPath
++        FROM videos v WHERE ${where}
++        ORDER BY (v.release_date IS NULL OR trim(v.release_date) = '') ASC,
++          v.release_date DESC, v.add_time DESC, v.id DESC LIMIT ? OFFSET ?`)
++        .all(...parameters,limit,offset) as ClassificationImageCandidate[]
++      return {items,total,limit,offset}
++    })()
++  }
++
++}
++
++export const listClassificationImagePage = createClassificationImagePageReader(getDb)
+diff --git a/src/main/services/catalogReadWorkerClient.ts b/src/main/services/catalogReadWorkerClient.ts
+new file mode 100644
+index 0000000..0329e1c
+--- /dev/null
++++ b/src/main/services/catalogReadWorkerClient.ts
+@@ -0,0 +1,278 @@
++import type { ClassificationEntityRef, ClassificationImageCandidate, ClassificationListPage, ClassificationPageQuery } from '@shared/classificationTypes'
++import type { TagFilterOptionsPage, TagOptionsQuery } from '@shared/commonTypes'
++
++export type CatalogReadPage = TagFilterOptionsPage | ClassificationListPage<ClassificationImageCandidate>
++type CatalogReadRequest =
++  | { operation?: 'tag-options'; query: TagOptionsQuery }
++  | { operation: 'classification-images'; entity: ClassificationEntityRef; query: ClassificationPageQuery }
++export type CatalogReadCommand = CatalogReadRequest & { type: 'read'; id: number }
++
++export interface CatalogReadContext {
++  identity: object
++  path: string
++  revision: string
++}
++
++export type CatalogReadWorkerMessage =
++  | { type: 'ready' }
++  | { type: 'result'; id: number; result: CatalogReadPage }
++  | { type: 'error'; id: number; message: string }
++
++/** Factory returns a transport before it emits ready. off must remove the supplied listener. */
++export interface CatalogReadWorkerTransport {
++  postMessage(message: CatalogReadCommand): void
++  on(event: 'message', listener: (message: CatalogReadWorkerMessage) => void): unknown
++  on(event: 'error', listener: (error: Error) => void): unknown
++  on(event: 'exit', listener: (code: number) => void): unknown
++  off(event: 'message', listener: (message: CatalogReadWorkerMessage) => void): unknown
++  off(event: 'error', listener: (error: Error) => void): unknown
++  off(event: 'exit', listener: (code: number) => void): unknown
++  terminate(): Promise<unknown>
++}
++
++export interface CatalogReadWorkerClientOptions {
++  contextProvider: () => CatalogReadContext
++  transportFactory: (context: CatalogReadContext) => CatalogReadWorkerTransport
++  startupTimeoutMs?: number
++  queryTimeoutMs?: number
++  queueTimeoutMs?: number
++}
++
++interface Subscriber {
++  resolve: (page: CatalogReadPage) => void
++  reject: (error: Error) => void
++  cleanup: () => void
++  stopWaiting: () => void
++}
++interface Flight {
++  id: number
++  key: string
++  request: CatalogReadRequest
++  subscribers: Set<Subscriber>
++}
++interface WorkerState {
++  transport: CatalogReadWorkerTransport
++  ready: boolean
++  timer?: ReturnType<typeof setTimeout>
++  detach: () => void
++}
++
++function abortError(): Error {
++  const error = new Error('Catalog read aborted')
++  error.name = 'AbortError'
++  return error
++}
++
++function normalize(query: TagOptionsQuery): Required<TagOptionsQuery> {
++  const { search = '', limit = 100, offset = 0 } = query
++  if (typeof search !== 'string' || search.length > 500
++    || !Number.isSafeInteger(limit) || limit < 1 || limit > 100
++    || !Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid tag options query')
++  // Keep original casing in the payload: lowercasing can expand a valid 500-unit query.
++  return { search: search.trim(), limit, offset }
++}
++
++/** One worker, one executing query, at most 32 accepted subscribers (including coalesced reads). */
++export class CatalogReadWorkerClient {
++  private context?: CatalogReadContext
++  private worker?: WorkerState
++  private stopping?: Promise<void>
++  private terminationError?: Error
++  private disposed = false
++  private accepted = 0
++  private nextId = 0
++  private flights = new Map<string, Flight>()
++  private queue: Flight[] = []
++  private running?: Flight
++  private readonly startupTimeoutMs: number
++  private readonly queryTimeoutMs: number
++  private readonly queueTimeoutMs: number
++
++  constructor(private readonly options: CatalogReadWorkerClientOptions) {
++    this.startupTimeoutMs = options.startupTimeoutMs ?? 15_000
++    this.queryTimeoutMs = options.queryTimeoutMs ?? 15_000
++    this.queueTimeoutMs = options.queueTimeoutMs ?? 30_000
++    for (const timeout of [this.startupTimeoutMs, this.queryTimeoutMs, this.queueTimeoutMs]) {
++      if (!Number.isInteger(timeout) || timeout < 1 || timeout > 2_147_483_647) {
++        throw new Error('Invalid catalog worker deadline')
++      }
++    }
++  }
++
++  read(query: TagOptionsQuery, signal?: AbortSignal): Promise<TagFilterOptionsPage> {
++    try {
++      const normalized = normalize(query)
++      return this.enqueue({ query: normalized }, ['tag-options', normalized.search.toLowerCase(), normalized.limit, normalized.offset], signal) as Promise<TagFilterOptionsPage>
++    } catch (error) { return Promise.reject(error) }
++  }
++
++  readImageCandidates(entity: ClassificationEntityRef, query: ClassificationPageQuery = {}, signal?: AbortSignal): Promise<ClassificationListPage<ClassificationImageCandidate>> {
++    try {
++      if (!['organization','director','series'].includes(entity.kind) || !Number.isSafeInteger(entity.id) || entity.id <= 0) throw new Error('Invalid classification entity')
++      const limit = query.limit ?? 60, offset = query.offset ?? 0
++      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid image candidate page')
++      const identity = {kind:entity.kind, id:entity.id}
++      return this.enqueue({operation:'classification-images', entity:identity, query:{limit,offset}}, ['classification-images',identity.kind,identity.id,limit,offset], signal) as Promise<ClassificationListPage<ClassificationImageCandidate>>
++    } catch (error) { return Promise.reject(error) }
++  }
++
++  // Request kind is part of the coalescing key and stays attached to the running
++  // ID. Public methods narrow the trusted worker response to that request kind.
++  private enqueue(request: CatalogReadRequest, requestKey: unknown[], signal?: AbortSignal): Promise<CatalogReadPage> {
++    try {
++      if (this.disposed) throw new Error('Catalog read client disposed')
++      if (this.terminationError) throw this.terminationError
++      if (signal?.aborted) throw abortError()
++      const context = { ...this.options.contextProvider() }
++      if (this.context && (this.context.identity !== context.identity || this.context.path !== context.path)) {
++        this.fail(new Error('Catalog read context changed'))
++      }
++      this.context = context
++      if (this.accepted >= 32) throw new Error('Catalog read capacity exceeded')
++      const key = JSON.stringify([context.revision, ...requestKey])
++      let flight = this.flights.get(key)
++      if (!flight) {
++        flight = { id: ++this.nextId, key, request, subscribers: new Set() }
++        this.flights.set(key, flight)
++        this.queue.push(flight)
++      }
++      const selected = flight
++      const promise = new Promise<CatalogReadPage>((resolve, reject) => {
++        let waitingTimer: ReturnType<typeof setTimeout> | undefined
++        const stopWaiting = (): void => { clearTimeout(waitingTimer); waitingTimer = undefined }
++        const withdraw = (error: Error): void => {
++          this.settleSubscriber(selected, subscriber, error)
++          if (selected.subscribers.size === 0 && selected !== this.running) {
++            this.queue = this.queue.filter(item => item !== selected)
++            this.forget(selected)
++          }
++        }
++        const abort = (): void => withdraw(abortError())
++        const subscriber: Subscriber = {
++          resolve, reject, stopWaiting,
++          cleanup: () => { stopWaiting(); signal?.removeEventListener('abort', abort) }
++        }
++        selected.subscribers.add(subscriber)
++        this.accepted++
++        signal?.addEventListener('abort', abort, { once: true })
++        if (selected !== this.running) {
++          waitingTimer = setTimeout(() => withdraw(new Error('Catalog worker queue timed out')), this.queueTimeoutMs)
++        }
++      })
++      this.pump()
++      return promise
++    } catch (error) {
++      return Promise.reject(error)
++    }
++  }
++
++  /** Rejects immediately; resolution means native worker termination has completed. */
++  async dispose(): Promise<void> {
++    this.disposed = true
++    this.fail(new Error('Catalog read client disposed'))
++    await this.stopping
++    if (this.terminationError) throw this.terminationError
++  }
++
++  private forget(flight: Flight): void {
++    if (this.flights.get(flight.key) === flight) this.flights.delete(flight.key)
++  }
++
++  private settleSubscriber(flight: Flight, subscriber: Subscriber, error?: Error, page?: CatalogReadPage): void {
++    if (!flight.subscribers.delete(subscriber)) return
++    this.accepted--
++    subscriber.cleanup()
++    if (error) subscriber.reject(error)
++    else {
++      try { subscriber.resolve(structuredClone(page!)) }
++      catch (cause) { subscriber.reject(cause instanceof Error ? cause : new Error(String(cause))) }
++    }
++  }
++
++  private rejectAll(error: Error): void {
++    for (const flight of this.flights.values()) {
++      for (const subscriber of flight.subscribers) this.settleSubscriber(flight, subscriber, error)
++    }
++    this.flights.clear()
++    this.queue = []
++    this.running = undefined
++  }
++
++  private fail(error: Error): void {
++    this.rejectAll(error)
++    const worker = this.worker
++    if (!worker) return
++    this.worker = undefined
++    clearTimeout(worker.timer)
++    // Keep error/exit listeners until termination settles: EventEmitter errors must stay handled.
++    this.stopping = Promise.resolve().then(() => worker.transport.terminate()).then(
++      () => {},
++      cause => {
++        this.terminationError = new Error(`Catalog worker termination failed: ${String(cause)}`)
++        this.rejectAll(this.terminationError)
++      }
++    ).then(() => {
++      worker.detach()
++      this.stopping = undefined
++      this.pump()
++    })
++  }
++
++  private pump(): void {
++    if (this.disposed || this.terminationError || this.stopping || !this.queue.length || this.running) return
++    if (!this.worker) {
++      try {
++        const transport = this.options.transportFactory({ ...this.context! })
++        const worker: WorkerState = { transport, ready: false, detach: () => {} }
++        this.worker = worker
++        const message = (event: CatalogReadWorkerMessage): void => {
++          if (this.worker !== worker) return
++          if (!event || typeof event !== 'object') {
++            this.fail(new Error('Unexpected catalog worker message'))
++            return
++          }
++          if (event.type === 'ready' && !worker.ready) {
++            clearTimeout(worker.timer)
++            worker.ready = true
++            this.pump()
++          } else if (event.type === 'result' && this.running && this.running.id === event.id) {
++            clearTimeout(worker.timer)
++            const flight = this.running
++            this.running = undefined
++            this.forget(flight)
++            for (const subscriber of flight.subscribers) this.settleSubscriber(flight, subscriber, undefined, event.result)
++            this.pump()
++          } else if (event.type === 'error') {
++            this.fail(new Error(event.message))
++          } else {
++            this.fail(new Error('Unexpected catalog worker message'))
++          }
++        }
++        const error = (cause: Error): void => { if (this.worker === worker) this.fail(cause) }
++        const exit = (code: number): void => {
++          if (this.worker === worker) this.fail(new Error(`Unexpected catalog worker exit: ${code}`))
++        }
++        worker.detach = () => {
++          transport.off('message', message)
++          transport.off('error', error)
++          transport.off('exit', exit)
++        }
++        transport.on('message', message)
++        transport.on('error', error)
++        transport.on('exit', exit)
++        worker.timer = setTimeout(() => this.fail(new Error('Catalog worker startup timed out')), this.startupTimeoutMs)
++      } catch (error) {
++        this.fail(error instanceof Error ? error : new Error(String(error)))
++      }
++      return
++    }
++    if (!this.worker.ready) return
++    const worker = this.worker
++    const flight = this.queue.shift()!
++    this.running = flight
++    for (const subscriber of flight.subscribers) subscriber.stopWaiting()
++    worker.timer = setTimeout(() => this.fail(new Error('Catalog worker query timed out')), this.queryTimeoutMs)
++    try { worker.transport.postMessage({ type: 'read', id: flight.id, ...flight.request }) }
++    catch (error) { this.fail(error instanceof Error ? error : new Error(String(error))) }
++  }
++}
+diff --git a/src/main/services/catalogReadWorker.ts b/src/main/services/catalogReadWorker.ts
+new file mode 100644
+index 0000000..e06f992
+--- /dev/null
++++ b/src/main/services/catalogReadWorker.ts
+@@ -0,0 +1,33 @@
++import type { ClassificationEntityRef } from '@shared/classificationTypes'
++import { createClassificationImagePageReader } from './classificationImagePage'
++import { parentPort, workerData } from 'node:worker_threads'
++import type { TagOptionsQuery } from '@shared/commonTypes'
++import { openReadOnlyDatabaseAtPath } from '../db/database'
++import { createTagFilterOptionsReader } from './tagQueryService'
++
++const port = parentPort
++if (!port || typeof workerData?.databasePath !== 'string') throw new Error('Invalid catalog reader startup')
++const connection = openReadOnlyDatabaseAtPath(workerData.databasePath)
++const read = createTagFilterOptionsReader(() => connection)
++const readImages = createClassificationImagePageReader(() => connection)
++port.on('message', (message: { type?: string; id?: number; operation?: string; entity?: ClassificationEntityRef; query?: TagOptionsQuery }) => {
++  if (message.type === 'close') {
++    connection.close()
++    port.close()
++    return
++  }
++  if (message.type !== 'read' || !Number.isSafeInteger(message.id) || Number(message.id) <= 0) {
++    throw new Error('Invalid catalog reader command')
++  }
++  try {
++    if (!message.query) throw new Error('Missing catalog query')
++    if (message.operation !== undefined && message.operation !== 'tag-options' && message.operation !== 'classification-images') throw new Error('Unknown catalog read operation')
++    if (message.operation === 'classification-images' && !message.entity) throw new Error('Missing classification entity')
++    const result = message.operation === 'classification-images'
++      ? readImages(message.entity!, message.query) : read(message.query)
++    port.postMessage({ type: 'result', id: message.id, result })
++  } catch (error) {
++    port.postMessage({ type: 'error', id: message.id, message: error instanceof Error ? error.message : String(error) })
++  }
++})
++port.postMessage({ type: 'ready' })
+diff --git a/src/main/ipc/facetHandlers.ts b/src/main/ipc/facetHandlers.ts
+index 2378b30..b974fe0 100644
+--- a/src/main/ipc/facetHandlers.ts
++++ b/src/main/ipc/facetHandlers.ts
+@@ -1,6 +1,7 @@
+ import { IPC } from '@shared/ipc-channels'
+ import { appCommandAdapter } from './appContractAdapter'
+ import { tagQueryService } from '../services/tagQueryService'
++import { catalogReadService } from '../services/catalogReadService'
+ import { classificationQueryService } from '../services/classificationQueryService'
+ import { classificationMaintenanceService } from '../services/classificationMaintenanceService'
+ import { classificationImageService } from '../services/classificationImageService'
+@@ -11,6 +12,7 @@ import { classificationDeletionService } from '../services/classificationDeletio
+ import { organizationDeletionService } from '../services/organizationDeletionService'
+ 
+ interface ClassificationHandlerDependencies {
++  readService: Pick<typeof catalogReadService, 'readImageCandidates'>
+   queryService: typeof classificationQueryService
+   maintenanceService: typeof classificationMaintenanceService
+   imageService: typeof classificationImageService
+@@ -24,6 +26,7 @@ interface ClassificationHandlerDependencies {
+ export function registerClassificationHandlers(
+   adapter: typeof appCommandAdapter = appCommandAdapter,
+   dependencies: ClassificationHandlerDependencies = {
++    readService: catalogReadService,
+     queryService: classificationQueryService,
+     maintenanceService: classificationMaintenanceService,
+     imageService: classificationImageService,
+@@ -34,6 +37,8 @@ export function registerClassificationHandlers(
+     seriesMergeService
+   }
+ ): void {
++  adapter.register(IPC.ORGANIZATION_PAGE, (query) => dependencies.queryService.listOrganizationsPage(query))
++  adapter.register(IPC.SERIES_PAGE, (query) => dependencies.queryService.listSeriesPage(query))
+   adapter.register(IPC.ORGANIZATION_LIST, (query) =>
+     dependencies.queryService.listOrganizations(query)
+   )
+@@ -67,6 +72,7 @@ export function registerClassificationHandlers(
+   adapter.register(IPC.ORGANIZATION_DELETE, (id) =>
+     dependencies.organizationDeletionService.deleteOrganization(id)
+   )
++  adapter.register(IPC.DIRECTOR_PAGE, (query) => dependencies.queryService.listDirectorsPage(query))
+   adapter.register(IPC.DIRECTOR_LIST, (query) => dependencies.queryService.listDirectors(query))
+   adapter.register(IPC.DIRECTOR_GET, (id) => dependencies.queryService.getDirector(id))
+   adapter.register(IPC.DIRECTOR_OPTIONS, (search) =>
+@@ -97,6 +103,7 @@ export function registerClassificationHandlers(
+     dependencies.deletionService.previewSeries(id)
+   )
+   adapter.register(IPC.SERIES_DELETE, (id) => dependencies.deletionService.deleteSeries(id))
++  adapter.register(IPC.CLASSIFICATION_IMAGE_PAGE, (entity, query) => dependencies.readService.readImageCandidates(entity, query))
+   adapter.register(IPC.CLASSIFICATION_IMAGE_CANDIDATES, (entity) =>
+     dependencies.queryService.listImageCandidates(entity)
+   )
+@@ -106,6 +113,9 @@ export function registerClassificationHandlers(
+ }
+ 
+ export function registerFacetHandlers(): void {
++  appCommandAdapter.register(IPC.TAG_LABELS, (ids) => tagQueryService.labels(ids))
++  appCommandAdapter.register(IPC.TAG_FILTER_OPTIONS, (query) => catalogReadService.read(query))
++  appCommandAdapter.register(IPC.TAG_MANUAL_OPTIONS, (query) => tagQueryService.manualOptions(query))
+   appCommandAdapter.register(
+     IPC.TAG_LIST,
+     (): Array<{ id: number; name: string; video_count: number }> => tagQueryService.list()
+diff --git a/src/main/ipc/facetHandlers.test.ts b/src/main/ipc/facetHandlers.test.ts
+index 95ac8bd..69b7b81 100644
+--- a/src/main/ipc/facetHandlers.test.ts
++++ b/src/main/ipc/facetHandlers.test.ts
+@@ -17,6 +17,10 @@ describe('classification IPC contract', () => {
+   it('registers every command and forwards typed arguments to the public services', async () => {
+     const calls: unknown[] = []
+     const queryService: ClassificationQueryService = {
++      listImageCandidatesPage: () => {throw new Error('IPC must not run image page SQL on the writer thread')},
++      listDirectorsPage: query => { calls.push(['director-page',query]);return {items:[],total:0,limit:60,offset:query.offset ?? 0} },
++      listOrganizationsPage: query => { calls.push(['organization-page',query]);return {items:[],total:0,limit:60,offset:query.offset ?? 0} },
++      listSeriesPage: query => { calls.push(['series-page',query]);return {items:[],total:0,limit:60,offset:query.offset ?? 0} },
+       listImageCandidates(entity) {
+         calls.push(['image-candidates', entity])
+         return []
+@@ -211,6 +215,7 @@ describe('classification IPC contract', () => {
+     } as typeof appCommandAdapter
+ 
+     registerClassificationHandlers(adapter, {
++      readService: {readImageCandidates: async (entity,query) => {calls.push(['image-page',entity,query]);return {items:[],total:0,limit:60,offset:query?.offset ?? 0}}},
+       queryService,
+       maintenanceService,
+       imageService,
+@@ -355,5 +360,15 @@ describe('classification IPC contract', () => {
+       ['image-candidates', imageEntity],
+       ['image-set', imageEntity, imageInput]
+     ])
++    const organizationPage = { ...listQuery, limit:60, offset:120 }
++    const seriesPage = { ...seriesQuery, limit:60, offset:60 }
++    assert.deepEqual(handlers.get(IPC.ORGANIZATION_PAGE)?.(organizationPage), {items:[],total:0,limit:60,offset:120})
++    assert.deepEqual(handlers.get(IPC.SERIES_PAGE)?.(seriesPage), {items:[],total:0,limit:60,offset:60})
++    assert.deepEqual(calls.slice(-2), [['organization-page',organizationPage],['series-page',seriesPage]])
++    const directorPage = { ...directorQuery, limit:60, offset:120 }
++    assert.deepEqual(handlers.get(IPC.DIRECTOR_PAGE)?.(directorPage), {items:[],total:0,limit:60,offset:120})
++    assert.deepEqual(calls.at(-1), ['director-page',directorPage])
++    assert.deepEqual(await handlers.get(IPC.CLASSIFICATION_IMAGE_PAGE)?.(imageEntity,{offset:60}),{items:[],total:0,limit:60,offset:60})
++    assert.deepEqual(calls.at(-1),['image-page',imageEntity,{offset:60}])
+   })
+ })
+diff --git a/src/main/services/catalogReadWorkerClient.test.ts b/src/main/services/catalogReadWorkerClient.test.ts
+new file mode 100644
+index 0000000..dad5192
+--- /dev/null
++++ b/src/main/services/catalogReadWorkerClient.test.ts
+@@ -0,0 +1,359 @@
++import assert from 'node:assert/strict'
++import { EventEmitter } from 'node:events'
++import { it } from 'node:test'
++import type { TagOptionsQuery } from '@shared/commonTypes'
++import { CatalogReadWorkerClient, type CatalogReadContext, type CatalogReadCommand, type CatalogReadPage } from './catalogReadWorkerClient'
++
++function deferred() {
++  let resolve!: () => void
++  let reject!: (error: Error) => void
++  const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no })
++  return { promise, resolve, reject }
++}
++class Transport extends EventEmitter {
++  sent: CatalogReadCommand[] = []
++  termination = deferred()
++  terminations = 0
++  postMessage(message: CatalogReadCommand): void { this.sent.push(message) }
++  terminate(): Promise<void> { this.terminations++; return this.termination.promise }
++  ready(): void { this.emit('message', { type: 'ready' }) }
++  result(page: CatalogReadPage = { items: [{ id: 1, label: 'One', video_count: 2 }], hasMore: false }): void {
++    this.emit('message', { type: 'result', id: this.sent.at(-1)!.id, result: page })
++  }
++}
++const tick = async (): Promise<void> => { await new Promise<void>(resolve => setImmediate(resolve)) }
++function fixture(timeout = 1000, queueTimeoutMs = 30_000) {
++  let context: CatalogReadContext = { identity: {}, path: '/synthetic/library.db', revision: '1' }
++  const transports: Transport[] = []
++  const client = new CatalogReadWorkerClient({
++    contextProvider: () => context,
++    transportFactory: () => { const transport = new Transport(); transports.push(transport); return transport },
++    startupTimeoutMs: timeout, queryTimeoutMs: timeout, queueTimeoutMs
++  })
++  return { client, transports, context: () => context,
++    change: (patch: Partial<CatalogReadContext>) => { context = { ...context, ...patch } },
++    async close() {
++      const done = client.dispose()
++      for (const transport of transports) transport.termination.resolve()
++      await done
++      for (const transport of transports) assert.deepEqual(transport.eventNames(), [])
++    }
++  }
++}
++
++it('counts merged subscribers toward capacity, normalizes keys, and clones each successful result', async () => {
++  const f = fixture()
++  try {
++    const reads = Array.from({ length: 32 }, (_, i) => f.client.read(i % 2 ? { search: ' ONE ' } : { search: 'one', limit: 100, offset: 0 }))
++    await assert.rejects(f.client.read({ search: 'other' }), /capacity/)
++    assert.equal(f.transports.length, 1)
++    const worker = f.transports[0]
++    assert.equal(worker.sent.length, 0)
++    worker.ready()
++    assert.equal(worker.sent.length, 1)
++    worker.result()
++    const pages = await Promise.all(reads)
++    pages[0].items[0].label = 'Mutated'
++    assert.equal(pages[1].items[0].label, 'One')
++    const next = f.client.read({})
++    worker.result()
++    await next
++  } finally { await f.close() }
++})
++
++it('serializes different revisions and keeps a folded expanding query valid in the payload', async () => {
++  const f = fixture()
++  try {
++    const first = f.client.read({ search: 'İ'.repeat(500) })
++    const worker = f.transports[0]; worker.ready()
++    f.change({ revision: '2' })
++    const second = f.client.read({ search: 'İ'.repeat(500) })
++    assert.equal(worker.sent.length, 1)
++    assert.equal((worker.sent[0].query as TagOptionsQuery).search!.length, 500)
++    worker.result(); await first
++    assert.equal(worker.sent.length, 2)
++    worker.result(); await second
++  } finally { await f.close() }
++})
++
++for (const patch of [{ identity: {} }, { path: '/synthetic/other.db' }]) {
++  it(`rejects old generation on ${Object.keys(patch)[0]} change and waits for termination`, async () => {
++    const f = fixture()
++    try {
++      const old = assert.rejects(f.client.read({}), /context changed/)
++      const worker = f.transports[0]; worker.ready()
++      f.change(patch)
++      const next = f.client.read({})
++      await old; await tick()
++      assert.equal(worker.terminations, 1)
++      assert.equal(f.transports.length, 1)
++      worker.result(); worker.emit('error', new Error('late')); worker.emit('exit', 0)
++      worker.termination.resolve(); await tick()
++      assert.equal(f.transports.length, 2)
++      assert.deepEqual(worker.eventNames(), [])
++      f.transports[1].ready(); f.transports[1].result(); await next
++    } finally { await f.close() }
++  })
++}
++
++it('removes queued aborts but retains an executing slot after all subscribers abort', async () => {
++  const f = fixture()
++  try {
++    const a = new AbortController(), b = new AbortController(), queued = new AbortController()
++    const first = assert.rejects(f.client.read({}, a.signal), { name: 'AbortError' })
++    const merged = assert.rejects(f.client.read({}, b.signal), { name: 'AbortError' })
++    const worker = f.transports[0]; worker.ready()
++    const removed = assert.rejects(f.client.read({ offset: 100 }, queued.signal), { name: 'AbortError' })
++    queued.abort(); a.abort(); b.abort(); await Promise.all([first, merged, removed])
++    const next = f.client.read({ offset: 200 })
++    assert.equal(worker.sent.length, 1)
++    worker.result()
++    assert.equal(worker.sent.length, 2)
++    assert.equal(worker.sent[1].query.offset, 200)
++    worker.result(); await next
++  } finally { await f.close() }
++})
++
++it('one subscriber abort does not cancel another or retain its signal listener', async () => {
++  const f = fixture()
++  try {
++    const controller = new AbortController()
++    let removed = 0
++    const original = controller.signal.removeEventListener.bind(controller.signal)
++    controller.signal.removeEventListener = (...args) => { removed++; original(...args) }
++    const cancelled = assert.rejects(f.client.read({}, controller.signal), { name: 'AbortError' })
++    const survivor = f.client.read({})
++    controller.abort(); await cancelled
++    f.transports[0].ready(); f.transports[0].result(); await survivor
++    assert.equal(removed, 1)
++    await assert.rejects(f.client.read({}, controller.signal), { name: 'AbortError' })
++  } finally { await f.close() }
++})
++
++for (const failure of ['startup timeout', 'query timeout', 'exit', 'error', 'protocol error'] as const) {
++  it(`rejects all accepted on ${failure}, without retry or overlapping workers`, async () => {
++    const f = fixture(failure.includes('timeout') ? 15 : 1000)
++    try {
++      const first = assert.rejects(f.client.read({}), /timed out|exit|injected/)
++      const second = assert.rejects(f.client.read({ offset: 100 }), /timed out|exit|injected/)
++      const worker = f.transports[0]
++      if (failure !== 'startup timeout') worker.ready()
++      if (failure === 'exit') worker.emit('exit', 0)
++      if (failure === 'error') worker.emit('error', new Error('injected'))
++      if (failure === 'protocol error') worker.emit('message', { type: 'error', id: worker.sent[0].id, message: 'injected' })
++      await Promise.all([first, second]); await tick()
++      assert.equal(worker.terminations, 1)
++      assert.equal(f.transports.length, 1)
++      worker.termination.resolve(); await tick()
++      assert.equal(f.transports.length, 1, 'no automatic retry')
++    } finally { await f.close() }
++  })
++}
++
++it('dispose closes admission immediately and waits for a running termination', async () => {
++  const f = fixture()
++  const read = assert.rejects(f.client.read({}), /disposed/)
++  f.transports[0].ready()
++  let finished = false
++  const done = f.client.dispose().then(() => { finished = true })
++  await read; await tick()
++  await assert.rejects(f.client.read({}), /disposed/)
++  assert.equal(finished, false)
++  f.transports[0].termination.resolve(); await done
++  await f.client.dispose()
++  assert.equal(f.transports[0].terminations, 1)
++  assert.deepEqual(f.transports[0].eventNames(), [])
++})
++
++it('fails closed if termination rejects and rejects requests waiting for replacement', async () => {
++  const f = fixture()
++  const old = assert.rejects(f.client.read({}), /context changed/)
++  f.change({ identity: {} })
++  const waiting = assert.rejects(f.client.read({}), /termination failed/)
++  await old
++  f.transports[0].termination.reject(new Error('cannot terminate'))
++  await waiting; await tick()
++  await assert.rejects(f.client.read({}), /termination failed/)
++  await assert.rejects(f.client.dispose(), /termination failed/)
++  assert.equal(f.transports.length, 1)
++  assert.deepEqual(f.transports[0].eventNames(), [])
++})
++
++it('rejects invalid queries before creating a worker and contains factory/post failures', async () => {
++  const f = fixture()
++  for (const query of [{ limit: 101 }, { offset: -1 }, { search: 'x'.repeat(501) }]) {
++    await assert.rejects(f.client.read(query), /Invalid/)
++  }
++  assert.equal(f.transports.length, 0)
++  await f.close()
++  const client = new CatalogReadWorkerClient({ contextProvider: f.context, transportFactory: () => { throw new Error('factory') } })
++  await assert.rejects(client.read({}), /factory/)
++  await client.dispose()
++  const g = fixture()
++  const failed = assert.rejects(g.client.read({}), /post/)
++  g.transports[0].postMessage = () => { throw new Error('post') }
++  g.transports[0].ready(); await failed
++  await g.close()
++})
++
++it('bounds subscribers while termination is pending and supersedes a waiting generation', async () => {
++  const f = fixture()
++  try {
++    const old = assert.rejects(f.client.read({}), /context changed/)
++    f.change({ identity: {} })
++    const waiting = Array.from({ length: 32 }, () => assert.rejects(f.client.read({}), /context changed/))
++    await assert.rejects(f.client.read({}), /capacity/)
++    assert.equal(f.transports.length, 1)
++    f.change({ identity: {} })
++    const latest = f.client.read({})
++    await old; await Promise.all(waiting)
++    f.transports[0].termination.resolve(); await tick()
++    assert.equal(f.transports.length, 2)
++    f.transports[1].ready(); f.transports[1].result(); await latest
++  } finally { await f.close() }
++})
++
++it('does not launch work after repeated queued cancellations before ready', async () => {
++  const f = fixture()
++  try {
++    for (let offset = 0; offset < 64; offset++) {
++      const controller = new AbortController()
++      const cancelled = assert.rejects(f.client.read({ offset }, controller.signal), { name: 'AbortError' })
++      controller.abort(); await cancelled
++    }
++    assert.equal(f.transports.length, 1)
++    f.transports[0].ready()
++    assert.equal(f.transports[0].sent.length, 0)
++    const next = f.client.read({})
++    assert.equal(f.transports[0].sent.length, 1)
++    f.transports[0].result(); await next
++  } finally { await f.close() }
++})
++
++it('contains unexpected messages and dispose drains an already-started replacement barrier', async () => {
++  const f = fixture()
++  const old = assert.rejects(f.client.read({}), /Unexpected/)
++  f.transports[0].emit('message', null)
++  await old
++  const queued = assert.rejects(f.client.read({}), /disposed/)
++  const done = f.client.dispose()
++  await queued
++  f.transports[0].termination.resolve(); await done
++  assert.equal(f.transports.length, 1)
++  assert.deepEqual(f.transports[0].eventNames(), [])
++})
++
++
++it('expires waiting subscribers and frees capacity while native termination remains pending', async (t) => {
++  t.mock.timers.enable({ apis: ['setTimeout'] })
++  const f = fixture(1000, 50)
++  try {
++    const old = assert.rejects(f.client.read({}), /context changed/)
++    f.change({ identity: {} })
++    const errors: unknown[] = []
++    const waiting = Array.from({ length: 32 }, () => f.client.read({}).catch(error => { errors.push(error) }))
++    await old
++    await assert.rejects(f.client.read({}), /capacity/)
++    t.mock.timers.tick(50)
++    await Promise.resolve()
++    assert.equal(errors.length, 32)
++    for (const error of errors) assert.match(String(error), /queue timed out/)
++    await Promise.all(waiting)
++    assert.equal(f.transports.length, 1, 'expiration must not bypass the native termination barrier')
++    const next = f.client.read({})
++    f.transports[0].termination.resolve(); await tick()
++    assert.equal(f.transports.length, 2)
++    f.transports[1].ready(); f.transports[1].result(); await next
++  } finally { await f.close() }
++})
++
++it('keeps independent waiting deadlines for coalesced subscribers and clears them at execution', async (t) => {
++  t.mock.timers.enable({ apis: ['setTimeout'] })
++  const f = fixture(1000, 50)
++  try {
++    const active = f.client.read({})
++    void active.catch(() => {})
++    const worker = f.transports[0]; worker.ready()
++    let expired: unknown
++    const first = f.client.read({ offset: 100 }).catch(error => { expired = error })
++    t.mock.timers.tick(30)
++    const survivor = f.client.read({ offset: 100 })
++    void survivor.catch(() => {})
++    t.mock.timers.tick(20); await Promise.resolve()
++    assert.match(String(expired), /queue timed out/)
++    await first
++    assert.equal(worker.sent.length, 1)
++    worker.result(); await active
++    assert.equal(worker.sent.length, 2)
++    t.mock.timers.tick(60)
++    worker.result(); await survivor
++    assert.equal(worker.terminations, 0)
++  } finally { await f.close() }
++})
++
++it('never executes a page whose only subscriber expired before ready', async (t) => {
++  t.mock.timers.enable({ apis: ['setTimeout'] })
++  const f = fixture(1000, 50)
++  try {
++    let expired: unknown
++    const pending = f.client.read({}).catch(error => { expired = error })
++    t.mock.timers.tick(50); await Promise.resolve()
++    assert.match(String(expired), /queue timed out/)
++    await pending
++    f.transports[0].ready()
++    assert.equal(f.transports[0].sent.length, 0)
++    const next = f.client.read({})
++    f.transports[0].result(); await next
++  } finally { await f.close() }
++})
++
++
++it('shares admission across tag/image requests, keys entity kinds separately and copies caller inputs', async () => {
++  const f=fixture()
++  const imagePage={items:[{videoId:1,code:'ONE',title:null,coverPath:'one.jpg'}],total:1,limit:60,offset:0}
++  try {
++    const entity={kind:'director' as const,id:1},query={offset:0}
++    const first=f.client.readImageCandidates(entity,query)
++    entity.id=99;query.offset=60
++    const duplicate=f.client.readImageCandidates({kind:'director',id:1},{limit:60})
++    const tags=f.client.read({limit:60})
++    const others=Array.from({length:29},()=>f.client.readImageCandidates({kind:'series',id:1}))
++    await assert.rejects(f.client.readImageCandidates({kind:'organization',id:1}),/capacity/)
++    const worker=f.transports[0];worker.ready()
++    assert.deepEqual(worker.sent[0],{type:'read',id:1,operation:'classification-images',entity:{kind:'director',id:1},query:{limit:60,offset:0}})
++    worker.result(imagePage)
++    const [a,b]=await Promise.all([first,duplicate]);a.items[0].code='mutated';assert.equal(b.items[0].code,'ONE')
++    assert.equal(worker.sent.length,2);assert.equal(worker.sent[1].operation,undefined)
++    worker.result();await tags
++    assert.equal(worker.sent.length,3);assert.equal(worker.sent[2].operation,'classification-images')
++    if(worker.sent[2].operation==='classification-images') assert.equal(worker.sent[2].entity.kind,'series')
++    worker.result(imagePage);assert.equal((await Promise.all(others)).length,29)
++    assert.equal(f.transports.length,1)
++  } finally {await f.close()}
++})
++
++it('retains the executing image slot after cancellation and retires it before switching databases',async()=>{
++ const f=fixture()
++ try{
++  const abort=new AbortController()
++  const cancelled=assert.rejects(f.client.readImageCandidates({kind:'director',id:1},{},abort.signal),{name:'AbortError'})
++  const worker=f.transports[0];worker.ready();abort.abort();await cancelled
++  const queued=assert.rejects(f.client.read({}),/context changed/)
++  assert.equal(worker.sent.length,1)
++  f.change({path:'/synthetic/new.db',identity:{}})
++  const next=f.client.readImageCandidates({kind:'director',id:1})
++  await queued;await tick();assert.equal(f.transports.length,1)
++  worker.result({items:[],total:0,limit:60,offset:0});worker.termination.resolve();await tick()
++  assert.equal(f.transports.length,2)
++  f.transports[1].ready();f.transports[1].result({items:[],total:0,limit:60,offset:0});assert.equal((await next).total,0)
++ } finally {await f.close()}
++})
++
++it('validates image requests before allocating a reader',async()=>{
++ const f=fixture()
++ try{
++  for(const id of [0,-1,1.5,Infinity,Number.MAX_SAFE_INTEGER+1])await assert.rejects(f.client.readImageCandidates({kind:'series',id}),/entity/)
++  for(const query of [{limit:101},{limit:0},{offset:-1},{offset:Infinity}])await assert.rejects(f.client.readImageCandidates({kind:'series',id:1},query),/page/)
++  assert.equal(f.transports.length,0)
++ }finally{await f.close()}
++})
+diff --git a/src/main/services/catalogReadWorker.integration.test.ts b/src/main/services/catalogReadWorker.integration.test.ts
+new file mode 100644
+index 0000000..6dd60fb
+--- /dev/null
++++ b/src/main/services/catalogReadWorker.integration.test.ts
+@@ -0,0 +1,100 @@
++import { listClassificationImagePage, createClassificationImagePageReader } from './classificationImagePage'
++import { openReadOnlyDatabaseAtPath } from '../db/database'
++import assert from 'node:assert/strict'
++import { after, afterEach, before, it } from 'node:test'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { buildSync } from 'esbuild'
++import { closeDatabase, getDatabaseReadRevision, initDatabaseAtPath } from '../db/database'
++import { listTagFilterOptions } from '../db/tagRepo'
++import { insertTestVideoWithFile } from '../db/testVideoFixtures'
++import { CatalogReadWorkerClient } from './catalogReadWorkerClient'
++import { createCatalogReadWorkerTransport } from './catalogReadWorkerTransport'
++
++let root: string
++let bundle: string
++let client: CatalogReadWorkerClient | undefined
++let sequence = 0
++before(() => {
++  root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-catalog-worker-test-'))
++  bundle = path.join(root, 'worker.cjs')
++  buildSync({ entryPoints: [path.resolve('src/main/services/catalogReadWorker.ts')], outfile: bundle,
++    bundle: true, platform: 'node', format: 'cjs', packages: 'external', tsconfig: path.resolve('tsconfig.node.json'),
++    banner: { js: `require = require('node:module').createRequire(${JSON.stringify(path.resolve('package.json'))});` } })
++})
++afterEach(async () => { await client?.dispose(); client = undefined; closeDatabase() })
++after(() => fs.rmSync(root, { recursive: true, force: true }))
++function setup() {
++  const filename = path.join(root, `catalog-${sequence++}.db`)
++  const db = initDatabaseAtPath(filename)
++  insertTestVideoWithFile(db, { code: 'WORKER-1', filePath: 'synthetic.mp4', scrapedStatus: 0 })
++  db.exec("INSERT INTO tags(id,name) VALUES(1,'École'); INSERT INTO video_tag(video_id,tag_id) VALUES(1,1)")
++  client = new CatalogReadWorkerClient({
++    contextProvider: () => {
++      const revision = getDatabaseReadRevision(db)
++      return { identity: db, path: filename, revision: JSON.stringify([revision.changes, revision.dataVersion]) }
++    },
++    transportFactory: context => createCatalogReadWorkerTransport(bundle, context.path)
++  })
++  return db
++}
++
++it('executes real read-only tag queries and observes writes through the worker cache', async () => {
++  const db = setup()
++  assert.deepEqual(await client!.read({ search: 'éco' }), listTagFilterOptions({ search: 'éco' }))
++  const page = await client!.read({})
++  page.items[0].label = 'caller mutation'
++  assert.equal((await client!.read({})).items[0].label, 'École')
++  db.exec('UPDATE library_video_memberships SET is_hidden=1')
++  const pages = await Promise.all([client!.read({}), client!.read({})])
++  assert.equal(pages[0].items[0].video_count, 0)
++  pages[0].items[0].label = 'subscriber mutation'
++  assert.equal(pages[1].items[0].label, 'École')
++  await client!.dispose()
++  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM video_tag').get() && db.open, true)
++  await assert.rejects(client!.read({}), /disposed/)
++})
++
++it('rejects a changed catalog version at worker startup without migration', async () => {
++  const db = setup()
++  db.pragma('user_version=16')
++  await assert.rejects(client!.read({}), /schema|worker|reader/i)
++  await client!.dispose()
++  assert.equal(db.pragma('user_version', { simple: true }), 16)
++  assert.deepEqual(db.prepare('SELECT name FROM tags').all(), [{ name: 'École' }])
++})
++
++it('settles in-flight initialization and queued requests when disposed', async () => {
++  setup()
++  const first = client!.read({})
++  const second = client!.read({ search: 'other' })
++  const rejected = Promise.all([assert.rejects(first, /disposed/), assert.rejects(second, /disposed/)])
++  await client!.dispose()
++  await rejected
++})
++
++
++it('executes all classification cover pages on the readonly worker and observes committed writes',async()=>{
++ const db=setup()
++ db.exec("INSERT INTO organizations(id,main_name) VALUES(1,'Org');INSERT INTO directors(id,main_name) VALUES(1,'Director');INSERT INTO series(id,main_name) VALUES(1,'Series')")
++ const insert=db.prepare('INSERT INTO videos(code,title,cover_path,release_date,maker_organization_id,publisher_organization_id,director_id,series_id) VALUES(?,?,?,?,1,1,1,1)')
++ for(let n=0;n<125;n++)insert.run(`COVER-${n}`,`Title-${n}`,n%7===0?' ':`cover-${n}.jpg`,n%2?'2026-01-01':null)
++ for(const kind of ['organization','director','series'] as const)for(const offset of [0,60,120]){
++   const entity={kind,id:1},expected=listClassificationImagePage(entity,{offset})
++   assert.deepEqual(await client!.readImageCandidates(entity,{offset}),expected)
++ }
++ db.exec("UPDATE videos SET cover_path=NULL WHERE code='COVER-1'")
++ const pages=await Promise.all([client!.readImageCandidates({kind:'director',id:1}),client!.readImageCandidates({kind:'director',id:1})])
++ assert.deepEqual(pages[0],listClassificationImagePage({kind:'director',id:1}))
++ pages[0].items[0].code='mutated';assert.notEqual(pages[1].items[0].code,'mutated')
++ assert.deepEqual(await client!.read({}),listTagFilterOptions({}))
++ const readonly=openReadOnlyDatabaseAtPath(db.name)
++ try{assert.deepEqual(createClassificationImagePageReader(()=>readonly)({kind:'series',id:1}),listClassificationImagePage({kind:'series',id:1}));assert.throws(()=>readonly.exec('DELETE FROM videos'),/readonly|read-only/i)}finally{readonly.close()}
++})
++
++it('rejects image initialization against an incompatible schema without rewriting it',async()=>{
++ const db=setup();db.pragma('user_version=16')
++ await assert.rejects(client!.readImageCandidates({kind:'director',id:1}),/schema|worker|reader/i)
++ await client!.dispose();assert.equal(db.pragma('user_version',{simple:true}),16)
++})
+diff --git a/scripts/performance/classification-image-worker-benchmark.ts b/scripts/performance/classification-image-worker-benchmark.ts
+new file mode 100644
+index 0000000..36d65ff
+--- /dev/null
++++ b/scripts/performance/classification-image-worker-benchmark.ts
+@@ -0,0 +1,53 @@
++/** Standalone real worker / main-thread responsiveness comparison on a synthetic DB. */
++import {it} from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import {performance} from 'node:perf_hooks'
++import {buildSync} from 'esbuild'
++import {getDatabaseReadRevision,initDatabaseAtPath,closeDatabase} from '../../src/main/db/database'
++import {listClassificationImagePage} from '../../src/main/services/classificationImagePage'
++import {CatalogReadWorkerClient} from '../../src/main/services/catalogReadWorkerClient'
++import {createCatalogReadWorkerTransport} from '../../src/main/services/catalogReadWorkerTransport'
++const delay=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms))
++it('measures real read worker responsiveness without claiming faster SQL',async()=>{
++ const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-image-worker-bench-')),bundle=path.join(root,'worker.cjs')
++ let client:CatalogReadWorkerClient|undefined
++ try {
++  buildSync({entryPoints:[path.resolve('src/main/services/catalogReadWorker.ts')],outfile:bundle,bundle:true,platform:'node',format:'cjs',packages:'external',tsconfig:path.resolve('tsconfig.node.json'),banner:{js:`require = require('node:module').createRequire(${JSON.stringify(path.resolve('package.json'))});`}})
++  const db=initDatabaseAtPath(path.join(root,'catalog.db'))
++  db.exec(`INSERT INTO directors(id,main_name) VALUES(1,'Director');
++   WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<50000)
++   INSERT INTO videos(id,code,title,cover_path,release_date,add_time,director_id)
++    SELECT x,printf('VIDEO-%06d',x),hex(zeroblob(128)),printf('cover/%06d/',x)||hex(zeroblob(100))||'.jpg','2026-01-01','2026-01-01',1 FROM n;ANALYZE;`)
++  let dispatches=0
++  client=new CatalogReadWorkerClient({contextProvider:()=>{const revision=getDatabaseReadRevision(db);return{identity:db,path:db.name,revision:JSON.stringify([revision.changes,revision.dataVersion,db.pragma('schema_version',{simple:true})])}},transportFactory:context=>{
++   const transport=createCatalogReadWorkerTransport(bundle,context.path),post=transport.postMessage.bind(transport)
++   transport.postMessage=((message:unknown)=>{if((message as {type:string}).type==='read')dispatches++;post(message)}) as typeof transport.postMessage
++   return transport
++  }})
++  const entity={kind:'director' as const,id:1},query={limit:60,offset:49980},expected=listClassificationImagePage(entity,query)
++  const startup=performance.now();assert.deepEqual(await client.readImageCandidates(entity,query),expected);const startupAndFirstReadMs=performance.now()-startup
++  const samples:unknown[]=[]
++  for(const mode of ['writer','worker'] as const){
++   const run=()=>mode==='writer'?listClassificationImagePage(entity,query):client!.readImageCandidates(entity,query)
++   assert.deepEqual(await run(),expected)
++   for(let sample=0;sample<3;sample++){
++    let last=performance.now(),during=0;const gaps:number[]=[]
++    const timer=setInterval(()=>{const now=performance.now();gaps.push(now-last);last=now;during++},2)
++    try{
++     await delay(10);gaps.length=0;during=0;last=performance.now()
++     const start=performance.now(),value=await run(),elapsedMs=performance.now()-start,callbacksDuringRead=during
++     await delay(8)
++     assert.deepEqual(value,expected)
++     samples.push({mode,sample,elapsedMs,callbacksDuringRead,maxTimerGapMs:Math.max(...gaps),jsonBytes:Buffer.byteLength(JSON.stringify(value))})
++    }finally{clearInterval(timer)}
++   }
++  }
++  const before=dispatches,coalesced=await Promise.all(Array.from({length:32},()=>client!.readImageCandidates(entity,query)))
++  assert.equal(dispatches-before,1);assert.equal(coalesced.length,32)
++  coalesced[0].items[0].code='mutated';assert.notEqual(coalesced[1].items[0].code,'mutated')
++  console.log(JSON.stringify({startupAndFirstReadMs,samples,coalescedSubscribers:32,coalescedDispatches:dispatches-before,notes:['50k videos / same director, date ties, 256-char titles and >200-char cover paths; existing deep OFFSET query unchanged.','One warmup then three samples per mode, writer first; 2ms interval before read, 8ms drain afterwards. Timer gaps are diagnostic samples, not p95 or a universal frame bound.','Worker timing includes queue/message/copy/context overhead; first read includes worker startup. All file data seeded locally/warm OS cache; no cold/Windows/HDD or main-process IPC claim.','Oracle/assertions/JSON excluded from timed read; full data retained, no peak memory claim. Native interruption/termination limits and byte budgets remain.']},null,2))
++ }finally{await client?.dispose();closeDatabase();fs.rmSync(root,{recursive:true,force:true})}
++})

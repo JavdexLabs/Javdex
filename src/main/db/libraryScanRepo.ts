@@ -6,6 +6,9 @@ import type {
   LibraryScanTrigger
 } from '@shared/libraryTypes'
 import { getDb } from './database'
+import { readScanAuditSource } from './scanAuditSource'
+import { normalizeAudit } from '../scanner/libraryScanAuditValidation'
+import { SCAN_AUDIT_META_MAX_BYTES } from './scanAuditWriter'
 
 type PersistedScanTrigger = 'manual' | 'automatic' | 'initial' | 'root'
 type PersistedScanStatus = 'completed' | 'failed' | 'cancelled'
@@ -65,7 +68,13 @@ export function recoverInterruptedLibraryScanRuns(
           ORDER BY library_id, started_at, id`
       )
       .all() as Array<{ id: string; library_id: number }>
+    // Include a terminal run left sealed by an interrupted publication attempt.
+    // Existing published history remains immutable and is never reclassified.
+    const abandon = database.prepare(`UPDATE library_scan_audit_manifests SET state='abandoned'
+      WHERE state IN ('collecting','sealed') AND run_id IN (
+        SELECT id FROM library_scan_runs WHERE status NOT IN ('queued','running'))`)
     if (interrupted.length === 0) {
+      abandon.run()
       return { recoveredRunCount: 0, recoveredStateCount: 0 }
     }
 
@@ -83,6 +92,8 @@ export function recoverInterruptedLibraryScanRuns(
         run.library_id
       ).changes
     }
+
+    abandon.run()
 
     const idsByLibrary = new Map<number, Set<string>>()
     for (const run of interrupted) {
@@ -170,10 +181,30 @@ export function finishLibraryScanRun(input: {
   replaceUnrecognizedRootIds?: readonly number[]
   unrecognizedFiles?: readonly LibraryUnrecognizedFileInput[]
 }): void {
+  completeLibraryScanRun(input, input.audit)
+}
+
+export type FinishLibraryScanEntriesInput = Omit<Parameters<typeof finishLibraryScanRun>[0], 'audit' | 'unrecognizedFiles'> & {
+  /** Fresh iterable per publication attempt. Never retry with an exhausted/closed generator:
+   * an empty successful enumeration would replace the selected roots with no rows.
+   * Failed/cancelled runs and empty replacement roots do not acquire this iterator. */
+  unrecognizedFiles?: Iterable<LibraryUnrecognizedFileInput>
+}
+
+/** The sealed audit, scan result and synchronous iterable replacement commit together. */
+export function finishLibraryScanEntriesRun(input: FinishLibraryScanEntriesInput): void {
+  completeLibraryScanRun(input)
+}
+
+function completeLibraryScanRun(
+  input: FinishLibraryScanEntriesInput,
+  audit?: LibraryScanAudit
+): void {
   const database = getDb()
   database.transaction(() => {
+    if (!audit) validateSealedAuditForPublication(database, input)
     const summaryJson = JSON.stringify(input.summary)
-    const auditJson = JSON.stringify(input.audit)
+    const auditJson = audit ? JSON.stringify(audit) : null
     const errorSummary = input.summary.errorSummary
     const updated = database
       .prepare(
@@ -214,21 +245,20 @@ export function finishLibraryScanRun(input: {
       )
 
     if (successful && input.replaceUnrecognizedRootIds?.length) {
-      const rootIds = Array.from(new Set(input.replaceUnrecognizedRootIds))
-      const placeholders = rootIds.map(() => '?').join(', ')
+      const rootIds = new Set(input.replaceUnrecognizedRootIds)
       database
         .prepare(
           `DELETE FROM library_unrecognized_files
-            WHERE library_id = ? AND root_id IN (${placeholders})`
+            WHERE library_id = ? AND root_id IN (SELECT value FROM json_each(?))`
         )
-        .run(input.libraryId, ...rootIds)
+        .run(input.libraryId, JSON.stringify([...rootIds]))
       const insert = database.prepare(
         `INSERT INTO library_unrecognized_files (
            library_id, root_id, file_path, normalized_path, reason, scan_run_id, last_seen_at
          ) VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
       for (const file of input.unrecognizedFiles ?? []) {
-        if (!rootIds.includes(file.rootId)) continue
+        if (!rootIds.has(file.rootId)) continue
         insert.run(
           input.libraryId,
           file.rootId,
@@ -240,7 +270,48 @@ export function finishLibraryScanRun(input: {
         )
       }
     }
+    if (!audit) {
+      const published = database.prepare(`UPDATE library_scan_audit_manifests
+        SET state='published',published_at=? WHERE run_id=? AND state='sealed'`)
+        .run(input.summary.finishedAt, input.runId)
+      if (published.changes !== 1) throw new Error('扫描审计未封存或已发布')
+    }
   })()
+}
+
+function validateSealedAuditForPublication(
+  database: Database.Database,
+  input: FinishLibraryScanEntriesInput
+): void {
+  if (!Number.isSafeInteger(input.libraryId) || input.libraryId <= 0
+    || typeof input.runId !== 'string' || !input.runId || input.runId.length > 256
+    || typeof input.summary.finishedAt !== 'string' || !input.summary.finishedAt || input.summary.finishedAt.length > 100) {
+    throw new Error('扫描审计身份无效')
+  }
+  const size = database.prepare(`SELECT length(CAST(m.meta_json AS BLOB)) AS bytes
+    FROM library_scan_audit_manifests m JOIN library_scan_runs r ON r.id=m.run_id
+    WHERE r.id=? AND r.library_id=? AND r.status='running' AND m.state='sealed'`)
+    .get(input.runId,input.libraryId) as { bytes: number } | undefined
+  if (!size || size.bytes > SCAN_AUDIT_META_MAX_BYTES) throw new Error('扫描审计未封存或元数据超限')
+  const row = database.prepare(`SELECT m.meta_json,r.config_revision,r.trigger,r.started_at FROM library_scan_audit_manifests m
+    JOIN library_scan_runs r ON r.id=m.run_id
+    WHERE r.id=? AND r.library_id=? AND r.status='running' AND m.state='sealed'`)
+    .get(input.runId,input.libraryId) as { meta_json: string; config_revision: number; trigger: string; started_at: string } | undefined
+  if (!row) throw new Error('扫描审计未封存或元数据超限')
+  const meta = JSON.parse(row.meta_json) as Record<string, unknown>
+  const sections = ['files','removedResources','promotedResources','deletedVideos','pendingGroups']
+  const duplicate = database.prepare(`SELECT 1 FROM library_scan_audit_manifests m,json_each(m.meta_json) e
+    WHERE m.run_id=? GROUP BY e.key HAVING COUNT(*)>1 LIMIT 1`).get(input.runId)
+  if (duplicate || sections.some(section => Object.hasOwn(meta,section))) throw new Error('扫描审计元数据无效')
+  const valid = normalizeAudit({ ...meta, ...Object.fromEntries(sections.map(section => [section,[]])) })
+  const summary = input.summary
+  if (!valid || summary.libraryId !== input.libraryId || summary.runId !== input.runId
+    || ['libraryId','runId','configRevision','trigger','startedAt','finishedAt','status'].some(key => meta[key] !== summary[key as keyof LibraryScanSummary])
+    || row.config_revision !== summary.configRevision || row.started_at !== summary.startedAt
+    || row.trigger !== persistedTrigger(summary.trigger)
+    || (input.status === 'completed' ? !['success','completed_with_errors'].includes(summary.status) : input.status !== summary.status)) {
+    throw new Error('扫描审计与运行结果不一致')
+  }
 }
 
 export function getLatestLibraryScanSnapshot(libraryId: number): LibraryScanLatestSnapshot {
@@ -264,25 +335,13 @@ export function getLatestLibraryScanSnapshot(libraryId: number): LibraryScanLate
         typeof candidate.status === 'string' &&
         typeof candidate.finishedAt === 'string'
     )
-    const latestRun = summary
-      ? (database
-          .prepare(
-            `SELECT audit_json
-               FROM library_scan_runs
-              WHERE id = ? AND library_id = ? AND audit_json IS NOT NULL`
-          )
-          .get(summary.runId, libraryId) as { audit_json: string | null } | undefined)
-      : (database
-          .prepare(
-            `SELECT audit_json
-               FROM library_scan_runs
-              WHERE library_id = ? AND audit_json IS NOT NULL
-              ORDER BY started_at DESC, id DESC
-              LIMIT 1`
-          )
-          .get(libraryId) as { audit_json: string | null } | undefined)
+    const source = readScanAuditSource(
+      database,
+      summary ? { libraryId, runId: summary.runId } : { libraryId, latest: true },
+      'body'
+    )
     const audit = parseScopedScanJson<LibraryScanAudit>(
-      latestRun?.audit_json,
+      source?.body,
       libraryId,
       (candidate) =>
         (candidate.schemaVersion === 1 || candidate.schemaVersion === 2) &&

@@ -1,0 +1,46 @@
+▶ ActressAvatarEditor
+  ✔ keeps rendering when the current avatar enters crop editing (51.371ms)
+  ✔ keeps rendering when a legacy avatar without its original enters crop editing (17.21275ms)
+✔ ActressAvatarEditor (69.172833ms)
+✔ pages associated covers without loading an actress detail or accumulating tiles (4.582209ms)
+✔ does not replace a user-selected source tab when the first cover page arrives late (1.389875ms)
+✖ pages photo sources with global labels and retries without fetching complete metadata (2.645125ms)
+✔ keeps local selection when the user opens a file picker before photos arrive (1.424292ms)
+✔ pages40 candidates and preserves selection and name plan across pages and search (610.999708ms)
+✔ retries page failures without losing the selected merge plan (107.30025ms)
+✔ ignores old page responses while a changed search is debouncing (427.622792ms)
+✔ locks a captured merge against duplicate submission and retains plan on failure (164.998125ms)
+✔ resets session on keep identity change and ignores old page and merge completion (167.941042ms)
+✔ resets the name plan only when choosing a different merge candidate or clearing selection (106.613833ms)
+✔ loads metadata once while paging 60/60/5 works and preserving the full count (267.515791ms)
+✔ retries page errors, clamps a removed last page, and rejects late actor results (6.422333ms)
+✔ does not invalidate the new actor metadata when the old editor save settles late (6.831208ms)
+✔ retains an open merge plan and its full count while the visible works refresh (7.055625ms)
+✔ does not reuse the prior actor page when an intervening actor request is still pending (3.343791ms)
+ℹ tests 17
+ℹ suites 1
+ℹ pass 16
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1760.932875
+
+✖ failing tests:
+
+test at src/renderer/src/components/ActressAvatarEditor.test.tsx:2:8527
+✖ pages photo sources with global labels and retries without fetching complete metadata (2.645125ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  '写真 1' !== '写真 61'
+  
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/renderer/src/components/ActressAvatarEditor.test.tsx:219:10)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '写真 1',
+    expected: '写真 61',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

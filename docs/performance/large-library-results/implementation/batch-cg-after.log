@@ -1,0 +1,84 @@
+{
+  "productionSha256": "89642aec8e162b5ab65d6eeb12041aa5bf5b1890f153014fbdf3983b986a53a3",
+  "runtime": {
+    "node": "24.18.1",
+    "acorn": "8.16.0",
+    "ada": "3.4.4",
+    "amaro": "1.1.9",
+    "ares": "1.34.6",
+    "brotli": "1.2.0",
+    "cldr": "48.0",
+    "icu": "78.2",
+    "llhttp": "9.4.3",
+    "merve": "1.2.2",
+    "modules": "148",
+    "napi": "10",
+    "nbytes": "0.1.4",
+    "ncrypto": "0.0.1",
+    "nghttp2": "1.69.0",
+    "nghttp3": "",
+    "ngtcp2": "",
+    "openssl": "0.0.0",
+    "simdjson": "4.6.4",
+    "simdutf": "7.7.0",
+    "sqlite": "3.53.1",
+    "tz": "2025c",
+    "undici": "7.29.0",
+    "unicode": "17.0",
+    "uv": "1.52.1",
+    "uvwasi": "0.0.23",
+    "v8": "15.0.245.28-electron.0",
+    "zlib": "1.3.2.1-motley",
+    "zstd": "1.6.0",
+    "electron": "43.4.1",
+    "chrome": "150.0.7871.224"
+  },
+  "results": [
+    {
+      "rootCount": 1,
+      "unrecognizedFiles": 30000,
+      "samplesMs": [
+        116.76308400000005,
+        126.28591700000004,
+        120.23791599999993
+      ],
+      "medianMs": 120.23791599999993
+    },
+    {
+      "rootCount": 100,
+      "unrecognizedFiles": 30000,
+      "samplesMs": [
+        145.39274999999998,
+        152.32408299999997,
+        198.6949169999998
+      ],
+      "medianMs": 152.32408299999997
+    },
+    {
+      "rootCount": 1000,
+      "unrecognizedFiles": 30000,
+      "samplesMs": [
+        136.11429199999975,
+        135.1885830000001,
+        136.34349999999995
+      ],
+      "medianMs": 136.11429199999975
+    }
+  ],
+  "notes": [
+    "Synthetic isolated databases; valid root rows inserted directly. No real source directories or user database are scanned.",
+    "Fixed 1/100/1000-root order; each case 30000 entries distributed cyclically across roots. One warmup and three hot samples.",
+    "Only finishLibraryScanRun is timed, including its JSON serialization, transaction and DELETE/INSERT work. Fixture, begin and verification excluded.",
+    "Every sample replaces 30000 seeded/current rows; full audit/summary/path equality verified after commit. No fault-injection proof of crash atomicity.",
+    "Not p95, cold/Windows/HDD, mixed load, memory peak or maximum SQL-variable boundary evidence; 1000 roots is below usual variable limits."
+  ]
+}
+✔ measures actual scan finalization across root counts with consistent persisted results (2333.010042ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2479.929583

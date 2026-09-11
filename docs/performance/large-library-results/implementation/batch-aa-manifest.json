@@ -1,0 +1,21 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-aa-tags-statistics.patch": "11b38f6919ddd90466b1888afd48b686bf67d2670faeafe87a92185bba7fedff",
+    "batch-aa-statistics-before-query-fix.json": "754201f9259de97d4f25862ceb81a6ad7642e8b3b61f6ead0c20be274e3fe3d4",
+    "batch-aa-statistics-optimize.json": "16db565221ecaaf7ceef0500e53162abf06fefabae80aa2d8cfdbf2b38db769f",
+    "batch-aa-statistics-analyze.json": "0e9c3839d7e72ef4f5ce9d9e3b875fbe2e613a244531381e0469f8597a64020a",
+    "batch-aa-300382-analyzed.json": "02f287157e65ad845b629e3a6992b4541a96e16777965c83d3fa34e512a12281",
+    "batch-aa-target-tests.log": "48091cf92d84768347956d7e61fc664ae66dec70d25a812234b502202293aca2",
+    "batch-aa-full-tests.log": "05be9e4f1d497d1901757d16ddc4faa8dc28dffae17719b3f03642f066a6f65b",
+    "batch-aa-build.log": "09ad5815bb6514c200deb766ac8caf53da8f9d0153de97c2ce351fbd9c2928a6"
+  },
+  "notes": [
+    "Cumulative selected source snapshot against HEAD; benchmark is untracked and includes prior accepted work. Depends on prior B-Z batches; not a standalone patch.",
+    "Manual tag INNER JOIN visible counts plus independent manual EXISTS preserves zero-visible/manual-only semantics. Four tag tests passed including mixed origin visibility oracle before/after optimize/full ANALYZE.",
+    "Final optimize/analyze probes each compare 25 single-library and 27 fresh overlap cases. Full result equality passes. Initial before-query-fix historical probe had only two overlap cases and is not final coverage evidence.",
+    "Separate 300382 analyzed full matrix passed. Synthetic all-manual relation benchmark; mixed manual/scraped tested only in correctness fixture. Local macOS warm OS, three warm samples, not p95/Windows/HDD/customer database.",
+    "Full npm test 2124pass/1skip/0fail; build passed. Standards/Spec coverage finding fixed and statically rechecked. No production statistics hook or new schema change in AA.",
+    "Remaining 300k manual aggregation ~1375ms; stats alter plans and do not monotonically improve all queries. Entire 15-package/42-risk plan remains incomplete. No user data, commits, push or release."
+  ]
+}

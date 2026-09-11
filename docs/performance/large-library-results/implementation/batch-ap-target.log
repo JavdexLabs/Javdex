@@ -1,0 +1,29 @@
+✔ locates a deep-linked pending item, pages with a bounded cache and ignores a late detail (605.518ms)
+✔ shows an explicit page error and retries without fetching the full inbox (68.800959ms)
+✔ recovers the last page after deletion and selects the surviving first item (82.81175ms)
+✔ does not block a different queue when scrape count fails or reuse its disabled page total (84.516209ms)
+✔ ignores an old page that resolves after navigation to a newer page (99.382583ms)
+▶ PendingCenterPage scrape resolution
+  ✔ carries an explicit director through merge-and-apply without stacking prompts (507.843625ms)
+  ✔ previews either persisted identity and submits only after explicit confirmation (38.920333ms)
+  ✔ shows the library filter only for scan decisions (29.672709ms)
+  ✔ clears the library filter from the scoped empty state and keeps the scan tab selected (25.09325ms)
+✔ PendingCenterPage scrape resolution (602.365458ms)
+✔ locates scan anchors, reads only selected details and ignores late details after paging (582.903208ms)
+✔ reports page errors and missing selected records without treating them as an empty queue (111.557834ms)
+✔ clamps the deleted last page and does not show an old library page (176.321791ms)
+✔ uses only count on another category and count failure does not block that category (43.885125ms)
+✔ does not block scrape on a library listing failure (44.490334ms)
+✔ resolves identity deep links to the scoped identity pane without group detail reads (45.540083ms)
+✔ retries rejected selected detail without reloading full queues (129.147625ms)
+✔ loads actor details only in its category and keeps inactive summary counts current (168.812917ms)
+✔ shows unknown actor count without blocking scan when summary fails (45.738708ms)
+✔ preserves an explicit ownership decision while detail reads are disabled and reenabled (309.340667ms)
+ℹ tests 19
+ℹ suites 1
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1899.651167

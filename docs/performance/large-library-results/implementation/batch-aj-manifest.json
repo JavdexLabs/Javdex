@@ -1,0 +1,24 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-aj-asar-smoke.json": "2bcc5ad8fc8321227024dfcc4ab6c0d0c9d645b6908d766062f11ba939634d45",
+    "batch-aj-asar-smoke.log": "6951298a532d80fb680e15aac126236c03537c5a425596cbecfca63ab6a59cd9",
+    "batch-aj-build.log": "75a72134ce3f55befe588068c29c6f53b56f7440cf28bd493ac2f7f9985ef9aa",
+    "batch-aj-full.log": "dd1bac0d2b24c6161147d49d7ef2e5d64e1d859d63d6c0547ededf9b06b6113b",
+    "batch-aj-production-worker.patch": "7d248ffe23467d9269448f94936deae0404f7c923a6f79dba1c457da542a01d3",
+    "batch-aj-review.md": "f0faf7406b825c98a953f86c45b5ba9ec57e425c386d6a3e34e60c8461472d91",
+    "batch-aj-shutdown-lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "batch-aj-target.log": "db367cb9c59c67277b4b610751f5d8b4424feaade653c6abc9fa04f0f4ca55db",
+    "batch-aj-types.log": "6d0d17a20e6619cb40e20a31bc9104ddaed43fa0b5274db0b78f737378c77bcc",
+    "batch-aj-worker-300382.json": "bce790caeebe50755dee96b92771e90892fe3192e4ba7d6cc4c6eb2d39784dc6",
+    "batch-aj-worker-300382.log": "407d11e61c61234fc79a7ef79cfa73a398c754bacfcd6f2ac1931d4d239d696f"
+  },
+  "notes": [
+    "Cumulative selected diff against HEAD plus full untracked sources; depends on B-AI, not standalone.",
+    "Full2184pass1skip precedes final appMain termination rejection fix; final build, node types/lint and45 targeted tests follow that fix.",
+    "Only TAG_FILTER_OPTIONS production IPC offloaded; 32 subscribers, serial worker and bounded cache. Native termination is not guaranteed SQL interruption; queued requests during retirement currently have no independent deadline.",
+    "ASAR smoke uses built worker/chunks and native addon in a disposable archive under real windowless Electron, not a signed installer or full application startup.",
+    "Final benchmark sequential and isolated from build/types/tests: actual timestamp changes invalidate cache; three warm synthetic samples, equality checks included, not p95/Windows/HDD/full IPC.",
+    "Schema17 unchanged; no user database, commit, push or release. Full plan remains incomplete."
+  ]
+}

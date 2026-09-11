@@ -1,3 +1,4 @@
+import { avatarLogNotice } from '../avatarAutoCrop/logs'
 import WebAccessPanel from '../components/settings/WebAccessPanel'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
@@ -287,7 +288,7 @@ export default function SettingsPage(): JSX.Element {
 
   useEffect(() => {
     scrollBatchLogToBottom(avatarBatchLogRef)
-  }, [avatarAutoCropBatch.state.logs.length])
+  }, [avatarAutoCropBatch.state.totalLogCount])
 
   const refreshVideoBatchScopeHint = useCallback(async (
     status: VideoBatchScrapeStatus,
@@ -982,6 +983,7 @@ export default function SettingsPage(): JSX.Element {
                   ? avatarBatchLogRef
                   : videoBatchLogRef
             }
+            logNotice={batchDetailScope === 'avatar' ? avatarLogNotice(avatarAutoCropBatch.state) : undefined}
             emptyLog={
               batchDetailScope === 'actress'
                 ? '暂无演员任务日志'

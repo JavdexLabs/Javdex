@@ -19,6 +19,14 @@ npm run dev
 
 开发启动使用应用的用户数据目录，测试隔离机制见 [appIdentity.ts](../src/shared/appIdentity.ts) 与相关测试。调试数据库、扫描或删除行为前，使用测试资料与独立测试目录。
 
+## 未发布数据库迁移
+
+生产版 v0.6.2 使用 schema 15。本分支此前拆分的开发迁移 16/17/18 已合并为单次 **15 → 16**：建立 Agent 资源清理队列、升级标签覆盖索引、建立逐项扫描审计表及约束。三部分在同一事务内执行，全部成功后才记录版本 16；失败整次回滚。新建数据库与生产版升级后的结构相同。
+
+已运行旧开发分支的数据库不属于已发布升级路径。旧不完整 schema 16 与开发 schema 17/18 会明确拒绝打开，保持数据和版本不变；使用匹配的开发构建或升级前备份处理，不要手动降低 `user_version`。合并迁移不会替用户改写已有开发数据库。将来正式增加版本 17/18 时，须重新检查旧开发库的结构识别，不能仅靠版本数字接受这些历史快照。
+
+旧性能报告和原始证据中的 V17/V18 编号保留为当时的历史记录；当前迁移以 `src/main/db/migrations.ts` 为准。回归测试使用从官方 v0.6.2 冻结的 schema SQL，验证数据保留、DDL 一致性及各阶段失败回滚。
+
 ## 检查与构建
 
 ```bash
@@ -100,6 +108,7 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 | 刮削插件与沙箱 API | [刮削插件规范](SCRAPER_PLUGIN_FORMAT.md) |
 | 插件开发助手与 MCP | [插件开发 Agent](PLUGIN_DEV_AGENT.md) |
 | NFO 导出格式与验证范围 | [NFO 兼容性](NFO_COMPATIBILITY.md) |
+| 大媒体库性能与优化计划 | [性能审计](performance/large-library-performance-audit.md)、[实施计划](performance/large-library-optimization-plan.md)、[基准复跑](performance/large-library-results/README.md) |
 | 数据库结构与迁移 | [schema.ts](../src/main/db/schema.ts)、[migrations.ts](../src/main/db/migrations.ts) |
 | Issue、PRD 与分类标签 | [Issue 约定](agents/issue-tracker.md)、[标签约定](agents/triage-labels.md) |
 | 版本与发布 | [发布规范](VERSIONING_AND_RELEASE.md)、[更新日志](../CHANGELOG.md) |

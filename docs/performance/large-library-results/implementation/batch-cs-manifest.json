@@ -1,0 +1,15 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cs-build.log": "a56e51a54cb5b546e3bd619da0fa33dd173defa6f14e90ca96774676607f062f",
+    "batch-cs-full.log": "68da5796a4dd8776f90f706413fd587921383d7644a3412bbdea38dd475af011",
+    "batch-cs-resource-audit-transactions.patch": "808e6759c67dae04669276f798eedf0565b54231f83cf4349b82f029be6dc3d0",
+    "batch-cs-review.md": "4e3de04a85b35a88be98fbf6c494d4ae4f9cf02087761c729598fe237f197695",
+    "batch-cs-target.log": "1975f4521c458d8a36686bd67a52cd08917877319366e7969e763fb9d199aa84"
+  },
+  "notes": [
+    "Selected cumulative patch depends on previous batches.",
+    "175 focused; full2598pass1skip0fail; build terminal0.",
+    "Main file-loop transaction coverage, not NFO/tail/coordinator/full15/42 completion."
+  ]
+}

@@ -1,5 +1,12 @@
+import { listActressGalleryPage } from './actressGalleryPageRepo'
+import type { ActressProfile } from '@shared/actressTypes'
+import type { ActressMetadata } from '@shared/actressTypes'
+import type { ActressAvatarAutoCropTarget } from '@shared/actressAvatarCropTypes'
+import type { ActressMergeCandidatePage, ActressMergeCandidateQuery } from '@shared/actressTypes'
+import type { ActressPickerIdentity, ActressPickerItem, ActressPickerPage, ActressPickerQuery } from '@shared/actressTypes'
 import type { Database as SqliteDatabase } from 'better-sqlite3'
 import { getDb } from './database'
+import { createRevisionReadCache } from './revisionReadCache'
 import { normalizeActressName } from './actressNameNormalization'
 import type { Actress, ActressDetail, ActressGalleryAsset, ActressEditInput, ActressGender, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressListStatusCounts, ActressListStatusFilter, ActressAvatarFilter, ActressMergeMainNameFrom } from '@shared/actressTypes'
 import type { ActressScrapeResult, ActressScrapeFieldImpact, ActressScrapeField, ActressScrapeUpdateMode, ActressBatchScrapeFilter, ActressBatchScrapeStatus } from '@shared/actressScrapeTypes'
@@ -7,7 +14,7 @@ import type { ScrapedStatus, SortDir } from '@shared/commonTypes'
 import type { ActressDeleteImpact, ActressDeleteMode } from '@shared/actressIpcContract'
 import { ALL_ACTRESS_SCRAPE_FIELDS, ACTRESS_BATCH_DEFAULT_MISSING_FIELDS } from '@shared/actressScrapeTypes'
 import { ACTRESS_LIST_STATUS_SCRAPED_STATUS, actressStatusFilterOf } from '@shared/actressTypes'
-import { canMergeActressGenders } from '@shared/actressProfileOptions'
+import { actressMergeGenderGroup, canMergeActressGenders } from '@shared/actressProfileOptions'
 import { normalizeCupSize } from '@shared/cupSizeUtils'
 import { actressSearchLikeParams, actressTextSearchSql } from './actressSearchSql'
 import {
@@ -356,22 +363,23 @@ function queryActressListRows(
   const queryParams = limit == null ? params : [...params, limit, offset]
   return db
     .prepare(
-      `SELECT a.*,
-              COUNT(
-                CASE WHEN EXISTS (
-                  SELECT 1
-                  FROM library_video_memberships membership
-                  JOIN media_libraries library ON library.id = membership.library_id
-                  WHERE membership.video_id = va.video_id
-                    AND membership.is_hidden = 0
-                    AND library.status = 'active'
-                ) THEN va.video_id END
-              ) AS video_count,
+      `WITH eligible AS MATERIALIZED (
+         SELECT a.* FROM actresses a ${where}
+       ), members AS MATERIALIZED (
+         SELECT DISTINCT membership.video_id
+         FROM library_video_memberships membership
+         JOIN media_libraries library ON library.id = membership.library_id
+         WHERE membership.is_hidden = 0 AND library.status = 'active'
+       ), counts AS (
+         SELECT va.actress_id, COUNT(*) AS video_count
+         FROM video_actress va
+         JOIN eligible ON eligible.id = va.actress_id
+         JOIN members ON members.video_id = va.video_id
+         GROUP BY va.actress_id
+       )
+       SELECT a.*, COALESCE(counts.video_count, 0) AS video_count,
               (SELECT COUNT(*) FROM actress_gallery_assets ag WHERE ag.actress_id = a.id) AS gallery_count
-       FROM actresses a
-       LEFT JOIN video_actress va ON va.actress_id = a.id
-       ${where}
-       GROUP BY a.id
+       FROM eligible a LEFT JOIN counts ON counts.actress_id = a.id
        ORDER BY ${orderBy}
        ${pagination}`
     )
@@ -382,6 +390,21 @@ export interface ActressAvatarCandidate {
   id: number
   main_name: string
   avatar_path: string
+}
+
+const AVATAR_CROP_TARGET_PREDICATE = `length(CAST(avatar_source_path AS BLOB)) > 0
+  OR length(CAST(avatar_path AS BLOB)) > 0`
+
+export function listActressAvatarCropTargets(): ActressAvatarAutoCropTarget[] {
+  return getDb().prepare(`SELECT id AS actressId, main_name AS mainName
+    FROM actresses WHERE ${AVATAR_CROP_TARGET_PREDICATE}
+    ORDER BY id ASC`).all() as ActressAvatarAutoCropTarget[]
+}
+
+/** Matches the crop queue's truthy path test, including whitespace and embedded NUL. */
+export function countActressAvatarCropTargets(): number {
+  return (getDb().prepare(`SELECT COUNT(*) AS count FROM actresses
+    WHERE ${AVATAR_CROP_TARGET_PREDICATE}`).get() as { count: number }).count
 }
 
 /** Pure database candidates for application-layer avatar inspection. */
@@ -469,6 +492,13 @@ function countActressListRows(
 
 /** Actress list read contract: filtered rows plus the status counts the toolbar shows. */
 export function listActressPage(query: ActressListQuery = {}): ActressListPage {
+  // Empty budgets provide a pinned read transaction/revision without caching list payloads.
+  return createRevisionReadCache(getDb(), {}).read((memo) => ({
+    ...readActressPage(query), readRevision: memo.revision
+  }))
+}
+
+function readActressPage(query: ActressListQuery): ActressListPage {
   const gender = query.gender ?? 'female'
   const status = query.status ?? 'all'
   const requestedAvatar = query.avatar ?? 'all'
@@ -538,7 +568,7 @@ export function backfillActressGalleryAssetDimensions(
   return updated
 }
 
-export function getActressDetail(id: number): ActressDetail | null {
+function readActressProfileFields(id: number): Omit<ActressMetadata, 'gallery'> | null {
   const db = getDb()
   const actress = db.prepare('SELECT * FROM actresses WHERE id = ?').get(id) as
     | Actress
@@ -547,14 +577,41 @@ export function getActressDetail(id: number): ActressDetail | null {
 
   const names = listActressNameRows(id)
 
-  const gallery = db
-    .prepare(
-      `SELECT * FROM actress_gallery_assets
-       WHERE actress_id = ?
-       ORDER BY position, id`
-    )
-    .all(id) as ActressDetail['gallery']
 
+  return {
+    ...actress,
+    name_zh: getActressTypedName(id, 'zh', names),
+    name_en: getActressTypedName(id, 'en', names),
+    aliases: listActressAliasNames(id, names),
+    names,
+    links: readRelatedLinks(db, 'actress_links', 'actress_id', id)
+  }
+}
+
+export function getActressMetadata(id: number): ActressMetadata | null {
+  const fields = readActressProfileFields(id)
+  if (!fields) return null
+  const gallery = getDb().prepare(`SELECT * FROM actress_gallery_assets
+    WHERE actress_id = ? ORDER BY position, id`).all(id) as ActressGalleryAsset[]
+  return { ...fields, gallery }
+}
+
+export function getActressProfile(id: number): ActressProfile | null {
+  if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Invalid actress ID')
+  const db = getDb()
+  return db.transaction(() => {
+    const fields = readActressProfileFields(id)
+    if (!fields) return null
+    const page = listActressGalleryPage(id, { limit: 1 })!
+    const count = (db.prepare('SELECT COUNT(*) AS n FROM actress_gallery_assets WHERE actress_id = ?').get(id) as { n: number }).n
+    return { ...fields, gallery_count: count, display_gallery_count: page.total, first_gallery: page.items[0] ?? null }
+  })()
+}
+
+export function getActressDetail(id: number): ActressDetail | null {
+  const metadata = getActressMetadata(id)
+  if (!metadata) return null
+  const db = getDb()
   const videos = db
     .prepare(
       `SELECT v.*${videoListSelectExtras()} FROM videos v
@@ -572,16 +629,7 @@ export function getActressDetail(id: number): ActressDetail | null {
     )
     .all(id) as VideoListProjectionRow[]
 
-  return {
-    ...actress,
-    name_zh: getActressTypedName(id, 'zh', names),
-    name_en: getActressTypedName(id, 'en', names),
-    aliases: listActressAliasNames(id, names),
-    names,
-    gallery,
-    videos: hydrateVideoListRows(videos),
-    links: readRelatedLinks(db, 'actress_links', 'actress_id', id)
-  }
+  return { ...metadata, videos: hydrateVideoListRows(videos) }
 }
 
 export function addActressGalleryAsset(
@@ -2014,4 +2062,106 @@ function clearActressPosterForPaths(actressId: number, paths: Array<string | nul
 
 function nowIso(): string {
   return new Date().toISOString()
+}
+
+
+const ACTRESS_PICKER_PROJECTION = `a.id,
+      substr(CAST(a.main_name AS BLOB), 1, 516) AS name_prefix,
+      CASE WHEN length(CAST(a.avatar_path AS BLOB)) <= 4096 THEN a.avatar_path ELSE NULL END AS avatar_path`
+interface ActressPickerRow { id: number; name_prefix: Buffer; avatar_path: string | null }
+function actressPickerLabel(item: ActressPickerRow): ActressPickerItem {
+  // 129 UTF-8 code points need at most516 bytes, including embedded NULs.
+  const name = Array.from(item.name_prefix.toString('utf8'))
+  return {
+    id: item.id,
+    main_name: name.length > 128 ? name.slice(0, 128).join('') + '…' : name.join(''),
+    avatar_path: item.avatar_path != null && Buffer.byteLength(JSON.stringify(item.avatar_path)) <= 4096
+      ? item.avatar_path : null
+  }
+}
+
+/** Bounded labels for identity selection; retain owned-name search semantics. */
+export function listActressPickerPage(query: ActressPickerQuery = {}): ActressPickerPage {
+  return queryActressPickerPage(query, 'all')
+}
+
+/** Plugin test choices keep the previous female-only candidate scope. */
+export function listActressTestTargetPage(query: ActressPickerQuery = {}): ActressPickerPage {
+  return queryActressPickerPage(query, 'female')
+}
+
+export function getActressTestTargetName(id: number): string | null {
+  if (!Number.isSafeInteger(id) || id < 1) throw new Error('Invalid actress test target ID')
+  const row = getDb().prepare("SELECT main_name FROM actresses WHERE id = ? AND gender = 'female'")
+    .get(id) as { main_name: string } | undefined
+  return row?.main_name ?? null
+}
+
+function queryActressPickerPage(query: ActressPickerQuery, gender: ActressGenderFilter): ActressPickerPage {
+  const { search, limit = 40, offset = 0 } = query
+  if ((search !== undefined && (typeof search !== 'string' || search.length > 256)) ||
+      !Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
+      !Number.isSafeInteger(offset) || offset < 0) {
+    throw new Error('Invalid actress picker query')
+  }
+  const { sql: where, params } = buildActressListWhere(search, gender, 'all')
+  const rows = getDb().prepare(`
+    SELECT ${ACTRESS_PICKER_PROJECTION}
+    FROM actresses a ${where}
+    ORDER BY a.main_name ASC, a.id ASC
+    LIMIT ? OFFSET ?
+  `).all(...params, limit + 1, offset) as Array<{ id: number; name_prefix: Buffer; avatar_path: string | null }>
+  const items = rows.slice(0, limit).map(actressPickerLabel)
+  return { items, hasMore: rows.length > limit, offset }
+}
+
+/** Current identity for a pending ownership choice, without loading works or profile. */
+export function getActressPickerIdentity(id: number): ActressPickerIdentity | null {
+  if (!Number.isSafeInteger(id) || id < 1) throw new Error('Invalid actress picker identity')
+  const row = getDb().prepare(`SELECT ${ACTRESS_PICKER_PROJECTION}, a.revision FROM actresses a WHERE a.id = ?`)
+    .get(id) as (ActressPickerRow & { revision: number }) | undefined
+  return row ? { ...actressPickerLabel(row), revision: row.revision } : null
+}
+
+
+/** Merge-compatible choices with visible-video counts restricted to the returned page. */
+export function listActressMergeCandidates(query: ActressMergeCandidateQuery): ActressMergeCandidatePage {
+  const { keepId, search, limit = 40, offset = 0 } = query
+  if (!Number.isSafeInteger(keepId) || keepId < 1 ||
+      (search !== undefined && (typeof search !== 'string' || search.length > 256)) ||
+      !Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
+      !Number.isSafeInteger(offset) || offset < 0) {
+    throw new Error('Invalid actress merge candidate query')
+  }
+  const db = getDb()
+  return db.transaction(() => {
+    const keep = db.prepare('SELECT gender FROM actresses WHERE id = ?').get(keepId) as { gender: ActressGender | null } | undefined
+    if (!keep) throw new Error('保留演员不存在')
+    const { sql: where, params } = buildActressListWhere(search, 'all', 'all')
+    const rows = db.prepare(`SELECT ${ACTRESS_PICKER_PROJECTION}, a.gender
+      FROM actresses a
+      WHERE a.id != ?
+        AND CASE WHEN a.gender = 'male' THEN 'male' ELSE 'female' END = ?
+        ${where ? 'AND ' + where.slice(6) : ''}
+      ORDER BY a.main_name ASC, a.id ASC
+      LIMIT ? OFFSET ?`)
+      .all(keepId, actressMergeGenderGroup(keep.gender), ...params, limit + 1, offset) as Array<ActressPickerRow & { gender: ActressGender | null }>
+    const page = rows.slice(0, limit)
+    const counts = page.length === 0 ? [] : db.prepare(`
+      SELECT va.actress_id, COUNT(*) AS video_count
+      FROM video_actress va
+      WHERE va.actress_id IN (SELECT value FROM json_each(?))
+        AND EXISTS (
+          SELECT 1 FROM library_video_memberships membership
+          JOIN media_libraries library ON library.id = membership.library_id
+          WHERE membership.video_id = va.video_id AND membership.is_hidden = 0 AND library.status = 'active'
+        )
+      GROUP BY va.actress_id`).all(JSON.stringify(page.map(row => row.id))) as Array<{ actress_id: number; video_count: number }>
+    const byId = new Map(counts.map(row => [row.actress_id, row.video_count]))
+    return {
+      items: page.map(row => ({ ...actressPickerLabel(row), gender: row.gender, video_count: byId.get(row.id) ?? 0 })),
+      hasMore: rows.length > limit,
+      offset
+    }
+  })()
 }

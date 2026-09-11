@@ -1,0 +1,21 @@
+✖ counts avatars through the scalar API without loading targets and propagates failures (43.412958ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 194.187458
+
+✖ failing tests:
+
+test at src/renderer/src/contexts/AvatarAutoCropBatchContext.test.tsx:2:1119
+✖ counts avatars through the scalar API without loading targets and propagates failures (43.412958ms)
+  Error: Full target list forbidden for counting
+      at Object.list (/Users/nut/Project/JavdexLabs/Javdex/src/renderer/src/contexts/AvatarAutoCropBatchContext.test.tsx:15:27)
+      at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/renderer/src/contexts/AvatarAutoCropBatchContext.tsx:347:46)
+      at Object.countAllAvatars (/Users/nut/Project/JavdexLabs/Javdex/src/renderer/src/contexts/AvatarAutoCropBatchContext.tsx:351:19)
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/renderer/src/contexts/AvatarAutoCropBatchContext.test.tsx:31:32)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3)

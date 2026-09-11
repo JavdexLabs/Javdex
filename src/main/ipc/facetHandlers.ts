@@ -1,6 +1,7 @@
 import { IPC } from '@shared/ipc-channels'
 import { appCommandAdapter } from './appContractAdapter'
 import { tagQueryService } from '../services/tagQueryService'
+import { catalogReadService } from '../services/catalogReadService'
 import { classificationQueryService } from '../services/classificationQueryService'
 import { classificationMaintenanceService } from '../services/classificationMaintenanceService'
 import { classificationImageService } from '../services/classificationImageService'
@@ -11,6 +12,7 @@ import { classificationDeletionService } from '../services/classificationDeletio
 import { organizationDeletionService } from '../services/organizationDeletionService'
 
 interface ClassificationHandlerDependencies {
+  readService: Pick<typeof catalogReadService, 'readImageCandidates'>
   queryService: typeof classificationQueryService
   maintenanceService: typeof classificationMaintenanceService
   imageService: typeof classificationImageService
@@ -24,6 +26,7 @@ interface ClassificationHandlerDependencies {
 export function registerClassificationHandlers(
   adapter: typeof appCommandAdapter = appCommandAdapter,
   dependencies: ClassificationHandlerDependencies = {
+    readService: catalogReadService,
     queryService: classificationQueryService,
     maintenanceService: classificationMaintenanceService,
     imageService: classificationImageService,
@@ -34,6 +37,8 @@ export function registerClassificationHandlers(
     seriesMergeService
   }
 ): void {
+  adapter.register(IPC.ORGANIZATION_PAGE, (query) => dependencies.queryService.listOrganizationsPage(query))
+  adapter.register(IPC.SERIES_PAGE, (query) => dependencies.queryService.listSeriesPage(query))
   adapter.register(IPC.ORGANIZATION_LIST, (query) =>
     dependencies.queryService.listOrganizations(query)
   )
@@ -67,6 +72,7 @@ export function registerClassificationHandlers(
   adapter.register(IPC.ORGANIZATION_DELETE, (id) =>
     dependencies.organizationDeletionService.deleteOrganization(id)
   )
+  adapter.register(IPC.DIRECTOR_PAGE, (query) => dependencies.queryService.listDirectorsPage(query))
   adapter.register(IPC.DIRECTOR_LIST, (query) => dependencies.queryService.listDirectors(query))
   adapter.register(IPC.DIRECTOR_GET, (id) => dependencies.queryService.getDirector(id))
   adapter.register(IPC.DIRECTOR_OPTIONS, (search) =>
@@ -97,6 +103,7 @@ export function registerClassificationHandlers(
     dependencies.deletionService.previewSeries(id)
   )
   adapter.register(IPC.SERIES_DELETE, (id) => dependencies.deletionService.deleteSeries(id))
+  adapter.register(IPC.CLASSIFICATION_IMAGE_PAGE, (entity, query) => dependencies.readService.readImageCandidates(entity, query))
   adapter.register(IPC.CLASSIFICATION_IMAGE_CANDIDATES, (entity) =>
     dependencies.queryService.listImageCandidates(entity)
   )
@@ -106,6 +113,9 @@ export function registerClassificationHandlers(
 }
 
 export function registerFacetHandlers(): void {
+  appCommandAdapter.register(IPC.TAG_LABELS, (ids) => tagQueryService.labels(ids))
+  appCommandAdapter.register(IPC.TAG_FILTER_OPTIONS, (query) => catalogReadService.read(query))
+  appCommandAdapter.register(IPC.TAG_MANUAL_OPTIONS, (query) => tagQueryService.manualOptions(query))
   appCommandAdapter.register(
     IPC.TAG_LIST,
     (): Array<{ id: number; name: string; video_count: number }> => tagQueryService.list()

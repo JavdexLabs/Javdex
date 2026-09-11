@@ -1,4 +1,4 @@
-import type { Video, VideoResourceKind } from '@shared/videoTypes'
+import type { Video, VideoCard, VideoResourceKind } from '@shared/videoTypes'
 
 const VIDEO_RESOURCE_KINDS = new Set<VideoResourceKind>([
   'local',
@@ -33,7 +33,11 @@ export function videoListSelectExtras(videoAlias = 'v'): string {
     (SELECT COUNT(*)
      FROM video_resources vr
      WHERE vr.video_id = ${videoAlias}.id) AS resource_count,
-    (SELECT group_concat(resource_kind, ',')
+    ${resourceKindsSelect(videoAlias)}`
+}
+
+function resourceKindsSelect(videoAlias: string): string {
+  return `(SELECT group_concat(resource_kind, ',')
      FROM (
        SELECT vr.kind AS resource_kind,
               MAX(vr.is_primary) AS has_primary,
@@ -44,6 +48,28 @@ export function videoListSelectExtras(videoAlias = 'v'): string {
        GROUP BY vr.kind
        ORDER BY has_primary DESC, first_added ASC, first_id ASC
      )) AS resource_kinds_csv`
+}
+
+export type VideoCardProjectionRow = Omit<VideoCard, 'resource_kinds' | 'has_pending_scrape'> & {
+  resource_kinds_csv: string | null
+  has_pending_scrape: number | boolean
+}
+
+export function videoCardSelect(videoAlias = 'v'): string {
+  return `${videoAlias}.id, ${videoAlias}.code, ${videoAlias}.title, ${videoAlias}.cover_path,
+    ${videoAlias}.scraped_status,
+    EXISTS (SELECT 1 FROM pending_video_scrapes pvs WHERE pvs.video_id = ${videoAlias}.id) AS has_pending_scrape,
+    ${resourceKindsSelect(videoAlias)}`
+}
+
+export function hydrateVideoCardRows(rows: VideoCardProjectionRow[]): VideoCard[] {
+  return rows.map(({ resource_kinds_csv, has_pending_scrape, ...card }) => ({
+    ...card,
+    has_pending_scrape: Boolean(has_pending_scrape),
+    resource_kinds: (resource_kinds_csv?.split(',') ?? []).filter(
+      (kind): kind is VideoResourceKind => VIDEO_RESOURCE_KINDS.has(kind as VideoResourceKind)
+    )
+  }))
 }
 
 export function hydrateVideoListRows(rows: VideoListProjectionRow[]): Video[] {

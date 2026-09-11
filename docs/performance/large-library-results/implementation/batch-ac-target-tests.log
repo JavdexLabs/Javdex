@@ -1,0 +1,43 @@
+▶ tagRepo.pruneUnusedTags
+  ✔ deletes tags with no video links and keeps tags still used by a video (11.603833ms)
+✔ tagRepo.pruneUnusedTags (11.99225ms)
+▶ tagRepo selected labels
+  ✔ looks up only selected IDs through the tag primary key and omits deleted IDs (12.737458ms)
+  ✔ bounds display labels and JSON bytes without changing full stored names (8.839708ms)
+  ✔ rejects invalid or oversized requests and does no SQL work for an empty selection (6.949916ms)
+✔ tagRepo selected labels (28.722625ms)
+▶ tagRepo active catalog projection
+  ✔ matches manual association and visibility semantics before and after statistics maintenance (22.807625ms)
+  ✔ deduplicates shared memberships and preserves manual origin and zero-count tags (6.5775ms)
+  ✔ counts only videos that can be opened through the active visible catalog (6.566708ms)
+✔ tagRepo active catalog projection (36.076333ms)
+✔ bounds selected tag label IPC requests before repository access (1.067083ms)
+▶ typed IPC adapter
+  ✔ does not expose the legacy unreviewed video deletion command (0.148542ms)
+  ✔ forwards command arguments and returns the application result (0.111166ms)
+  ✔ rejects malformed arguments before invoking the application handler (0.168417ms)
+  ✔ accepts link-resource updates without an import-only target (0.835458ms)
+  ✔ only accepts metadata retention when removing a last video resource (0.149334ms)
+  ✔ accepts one exact plugin approval decision and rejects malformed decisions (0.305292ms)
+  ✔ accepts only explicit plugin continuation kinds (0.090292ms)
+  ✔ accepts only typed plugin user responses with request-bound actions (0.376083ms)
+  ✔ accepts plugin history clearing only without renderer-supplied run ids (0.064708ms)
+  ✔ accepts unrecoverable plugin-session discard only without renderer-supplied run ids (0.041625ms)
+  ✔ keeps legacy model limits out of the generic settings mutation contract (0.312667ms)
+  ✔ validates playlist import start and identity controls at the IPC boundary (0.423792ms)
+  ✔ requires the path-removal impact revision at the settings boundary (0.102417ms)
+  ✔ accepts only the structured model-management command vocabulary (0.371333ms)
+  ✔ serializes successful results and thrown errors (0.65675ms)
+  ✔ sends the contracted event payload unchanged (0.046917ms)
+✔ typed IPC adapter (4.473917ms)
+✔ does not fetch empty/inactive selections and resolves only unique selected IDs (7.765584ms)
+✔ ignores responses for previous filters and refreshes on returning from detail (2.355291ms)
+✔ does not loop on a rejected lookup and discards in-flight results after deactivation (1.347792ms)
+ℹ tests 27
+ℹ suites 4
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 318.697459

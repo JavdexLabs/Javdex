@@ -1,0 +1,76 @@
+{
+  "measuredAt": "2026-09-10T08:39:19.125Z",
+  "runtime": {
+    "node": "24.18.1",
+    "acorn": "8.16.0",
+    "ada": "3.4.4",
+    "amaro": "1.1.9",
+    "ares": "1.34.6",
+    "brotli": "1.2.0",
+    "cldr": "48.0",
+    "icu": "78.2",
+    "llhttp": "9.4.3",
+    "merve": "1.2.2",
+    "modules": "148",
+    "napi": "10",
+    "nbytes": "0.1.4",
+    "ncrypto": "0.0.1",
+    "nghttp2": "1.69.0",
+    "nghttp3": "",
+    "ngtcp2": "",
+    "openssl": "0.0.0",
+    "simdjson": "4.6.4",
+    "simdutf": "7.7.0",
+    "sqlite": "3.53.1",
+    "tz": "2025c",
+    "undici": "7.29.0",
+    "unicode": "17.0",
+    "uv": "1.52.1",
+    "uvwasi": "0.0.23",
+    "v8": "15.0.245.28-electron.0",
+    "zlib": "1.3.2.1-motley",
+    "zstd": "1.6.0",
+    "electron": "43.4.1",
+    "chrome": "150.0.7871.224"
+  },
+  "results": [
+    {
+      "files": 1000,
+      "variant": "sync-baseline",
+      "elapsedMs": 31.289459000000022,
+      "firstTimerBeforeFinished": false,
+      "ticks": 2,
+      "maximumTickGapMs": 32.26162499999998
+    },
+    {
+      "files": 1000,
+      "variant": "async-current",
+      "elapsedMs": 22.01291600000002,
+      "firstTimerBeforeFinished": true,
+      "ticks": 5,
+      "maximumTickGapMs": 6.778624999999977
+    },
+    {
+      "files": 10000,
+      "variant": "sync-baseline",
+      "elapsedMs": 318.86341600000003,
+      "firstTimerBeforeFinished": false,
+      "ticks": 2,
+      "maximumTickGapMs": 318.9869580000001
+    },
+    {
+      "files": 10000,
+      "variant": "async-current",
+      "elapsedMs": 239.22083300000008,
+      "firstTimerBeforeFinished": true,
+      "ticks": 45,
+      "maximumTickGapMs": 11.230416999999989
+    }
+  ],
+  "notes": [
+    "One local macOS temporary-directory sample per case. Synthetic small files; OS cache not evicted.",
+    "Sync baseline reproduces the old rmSync call; async current executes PluginWorkspaceModule.remove.",
+    "Timer responsiveness and wall time, not p95, memory, native request-count bounds or Windows/HDD acceptance.",
+    "Synchronous fixture construction is outside the measured interval."
+  ]
+}

@@ -54,14 +54,26 @@ export function parsePendingCenterSearch(params: URLSearchParams): {
   item: PendingItemKey | null
   videoId: number | null
   libraryId: number | null
+  scrapeOffset: number
+  scanOffset: number
+  actressOffset: number
+  queueDomain: PendingDomain | null
 } {
+  const actressOffset = Number(params.get(LIST_PARAM.pendingActressOffset))
+  const scanOffset = Number(params.get(LIST_PARAM.pendingScanOffset))
+  const scrapeOffset = Number(params.get(LIST_PARAM.pendingScrapeOffset))
+  const queueDomain = params.get(LIST_PARAM.pendingQueueDomain)
   const rawType = params.get(LIST_PARAM.pendingType)
   const videoId = Number(params.get(LIST_PARAM.pendingVideoId))
   const libraryId = Number(params.get(LIST_PARAM.pendingLibraryId))
   return {
+    queueDomain: isPendingDomain(queueDomain) ? queueDomain : null,
+    actressOffset: Number.isSafeInteger(actressOffset) && actressOffset >= 0 ? actressOffset : 0,
+    scanOffset: Number.isSafeInteger(scanOffset) && scanOffset >= 0 ? scanOffset : 0,
+    scrapeOffset: Number.isSafeInteger(scrapeOffset) && scrapeOffset >= 0 ? scrapeOffset : 0,
     type: isPendingDomain(rawType) ? rawType : 'all',
     item: parsePendingItemKey(params.get(LIST_PARAM.pendingItem)),
-    videoId: Number.isInteger(videoId) && videoId > 0 ? videoId : null,
+    videoId: Number.isSafeInteger(videoId) && videoId > 0 ? videoId : null,
     libraryId: Number.isSafeInteger(libraryId) && libraryId > 0 ? libraryId : null
   }
 }
@@ -72,6 +84,10 @@ export function pendingCenterPath(
     item?: PendingItemKey | null
     videoId?: number
     libraryId?: number
+    queueDomain?: PendingDomain
+    actressOffset?: number
+    scanOffset?: number
+    scrapeOffset?: number
   } = {}
 ): string {
   const params = new URLSearchParams()
@@ -81,6 +97,16 @@ export function pendingCenterPath(
   if (options.libraryId != null) {
     params.set(LIST_PARAM.pendingLibraryId, String(options.libraryId))
   }
+  if (options.scrapeOffset && Number.isSafeInteger(options.scrapeOffset) && options.scrapeOffset > 0) {
+    params.set(LIST_PARAM.pendingScrapeOffset, String(options.scrapeOffset))
+  }
+  if (options.scanOffset && Number.isSafeInteger(options.scanOffset) && options.scanOffset > 0) {
+    params.set(LIST_PARAM.pendingScanOffset, String(options.scanOffset))
+  }
+  if (options.actressOffset && Number.isSafeInteger(options.actressOffset) && options.actressOffset > 0) {
+    params.set(LIST_PARAM.pendingActressOffset, String(options.actressOffset))
+  }
+  if (options.queueDomain) params.set(LIST_PARAM.pendingQueueDomain, options.queueDomain)
   const query = params.toString()
   return query ? `${ROUTE_PATH.pending}?${query}` : ROUTE_PATH.pending
 }

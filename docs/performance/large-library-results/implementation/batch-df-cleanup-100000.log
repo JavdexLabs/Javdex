@@ -1,0 +1,10 @@
+{"videos":100000,"results":[{"mode":"atomic","sample":0,"durationMs":6486.00925,"maxTimerGapMs":8341.882166000001,"ticksDuringCleanup":0,"auditWrites":100000,"sqliteVersion":{"version":"3.53.4"}},{"mode":"atomic","sample":1,"durationMs":6675.932666999999,"maxTimerGapMs":7781.158250000002,"ticksDuringCleanup":0,"auditWrites":100000,"sqliteVersion":{"version":"3.53.4"}},{"mode":"atomic","sample":2,"durationMs":6435.487000000001,"maxTimerGapMs":7227.411417000003,"ticksDuringCleanup":0,"auditWrites":100000,"sqliteVersion":{"version":"3.53.4"}},{"mode":"cooperative","sample":0,"durationMs":6853.867834000001,"maxTimerGapMs":75.67712499999834,"ticksDuringCleanup":780,"auditWrites":100000,"sqliteVersion":{"version":"3.53.4"}},{"mode":"cooperative","sample":1,"durationMs":7240.195709,"maxTimerGapMs":110.59658399999898,"ticksDuringCleanup":780,"auditWrites":100000,"sqliteVersion":{"version":"3.53.4"}},{"mode":"cooperative","sample":2,"durationMs":7021.412125000003,"maxTimerGapMs":78.81104100000084,"ticksDuringCleanup":780,"auditWrites":100000,"sqliteVersion":{"version":"3.53.4"}}],"platform":"darwin","arch":"arm64","caveats":["Three warm local synthetic samples per mode; real SQLite audit writes and final publication, empty stubbed file scan.","Only resource-less membership stage measured; pending/deferred/FS stages need independent workload measurements.","Timer drain includes terminal synchronous publication. Not Windows/HDD, p95, hard deadline, or crash recovery benchmark."]}
+✔ compares atomic and cooperative membership cleanup including durable audit and finalization (48136.303875ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 48580.039583

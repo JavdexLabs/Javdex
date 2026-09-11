@@ -1,0 +1,225 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.fileDetail = fileDetail;
+exports.fileView = fileView;
+exports.isAttentionFile = isAttentionFile;
+exports.hasNfoPendingTarget = hasNfoPendingTarget;
+exports.resourceView = resourceView;
+exports.pendingItemKey = pendingItemKey;
+exports.buildScanAuditViewItems = buildScanAuditViewItems;
+function fileDetail(entry) {
+    const primary = (() => {
+        switch (entry.outcome) {
+            case 'added':
+                return entry.createdVideo ? '新建影片并添加资源' : '挂载到已有影片';
+            case 'updated':
+                return {
+                    relocated: '路径已重定位',
+                    metadata_refreshed: '文件信息已刷新',
+                    strm_target_synced: 'STRM 目标已同步'
+                }[entry.updateKind];
+            case 'pending':
+                return `${entry.normalizedCode || '番号未知'} · ${entry.sourceKind === 'strm' ? 'STRM' : '本地文件'} · ${entry.addedToQueue ? '已加入待确认队列' : '仍在待确认队列'}`;
+            case 'skipped':
+                return {
+                    unchanged: '未变化',
+                    below_min_duration: '低于最短时长',
+                    duplicate: '重复资源'
+                }[entry.skipReason];
+            case 'unrecognized':
+                return '文件名未识别出番号';
+            case 'strm_failure':
+                return entry.message;
+            case 'processing_failure':
+                return entry.message;
+        }
+    })();
+    if (!entry.nfo)
+        return primary;
+    const nfoLabel = {
+        imported: 'NFO 已导入',
+        skipped: 'NFO 已跳过',
+        warning: 'NFO 警告',
+        'pending-candidate': 'NFO 候选待确认',
+        'identity-conflict': 'NFO 身份冲突'
+    }[entry.nfo.disposition];
+    const warnings = entry.nfo.warnings?.map((warning) => warning.message).join('；');
+    return `${primary} · ${nfoLabel}${warnings ? ` · ${warnings}` : ''}`;
+}
+function fileView(entry, index) {
+    return {
+        key: `file:${index}:${entry.filePath}`,
+        title: entry.filePath.split(/[\\/]/).pop() || entry.filePath,
+        detail: fileDetail(entry),
+        outcome: entry.outcome,
+        path: entry.filePath,
+        rootId: entry.rootId,
+        videoId: 'videoId' in entry ? entry.videoId : undefined,
+        groupId: entry.outcome === 'pending' ? entry.groupId ?? undefined : undefined
+    };
+}
+function isAttentionFile(entry) {
+    return (['unrecognized', 'strm_failure', 'processing_failure'].includes(entry.outcome) ||
+        entry.nfo?.disposition === 'warning' ||
+        entry.nfo?.disposition === 'identity-conflict' ||
+        entry.nfo?.disposition === 'pending-candidate');
+}
+function hasNfoPendingTarget(entry) {
+    if (entry.nfo?.disposition === 'identity-conflict') {
+        return (entry.nfo.pendingIdentityId != null);
+    }
+    if (entry.nfo?.disposition === 'pending-candidate') {
+        return (entry.nfo.pendingScrapeId != null);
+    }
+    return false;
+}
+function resourceView(entry, index) {
+    const reason = {
+        missing: '源文件缺失',
+        removed_library_path: '媒体库路径已移除',
+        promoted_after_removal: '原主资源移除后提升'
+    }[entry.reason];
+    return {
+        key: `resource:${index}:${entry.resourceId}`,
+        title: `${entry.videoCode}${entry.videoTitle ? ` · ${entry.videoTitle}` : ''}`,
+        detail: `${entry.resourceKind.toUpperCase()} · ${reason} · ${entry.displayName || entry.sourcePath || '外部目标已隐藏'}`,
+        path: entry.sourcePath ?? undefined,
+        videoId: entry.videoId
+    };
+}
+function pendingItemKey(domain, id) {
+    return { domain, id: String(id) };
+}
+function buildScanAuditViewItems({ audit: matchedAudit, unrecognized, activeTab, changesFilter, outcome }) {
+    const uniqueUnrecognized = (() => {
+        const seen = new Set();
+        return unrecognized.filter(item => {
+            if (seen.has(item.filePath))
+                return false;
+            seen.add(item.filePath);
+            return true;
+        });
+    })();
+    const cachedUnrecognizedPaths = new Set(unrecognized.map((item) => item.filePath));
+    if (activeTab === 'failed') {
+        const failedFileEntries = matchedAudit?.files.filter(isAttentionFile) ?? [];
+        const fileItems = failedFileEntries.map((entry, index) => {
+            const item = fileView(entry, index);
+            if (entry.outcome === 'unrecognized') {
+                const isPending = cachedUnrecognizedPaths.has(entry.filePath);
+                item.isUnrecognizedPending = isPending;
+                item.status = isPending ? '待处理' : '已处理';
+                item.requiresAttention = isPending;
+            }
+            if (entry.nfo?.disposition === 'identity-conflict' ||
+                entry.nfo?.disposition === 'pending-candidate') {
+                const pending = hasNfoPendingTarget(entry);
+                item.status = pending ? '待处理' : '已处理';
+                item.requiresAttention = pending;
+                if (pending) {
+                    item.pendingTarget =
+                        entry.nfo.disposition === 'identity-conflict'
+                            ? pendingItemKey('scan', `identity-${entry.nfo.pendingIdentityId}`)
+                            : pendingItemKey('scrape', entry.nfo.pendingScrapeId);
+                }
+            }
+            return item;
+        });
+        const groupItems = (matchedAudit?.pendingGroups ?? []).map((entry) => ({
+            key: `pending-group:${entry.groupId}`,
+            title: `待确认归属 · ${entry.normalizedCode}`,
+            detail: `${entry.resourceCount} 个扫描资源`,
+            groupId: entry.groupId,
+            pendingTarget: pendingItemKey('scan', entry.groupId),
+            status: '待处理',
+            requiresAttention: true
+        }));
+        // Unrecognized files that might not be in file list (e.g. persistent across scans)
+        const listedPaths = new Set(failedFileEntries.map((f) => f.filePath));
+        const extraUnrecItems = uniqueUnrecognized
+            .filter(item => !listedPaths.has(item.filePath))
+            .map((item, idx) => ({
+            key: `extra-unrec:${idx}:${item.filePath}`,
+            title: item.filePath.split(/[\\/]/).pop() || item.filePath,
+            detail: '未识别番号文件',
+            outcome: 'unrecognized',
+            path: item.filePath,
+            rootId: item.rootId,
+            isUnrecognizedPending: true,
+            status: '待处理',
+            requiresAttention: true
+        }));
+        return [...extraUnrecItems, ...fileItems, ...groupItems];
+    }
+    if (!matchedAudit)
+        return [];
+    if (activeTab === 'added_updated') {
+        return matchedAudit.files
+            .filter((entry) => entry.outcome === 'added' || entry.outcome === 'updated')
+            .map(fileView);
+    }
+    if (activeTab === 'skipped') {
+        return matchedAudit.files
+            .filter((entry) => entry.outcome === 'skipped')
+            .map(fileView);
+    }
+    if (activeTab === 'changes') {
+        const deletedVideoIds = new Set(matchedAudit.deletedVideos.map((entry) => entry.videoId));
+        const removed = matchedAudit.removedResources.map((entry, index) => {
+            const item = resourceView(entry, index);
+            if (deletedVideoIds.has(entry.videoId))
+                item.videoId = undefined;
+            return item;
+        });
+        const promoted = matchedAudit.promotedResources.map(resourceView);
+        const deleted = matchedAudit.deletedVideos.map((entry, index) => ({
+            key: `deleted:${index}:${entry.videoId}`,
+            title: `${entry.videoCode}${entry.videoTitle ? ` · ${entry.videoTitle}` : ''}`,
+            detail: '扫描后移出的无资源成员'
+        }));
+        if (changesFilter === 'removed')
+            return removed;
+        if (changesFilter === 'promoted')
+            return promoted;
+        if (changesFilter === 'deleted')
+            return deleted;
+        return [...removed, ...promoted, ...deleted];
+    }
+    // Default 'all'
+    let allFiles = matchedAudit.files;
+    if (outcome !== 'all') {
+        allFiles = allFiles.filter((entry) => entry.outcome === outcome);
+    }
+    return allFiles.map((entry, index) => {
+        const item = fileView(entry, index);
+        if (entry.nfo?.disposition === 'identity-conflict' ||
+            entry.nfo?.disposition === 'pending-candidate') {
+            const pending = hasNfoPendingTarget(entry);
+            item.status = pending ? '待处理' : '已处理';
+            item.requiresAttention = pending;
+            if (pending) {
+                item.pendingTarget =
+                    entry.nfo.disposition === 'identity-conflict'
+                        ? pendingItemKey('scan', `identity-${entry.nfo.pendingIdentityId}`)
+                        : pendingItemKey('scrape', entry.nfo.pendingScrapeId);
+            }
+            if (!pending)
+                item.groupId = undefined;
+        }
+        else if (entry.outcome === 'pending') {
+            const pending = entry.groupId != null;
+            item.status = pending ? '待处理' : '已处理';
+            item.requiresAttention = pending;
+            if (pending)
+                item.pendingTarget = pendingItemKey('scan', entry.groupId);
+            if (!pending)
+                item.groupId = undefined;
+        }
+        else if (entry.outcome === 'unrecognized') {
+            const pending = cachedUnrecognizedPaths.has(entry.filePath);
+            item.status = pending ? '待处理' : '已处理';
+            item.requiresAttention = pending;
+        }
+        return item;
+    });
+}

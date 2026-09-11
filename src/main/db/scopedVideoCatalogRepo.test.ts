@@ -70,7 +70,8 @@ function seedLargeScopedCatalog(database: Database.Database, count = 1_000): voi
 function selectStatements(trace: string[]): string[] {
   return trace
     .map((statement) => statement.trim())
-    .filter((statement) => /^(SELECT|WITH)\b/i.test(statement))
+    // Revision reads are constant-cost bookkeeping, counted separately from catalog work.
+    .filter((statement) => /^(SELECT|WITH)\b/i.test(statement) && !statement.includes('AS revision_changes'))
 }
 
 function explainPlan(database: Database.Database, statement: string): string {
@@ -169,7 +170,10 @@ describe('scoped video catalog repo', () => {
       database.prepare("UPDATE media_libraries SET status = 'archived' WHERE id = 2").run()
       const repo = createScopedVideoCatalogRepo(database)
 
-      assert.deepEqual(repo.list({ kind: 'library', libraryId: 2 }), {
+      const archivedPage = repo.list({ kind: 'library', libraryId: 2 })
+      assert.equal(typeof archivedPage.readRevision, 'string')
+      const { readRevision: _readRevision, ...archivedBusiness } = archivedPage
+      assert.deepEqual(archivedBusiness, {
         items: [],
         total: 0
       })
@@ -187,6 +191,49 @@ describe('scoped video catalog repo', () => {
       const repo = createScopedVideoCatalogRepo(database)
       assert.throws(() => repo.list({ kind: 'library', libraryId: 0 }), /正整数/)
       assert.throws(() => repo.list({ kind: 'all', libraryIds: [1, -2] }), /正整数/)
+    } finally {
+      database.close()
+    }
+  })
+
+  it('keeps fixed actor and tag filters unique across shared and hidden memberships', () => {
+    const database = createFixture()
+    try {
+      database.exec(`
+        INSERT INTO actresses (id, main_name) VALUES (1, 'Example');
+        INSERT INTO tags (id, name) VALUES (1, 'One'), (2, 'Two');
+        INSERT INTO video_actress (video_id, actress_id) VALUES (101, 1), (102, 1);
+        INSERT INTO video_tag (video_id, tag_id) VALUES (101, 1), (101, 2), (102, 1);
+      `)
+      const repo = createScopedVideoCatalogRepo(database)
+      const query = { actressId: 1, tagId: 1, tagIds: [1, 2] }
+      assert.equal(repo.list({ kind: 'all' }, query).total, 1)
+      assert.deepEqual(repo.list({ kind: 'all' }, query).items.map(v => v.id), [101])
+      assert.deepEqual(repo.list({ kind: 'all' }, { ...query, offset: 1 }).items, [])
+      database.exec('UPDATE library_video_memberships SET is_hidden = 1 WHERE library_id = 2 AND video_id = 101')
+      assert.equal(repo.list({ kind: 'all' }, query).items[0].preferredLibraryId, 1)
+      database.exec('UPDATE library_video_memberships SET is_hidden = 1 WHERE video_id = 101')
+      assert.equal(repo.list({ kind: 'all' }, query).total, 0)
+    } finally {
+      database.close()
+    }
+  })
+
+  it('normalizes a single active library and serves no-count pages with identical ordering', () => {
+    const trace: string[] = []
+    const database = createFixture(sql => trace.push(sql))
+    try {
+      database.exec("UPDATE media_libraries SET status = 'archived' WHERE id = 1")
+      const repo = createScopedVideoCatalogRepo(database)
+      for (const sortBy of ['add_time', 'code', 'rating', 'release_date'] as const) {
+        for (const sortDir of ['asc', 'desc'] as const) {
+          const query = { sortBy, sortDir, limit: 1, offset: 1 }
+          const expected = repo.list({ kind: 'library', libraryId: 2 }, query)
+          trace.length = 0
+          assert.deepEqual(repo.listPage({ kind: 'all' }, query), expected.items)
+          assert.equal(trace.some(sql => /COUNT\(\*\) AS count|ROW_NUMBER/i.test(sql)), false)
+        }
+      }
     } finally {
       database.close()
     }
@@ -211,7 +258,7 @@ describe('scoped video catalog repo', () => {
       assert.equal(statements.length, 2)
       assert.equal(statements.some((statement) => /ORDER\s+BY\s+RANDOM\s*\(/i.test(statement)), false)
       const pageStatement = statements.find((statement) =>
-        statement.includes('SELECT DISTINCT v.*')
+        statement.includes('WITH page AS MATERIALIZED')
       )
       assert.ok(pageStatement)
       const plan = explainPlan(database, pageStatement)
@@ -221,4 +268,31 @@ describe('scoped video catalog repo', () => {
       database.close()
     }
   })
+})
+
+it('reuses count across pages and sort while isolating scope/filter/page and caller mutations', () => {
+  const trace: string[] = [], database = createFixture(sql => trace.push(sql))
+  try {
+    const repo = createScopedVideoCatalogRepo(database), scope = { kind: 'library' as const, libraryId: 2 }
+    trace.length = 0
+    const first = repo.list(scope, { limit: 1, offset: 0 })
+    const expectedId = first.items[0].id
+    first.items[0].title = 'caller mutation'; first.items[0].libraries.length = 0
+    const second = repo.list(scope, { limit: 1, offset: 1, sortBy: 'code' })
+    assert.equal(second.total, 2)
+    const cached = repo.list(scope, { limit: 1, offset: 0 })
+    assert.equal(cached.items[0].id, expectedId)
+    assert.notEqual(cached.items[0].title, 'caller mutation')
+    assert.ok(cached.items[0].libraries.length)
+    assert.equal(trace.filter(sql => /^\s*SELECT COUNT\(\*\) AS count FROM library_video_memberships/.test(sql)).length, 1)
+    assert.equal(trace.filter(sql => /WITH page AS MATERIALIZED/.test(sql)).length, 2)
+    assert.equal(repo.list({ kind: 'library', libraryId: 1 }).total, 1)
+    assert.equal(repo.list(scope, { year: 2023 }).total, 1)
+    assert.equal(createScopedVideoCatalogRepo(database), repo)
+    database.transaction(() => {
+      database.exec('UPDATE library_video_memberships SET is_hidden=1 WHERE library_id=2 AND video_id=102')
+      assert.equal(repo.list(scope).total, 1)
+    })()
+    assert.equal(repo.list(scope).total, 1)
+  } finally { database.close() }
 })

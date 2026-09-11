@@ -317,7 +317,9 @@ export class AgentExecution {
       settledMs: Math.max(0, Date.now() - startedAt),
       source: 'live'
     })
-    this.store.updateProductState(runId, 'cancelled', active.productState)
+    // A product may persist domain events between runtime projections. Preserve
+    // that newer durable state (including append-only log cursors) when aborting.
+    this.store.updateProductStateFrom(runId, 'cancelled', (current) => current.productState)
   }
 
   async closeRun(runId: string): Promise<void> {

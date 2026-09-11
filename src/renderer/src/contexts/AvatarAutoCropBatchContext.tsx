@@ -1,3 +1,4 @@
+import { appendAvatarLog, type AvatarLogState } from '../avatarAutoCrop/logs'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   createContext,
@@ -10,8 +11,7 @@ import {
   type ReactNode
 } from 'react'
 import { createAvatarCropV1, type ActressAvatarCommit } from '@shared/avatarCrop'
-import type { ActressAvatarAutoCropOutcome, ActressAvatarAutoCropRequest, ActressAvatarAutoCropTarget } from '@shared/actressAvatarCropTypes'
-import type { ActressListItem } from '@shared/actressTypes'
+import type { ActressAvatarAutoCropOutcome, ActressAvatarAutoCropRequest, ActressAvatarAutoCropTarget, ActressAvatarCropTargetPage } from '@shared/actressAvatarCropTypes'
 import type { BatchLogEntry } from '@shared/batchScrapeTypes'
 import { api, assetUrl } from '../api'
 import { createAvatarAnalysisBitmap, loadAvatarAnalysisImage } from '../avatarAutoCrop/image'
@@ -28,7 +28,7 @@ import {
 export type AvatarAutoCropBatchStatus = 'idle' | 'running' | 'cancelling' | 'done'
 export type AvatarAutoCropBatchSource = 'manual'
 
-export interface AvatarAutoCropBatchState {
+export interface AvatarAutoCropBatchState extends AvatarLogState {
   status: AvatarAutoCropBatchStatus
   source: AvatarAutoCropBatchSource | null
   total: number
@@ -38,7 +38,6 @@ export interface AvatarAutoCropBatchState {
   skipped: number
   currentName: string | null
   cancelled: boolean
-  logs: BatchLogEntry[]
 }
 
 interface AvatarAutoCropBatchContextValue {
@@ -58,7 +57,9 @@ const INITIAL_STATE: AvatarAutoCropBatchState = {
   skipped: 0,
   currentName: null,
   cancelled: false,
-  logs: []
+  logs: [],
+  totalLogCount: 0,
+  shortenedLogCount: 0
 }
 
 const Context = createContext<AvatarAutoCropBatchContextValue | null>(null)
@@ -75,13 +76,6 @@ function batchLog(
     message
   }
 }
-
-function avatarTargets(items: ActressListItem[]): ActressAvatarAutoCropTarget[] {
-  return items
-    .filter((item) => Boolean(item.avatar_source_path || item.avatar_path))
-    .map((item) => ({ actressId: item.id, mainName: item.main_name }))
-}
-
 
 async function smartCropAvatar(
   target: ActressAvatarAutoCropTarget,
@@ -140,8 +134,11 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode 
   const toast = useToast()
   const [state, setState] = useState<AvatarAutoCropBatchState>(INITIAL_STATE)
   const pendingRef = useRef<ActressAvatarAutoCropTarget[]>([])
-  const queuedIdsRef = useRef(new Set<number>())
+  const nextAfterIdRef = useRef<number | null>(null)
   const runningRef = useRef(false)
+  const startingRef = useRef(false)
+  const mountedRef = useRef(true)
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
   const scrapeCropRunningRef = useRef(false)
   const batchLockTokenRef = useRef<string | null>(null)
   const cancelRequestedRef = useRef(false)
@@ -154,7 +151,15 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode 
     try {
       settings = await api.settings.get()
       while (!cancelRequestedRef.current) {
-        const target = pendingRef.current.shift()
+        if (pendingRef.current.length === 0 && nextAfterIdRef.current !== null) {
+          const token = batchLockTokenRef.current
+          if (!token) throw new Error('头像任务令牌已失效')
+          const page = await api.avatarAutoCropBatch.targets(token, nextAfterIdRef.current)
+          if (cancelRequestedRef.current) break
+          pendingRef.current = page.items.slice().reverse()
+          nextAfterIdRef.current = page.nextAfterId
+        }
+        const target = pendingRef.current.pop()
         if (!target) break
 
         setState((current) => ({
@@ -170,16 +175,13 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode 
             notifyAvatarAutoCropSaved(target.actressId)
             setState((current) => ({
               ...current,
-              logs: [...current.logs, batchLog(target.mainName, 'success', '智能构图完成')]
+              ...appendAvatarLog(current, batchLog(target.mainName, 'success', '智能构图完成'))
             }))
           } else {
             totalsRef.current.skipped += 1
             setState((current) => ({
               ...current,
-              logs: [
-                ...current.logs,
-                batchLog(target.mainName, 'info', '没有可用的头像原图，已跳过')
-              ]
+              ...appendAvatarLog(current, batchLog(target.mainName, 'info', '没有可用的头像原图，已跳过'))
             }))
           }
         } catch (error) {
@@ -187,11 +189,10 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode 
           totalsRef.current.failed += 1
           setState((current) => ({
             ...current,
-            logs: [...current.logs, batchLog(target.mainName, 'error', errorMessage)]
+            ...appendAvatarLog(current, batchLog(target.mainName, 'error', errorMessage))
           }))
         } finally {
           totalsRef.current.current += 1
-          queuedIdsRef.current.delete(target.actressId)
           setState((current) => ({
             ...current,
             current: totalsRef.current.current,
@@ -202,18 +203,16 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode 
         }
       }
     } catch (error) {
-      const unprocessed = pendingRef.current.length
-      totalsRef.current.failed += unprocessed
-      totalsRef.current.current += unprocessed
+      if (!cancelRequestedRef.current) {
+        const unprocessed = totalsRef.current.total - totalsRef.current.current
+        totalsRef.current.failed += unprocessed
+        totalsRef.current.current += unprocessed
+        setState((current) => ({
+          ...current,
+          ...appendAvatarLog(current, batchLog('-', 'error', `批量构图中断：${(error as Error).message}；${unprocessed} 项未处理，计入失败`))
+        }))
+      }
       pendingRef.current = []
-      queuedIdsRef.current.clear()
-      setState((current) => ({
-        ...current,
-        logs: [
-          ...current.logs,
-          batchLog('-', 'error', `批量构图中断：${(error as Error).message}`)
-        ]
-      }))
     } finally {
       const cancelled = cancelRequestedRef.current
       const batchLockToken = batchLockTokenRef.current
@@ -227,7 +226,7 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode 
         }
       }
       pendingRef.current = []
-      queuedIdsRef.current.clear()
+      nextAfterIdRef.current = null
       runningRef.current = false
       cancelRequestedRef.current = false
       sourceRef.current = null
@@ -241,14 +240,11 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode 
         skipped: totalsRef.current.skipped,
         currentName: null,
         cancelled,
-        logs: [
-          ...current.logs,
-          batchLog(
+        ...appendAvatarLog(current, batchLog(
             '-',
             cancelled ? 'info' : totalsRef.current.failed > 0 ? 'error' : 'success',
             `${cancelled ? '批量构图已停止' : '批量构图已完成'}：成功 ${totalsRef.current.success}，失败 ${totalsRef.current.failed}，跳过 ${totalsRef.current.skipped}`
-          )
-        ]
+          ))
       }))
 
       const result = totalsRef.current
@@ -262,14 +258,15 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode 
   }, [queryClient, toast])
 
   const startQueue = useCallback(
-    (targets: ActressAvatarAutoCropTarget[]): void => {
-      pendingRef.current = targets
-      queuedIdsRef.current = new Set(targets.map((target) => target.actressId))
+    (page: ActressAvatarCropTargetPage): void => {
+      // Only one page is retained; pop preserves the server's processing order.
+      pendingRef.current = page.items.slice().reverse()
+      nextAfterIdRef.current = page.nextAfterId
       runningRef.current = true
       cancelRequestedRef.current = false
       sourceRef.current = 'manual'
       totalsRef.current = {
-        total: targets.length,
+        total: page.total,
         current: 0,
         success: 0,
         failed: 0,
@@ -278,20 +275,18 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode 
       setState({
         status: 'running',
         source: 'manual',
-        total: targets.length,
+        total: page.total,
         current: 0,
         success: 0,
         failed: 0,
         skipped: 0,
         currentName: null,
         cancelled: false,
-        logs: [
-          batchLog(
+        ...appendAvatarLog(INITIAL_STATE, batchLog(
             '-',
             'info',
-            `开始批量智能构图，共 ${targets.length} 张头像`
-          )
-        ]
+            `开始批量智能构图，共 ${page.total} 张头像`
+          ))
       })
       void drainQueue()
     },
@@ -300,7 +295,7 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode 
 
   const cropScrapedAvatar = useCallback(
     async (request: ActressAvatarAutoCropRequest): Promise<ActressAvatarAutoCropOutcome> => {
-      if (runningRef.current) {
+      if (runningRef.current || startingRef.current) {
         return { status: 'failed', message: '正在执行“构图全部头像”，请稍后重试' }
       }
       if (scrapeCropRunningRef.current) {
@@ -335,6 +330,12 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode 
 
   useEffect(
     () => () => {
+      if (runningRef.current) {
+        cancelRequestedRef.current = true
+        pendingRef.current = []
+        // The in-flight operation owns the lock until drainQueue finally settles.
+        return
+      }
       const batchLockToken = batchLockTokenRef.current
       if (!batchLockToken) return
       batchLockTokenRef.current = null
@@ -343,31 +344,36 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode 
     []
   )
 
-  const listAllAvatarTargets = useCallback(async (): Promise<ActressAvatarAutoCropTarget[]> => {
-    return avatarTargets(await api.actresses.list(undefined, 'all'))
+  const countAllAvatars = useCallback(async (): Promise<number> => {
+    return api.actresses.countAvatarCropTargets()
   }, [])
 
-  const countAllAvatars = useCallback(async (): Promise<number> => {
-    return (await listAllAvatarTargets()).length
-  }, [listAllAvatarTargets])
-
   const startAllAvatars = useCallback(async (): Promise<number> => {
-    if (runningRef.current) throw new Error('已有头像智能构图任务正在进行')
+    if (runningRef.current || startingRef.current) throw new Error('已有头像智能构图任务正在进行')
     if (scrapeCropRunningRef.current) throw new Error('请等待当前演员头像智能构图完成')
-    const targets = await listAllAvatarTargets()
-    if (targets.length === 0) return 0
-
-    const batchLockToken = await api.avatarAutoCropBatch.begin()
-    batchLockTokenRef.current = batchLockToken
+    startingRef.current = true
+    let token: string | null = null
+    let handedOff = false
     try {
-      startQueue(targets)
-    } catch (error) {
-      batchLockTokenRef.current = null
-      await api.avatarAutoCropBatch.end(batchLockToken).catch(() => undefined)
-      throw error
+      token = await api.avatarAutoCropBatch.begin()
+      if (!mountedRef.current) {
+        await api.avatarAutoCropBatch.end(token)
+        return 0
+      }
+      batchLockTokenRef.current = token
+      const page = await api.avatarAutoCropBatch.targets(token, 0)
+      if (!mountedRef.current || page.total === 0) return 0
+      startQueue(page)
+      handedOff = true
+      return page.total
+    } finally {
+      startingRef.current = false
+      if (!handedOff && token && batchLockTokenRef.current === token) {
+        batchLockTokenRef.current = null
+        await api.avatarAutoCropBatch.end(token)
+      }
     }
-    return targets.length
-  }, [listAllAvatarTargets, startQueue])
+  }, [startQueue])
 
   const cancel = useCallback((): void => {
     if (!runningRef.current || sourceRef.current !== 'manual') return
@@ -376,7 +382,7 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode 
     setState((current) => ({
       ...current,
       status: 'cancelling',
-      logs: [...current.logs, batchLog('-', 'info', '已请求停止，将在当前头像处理完成后结束')]
+      ...appendAvatarLog(current, batchLog('-', 'info', '已请求停止，将在当前头像处理完成后结束'))
     }))
   }, [])
 

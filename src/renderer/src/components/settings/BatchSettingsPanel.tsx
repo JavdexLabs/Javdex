@@ -16,6 +16,7 @@ export default function BatchSettingsPanel({
   resumeDisabledReason = null,
   logRef,
   emptyLog,
+  logNotice,
   skipped,
   customControls,
   pendingGroupCount = 0,
@@ -32,6 +33,7 @@ export default function BatchSettingsPanel({
   resumeDisabledReason?: string | null
   logRef: RefObject<HTMLDivElement>
   emptyLog: string
+  logNotice?: string
   skipped?: number
   customControls?: ReactNode
   pendingGroupCount?: number
@@ -158,6 +160,7 @@ export default function BatchSettingsPanel({
           <span>执行日志</span>
           <small>{batch?.logs.length ?? 0} 条</small>
         </div>
+        {logNotice ? <div className="batch-log-head"><small>{logNotice}</small></div> : null}
         {batch?.logs.length ? (
           <div className="log-box log-box--batch copyable-text" ref={logRef}>
             {batch.logs.map((line, index) => (

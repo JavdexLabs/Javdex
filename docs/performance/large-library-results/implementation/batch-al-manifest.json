@@ -1,0 +1,27 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-al-benchmark.json": "fd161f8ccc618f6964bf1622290095ff5934e4c663030f9c702e7a7faa0a443a",
+    "batch-al-benchmark.log": "2bb20669f8ccce0405c2b35bbc25c33be9c0054f15299f2ce32a8790924cf867",
+    "batch-al-browser.log": "d91a0cc0db064c94e981fc8675f31636658a9c7416c22978c56ebfe3857c349e",
+    "batch-al-build.log": "645da32ef83fc57959cc976d71ab3d3aef1e71a707473cc45f7b6aa95865614e",
+    "batch-al-full.log": "ce0c00f302b107aff3f2a783a614e666e3428f04d9b7afdfe7d2037cd67f1689",
+    "batch-al-pending-summary.patch": "74dd3983e68d00c682c44df9354351179a127b10db118bac6e87eba8632b4ee9",
+    "batch-al-resolution.log": "8396c33389a84039afec534deb1980732f49f62a31fed9da6353a240de4a303b",
+    "batch-al-review.md": "5394dd9a9e60d2cebec0ffe1dd4e383ae649c75fc2034a234f91c8888dbe9d81",
+    "batch-al-target.log": "faa3f572ab801956b593bc2322036a90e356a6f559971c83efe7177c0a4f636a",
+    "batch-al-ui-1000x640.png": "a4952ffb60419eec8972ca04521e96c9cdbe6af83bccb249e269c2a3d97bd443",
+    "batch-al-ui-1440x900.png": "66d39e84025a4a8caddb908cccb2ff5f0f706a61d52cbcfdff3923ddbc97143a",
+    "batch-al-ui-results.json": "97516c3193ce5325ea5d1aae629bb06242d66482ec21673050435012cdcf2572"
+  },
+  "notes": [
+    "Cumulative selected tracked diff vs HEAD plus full untracked tests/scripts, depends on B-AK; not standalone.",
+    "68 final targeted tests pass. Final full2194pass1skip0fail and build pass after production fixes.",
+    "Actual React page and Chrome1000x640/1440x900 with synthetic IPC; not complete native application or all keyboard flows.",
+    "Benchmark10k entries, one source/candidate and4KiB summary each, after ANALYZE, three warm sequential samples. Repo-only timing excludes serialization/assertions; JSON-equivalent bytes not actual IPC allocations.",
+    "First50 summary equality; deep page checks rank and membership; detail checks identity and summary length. RSS after old full hydration cannot identify new-stage memory or peaks.",
+    "Per-page metadata bounded, candidate count/JSON extraction/rank/OFFSET SQL work not constant. Canonicalization still causes extra summary-page query, but only one detail per selected page in browser fixture.",
+    "MediaLibrarySettings retains old full pending lookup for audit references. Scan/actress full queues, events, backend isolation and complete15/42 plan remain.",
+    "No schema change(current17), user DB, commit, push or release."
+  ]
+}

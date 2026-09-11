@@ -1,0 +1,46 @@
+✖ catalog entrypoints must stop executing catalog SELECTs on the main connection (53.095291ms)
+ℹ {"existing-native-worker":0,"desktop-list-count":3,"desktop-years":1,"desktop-home-IPC":7,"desktop-search-IPC":3,"web-browse-search":2,"web-home":7,"web-collections":2}
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 396.3785
+
+✖ failing tests:
+
+test at ../../../../../private/tmp/javdex-catalog-entrypoint-worker-red.test.ts:2:2131
+✖ catalog entrypoints must stop executing catalog SELECTs on the main connection (53.095291ms)
+  AssertionError [ERR_ASSERTION]: Current entrypoints still run catalog SQL on the main connection; worker migration required
+  + actual - expected
+  
+    {
+  +   'desktop-home-IPC': 7,
+  +   'desktop-list-count': 3,
+  +   'desktop-search-IPC': 3,
+  +   'desktop-years': 1,
+  -   'desktop-home-IPC': 0,
+  -   'desktop-list-count': 0,
+  -   'desktop-search-IPC': 0,
+  -   'desktop-years': 0,
+      'existing-native-worker': 0,
+  +   'web-browse-search': 2,
+  +   'web-collections': 2,
+  +   'web-home': 7
+  -   'web-browse-search': 0,
+  -   'web-collections': 0,
+  -   'web-home': 0
+    }
+  
+      at TestContext.<anonymous> (/private/tmp/javdex-catalog-entrypoint-worker-red.test.ts:67:12)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: { 'existing-native-worker': 0, 'desktop-list-count': 3, 'desktop-years': 1, 'desktop-home-IPC': 7, 'desktop-search-IPC': 3, 'web-browse-search': 2, 'web-home': 7, 'web-collections': 2 },
+    expected: { 'existing-native-worker': 0, 'desktop-list-count': 0, 'desktop-years': 0, 'desktop-home-IPC': 0, 'desktop-search-IPC': 0, 'web-browse-search': 0, 'web-home': 0, 'web-collections': 0 },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

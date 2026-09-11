@@ -1,5 +1,6 @@
 import { IPC } from './ipc-channels'
 import type {
+  ActressAvatarCropTargetPage,
   ActressAvatarAutoCropRequest,
   ActressAvatarAutoCropResponse
 } from './actressAvatarCropTypes'
@@ -27,6 +28,8 @@ import type {
 } from './videoScrapeTypes'
 import type {
   PendingVideoScrape,
+  PendingVideoScrapePage,
+  PendingVideoScrapePageQuery,
   PendingVideoScrapeConfirmInput,
   PendingVideoScrapeResolutionResult
 } from './videoScrapeTypes'
@@ -57,6 +60,10 @@ export interface ScrapeIpcContract {
     ]
     result: VideoScrapeOneResult
   }
+  [IPC.PENDING_VIDEO_SCRAPE_COUNT]: { args: []; result: number }
+  [IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS]: { args: [ids: number[]]; result: number[] }
+  [IPC.PENDING_VIDEO_SCRAPE_PAGE]: { args: [query: PendingVideoScrapePageQuery]; result: PendingVideoScrapePage }
+  [IPC.PENDING_VIDEO_SCRAPE_GET]: { args: [id: number]; result: PendingVideoScrape | null }
   [IPC.PENDING_VIDEO_SCRAPE_LIST]: { args: []; result: PendingVideoScrape[] }
   [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: {
     args: [input: PendingVideoScrapeConfirmInput]
@@ -82,6 +89,7 @@ export interface ScrapeIpcContract {
   [IPC.BATCH_SCRAPE_RESUME]: { args: []; result: boolean }
   [IPC.BATCH_SCRAPE_DISCARD]: { args: []; result: boolean }
   [IPC.AVATAR_AUTO_CROP_BATCH_BEGIN]: { args: []; result: string }
+  [IPC.AVATAR_AUTO_CROP_BATCH_TARGETS]: { args: [token: string, afterId: number]; result: ActressAvatarCropTargetPage }
   [IPC.AVATAR_AUTO_CROP_BATCH_END]: { args: [token: string]; result: boolean }
   [IPC.SCRAPER_LIST]: { args: []; result: string[] }
   [IPC.SCRAPER_PLUGIN_DETAILS]: { args: []; result: ScraperPluginDescriptor[] }

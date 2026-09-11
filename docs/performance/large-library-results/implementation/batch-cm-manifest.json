@@ -1,0 +1,15 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cm-build.log": "729ce3d9d818da98ac544f023139e7fe9e564aa82cb2e7d52d7a35e2c677b2e0",
+    "batch-cm-dual-audit-read.patch": "2b065e6890459bf986457d05783ab49e3bc0a526c51f478341b18fb1a0acb5ec",
+    "batch-cm-full.log": "f52b48620cdf2bd79bde0df1a05e7ba18fd687b46cd08e4240ba8d895ea13961",
+    "batch-cm-review.md": "dfa3b8b73530be4c8a19ea471e41d7dc3cacce902dc00b3288f551b08eef325e",
+    "batch-cm-target.log": "523f462f5e8397716c0ef67eea81fa8bd762860115bd09d3ea0c149cffc10608"
+  },
+  "notes": [
+    "Selected cumulative patch depends on earlier batches incl. schema18.",
+    "84 focused; full2540pass1skip0fail; build terminal0.",
+    "Dual reads wired; streaming production writer not active; full15/42 incomplete."
+  ]
+}

@@ -1,0 +1,30 @@
+[stage:start] database.init
+[stage:end] {"stage":"database.init","ms":7.268332999999984}
+[stage:start] fixture
+[stage:end] {"stage":"fixture","ms":31.29495800000001}
+[stage:start] analyze
+[stage:end] {"stage":"analyze","ms":2.2097909999999956}
+[stage:start] maintenance.cold
+[stage:end] {"stage":"maintenance.cold","ms":32.13483400000001}
+[stage:start] maintenance.warm
+[stage:end] {"stage":"maintenance.warm","ms":0.9760000000000559}
+[stage:start] page.first
+[stage:end] {"stage":"page.first","ms":5.802041999999972}
+[stage:start] detail.selected
+[stage:end] {"stage":"detail.selected","ms":167.62662500000005}
+[stage:start] legacy.no-field-plans
+✖ scripts/performance/actress-conflict-stage-probe.ts (57594.881083ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 57599.490792
+
+✖ failing tests:
+
+test at scripts/performance/actress-conflict-stage-probe.ts:1:1
+✖ scripts/performance/actress-conflict-stage-probe.ts (57594.881083ms)
+  'test failed'

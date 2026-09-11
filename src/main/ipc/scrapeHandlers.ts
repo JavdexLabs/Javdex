@@ -87,6 +87,12 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
   )
 
   registerScrapeHandler(IPC.SCRAPE_ONE, (...args) => jobs.scrapeOneVideo(...args))
+  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_COUNT, () =>
+    jobs.countPendingVideoScrapes()
+  )
+  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS, (ids) => jobs.existingPendingVideoScrapeIds(ids))
+  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_PAGE, (query) => jobs.pagePendingVideoScrapes(query))
+  registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_GET, (id) => jobs.getPendingVideoScrape(id))
   registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_LIST, () =>
     jobs.listPendingVideoScrapes()
   )
@@ -125,6 +131,7 @@ export function registerScrapeHandlers(ctx: IpcContext): void {
   registerScrapeHandler(IPC.BATCH_SCRAPE_RESUME, () => jobs.resumeActiveBatch())
   registerScrapeHandler(IPC.BATCH_SCRAPE_DISCARD, () => jobs.discardActiveBatch())
   registerScrapeHandler(IPC.AVATAR_AUTO_CROP_BATCH_BEGIN, () => jobs.beginAvatarAutoCropBatch())
+  registerScrapeHandler(IPC.AVATAR_AUTO_CROP_BATCH_TARGETS, (token, afterId) => jobs.pageAvatarAutoCropTargets(token, afterId))
   registerScrapeHandler(IPC.AVATAR_AUTO_CROP_BATCH_END, (token) =>
     jobs.endAvatarAutoCropBatch(token)
   )

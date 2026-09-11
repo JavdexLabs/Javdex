@@ -1,0 +1,1051 @@
+diff --git a/src/main/services/classificationImagePage.ts b/src/main/services/classificationImagePage.ts
+new file mode 100644
+index 0000000..c00cce8
+--- /dev/null
++++ b/src/main/services/classificationImagePage.ts
+@@ -0,0 +1,25 @@
++import type { ClassificationEntityRef, ClassificationImageCandidate, ClassificationListPage, ClassificationPageQuery } from '@shared/classificationTypes'
++import { getDb } from '../db/database'
++
++/** Preserve the original all-video cover eligibility and date ordering. */
++export function listClassificationImagePage(entity: ClassificationEntityRef, query: ClassificationPageQuery = {}): ClassificationListPage<ClassificationImageCandidate> {
++  if (!Number.isSafeInteger(entity.id) || entity.id <= 0) throw new Error('分类实体参数无效')
++  const limit = query.limit ?? 60, offset = query.offset ?? 0
++  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('Invalid image candidate page limit')
++  if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid image candidate page offset')
++  const predicate = entity.kind === 'organization' ? '(v.maker_organization_id = ? OR v.publisher_organization_id = ?)'
++    : entity.kind === 'director' ? 'v.director_id = ?' : entity.kind === 'series' ? 'v.series_id = ?' : null
++  if (!predicate) throw new Error('分类实体参数无效')
++  const parameters = entity.kind === 'organization' ? [entity.id,entity.id] : [entity.id]
++  const where = `${predicate} AND v.cover_path IS NOT NULL AND trim(v.cover_path) != ''`
++  const db = getDb()
++  return db.transaction(() => {
++    const total = (db.prepare(`SELECT COUNT(*) AS n FROM videos v WHERE ${where}`).get(...parameters) as {n:number}).n
++    const items = db.prepare(`SELECT v.id AS videoId, v.code, v.title, v.cover_path AS coverPath
++      FROM videos v WHERE ${where}
++      ORDER BY (v.release_date IS NULL OR trim(v.release_date) = '') ASC,
++        v.release_date DESC, v.add_time DESC, v.id DESC LIMIT ? OFFSET ?`)
++      .all(...parameters,limit,offset) as ClassificationImageCandidate[]
++    return {items,total,limit,offset}
++  })()
++}
+diff --git a/src/main/services/classificationImagePage.test.ts b/src/main/services/classificationImagePage.test.ts
+new file mode 100644
+index 0000000..fd2feb5
+--- /dev/null
++++ b/src/main/services/classificationImagePage.test.ts
+@@ -0,0 +1,39 @@
++import assert from 'node:assert/strict'
++import {beforeEach,afterEach,it} from 'node:test'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import Database from 'better-sqlite3'
++import {getDb,initDatabaseAtPath,closeDatabase} from '../db/database'
++import {classificationQueryService as read} from './classificationQueryService'
++import {appIpcSchemas} from '../ipc/ipcCommandSchemas'
++import {IPC} from '@shared/ipc-channels'
++let root:string
++beforeEach(()=>{root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-image-page-'));initDatabaseAtPath(path.join(root,'catalog.db'));getDb().exec("INSERT INTO organizations(id,main_name) VALUES(1,'Org');INSERT INTO directors(id,main_name) VALUES(1,'Director');INSERT INTO series(id,main_name) VALUES(1,'Series')")})
++afterEach(()=>{closeDatabase();fs.rmSync(root,{recursive:true,force:true})})
++it('matches all candidate fields/order and deduplicates dual-role organization links before LIMIT',()=>{
++ const db=getDb(),paths=[null,'',' ','\t','\0tail',' cover.jpg ','cover.jpg'],dates=[null,'',' ','2024-01-01','2020-01-01']
++ let n=0
++ const insert=db.prepare('INSERT INTO videos(code,title,cover_path,release_date,add_time,maker_organization_id,publisher_organization_id,director_id,series_id) VALUES(?,?,?,?,?,?,?,?,?)')
++ for(let repeat=0;repeat<5;repeat++)for(const cover of paths)for(const date of dates){n++;insert.run(`CODE-${n}`,`Title-${n}`,cover,date,n%2?'2021-01-01':'2020-01-01',n%3?1:null,n%2?1:null,1,1)}
++ for(const kind of ['organization','director','series'] as const){const entity={kind,id:1},expected=read.listImageCandidates(entity),actual=[]
++  for(let offset=0;offset<=expected.length;offset+=60){const page=read.listImageCandidatesPage(entity,{offset});assert.equal(page.total,expected.length);assert.ok(page.items.length<=60);actual.push(...page.items)}
++  assert.deepEqual(actual,expected)
++  assert.equal(new Set(actual.map(item=>item.videoId)).size,actual.length)
++  assert.equal(read.listImageCandidatesPage({kind,id:999}).total,0)
++ }
++})
++it('holds count and candidate rows in the same snapshot across a cover removal',()=>{
++ const db=getDb();db.exec("INSERT INTO videos(code,cover_path,director_id) VALUES('ONE','one.jpg',1)")
++ const other=new Database(path.join(root,'catalog.db')),prepare=db.prepare.bind(db);let fired=false
++ db.prepare=((sql:string)=>{const stmt=prepare(sql);if(sql.startsWith('SELECT COUNT(*) AS n FROM videos')){const get=stmt.get.bind(stmt);stmt.get=((...args:unknown[])=>{const result=get(...args);if(!fired){fired=true;other.exec('UPDATE videos SET cover_path=NULL')}return result}) as typeof stmt.get}return stmt}) as typeof db.prepare
++ try {const page=read.listImageCandidatesPage({kind:'director',id:1});assert.equal(page.total,1);assert.equal(page.items[0].coverPath,'one.jpg');assert.equal(read.listImageCandidatesPage({kind:'director',id:1}).total,0)}finally{db.prepare=prepare;other.close()}
++})
++it('rejects unsafe entity IDs, unsupported page flags and excessive pages',()=>{
++ const schema=appIpcSchemas[IPC.CLASSIFICATION_IMAGE_PAGE],entity={kind:'series' as const,id:1}
++ assert.equal(schema.safeParse([entity]).success,true)
++ assert.deepEqual(read.listImageCandidatesPage(entity),{items:[],total:0,limit:60,offset:0})
++ for(const id of [0,-1,1.5,Infinity,Number.MAX_SAFE_INTEGER+1]){assert.throws(()=>read.listImageCandidatesPage({...entity,id}));assert.equal(schema.safeParse([{...entity,id}]).success,false)}
++ for(const q of [{limit:0},{limit:101},{offset:-1},{offset:0.5},{offset:Number.MAX_SAFE_INTEGER+1}]){assert.throws(()=>read.listImageCandidatesPage(entity,q));assert.equal(schema.safeParse([entity,q]).success,false)}
++ assert.equal(schema.safeParse([entity,{sort:'code'}]).success,false)
++})
+diff --git a/src/main/services/classificationQueryService.ts b/src/main/services/classificationQueryService.ts
+index f3af6fc..1eac662 100644
+--- a/src/main/services/classificationQueryService.ts
++++ b/src/main/services/classificationQueryService.ts
+@@ -1,3 +1,5 @@
++import { listClassificationImagePage } from './classificationImagePage'
++import { listOrganizationPage, listSeriesPage, listDirectorPage } from './classificationListPage'
+ import type {
+   ClassificationEntityRef,
+   ClassificationImageCandidate,
+@@ -42,6 +44,10 @@ function searchLikePattern(search: string | undefined): string {
+ }
+ 
+ export interface ClassificationQueryService {
++  listImageCandidatesPage: typeof listClassificationImagePage
++  listDirectorsPage: typeof listDirectorPage
++  listOrganizationsPage: typeof listOrganizationPage
++  listSeriesPage: typeof listSeriesPage
+   listImageCandidates(entity: ClassificationEntityRef): ClassificationImageCandidate[]
+   listOrganizations(query: OrganizationListQuery): OrganizationListItem[]
+   getOrganization(id: number, role: OrganizationRole): OrganizationDetail | null
+@@ -56,6 +62,10 @@ export interface ClassificationQueryService {
+ }
+ 
+ export const classificationQueryService: ClassificationQueryService = {
++  listImageCandidatesPage: listClassificationImagePage,
++  listDirectorsPage: listDirectorPage,
++  listOrganizationsPage: listOrganizationPage,
++  listSeriesPage,
+   listImageCandidates(entity): ClassificationImageCandidate[] {
+     if (!Number.isInteger(entity.id) || entity.id <= 0) throw new Error('分类实体参数无效')
+     const predicate =
+diff --git a/src/main/ipc/facetHandlers.ts b/src/main/ipc/facetHandlers.ts
+index 2378b30..189e338 100644
+--- a/src/main/ipc/facetHandlers.ts
++++ b/src/main/ipc/facetHandlers.ts
+@@ -1,6 +1,7 @@
+ import { IPC } from '@shared/ipc-channels'
+ import { appCommandAdapter } from './appContractAdapter'
+ import { tagQueryService } from '../services/tagQueryService'
++import { catalogReadService } from '../services/catalogReadService'
+ import { classificationQueryService } from '../services/classificationQueryService'
+ import { classificationMaintenanceService } from '../services/classificationMaintenanceService'
+ import { classificationImageService } from '../services/classificationImageService'
+@@ -34,6 +35,8 @@ export function registerClassificationHandlers(
+     seriesMergeService
+   }
+ ): void {
++  adapter.register(IPC.ORGANIZATION_PAGE, (query) => dependencies.queryService.listOrganizationsPage(query))
++  adapter.register(IPC.SERIES_PAGE, (query) => dependencies.queryService.listSeriesPage(query))
+   adapter.register(IPC.ORGANIZATION_LIST, (query) =>
+     dependencies.queryService.listOrganizations(query)
+   )
+@@ -67,6 +70,7 @@ export function registerClassificationHandlers(
+   adapter.register(IPC.ORGANIZATION_DELETE, (id) =>
+     dependencies.organizationDeletionService.deleteOrganization(id)
+   )
++  adapter.register(IPC.DIRECTOR_PAGE, (query) => dependencies.queryService.listDirectorsPage(query))
+   adapter.register(IPC.DIRECTOR_LIST, (query) => dependencies.queryService.listDirectors(query))
+   adapter.register(IPC.DIRECTOR_GET, (id) => dependencies.queryService.getDirector(id))
+   adapter.register(IPC.DIRECTOR_OPTIONS, (search) =>
+@@ -97,6 +101,7 @@ export function registerClassificationHandlers(
+     dependencies.deletionService.previewSeries(id)
+   )
+   adapter.register(IPC.SERIES_DELETE, (id) => dependencies.deletionService.deleteSeries(id))
++  adapter.register(IPC.CLASSIFICATION_IMAGE_PAGE, (entity, query) => dependencies.queryService.listImageCandidatesPage(entity, query))
+   adapter.register(IPC.CLASSIFICATION_IMAGE_CANDIDATES, (entity) =>
+     dependencies.queryService.listImageCandidates(entity)
+   )
+@@ -106,6 +111,9 @@ export function registerClassificationHandlers(
+ }
+ 
+ export function registerFacetHandlers(): void {
++  appCommandAdapter.register(IPC.TAG_LABELS, (ids) => tagQueryService.labels(ids))
++  appCommandAdapter.register(IPC.TAG_FILTER_OPTIONS, (query) => catalogReadService.read(query))
++  appCommandAdapter.register(IPC.TAG_MANUAL_OPTIONS, (query) => tagQueryService.manualOptions(query))
+   appCommandAdapter.register(
+     IPC.TAG_LIST,
+     (): Array<{ id: number; name: string; video_count: number }> => tagQueryService.list()
+diff --git a/src/main/ipc/facetHandlers.test.ts b/src/main/ipc/facetHandlers.test.ts
+index 95ac8bd..a8d9f38 100644
+--- a/src/main/ipc/facetHandlers.test.ts
++++ b/src/main/ipc/facetHandlers.test.ts
+@@ -17,6 +17,10 @@ describe('classification IPC contract', () => {
+   it('registers every command and forwards typed arguments to the public services', async () => {
+     const calls: unknown[] = []
+     const queryService: ClassificationQueryService = {
++      listImageCandidatesPage: (entity,query) => {calls.push(['image-page',entity,query]);return {items:[],total:0,limit:60,offset:query?.offset ?? 0}},
++      listDirectorsPage: query => { calls.push(['director-page',query]);return {items:[],total:0,limit:60,offset:query.offset ?? 0} },
++      listOrganizationsPage: query => { calls.push(['organization-page',query]);return {items:[],total:0,limit:60,offset:query.offset ?? 0} },
++      listSeriesPage: query => { calls.push(['series-page',query]);return {items:[],total:0,limit:60,offset:query.offset ?? 0} },
+       listImageCandidates(entity) {
+         calls.push(['image-candidates', entity])
+         return []
+@@ -355,5 +359,15 @@ describe('classification IPC contract', () => {
+       ['image-candidates', imageEntity],
+       ['image-set', imageEntity, imageInput]
+     ])
++    const organizationPage = { ...listQuery, limit:60, offset:120 }
++    const seriesPage = { ...seriesQuery, limit:60, offset:60 }
++    assert.deepEqual(handlers.get(IPC.ORGANIZATION_PAGE)?.(organizationPage), {items:[],total:0,limit:60,offset:120})
++    assert.deepEqual(handlers.get(IPC.SERIES_PAGE)?.(seriesPage), {items:[],total:0,limit:60,offset:60})
++    assert.deepEqual(calls.slice(-2), [['organization-page',organizationPage],['series-page',seriesPage]])
++    const directorPage = { ...directorQuery, limit:60, offset:120 }
++    assert.deepEqual(handlers.get(IPC.DIRECTOR_PAGE)?.(directorPage), {items:[],total:0,limit:60,offset:120})
++    assert.deepEqual(calls.at(-1), ['director-page',directorPage])
++    assert.deepEqual(handlers.get(IPC.CLASSIFICATION_IMAGE_PAGE)?.(imageEntity,{offset:60}),{items:[],total:0,limit:60,offset:60})
++    assert.deepEqual(calls.at(-1),['image-page',imageEntity,{offset:60}])
+   })
+ })
+diff --git a/src/main/ipc/ipcCommandSchemas.ts b/src/main/ipc/ipcCommandSchemas.ts
+index db0e4ed..bf3dd02 100644
+--- a/src/main/ipc/ipcCommandSchemas.ts
++++ b/src/main/ipc/ipcCommandSchemas.ts
+@@ -22,6 +22,13 @@ const record = z.record(z.string(), z.unknown())
+ const object = z.object({}).passthrough()
+ const noArgs = z.tuple([])
+ const sortDirection = z.enum(['asc', 'desc'])
++const playlistPageQuery = z.object({
++    sortBy: z.enum(['added_at', 'release_date']).optional(),
++    sortDir: sortDirection.optional(),
++    resourceKinds: z.array(z.enum(['local', 'direct', 'web', 'magnet', 'ed2k', 'none'])).max(6).optional(),
++    limit: z.number().int().min(1).max(200).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict()
+ const organizationRole = z.enum(['maker', 'publisher'])
+ const pluginKind = z.enum(['video', 'actress'])
+ const scrapeFields = z.array(text)
+@@ -365,6 +372,14 @@ const pluginPackage = z
+   })
+   .strict()
+ 
++const classificationPageQuery = z.object({
++  search: z.string().optional(),
++  sortBy: z.enum(['video_count', 'updated_at']).optional(),
++  sortDir: z.enum(['asc','desc']).optional(),
++  limit: z.number().int().min(1).max(100).optional(),
++  offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++}).strict()
++
+ export const videoIpcSchemas = {
+   [IPC.VIDEO_LIST]: z.tuple([catalogScope, videoQueryIpcSchema.optional()]),
+   [IPC.VIDEO_GET]: z.tuple([catalogScope, positiveSafeInteger]),
+@@ -379,6 +394,7 @@ export const videoIpcSchemas = {
+   [IPC.VIDEO_SAMPLE_DELETE]: z.tuple([id, id]),
+   [IPC.VIDEO_POSTER_SET]: z.tuple([id, nullableText]),
+   [IPC.VIDEO_MANUAL_TAG_ADD]: z.tuple([id, nonEmptyText]),
++  [IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]: z.tuple([positiveSafeInteger, positiveSafeInteger]),
+   [IPC.VIDEO_MANUAL_TAG_REMOVE]: z.tuple([id, id]),
+   [IPC.VIDEO_RESOURCE_IMPORT]: z.tuple([videoLinkImport]),
+   [IPC.VIDEO_RESOURCE_GET]: z.tuple([id, id, id]),
+@@ -423,6 +439,26 @@ export const videoIpcSchemas = {
+ } satisfies IpcArgsSchemaMap<VideoIpcContract>
+ 
+ export const actressIpcSchemas = {
++  [IPC.ACTRESS_MERGE_CANDIDATES]: z.tuple([z.object({
++    keepId: positiveSafeInteger,
++    search: z.string().max(256).optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict()]),
++  [IPC.ACTRESS_AVATAR_CROP_TARGETS]: z.tuple([]),
++  [IPC.ACTRESS_AVATAR_CROP_COUNT]: z.tuple([]),
++  [IPC.ACTRESS_TEST_TARGET_GET]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_TEST_TARGET_PAGE]: z.tuple([z.object({
++    search: z.string().max(256).optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
++  [IPC.ACTRESS_PICKER_GET]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_PICKER_PAGE]: z.tuple([z.object({
++    search: z.string().max(256).optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
+   [IPC.ACTRESS_LIST]: z.tuple([
+     optionalText,
+     z.enum(['female', 'male', 'all']).optional(),
+@@ -431,6 +467,19 @@ export const actressIpcSchemas = {
+   ]),
+   [IPC.ACTRESS_LIST_PAGE]: z.tuple([object.optional()]),
+   [IPC.ACTRESS_FACE_SCAN_MANIFEST]: noArgs,
++  [IPC.ACTRESS_GALLERY_PAGE]: z.tuple([positiveSafeInteger, z.object({
++    anchorId: positiveSafeInteger.optional(),
++    localOnly: z.boolean().optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
++  [IPC.ACTRESS_PROFILE]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_METADATA]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_VIDEO_PAGE]: z.tuple([positiveSafeInteger, z.object({
++    withCover: z.boolean().optional(),
++    limit: z.number().int().min(1).max(240).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
+   [IPC.ACTRESS_GET]: z.tuple([id]),
+   [IPC.ACTRESS_AVATAR_SOURCE_INFO]: z.tuple([id]),
+   [IPC.ACTRESS_EDIT]: z.tuple([id, object]),
+@@ -450,6 +499,12 @@ export const actressIpcSchemas = {
+   ]),
+   [IPC.ACTRESS_MARK_SCRAPE_SUCCESS]: z.tuple([id]),
+   [IPC.ACTRESS_CONFLICT_LIST]: noArgs,
++  [IPC.ACTRESS_CONFLICT_GET]: z.tuple([nonEmptyText]),
++  [IPC.ACTRESS_CONFLICT_QUEUE_PAGE]: z.tuple([z.object({
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchorName: nonEmptyText.optional()
++  }).strict()]),
+   [IPC.ACTRESS_CONFLICT_COUNT]: noArgs,
+   [IPC.ACTRESS_CONFLICT_SUMMARY]: noArgs,
+   [IPC.ACTRESS_CONFLICT_INSPECT_NAME]: z.tuple([
+@@ -507,6 +562,14 @@ export const scrapeIpcSchemas = {
+     id.optional(),
+     id.optional()
+   ]),
++  [IPC.PENDING_VIDEO_SCRAPE_COUNT]: noArgs,
++  [IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS]: z.tuple([z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)]),
++  [IPC.PENDING_VIDEO_SCRAPE_PAGE]: z.tuple([z.object({
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchorId: id.max(Number.MAX_SAFE_INTEGER).optional(), videoId: id.max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().refine(value => value.anchorId === undefined || value.videoId === undefined)]),
++  [IPC.PENDING_VIDEO_SCRAPE_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.PENDING_VIDEO_SCRAPE_LIST]: noArgs,
+   [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: z.tuple([
+     z.object({
+@@ -530,6 +593,7 @@ export const scrapeIpcSchemas = {
+   [IPC.BATCH_SCRAPE_RESUME]: noArgs,
+   [IPC.BATCH_SCRAPE_DISCARD]: noArgs,
+   [IPC.AVATAR_AUTO_CROP_BATCH_BEGIN]: noArgs,
++  [IPC.AVATAR_AUTO_CROP_BATCH_TARGETS]: z.tuple([nonEmptyText, z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.AVATAR_AUTO_CROP_BATCH_END]: z.tuple([nonEmptyText]),
+   [IPC.SCRAPER_LIST]: noArgs,
+   [IPC.SCRAPER_PLUGIN_DETAILS]: noArgs,
+@@ -634,6 +698,19 @@ export const appIpcSchemas = {
+     nonEmptyText,
+     videoResourceImportTarget
+   ]),
++  [IPC.PENDING_AUDIT_PRESENCE]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),z.object({
++    groupIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
++    identityIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
++    scrapeIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)
++  }).strict().refine(value => value.groupIds.length + value.identityIds.length + value.scrapeIds.length <= 100)]),
++  [IPC.PENDING_SCAN_QUEUE_PAGE]: z.tuple([z.object({
++    libraryId:id.max(Number.MAX_SAFE_INTEGER).optional(), limit:z.number().int().min(1).max(100).optional(),
++    offset:z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchor:z.object({kind:z.enum(['group','identity']),id:id.max(Number.MAX_SAFE_INTEGER)}).strict().optional()
++  }).strict()]),
++  [IPC.PENDING_SCAN_QUEUE_COUNT]: z.tuple([id.max(Number.MAX_SAFE_INTEGER).optional()]),
++  [IPC.PENDING_SCAN_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),id.max(Number.MAX_SAFE_INTEGER)]),
++  [IPC.PENDING_RESOURCE_IDENTITY_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),id.max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.PENDING_SCAN_LIST]: z.tuple([id]),
+   [IPC.PENDING_SCAN_RESOLVE]: z.tuple([id, id, pendingScanResolution]),
+   [IPC.PENDING_RESOURCE_IDENTITY_LIST]: z.tuple([id]),
+@@ -648,6 +725,9 @@ export const appIpcSchemas = {
+     z.enum(['added_at', 'release_date']).optional(),
+     sortDirection.optional()
+   ]),
++  [IPC.PLAYLIST_VIDEO_PAGE]: z.tuple([id, playlistPageQuery]),
++  [IPC.PLAYLIST_METADATA]: z.tuple([id, z.enum(['added_at', 'release_date']).optional(), sortDirection.optional()]),
++  [IPC.PLAYLIST_GET_PAGE]: z.tuple([id, playlistPageQuery]),
+   [IPC.PLAYLIST_CREATE]: z.tuple([profileInput]),
+   [IPC.PLAYLIST_UPDATE]: z.tuple([id, profileInput]),
+   [IPC.PLAYLIST_DELETE]: z.tuple([id]),
+@@ -656,6 +736,19 @@ export const appIpcSchemas = {
+   [IPC.PLAYLIST_REMOVE_VIDEO]: z.tuple([id, id]),
+   [IPC.TAG_LIST]: noArgs,
+   [IPC.TAG_LIST_MANUAL]: noArgs,
++  [IPC.TAG_LABELS]: z.tuple([z.array(positiveSafeInteger).max(100)]),
++  [IPC.TAG_FILTER_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
++  [IPC.TAG_MANUAL_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
++  [IPC.ORGANIZATION_PAGE]: z.tuple([classificationPageQuery.extend({role: z.enum(['maker','publisher'])})]),
++  [IPC.SERIES_PAGE]: z.tuple([classificationPageQuery]),
+   [IPC.ORGANIZATION_LIST]: z.tuple([listQuery]),
+   [IPC.ORGANIZATION_GET]: z.tuple([id, organizationRole]),
+   [IPC.ORGANIZATION_OPTIONS]: z.tuple([optionalText]),
+@@ -667,6 +760,7 @@ export const appIpcSchemas = {
+   [IPC.ORGANIZATION_ROLE_REMOVE]: z.tuple([id, organizationRole]),
+   [IPC.ORGANIZATION_DELETE_PREVIEW]: z.tuple([id]),
+   [IPC.ORGANIZATION_DELETE]: z.tuple([id]),
++  [IPC.DIRECTOR_PAGE]: z.tuple([classificationPageQuery]),
+   [IPC.DIRECTOR_LIST]: z.tuple([listQuery]),
+   [IPC.DIRECTOR_GET]: z.tuple([id]),
+   [IPC.DIRECTOR_OPTIONS]: z.tuple([optionalText]),
+@@ -683,6 +777,10 @@ export const appIpcSchemas = {
+   [IPC.SERIES_MERGE]: z.tuple([mergeInput]),
+   [IPC.SERIES_DELETE_PREVIEW]: z.tuple([id]),
+   [IPC.SERIES_DELETE]: z.tuple([id]),
++  [IPC.CLASSIFICATION_IMAGE_PAGE]: z.tuple([classificationEntity.extend({id: positiveSafeInteger}), z.object({
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
+   [IPC.CLASSIFICATION_IMAGE_CANDIDATES]: z.tuple([classificationEntity]),
+   [IPC.CLASSIFICATION_IMAGE_SET]: z.tuple([
+     classificationEntity,
+diff --git a/src/shared/ipc-channels.ts b/src/shared/ipc-channels.ts
+index 00ed96e..a29c6ff 100644
+--- a/src/shared/ipc-channels.ts
++++ b/src/shared/ipc-channels.ts
+@@ -75,6 +75,11 @@ export const IPC = {
+   SCAN_STATE_CHANGED: 'scan:stateChanged', // main -> renderer event
+   FILE_RENAME: 'file:rename',
+   FILE_IMPORT_MANUAL: 'file:importManual',
++  PENDING_AUDIT_PRESENCE: 'pendingAudit:presence',
++  PENDING_SCAN_QUEUE_PAGE: 'pendingScanQueue:page',
++  PENDING_SCAN_QUEUE_COUNT: 'pendingScanQueue:count',
++  PENDING_SCAN_GET: 'pendingScan:get',
++  PENDING_RESOURCE_IDENTITY_GET: 'pendingResourceIdentity:get',
+   PENDING_SCAN_LIST: 'pendingScan:list',
+   PENDING_SCAN_RESOLVE: 'pendingScan:resolve',
+   PENDING_RESOURCE_IDENTITY_LIST: 'pendingResourceIdentity:list',
+@@ -94,6 +99,7 @@ export const IPC = {
+   VIDEO_SAMPLE_DELETE: 'video:sampleDelete',
+   VIDEO_POSTER_SET: 'video:posterSet',
+   VIDEO_MANUAL_TAG_ADD: 'video:manualTagAdd',
++  VIDEO_MANUAL_TAG_ADD_EXISTING: 'video:manualTagAddExisting',
+   VIDEO_MANUAL_TAG_REMOVE: 'video:manualTagRemove',
+   VIDEO_RESOURCE_IMPORT: 'video:resourceImport',
+   VIDEO_RESOURCE_GET: 'video:resourceGet',
+@@ -114,6 +120,9 @@ export const IPC = {
+   // Playlists
+   PLAYLIST_LIST: 'playlist:list',
+   PLAYLIST_GET: 'playlist:get',
++  PLAYLIST_GET_PAGE: 'playlist:getPage',
++  PLAYLIST_METADATA: 'playlist:metadata',
++  PLAYLIST_VIDEO_PAGE: 'playlist:videoPage',
+   PLAYLIST_CREATE: 'playlist:create',
+   PLAYLIST_UPDATE: 'playlist:update',
+   PLAYLIST_DELETE: 'playlist:delete',
+@@ -124,7 +133,18 @@ export const IPC = {
+   // Actresses
+   ACTRESS_LIST: 'actress:list',
+   ACTRESS_LIST_PAGE: 'actress:listPage',
++  ACTRESS_PICKER_PAGE: 'actress:pickerPage',
++  ACTRESS_AVATAR_CROP_TARGETS: 'actress:avatarCropTargets',
++  ACTRESS_AVATAR_CROP_COUNT: 'actress:avatarCropCount',
++  ACTRESS_TEST_TARGET_PAGE: 'actress:testTargetPage',
++  ACTRESS_TEST_TARGET_GET: 'actress:testTargetGet',
++  ACTRESS_PICKER_GET: 'actress:pickerGet',
++  ACTRESS_MERGE_CANDIDATES: 'actress:mergeCandidates',
+   ACTRESS_FACE_SCAN_MANIFEST: 'actress:faceScanManifest',
++  ACTRESS_GALLERY_PAGE: 'actress:galleryPage',
++  ACTRESS_PROFILE: 'actress:profile',
++  ACTRESS_METADATA: 'actress:metadata',
++  ACTRESS_VIDEO_PAGE: 'actress:videoPage',
+   ACTRESS_GET: 'actress:get',
+   ACTRESS_AVATAR_SOURCE_INFO: 'actress:avatarSourceInfo',
+   ACTRESS_EDIT: 'actress:edit',
+@@ -138,6 +158,8 @@ export const IPC = {
+   ACTRESS_MERGE: 'actress:merge',
+   ACTRESS_MARK_SCRAPE_SUCCESS: 'actress:markScrapeSuccess',
+   ACTRESS_CONFLICT_LIST: 'actressConflict:list',
++  ACTRESS_CONFLICT_QUEUE_PAGE: 'actressConflict:queuePage',
++  ACTRESS_CONFLICT_GET: 'actressConflict:get',
+   ACTRESS_CONFLICT_COUNT: 'actressConflict:count',
+   ACTRESS_CONFLICT_SUMMARY: 'actressConflict:summary',
+   ACTRESS_CONFLICT_INSPECT_NAME: 'actressConflict:inspectName',
+@@ -148,9 +170,13 @@ export const IPC = {
+   // Tags
+   TAG_LIST: 'tag:list',
+   TAG_LIST_MANUAL: 'tag:listManual',
++  TAG_LABELS: 'tag:labels',
++  TAG_FILTER_OPTIONS: 'tag:filterOptions',
++  TAG_MANUAL_OPTIONS: 'tag:manualOptions',
+ 
+   // Classification entities
+   ORGANIZATION_LIST: 'organization:list',
++  ORGANIZATION_PAGE: 'organization:page',
+   ORGANIZATION_GET: 'organization:get',
+   ORGANIZATION_OPTIONS: 'organization:options',
+   ORGANIZATION_MERGE_OPTIONS: 'organization:mergeOptions',
+@@ -161,6 +187,7 @@ export const IPC = {
+   ORGANIZATION_ROLE_REMOVE: 'organization:roleRemove',
+   ORGANIZATION_DELETE_PREVIEW: 'organization:deletePreview',
+   ORGANIZATION_DELETE: 'organization:delete',
++  DIRECTOR_PAGE: 'director:page',
+   DIRECTOR_LIST: 'director:list',
+   DIRECTOR_GET: 'director:get',
+   DIRECTOR_OPTIONS: 'director:options',
+@@ -170,6 +197,7 @@ export const IPC = {
+   DIRECTOR_DELETE_PREVIEW: 'director:deletePreview',
+   DIRECTOR_DELETE: 'director:delete',
+   SERIES_LIST: 'series:list',
++  SERIES_PAGE: 'series:page',
+   SERIES_GET: 'series:get',
+   SERIES_OPTIONS: 'series:options',
+   SERIES_CREATE: 'series:create',
+@@ -177,11 +205,16 @@ export const IPC = {
+   SERIES_MERGE: 'series:merge',
+   SERIES_DELETE_PREVIEW: 'series:deletePreview',
+   SERIES_DELETE: 'series:delete',
++  CLASSIFICATION_IMAGE_PAGE: 'classificationImage:page',
+   CLASSIFICATION_IMAGE_CANDIDATES: 'classificationImage:candidates',
+   CLASSIFICATION_IMAGE_SET: 'classificationImage:set',
+ 
+   // Scraping
+   SCRAPE_ONE: 'scrape:one',
++  PENDING_VIDEO_SCRAPE_COUNT: 'pendingVideoScrape:count',
++  PENDING_VIDEO_SCRAPE_EXISTING_IDS: 'pendingVideoScrape:existingIds',
++  PENDING_VIDEO_SCRAPE_PAGE: 'pendingVideoScrape:page',
++  PENDING_VIDEO_SCRAPE_GET: 'pendingVideoScrape:get',
+   PENDING_VIDEO_SCRAPE_LIST: 'pendingVideoScrape:list',
+   PENDING_VIDEO_SCRAPE_CONFIRM: 'pendingVideoScrape:confirm',
+   PENDING_VIDEO_SCRAPE_DISCARD: 'pendingVideoScrape:discard',
+@@ -201,6 +234,7 @@ export const IPC = {
+   BATCH_SCRAPE_RESUME: 'batchScrape:resume',
+   BATCH_SCRAPE_DISCARD: 'batchScrape:discard',
+   AVATAR_AUTO_CROP_BATCH_BEGIN: 'avatarAutoCropBatch:begin',
++  AVATAR_AUTO_CROP_BATCH_TARGETS: 'avatarAutoCropBatch:targets',
+   AVATAR_AUTO_CROP_BATCH_END: 'avatarAutoCropBatch:end',
+   SCRAPER_LIST: 'scrape:listPlugins',
+   SCRAPER_PLUGIN_DETAILS: 'scrape:pluginDetails',
+diff --git a/src/shared/appIpcContract.ts b/src/shared/appIpcContract.ts
+index 14472f9..f3626e2 100644
+--- a/src/shared/appIpcContract.ts
++++ b/src/shared/appIpcContract.ts
+@@ -1,3 +1,4 @@
++import type { ClassificationPageQuery, ClassificationListPage } from './classificationTypes'
+ import type { WebAccessInput, WebAccessStatus } from './webTypes'
+ import { IPC } from './ipc-channels'
+ import type {
+@@ -20,6 +21,9 @@ import type {
+   PendingResourceIdentity,
+   PendingResourceIdentityResolution,
+   PendingResourceIdentityResolutionResult,
++  PendingAuditIds,
++  PendingScanQueueQuery,
++  PendingScanQueuePage,
+   PendingScanGroup,
+   PendingScanGroupResolution,
+   PendingScanGroupResolutionResult,
+@@ -27,10 +31,14 @@ import type {
+   RenameImportResult,
+   ScanResult
+ } from './libraryTypes'
+-import type { TagListItem, SortDir } from './commonTypes'
++import type { TagListItem, TagLabel, TagOptionsQuery, TagOptionsPage, TagFilterOptionsPage, SortDir } from './commonTypes'
+ import type {
+   PlaylistCreateInput,
+   PlaylistDetail,
++  PlaylistPage,
++  PlaylistMetadata,
++  PlaylistVideosPage,
++  PlaylistPageQuery,
+   PlaylistListItem,
+   PlaylistUpdateInput,
+   PlaylistVideoMembership,
+@@ -214,6 +222,11 @@ export interface AppIpcContract {
+     ]
+     result: ManualImportResult
+   }
++  [IPC.PENDING_AUDIT_PRESENCE]: { args: [libraryId: number, ids: PendingAuditIds]; result: PendingAuditIds }
++  [IPC.PENDING_SCAN_QUEUE_PAGE]: { args: [query: PendingScanQueueQuery]; result: PendingScanQueuePage }
++  [IPC.PENDING_SCAN_QUEUE_COUNT]: { args: [libraryId?: number]; result: number }
++  [IPC.PENDING_SCAN_GET]: { args: [libraryId: number, groupId: number]; result: PendingScanGroup | null }
++  [IPC.PENDING_RESOURCE_IDENTITY_GET]: { args: [libraryId: number, identityId: number]; result: PendingResourceIdentity | null }
+   [IPC.PENDING_SCAN_LIST]: {
+     args: [libraryId: number]
+     result: PendingScanGroup[]
+@@ -236,6 +249,9 @@ export interface AppIpcContract {
+     args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir]
+     result: PlaylistDetail | null
+   }
++  [IPC.PLAYLIST_METADATA]: { args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir]; result: PlaylistMetadata | null }
++  [IPC.PLAYLIST_VIDEO_PAGE]: { args: [id: number, query: PlaylistPageQuery]; result: PlaylistVideosPage | null }
++  [IPC.PLAYLIST_GET_PAGE]: { args: [id: number, query: PlaylistPageQuery]; result: PlaylistPage | null }
+   [IPC.PLAYLIST_CREATE]: { args: [input: PlaylistCreateInput]; result: number }
+   [IPC.PLAYLIST_UPDATE]: { args: [id: number, input: PlaylistUpdateInput]; result: boolean }
+   [IPC.PLAYLIST_DELETE]: { args: [id: number]; result: boolean }
+@@ -245,6 +261,11 @@ export interface AppIpcContract {
+ 
+   [IPC.TAG_LIST]: { args: []; result: TagListItem[] }
+   [IPC.TAG_LIST_MANUAL]: { args: []; result: TagListItem[] }
++  [IPC.TAG_LABELS]: { args: [ids: number[]]; result: TagLabel[] }
++  [IPC.TAG_FILTER_OPTIONS]: { args: [query: TagOptionsQuery]; result: TagFilterOptionsPage }
++  [IPC.TAG_MANUAL_OPTIONS]: { args: [query: TagOptionsQuery]; result: TagOptionsPage }
++  [IPC.ORGANIZATION_PAGE]: { args: [query: OrganizationListQuery & ClassificationPageQuery]; result: ClassificationListPage<OrganizationListItem> }
++  [IPC.SERIES_PAGE]: { args: [query: SeriesListQuery & ClassificationPageQuery]; result: ClassificationListPage<SeriesListItem> }
+   [IPC.ORGANIZATION_LIST]: {
+     args: [query: OrganizationListQuery]
+     result: OrganizationListItem[]
+@@ -286,6 +307,7 @@ export interface AppIpcContract {
+     args: [id: number]
+     result: OrganizationDeleteResult
+   }
++  [IPC.DIRECTOR_PAGE]: { args: [query: DirectorListQuery & ClassificationPageQuery]; result: ClassificationListPage<DirectorListItem> }
+   [IPC.DIRECTOR_LIST]: { args: [query: DirectorListQuery]; result: DirectorListItem[] }
+   [IPC.DIRECTOR_GET]: { args: [id: number]; result: DirectorDetail | null }
+   [IPC.DIRECTOR_OPTIONS]: { args: [search?: string]; result: DirectorOption[] }
+@@ -302,6 +324,7 @@ export interface AppIpcContract {
+   [IPC.SERIES_MERGE]: { args: [input: SeriesMergeInput]; result: SeriesMergeResult }
+   [IPC.SERIES_DELETE_PREVIEW]: { args: [id: number]; result: SeriesDeleteImpact }
+   [IPC.SERIES_DELETE]: { args: [id: number]; result: SeriesDeleteResult }
++  [IPC.CLASSIFICATION_IMAGE_PAGE]: { args: [entity: ClassificationEntityRef, query?: ClassificationPageQuery]; result: ClassificationListPage<ClassificationImageCandidate> }
+   [IPC.CLASSIFICATION_IMAGE_CANDIDATES]: {
+     args: [entity: ClassificationEntityRef]
+     result: ClassificationImageCandidate[]
+diff --git a/src/preload/index.ts b/src/preload/index.ts
+index 744da7d..4dad82b 100644
+--- a/src/preload/index.ts
++++ b/src/preload/index.ts
+@@ -1,3 +1,9 @@
++import type { ClassificationPageQuery } from '@shared/classificationTypes'
++import type { ActressGalleryPageQuery } from '../shared/actressTypes'
++import type { ActressVideoPageQuery } from '../shared/actressTypes'
++import type { ActressMergeCandidateQuery } from '../shared/actressTypes'
++import type { ActressPickerQuery } from '../shared/actressTypes'
++import type { PendingAuditIds, PendingScanQueueQuery } from '../shared/libraryTypes'
+ import type { WebAccessInput } from '../shared/webTypes'
+ import { contextBridge, ipcRenderer, webUtils } from 'electron'
+ import { IPC } from '../shared/ipc-channels'
+@@ -88,7 +94,7 @@ import type {
+   VideoScrapeField,
+   VideoScrapeUpdateMode
+ } from '../shared/scrapeTypes'
+-import type { PendingVideoScrapeConfirmInput } from '../shared/videoScrapeTypes'
++import type { PendingVideoScrapeConfirmInput, PendingVideoScrapePageQuery } from '../shared/videoScrapeTypes'
+ import type {
+   LibraryScanEvent,
+   PendingResourceIdentityResolution,
+@@ -103,8 +109,8 @@ import type {
+ } from '../shared/libraryTypes'
+ import type { ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../shared/actressTypes'
+ import type { IpcResponse } from '../shared/ipcTypes'
+-import type { InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
+-import type { SortDir } from '../shared/commonTypes'
++import type { ActressConflictQueueQuery, InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
++import type { SortDir, TagOptionsQuery } from '../shared/commonTypes'
+ import type { PlaylistCreateInput, PlaylistUpdateInput, PlaylistVideoSortBy } from '../shared/playlistTypes'
+ import type { PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevInstallInput } from '../shared/pluginDevTypes'
+ import type {
+@@ -337,6 +343,11 @@ const api = {
+       code: string,
+       target: VideoResourceImportTarget
+     ) => invokeApp(IPC.FILE_IMPORT_MANUAL, libraryId, rootId, filePath, code, target),
++    pendingAuditPresence: (libraryId: number, ids: PendingAuditIds) => invokeApp(IPC.PENDING_AUDIT_PRESENCE, libraryId, ids),
++    pagePendingQueue: (query: PendingScanQueueQuery) => invokeApp(IPC.PENDING_SCAN_QUEUE_PAGE, query),
++    countPendingQueue: (libraryId?: number) => invokeApp(IPC.PENDING_SCAN_QUEUE_COUNT, libraryId),
++    getPendingGroup: (libraryId: number, groupId: number) => invokeApp(IPC.PENDING_SCAN_GET, libraryId, groupId),
++    getPendingIdentity: (libraryId: number, identityId: number) => invokeApp(IPC.PENDING_RESOURCE_IDENTITY_GET, libraryId, identityId),
+     listPending: (libraryId: number) => invokeApp(IPC.PENDING_SCAN_LIST, libraryId),
+     resolvePending: (
+       libraryId: number,
+@@ -381,6 +392,8 @@ const api = {
+       invokeVideo(IPC.VIDEO_POSTER_SET, id, posterPath),
+     addManualTag: (id: number, name: string) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name),
++    addExistingManualTag: (id: number, tagId: number) =>
++      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, id, tagId),
+     removeManualTag: (id: number, tagId: number) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId),
+     importLinkResource: (input: VideoLinkResourceImportInput) =>
+@@ -448,6 +461,12 @@ const api = {
+       invokeVideo(IPC.VIDEO_RESOURCE_SPLIT, libraryId, videoId, resourceId)
+   },
+   playlists: {
++    metadata: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
++      invokeApp(IPC.PLAYLIST_METADATA, id, sortBy, sortDir),
++    videoPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_VIDEO_PAGE, id, query),
++    getPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_GET_PAGE, id, query),
+     list: () => invokeApp(IPC.PLAYLIST_LIST),
+     get: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
+       invokeApp(IPC.PLAYLIST_GET, id, sortBy, sortDir),
+@@ -463,6 +482,13 @@ const api = {
+       invokeApp(IPC.PLAYLIST_REMOVE_VIDEO, playlistId, videoId)
+   },
+   actresses: {
++    mergeCandidates: (query: ActressMergeCandidateQuery) => invokeActress(IPC.ACTRESS_MERGE_CANDIDATES, query),
++    avatarCropTargets: () => invokeActress(IPC.ACTRESS_AVATAR_CROP_TARGETS),
++    countAvatarCropTargets: () => invokeActress(IPC.ACTRESS_AVATAR_CROP_COUNT),
++    testTargetPage: (query: ActressPickerQuery = {}) => invokeActress(IPC.ACTRESS_TEST_TARGET_PAGE, query),
++    testTargetGet: (id: number) => invokeActress(IPC.ACTRESS_TEST_TARGET_GET, id),
++    pickerGet: (id: number) => invokeActress(IPC.ACTRESS_PICKER_GET, id),
++    pickerPage: (query: ActressPickerQuery = {}) => invokeActress(IPC.ACTRESS_PICKER_PAGE, query),
+     list: (
+       search?: string,
+       gender?: ActressGenderFilter,
+@@ -471,6 +497,10 @@ const api = {
+     ) => invokeActress(IPC.ACTRESS_LIST, search, gender, sortBy, sortDir),
+     listPage: (query: ActressListQuery) => invokeActress(IPC.ACTRESS_LIST_PAGE, query),
+     faceScanManifest: () => invokeActress(IPC.ACTRESS_FACE_SCAN_MANIFEST),
++    galleryPage: (id: number, query?: ActressGalleryPageQuery) => invokeActress(IPC.ACTRESS_GALLERY_PAGE, id, query),
++    profile: (id: number) => invokeActress(IPC.ACTRESS_PROFILE, id),
++    metadata: (id: number) => invokeActress(IPC.ACTRESS_METADATA, id),
++    videoPage: (id: number, query?: ActressVideoPageQuery) => invokeActress(IPC.ACTRESS_VIDEO_PAGE, id, query),
+     get: (id: number) => invokeActress(IPC.ACTRESS_GET, id),
+     getAvatarSourceInfo: (id: number) =>
+       invokeActress(IPC.ACTRESS_AVATAR_SOURCE_INFO, id),
+@@ -491,12 +521,16 @@ const api = {
+     markScrapeSuccess: (id: number) => invokeActress(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id)
+   },
+   tags: {
++    filterOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_FILTER_OPTIONS, query),
++    manualOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_MANUAL_OPTIONS, query),
++    labels: (ids: number[]) => invokeApp(IPC.TAG_LABELS, ids),
+     list: () =>
+       invokeApp(IPC.TAG_LIST),
+     listManual: () =>
+       invokeApp(IPC.TAG_LIST_MANUAL)
+   },
+   organizations: {
++    page: (query: OrganizationListQuery & ClassificationPageQuery) => invokeApp(IPC.ORGANIZATION_PAGE, query),
+     list: (query: OrganizationListQuery) => invokeApp(IPC.ORGANIZATION_LIST, query),
+     get: (id: number, role: OrganizationRole) => invokeApp(IPC.ORGANIZATION_GET, id, role),
+     options: (search?: string) => invokeApp(IPC.ORGANIZATION_OPTIONS, search),
+@@ -513,6 +547,7 @@ const api = {
+     remove: (id: number) => invokeApp(IPC.ORGANIZATION_DELETE, id)
+   },
+   directors: {
++    page: (query: DirectorListQuery & ClassificationPageQuery) => invokeApp(IPC.DIRECTOR_PAGE, query),
+     list: (query: DirectorListQuery) => invokeApp(IPC.DIRECTOR_LIST, query),
+     get: (id: number) => invokeApp(IPC.DIRECTOR_GET, id),
+     options: (search?: string) => invokeApp(IPC.DIRECTOR_OPTIONS, search),
+@@ -524,6 +559,7 @@ const api = {
+     remove: (id: number) => invokeApp(IPC.DIRECTOR_DELETE, id)
+   },
+   series: {
++    page: (query: SeriesListQuery & ClassificationPageQuery) => invokeApp(IPC.SERIES_PAGE, query),
+     list: (query: SeriesListQuery) => invokeApp(IPC.SERIES_LIST, query),
+     get: (id: number) => invokeApp(IPC.SERIES_GET, id),
+     options: (search?: string) => invokeApp(IPC.SERIES_OPTIONS, search),
+@@ -534,6 +570,7 @@ const api = {
+     remove: (id: number) => invokeApp(IPC.SERIES_DELETE, id)
+   },
+   classificationImages: {
++    page: (entity: ClassificationEntityRef, query?: ClassificationPageQuery) => invokeApp(IPC.CLASSIFICATION_IMAGE_PAGE, entity, query),
+     candidates: (entity: ClassificationEntityRef) =>
+       invokeApp(IPC.CLASSIFICATION_IMAGE_CANDIDATES, entity),
+     set: (entity: ClassificationEntityRef, input: ClassificationImageInput | null) =>
+@@ -557,6 +594,10 @@ const api = {
+         directorSelectionId,
+         libraryId
+       ),
++    countPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_COUNT),
++    existingPendingIds: (ids: number[]) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS, ids),
++    pagePending: (query: PendingVideoScrapePageQuery) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_PAGE, query),
++    getPending: (id: number) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_GET, id),
+     listPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_LIST),
+     confirmPending: (input: PendingVideoScrapeConfirmInput) =>
+       invokeScrape(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, input),
+@@ -625,6 +666,8 @@ const api = {
+         autoCropAvatar
+       ),
+     listConflicts: () => invokeActress(IPC.ACTRESS_CONFLICT_LIST),
++    getConflict: (normalizedName: string) => invokeActress(IPC.ACTRESS_CONFLICT_GET, normalizedName),
++    pageConflicts: (query: ActressConflictQueueQuery) => invokeActress(IPC.ACTRESS_CONFLICT_QUEUE_PAGE, query),
+     conflictCount: () => invokeActress(IPC.ACTRESS_CONFLICT_COUNT),
+     conflictSummary: () =>
+       invokeActress(IPC.ACTRESS_CONFLICT_SUMMARY),
+@@ -755,6 +798,7 @@ const api = {
+   },
+   avatarAutoCropBatch: {
+     begin: () => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_BEGIN),
++    targets: (token: string, afterId: number) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_TARGETS, token, afterId),
+     end: (token: string) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_END, token)
+   },
+   player: {
+diff --git a/src/renderer/src/components/ClassificationImageModal.tsx b/src/renderer/src/components/ClassificationImageModal.tsx
+index 376aff2..63bfffa 100644
+--- a/src/renderer/src/components/ClassificationImageModal.tsx
++++ b/src/renderer/src/components/ClassificationImageModal.tsx
+@@ -1,5 +1,5 @@
+-import { useEffect, useRef, useState } from "react";
+-import { useQuery } from "@tanstack/react-query";
++import { useCallback, useEffect, useRef, useState } from "react";
++import { useBoundedMediaPage } from "../hooks/useBoundedMediaPage";
+ import { useHorizontalDragScroll } from "../hooks/useHorizontalDragScroll";
+ import {
+   Building2,
+@@ -17,7 +17,6 @@ import type {
+   ClassificationImageUpdateResult,
+ } from "@shared/classificationTypes";
+ import { api, assetUrl } from "../api";
+-import { classificationImageKeys } from "../query/queryKeys";
+ import EmptyState from "./EmptyState";
+ import Modal from "./Modal";
+ import { useTheme } from "./ThemeProvider";
+@@ -47,7 +46,11 @@ function remotePreviewUrl(mimeType: string, dataBase64: string): string {
+   return `data:${mimeType};base64,${dataBase64}`;
+ }
+ 
+-export default function ClassificationImageModal({
++export default function ClassificationImageModal(props: Props): JSX.Element {
++  return <ClassificationImageEditor key={`${props.entity.kind}:${props.entity.id}`} {...props} />;
++}
++
++function ClassificationImageEditor({
+   entity,
+   entityLabel,
+   imagePath,
+@@ -60,6 +63,8 @@ export default function ClassificationImageModal({
+   const fileInputRef = useRef<HTMLInputElement>(null);
+   const objectUrlRef = useRef<string | null>(null);
+   const remoteRequestRef = useRef(0);
++  const activeRef = useRef(true);
++  useEffect(() => { activeRef.current = true; return () => { activeRef.current = false } }, []);
+   const current = classificationImageDisplayState(imagePath, fallbackCoverPath);
+   const [mode, setMode] = useState<SourceMode>("file");
+   const [pending, setPending] = useState<
+@@ -76,12 +81,14 @@ export default function ClassificationImageModal({
+     privacyMode.privacyModeEnabled &&
+     privacyMode.privacyModeScopes.includes("mediaEditors");
+   const coverScroll = useHorizontalDragScroll();
+-  const candidatesQuery = useQuery({
+-    queryKey: classificationImageKeys.candidates(entity),
+-    queryFn: () => api.classificationImages.candidates(entity),
+-    enabled: !mediaEditorsHidden,
+-  });
+-  const coverCandidates = candidatesQuery.data ?? [];
++  const candidateEnabled = !mediaEditorsHidden && mode === "video";
++  const { kind, id } = entity;
++  const readCandidates = useCallback((offset: number) => candidateEnabled
++    ? api.classificationImages.page({kind, id}, {limit:60, offset})
++    : Promise.resolve(null), [kind, id, candidateEnabled]);
++  const candidatesQuery = useBoundedMediaPage(`${kind}:${id}:${candidateEnabled}`, readCandidates);
++  const coverCandidates = candidatesQuery.data?.items ?? [];
++  useEffect(() => { if (coverScroll.ref.current) coverScroll.ref.current.scrollLeft = 0 }, [candidatesQuery.offset, coverScroll.ref]);
+   const placeholder =
+     entity.kind === "organization" ? (
+       <Building2 {...UI_ICON_SM} aria-hidden />
+@@ -154,7 +161,9 @@ export default function ClassificationImageModal({
+     setSaving(true);
+     try {
+       const result = await api.classificationImages.set(entity, pending);
++      if (!activeRef.current) return;
+       await onChanged(result);
++      if (!activeRef.current) return;
+       if (result.cleanupFailures.length > 0) {
+         toast.show("主图已更新，但旧图片清理失败，可稍后重试", "info");
+       } else {
+@@ -164,7 +173,7 @@ export default function ClassificationImageModal({
+     } catch (error) {
+       toast.show(String((error as Error).message), "error");
+     } finally {
+-      setSaving(false);
++      if (activeRef.current) setSaving(false);
+     }
+   };
+ 
+@@ -345,10 +354,10 @@ export default function ClassificationImageModal({
+                 onPointerUp={coverScroll.onPointerUp}
+                 onPointerCancel={coverScroll.onPointerCancel}
+               >
+-                {candidatesQuery.isLoading ? (
++                {candidatesQuery.loading ? (
+                   <p className={styles.sourceEmpty}>加载关联封面…</p>
+-                ) : candidatesQuery.isError ? (
+-                  <p className={styles.sourceEmpty}>关联封面加载失败</p>
++                ) : candidatesQuery.error ? (
++                  <div className={styles.sourceEmpty} role="alert">关联封面加载失败<Button onClick={candidatesQuery.reload}>重试</Button></div>
+                 ) : coverCandidates.length === 0 ? (
+                   <p className={styles.sourceEmpty}>暂无关联影片封面</p>
+                 ) : (
+@@ -380,7 +389,7 @@ export default function ClassificationImageModal({
+                           className={`${styles.candidateCover} classification-image-candidate-cover`}
+                         >
+                           <img
+-                            src={assetUrl(candidate.coverPath) ?? ""}
++                            src={assetUrl(candidate.coverPath, 320) ?? ""}
+                             alt=""
+                             loading="lazy"
+                             draggable={false}
+@@ -395,6 +404,13 @@ export default function ClassificationImageModal({
+                 )}
+               </div>
+             </div>
++            {candidateEnabled && candidatesQuery.data && (
++              <nav className={styles.pagination} aria-label="分类封面分页">
++                <Button disabled={candidatesQuery.offset === 0} onClick={() => candidatesQuery.move(candidatesQuery.offset - 60)}>上一页</Button>
++                <span>第 {candidatesQuery.offset / 60 + 1} 页 · 共 {candidatesQuery.data.total} 张</span>
++                <Button disabled={candidatesQuery.offset + coverCandidates.length >= candidatesQuery.data.total} onClick={() => candidatesQuery.move(candidatesQuery.offset + 60)}>下一页</Button>
++              </nav>
++            )}
+           </div>
+         </div>
+       )}
+diff --git a/src/renderer/src/components/ClassificationImageModal.module.css b/src/renderer/src/components/ClassificationImageModal.module.css
+index 9518976..9c55567 100644
+--- a/src/renderer/src/components/ClassificationImageModal.module.css
++++ b/src/renderer/src/components/ClassificationImageModal.module.css
+@@ -247,3 +247,11 @@
+     justify-items: stretch;
+   }
+ }
++
++.pagination {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: var(--classification-image-control-gap);
++  flex-wrap: wrap;
++}
+diff --git a/src/renderer/src/components/ClassificationImageModal.interaction.test.tsx b/src/renderer/src/components/ClassificationImageModal.interaction.test.tsx
+new file mode 100644
+index 0000000..f266ec5
+--- /dev/null
++++ b/src/renderer/src/components/ClassificationImageModal.interaction.test.tsx
+@@ -0,0 +1,69 @@
++import assert from 'node:assert/strict'
++import {afterEach,it} from 'node:test'
++import React from 'react'
++import TestRenderer,{act} from 'react-test-renderer'
++import type {ClassificationEntityRef,ClassificationImageInput,ClassificationListPage,ClassificationImageCandidate,ClassificationImageUpdateResult} from '@shared/classificationTypes'
++let total=125,fail=false,cancelled=0,changed=0
++let hold: (()=>Promise<ClassificationListPage<ClassificationImageCandidate>>) | null=null
++let saveHold: (()=>Promise<ClassificationImageUpdateResult>) | null=null
++const calls:Array<{entity:ClassificationEntityRef;offset:number}>=[],saves:Array<{entity:ClassificationEntityRef;input:ClassificationImageInput}>=[]
++function page(offset:number){return{items:Array.from({length:Math.min(60,Math.max(0,total-offset))},(_,n)=>({videoId:offset+n+1,code:`CODE-${offset+n+1}`,title:null,coverPath:`covers/${offset+n+1}.jpg`})),total,limit:60,offset}}
++Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++Object.defineProperty(globalThis,'window',{configurable:true,value:Object.assign(new EventTarget(),{api:{classificationImages:{
++ candidates:()=>{throw Error('Full candidates forbidden')},
++ page:async(entity:ClassificationEntityRef,q:{offset:number})=>{calls.push({entity,offset:q.offset});if(fail){fail=false;throw Error('Page failed')}if(hold){const run=hold;hold=null;return run()}return page(q.offset)},
++ set:async(entity:ClassificationEntityRef,input:ClassificationImageInput)=>{saves.push({entity,input});return saveHold?saveHold():{imagePath:'saved.jpg',cleanupFailures:[]}}
++}}})})
++Object.defineProperty(globalThis,'document',{configurable:true,value:{body:{style:{overflow:''}},activeElement:null}})
++let renderer:TestRenderer.ReactTestRenderer|undefined
++let Component:typeof import('./ClassificationImageModal').default
++let entity:ClassificationEntityRef={kind:'director',id:1}
++function tree(){return <Component entity={entity} entityLabel="导演" imagePath={null} fallbackCoverPath={null} onCancel={()=>{cancelled++}} onChanged={()=>{changed++}}/>}
++const text=(n:TestRenderer.ReactTestInstance):string=>n.children.map(v=>typeof v==='string'?v:text(v)).join('')
++async function click(label:string){await act(async()=>{const b=renderer!.root.findAllByType('button').find(b=>b.props['aria-label']===label||text(b)===label)!;assert.ok(b,label);assert.ok(!b.props.disabled,label);b.props.onClick()})}
++const candidates=()=>renderer!.root.findAllByType('button').filter(b=>/^CODE-/.test(b.props['aria-label']??''))
++async function mount(){Component=(await import('./ClassificationImageModal')).default;await act(async()=>{renderer=TestRenderer.create(tree())})}
++afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;total=125;fail=false;hold=null;saveHold=null;calls.length=0;saves.length=0;cancelled=0;changed=0;entity={kind:'director',id:1}})
++
++it('loads only the video source and retains the chosen original across 60/60/5 and error retry',async()=>{
++ await mount();assert.equal(calls.length,0)
++ await click('图片链接');assert.equal(calls.length,0)
++ await click('影片封面');assert.equal(candidates().length,60)
++ await click('CODE-1');assert.ok(renderer!.root.findAllByType('img').some(n=>n.props.src==='media://covers/1.jpg'))
++ assert.equal(candidates()[0].findByType('img').props.src,'media://covers/1.jpg?size=320')
++ await click('下一页');assert.equal(candidates()[0].props['aria-label'],'CODE-61')
++ fail=true;await click('下一页');assert.equal(candidates().length,0)
++ await click('重试');assert.equal(candidates().length,5)
++ assert.ok(renderer!.root.findAllByType('img').some(n=>n.props.src==='media://covers/1.jpg'))
++ await click('上一页');await click('上一页');assert.equal(candidates()[0].props['aria-pressed'],true)
++ await click('保存主图');assert.deepEqual(saves,[{entity:{kind:'director',id:1},input:{source:'video-cover',videoId:1}}]);assert.equal(changed,1);assert.equal(cancelled,1)
++})
++it('clamps a shrunken last page and ignores a response after an entity switch',async()=>{
++ await mount();await click('影片封面');await click('下一页');total=30;await click('下一页')
++ assert.equal(candidates().length,30);assert.equal(calls.at(-1)!.offset,0)
++ total=125;let finish!:(p:ReturnType<typeof page>)=>void;hold=()=>new Promise(resolve=>{finish=resolve})
++ await click('本地图片');await click('影片封面');assert.equal(candidates().length,0)
++ entity={kind:'series',id:2};await act(async()=>renderer!.update(tree()))
++ await act(async()=>finish(page(0)));assert.equal(candidates().length,0)
++ await click('影片封面');assert.equal(candidates().length,60);assert.deepEqual(calls.at(-1)!.entity,entity)
++})
++it('does not close or refresh a new entity editor when an old save settles',async()=>{
++ await mount();await click('影片封面');await click('CODE-1')
++ let finish!:(result:ClassificationImageUpdateResult)=>void;saveHold=()=>new Promise(resolve=>{finish=resolve})
++ await click('保存主图');entity={kind:'series',id:2};await act(async()=>renderer!.update(tree()))
++ await act(async()=>finish({imagePath:'saved.jpg',cleanupFailures:[]}));assert.equal(changed,0);assert.equal(cancelled,0)
++ assert.ok(renderer!.root.findAllByType('button').find(b=>text(b)==='保存主图')!.props.disabled)
++})
++
++
++it('does not replace a chosen video cover with a late URL preview after switching sources',async()=>{
++ let finish!:(value:{mimeType:string;dataBase64:string})=>void
++ Object.assign(window.api,{assets:{fetchRemoteImagePreview:()=>new Promise(resolve=>{finish=resolve})}})
++ await mount();await click('图片链接')
++ await act(async()=>renderer!.root.findAllByType('input').find(n=>n.props.type==='url')!.props.onChange({target:{value:'https://example.test/image.jpg'}}))
++ await click('加载并预览')
++ await click('影片封面');await click('CODE-1')
++ await act(async()=>finish({mimeType:'image/png',dataBase64:'AAAA'}))
++ assert.ok(renderer!.root.findAllByType('img').some(n=>n.props.src==='media://covers/1.jpg'))
++ await click('保存主图');assert.deepEqual(saves[0].input,{source:'video-cover',videoId:1})
++})
+diff --git a/scripts/performance/classification-image-ui.mjs b/scripts/performance/classification-image-ui.mjs
+new file mode 100644
+index 0000000..54e2afe
+--- /dev/null
++++ b/scripts/performance/classification-image-ui.mjs
+@@ -0,0 +1,57 @@
++/** Actual image editor, privacy provider and styles, with synthetic API/local SVG. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import{createServer}from'vite'
++import react from '@vitejs/plugin-react'
++import{chromium}from'playwright-core'
++const repo=process.cwd(),root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-image-editor-ui-')),output=path.resolve(process.env.JAVDEX_IMAGE_EDITOR_UI_OUTPUT??path.join(root,'results'));fs.mkdirSync(output,{recursive:true})
++const local=p=>JSON.stringify('/@fs'+path.join(repo,p))
++fs.writeFileSync(path.join(root,'index.html'),'<html><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
++fs.writeFileSync(path.join(root,'image.svg'),'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400"><rect width="640" height="400" fill="#334455"/><circle cx="320" cy="200" r="100" fill="#889aab"/></svg>')
++fs.writeFileSync(path.join(root,'fixture.jsx'),`
++import React,{useState}from'react';import{createRoot}from'react-dom/client';import ${local('src/renderer/src/styles/global.css')};
++window.React=React;window.__calls=[];window.__saves=[];window.__cancelled=0;
++window.api={settings:{get:async()=>({theme:'graphite',privacyModeEnabled:false,privacyModeScopes:['mediaEditors']})},classificationImages:{candidates:()=>{throw Error('Full candidates forbidden')},page:async(entity,q)=>{window.__calls.push({entity,q});if(window.__fail){window.__fail=false;throw Error('Page failed')}if(window.__hold){window.__hold=false;await new Promise(resolve=>window.__release=resolve)}return {items:Array.from({length:Math.min(60,Math.max(0,125-q.offset))},(_,n)=>({videoId:q.offset+n+1,code:'CODE-'+(q.offset+n+1),title:null,coverPath:'covers/'+(q.offset+n+1)+'.jpg'})),offset:q.offset,total:125,limit:60}},set:async(entity,input)=>{window.__saves.push({entity,input});return{imagePath:'saved.jpg',cleanupFailures:[]}}}};
++const Component=(await import(${local('src/renderer/src/components/ClassificationImageModal.tsx')})).default;
++const {ThemeProvider,useTheme}=await import(${local('src/renderer/src/components/ThemeProvider.tsx')});
++function Editor(){const theme=useTheme();window.__privacy=enabled=>theme.syncPrivacyMode({privacyModeEnabled:enabled,privacyModeScopes:['mediaEditors']});const [entity,setEntity]=useState({kind:'director',id:1});window.__entity=setEntity;return <Component entity={entity} entityLabel="导演" imagePath="current.jpg" fallbackCoverPath={null} onCancel={()=>window.__cancelled++} onChanged={()=>{}}/>}
++createRoot(document.getElementById('root')).render(<ThemeProvider><Editor/></ThemeProvider>);
++`)
++let server,browser;const results=[]
++try{
++ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react(),{name:'synthetic-media',transform(code,id){if(id===path.join(repo,'src/renderer/src/api.ts'))return code.replace('const url = `media://${normalized}`',"const url = '/image.svg?path=' + encodeURIComponent(normalized)")}}],resolve:{alias:{'@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom')}},server:{host:'127.0.0.1',port:0,fs:{allow:[repo,root]}}})
++ await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
++ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]){
++  const page=await browser.newPage({viewport}),errors=[],requests=[];page.on('pageerror',error=>errors.push(error.message));page.on('request',request=>{if(request.url().includes('/image.svg?'))requests.push(request.url())})
++  await page.goto('http://127.0.0.1:'+server.httpServer.address().port)
++  await page.getByRole('tab',{name:'影片封面'}).waitFor();assert.equal(await page.evaluate(()=>window.__calls.length),0)
++  await page.getByRole('tab',{name:'图片链接'}).click();assert.equal(await page.evaluate(()=>window.__calls.length),0)
++  await page.evaluate(()=>window.__privacy(true));await page.getByText('隐私模式已隐藏媒体编辑',{exact:true}).waitFor();assert.equal(await page.evaluate(()=>window.__calls.length),0)
++  await page.evaluate(()=>window.__privacy(false));await page.getByRole('tab',{name:'影片封面'}).click()
++  const candidates=page.locator('button[aria-label^="CODE-"]'),pager=page.getByRole('navigation',{name:'分类封面分页'})
++  await page.waitForFunction(()=>document.querySelectorAll('button[aria-label^="CODE-"]').length===60)
++  await page.getByRole('button',{name:'CODE-1',exact:true}).click()
++  await pager.getByRole('button',{name:'下一页'}).click();await page.getByRole('button',{name:'CODE-61',exact:true}).waitFor()
++  await page.evaluate(()=>window.__fail=true);await pager.getByRole('button',{name:'下一页'}).click();await page.getByRole('button',{name:'重试'}).click()
++  await page.waitForFunction(()=>document.querySelectorAll('button[aria-label^="CODE-"]').length===5)
++  assert.ok((await page.locator('.classification-image-preview img').getAttribute('src')).includes('covers%2F1.jpg'))
++  await pager.getByRole('button',{name:'上一页'}).click();await page.getByRole('button',{name:'CODE-61',exact:true}).waitFor()
++  await pager.getByRole('button',{name:'上一页'}).click();await page.getByRole('button',{name:'CODE-1',exact:true}).waitFor()
++  assert.equal(await page.getByRole('button',{name:'CODE-1',exact:true}).getAttribute('aria-pressed'),'true')
++  const geometry=await pager.evaluate(el=>{const panel=document.querySelector('[role=tabpanel][data-active=true]'),save=Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='保存主图');return {pager:el.getBoundingClientRect().toJSON(),panel:panel.getBoundingClientRect().toJSON(),save:save.getBoundingClientRect().toJSON(),viewport:innerHeight,horizontal:document.documentElement.scrollWidth>innerWidth}})
++  assert.ok(geometry.pager.top>=geometry.panel.bottom);assert.ok(geometry.save.bottom<=viewport.height);assert.ok(geometry.pager.bottom<=geometry.save.top);assert.equal(geometry.horizontal,false)
++  await page.waitForFunction(()=>{const img=document.querySelector('.classification-image-preview img');return img.complete&&img.naturalWidth>0})
++  await page.screenshot({path:path.join(output,viewport.width+'x'+viewport.height+'.png')})
++  await page.getByRole('button',{name:'保存主图',exact:true}).click();await page.waitForFunction(()=>window.__saves.length===1)
++  assert.deepEqual(await page.evaluate(()=>window.__saves[0]),{entity:{kind:'director',id:1},input:{source:'video-cover',videoId:1}})
++  await page.evaluate(()=>window.__hold=true);await pager.getByRole('button',{name:'下一页'}).click();await page.waitForFunction(()=>typeof window.__release==='function')
++  await page.evaluate(()=>window.__privacy(true));await page.getByText('隐私模式已隐藏媒体编辑',{exact:true}).waitFor();await page.evaluate(()=>window.__release());const beforeResume=await page.evaluate(()=>window.__calls.length);await page.evaluate(()=>window.__privacy(false))
++  await page.getByRole('button',{name:'CODE-61',exact:true}).waitFor();assert.equal(await candidates.count(),60);assert.equal(await page.evaluate(()=>window.__calls.length),beforeResume+1);assert.ok((await page.locator('.classification-image-preview img').getAttribute('src')).includes('covers%2F1.jpg'))
++  await page.evaluate(()=>window.__entity({kind:'series',id:2}));await page.getByRole('tab',{name:'本地图片'}).waitFor();assert.equal(await page.getByRole('button',{name:'保存主图',exact:true}).isDisabled(),true)
++  assert.ok(requests.some(value=>{const url=new URL(value);return url.searchParams.get('path')==='covers/1.jpg'&&url.searchParams.get('size')==='320'}));assert.ok(requests.some(value=>{const url=new URL(value);return url.searchParams.get('path')==='covers/1.jpg'&&!url.searchParams.has('size')}))
++  assert.deepEqual(errors,[]);results.push({viewport,geometry,calls:await page.evaluate(()=>window.__calls),requests,errors});await page.close()
++ }
++ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2));console.log(output)
++}finally{await browser?.close();await server?.close();if(!output.startsWith(root+path.sep))fs.rmSync(root,{recursive:true,force:true})}
+diff --git a/scripts/performance/classification-image-page-benchmark.ts b/scripts/performance/classification-image-page-benchmark.ts
+new file mode 100644
+index 0000000..06b9b01
+--- /dev/null
++++ b/scripts/performance/classification-image-page-benchmark.ts
+@@ -0,0 +1,29 @@
++/** Standalone synthetic cover candidate benchmark; no user data or media. */
++import {it} from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import {performance} from 'node:perf_hooks'
++import {initDatabaseAtPath,closeDatabase} from '../../src/main/db/database'
++import {classificationQueryService as read} from '../../src/main/services/classificationQueryService'
++it('compares full cover candidates with bounded pages',()=>{
++ const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-cover-page-bench-')),results:unknown[]=[]
++ try{for(const count of [10000,50000]){
++  const db=initDatabaseAtPath(path.join(root,`${count}.db`))
++  db.exec(`INSERT INTO organizations(id,main_name) VALUES(1,'Org'); INSERT INTO directors(id,main_name) VALUES(1,'Director'); INSERT INTO series(id,main_name) VALUES(1,'Series');
++    WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<${count})
++    INSERT INTO videos(id,code,title,cover_path,release_date,add_time,maker_organization_id,publisher_organization_id,director_id,series_id)
++      SELECT x,printf('VIDEO-%06d',x),hex(zeroblob(128)),printf('cover/%06d/',x)||hex(zeroblob(100))||'.jpg','2026-01-01','2026-01-01',1,1,1,1 FROM n;ANALYZE;`)
++  for(const kind of ['organization','director','series'] as const){const entity={kind,id:1},expected=read.listImageCandidates(entity)
++    for(const name of ['legacy','first','last']){const offset=name==='last'?Math.floor((count-1)/60)*60:0
++      const run=()=>name==='legacy'?read.listImageCandidates(entity):read.listImageCandidatesPage(entity,{offset})
++      const check=(value:ReturnType<typeof run>)=>{if(Array.isArray(value))assert.deepEqual(value,expected);else{assert.equal(value.total,count);assert.deepEqual(value.items,expected.slice(offset,offset+60))}}
++      check(run());const samples:number[]=[];let jsonBytes=0
++      for(let n=0;n<3;n++){const t=performance.now(),value=run();samples.push(performance.now()-t);check(value);jsonBytes=Buffer.byteLength(JSON.stringify(value))}
++      results.push({count,kind,name,offset,samples,medianMs:[...samples].sort((a,b)=>a-b)[1],jsonBytes})
++    }
++  }closeDatabase()
++ }}finally{closeDatabase();fs.rmSync(root,{recursive:true,force:true})}
++ console.log(JSON.stringify({results,notes:['All videos linked to the same entity, dual-role organization association, same dates; 256-char titles and >200-char cover paths.','ANALYZE, one warmup, 3 warm samples, fixed legacy-first order; assertion/JSON time excluded; full oracle retained.','No p95, IPC, cold, Windows/HDD, actual media, concurrent request or peak memory claim. Count/sort/deep offset remain data-dependent.']},null,2))
++})

@@ -183,6 +183,11 @@ export class AgentRunStore {
     return this.getRun<ProductState>(runId)!
   }
 
+  getRunStatus(runId: string): AgentRunStatus | null {
+    const row = this.database().prepare('SELECT status FROM agent_runs WHERE id = ?').get(runId) as { status: AgentRunStatus } | undefined
+    return row?.status ?? null
+  }
+
   getRun<ProductState = Record<string, unknown>>(runId: string): AgentRunRecord<ProductState> | null {
     const row = this.database().prepare('SELECT * FROM agent_runs WHERE id = ?').get(runId) as RunRow | undefined
     return row ? toRun<ProductState>(row) : null
@@ -199,13 +204,57 @@ export class AgentRunStore {
     `).run(json(snapshot), snapshot.revision, now(), runId)
   }
 
-  listRecoverableRuns(): AgentRunRecord[] {
-    const rows = this.database().prepare(`
-      SELECT * FROM agent_runs
-      WHERE status <> 'closed'
-      ORDER BY updated_at ASC
-    `).all() as RunRow[]
-    return rows.map((row) => toRun(row))
+  *iterateRecoverableRunIds(useCase: string, statuses?: readonly AgentRunStatus[]): Generator<string> {
+    yield* this.iterateSelectedRunIds(useCase, statuses, false)
+  }
+
+  *iterateCleanupRunIds(useCase: string): Generator<string> {
+    yield* this.iterateSelectedRunIds(useCase, undefined, true)
+  }
+
+  setResourceCleanupPending(runId: string, pending: boolean): void {
+    if (pending) {
+      this.database().prepare(`INSERT INTO agent_resource_cleanup (run_id, requested_at)
+        VALUES (?, ?) ON CONFLICT(run_id) DO NOTHING`).run(runId, now())
+    } else {
+      this.database().prepare('DELETE FROM agent_resource_cleanup WHERE run_id = ?').run(runId)
+    }
+  }
+
+  private *iterateSelectedRunIds(useCase: string, statuses: readonly AgentRunStatus[] | undefined, includeCleanup: boolean): Generator<string> {
+    if (!useCase.trim()) throw new Error('Agent use case must not be empty')
+    if (statuses?.length === 0) return
+    const db = this.database()
+    const table = `agent_restore_${randomUUID().replaceAll('-', '')}`
+    const statusFilter = statuses ? ` AND status IN (${statuses.map(() => '?').join(',')})` : ''
+    const eligibility = includeCleanup
+      ? `(status <> 'closed' OR EXISTS (SELECT 1 FROM agent_resource_cleanup AS cleanup WHERE cleanup.run_id = agent_runs.id))`
+      : `status <> 'closed'`
+    // Snapshot only IDs in SQLite. Preserve updated_at order while recovery
+    // updates those timestamps, without retaining every product/config in JS.
+    db.exec(`CREATE TEMP TABLE ${table} (position INTEGER PRIMARY KEY, id TEXT NOT NULL)`)
+    try {
+      db.prepare(`INSERT INTO ${table} (id) SELECT id FROM agent_runs
+        WHERE use_case = ? AND ${eligibility}${statusFilter} ORDER BY updated_at ASC, rowid ASC`)
+        .run(useCase, ...(statuses ?? []))
+      const statement = db.prepare(`SELECT position, id FROM ${table} WHERE position > ? ORDER BY position LIMIT 128`)
+      let after = 0
+      while (true) {
+        const rows = statement.all(after) as Array<{ position: number; id: string }>
+        if (rows.length === 0) return
+        for (const row of rows) yield row.id
+        after = rows[rows.length - 1].position
+      }
+    } finally { db.exec(`DROP TABLE ${table}`) }
+  }
+
+  *iterateRecoverableRuns(useCase: string, statuses?: readonly AgentRunStatus[]): Generator<AgentRunRecord> {
+    for (const id of this.iterateRecoverableRunIds(useCase, statuses)) {
+      const record = this.getRun(id)
+      // A previous asynchronous recovery may have closed a later run.
+      if (record && record.useCase === useCase && record.status !== 'closed' &&
+        (!statuses || statuses.includes(record.status))) yield record
+    }
   }
 
   findLatestRun<ProductState = Record<string, unknown>>(useCase: string): AgentRunRecord<ProductState> | null {
@@ -221,6 +270,21 @@ export class AgentRunStore {
     this.database().prepare(`
       UPDATE agent_runs SET status = ?, product_state_json = ?, updated_at = ? WHERE id = ?
     `).run(status, json(state), now(), runId)
+  }
+
+  /** Build and commit a state together with any journal appends made by the synchronous builder. */
+  updateProductStateFrom<ProductState extends Record<string, unknown>>(
+    runId: string,
+    status: AgentRunStatus,
+    build: (current: AgentRunRecord<ProductState>) => ProductState
+  ): ProductState {
+    return this.database().transaction(() => {
+      const current = this.getRun<ProductState>(runId)
+      if (!current) throw new Error('Agent run does not exist')
+      const next = build(current)
+      this.updateProductState(runId, status, next)
+      return next
+    })()
   }
 
   acceptOperation(input: {
@@ -312,14 +376,26 @@ export class AgentRunStore {
     return Number(result.lastInsertRowid)
   }
 
+  getProductJournalCursor(runId: string): number {
+    const row = this.database().prepare(`
+      SELECT seq FROM agent_product_journal
+      WHERE run_id = ? ORDER BY seq DESC LIMIT 1
+    `).get(runId) as { seq: number } | undefined
+    return row?.seq ?? 0
+  }
+
   readProductJournal<Event = Record<string, unknown>>(
     runId: string,
-    afterSeq = 0
+    afterSeq = 0,
+    limit = 500,
+    throughSeq = Number.MAX_SAFE_INTEGER
   ): AgentJournalRecord<Event>[] {
+    if (!Number.isSafeInteger(afterSeq) || afterSeq < 0 || !Number.isSafeInteger(throughSeq) || throughSeq < afterSeq) throw new Error('Invalid journal cursor')
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error('Journal page limit must be between 1 and 500')
     const rows = this.database().prepare(`
       SELECT seq, run_id, operation_id, event_type, payload_json, created_at
-      FROM agent_product_journal WHERE run_id = ? AND seq > ? ORDER BY seq ASC
-    `).all(runId, afterSeq) as Array<{
+      FROM agent_product_journal WHERE run_id = ? AND seq > ? AND seq <= ? ORDER BY seq ASC LIMIT ?
+    `).all(runId, afterSeq, throughSeq, limit) as Array<{
       seq: number; run_id: string; operation_id: string | null; event_type: string; payload_json: string; created_at: string
     }>
     return rows.map((row) => ({

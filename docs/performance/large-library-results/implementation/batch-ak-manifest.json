@@ -1,0 +1,23 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ak-asar.json": "2bcc5ad8fc8321227024dfcc4ab6c0d0c9d645b6908d766062f11ba939634d45",
+    "batch-ak-asar.log": "a2226ac616e57170a6d15013941d9daf7ad70a8eb7362e7aee54e7868777ec18",
+    "batch-ak-before.log": "937829d50de2176b64b69f9a57a416f30b6562badae398e23f3585194e12c26b",
+    "batch-ak-build.log": "9e47512efc3bc34697725f134f0eba0fc06966886d7ebf25f17c3f2daad28ac5",
+    "batch-ak-full.log": "f24663bd1e02c8c6dc33cecaf3f98358f9e312af0f50ffcee66acbf1b14b6c3d",
+    "batch-ak-queue-deadline.patch": "a909270e43be41bc19db809190e43a47e58177b1237fa2760417c0d67e676666",
+    "batch-ak-review.md": "a480514cb36e83ced05010d7ced8ff1c05b429838e053be6b68a68b8034f01ba",
+    "batch-ak-target.log": "b496b62beefa692c2aa4832c917debea0118ccfab97a1c1e21579331d228bfe1",
+    "batch-ak-worker-300382.json": "65626b9a364a62d434bd6935febda1847f243f8640ea7d5d942f21e736cc229c",
+    "batch-ak-worker-300382.log": "3adb0752a3b36596001e1ea849e4f47300dc7bdbbf4e16f5d9e13cd6c70b0131"
+  },
+  "notes": [
+    "Full untracked client/test snapshot, depends on AJ and prior cumulative implementation, not a standalone patch.",
+    "Before log:17pass3fail on missing queue deadline; failure cleanup also produced unhandled rejections, final tests attach cleanup rejection handlers and pass.",
+    "23 targeted pass, final full2187pass1skip0fail, build and windowless real Electron ASAR pass.",
+    "Final isolated sequential300382 benchmark uses built worker/client and actual committed timestamp changes. Three warm samples, not p95, full IPC, Windows/HDD or long-run acceptance.",
+    "Queue timeout30s per subscriber; executing query15s; neither guarantees native termination or total request bound. No overlap while retiring.",
+    "Schema17 unchanged. No user data, commit, push or release; full15packages42risks still incomplete."
+  ]
+}

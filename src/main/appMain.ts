@@ -8,16 +8,18 @@ import { applyAppIcons, resolveWindowIcon } from './appIcon'
 import { configureAppIdentity } from './appPaths'
 import fs from 'node:fs'
 import { initDatabaseAtPath, closeDatabase } from './db/database'
+import { catalogReadService } from './services/catalogReadService'
 import { recoverInterruptedLibraryScanRuns } from './db/libraryScanRepo'
 import { mediaAssetStore } from './services/mediaAssetStore'
 import { registerIpcHandlers } from './ipc'
 import { scrapeBrowser } from './scrapers/scrapeBrowser'
 import { migrateUserPluginsAwayFromBuiltInNames } from './scrapers/scraperPluginService'
-import { resolveMediaAssetPath, toStoredAssetPath } from './services/mediaProtocol'
+import { serveMediaAssetRequest } from './services/mediaProtocol'
 import { checkForLatestRelease, shouldRunAutomaticCheck } from './services/appReleaseService'
 import { cleanupOrphanedActressScrapeStaging } from './services/actressIdentityConflictWorkflow'
 import { cleanupOrphanedVideoScrapeStaging } from './services/videoPendingScrapeService'
 import { automaticScanScheduler } from './services/automaticScanScheduler'
+import { scanCoordinator } from './scanner/scanCoordinator'
 import { recoverPendingLocalFileDeletions } from './services/pendingLocalFileDeletionService'
 import { isSameRendererLocation } from './ipc/ipcSecurity'
 import { pluginDeveloper } from './services/pluginDevAgent/pluginDeveloper'
@@ -133,31 +135,7 @@ function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
 
 /** Serve files from the media_assets directory through the media:// scheme. */
 function registerAssetProtocol(): void {
-  protocol.handle('media', (request) => {
-    const root = mediaAssetStore.rootPath()
-    const abs = resolveMediaAssetPath(request.url, root)
-
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-      'Access-Control-Allow-Headers': '*'
-    }
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: corsHeaders })
-    }
-    if (!abs) {
-      return new Response('Forbidden', { status: 403, headers: corsHeaders })
-    }
-    try {
-      const relPosix = toStoredAssetPath(abs, root)
-      const { body, mime } = mediaAssetStore.readForServe(relPosix)
-      return new Response(body, {
-        headers: { 'Content-Type': mime, ...corsHeaders }
-      })
-    } catch {
-      return new Response('Not Found', { status: 404, headers: corsHeaders })
-    }
-  })
+  protocol.handle('media', (request) => serveMediaAssetRequest(request, mediaAssetStore))
 }
 
 if (gotSingleInstanceLock) {
@@ -245,7 +223,13 @@ if (gotSingleInstanceLock) {
     shutdownInProgress = true
     automaticScanScheduler.stop()
     powerMonitor.off('resume', handleSystemResume)
+    let readerTerminationFailed = false
     void Promise.allSettled([
+      scanCoordinator.stopAndDrain(),
+      catalogReadService.dispose().catch((error: unknown) => {
+        readerTerminationFailed = true
+        console.error('[catalog-reader] Failed to confirm termination', error)
+      }),
       webAccess.stop(),
       pluginDeveloper.dispose(),
       libraryCurator.dispose(),
@@ -258,6 +242,12 @@ if (gotSingleInstanceLock) {
       ]))
       .finally(() => {
         destroyAppTray()
+        if (readerTerminationFailed) {
+          // Do not report a clean database shutdown while a native reader may
+          // still be alive. Other product cleanup has settled before process exit.
+          app.exit(1)
+          return
+        }
         closeDatabase()
         shutdownReady = true
         app.quit()

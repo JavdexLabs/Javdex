@@ -1,0 +1,959 @@
+diff --git a/src/main/scanner/libraryPathUtils.ts b/src/main/scanner/libraryPathUtils.ts
+index 920aa26..761c0a4 100644
+--- a/src/main/scanner/libraryPathUtils.ts
++++ b/src/main/scanner/libraryPathUtils.ts
+@@ -1,8 +1,8 @@
+ import path from 'node:path'
+ 
+-export function isPathUnderRoot(filePath: string, root: string): boolean {
+-  const relative = path.relative(path.resolve(root), path.resolve(filePath))
+-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
++export function isPathUnderRoot(filePath: string, root: string, paths: typeof path = path): boolean {
++  const relative = paths.relative(paths.resolve(root), paths.resolve(filePath))
++  return relative === '' || (!relative.startsWith('..') && !paths.isAbsolute(relative))
+ }
+ 
+ export function isSameLibraryPath(left: string, right: string): boolean {
+diff --git a/src/main/scanner/libraryRootMatcher.ts b/src/main/scanner/libraryRootMatcher.ts
+new file mode 100644
+index 0000000..1aae2b3
+--- /dev/null
++++ b/src/main/scanner/libraryRootMatcher.ts
+@@ -0,0 +1,54 @@
++import path from 'node:path'
++import { isPathUnderRoot } from './libraryPathUtils'
++
++interface RootPath {
++  path: string
++  realPath?: string | null
++}
++
++/** Per-scan immutable roots; selection only, never a cached filesystem authorization. */
++export function createLibraryRootMatcher<T extends RootPath>(
++  roots: readonly T[],
++  includeRealPath = false,
++  paths: typeof path = path
++): (filePath: string) => T | undefined {
++  const matches = (filePath: string, root: T): boolean =>
++    isPathUnderRoot(filePath, root.path, paths) ||
++    Boolean(includeRealPath && root.realPath && isPathUnderRoot(filePath, root.realPath, paths))
++  const fallback = (filePath: string): T | undefined => roots.find(root => matches(filePath, root))
++  if (!roots.length) return () => undefined
++
++  const windows = paths.sep === '\\'
++  const special = (value: string): boolean => windows && /^\\\\[?.]\\/.test(value)
++  const hasFixedWindowsRoot = (value: string): boolean =>
++    /^[a-z]:\\/i.test(value) || /^\\\\[^\\]+\\[^\\]+(?:\\|$)/.test(value)
++  const key = (value: string): string => windows ? value.toLowerCase() : value
++  const byPath = new Map<string, number>()
++  for (let ordinal = 0; ordinal < roots.length; ordinal++) {
++    const root = roots[ordinal]
++    const aliases = includeRealPath && root.realPath ? [root.path, root.realPath] : [root.path]
++    for (const alias of aliases) {
++      // Keep deferred validation, relative-root cwd semantics and unusual Windows namespaces.
++      if (typeof alias !== 'string' || !paths.isAbsolute(alias) || special(alias)) return fallback
++      if (windows && !hasFixedWindowsRoot(alias.replaceAll('/', '\\'))) return fallback
++      const resolved = key(paths.resolve(alias))
++      if (!byPath.has(resolved)) byPath.set(resolved, ordinal)
++    }
++  }
++
++  return (filePath: string): T | undefined => {
++    const resolved = paths.resolve(filePath)
++    if (special(resolved)) return fallback(filePath)
++    let current = resolved
++    let first = roots.length
++    for (;;) {
++      const ordinal = byPath.get(key(current))
++      // Preserve legacy '..hidden' rejection and first-root order, not longest-prefix order.
++      if (ordinal !== undefined && ordinal < first && matches(filePath, roots[ordinal])) first = ordinal
++      const parent = paths.dirname(current)
++      if (parent === current) break
++      current = parent
++    }
++    return first === roots.length ? undefined : roots[first]
++  }
++}
+diff --git a/src/main/scanner/libraryRootMatcher.test.ts b/src/main/scanner/libraryRootMatcher.test.ts
+new file mode 100644
+index 0000000..003a687
+--- /dev/null
++++ b/src/main/scanner/libraryRootMatcher.test.ts
+@@ -0,0 +1,125 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import path from 'node:path'
++import { createLibraryRootMatcher } from './libraryRootMatcher'
++import { isPathUnderRoot } from './libraryPathUtils'
++
++for (const paths of [path.posix, path.win32]) {
++  const windows = paths.sep === '\\'
++  const base = windows ? 'C:\\media' : '/media'
++  const join = (...parts: string[]) => paths.join(base, ...parts)
++  const roots = [
++    { path: join('a', 'nested'), realPath: join('real') },
++    { path: join('a') },
++    { path: join('a'), realPath: join('other') },
++    { path: join('..hidden'), realPath: '' },
++    { path: base },
++    { path: windows ? 'D:\\other' : '/elsewhere' }
++  ]
++  const files = [base, join('a'), join('a', 'nested'), join('a', 'nested', 'f'),
++    join('ab', 'f'), join('real', 'f'), join('other', 'f'), join('..hidden', 'f'),
++    join('a', '..hidden', 'f'), join('a', 'child', '..hidden', 'f'),
++    join('a', '..', 'a', 'f'), join('a', '.', 'f'), join('a', 'f').toUpperCase(),
++    '', '.', 'relative', windows ? 'C:relative' : '../relative',
++    windows ? 'D:\\other\\f' : '/elsewhere/f', windows ? '\\media\\a\\f' : '//media//a//f']
++  it(`matches original find by object identity for ${windows ? 'win32' : 'posix'} paths and both alias modes`, () => {
++    for (const ordered of [roots, [...roots].reverse()]) {
++      for (const aliases of [false, true]) {
++        const match = createLibraryRootMatcher(ordered, aliases, paths)
++        for (const file of files) {
++          const expected = ordered.find(root => isPathUnderRoot(file, root.path, paths) ||
++            Boolean(aliases && root.realPath && isPathUnderRoot(file, root.realPath, paths)))
++          assert.equal(match(file), expected, JSON.stringify({ file, aliases, roots: ordered }))
++        }
++      }
++    }
++  })
++  it(`preserves the earliest parent, alias and duplicate root for ${windows ? 'win32' : 'posix'}`, () => {
++    const parent = { path: base, realPath: join('real') }
++    const child = { path: join('a') }
++    const duplicate = { path: base }
++    assert.equal(createLibraryRootMatcher([parent, child, duplicate], false, paths)(join('a', 'f')), parent)
++    assert.equal(createLibraryRootMatcher([child, parent], false, paths)(join('a', 'f')), child)
++    const earlierAlias = { path: join('else'), realPath: join('a') }
++    assert.equal(createLibraryRootMatcher([earlierAlias, child], true, paths)(join('a', 'f')), earlierAlias)
++    assert.equal(createLibraryRootMatcher([earlierAlias, child], false, paths)(join('a', 'f')), child)
++  })
++}
++
++it('matches UNC and namespace paths without expanding the old predicate', () => {
++  const paths = path.win32
++  const roots = [{ path: '\\\\server\\share\\a' }, { path: '\\\\SERVER\\share' },
++    { path: '\\\\other\\share' }]
++  for (const ordered of [roots, [{ path: '\\\\?\\C:\\media' }, ...roots]]) {
++    const match = createLibraryRootMatcher(ordered, false, paths)
++    for (const file of ['\\\\server\\share\\a\\f', '\\\\server\\share', '\\\\SERVER\\share\\a',
++      '\\\\server\\different\\a', '\\\\?\\C:\\media\\f', '\\\\.\\C:\\media\\f']) {
++      assert.equal(match(file), ordered.find(root => isPathUnderRoot(file, root.path, paths)), file)
++    }
++  }
++})
++
++it('keeps relative-root fallback and validation short circuit behavior', () => {
++  const first = { path: process.cwd() }
++  const bad = { path: null as unknown as string }
++  const match = createLibraryRootMatcher([first, bad])
++  assert.equal(match(path.join(process.cwd(), 'file')), first)
++  assert.throws(() => match(path.parse(process.cwd()).root), TypeError)
++  assert.equal(createLibraryRootMatcher([])(null as unknown as string), undefined)
++  assert.throws(() => createLibraryRootMatcher([first])(null as unknown as string), TypeError)
++  for (const roots of [[{ path: '.' }], [{ path: '' }], [{ path: 'relative' }, first]]) {
++    const find = createLibraryRootMatcher(roots)
++    for (const file of ['', '.', 'relative/f', '../f', path.join(process.cwd(), 'f')]) {
++      assert.equal(find(file), roots.find(root => isPathUnderRoot(file, root.path)))
++    }
++  }
++})
++
++it('does not introduce whitespace or NUL validation', () => {
++  const roots = [{ path: '/ media ' }, { path: '/media\0root' }]
++  const match = createLibraryRootMatcher(roots, false, path.posix)
++  for (const file of ['/ media /f', '/media\0root/f', '/media/f']) {
++    assert.equal(match(file), roots.find(root => isPathUnderRoot(file, root.path, path.posix)))
++  }
++})
++
++it('matches deterministic mixed path cases including Windows lexical edge forms', () => {
++  for (const paths of [path.posix, path.win32]) {
++    const base = paths.sep === '\\' ? 'C:\\data' : '/data'
++    const names = ['a', 'A', 'ab', '..hidden', 'deep/child', 'İ', 'i\u0307', 'K', 'K', ' spaced ', '中文']
++    const roots = names.map((name, id) => ({ id, path: paths.resolve(base, name), realPath: paths.resolve(base, 'alias', name) }))
++    roots.push({ id: roots.length, path: base, realPath: paths.resolve(base, 'mirror') })
++    for (const order of [roots, [...roots].reverse()]) for (const aliases of [false, true]) {
++      const match = createLibraryRootMatcher(order, aliases, paths)
++      for (const name of names) for (const prefix of [base, paths.join(base, 'alias'), paths.join(base, 'missing')]) {
++        for (const suffix of ['', '/file', '/..hidden/file', '/child/..hidden/file', '/../a/file']) {
++          const file = paths.resolve(prefix, name + suffix)
++          for (const spelling of [file, file.toUpperCase(), paths.sep === '\\' ? file.replaceAll('\\', '/') : file + '/']) {
++            assert.equal(match(spelling), order.find(root => isPathUnderRoot(spelling, root.path, paths) ||
++              Boolean(aliases && root.realPath && isPathUnderRoot(spelling, root.realPath, paths))), spelling)
++          }
++        }
++      }
++    }
++  }
++  const roots = [{ path: '\\data' }, { path: 'C:\\data' }, { path: '//server/share/data' }]
++  const match = createLibraryRootMatcher(roots, false, path.win32)
++  for (const file of ['\\data\\file', 'C:\\data\\file', 'D:\\data\\file', '//server/share/data/file']) {
++    assert.equal(match(file), roots.find(root => isPathUnderRoot(file, root.path, path.win32)))
++  }
++})
++
++it('checks only ancestor candidates instead of testing every unrelated root', () => {
++  const roots = Array.from({ length: 1000 }, (_, id) => ({ path: `/media/root-${id}` }))
++  let checks = 0
++  const paths = { ...path.posix, relative: (from: string, to: string) => {
++    checks++
++    return path.posix.relative(from, to)
++  } }
++  const file = '/media/root-999/file.mp4'
++  const expected = roots.find(root => isPathUnderRoot(file, root.path, paths))
++  assert.equal(checks, 1000)
++  checks = 0
++  assert.equal(createLibraryRootMatcher(roots, false, paths)(file), expected)
++  assert.equal(checks, 1)
++})
+diff --git a/src/main/scanner/scanCoordinator.ts b/src/main/scanner/scanCoordinator.ts
+index 7c08dde..6b04701 100644
+--- a/src/main/scanner/scanCoordinator.ts
++++ b/src/main/scanner/scanCoordinator.ts
+@@ -1,10 +1,9 @@
+ import fs from 'node:fs'
++import { createProgressPublisher } from '../services/progressPublisher'
+ import { randomUUID } from 'node:crypto'
+ import type {
+   LibraryScanAudit,
+   LibraryScanEvent,
+-  LibraryScanFileAuditEntry,
+-  LibraryScanPendingGroupAuditEntry,
+   LibraryScanResourceAuditEntry,
+   LibraryScanSummary,
+   LibraryScanTrigger,
+@@ -20,7 +19,7 @@ import type { Video, VideoResource } from '@shared/videoTypes'
+ import {
+   getVideoById,
+   getVideoResourceInLibrary,
+-  listSourceManagedVideoResourceRefs,
++  iterateSourceManagedVideoResourceRefs,
+   listVideoResources,
+   removeVideoResourceRecord,
+   setPrimaryVideoResource,
+@@ -41,7 +40,8 @@ import {
+   finishLibraryScanRun,
+   type LibraryUnrecognizedFileInput
+ } from '../db/libraryScanRepo'
+-import { listPendingScanGroups, reconcilePendingScanResources } from '../db/pendingScanRepo'
++import { reconcilePendingScanResources } from '../db/pendingScanRepo'
++import { readPendingScanAuditEntries } from '../db/pendingScanAuditRepo'
+ import { reconcilePendingResourceIdentities } from '../db/pendingResourceIdentityRepo'
+ import { maintenanceTaskGate, type MaintenanceTaskGate } from '../services/maintenanceTaskGate'
+ import {
+@@ -57,7 +57,7 @@ import {
+   type RecoverLegacyLibraryPathCleanupResult,
+   type PendingLibraryPathCleanupResult
+ } from '../services/libraryPathCleanupService'
+-import { isPathUnderRoot } from './libraryPathUtils'
++import { createLibraryRootMatcher } from './libraryRootMatcher'
+ import {
+   scanFolders,
+   type ScanFoldersRequest,
+@@ -99,7 +99,7 @@ export interface ScanCoordinatorDependencies {
+     onProgress?: ScanProgressFn,
+     options?: ScanOptions
+   ) => Promise<ScanResult>
+-  listLocalResources: (libraryId: number) => LocalVideoResourceRef[]
++  listLocalResources: (libraryId: number) => Iterable<LocalVideoResourceRef>
+   getResourceById: (libraryId: number, resourceId: number) => VideoResource | null
+   getVideoById: (videoId: number) => Video | null
+   listResources: (libraryId: number, videoId: number) => VideoResource[]
+@@ -115,7 +115,7 @@ export interface ScanCoordinatorDependencies {
+   ) => PendingLibraryPathCleanupResult
+   runCleanupTransaction: <T>(operation: () => T) => T
+   removeResourceLessMemberships: (libraryId: number) => RemovedResourceLessMembership[]
+-  listPendingScanGroups: typeof listPendingScanGroups
++  readPendingScanAuditEntries: typeof readPendingScanAuditEntries
+   beginRun: typeof beginLibraryScanRun
+   finishRun: (input: FinishRunInput) => void
+   now: () => string
+@@ -200,6 +200,9 @@ export class ScanCoordinator {
+     let snapshot: MediaLibraryScanSnapshot | null = null
+     let selectedRoots: Readonly<MediaLibraryRoot>[] = []
+     let beganRun = false
++    const progressPublisher = createProgressPublisher<ScanProgress>((progress) => {
++      this.emit({ phase: 'progress', libraryId: request.libraryId, runId, trigger, progress })
++    })
+     const auditState: Omit<
+       LibraryScanAudit,
+       | 'schemaVersion'
+@@ -285,13 +288,7 @@ export class ScanCoordinator {
+         },
+         (progress) => {
+           request.onProgress?.(progress)
+-          this.emit({
+-            phase: 'progress',
+-            libraryId: request.libraryId,
+-            runId,
+-            trigger,
+-            progress
+-          })
++          progressPublisher.update(progress)
+         },
+         {
+           signal: controller.signal,
+@@ -357,16 +354,13 @@ export class ScanCoordinator {
+         selectedRoots.every((root) => snapshot?.roots.some((item) => item.id === root.id))
+       const safeRootIds = new Set(safeRoots.map((root) => root.id))
+       const safeRootsById = new Map(safeRoots.map((root) => [root.id, root] as const))
++      const matchPendingRoot = createLibraryRootMatcher(safeRoots, true)
+       const cleanup = this.dependencies.runCleanupTransaction(() => {
+         for (const root of safeRoots) {
+           this.dependencies.authorizeRoot(request.libraryId, root.id, root)
+         }
+         const inspectAuthorizedPendingPath = (filePath: string): LocalPathState => {
+-          const root = safeRoots.find(
+-            (candidate) =>
+-              isPathUnderRoot(filePath, candidate.path) ||
+-              Boolean(candidate.realPath && isPathUnderRoot(filePath, candidate.realPath))
+-          )
++          const root = matchPendingRoot(filePath)
+           if (!root) return 'unknown'
+           const state = this.dependencies.inspectPath(filePath)
+           if (state === 'present') {
+@@ -410,16 +404,20 @@ export class ScanCoordinator {
+       result.removed += cleanup.missingResources.removed + cleanup.deferredCleanup.removed
+       result.promoted += cleanup.missingResources.promoted + cleanup.deferredCleanup.promoted
+       result.deletedVideos = cleanup.removedMemberships.length
+-      auditState.removedResources.push(...cleanup.missingResources.removedResources)
+-      auditState.promotedResources.push(...cleanup.missingResources.promotedResources)
+-      auditState.deletedVideos.push(
+-        ...cleanup.removedMemberships.map((video) => ({
++      for (const resource of cleanup.missingResources.removedResources) {
++        auditState.removedResources.push(resource)
++      }
++      for (const resource of cleanup.missingResources.promotedResources) {
++        auditState.promotedResources.push(resource)
++      }
++      for (const video of cleanup.removedMemberships) {
++        auditState.deletedVideos.push({
+           videoId: video.videoId,
+           videoCode: video.videoCode,
+           videoTitle: video.videoTitle,
+-          reason: 'resource_less' as const
+-        }))
+-      )
++          reason: 'resource_less'
++        })
++      }
+       const status =
+         result.strmFailures.length + result.omittedStrmFailures > 0
+           ? 'completed_with_errors'
+@@ -460,6 +458,7 @@ export class ScanCoordinator {
+       }
+       throw new Error(errorSummary)
+     } finally {
++      progressPublisher.close()
+       if (this.activeRun?.controller === controller) this.activeRun = null
+       lease.release()
+       if (beganRun) {
+@@ -505,26 +504,16 @@ export class ScanCoordinator {
+     libraryId: number,
+     auditState: Pick<LibraryScanAudit, 'files' | 'pendingGroups'>
+   ): void {
+-    const auditPendingIds = new Set(
+-      auditState.files
+-        .filter(
+-          (entry): entry is Extract<LibraryScanFileAuditEntry, { outcome: 'pending' }> =>
+-            entry.outcome === 'pending' && entry.groupId != null
+-        )
+-        .map((entry) => entry.groupId as number)
+-    )
+-    auditState.pendingGroups = this.dependencies
+-      .listPendingScanGroups(libraryId)
+-      .filter((group) => auditPendingIds.has(group.id))
+-      .map((group): LibraryScanPendingGroupAuditEntry => ({
+-        groupId: group.id,
+-        normalizedCode: group.normalizedCode,
+-        resourceCount: group.resources.filter((resource) =>
+-          auditState.files.some(
+-            (entry) => entry.outcome === 'pending' && entry.filePath === resource.filePath
+-          )
+-        ).length
+-      }))
++    const groupIds = new Set<number>()
++    const pendingPaths = new Set<string>()
++    for (const entry of auditState.files) {
++      if (entry.outcome !== 'pending') continue
++      pendingPaths.add(entry.filePath)
++      if (entry.groupId != null) groupIds.add(entry.groupId)
++    }
++    auditState.pendingGroups = groupIds.size === 0
++      ? []
++      : this.dependencies.readPendingScanAuditEntries(libraryId, groupIds, pendingPaths)
+   }
+ 
+   private emit(event: LibraryScanEvent): void {
+@@ -637,9 +626,10 @@ export class ScanCoordinator {
+       status,
+       ...auditState
+     }
++    const matchUnrecognizedRoot = createLibraryRootMatcher(safeRoots)
+     const unrecognizedFiles: LibraryUnrecognizedFileInput[] = result.unrecognizedFiles.flatMap(
+       (filePath) => {
+-        const root = safeRoots.find((candidate) => isPathUnderRoot(filePath, candidate.path))
++        const root = matchUnrecognizedRoot(filePath)
+         if (!root) return []
+         this.dependencies.authorizeRootFile(snapshot.libraryId, root.id, filePath, root)
+         return [
+@@ -703,9 +693,10 @@ export class ScanCoordinator {
+         ref.locator,
+         root
+       )
+-      const remaining = this.dependencies
+-        .listResources(libraryId, ref.video_id)
+-        .filter((item) => item.id !== resource.id)
++      const remaining = resource.is_primary
++        ? this.dependencies.listResources(libraryId, ref.video_id)
++          .filter((item) => item.id !== resource.id)
++        : []
+       const removedAudit = this.resourceAuditEntry(resource, 'missing')
+       this.dependencies.removeResourceRecord(libraryId, resource.id)
+       removed += 1
+@@ -756,7 +747,7 @@ export function createScanCoordinator(
+     authorizeRootDeletionTarget:
+       dependencies.authorizeRootDeletionTarget ?? authorizeMediaLibraryRootDeletionTarget,
+     scanFolders: dependencies.scanFolders ?? scanFolders,
+-    listLocalResources: dependencies.listLocalResources ?? listSourceManagedVideoResourceRefs,
++    listLocalResources: dependencies.listLocalResources ?? iterateSourceManagedVideoResourceRefs,
+     getResourceById: dependencies.getResourceById ?? getVideoResourceInLibrary,
+     getVideoById: dependencies.getVideoById ?? getVideoById,
+     listResources: dependencies.listResources ?? listVideoResources,
+@@ -776,7 +767,7 @@ export function createScanCoordinator(
+     runCleanupTransaction: dependencies.runCleanupTransaction ?? runCleanupTransaction,
+     removeResourceLessMemberships:
+       dependencies.removeResourceLessMemberships ?? removeResourceLessMemberships,
+-    listPendingScanGroups: dependencies.listPendingScanGroups ?? listPendingScanGroups,
++    readPendingScanAuditEntries: dependencies.readPendingScanAuditEntries ?? readPendingScanAuditEntries,
+     beginRun: dependencies.beginRun ?? beginLibraryScanRun,
+     finishRun: dependencies.finishRun ?? finishLibraryScanRun,
+     now: dependencies.now ?? (() => new Date().toISOString()),
+diff --git a/src/main/scanner/scanCoordinator.test.ts b/src/main/scanner/scanCoordinator.test.ts
+index 7a20de4..ba1b6b4 100644
+--- a/src/main/scanner/scanCoordinator.test.ts
++++ b/src/main/scanner/scanCoordinator.test.ts
+@@ -9,9 +9,9 @@ import type {
+   ScanResult
+ } from '@shared/libraryTypes'
+ import type { Video, VideoResource } from '@shared/videoTypes'
+-import { DEFAULT_MEDIA_LIBRARY_CONFIG } from '@shared/mediaLibraryTypes'
++import { DEFAULT_MEDIA_LIBRARY_CONFIG, type MediaLibraryRoot } from '@shared/mediaLibraryTypes'
+ import { MaintenanceTaskGate } from '../services/maintenanceTaskGate'
+-import { createScanCoordinator } from './scanCoordinator'
++import { createScanCoordinator, type ScanCoordinatorDependencies } from './scanCoordinator'
+ import type { ScanOptions, ScanProgressFn } from './scanner'
+ 
+ interface LegacyCoordinatorDependencies {
+@@ -24,7 +24,7 @@ interface LegacyCoordinatorDependencies {
+     onProgress?: ScanProgressFn,
+     options?: ScanOptions & { unavailableRoots?: string[] }
+   ) => Promise<ScanResult>
+-  listLocalResources?: () => Array<{ video_id: number; resource_id: number; locator: string }>
++  listLocalResources?: () => Iterable<{ video_id: number; resource_id: number; locator: string }>
+   getResourceById?: (resourceId: number) => VideoResource | null
+   getVideoById?: (videoId: number) => Video | null
+   listResources?: (videoId: number) => VideoResource[]
+@@ -55,6 +55,7 @@ interface LegacyCoordinatorDependencies {
+   deleteResourceLessVideos?: () => number
+   listResourceLessVideos?: () => Array<Pick<Video, 'id' | 'code' | 'title'>>
+   listPendingScanGroups?: () => PendingScanGroup[]
++  readPendingScanAuditEntries?: ScanCoordinatorDependencies['readPendingScanAuditEntries']
+   recordScanSummary?: (
+     summary: LibraryScanSummary,
+     unrecognizedFiles: string[] | undefined,
+@@ -77,7 +78,8 @@ type TestCoordinator = Omit<ReturnType<typeof createScanCoordinator>, 'run'> & {
+ }
+ 
+ function createTestScanCoordinator(
+-  dependencies: LegacyCoordinatorDependencies
++  dependencies: LegacyCoordinatorDependencies,
++  actualOverrides: Partial<ScanCoordinatorDependencies> = {}
+ ): TestCoordinator {
+   let rootsBound = !dependencies.initiallyOfflineIdentity
+   const configuredFolders = (): string[] => dependencies.getConfiguredFolders?.() ?? ['/online']
+@@ -155,11 +157,11 @@ function createTestScanCoordinator(
+       libraryId: request.libraryId,
+       runId: request.runId
+     }),
+-    listLocalResources: () =>
+-      (dependencies.listLocalResources?.() ?? []).map((resource) => ({
+-        library_id: 1,
+-        ...resource
+-      })),
++    listLocalResources: function* () {
++      for (const resource of dependencies.listLocalResources?.() ?? []) {
++        yield { library_id: 1, ...resource }
++      }
++    },
+     getResourceById: (_libraryId, resourceId) =>
+       dependencies.getResourceById?.(resourceId) ?? null,
+     getVideoById: (videoId) => dependencies.getVideoById?.(videoId) ?? null,
+@@ -218,7 +220,14 @@ function createTestScanCoordinator(
+         }
+       })
+     },
+-    listPendingScanGroups: () => dependencies.listPendingScanGroups?.() ?? [],
++    readPendingScanAuditEntries: dependencies.readPendingScanAuditEntries ?? ((_libraryId, groupIds, pendingPaths) =>
++      (dependencies.listPendingScanGroups?.() ?? [])
++        .filter(group => groupIds.has(group.id))
++        .map(group => ({
++          groupId: group.id,
++          normalizedCode: group.normalizedCode,
++          resourceCount: group.resources.filter(resource => pendingPaths.has(resource.filePath)).length
++        }))),
+     beginRun: () => undefined,
+     finishRun: (input) =>
+       dependencies.recordScanSummary?.(
+@@ -231,7 +240,8 @@ function createTestScanCoordinator(
+     gate: dependencies.gate ?? new MaintenanceTaskGate(),
+     ...(dependencies.runCleanupTransaction
+       ? { runCleanupTransaction: dependencies.runCleanupTransaction }
+-      : {})
++      : {}),
++    ...actualOverrides
+   })
+   const scopedRun = coordinator.run.bind(coordinator)
+   coordinator.run = ((request: TestScanCoordinatorRequest = {}) => {
+@@ -296,6 +306,44 @@ function resource(input: Partial<VideoResource> & Pick<VideoResource, 'id' | 'vi
+ }
+ 
+ describe('ScanCoordinator', () => {
++  it('coalesces display progress while preserving per-file callbacks and the final event', async () => {
++    const size = 300_382
++    const events: LibraryScanEvent[] = []
++    let callbacks = 0
++    const coordinator = createTestScanCoordinator({
++      scanFolders: async (_roots, onProgress) => {
++        for (let scanned = 1; scanned <= size; scanned++) {
++          onProgress?.({ scanned, imported: 0, currentFile: `/online/${scanned}.mp4` })
++        }
++        return { ...emptyScanResult(), scannedFiles: size }
++      }
++    })
++    coordinator.subscribe(event => events.push(event))
++    await coordinator.run({ onProgress: () => { callbacks++ } })
++    assert.equal(callbacks, size)
++    const progress = events.filter(event => event.phase === 'progress')
++    assert.ok(progress.length < size)
++    assert.equal(progress.at(-1)?.progress.scanned, size)
++    assert.equal(events.at(-1)?.phase, 'completed')
++    assert.equal(events.at(-2)?.phase, 'progress')
++  })
++
++  it('flushes pending progress before a failure without delaying the failure event', async () => {
++    const events: LibraryScanEvent[] = []
++    const coordinator = createTestScanCoordinator({
++      scanFolders: async (_roots, onProgress) => {
++        onProgress?.({ scanned: 1, imported: 0, currentFile: '/online/one.mp4' })
++        onProgress?.({ scanned: 2, imported: 0, currentFile: '/online/two.mp4' })
++        throw new Error('scan failed')
++      }
++    })
++    coordinator.subscribe(event => events.push(event))
++    await assert.rejects(coordinator.run(), /scan failed/)
++    assert.equal(events.filter(event => event.phase === 'progress').at(-1)?.progress.scanned, 2)
++    assert.equal(events.at(-1)?.phase, 'failed')
++    assert.equal(coordinator.running, false)
++  })
++
+   it('binds an offline-created root identity and refreshes the frozen snapshot before scanning', async () => {
+     let bindings = 0
+     let scanned = 0
+@@ -867,6 +915,89 @@ describe('ScanCoordinator', () => {
+     assert.equal(result.removed, 2)
+   })
+ 
++  it('removes many non-primary resources without reading sibling resource lists', async () => {
++    const count = 5000
++    let removed = 0, audited = 0
++    const coordinator = createTestScanCoordinator({
++      listLocalResources: function* () {
++        for (let id = 1; id <= count; id++) {
++          yield { video_id: 1, resource_id: id, locator: `/online/${id}.mp4` }
++        }
++      },
++      getResourceById: id => resource({id, video_id:1, kind:'local', locator:`/online/${id}.mp4`, is_primary:0}),
++      getVideoById: () => ({id:1, code:'MANY', title:null}) as Video,
++      listResources: () => { throw new Error('non-primary removal must not load siblings') },
++      removeResourceRecord: () => { removed++ },
++      setPrimaryResource: () => assert.fail('non-primary removal must not promote a resource'),
++      inspectPath: () => 'missing',
++      recordScanSummary: (_summary, _files, audit) => { audited = audit.removedResources.length }
++    })
++    const result = await coordinator.run()
++    assert.equal(result.removed, count)
++    assert.equal(result.promoted, 0)
++    assert.equal(removed, count)
++    assert.equal(audited, count)
++  })
++
++  it('consumes cleanup references lazily and closes iteration on a path failure', async () => {
++    let removed = 0, closed = false
++    const coordinator = createTestScanCoordinator({
++      listLocalResources: function* () {
++        try {
++          yield { video_id: 1, resource_id: 1, locator: '/online/1.mp4' }
++          assert.equal(removed, 1, 'cleanup must process a reference before asking for the next')
++          yield { video_id: 2, resource_id: 2, locator: '/online/2.mp4' }
++          assert.fail('unknown path must stop enumeration')
++        } finally { closed = true }
++      },
++      getResourceById: id => resource({id, video_id:id, kind:'local', locator:`/online/${id}.mp4`, is_primary:0}),
++      removeResourceRecord: () => { removed++ },
++      inspectPath: value => value.endsWith('/1.mp4') ? 'missing' : 'unknown'
++    })
++    await assert.rejects(coordinator.run(), /无法确认本地资源是否存在/)
++    assert.equal(removed, 1)
++    assert.equal(closed, true)
++  })
++
++  it('preserves all three cleanup audit sequences above the argument limit', async () => {
++    const size = 300_382
++    let audited = false
++    const coordinator = createTestScanCoordinator({
++      listLocalResources: () => Array.from({ length: size }, (_, index) => ({
++        video_id: index + 1, resource_id: index + 1, locator: `/online/${index + 1}.mp4`
++      })),
++      getResourceById: id => resource({
++        id, video_id: id, kind: 'local', locator: `/online/${id}.mp4`, is_primary: 1
++      }),
++      getVideoById: id => ({ id, code: `AUDIT-${id}`, title: null }) as Video,
++      listResources: id => [resource({
++        id: size + id, video_id: id, kind: 'web', locator: `https://example.test/${id}`
++      })],
++      inspectPath: () => 'missing',
++      shouldAutoDeleteResourceLessVideos: () => true,
++      deleteResourceLessVideos: () => size,
++      listResourceLessVideos: () => Array.from({ length: size }, (_, index) => ({
++        id: size * 2 + index, code: `EMPTY-${index}`, title: null
++      })),
++      recordScanSummary: (_summary, _files, audit) => {
++        audited = true
++        assert.equal(audit.removedResources.length, size)
++        assert.equal(audit.promotedResources.length, size)
++        assert.equal(audit.deletedVideos.length, size)
++        for (let index = 0; index < size; index++) {
++          assert.equal(audit.removedResources[index].resourceId, index + 1)
++          assert.equal(audit.promotedResources[index].resourceId, size + index + 1)
++          assert.equal(audit.deletedVideos[index].videoId, size * 2 + index)
++        }
++      }
++    })
++    const result = await coordinator.run()
++    assert.equal(result.removed, size)
++    assert.equal(result.promoted, size)
++    assert.equal(result.deletedVideos, size)
++    assert.equal(audited, true)
++  })
++
+   it('removes resource-less memberships after deferred cleanup on a safe full scan', async () => {
+     const order: string[] = []
+     const summaries: LibraryScanSummary[] = []
+@@ -1060,3 +1191,201 @@ describe('ScanCoordinator', () => {
+     await first
+   })
+ })
++
++it('reads pending audit summaries with only referenced groups and all exact pending paths', async () => {
++  const calls: Array<{ libraryId: number; groupIds: number[]; paths: string[] }> = []
++  let recorded: LibraryScanAudit | undefined
++  const expected = [
++    { groupId: 9, normalizedCode: 'OLDER', resourceCount: 3 },
++    { groupId: 2, normalizedCode: 'NEWER', resourceCount: 0 }
++  ]
++  const coordinator = createTestScanCoordinator({
++    scanFolders: async (_folders, _progress, options) => {
++      for (const [groupId, filePath] of [
++        [2, '/online/Case.mp4'], [9, '/online/second.mp4'], [2, '/online/Case.mp4'],
++        [null, '/online/no-group.mp4'], [null, '/online/case.mp4']
++      ] as const) options?.onFileResult?.({ outcome: 'pending', rootId: 1, sourceKind: 'local',
++        groupId, filePath, normalizedCode: null, addedToQueue: true })
++      options?.onFileResult?.({ outcome: 'unrecognized', rootId: 1, sourceKind: 'local', filePath: '/online/not-pending.mp4' })
++      return emptyScanResult()
++    },
++    listPendingScanGroups: () => { throw Error('Full pending DTO listing is forbidden') },
++    readPendingScanAuditEntries: (libraryId, groupIds, pendingPaths) => {
++      calls.push({ libraryId, groupIds: [...groupIds], paths: [...pendingPaths] })
++      return expected
++    },
++    recordScanSummary: (_summary, _unrecognized, audit) => { recorded = audit }
++  })
++  await coordinator.run()
++  assert.deepEqual(calls, [{ libraryId: 1, groupIds: [2, 9], paths: [
++    '/online/Case.mp4', '/online/second.mp4', '/online/no-group.mp4', '/online/case.mp4'
++  ] }])
++  assert.deepEqual(recorded?.pendingGroups, expected, 'preserve reader ordering and counts without regrouping')
++})
++
++for (const mode of ['no-files', 'non-pending', 'pending-without-group'] as const) {
++  it(`skips the pending audit DB reader for ${mode}`, async () => {
++    let calls = 0
++    let recorded: LibraryScanAudit | undefined
++    const coordinator = createTestScanCoordinator({
++      scanFolders: async (_folders, _progress, options) => {
++        if (mode === 'non-pending') options?.onFileResult?.({
++          outcome: 'unrecognized', rootId: 1, sourceKind: 'local', filePath: '/online/unknown.mp4'
++        })
++        if (mode === 'pending-without-group') options?.onFileResult?.({
++          outcome: 'pending', rootId: 1, sourceKind: 'local', filePath: '/online/pending.mp4',
++          groupId: null, normalizedCode: null, addedToQueue: true
++        })
++        return emptyScanResult()
++      },
++      readPendingScanAuditEntries: () => { calls++; throw Error('Must skip DB') },
++      recordScanSummary: (_summary, _unrecognized, audit) => { recorded = audit }
++    })
++    await coordinator.run()
++    assert.equal(calls, 0)
++    assert.deepEqual(recorded?.pendingGroups, [])
++  })
++}
++
++function matchingRoot(id: number, rootPath: string, realPath = rootPath): MediaLibraryRoot {
++  return { id, libraryId: 1, path: rootPath, normalizedPath: rootPath, realPath,
++    normalizedRealPath: realPath, deviceId: `device-${id}`, inode: `inode-${id}`,
++    position: id, state: 'active', createdAt: '2026-08-10', updatedAt: '2026-08-10' }
++}
++function matchingCoordinator(roots: MediaLibraryRoot[], overrides: Partial<ScanCoordinatorDependencies>) {
++  return createTestScanCoordinator({ getConfiguredFolders: () => roots.map(root => root.path) }, {
++    readScanSnapshot: () => Object.freeze({ libraryId: 1, libraryRevision: 1, configRevision: 1, capturedAt: '2026-08-10',
++      config: Object.freeze({ ...DEFAULT_MEDIA_LIBRARY_CONFIG, libraryId: 1, revision: 1 }),
++      roots: Object.freeze(roots.map(root => Object.freeze(root))) }),
++    ...overrides
++  })
++}
++
++for (const order of ['parent-first', 'child-first'] as const) {
++  it(`keeps original first root for cleanup and unrecognized summary with ${order}`, async () => {
++    const parent = matchingRoot(1, '/online')
++    const child = matchingRoot(2, '/online/nested')
++    const roots = order === 'parent-first' ? [parent, child] : [child, parent]
++    const filePath = '/online/nested/unknown.mp4'
++    const files: Array<{ root: Readonly<MediaLibraryRoot>; path: string }> = []
++    const deleted: Readonly<MediaLibraryRoot>[] = []
++    const inspected: string[] = []
++    let finished: Parameters<ScanCoordinatorDependencies['finishRun']>[0] | undefined
++    const coordinator = matchingCoordinator(roots, {
++      scanFolders: async () => ({ ...emptyScanResult(), failed: 1, unrecognizedFiles: [filePath] }),
++      inspectPath: path => { inspected.push(path); return path.endsWith('missing.mp4') ? 'missing' : 'present' },
++      authorizeRootFile: (_library, rootId, path, root) => {
++        assert.strictEqual(root, roots[0]); assert.equal(rootId, roots[0].id)
++        files.push({ root: root!, path }); return root!
++      },
++      authorizeRootDeletionTarget: (_library, rootId, _path, root) => {
++        assert.strictEqual(root, roots[0]); assert.equal(rootId, roots[0].id)
++        deleted.push(root!); return root!
++      },
++      reconcilePendingScanResources: (_library, _rootIds, inspect) => {
++        assert.equal(inspect(filePath), 'present')
++        assert.equal(inspect('/online/nested/missing.mp4'), 'missing')
++        assert.equal(inspect('/outside/unknown.mp4'), 'unknown')
++        return { removedResources: 0, removedGroups: 0 }
++      },
++      finishRun: value => { finished = value }
++    })
++    await coordinator.run()
++    assert.deepEqual(inspected, [filePath, '/online/nested/missing.mp4'])
++    assert.deepEqual(files.map(entry => entry.path), [filePath, filePath])
++    assert.deepEqual(deleted, [roots[0]])
++    assert.equal(finished?.unrecognizedFiles?.[0].rootId, roots[0].id)
++    assert.equal(finished?.unrecognizedFiles?.[0].filePath, filePath)
++  })
++}
++
++it('uses the early realPath alias for cleanup but only configured paths for summary', async () => {
++  const alias = matchingRoot(1, '/configured', '/actual')
++  const later = matchingRoot(2, '/actual/nested')
++  const roots = [alias, later]
++  const cleanupPath = '/actual/alias-only.mp4'
++  const sharedPath = '/actual/nested/unknown.mp4'
++  const authorized: Array<{ path: string; root: Readonly<MediaLibraryRoot> }> = []
++  let finished: Parameters<ScanCoordinatorDependencies['finishRun']>[0] | undefined
++  const coordinator = matchingCoordinator(roots, {
++    scanFolders: async () => ({ ...emptyScanResult(), failed: 2, unrecognizedFiles: [cleanupPath, sharedPath] }),
++    authorizeRootFile: (_library, _rootId, path, root) => { authorized.push({ path, root: root! }); return root! },
++    reconcilePendingScanResources: (_library, _rootIds, inspect) => {
++      assert.equal(inspect(cleanupPath), 'present')
++      assert.equal(inspect(sharedPath), 'present')
++      return { removedResources: 0, removedGroups: 0 }
++    },
++    finishRun: value => { finished = value }
++  })
++  await coordinator.run()
++  assert.deepEqual(authorized.map(entry => entry.path), [cleanupPath, sharedPath, sharedPath])
++  assert.strictEqual(authorized[0].root, alias)
++  assert.strictEqual(authorized[1].root, alias)
++  assert.strictEqual(authorized[2].root, later)
++  assert.deepEqual(finished?.unrecognizedFiles?.map(file => ({ path: file.filePath, rootId: file.rootId })),
++    [{ path: sharedPath, rootId: later.id }])
++})
++
++for (const phase of ['cleanup-present', 'cleanup-missing', 'summary'] as const) {
++  it(`does not try a later matching root after ${phase} authorization fails`, async () => {
++    const roots = [matchingRoot(1, '/online'), matchingRoot(2, '/online/nested')]
++    const filePath = '/online/nested/unknown.mp4'
++    const attempts: number[] = []
++    const rejectFirst = (_library: number, rootId: number, _path: string, root?: Readonly<MediaLibraryRoot>): MediaLibraryRoot => {
++      attempts.push(rootId)
++      assert.strictEqual(root, roots[0])
++      throw Error('first matching root authorization failed')
++    }
++    const coordinator = matchingCoordinator(roots, {
++      scanFolders: async () => ({ ...emptyScanResult(), failed: 1, unrecognizedFiles: [filePath] }),
++      inspectPath: () => phase === 'cleanup-missing' ? 'missing' : 'present',
++      authorizeRootFile: rejectFirst,
++      authorizeRootDeletionTarget: rejectFirst,
++      reconcilePendingScanResources: (_library, _rootIds, inspect) => {
++        if (phase !== 'summary') inspect(filePath)
++        return { removedResources: 0, removedGroups: 0 }
++      }
++    })
++    await assert.rejects(coordinator.run(), /first matching root authorization failed/)
++    assert.deepEqual(attempts, [roots[0].id])
++  })
++}
++
++it('reauthorizes the first matching root for unknown pending paths without inspecting unmatched paths or falling back', async () => {
++  const roots = [matchingRoot(1, '/online'), matchingRoot(2, '/online/nested')]
++  const inspected: string[] = []
++  const authorized: number[] = []
++  let insidePendingInspection = false
++  let rejectUnknown = false
++  const coordinator = matchingCoordinator(roots, {
++    inspectPath: filePath => { inspected.push(filePath); return 'unknown' },
++    authorizeRoot: (_library, rootId, root) => {
++      assert.ok(root)
++      if (insidePendingInspection) {
++        authorized.push(rootId)
++        assert.strictEqual(root, roots[0])
++        assert.equal(Object.isFrozen(root), true)
++        if (rejectUnknown) throw Error('unknown root authorization failed')
++      }
++      return root
++    },
++    authorizeRootFile: () => { throw Error('unknown must not authorize a present file') },
++    authorizeRootDeletionTarget: () => { throw Error('unknown must not authorize deletion') },
++    reconcilePendingScanResources: (_library, _rootIds, inspect) => {
++      insidePendingInspection = true
++      try {
++        assert.equal(inspect('/online/nested/unknown.mp4'), 'unknown')
++        assert.equal(inspect('/outside/unknown.mp4'), 'unknown')
++        assert.deepEqual(authorized, [roots[0].id])
++        rejectUnknown = true
++        assert.throws(() => inspect('/online/nested/unknown.mp4'), /unknown root authorization failed/)
++        assert.deepEqual(authorized, [roots[0].id, roots[0].id])
++      } finally {
++        insidePendingInspection = false
++      }
++      return { removedResources: 0, removedGroups: 0 }
++    }
++  })
++  await coordinator.run()
++  assert.deepEqual(inspected, ['/online/nested/unknown.mp4', '/online/nested/unknown.mp4'])
++})
+diff --git a/scripts/performance/library-root-matcher-benchmark.ts b/scripts/performance/library-root-matcher-benchmark.ts
+new file mode 100644
+index 0000000..0e22d73
+--- /dev/null
++++ b/scripts/performance/library-root-matcher-benchmark.ts
+@@ -0,0 +1,100 @@
++/** Synthetic strings only. Opt in to 100k files with JAVDEX_ROOT_MATCH_FILES=100000. */
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import path from 'node:path'
++import { performance } from 'node:perf_hooks'
++import { isPathUnderRoot } from '../../src/main/scanner/libraryPathUtils'
++import { createLibraryRootMatcher } from '../../src/main/scanner/libraryRootMatcher'
++
++type Root = { id: number; path: string; realPath: string | null }
++type Match = (filePath: string) => Root | undefined
++
++function summarize(samples: number[]): { samplesMs: number[]; medianMs: number } {
++  return { samplesMs: samples, medianMs: [...samples].sort((a, b) => a - b)[1] }
++}
++
++it('compares root matching against ordered find by object identity', () => {
++  const rawCount = process.env.JAVDEX_ROOT_MATCH_FILES ?? '10000'
++  assert.ok(['10000', '100000'].includes(rawCount), 'JAVDEX_ROOT_MATCH_FILES must be 10000 or 100000')
++  const fileCount = Number(rawCount)
++  const base = path.resolve('/__javdex_synthetic_root_matcher__')
++  const results: unknown[] = []
++
++  for (const rootCount of [1, 100, 1000]) {
++    const roots: Root[] = Array.from({ length: rootCount }, (_, index) => ({
++      id: index + 1,
++      // Every tenth root is nested beneath an earlier root: preserve first-root semantics.
++      path: index > 0 && index % 10 === 0
++        ? path.join(base, 'logical', `root-${index - 1}`, 'nested')
++        : path.join(base, 'logical', `root-${index}`),
++      realPath: index % 3 === 2 ? null : path.join(base, 'physical', `root-${index}`)
++    }))
++    // A later root's logical path also aliases the first root's physical path.
++    if (roots.length > 1) roots[roots.length - 1].path = roots[0].realPath!
++    const files = Array.from({ length: fileCount }, (_, index) => {
++      const root = roots[Math.floor(index / 8) % rootCount]
++      const filename = `file-${index}.mp4`
++      switch (index % 8) {
++        case 0: return path.join(root.path, filename)
++        case 1: return path.join(root.realPath ?? path.join(base, 'absent-physical'), filename)
++        case 2: return root.path
++        case 3: return path.join(`${root.path}-sibling`, filename)
++        case 4: return path.join(base, 'unmatched', filename)
++        case 5: return path.join(root.path, 'nested', filename)
++        case 6: return `${root.path}${path.sep}sub${path.sep}..${path.sep}${filename}`
++        default: return path.join(root.realPath ?? path.join(base, 'absent-physical'), 'nested', filename)
++      }
++    })
++
++    for (const includeRealPath of [false, true]) {
++      const legacy: Match = (filePath) => roots.find((root) =>
++        isPathUnderRoot(filePath, root.path) ||
++        Boolean(includeRealPath && root.realPath && isPathUnderRoot(filePath, root.realPath))
++      )
++      // Oracle construction is deliberately outside all timing, but adds one legacy pass.
++      const expected = files.map(legacy)
++      const expectedChecksum = expected.reduce((sum, root, index) => sum + (root?.id ?? 0) * (index + 1), 0)
++      const unmatched = expected.filter((root) => root === undefined).length
++      assert.ok(unmatched > 0 && unmatched < fileCount)
++      assert.ok(Number.isSafeInteger(expectedChecksum))
++
++      for (const mode of ['legacy-find', 'matcher'] as const) {
++        const buildSamples: number[] = []
++        const matchSamples: number[] = []
++        for (let sample = -1; sample < 3; sample++) {
++          const buildStart = performance.now()
++          const match: Match = mode === 'legacy-find'
++            ? legacy
++            : createLibraryRootMatcher(roots, includeRealPath)
++          const buildMs = performance.now() - buildStart
++          const actual = new Array<Root | undefined>(fileCount)
++          const matchStart = performance.now()
++          for (let index = 0; index < files.length; index++) actual[index] = match(files[index])
++          const matchMs = performance.now() - matchStart
++
++          let checksum = 0
++          for (let index = 0; index < actual.length; index++) {
++            assert.strictEqual(actual[index], expected[index], `${rootCount}/${includeRealPath}/${mode}/${sample}/${index}`)
++            checksum += (actual[index]?.id ?? 0) * (index + 1)
++          }
++          assert.equal(checksum, expectedChecksum)
++          if (sample >= 0) {
++            buildSamples.push(buildMs)
++            matchSamples.push(matchMs)
++          }
++        }
++        results.push({ rootCount, fileCount, includeRealPath, mode, unmatched,
++          checksum: expectedChecksum, build: summarize(buildSamples), matching: summarize(matchSamples) })
++      }
++    }
++  }
++
++  console.log(JSON.stringify({ runtime: process.versions, platform: process.platform, arch: process.arch, results, notes: [
++    'No filesystem or database access for fixture/matching; all paths are synthetic strings, not existing directories or resolved filesystem symlinks.',
++    'Defaults to 10000 files; JAVDEX_ROOT_MATCH_FILES=100000 increases legacy work substantially. Root counts 1/100/1000; both path-only and realPath-enabled modes.',
++    'Fixed order: root count ascending, path-only then realPath, legacy then matcher. Each mode one warmup and three hot samples; oracle adds an untimed legacy pass.',
++    'Matching includes loop and result-array assignments; allocation, identity assertions, checksum and serialization are excluded. Build is separately timed for each freshly created matcher; legacy has no index build (only function selection).',
++    'Identity equality covers all generated paths on every sample, including first-root precedence, aliases, exact roots, normalized dot segments, nested paths and unmatched siblings.',
++    'Warm host-path diagnostic only, not p95, cold I/O, Windows path semantics on another OS, memory peaks, event-loop responsiveness or total scan speed. Fixed ordering/JIT/GC can affect comparisons.'
++  ] }, null, 2))
++})

@@ -1,6 +1,7 @@
+import type { CatalogWindow } from '../query/useWindowedCatalog'
 import { forwardRef, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { FixedSizeGrid, type GridChildComponentProps } from 'react-window'
-import type { ActressListItem } from '@shared/actressTypes'
+import type { ActressCard } from '@shared/cardProjection'
 import { useElementSize } from '../hooks/useElementSize'
 import { useLayoutSpacing } from '../hooks/useLayoutSpacing'
 import { resolveScrollTopForKey, setListScroll } from '../listView/listViewMemory'
@@ -16,7 +17,8 @@ import Button from './Button'
 import Spinner from './Spinner'
 
 interface VirtualActressGridProps {
-  actresses: ActressListItem[]
+  catalogWindow?: CatalogWindow<ActressCard>
+  actresses: ActressCard[]
   selectedIds: Set<number>
   selectionMode: boolean
   hasMore: boolean
@@ -24,14 +26,15 @@ interface VirtualActressGridProps {
   loadMoreFailed: boolean
   onLoadMore: () => void
   onRetryLoadMore: () => void
-  onToggleSelect: (actress: ActressListItem, index: number, event: React.MouseEvent) => void
-  onOpen: (actress: ActressListItem) => void
-  onDelete: (actress: ActressListItem) => void
+  onToggleSelect: (actress: ActressCard, index: number, event: React.MouseEvent) => void
+  onOpen: (actress: ActressCard) => void
+  onDelete: (actress: ActressCard) => void
   scrollMemoryKey: string
 }
 
 export default function VirtualActressGrid({
   actresses,
+  catalogWindow,
   selectedIds,
   selectionMode,
   hasMore,
@@ -67,9 +70,9 @@ export default function VirtualActressGrid({
   const { columnCount, cardWidth, columnStride, rowHeight } = computeActressGridLayout(layoutWidth)
   const showStatusRow = loadingMore || loadMoreFailed || hasMore
   const { statusRowStart, renderedCount } = actressGridSlotCount(
-    actresses.length,
+    catalogWindow?.total ?? actresses.length,
     columnCount,
-    showStatusRow
+    !catalogWindow && showStatusRow
   )
   const rowCount = Math.ceil(renderedCount / columnCount)
   const innerHeight = cardAreaPadTop + rowCount * rowHeight + cardAreaPadBottom
@@ -111,7 +114,14 @@ export default function VirtualActressGrid({
       paddingBottom: ACTRESS_GRID_GAP,
       boxSizing: 'border-box' as const
     }
-    if (index >= actresses.length) {
+    const windowActress = catalogWindow?.getItem(index)
+    if (catalogWindow && !windowActress) {
+      if (index >= catalogWindow.total) return null
+      return <div style={cellStyle}>{catalogWindow.error
+        ? <Button size="sm" onClick={catalogWindow.retry}>加载失败，重试</Button>
+        : <Spinner aria-label="正在加载演员" />}</div>
+    }
+    if (!catalogWindow && index >= actresses.length) {
       if (columnIndex !== 0 || index !== statusRowStart) return null
       return (
         <div className="virtual-actress-grid-status" style={cellStyle}>
@@ -125,7 +135,7 @@ export default function VirtualActressGrid({
         </div>
       )
     }
-    const actress = actresses[index]
+    const actress = windowActress ?? actresses[index]
     return (
       <div className="virtual-actress-grid-cell" style={cellStyle}>
         <ActressCardTile
@@ -156,9 +166,10 @@ export default function VirtualActressGrid({
           className="virtual-actress-grid-scroller"
           initialScrollTop={scrollTopRef.current}
           onScroll={({ scrollTop }) => persistScroll(scrollTop)}
-          onItemsRendered={({ overscanRowStopIndex }) => {
+          onItemsRendered={({ overscanRowStartIndex, overscanRowStopIndex }) => {
             persistScroll(scrollTopRef.current, overscanRowStopIndex)
-            if (hasMore && !loadMoreFailed && overscanRowStopIndex >= rowCount - 3) onLoadMore()
+            catalogWindow?.onVisibleRange(overscanRowStartIndex * columnCount, Math.min(renderedCount - 1, (overscanRowStopIndex + 1) * columnCount - 1))
+            if (!catalogWindow && hasMore && !loadMoreFailed && overscanRowStopIndex >= rowCount - 3) onLoadMore()
           }}
         >
           {Cell}

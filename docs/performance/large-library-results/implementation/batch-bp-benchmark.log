@@ -1,0 +1,1258 @@
+{
+  "entitiesPerKind": 10000,
+  "videos": 100000,
+  "metrics": [
+    {
+      "kind": "maker",
+      "sortBy": "video_count",
+      "name": "legacy",
+      "samples": [
+        32.28533299999998,
+        32.11387500000001,
+        32.98916699999995
+      ],
+      "medianMs": 32.28533299999998,
+      "jsonBytes": 1418895
+    },
+    {
+      "kind": "maker",
+      "sortBy": "video_count",
+      "name": "first",
+      "samples": [
+        5.171791999999982,
+        5.223208,
+        5.2892080000000306
+      ],
+      "medianMs": 5.223208,
+      "jsonBytes": 8438
+    },
+    {
+      "kind": "maker",
+      "sortBy": "video_count",
+      "name": "last",
+      "samples": [
+        5.626292000000035,
+        5.87966700000004,
+        5.956208000000061
+      ],
+      "medianMs": 5.87966700000004,
+      "jsonBytes": 5731
+    },
+    {
+      "kind": "maker",
+      "sortBy": "updated_at",
+      "name": "legacy",
+      "samples": [
+        33.898416,
+        33.615291999999954,
+        31.625499999999988
+      ],
+      "medianMs": 33.615291999999954,
+      "jsonBytes": 1418895
+    },
+    {
+      "kind": "maker",
+      "sortBy": "updated_at",
+      "name": "first",
+      "samples": [
+        6.2555830000000014,
+        6.011750000000006,
+        5.879207999999949
+      ],
+      "medianMs": 6.011750000000006,
+      "jsonBytes": 8438
+    },
+    {
+      "kind": "maker",
+      "sortBy": "updated_at",
+      "name": "last",
+      "samples": [
+        6.780334000000039,
+        6.777958000000012,
+        6.8075419999998985
+      ],
+      "medianMs": 6.780334000000039,
+      "jsonBytes": 5731
+    },
+    {
+      "kind": "series",
+      "sortBy": "video_count",
+      "name": "legacy",
+      "samples": [
+        33.80958399999997,
+        34.243041999999946,
+        35.06116700000007
+      ],
+      "medianMs": 34.243041999999946,
+      "jsonBytes": 2007789
+    },
+    {
+      "kind": "series",
+      "sortBy": "video_count",
+      "name": "first",
+      "samples": [
+        3.487333000000035,
+        3.5679580000000897,
+        3.5820420000000013
+      ],
+      "medianMs": 3.5679580000000897,
+      "jsonBytes": 11849
+    },
+    {
+      "kind": "series",
+      "sortBy": "video_count",
+      "name": "last",
+      "samples": [
+        4.192792000000054,
+        4.2036249999998745,
+        4.449583000000075
+      ],
+      "medianMs": 4.2036249999998745,
+      "jsonBytes": 8092
+    },
+    {
+      "kind": "series",
+      "sortBy": "updated_at",
+      "name": "legacy",
+      "samples": [
+        35.581957999999986,
+        34.67708399999992,
+        35.70016700000019
+      ],
+      "medianMs": 35.581957999999986,
+      "jsonBytes": 2007789
+    },
+    {
+      "kind": "series",
+      "sortBy": "updated_at",
+      "name": "first",
+      "samples": [
+        4.482916000000159,
+        4.366749999999911,
+        4.460125000000062
+      ],
+      "medianMs": 4.460125000000062,
+      "jsonBytes": 11849
+    },
+    {
+      "kind": "series",
+      "sortBy": "updated_at",
+      "name": "last",
+      "samples": [
+        5.402458999999908,
+        5.12070800000015,
+        4.994833999999855
+      ],
+      "medianMs": 5.12070800000015,
+      "jsonBytes": 8092
+    },
+    {
+      "kind": "director",
+      "sortBy": "video_count",
+      "name": "legacy",
+      "samples": [
+        33.42316600000004,
+        32.39929200000006,
+        31.938458000000082
+      ],
+      "medianMs": 32.39929200000006,
+      "jsonBytes": 1378895
+    },
+    {
+      "kind": "director",
+      "sortBy": "video_count",
+      "name": "first",
+      "samples": [
+        3.2319159999999556,
+        3.1097090000000662,
+        3.1629159999999956
+      ],
+      "medianMs": 3.1629159999999956,
+      "jsonBytes": 8198
+    },
+    {
+      "kind": "director",
+      "sortBy": "video_count",
+      "name": "last",
+      "samples": [
+        4.102541999999858,
+        3.9579579999999623,
+        3.9863330000000587
+      ],
+      "medianMs": 3.9863330000000587,
+      "jsonBytes": 5571
+    },
+    {
+      "kind": "director",
+      "sortBy": "updated_at",
+      "name": "legacy",
+      "samples": [
+        34.58404100000007,
+        34.51929100000007,
+        34.75849999999991
+      ],
+      "medianMs": 34.58404100000007,
+      "jsonBytes": 1378895
+    },
+    {
+      "kind": "director",
+      "sortBy": "updated_at",
+      "name": "first",
+      "samples": [
+        4.345749999999953,
+        4.3179170000000795,
+        4.25304200000005
+      ],
+      "medianMs": 4.3179170000000795,
+      "jsonBytes": 8198
+    },
+    {
+      "kind": "director",
+      "sortBy": "updated_at",
+      "name": "last",
+      "samples": [
+        5.203792000000021,
+        5.003582999999935,
+        5.216499999999996
+      ],
+      "medianMs": 5.203792000000021,
+      "jsonBytes": 5571
+    }
+  ],
+  "plans": [
+    {
+      "kind": "maker",
+      "sortBy": "video_count",
+      "offset": 0,
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE page"
+        },
+        {
+          "id": 13,
+          "parent": 3,
+          "notused": 142,
+          "detail": "SCAN e USING COVERING INDEX idx_organizations_updated_at"
+        },
+        {
+          "id": 16,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 20,
+          "parent": 16,
+          "notused": 39,
+          "detail": "SEARCH r USING COVERING INDEX sqlite_autoindex_organization_roles_1 (organization_id=? AND role=?)"
+        },
+        {
+          "id": 33,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 38,
+          "parent": 33,
+          "notused": 42,
+          "detail": "SEARCH n USING INDEX sqlite_autoindex_organization_names_1 (organization_id=?)"
+        },
+        {
+          "id": 54,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 59,
+          "parent": 54,
+          "notused": 50,
+          "detail": "SEARCH v USING COVERING INDEX idx_videos_maker_organization_id (maker_organization_id=?)"
+        },
+        {
+          "id": 81,
+          "parent": 3,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 94,
+          "parent": 0,
+          "notused": 146,
+          "detail": "SCAN page"
+        },
+        {
+          "id": 96,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH e USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 105,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 5"
+        },
+        {
+          "id": 111,
+          "parent": 105,
+          "notused": 60,
+          "detail": "SEARCH v USING INDEX idx_videos_maker_organization_id (maker_organization_id=?)"
+        },
+        {
+          "id": 131,
+          "parent": 105,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "kind": "maker",
+      "sortBy": "video_count",
+      "offset": 9960,
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE page"
+        },
+        {
+          "id": 13,
+          "parent": 3,
+          "notused": 142,
+          "detail": "SCAN e USING COVERING INDEX idx_organizations_updated_at"
+        },
+        {
+          "id": 16,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 20,
+          "parent": 16,
+          "notused": 39,
+          "detail": "SEARCH r USING COVERING INDEX sqlite_autoindex_organization_roles_1 (organization_id=? AND role=?)"
+        },
+        {
+          "id": 33,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 38,
+          "parent": 33,
+          "notused": 42,
+          "detail": "SEARCH n USING INDEX sqlite_autoindex_organization_names_1 (organization_id=?)"
+        },
+        {
+          "id": 54,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 59,
+          "parent": 54,
+          "notused": 50,
+          "detail": "SEARCH v USING COVERING INDEX idx_videos_maker_organization_id (maker_organization_id=?)"
+        },
+        {
+          "id": 81,
+          "parent": 3,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 94,
+          "parent": 0,
+          "notused": 146,
+          "detail": "SCAN page"
+        },
+        {
+          "id": 96,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH e USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 105,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 5"
+        },
+        {
+          "id": 111,
+          "parent": 105,
+          "notused": 60,
+          "detail": "SEARCH v USING INDEX idx_videos_maker_organization_id (maker_organization_id=?)"
+        },
+        {
+          "id": 131,
+          "parent": 105,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "kind": "maker",
+      "sortBy": "updated_at",
+      "offset": 0,
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE page"
+        },
+        {
+          "id": 13,
+          "parent": 3,
+          "notused": 142,
+          "detail": "SCAN e USING COVERING INDEX idx_organizations_updated_at"
+        },
+        {
+          "id": 16,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 20,
+          "parent": 16,
+          "notused": 39,
+          "detail": "SEARCH r USING COVERING INDEX sqlite_autoindex_organization_roles_1 (organization_id=? AND role=?)"
+        },
+        {
+          "id": 33,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 38,
+          "parent": 33,
+          "notused": 42,
+          "detail": "SEARCH n USING INDEX sqlite_autoindex_organization_names_1 (organization_id=?)"
+        },
+        {
+          "id": 54,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 59,
+          "parent": 54,
+          "notused": 50,
+          "detail": "SEARCH v USING COVERING INDEX idx_videos_maker_organization_id (maker_organization_id=?)"
+        },
+        {
+          "id": 88,
+          "parent": 3,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        },
+        {
+          "id": 104,
+          "parent": 0,
+          "notused": 146,
+          "detail": "SCAN page"
+        },
+        {
+          "id": 106,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH e USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 115,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 5"
+        },
+        {
+          "id": 121,
+          "parent": 115,
+          "notused": 60,
+          "detail": "SEARCH v USING INDEX idx_videos_maker_organization_id (maker_organization_id=?)"
+        },
+        {
+          "id": 141,
+          "parent": 115,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "kind": "maker",
+      "sortBy": "updated_at",
+      "offset": 9960,
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE page"
+        },
+        {
+          "id": 13,
+          "parent": 3,
+          "notused": 142,
+          "detail": "SCAN e USING COVERING INDEX idx_organizations_updated_at"
+        },
+        {
+          "id": 16,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 20,
+          "parent": 16,
+          "notused": 39,
+          "detail": "SEARCH r USING COVERING INDEX sqlite_autoindex_organization_roles_1 (organization_id=? AND role=?)"
+        },
+        {
+          "id": 33,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 3"
+        },
+        {
+          "id": 38,
+          "parent": 33,
+          "notused": 42,
+          "detail": "SEARCH n USING INDEX sqlite_autoindex_organization_names_1 (organization_id=?)"
+        },
+        {
+          "id": 54,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 59,
+          "parent": 54,
+          "notused": 50,
+          "detail": "SEARCH v USING COVERING INDEX idx_videos_maker_organization_id (maker_organization_id=?)"
+        },
+        {
+          "id": 88,
+          "parent": 3,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        },
+        {
+          "id": 104,
+          "parent": 0,
+          "notused": 146,
+          "detail": "SCAN page"
+        },
+        {
+          "id": 106,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH e USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 115,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 5"
+        },
+        {
+          "id": 121,
+          "parent": 115,
+          "notused": 60,
+          "detail": "SEARCH v USING INDEX idx_videos_maker_organization_id (maker_organization_id=?)"
+        },
+        {
+          "id": 141,
+          "parent": 115,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "kind": "series",
+      "sortBy": "video_count",
+      "offset": 0,
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE page"
+        },
+        {
+          "id": 13,
+          "parent": 3,
+          "notused": 142,
+          "detail": "SCAN e USING COVERING INDEX idx_series_updated_at"
+        },
+        {
+          "id": 17,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 22,
+          "parent": 17,
+          "notused": 42,
+          "detail": "SEARCH n USING INDEX sqlite_autoindex_series_names_1 (series_id=?)"
+        },
+        {
+          "id": 38,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 43,
+          "parent": 38,
+          "notused": 50,
+          "detail": "SEARCH v USING COVERING INDEX idx_videos_series_id (series_id=?)"
+        },
+        {
+          "id": 65,
+          "parent": 3,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 79,
+          "parent": 0,
+          "notused": 147,
+          "detail": "SCAN page"
+        },
+        {
+          "id": 81,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH e USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 84,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH owner USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN"
+        },
+        {
+          "id": 95,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 101,
+          "parent": 95,
+          "notused": 60,
+          "detail": "SEARCH v USING INDEX idx_videos_series_id (series_id=?)"
+        },
+        {
+          "id": 121,
+          "parent": 95,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "kind": "series",
+      "sortBy": "video_count",
+      "offset": 9960,
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE page"
+        },
+        {
+          "id": 13,
+          "parent": 3,
+          "notused": 142,
+          "detail": "SCAN e USING COVERING INDEX idx_series_updated_at"
+        },
+        {
+          "id": 17,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 22,
+          "parent": 17,
+          "notused": 42,
+          "detail": "SEARCH n USING INDEX sqlite_autoindex_series_names_1 (series_id=?)"
+        },
+        {
+          "id": 38,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 43,
+          "parent": 38,
+          "notused": 50,
+          "detail": "SEARCH v USING COVERING INDEX idx_videos_series_id (series_id=?)"
+        },
+        {
+          "id": 65,
+          "parent": 3,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 79,
+          "parent": 0,
+          "notused": 147,
+          "detail": "SCAN page"
+        },
+        {
+          "id": 81,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH e USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 84,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH owner USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN"
+        },
+        {
+          "id": 95,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 101,
+          "parent": 95,
+          "notused": 60,
+          "detail": "SEARCH v USING INDEX idx_videos_series_id (series_id=?)"
+        },
+        {
+          "id": 121,
+          "parent": 95,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "kind": "series",
+      "sortBy": "updated_at",
+      "offset": 0,
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE page"
+        },
+        {
+          "id": 13,
+          "parent": 3,
+          "notused": 142,
+          "detail": "SCAN e USING COVERING INDEX idx_series_updated_at"
+        },
+        {
+          "id": 17,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 22,
+          "parent": 17,
+          "notused": 42,
+          "detail": "SEARCH n USING INDEX sqlite_autoindex_series_names_1 (series_id=?)"
+        },
+        {
+          "id": 38,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 43,
+          "parent": 38,
+          "notused": 50,
+          "detail": "SEARCH v USING COVERING INDEX idx_videos_series_id (series_id=?)"
+        },
+        {
+          "id": 72,
+          "parent": 3,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        },
+        {
+          "id": 89,
+          "parent": 0,
+          "notused": 147,
+          "detail": "SCAN page"
+        },
+        {
+          "id": 91,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH e USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 94,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH owner USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN"
+        },
+        {
+          "id": 105,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 111,
+          "parent": 105,
+          "notused": 60,
+          "detail": "SEARCH v USING INDEX idx_videos_series_id (series_id=?)"
+        },
+        {
+          "id": 131,
+          "parent": 105,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "kind": "series",
+      "sortBy": "updated_at",
+      "offset": 9960,
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE page"
+        },
+        {
+          "id": 13,
+          "parent": 3,
+          "notused": 142,
+          "detail": "SCAN e USING COVERING INDEX idx_series_updated_at"
+        },
+        {
+          "id": 17,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 22,
+          "parent": 17,
+          "notused": 42,
+          "detail": "SEARCH n USING INDEX sqlite_autoindex_series_names_1 (series_id=?)"
+        },
+        {
+          "id": 38,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 43,
+          "parent": 38,
+          "notused": 50,
+          "detail": "SEARCH v USING COVERING INDEX idx_videos_series_id (series_id=?)"
+        },
+        {
+          "id": 72,
+          "parent": 3,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        },
+        {
+          "id": 89,
+          "parent": 0,
+          "notused": 147,
+          "detail": "SCAN page"
+        },
+        {
+          "id": 91,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH e USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 94,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH owner USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN"
+        },
+        {
+          "id": 105,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 111,
+          "parent": 105,
+          "notused": 60,
+          "detail": "SEARCH v USING INDEX idx_videos_series_id (series_id=?)"
+        },
+        {
+          "id": 131,
+          "parent": 105,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "kind": "director",
+      "sortBy": "video_count",
+      "offset": 0,
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE page"
+        },
+        {
+          "id": 13,
+          "parent": 3,
+          "notused": 141,
+          "detail": "SCAN e USING COVERING INDEX idx_directors_updated_at"
+        },
+        {
+          "id": 17,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 22,
+          "parent": 17,
+          "notused": 42,
+          "detail": "SEARCH n USING INDEX sqlite_autoindex_director_names_1 (director_id=?)"
+        },
+        {
+          "id": 38,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 43,
+          "parent": 38,
+          "notused": 50,
+          "detail": "SEARCH v USING COVERING INDEX idx_videos_director_id (director_id=?)"
+        },
+        {
+          "id": 65,
+          "parent": 3,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 78,
+          "parent": 0,
+          "notused": 147,
+          "detail": "SCAN page"
+        },
+        {
+          "id": 80,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH e USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 89,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 95,
+          "parent": 89,
+          "notused": 60,
+          "detail": "SEARCH v USING INDEX idx_videos_director_id (director_id=?)"
+        },
+        {
+          "id": 115,
+          "parent": 89,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "kind": "director",
+      "sortBy": "video_count",
+      "offset": 9960,
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE page"
+        },
+        {
+          "id": 13,
+          "parent": 3,
+          "notused": 141,
+          "detail": "SCAN e USING COVERING INDEX idx_directors_updated_at"
+        },
+        {
+          "id": 17,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 22,
+          "parent": 17,
+          "notused": 42,
+          "detail": "SEARCH n USING INDEX sqlite_autoindex_director_names_1 (director_id=?)"
+        },
+        {
+          "id": 38,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 43,
+          "parent": 38,
+          "notused": 50,
+          "detail": "SEARCH v USING COVERING INDEX idx_videos_director_id (director_id=?)"
+        },
+        {
+          "id": 65,
+          "parent": 3,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        },
+        {
+          "id": 78,
+          "parent": 0,
+          "notused": 147,
+          "detail": "SCAN page"
+        },
+        {
+          "id": 80,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH e USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 89,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 95,
+          "parent": 89,
+          "notused": 60,
+          "detail": "SEARCH v USING INDEX idx_videos_director_id (director_id=?)"
+        },
+        {
+          "id": 115,
+          "parent": 89,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "kind": "director",
+      "sortBy": "updated_at",
+      "offset": 0,
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE page"
+        },
+        {
+          "id": 13,
+          "parent": 3,
+          "notused": 141,
+          "detail": "SCAN e USING COVERING INDEX idx_directors_updated_at"
+        },
+        {
+          "id": 17,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 22,
+          "parent": 17,
+          "notused": 42,
+          "detail": "SEARCH n USING INDEX sqlite_autoindex_director_names_1 (director_id=?)"
+        },
+        {
+          "id": 38,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 43,
+          "parent": 38,
+          "notused": 50,
+          "detail": "SEARCH v USING COVERING INDEX idx_videos_director_id (director_id=?)"
+        },
+        {
+          "id": 72,
+          "parent": 3,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        },
+        {
+          "id": 88,
+          "parent": 0,
+          "notused": 147,
+          "detail": "SCAN page"
+        },
+        {
+          "id": 90,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH e USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 99,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 105,
+          "parent": 99,
+          "notused": 60,
+          "detail": "SEARCH v USING INDEX idx_videos_director_id (director_id=?)"
+        },
+        {
+          "id": 125,
+          "parent": 99,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    },
+    {
+      "kind": "director",
+      "sortBy": "updated_at",
+      "offset": 9960,
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "MATERIALIZE page"
+        },
+        {
+          "id": 13,
+          "parent": 3,
+          "notused": 141,
+          "detail": "SCAN e USING COVERING INDEX idx_directors_updated_at"
+        },
+        {
+          "id": 17,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 2"
+        },
+        {
+          "id": 22,
+          "parent": 17,
+          "notused": 42,
+          "detail": "SEARCH n USING INDEX sqlite_autoindex_director_names_1 (director_id=?)"
+        },
+        {
+          "id": 38,
+          "parent": 3,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 1"
+        },
+        {
+          "id": 43,
+          "parent": 38,
+          "notused": 50,
+          "detail": "SEARCH v USING COVERING INDEX idx_videos_director_id (director_id=?)"
+        },
+        {
+          "id": 72,
+          "parent": 3,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        },
+        {
+          "id": 88,
+          "parent": 0,
+          "notused": 147,
+          "detail": "SCAN page"
+        },
+        {
+          "id": 90,
+          "parent": 0,
+          "notused": 40,
+          "detail": "SEARCH e USING INTEGER PRIMARY KEY (rowid=?)"
+        },
+        {
+          "id": 99,
+          "parent": 0,
+          "notused": 0,
+          "detail": "CORRELATED SCALAR SUBQUERY 4"
+        },
+        {
+          "id": 105,
+          "parent": 99,
+          "notused": 60,
+          "detail": "SEARCH v USING INDEX idx_videos_director_id (director_id=?)"
+        },
+        {
+          "id": 125,
+          "parent": 99,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Ten videos per entity; all update/release dates tied. ANALYZE, one warmup, 3 warm samples, fixed legacy-first ordering.",
+    "Timing excludes assertions/JSON serialization; complete oracle retained. No p95, cold, peak-memory, IPC or Windows/HDD claim.",
+    "Counts/ranking still scan entity/video relations; page payload and hydration are bounded, field byte lengths are not."
+  ]
+}
+✔ compares complete entity lists to first/last pages with 100k associated videos (1624.899375ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1790.411292

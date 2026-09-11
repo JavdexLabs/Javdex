@@ -1,0 +1,27 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-at-build.log": "6ec9d08f51a0269f1e2af1d0c0e0f5c7b1ef6df6f787fc4616a55b745a0efd6c",
+    "batch-at-full.log": "e4a04b781f02eb783f1020d543842fd4382013165cb38a7975a9c6ca701bc38d",
+    "batch-at-green.log": "0b92bfdad247646ca9b959620ea9dd1ad62864d65c6444209d608fb7f4020544",
+    "batch-at-merge-preflight.patch": "792bc1f89e494270b582f54e3c8cede18228d4954388b2ca382fad0cdd3184e9",
+    "batch-at-original-replay.json": "fa6b37ea6f0d71ada58650be124c338e00d03681016ca119655fa7752edb04b2",
+    "batch-at-original-replay.log": "a410e8b748b3c08fa7c4ac7c98d2fb215bf64a4da0390ad943fe766613e9af63",
+    "batch-at-red.log": "2d998336426c167e9580c23cb0d44ea9032ea4c64c9ef9d933117d4dfe422e36",
+    "batch-at-review.md": "e8d98da948c3f9be95491c7cd955e89e3f863fe073ffd21c9192d44e7eae0bb0",
+    "batch-at-stage-before.log": "9137c79073c4f7f5d4918b47dfe359fc3124374269c35b17f1209a7eb67948d8",
+    "batch-at-stage-final.json": "480a397eb3281cdee7c9e23294b4e7d2d724dcea5edc07658f46d2970941d1d6",
+    "batch-at-stage-final.log": "83210fdd2346590dc5b706f754ddf452a68b8ba085a3f153628ad6b481ca5ff4"
+  },
+  "references": {
+    "batch-ar-benchmark-1000-source.ts": "0f4222e5497bba1a6cde2e5b6179b5d55c301e2e04feafc1ac55d0d43882eab9"
+  },
+  "notes": [
+    "Cumulative selected diff vs HEAD plus full new stage probe, depends on B-AS; not standalone.",
+    "Final full2238pass1skip0fail; focused66pass; build successful.",
+    "Original AR1000 replay passed11799.76ms total; warm3 median page1.139/deep1.080/get2.640/full API2267.373ms; full API already uses new SQL.",
+    "Differential old-SQL public get4.006 vs151.784ms fixed-order single observations, full objects equal; interception count1. No stable speedup ratio.",
+    "Initial stage baseline intentionally terminated during old full-list read; distinguish from preserved AR180s timeout.",
+    "No user data/schema/commit/push/release; all15work packages/42risks remain in scope."
+  ]
+}

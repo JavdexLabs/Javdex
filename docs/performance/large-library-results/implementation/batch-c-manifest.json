@@ -1,0 +1,10 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "patchSha256": "d5e64ab8af7931d5065d18ea6af6038b6b3b629365cc747147f5ef0ad4348e72",
+  "notes": [
+    "Apply batch-b.patch then replace homeDiscoveryRepo.ts with the baseline plus batch-c-discovery.patch changes. Patch is against HEAD, not an incremental patch on B.",
+    "Other late B changes affect scanner and badge behavior, not the measured discovery queries.",
+    "Array aggregation was changed from bounded spread to a loop after measurement; SQL is unchanged.",
+    "Node typecheck and 14 homeDiscovery tests passed; lint status recorded in task tool output."
+  ]
+}

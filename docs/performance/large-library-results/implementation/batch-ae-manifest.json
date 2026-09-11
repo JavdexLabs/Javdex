@@ -1,0 +1,35 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ae-index-probes.patch": "9ee6bf20d4b5115597251f68ded957925b0ed311bb2e7d6291e929b661c4ac9c",
+    "batch-ae-matrix-300382-0.json": "fa991a84dc00fd93eefdb653056b7659dc8f362dbe40059060dac57cd59e9118",
+    "batch-ae-matrix-300382-0.log": "4a7fcdb8fccbfae3566cc8c9795715b9d28d87438608e252a6683d939680ad37",
+    "batch-ae-matrix-300382-1.json": "e4197bf00fa6a3b8ff2ff1bb8c8a3b41d99d7bc837cfa5e28ac38f32291babf1",
+    "batch-ae-matrix-300382-1.log": "c6078df310be6b241fe55fe4d85750e406c69ae07358defbe9bc738570ac1a03",
+    "batch-ae-release-aba.json": "baeff7621703ae18e34b68a7ecedf9e87378e162e519f8453003e99913f36d62",
+    "batch-ae-release-aba.log": "cfc1ee1140ddea543be47525714c686b859a8321b313782ca87980ad7b5b5ea1",
+    "batch-ae-release-recheck.json": "2ad1b53f6a4f6ca3af4de2fc20a3cba3e122a06df69fadad50f9d00b83600533",
+    "batch-ae-release-recheck.log": "c5b47b67815e5bdc398d7ac8100305584553f7017f8ddd8521d389556c053aea",
+    "batch-ae-tag-origin-10000-all.json": "fc0fcc28165b900642656619cb222b4e64905899705163683c3995a271218922",
+    "batch-ae-tag-origin-10000-all.log": "eb4f3a59654fa44534b02a884af63c8a2e87c8c04175b9364d600ae586898e12",
+    "batch-ae-tag-origin-10000-skew.json": "4968cb1b2260a91e43e3a7e06d61daa57fe3b83b91a1de95f1e8bb5d723204b2",
+    "batch-ae-tag-origin-10000-skew.log": "1b1721916350b0d2f76f25fde3bbb7e013987ed62a31b8682b492c26c396c164",
+    "batch-ae-tag-origin-10000-sparse.json": "bf4c226e393932cb182f572a81ac84950412cd522ac0eac37090e0e17c57a017",
+    "batch-ae-tag-origin-10000-sparse.log": "8069f8851f24922a92409d7c7732beb2f3e6fc5b553b02c8bd583baa02ba9dc7",
+    "batch-ae-tag-origin-300382-all.json": "c77212297fe2bfdb44aaa10b0ef8b3839af7254fa372798e36729efa11a6e04e",
+    "batch-ae-tag-origin-300382-all.log": "b2e818c5ab48974de6b867df9cdf890ff6f20994871e8ce0588713722f08fdcb",
+    "batch-ae-tag-origin-300382-skew.json": "9e0f839b8b951ec789b97e40a94d83a0db43b036518e5bc5453aa92eb072df9f",
+    "batch-ae-tag-origin-300382-skew.log": "5e62aa04602d1a10cd3f7ddeaee44fb032873f72acda464a0a77e0d0e8127989",
+    "batch-ae-tag-origin-300382-sparse.json": "47b824368e73e62f8a7ba3b0b19a176ebb2c2940e3999daa89a5526a442bd844",
+    "batch-ae-tag-origin-300382-sparse.log": "a9e99b6587a31baf928f98f84e5d01aef2317ed26444196db325c7d2a213946b",
+    "batch-ae-unknown-case.log": "2167fe80a6db053be2fca9c33758a032b593236dc65042fd7b03f90337e33c72"
+  },
+  "notes": [
+    "Full untracked benchmark source snapshot; depends on accepted production work B-AD, not standalone.",
+    "Six final dedicated fixtures, each 34 records and full-result comparisons; includes nonempty search and offset2 page assertions, not nonempty deep pages in every distribution.",
+    "Two full analyzed 300382 matrices: 30/32 comparisons per run, 124 measurements. Full matrices predate optional focused-case control; default behavior unchanged.",
+    "release-recheck is historical A-B diagnosis; release-aba uses final A-B-A control and ten warm samples. Unknown case deliberately fails; not a current test failure.",
+    "Ordering query drift did not reverse on baseline-index restoration. Environment/cache/physical-layout effects not identified; do not claim zero regression or p95 acceptance.",
+    "No production migration/index or user-data change in AE. Full goal remains incomplete."
+  ]
+}

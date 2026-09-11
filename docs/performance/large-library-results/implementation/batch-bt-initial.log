@@ -1,0 +1,37 @@
+{"sourceIterationPlans":[[{"id":5,"parent":0,"notused":61,"detail":"SEARCH video_resources USING INDEX idx_video_resources_library_video (library_id=?)"},{"id":36,"parent":0,"notused":0,"detail":"USE TEMP B-TREE FOR ORDER BY"}]]}
+✔ iterates source-managed resources in order while deleting, with bounded reads and rollback (19.651083ms)
+▶ ScanCoordinator
+  ✔ coalesces display progress while preserving per-file callbacks and the final event (11.878125ms)
+  ✔ flushes pending progress before a failure without delaying the failure event (0.504ms)
+  ✔ binds an offline-created root identity and refreshes the frozen snapshot before scanning (0.783458ms)
+  ✔ persists matching complete audit details with the latest summary (0.249625ms)
+  ✔ publishes scan lifecycle events for every trigger (0.208041ms)
+  ✔ uses one frozen configuration snapshot for the complete run (0.112459ms)
+  ✔ reconciles resource identity pending rows only under roots proven safe after traversal (0.136375ms)
+  ✔ preserves offline roots and removes only missing local resources under accessible roots (0.322ms)
+  ✔ aborts cleanup when a local path cannot be audited (0.27925ms)
+  ✔ treats a root that becomes unreadable after traversal as offline (0.109834ms)
+  ✔ rechecks the frozen root identity immediately before cleanup writes (0.095958ms)
+  ✔ does not run cleanup after cancellation and releases the mutual-exclusion lease (0.122625ms)
+  ✔ keeps resources after a coordinator-level failure (0.098667ms)
+  ✔ skips every destructive cleanup after a file processing failure (0.063959ms)
+  ✔ replaces the unrecognized-file snapshot after every safe completed scan (0.084041ms)
+  ✔ completes safe cleanup with errors when failures are isolated to STRM files (0.103375ms)
+  ✔ consumes deferred path cleanup only after a successful uncancelled scan (0.058667ms)
+  ✔ keeps deferred path cleanup queued after a partial folder scan (0.064708ms)
+  ✔ allows a full cleanup-only scan after the final configured folder was removed (0.04525ms)
+  ✔ preserves all three cleanup audit sequences above the argument limit (199.335958ms)
+  ✔ removes resource-less memberships after deferred cleanup on a safe full scan (0.240666ms)
+  ✔ persists a sanitized failed summary without running destructive cleanup (0.196583ms)
+  ✔ rolls back resource cleanup and keeps pending roots when auto-delete fails (0.165ms)
+  ✔ keeps pending roots when the cleanup transaction cannot commit (0.11375ms)
+  ✔ rejects duplicate scans and scans blocked by resource maintenance (8.170625ms)
+✔ ScanCoordinator (224.210709ms)
+ℹ tests 26
+ℹ suites 1
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 579.416916

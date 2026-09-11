@@ -1,0 +1,10 @@
+{"runtime":{"node":"24.18.1","acorn":"8.16.0","ada":"3.4.4","amaro":"1.1.9","ares":"1.34.6","brotli":"1.2.0","cldr":"48.0","icu":"78.2","llhttp":"9.4.3","merve":"1.2.2","modules":"148","napi":"10","nbytes":"0.1.4","ncrypto":"0.0.1","nghttp2":"1.69.0","nghttp3":"","ngtcp2":"","openssl":"0.0.0","simdjson":"4.6.4","simdutf":"7.7.0","sqlite":"3.53.1","tz":"2025c","undici":"7.29.0","unicode":"17.0","uv":"1.52.1","uvwasi":"0.0.23","v8":"15.0.245.28-electron.0","zlib":"1.3.2.1-motley","zstd":"1.6.0","electron":"43.4.1","chrome":"150.0.7871.224"},"platform":"darwin","arch":"arm64","worker":{"phase":"done","result":{"total":500000500000},"label":{"matched":1},"elapsedMs":71.57291599999999,"readonly":true,"ticksDuringRead":11},"workerMaxTimerGapMs":6.289958000000013,"directMs":71.64220799999998,"directMaxTimerGapMs":72.1335,"caveats":["Single synthetic CPU query; not real large-library latency, p95, Windows/HDD or production IPC validation.","Worker uses actual read-only factory and native SQLite; bundle creation and fixture setup are outside timer measurement.","ticksDuringRead spans main receipt of reading/done messages, including message scheduling and reader.close tail; not every tick is proven inside native SELECT.","workerMaxTimerGapMs includes worker startup/loading/read/termination wait; elapsedMs and directMs measure SQL prepare/get.","No production worker pool, admission queue, cancellation, packaging path or shutdown integration is claimed."]}
+✔ runs native catalog reads in a worker while main timers continue (198.342375ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 360.698041

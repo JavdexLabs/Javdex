@@ -1,0 +1,298 @@
+diff --git a/src/renderer/src/hooks/useMediaLibraryScanController.ts b/src/renderer/src/hooks/useMediaLibraryScanController.ts
+index 2d73f45..cc523f9 100644
+--- a/src/renderer/src/hooks/useMediaLibraryScanController.ts
++++ b/src/renderer/src/hooks/useMediaLibraryScanController.ts
+@@ -16,6 +16,7 @@ export const mediaLibraryScanLatestKey = (libraryId: number): readonly unknown[]
+ export interface MediaLibraryScanController {
+   latest: LibraryScanLatestSnapshot | null
+   latestLoading: boolean
++  latestError: string | null
+   running: boolean
+   cancelling: boolean
+   activeRunId: string | null
+@@ -29,7 +30,7 @@ export interface MediaLibraryScanController {
+ 
+ export function useMediaLibraryScanController(
+   libraryId: number,
+-  options?: { onSettled?: () => void | Promise<void> }
++  options?: { onSettled?: () => void | Promise<void>; loadLatest?: boolean }
+ ): MediaLibraryScanController {
+   const queryClient = useQueryClient()
+   const activeRunIdRef = useRef<string | null>(null)
+@@ -42,9 +43,18 @@ export function useMediaLibraryScanController(
+   const [progress, setProgress] = useState<ScanProgress | null>(null)
+   const [result, setResult] = useState<ScanResult | null>(null)
+   const [error, setError] = useState<string | null>(null)
++  const loadLatest = options?.loadLatest ?? true
++  const latestContextRef = useRef({ libraryId, loadLatest })
++  latestContextRef.current = { libraryId, loadLatest }
+   const latestQuery = useQuery({
+-    queryKey: mediaLibraryScanLatestKey(libraryId),
+-    queryFn: () => api.scan.getLatest(libraryId)
++    queryKey: loadLatest ? mediaLibraryScanLatestKey(libraryId) : ['media-library-scan-inactive', libraryId],
++    enabled: loadLatest,
++    gcTime: 0,
++    queryFn: async ({ signal }) => {
++      const latest = await api.scan.getLatest(libraryId)
++      signal.throwIfAborted()
++      return latest
++    }
+   })
+ 
+   const setRunId = useCallback((runId: string | null): void => {
+@@ -160,12 +170,14 @@ export function useMediaLibraryScanController(
+   }
+ 
+   const refreshLatest = async (): Promise<void> => {
+-    await latestQuery.refetch()
++    if (latestContextRef.current.libraryId === libraryId && latestContextRef.current.loadLatest) await latestQuery.refetch()
++    else await queryClient.invalidateQueries({queryKey: mediaLibraryScanLatestKey(libraryId), exact: true, refetchType: 'none'})
+   }
+ 
+   return {
+-    latest: latestQuery.data ?? null,
+-    latestLoading: latestQuery.isLoading,
++    latest: loadLatest ? latestQuery.data ?? null : null,
++    latestLoading: loadLatest && latestQuery.isLoading,
++    latestError: loadLatest && latestQuery.error ? latestQuery.error.message : null,
+     running,
+     cancelling,
+     activeRunId,
+diff --git a/src/renderer/src/hooks/useMediaLibraryScanController.interaction.test.tsx b/src/renderer/src/hooks/useMediaLibraryScanController.interaction.test.tsx
+new file mode 100644
+index 0000000..3c74eb7
+--- /dev/null
++++ b/src/renderer/src/hooks/useMediaLibraryScanController.interaction.test.tsx
+@@ -0,0 +1,58 @@
++import assert from 'node:assert/strict'
++import {afterEach,it} from 'node:test'
++import React from 'react'
++import TestRenderer,{act} from 'react-test-renderer'
++import {QueryClient,QueryClientProvider} from '@tanstack/react-query'
++import type {LibraryScanLatestSnapshot} from '@shared/libraryTypes'
++
++type Request={id:number;resolve:(value:LibraryScanLatestSnapshot)=>void;reject:(error:Error)=>void}
++const requests:Request[]=[]
++Object.defineProperty(globalThis,'React',{configurable:true,value:React})
++Object.defineProperty(globalThis,'window',{configurable:true,value:{api:{scan:{
++ getLatest:(id:number)=>new Promise<LibraryScanLatestSnapshot>((resolve,reject)=>requests.push({id,resolve,reject})),
++ onProgress:()=>()=>undefined,onStateChanged:()=>()=>undefined
++}}}})
++let renderer:TestRenderer.ReactTestRenderer|undefined
++let client:QueryClient
++let current:ReturnType<typeof import('./useMediaLibraryScanController').useMediaLibraryScanController>
++let hook:typeof import('./useMediaLibraryScanController').useMediaLibraryScanController
++function Probe({id,enabled}:{id:number;enabled:boolean}):null{current=hook(id,{loadLatest:enabled});return null}
++async function show(id:number,enabled:boolean){
++ hook=(await import('./useMediaLibraryScanController')).useMediaLibraryScanController
++ client??=new QueryClient({defaultOptions:{queries:{retry:false}}})
++ await act(async()=>{const node=<QueryClientProvider client={client}><Probe id={id} enabled={enabled}/></QueryClientProvider>
++  if(renderer)renderer.update(node);else renderer=TestRenderer.create(node)
++ })
++}
++async function flush(){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,10))})}
++function currentPath(){return current.latest?.unrecognized[0].filePath}
++function snapshot(path:string):LibraryScanLatestSnapshot{return {summary:null,audit:null,unrecognized:[{rootId:1,filePath:path}]}}
++afterEach(async()=>{await act(async()=>renderer?.unmount());renderer=undefined;client?.clear();requests.length=0})
++it('does not load hidden scan history, including manual refresh and invalidation, and releases completed data',async()=>{
++ await show(1,false);assert.equal(requests.length,0);assert.equal(current.latestLoading,false)
++ await act(async()=>{await current.refreshLatest();await client.invalidateQueries()});assert.equal(requests.length,0)
++ await show(1,true);assert.equal(requests.length,1);assert.equal(current.latestLoading,true)
++ requests[0].resolve(snapshot('first'));await flush();assert.equal(currentPath(),'first')
++ const oldRefresh = current.refreshLatest
++ await show(1,false);await flush();assert.equal(current.latest,null)
++ await act(async()=>{void oldRefresh()});assert.equal(requests.length,1)
++ assert.equal(client.getQueryCache().find({queryKey:['media-library-scan-latest',1],exact:true}),undefined)
++ await show(1,true);assert.equal(requests.length,2);assert.equal(current.latest,null)
++ requests[1].resolve(snapshot('fresh'));await flush();assert.equal(currentPath(),'fresh')
++})
++it('discards pending results after leaving and re-entering or switching libraries',async()=>{
++ await show(1,true);await show(1,false);await show(1,true)
++ assert.equal(requests.length,2)
++ requests[0].resolve(snapshot('stale'));await flush();assert.equal(current.latest,null)
++ await show(2,true);assert.equal(requests[2].id,2)
++ requests[1].resolve(snapshot('old-library'));await flush();assert.equal(current.latest,null)
++ requests[2].resolve(snapshot('library-two'));await flush();assert.equal(currentPath(),'library-two')
++})
++it('exposes history load errors and retries without treating failure as an empty history',async()=>{
++ await show(1,true);requests[0].reject(new Error('injected'));await flush()
++ assert.equal(current.latestError,'injected');assert.equal(current.latestLoading,false)
++ let retry:Promise<void>|undefined
++ await act(async()=>{retry=current.refreshLatest()});assert.equal(requests.length,2)
++ requests[1].resolve(snapshot('recovered'));await act(async()=>retry);await flush()
++ assert.equal(current.latestError,null);assert.equal(currentPath(),'recovered')
++})
+diff --git a/src/renderer/src/pages/MediaLibrarySettingsPage.tsx b/src/renderer/src/pages/MediaLibrarySettingsPage.tsx
+index 89a1174..b97ffc7 100644
+--- a/src/renderer/src/pages/MediaLibrarySettingsPage.tsx
++++ b/src/renderer/src/pages/MediaLibrarySettingsPage.tsx
+@@ -108,37 +108,11 @@ export function MediaLibrarySettingsContent({
+     queryKey: ['media-libraries', 'list', 'active'],
+     queryFn: () => api.mediaLibraries.list()
+   })
+-  const pendingGroupsQuery = useQuery({
+-    queryKey: ['pending-scan-groups', libraryId],
+-    queryFn: () => api.scan.listPending(libraryId)
+-  })
+-  const pendingScanGroupIds = useMemo(
+-    () => new Set((pendingGroupsQuery.data ?? []).map((group) => group.id)),
+-    [pendingGroupsQuery.data]
+-  )
+-  const pendingIdentitiesQuery = useQuery({
+-    queryKey: ['pending-resource-identities', libraryId],
+-    queryFn: () => api.scan.listPendingResourceIdentities(libraryId)
+-  })
+-  const pendingResourceIdentityIds = useMemo(
+-    () => new Set((pendingIdentitiesQuery.data ?? []).map((identity) => identity.id)),
+-    [pendingIdentitiesQuery.data]
+-  )
+-  const pendingScrapesQuery = useQuery({
+-    queryKey: ['pending-video-scrapes'],
+-    queryFn: () => api.scrape.listPending()
+-  })
+-  const pendingVideoScrapeIds = useMemo(
+-    () => new Set((pendingScrapesQuery.data ?? []).map((pending) => pending.id)),
+-    [pendingScrapesQuery.data]
+-  )
+   const scan = useMediaLibraryScanController(libraryId, {
++    loadLatest: tab === 'sources',
+     onSettled: () =>
+       Promise.all([
+-        libraryQuery.refetch(),
+-        pendingGroupsQuery.refetch(),
+-        pendingIdentitiesQuery.refetch(),
+-        pendingScrapesQuery.refetch()
++        libraryQuery.refetch()
+       ]).then(() => undefined)
+   })
+   const library = libraryQuery.data ?? null
+@@ -693,9 +667,6 @@ export function MediaLibrarySettingsContent({
+               library={library}
+               scan={scan}
+               latestScanSummary={latestScanSummary}
+-              pendingScanGroupIds={pendingScanGroupIds}
+-              pendingResourceIdentityIds={pendingResourceIdentityIds}
+-              pendingVideoScrapeIds={pendingVideoScrapeIds}
+               selectedScanMetric={selectedScanMetric}
+               setSelectedScanMetric={setSelectedScanMetric}
+               configDraft={configDraft}
+diff --git a/src/renderer/src/pages/MediaLibrarySettingsTabs.tsx b/src/renderer/src/pages/MediaLibrarySettingsTabs.tsx
+index 9b00afc..74433d0 100644
+--- a/src/renderer/src/pages/MediaLibrarySettingsTabs.tsx
++++ b/src/renderer/src/pages/MediaLibrarySettingsTabs.tsx
+@@ -133,9 +133,6 @@ function ScanHistorySummary({
+   audit,
+   selected,
+   unrecognized,
+-  currentPendingGroupIds,
+-  currentPendingIdentityIds,
+-  currentPendingScrapeIds,
+   onSelect,
+   onResolvedUnrecognized,
+   onOpenPending,
+@@ -145,9 +142,6 @@ function ScanHistorySummary({
+   audit: LibraryScanLatestSnapshot['audit']
+   selected: LibraryScanMetricKey | null
+   unrecognized: LibraryScanLatestSnapshot['unrecognized']
+-  currentPendingGroupIds: Set<number>
+-  currentPendingIdentityIds: Set<number>
+-  currentPendingScrapeIds: Set<number>
+   onSelect: (key: LibraryScanMetricKey | null) => void
+   onResolvedUnrecognized: (path: string) => void
+   onOpenPending: (target: PendingItemKey) => void
+@@ -178,9 +172,6 @@ function ScanHistorySummary({
+         audit={audit}
+         selected={selected}
+         unrecognized={unrecognized}
+-        currentPendingGroupIds={currentPendingGroupIds}
+-        currentPendingIdentityIds={currentPendingIdentityIds}
+-        currentPendingScrapeIds={currentPendingScrapeIds}
+         onSelect={onSelect}
+         onResolvedUnrecognized={onResolvedUnrecognized}
+         onOpenPending={onOpenPending}
+@@ -470,9 +461,6 @@ export function ScanSettingsTab({
+   library,
+   scan,
+   latestScanSummary,
+-  pendingScanGroupIds,
+-  pendingResourceIdentityIds,
+-  pendingVideoScrapeIds,
+   selectedScanMetric,
+   setSelectedScanMetric,
+   configDraft,
+@@ -484,9 +472,6 @@ export function ScanSettingsTab({
+   library: MediaLibraryDetail
+   scan: ScanController
+   latestScanSummary: LibraryScanSummary | null
+-  pendingScanGroupIds: Set<number>
+-  pendingResourceIdentityIds: Set<number>
+-  pendingVideoScrapeIds: Set<number>
+   selectedScanMetric: LibraryScanMetricKey | null
+   setSelectedScanMetric: Dispatch<SetStateAction<LibraryScanMetricKey | null>>
+   configDraft: MediaLibraryConfigValues
+@@ -593,15 +578,19 @@ export function ScanSettingsTab({
+             <h5 id="library-last-scan-title">最近一次扫描</h5>
+             <span>只保留最近一次手动或后台扫描的审计摘要。</span>
+           </div>
+-          {latestScanSummary ? (
++          {scan.latestLoading ? (
++            <SettingsEmptyPanel variant="compact">正在加载扫描记录…</SettingsEmptyPanel>
++          ) : scan.latestError ? (
++            <SettingsEmptyPanel variant="compact">
++              <span role="alert">扫描记录加载失败：{scan.latestError}</span>
++              <Button size="sm" onClick={() => void scan.refreshLatest()}>重试</Button>
++            </SettingsEmptyPanel>
++          ) : latestScanSummary ? (
+             <ScanHistorySummary
+               summary={latestScanSummary}
+               audit={scan.latest?.audit ?? null}
+               selected={selectedScanMetric}
+               unrecognized={scan.latest?.unrecognized ?? []}
+-              currentPendingGroupIds={pendingScanGroupIds}
+-              currentPendingIdentityIds={pendingResourceIdentityIds}
+-              currentPendingScrapeIds={pendingVideoScrapeIds}
+               onSelect={setSelectedScanMetric}
+               onResolvedUnrecognized={() => {
+                 void scan.refreshLatest()
+diff --git a/src/renderer/src/pages/MediaLibrarySettingsTabs.test.tsx b/src/renderer/src/pages/MediaLibrarySettingsTabs.test.tsx
+index 0e8b80d..ec21d05 100644
+--- a/src/renderer/src/pages/MediaLibrarySettingsTabs.test.tsx
++++ b/src/renderer/src/pages/MediaLibrarySettingsTabs.test.tsx
+@@ -81,9 +81,6 @@ describe('ScanSettingsTab', () => {
+             refreshLatest: async () => undefined
+           } as never}
+           latestScanSummary={null}
+-          pendingScanGroupIds={new Set()}
+-          pendingResourceIdentityIds={new Set()}
+-          pendingVideoScrapeIds={new Set()}
+           selectedScanMetric={null}
+           setSelectedScanMetric={() => undefined}
+           configDraft={DEFAULT_MEDIA_LIBRARY_CONFIG}
+@@ -111,3 +108,27 @@ describe('ScanSettingsTab', () => {
+     assert.deepEqual(updates, [['autoImportLocalNfo', false]])
+   })
+ })
++
++it('distinguishes scan history loading, failure with retry and an empty result', async () => {
++  const { ScanSettingsTab } = await import('./MediaLibrarySettingsTabs')
++  let retries = 0
++  const render = (latestLoading: boolean, latestError: string | null) => (
++    <ScanSettingsTab libraryId={library.id} library={library}
++      scan={{running:false,cancelling:false,activeRunId:null,progress:null,error:null,latest:null,
++        latestLoading,latestError,start:async()=>undefined,cancel:async()=>undefined,
++        refreshLatest:async()=>{retries++}} as never}
++      latestScanSummary={null} selectedScanMetric={null} setSelectedScanMetric={()=>undefined}
++      configDraft={DEFAULT_MEDIA_LIBRARY_CONFIG} updateConfigImmediately={async()=>undefined}
++      formDisabled={false} navigate={()=>undefined}/>
++  )
++  await act(async()=>{renderer=TestRenderer.create(render(true,null))})
++  assert.match(nodeText(renderer!.root),/正在加载扫描记录/)
++  assert.doesNotMatch(nodeText(renderer!.root),/尚无扫描记录/)
++  await act(async()=>renderer!.update(render(false,'injected')))
++  assert.match(nodeText(renderer!.root),/扫描记录加载失败：injected/)
++  const retry=renderer!.root.findAllByType('button').find(node=>nodeText(node)==='重试')
++  assert.ok(retry)
++  await act(async()=>retry.props.onClick());assert.equal(retries,1)
++  await act(async()=>renderer!.update(render(false,null)))
++  assert.match(nodeText(renderer!.root),/尚无扫描记录/)
++})

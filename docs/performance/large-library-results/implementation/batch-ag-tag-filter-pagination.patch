@@ -1,0 +1,1526 @@
+diff --git a/src/main/db/tagRepo.test.ts b/src/main/db/tagRepo.test.ts
+index 85afdcf..a17e43f 100644
+--- a/src/main/db/tagRepo.test.ts
++++ b/src/main/db/tagRepo.test.ts
+@@ -5,7 +5,7 @@ import os from 'node:os'
+ import path from 'node:path'
+ import { closeDatabase, getDb, initDatabaseAtPath } from './database'
+ import { insertTestVideoWithFile } from './testVideoFixtures'
+-import { listManualTags, listTags, pruneUnusedTags } from './tagRepo'
++import { getTagLabels, listTagFilterOptions, listManualTagOptions, listManualTags, listTags, pruneUnusedTags } from './tagRepo'
+ 
+ let tempRoot: string | null = null
+ 
+@@ -40,7 +40,178 @@ describe('tagRepo.pruneUnusedTags', () => {
+   })
+ })
+ 
++describe('tagRepo selected labels', () => {
++  it('looks up only selected IDs through the tag primary key and omits deleted IDs', (t) => {
++    setupDb()
++    const db = getDb()
++    db.exec(`WITH RECURSIVE n(x) AS (VALUES(3) UNION ALL SELECT x+1 FROM n WHERE x<10000)
++      INSERT INTO tags(id,name) SELECT x,'Unselected '||x FROM n`)
++    const prepare = db.prepare.bind(db)
++    const statements: string[] = []
++    t.mock.method(db, 'prepare', (sql: string) => { statements.push(sql); return prepare(sql) })
++    assert.deepEqual(getTagLabels([2, 1, 2, 20000]), [{ id: 1, label: 'Linked' }, { id: 2, label: 'Orphan' }])
++    assert.equal(statements.length, 1)
++    assert.doesNotMatch(statements[0], /video_tag|membership|COUNT\(/i)
++    const plan = prepare(`EXPLAIN QUERY PLAN ${statements[0]}`).all(2, 1, 20000) as Array<{ detail: string }>
++    assert.ok(plan.some(row => /SEARCH tags USING INTEGER PRIMARY KEY/.test(row.detail)))
++    assert.ok(plan.every(row => !/SCAN tags/.test(row.detail)))
++  })
++
++  it('bounds display labels and JSON bytes without changing full stored names', () => {
++    setupDb()
++    const db = getDb()
++    const insert = db.prepare('INSERT INTO tags(id,name) VALUES (?,?)')
++    const ids = Array.from({ length: 100 }, (_, index) => index + 3)
++    db.transaction(() => { for (const id of ids) insert.run(id, '\u0001'.repeat(2048) + id) })()
++    const labels = getTagLabels(ids)
++    assert.equal(labels.length, 100)
++    assert.ok(labels.every(row => row.label === '\u0001'.repeat(128) + '…'))
++    assert.ok(Buffer.byteLength(JSON.stringify(labels)) < 96 * 1024)
++    assert.equal((db.prepare('SELECT name FROM tags WHERE id=3').get() as { name: string }).name, '\u0001'.repeat(2048) + '3')
++    db.prepare('UPDATE tags SET name=? WHERE id=3').run('😀'.repeat(129))
++    assert.equal(getTagLabels([3])[0].label, '😀'.repeat(128) + '…')
++  })
++
++  it('rejects invalid or oversized requests and does no SQL work for an empty selection', (t) => {
++    setupDb()
++    const prepare = t.mock.method(getDb(), 'prepare', () => { throw new Error('unexpected query') })
++    assert.deepEqual(getTagLabels([]), [])
++    for (const ids of [[0], [-1], [1.5], [NaN], [Number.MAX_SAFE_INTEGER + 1], Array(101).fill(1)]) {
++      assert.throws(() => getTagLabels(ids), /最多接受100个有效ID/)
++    }
++    assert.equal(prepare.mock.callCount(), 0)
++  })
++})
++
++describe('tagRepo manual candidates', () => {
++  it('pages alphabetically without counts and retains hidden/manual-only associations', () => {
++    setupDb()
++    const db = getDb()
++    const insert = db.prepare('INSERT INTO tags(id,name) VALUES (?,?)')
++    db.transaction(() => {
++      for (let i = 0; i < 205; i++) {
++        insert.run(i + 3, `T${String(i).padStart(3, '0')}`)
++        db.prepare("INSERT INTO video_tag(video_id,tag_id,origin) VALUES (1,?,'manual')").run(i + 3)
++      }
++      insert.run(999, 'Scraped only')
++      db.exec("INSERT INTO video_tag(video_id,tag_id,origin) VALUES (1,999,'scraped'); UPDATE library_video_memberships SET is_hidden=1")
++    })()
++    const expected = db.prepare('SELECT id,name AS label FROM tags WHERE id=1 OR id BETWEEN 3 AND 207 ORDER BY name').all()
++    for (const maintain of [() => {}, () => db.exec('ANALYZE')]) {
++      maintain()
++      const pages = [0, 100, 200].map(offset => listManualTagOptions({ offset }))
++      assert.deepEqual(pages.map(page => page.items.length), [100, 100, 6])
++      assert.deepEqual(pages.map(page => page.hasMore), [true, true, false])
++      assert.deepEqual(pages.flatMap(page => page.items), expected)
++      assert.deepEqual(listManualTagOptions({ offset: 300 }), { items: [], hasMore: false })
++    }
++    db.transaction(() => {
++      for (let i = 3; i <= 207; i++) db.prepare('UPDATE tags SET name=? WHERE id=?').run('\u0001'.repeat(2048) + i, i)
++    })()
++    const bounded = listManualTagOptions({})
++    assert.equal(bounded.items.length, 100)
++    assert.equal(bounded.hasMore, true)
++    assert.ok(Buffer.byteLength(JSON.stringify(bounded)) < 96 * 1024)
++    assert.ok(bounded.items.every(tag => tag.label === '\u0001'.repeat(128) + '…'))
++  })
++
++  it('preserves Unicode/literal substring matching and searches beyond display truncation', () => {
++    setupDb()
++    const db = getDb()
++    const names = ['École', 'İZMİR', 'Straße', '50%_sale', "it's", '😀'.repeat(200) + 'Needle', 'İ'.repeat(500)]
++    db.transaction(() => names.forEach((name, index) => {
++      db.prepare('INSERT INTO tags(id,name) VALUES (?,?)').run(index + 3, name)
++      db.prepare("INSERT INTO video_tag(video_id,tag_id,origin) VALUES (1,?,'manual')").run(index + 3)
++    }))()
++    for (const search of ['éCO', 'i', 'İZ', 'izmir', 'STRASSE', '%_', "it's", 'needle', '  linked  ', 'absent', 'İ'.repeat(500)]) {
++      const expectedIds = [{ id: 1, name: 'Linked' }, ...names.map((name, i) => ({ id: i + 3, name }))]
++        .filter(tag => tag.name.toLowerCase().includes(search.trim().toLowerCase())).map(tag => tag.id).sort((a, b) => a - b)
++      assert.deepEqual(listManualTagOptions({ search }).items.map(tag => tag.id).sort((a, b) => a - b), expectedIds)
++    }
++    assert.equal(listManualTagOptions({ search: 'needle' }).items[0].label, '😀'.repeat(128) + '…')
++  })
++
++  it('uses tag-key existence checks under skewed statistics and validates its work limits', (t) => {
++    setupDb()
++    const db = getDb()
++    db.exec(`WITH RECURSIVE n(x) AS (VALUES(3) UNION ALL SELECT x+1 FROM n WHERE x<10000)
++      INSERT INTO tags(id,name) SELECT x,'Unlinked '||x FROM n; ANALYZE`)
++    const prepare = db.prepare.bind(db)
++    let sql = ''
++    t.mock.method(db, 'prepare', (query: string) => { sql = query; return prepare(query) })
++    assert.equal(listManualTagOptions({}).items.length, 1)
++    assert.doesNotMatch(sql, /COUNT\(|library_video|GROUP BY/i)
++    const plan = prepare(`EXPLAIN QUERY PLAN ${sql}`).all(101, 0) as Array<{ detail: string }>
++    assert.ok(plan.some(row => /idx_video_tag_tag_id/.test(row.detail)))
++    for (const query of [{ limit: 0 }, { limit: 101 }, { offset: -1 }, { offset: 1.5 }, { search: 'x'.repeat(501) }]) {
++      assert.throws(() => listManualTagOptions(query), /无效的标签候选/)
++    }
++  })
++})
++
+ describe('tagRepo active catalog projection', () => {
++  it('matches manual association and visibility semantics before and after statistics maintenance', () => {
++    setupDb()
++    const db = getDb()
++    db.exec(`
++      INSERT INTO media_libraries (id, name, status) VALUES
++        (2, 'Shared', 'active'), (3, 'Archived', 'archived');
++      INSERT INTO tags (id, name) VALUES (3, 'Mixed'), (4, 'Hidden manual'), (5, 'Scraped only');
++    `)
++    for (let i = 2; i <= 80; i++) {
++      insertTestVideoWithFile(db, { code: `MIX-${i}`, filePath: `${i}.mp4`, scrapedStatus: 0 })
++    }
++    db.exec(`
++      UPDATE library_video_memberships SET is_hidden = (video_id % 3 = 0);
++      INSERT INTO library_video_memberships (library_id, video_id, added_at, updated_at, added_via, discovery_key)
++        SELECT 2, id, '2026', '2026', 'shared', id FROM videos WHERE id % 4 = 0;
++      INSERT INTO library_video_memberships (library_id, video_id, added_at, updated_at, added_via, discovery_key)
++        SELECT 3, id, '2026', '2026', 'shared', id FROM videos;
++      INSERT INTO video_tag (video_id, tag_id, origin)
++        SELECT id, 3, CASE WHEN id % 2 = 0 THEN 'manual' ELSE 'scraped' END FROM videos;
++      INSERT INTO video_tag (video_id, tag_id, origin) VALUES
++        (3, 4, 'manual'), (2, 4, 'scraped'), (2, 5, 'scraped');
++    `)
++    const expected = (manualOnly: boolean) => db.prepare(`
++      SELECT t.*, (
++        SELECT COUNT(*) FROM video_tag vt
++        WHERE vt.tag_id = t.id ${manualOnly ? "AND vt.origin = 'manual'" : ''}
++          AND EXISTS (
++            SELECT 1 FROM library_video_memberships m JOIN media_libraries l ON l.id = m.library_id
++            WHERE m.video_id = vt.video_id AND m.is_hidden = 0 AND l.status = 'active'
++          )
++      ) AS video_count FROM tags t
++      ${manualOnly ? "WHERE EXISTS (SELECT 1 FROM video_tag vt WHERE vt.tag_id = t.id AND vt.origin = 'manual')" : ''}
++      ORDER BY video_count DESC, t.name
++    `).all()
++    const all = expected(false)
++    const manual = expected(true)
++    for (const maintain of [() => {}, () => db.pragma('optimize = 0x10012'), () => db.exec('ANALYZE')]) {
++      maintain()
++      assert.deepEqual(listTags(), all)
++      assert.deepEqual(listManualTags(), manual)
++      assert.equal(listManualTags().find(tag => tag.id === 4)?.video_count, 0)
++      assert.equal(listManualTags().some(tag => tag.id === 5), false)
++    }
++  })
++
++  it('deduplicates shared memberships and preserves manual origin and zero-count tags', () => {
++    setupDb()
++    const db = getDb()
++    db.exec(`
++      UPDATE video_tag SET origin = 'scraped' WHERE tag_id = 1;
++      INSERT INTO media_libraries (id, name, status) VALUES (2, 'Shared', 'active');
++      INSERT INTO library_video_memberships (library_id, video_id, added_at, updated_at, added_via, discovery_key) VALUES (2, 1, '2026', '2026', 'shared', 1);
++      INSERT INTO tags (id, name) VALUES (3, 'Manual');
++      INSERT INTO video_tag (video_id, tag_id, origin) VALUES (1, 3, 'manual');
++    `)
++    assert.deepEqual(listTags().map(t => [t.id, t.video_count]), [[1, 1], [3, 1], [2, 0]])
++    assert.deepEqual(listManualTags().map(t => [t.id, t.video_count]), [[3, 1]])
++    db.exec("UPDATE media_libraries SET status = 'archived' WHERE id = 2; UPDATE library_video_memberships SET is_hidden = 1 WHERE library_id = 1")
++    assert.deepEqual(listManualTags().map(t => [t.id, t.video_count]), [[3, 0]])
++    assert.equal(listTags().every(t => t.video_count === 0), true)
++  })
++
+   it('counts only videos that can be opened through the active visible catalog', () => {
+     setupDb()
+     const db = getDb()
+@@ -54,3 +225,66 @@ describe('tagRepo active catalog projection', () => {
+     assert.equal(listManualTags().find((tag) => tag.id === 1)?.video_count, 0)
+   })
+ })
++
++
++describe('tagRepo filter candidates', () => {
++  it('paginates names before counts and matches global visibility counts with shared and archived members', () => {
++    setupDb()
++    const db = getDb()
++    db.exec(`INSERT INTO media_libraries(id,name,status) VALUES(2,'Shared','active'),(3,'Archived','archived');
++      INSERT INTO library_video_memberships(library_id,video_id,added_at,discovery_key)
++        VALUES(2,1,'now',1),(3,1,'now',1);
++      WITH RECURSIVE n(x) AS (VALUES(3) UNION ALL SELECT x+1 FROM n WHERE x<206)
++      INSERT INTO tags(id,name) SELECT x,printf('Tag %03d',x) FROM n;
++      INSERT INTO video_tag(video_id,tag_id,origin) VALUES(1,3,'scraped'),(1,206,'manual');`)
++    for (const stage of ['initial', 'analyzed', 'hidden']) {
++      if (stage === 'analyzed') db.exec('ANALYZE')
++      if (stage === 'hidden') db.exec('UPDATE library_video_memberships SET is_hidden=1 WHERE library_id IN (1,2)')
++      const expected = listTags().sort((a,b) => a.name < b.name ? -1 : a.name > b.name ? 1 : a.id-b.id)
++        .map(({ id, name, video_count }) => ({ id, label: name, video_count }))
++      const pages = [0,100,200].map(offset => listTagFilterOptions({ offset }))
++      assert.deepEqual(pages.map(page => page.items.length), [100,100,6])
++      assert.deepEqual(pages.map(page => page.hasMore), [true,true,false])
++      assert.deepEqual(pages.flatMap(page => page.items), expected)
++    }
++  })
++
++  it('keeps Unicode literal search, bounded labels and page-only count parameters', (t) => {
++    setupDb()
++    const db = getDb()
++    db.exec(`WITH RECURSIVE n(x) AS (VALUES(4) UNION ALL SELECT x+1 FROM n WHERE x<10004)
++      INSERT INTO tags(id,name) SELECT x,'Unrelated '||x FROM n;
++      INSERT INTO video_tag(video_id,tag_id) SELECT 1,id FROM tags WHERE id>=4;`)
++    const name = 'ÉCOLE_%' + '😀'.repeat(200) + 'Needle'
++    db.prepare('INSERT INTO tags(id,name) VALUES(3,?)').run(name)
++    const trace: { sql: string; params: unknown[] }[] = []
++    const prepare = db.prepare.bind(db)
++    t.mock.method(db, 'prepare', (sql: string) => {
++      const statement = prepare(sql)
++      const all = statement.all.bind(statement)
++      statement.all = ((...params: unknown[]) => { trace.push({ sql, params }); return all(...params) }) as typeof statement.all
++      return statement
++    })
++    const page = listTagFilterOptions({ search: 'école_%', limit: 1 })
++    assert.deepEqual(page.items, [{ id:3, label: Array.from(name).slice(0,128).join('') + '…', video_count:0 }])
++    assert.deepEqual(trace.find(entry => entry.sql.includes('FROM video_tag'))?.params, [3])
++    assert.equal(listTagFilterOptions({ search: 'Needle' }).items[0]?.id, 3)
++    trace.length = 0
++    assert.deepEqual(listTagFilterOptions({ search: 'absent' }), { items: [], hasMore: false })
++    assert.equal(trace.length, 1, 'empty page must not query associations')
++    trace.length = 0
++    for (const query of [{ limit:101 },{ limit:0 },{ offset:-1 },{ search:'x'.repeat(501) }]) {
++      assert.throws(() => listTagFilterOptions(query))
++    }
++    assert.equal(trace.length,0)
++    for (const maintain of [() => {}, () => db.exec('ANALYZE')]) {
++      maintain()
++      trace.length = 0
++      listTagFilterOptions({ search: 'école_%', limit: 1 })
++      const countQuery = trace.find(entry => entry.sql.includes('FROM video_tag'))!
++      const plan = prepare(`EXPLAIN QUERY PLAN ${countQuery.sql}`).all(...countQuery.params) as { detail: string }[]
++      assert.ok(plan.some(row => /SEARCH vt USING INDEX idx_video_tag_tag_id \(tag_id=\?\)/.test(row.detail)), JSON.stringify(plan))
++      assert.ok(!plan.some(row => /SCAN vt/.test(row.detail)))
++    }
++  })
++})
+diff --git a/src/main/db/tagRepo.ts b/src/main/db/tagRepo.ts
+index 3382a1e..f4f7e60 100644
+--- a/src/main/db/tagRepo.ts
++++ b/src/main/db/tagRepo.ts
+@@ -1,5 +1,5 @@
+ import { getDb } from './database'
+-import type { TagListItem } from '@shared/commonTypes'
++import type { TagLabel, TagListItem, TagOptionsPage, TagOptionsQuery, TagFilterOptionsPage } from '@shared/commonTypes'
+ 
+ /** Find or create a tag, returning its id. */
+ export function ensureTag(name: string): number {
+@@ -15,47 +15,110 @@ export function ensureTag(name: string): number {
+ 
+ export type { TagListItem }
+ 
++function queryTags(manualOnly: boolean): TagListItem[] {
++  // Materialize visibility once; shared membership must not multiply relationship counts.
++  // The uncorrelated manual-tag set also retains invisible-only associations.
++  // A correlated EXISTS can repeatedly scan all manual links under skewed statistics.
++  return getDb().prepare(
++    `WITH members AS MATERIALIZED (
++       SELECT DISTINCT membership.video_id
++       FROM library_video_memberships membership
++       JOIN media_libraries library ON library.id = membership.library_id
++       WHERE membership.is_hidden = 0 AND library.status = 'active'
++     ), counts AS (
++       SELECT vt.tag_id, COUNT(members.video_id) AS video_count
++       FROM video_tag vt JOIN members ON members.video_id = vt.video_id
++       ${manualOnly ? "WHERE vt.origin = 'manual'" : ''}
++       GROUP BY vt.tag_id
++     )
++     SELECT t.*, COALESCE(counts.video_count, 0) AS video_count
++     FROM tags t LEFT JOIN counts ON counts.tag_id = t.id
++     ${manualOnly ? `WHERE t.id IN (
++       SELECT manual_link.tag_id FROM video_tag manual_link
++       WHERE manual_link.origin = 'manual'
++     )` : ''}
++     ORDER BY video_count DESC, t.name`
++  ).all() as TagListItem[]
++}
++
+ export function listTags(): TagListItem[] {
+-  const db = getDb()
+-  return db
+-    .prepare(
+-      `SELECT t.*, COUNT(
+-         CASE WHEN EXISTS (
+-           SELECT 1
+-           FROM library_video_memberships membership
+-           JOIN media_libraries library ON library.id = membership.library_id
+-           WHERE membership.video_id = vt.video_id
+-             AND membership.is_hidden = 0
+-             AND library.status = 'active'
+-         ) THEN vt.video_id END
+-       ) AS video_count
+-       FROM tags t
+-       LEFT JOIN video_tag vt ON vt.tag_id = t.id
+-       GROUP BY t.id
+-       ORDER BY video_count DESC, t.name`
+-    )
+-    .all() as TagListItem[]
++  return queryTags(false)
+ }
+ 
+-/** Tags that appear as custom/manual on at least one video. */
++/** Tags with any manual association, including ones with no currently visible videos. */
+ export function listManualTags(): TagListItem[] {
+-  const db = getDb()
+-  return db
+-    .prepare(
+-      `SELECT t.*, COUNT(DISTINCT CASE WHEN EXISTS (
+-         SELECT 1
+-         FROM library_video_memberships membership
+-         JOIN media_libraries library ON library.id = membership.library_id
+-         WHERE membership.video_id = vt.video_id
+-           AND membership.is_hidden = 0
+-           AND library.status = 'active'
+-       ) THEN vt.video_id END) AS video_count
+-       FROM tags t
+-       JOIN video_tag vt ON vt.tag_id = t.id AND vt.origin = 'manual'
+-       GROUP BY t.id
+-       ORDER BY video_count DESC, t.name`
++  return queryTags(true)
++}
++
++/** Resolve only selected filter labels, without scanning relationships or computing counts. */
++export function getTagLabels(ids: number[]): TagLabel[] {
++  if (ids.length > 100 || ids.some(id => !Number.isSafeInteger(id) || id <= 0)) {
++    throw new Error('标签名称查询最多接受100个有效ID')
++  }
++  const selected = [...new Set(ids)]
++  if (selected.length === 0) return []
++  // 100 labels of at most 129 code points keep even JSON-escaped control text below 96KiB.
++  // Full names remain in the database; this DTO is only for filter-chip display.
++  return getDb().prepare(`SELECT id,
++    substr(name, 1, 128) || CASE WHEN length(name) > 128 THEN '…' ELSE '' END AS label
++    FROM tags WHERE id IN (${selected.map(() => '?').join(',')}) ORDER BY id`
++  ).all(...selected) as TagLabel[]
++}
++
++/** Alphabetical manual-tag candidates, with no visibility counts or full-name payloads. */
++export function listManualTagOptions(query: TagOptionsQuery): TagOptionsPage {
++  const limit = query.limit ?? 100
++  const offset = query.offset ?? 0
++  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100
++    || !Number.isSafeInteger(offset) || offset < 0
++    || (query.search !== undefined && (typeof query.search !== 'string' || query.search.length > 500))) {
++    throw new Error('无效的标签候选查询')
++  }
++  const search = (query.search ?? '').trim().toLowerCase()
++  // Pin the existing tag-key path: skewed statistics can otherwise select origin
++  // for every outer tag and repeatedly scan all manual relationships.
++  const rows = getDb().prepare(`SELECT t.id,
++      substr(t.name, 1, 128) || CASE WHEN length(t.name) > 128 THEN '…' ELSE '' END AS label
++    FROM tags t
++    WHERE ${search ? 'tag_name_contains_folded(t.name, ?) AND' : ''} EXISTS (
++      SELECT 1 FROM video_tag vt INDEXED BY idx_video_tag_tag_id
++      WHERE vt.tag_id = t.id AND vt.origin = 'manual'
+     )
+-    .all() as TagListItem[]
++    ORDER BY t.name LIMIT ? OFFSET ?`
++  ).all(...(search ? [search] : []), limit + 1, offset) as TagLabel[]
++  return { items: rows.slice(0, limit), hasMore: rows.length > limit }
++}
++
++/** Select a bounded name page before counting its visible associations. */
++export function listTagFilterOptions(query: TagOptionsQuery): TagFilterOptionsPage {
++  const limit = query.limit ?? 100
++  const offset = query.offset ?? 0
++  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100
++    || !Number.isSafeInteger(offset) || offset < 0
++    || (query.search !== undefined && (typeof query.search !== 'string' || query.search.length > 500))) {
++    throw new Error('无效的标签候选查询')
++  }
++  const db = getDb()
++  const search = (query.search ?? '').trim().toLowerCase()
++  return db.transaction(() => {
++    const rows = db.prepare(`SELECT id,
++      substr(name, 1, 128) || CASE WHEN length(name) > 128 THEN '…' ELSE '' END AS label
++      FROM tags ${search ? 'WHERE tag_name_contains_folded(name, ?)' : ''}
++      ORDER BY name, id LIMIT ? OFFSET ?`)
++      .all(...(search ? [search] : []), limit + 1, offset) as TagLabel[]
++    const page = rows.slice(0, limit)
++    if (page.length === 0) return { items: [], hasMore: false }
++    // video_tag PK makes each video/tag pair unique; EXISTS avoids counting
++    // shared library memberships twice. All origins and zero-count tags remain.
++    const counts = db.prepare(`SELECT vt.tag_id, COUNT(*) AS video_count
++      FROM video_tag vt INDEXED BY idx_video_tag_tag_id
++      WHERE vt.tag_id IN (${page.map(() => '?').join(',')}) AND EXISTS (
++        SELECT 1 FROM library_video_memberships m JOIN media_libraries l ON l.id=m.library_id
++        WHERE m.video_id=vt.video_id AND m.is_hidden=0 AND l.status='active'
++      ) GROUP BY vt.tag_id`).all(...page.map(row => row.id)) as { tag_id: number; video_count: number }[]
++    const byId = new Map(counts.map(row => [row.tag_id, row.video_count]))
++    return { items: page.map(row => ({ ...row, video_count: byId.get(row.id) ?? 0 })), hasMore: rows.length > limit }
++  })()
+ }
+ 
+ /** Drop tag row when it has no video associations left (e.g. last manual link removed). */
+diff --git a/src/main/ipc/facetHandlers.ts b/src/main/ipc/facetHandlers.ts
+index 2378b30..46d13a9 100644
+--- a/src/main/ipc/facetHandlers.ts
++++ b/src/main/ipc/facetHandlers.ts
+@@ -106,6 +106,9 @@ export function registerClassificationHandlers(
+ }
+ 
+ export function registerFacetHandlers(): void {
++  appCommandAdapter.register(IPC.TAG_LABELS, (ids) => tagQueryService.labels(ids))
++  appCommandAdapter.register(IPC.TAG_FILTER_OPTIONS, (query) => tagQueryService.filterOptions(query))
++  appCommandAdapter.register(IPC.TAG_MANUAL_OPTIONS, (query) => tagQueryService.manualOptions(query))
+   appCommandAdapter.register(
+     IPC.TAG_LIST,
+     (): Array<{ id: number; name: string; video_count: number }> => tagQueryService.list()
+diff --git a/src/main/ipc/ipcCommandSchemas.ts b/src/main/ipc/ipcCommandSchemas.ts
+index db0e4ed..e2ae271 100644
+--- a/src/main/ipc/ipcCommandSchemas.ts
++++ b/src/main/ipc/ipcCommandSchemas.ts
+@@ -22,6 +22,13 @@ const record = z.record(z.string(), z.unknown())
+ const object = z.object({}).passthrough()
+ const noArgs = z.tuple([])
+ const sortDirection = z.enum(['asc', 'desc'])
++const playlistPageQuery = z.object({
++    sortBy: z.enum(['added_at', 'release_date']).optional(),
++    sortDir: sortDirection.optional(),
++    resourceKinds: z.array(z.enum(['local', 'direct', 'web', 'magnet', 'ed2k', 'none'])).max(6).optional(),
++    limit: z.number().int().min(1).max(200).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict()
+ const organizationRole = z.enum(['maker', 'publisher'])
+ const pluginKind = z.enum(['video', 'actress'])
+ const scrapeFields = z.array(text)
+@@ -379,6 +386,7 @@ export const videoIpcSchemas = {
+   [IPC.VIDEO_SAMPLE_DELETE]: z.tuple([id, id]),
+   [IPC.VIDEO_POSTER_SET]: z.tuple([id, nullableText]),
+   [IPC.VIDEO_MANUAL_TAG_ADD]: z.tuple([id, nonEmptyText]),
++  [IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]: z.tuple([positiveSafeInteger, positiveSafeInteger]),
+   [IPC.VIDEO_MANUAL_TAG_REMOVE]: z.tuple([id, id]),
+   [IPC.VIDEO_RESOURCE_IMPORT]: z.tuple([videoLinkImport]),
+   [IPC.VIDEO_RESOURCE_GET]: z.tuple([id, id, id]),
+@@ -507,6 +515,7 @@ export const scrapeIpcSchemas = {
+     id.optional(),
+     id.optional()
+   ]),
++  [IPC.PENDING_VIDEO_SCRAPE_COUNT]: noArgs,
+   [IPC.PENDING_VIDEO_SCRAPE_LIST]: noArgs,
+   [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: z.tuple([
+     z.object({
+@@ -648,6 +657,9 @@ export const appIpcSchemas = {
+     z.enum(['added_at', 'release_date']).optional(),
+     sortDirection.optional()
+   ]),
++  [IPC.PLAYLIST_VIDEO_PAGE]: z.tuple([id, playlistPageQuery]),
++  [IPC.PLAYLIST_METADATA]: z.tuple([id, z.enum(['added_at', 'release_date']).optional(), sortDirection.optional()]),
++  [IPC.PLAYLIST_GET_PAGE]: z.tuple([id, playlistPageQuery]),
+   [IPC.PLAYLIST_CREATE]: z.tuple([profileInput]),
+   [IPC.PLAYLIST_UPDATE]: z.tuple([id, profileInput]),
+   [IPC.PLAYLIST_DELETE]: z.tuple([id]),
+@@ -656,6 +668,17 @@ export const appIpcSchemas = {
+   [IPC.PLAYLIST_REMOVE_VIDEO]: z.tuple([id, id]),
+   [IPC.TAG_LIST]: noArgs,
+   [IPC.TAG_LIST_MANUAL]: noArgs,
++  [IPC.TAG_LABELS]: z.tuple([z.array(positiveSafeInteger).max(100)]),
++  [IPC.TAG_FILTER_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
++  [IPC.TAG_MANUAL_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
+   [IPC.ORGANIZATION_LIST]: z.tuple([listQuery]),
+   [IPC.ORGANIZATION_GET]: z.tuple([id, organizationRole]),
+   [IPC.ORGANIZATION_OPTIONS]: z.tuple([optionalText]),
+diff --git a/src/main/ipc/typedIpcAdapter.test.ts b/src/main/ipc/typedIpcAdapter.test.ts
+index f98a4d0..8778600 100644
+--- a/src/main/ipc/typedIpcAdapter.test.ts
++++ b/src/main/ipc/typedIpcAdapter.test.ts
+@@ -7,6 +7,30 @@ import { executeIpcHandler } from './shared'
+ import { appIpcSchemas, videoIpcSchemas } from './ipcCommandSchemas'
+ import type { IpcMainInvokeEvent } from 'electron'
+ 
++it('validates manual tag candidate bounds and existing-tag identities', () => {
++  for (const channel of [IPC.TAG_MANUAL_OPTIONS, IPC.TAG_FILTER_OPTIONS] as const) {
++    const options = appIpcSchemas[channel]
++    assert.equal(options.safeParse([{}]).success, true)
++    assert.equal(options.safeParse([{ search: 'École', limit: 100, offset: 100 }]).success, true)
++    for (const query of [{ limit: 101 }, { limit: 0 }, { offset: -1 }, { offset: 0.5 }, { search: 'x'.repeat(501) }, { extra: true }]) {
++      assert.equal(options.safeParse([query]).success, false)
++    }
++  }
++  const attach = videoIpcSchemas[IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]
++  assert.equal(attach.safeParse([1, 2]).success, true)
++  for (const args of [[0, 2], [1, -1], [1, 1.5], [1, Number.MAX_SAFE_INTEGER + 1], [1, 'name']]) {
++    assert.equal(attach.safeParse(args).success, false)
++  }
++})
++
++it('bounds selected tag label IPC requests before repository access', () => {
++  const schema = appIpcSchemas[IPC.TAG_LABELS]
++  assert.equal(schema.safeParse([[]]).success, true)
++  assert.equal(schema.safeParse([Array.from({ length: 100 }, (_, index) => index + 1)]).success, true)
++  for (const args of [[[0]], [[-1]], [[1.5]], [[Number.MAX_SAFE_INTEGER + 1]], [Array(101).fill(1)], [[1], 'extra']]) {
++    assert.equal(schema.safeParse(args).success, false)
++  }
++})
+ describe('typed IPC adapter', () => {
+   it('does not expose the legacy unreviewed video deletion command', () => {
+     assert.equal('VIDEO_DELETE' in IPC, false)
+diff --git a/src/main/services/tagQueryService.ts b/src/main/services/tagQueryService.ts
+index 31f9616..c3f837c 100644
+--- a/src/main/services/tagQueryService.ts
++++ b/src/main/services/tagQueryService.ts
+@@ -1,12 +1,18 @@
+-import type { TagListItem } from '@shared/commonTypes'
+-import { listManualTags, listTags } from '../db/tagRepo'
++import type { TagLabel, TagListItem, TagOptionsPage, TagFilterOptionsPage, TagOptionsQuery } from '@shared/commonTypes'
++import { getTagLabels, listTagFilterOptions, listManualTagOptions, listManualTags, listTags } from '../db/tagRepo'
+ 
+ export interface TagQueryService {
+   list(): TagListItem[]
+   listManual(): TagListItem[]
++  labels(ids: number[]): TagLabel[]
++  filterOptions(query: TagOptionsQuery): TagFilterOptionsPage
++  manualOptions(query: TagOptionsQuery): TagOptionsPage
+ }
+ 
+ export const tagQueryService: TagQueryService = {
+   list: listTags,
+-  listManual: listManualTags
++  listManual: listManualTags,
++  labels: getTagLabels,
++  filterOptions: listTagFilterOptions,
++  manualOptions: listManualTagOptions
+ }
+diff --git a/src/preload/index.ts b/src/preload/index.ts
+index 744da7d..df10bc4 100644
+--- a/src/preload/index.ts
++++ b/src/preload/index.ts
+@@ -104,7 +104,7 @@ import type {
+ import type { ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../shared/actressTypes'
+ import type { IpcResponse } from '../shared/ipcTypes'
+ import type { InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
+-import type { SortDir } from '../shared/commonTypes'
++import type { SortDir, TagOptionsQuery } from '../shared/commonTypes'
+ import type { PlaylistCreateInput, PlaylistUpdateInput, PlaylistVideoSortBy } from '../shared/playlistTypes'
+ import type { PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevInstallInput } from '../shared/pluginDevTypes'
+ import type {
+@@ -381,6 +381,8 @@ const api = {
+       invokeVideo(IPC.VIDEO_POSTER_SET, id, posterPath),
+     addManualTag: (id: number, name: string) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name),
++    addExistingManualTag: (id: number, tagId: number) =>
++      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, id, tagId),
+     removeManualTag: (id: number, tagId: number) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId),
+     importLinkResource: (input: VideoLinkResourceImportInput) =>
+@@ -448,6 +450,12 @@ const api = {
+       invokeVideo(IPC.VIDEO_RESOURCE_SPLIT, libraryId, videoId, resourceId)
+   },
+   playlists: {
++    metadata: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
++      invokeApp(IPC.PLAYLIST_METADATA, id, sortBy, sortDir),
++    videoPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_VIDEO_PAGE, id, query),
++    getPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_GET_PAGE, id, query),
+     list: () => invokeApp(IPC.PLAYLIST_LIST),
+     get: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
+       invokeApp(IPC.PLAYLIST_GET, id, sortBy, sortDir),
+@@ -491,6 +499,9 @@ const api = {
+     markScrapeSuccess: (id: number) => invokeActress(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id)
+   },
+   tags: {
++    filterOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_FILTER_OPTIONS, query),
++    manualOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_MANUAL_OPTIONS, query),
++    labels: (ids: number[]) => invokeApp(IPC.TAG_LABELS, ids),
+     list: () =>
+       invokeApp(IPC.TAG_LIST),
+     listManual: () =>
+@@ -557,6 +568,7 @@ const api = {
+         directorSelectionId,
+         libraryId
+       ),
++    countPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_COUNT),
+     listPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_LIST),
+     confirmPending: (input: PendingVideoScrapeConfirmInput) =>
+       invokeScrape(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, input),
+diff --git a/src/renderer/src/components/TagFilter.tsx b/src/renderer/src/components/TagFilter.tsx
+index 0412a88..907dc49 100644
+--- a/src/renderer/src/components/TagFilter.tsx
++++ b/src/renderer/src/components/TagFilter.tsx
+@@ -1,12 +1,14 @@
+ import Checkbox from './Checkbox'
+-import { useEffect, useMemo, useRef, useState } from 'react'
+-import { api } from '../api'
++import { useEffect, useRef, useState } from 'react'
++import { useTagFilterOptions } from '../hooks/useTagFilterOptions'
++import { useTagLabels } from '../hooks/useTagLabels'
++import { useDebounce } from '../hooks/useDebounce'
+ import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
+ import Button from './Button'
+ 
+ interface TagItem {
+   id: number
+-  name: string
++  label: string
+   video_count: number
+ }
+ 
+@@ -37,9 +39,10 @@ function TagOptionList({
+           <label key={t.id} className="tag-option">
+             <Checkbox
+               checked={selected.includes(t.id)}
++              disabled={!selected.includes(t.id) && selected.length >= 100}
+               onChange={() => onToggle(t.id)}
+             />
+-            <span className="tag-option-name">{t.name}</span>
++            <span className="tag-option-name">{t.label}</span>
+             <span className="tag-option-count">{t.video_count}</span>
+           </label>
+         ))
+@@ -71,10 +74,11 @@ function TagChipCloud({
+             type="button"
+             role="option"
+             aria-selected={isSelected}
++            disabled={!isSelected && selected.length >= 100}
+             className={`tag-chip-cloud-item${isSelected ? ' tag-chip-cloud-item--selected' : ''}`}
+             onClick={() => onToggle(t.id)}
+           >
+-            <span className="tag-chip-cloud-name">{t.name}</span>
++            <span className="tag-chip-cloud-name">{t.label}</span>
+             <span className="tag-chip-cloud-count">{t.video_count}</span>
+           </button>
+         )
+@@ -92,19 +96,19 @@ export default function TagFilter({
+   showInlineChips = true,
+   variant = 'default'
+ }: Props): JSX.Element {
+-  const [tags, setTags] = useState<TagItem[]>([])
+   const [open, setOpen] = useState(false)
+   const [search, setSearch] = useState('')
+   const addRef = useRef<HTMLDivElement>(null)
+ 
+   const isCompact = variant === 'popover'
+ 
+-  useEffect(() => {
+-    api.tags
+-      .list()
+-      .then(setTags)
+-      .catch(() => {})
+-  }, [])
++  const [offset, setOffset] = useState(0)
++  const [retry, setRetry] = useState(0)
++  const debouncedSearch = useDebounce(search.trim(), 250)
++  const searchPending = search.trim() !== debouncedSearch
++  const page = useTagFilterOptions((isCompact || open) && !searchPending, debouncedSearch, offset, retry)
++  const byId = useTagLabels(selected, showInlineChips)
++  const changeSearch = (value: string): void => { setSearch(value); setOffset(0) }
+ 
+   useEffect(() => {
+     if (!open || isCompact) return
+@@ -123,18 +127,8 @@ export default function TagFilter({
+     }
+   }, [open, isCompact])
+ 
+-  const byId = useMemo(() => new Map(tags.map((t) => [t.id, t])), [tags])
+-
+-  const filtered = useMemo(() => {
+-    const q = search.trim().toLowerCase()
+-    const list = q ? tags.filter((t) => t.name.toLowerCase().includes(q)) : [...tags]
+-    if (isCompact) {
+-      list.sort((a, b) => b.video_count - a.video_count)
+-    }
+-    return list.slice(0, 200)
+-  }, [tags, search, isCompact])
+-
+   const toggle = (id: number): void => {
++    if (!selected.includes(id) && selected.length >= 100) return
+     onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id])
+   }
+ 
+@@ -147,47 +141,41 @@ export default function TagFilter({
+         className="tag-chip selected"
+         onClick={() => toggle(id)}
+       >
+-        {byId.get(id)?.name ?? id} ×
++        {byId.get(id) ?? id} ×
+       </button>
+     ))
+ 
+-  if (isCompact) {
+-    return (
+-      <div className="tag-filter tag-filter--compact">
+-        <input
+-          className="text-input library-filter-input tag-chip-cloud-search"
+-          placeholder="搜索标签…"
+-          value={search}
+-          onChange={(e) => setSearch(e.target.value)}
+-          aria-label="搜索标签"
+-        />
+-        <TagChipCloud filtered={filtered} selected={selected} onToggle={toggle} />
+-      </div>
+-    )
+-  }
+-
++  const content = (
++    <>
++      <input
++        className={isCompact ? 'text-input library-filter-input tag-chip-cloud-search' : 'text-input tag-popover-search'}
++        placeholder="搜索标签…"
++        aria-label="搜索标签"
++        maxLength={500}
++        value={search}
++        onChange={(e) => changeSearch(e.target.value)}
++      />
++      <div className="library-filter-tags-hint" aria-live="polite">按名称 · 第 {offset / 100 + 1} 页{selected.length >= 100 ? ' · 最多选择100个标签' : ''}</div>
++      {page.loading || searchPending ? <div role="status">正在加载标签…</div> : page.error ? (
++        <div role="alert">{page.error} <Button size="sm" onClick={() => setRetry(value => value + 1)}>重试</Button></div>
++      ) : isCompact ? <TagChipCloud filtered={page.items} selected={selected} onToggle={toggle} />
++        : <TagOptionList filtered={page.items} selected={selected} onToggle={toggle} />}
++      <nav className="tag-filter-pagination" aria-label="标签筛选分页">
++        <Button size="sm" disabled={offset === 0 || page.loading || searchPending} onClick={() => setOffset(value => Math.max(0, value - 100))}>上一页</Button>
++        <Button size="sm" disabled={!page.hasMore || page.loading || searchPending} onClick={() => setOffset(value => value + 100)}>下一页</Button>
++      </nav>
++    </>
++  )
++  if (isCompact) return <div className="tag-filter tag-filter--compact">{content}</div>
+   return (
+     <div className="tag-filter">
+       <div className="tag-filter-row">
+         <div className="tag-filter-add" ref={addRef}>
+-          <Button type="button" size="sm" className="tag-filter-add-btn" onClick={() => setOpen((o) => !o)}>
++          <Button type="button" size="sm" className="tag-filter-add-btn" onClick={() => setOpen(value => !value)}>
+             添加标签{selected.length ? ` (${selected.length})` : ''}
+           </Button>
+-
+-          {open ? (
+-            <div className="tag-popover">
+-              <input
+-                className="text-input tag-popover-search"
+-                autoFocus
+-                placeholder="搜索标签…"
+-                value={search}
+-                onChange={(e) => setSearch(e.target.value)}
+-              />
+-              <TagOptionList filtered={filtered} selected={selected} onToggle={toggle} />
+-            </div>
+-          ) : null}
++          {open ? <div className="tag-popover">{content}</div> : null}
+         </div>
+-
+         {chips}
+       </div>
+     </div>
+diff --git a/src/renderer/src/pages/LibraryPage.tsx b/src/renderer/src/pages/LibraryPage.tsx
+index 1b2df65..f576b77 100644
+--- a/src/renderer/src/pages/LibraryPage.tsx
++++ b/src/renderer/src/pages/LibraryPage.tsx
+@@ -29,6 +29,7 @@ import type {
+ import { ALL_VIDEO_SCRAPE_FIELDS, VIDEO_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_UPDATE_MODE_OPTIONS } from '@shared/videoScrapeTypes'
+ import { api } from '../api'
+ import { useDebounce } from '../hooks/useDebounce'
++import { useTagLabels } from '../hooks/useTagLabels'
+ import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
+ import { useRangeSelection } from '../hooks/useRangeSelection'
+ import { useToast } from '../components/Toast'
+@@ -266,43 +267,13 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
+     [setSearchParams]
+   )
+ 
+-  const [tagNames, setTagNames] = useState<Map<number, string>>(new Map())
++  const tagNames = useTagLabels(tagIds, surfaceMode === 'active' && !detailOpen)
+   const [years, setYears] = useState<number[]>([])
+ 
+-  const refreshTagNames = useCallback(() => {
+-    api.tags
+-      .list()
+-      .then((tags) => setTagNames(new Map(tags.map((t) => [t.id, t.name]))))
+-      .catch(() => {})
+-  }, [])
+-
+   useEffect(() => {
+     if (surfaceMode !== 'active') return
+     api.videos.years(scope).then(setYears).catch(() => {})
+-    refreshTagNames()
+-  }, [refreshTagNames, scope, surfaceMode])
+-
+-  useEffect(() => {
+-    const tagLabels = (location.state as { tagLabels?: Record<number, string> } | null)?.tagLabels
+-    if (!tagLabels) return
+-    setTagNames((prev) => {
+-      const next = new Map(prev)
+-      for (const [id, name] of Object.entries(tagLabels)) {
+-        next.set(Number(id), name)
+-      }
+-      return next
+-    })
+-  }, [location.state])
+-
+-  useEffect(() => {
+-    if (tagIds.some((id) => !tagNames.has(id))) {
+-      refreshTagNames()
+-    }
+-  }, [tagIds, tagNames, refreshTagNames])
+-
+-  useEffect(() => {
+-    if (!detailOpen) refreshTagNames()
+-  }, [detailOpen, refreshTagNames])
++  }, [scope, surfaceMode])
+ 
+   useEffect(() => {
+     if (effectiveDefaultScraper) {
+@@ -908,7 +879,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
+                   </Button>
+ 
+                   <LibraryFilterPopover
+-                    open={filterOpen}
++                    open={filterOpen && surfaceMode === 'active' && !detailOpen}
+                     onClose={() => setFilterOpen(false)}
+                     years={years}
+                     state={filterState}
+diff --git a/src/renderer/src/styles/entity-browsing.css b/src/renderer/src/styles/entity-browsing.css
+index baf802b..469390c 100644
+--- a/src/renderer/src/styles/entity-browsing.css
++++ b/src/renderer/src/styles/entity-browsing.css
+@@ -1064,3 +1064,17 @@ button.actress-mini:focus-visible .actress-avatar {
+   font-size: 12px;
+   margin-top: 6px;
+ }
++
++
++.tag-filter-pagination {
++  display: flex;
++  flex-wrap: wrap;
++  gap: var(--control-pad-x);
++  margin-top: var(--control-pad-x);
++}
++
++.tag-chip-cloud-item:disabled {
++  cursor: default;
++  color: var(--text-muted);
++  border-color: var(--border-subtle);
++}
+diff --git a/src/shared/appIpcContract.ts b/src/shared/appIpcContract.ts
+index 14472f9..7d98f7f 100644
+--- a/src/shared/appIpcContract.ts
++++ b/src/shared/appIpcContract.ts
+@@ -27,10 +27,14 @@ import type {
+   RenameImportResult,
+   ScanResult
+ } from './libraryTypes'
+-import type { TagListItem, SortDir } from './commonTypes'
++import type { TagListItem, TagLabel, TagOptionsQuery, TagOptionsPage, TagFilterOptionsPage, SortDir } from './commonTypes'
+ import type {
+   PlaylistCreateInput,
+   PlaylistDetail,
++  PlaylistPage,
++  PlaylistMetadata,
++  PlaylistVideosPage,
++  PlaylistPageQuery,
+   PlaylistListItem,
+   PlaylistUpdateInput,
+   PlaylistVideoMembership,
+@@ -236,6 +240,9 @@ export interface AppIpcContract {
+     args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir]
+     result: PlaylistDetail | null
+   }
++  [IPC.PLAYLIST_METADATA]: { args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir]; result: PlaylistMetadata | null }
++  [IPC.PLAYLIST_VIDEO_PAGE]: { args: [id: number, query: PlaylistPageQuery]; result: PlaylistVideosPage | null }
++  [IPC.PLAYLIST_GET_PAGE]: { args: [id: number, query: PlaylistPageQuery]; result: PlaylistPage | null }
+   [IPC.PLAYLIST_CREATE]: { args: [input: PlaylistCreateInput]; result: number }
+   [IPC.PLAYLIST_UPDATE]: { args: [id: number, input: PlaylistUpdateInput]; result: boolean }
+   [IPC.PLAYLIST_DELETE]: { args: [id: number]; result: boolean }
+@@ -245,6 +252,9 @@ export interface AppIpcContract {
+ 
+   [IPC.TAG_LIST]: { args: []; result: TagListItem[] }
+   [IPC.TAG_LIST_MANUAL]: { args: []; result: TagListItem[] }
++  [IPC.TAG_LABELS]: { args: [ids: number[]]; result: TagLabel[] }
++  [IPC.TAG_FILTER_OPTIONS]: { args: [query: TagOptionsQuery]; result: TagFilterOptionsPage }
++  [IPC.TAG_MANUAL_OPTIONS]: { args: [query: TagOptionsQuery]; result: TagOptionsPage }
+   [IPC.ORGANIZATION_LIST]: {
+     args: [query: OrganizationListQuery]
+     result: OrganizationListItem[]
+diff --git a/src/shared/commonTypes.ts b/src/shared/commonTypes.ts
+index cdfc7e4..6fdef8c 100644
+--- a/src/shared/commonTypes.ts
++++ b/src/shared/commonTypes.ts
+@@ -10,3 +10,26 @@ export interface Tag {
+ export interface TagListItem extends Tag {
+   video_count: number
+ }
++
++/** Display-only label; never use a truncated label as a tag's identity or edit value. */
++export interface TagLabel {
++  id: number
++  label: string
++}
++
++export interface TagOptionsQuery {
++  search?: string
++  offset?: number
++  limit?: number
++}
++
++export interface TagOptionsPage {
++  items: TagLabel[]
++  hasMore: boolean
++}
++
++/** Alphabetical filter candidates with global active/visible video counts. */
++export interface TagFilterOptionsPage {
++  items: Array<TagLabel & { video_count: number }>
++  hasMore: boolean
++}
+diff --git a/src/shared/ipc-channels.ts b/src/shared/ipc-channels.ts
+index 00ed96e..f2b1c61 100644
+--- a/src/shared/ipc-channels.ts
++++ b/src/shared/ipc-channels.ts
+@@ -94,6 +94,7 @@ export const IPC = {
+   VIDEO_SAMPLE_DELETE: 'video:sampleDelete',
+   VIDEO_POSTER_SET: 'video:posterSet',
+   VIDEO_MANUAL_TAG_ADD: 'video:manualTagAdd',
++  VIDEO_MANUAL_TAG_ADD_EXISTING: 'video:manualTagAddExisting',
+   VIDEO_MANUAL_TAG_REMOVE: 'video:manualTagRemove',
+   VIDEO_RESOURCE_IMPORT: 'video:resourceImport',
+   VIDEO_RESOURCE_GET: 'video:resourceGet',
+@@ -114,6 +115,9 @@ export const IPC = {
+   // Playlists
+   PLAYLIST_LIST: 'playlist:list',
+   PLAYLIST_GET: 'playlist:get',
++  PLAYLIST_GET_PAGE: 'playlist:getPage',
++  PLAYLIST_METADATA: 'playlist:metadata',
++  PLAYLIST_VIDEO_PAGE: 'playlist:videoPage',
+   PLAYLIST_CREATE: 'playlist:create',
+   PLAYLIST_UPDATE: 'playlist:update',
+   PLAYLIST_DELETE: 'playlist:delete',
+@@ -148,6 +152,9 @@ export const IPC = {
+   // Tags
+   TAG_LIST: 'tag:list',
+   TAG_LIST_MANUAL: 'tag:listManual',
++  TAG_LABELS: 'tag:labels',
++  TAG_FILTER_OPTIONS: 'tag:filterOptions',
++  TAG_MANUAL_OPTIONS: 'tag:manualOptions',
+ 
+   // Classification entities
+   ORGANIZATION_LIST: 'organization:list',
+@@ -182,6 +189,7 @@ export const IPC = {
+ 
+   // Scraping
+   SCRAPE_ONE: 'scrape:one',
++  PENDING_VIDEO_SCRAPE_COUNT: 'pendingVideoScrape:count',
+   PENDING_VIDEO_SCRAPE_LIST: 'pendingVideoScrape:list',
+   PENDING_VIDEO_SCRAPE_CONFIRM: 'pendingVideoScrape:confirm',
+   PENDING_VIDEO_SCRAPE_DISCARD: 'pendingVideoScrape:discard',
+diff --git a/src/renderer/src/hooks/useTagFilterOptions.ts b/src/renderer/src/hooks/useTagFilterOptions.ts
+new file mode 100644
+index 0000000..ea4ddc7
+--- /dev/null
++++ b/src/renderer/src/hooks/useTagFilterOptions.ts
+@@ -0,0 +1,29 @@
++import { useEffect, useState } from 'react'
++import type { TagFilterOptionsPage } from '@shared/commonTypes'
++import { api } from '../api'
++
++interface Snapshot extends TagFilterOptionsPage {
++  key: string
++  loading: boolean
++  error?: string
++}
++
++export function useTagFilterOptions(open: boolean, search: string, offset: number, retry: number): Omit<Snapshot, 'key'> {
++  const key = JSON.stringify([search, offset, retry])
++  const [snapshot, setSnapshot] = useState<Snapshot>()
++  useEffect(() => {
++    if (!open) { setSnapshot(undefined); return }
++    let active = true
++    setSnapshot({ key, items: [], hasMore: false, loading: true })
++    api.tags.filterOptions({ search, offset, limit: 100 })
++      .then(page => {
++        if (active) setSnapshot({ key, ...page, loading: false })
++      })
++      .catch(error => {
++        if (active) setSnapshot({ key, items: [], hasMore: false, loading: false,
++          error: String(error?.message ?? error) })
++      })
++    return () => { active = false }
++  }, [open, key, search, offset])
++  return open && snapshot?.key === key ? snapshot : { items: [], hasMore: false, loading: open }
++}
+diff --git a/src/renderer/src/components/TagFilter.interaction.test.tsx b/src/renderer/src/components/TagFilter.interaction.test.tsx
+new file mode 100644
+index 0000000..929f057
+--- /dev/null
++++ b/src/renderer/src/components/TagFilter.interaction.test.tsx
+@@ -0,0 +1,91 @@
++import assert from 'node:assert/strict'
++import { afterEach, before, it } from 'node:test'
++import React, { useState } from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import type { TagFilterOptionsPage, TagOptionsQuery } from '@shared/commonTypes'
++
++const requests: Array<{ query: TagOptionsQuery; resolve: (value: TagFilterOptionsPage) => void; reject: (error: Error) => void }> = []
++const selections: number[][] = []
++const fakeApi = { tags: {
++  filterOptions(query: TagOptionsQuery) { return new Promise<TagFilterOptionsPage>((resolve,reject) => requests.push({ query, resolve,reject })) },
++  list() { throw new Error('full catalog forbidden') },
++  labels(ids: number[]) { return Promise.resolve(ids.map(id => ({ id,label:`Selected ${id}` }))) }
++} }
++Object.defineProperty(globalThis,'React',{ configurable:true,value:React })
++Object.defineProperty(globalThis,'window',{ configurable:true,value:Object.assign(new EventTarget(),{ api:fakeApi,setTimeout,clearTimeout }) })
++Object.defineProperty(globalThis,'document',{ configurable:true,value:new EventTarget() })
++let Filter: typeof import('./TagFilter')['default']
++let Parent: typeof import('./LibraryFilterPopover')['default']
++before(async () => { Filter=(await import('./TagFilter')).default; Parent=(await import('./LibraryFilterPopover')).default })
++let renderer: TestRenderer.ReactTestRenderer | undefined
++function Host({ initial = [], variant = 'popover' }: { initial?: number[]; variant?: 'default'|'popover' }) {
++  const [selected,setSelected] = useState(initial)
++  return <Filter selected={selected} variant={variant} showInlineChips={false} onChange={ids => { selections.push(ids);setSelected(ids) }} />
++}
++async function mount(initial: number[] = [], variant: 'default'|'popover' = 'popover') {
++  await act(async () => { renderer=TestRenderer.create(<Host initial={initial} variant={variant} />) })
++}
++function options() { return renderer!.root.findAllByType('button').filter(n => n.props.role==='option') }
++async function click(label: string) {
++  const node=renderer!.root.findAllByType('button').find(n => React.Children.toArray(n.props.children).filter(value => typeof value === 'string' || typeof value === 'number').join('')===label)!
++  assert.ok(node,label);assert.equal(Boolean(node.props.disabled),false)
++  await act(async () => node.props.onClick())
++}
++async function resolve(index: number, ids: number[], hasMore=false) {
++  await act(async () => requests[index].resolve({ items:ids.map(id=>({ id,label:`Tag ${id}`,video_count:id })),hasMore }))
++}
++afterEach(async () => { await act(async () => renderer?.unmount());renderer=undefined;requests.length=0;selections.length=0 })
++
++it('loads on open only, pages without full catalog reads and preserves cross-page selection', async () => {
++  await mount([], 'default');assert.equal(requests.length,0)
++  await click('添加标签');assert.deepEqual(requests[0].query,{ search:'',offset:0,limit:100 })
++  // Default checkbox view uses the same paged hook.
++  await resolve(0,[1],true)
++  await click('下一页');assert.equal(requests[1].query.offset,100)
++  await act(async () => renderer!.unmount());renderer=undefined;requests.length=0
++  await mount();await resolve(0,[1],true)
++  await act(async () => options()[0].props.onClick())
++  assert.equal(requests.length,1,'selection alone does not reload candidates')
++  await click('下一页');await resolve(1,[101])
++  await act(async () => options()[0].props.onClick())
++  assert.deepEqual(selections.at(-1),[1,101])
++  await click('上一页');await resolve(2,[1],true)
++  assert.equal(options()[0].props['aria-selected'],true)
++})
++
++it('debounces and resets search, rejecting stale page/search responses', async () => {
++  await mount();await resolve(0,[1],true);await click('下一页')
++  await act(async () => renderer!.root.findByType('input').props.onChange({ target:{ value:'New' } }))
++  assert.equal(options().length,0)
++  await resolve(1,[101]);assert.equal(options().length,0)
++  await act(async () => { await new Promise(done => setTimeout(done,270)) })
++  assert.deepEqual(requests[2].query,{ search:'New',offset:0,limit:100 })
++  await resolve(2,[2]);assert.equal(options()[0].props['aria-selected'],false)
++})
++
++it('shows failure with explicit retry and enforces 100 selections while allowing removal', async () => {
++  await mount(Array.from({length:100},(_,i)=>i+1))
++  await act(async () => requests[0].reject(new Error('unavailable')))
++  assert.equal(renderer!.root.findAll(n=>n.props.role==='alert').length,1)
++  assert.equal(requests.length,1)
++  await click('重试');await resolve(1,[1,101])
++  assert.equal(options()[1].props.disabled,true)
++  await act(async () => options()[0].props.onClick())
++  assert.equal(options()[1].props.disabled,false)
++  await act(async () => options()[1].props.onClick())
++  assert.equal(selections.at(-1)!.length,100)
++  assert.ok(selections.at(-1)!.includes(101))
++})
++
++it('unmounts candidates with the actual parent popover and ignores late responses on reopen', async () => {
++  const props = { onClose:()=>{},years:[],state:{status:'all' as const,pendingScrape:'all' as const,year:'all' as const,codePrefix:'',sortBy:'add_time' as const,sortDir:'desc' as const,tagIds:[],resourceKinds:[]},onChange:()=>{},onReset:()=>{},anchorRef:{current:null} }
++  await act(async () => { renderer=TestRenderer.create(<Parent {...props} open={false} />) })
++  assert.equal(requests.length,0)
++  await act(async () => renderer!.update(<Parent {...props} open />))
++  assert.equal(requests.length,1)
++  await act(async () => renderer!.update(<Parent {...props} open={false} />))
++  await resolve(0,[1]);assert.equal(options().length,0)
++  await act(async () => renderer!.update(<Parent {...props} open />))
++  assert.equal(requests.length,2);await resolve(1,[2])
++  assert.equal(options().length,1)
++})
+diff --git a/scripts/performance/tag-filter-ui.mjs b/scripts/performance/tag-filter-ui.mjs
+new file mode 100644
+index 0000000..0ac3b9e
+--- /dev/null
++++ b/scripts/performance/tag-filter-ui.mjs
+@@ -0,0 +1,99 @@
++/** Real component/styles in an isolated Vite+Chrome fixture; never opens Electron or a personal DB. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { createServer } from 'vite'
++import react from '@vitejs/plugin-react'
++import { chromium } from 'playwright-core'
++
++const repository = process.cwd()
++const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-tag-filter-ui-'))
++const output = path.resolve(process.env.JAVDEX_TAG_FILTER_UI_OUTPUT ?? path.join(fixture, 'results'))
++fs.mkdirSync(output, { recursive: true })
++fs.writeFileSync(path.join(fixture, 'index.html'), '<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module" src="/fixture.jsx"></script></body></html>')
++fs.writeFileSync(path.join(fixture, 'fixture.jsx'), `
++import React from 'react';
++import { createRoot } from 'react-dom/client';
++import ${JSON.stringify('/@fs' + path.join(repository, 'src/renderer/src/styles/global.css'))};
++window.React = React;
++window.__requests = []; window.__selected = []; window.__failNext = false;
++const rows = Array.from({length:220},(_,i)=>({id:i+1,video_count:i+1,label:i===1?'L'.repeat(128)+'…':'标签'+String(i+1).padStart(3,'0')}));
++window.api = {
++  tags:{filterOptions:async(query)=>{
++    window.__requests.push(query);
++    if(window.__failNext){window.__failNext=false;throw new Error('合成读取失败');}
++    const filtered=rows.filter(row=>row.label.toLowerCase().includes((query.search||'').toLowerCase()));
++    const offset=query.offset||0,limit=query.limit||100;
++    return {items:filtered.slice(offset,offset+limit),hasMore:filtered.length>offset+limit};
++  }},
++  videos:{addExistingManualTag:async(_videoId,tagId)=>{window.__selected=tagId;return true},addManualTag:async()=>true,removeManualTag:async()=>true}
++};
++const Panel=(await import(${JSON.stringify('/@fs' + path.join(repository, 'src/renderer/src/components/LibraryFilterPopover.tsx'))})).default;
++function Host(){
++  const [open,setOpen]=React.useState(false), anchor=React.useRef(null);
++  const [state,setState]=React.useState({status:'all',pendingScrape:'all',year:'all',codePrefix:'',sortBy:'add_time',sortDir:'desc',tagIds:[],resourceKinds:[]});
++  return React.createElement('div',{style:{position:'relative',width:'min(600px,90vw)',margin:'20px auto'}},
++    React.createElement('button',{ref:anchor,onClick:()=>setOpen(true)},'打开筛选'),
++    React.createElement(Panel,{open,onClose:()=>setOpen(false),years:[],state,onChange:patch=>{setState(old=>({...old,...patch}));if(patch.tagIds)window.__selected=patch.tagIds},onReset:()=>{},anchorRef:anchor}));
++}
++createRoot(document.getElementById('root')).render(React.createElement(Host));
++`)
++let server, browser
++const results = []
++try {
++  server = await createServer({ configFile: false, root: fixture, cacheDir: path.join(fixture, '.vite'),
++    plugins: [react()], resolve: { alias: {
++      '@shared': path.join(repository, 'src/shared'),
++      react: path.join(repository, 'node_modules/react'),
++      'react-dom': path.join(repository, 'node_modules/react-dom')
++    } }, server: { host: '127.0.0.1', port: 0, fs: { allow: [fixture, repository] } } })
++  await server.listen()
++  const port = server.httpServer.address().port
++  browser = await chromium.launch({ channel: process.env.JAVDEX_BROWSER_CHANNEL || 'chrome', headless: true })
++  for (const viewport of [{ width: 1000, height: 640 }, { width: 1440, height: 900 }]) {
++    const page = await browser.newPage({ viewport })
++    const errors = []
++    page.on('pageerror', error => errors.push(error.message))
++    await page.goto(`http://127.0.0.1:${port}`)
++    await page.getByRole('button', { name: '打开筛选', exact: true }).waitFor()
++    assert.equal(await page.evaluate(() => window.__requests.length), 0)
++    await page.getByRole('button', { name: '打开筛选', exact: true }).click()
++    await page.waitForFunction(() => document.querySelectorAll('button[role=option]').length === 100)
++    const dialog = page.getByRole('dialog')
++    const scroll = page.locator('.tag-chip-cloud')
++    const geometry = await scroll.evaluate(element => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }))
++    await page.evaluate(async () => { await Promise.all(document.getAnimations().map(animation => animation.finished.catch(() => {}))) })
++    await page.getByRole('navigation', { name: '标签筛选分页' }).scrollIntoViewIfNeeded()
++    const box = await dialog.boundingBox()
++    await page.screenshot({ path: path.join(output, `${viewport.width}x${viewport.height}.png`) })
++    assert.ok(box && box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width + 1 && box.y + box.height <= viewport.height + 1)
++    assert.ok(geometry.scrollWidth <= geometry.clientWidth + 1, JSON.stringify(geometry))
++    await page.getByRole('navigation', { name: '标签筛选分页' }).getByRole('button', { name: '下一页' }).click()
++    await page.getByText('按名称 · 第 2 页', { exact: true }).waitFor()
++    await page.getByRole('option').filter({ hasText: '标签101' }).click()
++    await page.waitForFunction(() => window.__selected.includes(101))
++    await page.getByRole('button', { name: '完成', exact: true }).click()
++    await dialog.waitFor({ state: 'hidden' })
++    await page.evaluate(() => { window.__failNext = true })
++    await page.getByRole('button', { name: '打开筛选', exact: true }).click()
++    await page.getByRole('button', { name: '重试', exact: true }).click()
++    await page.waitForFunction(() => document.querySelectorAll('button[role=option]').length === 100)
++    await page.getByLabel('搜索标签', { exact: true }).fill('标签21')
++    await page.waitForFunction(() => document.querySelectorAll('button[role=option]').length === 10)
++    assert.deepEqual(errors, [])
++    const requests = await page.evaluate(() => window.__requests)
++    assert.ok(requests.every(query => query.limit === 100))
++    results.push({ viewport, geometry, box, requests, selectedTagId: 101, pageErrors: errors })
++    await page.close()
++  }
++  fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({ results,
++    caveats: ['Actual React component and stylesheet, mocked IPC and synthetic names.', 'Headless Chrome at supported minimum and larger desktop sizes; not native Electron, customer data, timing benchmark, or complete keyboard journey.'] }, null, 2) + '\n')
++  console.log(JSON.stringify({ output, results: results.length }))
++} finally {
++  await browser?.close()
++  await server?.close()
++  // Keep requested output; remove only the fixture created by this process.
++  if (output.startsWith(fixture + path.sep)) console.log(`Temporary screenshots retained at ${output}`)
++  else fs.rmSync(fixture, { recursive: true, force: true })
++}
+diff --git a/scripts/performance/large-library-benchmark.ts b/scripts/performance/large-library-benchmark.ts
+new file mode 100644
+index 0000000..cba0ead
+--- /dev/null
++++ b/scripts/performance/large-library-benchmark.ts
+@@ -0,0 +1,309 @@
++/** Synthetic, disposable SQLite benchmark; never opens the user's library.
++ * JAVDEX_BENCH_VIDEOS=300382 JAVDEX_BENCH_ANALYZE=1 JAVDEX_BENCH_OUTPUT=/tmp/results.json \
++ * node scripts/run-electron-tests.mjs scripts/performance/large-library-benchmark.ts
++ */
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import assert from 'node:assert/strict'
++import { performance } from 'node:perf_hooks'
++import { execFileSync } from 'node:child_process'
++import Database from 'better-sqlite3'
++import { initDatabaseAtPath, closeDatabase } from '../../src/main/db/database'
++import { migrateDatabase } from '../../src/main/db/migrations'
++import { listVideos } from '../../src/main/db/videoRepo'
++import { createScopedVideoCatalogRepo } from '../../src/main/db/scopedVideoCatalogRepo'
++import { createHomeDiscoveryRepo } from '../../src/main/db/homeDiscoveryRepo'
++import { getTagLabels, listTagFilterOptions, listManualTagOptions, listTags, listManualTags } from '../../src/main/db/tagRepo'
++import { listActressPage } from '../../src/main/db/actressRepo'
++import { getLibraryOverviewStats } from '../../src/main/db/overviewRepo'
++import { getPlaylistDetail, getPlaylistPage, getPlaylistMetadata, listPlaylistVideoPage } from '../../src/main/db/playlistRepo'
++import { WebCatalog } from '../../src/main/web/catalog'
++
++const count = Number(process.env.JAVDEX_BENCH_VIDEOS ?? 10000)
++assert.ok(Number.isSafeInteger(count) && count >= 1000 && count <= 1000000)
++const analyzed = process.env.JAVDEX_BENCH_ANALYZE === '1'
++const sparseManual = process.env.JAVDEX_BENCH_MANUAL_SPARSE === '1'
++const statisticsProbe = process.env.JAVDEX_BENCH_STATS_PROBE ?? ''
++const indexProbe = process.env.JAVDEX_BENCH_INDEX_PROBE ?? ''
++const migrationFrom = process.env.JAVDEX_BENCH_MIGRATE_FROM ?? ''
++assert.ok(['', '16'].includes(migrationFrom))
++assert.ok(!migrationFrom || (!indexProbe && !statisticsProbe && !process.env.JAVDEX_BENCH_PROFILE),
++  'Migration probes require the full matrix without other experiments')
++const selectedCase = process.env.JAVDEX_BENCH_CASE ?? ''
++assert.ok(!selectedCase || (indexProbe && /^[a-z_]+\.[a-z_]+$/.test(selectedCase)),
++  'A focused case is only supported for index regression diagnosis')
++assert.ok(['', 'tag-origin'].includes(indexProbe))
++assert.ok(!indexProbe || (analyzed && !statisticsProbe && !process.env.JAVDEX_BENCH_PROFILE),
++  'Index probes require the full analyzed matrix and cannot mix with statistics probes')
++assert.ok(['', 'analyze', 'optimize'].includes(statisticsProbe))
++assert.ok(!statisticsProbe || (!analyzed && !process.env.JAVDEX_BENCH_PROFILE), 'Statistics probes require the full un-analyzed matrix')
++const experimentsOnly = process.env.JAVDEX_BENCH_PROFILE === 'experiments'
++const coreOnly = process.env.JAVDEX_BENCH_PROFILE === 'core'
++assert.ok(count <= 10000 || analyzed || coreOnly, 'Large default-statistics runs require PROFILE=core or ANALYZE=1 to bound pathological aggregation time')
++const samples = Number(process.env.JAVDEX_BENCH_SAMPLES ?? 3)
++assert.ok(Number.isSafeInteger(samples) && samples >= 1 && samples <= 20)
++const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-library-bench-'))
++const priorUserData = process.env.JAVDEX_TEST_USER_DATA
++process.env.JAVDEX_TEST_USER_DATA = directory
++const db = initDatabaseAtPath(path.join(directory, 'synthetic.db'))
++const actors = Math.min(10000, Math.floor(count / 5))
++const results: any[] = []
++const plans = new Map<string, any>()
++const statisticsRuns: any[] = []
++const indexRuns: any[] = []
++const probeActions: Array<{ name: string; action: () => any; before: any }> = []
++let replayingProbe = false
++// Preserve the pre-V17 comparison baseline in disposable index experiments.
++if (indexProbe || migrationFrom) db.exec('DROP INDEX idx_video_tag_tag_id; CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id)')
++if (migrationFrom) db.pragma('user_version = 16')
++const rawPrepare = db.prepare.bind(db)
++let current: { calls: number; sqlMs: number; statements: any[] } | null = null
++// Record the real repository statements without changing their SQL or execution order.
++;(db as any).prepare = (sql: string) => {
++  const statement = rawPrepare(sql)
++  return new Proxy(statement, { get(target, property) {
++    const value = Reflect.get(target, property)
++    if (typeof value !== 'function') return value
++    if (!['get', 'all', 'run'].includes(String(property))) return value.bind(target)
++    return (...params: any[]) => {
++      const started = performance.now()
++      const result = value.apply(target, params)
++      if (current) {
++        current.calls++
++        current.sqlMs += performance.now() - started
++        current.statements.push({ sql, params, method: property })
++      }
++      return result
++    }
++  } })
++}
++function measure(name: string, action: () => any) {
++  if (selectedCase && name !== selectedCase && !name.endsWith(`.${selectedCase}`)) return { value: null, statements: [] }
++  if (process.env.JAVDEX_BENCH_PROFILE === 'playlist' && !name.startsWith('playlist.')) return {value:null,statements:[]}
++  if (process.env.JAVDEX_BENCH_PROFILE === 'startup' && name !== 'startup.current_schema') return {value:null,statements:[]}
++  if (experimentsOnly && !/^(legacy.first|scoped.library|tags.all|experiment\.)$/.test(name) && !name.startsWith('experiment.')) return {value:null,statements:[]}
++  if (coreOnly && /^(tags\.|actors\.|web\.|home\.)/.test(name)) return {value: null, statements: []}
++  console.log(`BEGIN ${name}`)
++  const times: number[] = []
++  let trace: any
++  let value: any
++  for (let i = 0; i <= samples; i++) {
++    current = { calls: 0, sqlMs: 0, statements: [] }
++    const started = performance.now()
++    value = action()
++    times.push(performance.now() - started)
++    trace = current
++    current = null
++  }
++  for (const entry of trace.statements) {
++    const planKey = statisticsProbe || indexProbe ? `${name}\0${entry.sql}` : entry.sql
++    if (!plans.has(planKey)) {
++      try { plans.set(planKey, { ...entry, caseName: name, plan: rawPrepare(`EXPLAIN QUERY PLAN ${entry.sql}`).all(...entry.params) }) }
++      catch { /* Some PRAGMA statements do not expose EQP. */ }
++    }
++  }
++  const warm = times.slice(1).sort((a,b) => a-b)
++  const bytes = Buffer.byteLength(JSON.stringify(value) ?? '')
++  const row = { name, firstMs: times[0], warmMedianMs: warm[Math.floor(warm.length / 2)], warmMaxMs: warm.at(-1), samples,
++    sqlCalls: trace.calls, sqlMsLast: trace.sqlMs, serializedBytes: bytes, rssBytesAfter: process.memoryUsage().rss }
++  results.push(row)
++  console.log(JSON.stringify(row))
++  if ((statisticsProbe || indexProbe) && !replayingProbe) probeActions.push({ name, action, before: structuredClone(value) })
++  return { value, statements: trace.statements }
++}
++function probeStatistics(stage: string): void {
++  if (!statisticsProbe) return
++  const actions = probeActions.splice(0)
++  const priorLimit = db.pragma('analysis_limit', { simple: true }) as number
++  const started = performance.now()
++  try {
++    if (statisticsProbe === 'analyze') db.exec('ANALYZE')
++    else {
++      // Explicit budget plus the current runtime's bounded-analysis bit. This
++      // is an experiment, not an automatic production maintenance hook.
++      db.pragma('analysis_limit = 1000')
++      db.pragma('optimize = 0x10012')
++    }
++  } finally { db.pragma(`analysis_limit = ${priorLimit}`) }
++  const elapsedMs = performance.now() - started
++  const statRows = rawPrepare('SELECT tbl, idx, stat FROM sqlite_stat1 ORDER BY tbl, idx').all()
++  replayingProbe = true
++  try {
++    for (const entry of actions) {
++      const after = measure(`statistics.${stage}.${entry.name}`, entry.action)
++      assert.deepEqual(after.value, entry.before, `Statistics changed results for ${entry.name}`)
++    }
++  } finally { replayingProbe = false }
++  statisticsRuns.push({ stage, mode: statisticsProbe, elapsedMs, analysisLimitRestored: db.pragma('analysis_limit', { simple: true }),
++    comparedCases: actions.map((entry) => entry.name), statRows })
++}
++function probeIndex(stage: string): void {
++  if (!indexProbe) return
++  const actions = probeActions.splice(0)
++  assert.ok(actions.length > 0, 'Index probe must compare at least one case in each stage; JAVDEX_BENCH_CASE must name a single-library case')
++  const replaceIndex = (fields: string) => db.transaction(() => {
++    db.exec('DROP INDEX idx_video_tag_tag_id')
++    db.exec(`CREATE INDEX idx_video_tag_tag_id ON video_tag(${fields})`)
++  })()
++  const started = performance.now()
++  replaceIndex('tag_id,origin')
++  db.exec('ANALYZE')
++  const buildAndAnalyzeMs = performance.now() - started
++  replayingProbe = true
++  try {
++    for (const entry of actions) {
++      const after = measure(`index.${stage}.${entry.name}`, entry.action)
++      assert.deepEqual(after.value, entry.before, `Index changed results for ${entry.name}`)
++    }
++    assert.deepEqual(db.pragma('foreign_key_check'), [])
++    assert.deepEqual(db.pragma('integrity_check'), [{ integrity_check: 'ok' }])
++  } finally {
++    // Restore the baseline before adding overlapping library memberships so
++    // each stage compares the same data with and without the candidate.
++    try {
++      replaceIndex('tag_id')
++      db.exec('ANALYZE')
++      if (selectedCase) {
++        for (const entry of actions) {
++          const restored = measure(`index-control.${stage}.${entry.name}`, entry.action)
++          assert.deepEqual(restored.value, entry.before, `Restored index changed results for ${entry.name}`)
++        }
++      }
++    } finally { replayingProbe = false }
++  }
++  indexRuns.push({ stage, candidate: indexProbe, buildAndAnalyzeMs,
++    comparedCases: actions.map(entry => entry.name) })
++}
++try {
++  const seedStart = performance.now()
++  db.transaction(() => {
++    db.exec(`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<${count})
++      INSERT INTO videos(id,code,title,summary,release_date,rating,add_time)
++      SELECT x,printf('TEST-%06d',x),'Synthetic movie '||x, printf('%0128d',x),
++        CASE WHEN x%20=0 THEN NULL WHEN x%20=1 THEN '' WHEN x%20=2 THEN ' ' ELSE date('2000-01-01','+'||(x%9000)||' days') END,
++        x%100/10.0,datetime('2020-01-01','+'||x||' seconds') FROM n;
++      INSERT INTO library_video_memberships(library_id,video_id,added_at,discovery_key)
++        SELECT 1,id,add_time,(id*1103515245+12345)%2147483648 FROM videos;
++      INSERT INTO video_resources(library_id,video_id,kind,locator,resource_key,is_primary)
++        SELECT 1,id,'direct','https://example.invalid/'||id||'.mp4','bench-'||id,1 FROM videos;
++      WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<${actors})
++        INSERT INTO actresses(id,main_name,gender) SELECT x,'Actor '||x,'female' FROM n;
++      INSERT INTO actress_names(actress_id,name,type,is_primary) SELECT id,main_name,'main',1 FROM actresses;
++      INSERT INTO actress_name_ownership(normalized_name,actress_id) SELECT 'actor'||id,id FROM actresses;
++      INSERT INTO video_actress SELECT id,1+id%${actors} FROM videos;
++      INSERT INTO video_actress SELECT id,1+(id+1)%${actors} FROM videos;
++      WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000)
++        INSERT INTO tags(id,name) SELECT x,'Tag '||x FROM n;
++      INSERT INTO video_tag(video_id,tag_id) SELECT id,1+id%1000 FROM videos;
++      INSERT INTO video_tag(video_id,tag_id) SELECT id,1+(id+1)%1000 FROM videos;
++      INSERT INTO video_tag(video_id,tag_id) SELECT id,1+(id+2)%1000 FROM videos;
++      INSERT INTO video_tag(video_id,tag_id) SELECT id,1+(id+3)%1000 FROM videos;
++      INSERT INTO video_tag(video_id,tag_id) SELECT id,1+(id+4)%1000 FROM videos WHERE id%3=0;
++      ${sparseManual ? "UPDATE video_tag SET origin=CASE WHEN video_id%100=0 THEN 'manual' ELSE 'scraped' END;" : ''}
++      INSERT INTO playlists(id,name) VALUES(1,'Synthetic large playlist');
++      INSERT INTO playlist_video(playlist_id,video_id,position) SELECT 1,id,id FROM videos WHERE id<=30000;`)
++  })()
++  db.pragma('wal_checkpoint(TRUNCATE)')
++  if (analyzed) db.exec('ANALYZE')
++  const seedMs = performance.now() - seedStart
++  measure('startup.current_schema', () => { migrateDatabase(db); return {schema: db.pragma('user_version',{simple:true})} })
++  const catalog = createScopedVideoCatalogRepo(db)
++  const web = new WebCatalog(db)
++  const base = measure('legacy.first', () => listVideos({ limit: 60 }))
++  measure('legacy.deep', () => listVideos({ limit: 60, offset: Math.max(0,count-60) }))
++  measure('legacy.release', () => listVideos({ limit: 60, sortBy: 'release_date' }))
++  measure('legacy.search_code', () => listVideos({ search: 'TEST-001234', limit: 60 }))
++  const scopedBase = measure('scoped.library', () => catalog.list({ kind:'library',libraryId:1 }))
++  measure('scoped.all_single_active', () => catalog.list({ kind:'all' }))
++  measure('scoped.all_selected_one', () => catalog.list({ kind:'all',libraryIds:[1] }))
++  measure('scoped.release', () => catalog.list({ kind:'library',libraryId:1 },{sortBy:'release_date'}))
++  measure('scoped.search_code', () => catalog.list({ kind:'all' },{search:'TEST-001234'}))
++  const tagsBase = measure('tags.all', () => listTags())
++  measure('tags.manual', () => listManualTags())
++  measure('tags.selected_labels', () => getTagLabels([1, 2, 3]))
++  measure('tags.selected_labels_100', () => getTagLabels(Array.from({ length: 100 }, (_, i) => i + 1)))
++  measure('tags.filter_options', () => listTagFilterOptions({}))
++  measure('tags.filter_options_search', () => listTagFilterOptions({ search: 'Tag 99' }))
++  measure('tags.filter_options_deep', () => listTagFilterOptions({ offset: 900 }))
++  measure('tags.manual_options', () => listManualTagOptions({}))
++  measure('tags.manual_options_search', () => listManualTagOptions({ search: 'Tag 99' }))
++  measure('tags.manual_options_deep', () => listManualTagOptions({ offset: 900 }))
++  measure('actors.first', () => listActressPage({ limit: 240 }))
++  measure('overview', () => getLibraryOverviewStats())
++  measure('home.single', () => createHomeDiscoveryRepo({database:db}).load({seed:'benchmark'}))
++  measure('web.first', () => web.browse(new URLSearchParams()))
++  measure('web.search', () => web.browse(new URLSearchParams('q=TEST-001234')))
++  measure('web.collections', () => web.collections())
++  measure('playlist.full', () => getPlaylistDetail(1))
++  measure('playlist.page', () => getPlaylistPage(1, {limit:60}))
++  measure('playlist.metadata', () => getPlaylistMetadata(1))
++  measure('playlist.video_page', () => listPlaylistVideoPage(1, {limit:60}))
++  measure('playlist.deep_page', () => getPlaylistPage(1, {limit:60, offset: Math.min(count, 30000) - 60}))
++  // Diagnostic SQL experiment only. No production schema or query changes.
++  for (const [index,entry] of base.statements.entries()) {
++    const sql = entry.sql.replace('COUNT(DISTINCT v.id)', 'COUNT(*)').replace('SELECT DISTINCT v.*','SELECT v.*')
++    const original = rawPrepare(entry.sql)[entry.method](...entry.params)
++    const variant = rawPrepare(sql)[entry.method](...entry.params)
++    assert.deepEqual(variant, original)
++    measure(`experiment.no_distinct.${index}`, () => (db.prepare(sql) as any)[entry.method](...entry.params))
++  }
++  if (experimentsOnly) {
++    for (const [index,entry] of scopedBase.statements.entries()) {
++      const sql = entry.sql.replace('COUNT(DISTINCT v.id)', 'COUNT(*)').replace('SELECT DISTINCT v.*','SELECT v.*')
++      assert.deepEqual(rawPrepare(sql)[entry.method](...entry.params),rawPrepare(entry.sql)[entry.method](...entry.params))
++      measure(`experiment.scoped_no_distinct.${index}`, () => (db.prepare(sql) as any)[entry.method](...entry.params))
++    }
++    const tagsSql = `WITH members AS MATERIALIZED (
++      SELECT DISTINCT m.video_id FROM library_video_memberships m JOIN media_libraries l ON l.id=m.library_id
++      WHERE m.is_hidden=0 AND l.status='active'
++    ), counts AS (
++      SELECT vt.tag_id,COUNT(*) AS n FROM video_tag vt JOIN members m ON m.video_id=vt.video_id GROUP BY vt.tag_id
++    ) SELECT t.*,COALESCE(c.n,0) AS video_count FROM tags t LEFT JOIN counts c ON c.tag_id=t.id
++      ORDER BY video_count DESC,t.name`
++    assert.deepEqual(rawPrepare(tagsSql).all(),tagsBase.value)
++    measure('experiment.tags_preaggregate', () => db.prepare(tagsSql).all())
++  }
++  const singleLibraryActions = probeActions.map(({ name, action }) => ({ name, action }))
++  probeStatistics('single-library')
++  probeIndex('single-library')
++  db.transaction(() => db.exec(`INSERT INTO media_libraries(id,name,status) VALUES(2,'Overlap','active');
++    INSERT INTO media_library_configs(library_id) VALUES(2);
++    INSERT INTO library_video_memberships(library_id,video_id,added_at,discovery_key)
++      SELECT 2,video_id,added_at,discovery_key FROM library_video_memberships WHERE library_id=1 AND video_id%3=0;
++    INSERT INTO video_resources(library_id,video_id,kind,locator,resource_key,is_primary)
++      SELECT 2,video_id,kind,locator,resource_key,1 FROM video_resources WHERE library_id=1 AND video_id%3=0;`))()
++  if (analyzed) db.exec('ANALYZE')
++  // Capture fresh expected results after the write, rather than comparing with
++  // the old single-library fixture. Replay the whole matrix in this state too.
++  for (const entry of singleLibraryActions) measure(`overlap.${entry.name}`, entry.action)
++  measure('scoped.all_overlap', () => catalog.list({kind:'all'}))
++  measure('home.overlap', () => createHomeDiscoveryRepo({database:db}).load({seed:'benchmark'}))
++  probeStatistics('after-overlap-write')
++  probeIndex('after-overlap-write')
++  const output = { baselineCommit: execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),
++    generatedAt: new Date().toISOString(), environment: { sqliteRuntime: rawPrepare('SELECT sqlite_version() AS version').get(), compileOptions: db.pragma('compile_options'), platform:process.platform,arch:process.arch,cpu:os.cpus()[0]?.model,totalMemory:os.totalmem(),versions:process.versions },
++    fixture: { analyzed, sparseManual, statisticsProbe, indexProbe, migrationFrom, selectedCase, coreOnly, experimentsOnly, videos:count,actors,tags:1000,videoTags:rawPrepare('SELECT count(*) AS n FROM video_tag').get(),summaryBytes:128,seedMs,
++      finalDatabaseBytes:(db.pragma('page_count',{simple:true}) as number) * (db.pragma('page_size',{simple:true}) as number) },
++    pragmas: Object.fromEntries(['journal_mode','synchronous','cache_size','mmap_size','temp_store','busy_timeout','user_version'].map(p=>[p,db.pragma(p,{simple:true})])),
++    caveats:['Synthetic data on local host; not the reporter Windows/HDD database.', 'First call is not cold-disk: fixture generation warms OS cache.', 'Three warm samples by default; median/max are not p95.', 'RSS after each case includes retained fixture/query memory and is not peak RSS.', 'SQL interception and timing bookkeeping are included; EQP and JSON byte calculation are outside the measured action.', 'Without a statistics or index probe, overlap library is added only for the last two cases. Probes replay the full matrix on fresh overlap results unless fixture.selectedCase is nonempty; focused diagnosis compares only that single-library case in each stage and additionally measures the restored baseline index. Index probes replace only the disposable tag index, compare full results, and restore the baseline index before the next stage. Full ANALYZE when fixture.analyzed=true; optional statisticsProbe explicitly records maintenance and result-equality checks. Probe analysis_limit is restored afterward.'],
++    statisticsRuns, indexRuns, results,plans:[...plans.values()] }
++  if (migrationFrom) {
++    closeDatabase()
++    const reopened = new Database(path.join(directory, 'synthetic.db'), { readonly: true })
++    try {
++      assert.equal(reopened.pragma('user_version', { simple: true }), 17)
++      assert.deepEqual((reopened.pragma('index_info(idx_video_tag_tag_id)') as { name: string }[]).map(row => row.name), ['tag_id', 'origin'])
++      assert.deepEqual(reopened.prepare('SELECT count(*) AS n FROM video_tag').get(), output.fixture.videoTags)
++      assert.equal((reopened.prepare('SELECT count(*) AS n FROM videos').get() as { n: number }).n, count)
++      assert.deepEqual(reopened.pragma('foreign_key_check'), [])
++      assert.deepEqual(reopened.pragma('integrity_check'), [{ integrity_check: 'ok' }])
++    } finally { reopened.close() }
++  }
++  if (process.env.JAVDEX_BENCH_OUTPUT) fs.writeFileSync(path.resolve(process.env.JAVDEX_BENCH_OUTPUT),JSON.stringify(output,null,2)+'\n')
++} finally {
++  closeDatabase()
++  if(priorUserData===undefined) delete process.env.JAVDEX_TEST_USER_DATA
++  else process.env.JAVDEX_TEST_USER_DATA=priorUserData
++  fs.rmSync(directory,{recursive:true,force:true})
++}

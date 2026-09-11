@@ -1,0 +1,25 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bn-target.log": "78c3d12138e82a14f25b79de3785608645a136c32c4210cfdc846bad001a9060",
+    "batch-bn-full.log": "abb80f68a172f3b49b9f155df7af13c31f80aaadd50dbf23591d6dbc50077e43",
+    "batch-bn-build.log": "5ce4ecd6f2e704178b5e9d514e0a1838ef0403a6f0f3653880984457b64ec274",
+    "batch-bn-browser.log": "0c07f6d01b3fe20593d3712e6e6411f63ce59dc0c097f59a45a674f44e2495e6",
+    "batch-bn-ui-1000x640-editor.png": "69907fcff630eb3c57b6412df988c53e33e832d6b999e290fce66ae5a02f1e1a",
+    "batch-bn-ui-1000x640-gallery.png": "4d0ac49e7c8888b8832fa6e0be05c751dfdd08933c5da45761900a11931f07b4",
+    "batch-bn-ui-1000x640-preview.png": "2be6138c329a4da53d3662e8906edb1a39f13a6bdb1b1b906031738f3b8be6b7",
+    "batch-bn-ui-1000x640-works.png": "587587bb2a4a60cdfa58ad84faf43985250558e6f184ae7a066b0f56df066141",
+    "batch-bn-ui-1440x900-editor.png": "4d62c327aa9fcd9965febe0b5a6463e21cb0aa0c067278c10b132e29fa821ee6",
+    "batch-bn-ui-1440x900-gallery.png": "19ed7914496e6dd721fa39be0d71e3f3cb09eb55d5d5c1a86d96d45122f85f8a",
+    "batch-bn-ui-1440x900-preview.png": "8620415e7f1ffed6f6a7230e9b10c79519cb08842b7c1a343c9f9cb137b3e086",
+    "batch-bn-ui-1440x900-works.png": "11fdec9f78cae86ae339f2e28a5524a22de0fcd9d6b8598a19c98b1ed9a0e65b",
+    "batch-bn-ui-results.json": "3c139a89331311d1448af9b9705da453c169274d99b7278053735e27d46b3653",
+    "batch-bn-main-gallery.patch": "434f2ad7112ae3b9a75708e8aa8a3cd70dd4fa4fe2fb4a45732f90137fc407a6",
+    "batch-bn-review.md": "06edf0a6a99e78eb819d7dc83958231199fc94458fcd5603cac2d9af5d762e79"
+  },
+  "notes": [
+    "Selected cumulative diff and full new files; depends on prior batches.",
+    "60 focused; full 2325 pass/1 skip/0 fail; build and two-viewport actual browser passed.",
+    "Main gallery/profile/preview are now paged. Query cost, byte/inflight budgets and other full15/42 requirements remain incomplete."
+  ]
+}

@@ -16,7 +16,9 @@ export function getListScroll(memoryKey: string): ListScrollSnapshot | undefined
 
 export function setListScroll(memoryKey: string, patch: Partial<ListScrollSnapshot>): void {
   const prev = scrollByKey.get(memoryKey) ?? { scrollTop: 0, visibleRowIndex: 0 }
+  scrollByKey.delete(memoryKey)
   scrollByKey.set(memoryKey, { ...prev, ...patch })
+  while (scrollByKey.size > 20) scrollByKey.delete(scrollByKey.keys().next().value!)
 }
 
 export function clearListScroll(memoryKey: string): void {

@@ -8,6 +8,7 @@ import { hashPassword, LoginLimiter, verifyPassword, WebSessions } from './auth'
 import { parseRange } from './http'
 import { isLocalPeer, WebServer } from './server'
 import type { WebCatalogReader } from './catalog'
+import { AssetReadQueueFullError, AssetReadTooLargeError, AssetPixelLimitError } from '../services/mediaAssetStore'
 
 describe('Web authentication and streaming', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-web-'))
@@ -24,7 +25,7 @@ describe('Web authentication and streaming', () => {
     detail: () => {
       throw new Error('not found')
     },
-    image: () => ({ body: Buffer.from('image'), mime: 'image/png' }),
+    image: async () => ({ body: Buffer.from('image'), mime: 'image/png' }),
     media: () => ({ file: movie, stat: fs.statSync(movie), mime: 'video/mp4' })
   }
   const login = (password = 'correct horse battery'): Promise<Response> =>
@@ -66,6 +67,117 @@ describe('Web authentication and streaming', () => {
     await server.stop()
     fs.rmSync(directory, { recursive: true, force: true })
   })
+  it('keeps image responses private and reports read queue overload as 503', async (t) => {
+    t.mock.method(catalog, 'image', async () => { throw new AssetReadQueueFullError() })
+    for (const method of ['GET', 'HEAD']) {
+      const result = await fetch(base + '/api/videos/1/images/cover', { method, headers: { Cookie: sessionCookie } })
+      assert.equal(result.status, 503)
+      assert.equal(result.headers.get('cache-control'), 'no-store')
+      if (method === 'HEAD') assert.equal(await result.text(), '')
+    }
+  })
+
+  it('forwards finite thumbnail sizes and rejects invalid sizes before image work', async (t) => {
+    const image = t.mock.method(catalog, 'image', async (_id: number, _key: string, _signal?: AbortSignal, size?: number) => {
+      assert.equal(size, 640)
+      return { body: Buffer.from('thumbnail'), mime: 'image/webp' }
+    })
+    const result = await fetch(base + '/api/videos/1/images/cover?size=640', { headers: { Cookie: sessionCookie } })
+    assert.equal(result.status, 200)
+    assert.equal(result.headers.get('content-type'), 'image/webp')
+    const bad = await fetch(base + '/api/videos/1/images/cover?size=0', { headers: { Cookie: sessionCookie } })
+    assert.equal(bad.status, 400)
+    assert.equal(image.mock.callCount(), 1)
+  })
+
+  it('reports oversized images as 413 without caching or a HEAD body', async (t) => {
+    for (const Failure of [AssetReadTooLargeError, AssetPixelLimitError]) for (const method of ['GET', 'HEAD']) {
+      t.mock.method(catalog, 'image', async () => { throw new Failure() })
+      const result = await fetch(base + '/api/videos/1/images/cover', { method, headers: { Cookie: sessionCookie } })
+      assert.equal(result.status, 413)
+      assert.equal(result.headers.get('cache-control'), 'no-store')
+      if (method === 'HEAD') assert.equal(await result.text(), '')
+    }
+  })
+
+  it('rechecks an expired session after image work while the connection remains open', async (t) => {
+    let clock = Date.now()
+    t.mock.method(Date, 'now', () => clock)
+    let started!: () => void
+    let release!: () => void
+    let readSignal: AbortSignal | undefined
+    const began = new Promise<void>((resolve) => { started = resolve })
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const isolated = new WebServer({
+      username: 'viewer', passwordHash, staticRoot: directory,
+      catalog: { ...catalog, image: async (_id, _key, signal) => {
+        readSignal = signal
+        started()
+        await gate
+        return { body: Buffer.from('private image'), mime: 'image/png' }
+      } }
+    })
+    try {
+      const origin = `http://127.0.0.1:${await isolated.start(0, '127.0.0.1')}`
+      const loginResponse = await fetch(origin + '/api/login', {
+        method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json', 'X-Javdex-Client': 'web' },
+        body: JSON.stringify({ username: 'viewer', password: 'correct horse battery' })
+      })
+      assert.equal(loginResponse.status, 200)
+      const cookie = loginResponse.headers.get('set-cookie')!.split(';')[0]
+      const response = fetch(origin + '/api/videos/1/images/cover', { headers: { Cookie: cookie } })
+      await began
+      clock += 15 * 24 * 60 * 60 * 1000
+      assert.equal(readSignal?.aborted, false)
+      release()
+      const result = await response
+      assert.equal(result.status, 401)
+      assert.doesNotMatch(await result.text(), /private image/)
+    } finally {
+      release()
+      await isolated.stop()
+    }
+  })
+
+  for (const reason of ['logout', 'disconnect'] as const) {
+    it(`cancels pending image work on ${reason} and never sends its completed bytes`, async (t) => {
+      const cookie = (await login()).headers.get('set-cookie')!.split(';')[0]
+      let started!: () => void
+      let cancelled!: () => void
+      let release!: () => void
+      const began = new Promise<void>((resolve) => { started = resolve })
+      const aborted = new Promise<void>((resolve) => { cancelled = resolve })
+      const gate = new Promise<void>((resolve) => { release = resolve })
+      t.mock.method(catalog, 'image', async (_id: number, _key: string, signal?: AbortSignal) => {
+        signal?.addEventListener('abort', cancelled, { once: true })
+        started()
+        await gate
+        return { body: Buffer.from('private image'), mime: 'image/png' }
+      })
+      const controller = new AbortController()
+      const result = fetch(base + '/api/videos/1/images/cover', {
+        headers: { Cookie: cookie }, signal: controller.signal
+      }).then(async (response) => ({ status: response.status, body: await response.text() }), () => ({ status: 0, body: '' }))
+      try {
+        await began
+        if (reason === 'logout') {
+          const loggedOut = await fetch(base + '/api/logout', {
+            method: 'POST', headers: { Cookie: cookie, Origin: base, 'X-Javdex-Client': 'web' }
+          })
+          assert.equal(loggedOut.status, 200)
+        } else controller.abort()
+        await aborted
+        release()
+        const response = await result
+        assert.notEqual(response.status, 200)
+        assert.notEqual(response.body, 'private image')
+      } finally {
+        release()
+        controller.abort()
+        await result
+      }
+    })
+  }
   it('stores salted password hashes and enforces minimum length', async () => {
     assert.equal(await verifyPassword('wrong password', passwordHash), false)
     assert.equal(

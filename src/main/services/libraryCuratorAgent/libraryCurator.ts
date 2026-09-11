@@ -253,7 +253,7 @@ export class LibraryCurator {
 
   async restoreRecoverableRuns(): Promise<Array<{ runId: string; error: string }>> {
     const failures: Array<{ runId: string; error: string }> = []
-    for (const record of agentRunStore.listRecoverableRuns()) {
+    for (const record of agentRunStore.iterateRecoverableRuns('library-curator')) {
       if (record.useCase !== 'library-curator' || this.active.has(record.id)) continue
       try {
         const state = record.productState as LibraryCuratorProductState
@@ -298,8 +298,7 @@ export class LibraryCurator {
     const id = runId ?? agentRunStore.findLatestRun<LibraryCuratorProductState>('library-curator')?.id
     const active = id ? this.active.get(id) : undefined
     if (!id || !active) return null
-    const journal = agentRunStore.readProductJournal(id)
-    return { ...result(id, active), cursor: journal.at(-1)?.seq ?? 0 }
+    return { ...result(id, active), cursor: agentRunStore.getProductJournalCursor(id) }
   }
 
   async dispose(): Promise<void> {

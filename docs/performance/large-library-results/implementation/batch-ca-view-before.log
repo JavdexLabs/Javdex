@@ -1,0 +1,441 @@
+{
+  "results": [
+    {
+      "count": 10000,
+      "snapshot": {
+        "libraryId": 1,
+        "runId": "probe",
+        "finishedAt": "2026-09-11T00:00:00Z"
+      },
+      "sourceBytes": 2914146,
+      "indexBytes": 6901760,
+      "buildMs": 45.928500000000014,
+      "samples": [
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 0,
+          "elapsedMs": 8.83004200000002,
+          "jsonBytes": 70044
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 0,
+          "elapsedMs": 9.230084000000005,
+          "jsonBytes": 70044
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 0,
+          "elapsedMs": 9.662542000000002,
+          "jsonBytes": 70044
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 9900,
+          "elapsedMs": 10.140832999999986,
+          "jsonBytes": 70677
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 9900,
+          "elapsedMs": 10.118625000000009,
+          "jsonBytes": 70677
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 9900,
+          "elapsedMs": 10.095250000000021,
+          "jsonBytes": 70677
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 0,
+          "elapsedMs": 4.884124999999983,
+          "jsonBytes": 76653
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 0,
+          "elapsedMs": 5.009415999999987,
+          "jsonBytes": 76653
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 0,
+          "elapsedMs": 5.049374999999998,
+          "jsonBytes": 76653
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 4900,
+          "elapsedMs": 5.503250000000037,
+          "jsonBytes": 77176
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 4900,
+          "elapsedMs": 5.456209000000001,
+          "jsonBytes": 77176
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 4900,
+          "elapsedMs": 5.685374999999965,
+          "jsonBytes": 77176
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 0,
+          "elapsedMs": 5.504458,
+          "jsonBytes": 66653
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 0,
+          "elapsedMs": 4.943209000000024,
+          "jsonBytes": 66653
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 0,
+          "elapsedMs": 5.0963330000000155,
+          "jsonBytes": 66653
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 4900,
+          "elapsedMs": 5.627375000000029,
+          "jsonBytes": 67176
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 4900,
+          "elapsedMs": 5.715291999999977,
+          "jsonBytes": 67176
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 4900,
+          "elapsedMs": 5.4902079999999955,
+          "jsonBytes": 67176
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 0,
+          "elapsedMs": 45.474625,
+          "jsonBytes": 70636
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 0,
+          "elapsedMs": 45.197667000000024,
+          "jsonBytes": 70636
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 0,
+          "elapsedMs": 46.22729199999992,
+          "jsonBytes": 70636
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 100,
+          "elapsedMs": 45.79500000000007,
+          "jsonBytes": 7894
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 100,
+          "elapsedMs": 45.540416999999934,
+          "jsonBytes": 7894
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 100,
+          "elapsedMs": 44.741499999999974,
+          "jsonBytes": 7894
+        }
+      ]
+    },
+    {
+      "count": 300000,
+      "snapshot": {
+        "libraryId": 1,
+        "runId": "probe",
+        "finishedAt": "2026-09-11T00:00:00Z"
+      },
+      "sourceBytes": 87939146,
+      "indexBytes": 206848000,
+      "buildMs": 1708.627709,
+      "samples": [
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 0,
+          "elapsedMs": 248.26691699999992,
+          "jsonBytes": 70047
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 0,
+          "elapsedMs": 249.00245799999993,
+          "jsonBytes": 70047
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 0,
+          "elapsedMs": 249.91212499999983,
+          "jsonBytes": 70047
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 299900,
+          "elapsedMs": 275.3169590000007,
+          "jsonBytes": 71282
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 299900,
+          "elapsedMs": 279.4271659999995,
+          "jsonBytes": 71282
+        },
+        {
+          "query": {
+            "tab": "all"
+          },
+          "offset": 299900,
+          "elapsedMs": 283.53133400000024,
+          "jsonBytes": 71282
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 0,
+          "elapsedMs": 124.6352079999997,
+          "jsonBytes": 76657
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 0,
+          "elapsedMs": 126.66387500000019,
+          "jsonBytes": 76657
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 0,
+          "elapsedMs": 124.03837500000009,
+          "jsonBytes": 76657
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 149900,
+          "elapsedMs": 140.06079200000022,
+          "jsonBytes": 77782
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 149900,
+          "elapsedMs": 141.16591700000026,
+          "jsonBytes": 77782
+        },
+        {
+          "query": {
+            "tab": "failed"
+          },
+          "offset": 149900,
+          "elapsedMs": 143.03641700000026,
+          "jsonBytes": 77782
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 0,
+          "elapsedMs": 125.94079200000033,
+          "jsonBytes": 66657
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 0,
+          "elapsedMs": 123.50554099999954,
+          "jsonBytes": 66657
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 0,
+          "elapsedMs": 122.00445899999977,
+          "jsonBytes": 66657
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 149900,
+          "elapsedMs": 136.8423329999996,
+          "jsonBytes": 67782
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 149900,
+          "elapsedMs": 138.31770899999992,
+          "jsonBytes": 67782
+        },
+        {
+          "query": {
+            "tab": "skipped"
+          },
+          "offset": 149900,
+          "elapsedMs": 140.65879199999927,
+          "jsonBytes": 67782
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 0,
+          "elapsedMs": 1430.9193750000013,
+          "jsonBytes": 70640
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 0,
+          "elapsedMs": 1436.5251249999983,
+          "jsonBytes": 70640
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 0,
+          "elapsedMs": 1460.1347499999993,
+          "jsonBytes": 70640
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 11100,
+          "elapsedMs": 1428.2647500000003,
+          "jsonBytes": 7966
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 11100,
+          "elapsedMs": 1429.6537080000016,
+          "jsonBytes": 7966
+        },
+        {
+          "query": {
+            "tab": "all",
+            "search": "/media/29"
+          },
+          "offset": 11100,
+          "elapsedMs": 1439.1186669999988,
+          "jsonBytes": 7966
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Actual readonly factory with views=true; 128MiB source/256MiB TEMP/1MiB page.",
+    "One build per scale, warmup plus three samples per query/page; full legacy oracle retained, assertions excluded from timing.",
+    "No persistent unrecognized rows or resource changes in this timing fixture; mixed semantics covered by module tests.",
+    "Not p95/cold/Windows/HDD/UI/IPC/peak memory; SQL synchronous here, production worker integration still pending."
+  ]
+}
+✔ measures combined audit views against historical full-array output (19016.734292ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19218.228375

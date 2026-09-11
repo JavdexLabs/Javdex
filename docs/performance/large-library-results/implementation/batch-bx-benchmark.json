@@ -1,0 +1,96 @@
+{
+  "results": [
+    {
+      "count": 10000,
+      "snapshot": {
+        "libraryId": 1,
+        "runId": "probe",
+        "finishedAt": "2026-09-11T00:00:00Z"
+      },
+      "sourceBytes": 2914068,
+      "indexBytes": 4571136,
+      "buildMs": 35.750625,
+      "samples": [
+        {
+          "offset": 0,
+          "elapsedMs": 0.1038340000000062,
+          "jsonBytes": 31375
+        },
+        {
+          "offset": 0,
+          "elapsedMs": 0.12075000000001523,
+          "jsonBytes": 31375
+        },
+        {
+          "offset": 0,
+          "elapsedMs": 0.07475000000002296,
+          "jsonBytes": 31375
+        },
+        {
+          "offset": 9900,
+          "elapsedMs": 0.21937500000001364,
+          "jsonBytes": 31798
+        },
+        {
+          "offset": 9900,
+          "elapsedMs": 0.17641700000001492,
+          "jsonBytes": 31798
+        },
+        {
+          "offset": 9900,
+          "elapsedMs": 0.16245899999998414,
+          "jsonBytes": 31798
+        }
+      ]
+    },
+    {
+      "count": 300000,
+      "snapshot": {
+        "libraryId": 1,
+        "runId": "probe",
+        "finishedAt": "2026-09-11T00:00:00Z"
+      },
+      "sourceBytes": 87939068,
+      "indexBytes": 137474048,
+      "buildMs": 1278.104792,
+      "samples": [
+        {
+          "offset": 0,
+          "elapsedMs": 0.08370899999999892,
+          "jsonBytes": 31376
+        },
+        {
+          "offset": 0,
+          "elapsedMs": 0.11483300000008967,
+          "jsonBytes": 31376
+        },
+        {
+          "offset": 0,
+          "elapsedMs": 0.06999999999993634,
+          "jsonBytes": 31376
+        },
+        {
+          "offset": 299900,
+          "elapsedMs": 4.479000000000042,
+          "jsonBytes": 32201
+        },
+        {
+          "offset": 299900,
+          "elapsedMs": 4.5587920000000395,
+          "jsonBytes": 32201
+        },
+        {
+          "offset": 299900,
+          "elapsedMs": 4.273333999999977,
+          "jsonBytes": 32201
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Real factory opens native readonly source, FILE TEMP and explicit source128MiB/index256MiB/page64KiB limits; builds synchronously in this standalone probe.",
+    "Build includes opening, validation, five collection passes, indices and counts; read timings include byte checks and serialization budget enforcement, exclude assertions.",
+    "One build per scale, page warmup then 3 samples; long-path synthetic files, full oracle retained. Not p95/cold/Windows/HDD/worker IPC/peak memory evidence.",
+    "No global admission/worker/UI integration yet; TEMP cache8MiB does not bound total native parser or process memory. Deep OFFSET still scales."
+  ]
+}

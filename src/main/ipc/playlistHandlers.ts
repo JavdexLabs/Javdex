@@ -1,9 +1,13 @@
+import { listPlaylistBrowsePage } from '../db/playlistListPageRepo'
 import { IPC } from '@shared/ipc-channels'
 import type { SortDir } from '@shared/commonTypes'
 import type { PlaylistDetail, PlaylistListItem, PlaylistVideoSortBy, PlaylistVideoMembership } from '@shared/playlistTypes'
 import {
   addVideoToPlaylist,
   getPlaylistDetail,
+  getPlaylistPage,
+  getPlaylistMetadata,
+  listPlaylistVideoPage,
   listPlaylists,
   listPlaylistsForVideo,
   removeVideoFromPlaylist
@@ -12,6 +16,10 @@ import { createPlaylist, deletePlaylist, updatePlaylist } from '../services/play
 import { appCommandAdapter } from './appContractAdapter'
 
 export function registerPlaylistHandlers(): void {
+  appCommandAdapter.register(IPC.PLAYLIST_LIST_PAGE, query => listPlaylistBrowsePage(query))
+  appCommandAdapter.register(IPC.PLAYLIST_METADATA, (id, sortBy, sortDir) => getPlaylistMetadata(id, {sortBy, sortDir}))
+  appCommandAdapter.register(IPC.PLAYLIST_VIDEO_PAGE, (id, query) => listPlaylistVideoPage(id, query))
+  appCommandAdapter.register(IPC.PLAYLIST_GET_PAGE, (id, query) => getPlaylistPage(id, query))
   appCommandAdapter.register(IPC.PLAYLIST_LIST, (): PlaylistListItem[] => listPlaylists())
 
   appCommandAdapter.register(

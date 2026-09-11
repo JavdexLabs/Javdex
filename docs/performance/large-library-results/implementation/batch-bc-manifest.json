@@ -1,0 +1,17 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bc-avatar-snapshot.patch": "c606fb577b78a16760942db6d647655795ed8c67662d57d3b191f6e0c191055a",
+    "batch-bc-build.log": "2f415dd433c2fe07f837aa43bbdf5de316c11c9a82a271e72fba57f00fe88622",
+    "batch-bc-full.log": "2515436e8ccca61434b2d1b30b8e9618ca91cda0b60d93219c5873d0ddd5b763",
+    "batch-bc-initial-type-failure.log": "de0a4ce51770c468e6beaf8e0bbe589274126276ad028e516d9c4addc7bec594",
+    "batch-bc-review.md": "e489bacdbcc3e96a4add8a37e218dca9d72c4a94145f1773d099684272bd74a6",
+    "batch-bc-target.log": "b4c74fa9c87cabe1ababddc44c4ad69175b6772180f8a4dbad4232b2ce69676d"
+  },
+  "notes": [
+    "Cumulative selected diff plus full new files; depends on prior batches.",
+    "31focused; final2283pass1skip0fail; build passed. Initial typecheck failure retained.",
+    "Backend snapshot and typed cursor prepared; Provider not wired yet.",
+    "TEMP storage and synchronous initialization grow with target set; no global constant-memory/performance claim. Full15/42scope active."
+  ]
+}

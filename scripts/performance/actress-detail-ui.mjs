@@ -1,0 +1,153 @@
+/** Actual actor detail/edit UI with synthetic IPC and a local image standing in for media://. */
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import {createServer} from 'vite'
+import react from '@vitejs/plugin-react'
+import {chromium} from 'playwright-core'
+const repo=process.cwd(),root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-actor-detail-ui-'))
+const output=path.resolve(process.env.JAVDEX_ACTOR_DETAIL_UI_OUTPUT??path.join(root,'results'));fs.mkdirSync(output,{recursive:true})
+fs.writeFileSync(path.join(root,'index.html'),'<html><body><div id="root" style="height:100vh"></div><script type="module" src="/fixture.jsx"></script></body></html>')
+fs.writeFileSync(path.join(root,'cover.svg'),'<svg xmlns="http://www.w3.org/2000/svg" width="160" height="240"><rect width="160" height="240" fill="#334455"/><circle cx="80" cy="80" r="32" fill="#b8c5d6"/><path d="M25 220V160Q80 110 135 160V220" fill="#889aaa"/></svg>')
+const local=p=>JSON.stringify('/@fs'+path.join(repo,p))
+fs.writeFileSync(path.join(root,'fixture.jsx'),`
+import React from 'react';import {createRoot} from 'react-dom/client';import {MemoryRouter,Route,Routes,useNavigate} from 'react-router-dom';import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
+import ${local('src/renderer/src/styles/global.css')};
+window.React=React;window.__calls=[];window.__metadata=[];
+window.api={actresses:{galleryPage:async(id,query)=>{window.__calls.push({id,kind:'gallery',query});if(window.__galleryFail){window.__galleryFail=false;throw Error('Synthetic gallery failure')}if(window.__galleryHold){window.__galleryHold=false;await new Promise(resolve=>window.__releaseGallery=resolve)}const offset=query.anchorId?Math.floor((query.anchorId-1)/60)*60:(query.offset??0);return {anchorIndex:query.anchorId?(query.anchorId-1)%60:undefined,items:Array.from({length:Math.min(60,Math.max(0,125-offset))},(_,n)=>({id:offset+n+1,local_path:'photos/'+(offset+n+1)+'.jpg',remote_url:null,width:640,height:480,position:offset+n})),total:125,limit:60,offset}},get:()=>{throw Error('Full detail forbidden')},metadata:()=>{throw Error('Full gallery metadata forbidden')},profile:async id=>{window.__metadata.push(id);return {id,main_name:'Actor-'+id,gender:'female',names:[],aliases:[],links:[],gallery_count:125,display_gallery_count:125,first_gallery:null,avatar_path:null,avatar_source_path:null,scraped_status:0}},videoPage:async(id,query)=>{window.__calls.push({id,query});if(window.__fail){window.__fail=false;throw Error('Page failed')}const total=125,offset=query.offset??0;return {videos:Array.from({length:Math.min(60,Math.max(0,total-offset))},(_,n)=>({id:id*1000+offset+n,code:'WORK-'+(offset+n),title:'Synthetic work '+(offset+n),cover_path:'covers/'+(offset+n)+'.jpg',scraped_status:0,resource_kinds:[]})),total,limit:60,offset}}} ,settings:{get:async()=>({})},actressScrape:{listPlugins:async()=>[],listPluginDetails:async()=>[]},agentMetadata:{onSnapshotChanged:()=>()=>{}},assets:{getPathForFile:()=>null}};
+const Component=(await import(${local('src/renderer/src/pages/ActressDetailPage.tsx')})).default;
+const {AppBackgroundProvider}=await import(${local('src/renderer/src/components/AppBackgroundContext.tsx')});
+const {ImagePreviewOverlayProvider}=await import(${local('src/renderer/src/components/ImagePreviewOverlayContext.tsx')});
+const {AgentMetadataCollectorProvider}=await import(${local('src/renderer/src/components/agentMetadata/AgentMetadataCollectorContext.tsx')});
+function Nav(){window.__navigate=useNavigate();return null}
+createRoot(document.getElementById('root')).render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={['/actresses/1']}><AppBackgroundProvider><ImagePreviewOverlayProvider><AgentMetadataCollectorProvider><Nav/><Routes><Route path="/actresses/:id" element={<Component/>}><Route path=":videoId" element={<div>Nested video</div>}/></Route></Routes></AgentMetadataCollectorProvider></ImagePreviewOverlayProvider></AppBackgroundProvider></MemoryRouter></QueryClientProvider>);
+`)
+let server,browser;const results=[]
+try {
+ server=await createServer({configFile:false,root,cacheDir:path.join(root,'.vite'),plugins:[react(),{name:'synthetic-media-protocol',transform(code,id){if(id===path.join(repo,'src/renderer/src/api.ts'))return code.replace('const url = `media://${normalized}`',"const url = '/cover.svg?path=' + encodeURIComponent(normalized)")}}],resolve:{alias:{
+  '@shared':path.join(repo,'src/shared'),react:path.join(repo,'node_modules/react'),'react-dom':path.join(repo,'node_modules/react-dom'),
+  'react-router-dom':path.join(repo,'node_modules/react-router-dom'),'@tanstack/react-query':path.join(repo,'node_modules/@tanstack/react-query')
+ }},server:{host:'127.0.0.1',port:0,fs:{allow:[root,repo]}}})
+ await server.listen();browser=await chromium.launch({channel:process.env.JAVDEX_BROWSER_CHANNEL||'chrome',headless:true})
+ for(const viewport of [{width:1000,height:640},{width:1440,height:900}]) {
+  const page=await browser.newPage({viewport}),errors=[],mediaRequests=[];page.on('request',request=>{if(request.url().includes('/cover.svg?'))mediaRequests.push(request.url())});page.on('pageerror',error=>errors.push(error.message))
+  await page.goto('http://127.0.0.1:'+server.httpServer.address().port)
+  await page.waitForFunction(()=>document.querySelectorAll('.poster-card').length===60)
+  const works=page.getByRole('navigation',{name:'演员作品分页'})
+  await works.getByRole('button',{name:'下一页'}).click()
+  await page.waitForFunction(()=>window.__calls.filter(c=>!c.query.withCover).at(-1).query.offset===60)
+  await works.getByRole('button',{name:'下一页'}).click()
+  await page.waitForFunction(()=>document.querySelectorAll('.poster-card').length===5)
+  assert.equal(await page.evaluate(()=>window.__metadata.length),1)
+  await page.waitForFunction(()=>Array.from(document.querySelectorAll('.poster-card img')).every(img=>img.complete))
+  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}-works.png`)})
+  await page.getByRole('tab',{name:'写真',exact:true}).click()
+  await page.waitForFunction(()=>document.querySelectorAll('.actress-gallery-masonry-btn').length===60)
+  const gallery=page.getByRole('navigation',{name:'演员写真分页'})
+  await gallery.getByRole('button',{name:'下一页'}).click()
+  await page.getByRole('button',{name:'写真 61',exact:true}).waitFor()
+  await gallery.getByRole('button',{name:'下一页'}).click()
+  await page.getByRole('button',{name:'写真 121',exact:true}).waitFor()
+  assert.equal(await page.locator('.actress-gallery-masonry-btn').count(),5)
+  await gallery.scrollIntoViewIfNeeded()
+  await page.waitForFunction(()=>{const img=Array.from(document.querySelectorAll('.actress-gallery-masonry-btn img')).at(-1);return img?.complete&&img.naturalWidth>0})
+  const galleryGeometry=await gallery.evaluate(el=>({top:el.getBoundingClientRect().top,bottom:el.getBoundingClientRect().bottom,viewport:innerHeight,horizontal:document.documentElement.scrollWidth>innerWidth}))
+  assert.ok(galleryGeometry.bottom<=galleryGeometry.viewport)
+  assert.equal(galleryGeometry.horizontal,false)
+  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}-gallery.png`)})
+  await page.getByRole('button',{name:'写真 121',exact:true}).click()
+  const lightbox=page.getByRole('dialog',{name:'写真预览'})
+  await lightbox.waitFor()
+  await page.keyboard.press('ArrowLeft')
+  await page.waitForFunction(()=>document.querySelector('.image-preview-counter')?.textContent==='120 / 125')
+  assert.equal(await lightbox.getByRole('tab').count(),60)
+  await page.keyboard.press('ArrowRight')
+  await page.waitForFunction(()=>document.querySelector('.image-preview-counter')?.textContent==='121 / 125')
+  assert.equal(await lightbox.getByRole('tab').count(),5)
+  await page.evaluate(()=>window.__galleryFail=true)
+  await page.keyboard.press('ArrowLeft')
+  await lightbox.getByRole('alert').waitFor()
+  assert.equal(await page.locator('.image-preview-counter').textContent(),'121 / 125')
+  await page.waitForTimeout(1200)
+  assert.equal(await page.locator('.image-preview-chrome--top').evaluate(el=>getComputedStyle(el).opacity),'1')
+  await lightbox.getByRole('button',{name:'重试',exact:true}).click()
+  await page.waitForFunction(()=>document.querySelector('.image-preview-counter')?.textContent==='120 / 125')
+  await page.keyboard.press('ArrowRight')
+  await page.waitForFunction(()=>document.querySelector('.image-preview-counter')?.textContent==='121 / 125')
+  // Cross the same boundary by a real pointer swipe, then advance with a button.
+  await page.evaluate(()=>window.__galleryHold=true)
+  const stage=await page.locator('.image-preview-viewport').boundingBox()
+  await page.mouse.move(stage.x+stage.width*.35,stage.y+stage.height*.5)
+  await page.mouse.down();await page.mouse.move(stage.x+stage.width*.7,stage.y+stage.height*.5,{steps:12});await page.mouse.up()
+  await page.waitForFunction(()=>document.querySelector('[aria-label="写真预览"]')?.getAttribute('aria-busy')==='true')
+  assert.equal(await page.locator('.image-preview-counter').textContent(),'121 / 125')
+  assert.equal(await page.locator('.image-preview-slide').first().evaluate(el=>getComputedStyle(el).transform),'matrix(1, 0, 0, 1, 0, 0)')
+  await page.waitForTimeout(1200)
+  assert.equal(await page.locator('.image-preview-chrome--top').evaluate(el=>getComputedStyle(el).opacity),'1')
+  const slowPreview=await page.evaluate(()=>({counter:document.querySelector('.image-preview-counter').textContent,transform:getComputedStyle(document.querySelector('.image-preview-slide')).transform,chromeOpacity:getComputedStyle(document.querySelector('.image-preview-chrome--top')).opacity,busy:document.querySelector('[aria-label="写真预览"]').getAttribute('aria-busy')}))
+  await page.evaluate(()=>window.__releaseGallery())
+  await page.waitForFunction(()=>document.querySelector('.image-preview-counter')?.textContent==='120 / 125')
+  await lightbox.getByRole('button',{name:'下一张',exact:true}).click()
+  await page.waitForFunction(()=>document.querySelector('.image-preview-counter')?.textContent==='121 / 125')
+  await page.keyboard.press('ArrowRight');await page.keyboard.press('ArrowRight');await page.keyboard.press('ArrowRight');await page.keyboard.press('ArrowRight')
+  await page.waitForFunction(()=>document.querySelector('.image-preview-counter')?.textContent==='125 / 125')
+  assert.equal(await lightbox.getByRole('button',{name:'下一张',exact:true}).isDisabled(),true)
+  assert.equal(await lightbox.locator('[role=tab][aria-selected=true]').getAttribute('aria-label'),'写真 125')
+  await page.waitForFunction(()=>{const img=document.querySelector('.image-preview-slide .image-preview-img');return img?.complete&&img.naturalWidth>0&&getComputedStyle(img).opacity==='1'})
+  assert.ok((await page.locator('.image-preview-slide .image-preview-img').first().getAttribute('src')).includes('photos%2F125.jpg'))
+  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}-preview.png`)})
+  await page.keyboard.press('Escape');await lightbox.waitFor({state:'hidden'})
+  assert.equal(await page.locator('.actress-gallery-masonry-btn').count(),5)
+  assert.equal(await page.evaluate(()=>window.__metadata.length),1)
+  await page.getByRole('tab',{name:'出演作品',exact:true}).click()
+  await page.getByRole('button',{name:'编辑',exact:true}).click()
+  await page.waitForFunction(()=>document.querySelectorAll('.avatar-pick-tile[aria-label^=\"WORK-\"]').length===60)
+  const covers=page.getByRole('navigation',{name:'头像封面分页'})
+  await covers.getByRole('button',{name:'下一页'}).click()
+  await page.waitForFunction(()=>document.querySelector('.avatar-pick-tile[aria-label^=\"WORK-\"]')?.getAttribute('aria-label')==='WORK-60')
+  await covers.getByRole('button',{name:'下一页'}).click()
+  await page.waitForFunction(()=>document.querySelectorAll('.avatar-pick-tile[aria-label^=\"WORK-\"]').length===5)
+  await covers.getByRole('button',{name:'上一页'}).click()
+  await covers.getByRole('button',{name:'上一页'}).click()
+  await page.waitForFunction(()=>document.querySelector('.avatar-pick-tile[aria-label^=\"WORK-\"]')?.getAttribute('aria-label')==='WORK-0')
+  await page.getByRole('button',{name:'WORK-0',exact:true}).click()
+  await page.waitForFunction(()=>document.querySelector('.avatar-pick-tile.active')?.getAttribute('aria-busy')==='false' && document.querySelector('.avatar-editor-edit-bar--visible'))
+  const zoom=page.locator('input[type=range]');await zoom.focus();await zoom.press('ArrowRight');const chosenZoom=await zoom.inputValue();assert.ok(Number(chosenZoom)>1)
+  await covers.getByRole('button',{name:'下一页'}).click()
+  await covers.getByRole('button',{name:'上一页'}).click()
+  await page.waitForFunction(()=>document.querySelector('.avatar-pick-tile.active')?.getAttribute('aria-label')==='WORK-0')
+  assert.equal(await zoom.inputValue(),chosenZoom,'crop zoom must survive cover page changes')
+  await page.getByRole('dialog').getByRole('tab',{name:'写真',exact:true}).click()
+  const photos=page.getByRole('navigation',{name:'头像写真分页'})
+  assert.equal(await page.locator('.avatar-pick-tile[aria-label^="写真 "]').count(),60)
+  await photos.getByRole('button',{name:'下一页'}).click()
+  await page.getByRole('button',{name:'写真 61',exact:true}).waitFor()
+  await photos.getByRole('button',{name:'下一页'}).click()
+  await page.getByRole('button',{name:'写真 121',exact:true}).waitFor()
+  assert.equal(await page.locator('.avatar-pick-tile[aria-label^="写真 "]').count(),5)
+  await photos.getByRole('button',{name:'上一页'}).click()
+  await photos.getByRole('button',{name:'上一页'}).click()
+  await page.getByRole('button',{name:'写真 1',exact:true}).click()
+  await page.waitForFunction(()=>document.querySelector('.avatar-pick-tile.active')?.getAttribute('aria-label')==='写真 1' && document.querySelector('.avatar-pick-tile.active')?.getAttribute('aria-busy')==='false')
+  await zoom.focus();await zoom.press('ArrowRight');const photoZoom=await zoom.inputValue();assert.ok(Number(photoZoom)>1)
+  await photos.getByRole('button',{name:'下一页'}).click()
+  await photos.getByRole('button',{name:'上一页'}).click()
+  await page.waitForFunction(()=>document.querySelector('.avatar-pick-tile.active')?.getAttribute('aria-label')==='写真 1')
+  assert.equal(await zoom.inputValue(),photoZoom,'photo crop zoom must survive page changes')
+  await photos.scrollIntoViewIfNeeded()
+  const geometry=await page.evaluate(()=>{const body=document.querySelector('.avatar-source-panel-body').getBoundingClientRect(),pager=document.querySelector('[aria-label="头像写真分页"]').getBoundingClientRect();return {bodyBottom:body.bottom,pagerTop:pager.top,pagerBottom:pager.bottom,viewport:innerHeight,horizontal:document.documentElement.scrollWidth>innerWidth}})
+  assert.ok(geometry.bodyBottom<=geometry.pagerTop,'cover pager must be outside image panel')
+  assert.ok(geometry.pagerBottom<=geometry.viewport,'cover pager must be reachable')
+  assert.equal(geometry.horizontal,false)
+  await page.screenshot({path:path.join(output,`${viewport.width}x${viewport.height}-editor.png`)})
+  for(const asset of ['covers/0.jpg','photos/1.jpg']){
+    assert.ok(mediaRequests.some(value=>{const url=new URL(value);return url.searchParams.get('path')===asset&&url.searchParams.get('size')==='320'}),'candidate uses thumbnail')
+    assert.ok(mediaRequests.some(value=>{const url=new URL(value);return url.searchParams.get('path')===asset&&!url.searchParams.has('size')}),'crop uses original source')
+  }
+  assert.deepEqual(errors,[])
+  results.push({viewport,geometry,galleryGeometry,slowPreview,galleryFailureRetryPassed:true,chosenZoom,photoZoom,mediaRequests,calls:await page.evaluate(()=>window.__calls),errors})
+  await page.close()
+ }
+ fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(results,null,2));console.log(output)
+} finally {await browser?.close();await server?.close();if(output!==root&&!output.startsWith(root+path.sep))fs.rmSync(root,{recursive:true,force:true})}

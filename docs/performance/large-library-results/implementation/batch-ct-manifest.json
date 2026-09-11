@@ -1,0 +1,15 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ct-build.log": "19328b2bbe088823d9b7f569a6733f850f5af68af39934a58a70ea5284a234c5",
+    "batch-ct-full.log": "ab558f42f36df451c3ab5769c71fcd0b7e7015a78f32b1c777af62af979eabc6",
+    "batch-ct-nfo-audit-transactions.patch": "1f0a5da6b0c29c5fe69942107188493c81b2533d943326f3bcb9cbc0e22931a9",
+    "batch-ct-review.md": "3c52c6c3112ce724a008ea0cd667dd8db99a18ad56e6679b605b1516359ee060",
+    "batch-ct-target.log": "b4806091bd13e54a26e4e88a07276993c4873cdba5e342c0851d18e459157e10"
+  },
+  "notes": [
+    "Selected cumulative patch depends on previous batches.",
+    "273 focused passed before fixture typing correction; final full validates corrected fixture:2612pass1skip0fail; build terminal0.",
+    "Core NFO write/audit atomicity; postcommit diagnostic revision, cleanup/coordinator and full15/42 remain."
+  ]
+}

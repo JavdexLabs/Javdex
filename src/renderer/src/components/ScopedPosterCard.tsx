@@ -1,10 +1,10 @@
-import type { ScopedVideo } from '@shared/catalogTypes'
+import type { ScopedVideoCard } from '@shared/cardProjection'
 import PosterCard, { type PosterCardProps } from './PosterCard'
 import styles from './ScopedPosterCard.module.css'
 import { mediaLibraryIdentityStyle } from './mediaLibraryIdentity'
 
-type ScopedPosterCardProps = Omit<PosterCardProps, 'video' | 'detailLibraryId'> & {
-  video: ScopedVideo
+type ScopedPosterCardProps = Omit<PosterCardProps<ScopedVideoCard>, 'video' | 'detailLibraryId'> & {
+  video: ScopedVideoCard
 }
 
 export default function ScopedPosterCard({

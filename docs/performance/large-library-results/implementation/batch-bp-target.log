@@ -1,0 +1,90 @@
+▶ classification IPC contract
+  ✔ registers every command and forwards typed arguments to the public services (1.327542ms)
+✔ classification IPC contract (1.647209ms)
+✔ matches every old list field and global ordering over pages, aliases, roles and cover boundaries (117.589375ms)
+✔ keeps count and page in one read snapshot across another connection changing the role (7.233167ms)
+✔ validates page boundaries in the service and typed IPC without changing complete-list APIs (7.443125ms)
+▶ route builders and parsers
+  ✔ round-trips library detail stacks (1.232125ms)
+  ✔ round-trips actress detail stacks (0.14525ms)
+  ✔ round-trips playlist and classification entity detail stacks (0.283542ms)
+  ✔ rejects malformed detail ids (0.181333ms)
+  ✔ builds pending-center locations without page-level query concatenation (0.890709ms)
+✔ route builders and parsers (3.187459ms)
+▶ classification list query contract
+  ✔ accepts only video count and update time sorting with video count descending by default (0.145708ms)
+  ✔ includes organization search and sorting in the shareable query identity (0.130792ms)
+  ✔ keeps series release sorting separate from classification-list sorting (0.067ms)
+✔ classification list query contract (0.451042ms)
+▶ actress avatar filter query contract
+  ✔ normalizes avatar filter values and omits the all default (0.107ms)
+  ✔ returns to the actress list without losing its query state (0.1585ms)
+  ✔ keeps avatar filters distinct in the actress query hash (0.1335ms)
+✔ actress avatar filter query contract (0.468958ms)
+▶ actress status filter query contract
+  ✔ parses the canonical status values and treats anything else as all (0.053375ms)
+  ✔ omits the param for all and writes the canonical value otherwise (0.072917ms)
+  ✔ includes status in the list query identity and ignores invalid values (0.033ms)
+  ✔ keeps search, gender and sort identity while only the status changes (0.03825ms)
+  ✔ round-trips the status query through actress detail and back (0.087084ms)
+  ✔ remembers the actress status filter across primary navigation (0.254125ms)
+✔ actress status filter query contract (0.585583ms)
+▶ primary navigation memory
+  ✔ restores query state per list and removes unrelated nested query keys (0.307166ms)
+  ✔ persists search only when leaving a list root (0.177875ms)
+  ✔ forgets a root so cross-nav no longer restores it (0.053625ms)
+  ✔ resolves same-section vs cross-section sidebar targets (0.1275ms)
+  ✔ builds nav link href from current search when active (0.097667ms)
+✔ primary navigation memory (0.807833ms)
+▶ navigation helpers
+  ✔ removes playlist-detail resource filters when returning to the playlist list (0.08175ms)
+  ✔ keeps home, search and media-library detail stacks scoped and reversible (0.556208ms)
+  ✔ closes nested actress details back to their parent video context (0.3385ms)
+  ✔ keeps stable series identity and release direction through its detail stack (0.123ms)
+  ✔ keeps director identity and query state through its stable detail stack (0.077167ms)
+  ✔ opens an organization by stable id while preserving its role-list query (0.111334ms)
+  ✔ keeps classification query only inside the same classification stack (0.049375ms)
+  ✔ keeps video and actress navigation inside the stable organization stack (0.092208ms)
+  ✔ keeps video and actress navigation inside the pending workbench stack (0.081584ms)
+  ✔ opens actress detail from the pending inbox and returns to it (0.050583ms)
+✔ navigation helpers (1.624458ms)
+▶ settings route contract
+  ✔ builds canonical settings paths and resolves valid sections (0.124792ms)
+✔ settings route contract (0.139584ms)
+▶ series real list page
+  ✔ renders 60/60/5 with server total and bounded page cache (1386.593625ms)
+  ✔ clears old cards while loading and supports failed-page retry (43.938791ms)
+  ✔ clamps a shrinking total to its last page, including zero (52.186334ms)
+  ✔ resets search/sort to page one and rejects late search data (864.075833ms)
+  ✔ invalidates uncommitted input across A → B → A history navigation (315.005708ms)
+  ✔ invalidates pending input when opening detail without changing search (632.048792ms)
+  ✔ retains page, active observer and scroll through nested detail and return (16.830209ms)
+✔ series real list page (3354.95675ms)
+▶ maker real list page
+  ✔ renders 60/60/5 with server total and bounded page cache (1401.647208ms)
+  ✔ clears old cards while loading and supports failed-page retry (29.301625ms)
+  ✔ clamps a shrinking total to its last page, including zero (60.326958ms)
+  ✔ resets search/sort to page one and rejects late search data (840.665584ms)
+  ✔ invalidates uncommitted input across A → B → A history navigation (318.053791ms)
+  ✔ invalidates pending input when opening detail without changing search (629.013875ms)
+  ✔ retains page, active observer and scroll through nested detail and return (25.963833ms)
+✔ maker real list page (3306.002958ms)
+▶ director real list page
+  ✔ renders 60/60/5 with server total and bounded page cache (1406.188792ms)
+  ✔ clears old cards while loading and supports failed-page retry (40.992333ms)
+  ✔ clamps a shrinking total to its last page, including zero (53.111292ms)
+  ✔ resets search/sort to page one and rejects late search data (829.09925ms)
+  ✔ invalidates uncommitted input across A → B → A history navigation (311.666083ms)
+  ✔ invalidates pending input when opening detail without changing search (627.365541ms)
+  ✔ retains page, active observer and scroll through nested detail and return (13.776834ms)
+✔ director real list page (3283.135292ms)
+✔ organization role change discards old filters and pending search (320.103917ms)
+✔ normalizes URL offsets safely and keys distinct pages (4.664333ms)
+ℹ tests 60
+ℹ suites 11
+ℹ pass 60
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10756.066625

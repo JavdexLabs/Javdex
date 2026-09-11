@@ -1,0 +1,38 @@
+{"sourceIterationPlans":[[{"id":4,"parent":0,"notused":156,"detail":"SEARCH video_resources USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)"}],[{"id":4,"parent":0,"notused":156,"detail":"SEARCH video_resources USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)"}]]}
+✔ iterates source-managed resources in order while deleting, with bounded reads and rollback (19.994458ms)
+▶ ScanCoordinator
+  ✔ coalesces display progress while preserving per-file callbacks and the final event (11.678958ms)
+  ✔ flushes pending progress before a failure without delaying the failure event (0.433333ms)
+  ✔ binds an offline-created root identity and refreshes the frozen snapshot before scanning (0.662542ms)
+  ✔ persists matching complete audit details with the latest summary (0.190958ms)
+  ✔ publishes scan lifecycle events for every trigger (0.155542ms)
+  ✔ uses one frozen configuration snapshot for the complete run (0.103708ms)
+  ✔ reconciles resource identity pending rows only under roots proven safe after traversal (0.150541ms)
+  ✔ preserves offline roots and removes only missing local resources under accessible roots (0.319125ms)
+  ✔ aborts cleanup when a local path cannot be audited (0.247042ms)
+  ✔ treats a root that becomes unreadable after traversal as offline (0.111958ms)
+  ✔ rechecks the frozen root identity immediately before cleanup writes (0.091ms)
+  ✔ does not run cleanup after cancellation and releases the mutual-exclusion lease (0.118416ms)
+  ✔ keeps resources after a coordinator-level failure (0.089292ms)
+  ✔ skips every destructive cleanup after a file processing failure (0.058667ms)
+  ✔ replaces the unrecognized-file snapshot after every safe completed scan (0.077291ms)
+  ✔ completes safe cleanup with errors when failures are isolated to STRM files (0.101875ms)
+  ✔ consumes deferred path cleanup only after a successful uncancelled scan (0.059709ms)
+  ✔ keeps deferred path cleanup queued after a partial folder scan (0.061834ms)
+  ✔ allows a full cleanup-only scan after the final configured folder was removed (0.05525ms)
+  ✔ consumes cleanup references lazily and closes iteration on a path failure (0.11025ms)
+  ✔ preserves all three cleanup audit sequences above the argument limit (207.891458ms)
+  ✔ removes resource-less memberships after deferred cleanup on a safe full scan (0.259208ms)
+  ✔ persists a sanitized failed summary without running destructive cleanup (0.213958ms)
+  ✔ rolls back resource cleanup and keeps pending roots when auto-delete fails (0.256792ms)
+  ✔ keeps pending roots when the cleanup transaction cannot commit (0.185292ms)
+  ✔ rejects duplicate scans and scans blocked by resource maintenance (4.353125ms)
+✔ ScanCoordinator (228.629917ms)
+ℹ tests 27
+ℹ suites 1
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 581.051041

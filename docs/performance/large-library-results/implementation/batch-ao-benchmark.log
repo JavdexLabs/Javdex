@@ -1,0 +1,10 @@
+{"groups":10000,"identities":10000,"resourcesPerGroup":2,"resourceDisplayNameCharacters":4096,"results":[{"name":"full","samples":[98.59387500000003,75.904042,88.1974580000001],"medianMs":88.1974580000001,"jsonBytes":90097861},{"name":"summary.first","samples":[3.0213340000000244,2.1103330000000824,2.1908750000000055],"medianMs":2.1908750000000055,"jsonBytes":4468},{"name":"summary.identity.deep","samples":[5.018499999999904,4.975082999999813,4.876500000000078],"medianMs":4.975082999999813,"jsonBytes":5790},{"name":"count","samples":[0.8608329999999569,0.6775420000001304,0.6894999999999527],"medianMs":0.6894999999999527,"jsonBytes":5},{"name":"detail.selected","samples":[0.11733400000002803,0.05170799999996234,0.04425000000014734],"medianMs":0.05170799999996234,"jsonBytes":8775}],"platform":"darwin","arch":"arm64","sqliteVersion":{"version":"3.53.4"},"caveats":["Three sequential warm synthetic samples after ANALYZE; not p95, cold Windows/HDD or full IPC.","Repo time excludes assertions and JSON serialization. JSON bytes approximate transport payload.","Count, UNION ordering, OFFSET and anchor rank still scale with queue size; queries remain on main thread.","Selected group resources remain unbounded; this fixture has only two per group. Full hydration is measured first."]}
+✔ measures mixed scan summary pages against complete hydration (953.962833ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1285.302708

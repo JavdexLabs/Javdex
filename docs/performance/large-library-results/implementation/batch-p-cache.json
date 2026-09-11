@@ -1,0 +1,164 @@
+{
+  "measuredAt": "2026-09-10T07:10:24.476Z",
+  "runtime": {
+    "node": "24.18.1",
+    "acorn": "8.16.0",
+    "ada": "3.4.4",
+    "amaro": "1.1.9",
+    "ares": "1.34.6",
+    "brotli": "1.2.0",
+    "cldr": "48.0",
+    "icu": "78.2",
+    "llhttp": "9.4.3",
+    "merve": "1.2.2",
+    "modules": "148",
+    "napi": "10",
+    "nbytes": "0.1.4",
+    "ncrypto": "0.0.1",
+    "nghttp2": "1.69.0",
+    "nghttp3": "",
+    "ngtcp2": "",
+    "openssl": "0.0.0",
+    "simdjson": "4.6.4",
+    "simdutf": "7.7.0",
+    "sqlite": "3.53.1",
+    "tz": "2025c",
+    "undici": "7.29.0",
+    "unicode": "17.0",
+    "uv": "1.52.1",
+    "uvwasi": "0.0.23",
+    "v8": "15.0.245.28-electron.0",
+    "zlib": "1.3.2.1-motley",
+    "zstd": "1.6.0",
+    "electron": "43.4.1",
+    "chrome": "150.0.7871.224"
+  },
+  "notes": [
+    "Small PNG plus synthetic trailing bytes; headers inspected but no pixel decoding, browser or network measured.",
+    "OS file cache and crypto key are warm in both cases. Cold refers only to the application byte cache.",
+    "Five sequential or twelve concurrent reads, instrumented open/decrypt/path-stat calls (fstat and bounded read chunks excluded), no p95 or Windows/HDD conclusion.",
+    "The hot path still stats the file and copies response bytes; cache limits do not bound active or response-buffer bytes."
+  ],
+  "results": [
+    {
+      "bytes": 1048576,
+      "encrypted": false,
+      "state": "cold-byte-cache",
+      "iterations": 5,
+      "elapsedMs": 2.395957999999979,
+      "openCalls": 5,
+      "decryptCalls": 0,
+      "statCalls": 10
+    },
+    {
+      "bytes": 1048576,
+      "encrypted": false,
+      "state": "hot-byte-cache",
+      "iterations": 5,
+      "elapsedMs": 0.5617079999999817,
+      "openCalls": 0,
+      "decryptCalls": 0,
+      "statCalls": 5
+    },
+    {
+      "bytes": 1048576,
+      "encrypted": false,
+      "state": "concurrent-cold-byte-cache",
+      "iterations": 12,
+      "elapsedMs": 1.2155410000000018,
+      "openCalls": 1,
+      "decryptCalls": 0,
+      "statCalls": 4
+    },
+    {
+      "bytes": 1048576,
+      "encrypted": true,
+      "state": "cold-byte-cache",
+      "iterations": 5,
+      "elapsedMs": 6.454250000000002,
+      "openCalls": 5,
+      "decryptCalls": 5,
+      "statCalls": 10
+    },
+    {
+      "bytes": 1048576,
+      "encrypted": true,
+      "state": "hot-byte-cache",
+      "iterations": 5,
+      "elapsedMs": 0.6089589999999987,
+      "openCalls": 0,
+      "decryptCalls": 0,
+      "statCalls": 5
+    },
+    {
+      "bytes": 1048576,
+      "encrypted": true,
+      "state": "concurrent-cold-byte-cache",
+      "iterations": 12,
+      "elapsedMs": 1.715167000000008,
+      "openCalls": 1,
+      "decryptCalls": 1,
+      "statCalls": 4
+    },
+    {
+      "bytes": 16777216,
+      "encrypted": false,
+      "state": "cold-byte-cache",
+      "iterations": 5,
+      "elapsedMs": 21.053167000000002,
+      "openCalls": 5,
+      "decryptCalls": 0,
+      "statCalls": 10
+    },
+    {
+      "bytes": 16777216,
+      "encrypted": false,
+      "state": "hot-byte-cache",
+      "iterations": 5,
+      "elapsedMs": 5.752541999999977,
+      "openCalls": 0,
+      "decryptCalls": 0,
+      "statCalls": 5
+    },
+    {
+      "bytes": 16777216,
+      "encrypted": false,
+      "state": "concurrent-cold-byte-cache",
+      "iterations": 12,
+      "elapsedMs": 15.973625000000027,
+      "openCalls": 1,
+      "decryptCalls": 0,
+      "statCalls": 4
+    },
+    {
+      "bytes": 16777216,
+      "encrypted": true,
+      "state": "cold-byte-cache",
+      "iterations": 5,
+      "elapsedMs": 58.22904199999999,
+      "openCalls": 5,
+      "decryptCalls": 5,
+      "statCalls": 10
+    },
+    {
+      "bytes": 16777216,
+      "encrypted": true,
+      "state": "hot-byte-cache",
+      "iterations": 5,
+      "elapsedMs": 5.882875000000013,
+      "openCalls": 0,
+      "decryptCalls": 0,
+      "statCalls": 5
+    },
+    {
+      "bytes": 16777216,
+      "encrypted": true,
+      "state": "concurrent-cold-byte-cache",
+      "iterations": 12,
+      "elapsedMs": 23.746083,
+      "openCalls": 1,
+      "decryptCalls": 1,
+      "statCalls": 4
+    }
+  ]
+}

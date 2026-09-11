@@ -1,0 +1,26 @@
+{
+  "count": 300000,
+  "sourceBytes": 87189134,
+  "startupAndPermissionMs": 572.515083,
+  "callbacksDuringWait": 232,
+  "maxTimerGapMs": 3.0973750000000564,
+  "warmPermissionMs": [
+    552.78325,
+    531.3683329999999,
+    532.8049999999998
+  ],
+  "notes": [
+    "Full legacy audit validation still O(N), even if the target occurs first; this moves work off the main thread and removes whole-body JS parsing, not all native parsing.",
+    "One startup plus three repeated reads; warm filesystem and retained source oracle. No p95/cold/platform/peak-memory/real-shell benchmark.",
+    "2ms main timer, max gap includes8ms drain. Shared worker remains occupied during checks; no fairness claim."
+  ]
+}
+✔ measures responsiveness during large audit permission scans on the real worker (2594.400542ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2772.840958

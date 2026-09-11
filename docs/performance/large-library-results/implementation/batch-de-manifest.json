@@ -1,0 +1,26 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-de-build.log": "3168d89043b7b48cebc6371e52db39bad3e75beadac0e156ac9181c324343e5b",
+    "batch-de-cancellation-red.log": "a1c834b1e593a2661b45c2ec4ae26ff6a15bf6ec38e80928550ddf64bd911d93",
+    "batch-de-counts-baseline.log": "61b05daa0f2257679df4608f9abe15e3a0316cd855e658e43ff0571677e93754",
+    "batch-de-counts-benchmark.log": "f8989e72026709aaea7007c177833ef9628a3fc6227f14bc686fac52ee958c7e",
+    "batch-de-counts-red.log": "f0edd900597a5f94a41e56d1c3e736de99489309ee40f5f646493b9aeb9f33da",
+    "batch-de-full.log": "7252bfb3a8311aeadf72d79363ffca3c0ba7f7a2c2262988c9706eb8df57c9e2",
+    "batch-de-nfo-workset.patch": "985b7e5c35618d099a42e6dcd7be784c1797b3d93b340849d087a19729347ec7",
+    "batch-de-review.md": "3f47af7d586d22380f87fe64ffa1fd2c802176294d511ec579d8572719117f58",
+    "batch-de-target.log": "07fb258f9b5f8c210303bee3b5efecfc43a64b938f257cafaa9f500f32bc5d86",
+    "batch-de-type-error.log": "227a1c87423a64b6c3cd5e323b305e67673ee5845ef119e7baabeab98d24c8af"
+  },
+  "notes": [
+    "User narrowed objective to NFO-related optimization, complete plan updates, then stop. Other15/42 work remains backlog, not active continuation.",
+    "CombinedDD/DE final gate:245joint tests;2813pass/1skip/0fail(2814total); full and build observed terminal exit0.55new tests against DC.",
+    "Initial full gate failed only on two MapIterator return annotations; fixed then full checks rerun. No runtime/source changes after final passing gate/build.",
+    "Summary count store is omitted for automatic merge; otherwise256occurrences/1MiB encoded keys, precise decrements and cached statements.",
+    "NFO directories/preflight/queue use request-private TEMP; indexed sidecar lookup, one-video apply, enqueue atomic with four resource/file-audit transaction paths. Cancellation checked before next batch hydration.",
+    "Selected patch is cumulative against HEAD, depends on earlier batches includingDC; not a standalone sequential patch.",
+    "Earlier uncached counter probe source was not separately frozen. Its log is iteration evidence, not a standalone release baseline; final same-source memory/TEMP probe is reproducible.",
+    "Single-video arrays/candidates, transient directory indexing, synchronous directory writes, TEMP growth and process-crash recovery remain explicitly bounded in scope, not solved globally.",
+    "schema18 unchanged; protected conflict controller test +27/-0 vsHEAD; no user database/media access, commit/push/release."
+  ]
+}

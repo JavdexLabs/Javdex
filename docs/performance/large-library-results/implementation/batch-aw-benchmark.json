@@ -1,0 +1,114 @@
+{
+  "actors": 10000,
+  "videos": 100000,
+  "videoActressEdges": 100000,
+  "memberships": 150000,
+  "eligible": 6666,
+  "skewPhase": {
+    "videos": 300000,
+    "videoActressEdges": 300000,
+    "memberships": 350000,
+    "hotActressId": 9998,
+    "extraWorks": 200000
+  },
+  "results": [
+    {
+      "name": "legacy.full",
+      "samples": [
+        185.414,
+        175.5351250000001,
+        170.775625
+      ],
+      "medianMs": 175.5351250000001,
+      "jsonBytes": 45328421
+    },
+    {
+      "name": "merge.first40",
+      "samples": [
+        0.32933299999990595,
+        0.3152910000001157,
+        0.2971669999999449
+      ],
+      "medianMs": 0.3152910000001157,
+      "jsonBytes": 3608
+    },
+    {
+      "name": "merge.last40",
+      "samples": [
+        9.268792000000076,
+        11.023957999999993,
+        9.877666999999974
+      ],
+      "medianMs": 9.877666999999974,
+      "jsonBytes": 2422
+    },
+    {
+      "name": "skew.merge.first40",
+      "samples": [
+        0.3180419999998776,
+        0.32366700000011406,
+        0.4076669999999467
+      ],
+      "medianMs": 0.32366700000011406,
+      "jsonBytes": 3608
+    },
+    {
+      "name": "skew.merge.last40",
+      "samples": [
+        75.34749999999985,
+        74.67987499999981,
+        77.03583299999991
+      ],
+      "medianMs": 75.34749999999985,
+      "jsonBytes": 2426
+    }
+  ],
+  "countPlan": [
+    {
+      "id": 7,
+      "parent": 0,
+      "notused": 121,
+      "detail": "SEARCH va USING INDEX idx_video_actress_actress_id (actress_id=?)"
+    },
+    {
+      "id": 11,
+      "parent": 0,
+      "notused": 0,
+      "detail": "LIST SUBQUERY 1"
+    },
+    {
+      "id": 13,
+      "parent": 11,
+      "notused": 0,
+      "detail": "SCAN json_each VIRTUAL TABLE INDEX 1:"
+    },
+    {
+      "id": 31,
+      "parent": 0,
+      "notused": 0,
+      "detail": "CORRELATED SCALAR SUBQUERY 2"
+    },
+    {
+      "id": 37,
+      "parent": 31,
+      "notused": 48,
+      "detail": "SEARCH membership USING INDEX idx_library_video_memberships_video (video_id=?)"
+    },
+    {
+      "id": 45,
+      "parent": 31,
+      "notused": 20,
+      "detail": "SEARCH library USING INTEGER PRIMARY KEY (rowid=?)"
+    }
+  ],
+  "sqlite": {
+    "version": "3.53.4"
+  },
+  "platform": "darwin",
+  "notes": [
+    "Synthetic4KiB profiles,10videos/actor with50k overlapping memberships;ANALYZE,warm-up,3warm samples,notp95/cold/Windows/HDD/IPC/UI.",
+    "Picker sorts by full name, unlike legacy video count. Oracle filtered for merge eligibility and explicitly re-sorted before projection comparison.",
+    "Skew phase adds200k works to last-page actor9998, then ANALYZE. First-page exclusion and last-page inclusion checked; final countPlan captured after skew using first-page IDs. High per-actor fanout still costs work; deep OFFSET walks earlier rows.",
+    "Oracle held in memory; no peak RSS claim. Timing excludes assertions and serialization; bytes are JSON responses."
+  ]
+}

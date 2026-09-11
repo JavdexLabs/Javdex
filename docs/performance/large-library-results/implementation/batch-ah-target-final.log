@@ -1,0 +1,37 @@
+▶ tagRepo.pruneUnusedTags
+  ✔ deletes tags with no video links and keeps tags still used by a video (14.40325ms)
+✔ tagRepo.pruneUnusedTags (14.72925ms)
+▶ tagRepo selected labels
+  ✔ looks up only selected IDs through the tag primary key and omits deleted IDs (12.360667ms)
+  ✔ bounds display labels and JSON bytes without changing full stored names (8.578917ms)
+  ✔ rejects invalid or oversized requests and does no SQL work for an empty selection (6.625ms)
+✔ tagRepo selected labels (27.720417ms)
+▶ tagRepo manual candidates
+  ✔ pages alphabetically without counts and retains hidden/manual-only associations (15.432125ms)
+  ✔ preserves Unicode/literal substring matching and searches beyond display truncation (6.531417ms)
+  ✔ uses tag-key existence checks under skewed statistics and validates its work limits (12.40175ms)
+✔ tagRepo manual candidates (34.475958ms)
+▶ tagRepo active catalog projection
+  ✔ matches manual association and visibility semantics before and after statistics maintenance (24.9095ms)
+  ✔ deduplicates shared memberships and preserves manual origin and zero-count tags (6.816791ms)
+  ✔ counts only videos that can be opened through the active visible catalog (5.879209ms)
+✔ tagRepo active catalog projection (37.681291ms)
+▶ tagRepo filter candidates
+  ✔ paginates names before counts and matches global visibility counts with shared and archived members (7.457125ms)
+  ✔ keeps Unicode literal search, bounded labels and page-only count parameters (23.244542ms)
+✔ tagRepo filter candidates (30.767041ms)
+✔ reuses canonical query pages, isolates caller mutations, and invalidates local and external writes (11.609125ms)
+✔ bypasses cached pages inside transactions and never publishes data that is rolled back (6.143375ms)
+✔ evicts least recently used pages and validates raw search before cache lookup (6.955667ms)
+✔ evicts by serialized byte budget before eight large pages accumulate (9.923167ms)
+✔ observes an external commit during a read and refreshes on the next call (7.074667ms)
+✔ does not cache a failed read and allows the same query to retry (5.704292ms)
+✔ separates connections even when their revision counters match (13.058667ms)
+ℹ tests 19
+ℹ suites 5
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 325.250333

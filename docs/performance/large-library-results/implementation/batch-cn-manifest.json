@@ -1,0 +1,15 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cn-audit-writer.patch": "9ea9f5c9b4234e523c12d223e7bfd3edd40b2a7b877ba96425417192d50e13a8",
+    "batch-cn-build.log": "82fe7a4b15607a62d7201ebd43d36af306dba61e887bab64e76f9c4392bfbf93",
+    "batch-cn-full.log": "db6249491d28578cb09aa1fbf3e1971320a9eec7c82a157b12dc8c42cc957f49",
+    "batch-cn-review.md": "f36a98d346a10b7fff2e49d4e22d4c482027aa4f490f253b730c83ea5557e5fc",
+    "batch-cn-target.log": "f29fa8ae2446bf42c105bad928d1a0cfa1399cbda86179a8e8ae0752a9e03c13"
+  },
+  "notes": [
+    "Selected cumulative patch depends on previous batches.",
+    "56 focused; full2561pass1skip0fail; build terminal0.",
+    "Writer and entries finish available, startup recovery wired; production scanner streaming not active; full15/42 incomplete."
+  ]
+}

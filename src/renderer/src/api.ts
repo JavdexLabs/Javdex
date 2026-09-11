@@ -1,12 +1,14 @@
 // Thin convenience wrapper around the preload-exposed window.api.
+import { imageThumbnailUrl, type ImageThumbnailSize } from '@shared/imageVariants'
 export const api = window.api
 
 /** Convert a stored relative asset path into a media:// URL the renderer can load. */
-export function assetUrl(relPath: string | null | undefined): string | null {
+export function assetUrl(relPath: string | null | undefined, size?: ImageThumbnailSize): string | null {
   if (!relPath) return null
   // Stored as e.g. "covers/abc.jpg" -> media://covers/abc.jpg
   const normalized = relPath.replace(/\\/g, '/').replace(/^\/+/, '')
-  return `media://${normalized}`
+  const url = `media://${normalized}`
+  return size === undefined ? url : imageThumbnailUrl(url, size)
 }
 
 /** Resolve a stored asset path or remote URL for display. */

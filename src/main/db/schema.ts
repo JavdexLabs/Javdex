@@ -532,6 +532,148 @@ CREATE INDEX IF NOT EXISTS idx_library_root_cleanup_jobs_library_state
 INSERT OR IGNORE INTO media_library_scan_state (library_id) VALUES (1);
 `
 
+/**
+ * Scan audit storage/state constraints only: audit business fields and writer/page byte
+ * budgets remain reader/writer responsibilities. No payload-size ceiling here.
+ * Publishing requires the run's terminal update first, in the same transaction;
+ * these triggers cannot enforce that callers use one transaction for both steps.
+ */
+export const SCAN_AUDIT_ENTRIES_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS library_scan_audit_manifests (
+    run_id TEXT NOT NULL PRIMARY KEY REFERENCES library_scan_runs(id) ON DELETE CASCADE,
+    format_version INTEGER NOT NULL DEFAULT 1 CHECK(typeof(format_version) = 'integer' AND format_version = 1),
+    state TEXT NOT NULL DEFAULT 'collecting'
+        CHECK(state IN ('collecting', 'sealed', 'published', 'abandoned')),
+    meta_json TEXT NOT NULL CHECK(json_valid(meta_json) AND json_type(meta_json) = 'object'),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sealed_at TEXT,
+    published_at TEXT,
+    CHECK(
+        (state = 'collecting' AND sealed_at IS NULL AND published_at IS NULL)
+        OR (state = 'sealed' AND sealed_at IS NOT NULL AND length(sealed_at) > 0 AND published_at IS NULL)
+        OR (state = 'published' AND sealed_at IS NOT NULL AND length(sealed_at) > 0
+            AND published_at IS NOT NULL AND length(published_at) > 0)
+        OR (state = 'abandoned' AND published_at IS NULL)
+    )
+);
+
+CREATE TABLE IF NOT EXISTS library_scan_audit_entries (
+    run_id TEXT NOT NULL REFERENCES library_scan_audit_manifests(run_id) ON DELETE CASCADE,
+    section TEXT NOT NULL CHECK(section IN (
+        'files', 'removedResources', 'promotedResources', 'deletedVideos', 'pendingGroups'
+    )),
+    ordinal INTEGER NOT NULL CHECK(typeof(ordinal) = 'integer' AND ordinal >= 0 AND ordinal <= 9007199254740991),
+    entry_key TEXT,
+    entry_json TEXT NOT NULL CHECK(json_valid(entry_json) AND json_type(entry_json) = 'object'),
+    entry_bytes INTEGER NOT NULL CHECK(typeof(entry_bytes) = 'integer'
+        AND entry_bytes = length(CAST(entry_json AS BLOB))),
+    PRIMARY KEY(run_id, section, ordinal),
+    UNIQUE(run_id, section, entry_key),
+    CHECK(
+        (section = 'files' AND entry_key IS NOT NULL AND length(entry_key) > 0)
+        OR (section <> 'files' AND entry_key IS NULL)
+    )
+) WITHOUT ROWID;
+
+CREATE TRIGGER IF NOT EXISTS library_scan_audit_manifest_insert_guard
+BEFORE INSERT ON library_scan_audit_manifests
+BEGIN
+    SELECT RAISE(ABORT, 'Audit manifest must start collecting on a running JSON-free run')
+    WHERE NEW.state <> 'collecting'
+        OR EXISTS (SELECT 1 FROM library_scan_audit_manifests WHERE run_id = NEW.run_id)
+        OR NOT EXISTS (
+            SELECT 1 FROM library_scan_runs
+            WHERE id = NEW.run_id AND status = 'running' AND audit_json IS NULL
+        );
+END;
+
+CREATE TRIGGER IF NOT EXISTS library_scan_audit_manifest_update_guard
+BEFORE UPDATE ON library_scan_audit_manifests
+BEGIN
+    SELECT RAISE(ABORT, 'Audit manifest identity is immutable')
+    WHERE NEW.run_id IS NOT OLD.run_id OR NEW.format_version IS NOT OLD.format_version
+        OR NEW.created_at IS NOT OLD.created_at;
+    SELECT RAISE(ABORT, 'Invalid audit manifest transition')
+    WHERE NOT (
+        (OLD.state = 'collecting' AND NEW.state IN ('sealed', 'abandoned'))
+        OR (OLD.state = 'sealed' AND NEW.state IN ('published', 'abandoned'))
+        OR (OLD.state = 'collecting' AND NEW.state = 'collecting' AND NEW.meta_json IS NOT OLD.meta_json)
+    );
+    SELECT RAISE(ABORT, 'Audit metadata can only change while collecting on a running run')
+    WHERE NEW.meta_json IS NOT OLD.meta_json AND NOT (
+        OLD.state = 'collecting' AND NEW.state = 'collecting'
+        AND EXISTS (SELECT 1 FROM library_scan_runs WHERE id = OLD.run_id AND status = 'running')
+    );
+    SELECT RAISE(ABORT, 'Audit sealed timestamp is immutable after sealing')
+    WHERE OLD.state = 'sealed' AND NEW.sealed_at IS NOT OLD.sealed_at;
+    SELECT RAISE(ABORT, 'Abandoning cannot set a sealed timestamp')
+    WHERE OLD.state = 'collecting' AND NEW.state = 'abandoned' AND NEW.sealed_at IS NOT OLD.sealed_at;
+    SELECT RAISE(ABORT, 'Sealing requires a running run')
+    WHERE NEW.state = 'sealed'
+        AND NOT EXISTS (SELECT 1 FROM library_scan_runs WHERE id = OLD.run_id AND status = 'running');
+    SELECT RAISE(ABORT, 'Publishing requires a finished terminal run')
+    WHERE NEW.state = 'published' AND NOT EXISTS (
+        SELECT 1 FROM library_scan_runs WHERE id = OLD.run_id
+        AND status IN ('completed', 'failed', 'cancelled', 'unavailable')
+        AND finished_at IS NOT NULL AND length(finished_at) > 0
+    );
+END;
+
+CREATE TRIGGER IF NOT EXISTS library_scan_audit_manifest_delete_guard
+BEFORE DELETE ON library_scan_audit_manifests
+BEGIN
+    SELECT RAISE(ABORT, 'Only abandoned audit manifests can be deleted directly')
+    WHERE OLD.state <> 'abandoned' AND EXISTS (SELECT 1 FROM library_scan_runs WHERE id = OLD.run_id);
+END;
+
+CREATE TRIGGER IF NOT EXISTS library_scan_audit_entry_insert_guard
+BEFORE INSERT ON library_scan_audit_entries
+BEGIN
+    SELECT RAISE(ABORT, 'Audit entries require a collecting manifest and running run')
+    WHERE NOT EXISTS (
+        SELECT 1 FROM library_scan_audit_manifests m JOIN library_scan_runs r ON r.id = m.run_id
+        WHERE m.run_id = NEW.run_id AND m.state = 'collecting' AND r.status = 'running'
+    );
+END;
+
+CREATE TRIGGER IF NOT EXISTS library_scan_audit_entry_update_guard
+BEFORE UPDATE ON library_scan_audit_entries
+BEGIN
+    SELECT RAISE(ABORT, 'Audit entry identity is immutable')
+    WHERE NEW.run_id IS NOT OLD.run_id OR NEW.section IS NOT OLD.section
+        OR NEW.ordinal IS NOT OLD.ordinal OR NEW.entry_key IS NOT OLD.entry_key;
+    SELECT RAISE(ABORT, 'Audit entries require collecting manifests and running runs')
+    WHERE NOT EXISTS (
+        SELECT 1 FROM library_scan_audit_manifests m JOIN library_scan_runs r ON r.id = m.run_id
+        WHERE m.run_id = OLD.run_id AND m.state = 'collecting' AND r.status = 'running'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM library_scan_audit_manifests m JOIN library_scan_runs r ON r.id = m.run_id
+        WHERE m.run_id = NEW.run_id AND m.state = 'collecting' AND r.status = 'running'
+    );
+END;
+
+CREATE TRIGGER IF NOT EXISTS library_scan_audit_entry_delete_guard
+BEFORE DELETE ON library_scan_audit_entries
+BEGIN
+    SELECT RAISE(ABORT, 'Audit entry deletion requires a collecting manifest and running run')
+    WHERE EXISTS (SELECT 1 FROM library_scan_audit_manifests WHERE run_id = OLD.run_id)
+        AND NOT EXISTS (
+            SELECT 1 FROM library_scan_audit_manifests m JOIN library_scan_runs r ON r.id = m.run_id
+            WHERE m.run_id = OLD.run_id AND m.state = 'collecting' AND r.status = 'running'
+        );
+END;
+
+CREATE TRIGGER IF NOT EXISTS library_scan_audit_run_update_guard
+BEFORE UPDATE ON library_scan_runs
+BEGIN
+    SELECT RAISE(ABORT, 'Published audit runs are immutable')
+    WHERE EXISTS (SELECT 1 FROM library_scan_audit_manifests WHERE run_id = OLD.id AND state = 'published');
+    SELECT RAISE(ABORT, 'Audit entries and legacy JSON cannot coexist')
+    WHERE NEW.audit_json IS NOT NULL
+        AND EXISTS (SELECT 1 FROM library_scan_audit_manifests WHERE run_id = OLD.id);
+END;
+`
+
 /** Immutable pre-multi-library pending-scan schema used by the V11 migration. */
 export const LEGACY_PENDING_SCAN_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS pending_scan_groups (
@@ -679,6 +821,14 @@ CREATE INDEX IF NOT EXISTS idx_playlist_links_playlist
     ON playlist_links(playlist_id, position);
 `
 
+export const AGENT_RESOURCE_CLEANUP_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS agent_resource_cleanup (
+    run_id TEXT PRIMARY KEY,
+    requested_at TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+);
+`
+
 export const AGENT_PLATFORM_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS agent_runs (
     id TEXT PRIMARY KEY,
@@ -698,6 +848,8 @@ CREATE TABLE IF NOT EXISTS agent_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_runs_status_updated
     ON agent_runs(status, updated_at);
+
+${AGENT_RESOURCE_CLEANUP_SCHEMA_SQL}
 
 CREATE TABLE IF NOT EXISTS agent_operations (
     id TEXT PRIMARY KEY,
@@ -1128,7 +1280,7 @@ CREATE TABLE IF NOT EXISTS video_tag (
     FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
     FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_video_tag_tag_id ON video_tag(tag_id);
+CREATE INDEX IF NOT EXISTS idx_video_tag_tag_id ON video_tag(tag_id,origin);
 CREATE INDEX IF NOT EXISTS idx_video_tag_origin ON video_tag(origin);
 
 ${VIDEO_SOURCES_SCHEMA_SQL}
@@ -1308,6 +1460,8 @@ ${PENDING_RESOURCE_IDENTITIES_SCHEMA_SQL}
 ${PENDING_VIDEO_SCRAPES_SCHEMA_SQL}
 
 ${MEDIA_LIBRARY_SCAN_SCHEMA_SQL}
+
+${SCAN_AUDIT_ENTRIES_SCHEMA_SQL}
 
 ${RELATED_LINKS_SCHEMA_SQL}
 

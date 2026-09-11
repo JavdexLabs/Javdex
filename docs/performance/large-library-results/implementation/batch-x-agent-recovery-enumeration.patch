@@ -1,0 +1,837 @@
+diff --git a/src/main/agent-platform/agentRunStore.test.ts b/src/main/agent-platform/agentRunStore.test.ts
+index e4e26ac..901091d 100644
+--- a/src/main/agent-platform/agentRunStore.test.ts
++++ b/src/main/agent-platform/agentRunStore.test.ts
+@@ -93,7 +93,7 @@ describe('AgentRunStore', () => {
+       store.updateProductState('cancelled', 'cancelled', {})
+ 
+       assert.deepEqual(
+-        store.listRecoverableRuns().map((run) => run.id).sort(),
++        [...store.iterateRecoverableRuns('test-agent')].map((run) => run.id).sort(),
+         ['cancelled', 'created', 'failed', 'running', 'settled', 'waiting']
+       )
+     } finally {
+@@ -297,3 +297,149 @@ describe('AgentRunStore', () => {
+     }
+   })
+ })
++
++describe('Agent product journal pagination', () => {
++  it('reads the last cursor through the run/seq index without parsing any payload in a 100k journal', (t) => {
++    const { db, store } = createStore()
++    try {
++      store.createRun({ runId: 'large', useCase: 'test-agent', resolved: resolved(), productState: {} })
++      store.createRun({ runId: 'other', useCase: 'test-agent', resolved: resolved(), productState: {} })
++      assert.equal(store.getProductJournalCursor('large'), 0)
++      assert.equal(store.getProductJournalCursor('missing'), 0)
++      const insert = db.prepare(`INSERT INTO agent_product_journal
++        (run_id, event_type, payload_json, created_at) VALUES (?, 'test', ?, '2026-09-10')`)
++      db.transaction(() => {
++        for (let index = 0; index < 100_000; index++) insert.run('large', 'invalid JSON must not be decoded for a cursor')
++        insert.run('other', '{}')
++      })()
++      const parse = t.mock.method(JSON, 'parse', () => { throw new Error('unexpected payload parse') })
++      const prepare = t.mock.method(db, 'prepare')
++      assert.equal(store.getProductJournalCursor('large'), 100_000)
++      assert.equal(prepare.mock.callCount(), 1)
++      const sql = prepare.mock.calls[0].arguments[0]
++      assert.equal(/payload_json|SELECT\s+\*/i.test(sql), false)
++      const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all('large') as Array<{ detail: string }>
++      assert.ok(plan.some((row) => /COVERING INDEX idx_agent_product_journal_run_seq/.test(row.detail)))
++      assert.equal(plan.some((row) => /TEMP B-TREE|SCAN agent_product_journal/.test(row.detail)), false)
++      assert.equal(parse.mock.callCount(), 0)
++      parse.mock.restore()
++      assert.throws(() => store.readProductJournal('large', 99_999, 1), SyntaxError)
++    } finally {
++      t.mock.restoreAll()
++      db.close()
++    }
++  })
++
++  it('pages with a strict size cap and no cross-run, duplicate or skipped events despite sequence gaps', (t) => {
++    const { db, store } = createStore()
++    try {
++      store.createRun({ runId: 'paged', useCase: 'test-agent', resolved: resolved(), productState: {} })
++      store.createRun({ runId: 'other', useCase: 'test-agent', resolved: resolved(), productState: {} })
++      const expected: number[] = []
++      db.transaction(() => {
++        for (let index = 0; index < 1001; index++) {
++          expected.push(store.appendProductEvent('paged', undefined, 'test', { index }))
++          store.appendProductEvent('other', undefined, 'other', { index })
++        }
++      })()
++      const parse = t.mock.method(JSON, 'parse')
++      const first = store.readProductJournal<{ index: number }>('paged')
++      assert.equal(first.length, 500)
++      assert.equal(parse.mock.callCount(), 500)
++      const second = store.readProductJournal<{ index: number }>('paged', first.at(-1)!.seq)
++      const third = store.readProductJournal<{ index: number }>('paged', second.at(-1)!.seq)
++      assert.equal(second.length, 500)
++      assert.equal(third.length, 1)
++      const all = [...first, ...second, ...third]
++      assert.deepEqual(all.map((row) => row.seq), expected)
++      assert.deepEqual(all.map((row) => row.payload.index), Array.from({ length: 1001 }, (_, index) => index))
++      assert.ok(all.every((row) => row.runId === 'paged'))
++      assert.deepEqual(store.readProductJournal('paged', third[0].seq), [])
++      assert.equal(store.readProductJournal('paged', 0, 1).length, 1)
++      assert.deepEqual(store.readProductJournal('missing'), [])
++      for (const value of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
++        assert.throws(() => store.readProductJournal('paged', value), /cursor/)
++      }
++      for (const value of [0, -1, 0.5, 501, NaN, Infinity]) {
++        assert.throws(() => store.readProductJournal('paged', 0, value), /limit/)
++      }
++      assert.equal((db.prepare('SELECT COUNT(*) AS total FROM agent_product_journal').get() as { total: number }).total, 2002)
++    } finally {
++      t.mock.restoreAll()
++      db.close()
++    }
++  })
++})
++
++describe('Agent recovery enumeration', () => {
++  it('filters use case and status before parsing, lazily loads one product, and releases temporary ID pages', (t) => {
++    const { db, store } = createStore()
++    try {
++      const insert = db.prepare(`INSERT INTO agent_runs
++        (id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
++        VALUES (?,?,?,'test',?,'pi',?,'now',?)`)
++      db.transaction(() => {
++        for (let index = 0; index < 10_000; index++) {
++          insert.run(`other-${index}`, 'other', 'waiting_user', 'bad JSON', 'bad JSON', '0')
++          insert.run(`closed-${index}`, 'owned', 'closed', 'bad JSON', 'bad JSON', '0')
++        }
++        insert.run('settled', 'owned', 'settled', 'bad JSON', 'bad JSON', '0')
++        for (let index = 0; index < 260; index++) {
++          insert.run(`owned-${index}`, 'owned', 'waiting_user', '{}', JSON.stringify({ index }), String(1000 - index).padStart(4, '0'))
++        }
++      })()
++      const get = t.mock.method(store, 'getRun')
++      const iter = store.iterateRecoverableRuns('owned', ['waiting_user'])
++      assert.equal(get.mock.callCount(), 0)
++      assert.equal(iter.next().value!.id, 'owned-259')
++      assert.equal(get.mock.callCount(), 1)
++      assert.equal((db.prepare("SELECT COUNT(*) AS total FROM sqlite_temp_master WHERE name LIKE 'agent_restore_%'")
++        .get() as { total: number }).total, 1)
++      iter.return(undefined)
++      assert.equal((db.prepare("SELECT COUNT(*) AS total FROM sqlite_temp_master WHERE name LIKE 'agent_restore_%'")
++        .get() as { total: number }).total, 0)
++      assert.equal([...store.iterateRecoverableRuns('owned', ['waiting_user'])].length, 260)
++      assert.equal(get.mock.callCount(), 261, 'only the one early result plus owned eligible records are parsed')
++      assert.deepEqual([...store.iterateRecoverableRunIds('owned', ['settled'])], ['settled'], 'ID-only cleanup must not parse corrupt payloads')
++      assert.deepEqual([...store.iterateRecoverableRuns('owned', [])], [])
++    } finally {
++      t.mock.restoreAll()
++      db.close()
++    }
++  })
++
++  it('keeps the original recovery order across pages while timestamps change and excludes runs created mid-iteration', () => {
++    const { db, store } = createStore()
++    try {
++      for (let index = 0; index < 260; index++) {
++        store.createRun({ runId: `run-${index}`, useCase: 'owned', resolved: resolved(), productState: {} })
++        db.prepare('UPDATE agent_runs SET updated_at = ? WHERE id = ?').run(String(1000 - index).padStart(4, '0'), `run-${index}`)
++      }
++      const seen: string[] = []
++      for (const run of store.iterateRecoverableRuns('owned')) {
++        seen.push(run.id)
++        store.updateProductState(run.id, 'waiting_user', { restored: true })
++        if (seen.length === 1) {
++          store.createRun({ runId: 'new-run', useCase: 'owned', resolved: resolved(), productState: {} })
++          store.closeRun('run-0')
++        }
++      }
++      assert.deepEqual(seen, Array.from({ length: 259 }, (_, index) => `run-${259 - index}`))
++      assert.equal(new Set(seen).size, 259)
++      assert.equal((db.prepare("SELECT COUNT(*) AS total FROM sqlite_temp_master WHERE name LIKE 'agent_restore_%'")
++        .get() as { total: number }).total, 0)
++      assert.throws(() => [...store.iterateRecoverableRuns(' ')], /must not be empty/)
++    } finally { db.close() }
++  })
++
++  it('drops the temporary snapshot if an owned payload cannot be parsed', () => {
++    const { db, store } = createStore()
++    try {
++      store.createRun({ runId: 'bad-owned', useCase: 'owned', resolved: resolved(), productState: {} })
++      db.prepare("UPDATE agent_runs SET product_state_json = 'bad JSON' WHERE id = 'bad-owned'").run()
++      assert.throws(() => [...store.iterateRecoverableRuns('owned')], SyntaxError)
++      assert.equal((db.prepare("SELECT COUNT(*) AS total FROM sqlite_temp_master WHERE name LIKE 'agent_restore_%'")
++        .get() as { total: number }).total, 0)
++    } finally { db.close() }
++  })
++})
+diff --git a/src/main/agent-platform/agentRunStore.ts b/src/main/agent-platform/agentRunStore.ts
+index a6a50e5..92db76a 100644
+--- a/src/main/agent-platform/agentRunStore.ts
++++ b/src/main/agent-platform/agentRunStore.ts
+@@ -199,13 +199,37 @@ export class AgentRunStore {
+     `).run(json(snapshot), snapshot.revision, now(), runId)
+   }
+ 
+-  listRecoverableRuns(): AgentRunRecord[] {
+-    const rows = this.database().prepare(`
+-      SELECT * FROM agent_runs
+-      WHERE status <> 'closed'
+-      ORDER BY updated_at ASC
+-    `).all() as RunRow[]
+-    return rows.map((row) => toRun(row))
++  *iterateRecoverableRunIds(useCase: string, statuses?: readonly AgentRunStatus[]): Generator<string> {
++    if (!useCase.trim()) throw new Error('Agent use case must not be empty')
++    if (statuses?.length === 0) return
++    const db = this.database()
++    const table = `agent_restore_${randomUUID().replaceAll('-', '')}`
++    const statusFilter = statuses ? ` AND status IN (${statuses.map(() => '?').join(',')})` : ''
++    // Snapshot only IDs in SQLite. Preserve updated_at order while recovery
++    // updates those timestamps, without retaining every product/config in JS.
++    db.exec(`CREATE TEMP TABLE ${table} (position INTEGER PRIMARY KEY, id TEXT NOT NULL)`)
++    try {
++      db.prepare(`INSERT INTO ${table} (id) SELECT id FROM agent_runs
++        WHERE use_case = ? AND status <> 'closed'${statusFilter} ORDER BY updated_at ASC, rowid ASC`)
++        .run(useCase, ...(statuses ?? []))
++      const statement = db.prepare(`SELECT position, id FROM ${table} WHERE position > ? ORDER BY position LIMIT 128`)
++      let after = 0
++      while (true) {
++        const rows = statement.all(after) as Array<{ position: number; id: string }>
++        if (rows.length === 0) return
++        for (const row of rows) yield row.id
++        after = rows[rows.length - 1].position
++      }
++    } finally { db.exec(`DROP TABLE ${table}`) }
++  }
++
++  *iterateRecoverableRuns(useCase: string, statuses?: readonly AgentRunStatus[]): Generator<AgentRunRecord> {
++    for (const id of this.iterateRecoverableRunIds(useCase, statuses)) {
++      const record = this.getRun(id)
++      // A previous asynchronous recovery may have closed a later run.
++      if (record && record.useCase === useCase && record.status !== 'closed' &&
++        (!statuses || statuses.includes(record.status))) yield record
++    }
+   }
+ 
+   findLatestRun<ProductState = Record<string, unknown>>(useCase: string): AgentRunRecord<ProductState> | null {
+@@ -223,6 +247,21 @@ export class AgentRunStore {
+     `).run(status, json(state), now(), runId)
+   }
+ 
++  /** Build and commit a state together with any journal appends made by the synchronous builder. */
++  updateProductStateFrom<ProductState extends Record<string, unknown>>(
++    runId: string,
++    status: AgentRunStatus,
++    build: (current: AgentRunRecord<ProductState>) => ProductState
++  ): ProductState {
++    return this.database().transaction(() => {
++      const current = this.getRun<ProductState>(runId)
++      if (!current) throw new Error('Agent run does not exist')
++      const next = build(current)
++      this.updateProductState(runId, status, next)
++      return next
++    })()
++  }
++
+   acceptOperation(input: {
+     runId: string
+     operationId?: string
+@@ -312,14 +351,26 @@ export class AgentRunStore {
+     return Number(result.lastInsertRowid)
+   }
+ 
++  getProductJournalCursor(runId: string): number {
++    const row = this.database().prepare(`
++      SELECT seq FROM agent_product_journal
++      WHERE run_id = ? ORDER BY seq DESC LIMIT 1
++    `).get(runId) as { seq: number } | undefined
++    return row?.seq ?? 0
++  }
++
+   readProductJournal<Event = Record<string, unknown>>(
+     runId: string,
+-    afterSeq = 0
++    afterSeq = 0,
++    limit = 500,
++    throughSeq = Number.MAX_SAFE_INTEGER
+   ): AgentJournalRecord<Event>[] {
++    if (!Number.isSafeInteger(afterSeq) || afterSeq < 0 || !Number.isSafeInteger(throughSeq) || throughSeq < afterSeq) throw new Error('Invalid journal cursor')
++    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error('Journal page limit must be between 1 and 500')
+     const rows = this.database().prepare(`
+       SELECT seq, run_id, operation_id, event_type, payload_json, created_at
+-      FROM agent_product_journal WHERE run_id = ? AND seq > ? ORDER BY seq ASC
+-    `).all(runId, afterSeq) as Array<{
++      FROM agent_product_journal WHERE run_id = ? AND seq > ? AND seq <= ? ORDER BY seq ASC LIMIT ?
++    `).all(runId, afterSeq, throughSeq, limit) as Array<{
+       seq: number; run_id: string; operation_id: string | null; event_type: string; payload_json: string; created_at: string
+     }>
+     return rows.map((row) => ({
+diff --git a/src/main/services/agentMetadata/agentMetadataCollection.ts b/src/main/services/agentMetadata/agentMetadataCollection.ts
+index 32ab202..a1d1b5d 100644
+--- a/src/main/services/agentMetadata/agentMetadataCollection.ts
++++ b/src/main/services/agentMetadata/agentMetadataCollection.ts
+@@ -474,14 +474,13 @@ export class AgentMetadataCollection {
+   snapshot(runId: string): AgentMetadataSnapshot | null {
+     const active = this.active.get(runId)
+     if (!active) return null
+-    const journal = agentRunStore.readProductJournal(runId)
+     const draft = active.state.draftId
+       ? agentMetadataDraftService.getDraft(active.state.draftId) ?? undefined
+       : undefined
+     return {
+       runId,
+       revision: active.state.revision,
+-      cursor: journal.at(-1)?.seq ?? 0,
++      cursor: agentRunStore.getProductJournalCursor(runId),
+       target: structuredClone(active.state.target),
+       phase: active.state.phase,
+       summary: active.state.summary,
+@@ -495,7 +494,7 @@ export class AgentMetadataCollection {
+ 
+   async restoreRecoverableRuns(): Promise<Array<{ runId: string; error: string }>> {
+     const failures: Array<{ runId: string; error: string }> = []
+-    for (const record of agentRunStore.listRecoverableRuns()) {
++    for (const record of agentRunStore.iterateRecoverableRuns('metadata-collector')) {
+       if (record.useCase !== 'metadata-collector' || this.active.has(record.id)) continue
+       try {
+         const state = record.productState as AgentMetadataProductState
+diff --git a/src/main/services/libraryCuratorAgent/libraryCurator.ts b/src/main/services/libraryCuratorAgent/libraryCurator.ts
+index 8f03a57..21b5b32 100644
+--- a/src/main/services/libraryCuratorAgent/libraryCurator.ts
++++ b/src/main/services/libraryCuratorAgent/libraryCurator.ts
+@@ -253,7 +253,7 @@ export class LibraryCurator {
+ 
+   async restoreRecoverableRuns(): Promise<Array<{ runId: string; error: string }>> {
+     const failures: Array<{ runId: string; error: string }> = []
+-    for (const record of agentRunStore.listRecoverableRuns()) {
++    for (const record of agentRunStore.iterateRecoverableRuns('library-curator')) {
+       if (record.useCase !== 'library-curator' || this.active.has(record.id)) continue
+       try {
+         const state = record.productState as LibraryCuratorProductState
+@@ -298,8 +298,7 @@ export class LibraryCurator {
+     const id = runId ?? agentRunStore.findLatestRun<LibraryCuratorProductState>('library-curator')?.id
+     const active = id ? this.active.get(id) : undefined
+     if (!id || !active) return null
+-    const journal = agentRunStore.readProductJournal(id)
+-    return { ...result(id, active), cursor: journal.at(-1)?.seq ?? 0 }
++    return { ...result(id, active), cursor: agentRunStore.getProductJournalCursor(id) }
+   }
+ 
+   async dispose(): Promise<void> {
+diff --git a/src/main/services/playlistImport/playlistImportModule.ts b/src/main/services/playlistImport/playlistImportModule.ts
+index 2ced356..576135b 100644
+--- a/src/main/services/playlistImport/playlistImportModule.ts
++++ b/src/main/services/playlistImport/playlistImportModule.ts
+@@ -292,8 +292,8 @@ function provisionalSnapshot(
+ 
+ export async function createPlaylistImportModule(): Promise<PlaylistImportModule> {
+   const { playlistImportRunDriver } = await import('./playlistImportRunDriver')
+-  for (const run of agentRunStore.listRecoverableRuns()) {
+-    if (run.useCase === 'playlist-importer') agentRunStore.closeRun(run.id)
++  for (const id of agentRunStore.iterateRecoverableRunIds('playlist-importer')) {
++    agentRunStore.closeRun(id)
+   }
+   return new PlaylistImportModuleImpl(getDb, playlistImportRunDriver)
+ }
+diff --git a/src/main/services/pluginDevAgent/pluginDeveloper.test.ts b/src/main/services/pluginDevAgent/pluginDeveloper.test.ts
+index 624248c..e7f3aa1 100644
+--- a/src/main/services/pluginDevAgent/pluginDeveloper.test.ts
++++ b/src/main/services/pluginDevAgent/pluginDeveloper.test.ts
+@@ -11,12 +11,12 @@ import type {
+   PluginDevUserResponse
+ } from '@shared/pluginDevTypes'
+ import type { ScraperPluginPackage } from '@shared/scraperPluginTypes'
+-import { agentExecution } from '../../agent-platform/agentExecution'
++import { AgentExecution, agentExecution } from '../../agent-platform/agentExecution'
+ import type { AgentRunRecord } from '../../agent-platform/agentRunStore'
+ import { agentRunStore } from '../../agent-platform/agentRunStore'
+ import { setCacheAffinityDeviceKeyForTests } from '../../agent-platform/cacheAffinity'
+ import { toolHost } from '../../agent-platform/toolHost'
+-import { closeDatabase, initDatabaseAtPath } from '../../db/database'
++import { closeDatabase, getDb, initDatabaseAtPath } from '../../db/database'
+ import type {
+   HostedToolBinding,
+   PersistedRunConfigurationSnapshot,
+@@ -26,6 +26,7 @@ import type {
+   RuntimeObservation
+ } from '../../agent-platform/types'
+ import { PluginDeveloper } from './pluginDeveloper'
++import { buildPluginDevAgentWorkLogFromSnapshot } from './workLog'
+ import {
+   createSession,
+   deleteSession
+@@ -154,6 +155,8 @@ interface TestActiveRun {
+ 
+ interface TestablePluginDeveloper {
+   active: Map<string, TestActiveRun>
++  emitDomainEvent(active: TestActiveRun, event: PluginDevAgentEvent): void
++  restoreSession(runId: string, state: Record<string, unknown>): PluginDevSession
+   materializeWorkspace(session: PluginDevSession, input: PluginDevAgentStartInput): void
+   runtimeNotify(active: TestActiveRun, event: RuntimeObservation): void
+   runtimeProject(
+@@ -327,8 +330,8 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
+     }
+     const restoreList = replaceMethod(
+       agentRunStore,
+-      'listRecoverableRuns',
+-      (() => records) as typeof agentRunStore.listRecoverableRuns
++      'iterateRecoverableRunIds',
++      (function* () { yield* records.filter((record) => record.useCase === 'plugin-developer').map((record) => record.id) }) as typeof agentRunStore.iterateRecoverableRunIds
+     )
+     const restoreClose = replaceMethod(agentExecution, 'closeRun', (async (runId) => {
+       closed.push(runId)
+@@ -372,8 +375,8 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
+     let closeCalls = 0
+     const restoreList = replaceMethod(
+       agentRunStore,
+-      'listRecoverableRuns',
+-      (() => []) as typeof agentRunStore.listRecoverableRuns
++      'iterateRecoverableRunIds',
++      (function* () {}) as typeof agentRunStore.iterateRecoverableRunIds
+     )
+     const restoreClose = replaceMethod(agentExecution, 'closeRun', (async () => {
+       closeCalls += 1
+@@ -427,8 +430,8 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
+     testable(developer).active.set(running.id, activeRun(running))
+     const restoreList = replaceMethod(
+       agentRunStore,
+-      'listRecoverableRuns',
+-      (() => records) as typeof agentRunStore.listRecoverableRuns
++      'iterateRecoverableRunIds',
++      (function* () { yield* records.filter((record) => record.useCase === 'plugin-developer').map((record) => record.id) }) as typeof agentRunStore.iterateRecoverableRunIds
+     )
+     const restoreGet = replaceMethod(
+       agentRunStore,
+@@ -597,10 +600,19 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
+       'updateProductState',
+       (() => undefined) as typeof agentRunStore.updateProductState
+     )
++    let journalSeq = 0
++    const restoreCursor = replaceMethod(agentRunStore, 'getProductJournalCursor', () => journalSeq)
++    const restoreTransition = replaceMethod(agentRunStore, 'updateProductStateFrom', ((
++      _runId: string, _status: string, build: (current: AgentRunRecord) => Record<string, unknown>
++    ) => {
++      const next = build(record)
++      record.productState = next as typeof productState
++      return next
++    }) as typeof agentRunStore.updateProductStateFrom)
+     const restoreAppend = replaceMethod(
+       agentRunStore,
+       'appendProductEvent',
+-      (() => 0) as typeof agentRunStore.appendProductEvent
++      (() => ++journalSeq) as typeof agentRunStore.appendProductEvent
+     )
+     const restoreOpen = replaceMethod(
+       agentExecution,
+@@ -637,6 +649,8 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
+       restoreConfiguration()
+       restoreOpen()
+       restoreAppend()
++      restoreTransition()
++      restoreCursor()
+       restoreUpdate()
+       restoreGetRun()
+       testable(developer).active.delete(runId)
+@@ -1739,3 +1753,145 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
+     }
+   })
+ })
++
++it('uses the indexed journal cursor for active and persisted plugin snapshots', (t) => {
++  const developer = new PluginDeveloper()
++  const session = createSession({ ...input, package: structuredClone(packageValue) }, 'snapshot-cursor')
++  testable(developer).active.set(session.id, activeRun(session))
++  const cursor = t.mock.method(agentRunStore, 'getProductJournalCursor', () => 12345)
++  t.mock.method(toolHost, 'pendingApprovals', () => [])
++  t.mock.method(agentRunStore, 'readProductJournal', () => { throw new Error('snapshot must not load the journal') })
++  try {
++    const snapshot = developer.getSnapshot(session.id)
++    assert.equal(snapshot?.cursor, 12345)
++    assert.equal(cursor.mock.callCount(), 1)
++    assert.equal(cursor.mock.calls[0].arguments[0], session.id)
++    assert.deepEqual(snapshot?.workLog, [])
++    testable(developer).active.delete(session.id)
++    const record: AgentRunRecord = {
++      id: session.id, useCase: 'plugin-developer', status: 'settled', configRevision: 'test',
++      configSnapshot: frozenSnapshot(), recoveryGeneration: 0, createdAt: '', updatedAt: '',
++      productState: {
++        schemaVersion: 1, input, status: 'completed', package: packageValue, runTargets: [],
++        summary: 'finished', phase: 'ready', step: 1, totalTokens: 17, workLog: []
++      }
++    }
++    t.mock.method(agentRunStore, 'getRun', (() => record) as typeof agentRunStore.getRun)
++    const persisted = developer.getSnapshot(session.id)
++    assert.equal(persisted?.cursor, 12345)
++    assert.equal(persisted?.result.status, 'completed')
++    assert.equal(cursor.mock.callCount(), 2)
++  } finally {
++    t.mock.restoreAll()
++    deleteSession(session.id)
++  }
++})
++
++
++it('preserves incremental logs across stale-runtime cancellation, cold snapshot, restore and export', async (t) => {
++  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-plugin-log-integration-'))
++  initDatabaseAtPath(path.join(directory, 'test.sqlite'))
++  const developer = new PluginDeveloper()
++  const session = createSession({ ...input, package: structuredClone(packageValue) }, 'incremental-domain-log')
++  const active = activeRun(session)
++  testable(developer).active.set(session.id, active)
++  const execution = new AgentExecution(agentRunStore, async () => ({
++    runtimeId: 'pi',
++    open: async () => ({
++      source: 'restored',
++      session: {
++        ref: { runtimeId: 'pi', sessionId: 'test', sessionFile: path.join(directory, 'runtime.jsonl'), codecVersion: 1 },
++        dispatch: async () => ({ accepted: true }), requestManualCompaction: async () => ({ accepted: true }),
++        abort: async () => {}, dispose: async () => {}
++      }
++    }),
++    rebuild: async () => { throw new Error('unexpected rebuild') }
++  }))
++  try {
++    const db = getDb()
++    db.prepare(`INSERT INTO agent_runs
++      (id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
++      VALUES (?,'plugin-developer','running','test',?,'pi',?,'now','now')`)
++      .run(session.id, JSON.stringify(frozenSnapshot()), JSON.stringify({ schemaVersion: 1, workLog: [] }))
++    const clone = globalThis.structuredClone
++    const guard = t.mock.method(globalThis, 'structuredClone', ((value: unknown) => {
++      assert.notEqual(value, session.workLog, 'event persistence must not clone the full work log')
++      return clone(value)
++    }) as typeof globalThis.structuredClone)
++    for (let index = 0; index < 1000; index++) {
++      testable(developer).emitDomainEvent(active, { type: 'step_start', sessionId: session.id, step: index })
++    }
++    guard.mock.restore()
++    const stored = agentRunStore.getRun(session.id)!.productState
++    assert.equal(stored.schemaVersion, 2)
++    assert.equal(Array.isArray(stored.workLog), false)
++    assert.equal((stored.workLog as { count: number }).count, 1000)
++    assert.equal((db.prepare("SELECT COUNT(*) AS total FROM agent_product_journal WHERE event_type = 'plugin.work_log_entry'")
++      .get() as { total: number }).total, 1000)
++    const frozen = frozenSnapshot()
++    await execution.openRun({ useCase: 'plugin-developer', productState: stored,
++      resume: agentRunStore.getRun(session.id)!,
++      resolved: { ...frozen, model: access('primary'), verifierModel: undefined, tools: [], sessionDirectory: directory }
++    })
++    // The runtime retains count=1000; this product event advances only durable state.
++    testable(developer).emitDomainEvent(active, { type: 'step_start', sessionId: session.id, step: 1000 })
++    const expected = structuredClone(session.workLog)
++    t.mock.method(agentExecution, 'abort', execution.abort.bind(execution))
++    t.mock.method(agentExecution, 'releaseRun', execution.releaseRun.bind(execution))
++    await developer.cancel(session.id)
++    const cancelled = agentRunStore.getRun(session.id)!
++    assert.equal(cancelled.status, 'cancelled')
++    assert.equal((cancelled.productState.workLog as { count: number }).count, 1001)
++    const snapshot = developer.getSnapshot(session.id)!
++    assert.deepEqual(snapshot.workLog, expected)
++    assert.equal(snapshot.events.length, 1001)
++    const exported = buildPluginDevAgentWorkLogFromSnapshot(snapshot)
++    assert.deepEqual(exported.entries, expected)
++    assert.equal(exported.timeline.length, 1001)
++    const restored = testable(developer).restoreSession(session.id, cancelled.productState)
++    assert.deepEqual(restored.workLog, expected)
++    testable(developer).emitDomainEvent(activeRun(restored), { type: 'step_start', sessionId: restored.id, step: 1001 })
++    assert.equal((agentRunStore.getRun(restored.id)!.productState.workLog as { count: number }).count, 1002)
++  } finally {
++    t.mock.restoreAll()
++    testable(developer).active.delete(session.id)
++    deleteSession(session.id)
++    await execution.dispose()
++    closeDatabase()
++    fs.rmSync(directory, { recursive: true, force: true })
++  }
++})
++
++it('keeps the migrated work log reference when runtime reopen fails during recovery', async (t) => {
++  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-plugin-log-recovery-'))
++  initDatabaseAtPath(path.join(directory, 'test.sqlite'))
++  const developer = new PluginDeveloper()
++  const id = 'log-recovery-failure'
++  const legacy = [{ at: '2026-09-10T00:00:00Z', kind: 'user_message', sessionId: id, source: 'start', text: 'keep this message' }]
++  const frozen = frozenSnapshot()
++  try {
++    getDb().prepare(`INSERT INTO agent_runs
++      (id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
++      VALUES (?,'plugin-developer','waiting_user','test',?,'pi',?,'now','now')`)
++      .run(id, JSON.stringify(frozen), JSON.stringify({
++        schemaVersion: 1, input, package: packageValue, status: 'waiting_user', phase: 'working',
++        step: 1, totalTokens: 0, modelTurnCount: 0, discoveryToolCalls: 0, runTargets: [], summary: 'old', workLog: legacy
++      }))
++    t.mock.method(testable(developer), 'materializeWorkspace', () => {})
++    t.mock.method(testable(developer), 'restoredConfiguration', () => ({
++      ...frozen, model: access('primary'), verifierModel: undefined, tools: [], sessionDirectory: directory
++    }))
++    t.mock.method(agentExecution, 'openRun', async () => { throw new Error('restore open failure') })
++    assert.deepEqual(await developer.restoreRecoverableRuns(), [{ runId: id, error: 'restore open failure' }])
++    const current = agentRunStore.getRun(id)!
++    assert.equal(current.productState.schemaVersion, 2)
++    assert.equal(current.productState.recoveryBlocked, true)
++    assert.equal(Array.isArray(current.productState.workLog), false)
++    assert.deepEqual(developer.getSnapshot(id)?.workLog, legacy)
++  } finally {
++    t.mock.restoreAll()
++    deleteSession(id)
++    closeDatabase()
++    fs.rmSync(directory, { recursive: true, force: true })
++  }
++})
+diff --git a/src/main/services/pluginDevAgent/pluginDeveloper.ts b/src/main/services/pluginDevAgent/pluginDeveloper.ts
+index aa70960..22ac359 100644
+--- a/src/main/services/pluginDevAgent/pluginDeveloper.ts
++++ b/src/main/services/pluginDevAgent/pluginDeveloper.ts
+@@ -49,6 +49,7 @@ import {
+ } from './sessionStore'
+ import { createPluginDeveloperToolHandlers } from './toolPack'
+ import type { PluginDevSession } from './types'
++import { appendPluginWorkLog, readPluginWorkLog, type PersistedPluginWorkLog } from './workLogPersistence'
+ import { pluginArtifactHash } from './pluginArtifact'
+ import { isPluginExecutionUnmatchedTargets } from './pluginExecution'
+ import { pluginWorkspace } from './pluginWorkspace'
+@@ -61,10 +62,12 @@ import {
+   releasePluginDeveloperBrowser
+ } from './toolExecutor'
+ 
+-const PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION = 1 as const
++const PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION = 2 as const
++
++function supportsProductStateVersion(version: unknown): boolean { return version === 1 || version === 2 }
+ 
+ interface PluginDeveloperProductState extends Record<string, unknown> {
+-  schemaVersion: typeof PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION
++  schemaVersion: 1 | typeof PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION
+   input: PluginDevAgentStartInput
+   status: PluginDevSession['status']
+   phase: PluginDevSession['phase']
+@@ -84,7 +87,7 @@ interface PluginDeveloperProductState extends Record<string, unknown> {
+   endedAt?: number
+   failureMessage?: string
+   summary: string
+-  workLog: PluginDevAgentWorkLogEntry[]
++  workLog: PersistedPluginWorkLog
+   recoveryBlocked?: boolean
+ }
+ 
+@@ -173,12 +176,12 @@ function adoptInstalledPackage(
+   return installed
+ }
+ 
+-function toProductState(
++function persistProductState(
+   session: PluginDevSession,
+   input: PluginDevAgentStartInput,
+   summary: string
+ ): PluginDeveloperProductState {
+-  return {
++  const state = {
+     schemaVersion: PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION,
+     input: structuredClone(input),
+     status: session.status,
+@@ -202,9 +205,15 @@ function toProductState(
+       : undefined,
+     endedAt: session.endedAt,
+     failureMessage: session.failureMessage,
+-    summary,
+-    workLog: structuredClone(session.workLog ?? [])
++    summary
+   }
++  // Before createRun there is no journal owner; the initial (usually single) user
++  // message stays inline. The first committed update migrates it atomically.
++  if (!agentRunStore.getRun(session.id)) return { ...state, workLog: structuredClone(session.workLog ?? []) }
++  return agentRunStore.updateProductStateFrom<PluginDeveloperProductState>(session.id, runStatus(session), (current) => ({
++    ...state,
++    workLog: appendPluginWorkLog(session.id, current.productState.workLog, session.workLog ?? [])
++  }))
+ }
+ 
+ function toResult(active: ActivePluginRun): PluginDevAgentSessionResult {
+@@ -444,11 +453,7 @@ export class PluginDeveloper {
+           }
+         })
+       }
+-      agentRunStore.updateProductState(
+-        active.session.id,
+-        runStatus(active.session),
+-        toProductState(active.session, active.input, active.summary)
+-      )
++      persistProductState(active.session, active.input, active.summary)
+     }
+   }
+ 
+@@ -754,7 +759,7 @@ export class PluginDeveloper {
+       this.scheduleTerminalRelease(active)
+     }
+     return {
+-      state: toProductState(session, active.input, active.summary),
++      state: persistProductState(session, active.input, active.summary),
+       status: runStatus(session)
+     }
+   }
+@@ -884,7 +889,7 @@ export class PluginDeveloper {
+     runId: AgentRunId,
+     state: PluginDeveloperProductState
+   ): PluginDevSession {
+-    if (state.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION || !state.input || !state.package) {
++    if (!supportsProductStateVersion(state.schemaVersion) || !state.input || !state.package) {
+       throw new Error('PluginDeveloper 产品快照版本不兼容')
+     }
+     const session = createSession(state.input, runId)
+@@ -908,7 +913,7 @@ export class PluginDeveloper {
+       : undefined
+     session.endedAt = state.endedAt
+     session.failureMessage = state.failureMessage
+-    session.workLog = structuredClone(state.workLog ?? [])
++    session.workLog = readPluginWorkLog(runId, state.workLog)
+     const acceptance = pluginRunAcceptance.evaluate({
+       package: session.package,
+       targets: session.runTargets,
+@@ -982,7 +987,7 @@ export class PluginDeveloper {
+ 
+   async restoreRecoverableRuns(): Promise<Array<{ runId: string; error: string }>> {
+     const failures: Array<{ runId: string; error: string }> = []
+-    for (const record of agentRunStore.listRecoverableRuns()) {
++    for (const record of agentRunStore.iterateRecoverableRuns('plugin-developer', [...PLUGIN_DEV_RECOVERABLE_RUN_STATUSES])) {
+       if (record.useCase !== 'plugin-developer' || this.active.has(record.id)) continue
+       if (!isRecoverablePluginDevRunStatus(record.status)) continue
+       let active: ActivePluginRun | undefined
+@@ -1017,15 +1022,11 @@ export class PluginDeveloper {
+         // Persist restore-time migrations before opening Pi. A healthy restored checkpoint is not
+         // required to emit another durable observation, so relying on runtime projection here can
+         // leave legacy verification/loop state in the durable product snapshot indefinitely.
+-        agentRunStore.updateProductState(
+-          record.id,
+-          runStatus(session),
+-          toProductState(session, state.input, active.summary)
+-        )
++        persistProductState(session, state.input, active.summary)
+         const opened = await agentExecution.openRun({
+           useCase: 'plugin-developer',
+           resolved,
+-          productState: toProductState(session, state.input, active.summary),
++          productState: persistProductState(session, state.input, active.summary),
+           resume: record,
+           notify: (event) => this.runtimeNotify(active!, event),
+           project: (event) => this.runtimeProject(active!, event)
+@@ -1051,7 +1052,7 @@ export class PluginDeveloper {
+         this.active.delete(record.id)
+         agentRunStore.interruptAcceptedOperations(record.id, message)
+         agentRunStore.updateProductState(record.id, 'failed', {
+-          ...record.productState,
++          ...(agentRunStore.getRun(record.id)?.productState ?? record.productState),
+           recoveryBlocked: true,
+           recoveryError: message
+         })
+@@ -1070,7 +1071,7 @@ export class PluginDeveloper {
+       throw new Error('会话不存在')
+     }
+     const state = record.productState
+-    if (state.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION || state.recoveryBlocked) {
++    if (!supportsProductStateVersion(state.schemaVersion) || state.recoveryBlocked) {
+       throw new Error(state.recoveryBlocked ? '会话恢复已被阻止' : '会话快照版本不兼容')
+     }
+     const session = this.restoreSession(runId, state)
+@@ -1106,15 +1107,11 @@ export class PluginDeveloper {
+         record.configSnapshot.model.descriptor
+       )
+       active.tools = resolved.tools
+-      agentRunStore.updateProductState(
+-        runId,
+-        'waiting_user',
+-        toProductState(session, state.input, active.summary)
+-      )
++      persistProductState(session, state.input, active.summary)
+       await agentExecution.openRun({
+         useCase: 'plugin-developer',
+         resolved,
+-        productState: toProductState(session, state.input, active.summary),
++        productState: persistProductState(session, state.input, active.summary),
+         resume: { ...record, status: 'waiting_user' },
+         notify: (event) => this.runtimeNotify(active, event),
+         project: (event) => this.runtimeProject(active, event)
+@@ -1133,10 +1130,10 @@ export class PluginDeveloper {
+     if (!active) {
+       const record = agentRunStore.getRun<PluginDeveloperProductState>(runId)
+       const state = record?.productState
+-      if (!record || record.useCase !== 'plugin-developer' || state?.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION) return null
+-      const workLog = structuredClone(state.workLog ?? [])
++      if (!record || record.useCase !== 'plugin-developer' || !state || !supportsProductStateVersion(state.schemaVersion)) return null
++      const workLog = readPluginWorkLog(runId, state.workLog)
+       return {
+-        cursor: agentRunStore.readProductJournal(runId).at(-1)?.seq ?? 0,
++        cursor: agentRunStore.getProductJournalCursor(runId),
+         input: structuredClone(state.input),
+         result: {
+           sessionId: runId,
+@@ -1163,9 +1160,8 @@ export class PluginDeveloper {
+           : undefined
+       }
+     }
+-    const journal = agentRunStore.readProductJournal(runId)
+     return {
+-      cursor: journal.at(-1)?.seq ?? 0,
++      cursor: agentRunStore.getProductJournalCursor(runId),
+       input: structuredClone(active.input),
+       result: structuredClone(toResult(active)),
+       phase: active.session.phase,
+@@ -1186,7 +1182,7 @@ export class PluginDeveloper {
+   assertReadyArtifact(sessionId: string, packageInput: PluginDevSession['package']): void {
+     const active = this.active.get(sessionId)
+     const record = active ? undefined : agentRunStore.getRun<PluginDeveloperProductState>(sessionId)
+-    if (!active && record?.productState.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION) {
++    if (!active && !supportsProductStateVersion(record?.productState.schemaVersion)) {
+       throw new Error('历史插件开发会话只读，不能用于当前安装门禁。')
+     }
+     const workspaceDraftError = active?.session.workspaceDraftError ?? record?.productState.workspaceDraftError
+@@ -1228,7 +1224,7 @@ export class PluginDeveloper {
+     }
+ 
+     const record = agentRunStore.getRun<PluginDeveloperProductState>(sessionId)
+-    if (!record || record.useCase !== 'plugin-developer' || record.productState.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION) {
++    if (!record || record.useCase !== 'plugin-developer' || !supportsProductStateVersion(record.productState.schemaVersion)) {
+       throw new Error('插件开发会话不存在或版本不兼容')
+     }
+     const gate = pluginRunAcceptance.evaluate({
+@@ -1409,7 +1405,7 @@ export class PluginDeveloper {
+         runId: session.id,
+         useCase: 'plugin-developer',
+         resolved,
+-        productState: toProductState(session, input, active.summary),
++        productState: persistProductState(session, input, active.summary),
+         notify: (event) => this.runtimeNotify(active, event),
+         project: (event) => this.runtimeProject(active, event)
+       })
+@@ -1520,11 +1516,7 @@ ${continuationPrompt}`
+         session.incrementalEditOnly = true
+         session.phase = 'working'
+       }
+-      agentRunStore.updateProductState(
+-        session.id,
+-        'running',
+-        toProductState(session, active.input, active.summary)
+-      )
++      persistProductState(session, active.input, active.summary)
+       this.emitDomainEvent(active, { type: 'step_start', sessionId: session.id, step: session.step })
+       const settled = this.waitForSettled(active)
+       const dispatched = await agentExecution.dispatch({
+@@ -1560,11 +1552,7 @@ ${continuationPrompt}`
+     try {
+       await agentExecution.abort(sessionId, '用户终止插件开发')
+     } finally {
+-      agentRunStore.updateProductState(
+-        sessionId,
+-        'cancelled',
+-        toProductState(active.session, active.input, active.summary)
+-      )
++      persistProductState(active.session, active.input, active.summary)
+       const waiter = active.waiter
+       active.waiter = undefined
+       waiter?.resolve(toResult(active))
+@@ -1575,9 +1563,7 @@ ${continuationPrompt}`
+   private collectPluginDevRunIds(): Set<string> {
+     const ids = new Set(
+       agentRunStore
+-        .listRecoverableRuns()
+-        .filter((record) => record.useCase === 'plugin-developer')
+-        .map((record) => record.id)
++        .iterateRecoverableRunIds('plugin-developer')
+     )
+     for (const runId of this.active.keys()) ids.add(runId)
+     return ids

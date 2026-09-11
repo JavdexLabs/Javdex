@@ -1,9 +1,9 @@
-import { useEffect, useMemo } from 'react'
-import { useInfiniteQuery } from '@tanstack/react-query'
-import type { ActressListItem, ActressListQuery, ActressListStatusCounts } from '@shared/actressTypes'
+import { useEffect } from 'react'
+import { useWindowedCatalog, type CatalogWindow } from './useWindowedCatalog'
+import { actressKeys } from './queryKeys'
+import type { ActressListQuery, ActressListStatusCounts } from '@shared/actressTypes'
+import { toActressCardPage, type ActressCard, type ActressCardPage } from '@shared/cardProjection'
 import { api } from '../api'
-import { flattenActressListPages } from './actressListPages'
-import { actressInfiniteQueryOptions } from './actressInfiniteQueryOptions'
 
 const EMPTY_STATUS_COUNTS: ActressListStatusCounts = {
   all: 0,
@@ -13,9 +13,12 @@ const EMPTY_STATUS_COUNTS: ActressListStatusCounts = {
 }
 
 export interface InfiniteActressListResult {
-  items: ActressListItem[]
+  window: CatalogWindow<ActressCard>
+  items: ActressCard[]
   total: number
   statusCounts: ActressListStatusCounts
+  error: unknown
+  retry: () => void
   loading: boolean
   loadingMore: boolean
   hasMore: boolean
@@ -31,38 +34,11 @@ export function useInfiniteActressList(
   queryHash: string,
   onError: (error: unknown) => void
 ): InfiniteActressListResult {
-  const stableQuery = useMemo(() => ({ ...query }), [query])
-  const result = useInfiniteQuery(
-    actressInfiniteQueryOptions(stableQuery, queryHash, api.actresses.listPage)
+  const result = useWindowedCatalog<ActressCard, ActressCardPage>(
+    actressKeys.list(query, queryHash), 240,
+    async offset => toActressCardPage(await api.actresses.listPage({ ...query, limit: 240, offset }))
   )
-
-  useEffect(() => {
-    if (result.isError && result.error) onError(result.error)
-  }, [result.isError, result.error, onError])
-
-  const items = useMemo(
-    () => flattenActressListPages(result.data?.pages ?? []),
-    [result.data]
-  )
-  const total = result.data?.pages[0]?.total ?? 0
-
-  return {
-    items,
-    total,
-    statusCounts: result.data?.pages[0]?.statusCounts ?? EMPTY_STATUS_COUNTS,
-    loading: result.isLoading && items.length === 0,
-    loadingMore: result.isFetchingNextPage,
-    hasMore: items.length < total,
-    nextPageError: result.isFetchNextPageError,
-    loadMore: () => {
-      if (result.hasNextPage && !result.isFetchingNextPage) void result.fetchNextPage()
-    },
-    retryLoadMore: () => {
-      if (!result.isFetchingNextPage) void result.fetchNextPage()
-    },
-    isFetching: result.isFetching,
-    refetchSilent: () => {
-      void result.refetch()
-    }
-  }
+  useEffect(() => { if (result.error) onError(result.error) }, [result.error, onError])
+  return { ...result, statusCounts: result.page?.statusCounts ?? EMPTY_STATUS_COUNTS,
+    loadingMore: result.isFetching && !result.loading, nextPageError: Boolean(result.error), retryLoadMore: result.retry }
 }

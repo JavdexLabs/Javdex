@@ -1,0 +1,9 @@
+{
+  "baselineCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "patchSha256": "3249db2f6654e9821976a6666802a6c12f438414de36a372c959548af5be5793",
+  "notes": [
+    "Diff is against HEAD and replaces overlapping earlier-batch files; not an incremental patch over batch D.",
+    "Keep the typed playlist IPC/preload/schema additions from batch D; this patch refines card projection and component behavior.",
+    "CSS wrapping refinement occurred after benchmark and full test run; CSS architecture check passed, visual verification remains pending."
+  ]
+}

@@ -17,3 +17,10 @@ export interface ActressAvatarAutoCropRequest extends ActressAvatarAutoCropTarge
 export interface ActressAvatarAutoCropResponse extends ActressAvatarAutoCropOutcome {
   requestId: string
 }
+
+
+export interface ActressAvatarCropTargetPage {
+  items: ActressAvatarAutoCropTarget[]
+  total: number
+  nextAfterId: number | null
+}

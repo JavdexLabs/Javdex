@@ -25,7 +25,75 @@ describe('Web read-only catalog scope', () => {
     delete process.env.JAVDEX_TEST_USER_DATA
     fs.rmSync(directory, { recursive: true, force: true })
   })
-  it('filters archived/hidden memberships for lists, details, images, and media', () => {
+  for (const change of ['hidden', 'archived', 'cover', 'cast', 'sample'] as const) {
+    it(`rechecks image authorization after async work when ${change} changes`, async (t) => {
+      const { videoId } = insertTestVideoWithFile(db, { code: 'ASYNC', filePath: '/video/async.mp4' })
+      db.prepare('UPDATE videos SET cover_path = ? WHERE id = ?').run('covers/old.png', videoId)
+      const actressId = Number(db.prepare("INSERT INTO actresses (main_name, avatar_path) VALUES ('Async', 'avatars/old.png')").run().lastInsertRowid)
+      db.prepare('INSERT INTO video_actress (video_id, actress_id) VALUES (?, ?)').run(videoId, actressId)
+      const assetId = Number(db.prepare("INSERT INTO video_assets (video_id, type, local_path) VALUES (?, 'sample', 'samples/old.png')").run(videoId).lastInsertRowid)
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => { release = resolve })
+      t.mock.method(mediaAssetStore, 'readForServeAsync', async () => {
+        await gate
+        return { body: Buffer.from('old image'), mime: 'image/png' }
+      })
+      const key = change === 'cast' ? `actress-${actressId}` : change === 'sample' ? String(assetId) : 'cover'
+      const result = catalog.image(videoId, key)
+      const rejected = assert.rejects(result, /图片/)
+      if (change === 'hidden') db.prepare('UPDATE library_video_memberships SET is_hidden = 1 WHERE video_id = ?').run(videoId)
+      else if (change === 'archived') db.prepare("UPDATE media_libraries SET status = 'archived'").run()
+      else if (change === 'cover') db.prepare("UPDATE videos SET cover_path = 'covers/new.png' WHERE id = ?").run(videoId)
+      else if (change === 'cast') db.prepare('DELETE FROM video_actress WHERE video_id = ?').run(videoId)
+      else db.prepare('DELETE FROM video_assets WHERE id = ?').run(assetId)
+      release()
+      await rejected
+    })
+  }
+
+  it('reads only the authorized image path before and after serving, without full details', async (t) => {
+    const { videoId } = insertTestVideoWithFile(db, { code: 'SLIM', filePath: '/video/slim.mp4', summary: 'large'.repeat(20000) })
+    db.prepare("UPDATE videos SET cover_path = 'covers/slim.png' WHERE id = ?").run(videoId)
+    const sql: string[] = []
+    const prepare = db.prepare.bind(db)
+    t.mock.method(db, 'prepare', (query: string) => { sql.push(query); return prepare(query) })
+    t.mock.method(mediaAssetStore, 'readForServeAsync', async () => ({ body: Buffer.from('image'), mime: 'image/png' }))
+    assert.equal((await catalog.image(videoId, 'cover')).body.toString(), 'image')
+    assert.equal(sql.length, 2)
+    assert.ok(sql.every((query) => query.startsWith('SELECT v.cover_path AS path')))
+    assert.ok(sql.every((query) => !query.includes('v.*')))
+  })
+
+  it('forwards thumbnail size through the real catalog while preserving original requests', async (t) => {
+    const { videoId } = insertTestVideoWithFile(db, { code: 'THUMB', filePath: '/video/thumb.mp4' })
+    db.prepare("UPDATE videos SET cover_path = 'covers/thumb.png' WHERE id = ?").run(videoId)
+    const read = t.mock.method(mediaAssetStore, 'readForServeAsync', async () => ({ body: Buffer.from('image'), mime: 'image/webp' }))
+    const abort = new AbortController()
+    await catalog.image(videoId, 'cover', abort.signal, 640)
+    assert.deepEqual(read.mock.calls[0].arguments, ['covers/thumb.png', abort.signal, 640])
+    await catalog.image(videoId, 'cover')
+    assert.deepEqual(read.mock.calls[1].arguments, ['covers/thumb.png', undefined, undefined])
+  })
+
+  it('forwards the caller signal to the async Store and drops a cancelled result', async (t) => {
+    const { videoId } = insertTestVideoWithFile(db, { code: 'CANCEL', filePath: '/video/cancel.mp4' })
+    db.prepare("UPDATE videos SET cover_path = 'covers/cancel.png' WHERE id = ?").run(videoId)
+    const abort = new AbortController()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    t.mock.method(mediaAssetStore, 'readForServeAsync', async (rel: string, signal?: AbortSignal) => {
+      assert.equal(rel, 'covers/cancel.png')
+      assert.equal(signal, abort.signal)
+      await gate
+      return { body: Buffer.from('image'), mime: 'image/png' }
+    })
+    const operation = catalog.image(videoId, 'cover', abort.signal)
+    const rejected = assert.rejects(operation, { name: 'AbortError' })
+    abort.abort()
+    release()
+    await rejected
+  })
+  it('filters archived/hidden memberships for lists, details, images, and media', async () => {
     const visible = insertTestVideoWithFile(db, {
       code: 'VISIBLE',
       filePath: '/private/movie.mp4',
@@ -54,7 +122,7 @@ describe('Web read-only catalog scope', () => {
     assert.equal(result.items[0].id, visible.videoId)
     for (const video of [hidden, archived]) {
       assert.throws(() => catalog.detail(video.videoId))
-      assert.throws(() => catalog.image(video.videoId, 'cover'))
+      await assert.rejects(() => catalog.image(video.videoId, 'cover'))
       assert.throws(() => catalog.media(video.videoId, video.fileId))
     }
     assert.equal(catalog.collections().libraries.length, 1)
@@ -68,7 +136,7 @@ describe('Web read-only catalog scope', () => {
     assert.equal(detail.resources[0].playable, false)
     assert.throws(() => catalog.media(visible.videoId, visible.fileId))
   })
-  it('describes local resources without exposing their directory', () => {
+  it('describes local resources without exposing their directory', async () => {
     const { videoId, fileId } = insertTestVideoWithFile(db, {
       code: 'RESOURCE', filePath: '/private/library/sample-CD1.mp4'
     })
@@ -83,7 +151,7 @@ describe('Web read-only catalog scope', () => {
     db.prepare('UPDATE video_resources SET display_name = ? WHERE id = ?').run('自定义版本', fileId)
     assert.equal(catalog.detail(videoId).resources[0].name, '自定义版本')
   })
-  it('uses the cover rather than the background for browse, detail and image requests', (t) => {
+  it('uses the cover rather than the background for browse, detail and image requests', async (t) => {
     const { videoId } = insertTestVideoWithFile(db, {
       code: 'ARTWORK',
       filePath: '/video/artwork.mp4'
@@ -91,23 +159,23 @@ describe('Web read-only catalog scope', () => {
     db.prepare('UPDATE videos SET cover_path = ?, poster_path = ? WHERE id = ?')
       .run('covers/front.png', 'posters/background.png', videoId)
     const image = { body: Buffer.from('cover'), mime: 'image/png' }
-    const read = t.mock.method(mediaAssetStore, 'readForServe', (rel: string) => {
+    const read = t.mock.method(mediaAssetStore, 'readForServeAsync', async (rel: string) => {
       assert.equal(rel, 'covers/front.png')
       return image
     })
     const coverUrl = `/api/videos/${videoId}/images/cover`
     assert.equal(catalog.browse(new URLSearchParams()).items[0].cover, coverUrl)
     assert.equal(catalog.detail(videoId).cover, coverUrl)
-    assert.deepEqual(catalog.image(videoId, 'cover'), image)
+    assert.deepEqual(await catalog.image(videoId, 'cover'), image)
     assert.equal(read.mock.callCount(), 1)
 
     db.prepare('UPDATE videos SET cover_path = NULL WHERE id = ?').run(videoId)
     assert.equal(catalog.browse(new URLSearchParams()).items[0].cover, null)
     assert.equal(catalog.detail(videoId).cover, null)
-    assert.throws(() => catalog.image(videoId, 'cover'), /图片不存在/)
+    await assert.rejects(() => catalog.image(videoId, 'cover'), /图片不存在/)
     assert.equal(read.mock.callCount(), 1)
   })
-  it('queries with parameters, paginates stably and filters clear membership scopes', () => {
+  it('queries with parameters, paginates stably and filters clear membership scopes', async () => {
     for (let index = 0; index < 40; index++)
       insertTestVideoWithFile(db, {
         code: `CODE-${index}`,
@@ -133,7 +201,7 @@ describe('Web read-only catalog scope', () => {
     assert.throws(() => catalog.browse(new URLSearchParams('sort=constructor')))
     assert.throws(() => catalog.browse(new URLSearchParams('page=-1')))
   })
-  it('uses stable desktop discovery and respects library home participation', () => {
+  it('uses stable desktop discovery and respects library home participation', async () => {
     const root = addMediaLibraryRoot({ libraryId: 1, expectedRevision: 1, root: { path: directory } })
     for (let index = 0; index < 20; index++) {
       insertTestVideoWithFile(db, { code: `HOME-${index}`, filePath: path.join(directory, `${index}.mp4`), rootId: root.id })
@@ -148,7 +216,7 @@ describe('Web read-only catalog scope', () => {
     assert.deepEqual(catalog.home('stable-seed'), { discovery: [], recent: [] })
     assert.throws(() => catalog.home('x'.repeat(101)))
   })
-  it('exposes cast display metadata and only serves avatars linked to visible videos', (t) => {
+  it('exposes cast display metadata and only serves avatars linked to visible videos', async (t) => {
     const { videoId } = insertTestVideoWithFile(db, { code: 'CAST', filePath: '/private/cast.mp4' })
     const insert = db.prepare('INSERT INTO actresses (main_name, gender, avatar_path) VALUES (?, ?, ?)')
     const actorId = Number(insert.run('Sample actor', 'male', 'avatars/sample.png').lastInsertRowid)
@@ -158,17 +226,17 @@ describe('Web read-only catalog scope', () => {
     assert.deepEqual(cast.map(({ id, name, gender, avatar }) => ({ id, name, gender, avatar })), [{
       id: actorId, name: 'Sample actor', gender: 'male', avatar: `/api/videos/${videoId}/images/actress-${actorId}`
     }])
-    const read = t.mock.method(mediaAssetStore, 'readForServe', (rel: string) => {
+    const read = t.mock.method(mediaAssetStore, 'readForServeAsync', async (rel: string) => {
       assert.equal(rel, 'avatars/sample.png')
       return { body: Buffer.from('avatar'), mime: 'image/png' }
     })
-    assert.equal(catalog.image(videoId, `actress-${actorId}`).body.toString(), 'avatar')
-    assert.throws(() => catalog.image(videoId, `actress-${otherId}`))
+    assert.equal((await catalog.image(videoId, `actress-${actorId}`)).body.toString(), 'avatar')
+    await assert.rejects(() => catalog.image(videoId, `actress-${otherId}`))
     db.prepare('UPDATE library_video_memberships SET is_hidden = 1 WHERE video_id = ?').run(videoId)
-    assert.throws(() => catalog.image(videoId, `actress-${actorId}`))
+    await assert.rejects(() => catalog.image(videoId, `actress-${actorId}`))
     assert.equal(read.mock.callCount(), 1)
   })
-  it('downloads non-playable files and exposes only supported external links', () => {
+  it('downloads non-playable files and exposes only supported external links', async () => {
     const root = addMediaLibraryRoot({ libraryId: 1, expectedRevision: 1, root: { path: directory } })
     const file = path.join(directory, 'sample.avi')
     fs.writeFileSync(file, 'download bytes')
@@ -195,7 +263,7 @@ describe('Web read-only catalog scope', () => {
     db.prepare('UPDATE library_video_memberships SET is_hidden = 1 WHERE video_id = ?').run(record.videoId)
     assert.throws(() => catalog.media(record.videoId, record.fileId, true))
   })
-  it('resolves only authorized files and refuses symlink escapes and disabled roots', () => {
+  it('resolves only authorized files and refuses symlink escapes and disabled roots', async () => {
     const mediaRoot = path.join(directory, 'media')
     fs.mkdirSync(mediaRoot)
     const root = addMediaLibraryRoot({

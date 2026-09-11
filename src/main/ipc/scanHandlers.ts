@@ -1,21 +1,23 @@
+import { catalogReadService } from '../services/catalogReadService'
+import { SCAN_AUDIT_READ_LIMITS } from '../services/scanAuditReadPolicy'
 import fs from 'node:fs'
 import { shell } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import type { ManualImportResult, RenameImportResult, ScanResult } from '@shared/libraryTypes'
+import type { ManualImportResult, RenameImportResult, ScanCompletionResult } from '@shared/libraryTypes'
 import { normalizeAbsoluteLocalPath, normalizeLocalPathIdentity } from '@shared/localPathIdentity'
 import type { MediaLibraryRoot } from '@shared/mediaLibraryTypes'
 import {
   getLatestLibraryScanSnapshot,
-  libraryUnrecognizedFileExists,
   removeLibraryUnrecognizedFile,
   renameLibraryUnrecognizedFile
 } from '../db/libraryScanRepo'
 import { getMediaLibraryRoot } from '../db/mediaLibraryRepo'
-import { listPendingScanGroups, resolvePendingScanGroup } from '../db/pendingScanRepo'
-import { listPendingResourceIdentities } from '../db/pendingResourceIdentityRepo'
+import { pagePendingScanQueue, countPendingScanQueue } from '../db/pendingScanQueueRepo'
+import { getPendingAuditPresence } from '../db/pendingAuditRepo'
+import { listPendingScanGroups, getPendingScanGroup, resolvePendingScanGroup } from '../db/pendingScanRepo'
+import { listPendingResourceIdentities, getPendingResourceIdentity } from '../db/pendingResourceIdentityRepo'
 import { listVideoResources } from '../db/videoRepo'
 import {
-  libraryScanAuditContainsPath,
   readLibraryScanAudit
 } from '../scanner/libraryScanAuditStore'
 import { importManual, renameAndImport } from '../scanner/scanner'
@@ -46,6 +48,45 @@ export function registerScanLatestHandler(
   commandAdapter.register(IPC.SCAN_LATEST_GET, (libraryId) => readLatest(libraryId))
 }
 
+export function registerScanAuditReadHandlers(
+  commandAdapter: Pick<typeof appCommandAdapter, 'register'> = appCommandAdapter,
+  reader: Pick<typeof catalogReadService, 'readAuditHeader' | 'readAuditPage' | 'readAuditViewPage'> = catalogReadService
+): void {
+  commandAdapter.register(IPC.SCAN_AUDIT_HEADER, libraryId => reader.readAuditHeader(libraryId))
+  commandAdapter.register(IPC.SCAN_AUDIT_PAGE, (snapshot, query) => reader.readAuditPage(snapshot, query, SCAN_AUDIT_READ_LIMITS))
+  commandAdapter.register(IPC.SCAN_AUDIT_VIEW_PAGE, (snapshot, query) =>
+    reader.readAuditViewPage(snapshot, query, SCAN_AUDIT_READ_LIMITS))
+}
+
+export function registerScanAuditRevealHandler(
+  commandAdapter: Pick<typeof appCommandAdapter, 'register'> = appCommandAdapter,
+  reader: Pick<typeof catalogReadService, 'canRevealAuditPath'> = catalogReadService,
+  access: (filePath: string) => Promise<void> = filePath => fs.promises.access(filePath),
+  reveal: (filePath: string) => void = filePath => shell.showItemInFolder(filePath)
+): void {
+  commandAdapter.register(IPC.SCAN_AUDIT_REVEAL_FILE, async (libraryId, filePath) => {
+    try {
+      normalizeAbsoluteLocalPath(filePath)
+    } catch {
+      return { ok: false, error: '路径不属于该媒体库最近一次扫描审计' }
+    }
+    let allowed: boolean
+    try {
+      allowed = await reader.canRevealAuditPath(libraryId, filePath)
+    } catch {
+      return { ok: false, error: '无法验证路径是否属于该媒体库最近一次扫描审计' }
+    }
+    if (!allowed) return { ok: false, error: '路径不属于该媒体库最近一次扫描审计' }
+    try {
+      await access(filePath)
+    } catch {
+      return { ok: false, fileMissing: true }
+    }
+    reveal(filePath)
+    return { ok: true }
+  })
+}
+
 export function registerScanHandlers(ctx: IpcContext): void {
   scanCoordinator.subscribe((event) => {
     const webContents = ctx.getWindow()?.webContents
@@ -61,31 +102,22 @@ export function registerScanHandlers(ctx: IpcContext): void {
 
   appCommandAdapter.register(
     IPC.SCAN_RUN,
-    async (libraryId, rootIds): Promise<ScanResult> =>
+    async (libraryId, rootIds): Promise<ScanCompletionResult> =>
       scanCoordinator.run({ libraryId, rootIds, trigger: 'manual' })
   )
 
   appCommandAdapter.register(IPC.SCAN_CANCEL, (runId): boolean => scanCoordinator.cancel(runId))
   registerScanLatestHandler()
+  registerScanAuditReadHandlers()
   appCommandAdapter.register(IPC.SCAN_AUDIT_GET, (libraryId) =>
     readLibraryScanAudit(libraryId)
   )
-  appCommandAdapter.register(IPC.SCAN_AUDIT_REVEAL_FILE, (libraryId, filePath) => {
-    let normalizedPath: string
-    try {
-      normalizedPath = normalizeAbsoluteLocalPath(filePath).normalizedPath
-    } catch {
-      return { ok: false, error: '路径不属于该媒体库最近一次扫描审计' }
-    }
-    const audit = readLibraryScanAudit(libraryId)
-    const allowed =
-      Boolean(audit && libraryScanAuditContainsPath(audit, filePath)) ||
-      libraryUnrecognizedFileExists(libraryId, normalizedPath)
-    if (!allowed) return { ok: false, error: '路径不属于该媒体库最近一次扫描审计' }
-    if (!fs.existsSync(filePath)) return { ok: false, fileMissing: true }
-    shell.showItemInFolder(filePath)
-    return { ok: true }
-  })
+  registerScanAuditRevealHandler()
+  appCommandAdapter.register(IPC.PENDING_AUDIT_PRESENCE, (libraryId, ids) => getPendingAuditPresence(libraryId, ids))
+  appCommandAdapter.register(IPC.PENDING_SCAN_QUEUE_PAGE, (query) => pagePendingScanQueue(query))
+  appCommandAdapter.register(IPC.PENDING_SCAN_QUEUE_COUNT, (libraryId) => countPendingScanQueue(libraryId))
+  appCommandAdapter.register(IPC.PENDING_SCAN_GET, (libraryId, groupId) => getPendingScanGroup(libraryId, groupId))
+  appCommandAdapter.register(IPC.PENDING_RESOURCE_IDENTITY_GET, (libraryId, identityId) => getPendingResourceIdentity(libraryId, identityId))
   appCommandAdapter.register(IPC.PENDING_SCAN_LIST, (libraryId) =>
     listPendingScanGroups(libraryId)
   )

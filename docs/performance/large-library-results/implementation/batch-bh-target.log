@@ -1,0 +1,39 @@
+✔ pages the same visible works once across libraries with stable date ties and narrow cards (40.701583ms)
+✔ distinguishes missing and empty actors and rejects unbounded or invalid page arguments (5.461542ms)
+✔ keeps count and cards on the same read snapshot during an external visibility change (6.616625ms)
+✔ validates manual tag candidate bounds and existing-tag identities (1.517959ms)
+✔ bounds selected tag label IPC requests before repository access (0.2715ms)
+▶ typed IPC adapter
+  ✔ does not expose the legacy unreviewed video deletion command (0.122083ms)
+  ✔ forwards command arguments and returns the application result (0.095917ms)
+  ✔ rejects malformed arguments before invoking the application handler (0.173375ms)
+  ✔ accepts link-resource updates without an import-only target (0.201541ms)
+  ✔ only accepts metadata retention when removing a last video resource (0.117417ms)
+  ✔ accepts one exact plugin approval decision and rejects malformed decisions (0.296625ms)
+  ✔ accepts only explicit plugin continuation kinds (0.162ms)
+  ✔ accepts only typed plugin user responses with request-bound actions (0.530125ms)
+  ✔ accepts plugin history clearing only without renderer-supplied run ids (0.044417ms)
+  ✔ accepts unrecoverable plugin-session discard only without renderer-supplied run ids (0.032875ms)
+  ✔ keeps legacy model limits out of the generic settings mutation contract (0.281667ms)
+  ✔ validates playlist import start and identity controls at the IPC boundary (0.443042ms)
+  ✔ requires the path-removal impact revision at the settings boundary (0.093375ms)
+  ✔ accepts only the structured model-management command vocabulary (0.4195ms)
+  ✔ serializes successful results and thrown errors (0.563375ms)
+  ✔ sends the contracted event payload unchanged (0.050666ms)
+✔ typed IPC adapter (3.871542ms)
+✔ bounds actress conflict summary pages and keeps detail identities exact (0.168667ms)
+✔ validates bounded actress picker requests (0.130584ms)
+✔ validates narrow actress identity IDs (0.062291ms)
+✔ validates merge candidate paging and keep identity (0.135667ms)
+✔ accepts only zero arguments for avatar crop count (0.022166ms)
+✔ accepts only zero arguments for avatar crop target enumeration (0.025875ms)
+✔ validates plugin actress test picker bounds and identities (0.125166ms)
+✔ validates actress works page bounds and rejects unexpected filter fields (0.115542ms)
+ℹ tests 29
+ℹ suites 1
+ℹ pass 29
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 340.390166

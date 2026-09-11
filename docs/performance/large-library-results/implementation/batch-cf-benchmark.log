@@ -1,0 +1,167 @@
+{
+  "benchmark": "pending-scan-audit",
+  "environment": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v24.18.1",
+    "electron": "43.4.1",
+    "sqlite": "3.53.1"
+  },
+  "warmupRunsPerMethod": 1,
+  "hotSamplesPerMethod": 3,
+  "results": [
+    {
+      "resources": 10000,
+      "groups": 1000,
+      "resourcesPerGroup": 10,
+      "scenario": "tenGroups",
+      "selectedGroups": 10,
+      "pendingPaths": 3002,
+      "databaseBytes": 16445440,
+      "oraclePassed": true,
+      "methods": {
+        "legacyFullDtoFilterMap": {
+          "warmupMs": 25.213832999999966,
+          "samplesMs": [
+            26.275082999999995,
+            25.129250000000013,
+            26.090666999999996
+          ],
+          "medianMs": 26.090666999999996,
+          "outputRows": 10,
+          "outputJsonBytes": 629
+        },
+        "targetedAuditEntries": {
+          "warmupMs": 0.42312499999997044,
+          "samplesMs": [
+            0.30762499999997317,
+            0.12941699999998946,
+            0.32954200000000355
+          ],
+          "medianMs": 0.30762499999997317,
+          "outputRows": 10,
+          "outputJsonBytes": 629
+        }
+      }
+    },
+    {
+      "resources": 10000,
+      "groups": 1000,
+      "resourcesPerGroup": 10,
+      "scenario": "allGroups",
+      "selectedGroups": 1000,
+      "pendingPaths": 3002,
+      "databaseBytes": 16445440,
+      "oraclePassed": true,
+      "methods": {
+        "legacyFullDtoFilterMap": {
+          "warmupMs": 23.286583000000007,
+          "samplesMs": [
+            26.456874999999968,
+            25.534375000000068,
+            26.45637499999998
+          ],
+          "medianMs": 26.45637499999998,
+          "outputRows": 1000,
+          "outputJsonBytes": 62787
+        },
+        "targetedAuditEntries": {
+          "warmupMs": 10.829958000000033,
+          "samplesMs": [
+            10.07287500000001,
+            11.251708000000065,
+            9.744291999999973
+          ],
+          "medianMs": 10.07287500000001,
+          "outputRows": 1000,
+          "outputJsonBytes": 62787
+        }
+      }
+    },
+    {
+      "resources": 50000,
+      "groups": 5000,
+      "resourcesPerGroup": 10,
+      "scenario": "tenGroups",
+      "selectedGroups": 10,
+      "pendingPaths": 15002,
+      "databaseBytes": 78614528,
+      "oraclePassed": true,
+      "methods": {
+        "legacyFullDtoFilterMap": {
+          "warmupMs": 138.18058300000007,
+          "samplesMs": [
+            152.0602919999999,
+            140.395667,
+            135.6791250000001
+          ],
+          "medianMs": 140.395667,
+          "outputRows": 10,
+          "outputJsonBytes": 643
+        },
+        "targetedAuditEntries": {
+          "warmupMs": 0.3732079999999769,
+          "samplesMs": [
+            0.36183299999993324,
+            0.15479200000004312,
+            0.3013750000000073
+          ],
+          "medianMs": 0.3013750000000073,
+          "outputRows": 10,
+          "outputJsonBytes": 643
+        }
+      }
+    },
+    {
+      "resources": 50000,
+      "groups": 5000,
+      "resourcesPerGroup": 10,
+      "scenario": "allGroups",
+      "selectedGroups": 5000,
+      "pendingPaths": 15002,
+      "databaseBytes": 78614528,
+      "oraclePassed": true,
+      "methods": {
+        "legacyFullDtoFilterMap": {
+          "warmupMs": 150.22016600000006,
+          "samplesMs": [
+            165.16354200000023,
+            147.18612499999972,
+            146.82983399999966
+          ],
+          "medianMs": 147.18612499999972,
+          "outputRows": 5000,
+          "outputJsonBytes": 322787
+        },
+        "targetedAuditEntries": {
+          "warmupMs": 68.40425000000005,
+          "samplesMs": [
+            66.65475000000015,
+            65.04254200000014,
+            67.6362079999999
+          ],
+          "medianMs": 66.65475000000015,
+          "outputRows": 5000,
+          "outputJsonBytes": 322787
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "Synthetic temporary SQLite files only; 10 resources per group, ASCII target_locator/display_name each exactly 512 characters. No user database or media files.",
+    "Untimed legacy oracle reads precede one explicit warmup per method. Three hot rounds alternate method order; warmup and timings are not cold-cache measurements.",
+    "Timing includes each repository call and legacy filter/map, including DTO materialization, path checks and the new repository transaction. Fixture setup, ANALYZE, assertions and JSON serialization are outside timing.",
+    "Output JSON bytes describe final audit summaries only, not transient full DTO allocations. Peak memory, event-loop delay, IPC, filesystem scan/reveal and complete coordinator runtime are not measured.",
+    "A single synthetic library, global pending path set, 1k/5k groups and 10k/50k resources do not establish Windows HDD or production performance. Three samples do not support p95 claims.",
+    "Selecting all groups still visits every group/resource path and builds the full audit summary array. This does not claim constant memory or constant total runtime."
+  ]
+}
+✔ compares pending scan audit summaries with full pending DTO hydration (2636.342291ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2861.8155

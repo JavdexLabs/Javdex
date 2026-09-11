@@ -1,0 +1,38 @@
+import {it} from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import {performance} from 'node:perf_hooks'
+import {initDatabaseAtPath,closeDatabase} from '/Users/nut/Project/JavdexLabs/Javdex/src/main/db/database'
+import {WebCatalogQueryReader as Current} from '/Users/nut/Project/JavdexLabs/Javdex/src/main/web/catalogQueryReader'
+import {WebCatalogQueryReader as Before} from '/tmp/javdex-perf11-web-baseline'
+it('web preserves main-name literal search with actor precomputation',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-perf11-web-'))
+ try {
+ const db=initDatabaseAtPath(path.join(dir,'db'))
+ db.exec(`BEGIN;
+ CREATE TABLE bench_revision(value INTEGER); INSERT INTO bench_revision VALUES(0);
+ WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
+ INSERT INTO videos(id,code,title) SELECT x,printf('ABC-%06d',x),'中文作品 '||x FROM n;
+ INSERT INTO library_video_memberships(library_id,video_id,discovery_key) SELECT 1,id,id FROM videos;
+ WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000)
+ INSERT INTO actresses(id,main_name) SELECT x,printf('Actor%05d',x) FROM n;
+ INSERT INTO video_actress SELECT id,((id-1)%1000)+1 FROM videos;
+ INSERT INTO video_actress SELECT id,((id+499)%1000)+1 FROM videos;
+ UPDATE actresses SET main_name='演员_%\\' WHERE id=2;
+ INSERT INTO actress_names(actress_id,name,type,source) VALUES(3,'AliasOnly','alias','manual');
+ UPDATE library_video_memberships SET is_hidden=1 WHERE video_id % 7=0;
+ COMMIT;`)
+ console.log('fixture ready'); const old=new Before(db),now=new Current(db),results=[]
+ for(const q of ['中文作品 123','Actor00001','%','Actor','不存在']){
+  console.log('query',q); const query={search:q}; const expected=old.browse(query);assert.deepEqual(now.browse(query),expected)
+  const before=[],after=[]
+  for(let n=0;n<3;n++) for(const [reader,samples] of (n%2?[[now,after],[old,before]]:[[old,before],[now,after]]) as const){
+   db.exec('UPDATE bench_revision SET value=value+1');const start=performance.now();const got=reader.browse(query);samples.push(performance.now()-start);assert.deepEqual(got,expected)
+  }
+  results.push({q,total:expected.total,before,after});console.log(JSON.stringify(results.at(-1)))
+ }
+ fs.writeFileSync('/tmp/javdex-perf11-web.json',JSON.stringify({videos:10000,actors:1000,relations:20000,results},null,2))
+ }finally{closeDatabase();fs.rmSync(dir,{recursive:true,force:true})}
+})

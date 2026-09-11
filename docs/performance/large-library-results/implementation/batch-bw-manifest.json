@@ -1,0 +1,15 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bw-final.log": "af3be72cff0216c9a306f43cdd939753857c3a7ceb5d29446974a86eb05be357",
+    "batch-bw-probe.json": "9b1d59d18b206749fd25bc79b163ce53291508115ac335eba8f3736ae49665e6",
+    "batch-bw-probes.patch": "bd8fb06b5c900e47b0507c66ad8207b40e7d90d8eb79c11f3e11dfb143d28877",
+    "batch-bw-review.md": "5a7d1c5c8a77eae9005ecb6a119e2363ec8e42b7118788c6bada28d57fec453a"
+  },
+  "notes": [
+    "New standalone probes depend on current database initializer/runtime. No production change.",
+    "2 decision probes passed; no full suite/build rerun.",
+    "Cached-view is retained filtered raw entries, not complete UI; TEMP cost excludes construction per read.",
+    "Full15/42goal remains incomplete; actual audit backend pagination not implemented."
+  ]
+}

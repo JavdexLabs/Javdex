@@ -1,0 +1,537 @@
+diff --git a/src/main/db/libraryScanRepo.ts b/src/main/db/libraryScanRepo.ts
+index 0582976..28ba00e 100644
+--- a/src/main/db/libraryScanRepo.ts
++++ b/src/main/db/libraryScanRepo.ts
+@@ -6,6 +6,9 @@ import type {
+   LibraryScanTrigger
+ } from '@shared/libraryTypes'
+ import { getDb } from './database'
++import { readScanAuditSource } from './scanAuditSource'
++import { normalizeAudit } from '../scanner/libraryScanAuditValidation'
++import { SCAN_AUDIT_META_MAX_BYTES } from './scanAuditWriter'
+ 
+ type PersistedScanTrigger = 'manual' | 'automatic' | 'initial' | 'root'
+ type PersistedScanStatus = 'completed' | 'failed' | 'cancelled'
+@@ -65,7 +68,13 @@ export function recoverInterruptedLibraryScanRuns(
+           ORDER BY library_id, started_at, id`
+       )
+       .all() as Array<{ id: string; library_id: number }>
++    // Include a terminal run left sealed by an interrupted publication attempt.
++    // Existing published history remains immutable and is never reclassified.
++    const abandon = database.prepare(`UPDATE library_scan_audit_manifests SET state='abandoned'
++      WHERE state IN ('collecting','sealed') AND run_id IN (
++        SELECT id FROM library_scan_runs WHERE status NOT IN ('queued','running'))`)
+     if (interrupted.length === 0) {
++      abandon.run()
+       return { recoveredRunCount: 0, recoveredStateCount: 0 }
+     }
+ 
+@@ -84,6 +93,8 @@ export function recoverInterruptedLibraryScanRuns(
+       ).changes
+     }
+ 
++    abandon.run()
++
+     const idsByLibrary = new Map<number, Set<string>>()
+     for (const run of interrupted) {
+       const ids = idsByLibrary.get(run.library_id) ?? new Set<string>()
+@@ -170,10 +181,30 @@ export function finishLibraryScanRun(input: {
+   replaceUnrecognizedRootIds?: readonly number[]
+   unrecognizedFiles?: readonly LibraryUnrecognizedFileInput[]
+ }): void {
++  completeLibraryScanRun(input, input.audit)
++}
++
++export type FinishLibraryScanEntriesInput = Omit<Parameters<typeof finishLibraryScanRun>[0], 'audit' | 'unrecognizedFiles'> & {
++  /** Fresh iterable per publication attempt. Never retry with an exhausted/closed generator:
++   * an empty successful enumeration would replace the selected roots with no rows.
++   * Failed/cancelled runs and empty replacement roots do not acquire this iterator. */
++  unrecognizedFiles?: Iterable<LibraryUnrecognizedFileInput>
++}
++
++/** The sealed audit, scan result and synchronous iterable replacement commit together. */
++export function finishLibraryScanEntriesRun(input: FinishLibraryScanEntriesInput): void {
++  completeLibraryScanRun(input)
++}
++
++function completeLibraryScanRun(
++  input: FinishLibraryScanEntriesInput,
++  audit?: LibraryScanAudit
++): void {
+   const database = getDb()
+   database.transaction(() => {
++    if (!audit) validateSealedAuditForPublication(database, input)
+     const summaryJson = JSON.stringify(input.summary)
+-    const auditJson = JSON.stringify(input.audit)
++    const auditJson = audit ? JSON.stringify(audit) : null
+     const errorSummary = input.summary.errorSummary
+     const updated = database
+       .prepare(
+@@ -214,21 +245,20 @@ export function finishLibraryScanRun(input: {
+       )
+ 
+     if (successful && input.replaceUnrecognizedRootIds?.length) {
+-      const rootIds = Array.from(new Set(input.replaceUnrecognizedRootIds))
+-      const placeholders = rootIds.map(() => '?').join(', ')
++      const rootIds = new Set(input.replaceUnrecognizedRootIds)
+       database
+         .prepare(
+           `DELETE FROM library_unrecognized_files
+-            WHERE library_id = ? AND root_id IN (${placeholders})`
++            WHERE library_id = ? AND root_id IN (SELECT value FROM json_each(?))`
+         )
+-        .run(input.libraryId, ...rootIds)
++        .run(input.libraryId, JSON.stringify([...rootIds]))
+       const insert = database.prepare(
+         `INSERT INTO library_unrecognized_files (
+            library_id, root_id, file_path, normalized_path, reason, scan_run_id, last_seen_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+       )
+       for (const file of input.unrecognizedFiles ?? []) {
+-        if (!rootIds.includes(file.rootId)) continue
++        if (!rootIds.has(file.rootId)) continue
+         insert.run(
+           input.libraryId,
+           file.rootId,
+@@ -240,9 +270,50 @@ export function finishLibraryScanRun(input: {
+         )
+       }
+     }
++    if (!audit) {
++      const published = database.prepare(`UPDATE library_scan_audit_manifests
++        SET state='published',published_at=? WHERE run_id=? AND state='sealed'`)
++        .run(input.summary.finishedAt, input.runId)
++      if (published.changes !== 1) throw new Error('扫描审计未封存或已发布')
++    }
+   })()
+ }
+ 
++function validateSealedAuditForPublication(
++  database: Database.Database,
++  input: FinishLibraryScanEntriesInput
++): void {
++  if (!Number.isSafeInteger(input.libraryId) || input.libraryId <= 0
++    || typeof input.runId !== 'string' || !input.runId || input.runId.length > 256
++    || typeof input.summary.finishedAt !== 'string' || !input.summary.finishedAt || input.summary.finishedAt.length > 100) {
++    throw new Error('扫描审计身份无效')
++  }
++  const size = database.prepare(`SELECT length(CAST(m.meta_json AS BLOB)) AS bytes
++    FROM library_scan_audit_manifests m JOIN library_scan_runs r ON r.id=m.run_id
++    WHERE r.id=? AND r.library_id=? AND r.status='running' AND m.state='sealed'`)
++    .get(input.runId,input.libraryId) as { bytes: number } | undefined
++  if (!size || size.bytes > SCAN_AUDIT_META_MAX_BYTES) throw new Error('扫描审计未封存或元数据超限')
++  const row = database.prepare(`SELECT m.meta_json,r.config_revision,r.trigger,r.started_at FROM library_scan_audit_manifests m
++    JOIN library_scan_runs r ON r.id=m.run_id
++    WHERE r.id=? AND r.library_id=? AND r.status='running' AND m.state='sealed'`)
++    .get(input.runId,input.libraryId) as { meta_json: string; config_revision: number; trigger: string; started_at: string } | undefined
++  if (!row) throw new Error('扫描审计未封存或元数据超限')
++  const meta = JSON.parse(row.meta_json) as Record<string, unknown>
++  const sections = ['files','removedResources','promotedResources','deletedVideos','pendingGroups']
++  const duplicate = database.prepare(`SELECT 1 FROM library_scan_audit_manifests m,json_each(m.meta_json) e
++    WHERE m.run_id=? GROUP BY e.key HAVING COUNT(*)>1 LIMIT 1`).get(input.runId)
++  if (duplicate || sections.some(section => Object.hasOwn(meta,section))) throw new Error('扫描审计元数据无效')
++  const valid = normalizeAudit({ ...meta, ...Object.fromEntries(sections.map(section => [section,[]])) })
++  const summary = input.summary
++  if (!valid || summary.libraryId !== input.libraryId || summary.runId !== input.runId
++    || ['libraryId','runId','configRevision','trigger','startedAt','finishedAt','status'].some(key => meta[key] !== summary[key as keyof LibraryScanSummary])
++    || row.config_revision !== summary.configRevision || row.started_at !== summary.startedAt
++    || row.trigger !== persistedTrigger(summary.trigger)
++    || (input.status === 'completed' ? !['success','completed_with_errors'].includes(summary.status) : input.status !== summary.status)) {
++    throw new Error('扫描审计与运行结果不一致')
++  }
++}
++
+ export function getLatestLibraryScanSnapshot(libraryId: number): LibraryScanLatestSnapshot {
+   if (!Number.isSafeInteger(libraryId) || libraryId <= 0) throw new Error('媒体库 ID 无效')
+   const database = getDb()
+@@ -264,25 +335,13 @@ export function getLatestLibraryScanSnapshot(libraryId: number): LibraryScanLate
+         typeof candidate.status === 'string' &&
+         typeof candidate.finishedAt === 'string'
+     )
+-    const latestRun = summary
+-      ? (database
+-          .prepare(
+-            `SELECT audit_json
+-               FROM library_scan_runs
+-              WHERE id = ? AND library_id = ? AND audit_json IS NOT NULL`
+-          )
+-          .get(summary.runId, libraryId) as { audit_json: string | null } | undefined)
+-      : (database
+-          .prepare(
+-            `SELECT audit_json
+-               FROM library_scan_runs
+-              WHERE library_id = ? AND audit_json IS NOT NULL
+-              ORDER BY started_at DESC, id DESC
+-              LIMIT 1`
+-          )
+-          .get(libraryId) as { audit_json: string | null } | undefined)
++    const source = readScanAuditSource(
++      database,
++      summary ? { libraryId, runId: summary.runId } : { libraryId, latest: true },
++      'body'
++    )
+     const audit = parseScopedScanJson<LibraryScanAudit>(
+-      latestRun?.audit_json,
++      source?.body,
+       libraryId,
+       (candidate) =>
+         (candidate.schemaVersion === 1 || candidate.schemaVersion === 2) &&
+diff --git a/src/main/db/scanAuditUnrecognizedPaths.ts b/src/main/db/scanAuditUnrecognizedPaths.ts
+new file mode 100644
+index 0000000..2a59058
+--- /dev/null
++++ b/src/main/db/scanAuditUnrecognizedPaths.ts
+@@ -0,0 +1,47 @@
++import type Database from 'better-sqlite3'
++
++/**
++ * Lazily read immutable, sealed file outcomes during the caller's synchronous
++ * publication transaction. Each query completes before yielding, so the caller
++ * can authorize the path and write its replacement row without a busy cursor.
++ * One-shot: create a fresh iterator for every publication attempt. Consume it
++ * synchronously within one transaction; do not pause across transaction changes.
++ * Does not own a connection/transaction or normalize/authorize filesystem paths.
++ */
++export function iterateScanAuditUnrecognizedPaths(
++  db: Database.Database,
++  scope: { libraryId: number; runId: string }
++): IterableIterator<string> {
++  const { libraryId, runId } = scope
++  if (!Number.isSafeInteger(libraryId) || libraryId <= 0 ||
++      typeof runId !== 'string' || !runId || runId.length > 256) {
++    throw new Error('Invalid scan audit scope')
++  }
++  return (function* () {
++    const readScope = db.prepare(`SELECT r.library_id, r.status, m.state FROM library_scan_runs r
++      JOIN library_scan_audit_manifests m ON m.run_id=r.id WHERE r.id=?`)
++    const assertReadable = (): void => {
++      if (!db.inTransaction) throw new Error('Unrecognized audit paths require a publication transaction')
++      const row = readScope.get(runId) as
++        { library_id: number; status: string; state: string } | undefined
++      if (!row || row.library_id !== libraryId || row.state !== 'sealed' ||
++          (row.status !== 'running' && row.status !== 'completed')) {
++        throw new Error('Unrecognized audit paths require a scoped sealed audit')
++      }
++    }
++    assertReadable()
++    const next = db.prepare(`SELECT ordinal, entry_key AS filePath
++      FROM library_scan_audit_entries
++      WHERE run_id=? AND section='files' AND ordinal>?
++        AND json_extract(entry_json,'$.outcome')='unrecognized'
++      ORDER BY ordinal LIMIT 1`)
++    let ordinal = -1
++    for (;;) {
++      assertReadable()
++      const row = next.get(runId, ordinal) as { ordinal: number; filePath: string } | undefined
++      if (!row) return
++      ordinal = row.ordinal
++      yield row.filePath
++    }
++  })()
++}
+diff --git a/src/main/db/scanAuditUnrecognizedPaths.test.ts b/src/main/db/scanAuditUnrecognizedPaths.test.ts
+new file mode 100644
+index 0000000..d144761
+--- /dev/null
++++ b/src/main/db/scanAuditUnrecognizedPaths.test.ts
+@@ -0,0 +1,151 @@
++import { beforeEach, afterEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import type Database from 'better-sqlite3'
++import type { LibraryScanSummary } from '@shared/libraryTypes'
++import { initDatabaseAtPath, closeDatabase } from './database'
++import { createScanAuditWriter, type ScanAuditMetadata } from './scanAuditWriter'
++import { beginLibraryScanRun, finishLibraryScanEntriesRun, type LibraryUnrecognizedFileInput } from './libraryScanRepo'
++import { iterateScanAuditUnrecognizedPaths } from './scanAuditUnrecognizedPaths'
++
++let db:Database.Database,directory:string,writer:ReturnType<typeof createScanAuditWriter>
++const scope={libraryId:1,runId:'paths'}
++const meta:ScanAuditMetadata={schemaVersion:2,...scope,configRevision:1,trigger:'manual',startedAt:'start',finishedAt:'finish',status:'success'}
++const summary:LibraryScanSummary={...scope,configRevision:1,trigger:'manual',startedAt:'start',finishedAt:'finish',status:'success',
++  scannedFiles:3,resourcesAdded:0,resourcesUpdated:0,resourcesRemoved:0,primaryResourcesPromoted:0,videosDeleted:0,
++  skippedFiles:1,failedFiles:2,pendingScanGroups:0,pendingScanResources:0,offlineFolders:[],errorSummary:null}
++beforeEach(()=>{
++  directory=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-unrecognized-paths-'))
++  db=initDatabaseAtPath(path.join(directory,'catalog.db'))
++  db.exec(`INSERT INTO media_library_roots(id,library_id,path,normalized_path) VALUES(1,1,'/fixture','/fixture');
++    INSERT INTO library_scan_runs(id,library_id,config_revision,trigger,status,started_at,audit_json) VALUES('old',1,1,'manual','completed','old','{}');
++    INSERT INTO library_unrecognized_files(library_id,root_id,file_path,normalized_path,scan_run_id,last_seen_at) VALUES(1,1,'/fixture/old','/fixture/old','old','old');`)
++  beginLibraryScanRun({...scope,configRevision:1,trigger:'manual',startedAt:'start'})
++  writer=createScanAuditWriter(db,scope);writer.start(meta)
++  writer.writeBatch('files',['/fixture/z','/fixture/recognized','/fixture/a'].map(filePath=>({rootId:1,filePath,sourceKind:'local' as const,outcome:'unrecognized' as const})))
++  writer.writeBatch('files',[
++    {rootId:1,filePath:'/fixture/recognized',sourceKind:'local',outcome:'skipped',skipReason:'unchanged'},
++    {rootId:1,filePath:'/fixture/z',sourceKind:'local',outcome:'unrecognized'}
++  ])
++})
++afterEach(()=>{closeDatabase();fs.rmSync(directory,{recursive:true,force:true})})
++function snapshot(){return {
++  runs:db.prepare('SELECT * FROM library_scan_runs ORDER BY id').all(),
++  state:db.prepare('SELECT * FROM media_library_scan_state ORDER BY library_id').all(),
++  unrecognized:db.prepare('SELECT * FROM library_unrecognized_files ORDER BY normalized_path').all(),
++  manifest:db.prepare('SELECT * FROM library_scan_audit_manifests ORDER BY run_id').all(),
++  entries:db.prepare('SELECT * FROM library_scan_audit_entries ORDER BY section,ordinal').all()
++}}
++function finish(unrecognizedFiles:Iterable<LibraryUnrecognizedFileInput>){
++  finishLibraryScanEntriesRun({...scope,status:'completed',summary,replaceUnrecognizedRootIds:[1],unrecognizedFiles})
++}
++function mapped(failSecond=false){
++  const iterator=iterateScanAuditUnrecognizedPaths(db,{...scope})
++  const originalReturn=iterator.return!.bind(iterator)
++  let returned=0,closed=false,count=0
++  iterator.return=(value?:unknown)=>{returned++;return originalReturn(value)}
++  const input=(function*(){
++    try{
++      for(const filePath of iterator){
++        assert.equal(db.inTransaction,true)
++        if(++count===2){
++          assert.equal((db.prepare("SELECT COUNT(*) AS n FROM library_unrecognized_files WHERE scan_run_id='paths'").get() as {n:number}).n,1)
++          if(failSecond)throw new Error('second path authorization/map failed')
++        }
++        yield {rootId:1,filePath,normalizedPath:filePath}
++      }
++    }finally{closed=true}
++  })()
++  return {input,iterator,get returned(){return returned},get closed(){return closed}}
++}
++
++it('uses final upsert outcomes and original ordinal order without full-entry hydration or all()',t=>{
++  writer.seal(meta)
++  const prepare=db.prepare
++  let keysetGets=0
++  const spy=t.mock.method(db,'prepare',function(sql:string){
++    const statement=prepare.call(db,sql)
++    statement.all=(()=>{assert.fail('path iterator must not materialize an all() array')}) as typeof statement.all
++    if(sql.includes('FROM library_scan_audit_entries')){
++      assert.match(sql,/ordinal\s*>\s*\?/);assert.match(sql,/ORDER BY ordinal LIMIT 1/i)
++      const projection=sql.slice(0,sql.indexOf('FROM'))
++      assert.doesNotMatch(projection,/entry_json|\*/i)
++      const get=statement.get.bind(statement)
++      statement.get=((...args:unknown[])=>{keysetGets++;const row=Reflect.apply(get,statement,args) as Record<string,unknown>|undefined;if(row)assert.equal(Object.hasOwn(row,'entry_json'),false);return row}) as typeof statement.get
++    }
++    return statement
++  })
++  try{assert.deepEqual(db.transaction(()=>Array.from(iterateScanAuditUnrecognizedPaths(db,scope)))(),['/fixture/z','/fixture/a'])}
++  finally{spy.mock.restore()}
++  assert.equal(keysetGets,3)
++})
++
++it('rejects wrong identity/state and checks transaction and sealed state on every resume',()=>{
++  assert.throws(()=>iterateScanAuditUnrecognizedPaths(db,{libraryId:0,runId:'paths'}))
++  assert.throws(()=>db.transaction(()=>iterateScanAuditUnrecognizedPaths(db,scope).next())(),/sealed/i)
++  writer.seal(meta)
++  assert.throws(()=>iterateScanAuditUnrecognizedPaths(db,scope).next(),/transaction/i)
++  for(const bad of [{libraryId:2,runId:'paths'},{libraryId:1,runId:'missing'}])assert.throws(()=>db.transaction(()=>iterateScanAuditUnrecognizedPaths(db,bad).next())(),/scoped|sealed/i)
++  const outside=iterateScanAuditUnrecognizedPaths(db,scope)
++  db.transaction(()=>assert.equal(outside.next().value,'/fixture/z'))()
++  assert.throws(()=>outside.next(),/transaction/i)
++  db.transaction(()=>{
++    const changing=iterateScanAuditUnrecognizedPaths(db,scope)
++    assert.equal(changing.next().value,'/fixture/z')
++    db.prepare("UPDATE library_scan_audit_manifests SET state='abandoned' WHERE run_id='paths'").run()
++    assert.throws(()=>changing.next(),/sealed/i)
++  })()
++})
++
++it('captures identity before first consumption and does not normalize returned path strings',()=>{
++  writer.writeBatch('files',[{rootId:1,filePath:'/fixture/sub/../MiXeD',sourceKind:'local',outcome:'unrecognized'}]);writer.seal(meta)
++  const mutable={...scope},iterator=iterateScanAuditUnrecognizedPaths(db,mutable)
++  mutable.libraryId=999;mutable.runId='other'
++  assert.deepEqual(db.transaction(()=>Array.from(iterator))(),['/fixture/z','/fixture/a','/fixture/sub/../MiXeD'])
++})
++
++it('rejects failed/cancelled or deleted runs on resume instead of reporting normal EOF',()=>{
++  writer.seal(meta)
++  const restore=new Error('restore fixture transaction')
++  for(const mutation of [
++    "UPDATE library_scan_runs SET status='failed',finished_at='stopped' WHERE id='paths'",
++    "UPDATE library_scan_runs SET status='cancelled',finished_at='stopped' WHERE id='paths'",
++    "DELETE FROM library_scan_runs WHERE id='paths'"
++  ]){
++    assert.throws(()=>db.transaction(()=>{
++      const iterator=iterateScanAuditUnrecognizedPaths(db,scope)
++      assert.equal(iterator.next().value,'/fixture/z')
++      db.exec(mutation)
++      assert.throws(()=>iterator.next(),/sealed|scope|running|completed/i)
++      throw restore
++    })(),error=>error===restore)
++  }
++})
++
++it('publishes on the same connection while mapping lazy paths without a busy cursor',()=>{
++  writer.seal(meta);const mapping=mapped()
++  finish(mapping.input)
++  assert.equal(mapping.closed,true)
++  assert.deepEqual(db.prepare('SELECT file_path,scan_run_id FROM library_unrecognized_files ORDER BY normalized_path').all(),[
++    {file_path:'/fixture/a',scan_run_id:'paths'},{file_path:'/fixture/z',scan_run_id:'paths'}
++  ])
++  assert.equal((db.prepare("SELECT state FROM library_scan_audit_manifests WHERE run_id='paths'").get() as {state:string}).state,'published')
++  assert.equal((db.prepare("SELECT status FROM library_scan_runs WHERE id='paths'").get() as {status:string}).status,'completed')
++  assert.deepEqual(db.pragma('foreign_key_check'),[])
++})
++
++for(const failure of ['mapping','native-write'] as const)it(`closes the path iterator and rolls back publication on second ${failure} failure, then retries`,()=>{
++  writer.seal(meta);const before=snapshot(),mapping=mapped(failure==='mapping')
++  if(failure==='native-write')db.exec(`CREATE TEMP TRIGGER fail_second_path BEFORE INSERT ON library_unrecognized_files
++    WHEN NEW.file_path='/fixture/a' BEGIN SELECT RAISE(ABORT,'second path native write failed');END;`)
++  assert.throws(()=>finish(mapping.input),failure==='mapping'?/authorization\/map failed/:/native write failed/)
++  assert.equal(mapping.closed,true);assert.equal(mapping.returned,1)
++  assert.deepEqual(mapping.iterator.next(),{value:undefined,done:true})
++  assert.equal(db.inTransaction,false);assert.deepEqual(snapshot(),before)
++  if(failure==='native-write')db.exec('DROP TRIGGER fail_second_path')
++  const retry=mapped();finish(retry.input);assert.equal(retry.closed,true)
++  assert.equal((db.prepare("SELECT state FROM library_scan_audit_manifests WHERE run_id='paths'").get() as {state:string}).state,'published')
++  assert.deepEqual(db.pragma('foreign_key_check'),[])
++})
+diff --git a/src/main/db/scanUnrecognizedPublication.test.ts b/src/main/db/scanUnrecognizedPublication.test.ts
+new file mode 100644
+index 0000000..6d3fb13
+--- /dev/null
++++ b/src/main/db/scanUnrecognizedPublication.test.ts
+@@ -0,0 +1,143 @@
++import { beforeEach, afterEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import type Database from 'better-sqlite3'
++import type { LibraryScanSummary } from '@shared/libraryTypes'
++import { initDatabaseAtPath, closeDatabase } from './database'
++import { beginLibraryScanRun, finishLibraryScanEntriesRun, type LibraryUnrecognizedFileInput } from './libraryScanRepo'
++import { createScanAuditWriter } from './scanAuditWriter'
++
++let directory: string, db: Database.Database
++beforeEach(() => {
++  directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-unrecognized-publication-'))
++  db = initDatabaseAtPath(path.join(directory, 'catalog.db'))
++  db.exec(`INSERT INTO media_libraries(id,name) VALUES(2,'Other');
++    INSERT INTO media_library_roots(id,library_id,path,normalized_path) VALUES(10,1,'/media','/media'),(20,2,'/other','/other');
++    INSERT INTO library_scan_runs(id,library_id,config_revision,trigger,status,started_at)
++      VALUES('old',1,1,'manual','completed','old'),('other',2,1,'manual','completed','old');
++    INSERT INTO library_unrecognized_files(library_id,root_id,file_path,normalized_path,scan_run_id,last_seen_at)
++      VALUES(1,10,'/media/old','/media/old','old','old'),(2,20,'/other/old','/other/old','other','old');`)
++})
++afterEach(() => { closeDatabase(); fs.rmSync(directory, { recursive: true, force: true }) })
++function prepare(runId: string, status: LibraryScanSummary['status'] = 'success') {
++  const summary: LibraryScanSummary = { libraryId: 1, runId, configRevision: 1, trigger: 'manual', startedAt: 'start', finishedAt: 'finish', status,
++    scannedFiles: 2, resourcesAdded: 0, resourcesUpdated: 0, resourcesRemoved: 0, primaryResourcesPromoted: 0, videosDeleted: 0,
++    skippedFiles: 0, failedFiles: 0, pendingScanGroups: 0, pendingScanResources: 0, offlineFolders: [], errorSummary: null }
++  beginLibraryScanRun({ libraryId: 1, runId, configRevision: 1, trigger: 'manual', startedAt: 'start' })
++  const writer = createScanAuditWriter(db, { libraryId: 1, runId })
++  const meta = { schemaVersion: 2 as const, libraryId: 1, runId, configRevision: 1, trigger: 'manual' as const,
++    startedAt: 'start', finishedAt: 'finish', status }
++  writer.start(meta)
++  writer.writeBatch('files', [{ rootId: 10, filePath: '/media/new', sourceKind: 'local', outcome: 'unrecognized' }])
++  writer.seal(meta)
++  return summary
++}
++function finish(summary: LibraryScanSummary, files: Iterable<LibraryUnrecognizedFileInput>, status: 'completed' | 'failed' | 'cancelled' = 'completed') {
++  finishLibraryScanEntriesRun({ libraryId: 1, runId: summary.runId, summary, status,
++    replaceUnrecognizedRootIds: [10, 10], unrecognizedFiles: files })
++}
++const files: LibraryUnrecognizedFileInput[] = [
++  { rootId: 10, filePath: '/media/a', normalizedPath: '/media/a' },
++  { rootId: 20, filePath: '/other/ignored', normalizedPath: '/other/ignored' },
++  { rootId: 10, filePath: '/media/b', normalizedPath: '/media/b', reason: 'test' }
++]
++function snapshot() {
++  return ['library_scan_runs', 'media_library_scan_state', 'library_unrecognized_files',
++    'library_scan_audit_manifests', 'library_scan_audit_entries'].map((table) => db.prepare(`SELECT * FROM ${table}`).all())
++}
++function pendingRows() {
++  return db.prepare('SELECT library_id,root_id,file_path,normalized_path,reason FROM library_unrecognized_files ORDER BY library_id,normalized_path').all()
++}
++
++it('publishes array and generator inputs equivalently and filters roots without touching another library', () => {
++  finish(prepare('array'), files)
++  const expected = pendingRows()
++  let enumerated = 0, closed = false
++  function* input() { try { for (const file of files) { enumerated++; yield file } } finally { closed = true } }
++  finish(prepare('generator'), input())
++  assert.equal(enumerated, files.length)
++  assert.equal(closed, true)
++  assert.deepEqual(pendingRows(), expected)
++  assert.deepEqual(db.prepare("SELECT state FROM library_scan_audit_manifests WHERE run_id='generator'").get(), { state: 'published' })
++  assert.equal(expected.length, 3)
++})
++
++it('rolls back a native second INSERT failure, closes the generator, and retries', () => {
++  const summary = prepare('insert-fault'), before = snapshot()
++  db.exec(`CREATE TRIGGER fail_unrecognized_insert AFTER INSERT ON library_unrecognized_files
++    WHEN NEW.file_path='/media/b' BEGIN SELECT RAISE(ABORT, 'native unrecognized fault'); END`)
++  let closed = false, produced = 0
++  function* input() { try { for (const file of files) { produced++; yield file } } finally { closed = true } }
++  const failedAttempt = input()
++  assert.throws(() => finish(summary, failedAttempt), /native unrecognized fault/)
++  assert.equal(closed, true)
++  assert.equal(produced, 3)
++  assert.equal(failedAttempt.next().done, true)
++  assert.deepEqual(snapshot(), before)
++  db.exec('DROP TRIGGER fail_unrecognized_insert')
++  finish(summary, input())
++  assert.equal(produced, 6, 'retry factory must produce every input again')
++  assert.deepEqual(db.prepare("SELECT state FROM library_scan_audit_manifests WHERE run_id='insert-fault'").get(), { state: 'published' })
++})
++
++for (const kind of ['next', 'authorization'] as const) {
++  it(`rolls back iterator ${kind} failure after an earlier insert`, () => {
++    const summary = prepare(kind), before = snapshot(), failure = new Error(`${kind} failed`)
++    let closed = false
++    function* input(): Generator<LibraryUnrecognizedFileInput> {
++      try {
++        yield files[0]
++        if (kind === 'next') throw failure
++        yield { get rootId(): number { throw failure }, filePath: '/media/b', normalizedPath: '/media/b' }
++      } finally { closed = true }
++    }
++    assert.throws(() => finish(summary, input()), (error) => error === failure)
++    assert.equal(closed, true)
++    assert.deepEqual(snapshot(), before)
++    finish(summary, files)
++  })
++}
++
++it('rolls back all writes on late native publication failure after fully consuming the generator', () => {
++  const summary = prepare('publish-fault'), before = snapshot()
++  db.exec(`CREATE TRIGGER fail_unrecognized_publish AFTER UPDATE OF state ON library_scan_audit_manifests
++    WHEN NEW.run_id='publish-fault' AND NEW.state='published'
++    BEGIN SELECT RAISE(ABORT, 'native publication fault'); END`)
++  let closed = false
++  function* input() { try { yield* files } finally { closed = true } }
++  assert.throws(() => finish(summary, input()), /native publication fault/)
++  assert.equal(closed, true)
++  assert.deepEqual(snapshot(), before)
++  db.exec('DROP TRIGGER fail_unrecognized_publish')
++  finish(summary, input())
++})
++
++for (const status of ['failed', 'cancelled'] as const) {
++  it(`does not acquire or enumerate the iterable for ${status} runs`, () => {
++    const summary = prepare(status, status), before = pendingRows()
++    const input: Iterable<LibraryUnrecognizedFileInput> = {
++      get [Symbol.iterator](): () => Iterator<LibraryUnrecognizedFileInput> { throw new Error('must not enumerate') }
++    }
++    finish(summary, input, status)
++    assert.deepEqual(pendingRows(), before)
++    assert.deepEqual(db.prepare('SELECT status FROM library_scan_runs WHERE id=?').get(status), { status })
++    assert.deepEqual(db.prepare('SELECT state FROM library_scan_audit_manifests WHERE run_id=?').get(status), { state: 'published' })
++  })
++}
++
++it('does not enumerate on scope validation failure or empty replacement roots, and rejects async-only input', () => {
++  const summary = prepare('guarded'), before = snapshot()
++  const input: Iterable<LibraryUnrecognizedFileInput> = {
++    get [Symbol.iterator](): () => Iterator<LibraryUnrecognizedFileInput> { throw new Error('must not enumerate') }
++  }
++  assert.throws(() => finishLibraryScanEntriesRun({ libraryId: 2, runId: summary.runId, summary, status: 'completed',
++    replaceUnrecognizedRootIds: [10], unrecognizedFiles: input }))
++  assert.deepEqual(snapshot(), before)
++  const asyncOnly = { async *[Symbol.asyncIterator]() { yield files[0] } }
++  assert.throws(() => finish(summary, asyncOnly as never), /iterable/)
++  assert.deepEqual(snapshot(), before)
++  finishLibraryScanEntriesRun({ libraryId: 1, runId: summary.runId, summary, status: 'completed',
++    replaceUnrecognizedRootIds: [], unrecognizedFiles: input })
++})

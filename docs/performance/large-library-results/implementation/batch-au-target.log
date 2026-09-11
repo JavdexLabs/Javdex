@@ -1,0 +1,44 @@
+✔ pages narrow labels from 10000 actors without catalog statistics or profile data (120.931291ms)
+✔ preserves owned-name search matching and includes all genders (8.983458ms)
+✔ sorts full names before shortening labels and bounds escaped JSON payloads (11.840583ms)
+✔ rejects invalid limits, offsets and overlong search before reading (5.928333ms)
+✔ bounds labels containing embedded NUL without losing the valid prefix (8.7295ms)
+✔ validates manual tag candidate bounds and existing-tag identities (1.697125ms)
+✔ bounds selected tag label IPC requests before repository access (2.255416ms)
+▶ typed IPC adapter
+  ✔ does not expose the legacy unreviewed video deletion command (0.35875ms)
+  ✔ forwards command arguments and returns the application result (0.191417ms)
+  ✔ rejects malformed arguments before invoking the application handler (0.210083ms)
+  ✔ accepts link-resource updates without an import-only target (0.298167ms)
+  ✔ only accepts metadata retention when removing a last video resource (0.069ms)
+  ✔ accepts one exact plugin approval decision and rejects malformed decisions (0.228125ms)
+  ✔ accepts only explicit plugin continuation kinds (0.09575ms)
+  ✔ accepts only typed plugin user responses with request-bound actions (0.68425ms)
+  ✔ accepts plugin history clearing only without renderer-supplied run ids (0.084542ms)
+  ✔ accepts unrecoverable plugin-session discard only without renderer-supplied run ids (0.053375ms)
+  ✔ keeps legacy model limits out of the generic settings mutation contract (0.645917ms)
+  ✔ validates playlist import start and identity controls at the IPC boundary (0.494125ms)
+  ✔ requires the path-removal impact revision at the settings boundary (0.119834ms)
+  ✔ accepts only the structured model-management command vocabulary (0.456417ms)
+  ✔ serializes successful results and thrown errors (0.88025ms)
+  ✔ sends the contracted event payload unchanged (0.094417ms)
+✔ typed IPC adapter (5.420209ms)
+✔ bounds actress conflict summary pages and keeps detail identities exact (0.298917ms)
+✔ validates bounded actress picker requests (0.198209ms)
+▶ actressQueryService.listActresses
+  ✔ returns a stable page and the full matching total from the real database (12.841459ms)
+  ✔ reuses one exact avatar-filter snapshot across subsequent pages (0.170959ms)
+  ✔ refreshes the avatar-filter snapshot whenever the first page reloads (0.09475ms)
+  ✔ inspects avatar health and fingerprints outside the database repository (13.396167ms)
+✔ actressQueryService.listActresses (26.909625ms)
+▶ actressQueryService.listFaceScanManifest
+  ✔ exposes the dedicated minimal manifest through the query seam (0.132959ms)
+✔ actressQueryService.listFaceScanManifest (0.186167ms)
+ℹ tests 30
+ℹ suites 3
+ℹ pass 30
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 430.155375

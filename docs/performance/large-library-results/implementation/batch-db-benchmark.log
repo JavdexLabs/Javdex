@@ -1,0 +1,59 @@
+{
+  "results": [
+    {
+      "count": 100,
+      "samples": [
+        {
+          "elapsedMs": 9.954999999999984,
+          "directoryReads": 1,
+          "candidates": 1
+        },
+        {
+          "elapsedMs": 10.101207999999986,
+          "directoryReads": 1,
+          "candidates": 1
+        },
+        {
+          "elapsedMs": 9.54529199999996,
+          "directoryReads": 1,
+          "candidates": 1
+        }
+      ]
+    },
+    {
+      "count": 1000,
+      "samples": [
+        {
+          "elapsedMs": 84.75087500000006,
+          "directoryReads": 1,
+          "candidates": 1
+        },
+        {
+          "elapsedMs": 84.12808400000006,
+          "directoryReads": 1,
+          "candidates": 1
+        },
+        {
+          "elapsedMs": 85.58429100000001,
+          "directoryReads": 1,
+          "candidates": 1
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Actual default adapter, same-video local parts sharing one movie.nfo; title-only collection with real catalog/root/file authorization.",
+    "One warmup plus3 samples per scale; includes collect and directory read counting, excludes fixture setup and candidate application.",
+    "Repeated calls remain separate requests. Ordinary cache-warm temporary filesystem; no cold disk, p95, Windows/HDD, concurrent devices or peak RSS claim.",
+    "Other file authorization/stat/read work remains; this measures request-local directory reuse, not full scan throughput."
+  ]
+}
+✔ measures default NFO collection and directory read counts with many resources in one directory (512.394375ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 798.40875

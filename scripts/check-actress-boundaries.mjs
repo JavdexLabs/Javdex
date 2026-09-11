@@ -160,6 +160,7 @@ for (const specifier of importsOf(videoHandler)) {
 const classificationHandler = 'src/main/ipc/facetHandlers.ts'
 const classificationApplicationSeams = new Set([
   '../services/tagQueryService',
+  '../services/catalogReadService',
   '../services/classificationQueryService',
   '../services/classificationMaintenanceService',
   '../services/classificationImageService',

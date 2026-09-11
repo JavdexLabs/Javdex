@@ -1,0 +1,36 @@
+node:internal/modules/run_main:122
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Skew baseline is pathological at 10k; fix the plan before scaling it further
+    at fs (/Users/nut/Project/JavdexLabs/Javdex/scripts/performance/tag-index-benchmark.ts:17:8)
+    at Object.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/scripts/performance/tag-index-benchmark.ts:122:1)
+    at loadCJSModuleWithSpecialRequire (node:internal/modules/esm/translators:187:3)
+    at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:249:9)
+    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:643:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:116:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}
+
+Node.js v24.18.1
+✖ scripts/performance/tag-index-benchmark.ts (120.664958ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 123.85425
+
+✖ failing tests:
+
+test at scripts/performance/tag-index-benchmark.ts:1:1
+✖ scripts/performance/tag-index-benchmark.ts (120.664958ms)
+  'test failed'

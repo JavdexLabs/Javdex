@@ -1,0 +1,20 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-aw-benchmark.json": "49c2cbb7cc7da753e9da17fed5bc6f0866b14c7fe822c6c5ef8ebf1b002a7ebb",
+    "batch-aw-benchmark.log": "2b0b4e528a7e1701f9859649963d738d724d167a3a943def4f0abcaaccef6b5d",
+    "batch-aw-build.log": "ecd110a2ad8c3b22c74096a575167d07da95ae6a567c0eab770a12e01e3c248b",
+    "batch-aw-full.log": "8caefd055ce5e54ee0575c6ba30e6dd0b3061170692e7aedc1780e1b0e80b7e9",
+    "batch-aw-merge-candidate-api.patch": "54d18bff3d8ab1e475d9cf3b0b80b1fa463de04baa196e3dbdcb37865d9e5827",
+    "batch-aw-review.md": "f0bcbaf325bba7f2235a4ee7b84ea7642bc3d137db74d4c30efc83a8e3d9e145",
+    "batch-aw-target.log": "1f07fa88a19173f66a6ca1469a878c08103832891cf1121bf6d19be2f9954eee"
+  },
+  "notes": [
+    "Selected cumulative diff vsHEAD plus full new test/benchmark; depends on B-AV, not standalone.",
+    "Final34focused/full2260pass1skip0fail; build successful.",
+    "Candidate counts restricted to page IDs in same read transaction; original active-visible count and gender compatibility retained.",
+    "Parameterized EQP after skew uses actress_id and membership video_id indexes. High in-page fanout still costs work; no O(page) or p95 claim.",
+    "MergeActressModal not wired yet; no frontend improvement claim.",
+    "No user database/media/schema/commit/push/release. All15work packages/42risks remain in scope."
+  ]
+}

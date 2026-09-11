@@ -1,0 +1,9 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "31e5cf74ba326f1b5ac1d1c3549bdd68092d69e3c49d374a9b51acfee06846b8",
+  "notes": [
+    "Patch is against HEAD, not an incremental diff. Keep narrow card types/projection and PosterCard generic changes from E for files absent here.",
+    "Benchmark is synthetic 300382-video library with 30000-item playlist; three warm samples are not p95 or UI timing.",
+    "Snapshot includes the later forced-refresh cache invalidation fix and nine component tests; benchmark SQL is unchanged. Last three component tests and the cache fix were validated after the full test/build run."
+  ]
+}

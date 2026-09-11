@@ -1,0 +1,17 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bd-avatar-page-consumer.patch": "9e616d0a823978f302706125b492fcc9aa23af7e0f07c7729073d1d93e70bf4d",
+    "batch-bd-build.log": "4b981da4b3e801ff13c9a799dbe19d45ec51e2a72dcc9e5eb1b8ff718954fa38",
+    "batch-bd-full-read-red.log": "a671543d3218c32db3260f758bb0d608d6faa587237e23cae7ad87179dbe03ed",
+    "batch-bd-full.log": "c87eb7e1c760939781790640af0d2e7fcc3bc941131d7d43e345ae2a4c9ab9cf",
+    "batch-bd-review.md": "796b1ac97e68f9e7d20aa3325d03a880eedd737a8724791b58694cbda2210acb",
+    "batch-bd-target.log": "4c8e6a621889f43c2425a3ce687e6602e85f273eb67894c3a6ccf3eb31f97192"
+  },
+  "notes": [
+    "Cumulative selected diff plus new/current tests; depends on earlier batches.",
+    "Actual Provider snapshot pagination, three focused tests, full-read replay red.",
+    "Full2284pass1skip0fail; build passed.",
+    "Backend TEMP O(N)/sync initialization and wider15/42scope remain active; no global heap or p95 claims."
+  ]
+}

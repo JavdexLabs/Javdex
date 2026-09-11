@@ -1,0 +1,17 @@
+✔ opens a separate read-only WAL connection with matching SQL functions and no migration (10.205875ms)
+✔ keeps a read snapshot while the writer commits and observes it on the next transaction (7.109625ms)
+✔ rejects missing, old, newer and non-WAL catalogs without initializing or migrating them (2.597583ms)
+✔ does not publish an unsuccessfully initialized writer and permits a subsequent valid initialization (6.330209ms)
+✔ pages every section with stable ordinal, filtered totals and independent results (14.385583ms)
+✔ holds an immutable copied snapshot across writer changes and leaves main schema/data unchanged (8.430042ms)
+✔ rejects source/index/page budget overflows without truncation and can rebuild after failure (11.992667ms)
+✔ rejects wrong scope, mismatched versions/identity, malformed collections and non-object entries (18.482792ms)
+✔ copies all collections from one read snapshot when the writer commits during construction (8.219875ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 238.655833

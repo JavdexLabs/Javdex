@@ -1,0 +1,257 @@
+BEGIN startup.current_schema
+{"name":"startup.current_schema","firstMs":246.835916,"warmMedianMs":247.2481659999994,"warmMaxMs":248.6266660000001,"samples":3,"sqlCalls":0,"sqlMsLast":0,"serializedBytes":13,"rssBytesAfter":177504256}
+BEGIN legacy.first
+{"name":"legacy.first","firstMs":3.927750000000742,"warmMedianMs":2.843417000000045,"warmMaxMs":3.1051669999997102,"samples":3,"sqlCalls":2,"sqlMsLast":2.7334590000009484,"serializedBytes":41393,"rssBytesAfter":177651712}
+BEGIN legacy.deep
+{"name":"legacy.deep","firstMs":553.4495420000003,"warmMedianMs":555.3866250000001,"warmMaxMs":560.3267919999998,"samples":3,"sqlCalls":2,"sqlMsLast":560.1361680000009,"serializedBytes":40895,"rssBytesAfter":177750016}
+BEGIN legacy.release
+{"name":"legacy.release","firstMs":562.351541,"warmMedianMs":566.6191249999993,"warmMaxMs":567.7704160000012,"samples":3,"sqlCalls":2,"sqlMsLast":567.5700419999994,"serializedBytes":41452,"rssBytesAfter":177864704}
+BEGIN legacy.search_code
+{"name":"legacy.search_code","firstMs":96.56766699999935,"warmMedianMs":94.85774999999921,"warmMaxMs":95.47095799999988,"samples":3,"sqlCalls":2,"sqlMsLast":94.453125,"serializedBytes":708,"rssBytesAfter":177995776}
+BEGIN scoped.library
+{"name":"scoped.library","firstMs":66.2674160000006,"warmMedianMs":65.99091700000099,"warmMaxMs":66.26383400000122,"samples":3,"sqlCalls":2,"sqlMsLast":65.60275100000035,"serializedBytes":50573,"rssBytesAfter":178192384}
+BEGIN scoped.all_single_active
+{"name":"scoped.all_single_active","firstMs":65.6311250000017,"warmMedianMs":65.64066699999967,"warmMaxMs":66.65362499999901,"samples":3,"sqlCalls":3,"sqlMsLast":66.36083300000064,"serializedBytes":50573,"rssBytesAfter":178372608}
+BEGIN scoped.all_selected_one
+{"name":"scoped.all_selected_one","firstMs":65.96787500000028,"warmMedianMs":66.6075839999994,"warmMaxMs":66.82883299999958,"samples":3,"sqlCalls":3,"sqlMsLast":66.55774999999994,"serializedBytes":50573,"rssBytesAfter":178634752}
+BEGIN scoped.release
+{"name":"scoped.release","firstMs":82.00220799999988,"warmMedianMs":81.91650000000118,"warmMaxMs":81.97808400000031,"samples":3,"sqlCalls":2,"sqlMsLast":81.64704100000017,"serializedBytes":50632,"rssBytesAfter":179159040}
+BEGIN scoped.search_code
+{"name":"scoped.search_code","firstMs":368.8044580000005,"warmMedianMs":372.1379589999997,"warmMaxMs":372.8040000000001,"samples":3,"sqlCalls":3,"sqlMsLast":369.7349579999973,"serializedBytes":861,"rssBytesAfter":179830784}
+BEGIN tags.all
+{"name":"tags.all","firstMs":567.3758330000001,"warmMedianMs":576.5400000000009,"warmMaxMs":611.5875410000008,"samples":3,"sqlCalls":1,"sqlMsLast":611.4727920000005,"serializedBytes":46787,"rssBytesAfter":188481536}
+BEGIN tags.manual
+{"name":"tags.manual","firstMs":1524.4278749999994,"warmMedianMs":1442.039458000003,"warmMaxMs":1445.348249999999,"samples":3,"sqlCalls":1,"sqlMsLast":1445.237000000001,"serializedBytes":46787,"rssBytesAfter":188973056}
+BEGIN tags.selected_labels
+{"name":"tags.selected_labels","firstMs":0.12741599999935715,"warmMedianMs":0.02050000000235741,"warmMaxMs":0.021124999999301508,"samples":3,"sqlCalls":1,"sqlMsLast":0.006792000000132248,"serializedBytes":76,"rssBytesAfter":189104128}
+BEGIN tags.selected_labels_100
+{"name":"tags.selected_labels_100","firstMs":0.06925000000046566,"warmMedianMs":0.0498749999969732,"warmMaxMs":0.06262499999866122,"samples":3,"sqlCalls":1,"sqlMsLast":0.025499999999738066,"serializedBytes":2685,"rssBytesAfter":189202432}
+BEGIN tags.manual_options
+{"name":"tags.manual_options","firstMs":0.22450000000026193,"warmMedianMs":0.0614160000004631,"warmMaxMs":0.0784590000002936,"samples":3,"sqlCalls":1,"sqlMsLast":0.04845800000111922,"serializedBytes":2906,"rssBytesAfter":189251584}
+BEGIN tags.manual_options_search
+{"name":"tags.manual_options_search","firstMs":0.2071250000008149,"warmMedianMs":0.13162500000180444,"warmMaxMs":0.13795899999968242,"samples":3,"sqlCalls":1,"sqlMsLast":0.1204169999982696,"serializedBytes":344,"rssBytesAfter":189579264}
+BEGIN tags.manual_options_deep
+{"name":"tags.manual_options_deep","firstMs":1.103624999999738,"warmMedianMs":0.3335000000006403,"warmMaxMs":0.4009169999990263,"samples":3,"sqlCalls":1,"sqlMsLast":0.3054999999985739,"serializedBytes":2909,"rssBytesAfter":189677568}
+BEGIN actors.first
+{"name":"actors.first","firstMs":424.90570800000205,"warmMedianMs":432.0679999999993,"warmMaxMs":436.9827089999999,"samples":3,"sqlCalls":3,"sqlMsLast":436.77683400000024,"serializedBytes":104927,"rssBytesAfter":196083712}
+BEGIN overview
+{"name":"overview","firstMs":7.599208000003273,"warmMedianMs":6.245833000000857,"warmMaxMs":6.33758399999715,"samples":3,"sqlCalls":6,"sqlMsLast":6.008292999998957,"serializedBytes":268,"rssBytesAfter":196296704}
+BEGIN home.single
+{"name":"home.single","firstMs":78.53049999999712,"warmMedianMs":77.45604100000128,"warmMaxMs":77.87154200000077,"samples":3,"sqlCalls":7,"sqlMsLast":77.06887500000084,"serializedBytes":21173,"rssBytesAfter":197738496}
+BEGIN web.first
+{"name":"web.first","firstMs":81.4297910000023,"warmMedianMs":80.6274169999997,"warmMaxMs":80.97808299999815,"samples":3,"sqlCalls":2,"sqlMsLast":80.54054200000246,"serializedBytes":4919,"rssBytesAfter":197935104}
+BEGIN web.search
+{"name":"web.search","firstMs":439.6129579999979,"warmMedianMs":432.43274999999994,"warmMaxMs":433.5162500000006,"samples":3,"sqlCalls":2,"sqlMsLast":433.2802069999998,"serializedBytes":177,"rssBytesAfter":198148096}
+BEGIN web.collections
+{"name":"web.collections","firstMs":38.92012500000055,"warmMedianMs":37.561625000002095,"warmMaxMs":37.5958329999994,"samples":3,"sqlCalls":2,"sqlMsLast":36.831083000000945,"serializedBytes":135,"rssBytesAfter":198230016}
+BEGIN playlist.full
+{"name":"playlist.full","firstMs":93.67808299999888,"warmMedianMs":95.77204199999687,"warmMaxMs":100.4073750000025,"samples":3,"sqlCalls":3,"sqlMsLast":78.7923339999943,"serializedBytes":20601442,"rssBytesAfter":358612992}
+BEGIN playlist.page
+{"name":"playlist.page","firstMs":9.703584000002593,"warmMedianMs":7.715417000003072,"warmMaxMs":7.818250000000262,"samples":3,"sqlCalls":6,"sqlMsLast":7.5987069999973755,"serializedBytes":9718,"rssBytesAfter":360562688}
+BEGIN playlist.metadata
+{"name":"playlist.metadata","firstMs":1.3271249999997963,"warmMedianMs":1.156290999999328,"warmMaxMs":1.2677920000023732,"samples":3,"sqlCalls":3,"sqlMsLast":1.2377919999962614,"serializedBytes":169,"rssBytesAfter":360595456}
+BEGIN playlist.video_page
+{"name":"playlist.video_page","firstMs":6.299000000002707,"warmMedianMs":6.67329200000313,"warmMaxMs":6.868458000000828,"samples":3,"sqlCalls":3,"sqlMsLast":6.597333000001527,"serializedBytes":9550,"rssBytesAfter":360677376}
+BEGIN playlist.deep_page
+{"name":"playlist.deep_page","firstMs":13.887166999997135,"warmMedianMs":14.036667000000307,"warmMaxMs":14.462124999998196,"samples":3,"sqlCalls":6,"sqlMsLast":13.888997999998537,"serializedBytes":9344,"rssBytesAfter":360890368}
+BEGIN experiment.no_distinct.0
+{"name":"experiment.no_distinct.0","firstMs":0.035667000000103144,"warmMedianMs":0.02958299999954761,"warmMaxMs":0.0305000000007567,"samples":3,"sqlCalls":1,"sqlMsLast":0.018875000001571607,"serializedBytes":12,"rssBytesAfter":360906752}
+BEGIN experiment.no_distinct.1
+{"name":"experiment.no_distinct.1","firstMs":0.22845799999777228,"warmMedianMs":0.20449999999982538,"warmMaxMs":0.20995899999979883,"samples":3,"sqlCalls":1,"sqlMsLast":0.18054099999790196,"serializedBytes":41248,"rssBytesAfter":361021440}
+BEGIN index.single-library.startup.current_schema
+{"name":"index.single-library.startup.current_schema","firstMs":251.770833999999,"warmMedianMs":251.32695799999783,"warmMaxMs":252.75741699999708,"samples":3,"sqlCalls":0,"sqlMsLast":0,"serializedBytes":13,"rssBytesAfter":361152512}
+BEGIN index.single-library.legacy.first
+{"name":"index.single-library.legacy.first","firstMs":3.534124999998312,"warmMedianMs":2.9489580000008573,"warmMaxMs":3.061333999998169,"samples":3,"sqlCalls":2,"sqlMsLast":2.922374999998283,"serializedBytes":41393,"rssBytesAfter":361234432}
+BEGIN index.single-library.legacy.deep
+{"name":"index.single-library.legacy.deep","firstMs":566.7817080000023,"warmMedianMs":566.5729159999973,"warmMaxMs":611.3481250000004,"samples":3,"sqlCalls":2,"sqlMsLast":611.148500000003,"serializedBytes":40895,"rssBytesAfter":361299968}
+BEGIN index.single-library.legacy.release
+{"name":"index.single-library.legacy.release","firstMs":572.4869580000013,"warmMedianMs":676.9567079999979,"warmMaxMs":712.3076250000013,"samples":3,"sqlCalls":2,"sqlMsLast":712.0668750000041,"serializedBytes":41452,"rssBytesAfter":361381888}
+BEGIN index.single-library.legacy.search_code
+{"name":"index.single-library.legacy.search_code","firstMs":125.86179199999606,"warmMedianMs":102.83670799999527,"warmMaxMs":103.63462500000605,"samples":3,"sqlCalls":2,"sqlMsLast":103.34949900000356,"serializedBytes":708,"rssBytesAfter":361480192}
+BEGIN index.single-library.scoped.library
+{"name":"index.single-library.scoped.library","firstMs":67.69220800000039,"warmMedianMs":67.30512500000623,"warmMaxMs":68.33599999999569,"samples":3,"sqlCalls":2,"sqlMsLast":67.96541700000671,"serializedBytes":50573,"rssBytesAfter":361693184}
+BEGIN index.single-library.scoped.all_single_active
+{"name":"index.single-library.scoped.all_single_active","firstMs":67.4304159999956,"warmMedianMs":67.40120800000295,"warmMaxMs":67.6373750000057,"samples":3,"sqlCalls":3,"sqlMsLast":65.91408299999603,"serializedBytes":50573,"rssBytesAfter":361840640}
+BEGIN index.single-library.scoped.all_selected_one
+{"name":"index.single-library.scoped.all_selected_one","firstMs":67.38366700000188,"warmMedianMs":68.25358299999789,"warmMaxMs":68.29795799999556,"samples":3,"sqlCalls":3,"sqlMsLast":67.02375000000029,"serializedBytes":50573,"rssBytesAfter":362037248}
+BEGIN index.single-library.scoped.release
+{"name":"index.single-library.scoped.release","firstMs":83.64616699999897,"warmMedianMs":82.90291699999943,"warmMaxMs":83.5075829999987,"samples":3,"sqlCalls":2,"sqlMsLast":82.62458299999707,"serializedBytes":50632,"rssBytesAfter":362250240}
+BEGIN index.single-library.scoped.search_code
+{"name":"index.single-library.scoped.search_code","firstMs":376.1121669999993,"warmMedianMs":383.16416700000264,"warmMaxMs":383.77516599999944,"samples":3,"sqlCalls":3,"sqlMsLast":383.39300000000367,"serializedBytes":861,"rssBytesAfter":362528768}
+BEGIN index.single-library.tags.all
+{"name":"index.single-library.tags.all","firstMs":578.8806670000049,"warmMedianMs":577.5972499999989,"warmMaxMs":577.7136669999963,"samples":3,"sqlCalls":1,"sqlMsLast":577.0820840000015,"serializedBytes":46787,"rssBytesAfter":362594304}
+BEGIN index.single-library.tags.manual
+{"name":"index.single-library.tags.manual","firstMs":1409.6121249999997,"warmMedianMs":1404.9726660000015,"warmMaxMs":1421.3625840000022,"samples":3,"sqlCalls":1,"sqlMsLast":1421.250417000003,"serializedBytes":46787,"rssBytesAfter":342556672}
+BEGIN index.single-library.tags.selected_labels
+{"name":"index.single-library.tags.selected_labels","firstMs":0.06683300000440795,"warmMedianMs":0.020291000000725035,"warmMaxMs":0.02916700000059791,"samples":3,"sqlCalls":1,"sqlMsLast":0.0057090000045718625,"serializedBytes":76,"rssBytesAfter":342556672}
+BEGIN index.single-library.tags.selected_labels_100
+{"name":"index.single-library.tags.selected_labels_100","firstMs":0.09012500000244472,"warmMedianMs":0.043416999993496574,"warmMaxMs":0.0559579999971902,"samples":3,"sqlCalls":1,"sqlMsLast":0.021541999994951766,"serializedBytes":2685,"rssBytesAfter":342589440}
+BEGIN index.single-library.tags.manual_options
+{"name":"index.single-library.tags.manual_options","firstMs":0.19320799999695737,"warmMedianMs":0.052082999995036516,"warmMaxMs":0.06058399999892572,"samples":3,"sqlCalls":1,"sqlMsLast":0.04174999999668216,"serializedBytes":2906,"rssBytesAfter":342605824}
+BEGIN index.single-library.tags.manual_options_search
+{"name":"index.single-library.tags.manual_options_search","firstMs":0.17899999999644933,"warmMedianMs":0.12458300000434974,"warmMaxMs":0.12683300000207964,"samples":3,"sqlCalls":1,"sqlMsLast":0.11541600000055041,"serializedBytes":344,"rssBytesAfter":342622208}
+BEGIN index.single-library.tags.manual_options_deep
+{"name":"index.single-library.tags.manual_options_deep","firstMs":1.0453339999949094,"warmMedianMs":0.25041699999565026,"warmMaxMs":0.29408399999374524,"samples":3,"sqlCalls":1,"sqlMsLast":0.23224999999365536,"serializedBytes":2909,"rssBytesAfter":342671360}
+BEGIN index.single-library.actors.first
+{"name":"index.single-library.actors.first","firstMs":434.234749999996,"warmMedianMs":442.54133300000103,"warmMaxMs":455.971666999998,"samples":3,"sqlCalls":3,"sqlMsLast":455.76233299999876,"serializedBytes":104927,"rssBytesAfter":342966272}
+BEGIN index.single-library.overview
+{"name":"index.single-library.overview","firstMs":8.10399999999936,"warmMedianMs":6.722625000002154,"warmMaxMs":6.856166999998095,"samples":3,"sqlCalls":6,"sqlMsLast":6.6218320000043605,"serializedBytes":268,"rssBytesAfter":343031808}
+BEGIN index.single-library.home.single
+{"name":"index.single-library.home.single","firstMs":84.33095799999865,"warmMedianMs":80.53149999999732,"warmMaxMs":82.79624999999942,"samples":3,"sqlCalls":7,"sqlMsLast":79.80758300000161,"serializedBytes":21173,"rssBytesAfter":343670784}
+BEGIN index.single-library.web.first
+{"name":"index.single-library.web.first","firstMs":82.8357079999987,"warmMedianMs":82.41637499999342,"warmMaxMs":82.47904100000596,"samples":3,"sqlCalls":2,"sqlMsLast":82.3225420000017,"serializedBytes":4919,"rssBytesAfter":343703552}
+BEGIN index.single-library.web.search
+{"name":"index.single-library.web.search","firstMs":441.6801250000062,"warmMedianMs":437.8413750000036,"warmMaxMs":438.7131670000017,"samples":3,"sqlCalls":2,"sqlMsLast":437.655958000003,"serializedBytes":177,"rssBytesAfter":343801856}
+BEGIN index.single-library.web.collections
+{"name":"index.single-library.web.collections","firstMs":39.52354199999536,"warmMedianMs":37.44537500000297,"warmMaxMs":37.78062499999942,"samples":3,"sqlCalls":2,"sqlMsLast":37.69195899999613,"serializedBytes":135,"rssBytesAfter":343867392}
+BEGIN index.single-library.playlist.full
+{"name":"index.single-library.playlist.full","firstMs":104.93704199999775,"warmMedianMs":93.2440409999981,"warmMaxMs":95.40204200000153,"samples":3,"sqlCalls":3,"sqlMsLast":76.3347089999952,"serializedBytes":20601442,"rssBytesAfter":391561216}
+BEGIN index.single-library.playlist.page
+{"name":"index.single-library.playlist.page","firstMs":9.27362500000163,"warmMedianMs":7.578958000005514,"warmMaxMs":7.943166999997629,"samples":3,"sqlCalls":6,"sqlMsLast":7.488582999991195,"serializedBytes":9718,"rssBytesAfter":404045824}
+BEGIN index.single-library.playlist.metadata
+{"name":"index.single-library.playlist.metadata","firstMs":1.482624999996915,"warmMedianMs":1.1650829999998678,"warmMaxMs":1.177332999999635,"samples":3,"sqlCalls":3,"sqlMsLast":1.122666000002937,"serializedBytes":169,"rssBytesAfter":404094976}
+BEGIN index.single-library.playlist.video_page
+{"name":"index.single-library.playlist.video_page","firstMs":6.2335000000020955,"warmMedianMs":6.6322090000030585,"warmMaxMs":6.645582999997714,"samples":3,"sqlCalls":3,"sqlMsLast":6.368999999991502,"serializedBytes":9550,"rssBytesAfter":404176896}
+BEGIN index.single-library.playlist.deep_page
+{"name":"index.single-library.playlist.deep_page","firstMs":14.212166999997862,"warmMedianMs":13.894417000003159,"warmMaxMs":14.07366699999693,"samples":3,"sqlCalls":6,"sqlMsLast":13.531375999991724,"serializedBytes":9344,"rssBytesAfter":404357120}
+BEGIN index.single-library.experiment.no_distinct.0
+{"name":"index.single-library.experiment.no_distinct.0","firstMs":0.6660829999964335,"warmMedianMs":0.022124999995867256,"warmMaxMs":0.03674999999930151,"samples":3,"sqlCalls":1,"sqlMsLast":0.017583999993803445,"serializedBytes":12,"rssBytesAfter":404357120}
+BEGIN index.single-library.experiment.no_distinct.1
+{"name":"index.single-library.experiment.no_distinct.1","firstMs":0.2791250000009313,"warmMedianMs":0.19691700000112178,"warmMaxMs":0.20033300000068266,"samples":3,"sqlCalls":1,"sqlMsLast":0.17179200000100536,"serializedBytes":41248,"rssBytesAfter":404439040}
+BEGIN overlap.startup.current_schema
+{"name":"overlap.startup.current_schema","firstMs":293.3093330000047,"warmMedianMs":291.51437499999884,"warmMaxMs":293.6867910000001,"samples":3,"sqlCalls":0,"sqlMsLast":0,"serializedBytes":13,"rssBytesAfter":405258240}
+BEGIN overlap.legacy.first
+{"name":"overlap.legacy.first","firstMs":3.682667000000947,"warmMedianMs":2.9477919999990263,"warmMaxMs":3.1386249999995925,"samples":3,"sqlCalls":2,"sqlMsLast":2.7264170000053127,"serializedBytes":41393,"rssBytesAfter":405372928}
+BEGIN overlap.legacy.deep
+{"name":"overlap.legacy.deep","firstMs":603.0820000000022,"warmMedianMs":607.2720000000045,"warmMaxMs":607.6619580000042,"samples":3,"sqlCalls":2,"sqlMsLast":607.1121249999997,"serializedBytes":40895,"rssBytesAfter":405438464}
+BEGIN overlap.legacy.release
+{"name":"overlap.legacy.release","firstMs":617.8915829999969,"warmMedianMs":621.893458999999,"warmMaxMs":624.1537919999973,"samples":3,"sqlCalls":2,"sqlMsLast":623.9867500000037,"serializedBytes":41452,"rssBytesAfter":405487616}
+BEGIN overlap.legacy.search_code
+{"name":"overlap.legacy.search_code","firstMs":98.84700000000157,"warmMedianMs":97.01745900000242,"warmMaxMs":97.35129099999904,"samples":3,"sqlCalls":2,"sqlMsLast":96.8382089999941,"serializedBytes":708,"rssBytesAfter":405569536}
+BEGIN overlap.scoped.library
+{"name":"overlap.scoped.library","firstMs":5.105540999997174,"warmMedianMs":3.953458000003593,"warmMaxMs":4.031834000001254,"samples":3,"sqlCalls":2,"sqlMsLast":3.8868339999971795,"serializedBytes":51893,"rssBytesAfter":405831680}
+BEGIN overlap.scoped.all_single_active
+{"name":"overlap.scoped.all_single_active","firstMs":502.08816600000137,"warmMedianMs":500.4259579999998,"warmMaxMs":501.9906250000058,"samples":3,"sqlCalls":3,"sqlMsLast":499.3158739999999,"serializedBytes":51893,"rssBytesAfter":406175744}
+BEGIN overlap.scoped.all_selected_one
+{"name":"overlap.scoped.all_selected_one","firstMs":5.178415999995195,"warmMedianMs":4.041917000002286,"warmMaxMs":4.123791999998502,"samples":3,"sqlCalls":3,"sqlMsLast":3.645082999995793,"serializedBytes":51893,"rssBytesAfter":406405120}
+BEGIN overlap.scoped.release
+{"name":"overlap.scoped.release","firstMs":82.1397500000021,"warmMedianMs":83.31175000000076,"warmMaxMs":83.61025000000518,"samples":3,"sqlCalls":2,"sqlMsLast":83.00404200000048,"serializedBytes":50632,"rssBytesAfter":406618112}
+BEGIN overlap.scoped.search_code
+{"name":"overlap.scoped.search_code","firstMs":497.3780839999963,"warmMedianMs":499.98466599999665,"warmMaxMs":502.0813749999943,"samples":3,"sqlCalls":3,"sqlMsLast":495.40720899999724,"serializedBytes":861,"rssBytesAfter":406896640}
+BEGIN overlap.tags.all
+{"name":"overlap.tags.all","firstMs":593.2951249999969,"warmMedianMs":597.3792079999985,"warmMaxMs":597.700417,"samples":3,"sqlCalls":1,"sqlMsLast":597.6072500000009,"serializedBytes":46787,"rssBytesAfter":406945792}
+BEGIN overlap.tags.manual
+{"name":"overlap.tags.manual","firstMs":1486.248624999993,"warmMedianMs":1485.4799589999893,"warmMaxMs":1547.2312079999974,"samples":3,"sqlCalls":1,"sqlMsLast":1547.1313329999975,"serializedBytes":46787,"rssBytesAfter":407011328}
+BEGIN overlap.tags.selected_labels
+{"name":"overlap.tags.selected_labels","firstMs":0.05141699999512639,"warmMedianMs":0.013208000003942288,"warmMaxMs":0.018750000002910383,"samples":3,"sqlCalls":1,"sqlMsLast":0.004790999999386258,"serializedBytes":76,"rssBytesAfter":407011328}
+BEGIN overlap.tags.selected_labels_100
+{"name":"overlap.tags.selected_labels_100","firstMs":0.10245800000848249,"warmMedianMs":0.04604200000176206,"warmMaxMs":0.061165999999502674,"samples":3,"sqlCalls":1,"sqlMsLast":0.02433299999393057,"serializedBytes":2685,"rssBytesAfter":407044096}
+BEGIN overlap.tags.manual_options
+{"name":"overlap.tags.manual_options","firstMs":0.19087500000023283,"warmMedianMs":0.05941599998914171,"warmMaxMs":0.06766699999570847,"samples":3,"sqlCalls":1,"sqlMsLast":0.04820800000743475,"serializedBytes":2906,"rssBytesAfter":407076864}
+BEGIN overlap.tags.manual_options_search
+{"name":"overlap.tags.manual_options_search","firstMs":0.15262500000244472,"warmMedianMs":0.1375830000033602,"warmMaxMs":0.14254200000141282,"samples":3,"sqlCalls":1,"sqlMsLast":0.11758299999928568,"serializedBytes":344,"rssBytesAfter":407109632}
+BEGIN overlap.tags.manual_options_deep
+{"name":"overlap.tags.manual_options_deep","firstMs":1.072667000000365,"warmMedianMs":0.359375,"warmMaxMs":0.3821250000037253,"samples":3,"sqlCalls":1,"sqlMsLast":0.31641600000148173,"serializedBytes":2909,"rssBytesAfter":407158784}
+BEGIN overlap.actors.first
+{"name":"overlap.actors.first","firstMs":455.20270899999014,"warmMedianMs":457.0071659999958,"warmMaxMs":458.3730409999989,"samples":3,"sqlCalls":3,"sqlMsLast":458.2018750000134,"serializedBytes":104927,"rssBytesAfter":407420928}
+BEGIN overlap.overview
+{"name":"overlap.overview","firstMs":7.553916999997455,"warmMedianMs":6.430500000002212,"warmMaxMs":6.452082999996492,"samples":3,"sqlCalls":6,"sqlMsLast":6.393582999997307,"serializedBytes":268,"rssBytesAfter":407519232}
+BEGIN overlap.home.single
+{"name":"overlap.home.single","firstMs":762.8629170000058,"warmMedianMs":726.0887909999874,"warmMaxMs":745.0825830000103,"samples":3,"sqlCalls":7,"sqlMsLast":725.0885009999765,"serializedBytes":22552,"rssBytesAfter":409501696}
+BEGIN overlap.web.first
+{"name":"overlap.web.first","firstMs":91.88095800000883,"warmMedianMs":92.06829099998868,"warmMaxMs":92.21474999999919,"samples":3,"sqlCalls":2,"sqlMsLast":90.9964159999945,"serializedBytes":4919,"rssBytesAfter":409567232}
+BEGIN overlap.web.search
+{"name":"overlap.web.search","firstMs":458.0404170000111,"warmMedianMs":452.1300830000109,"warmMaxMs":453.32966599999054,"samples":3,"sqlCalls":2,"sqlMsLast":453.11954200000037,"serializedBytes":177,"rssBytesAfter":409632768}
+BEGIN overlap.web.collections
+{"name":"overlap.web.collections","firstMs":49.20162499998696,"warmMedianMs":48.61666699999478,"warmMaxMs":49.080750000008265,"samples":3,"sqlCalls":2,"sqlMsLast":47.54829099999915,"serializedBytes":176,"rssBytesAfter":409731072}
+BEGIN overlap.playlist.full
+{"name":"overlap.playlist.full","firstMs":107.49820799998997,"warmMedianMs":98.25454100000206,"warmMaxMs":99.85337500000605,"samples":3,"sqlCalls":3,"sqlMsLast":80.92516800001613,"serializedBytes":20601442,"rssBytesAfter":420315136}
+BEGIN overlap.playlist.page
+{"name":"overlap.playlist.page","firstMs":10.412917000008747,"warmMedianMs":7.5318330000009155,"warmMaxMs":8.256708000000799,"samples":3,"sqlCalls":6,"sqlMsLast":7.429123000008985,"serializedBytes":9718,"rssBytesAfter":420298752}
+BEGIN overlap.playlist.metadata
+{"name":"overlap.playlist.metadata","firstMs":1.801208000004408,"warmMedianMs":1.12295799999265,"warmMaxMs":1.197874999998021,"samples":3,"sqlCalls":3,"sqlMsLast":1.1002920000028098,"serializedBytes":169,"rssBytesAfter":420331520}
+BEGIN overlap.playlist.video_page
+{"name":"overlap.playlist.video_page","firstMs":6.305832999991253,"warmMedianMs":6.268000000010943,"warmMaxMs":6.870208000007551,"samples":3,"sqlCalls":3,"sqlMsLast":6.213583999997354,"serializedBytes":9550,"rssBytesAfter":420380672}
+BEGIN overlap.playlist.deep_page
+{"name":"overlap.playlist.deep_page","firstMs":14.336249999993015,"warmMedianMs":13.736250000001746,"warmMaxMs":13.786917000004905,"samples":3,"sqlCalls":6,"sqlMsLast":13.58970800001407,"serializedBytes":9344,"rssBytesAfter":420478976}
+BEGIN overlap.experiment.no_distinct.0
+{"name":"overlap.experiment.no_distinct.0","firstMs":0.6781670000054874,"warmMedianMs":0.022458999999798834,"warmMaxMs":0.038874999998370185,"samples":3,"sqlCalls":1,"sqlMsLast":0.018457999991369434,"serializedBytes":12,"rssBytesAfter":420495360}
+BEGIN overlap.experiment.no_distinct.1
+{"name":"overlap.experiment.no_distinct.1","firstMs":0.28149999999732245,"warmMedianMs":0.22012499999254942,"warmMaxMs":0.22062499998719431,"samples":3,"sqlCalls":1,"sqlMsLast":0.17120799999975134,"serializedBytes":41248,"rssBytesAfter":420511744}
+BEGIN scoped.all_overlap
+{"name":"scoped.all_overlap","firstMs":507.57612500000687,"warmMedianMs":506.49533400000655,"warmMaxMs":508.1890829999902,"samples":3,"sqlCalls":3,"sqlMsLast":506.0934159999888,"serializedBytes":51893,"rssBytesAfter":420724736}
+BEGIN home.overlap
+{"name":"home.overlap","firstMs":720.2521249999991,"warmMedianMs":725.7334169999958,"warmMaxMs":743.676707999999,"samples":3,"sqlCalls":7,"sqlMsLast":724.8446669999976,"serializedBytes":22552,"rssBytesAfter":421576704}
+BEGIN index.after-overlap-write.overlap.startup.current_schema
+{"name":"index.after-overlap-write.overlap.startup.current_schema","firstMs":292.50466700000106,"warmMedianMs":301.75616699999955,"warmMaxMs":315.7589169999992,"samples":3,"sqlCalls":0,"sqlMsLast":0,"serializedBytes":13,"rssBytesAfter":421724160}
+BEGIN index.after-overlap-write.overlap.legacy.first
+{"name":"index.after-overlap-write.overlap.legacy.first","firstMs":3.7355419999948936,"warmMedianMs":3.122292000000016,"warmMaxMs":3.2369999999937136,"samples":3,"sqlCalls":2,"sqlMsLast":2.952167000010377,"serializedBytes":41393,"rssBytesAfter":421789696}
+BEGIN index.after-overlap-write.overlap.legacy.deep
+{"name":"index.after-overlap-write.overlap.legacy.deep","firstMs":613.0727079999924,"warmMedianMs":620.4413329999952,"warmMaxMs":656.2524169999961,"samples":3,"sqlCalls":2,"sqlMsLast":620.2609170000069,"serializedBytes":40895,"rssBytesAfter":421806080}
+BEGIN index.after-overlap-write.overlap.legacy.release
+{"name":"index.after-overlap-write.overlap.legacy.release","firstMs":633.6486670000013,"warmMedianMs":640.4624999999942,"warmMaxMs":641.2157920000027,"samples":3,"sqlCalls":2,"sqlMsLast":641.0310410000093,"serializedBytes":41452,"rssBytesAfter":421855232}
+BEGIN index.after-overlap-write.overlap.legacy.search_code
+{"name":"index.after-overlap-write.overlap.legacy.search_code","firstMs":102.29441600000428,"warmMedianMs":98.62683300000208,"warmMaxMs":99.40200000000186,"samples":3,"sqlCalls":2,"sqlMsLast":98.36187499998778,"serializedBytes":708,"rssBytesAfter":421969920}
+BEGIN index.after-overlap-write.overlap.scoped.library
+{"name":"index.after-overlap-write.overlap.scoped.library","firstMs":5.3237499999959255,"warmMedianMs":3.8890840000094613,"warmMaxMs":4.363916000002064,"samples":3,"sqlCalls":2,"sqlMsLast":3.669292000005953,"serializedBytes":51893,"rssBytesAfter":422182912}
+BEGIN index.after-overlap-write.overlap.scoped.all_single_active
+{"name":"index.after-overlap-write.overlap.scoped.all_single_active","firstMs":511.3078749999986,"warmMedianMs":510.5267080000049,"warmMaxMs":511.1556669999991,"samples":3,"sqlCalls":3,"sqlMsLast":506.5432080000028,"serializedBytes":51893,"rssBytesAfter":422379520}
+BEGIN index.after-overlap-write.overlap.scoped.all_selected_one
+{"name":"index.after-overlap-write.overlap.scoped.all_selected_one","firstMs":5.540624999994179,"warmMedianMs":4.0051669999957085,"warmMaxMs":4.139917000007699,"samples":3,"sqlCalls":3,"sqlMsLast":3.918249999987893,"serializedBytes":51893,"rssBytesAfter":422641664}
+BEGIN index.after-overlap-write.overlap.scoped.release
+{"name":"index.after-overlap-write.overlap.scoped.release","firstMs":82.98266700000386,"warmMedianMs":84.63395899999887,"warmMaxMs":86.03237500000978,"samples":3,"sqlCalls":2,"sqlMsLast":83.60695900001156,"serializedBytes":50632,"rssBytesAfter":422838272}
+BEGIN index.after-overlap-write.overlap.scoped.search_code
+{"name":"index.after-overlap-write.overlap.scoped.search_code","firstMs":504.32379200001014,"warmMedianMs":503.5815830000065,"warmMaxMs":505.3501249999972,"samples":3,"sqlCalls":3,"sqlMsLast":504.9388320000144,"serializedBytes":861,"rssBytesAfter":423133184}
+BEGIN index.after-overlap-write.overlap.tags.all
+{"name":"index.after-overlap-write.overlap.tags.all","firstMs":611.3084590000071,"warmMedianMs":599.5298330000078,"warmMaxMs":603.906833999994,"samples":3,"sqlCalls":1,"sqlMsLast":599.4335000000137,"serializedBytes":46787,"rssBytesAfter":423198720}
+BEGIN index.after-overlap-write.overlap.tags.manual
+{"name":"index.after-overlap-write.overlap.tags.manual","firstMs":1438.4838749999908,"warmMedianMs":1464.7578750000102,"warmMaxMs":1619.3685419999965,"samples":3,"sqlCalls":1,"sqlMsLast":1619.257249999995,"serializedBytes":46787,"rssBytesAfter":423264256}
+BEGIN index.after-overlap-write.overlap.tags.selected_labels
+{"name":"index.after-overlap-write.overlap.tags.selected_labels","firstMs":0.07704200000443961,"warmMedianMs":0.016750000009778887,"warmMaxMs":0.023042000000714324,"samples":3,"sqlCalls":1,"sqlMsLast":0.0057090000045718625,"serializedBytes":76,"rssBytesAfter":423280640}
+BEGIN index.after-overlap-write.overlap.tags.selected_labels_100
+{"name":"index.after-overlap-write.overlap.tags.selected_labels_100","firstMs":0.06862499999988358,"warmMedianMs":0.04383300000336021,"warmMaxMs":0.06258299999171868,"samples":3,"sqlCalls":1,"sqlMsLast":0.021917000005487353,"serializedBytes":2685,"rssBytesAfter":423329792}
+BEGIN index.after-overlap-write.overlap.tags.manual_options
+{"name":"index.after-overlap-write.overlap.tags.manual_options","firstMs":0.22841700000572018,"warmMedianMs":0.061417000004439615,"warmMaxMs":0.06870799999160226,"samples":3,"sqlCalls":1,"sqlMsLast":0.0453750000015134,"serializedBytes":2906,"rssBytesAfter":423346176}
+BEGIN index.after-overlap-write.overlap.tags.manual_options_search
+{"name":"index.after-overlap-write.overlap.tags.manual_options_search","firstMs":0.16016700000909623,"warmMedianMs":0.1260409999958938,"warmMaxMs":0.12929199999780394,"samples":3,"sqlCalls":1,"sqlMsLast":0.11683300000731833,"serializedBytes":344,"rssBytesAfter":423362560}
+BEGIN index.after-overlap-write.overlap.tags.manual_options_deep
+{"name":"index.after-overlap-write.overlap.tags.manual_options_deep","firstMs":1.182874999998603,"warmMedianMs":0.2609590000065509,"warmMaxMs":0.38520799999241717,"samples":3,"sqlCalls":1,"sqlMsLast":0.23312499999883585,"serializedBytes":2909,"rssBytesAfter":423362560}
+BEGIN index.after-overlap-write.overlap.actors.first
+{"name":"index.after-overlap-write.overlap.actors.first","firstMs":464.1333750000049,"warmMedianMs":458.89450000000943,"warmMaxMs":459.0553340000042,"samples":3,"sqlCalls":3,"sqlMsLast":458.8798739999911,"serializedBytes":104927,"rssBytesAfter":423690240}
+BEGIN index.after-overlap-write.overlap.overview
+{"name":"index.after-overlap-write.overlap.overview","firstMs":7.212874999997439,"warmMedianMs":6.3825420000066515,"warmMaxMs":6.543458000000101,"samples":3,"sqlCalls":6,"sqlMsLast":6.336459000027389,"serializedBytes":268,"rssBytesAfter":423772160}
+BEGIN index.after-overlap-write.overlap.home.single
+{"name":"index.after-overlap-write.overlap.home.single","firstMs":727.1755419999972,"warmMedianMs":718.6269590000011,"warmMaxMs":721.1659169999912,"samples":3,"sqlCalls":7,"sqlMsLast":714.9102919999859,"serializedBytes":22552,"rssBytesAfter":424689664}
+BEGIN index.after-overlap-write.overlap.web.first
+{"name":"index.after-overlap-write.overlap.web.first","firstMs":94.91016600000148,"warmMedianMs":95.26704200000677,"warmMaxMs":95.3729170000006,"samples":3,"sqlCalls":2,"sqlMsLast":94.8795839999948,"serializedBytes":4919,"rssBytesAfter":424722432}
+BEGIN index.after-overlap-write.overlap.web.search
+{"name":"index.after-overlap-write.overlap.web.search","firstMs":456.721000000005,"warmMedianMs":454.62416700000176,"warmMaxMs":454.6434169999993,"samples":3,"sqlCalls":2,"sqlMsLast":454.4226259999996,"serializedBytes":177,"rssBytesAfter":424771584}
+BEGIN index.after-overlap-write.overlap.web.collections
+{"name":"index.after-overlap-write.overlap.web.collections","firstMs":48.73204199998872,"warmMedianMs":48.5408749999915,"warmMaxMs":49.31233399998746,"samples":3,"sqlCalls":2,"sqlMsLast":49.181500000006054,"serializedBytes":176,"rssBytesAfter":424820736}
+BEGIN index.after-overlap-write.overlap.playlist.full
+{"name":"index.after-overlap-write.overlap.playlist.full","firstMs":97.20512499999313,"warmMedianMs":103.09791699999187,"warmMaxMs":104.8315419999999,"samples":3,"sqlCalls":3,"sqlMsLast":85.98329100001138,"serializedBytes":20601442,"rssBytesAfter":403881984}
+BEGIN index.after-overlap-write.overlap.playlist.page
+{"name":"index.after-overlap-write.overlap.playlist.page","firstMs":9.173334000006435,"warmMedianMs":7.290959000005387,"warmMaxMs":7.644957999989856,"samples":3,"sqlCalls":6,"sqlMsLast":7.193041000020457,"serializedBytes":9718,"rssBytesAfter":404013056}
+BEGIN index.after-overlap-write.overlap.playlist.metadata
+{"name":"index.after-overlap-write.overlap.playlist.metadata","firstMs":1.2503750000032596,"warmMedianMs":1.1427919999987353,"warmMaxMs":1.1444579999952111,"samples":3,"sqlCalls":3,"sqlMsLast":1.1182489999919198,"serializedBytes":169,"rssBytesAfter":404078592}
+BEGIN index.after-overlap-write.overlap.playlist.video_page
+{"name":"index.after-overlap-write.overlap.playlist.video_page","firstMs":6.177000000010594,"warmMedianMs":6.088791000001947,"warmMaxMs":6.3197500000096625,"samples":3,"sqlCalls":3,"sqlMsLast":6.022457000013674,"serializedBytes":9550,"rssBytesAfter":404127744}
+BEGIN index.after-overlap-write.overlap.playlist.deep_page
+{"name":"index.after-overlap-write.overlap.playlist.deep_page","firstMs":13.613541999991867,"warmMedianMs":13.442250000007334,"warmMaxMs":13.75037500000326,"samples":3,"sqlCalls":6,"sqlMsLast":13.266833000001498,"serializedBytes":9344,"rssBytesAfter":404242432}
+BEGIN index.after-overlap-write.overlap.experiment.no_distinct.0
+{"name":"index.after-overlap-write.overlap.experiment.no_distinct.0","firstMs":0.6864589999895543,"warmMedianMs":0.02104200000758283,"warmMaxMs":0.03525000000081491,"samples":3,"sqlCalls":1,"sqlMsLast":0.017541000008350238,"serializedBytes":12,"rssBytesAfter":404242432}
+BEGIN index.after-overlap-write.overlap.experiment.no_distinct.1
+{"name":"index.after-overlap-write.overlap.experiment.no_distinct.1","firstMs":0.2859159999934491,"warmMedianMs":0.22808300000906456,"warmMaxMs":0.232958000007784,"samples":3,"sqlCalls":1,"sqlMsLast":0.1693749999976717,"serializedBytes":41248,"rssBytesAfter":404307968}
+BEGIN index.after-overlap-write.scoped.all_overlap
+{"name":"index.after-overlap-write.scoped.all_overlap","firstMs":504.55354100000113,"warmMedianMs":508.0442500000063,"warmMaxMs":512.3500409999979,"samples":3,"sqlCalls":3,"sqlMsLast":511.97920799998974,"serializedBytes":51893,"rssBytesAfter":404570112}
+BEGIN index.after-overlap-write.home.overlap
+{"name":"index.after-overlap-write.home.overlap","firstMs":731.1852500000095,"warmMedianMs":719.6061249999912,"warmMaxMs":719.7211659999884,"samples":3,"sqlCalls":7,"sqlMsLast":718.8448769999814,"serializedBytes":22552,"rssBytesAfter":405454848}
+✔ scripts/performance/large-library-benchmark.ts (123689.130375ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 123692.4755

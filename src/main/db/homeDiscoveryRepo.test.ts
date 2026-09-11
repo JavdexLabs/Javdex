@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { closeDatabase, initDatabaseAtPath } from './database'
 import { normalizeActressName } from './actressNameNormalization'
 import {
   DEFAULT_MEDIA_LIBRARY_CONFIG,
@@ -97,7 +101,8 @@ function seedLargeSharedCatalog(database: Database.Database, count = 1_200): voi
 function selectStatements(trace: string[]): string[] {
   return trace
     .map((statement) => statement.trim())
-    .filter((statement) => /^(SELECT|WITH)\b/i.test(statement))
+    // Revision reads are constant-cost bookkeeping, counted separately from catalog work.
+    .filter((statement) => /^(SELECT|WITH)\b/i.test(statement) && !statement.includes('AS revision_changes'))
 }
 
 function explainPlan(database: Database.Database, statement: string): string[] {
@@ -535,6 +540,60 @@ describe('home discovery repo', () => {
     }
   })
 
+  it('matches global ranking across cursor wrap, equal keys and hidden shared memberships', () => {
+    const database = createFixture()
+    try {
+      seedLargeSharedCatalog(database, 180)
+      database.exec(`
+        UPDATE library_video_memberships SET discovery_key = 100 WHERE video_id % 3 = 0;
+        UPDATE library_video_memberships SET discovery_key = 50 WHERE library_id = 2 AND video_id % 5 = 0;
+        UPDATE library_video_memberships SET is_hidden = 1 WHERE library_id = 1 AND video_id % 7 = 0;
+        DELETE FROM video_resources WHERE library_id = 2 AND video_id % 11 = 0;
+      `)
+      // Exercise compound-query chunking and canonical selection across chunk boundaries.
+      database.transaction(() => {
+        for (let id = 3; id <= 70; id++) {
+          database.prepare('INSERT INTO media_libraries (id, name) VALUES (?, ?)').run(id, `Library ${id}`)
+          database.prepare('INSERT INTO media_library_configs (library_id) VALUES (?)').run(id)
+          database.prepare('INSERT INTO library_video_memberships (library_id, video_id, discovery_key) VALUES (?, 201, ?)').run(id, 71 - id)
+          database.prepare(`INSERT INTO video_resources (library_id, video_id, kind, locator, resource_key)
+            VALUES (?, 201, 'web', 'https://example.test/shared', 'web:shared')`).run(id)
+        }
+      })()
+      const repo = createHomeDiscoveryRepo({ database, listLibraries: () => [] })
+      for (const selected of [[1], [2], [1, 2], Array.from({ length: 70 }, (_, id) => id + 1)]) {
+        const ranked = database.prepare(`
+          SELECT video_id, library_id, discovery_key FROM (
+            SELECT membership.video_id, membership.library_id, membership.discovery_key,
+              ROW_NUMBER() OVER (PARTITION BY membership.video_id
+                ORDER BY membership.discovery_key, membership.library_id) AS rank
+            FROM library_video_memberships membership
+            JOIN media_libraries library ON library.id = membership.library_id
+            JOIN media_library_configs config ON config.library_id = library.id
+            WHERE membership.library_id IN (${selected.join(',')})
+              AND membership.is_hidden = 0 AND library.status = 'active'
+              AND config.include_in_home_discovery = 1
+              AND EXISTS (SELECT 1 FROM video_resources r
+                WHERE r.video_id = membership.video_id AND r.library_id = membership.library_id)
+          ) WHERE rank = 1 ORDER BY discovery_key, video_id
+        `).all() as Array<{ video_id: number; library_id: number; discovery_key: number }>
+        for (let index = 0; index < 20; index++) {
+          const seed = `ranking-parity-${index}`
+          const cursor = discoveryCursorForSeed(seed)
+          const expected = [...ranked.filter(row => row.discovery_key >= cursor),
+            ...ranked.filter(row => row.discovery_key < cursor)].slice(0, 16)
+          assert.deepEqual(
+            repo.load({ seed, libraryIds: selected, discoveryLimit: 16 }).discovery
+              .map(video => [video.id, video.preferredLibraryId]),
+            expected.map(row => [row.video_id, row.library_id])
+          )
+        }
+      }
+    } finally {
+      database.close()
+    }
+  })
+
   it('keeps large recent and discovery loads bounded and index-backed', () => {
     const trace: string[] = []
     const database = createFixture((sql) => trace.push(sql))
@@ -556,7 +615,7 @@ describe('home discovery repo', () => {
 
       const recent = statements.find(
         (statement) =>
-          statement.includes('SELECT DISTINCT v.*') &&
+          statement.includes('WITH page AS MATERIALIZED') &&
           statement.includes('scope_m.membership_added_at DESC')
       )
       const discovery = statements.find((statement) => statement.startsWith('WITH candidate AS'))
@@ -608,8 +667,9 @@ describe('home discovery repo', () => {
       assert.equal(second.items.length, 100)
       const combinedIds = [...first.items, ...second.items].map((video) => video.id)
       assert.equal(new Set(combinedIds).size, 200)
-      assert.equal(firstStatements.length, 2)
+      assert.equal(firstStatements.length, 3)
       assert.equal(selectStatements(trace).length, 2)
+      assert.equal(selectStatements(trace).some(statement => /^SELECT COUNT\(\*\) AS count FROM videos/.test(statement)), false)
       assert.equal(
         [...firstStatements, ...selectStatements(trace)].some((statement) =>
           /ORDER\s+BY\s+RANDOM\s*\(/i.test(statement)
@@ -618,7 +678,7 @@ describe('home discovery repo', () => {
       )
 
       const pageStatement = firstStatements.find((statement) =>
-        statement.includes('SELECT DISTINCT v.*')
+        statement.includes('WITH page AS MATERIALIZED')
       )
       assert.ok(pageStatement)
       const plan = explainPlan(database, pageStatement).join('\n')
@@ -627,4 +687,45 @@ describe('home discovery repo', () => {
       database.close()
     }
   })
+})
+
+it('uses only the supplied native connection and reuses home/status work across repeated seeds', () => {
+  const trace: string[] = [], database = createFixture(sql => trace.push(sql))
+  try {
+    // No global getDb initialization and no injected listLibraries fallback.
+    const repo = createHomeDiscoveryRepo({ database })
+    trace.length = 0
+    const first = repo.load({ seed: 'native' })
+    const expected = structuredClone(first)
+    first.libraries[0].name = 'caller mutation'
+    first.recent.length = 0
+    assert.deepEqual(repo.load({ seed: 'native' }), expected)
+    repo.load({ seed: 'different seed' })
+    assert.equal(trace.filter(sql => /^\s*WITH membership_counts AS/.test(sql)).length, 1)
+    assert.equal(createHomeDiscoveryRepo({ database }), repo)
+    database.exec("UPDATE media_libraries SET name='Changed' WHERE id=1")
+    assert.equal(repo.load({ seed: 'native' }).libraries.find(library => library.id === 1)?.name, 'Changed')
+    assert.throws(() => database.transaction(() => {
+      database.exec("UPDATE media_libraries SET name='Uncommitted' WHERE id=1")
+      assert.equal(repo.load({ seed: 'native' }).libraries.find(library => library.id === 1)?.name, 'Uncommitted')
+      throw new Error('rollback')
+    })(), /rollback/)
+    assert.equal(repo.load({ seed: 'native' }).libraries.find(library => library.id === 1)?.name, 'Changed')
+  } finally { database.close() }
+})
+
+
+it('keeps a retained default home reader bound to its original connection after a database switch', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-home-switch-'))
+  try {
+    const first = initDatabaseAtPath(path.join(directory, 'first.db'))
+    first.prepare("UPDATE media_libraries SET name='First' WHERE id=1").run()
+    const retained = createHomeDiscoveryRepo()
+    assert.equal(retained.load({ seed: 'same' }).libraries[0].name, 'First')
+    closeDatabase()
+    const second = initDatabaseAtPath(path.join(directory, 'second.db'))
+    second.prepare("UPDATE media_libraries SET name='Second' WHERE id=1").run()
+    assert.equal(createHomeDiscoveryRepo().load({ seed: 'same' }).libraries[0].name, 'Second')
+    assert.throws(() => retained.search({}), /not open|closed/)
+  } finally { closeDatabase(); fs.rmSync(directory, { recursive: true, force: true }) }
 })

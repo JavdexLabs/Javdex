@@ -90,8 +90,8 @@ function createHarness(overrides?: Partial<ConflictReviewRemoteDeps['api']>) {
 
   const deps: ConflictReviewRemoteDeps = {
     api: {
-      listActresses: async () => [],
-      getActress: async () => null,
+      pageActresses: async () => ({ items: [], hasMore: false, offset: 0 }),
+      getActressIdentity: async () => null,
       inspectConflictName: () =>
         new Promise((resolve) => inspectionResolvers.push(resolve)),
       validateIllegalNameReplacements: async (input) => {

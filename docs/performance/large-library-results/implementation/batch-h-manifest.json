@@ -1,0 +1,12 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "bd7fba0e53262f617b7fa9f0a88b416ec7cd0c8677d7bbabc25d2650789cbb2c",
+  "notes": [
+    "Patch is against HEAD, not incremental. Scanner includes prior batch B preflight/cancellation and large-array changes.",
+    "Index fixtures with 10000, 20000, 300382 and 600764 references assert exactly one list and N candidate reads for N lookups. Separate 20000 fixture uses the same filename with distinct target keys.",
+    "Real scanner integration: 40 imported resources, directory relocation preserving all IDs, then 40 existing + 40 pending + 40 new STRMs. Exactly one full candidate SELECT in each scan.",
+    "Known synchronous STRM mutations update the index. Known pending-table writes preserve it; other local changes, external commits, connection replacement or failed writes invalidate it.",
+    "Synthetic targeted regression: 76 passed. These are correctness/operation-count tests, not end-to-end latency, memory-peak or Windows/HDD acceptance.",
+    "Index initialization remains synchronous O(S) memory/work; repeated unknown writes or high-cardinality identical filename/target buckets can still be expensive. Remaining lifecycle/worker work is tracked in the full plan."
+  ]
+}

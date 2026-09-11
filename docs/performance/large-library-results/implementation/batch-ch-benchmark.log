@@ -1,0 +1,344 @@
+{
+  "runtime": {
+    "node": "24.18.1",
+    "acorn": "8.16.0",
+    "ada": "3.4.4",
+    "amaro": "1.1.9",
+    "ares": "1.34.6",
+    "brotli": "1.2.0",
+    "cldr": "48.0",
+    "icu": "78.2",
+    "llhttp": "9.4.3",
+    "merve": "1.2.2",
+    "modules": "148",
+    "napi": "10",
+    "nbytes": "0.1.4",
+    "ncrypto": "0.0.1",
+    "nghttp2": "1.69.0",
+    "nghttp3": "",
+    "ngtcp2": "",
+    "openssl": "0.0.0",
+    "simdjson": "4.6.4",
+    "simdutf": "7.7.0",
+    "sqlite": "3.53.1",
+    "tz": "2025c",
+    "undici": "7.29.0",
+    "unicode": "17.0",
+    "uv": "1.52.1",
+    "uvwasi": "0.0.23",
+    "v8": "15.0.245.28-electron.0",
+    "zlib": "1.3.2.1-motley",
+    "zstd": "1.6.0",
+    "electron": "43.4.1",
+    "chrome": "150.0.7871.224"
+  },
+  "platform": "darwin",
+  "arch": "arm64",
+  "results": [
+    {
+      "rootCount": 1,
+      "fileCount": 10000,
+      "includeRealPath": false,
+      "mode": "legacy-find",
+      "unmatched": 5000,
+      "checksum": 25001250,
+      "build": {
+        "samplesMs": [
+          0.0002920000000017353,
+          0.0005840000000034706,
+          0.00008299999998939711
+        ],
+        "medianMs": 0.0002920000000017353
+      },
+      "matching": {
+        "samplesMs": [
+          10.06295799999998,
+          10.161124999999998,
+          9.815415999999999
+        ],
+        "medianMs": 10.06295799999998
+      }
+    },
+    {
+      "rootCount": 1,
+      "fileCount": 10000,
+      "includeRealPath": false,
+      "mode": "matcher",
+      "unmatched": 5000,
+      "checksum": 25001250,
+      "build": {
+        "samplesMs": [
+          0.029916999999983318,
+          0.014167000000014696,
+          0.009749999999996817
+        ],
+        "medianMs": 0.014167000000014696
+      },
+      "matching": {
+        "samplesMs": [
+          9.588082999999983,
+          8.680459000000013,
+          8.706582999999995
+        ],
+        "medianMs": 8.706582999999995
+      }
+    },
+    {
+      "rootCount": 1,
+      "fileCount": 10000,
+      "includeRealPath": true,
+      "mode": "legacy-find",
+      "unmatched": 2500,
+      "checksum": 37503750,
+      "build": {
+        "samplesMs": [
+          0.00008400000001529406,
+          0.00008300000001781882,
+          0.00016699999997626946
+        ],
+        "medianMs": 0.00008400000001529406
+      },
+      "matching": {
+        "samplesMs": [
+          15.610334000000023,
+          15.465582999999981,
+          15.51566600000001
+        ],
+        "medianMs": 15.51566600000001
+      }
+    },
+    {
+      "rootCount": 1,
+      "fileCount": 10000,
+      "includeRealPath": true,
+      "mode": "matcher",
+      "unmatched": 2500,
+      "checksum": 37503750,
+      "build": {
+        "samplesMs": [
+          0.021958999999981188,
+          0.009041000000024724,
+          0.015667000000007647
+        ],
+        "medianMs": 0.015667000000007647
+      },
+      "matching": {
+        "samplesMs": [
+          14.506541000000027,
+          14.809458000000006,
+          14.458917000000042
+        ],
+        "medianMs": 14.506541000000027
+      }
+    },
+    {
+      "rootCount": 100,
+      "fileCount": 10000,
+      "includeRealPath": false,
+      "mode": "legacy-find",
+      "unmatched": 4862,
+      "checksum": 1283654571,
+      "build": {
+        "samplesMs": [
+          0.00008399999978792039,
+          0.0003749999996216502,
+          0.0002919999997175182
+        ],
+        "medianMs": 0.0002919999997175182
+      },
+      "matching": {
+        "samplesMs": [
+          804.6762089999997,
+          857.1150000000002,
+          802.367209
+        ],
+        "medianMs": 804.6762089999997
+      }
+    },
+    {
+      "rootCount": 100,
+      "fileCount": 10000,
+      "includeRealPath": false,
+      "mode": "matcher",
+      "unmatched": 4862,
+      "checksum": 1283654571,
+      "build": {
+        "samplesMs": [
+          0.04712500000005093,
+          0.036665999999968335,
+          0.040415999999822816
+        ],
+        "medianMs": 0.040415999999822816
+      },
+      "matching": {
+        "samplesMs": [
+          11.132458000000042,
+          10.146999999999935,
+          10.691125000000284
+        ],
+        "medianMs": 10.691125000000284
+      }
+    },
+    {
+      "rootCount": 100,
+      "fileCount": 10000,
+      "includeRealPath": true,
+      "mode": "legacy-find",
+      "unmatched": 3212,
+      "checksum": 1662207429,
+      "build": {
+        "samplesMs": [
+          0.00016599999980826396,
+          0,
+          0.00004200000148557592
+        ],
+        "medianMs": 0.00004200000148557592
+      },
+      "matching": {
+        "samplesMs": [
+          1216.8152919999993,
+          1220.532041999999,
+          1197.262917
+        ],
+        "medianMs": 1216.8152919999993
+      }
+    },
+    {
+      "rootCount": 100,
+      "fileCount": 10000,
+      "includeRealPath": true,
+      "mode": "matcher",
+      "unmatched": 3212,
+      "checksum": 1662207429,
+      "build": {
+        "samplesMs": [
+          0.08945800000037707,
+          0.06558299999960582,
+          0.04124999999839929
+        ],
+        "medianMs": 0.06558299999960582
+      },
+      "matching": {
+        "samplesMs": [
+          14.030917000000045,
+          13.82170799999949,
+          13.638500000000931
+        ],
+        "medianMs": 13.82170799999949
+      }
+    },
+    {
+      "rootCount": 1000,
+      "fileCount": 10000,
+      "includeRealPath": false,
+      "mode": "legacy-find",
+      "unmatched": 4873,
+      "checksum": 12150741784,
+      "build": {
+        "samplesMs": [
+          0.00020900000163237564,
+          0.00020900000527035445,
+          0.00016599999798927456
+        ],
+        "medianMs": 0.00020900000163237564
+      },
+      "matching": {
+        "samplesMs": [
+          7837.872124999998,
+          7838.674207999997,
+          7905.5742919999975
+        ],
+        "medianMs": 7838.674207999997
+      }
+    },
+    {
+      "rootCount": 1000,
+      "fileCount": 10000,
+      "includeRealPath": false,
+      "mode": "matcher",
+      "unmatched": 4873,
+      "checksum": 12150741784,
+      "build": {
+        "samplesMs": [
+          0.2245000000038999,
+          0.2434999999968568,
+          0.22804200000246055
+        ],
+        "medianMs": 0.22804200000246055
+      },
+      "matching": {
+        "samplesMs": [
+          10.380541999998968,
+          10.290750000000116,
+          10.335166999997455
+        ],
+        "medianMs": 10.335166999997455
+      }
+    },
+    {
+      "rootCount": 1000,
+      "fileCount": 10000,
+      "includeRealPath": true,
+      "mode": "legacy-find",
+      "unmatched": 3209,
+      "checksum": 16052097713,
+      "build": {
+        "samplesMs": [
+          0.000041000006604008377,
+          0.0002499999973224476,
+          0.00004199999966658652
+        ],
+        "medianMs": 0.00004199999966658652
+      },
+      "matching": {
+        "samplesMs": [
+          11366.341375000004,
+          11434.267334000004,
+          11421.856125000006
+        ],
+        "medianMs": 11421.856125000006
+      }
+    },
+    {
+      "rootCount": 1000,
+      "fileCount": 10000,
+      "includeRealPath": true,
+      "mode": "matcher",
+      "unmatched": 3209,
+      "checksum": 16052097713,
+      "build": {
+        "samplesMs": [
+          0.38741700000537094,
+          0.39541699999244884,
+          0.38891600001079496
+        ],
+        "medianMs": 0.38891600001079496
+      },
+      "matching": {
+        "samplesMs": [
+          14.386792000004789,
+          14.334209000007831,
+          14.610625000001164
+        ],
+        "medianMs": 14.386792000004789
+      }
+    }
+  ],
+  "notes": [
+    "No filesystem or database access for fixture/matching; all paths are synthetic strings, not existing directories or resolved filesystem symlinks.",
+    "Defaults to 10000 files; JAVDEX_ROOT_MATCH_FILES=100000 increases legacy work substantially. Root counts 1/100/1000; both path-only and realPath-enabled modes.",
+    "Fixed order: root count ascending, path-only then realPath, legacy then matcher. Each mode one warmup and three hot samples; oracle adds an untimed legacy pass.",
+    "Matching includes loop and result-array assignments; allocation, identity assertions, checksum and serialization are excluded. Build is separately timed for each freshly created matcher; legacy has no index build (only function selection).",
+    "Identity equality covers all generated paths on every sample, including first-root precedence, aliases, exact roots, normalized dot segments, nested paths and unmatched siblings.",
+    "Warm host-path diagnostic only, not p95, cold I/O, Windows path semantics on another OS, memory peaks, event-loop responsiveness or total scan speed. Fixed ordering/JIT/GC can affect comparisons."
+  ]
+}
+✔ compares root matching against ordered find by object identity (106626.808334ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 106772.689125

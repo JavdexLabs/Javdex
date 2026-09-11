@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useBoundedMediaPage } from "../hooks/useBoundedMediaPage";
 import { useHorizontalDragScroll } from "../hooks/useHorizontalDragScroll";
 import {
   Building2,
@@ -17,7 +17,6 @@ import type {
   ClassificationImageUpdateResult,
 } from "@shared/classificationTypes";
 import { api, assetUrl } from "../api";
-import { classificationImageKeys } from "../query/queryKeys";
 import EmptyState from "./EmptyState";
 import Modal from "./Modal";
 import { useTheme } from "./ThemeProvider";
@@ -47,7 +46,11 @@ function remotePreviewUrl(mimeType: string, dataBase64: string): string {
   return `data:${mimeType};base64,${dataBase64}`;
 }
 
-export default function ClassificationImageModal({
+export default function ClassificationImageModal(props: Props): JSX.Element {
+  return <ClassificationImageEditor key={`${props.entity.kind}:${props.entity.id}`} {...props} />;
+}
+
+function ClassificationImageEditor({
   entity,
   entityLabel,
   imagePath,
@@ -60,6 +63,8 @@ export default function ClassificationImageModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const objectUrlRef = useRef<string | null>(null);
   const remoteRequestRef = useRef(0);
+  const activeRef = useRef(true);
+  useEffect(() => { activeRef.current = true; return () => { activeRef.current = false } }, []);
   const current = classificationImageDisplayState(imagePath, fallbackCoverPath);
   const [mode, setMode] = useState<SourceMode>("file");
   const [pending, setPending] = useState<
@@ -76,12 +81,14 @@ export default function ClassificationImageModal({
     privacyMode.privacyModeEnabled &&
     privacyMode.privacyModeScopes.includes("mediaEditors");
   const coverScroll = useHorizontalDragScroll();
-  const candidatesQuery = useQuery({
-    queryKey: classificationImageKeys.candidates(entity),
-    queryFn: () => api.classificationImages.candidates(entity),
-    enabled: !mediaEditorsHidden,
-  });
-  const coverCandidates = candidatesQuery.data ?? [];
+  const candidateEnabled = !mediaEditorsHidden && mode === "video";
+  const { kind, id } = entity;
+  const readCandidates = useCallback((offset: number) => candidateEnabled
+    ? api.classificationImages.page({kind, id}, {limit:60, offset})
+    : Promise.resolve(null), [kind, id, candidateEnabled]);
+  const candidatesQuery = useBoundedMediaPage(`${kind}:${id}:${candidateEnabled}`, readCandidates);
+  const coverCandidates = candidatesQuery.data?.items ?? [];
+  useEffect(() => { if (coverScroll.ref.current) coverScroll.ref.current.scrollLeft = 0 }, [candidatesQuery.offset, coverScroll.ref]);
   const placeholder =
     entity.kind === "organization" ? (
       <Building2 {...UI_ICON_SM} aria-hidden />
@@ -154,7 +161,9 @@ export default function ClassificationImageModal({
     setSaving(true);
     try {
       const result = await api.classificationImages.set(entity, pending);
+      if (!activeRef.current) return;
       await onChanged(result);
+      if (!activeRef.current) return;
       if (result.cleanupFailures.length > 0) {
         toast.show("主图已更新，但旧图片清理失败，可稍后重试", "info");
       } else {
@@ -164,7 +173,7 @@ export default function ClassificationImageModal({
     } catch (error) {
       toast.show(String((error as Error).message), "error");
     } finally {
-      setSaving(false);
+      if (activeRef.current) setSaving(false);
     }
   };
 
@@ -345,10 +354,10 @@ export default function ClassificationImageModal({
                 onPointerUp={coverScroll.onPointerUp}
                 onPointerCancel={coverScroll.onPointerCancel}
               >
-                {candidatesQuery.isLoading ? (
+                {candidatesQuery.loading ? (
                   <p className={styles.sourceEmpty}>加载关联封面…</p>
-                ) : candidatesQuery.isError ? (
-                  <p className={styles.sourceEmpty}>关联封面加载失败</p>
+                ) : candidatesQuery.error ? (
+                  <div className={styles.sourceEmpty} role="alert">关联封面加载失败<Button onClick={candidatesQuery.reload}>重试</Button></div>
                 ) : coverCandidates.length === 0 ? (
                   <p className={styles.sourceEmpty}>暂无关联影片封面</p>
                 ) : (
@@ -380,7 +389,7 @@ export default function ClassificationImageModal({
                           className={`${styles.candidateCover} classification-image-candidate-cover`}
                         >
                           <img
-                            src={assetUrl(candidate.coverPath) ?? ""}
+                            src={assetUrl(candidate.coverPath, 320) ?? ""}
                             alt=""
                             loading="lazy"
                             draggable={false}
@@ -395,6 +404,13 @@ export default function ClassificationImageModal({
                 )}
               </div>
             </div>
+            {candidateEnabled && candidatesQuery.data && (
+              <nav className={styles.pagination} aria-label="分类封面分页">
+                <Button disabled={candidatesQuery.offset === 0} onClick={() => candidatesQuery.move(candidatesQuery.offset - 60)}>上一页</Button>
+                <span>第 {candidatesQuery.offset / 60 + 1} 页 · 共 {candidatesQuery.data.total} 张</span>
+                <Button disabled={candidatesQuery.offset + coverCandidates.length >= candidatesQuery.data.total} onClick={() => candidatesQuery.move(candidatesQuery.offset + 60)}>下一页</Button>
+              </nav>
+            )}
           </div>
         </div>
       )}

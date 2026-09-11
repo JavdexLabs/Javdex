@@ -17,6 +17,10 @@ describe('classification IPC contract', () => {
   it('registers every command and forwards typed arguments to the public services', async () => {
     const calls: unknown[] = []
     const queryService: ClassificationQueryService = {
+      listImageCandidatesPage: () => {throw new Error('IPC must not run image page SQL on the writer thread')},
+      listDirectorsPage: query => { calls.push(['director-page',query]);return {items:[],total:0,limit:60,offset:query.offset ?? 0} },
+      listOrganizationsPage: query => { calls.push(['organization-page',query]);return {items:[],total:0,limit:60,offset:query.offset ?? 0} },
+      listSeriesPage: query => { calls.push(['series-page',query]);return {items:[],total:0,limit:60,offset:query.offset ?? 0} },
       listImageCandidates(entity) {
         calls.push(['image-candidates', entity])
         return []
@@ -211,6 +215,7 @@ describe('classification IPC contract', () => {
     } as typeof appCommandAdapter
 
     registerClassificationHandlers(adapter, {
+      readService: {readImageCandidates: async (entity,query) => {calls.push(['image-page',entity,query]);return {items:[],total:0,limit:60,offset:query?.offset ?? 0}}},
       queryService,
       maintenanceService,
       imageService,
@@ -355,5 +360,15 @@ describe('classification IPC contract', () => {
       ['image-candidates', imageEntity],
       ['image-set', imageEntity, imageInput]
     ])
+    const organizationPage = { ...listQuery, limit:60, offset:120 }
+    const seriesPage = { ...seriesQuery, limit:60, offset:60 }
+    assert.deepEqual(handlers.get(IPC.ORGANIZATION_PAGE)?.(organizationPage), {items:[],total:0,limit:60,offset:120})
+    assert.deepEqual(handlers.get(IPC.SERIES_PAGE)?.(seriesPage), {items:[],total:0,limit:60,offset:60})
+    assert.deepEqual(calls.slice(-2), [['organization-page',organizationPage],['series-page',seriesPage]])
+    const directorPage = { ...directorQuery, limit:60, offset:120 }
+    assert.deepEqual(handlers.get(IPC.DIRECTOR_PAGE)?.(directorPage), {items:[],total:0,limit:60,offset:120})
+    assert.deepEqual(calls.at(-1), ['director-page',directorPage])
+    assert.deepEqual(await handlers.get(IPC.CLASSIFICATION_IMAGE_PAGE)?.(imageEntity,{offset:60}),{items:[],total:0,limit:60,offset:60})
+    assert.deepEqual(calls.at(-1),['image-page',imageEntity,{offset:60}])
   })
 })

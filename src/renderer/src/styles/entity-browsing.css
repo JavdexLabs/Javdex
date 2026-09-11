@@ -1064,3 +1064,27 @@ button.actress-mini:focus-visible .actress-avatar {
   font-size: 12px;
   margin-top: 6px;
 }
+
+
+.tag-filter-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--control-pad-x);
+  margin-top: var(--control-pad-x);
+}
+
+.tag-chip-cloud-item:disabled {
+  cursor: default;
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
+}
+
+.actress-works-pagination {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--form-label-gap);
+  padding-block: var(--form-label-gap);
+  color: var(--text-secondary);
+}

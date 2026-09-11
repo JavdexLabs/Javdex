@@ -55,13 +55,13 @@ try {
   }
   const items = Array.from({ length: 36 }, (_, i) => ({
     id: i + 1, title: `Sample film ${i + 1}`, code: `DEMO-${i + 1}`,
-    cover: null, releaseDate: '2026', duration: 120, rating: 0
+    cover: '/preview-fixture-landscape', releaseDate: '2026', duration: 120, rating: 0
   }))
   for (const [width, height, touch] of [[320, 844, true], [390, 844, true], [844, 390, true], [1280, 800, false]]) {
     const page = await browser.newPage({ viewport: { width, height }, isMobile: touch, hasTouch: touch, acceptDownloads: true })
     await page.route('**/preview-fixture-*', route => {
-      if (route.request().url().endsWith('broken')) return route.fulfill({ status: 404, body: '' })
-      const portrait = route.request().url().endsWith('portrait')
+      if (new URL(route.request().url()).pathname.endsWith('broken')) return route.fulfill({ status: 404, body: '' })
+      const portrait = new URL(route.request().url()).pathname.endsWith('portrait')
       return route.fulfill({ contentType: 'image/svg+xml', body: `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="${portrait ? 1200 : 450}"><rect width="100%" height="100%" fill="teal"/></svg>` })
     })
     await page.route('**/api/**', route => {
@@ -94,6 +94,9 @@ try {
     })
     await page.goto(`${base}/#/browse`)
     await page.getByRole('heading', { name: '随机发现', exact: true }).waitFor()
+    const cardImage = page.locator('.home-sections .video-card img').first()
+    await cardImage.waitFor()
+    assert.equal(new URL(await cardImage.getAttribute('src'), base).searchParams.get('size'), '640')
     {
       await keyboardJourney(page)
       // Start the independent layout checks from a fresh document.
@@ -305,6 +308,9 @@ try {
         await page.keyboard.press('Enter')
         await page.locator('.image-preview').waitFor()
         await page.getByRole('button', { name: '关闭预览', exact: true }).waitFor()
+        const previewSources = await page.locator('.image-preview img').evaluateAll(images => images.map(image => image.getAttribute('src')).filter(Boolean))
+        assert.ok(previewSources.length > 0)
+        assert.ok(previewSources.every(src => !new URL(src, base).searchParams.has('size')), 'preview retains original image URLs')
         await page.keyboard.press('ArrowLeft')
         await page.waitForFunction(() => document.querySelector('.yarl__counter')?.textContent.trim() === '1 / 4')
         for (const label of ['关闭预览', '放大', '下一张']) {

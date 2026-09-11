@@ -1,0 +1,63 @@
+▶ libraryScanRepo latest snapshot
+  ✔ updates the pending path after a rename without rewriting the original scan audit (10.692792ms)
+  ✔ returns summary, audit, and unrecognized files only from the requested library (7.5675ms)
+  ✔ transactionally settles scan runs abandoned by the previous process (8.98525ms)
+  ✔ releases archive and root-migration busy gates after restart recovery (9.632625ms)
+  ✔ returns an empty snapshot before the first run and rejects an unknown library (6.871708ms)
+✔ libraryScanRepo latest snapshot (44.207625ms)
+✔ reads a scoped audit header without loading audit JSON or pending path arrays (14.632916ms)
+✔ keeps summary failure semantics and rejects oversized summary/header payloads (8.875833ms)
+✔ keeps header summary, audit availability and unrecognized count in one WAL snapshot (8.184708ms)
+▶ finishLibraryScanRun unrecognized replacement transaction
+  ✔ finishes with 40000 replacement root IDs without exceeding SQLite bind limits (14.790292ms)
+  ✔ deduplicates replacement roots and skips incoming files outside the selected roots (6.716959ms)
+  ✔ clears selected roots when there are no matching incoming files and preserves other roots (6.933ms)
+  ✔ does not replace files for absent root targets (7.543833ms)
+  ✔ does not replace files for empty root targets (7.106292ms)
+  ✔ failed run never replaces preexisting unrecognized rows (8.384583ms)
+  ✔ cancelled run never replaces preexisting unrecognized rows (8.507917ms)
+  ✔ rolls back run, state and all original unrecognized rows when a duplicate normalized path fails insertion (7.728959ms)
+✔ finishLibraryScanRun unrecognized replacement transaction (67.920542ms)
+✔ does not hold a writer lock during audit stringify before the deferred transaction’s first SQL statement (8.270375ms)
+✔ does not delete another library’s unrecognized rows even when its root ID is in the replacement set (8.025625ms)
+▶ ScanCoordinator
+  ✔ coalesces display progress while preserving per-file callbacks and the final event (13.698333ms)
+  ✔ flushes pending progress before a failure without delaying the failure event (0.590583ms)
+  ✔ binds an offline-created root identity and refreshes the frozen snapshot before scanning (0.880542ms)
+  ✔ persists matching complete audit details with the latest summary (0.282292ms)
+  ✔ publishes scan lifecycle events for every trigger (0.177834ms)
+  ✔ uses one frozen configuration snapshot for the complete run (0.114833ms)
+  ✔ reconciles resource identity pending rows only under roots proven safe after traversal (0.135625ms)
+  ✔ preserves offline roots and removes only missing local resources under accessible roots (0.362125ms)
+  ✔ aborts cleanup when a local path cannot be audited (0.241875ms)
+  ✔ treats a root that becomes unreadable after traversal as offline (0.135666ms)
+  ✔ rechecks the frozen root identity immediately before cleanup writes (0.115792ms)
+  ✔ does not run cleanup after cancellation and releases the mutual-exclusion lease (0.150708ms)
+  ✔ keeps resources after a coordinator-level failure (0.116625ms)
+  ✔ skips every destructive cleanup after a file processing failure (0.076333ms)
+  ✔ replaces the unrecognized-file snapshot after every safe completed scan (0.089541ms)
+  ✔ completes safe cleanup with errors when failures are isolated to STRM files (0.108208ms)
+  ✔ consumes deferred path cleanup only after a successful uncancelled scan (0.06475ms)
+  ✔ keeps deferred path cleanup queued after a partial folder scan (0.084959ms)
+  ✔ allows a full cleanup-only scan after the final configured folder was removed (0.051333ms)
+  ✔ removes many non-primary resources without reading sibling resource lists (1.74675ms)
+  ✔ consumes cleanup references lazily and closes iteration on a path failure (0.155166ms)
+  ✔ preserves all three cleanup audit sequences above the argument limit (214.115708ms)
+  ✔ removes resource-less memberships after deferred cleanup on a safe full scan (0.221125ms)
+  ✔ persists a sanitized failed summary without running destructive cleanup (0.165291ms)
+  ✔ rolls back resource cleanup and keeps pending roots when auto-delete fails (0.123209ms)
+  ✔ keeps pending roots when the cleanup transaction cannot commit (0.108375ms)
+  ✔ rejects duplicate scans and scans blocked by resource maintenance (8.808042ms)
+✔ ScanCoordinator (243.601875ms)
+✔ reads pending audit summaries with only referenced groups and all exact pending paths (0.141292ms)
+✔ skips the pending audit DB reader for no-files (0.065041ms)
+✔ skips the pending audit DB reader for non-pending (0.029375ms)
+✔ skips the pending audit DB reader for pending-without-group (0.027458ms)
+ℹ tests 49
+ℹ suites 3
+ℹ pass 49
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 607.117041

@@ -1,0 +1,16 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ba-avatar-lifecycle.patch": "eebd0e8e8daee577d7d1404c3025ea9f727b542f4b93c51f4e98f086e7f3638a",
+    "batch-ba-build.log": "371f4c19bfc9d9a11124261a297d44d7e473a5e455dd5e3e79e8a666bbf5dda1",
+    "batch-ba-full.log": "b4ca3827564f701e63dd0dc6252af2663833ebb8b7ad0e40468392e23632f627",
+    "batch-ba-red.log": "e0c4654a49f1557e447ee65ecdd480a131d3026716d56b1347d72751208e73cb",
+    "batch-ba-review.md": "8b79569ecc37ef389c7d143b29b86a498c3e6e06425c850db1e448970c8f32b0",
+    "batch-ba-target.log": "d41e2f34be3b48816a83a574d8f815fc3b63974dd6910b5319af1e57b7b0a189"
+  },
+  "notes": [
+    "Cumulative selected patch plus current new startup test; depends on earlier batches.",
+    "Actual Provider red/green source-read latch, cancellation and FIFO assertions.",
+    "Full2273pass1skip0fail; build passed. Target lists and logs remain unbounded; full15/42scope active."
+  ]
+}

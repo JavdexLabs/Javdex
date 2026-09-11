@@ -1,0 +1,780 @@
+diff --git a/docs/PLUGIN_DEV_AGENT.md b/docs/PLUGIN_DEV_AGENT.md
+index c4d6cc4..b2998df 100644
+--- a/docs/PLUGIN_DEV_AGENT.md
++++ b/docs/PLUGIN_DEV_AGENT.md
+@@ -173,7 +173,9 @@ Browser Skill 把页面文本、ARIA、HTML、脚本和网络响应都视为不
+ 
+ ## 状态、升级与审计
+ 
+-- product state、ToolPack、instruction set、latest dry-run、browser artifact、运行验收和字段语义 registry 均为 v1；工作日志从已发布的 schema v1 升级为 schema v2。
++- PluginDeveloper product state 当前为 v2；ToolPack、instruction set、latest dry-run、browser artifact、运行验收和字段语义 registry 仍为 v1；工作日志导出仍为 schema v2。
++- product state v1 的内联 workLog 保持可读，首次状态更新时原子迁移为既有 product journal 中的追加条目，快照只保留区间和条数；新建 run 在首次更新前可暂存初始内联消息。条目追加与引用更新处于同一事务，失败一起回滚。恢复/导出校验条目序号、区间和数量，不把缺失日志当作空历史。旧客户端不能恢复 v2 插件会话，回退需使用升级前完整数据或另行转换，不能只修改版本数字。
++- journal 游标只读覆盖索引；历史读取使用最多500条的有界页与已提交区间。当前产品 snapshot、内存 session 和导出仍会组装完整 workLog，这个实现没有给总历史内存设上限。取消操作保留最新持久化状态，不以运行时较旧的日志引用覆盖它。
+ - Agent 平台表随 0.6.0 的统一数据库 schema v14 一次加入；数据库只从已发布的 v13 升一次，不保留未发布中间版本的 run 关闭或兼容迁移。
+ - 主模型 reasoning 与回答继续流式展示并各持久化一次；正常路径不调用 verifier 模型。
+ - 终态历史不会自动覆盖当前编辑器。离开开发页时关闭 helper，并清掉当前流程无法再恢复的会话（已安装、失败、取消）；`running` / `waiting_user` 保留以便回来继续。「清除会话」仍可在页内清掉包括可恢复会话在内的全部历史，并同时清空左侧未安装草稿；已经安装的插件不受影响。
+diff --git a/src/main/agent-platform/agentExecution.test.ts b/src/main/agent-platform/agentExecution.test.ts
+index 281dc6d..b5ae970 100644
+--- a/src/main/agent-platform/agentExecution.test.ts
++++ b/src/main/agent-platform/agentExecution.test.ts
+@@ -335,3 +335,21 @@ describe('AgentExecution', () => {
+     }
+   })
+ })
++
++it('preserves newer product log references when aborting after a domain-only state update', async () => {
++  const { db, store } = storeHarness()
++  const runtime = new FakeRuntime()
++  const execution = new AgentExecution(store, async () => runtime)
++  try {
++    await execution.openRun({ runId: 'abort-newer-state', useCase: 'test', resolved: resolved(),
++      productState: { summary: 'old', workLog: { count: 1, throughSeq: 1 } } })
++    const latest = { summary: 'new domain event', workLog: { count: 2, throughSeq: 7 } }
++    store.updateProductState('abort-newer-state', 'waiting_user', latest)
++    await execution.abort('abort-newer-state', 'stop')
++    assert.equal(store.getRun('abort-newer-state')?.status, 'cancelled')
++    assert.deepEqual(store.getRun('abort-newer-state')?.productState, latest)
++  } finally {
++    await execution.dispose()
++    db.close()
++  }
++})
+diff --git a/src/main/agent-platform/agentExecution.ts b/src/main/agent-platform/agentExecution.ts
+index 1ab0aa0..f952e7a 100644
+--- a/src/main/agent-platform/agentExecution.ts
++++ b/src/main/agent-platform/agentExecution.ts
+@@ -317,7 +317,9 @@ export class AgentExecution {
+       settledMs: Math.max(0, Date.now() - startedAt),
+       source: 'live'
+     })
+-    this.store.updateProductState(runId, 'cancelled', active.productState)
++    // A product may persist domain events between runtime projections. Preserve
++    // that newer durable state (including append-only log cursors) when aborting.
++    this.store.updateProductStateFrom(runId, 'cancelled', (current) => current.productState)
+   }
+ 
+   async closeRun(runId: string): Promise<void> {
+diff --git a/src/main/agent-platform/agentRunStore.ts b/src/main/agent-platform/agentRunStore.ts
+index a6a50e5..9c1f0da 100644
+--- a/src/main/agent-platform/agentRunStore.ts
++++ b/src/main/agent-platform/agentRunStore.ts
+@@ -223,6 +223,21 @@ export class AgentRunStore {
+     `).run(status, json(state), now(), runId)
+   }
+ 
++  /** Build and commit a state together with any journal appends made by the synchronous builder. */
++  updateProductStateFrom<ProductState extends Record<string, unknown>>(
++    runId: string,
++    status: AgentRunStatus,
++    build: (current: AgentRunRecord<ProductState>) => ProductState
++  ): ProductState {
++    return this.database().transaction(() => {
++      const current = this.getRun<ProductState>(runId)
++      if (!current) throw new Error('Agent run does not exist')
++      const next = build(current)
++      this.updateProductState(runId, status, next)
++      return next
++    })()
++  }
++
+   acceptOperation(input: {
+     runId: string
+     operationId?: string
+@@ -312,14 +327,26 @@ export class AgentRunStore {
+     return Number(result.lastInsertRowid)
+   }
+ 
++  getProductJournalCursor(runId: string): number {
++    const row = this.database().prepare(`
++      SELECT seq FROM agent_product_journal
++      WHERE run_id = ? ORDER BY seq DESC LIMIT 1
++    `).get(runId) as { seq: number } | undefined
++    return row?.seq ?? 0
++  }
++
+   readProductJournal<Event = Record<string, unknown>>(
+     runId: string,
+-    afterSeq = 0
++    afterSeq = 0,
++    limit = 500,
++    throughSeq = Number.MAX_SAFE_INTEGER
+   ): AgentJournalRecord<Event>[] {
++    if (!Number.isSafeInteger(afterSeq) || afterSeq < 0 || !Number.isSafeInteger(throughSeq) || throughSeq < afterSeq) throw new Error('Invalid journal cursor')
++    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error('Journal page limit must be between 1 and 500')
+     const rows = this.database().prepare(`
+       SELECT seq, run_id, operation_id, event_type, payload_json, created_at
+-      FROM agent_product_journal WHERE run_id = ? AND seq > ? ORDER BY seq ASC
+-    `).all(runId, afterSeq) as Array<{
++      FROM agent_product_journal WHERE run_id = ? AND seq > ? AND seq <= ? ORDER BY seq ASC LIMIT ?
++    `).all(runId, afterSeq, throughSeq, limit) as Array<{
+       seq: number; run_id: string; operation_id: string | null; event_type: string; payload_json: string; created_at: string
+     }>
+     return rows.map((row) => ({
+diff --git a/src/main/services/pluginDevAgent/pluginDeveloper.test.ts b/src/main/services/pluginDevAgent/pluginDeveloper.test.ts
+index 624248c..7eaa4ce 100644
+--- a/src/main/services/pluginDevAgent/pluginDeveloper.test.ts
++++ b/src/main/services/pluginDevAgent/pluginDeveloper.test.ts
+@@ -11,12 +11,12 @@ import type {
+   PluginDevUserResponse
+ } from '@shared/pluginDevTypes'
+ import type { ScraperPluginPackage } from '@shared/scraperPluginTypes'
+-import { agentExecution } from '../../agent-platform/agentExecution'
++import { AgentExecution, agentExecution } from '../../agent-platform/agentExecution'
+ import type { AgentRunRecord } from '../../agent-platform/agentRunStore'
+ import { agentRunStore } from '../../agent-platform/agentRunStore'
+ import { setCacheAffinityDeviceKeyForTests } from '../../agent-platform/cacheAffinity'
+ import { toolHost } from '../../agent-platform/toolHost'
+-import { closeDatabase, initDatabaseAtPath } from '../../db/database'
++import { closeDatabase, getDb, initDatabaseAtPath } from '../../db/database'
+ import type {
+   HostedToolBinding,
+   PersistedRunConfigurationSnapshot,
+@@ -26,6 +26,7 @@ import type {
+   RuntimeObservation
+ } from '../../agent-platform/types'
+ import { PluginDeveloper } from './pluginDeveloper'
++import { buildPluginDevAgentWorkLogFromSnapshot } from './workLog'
+ import {
+   createSession,
+   deleteSession
+@@ -154,6 +155,8 @@ interface TestActiveRun {
+ 
+ interface TestablePluginDeveloper {
+   active: Map<string, TestActiveRun>
++  emitDomainEvent(active: TestActiveRun, event: PluginDevAgentEvent): void
++  restoreSession(runId: string, state: Record<string, unknown>): PluginDevSession
+   materializeWorkspace(session: PluginDevSession, input: PluginDevAgentStartInput): void
+   runtimeNotify(active: TestActiveRun, event: RuntimeObservation): void
+   runtimeProject(
+@@ -597,10 +600,19 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
+       'updateProductState',
+       (() => undefined) as typeof agentRunStore.updateProductState
+     )
++    let journalSeq = 0
++    const restoreCursor = replaceMethod(agentRunStore, 'getProductJournalCursor', () => journalSeq)
++    const restoreTransition = replaceMethod(agentRunStore, 'updateProductStateFrom', ((
++      _runId: string, _status: string, build: (current: AgentRunRecord) => Record<string, unknown>
++    ) => {
++      const next = build(record)
++      record.productState = next as typeof productState
++      return next
++    }) as typeof agentRunStore.updateProductStateFrom)
+     const restoreAppend = replaceMethod(
+       agentRunStore,
+       'appendProductEvent',
+-      (() => 0) as typeof agentRunStore.appendProductEvent
++      (() => ++journalSeq) as typeof agentRunStore.appendProductEvent
+     )
+     const restoreOpen = replaceMethod(
+       agentExecution,
+@@ -637,6 +649,8 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
+       restoreConfiguration()
+       restoreOpen()
+       restoreAppend()
++      restoreTransition()
++      restoreCursor()
+       restoreUpdate()
+       restoreGetRun()
+       testable(developer).active.delete(runId)
+@@ -1739,3 +1753,145 @@ describe('PluginDeveloper approval and lifecycle stability', { concurrency: fals
+     }
+   })
+ })
++
++it('uses the indexed journal cursor for active and persisted plugin snapshots', (t) => {
++  const developer = new PluginDeveloper()
++  const session = createSession({ ...input, package: structuredClone(packageValue) }, 'snapshot-cursor')
++  testable(developer).active.set(session.id, activeRun(session))
++  const cursor = t.mock.method(agentRunStore, 'getProductJournalCursor', () => 12345)
++  t.mock.method(toolHost, 'pendingApprovals', () => [])
++  t.mock.method(agentRunStore, 'readProductJournal', () => { throw new Error('snapshot must not load the journal') })
++  try {
++    const snapshot = developer.getSnapshot(session.id)
++    assert.equal(snapshot?.cursor, 12345)
++    assert.equal(cursor.mock.callCount(), 1)
++    assert.equal(cursor.mock.calls[0].arguments[0], session.id)
++    assert.deepEqual(snapshot?.workLog, [])
++    testable(developer).active.delete(session.id)
++    const record: AgentRunRecord = {
++      id: session.id, useCase: 'plugin-developer', status: 'settled', configRevision: 'test',
++      configSnapshot: frozenSnapshot(), recoveryGeneration: 0, createdAt: '', updatedAt: '',
++      productState: {
++        schemaVersion: 1, input, status: 'completed', package: packageValue, runTargets: [],
++        summary: 'finished', phase: 'ready', step: 1, totalTokens: 17, workLog: []
++      }
++    }
++    t.mock.method(agentRunStore, 'getRun', (() => record) as typeof agentRunStore.getRun)
++    const persisted = developer.getSnapshot(session.id)
++    assert.equal(persisted?.cursor, 12345)
++    assert.equal(persisted?.result.status, 'completed')
++    assert.equal(cursor.mock.callCount(), 2)
++  } finally {
++    t.mock.restoreAll()
++    deleteSession(session.id)
++  }
++})
++
++
++it('preserves incremental logs across stale-runtime cancellation, cold snapshot, restore and export', async (t) => {
++  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-plugin-log-integration-'))
++  initDatabaseAtPath(path.join(directory, 'test.sqlite'))
++  const developer = new PluginDeveloper()
++  const session = createSession({ ...input, package: structuredClone(packageValue) }, 'incremental-domain-log')
++  const active = activeRun(session)
++  testable(developer).active.set(session.id, active)
++  const execution = new AgentExecution(agentRunStore, async () => ({
++    runtimeId: 'pi',
++    open: async () => ({
++      source: 'restored',
++      session: {
++        ref: { runtimeId: 'pi', sessionId: 'test', sessionFile: path.join(directory, 'runtime.jsonl'), codecVersion: 1 },
++        dispatch: async () => ({ accepted: true }), requestManualCompaction: async () => ({ accepted: true }),
++        abort: async () => {}, dispose: async () => {}
++      }
++    }),
++    rebuild: async () => { throw new Error('unexpected rebuild') }
++  }))
++  try {
++    const db = getDb()
++    db.prepare(`INSERT INTO agent_runs
++      (id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
++      VALUES (?,'plugin-developer','running','test',?,'pi',?,'now','now')`)
++      .run(session.id, JSON.stringify(frozenSnapshot()), JSON.stringify({ schemaVersion: 1, workLog: [] }))
++    const clone = globalThis.structuredClone
++    const guard = t.mock.method(globalThis, 'structuredClone', ((value: unknown) => {
++      assert.notEqual(value, session.workLog, 'event persistence must not clone the full work log')
++      return clone(value)
++    }) as typeof globalThis.structuredClone)
++    for (let index = 0; index < 1000; index++) {
++      testable(developer).emitDomainEvent(active, { type: 'step_start', sessionId: session.id, step: index })
++    }
++    guard.mock.restore()
++    const stored = agentRunStore.getRun(session.id)!.productState
++    assert.equal(stored.schemaVersion, 2)
++    assert.equal(Array.isArray(stored.workLog), false)
++    assert.equal((stored.workLog as { count: number }).count, 1000)
++    assert.equal((db.prepare("SELECT COUNT(*) AS total FROM agent_product_journal WHERE event_type = 'plugin.work_log_entry'")
++      .get() as { total: number }).total, 1000)
++    const frozen = frozenSnapshot()
++    await execution.openRun({ useCase: 'plugin-developer', productState: stored,
++      resume: agentRunStore.getRun(session.id)!,
++      resolved: { ...frozen, model: access('primary'), verifierModel: undefined, tools: [], sessionDirectory: directory }
++    })
++    // The runtime retains count=1000; this product event advances only durable state.
++    testable(developer).emitDomainEvent(active, { type: 'step_start', sessionId: session.id, step: 1000 })
++    const expected = structuredClone(session.workLog)
++    t.mock.method(agentExecution, 'abort', execution.abort.bind(execution))
++    t.mock.method(agentExecution, 'releaseRun', execution.releaseRun.bind(execution))
++    await developer.cancel(session.id)
++    const cancelled = agentRunStore.getRun(session.id)!
++    assert.equal(cancelled.status, 'cancelled')
++    assert.equal((cancelled.productState.workLog as { count: number }).count, 1001)
++    const snapshot = developer.getSnapshot(session.id)!
++    assert.deepEqual(snapshot.workLog, expected)
++    assert.equal(snapshot.events.length, 1001)
++    const exported = buildPluginDevAgentWorkLogFromSnapshot(snapshot)
++    assert.deepEqual(exported.entries, expected)
++    assert.equal(exported.timeline.length, 1001)
++    const restored = testable(developer).restoreSession(session.id, cancelled.productState)
++    assert.deepEqual(restored.workLog, expected)
++    testable(developer).emitDomainEvent(activeRun(restored), { type: 'step_start', sessionId: restored.id, step: 1001 })
++    assert.equal((agentRunStore.getRun(restored.id)!.productState.workLog as { count: number }).count, 1002)
++  } finally {
++    t.mock.restoreAll()
++    testable(developer).active.delete(session.id)
++    deleteSession(session.id)
++    await execution.dispose()
++    closeDatabase()
++    fs.rmSync(directory, { recursive: true, force: true })
++  }
++})
++
++it('keeps the migrated work log reference when runtime reopen fails during recovery', async (t) => {
++  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-plugin-log-recovery-'))
++  initDatabaseAtPath(path.join(directory, 'test.sqlite'))
++  const developer = new PluginDeveloper()
++  const id = 'log-recovery-failure'
++  const legacy = [{ at: '2026-09-10T00:00:00Z', kind: 'user_message', sessionId: id, source: 'start', text: 'keep this message' }]
++  const frozen = frozenSnapshot()
++  try {
++    getDb().prepare(`INSERT INTO agent_runs
++      (id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
++      VALUES (?,'plugin-developer','waiting_user','test',?,'pi',?,'now','now')`)
++      .run(id, JSON.stringify(frozen), JSON.stringify({
++        schemaVersion: 1, input, package: packageValue, status: 'waiting_user', phase: 'working',
++        step: 1, totalTokens: 0, modelTurnCount: 0, discoveryToolCalls: 0, runTargets: [], summary: 'old', workLog: legacy
++      }))
++    t.mock.method(testable(developer), 'materializeWorkspace', () => {})
++    t.mock.method(testable(developer), 'restoredConfiguration', () => ({
++      ...frozen, model: access('primary'), verifierModel: undefined, tools: [], sessionDirectory: directory
++    }))
++    t.mock.method(agentExecution, 'openRun', async () => { throw new Error('restore open failure') })
++    assert.deepEqual(await developer.restoreRecoverableRuns(), [{ runId: id, error: 'restore open failure' }])
++    const current = agentRunStore.getRun(id)!
++    assert.equal(current.productState.schemaVersion, 2)
++    assert.equal(current.productState.recoveryBlocked, true)
++    assert.equal(Array.isArray(current.productState.workLog), false)
++    assert.deepEqual(developer.getSnapshot(id)?.workLog, legacy)
++  } finally {
++    t.mock.restoreAll()
++    deleteSession(id)
++    closeDatabase()
++    fs.rmSync(directory, { recursive: true, force: true })
++  }
++})
+diff --git a/src/main/services/pluginDevAgent/pluginDeveloper.ts b/src/main/services/pluginDevAgent/pluginDeveloper.ts
+index aa70960..968ff1b 100644
+--- a/src/main/services/pluginDevAgent/pluginDeveloper.ts
++++ b/src/main/services/pluginDevAgent/pluginDeveloper.ts
+@@ -49,6 +49,7 @@ import {
+ } from './sessionStore'
+ import { createPluginDeveloperToolHandlers } from './toolPack'
+ import type { PluginDevSession } from './types'
++import { appendPluginWorkLog, readPluginWorkLog, type PersistedPluginWorkLog } from './workLogPersistence'
+ import { pluginArtifactHash } from './pluginArtifact'
+ import { isPluginExecutionUnmatchedTargets } from './pluginExecution'
+ import { pluginWorkspace } from './pluginWorkspace'
+@@ -61,10 +62,12 @@ import {
+   releasePluginDeveloperBrowser
+ } from './toolExecutor'
+ 
+-const PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION = 1 as const
++const PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION = 2 as const
++
++function supportsProductStateVersion(version: unknown): boolean { return version === 1 || version === 2 }
+ 
+ interface PluginDeveloperProductState extends Record<string, unknown> {
+-  schemaVersion: typeof PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION
++  schemaVersion: 1 | typeof PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION
+   input: PluginDevAgentStartInput
+   status: PluginDevSession['status']
+   phase: PluginDevSession['phase']
+@@ -84,7 +87,7 @@ interface PluginDeveloperProductState extends Record<string, unknown> {
+   endedAt?: number
+   failureMessage?: string
+   summary: string
+-  workLog: PluginDevAgentWorkLogEntry[]
++  workLog: PersistedPluginWorkLog
+   recoveryBlocked?: boolean
+ }
+ 
+@@ -173,12 +176,12 @@ function adoptInstalledPackage(
+   return installed
+ }
+ 
+-function toProductState(
++function persistProductState(
+   session: PluginDevSession,
+   input: PluginDevAgentStartInput,
+   summary: string
+ ): PluginDeveloperProductState {
+-  return {
++  const state = {
+     schemaVersion: PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION,
+     input: structuredClone(input),
+     status: session.status,
+@@ -202,9 +205,15 @@ function toProductState(
+       : undefined,
+     endedAt: session.endedAt,
+     failureMessage: session.failureMessage,
+-    summary,
+-    workLog: structuredClone(session.workLog ?? [])
++    summary
+   }
++  // Before createRun there is no journal owner; the initial (usually single) user
++  // message stays inline. The first committed update migrates it atomically.
++  if (!agentRunStore.getRun(session.id)) return { ...state, workLog: structuredClone(session.workLog ?? []) }
++  return agentRunStore.updateProductStateFrom<PluginDeveloperProductState>(session.id, runStatus(session), (current) => ({
++    ...state,
++    workLog: appendPluginWorkLog(session.id, current.productState.workLog, session.workLog ?? [])
++  }))
+ }
+ 
+ function toResult(active: ActivePluginRun): PluginDevAgentSessionResult {
+@@ -444,11 +453,7 @@ export class PluginDeveloper {
+           }
+         })
+       }
+-      agentRunStore.updateProductState(
+-        active.session.id,
+-        runStatus(active.session),
+-        toProductState(active.session, active.input, active.summary)
+-      )
++      persistProductState(active.session, active.input, active.summary)
+     }
+   }
+ 
+@@ -754,7 +759,7 @@ export class PluginDeveloper {
+       this.scheduleTerminalRelease(active)
+     }
+     return {
+-      state: toProductState(session, active.input, active.summary),
++      state: persistProductState(session, active.input, active.summary),
+       status: runStatus(session)
+     }
+   }
+@@ -884,7 +889,7 @@ export class PluginDeveloper {
+     runId: AgentRunId,
+     state: PluginDeveloperProductState
+   ): PluginDevSession {
+-    if (state.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION || !state.input || !state.package) {
++    if (!supportsProductStateVersion(state.schemaVersion) || !state.input || !state.package) {
+       throw new Error('PluginDeveloper 产品快照版本不兼容')
+     }
+     const session = createSession(state.input, runId)
+@@ -908,7 +913,7 @@ export class PluginDeveloper {
+       : undefined
+     session.endedAt = state.endedAt
+     session.failureMessage = state.failureMessage
+-    session.workLog = structuredClone(state.workLog ?? [])
++    session.workLog = readPluginWorkLog(runId, state.workLog)
+     const acceptance = pluginRunAcceptance.evaluate({
+       package: session.package,
+       targets: session.runTargets,
+@@ -1017,15 +1022,11 @@ export class PluginDeveloper {
+         // Persist restore-time migrations before opening Pi. A healthy restored checkpoint is not
+         // required to emit another durable observation, so relying on runtime projection here can
+         // leave legacy verification/loop state in the durable product snapshot indefinitely.
+-        agentRunStore.updateProductState(
+-          record.id,
+-          runStatus(session),
+-          toProductState(session, state.input, active.summary)
+-        )
++        persistProductState(session, state.input, active.summary)
+         const opened = await agentExecution.openRun({
+           useCase: 'plugin-developer',
+           resolved,
+-          productState: toProductState(session, state.input, active.summary),
++          productState: persistProductState(session, state.input, active.summary),
+           resume: record,
+           notify: (event) => this.runtimeNotify(active!, event),
+           project: (event) => this.runtimeProject(active!, event)
+@@ -1051,7 +1052,7 @@ export class PluginDeveloper {
+         this.active.delete(record.id)
+         agentRunStore.interruptAcceptedOperations(record.id, message)
+         agentRunStore.updateProductState(record.id, 'failed', {
+-          ...record.productState,
++          ...(agentRunStore.getRun(record.id)?.productState ?? record.productState),
+           recoveryBlocked: true,
+           recoveryError: message
+         })
+@@ -1070,7 +1071,7 @@ export class PluginDeveloper {
+       throw new Error('会话不存在')
+     }
+     const state = record.productState
+-    if (state.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION || state.recoveryBlocked) {
++    if (!supportsProductStateVersion(state.schemaVersion) || state.recoveryBlocked) {
+       throw new Error(state.recoveryBlocked ? '会话恢复已被阻止' : '会话快照版本不兼容')
+     }
+     const session = this.restoreSession(runId, state)
+@@ -1106,15 +1107,11 @@ export class PluginDeveloper {
+         record.configSnapshot.model.descriptor
+       )
+       active.tools = resolved.tools
+-      agentRunStore.updateProductState(
+-        runId,
+-        'waiting_user',
+-        toProductState(session, state.input, active.summary)
+-      )
++      persistProductState(session, state.input, active.summary)
+       await agentExecution.openRun({
+         useCase: 'plugin-developer',
+         resolved,
+-        productState: toProductState(session, state.input, active.summary),
++        productState: persistProductState(session, state.input, active.summary),
+         resume: { ...record, status: 'waiting_user' },
+         notify: (event) => this.runtimeNotify(active, event),
+         project: (event) => this.runtimeProject(active, event)
+@@ -1133,10 +1130,10 @@ export class PluginDeveloper {
+     if (!active) {
+       const record = agentRunStore.getRun<PluginDeveloperProductState>(runId)
+       const state = record?.productState
+-      if (!record || record.useCase !== 'plugin-developer' || state?.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION) return null
+-      const workLog = structuredClone(state.workLog ?? [])
++      if (!record || record.useCase !== 'plugin-developer' || !state || !supportsProductStateVersion(state.schemaVersion)) return null
++      const workLog = readPluginWorkLog(runId, state.workLog)
+       return {
+-        cursor: agentRunStore.readProductJournal(runId).at(-1)?.seq ?? 0,
++        cursor: agentRunStore.getProductJournalCursor(runId),
+         input: structuredClone(state.input),
+         result: {
+           sessionId: runId,
+@@ -1163,9 +1160,8 @@ export class PluginDeveloper {
+           : undefined
+       }
+     }
+-    const journal = agentRunStore.readProductJournal(runId)
+     return {
+-      cursor: journal.at(-1)?.seq ?? 0,
++      cursor: agentRunStore.getProductJournalCursor(runId),
+       input: structuredClone(active.input),
+       result: structuredClone(toResult(active)),
+       phase: active.session.phase,
+@@ -1186,7 +1182,7 @@ export class PluginDeveloper {
+   assertReadyArtifact(sessionId: string, packageInput: PluginDevSession['package']): void {
+     const active = this.active.get(sessionId)
+     const record = active ? undefined : agentRunStore.getRun<PluginDeveloperProductState>(sessionId)
+-    if (!active && record?.productState.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION) {
++    if (!active && !supportsProductStateVersion(record?.productState.schemaVersion)) {
+       throw new Error('历史插件开发会话只读，不能用于当前安装门禁。')
+     }
+     const workspaceDraftError = active?.session.workspaceDraftError ?? record?.productState.workspaceDraftError
+@@ -1228,7 +1224,7 @@ export class PluginDeveloper {
+     }
+ 
+     const record = agentRunStore.getRun<PluginDeveloperProductState>(sessionId)
+-    if (!record || record.useCase !== 'plugin-developer' || record.productState.schemaVersion !== PLUGIN_DEVELOPER_PRODUCT_STATE_SCHEMA_VERSION) {
++    if (!record || record.useCase !== 'plugin-developer' || !supportsProductStateVersion(record.productState.schemaVersion)) {
+       throw new Error('插件开发会话不存在或版本不兼容')
+     }
+     const gate = pluginRunAcceptance.evaluate({
+@@ -1409,7 +1405,7 @@ export class PluginDeveloper {
+         runId: session.id,
+         useCase: 'plugin-developer',
+         resolved,
+-        productState: toProductState(session, input, active.summary),
++        productState: persistProductState(session, input, active.summary),
+         notify: (event) => this.runtimeNotify(active, event),
+         project: (event) => this.runtimeProject(active, event)
+       })
+@@ -1520,11 +1516,7 @@ ${continuationPrompt}`
+         session.incrementalEditOnly = true
+         session.phase = 'working'
+       }
+-      agentRunStore.updateProductState(
+-        session.id,
+-        'running',
+-        toProductState(session, active.input, active.summary)
+-      )
++      persistProductState(session, active.input, active.summary)
+       this.emitDomainEvent(active, { type: 'step_start', sessionId: session.id, step: session.step })
+       const settled = this.waitForSettled(active)
+       const dispatched = await agentExecution.dispatch({
+@@ -1560,11 +1552,7 @@ ${continuationPrompt}`
+     try {
+       await agentExecution.abort(sessionId, '用户终止插件开发')
+     } finally {
+-      agentRunStore.updateProductState(
+-        sessionId,
+-        'cancelled',
+-        toProductState(active.session, active.input, active.summary)
+-      )
++      persistProductState(active.session, active.input, active.summary)
+       const waiter = active.waiter
+       active.waiter = undefined
+       waiter?.resolve(toResult(active))
+diff --git a/src/main/services/pluginDevAgent/workLogPersistence.ts b/src/main/services/pluginDevAgent/workLogPersistence.ts
+new file mode 100644
+index 0000000..affaae3
+--- /dev/null
++++ b/src/main/services/pluginDevAgent/workLogPersistence.ts
+@@ -0,0 +1,79 @@
++import type { PluginDevAgentWorkLogEntry } from '@shared/pluginDevTypes'
++import { agentRunStore, type AgentRunStore } from '../../agent-platform/agentRunStore'
++
++const EVENT_TYPE = 'plugin.work_log_entry'
++export interface PluginWorkLogReference {
++  format: 'journal-v1'
++  afterSeq: number
++  throughSeq: number
++  count: number
++}
++export type PersistedPluginWorkLog = PluginDevAgentWorkLogEntry[] | PluginWorkLogReference
++
++function validateReference(value: PluginWorkLogReference): void {
++  if (value?.format !== 'journal-v1' ||
++    ![value.afterSeq, value.throughSeq, value.count].every((number) => Number.isSafeInteger(number) && number >= 0) ||
++    value.throughSeq < value.afterSeq ||
++    (value.count === 0) !== (value.throughSeq === value.afterSeq)) {
++    throw new Error('Invalid plugin work log reference')
++  }
++}
++
++/** Must run inside the same transaction as the new product state. */
++export function appendPluginWorkLog(
++  runId: string,
++  previous: PersistedPluginWorkLog | undefined,
++  entries: readonly PluginDevAgentWorkLogEntry[],
++  store: AgentRunStore = agentRunStore
++): PluginWorkLogReference {
++  const legacy = previous === undefined || Array.isArray(previous)
++  const reference: PluginWorkLogReference = legacy
++    ? { format: 'journal-v1', afterSeq: store.getProductJournalCursor(runId), throughSeq: 0, count: 0 }
++    : { ...previous }
++  if (legacy) {
++    reference.throughSeq = reference.afterSeq
++    if (Array.isArray(previous) && (entries.length < previous.length ||
++      previous.some((entry, index) => JSON.stringify(entry) !== JSON.stringify(entries[index])))) {
++      throw new Error('Legacy plugin work log prefix changed')
++    }
++  }
++  validateReference(reference)
++  if (entries.length < reference.count) throw new Error('Plugin work log cannot shrink')
++  for (let index = reference.count; index < entries.length; index++) {
++    reference.throughSeq = store.appendProductEvent(runId, undefined, EVENT_TYPE, { index, entry: entries[index] })
++    reference.count++
++  }
++  validateReference(reference)
++  return reference
++}
++
++export function readPluginWorkLog(
++  runId: string,
++  value: PersistedPluginWorkLog | undefined,
++  store: AgentRunStore = agentRunStore
++): PluginDevAgentWorkLogEntry[] {
++  if (value === undefined) return []
++  if (Array.isArray(value)) return structuredClone(value)
++  validateReference(value)
++  const entries: PluginDevAgentWorkLogEntry[] = []
++  let cursor = value.afterSeq
++  while (cursor < value.throughSeq) {
++    const page = store.readProductJournal<{ index: number; entry: PluginDevAgentWorkLogEntry }>(runId, cursor, 500, value.throughSeq)
++    if (page.length === 0) throw new Error('Plugin work log journal is incomplete')
++    for (const record of page) {
++      if (record.seq > value.throughSeq) break
++      cursor = record.seq
++      if (record.eventType !== EVENT_TYPE) continue
++      if (record.payload.index !== entries.length || !record.payload.entry ||
++        !['event', 'user_message'].includes(record.payload.entry.kind)) {
++        throw new Error('Invalid plugin work log entry')
++      }
++      entries.push(record.payload.entry)
++    }
++    if (page.at(-1)!.seq > value.throughSeq && cursor !== value.throughSeq) {
++      throw new Error('Plugin work log journal endpoint is missing')
++    }
++  }
++  if (entries.length !== value.count) throw new Error('Plugin work log entry count mismatch')
++  return entries
++}
+diff --git a/src/main/services/pluginDevAgent/workLogPersistence.test.ts b/src/main/services/pluginDevAgent/workLogPersistence.test.ts
+new file mode 100644
+index 0000000..c6a44bc
+--- /dev/null
++++ b/src/main/services/pluginDevAgent/workLogPersistence.test.ts
+@@ -0,0 +1,124 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import Database from 'better-sqlite3'
++import type { PluginDevAgentWorkLogEntry } from '@shared/pluginDevTypes'
++import { AGENT_PLATFORM_SCHEMA_SQL } from '../../db/schema'
++import { AgentRunStore } from '../../agent-platform/agentRunStore'
++import { appendPluginWorkLog, readPluginWorkLog, type PersistedPluginWorkLog, type PluginWorkLogReference } from './workLogPersistence'
++
++type State = { schemaVersion: number; workLog: PersistedPluginWorkLog; summary: string }
++function entry(index: number): PluginDevAgentWorkLogEntry {
++  return { at: '2026-09-10T00:00:00Z', kind: 'user_message', sessionId: 'run', source: 'continue', text: `message-${index}` }
++}
++function fixture(legacy: PluginDevAgentWorkLogEntry[] = []) {
++  const db = new Database(':memory:')
++  db.pragma('foreign_keys = ON')
++  db.exec(AGENT_PLATFORM_SCHEMA_SQL)
++  db.prepare(`INSERT INTO agent_runs
++    (id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
++    VALUES ('run','plugin-developer','waiting_user','test','{}','pi',?,'now','now')`)
++    .run(JSON.stringify({ schemaVersion: 1, workLog: legacy, summary: 'old' }))
++  const store = new AgentRunStore(() => db)
++  const save = (entries: PluginDevAgentWorkLogEntry[]) => store.updateProductStateFrom<State>('run', 'waiting_user', (current) => ({
++    schemaVersion: 2, summary: 'new', workLog: appendPluginWorkLog('run', current.productState.workLog, entries, store)
++  }))
++  return { db, store, save }
++}
++
++it('migrates a legacy log once, preserves message/event order, and reads only its committed journal interval', () => {
++  const original = [entry(0), { at: '2026-09-10T00:00:01Z', kind: 'event' as const,
++    event: { type: 'step_start' as const, sessionId: 'run', step: 1 } }]
++  const { db, store, save } = fixture(original)
++  try {
++    assert.deepEqual(readPluginWorkLog('run', store.getRun<State>('run')!.productState.workLog, store), original)
++    assert.equal(store.getProductJournalCursor('run'), 0)
++    const all = [...original, ...Array.from({ length: 1001 }, (_, index) => entry(index + 1))]
++    store.appendProductEvent('run', undefined, 'unrelated', { ignored: true })
++    const first = save(all)
++    const cursor = store.getProductJournalCursor('run')
++    assert.equal(first.schemaVersion, 2)
++    assert.equal(Array.isArray(first.workLog), false)
++    assert.deepEqual(readPluginWorkLog('run', first.workLog, store), all)
++    save(all)
++    assert.equal(store.getProductJournalCursor('run'), cursor)
++    store.appendProductEvent('run', undefined, 'runtime.other', {})
++    all.push(entry(1003))
++    const next = save(all)
++    assert.deepEqual(readPluginWorkLog('run', next.workLog, store), all)
++    db.prepare(`INSERT INTO agent_product_journal (run_id,event_type,payload_json,created_at)
++      VALUES ('run','corrupt-future','not JSON','now')`).run()
++    assert.deepEqual(readPluginWorkLog('run', first.workLog, store), all.slice(0, -1))
++    assert.deepEqual(readPluginWorkLog('run', next.workLog, store), all)
++  } finally { db.close() }
++})
++
++it('rolls back journal appends when product state commit fails and retries without duplicates', () => {
++  const { db, store, save } = fixture([entry(0)])
++  try {
++    const initial = store.getRun<State>('run')!.productState
++    db.exec(`CREATE TRIGGER reject_state BEFORE UPDATE OF product_state_json ON agent_runs
++      BEGIN SELECT RAISE(ABORT, 'state failure'); END`)
++    assert.throws(() => save([entry(0), entry(1)]), /state failure/)
++    assert.deepEqual(store.getRun<State>('run')!.productState, initial)
++    assert.equal(store.getProductJournalCursor('run'), 0)
++    db.exec('DROP TRIGGER reject_state')
++    const migrated = save([entry(0), entry(1)])
++    const cursor = store.getProductJournalCursor('run')
++    db.exec(`CREATE TRIGGER reject_entry BEFORE INSERT ON agent_product_journal
++      WHEN json_extract(NEW.payload_json, '$.index') = 3 BEGIN SELECT RAISE(ABORT, 'entry failure'); END`)
++    assert.throws(() => save([entry(0), entry(1), entry(2), entry(3)]), /entry failure/)
++    assert.deepEqual(store.getRun<State>('run')!.productState, migrated)
++    assert.equal(store.getProductJournalCursor('run'), cursor)
++    db.exec('DROP TRIGGER reject_entry')
++    const retried = save([entry(0), entry(1), entry(2), entry(3)])
++    assert.deepEqual(readPluginWorkLog('run', retried.workLog, store), [entry(0), entry(1), entry(2), entry(3)])
++    assert.equal((db.prepare('SELECT COUNT(*) AS total FROM agent_product_journal').get() as { total: number }).total, 4)
++  } finally { db.close() }
++})
++
++it('rejects changed legacy prefixes, shrinking histories, missing rows and malformed references without rewriting data', () => {
++  const { db, store, save } = fixture([entry(0)])
++  try {
++    assert.throws(() => save([entry(1)]), /prefix changed/)
++    const committed = save([entry(0), entry(1)])
++    const ref = committed.workLog as PluginWorkLogReference
++    assert.throws(() => save([entry(0)]), /cannot shrink/)
++    for (const invalid of [{ ...ref, count: -1 }, { ...ref, throughSeq: 0 }, { ...ref, afterSeq: 0.5 }]) {
++      assert.throws(() => readPluginWorkLog('run', invalid, store), /Invalid/)
++    }
++    db.prepare('DELETE FROM agent_product_journal WHERE seq = ?').run(ref.throughSeq)
++    assert.throws(() => readPluginWorkLog('run', ref, store), /incomplete/)
++    assert.deepEqual(store.getRun<State>('run')!.productState, committed)
++  } finally { db.close() }
++})
++
++it('keeps logical state+journal writes linear for 1k, 10k and 100k log entries', (t) => {
++  const results: Array<{ entries: number; stateBytes: number; journalBytes: number }> = []
++  for (const count of [1000, 10_000, 100_000]) {
++    const { db, store, save } = fixture()
++    try {
++      let stateBytes = 0
++      db.function('capture_state', (value: string) => { stateBytes += Buffer.byteLength(value); return 0 })
++      db.exec(`CREATE TRIGGER capture_state AFTER UPDATE OF product_state_json ON agent_runs
++        BEGIN SELECT capture_state(NEW.product_state_json); END`)
++      const entries: PluginDevAgentWorkLogEntry[] = []
++      let final: State | undefined
++      db.transaction(() => {
++        for (let index = 0; index < count; index++) {
++          entries.push(entry(index))
++          final = save(entries)
++        }
++      })()
++      const row = db.prepare('SELECT COUNT(*) AS total, SUM(length(CAST(payload_json AS BLOB))) AS bytes FROM agent_product_journal')
++        .get() as { total: number; bytes: number }
++      assert.equal(row.total, count)
++      assert.ok(stateBytes < count * 200)
++      const restored = readPluginWorkLog('run', final!.workLog, store)
++      assert.deepEqual(restored, entries)
++      results.push({ entries: count, stateBytes, journalBytes: row.bytes })
++    } finally { db.close() }
++  }
++  assert.ok(results[2].stateBytes / results[1].stateBytes < 10.5)
++  assert.ok(results[2].journalBytes / results[1].journalBytes < 10.5)
++  t.diagnostic(JSON.stringify({ results, scope: 'In-memory SQLite logical JSON bytes; outer transaction amortizes test setup. Not WAL/device bytes, fsync latency, UI or cold recovery memory acceptance.' }))
++})

@@ -1,6 +1,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import fs from 'node:fs'
 import path from 'node:path'
+export { AssetReadQueueFullError } from './mediaAssetStore/readQueue'
+export { AssetReadTooLargeError, MAX_ASSET_READ_BYTES } from './mediaAssetStore/boundedRead'
+export { AssetPixelLimitError, MAX_ASSET_PIXELS } from './mediaAssetStore/pixelBudget'
+import type { ImageThumbnailSize } from '@shared/imageVariants'
 import {
   assetsRoot,
   deleteAssetOrThrow,
@@ -15,6 +19,7 @@ import {
   importSampleFromFile,
   readAssetBytes,
   readAssetForServe,
+  readAssetForServeAsync,
   resolveAssetPath
 } from './mediaAssetStore/filesystem'
 import {
@@ -189,6 +194,10 @@ export class MediaAssetStore {
 
   readForServe(relPath: string): { body: Buffer; mime: string } {
     return readAssetForServe(relPath)
+  }
+
+  readForServeAsync(relPath: string, signal?: AbortSignal, size?: ImageThumbnailSize): Promise<{ body: Buffer; mime: string }> {
+    return readAssetForServeAsync(relPath, signal, size)
   }
 
   fingerprint(data: Buffer): string {

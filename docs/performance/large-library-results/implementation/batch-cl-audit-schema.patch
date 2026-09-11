@@ -1,0 +1,787 @@
+diff --git a/src/main/db/migrations.ts b/src/main/db/migrations.ts
+index e0752bb..841f0dd 100644
+--- a/src/main/db/migrations.ts
++++ b/src/main/db/migrations.ts
+@@ -9,6 +9,7 @@ import {
+   CLASSIFICATION_V8_SCHEMA_SQL,
+   AGENT_METADATA_SCHEMA_SQL,
+   AGENT_PLATFORM_SCHEMA_SQL,
++  AGENT_RESOURCE_CLEANUP_SCHEMA_SQL,
+   MEDIA_LIBRARY_CORE_SCHEMA_SQL,
+   MEDIA_LIBRARY_MEMBERSHIP_SCHEMA_SQL,
+   MEDIA_LIBRARY_PENDING_SCAN_SCHEMA_SQL,
+@@ -19,10 +20,11 @@ import {
+   PENDING_VIDEO_DECISIONS_SCHEMA_SQL,
+   RELATED_LINKS_SCHEMA_SQL,
+   SCHEMA_SQL,
++  SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL,
+   VIDEO_SOURCES_SCHEMA_SQL
+ } from './schema'
+ 
+-export const CURRENT_SCHEMA_VERSION = 15
++export const CURRENT_SCHEMA_VERSION = 18
+ 
+ type Migration = {
+   version: number
+@@ -1369,6 +1371,23 @@ const MIGRATIONS: Migration[] = [
+   {
+     version: 15,
+     migrate: migrateToV15
++  },
++  {
++    version: 16,
++    migrate: (database) => database.exec(AGENT_RESOURCE_CLEANUP_SCHEMA_SQL)
++  },
++  {
++    version: 17,
++    migrate: (database) => {
++      // Keep the tag-key contract while covering manual-origin qualification.
++      // The enclosing migration transaction rolls back both DDL and version.
++      database.exec('DROP INDEX idx_video_tag_tag_id')
++      database.exec('CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id,origin)')
++    }
++  },
++  {
++    version: 18,
++    migrate: (database) => database.exec(SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL)
+   }
+ ]
+ 
+diff --git a/src/main/db/migrationsV14.test.ts b/src/main/db/migrationsV14.test.ts
+index 95a837a..96cfe55 100644
+--- a/src/main/db/migrationsV14.test.ts
++++ b/src/main/db/migrationsV14.test.ts
+@@ -32,6 +32,10 @@ function rowCount(database: Database.Database, table: string): number {
+ function createV13ReleaseFixture(database: Database.Database): void {
+   database.exec(`
+     PRAGMA foreign_keys = ON;
++    -- Minimal unaffected relationship/index required by the later V17 migration.
++    CREATE TABLE video_tag (video_id INTEGER NOT NULL, tag_id INTEGER NOT NULL,
++      origin TEXT NOT NULL DEFAULT 'manual', PRIMARY KEY(video_id,tag_id));
++    CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id);
+ 
+     CREATE TABLE videos (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+@@ -147,7 +151,7 @@ describe('V14 unreleased feature consolidation migration', () => {
+ 
+       migrateDatabase(database)
+ 
+-      assert.equal(CURRENT_SCHEMA_VERSION, 15)
++      assert.equal(CURRENT_SCHEMA_VERSION, 18)
+       assert.equal(database.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+       for (const table of [
+         'media_libraries',
+diff --git a/src/main/db/migrationsV15.test.ts b/src/main/db/migrationsV15.test.ts
+index 9a727e8..1a75b6e 100644
+--- a/src/main/db/migrationsV15.test.ts
++++ b/src/main/db/migrationsV15.test.ts
+@@ -25,12 +25,30 @@ function columnNames(database: Database.Database, table: string): Set<string> {
+ function createV14ReleaseFixture(database: Database.Database): void {
+   database.exec(`
+     PRAGMA foreign_keys = ON;
++    -- Minimal unaffected relationship/index required by the later V17 migration.
++    CREATE TABLE video_tag (video_id INTEGER NOT NULL, tag_id INTEGER NOT NULL,
++      origin TEXT NOT NULL DEFAULT 'manual', PRIMARY KEY(video_id,tag_id));
++    CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id);
+     CREATE TABLE media_libraries (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       name TEXT NOT NULL,
+       status TEXT NOT NULL DEFAULT 'active',
+       revision INTEGER NOT NULL DEFAULT 1
+     );
++CREATE TABLE IF NOT EXISTS library_scan_runs (
++    id TEXT PRIMARY KEY,
++    library_id INTEGER NOT NULL,
++    config_revision INTEGER NOT NULL,
++    trigger TEXT NOT NULL CHECK(trigger IN ('manual', 'automatic', 'initial', 'root')),
++    status TEXT NOT NULL
++        CHECK(status IN ('queued', 'running', 'completed', 'failed', 'cancelled', 'unavailable')),
++    started_at TEXT NOT NULL,
++    finished_at TEXT,
++    summary_json TEXT,
++    audit_json TEXT,
++    error_summary TEXT,
++    FOREIGN KEY (library_id) REFERENCES media_libraries(id) ON DELETE CASCADE
++);
+     CREATE TABLE media_library_configs (
+       library_id INTEGER PRIMARY KEY,
+       auto_scan_enabled INTEGER NOT NULL DEFAULT 0 CHECK(auto_scan_enabled IN (0, 1)),
+@@ -77,8 +95,8 @@ describe('V15 local NFO import migration', () => {
+     try {
+       database.pragma('foreign_keys = ON')
+       migrateDatabase(database)
+-      assert.equal(CURRENT_SCHEMA_VERSION, 15)
+-      assert.equal(database.pragma('user_version', { simple: true }), 15)
++      assert.equal(CURRENT_SCHEMA_VERSION, 18)
++      assert.equal(database.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+       assert.equal(columnNames(database, 'media_library_configs').has('auto_import_local_nfo'), true)
+       assert.equal(tableExists(database, 'pending_resource_identities'), true)
+       assert.deepEqual(
+@@ -104,7 +122,7 @@ describe('V15 local NFO import migration', () => {
+     try {
+       createV14ReleaseFixture(database)
+       migrateDatabase(database)
+-      assert.equal(database.pragma('user_version', { simple: true }), 15)
++      assert.equal(database.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
+       assert.deepEqual(
+         database
+           .prepare('SELECT auto_import_local_nfo, revision FROM media_library_configs WHERE library_id = 1')
+diff --git a/src/main/db/schema.ts b/src/main/db/schema.ts
+index 9dcff47..e01aa45 100644
+--- a/src/main/db/schema.ts
++++ b/src/main/db/schema.ts
+@@ -532,6 +532,148 @@ CREATE INDEX IF NOT EXISTS idx_library_root_cleanup_jobs_library_state
+ INSERT OR IGNORE INTO media_library_scan_state (library_id) VALUES (1);
+ `
+ 
++/**
++ * V18 storage/state constraints only: audit business fields and writer/page byte
++ * budgets remain reader/writer responsibilities. No payload-size ceiling here.
++ * Publishing requires the run's terminal update first, in the same transaction;
++ * these triggers cannot enforce that callers use one transaction for both steps.
++ */
++export const SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL = `
++CREATE TABLE IF NOT EXISTS library_scan_audit_manifests (
++    run_id TEXT NOT NULL PRIMARY KEY REFERENCES library_scan_runs(id) ON DELETE CASCADE,
++    format_version INTEGER NOT NULL DEFAULT 1 CHECK(typeof(format_version) = 'integer' AND format_version = 1),
++    state TEXT NOT NULL DEFAULT 'collecting'
++        CHECK(state IN ('collecting', 'sealed', 'published', 'abandoned')),
++    meta_json TEXT NOT NULL CHECK(json_valid(meta_json) AND json_type(meta_json) = 'object'),
++    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    sealed_at TEXT,
++    published_at TEXT,
++    CHECK(
++        (state = 'collecting' AND sealed_at IS NULL AND published_at IS NULL)
++        OR (state = 'sealed' AND sealed_at IS NOT NULL AND length(sealed_at) > 0 AND published_at IS NULL)
++        OR (state = 'published' AND sealed_at IS NOT NULL AND length(sealed_at) > 0
++            AND published_at IS NOT NULL AND length(published_at) > 0)
++        OR (state = 'abandoned' AND published_at IS NULL)
++    )
++);
++
++CREATE TABLE IF NOT EXISTS library_scan_audit_entries (
++    run_id TEXT NOT NULL REFERENCES library_scan_audit_manifests(run_id) ON DELETE CASCADE,
++    section TEXT NOT NULL CHECK(section IN (
++        'files', 'removedResources', 'promotedResources', 'deletedVideos', 'pendingGroups'
++    )),
++    ordinal INTEGER NOT NULL CHECK(typeof(ordinal) = 'integer' AND ordinal >= 0 AND ordinal <= 9007199254740991),
++    entry_key TEXT,
++    entry_json TEXT NOT NULL CHECK(json_valid(entry_json) AND json_type(entry_json) = 'object'),
++    entry_bytes INTEGER NOT NULL CHECK(typeof(entry_bytes) = 'integer'
++        AND entry_bytes = length(CAST(entry_json AS BLOB))),
++    PRIMARY KEY(run_id, section, ordinal),
++    UNIQUE(run_id, section, entry_key),
++    CHECK(
++        (section = 'files' AND entry_key IS NOT NULL AND length(entry_key) > 0)
++        OR (section <> 'files' AND entry_key IS NULL)
++    )
++) WITHOUT ROWID;
++
++CREATE TRIGGER IF NOT EXISTS library_scan_audit_manifest_insert_guard
++BEFORE INSERT ON library_scan_audit_manifests
++BEGIN
++    SELECT RAISE(ABORT, 'Audit manifest must start collecting on a running JSON-free run')
++    WHERE NEW.state <> 'collecting'
++        OR EXISTS (SELECT 1 FROM library_scan_audit_manifests WHERE run_id = NEW.run_id)
++        OR NOT EXISTS (
++            SELECT 1 FROM library_scan_runs
++            WHERE id = NEW.run_id AND status = 'running' AND audit_json IS NULL
++        );
++END;
++
++CREATE TRIGGER IF NOT EXISTS library_scan_audit_manifest_update_guard
++BEFORE UPDATE ON library_scan_audit_manifests
++BEGIN
++    SELECT RAISE(ABORT, 'Audit manifest identity is immutable')
++    WHERE NEW.run_id IS NOT OLD.run_id OR NEW.format_version IS NOT OLD.format_version
++        OR NEW.created_at IS NOT OLD.created_at;
++    SELECT RAISE(ABORT, 'Invalid audit manifest transition')
++    WHERE NOT (
++        (OLD.state = 'collecting' AND NEW.state IN ('sealed', 'abandoned'))
++        OR (OLD.state = 'sealed' AND NEW.state IN ('published', 'abandoned'))
++        OR (OLD.state = 'collecting' AND NEW.state = 'collecting' AND NEW.meta_json IS NOT OLD.meta_json)
++    );
++    SELECT RAISE(ABORT, 'Audit metadata can only change while collecting on a running run')
++    WHERE NEW.meta_json IS NOT OLD.meta_json AND NOT (
++        OLD.state = 'collecting' AND NEW.state = 'collecting'
++        AND EXISTS (SELECT 1 FROM library_scan_runs WHERE id = OLD.run_id AND status = 'running')
++    );
++    SELECT RAISE(ABORT, 'Audit sealed timestamp is immutable after sealing')
++    WHERE OLD.state = 'sealed' AND NEW.sealed_at IS NOT OLD.sealed_at;
++    SELECT RAISE(ABORT, 'Abandoning cannot set a sealed timestamp')
++    WHERE OLD.state = 'collecting' AND NEW.state = 'abandoned' AND NEW.sealed_at IS NOT OLD.sealed_at;
++    SELECT RAISE(ABORT, 'Sealing requires a running run')
++    WHERE NEW.state = 'sealed'
++        AND NOT EXISTS (SELECT 1 FROM library_scan_runs WHERE id = OLD.run_id AND status = 'running');
++    SELECT RAISE(ABORT, 'Publishing requires a finished terminal run')
++    WHERE NEW.state = 'published' AND NOT EXISTS (
++        SELECT 1 FROM library_scan_runs WHERE id = OLD.run_id
++        AND status IN ('completed', 'failed', 'cancelled', 'unavailable')
++        AND finished_at IS NOT NULL AND length(finished_at) > 0
++    );
++END;
++
++CREATE TRIGGER IF NOT EXISTS library_scan_audit_manifest_delete_guard
++BEFORE DELETE ON library_scan_audit_manifests
++BEGIN
++    SELECT RAISE(ABORT, 'Only abandoned audit manifests can be deleted directly')
++    WHERE OLD.state <> 'abandoned' AND EXISTS (SELECT 1 FROM library_scan_runs WHERE id = OLD.run_id);
++END;
++
++CREATE TRIGGER IF NOT EXISTS library_scan_audit_entry_insert_guard
++BEFORE INSERT ON library_scan_audit_entries
++BEGIN
++    SELECT RAISE(ABORT, 'Audit entries require a collecting manifest and running run')
++    WHERE NOT EXISTS (
++        SELECT 1 FROM library_scan_audit_manifests m JOIN library_scan_runs r ON r.id = m.run_id
++        WHERE m.run_id = NEW.run_id AND m.state = 'collecting' AND r.status = 'running'
++    );
++END;
++
++CREATE TRIGGER IF NOT EXISTS library_scan_audit_entry_update_guard
++BEFORE UPDATE ON library_scan_audit_entries
++BEGIN
++    SELECT RAISE(ABORT, 'Audit entry identity is immutable')
++    WHERE NEW.run_id IS NOT OLD.run_id OR NEW.section IS NOT OLD.section
++        OR NEW.ordinal IS NOT OLD.ordinal OR NEW.entry_key IS NOT OLD.entry_key;
++    SELECT RAISE(ABORT, 'Audit entries require collecting manifests and running runs')
++    WHERE NOT EXISTS (
++        SELECT 1 FROM library_scan_audit_manifests m JOIN library_scan_runs r ON r.id = m.run_id
++        WHERE m.run_id = OLD.run_id AND m.state = 'collecting' AND r.status = 'running'
++    ) OR NOT EXISTS (
++        SELECT 1 FROM library_scan_audit_manifests m JOIN library_scan_runs r ON r.id = m.run_id
++        WHERE m.run_id = NEW.run_id AND m.state = 'collecting' AND r.status = 'running'
++    );
++END;
++
++CREATE TRIGGER IF NOT EXISTS library_scan_audit_entry_delete_guard
++BEFORE DELETE ON library_scan_audit_entries
++BEGIN
++    SELECT RAISE(ABORT, 'Audit entry deletion requires a collecting manifest and running run')
++    WHERE EXISTS (SELECT 1 FROM library_scan_audit_manifests WHERE run_id = OLD.run_id)
++        AND NOT EXISTS (
++            SELECT 1 FROM library_scan_audit_manifests m JOIN library_scan_runs r ON r.id = m.run_id
++            WHERE m.run_id = OLD.run_id AND m.state = 'collecting' AND r.status = 'running'
++        );
++END;
++
++CREATE TRIGGER IF NOT EXISTS library_scan_audit_run_update_guard
++BEFORE UPDATE ON library_scan_runs
++BEGIN
++    SELECT RAISE(ABORT, 'Published audit runs are immutable')
++    WHERE EXISTS (SELECT 1 FROM library_scan_audit_manifests WHERE run_id = OLD.id AND state = 'published');
++    SELECT RAISE(ABORT, 'Audit entries and legacy JSON cannot coexist')
++    WHERE NEW.audit_json IS NOT NULL
++        AND EXISTS (SELECT 1 FROM library_scan_audit_manifests WHERE run_id = OLD.id);
++END;
++`
++
+ /** Immutable pre-multi-library pending-scan schema used by the V11 migration. */
+ export const LEGACY_PENDING_SCAN_SCHEMA_SQL = `
+ CREATE TABLE IF NOT EXISTS pending_scan_groups (
+@@ -679,6 +821,14 @@ CREATE INDEX IF NOT EXISTS idx_playlist_links_playlist
+     ON playlist_links(playlist_id, position);
+ `
+ 
++export const AGENT_RESOURCE_CLEANUP_SCHEMA_SQL = `
++CREATE TABLE IF NOT EXISTS agent_resource_cleanup (
++    run_id TEXT PRIMARY KEY,
++    requested_at TEXT NOT NULL,
++    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
++);
++`
++
+ export const AGENT_PLATFORM_SCHEMA_SQL = `
+ CREATE TABLE IF NOT EXISTS agent_runs (
+     id TEXT PRIMARY KEY,
+@@ -699,6 +849,8 @@ CREATE TABLE IF NOT EXISTS agent_runs (
+ CREATE INDEX IF NOT EXISTS idx_agent_runs_status_updated
+     ON agent_runs(status, updated_at);
+ 
++${AGENT_RESOURCE_CLEANUP_SCHEMA_SQL}
++
+ CREATE TABLE IF NOT EXISTS agent_operations (
+     id TEXT PRIMARY KEY,
+     run_id TEXT NOT NULL,
+@@ -1128,7 +1280,7 @@ CREATE TABLE IF NOT EXISTS video_tag (
+     FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+     FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+ );
+-CREATE INDEX IF NOT EXISTS idx_video_tag_tag_id ON video_tag(tag_id);
++CREATE INDEX IF NOT EXISTS idx_video_tag_tag_id ON video_tag(tag_id,origin);
+ CREATE INDEX IF NOT EXISTS idx_video_tag_origin ON video_tag(origin);
+ 
+ ${VIDEO_SOURCES_SCHEMA_SQL}
+@@ -1309,6 +1461,8 @@ ${PENDING_VIDEO_SCRAPES_SCHEMA_SQL}
+ 
+ ${MEDIA_LIBRARY_SCAN_SCHEMA_SQL}
+ 
++${SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL}
++
+ ${RELATED_LINKS_SCHEMA_SQL}
+ 
+ ${AGENT_PLATFORM_SCHEMA_SQL}
+diff --git a/src/main/db/migrationsV16.test.ts b/src/main/db/migrationsV16.test.ts
+new file mode 100644
+index 0000000..88353ce
+--- /dev/null
++++ b/src/main/db/migrationsV16.test.ts
+@@ -0,0 +1,65 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import Database from 'better-sqlite3'
++import { SCHEMA_SQL, SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL } from './schema'
++import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
++
++function releasedDatabase() {
++  const db = new Database(':memory:')
++  db.pragma('foreign_keys = ON')
++  db.exec(SCHEMA_SQL.replace(SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL, ''))
++  db.exec('DROP TABLE agent_resource_cleanup')
++  db.exec('DROP INDEX idx_video_tag_tag_id; CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id)')
++  db.pragma('user_version = 15')
++  db.prepare(`INSERT INTO agent_runs
++    (id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
++    VALUES ('old-run','plugin-developer','closed','test','bad config','pi','bad state','old','old')`).run()
++  db.prepare("INSERT INTO actresses (main_name) VALUES ('migration fixture')").run()
++  return db
++}
++
++it('adds the cleanup queue and later indexes when upgrading V15 and preserves old business data and damaged diagnostic state', () => {
++  const db = releasedDatabase()
++  try {
++    const schemaBefore = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT GLOB 'library_scan_audit_*' AND name <> 'idx_video_tag_tag_id' ORDER BY name").all()
++    const runsBefore = db.prepare('SELECT * FROM agent_runs').all()
++    const actressesBefore = db.prepare('SELECT * FROM actresses').all()
++    migrateDatabase(db)
++    assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
++    const schemaAfter = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT GLOB 'library_scan_audit_*' AND name <> 'agent_resource_cleanup' AND name <> 'idx_video_tag_tag_id' ORDER BY name").all()
++    assert.deepEqual(schemaAfter, schemaBefore)
++    assert.deepEqual(db.prepare('SELECT * FROM agent_runs').all(), runsBefore)
++    assert.deepEqual(db.prepare('SELECT * FROM actresses').all(), actressesBefore)
++    db.prepare("INSERT INTO agent_resource_cleanup VALUES ('old-run','now')").run()
++    assert.throws(() => db.prepare("INSERT INTO agent_resource_cleanup VALUES ('missing','now')").run(), /FOREIGN KEY/)
++    assert.deepEqual(db.pragma('foreign_key_check'), [])
++    assert.deepEqual(db.pragma('integrity_check'), [{ integrity_check: 'ok' }])
++    migrateDatabase(db)
++    assert.equal((db.prepare('SELECT COUNT(*) AS total FROM agent_resource_cleanup').get() as { total: number }).total, 1)
++    db.prepare("DELETE FROM agent_runs WHERE id = 'old-run'").run()
++    assert.equal((db.prepare('SELECT COUNT(*) AS total FROM agent_resource_cleanup').get() as { total: number }).total, 0)
++  } finally { db.close() }
++})
++
++it('rolls back both DDL and version when V16 fails after table creation, then upgrades on retry', (t) => {
++  const db = releasedDatabase()
++  try {
++    const exec = db.exec
++    const fault = t.mock.method(db, 'exec', (sql: string) => {
++      const result = exec.call(db, sql)
++      if (sql.includes('CREATE TABLE IF NOT EXISTS agent_resource_cleanup')) throw new Error('migration interrupted')
++      return result
++    })
++    assert.throws(() => migrateDatabase(db), /migration interrupted/)
++    assert.equal(db.pragma('user_version', { simple: true }), 15)
++    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'agent_resource_cleanup'").get(), undefined)
++    assert.equal(db.pragma('foreign_keys', { simple: true }), 1)
++    fault.mock.restore()
++    migrateDatabase(db)
++    assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
++    assert.deepEqual(db.pragma('foreign_key_check'), [])
++  } finally {
++    t.mock.restoreAll()
++    db.close()
++  }
++})
+diff --git a/src/main/db/migrationsV17.test.ts b/src/main/db/migrationsV17.test.ts
+new file mode 100644
+index 0000000..6442b33
+--- /dev/null
++++ b/src/main/db/migrationsV17.test.ts
+@@ -0,0 +1,77 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import Database from 'better-sqlite3'
++import { SCHEMA_SQL, SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL } from './schema'
++import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
++
++function v16() {
++  const db = new Database(':memory:')
++  db.pragma('foreign_keys = ON')
++  db.exec(SCHEMA_SQL.replace(SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL, ''))
++  db.exec('DROP INDEX idx_video_tag_tag_id; CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id)')
++  db.pragma('user_version = 16')
++  db.exec(`INSERT INTO videos(id,code) VALUES (1,'migration-1'),(2,'migration-2');
++    INSERT INTO tags(id,name) VALUES (1,'manual'),(2,'scraped');
++    INSERT INTO video_tag(video_id,tag_id,origin,source,created_at)
++      VALUES (1,1,'manual',NULL,'old'),(1,2,'scraped','source','old'),(2,1,'scraped','source','old');`)
++  return db
++}
++function snapshot(db: Database.Database) {
++  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB 'library_scan_audit_*' ORDER BY name").all() as { name: string }[]
++  return tables.map(({ name }) => ({ name, rows: db.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`).all() }))
++}
++function columns(db: Database.Database) {
++  return (db.pragma('index_info(idx_video_tag_tag_id)') as { name: string }[]).map(row => row.name)
++}
++
++it('upgrades V16 without changing any business rows or other schema and matches the current fresh tag index', () => {
++  const db = v16()
++  const fresh = new Database(':memory:')
++  try {
++    const before = snapshot(db)
++    const schema = () => db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT GLOB 'library_scan_audit_*' AND name <> 'idx_video_tag_tag_id' ORDER BY name").all()
++    const oldSchema = schema()
++    migrateDatabase(db)
++    assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
++    assert.deepEqual(columns(db), ['tag_id', 'origin'])
++    assert.deepEqual(snapshot(db), before)
++    assert.deepEqual(schema(), oldSchema)
++    migrateDatabase(fresh)
++    assert.deepEqual(columns(db), columns(fresh))
++    assert.deepEqual(db.prepare("SELECT sql FROM sqlite_master WHERE name='idx_video_tag_tag_id'").get(), fresh.prepare("SELECT sql FROM sqlite_master WHERE name='idx_video_tag_tag_id'").get())
++    migrateDatabase(db)
++    assert.deepEqual(snapshot(db), before)
++    db.exec("UPDATE video_tag SET origin='manual',source=NULL WHERE video_id=1 AND tag_id=2")
++    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM video_tag INDEXED BY idx_video_tag_tag_id WHERE tag_id=2 AND origin='manual'").get() as { n: number }).n, 1)
++    db.exec('DELETE FROM tags WHERE id=1')
++    db.exec('DELETE FROM videos WHERE id=1')
++    assert.deepEqual(db.prepare('SELECT * FROM video_tag').all(), [])
++    assert.deepEqual(db.pragma('foreign_key_check'), [])
++    assert.deepEqual(db.pragma('integrity_check'), [{ integrity_check: 'ok' }])
++  } finally { db.close(); fresh.close() }
++})
++
++for (const phase of ['drop', 'create'] as const) {
++  it(`rolls back index DDL and version after ${phase} failure, then retries`, (t) => {
++    const db = v16()
++    try {
++      const before = snapshot(db)
++      const exec = db.exec
++      const fault = t.mock.method(db, 'exec', (sql: string) => {
++        const result = exec.call(db, sql)
++        if (sql.includes(phase === 'drop' ? 'DROP INDEX idx_video_tag_tag_id' : 'CREATE INDEX idx_video_tag_tag_id')) throw new Error('index migration interrupted')
++        return result
++      })
++      assert.throws(() => migrateDatabase(db), /index migration interrupted/)
++      assert.equal(db.pragma('user_version', { simple: true }), 16)
++      assert.deepEqual(columns(db), ['tag_id'])
++      assert.deepEqual(snapshot(db), before)
++      assert.equal(db.pragma('foreign_keys', { simple: true }), 1)
++      fault.mock.restore()
++      migrateDatabase(db)
++      assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
++      assert.deepEqual(columns(db), ['tag_id', 'origin'])
++      assert.deepEqual(snapshot(db), before)
++    } finally { t.mock.restoreAll(); db.close() }
++  })
++}
+diff --git a/src/main/db/migrationsV18.test.ts b/src/main/db/migrationsV18.test.ts
+new file mode 100644
+index 0000000..3f556f8
+--- /dev/null
++++ b/src/main/db/migrationsV18.test.ts
+@@ -0,0 +1,158 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import Database from 'better-sqlite3'
++import { SCHEMA_SQL, SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL } from './schema'
++import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
++
++interface SchemaRow { type: string; name: string; tbl_name: string; sql: string | null }
++
++function schema(db: Database.Database): SchemaRow[] {
++  return db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' OR type='index' ORDER BY name").all() as SchemaRow[]
++}
++
++function quote(name: string): string { return `"${name.replaceAll('"', '""')}"` }
++
++function snapshot(db: Database.Database, tables: string[]) {
++  return tables.map(name => {
++    const columns = (db.pragma(`table_info(${quote(name)})`) as { name: string }[]).map(column => quote(column.name))
++    return { name, rows: db.prepare(`SELECT * FROM ${quote(name)} ORDER BY ${columns.join(',')}`).all() }
++  })
++}
++
++function checkIntegrity(db: Database.Database) {
++  assert.deepEqual(db.pragma('foreign_key_check'), [])
++  assert.deepEqual(db.pragma('integrity_check'), [{ integrity_check: 'ok' }])
++}
++
++function v17(): Database.Database {
++  assert.ok(SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL.trim().length > 0)
++  const parts = SCHEMA_SQL.split(SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL)
++  assert.equal(parts.length, 2, 'Remove exactly one complete V18 DDL block, not just change user_version')
++  const db = new Database(':memory:')
++  try {
++    db.pragma('foreign_keys = ON')
++    db.exec(parts.join(''))
++    db.pragma('user_version = 17')
++    db.exec(`INSERT INTO media_libraries(id,name,status) VALUES (2,'legacy archived','archived');
++      INSERT INTO media_library_roots(id,library_id,path,normalized_path) VALUES (10,1,'/legacy/one','/legacy/one'),(20,2,'/legacy/two','/legacy/two');
++      INSERT INTO videos(id,code,title) VALUES (1,'V18-ONE','legacy title'),(2,'V18-TWO','second');
++      INSERT INTO library_video_memberships(library_id,video_id,is_hidden,discovery_key,added_at,updated_at)
++        VALUES (1,1,0,1,'old','old'),(2,1,1,2,'old','old'),(1,2,0,3,'old','old');
++      INSERT INTO tags(id,name) VALUES (1,'legacy manual'),(2,'legacy scraped');
++      INSERT INTO video_tag(video_id,tag_id,origin,source,created_at)
++        VALUES (1,1,'manual',NULL,'old'),(1,2,'scraped','legacy-source','old');
++      INSERT INTO agent_runs(id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
++        VALUES ('legacy-agent','plugin-developer','closed','old','invalid config','pi','invalid state','old','old');
++      INSERT INTO agent_resource_cleanup(run_id,requested_at) VALUES ('legacy-agent','old');`)
++
++    const insert = db.prepare(`INSERT INTO library_scan_runs
++      (id,library_id,config_revision,trigger,status,started_at,finished_at,summary_json,audit_json,error_summary)
++      VALUES (?,?,1,'manual','completed','before','after',?,?,'legacy diagnostic')`)
++    const legacyAudit = (version: number, libraryId: number, runId: string) => JSON.stringify({
++      schemaVersion: version, libraryId, runId, configRevision: 1, trigger: 'manual',
++      status: 'success', startedAt: 'before', finishedAt: 'after',
++      files: [{ rootId: libraryId === 1 ? 10 : 20, filePath: '/legacy/unknown.mp4', sourceKind: 'local', outcome: 'unrecognized' }],
++      removedResources: [], promotedResources: [], deletedVideos: [], pendingGroups: [], note: '保留\u0000转义'
++    }, null, 2) + '\n'
++    for (const [index, body] of [
++      legacyAudit(1, 1, 'legacy-0'), legacyAudit(2, 2, 'legacy-1'),
++      '{damaged legacy JSON', '', null
++    ].entries()) {
++      insert.run(`legacy-${index}`, index === 1 ? 2 : 1, '{ "untouched": true }\n', body)
++    }
++    db.exec(`UPDATE media_library_scan_state SET active_run_id='legacy-0',last_status='completed',
++        last_summary_json='{ "runId": "legacy-0" }',revision=7 WHERE library_id=1;
++      INSERT INTO library_unrecognized_files(library_id,root_id,file_path,normalized_path,reason,scan_run_id,last_seen_at)
++        VALUES (1,10,'/legacy/one/unknown.mp4','/legacy/one/unknown.mp4','legacy reason','legacy-0','old');`)
++    checkIntegrity(db)
++    return db
++  } catch (error) { db.close(); throw error }
++}
++
++function assertUpgrade(db: Database.Database, before: ReturnType<typeof snapshot>) {
++  migrateDatabase(db)
++  assert.equal(CURRENT_SCHEMA_VERSION, 18)
++  assert.equal(db.pragma('user_version', { simple: true }), 18)
++  assert.deepEqual(snapshot(db, before.map(table => table.name)), before)
++  checkIntegrity(db)
++  const fresh = new Database(':memory:')
++  try {
++    fresh.pragma('foreign_keys = ON')
++    fresh.exec(SCHEMA_SQL)
++    // Compare all tables, explicit indexes and triggers, including unchanged legacy definitions.
++    assert.deepEqual(schema(db), schema(fresh))
++  } finally { fresh.close() }
++}
++
++it('adds V18 to a complete V17 schema without rewriting any legacy data or relationships', () => {
++  const db = v17()
++  try {
++    const oldSchema = schema(db)
++    const before = snapshot(db, oldSchema.filter(row => row.type === 'table').map(row => row.name))
++    const auditBytes = () => db.prepare('SELECT id,typeof(audit_json) AS kind,hex(CAST(audit_json AS BLOB)) AS bytes FROM library_scan_runs ORDER BY id').all()
++    const originalBytes = auditBytes()
++    assertUpgrade(db, before)
++    assert.equal(db.pragma('foreign_keys', { simple: true }), 1)
++    const added = schema(db).filter(row => !oldSchema.some(old => old.name === row.name))
++    assert.equal(added.filter(row => row.type === 'table').length, 2)
++    for (const table of added.filter(row => row.type === 'table')) {
++      assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM ${quote(table.name)}`).get() as { n: number }).n, 0)
++    }
++    assert.deepEqual(schema(db).filter(row => oldSchema.some(old => old.name === row.name)), oldSchema)
++    assert.deepEqual(auditBytes(), originalBytes)
++    // A second startup must remain data- and schema-idempotent.
++    assertUpgrade(db, before)
++    assert.deepEqual(auditBytes(), originalBytes)
++  } finally { db.close() }
++})
++
++for (const foreignKeys of [0, 1]) {
++  it(`rolls back executed V18 DDL and version, preserves foreign_keys=${foreignKeys}, then retries`, (t) => {
++    const db = v17()
++    try {
++      db.pragma(`foreign_keys = ${foreignKeys}`)
++      const oldSchema = schema(db)
++      const before = snapshot(db, oldSchema.filter(row => row.type === 'table').map(row => row.name))
++      const exec = db.exec
++      let injected = false
++      const fault = t.mock.method(db, 'exec', (sql: string) => {
++        const result = exec.call(db, sql)
++        if (sql.includes(SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL.trim())) {
++          injected = true
++          assert.equal(db.inTransaction, true)
++          assert.equal(schema(db).filter(row => row.type === 'table').length, before.length + 2,
++            'Both new tables must actually exist before injecting the failure')
++          throw new Error('V18 interrupted after new DDL')
++        }
++        return result
++      })
++      assert.throws(() => migrateDatabase(db), /V18 interrupted after new DDL/)
++      assert.equal(injected, true)
++      assert.equal(db.inTransaction, false)
++      assert.equal(db.pragma('user_version', { simple: true }), 17)
++      assert.equal(db.pragma('foreign_keys', { simple: true }), foreignKeys)
++      assert.deepEqual(schema(db), oldSchema)
++      assert.deepEqual(snapshot(db, before.map(table => table.name)), before)
++      checkIntegrity(db)
++      fault.mock.restore()
++      assertUpgrade(db, before)
++      assert.equal(db.pragma('foreign_keys', { simple: true }), foreignKeys)
++    } finally { t.mock.restoreAll(); db.close() }
++  })
++}
++
++it('upgrades a structurally restored V15 through cleanup, tag index and V18 without losing legacy rows', () => {
++  const db = v17()
++  try {
++    // Undo both actual post-V15 additions, rather than merely relabel a V17 database.
++    db.exec('DROP TABLE agent_resource_cleanup; DROP INDEX idx_video_tag_tag_id; CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id)')
++    db.pragma('user_version = 15')
++    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name='agent_resource_cleanup'").get(), undefined)
++    assert.deepEqual((db.pragma('index_info(idx_video_tag_tag_id)') as { name: string }[]).map(row => row.name), ['tag_id'])
++    const before = snapshot(db, schema(db).filter(row => row.type === 'table').map(row => row.name))
++    assertUpgrade(db, before)
++    assert.equal(db.pragma('foreign_keys', { simple: true }), 1)
++    assert.deepEqual((db.pragma('index_info(idx_video_tag_tag_id)') as { name: string }[]).map(row => row.name), ['tag_id', 'origin'])
++    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM agent_resource_cleanup').get() as { n: number }).n, 0)
++  } finally { db.close() }
++})
+diff --git a/src/main/db/scanAuditStorageSchema.test.ts b/src/main/db/scanAuditStorageSchema.test.ts
+new file mode 100644
+index 0000000..7d2a166
+--- /dev/null
++++ b/src/main/db/scanAuditStorageSchema.test.ts
+@@ -0,0 +1,140 @@
++import { beforeEach, afterEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import Database from 'better-sqlite3'
++import { migrateDatabase } from './migrations'
++import { recoverInterruptedLibraryScanRuns } from './libraryScanRepo'
++let db: Database.Database
++beforeEach(() => { db = new Database(':memory:'); db.pragma('foreign_keys = ON'); migrateDatabase(db) })
++afterEach(() => db.close())
++function run(id = 'run', json: string | null = null, status = 'running') {
++  db.prepare(`INSERT INTO library_scan_runs(id,library_id,config_revision,trigger,status,started_at,audit_json)
++    VALUES(?,1,1,'manual',?,'start',?)`).run(id, status, json)
++}
++function start(id = 'run') {
++  run(id)
++  db.prepare('INSERT INTO library_scan_audit_manifests(run_id,meta_json) VALUES(?,?)').run(id, '{}')
++}
++function insert(id = 'run', ordinal = 0, key: string | null = '/file', section = 'files', body = '{"outcome":"added"}') {
++  db.prepare('INSERT INTO library_scan_audit_entries(run_id,section,ordinal,entry_key,entry_json,entry_bytes) VALUES(?,?,?,?,?,?)')
++    .run(id, section, ordinal, key, body, Buffer.byteLength(body))
++}
++function seal(id = 'run') {
++  db.prepare("UPDATE library_scan_audit_manifests SET state='sealed',sealed_at='seal' WHERE run_id=?").run(id)
++}
++function publish(id = 'run') {
++  db.transaction(() => {
++    db.prepare("UPDATE library_scan_runs SET status='completed',finished_at='finish' WHERE id=?").run(id)
++    db.prepare("UPDATE library_scan_audit_manifests SET state='published',published_at='publish' WHERE run_id=?").run(id)
++  })()
++}
++function snapshot(id = 'run') {
++  return {
++    manifest: db.prepare('SELECT * FROM library_scan_audit_manifests WHERE run_id=?').get(id),
++    entries: db.prepare('SELECT * FROM library_scan_audit_entries WHERE run_id=? ORDER BY section,ordinal').all(id),
++    run: db.prepare('SELECT * FROM library_scan_runs WHERE id=?').get(id)
++  }
++}
++it('accepts collecting revisions and ordered section entries with exact byte accounting', () => {
++  start(); insert(); insert('run', 1, '/next')
++  insert('run', 0, null, 'pendingGroups', '{"name":"中文"}')
++  db.prepare("UPDATE library_scan_audit_entries SET entry_json='{}',entry_bytes=2 WHERE run_id='run' AND section='files' AND ordinal=0").run()
++  db.prepare("DELETE FROM library_scan_audit_entries WHERE run_id='run' AND section='files' AND ordinal=1").run()
++  assert.equal(snapshot().entries.length, 2)
++  assert.deepEqual(db.pragma('foreign_key_check'), [])
++})
++it('rejects invalid sections, JSON, identities, byte metadata and duplicate file keys', () => {
++  start(); insert()
++  assert.throws(() => insert('missing'))
++  assert.throws(() => insert('run', -1, '/negative'))
++  assert.throws(() => insert('run', 2, '/file'))
++  assert.throws(() => insert('run', 3, null))
++  assert.throws(() => insert('run', 4, '/key', 'pendingGroups', '{}'))
++  assert.throws(() => insert('run', 5, null, 'bad-section', '{}'))
++  assert.throws(() => insert('run', 6, '/array', 'files', '[]'))
++  assert.throws(() => insert('run', 7, '/bad', 'files', '{bad'))
++  assert.throws(() => db.prepare("UPDATE library_scan_audit_entries SET entry_bytes=1 WHERE run_id='run'").run())
++  assert.equal(snapshot().entries.length, 1)
++})
++it('does not mix legacy JSON audits with the new manifest or start from terminal runs', () => {
++  run('legacy', '{bad')
++  assert.throws(() => db.prepare("INSERT INTO library_scan_audit_manifests(run_id,meta_json) VALUES('legacy','{}')").run())
++  run('finished', null, 'completed')
++  assert.throws(() => db.prepare("INSERT INTO library_scan_audit_manifests(run_id,meta_json) VALUES('finished','{}')").run())
++  start()
++  assert.throws(() => db.prepare("UPDATE library_scan_runs SET audit_json='{}' WHERE id='run'").run())
++  assert.throws(() => db.prepare("INSERT INTO library_scan_audit_manifests(run_id,meta_json,state,sealed_at) VALUES('legacy','{}','sealed','seal')").run())
++})
++it('enforces sealed immutability and permits publication only with a terminal completed run', () => {
++  start(); insert(); seal()
++  const before = snapshot()
++  for (const sql of [
++    "UPDATE library_scan_audit_manifests SET meta_json='{\"changed\":true}' WHERE run_id='run'",
++    "UPDATE library_scan_audit_manifests SET state='collecting',sealed_at=NULL WHERE run_id='run'",
++    "UPDATE library_scan_audit_manifests SET state='published',published_at='publish' WHERE run_id='run'",
++    "UPDATE library_scan_audit_entries SET entry_json='{}',entry_bytes=2 WHERE run_id='run'",
++    "DELETE FROM library_scan_audit_entries WHERE run_id='run'",
++    "DELETE FROM library_scan_audit_manifests WHERE run_id='run'"
++  ]) assert.throws(() => db.exec(sql), sql)
++  assert.throws(() => insert('run', 1, '/later'))
++  assert.deepEqual(snapshot(), before)
++  publish()
++  const published = snapshot()
++  assert.equal((published.manifest as { state: string }).state, 'published')
++  for (const sql of [
++    "UPDATE library_scan_audit_manifests SET state='abandoned',published_at=NULL WHERE run_id='run'",
++    "UPDATE library_scan_runs SET finished_at='changed' WHERE id='run'",
++    "UPDATE library_scan_runs SET status='running' WHERE id='run'",
++    "DELETE FROM library_scan_audit_manifests WHERE run_id='run'",
++    "DELETE FROM library_scan_audit_entries WHERE run_id='run'"
++  ]) assert.throws(() => db.exec(sql), sql)
++  assert.deepEqual(snapshot(), published)
++})
++it('rolls back run completion and audit publication together on a later failure', () => {
++  start(); insert(); seal(); const before = snapshot()
++  assert.throws(() => db.transaction(() => { publish(); throw Error('publication fault') })(), /publication fault/)
++  assert.deepEqual(snapshot(), before)
++  publish()
++})
++it('retains interrupted audit entries for abandoned cleanup and does not permit late writes', () => {
++  for (const id of ['collecting', 'sealed']) { start(id); insert(id); if (id === 'sealed') seal(id) }
++  assert.equal(recoverInterruptedLibraryScanRuns(db).recoveredRunCount, 2)
++  for (const id of ['collecting', 'sealed']) {
++    assert.throws(() => insert(id, 1, '/late'))
++    db.prepare("UPDATE library_scan_audit_manifests SET state='abandoned' WHERE run_id=?").run(id)
++    assert.equal(snapshot(id).entries.length, 1)
++    assert.throws(() => db.prepare("UPDATE library_scan_audit_manifests SET state='collecting',sealed_at=NULL WHERE run_id=?").run(id))
++    db.prepare('DELETE FROM library_scan_audit_manifests WHERE run_id=?').run(id)
++    assert.equal(snapshot(id).entries.length, 0)
++  }
++})
++it('allows deleting whole runs or a library to cascade without permitting partial published deletion', () => {
++  start('one'); insert('one'); seal('one'); publish('one')
++  start('two'); insert('two'); seal('two'); publish('two')
++  db.prepare("DELETE FROM library_scan_runs WHERE id='one'").run()
++  assert.equal(snapshot('one').manifest, undefined)
++  assert.equal(snapshot('one').entries.length, 0)
++  db.prepare('DELETE FROM media_libraries WHERE id=1').run()
++  assert.equal(snapshot('two').manifest, undefined)
++  assert.equal(snapshot('two').entries.length, 0)
++  assert.deepEqual(db.pragma('foreign_key_check'), [])
++  assert.equal(db.pragma('integrity_check', { simple: true }), 'ok')
++})
++
++it('keeps entry identity stable while collecting and preserves every terminal publication outcome', () => {
++  start(); start('other'); insert()
++  const before = snapshot()
++  for (const assignment of ["run_id='other'", "section='removedResources',entry_key=NULL", 'ordinal=10', "entry_key='/changed'"]) {
++    assert.throws(() => db.exec(`UPDATE library_scan_audit_entries SET ${assignment} WHERE run_id='run'`))
++    assert.deepEqual(snapshot(), before)
++  }
++  for (const status of ['failed', 'cancelled', 'unavailable']) {
++    start(status); insert(status); seal(status)
++    db.prepare('UPDATE library_scan_runs SET status=? WHERE id=?').run(status, status)
++    assert.throws(() => db.prepare("UPDATE library_scan_audit_manifests SET state='published',published_at='end' WHERE run_id=?").run(status))
++    db.transaction(() => {
++      db.prepare("UPDATE library_scan_runs SET finished_at='end' WHERE id=?").run(status)
++      db.prepare("UPDATE library_scan_audit_manifests SET state='published',published_at='end' WHERE run_id=?").run(status)
++    })()
++    assert.equal((snapshot(status).run as { status: string }).status, status)
++  }
++})

@@ -1,0 +1,1036 @@
+diff --git a/src/main/db/actressRepo.ts b/src/main/db/actressRepo.ts
+index fdb3e87..310dcf7 100644
+--- a/src/main/db/actressRepo.ts
++++ b/src/main/db/actressRepo.ts
+@@ -1,3 +1,6 @@
++import type { ActressAvatarAutoCropTarget } from '@shared/actressAvatarCropTypes'
++import type { ActressMergeCandidatePage, ActressMergeCandidateQuery } from '@shared/actressTypes'
++import type { ActressPickerIdentity, ActressPickerItem, ActressPickerPage, ActressPickerQuery } from '@shared/actressTypes'
+ import type { Database as SqliteDatabase } from 'better-sqlite3'
+ import { getDb } from './database'
+ import { normalizeActressName } from './actressNameNormalization'
+@@ -7,7 +10,7 @@ import type { ScrapedStatus, SortDir } from '@shared/commonTypes'
+ import type { ActressDeleteImpact, ActressDeleteMode } from '@shared/actressIpcContract'
+ import { ALL_ACTRESS_SCRAPE_FIELDS, ACTRESS_BATCH_DEFAULT_MISSING_FIELDS } from '@shared/actressScrapeTypes'
+ import { ACTRESS_LIST_STATUS_SCRAPED_STATUS, actressStatusFilterOf } from '@shared/actressTypes'
+-import { canMergeActressGenders } from '@shared/actressProfileOptions'
++import { actressMergeGenderGroup, canMergeActressGenders } from '@shared/actressProfileOptions'
+ import { normalizeCupSize } from '@shared/cupSizeUtils'
+ import { actressSearchLikeParams, actressTextSearchSql } from './actressSearchSql'
+ import {
+@@ -356,22 +359,23 @@ function queryActressListRows(
+   const queryParams = limit == null ? params : [...params, limit, offset]
+   return db
+     .prepare(
+-      `SELECT a.*,
+-              COUNT(
+-                CASE WHEN EXISTS (
+-                  SELECT 1
+-                  FROM library_video_memberships membership
+-                  JOIN media_libraries library ON library.id = membership.library_id
+-                  WHERE membership.video_id = va.video_id
+-                    AND membership.is_hidden = 0
+-                    AND library.status = 'active'
+-                ) THEN va.video_id END
+-              ) AS video_count,
++      `WITH eligible AS MATERIALIZED (
++         SELECT a.* FROM actresses a ${where}
++       ), members AS MATERIALIZED (
++         SELECT DISTINCT membership.video_id
++         FROM library_video_memberships membership
++         JOIN media_libraries library ON library.id = membership.library_id
++         WHERE membership.is_hidden = 0 AND library.status = 'active'
++       ), counts AS (
++         SELECT va.actress_id, COUNT(*) AS video_count
++         FROM video_actress va
++         JOIN eligible ON eligible.id = va.actress_id
++         JOIN members ON members.video_id = va.video_id
++         GROUP BY va.actress_id
++       )
++       SELECT a.*, COALESCE(counts.video_count, 0) AS video_count,
+               (SELECT COUNT(*) FROM actress_gallery_assets ag WHERE ag.actress_id = a.id) AS gallery_count
+-       FROM actresses a
+-       LEFT JOIN video_actress va ON va.actress_id = a.id
+-       ${where}
+-       GROUP BY a.id
++       FROM eligible a LEFT JOIN counts ON counts.actress_id = a.id
+        ORDER BY ${orderBy}
+        ${pagination}`
+     )
+@@ -384,6 +388,21 @@ export interface ActressAvatarCandidate {
+   avatar_path: string
+ }
+ 
++const AVATAR_CROP_TARGET_PREDICATE = `length(CAST(avatar_source_path AS BLOB)) > 0
++  OR length(CAST(avatar_path AS BLOB)) > 0`
++
++export function listActressAvatarCropTargets(): ActressAvatarAutoCropTarget[] {
++  return getDb().prepare(`SELECT id AS actressId, main_name AS mainName
++    FROM actresses WHERE ${AVATAR_CROP_TARGET_PREDICATE}
++    ORDER BY id ASC`).all() as ActressAvatarAutoCropTarget[]
++}
++
++/** Matches the crop queue's truthy path test, including whitespace and embedded NUL. */
++export function countActressAvatarCropTargets(): number {
++  return (getDb().prepare(`SELECT COUNT(*) AS count FROM actresses
++    WHERE ${AVATAR_CROP_TARGET_PREDICATE}`).get() as { count: number }).count
++}
++
+ /** Pure database candidates for application-layer avatar inspection. */
+ export function listActressAvatarCandidates(): ActressAvatarCandidate[] {
+   return getDb()
+@@ -2015,3 +2034,89 @@ function clearActressPosterForPaths(actressId: number, paths: Array<string | nul
+ function nowIso(): string {
+   return new Date().toISOString()
+ }
++
++
++const ACTRESS_PICKER_PROJECTION = `a.id,
++      substr(CAST(a.main_name AS BLOB), 1, 516) AS name_prefix,
++      CASE WHEN length(CAST(a.avatar_path AS BLOB)) <= 4096 THEN a.avatar_path ELSE NULL END AS avatar_path`
++interface ActressPickerRow { id: number; name_prefix: Buffer; avatar_path: string | null }
++function actressPickerLabel(item: ActressPickerRow): ActressPickerItem {
++  // 129 UTF-8 code points need at most516 bytes, including embedded NULs.
++  const name = Array.from(item.name_prefix.toString('utf8'))
++  return {
++    id: item.id,
++    main_name: name.length > 128 ? name.slice(0, 128).join('') + '…' : name.join(''),
++    avatar_path: item.avatar_path != null && Buffer.byteLength(JSON.stringify(item.avatar_path)) <= 4096
++      ? item.avatar_path : null
++  }
++}
++
++/** Bounded labels for identity selection; retain owned-name search semantics. */
++export function listActressPickerPage(query: ActressPickerQuery = {}): ActressPickerPage {
++  const { search, limit = 40, offset = 0 } = query
++  if ((search !== undefined && (typeof search !== 'string' || search.length > 256)) ||
++      !Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
++      !Number.isSafeInteger(offset) || offset < 0) {
++    throw new Error('Invalid actress picker query')
++  }
++  const { sql: where, params } = buildActressListWhere(search, 'all', 'all')
++  const rows = getDb().prepare(`
++    SELECT ${ACTRESS_PICKER_PROJECTION}
++    FROM actresses a ${where}
++    ORDER BY a.main_name ASC, a.id ASC
++    LIMIT ? OFFSET ?
++  `).all(...params, limit + 1, offset) as Array<{ id: number; name_prefix: Buffer; avatar_path: string | null }>
++  const items = rows.slice(0, limit).map(actressPickerLabel)
++  return { items, hasMore: rows.length > limit, offset }
++}
++
++/** Current identity for a pending ownership choice, without loading works or profile. */
++export function getActressPickerIdentity(id: number): ActressPickerIdentity | null {
++  if (!Number.isSafeInteger(id) || id < 1) throw new Error('Invalid actress picker identity')
++  const row = getDb().prepare(`SELECT ${ACTRESS_PICKER_PROJECTION}, a.revision FROM actresses a WHERE a.id = ?`)
++    .get(id) as (ActressPickerRow & { revision: number }) | undefined
++  return row ? { ...actressPickerLabel(row), revision: row.revision } : null
++}
++
++
++/** Merge-compatible choices with visible-video counts restricted to the returned page. */
++export function listActressMergeCandidates(query: ActressMergeCandidateQuery): ActressMergeCandidatePage {
++  const { keepId, search, limit = 40, offset = 0 } = query
++  if (!Number.isSafeInteger(keepId) || keepId < 1 ||
++      (search !== undefined && (typeof search !== 'string' || search.length > 256)) ||
++      !Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
++      !Number.isSafeInteger(offset) || offset < 0) {
++    throw new Error('Invalid actress merge candidate query')
++  }
++  const db = getDb()
++  return db.transaction(() => {
++    const keep = db.prepare('SELECT gender FROM actresses WHERE id = ?').get(keepId) as { gender: ActressGender | null } | undefined
++    if (!keep) throw new Error('保留演员不存在')
++    const { sql: where, params } = buildActressListWhere(search, 'all', 'all')
++    const rows = db.prepare(`SELECT ${ACTRESS_PICKER_PROJECTION}, a.gender
++      FROM actresses a
++      WHERE a.id != ?
++        AND CASE WHEN a.gender = 'male' THEN 'male' ELSE 'female' END = ?
++        ${where ? 'AND ' + where.slice(6) : ''}
++      ORDER BY a.main_name ASC, a.id ASC
++      LIMIT ? OFFSET ?`)
++      .all(keepId, actressMergeGenderGroup(keep.gender), ...params, limit + 1, offset) as Array<ActressPickerRow & { gender: ActressGender | null }>
++    const page = rows.slice(0, limit)
++    const counts = page.length === 0 ? [] : db.prepare(`
++      SELECT va.actress_id, COUNT(*) AS video_count
++      FROM video_actress va
++      WHERE va.actress_id IN (SELECT value FROM json_each(?))
++        AND EXISTS (
++          SELECT 1 FROM library_video_memberships membership
++          JOIN media_libraries library ON library.id = membership.library_id
++          WHERE membership.video_id = va.video_id AND membership.is_hidden = 0 AND library.status = 'active'
++        )
++      GROUP BY va.actress_id`).all(JSON.stringify(page.map(row => row.id))) as Array<{ actress_id: number; video_count: number }>
++    const byId = new Map(counts.map(row => [row.actress_id, row.video_count]))
++    return {
++      items: page.map(row => ({ ...actressPickerLabel(row), gender: row.gender, video_count: byId.get(row.id) ?? 0 })),
++      hasMore: rows.length > limit,
++      offset
++    }
++  })()
++}
+diff --git a/src/main/ipc/actressHandlers.ts b/src/main/ipc/actressHandlers.ts
+index 76ff1cc..6ec9abe 100644
+--- a/src/main/ipc/actressHandlers.ts
++++ b/src/main/ipc/actressHandlers.ts
+@@ -5,6 +5,11 @@ import { actressQueryService } from '../services/actressQueryService'
+ import { registerActressHandler } from './actressContractAdapter'
+ 
+ export function registerActressHandlers(): void {
++  registerActressHandler(IPC.ACTRESS_AVATAR_CROP_TARGETS, () => actressQueryService.listAvatarCropTargets())
++  registerActressHandler(IPC.ACTRESS_AVATAR_CROP_COUNT, () => actressQueryService.countAvatarCropTargets())
++  registerActressHandler(IPC.ACTRESS_MERGE_CANDIDATES, (query) => actressQueryService.listMergeCandidates(query))
++  registerActressHandler(IPC.ACTRESS_PICKER_GET, (id) => actressQueryService.getPicker(id))
++  registerActressHandler(IPC.ACTRESS_PICKER_PAGE, (query) => actressQueryService.listPicker(query))
+   registerActressHandler(IPC.ACTRESS_LIST, (...args) =>
+     actressQueryService.listLegacy(...args)
+   )
+@@ -44,6 +49,12 @@ export function registerActressHandlers(): void {
+   registerActressHandler(IPC.ACTRESS_CONFLICT_LIST, () =>
+     actressIdentityConflictWorkflow.listConflictGroups()
+   )
++  registerActressHandler(IPC.ACTRESS_CONFLICT_QUEUE_PAGE, (query) =>
++    actressIdentityConflictWorkflow.pageConflictQueue(query)
++  )
++  registerActressHandler(IPC.ACTRESS_CONFLICT_GET, (normalizedName) =>
++    actressIdentityConflictWorkflow.getConflictGroup(normalizedName)
++  )
+   registerActressHandler(IPC.ACTRESS_CONFLICT_COUNT, () =>
+     actressIdentityConflictWorkflow.countPendingReviewItems()
+   )
+diff --git a/src/main/ipc/ipcCommandSchemas.ts b/src/main/ipc/ipcCommandSchemas.ts
+index db0e4ed..388ac56 100644
+--- a/src/main/ipc/ipcCommandSchemas.ts
++++ b/src/main/ipc/ipcCommandSchemas.ts
+@@ -22,6 +22,13 @@ const record = z.record(z.string(), z.unknown())
+ const object = z.object({}).passthrough()
+ const noArgs = z.tuple([])
+ const sortDirection = z.enum(['asc', 'desc'])
++const playlistPageQuery = z.object({
++    sortBy: z.enum(['added_at', 'release_date']).optional(),
++    sortDir: sortDirection.optional(),
++    resourceKinds: z.array(z.enum(['local', 'direct', 'web', 'magnet', 'ed2k', 'none'])).max(6).optional(),
++    limit: z.number().int().min(1).max(200).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict()
+ const organizationRole = z.enum(['maker', 'publisher'])
+ const pluginKind = z.enum(['video', 'actress'])
+ const scrapeFields = z.array(text)
+@@ -379,6 +386,7 @@ export const videoIpcSchemas = {
+   [IPC.VIDEO_SAMPLE_DELETE]: z.tuple([id, id]),
+   [IPC.VIDEO_POSTER_SET]: z.tuple([id, nullableText]),
+   [IPC.VIDEO_MANUAL_TAG_ADD]: z.tuple([id, nonEmptyText]),
++  [IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]: z.tuple([positiveSafeInteger, positiveSafeInteger]),
+   [IPC.VIDEO_MANUAL_TAG_REMOVE]: z.tuple([id, id]),
+   [IPC.VIDEO_RESOURCE_IMPORT]: z.tuple([videoLinkImport]),
+   [IPC.VIDEO_RESOURCE_GET]: z.tuple([id, id, id]),
+@@ -423,6 +431,20 @@ export const videoIpcSchemas = {
+ } satisfies IpcArgsSchemaMap<VideoIpcContract>
+ 
+ export const actressIpcSchemas = {
++  [IPC.ACTRESS_MERGE_CANDIDATES]: z.tuple([z.object({
++    keepId: positiveSafeInteger,
++    search: z.string().max(256).optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict()]),
++  [IPC.ACTRESS_AVATAR_CROP_TARGETS]: z.tuple([]),
++  [IPC.ACTRESS_AVATAR_CROP_COUNT]: z.tuple([]),
++  [IPC.ACTRESS_PICKER_GET]: z.tuple([positiveSafeInteger]),
++  [IPC.ACTRESS_PICKER_PAGE]: z.tuple([z.object({
++    search: z.string().max(256).optional(),
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().optional()]),
+   [IPC.ACTRESS_LIST]: z.tuple([
+     optionalText,
+     z.enum(['female', 'male', 'all']).optional(),
+@@ -450,6 +472,12 @@ export const actressIpcSchemas = {
+   ]),
+   [IPC.ACTRESS_MARK_SCRAPE_SUCCESS]: z.tuple([id]),
+   [IPC.ACTRESS_CONFLICT_LIST]: noArgs,
++  [IPC.ACTRESS_CONFLICT_GET]: z.tuple([nonEmptyText]),
++  [IPC.ACTRESS_CONFLICT_QUEUE_PAGE]: z.tuple([z.object({
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchorName: nonEmptyText.optional()
++  }).strict()]),
+   [IPC.ACTRESS_CONFLICT_COUNT]: noArgs,
+   [IPC.ACTRESS_CONFLICT_SUMMARY]: noArgs,
+   [IPC.ACTRESS_CONFLICT_INSPECT_NAME]: z.tuple([
+@@ -507,6 +535,14 @@ export const scrapeIpcSchemas = {
+     id.optional(),
+     id.optional()
+   ]),
++  [IPC.PENDING_VIDEO_SCRAPE_COUNT]: noArgs,
++  [IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS]: z.tuple([z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)]),
++  [IPC.PENDING_VIDEO_SCRAPE_PAGE]: z.tuple([z.object({
++    limit: z.number().int().min(1).max(100).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchorId: id.max(Number.MAX_SAFE_INTEGER).optional(), videoId: id.max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict().refine(value => value.anchorId === undefined || value.videoId === undefined)]),
++  [IPC.PENDING_VIDEO_SCRAPE_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.PENDING_VIDEO_SCRAPE_LIST]: noArgs,
+   [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: z.tuple([
+     z.object({
+@@ -634,6 +670,19 @@ export const appIpcSchemas = {
+     nonEmptyText,
+     videoResourceImportTarget
+   ]),
++  [IPC.PENDING_AUDIT_PRESENCE]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),z.object({
++    groupIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
++    identityIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100),
++    scrapeIds:z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)
++  }).strict().refine(value => value.groupIds.length + value.identityIds.length + value.scrapeIds.length <= 100)]),
++  [IPC.PENDING_SCAN_QUEUE_PAGE]: z.tuple([z.object({
++    libraryId:id.max(Number.MAX_SAFE_INTEGER).optional(), limit:z.number().int().min(1).max(100).optional(),
++    offset:z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    anchor:z.object({kind:z.enum(['group','identity']),id:id.max(Number.MAX_SAFE_INTEGER)}).strict().optional()
++  }).strict()]),
++  [IPC.PENDING_SCAN_QUEUE_COUNT]: z.tuple([id.max(Number.MAX_SAFE_INTEGER).optional()]),
++  [IPC.PENDING_SCAN_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),id.max(Number.MAX_SAFE_INTEGER)]),
++  [IPC.PENDING_RESOURCE_IDENTITY_GET]: z.tuple([id.max(Number.MAX_SAFE_INTEGER),id.max(Number.MAX_SAFE_INTEGER)]),
+   [IPC.PENDING_SCAN_LIST]: z.tuple([id]),
+   [IPC.PENDING_SCAN_RESOLVE]: z.tuple([id, id, pendingScanResolution]),
+   [IPC.PENDING_RESOURCE_IDENTITY_LIST]: z.tuple([id]),
+@@ -648,6 +697,9 @@ export const appIpcSchemas = {
+     z.enum(['added_at', 'release_date']).optional(),
+     sortDirection.optional()
+   ]),
++  [IPC.PLAYLIST_VIDEO_PAGE]: z.tuple([id, playlistPageQuery]),
++  [IPC.PLAYLIST_METADATA]: z.tuple([id, z.enum(['added_at', 'release_date']).optional(), sortDirection.optional()]),
++  [IPC.PLAYLIST_GET_PAGE]: z.tuple([id, playlistPageQuery]),
+   [IPC.PLAYLIST_CREATE]: z.tuple([profileInput]),
+   [IPC.PLAYLIST_UPDATE]: z.tuple([id, profileInput]),
+   [IPC.PLAYLIST_DELETE]: z.tuple([id]),
+@@ -656,6 +708,17 @@ export const appIpcSchemas = {
+   [IPC.PLAYLIST_REMOVE_VIDEO]: z.tuple([id, id]),
+   [IPC.TAG_LIST]: noArgs,
+   [IPC.TAG_LIST_MANUAL]: noArgs,
++  [IPC.TAG_LABELS]: z.tuple([z.array(positiveSafeInteger).max(100)]),
++  [IPC.TAG_FILTER_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
++  [IPC.TAG_MANUAL_OPTIONS]: z.tuple([z.object({
++    search: z.string().max(500).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
++    limit: z.number().int().min(1).max(100).optional()
++  }).strict()]),
+   [IPC.ORGANIZATION_LIST]: z.tuple([listQuery]),
+   [IPC.ORGANIZATION_GET]: z.tuple([id, organizationRole]),
+   [IPC.ORGANIZATION_OPTIONS]: z.tuple([optionalText]),
+diff --git a/src/main/ipc/typedIpcAdapter.test.ts b/src/main/ipc/typedIpcAdapter.test.ts
+index f98a4d0..98e3388 100644
+--- a/src/main/ipc/typedIpcAdapter.test.ts
++++ b/src/main/ipc/typedIpcAdapter.test.ts
+@@ -4,9 +4,33 @@ import { IPC } from '@shared/ipc-channels'
+ import type { VideoIpcContract } from '@shared/videoIpcContract'
+ import { createTypedEventAdapter, createTypedIpcAdapter } from './typedIpcAdapter'
+ import { executeIpcHandler } from './shared'
+-import { appIpcSchemas, videoIpcSchemas } from './ipcCommandSchemas'
++import { actressIpcSchemas, appIpcSchemas, videoIpcSchemas } from './ipcCommandSchemas'
+ import type { IpcMainInvokeEvent } from 'electron'
+ 
++it('validates manual tag candidate bounds and existing-tag identities', () => {
++  for (const channel of [IPC.TAG_MANUAL_OPTIONS, IPC.TAG_FILTER_OPTIONS] as const) {
++    const options = appIpcSchemas[channel]
++    assert.equal(options.safeParse([{}]).success, true)
++    assert.equal(options.safeParse([{ search: 'École', limit: 100, offset: 100 }]).success, true)
++    for (const query of [{ limit: 101 }, { limit: 0 }, { offset: -1 }, { offset: 0.5 }, { search: 'x'.repeat(501) }, { extra: true }]) {
++      assert.equal(options.safeParse([query]).success, false)
++    }
++  }
++  const attach = videoIpcSchemas[IPC.VIDEO_MANUAL_TAG_ADD_EXISTING]
++  assert.equal(attach.safeParse([1, 2]).success, true)
++  for (const args of [[0, 2], [1, -1], [1, 1.5], [1, Number.MAX_SAFE_INTEGER + 1], [1, 'name']]) {
++    assert.equal(attach.safeParse(args).success, false)
++  }
++})
++
++it('bounds selected tag label IPC requests before repository access', () => {
++  const schema = appIpcSchemas[IPC.TAG_LABELS]
++  assert.equal(schema.safeParse([[]]).success, true)
++  assert.equal(schema.safeParse([Array.from({ length: 100 }, (_, index) => index + 1)]).success, true)
++  for (const args of [[[0]], [[-1]], [[1.5]], [[Number.MAX_SAFE_INTEGER + 1]], [Array(101).fill(1)], [[1], 'extra']]) {
++    assert.equal(schema.safeParse(args).success, false)
++  }
++})
+ describe('typed IPC adapter', () => {
+   it('does not expose the legacy unreviewed video deletion command', () => {
+     assert.equal('VIDEO_DELETE' in IPC, false)
+@@ -295,3 +319,54 @@ describe('typed IPC adapter', () => {
+     assert.deepEqual(sent, [[IPC.SCRAPE_BATCH_PROGRESS, { current: 3 }]])
+   })
+ })
++
++it('bounds actress conflict summary pages and keeps detail identities exact',()=>{
++  const schema=actressIpcSchemas[IPC.ACTRESS_CONFLICT_QUEUE_PAGE]
++  assert.equal(schema.safeParse([{limit:100,offset:100,anchorName:'演员名'}]).success,true)
++  for(const query of [{limit:101},{limit:0},{offset:-1},{offset:Number.MAX_SAFE_INTEGER+1},{anchorName:''},{extra:true}])assert.equal(schema.safeParse([query]).success,false)
++  assert.equal(actressIpcSchemas[IPC.ACTRESS_CONFLICT_GET].safeParse(['Exact Name']).success,true)
++  assert.equal(actressIpcSchemas[IPC.ACTRESS_CONFLICT_GET].safeParse(['']).success,false)
++})
++
++
++it('validates bounded actress picker requests', () => {
++  const schema = actressIpcSchemas[IPC.ACTRESS_PICKER_PAGE]
++  assert.equal(schema.safeParse([undefined]).success, true)
++  assert.equal(schema.safeParse([{ limit: 100, offset: 40, search: 'name' }]).success, true)
++  for (const query of [{ limit: 101 }, { limit: 0 }, { offset: -1 }, { offset: 0.5 },
++    { offset: Infinity }, { search: 'x'.repeat(257) }, { extra: true }]) {
++    assert.equal(schema.safeParse([query]).success, false)
++  }
++})
++
++
++it('validates narrow actress identity IDs', () => {
++  const schema = actressIpcSchemas[IPC.ACTRESS_PICKER_GET]
++  assert.equal(schema.safeParse([1]).success, true)
++  for (const args of [[0], [-1], [1.5], [Infinity], [Number.MAX_SAFE_INTEGER+1], ['1'], [1, 2]]) {
++    assert.equal(schema.safeParse(args).success, false)
++  }
++})
++
++
++it('validates merge candidate paging and keep identity', () => {
++  const schema = actressIpcSchemas[IPC.ACTRESS_MERGE_CANDIDATES]
++  assert.equal(schema.safeParse([{keepId:1,limit:100,offset:40,search:'name'}]).success,true)
++  for (const query of [{},{keepId:0},{keepId:1.5},{keepId:1,limit:101},{keepId:1,offset:-1},{keepId:1,search:'x'.repeat(257)},{keepId:1,gender:'female'}]) {
++    assert.equal(schema.safeParse([query]).success,false)
++  }
++})
++
++
++it('accepts only zero arguments for avatar crop count', () => {
++  const schema = actressIpcSchemas[IPC.ACTRESS_AVATAR_CROP_COUNT]
++  assert.equal(schema.safeParse([]).success, true)
++  assert.equal(schema.safeParse([1]).success, false)
++})
++
++
++it('accepts only zero arguments for avatar crop target enumeration', () => {
++  const schema = actressIpcSchemas[IPC.ACTRESS_AVATAR_CROP_TARGETS]
++  assert.equal(schema.safeParse([]).success, true)
++  assert.equal(schema.safeParse([1]).success, false)
++})
+diff --git a/src/main/services/actressQueryService.ts b/src/main/services/actressQueryService.ts
+index 8abd83f..8120275 100644
+--- a/src/main/services/actressQueryService.ts
++++ b/src/main/services/actressQueryService.ts
+@@ -1,8 +1,16 @@
++import type { ActressAvatarAutoCropTarget } from '@shared/actressAvatarCropTypes'
++import type { ActressMergeCandidatePage, ActressMergeCandidateQuery } from '@shared/actressTypes'
++import type { ActressPickerIdentity, ActressPickerPage, ActressPickerQuery } from '@shared/actressTypes'
+ import {
++  listActressAvatarCropTargets,
++  countActressAvatarCropTargets,
+   getActressDetail,
++  getActressPickerIdentity,
+   listActresses,
+   listActressAvatarCandidates,
+-  listActressPage
++  listActressPage,
++  listActressPickerPage,
++  listActressMergeCandidates
+ } from '../db/actressRepo'
+ import { getActressAvatarSourceInfo } from './actressAssetService'
+ import { mediaAssetStore } from './mediaAssetStore'
+@@ -20,12 +28,17 @@ import { actressStatusFilterOf } from '@shared/actressTypes'
+ import type { SortDir } from '@shared/commonTypes'
+ 
+ export interface ActressQueryService {
++  listAvatarCropTargets(): ActressAvatarAutoCropTarget[]
++  countAvatarCropTargets(): number
+   listLegacy(
+     search?: string,
+     gender?: ActressGenderFilter,
+     sortBy?: ActressListSortBy,
+     sortDir?: SortDir
+   ): ActressListItem[]
++  listMergeCandidates(query: ActressMergeCandidateQuery): ActressMergeCandidatePage
++  getPicker(id: number): ActressPickerIdentity | null
++  listPicker(query?: ActressPickerQuery): ActressPickerPage
+   listActresses(query?: ActressListQuery): ActressListPage
+   listFaceScanManifest(): ActressFaceScanManifestItem[]
+   getActress(id: number): ActressDetail | null
+@@ -33,6 +46,11 @@ export interface ActressQueryService {
+ }
+ 
+ interface ActressQueryServiceDependencies {
++  listAvatarCropTargets: typeof listActressAvatarCropTargets
++  countAvatarCropTargets: typeof countActressAvatarCropTargets
++  listMergeCandidates: typeof listActressMergeCandidates
++  getPicker: typeof getActressPickerIdentity
++  listPicker: typeof listActressPickerPage
+   listLegacy: typeof listActresses
+   listPage: (query?: ActressListQuery) => ActressListPage
+   listFaceScanCandidates: typeof listActressAvatarCandidates
+@@ -58,6 +76,9 @@ function avatarPageSnapshotKey(query: ActressListQuery): string {
+ export function createActressQueryService(
+   dependencies: Partial<ActressQueryServiceDependencies> = {}
+ ): ActressQueryService {
++  const readMergeCandidates = dependencies.listMergeCandidates ?? listActressMergeCandidates
++  const readPickerIdentity = dependencies.getPicker ?? getActressPickerIdentity
++  const readPicker = dependencies.listPicker ?? listActressPickerPage
+   const readLegacyList = dependencies.listLegacy ?? listActresses
+   const readListPage = dependencies.listPage ?? listActressPage
+   const readFaceScanCandidates =
+@@ -68,6 +89,11 @@ export function createActressQueryService(
+   const avatarPageSnapshots = new Map<string, ActressListPage>()
+ 
+   return {
++    listAvatarCropTargets: () => (dependencies.listAvatarCropTargets ?? listActressAvatarCropTargets)(),
++    countAvatarCropTargets: () => (dependencies.countAvatarCropTargets ?? countActressAvatarCropTargets)(),
++    listMergeCandidates: (query) => readMergeCandidates(query),
++    getPicker: (id) => readPickerIdentity(id),
++    listPicker: (query) => readPicker(query),
+     listLegacy(search, gender, sortBy, sortDir): ActressListItem[] {
+       return readLegacyList(search, gender, sortBy, sortDir)
+     },
+diff --git a/src/preload/index.ts b/src/preload/index.ts
+index 744da7d..91b8432 100644
+--- a/src/preload/index.ts
++++ b/src/preload/index.ts
+@@ -1,3 +1,6 @@
++import type { ActressMergeCandidateQuery } from '../shared/actressTypes'
++import type { ActressPickerQuery } from '../shared/actressTypes'
++import type { PendingAuditIds, PendingScanQueueQuery } from '../shared/libraryTypes'
+ import type { WebAccessInput } from '../shared/webTypes'
+ import { contextBridge, ipcRenderer, webUtils } from 'electron'
+ import { IPC } from '../shared/ipc-channels'
+@@ -88,7 +91,7 @@ import type {
+   VideoScrapeField,
+   VideoScrapeUpdateMode
+ } from '../shared/scrapeTypes'
+-import type { PendingVideoScrapeConfirmInput } from '../shared/videoScrapeTypes'
++import type { PendingVideoScrapeConfirmInput, PendingVideoScrapePageQuery } from '../shared/videoScrapeTypes'
+ import type {
+   LibraryScanEvent,
+   PendingResourceIdentityResolution,
+@@ -103,8 +106,8 @@ import type {
+ } from '../shared/libraryTypes'
+ import type { ActressGalleryImportInput, ActressEditInput, ActressGenderFilter, ActressListQuery, ActressListSortBy, ActressMergeInput } from '../shared/actressTypes'
+ import type { IpcResponse } from '../shared/ipcTypes'
+-import type { InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
+-import type { SortDir } from '../shared/commonTypes'
++import type { ActressConflictQueueQuery, InspectActressConflictNameInput, DiscardPendingActressScrapeInput, ResolveActressConflictInput, ValidateIllegalNameReplacementsInput } from '../shared/actressConflictTypes'
++import type { SortDir, TagOptionsQuery } from '../shared/commonTypes'
+ import type { PlaylistCreateInput, PlaylistUpdateInput, PlaylistVideoSortBy } from '../shared/playlistTypes'
+ import type { PluginDevAgentEvent, PluginDevAgentMessageInput, PluginDevAgentStartInput, PluginDevDryRunInput, PluginDevInstallInput } from '../shared/pluginDevTypes'
+ import type {
+@@ -337,6 +340,11 @@ const api = {
+       code: string,
+       target: VideoResourceImportTarget
+     ) => invokeApp(IPC.FILE_IMPORT_MANUAL, libraryId, rootId, filePath, code, target),
++    pendingAuditPresence: (libraryId: number, ids: PendingAuditIds) => invokeApp(IPC.PENDING_AUDIT_PRESENCE, libraryId, ids),
++    pagePendingQueue: (query: PendingScanQueueQuery) => invokeApp(IPC.PENDING_SCAN_QUEUE_PAGE, query),
++    countPendingQueue: (libraryId?: number) => invokeApp(IPC.PENDING_SCAN_QUEUE_COUNT, libraryId),
++    getPendingGroup: (libraryId: number, groupId: number) => invokeApp(IPC.PENDING_SCAN_GET, libraryId, groupId),
++    getPendingIdentity: (libraryId: number, identityId: number) => invokeApp(IPC.PENDING_RESOURCE_IDENTITY_GET, libraryId, identityId),
+     listPending: (libraryId: number) => invokeApp(IPC.PENDING_SCAN_LIST, libraryId),
+     resolvePending: (
+       libraryId: number,
+@@ -381,6 +389,8 @@ const api = {
+       invokeVideo(IPC.VIDEO_POSTER_SET, id, posterPath),
+     addManualTag: (id: number, name: string) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD, id, name),
++    addExistingManualTag: (id: number, tagId: number) =>
++      invokeVideo(IPC.VIDEO_MANUAL_TAG_ADD_EXISTING, id, tagId),
+     removeManualTag: (id: number, tagId: number) =>
+       invokeVideo(IPC.VIDEO_MANUAL_TAG_REMOVE, id, tagId),
+     importLinkResource: (input: VideoLinkResourceImportInput) =>
+@@ -448,6 +458,12 @@ const api = {
+       invokeVideo(IPC.VIDEO_RESOURCE_SPLIT, libraryId, videoId, resourceId)
+   },
+   playlists: {
++    metadata: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
++      invokeApp(IPC.PLAYLIST_METADATA, id, sortBy, sortDir),
++    videoPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_VIDEO_PAGE, id, query),
++    getPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_GET_PAGE, id, query),
+     list: () => invokeApp(IPC.PLAYLIST_LIST),
+     get: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
+       invokeApp(IPC.PLAYLIST_GET, id, sortBy, sortDir),
+@@ -463,6 +479,11 @@ const api = {
+       invokeApp(IPC.PLAYLIST_REMOVE_VIDEO, playlistId, videoId)
+   },
+   actresses: {
++    mergeCandidates: (query: ActressMergeCandidateQuery) => invokeActress(IPC.ACTRESS_MERGE_CANDIDATES, query),
++    avatarCropTargets: () => invokeActress(IPC.ACTRESS_AVATAR_CROP_TARGETS),
++    countAvatarCropTargets: () => invokeActress(IPC.ACTRESS_AVATAR_CROP_COUNT),
++    pickerGet: (id: number) => invokeActress(IPC.ACTRESS_PICKER_GET, id),
++    pickerPage: (query: ActressPickerQuery = {}) => invokeActress(IPC.ACTRESS_PICKER_PAGE, query),
+     list: (
+       search?: string,
+       gender?: ActressGenderFilter,
+@@ -491,6 +512,9 @@ const api = {
+     markScrapeSuccess: (id: number) => invokeActress(IPC.ACTRESS_MARK_SCRAPE_SUCCESS, id)
+   },
+   tags: {
++    filterOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_FILTER_OPTIONS, query),
++    manualOptions: (query: TagOptionsQuery) => invokeApp(IPC.TAG_MANUAL_OPTIONS, query),
++    labels: (ids: number[]) => invokeApp(IPC.TAG_LABELS, ids),
+     list: () =>
+       invokeApp(IPC.TAG_LIST),
+     listManual: () =>
+@@ -557,6 +581,10 @@ const api = {
+         directorSelectionId,
+         libraryId
+       ),
++    countPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_COUNT),
++    existingPendingIds: (ids: number[]) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS, ids),
++    pagePending: (query: PendingVideoScrapePageQuery) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_PAGE, query),
++    getPending: (id: number) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_GET, id),
+     listPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_LIST),
+     confirmPending: (input: PendingVideoScrapeConfirmInput) =>
+       invokeScrape(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, input),
+@@ -625,6 +653,8 @@ const api = {
+         autoCropAvatar
+       ),
+     listConflicts: () => invokeActress(IPC.ACTRESS_CONFLICT_LIST),
++    getConflict: (normalizedName: string) => invokeActress(IPC.ACTRESS_CONFLICT_GET, normalizedName),
++    pageConflicts: (query: ActressConflictQueueQuery) => invokeActress(IPC.ACTRESS_CONFLICT_QUEUE_PAGE, query),
+     conflictCount: () => invokeActress(IPC.ACTRESS_CONFLICT_COUNT),
+     conflictSummary: () =>
+       invokeActress(IPC.ACTRESS_CONFLICT_SUMMARY),
+diff --git a/src/renderer/src/contexts/AvatarAutoCropBatchContext.tsx b/src/renderer/src/contexts/AvatarAutoCropBatchContext.tsx
+index c1ea90e..104891b 100644
+--- a/src/renderer/src/contexts/AvatarAutoCropBatchContext.tsx
++++ b/src/renderer/src/contexts/AvatarAutoCropBatchContext.tsx
+@@ -11,7 +11,6 @@ import {
+ } from 'react'
+ import { createAvatarCropV1, type ActressAvatarCommit } from '@shared/avatarCrop'
+ import type { ActressAvatarAutoCropOutcome, ActressAvatarAutoCropRequest, ActressAvatarAutoCropTarget } from '@shared/actressAvatarCropTypes'
+-import type { ActressListItem } from '@shared/actressTypes'
+ import type { BatchLogEntry } from '@shared/batchScrapeTypes'
+ import { api, assetUrl } from '../api'
+ import { createAvatarAnalysisBitmap, loadAvatarAnalysisImage } from '../avatarAutoCrop/image'
+@@ -76,13 +75,6 @@ function batchLog(
+   }
+ }
+ 
+-function avatarTargets(items: ActressListItem[]): ActressAvatarAutoCropTarget[] {
+-  return items
+-    .filter((item) => Boolean(item.avatar_source_path || item.avatar_path))
+-    .map((item) => ({ actressId: item.id, mainName: item.main_name }))
+-}
+-
+-
+ async function smartCropAvatar(
+   target: ActressAvatarAutoCropTarget,
+   settings: Awaited<ReturnType<typeof api.settings.get>>
+@@ -142,6 +134,9 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+   const pendingRef = useRef<ActressAvatarAutoCropTarget[]>([])
+   const queuedIdsRef = useRef(new Set<number>())
+   const runningRef = useRef(false)
++  const startingRef = useRef(false)
++  const mountedRef = useRef(true)
++  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
+   const scrapeCropRunningRef = useRef(false)
+   const batchLockTokenRef = useRef<string | null>(null)
+   const cancelRequestedRef = useRef(false)
+@@ -300,7 +295,7 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+ 
+   const cropScrapedAvatar = useCallback(
+     async (request: ActressAvatarAutoCropRequest): Promise<ActressAvatarAutoCropOutcome> => {
+-      if (runningRef.current) {
++      if (runningRef.current || startingRef.current) {
+         return { status: 'failed', message: '正在执行“构图全部头像”，请稍后重试' }
+       }
+       if (scrapeCropRunningRef.current) {
+@@ -344,29 +339,38 @@ export function AvatarAutoCropBatchProvider({ children }: { children: ReactNode
+   )
+ 
+   const listAllAvatarTargets = useCallback(async (): Promise<ActressAvatarAutoCropTarget[]> => {
+-    return avatarTargets(await api.actresses.list(undefined, 'all'))
++    return api.actresses.avatarCropTargets()
+   }, [])
+ 
+   const countAllAvatars = useCallback(async (): Promise<number> => {
+-    return (await listAllAvatarTargets()).length
+-  }, [listAllAvatarTargets])
++    return api.actresses.countAvatarCropTargets()
++  }, [])
+ 
+   const startAllAvatars = useCallback(async (): Promise<number> => {
+-    if (runningRef.current) throw new Error('已有头像智能构图任务正在进行')
++    if (runningRef.current || startingRef.current) throw new Error('已有头像智能构图任务正在进行')
+     if (scrapeCropRunningRef.current) throw new Error('请等待当前演员头像智能构图完成')
+-    const targets = await listAllAvatarTargets()
+-    if (targets.length === 0) return 0
+-
+-    const batchLockToken = await api.avatarAutoCropBatch.begin()
+-    batchLockTokenRef.current = batchLockToken
++    startingRef.current = true
++    let token: string | null = null
++    let handedOff = false
+     try {
++      token = await api.avatarAutoCropBatch.begin()
++      if (!mountedRef.current) {
++        await api.avatarAutoCropBatch.end(token)
++        return 0
++      }
++      batchLockTokenRef.current = token
++      const targets = await listAllAvatarTargets()
++      if (!mountedRef.current || targets.length === 0) return 0
+       startQueue(targets)
+-    } catch (error) {
+-      batchLockTokenRef.current = null
+-      await api.avatarAutoCropBatch.end(batchLockToken).catch(() => undefined)
+-      throw error
++      handedOff = true
++      return targets.length
++    } finally {
++      startingRef.current = false
++      if (!handedOff && token && batchLockTokenRef.current === token) {
++        batchLockTokenRef.current = null
++        await api.avatarAutoCropBatch.end(token)
++      }
+     }
+-    return targets.length
+   }, [listAllAvatarTargets, startQueue])
+ 
+   const cancel = useCallback((): void => {
+diff --git a/src/shared/actressIpcContract.ts b/src/shared/actressIpcContract.ts
+index 77b54c5..d23af4a 100644
+--- a/src/shared/actressIpcContract.ts
++++ b/src/shared/actressIpcContract.ts
+@@ -1,3 +1,6 @@
++import type { ActressAvatarAutoCropTarget } from './actressAvatarCropTypes'
++import type { ActressMergeCandidatePage, ActressMergeCandidateQuery } from './actressTypes'
++import type { ActressPickerIdentity, ActressPickerPage, ActressPickerQuery } from './actressTypes'
+ import { IPC } from './ipc-channels'
+ import type {
+   IpcContractArgs,
+@@ -6,7 +9,7 @@ import type {
+ } from './typedIpcContract'
+ import type { SortDir } from './commonTypes'
+ import type { ActressAvatarSourceInfo, ActressDetail, ActressEditInput, ActressFaceScanManifestItem, ActressGalleryAsset, ActressGalleryImportInput, ActressGenderFilter, ActressListItem, ActressListPage, ActressListQuery, ActressListSortBy, ActressMergeInput } from './actressTypes'
+-import type { ActressConflictReviewSummary, ActressNameConflictGroup, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from './actressConflictTypes'
++import type { ActressConflictQueuePage, ActressConflictQueueQuery, ActressConflictReviewSummary, ActressNameConflictGroup, DiscardPendingActressScrapeInput, DiscardPendingActressScrapeResult, InspectActressConflictNameInput, InspectActressConflictNameResult, ResolveActressConflictInput, ResolveActressConflictResult, ValidateIllegalNameReplacementsInput, ValidateIllegalNameReplacementsResult } from './actressConflictTypes'
+ 
+ export interface ActressDeleteCleanupFailure {
+   path: string
+@@ -42,6 +45,26 @@ export interface ActressIpcContract {
+     ]
+     result: ActressListItem[]
+   }
++  [IPC.ACTRESS_MERGE_CANDIDATES]: {
++    args: [query: ActressMergeCandidateQuery]
++    result: ActressMergeCandidatePage
++  }
++  [IPC.ACTRESS_AVATAR_CROP_TARGETS]: {
++    args: []
++    result: ActressAvatarAutoCropTarget[]
++  }
++  [IPC.ACTRESS_AVATAR_CROP_COUNT]: {
++    args: []
++    result: number
++  }
++  [IPC.ACTRESS_PICKER_GET]: {
++    args: [id: number]
++    result: ActressPickerIdentity | null
++  }
++  [IPC.ACTRESS_PICKER_PAGE]: {
++    args: [query?: ActressPickerQuery]
++    result: ActressPickerPage
++  }
+   [IPC.ACTRESS_LIST_PAGE]: {
+     args: [query?: ActressListQuery]
+     result: ActressListPage
+@@ -102,6 +125,14 @@ export interface ActressIpcContract {
+     args: []
+     result: ActressNameConflictGroup[]
+   }
++  [IPC.ACTRESS_CONFLICT_QUEUE_PAGE]: {
++    args: [query: ActressConflictQueueQuery]
++    result: ActressConflictQueuePage
++  }
++  [IPC.ACTRESS_CONFLICT_GET]: {
++    args: [normalizedName: string]
++    result: ActressNameConflictGroup | null
++  }
+   [IPC.ACTRESS_CONFLICT_COUNT]: {
+     args: []
+     result: number
+diff --git a/src/shared/ipc-channels.ts b/src/shared/ipc-channels.ts
+index 00ed96e..b483ec6 100644
+--- a/src/shared/ipc-channels.ts
++++ b/src/shared/ipc-channels.ts
+@@ -75,6 +75,11 @@ export const IPC = {
+   SCAN_STATE_CHANGED: 'scan:stateChanged', // main -> renderer event
+   FILE_RENAME: 'file:rename',
+   FILE_IMPORT_MANUAL: 'file:importManual',
++  PENDING_AUDIT_PRESENCE: 'pendingAudit:presence',
++  PENDING_SCAN_QUEUE_PAGE: 'pendingScanQueue:page',
++  PENDING_SCAN_QUEUE_COUNT: 'pendingScanQueue:count',
++  PENDING_SCAN_GET: 'pendingScan:get',
++  PENDING_RESOURCE_IDENTITY_GET: 'pendingResourceIdentity:get',
+   PENDING_SCAN_LIST: 'pendingScan:list',
+   PENDING_SCAN_RESOLVE: 'pendingScan:resolve',
+   PENDING_RESOURCE_IDENTITY_LIST: 'pendingResourceIdentity:list',
+@@ -94,6 +99,7 @@ export const IPC = {
+   VIDEO_SAMPLE_DELETE: 'video:sampleDelete',
+   VIDEO_POSTER_SET: 'video:posterSet',
+   VIDEO_MANUAL_TAG_ADD: 'video:manualTagAdd',
++  VIDEO_MANUAL_TAG_ADD_EXISTING: 'video:manualTagAddExisting',
+   VIDEO_MANUAL_TAG_REMOVE: 'video:manualTagRemove',
+   VIDEO_RESOURCE_IMPORT: 'video:resourceImport',
+   VIDEO_RESOURCE_GET: 'video:resourceGet',
+@@ -114,6 +120,9 @@ export const IPC = {
+   // Playlists
+   PLAYLIST_LIST: 'playlist:list',
+   PLAYLIST_GET: 'playlist:get',
++  PLAYLIST_GET_PAGE: 'playlist:getPage',
++  PLAYLIST_METADATA: 'playlist:metadata',
++  PLAYLIST_VIDEO_PAGE: 'playlist:videoPage',
+   PLAYLIST_CREATE: 'playlist:create',
+   PLAYLIST_UPDATE: 'playlist:update',
+   PLAYLIST_DELETE: 'playlist:delete',
+@@ -124,6 +133,11 @@ export const IPC = {
+   // Actresses
+   ACTRESS_LIST: 'actress:list',
+   ACTRESS_LIST_PAGE: 'actress:listPage',
++  ACTRESS_PICKER_PAGE: 'actress:pickerPage',
++  ACTRESS_AVATAR_CROP_TARGETS: 'actress:avatarCropTargets',
++  ACTRESS_AVATAR_CROP_COUNT: 'actress:avatarCropCount',
++  ACTRESS_PICKER_GET: 'actress:pickerGet',
++  ACTRESS_MERGE_CANDIDATES: 'actress:mergeCandidates',
+   ACTRESS_FACE_SCAN_MANIFEST: 'actress:faceScanManifest',
+   ACTRESS_GET: 'actress:get',
+   ACTRESS_AVATAR_SOURCE_INFO: 'actress:avatarSourceInfo',
+@@ -138,6 +152,8 @@ export const IPC = {
+   ACTRESS_MERGE: 'actress:merge',
+   ACTRESS_MARK_SCRAPE_SUCCESS: 'actress:markScrapeSuccess',
+   ACTRESS_CONFLICT_LIST: 'actressConflict:list',
++  ACTRESS_CONFLICT_QUEUE_PAGE: 'actressConflict:queuePage',
++  ACTRESS_CONFLICT_GET: 'actressConflict:get',
+   ACTRESS_CONFLICT_COUNT: 'actressConflict:count',
+   ACTRESS_CONFLICT_SUMMARY: 'actressConflict:summary',
+   ACTRESS_CONFLICT_INSPECT_NAME: 'actressConflict:inspectName',
+@@ -148,6 +164,9 @@ export const IPC = {
+   // Tags
+   TAG_LIST: 'tag:list',
+   TAG_LIST_MANUAL: 'tag:listManual',
++  TAG_LABELS: 'tag:labels',
++  TAG_FILTER_OPTIONS: 'tag:filterOptions',
++  TAG_MANUAL_OPTIONS: 'tag:manualOptions',
+ 
+   // Classification entities
+   ORGANIZATION_LIST: 'organization:list',
+@@ -182,6 +201,10 @@ export const IPC = {
+ 
+   // Scraping
+   SCRAPE_ONE: 'scrape:one',
++  PENDING_VIDEO_SCRAPE_COUNT: 'pendingVideoScrape:count',
++  PENDING_VIDEO_SCRAPE_EXISTING_IDS: 'pendingVideoScrape:existingIds',
++  PENDING_VIDEO_SCRAPE_PAGE: 'pendingVideoScrape:page',
++  PENDING_VIDEO_SCRAPE_GET: 'pendingVideoScrape:get',
+   PENDING_VIDEO_SCRAPE_LIST: 'pendingVideoScrape:list',
+   PENDING_VIDEO_SCRAPE_CONFIRM: 'pendingVideoScrape:confirm',
+   PENDING_VIDEO_SCRAPE_DISCARD: 'pendingVideoScrape:discard',
+diff --git a/src/main/db/actressAvatarCropTargets.test.ts b/src/main/db/actressAvatarCropTargets.test.ts
+new file mode 100644
+index 0000000..b6f7f50
+--- /dev/null
++++ b/src/main/db/actressAvatarCropTargets.test.ts
+@@ -0,0 +1,54 @@
++import { afterEach, beforeEach, it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { closeDatabase, getDb, initDatabaseAtPath } from './database'
++import { listActressAvatarCropTargets, listActresses } from './actressRepo'
++import { resetSettingsCacheForTests } from '../settings/settingsStore'
++
++let root: string
++let previous: string | undefined
++beforeEach(() => {
++  root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-picker-'))
++  previous = process.env.JAVDEX_TEST_USER_DATA
++  process.env.JAVDEX_TEST_USER_DATA = root
++  resetSettingsCacheForTests()
++  initDatabaseAtPath(path.join(root, 'catalog.db'))
++})
++afterEach(() => {
++  closeDatabase(); resetSettingsCacheForTests()
++  if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
++  else process.env.JAVDEX_TEST_USER_DATA = previous
++  fs.rmSync(root, { recursive: true, force: true })
++})
++
++import { insertTestVideoWithFile } from './testVideoFixtures'
++
++it('returns only target identity in ID order without counting works with all path and gender semantics', () => {
++  const db = getDb()
++  const insert = db.prepare('INSERT INTO actresses(id,main_name,gender,avatar_path,avatar_source_path,profile_summary) VALUES(?,?,?,?,?,?)')
++  insert.run(1, 'Alpha', 'female', null, null, 'x'.repeat(4096))
++  insert.run(2, 'Beta', 'male', '', '\u0000', 'x'.repeat(4096))
++  insert.run(3, 'Zulu', null, ' ', null, 'x'.repeat(4096))
++  insert.run(4, '😀'.repeat(200), 'female', 'avatar.jpg', '', 'x'.repeat(4096))
++  db.exec("INSERT INTO media_libraries(id,name,status) VALUES(2,'Overlap','active'),(3,'Archived','active')")
++  const video = (code: string, libraryId = 1) => insertTestVideoWithFile(db, {code,filePath:code+'.mp4',libraryId}).videoId
++  const first=video('FIRST'), second=video('SECOND'), hidden=video('HIDDEN'), archived=video('ARCHIVED',3)
++  db.exec("UPDATE media_libraries SET status='archived' WHERE id=3")
++  db.prepare('INSERT INTO library_video_memberships(library_id,video_id,discovery_key) VALUES(2,?,123)').run(first)
++  db.prepare('UPDATE library_video_memberships SET is_hidden=1 WHERE video_id=?').run(hidden)
++  for (const [vid,actor] of [[first,3],[second,3],[first,2],[hidden,2],[archived,2]]) db.prepare('INSERT INTO video_actress(video_id,actress_id) VALUES(?,?)').run(vid,actor)
++  const expected = listActresses(undefined,'all').filter(a=>Boolean(a.avatar_source_path||a.avatar_path)).sort((a,b)=>a.id-b.id).map(a=>({actressId:a.id,mainName:a.main_name}))
++  const prepare=db.prepare.bind(db), statements:string[]=[]
++  db.prepare=((sql:string)=>{statements.push(sql);return prepare(sql)}) as typeof db.prepare
++  try {
++    assert.deepEqual(listActressAvatarCropTargets(),expected)
++    assert.deepEqual(expected.map(a=>a.actressId),[2,3,4])
++    assert.equal(expected[2].mainName,'😀'.repeat(200))
++    assert.equal(statements.length,1)
++    assert.doesNotMatch(statements[0],/a\.\*|profile_summary|actress_gallery_assets|video_actress|library_video_memberships|video_count/i)
++    db.exec('DELETE FROM actresses')
++    assert.deepEqual(listActressAvatarCropTargets(),[])
++  } finally {db.prepare=prepare}
++})
+diff --git a/src/renderer/src/contexts/AvatarAutoCropBatchStart.test.tsx b/src/renderer/src/contexts/AvatarAutoCropBatchStart.test.tsx
+new file mode 100644
+index 0000000..c114a69
+--- /dev/null
++++ b/src/renderer/src/contexts/AvatarAutoCropBatchStart.test.tsx
+@@ -0,0 +1,88 @@
++import assert from 'node:assert/strict'
++import { it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
++import type { ElectronApi } from '../../../preload/index'
++import type { ActressAvatarAutoCropTarget } from '@shared/actressAvatarCropTypes'
++function deferred<T>() {
++  let resolve!: (value: T) => void
++  let reject!: (error: Error) => void
++  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
++  return { promise, resolve, reject }
++}
++
++it('serializes startup before target loading and releases ownership on empty, failed or unmounted startup', async () => {
++  let begin = deferred<string>()
++  let targets = deferred<ActressAvatarAutoCropTarget[]>()
++  let begins = 0, reads = 0
++  const ended: string[] = []
++  const processed: number[] = []
++  const fake = {
++    actresses: {
++      list: () => { throw new Error('Wide list forbidden') },
++      avatarCropTargets: () => { reads++; return targets.promise },
++      getAvatarSourceInfo: async (id: number) => { processed.push(id); return null }
++    },
++    settings: { get: async () => ({}) },
++    avatarAutoCropBatch: {
++      begin: () => { begins++; return begin.promise },
++      end: async (token: string) => { ended.push(token); return true }
++    },
++    actressScrape: { onAvatarAutoCropRequest: () => () => {} }
++  } as unknown as ElectronApi
++  Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
++  Object.defineProperty(globalThis, 'window', { configurable: true, value: { api: fake } })
++  const { AvatarAutoCropBatchProvider, useAvatarAutoCropBatch } = await import('./AvatarAutoCropBatchContext')
++  let current!: ReturnType<typeof useAvatarAutoCropBatch>
++  function Probe() { current = useAvatarAutoCropBatch(); return null }
++  const client = new QueryClient()
++  let renderer!: TestRenderer.ReactTestRenderer
++  const mount = async () => { await act(async () => { renderer = TestRenderer.create(
++    <QueryClientProvider client={client}><AvatarAutoCropBatchProvider><Probe /></AvatarAutoCropBatchProvider></QueryClientProvider>
++  ) }) }
++  const unmount = async () => { await act(async () => renderer.unmount()) }
++  try {
++    await mount()
++    const first = current.startAllAvatars()
++    await assert.rejects(current.startAllAvatars(), /已有头像/)
++    assert.equal(begins, 1); assert.equal(reads, 0)
++    begin.resolve('failure')
++    await new Promise(resolve => setImmediate(resolve))
++    assert.equal(reads, 1)
++    const rejected = assert.rejects(first, /Target failed/)
++    targets.reject(new Error('Target failed')); await rejected
++    assert.deepEqual(ended, ['failure'])
++    begin = deferred(); targets = deferred()
++    const empty = current.startAllAvatars(); begin.resolve('empty'); targets.resolve([])
++    assert.equal(await empty, 0)
++    assert.deepEqual(ended, ['failure', 'empty'])
++    begin = deferred(); targets = deferred()
++    const pendingLock = current.startAllAvatars()
++    await unmount(); begin.resolve('late-lock')
++    assert.equal(await pendingLock, 0)
++    assert.deepEqual(ended, ['failure', 'empty', 'late-lock'])
++    assert.equal(reads, 2)
++    await mount(); begin = deferred(); targets = deferred()
++    const pendingTargets = current.startAllAvatars(); begin.resolve('late-targets')
++    await new Promise(resolve => setImmediate(resolve))
++    await unmount()
++    targets.resolve([{actressId: 1, mainName: 'Never starts'}])
++    assert.equal(await pendingTargets, 0)
++    assert.deepEqual(ended, ['failure', 'empty', 'late-lock', 'late-targets'])
++    await mount(); begin = deferred(); targets = deferred()
++    let completed!: Promise<number>
++    await act(async () => {
++      completed = current.startAllAvatars(); begin.resolve('normal')
++      targets.resolve([{actressId: 7, mainName: 'First'}, {actressId: 2, mainName: 'Second'}])
++      assert.equal(await completed, 2)
++      await new Promise(resolve => setImmediate(resolve))
++    })
++    assert.deepEqual(processed, [7, 2])
++    assert.equal(current.state.status, 'done')
++    assert.equal(current.state.current, 2)
++    assert.equal(current.state.skipped, 2)
++    assert.deepEqual(ended, ['failure', 'empty', 'late-lock', 'late-targets', 'normal'])
++
++  } finally { await unmount(); client.clear() }
++})
+diff --git a/scripts/performance/actress-avatar-target-benchmark.ts b/scripts/performance/actress-avatar-target-benchmark.ts
+new file mode 100644
+index 0000000..0bcc4a4
+--- /dev/null
++++ b/scripts/performance/actress-avatar-target-benchmark.ts
+@@ -0,0 +1,42 @@
++/** Synthetic merge candidate/count probe. No user DB or media access. */
++import {it} from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import {performance} from 'node:perf_hooks'
++import {initDatabaseAtPath,closeDatabase} from '../../src/main/db/database'
++import {listActresses,listActressAvatarCropTargets} from '../../src/main/db/actressRepo'
++import {resetSettingsCacheForTests} from '../../src/main/settings/settingsStore'
++it('measures narrow avatar targets using user-approved ID order',()=>{
++ const root=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-merge-probe-')),previous=process.env.JAVDEX_TEST_USER_DATA
++ process.env.JAVDEX_TEST_USER_DATA=root;resetSettingsCacheForTests()
++ try {
++  const db=initDatabaseAtPath(path.join(root,'catalog.db'))
++  db.exec(`
++   WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
++   INSERT INTO actresses(id,main_name,gender,profile_summary)
++    SELECT x,printf('Actor-%05d',x),CASE WHEN x%3=0 THEN 'male' WHEN x%7=0 THEN NULL ELSE 'female' END,hex(zeroblob(2048)) FROM n;
++   INSERT INTO actress_names(actress_id,name,type,source) SELECT id,main_name,'main','manual' FROM actresses;
++   INSERT INTO actress_name_ownership(normalized_name,actress_id) SELECT normalize_actress_name(main_name),id FROM actresses;
++   WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100000)
++   INSERT INTO videos(id,code) SELECT x,printf('VIDEO-%06d',x) FROM n;
++   INSERT OR IGNORE INTO media_libraries(id,name) VALUES(1,'Active'),(2,'Overlap');
++   INSERT INTO library_video_memberships(library_id,video_id,discovery_key) SELECT 1,id,id FROM videos;
++   INSERT INTO library_video_memberships(library_id,video_id,discovery_key) SELECT 2,id,id FROM videos WHERE id%2=0;
++   INSERT INTO video_actress(video_id,actress_id) SELECT id,((id-1)%10000)+1 FROM videos;
++   UPDATE actresses SET avatar_path='avatars/'||id||'.jpg' WHERE id%3!=0;
++   ANALYZE;`)
++  const oracle=listActresses('','all')
++  const expected=oracle.filter(row=>Boolean(row.avatar_source_path||row.avatar_path)).sort((a,b)=>a.id-b.id).map(row=>({actressId:row.id,mainName:row.main_name}))
++  const results:Array<{name:string;samples:number[];medianMs:number;jsonBytes:number}>=[]
++  function measure<T>(name:string,read:()=>T,check:(value:T)=>void){
++   check(read());const samples:number[]=[];let jsonBytes=0
++   for(let i=0;i<3;i++){const start=performance.now(),value=read();samples.push(performance.now()-start);check(value);jsonBytes=Buffer.byteLength(JSON.stringify(value))}
++   results.push({name,samples,medianMs:[...samples].sort((a,b)=>a-b)[1],jsonBytes})
++  }
++  measure('legacy.full',()=>listActresses('','all'),value=>assert.deepEqual(value,oracle))
++  measure('narrow.targets',()=>listActressAvatarCropTargets(),value=>assert.deepEqual(value,expected))
++  console.log(JSON.stringify({actors:10000,videos:100000,memberships:150000,targets:expected.length,results,notes:['ANALYZE; warm-up then 3 warm samples, fixed legacy-first order.','Timing excludes assertion/serialization; oracle retained, no peak memory claim.','Full target list remains, work counting removed per user instruction; not bounded paging, p95, cold, Windows/HDD or IPC.']},null,2))
++ } finally {closeDatabase();resetSettingsCacheForTests();if(previous===undefined)delete process.env.JAVDEX_TEST_USER_DATA;else process.env.JAVDEX_TEST_USER_DATA=previous;fs.rmSync(root,{recursive:true,force:true})}
++})

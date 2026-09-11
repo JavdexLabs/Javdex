@@ -1,0 +1,54 @@
+▶ tagRepo.pruneUnusedTags
+  ✔ deletes tags with no video links and keeps tags still used by a video (9.681208ms)
+✔ tagRepo.pruneUnusedTags (10.045792ms)
+▶ tagRepo selected labels
+  ✔ looks up only selected IDs through the tag primary key and omits deleted IDs (13.100666ms)
+  ✔ bounds display labels and JSON bytes without changing full stored names (9.417542ms)
+  ✔ rejects invalid or oversized requests and does no SQL work for an empty selection (6.515375ms)
+✔ tagRepo selected labels (29.202542ms)
+▶ tagRepo manual candidates
+  ✔ pages alphabetically without counts and retains hidden/manual-only associations (16.213167ms)
+  ✔ preserves Unicode/literal substring matching and searches beyond display truncation (7.477625ms)
+  ✔ uses tag-key existence checks under skewed statistics and validates its work limits (11.672208ms)
+✔ tagRepo manual candidates (35.499916ms)
+▶ tagRepo active catalog projection
+  ✔ matches manual association and visibility semantics before and after statistics maintenance (20.794334ms)
+  ✔ deduplicates shared memberships and preserves manual origin and zero-count tags (5.947667ms)
+  ✔ counts only videos that can be opened through the active visible catalog (5.256542ms)
+✔ tagRepo active catalog projection (32.05725ms)
+▶ tagRepo filter candidates
+  ✔ paginates names before counts and matches global visibility counts with shared and archived members (7.449583ms)
+  ✔ keeps Unicode literal search, bounded labels and page-only count parameters (23.188666ms)
+✔ tagRepo filter candidates (30.683666ms)
+✔ validates manual tag candidate bounds and existing-tag identities (1.645709ms)
+✔ bounds selected tag label IPC requests before repository access (0.28525ms)
+▶ typed IPC adapter
+  ✔ does not expose the legacy unreviewed video deletion command (0.188833ms)
+  ✔ forwards command arguments and returns the application result (0.164417ms)
+  ✔ rejects malformed arguments before invoking the application handler (0.17275ms)
+  ✔ accepts link-resource updates without an import-only target (0.204666ms)
+  ✔ only accepts metadata retention when removing a last video resource (0.060583ms)
+  ✔ accepts one exact plugin approval decision and rejects malformed decisions (0.2025ms)
+  ✔ accepts only explicit plugin continuation kinds (0.08625ms)
+  ✔ accepts only typed plugin user responses with request-bound actions (0.582291ms)
+  ✔ accepts plugin history clearing only without renderer-supplied run ids (0.033792ms)
+  ✔ accepts unrecoverable plugin-session discard only without renderer-supplied run ids (0.027042ms)
+  ✔ keeps legacy model limits out of the generic settings mutation contract (0.255291ms)
+  ✔ validates playlist import start and identity controls at the IPC boundary (1.492334ms)
+  ✔ requires the path-removal impact revision at the settings boundary (0.140917ms)
+  ✔ accepts only the structured model-management command vocabulary (0.5455ms)
+  ✔ serializes successful results and thrown errors (0.524458ms)
+  ✔ sends the contracted event payload unchanged (0.053459ms)
+✔ typed IPC adapter (4.99125ms)
+✔ loads on open only, pages without full catalog reads and preserves cross-page selection (46.765541ms)
+✔ debounces and resets search, rejecting stale page/search responses (274.813667ms)
+✔ shows failure with explicit retry and enforces 100 selections while allowing removal (2.730834ms)
+✔ unmounts candidates with the actual parent popover and ignores late responses on reopen (5.140166ms)
+ℹ tests 34
+ℹ suites 6
+ℹ pass 34
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 518.80675

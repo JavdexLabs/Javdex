@@ -1,0 +1,77 @@
+import assert from 'node:assert/strict'
+import { it } from 'node:test'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { createRequire } from 'node:module'
+import { initDatabaseAtPath, closeDatabase, getDatabaseReadRevision } from '/Users/nut/Project/JavdexLabs/Javdex/src/main/db/database'
+import { insertTestVideoWithFile } from '/Users/nut/Project/JavdexLabs/Javdex/src/main/db/testVideoFixtures'
+import { videoQueryService } from '/Users/nut/Project/JavdexLabs/Javdex/src/main/services/videoQueryService'
+import { registerMediaLibraryHandlers } from '/Users/nut/Project/JavdexLabs/Javdex/src/main/ipc/mediaLibraryHandlers'
+import { createMediaLibraryCommandAdapter } from '/Users/nut/Project/JavdexLabs/Javdex/src/main/ipc/mediaLibraryContractAdapter'
+import { IPC } from '/Users/nut/Project/JavdexLabs/Javdex/src/shared/ipc-channels'
+import { WebCatalog } from '/Users/nut/Project/JavdexLabs/Javdex/src/main/web/catalog'
+import { CatalogReadWorkerClient } from '/Users/nut/Project/JavdexLabs/Javdex/src/main/services/catalogReadWorkerClient'
+import { createCatalogReadWorkerTransport } from '/Users/nut/Project/JavdexLabs/Javdex/src/main/services/catalogReadWorkerTransport'
+
+// Investigation-only red fixture. No timing assertions or user catalog access.
+// Desktop home/search use actual registration+schema+default service dependencies;
+// video uses actual query service; Web uses actual HTTP catalog adapter, not HTTP auth.
+it('catalog entrypoints must stop executing catalog SELECTs on the main connection', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-catalog-entrypoint-'))
+  const previous = process.env.JAVDEX_TEST_USER_DATA
+  process.env.JAVDEX_TEST_USER_DATA = root
+  let client: CatalogReadWorkerClient | undefined
+  try {
+    const db = initDatabaseAtPath(path.join(root, 'catalog.db'))
+    insertTestVideoWithFile(db, { code:'READ-1', filePath:'/synthetic/one.mp4', title:'One' })
+    db.exec("UPDATE videos SET release_date='2025-01-01'; INSERT INTO tags(id,name) VALUES(1,'Manual'); INSERT INTO video_tag(video_id,tag_id,origin) VALUES(1,1,'manual')")
+    const bundle = path.join(root, 'worker.cjs')
+    const require = createRequire('/Users/nut/Project/JavdexLabs/Javdex/package.json')
+    require('esbuild').buildSync({entryPoints:['/Users/nut/Project/JavdexLabs/Javdex/src/main/services/catalogReadWorker.ts'], outfile:bundle,
+      bundle:true,platform:'node',format:'cjs',packages:'external',tsconfig:'/Users/nut/Project/JavdexLabs/Javdex/tsconfig.node.json',
+      banner:{js:`require = require('node:module').createRequire(${JSON.stringify('/Users/nut/Project/JavdexLabs/Javdex/package.json')});`}})
+    client = new CatalogReadWorkerClient({contextProvider:()=>({identity:db,path:db.name,
+      revision:JSON.stringify(getDatabaseReadRevision(db))}),
+      transportFactory:context=>createCatalogReadWorkerTransport(bundle,context.path)})
+    const sql: string[] = []
+    const prepare = db.prepare.bind(db)
+    t.mock.method(db,'prepare',(query:string)=>{sql.push(query); return prepare(query)})
+    const observed: Record<string, number> = {}
+    async function measure(name:string, action:()=>unknown) {
+      sql.length=0
+      const result=await action()
+      observed[name]=sql.filter(text=>/\b(?:SELECT|WITH)\b/i.test(text) && /\b(?:videos|media_libraries|library_video_memberships|tags)\b/i.test(text)).length
+      return result
+    }
+    const tags = await measure('existing-native-worker',()=>client!.read({})) as {items:unknown[]}
+    assert.equal(tags.items.length,1)
+    assert.equal(observed['existing-native-worker'],0)
+    const handlers = new Map<string, (...args:any[])=>unknown>()
+    registerMediaLibraryHandlers(undefined,createMediaLibraryCommandAdapter((channel,handler)=>handlers.set(channel,handler)))
+    const scope={kind:'all' as const}
+    const list=await measure('desktop-list-count',()=>videoQueryService.list(scope,{limit:60})) as {total:number}
+    assert.equal(list.total,1)
+    assert.deepEqual(await measure('desktop-years',()=>videoQueryService.listYears(scope)),[2025])
+    const home=await measure('desktop-home-IPC',()=>handlers.get(IPC.HOME_LOAD)!({}, {seed:'fixture'})) as {libraries:unknown[]}
+    assert.equal(home.libraries.length,1)
+    const search=await measure('desktop-search-IPC',()=>handlers.get(IPC.HOME_SEARCH)!({}, {search:'READ'})) as {total:number}
+    assert.equal(search.total,1)
+    const web=new WebCatalog(db)
+    const browse=await measure('web-browse-search',()=>web.browse(new URLSearchParams('q=READ'))) as {total:number;pageSize:number}
+    assert.equal(browse.total,1);assert.equal(browse.pageSize,36)
+    await measure('web-home',()=>web.home('fixture'))
+    const collections=await measure('web-collections',()=>web.collections()) as {libraries:unknown[]}
+    assert.equal(collections.libraries.length,1)
+    t.diagnostic(JSON.stringify(observed))
+    assert.deepEqual(observed,Object.fromEntries(Object.keys(observed).map(key=>[key,0])),
+      'Current entrypoints still run catalog SQL on the main connection; worker migration required')
+  } finally {
+    try { await client?.dispose() } finally {
+      closeDatabase()
+      if(previous===undefined)delete process.env.JAVDEX_TEST_USER_DATA
+      else process.env.JAVDEX_TEST_USER_DATA=previous
+      fs.rmSync(root,{recursive:true,force:true})
+    }
+  }
+})

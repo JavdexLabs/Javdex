@@ -93,7 +93,7 @@ describe('AgentRunStore', () => {
       store.updateProductState('cancelled', 'cancelled', {})
 
       assert.deepEqual(
-        store.listRecoverableRuns().map((run) => run.id).sort(),
+        [...store.iterateRecoverableRuns('test-agent')].map((run) => run.id).sort(),
         ['cancelled', 'created', 'failed', 'running', 'settled', 'waiting']
       )
     } finally {
@@ -295,5 +295,151 @@ describe('AgentRunStore', () => {
     } finally {
       db.close()
     }
+  })
+})
+
+describe('Agent product journal pagination', () => {
+  it('reads the last cursor through the run/seq index without parsing any payload in a 100k journal', (t) => {
+    const { db, store } = createStore()
+    try {
+      store.createRun({ runId: 'large', useCase: 'test-agent', resolved: resolved(), productState: {} })
+      store.createRun({ runId: 'other', useCase: 'test-agent', resolved: resolved(), productState: {} })
+      assert.equal(store.getProductJournalCursor('large'), 0)
+      assert.equal(store.getProductJournalCursor('missing'), 0)
+      const insert = db.prepare(`INSERT INTO agent_product_journal
+        (run_id, event_type, payload_json, created_at) VALUES (?, 'test', ?, '2026-09-10')`)
+      db.transaction(() => {
+        for (let index = 0; index < 100_000; index++) insert.run('large', 'invalid JSON must not be decoded for a cursor')
+        insert.run('other', '{}')
+      })()
+      const parse = t.mock.method(JSON, 'parse', () => { throw new Error('unexpected payload parse') })
+      const prepare = t.mock.method(db, 'prepare')
+      assert.equal(store.getProductJournalCursor('large'), 100_000)
+      assert.equal(prepare.mock.callCount(), 1)
+      const sql = prepare.mock.calls[0].arguments[0]
+      assert.equal(/payload_json|SELECT\s+\*/i.test(sql), false)
+      const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all('large') as Array<{ detail: string }>
+      assert.ok(plan.some((row) => /COVERING INDEX idx_agent_product_journal_run_seq/.test(row.detail)))
+      assert.equal(plan.some((row) => /TEMP B-TREE|SCAN agent_product_journal/.test(row.detail)), false)
+      assert.equal(parse.mock.callCount(), 0)
+      parse.mock.restore()
+      assert.throws(() => store.readProductJournal('large', 99_999, 1), SyntaxError)
+    } finally {
+      t.mock.restoreAll()
+      db.close()
+    }
+  })
+
+  it('pages with a strict size cap and no cross-run, duplicate or skipped events despite sequence gaps', (t) => {
+    const { db, store } = createStore()
+    try {
+      store.createRun({ runId: 'paged', useCase: 'test-agent', resolved: resolved(), productState: {} })
+      store.createRun({ runId: 'other', useCase: 'test-agent', resolved: resolved(), productState: {} })
+      const expected: number[] = []
+      db.transaction(() => {
+        for (let index = 0; index < 1001; index++) {
+          expected.push(store.appendProductEvent('paged', undefined, 'test', { index }))
+          store.appendProductEvent('other', undefined, 'other', { index })
+        }
+      })()
+      const parse = t.mock.method(JSON, 'parse')
+      const first = store.readProductJournal<{ index: number }>('paged')
+      assert.equal(first.length, 500)
+      assert.equal(parse.mock.callCount(), 500)
+      const second = store.readProductJournal<{ index: number }>('paged', first.at(-1)!.seq)
+      const third = store.readProductJournal<{ index: number }>('paged', second.at(-1)!.seq)
+      assert.equal(second.length, 500)
+      assert.equal(third.length, 1)
+      const all = [...first, ...second, ...third]
+      assert.deepEqual(all.map((row) => row.seq), expected)
+      assert.deepEqual(all.map((row) => row.payload.index), Array.from({ length: 1001 }, (_, index) => index))
+      assert.ok(all.every((row) => row.runId === 'paged'))
+      assert.deepEqual(store.readProductJournal('paged', third[0].seq), [])
+      assert.equal(store.readProductJournal('paged', 0, 1).length, 1)
+      assert.deepEqual(store.readProductJournal('missing'), [])
+      for (const value of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+        assert.throws(() => store.readProductJournal('paged', value), /cursor/)
+      }
+      for (const value of [0, -1, 0.5, 501, NaN, Infinity]) {
+        assert.throws(() => store.readProductJournal('paged', 0, value), /limit/)
+      }
+      assert.equal((db.prepare('SELECT COUNT(*) AS total FROM agent_product_journal').get() as { total: number }).total, 2002)
+    } finally {
+      t.mock.restoreAll()
+      db.close()
+    }
+  })
+})
+
+describe('Agent recovery enumeration', () => {
+  it('filters use case and status before parsing, lazily loads one product, and releases temporary ID pages', (t) => {
+    const { db, store } = createStore()
+    try {
+      const insert = db.prepare(`INSERT INTO agent_runs
+        (id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
+        VALUES (?,?,?,'test',?,'pi',?,'now',?)`)
+      db.transaction(() => {
+        for (let index = 0; index < 10_000; index++) {
+          insert.run(`other-${index}`, 'other', 'waiting_user', 'bad JSON', 'bad JSON', '0')
+          insert.run(`closed-${index}`, 'owned', 'closed', 'bad JSON', 'bad JSON', '0')
+        }
+        insert.run('settled', 'owned', 'settled', 'bad JSON', 'bad JSON', '0')
+        for (let index = 0; index < 260; index++) {
+          insert.run(`owned-${index}`, 'owned', 'waiting_user', '{}', JSON.stringify({ index }), String(1000 - index).padStart(4, '0'))
+        }
+      })()
+      const get = t.mock.method(store, 'getRun')
+      const iter = store.iterateRecoverableRuns('owned', ['waiting_user'])
+      assert.equal(get.mock.callCount(), 0)
+      assert.equal(iter.next().value!.id, 'owned-259')
+      assert.equal(get.mock.callCount(), 1)
+      assert.equal((db.prepare("SELECT COUNT(*) AS total FROM sqlite_temp_master WHERE name LIKE 'agent_restore_%'")
+        .get() as { total: number }).total, 1)
+      iter.return(undefined)
+      assert.equal((db.prepare("SELECT COUNT(*) AS total FROM sqlite_temp_master WHERE name LIKE 'agent_restore_%'")
+        .get() as { total: number }).total, 0)
+      assert.equal([...store.iterateRecoverableRuns('owned', ['waiting_user'])].length, 260)
+      assert.equal(get.mock.callCount(), 261, 'only the one early result plus owned eligible records are parsed')
+      assert.deepEqual([...store.iterateRecoverableRunIds('owned', ['settled'])], ['settled'], 'ID-only cleanup must not parse corrupt payloads')
+      assert.deepEqual([...store.iterateRecoverableRuns('owned', [])], [])
+    } finally {
+      t.mock.restoreAll()
+      db.close()
+    }
+  })
+
+  it('keeps the original recovery order across pages while timestamps change and excludes runs created mid-iteration', () => {
+    const { db, store } = createStore()
+    try {
+      for (let index = 0; index < 260; index++) {
+        store.createRun({ runId: `run-${index}`, useCase: 'owned', resolved: resolved(), productState: {} })
+        db.prepare('UPDATE agent_runs SET updated_at = ? WHERE id = ?').run(String(1000 - index).padStart(4, '0'), `run-${index}`)
+      }
+      const seen: string[] = []
+      for (const run of store.iterateRecoverableRuns('owned')) {
+        seen.push(run.id)
+        store.updateProductState(run.id, 'waiting_user', { restored: true })
+        if (seen.length === 1) {
+          store.createRun({ runId: 'new-run', useCase: 'owned', resolved: resolved(), productState: {} })
+          store.closeRun('run-0')
+        }
+      }
+      assert.deepEqual(seen, Array.from({ length: 259 }, (_, index) => `run-${259 - index}`))
+      assert.equal(new Set(seen).size, 259)
+      assert.equal((db.prepare("SELECT COUNT(*) AS total FROM sqlite_temp_master WHERE name LIKE 'agent_restore_%'")
+        .get() as { total: number }).total, 0)
+      assert.throws(() => [...store.iterateRecoverableRuns(' ')], /must not be empty/)
+    } finally { db.close() }
+  })
+
+  it('drops the temporary snapshot if an owned payload cannot be parsed', () => {
+    const { db, store } = createStore()
+    try {
+      store.createRun({ runId: 'bad-owned', useCase: 'owned', resolved: resolved(), productState: {} })
+      db.prepare("UPDATE agent_runs SET product_state_json = 'bad JSON' WHERE id = 'bad-owned'").run()
+      assert.throws(() => [...store.iterateRecoverableRuns('owned')], SyntaxError)
+      assert.equal((db.prepare("SELECT COUNT(*) AS total FROM sqlite_temp_master WHERE name LIKE 'agent_restore_%'")
+        .get() as { total: number }).total, 0)
+    } finally { db.close() }
   })
 })

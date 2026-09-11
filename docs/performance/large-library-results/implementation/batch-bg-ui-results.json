@@ -1,0 +1,224 @@
+[
+  {
+    "viewport": {
+      "width": 1000,
+      "height": 640
+    },
+    "geometry": {
+      "width": 1000,
+      "scrollWidth": 1000
+    },
+    "pager": {
+      "x": 163,
+      "y": 500,
+      "width": 674,
+      "height": 32
+    },
+    "rowGeometry": [
+      {
+        "rowTop": 122,
+        "rowBottom": 176,
+        "avatarTop": 130,
+        "avatarBottom": 168,
+        "avatarWidth": 38,
+        "avatarRadius": "50%"
+      },
+      {
+        "rowTop": 182,
+        "rowBottom": 236,
+        "avatarTop": 190,
+        "avatarBottom": 228,
+        "avatarWidth": 38,
+        "avatarRadius": "50%"
+      },
+      {
+        "rowTop": 242,
+        "rowBottom": 296,
+        "avatarTop": 250,
+        "avatarBottom": 288,
+        "avatarWidth": 38,
+        "avatarRadius": "50%"
+      },
+      {
+        "rowTop": 302,
+        "rowBottom": 356,
+        "avatarTop": 310,
+        "avatarBottom": 348,
+        "avatarWidth": 38,
+        "avatarRadius": "50%"
+      },
+      {
+        "rowTop": 362,
+        "rowBottom": 416,
+        "avatarTop": 370,
+        "avatarBottom": 408,
+        "avatarWidth": 38,
+        "avatarRadius": "50%"
+      }
+    ],
+    "calls": [
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 0
+      },
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 40
+      },
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 80
+      },
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 40
+      },
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 0
+      },
+      {
+        "search": "Candidate-100",
+        "limit": 40,
+        "offset": 0
+      },
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 0
+      },
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 40
+      },
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 40
+      },
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 0
+      }
+    ],
+    "errors": []
+  },
+  {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "geometry": {
+      "width": 1440,
+      "scrollWidth": 1440
+    },
+    "pager": {
+      "x": 383,
+      "y": 694,
+      "width": 674,
+      "height": 32
+    },
+    "rowGeometry": [
+      {
+        "rowTop": 188,
+        "rowBottom": 242,
+        "avatarTop": 196,
+        "avatarBottom": 234,
+        "avatarWidth": 38,
+        "avatarRadius": "50%"
+      },
+      {
+        "rowTop": 248,
+        "rowBottom": 302,
+        "avatarTop": 256,
+        "avatarBottom": 294,
+        "avatarWidth": 38,
+        "avatarRadius": "50%"
+      },
+      {
+        "rowTop": 308,
+        "rowBottom": 362,
+        "avatarTop": 316,
+        "avatarBottom": 354,
+        "avatarWidth": 38,
+        "avatarRadius": "50%"
+      },
+      {
+        "rowTop": 368,
+        "rowBottom": 422,
+        "avatarTop": 376,
+        "avatarBottom": 414,
+        "avatarWidth": 38,
+        "avatarRadius": "50%"
+      },
+      {
+        "rowTop": 428,
+        "rowBottom": 482,
+        "avatarTop": 436,
+        "avatarBottom": 474,
+        "avatarWidth": 38,
+        "avatarRadius": "50%"
+      }
+    ],
+    "calls": [
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 0
+      },
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 40
+      },
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 80
+      },
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 40
+      },
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 0
+      },
+      {
+        "search": "Candidate-100",
+        "limit": 40,
+        "offset": 0
+      },
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 0
+      },
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 40
+      },
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 40
+      },
+      {
+        "search": "",
+        "limit": 40,
+        "offset": 0
+      }
+    ],
+    "errors": []
+  }
+]

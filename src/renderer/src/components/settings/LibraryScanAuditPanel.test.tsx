@@ -7,14 +7,36 @@ import type {
   LibraryScanLatestSnapshot,
   LibraryScanSummary
 } from '@shared/libraryTypes'
+import { buildScanAuditViewItems } from '@shared/scanAuditView'
+import type { ScanAuditSnapshotIdentity, ScanAuditViewQuery } from '@shared/scanAuditReadTypes'
 import type { PendingItemKey } from '../../listView/pendingRoutes'
+
+let fixtureAudit: LibraryScanAudit | null = null
+let fixtureUnrecognized: LibraryScanLatestSnapshot['unrecognized'] = []
+function getAuditViewPage(snapshot: ScanAuditSnapshotIdentity, query: ScanAuditViewQuery) {
+  const items = buildScanAuditViewItems({ audit: fixtureAudit, unrecognized: fixtureUnrecognized,
+    activeTab: query.tab, outcome: query.outcome ?? 'all', changesFilter: query.changesFilter ?? 'all' })
+  const offset = query.offset ?? 0
+  return Promise.resolve({ snapshot, items: items.slice(offset, offset + 100), total: items.length,
+    limit: 100, offset, anchorOffset: null, auditAvailable: fixtureAudit !== null,
+    attentionBadgeCount: buildScanAuditViewItems({ audit: fixtureAudit, unrecognized: fixtureUnrecognized,
+      activeTab: 'failed', outcome: 'all', changesFilter: 'all' }).length })
+}
+
+let presentIds = new Set<number>()
+let presentIdentities = new Set<number>()
+let presentGroups = new Set<number>()
+const presenceRequests: number[][] = []
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 Object.defineProperty(globalThis, 'window', {
   configurable: true,
   value: {
     api: {
-      scan: { revealAuditFile: async () => ({ ok: true }) },
+      scan: { getAuditViewPage, pendingAuditPresence: async (_libraryId:number, ids:{groupIds:number[];identityIds:number[];scrapeIds:number[]}) => {
+        presenceRequests.push([...ids.groupIds,...ids.identityIds,...ids.scrapeIds]);
+        return {groupIds:ids.groupIds.filter(id=>presentGroups.has(id)),identityIds:ids.identityIds.filter(id=>presentIdentities.has(id)),scrapeIds:ids.scrapeIds.filter(id=>presentIds.has(id))}
+      }, revealAuditFile: async () => ({ ok: true }) },
       videos: { list: async () => ({ items: [], total: 0 }) }
     },
     setTimeout,
@@ -29,6 +51,8 @@ let renderer: TestRenderer.ReactTestRenderer | null = null
 afterEach(() => {
   renderer?.unmount()
   renderer = null
+  presenceRequests.length = 0
+  presentIds = new Set()
 })
 
 function summary(overrides: Partial<LibraryScanSummary> = {}): LibraryScanSummary {
@@ -78,6 +102,7 @@ async function renderPanel({
   scanSummary,
   scanAudit,
   unrecognized = [],
+  currentPendingGroupIds = new Set(),
   currentPendingIdentityIds = new Set(),
   currentPendingScrapeIds = new Set(),
   onOpenPending = () => undefined
@@ -85,23 +110,25 @@ async function renderPanel({
   scanSummary: LibraryScanSummary
   scanAudit: LibraryScanAudit | null
   unrecognized?: LibraryScanLatestSnapshot['unrecognized']
+  currentPendingGroupIds?: Set<number>
   currentPendingIdentityIds?: Set<number>
   currentPendingScrapeIds?: Set<number>
   onOpenPending?: (target: PendingItemKey) => void
 }): Promise<void> {
+  fixtureAudit = scanAudit
+  fixtureUnrecognized = unrecognized
+  presentIds = currentPendingScrapeIds
+  presentIdentities = currentPendingIdentityIds
+  presentGroups = currentPendingGroupIds
   const { default: LibraryScanAuditPanel } = await import('./LibraryScanAuditPanel')
-  act(() => {
+  await act(async () => {
     renderer = TestRenderer.create(
       <LibraryScanAuditPanel
         summary={scanSummary}
-        audit={scanAudit}
+        revision={1}
+        onRefreshHistory={async () => undefined}
         selected={null}
-        unrecognized={unrecognized}
-        currentPendingGroupIds={new Set()}
-        currentPendingIdentityIds={currentPendingIdentityIds}
-        currentPendingScrapeIds={currentPendingScrapeIds}
         onSelect={() => undefined}
-        onResolvedUnrecognized={() => undefined}
         onOpenVideo={() => undefined}
         onOpenPending={onOpenPending}
       />
@@ -175,7 +202,7 @@ describe('LibraryScanAuditPanel', () => {
         button.findAllByType('span').some((span) => span.children.includes('全部文件'))
       )
     assert.ok(allFilesTab)
-    act(() => allFilesTab.props.onClick())
+    await act(async () => allFilesTab.props.onClick())
 
     const output = JSON.stringify(renderer?.toJSON())
     assert.match(output, /处理/)
@@ -328,4 +355,45 @@ describe('LibraryScanAuditPanel', () => {
     )
     assert.match(output, /远程图片已忽略/)
   })
+})
+
+
+it('limits a large failed audit to100 visible rows and queries only their pending IDs',async()=>{
+  const files: LibraryScanAudit['files']=Array.from({length:201},(_,i)=>({
+    outcome:'added',rootId:1,sourceKind:'local',filePath:`/synthetic/FILE-${i+1}.mp4`,videoId:i+1,videoCode:`FILE-${i+1}`,
+    resourceId:i+1,resourceKind:'local',createdVideo:true,nfo:{disposition:'pending-candidate',pendingScrapeId:i+1}
+  }))
+  await renderPanel({scanSummary:summary({scannedFiles:201}),scanAudit:{...audit(files),schemaVersion:2},currentPendingScrapeIds:new Set([1,101,201])})
+  assert.deepEqual(presenceRequests[0],Array.from({length:100},(_,i)=>i+1))
+  assert.equal(renderer!.root.findAll(node=>node.props['data-audit-anchor']).length,100)
+  const next=()=>renderer!.root.findAllByType('button').find(node=>node.children.includes('下一页'))!
+  await act(async()=>next().props.onClick())
+  assert.deepEqual(presenceRequests.at(-1),Array.from({length:100},(_,i)=>101+i))
+  await act(async()=>next().props.onClick())
+  assert.deepEqual(presenceRequests.at(-1),[201])
+  assert.equal(renderer!.root.findAll(node=>node.props['data-audit-anchor']).length,1)
+  assert.ok(presenceRequests.every(ids=>ids.length<=100))
+})
+
+
+it('routes all three kinds from one mixed pending presence response',async()=>{
+  const opened:PendingItemKey[]=[]
+  const files:LibraryScanAudit['files']=[
+    {outcome:'added',rootId:1,sourceKind:'local',filePath:'/identity.mp4',videoId:1,videoCode:'IDENTITY',resourceId:1,resourceKind:'local',createdVideo:true,nfo:{disposition:'identity-conflict',pendingIdentityId:7}},
+    {outcome:'added',rootId:1,sourceKind:'local',filePath:'/scrape.mp4',videoId:2,videoCode:'SCRAPE',resourceId:2,resourceKind:'local',createdVideo:true,nfo:{disposition:'pending-candidate',pendingScrapeId:8}}
+  ]
+  await renderPanel({scanSummary:summary(),scanAudit:{...audit(files),schemaVersion:2,pendingGroups:[{groupId:9,normalizedCode:'GROUP',resourceCount:1}]},currentPendingGroupIds:new Set([9]),currentPendingIdentityIds:new Set([7]),currentPendingScrapeIds:new Set([8]),onOpenPending:target=>opened.push(target)})
+  assert.deepEqual(presenceRequests,[ [9,7,8] ])
+  const buttons=renderer!.root.findAllByType('button').filter(node=>node.children.includes('处理待办'))
+  assert.equal(buttons.length,3)
+  act(()=>buttons.forEach(button=>button.props.onClick()))
+  assert.deepEqual(opened,[{domain:'scan',id:'identity-7'},{domain:'scrape',id:'8'},{domain:'scan',id:'9'}])
+})
+
+
+it('keeps a stable audit anchor when a historical group is no longer pending',async()=>{
+ await renderPanel({scanSummary:summary(),scanAudit:{...audit([]),pendingGroups:[{groupId:9,normalizedCode:'GONE',resourceCount:1}]}})
+ assert.equal(renderer!.root.findAllByProps({'data-audit-anchor':'group:9'}).length,1)
+ assert.equal(renderer!.root.findAllByType('button').filter(node=>node.children.includes('处理待办')).length,0)
+ assert.match(JSON.stringify(renderer!.toJSON()),/已处理/)
 })

@@ -1,5 +1,6 @@
 import { ALL_VIDEO_SCRAPE_FIELDS, type VideoScrapeField } from '@shared/videoScrapeTypes'
 import { LOCAL_NFO_SOURCE_NAME } from '@shared/videoMetadataSourceConstants'
+import { getDb } from '../db/database'
 import { getVideoById } from '../db/videoRepo'
 import { replacePendingVideoScrape } from '../db/pendingVideoScrapeRepo'
 import {
@@ -33,7 +34,10 @@ export interface LocalNfoScanApplyResult {
 
 export interface LocalNfoScanService {
   inspectIdentity(anchor: LocalNfoAnchor): LocalNfoIdentityInspection
-  apply(videoId: number, code: string, anchors: readonly LocalNfoAnchor[]): Promise<LocalNfoScanApplyResult>
+  /** Before DB commit, not proof of commit. No-write outcomes may run without a business transaction.
+   * Returned warnings may grow during post-commit asset handling. */
+  apply(videoId: number, code: string, anchors: readonly LocalNfoAnchor[],
+    beforeCommit?: (result: LocalNfoScanApplyResult) => void): Promise<LocalNfoScanApplyResult>
 }
 
 const SCAN_FIELDS = ALL_VIDEO_SCRAPE_FIELDS.filter((field) =>
@@ -46,10 +50,19 @@ export function createLocalNfoScanService(
   return {
     inspectIdentity: (anchor) => source.inspectIdentity(anchor),
 
-    async apply(videoId, code, anchors) {
+    async apply(videoId, code, anchors, beforeCommit) {
+      const notify = (result: LocalNfoScanApplyResult): LocalNfoScanApplyResult => {
+        const returned: unknown = beforeCommit?.(result)
+        if (returned != null && (typeof returned === 'object' || typeof returned === 'function') &&
+            typeof (returned as { then?: unknown }).then === 'function') {
+          void Promise.resolve(returned).catch(() => {})
+          throw new Error('NFO commit callback must be synchronous')
+        }
+        return result
+      }
       const video = getVideoById(videoId)
-      if (!video) return { disposition: 'warning', warnings: ['NFO 目标影片不存在'] }
-      if (video.scraped_status === 1) return { disposition: 'skipped', warnings: [] }
+      if (!video) return notify({ disposition: 'warning', warnings: ['NFO 目标影片不存在'] })
+      if (video.scraped_status === 1) return notify({ disposition: 'skipped', warnings: [] })
 
       const effective = resolveEffectiveVideoScrapeFields(
         videoId,
@@ -58,7 +71,7 @@ export function createLocalNfoScanService(
         LOCAL_NFO_SOURCE_NAME,
         LOCAL_NFO_SOURCE_NAME
       )
-      if (effective.length === 0) return { disposition: 'skipped', warnings: [] }
+      if (effective.length === 0) return notify({ disposition: 'skipped', warnings: [] })
       const collected = await source.collectFromAnchors(
         {
           target: { kind: 'video', videoId, code },
@@ -67,10 +80,10 @@ export function createLocalNfoScanService(
         anchors
       )
       if (collected.candidates.length === 0) {
-        return {
+        return notify({
           disposition: collected.warnings.length > 0 ? 'warning' : 'none',
           warnings: collected.warnings
-        }
+        })
       }
 
       const identityConflictVideoId =
@@ -92,43 +105,51 @@ export function createLocalNfoScanService(
         })
         const persisted = await mediaAssetStore.coordinateDatabaseChange(async () => {
           const staged = await candidateStager.stageForPending(collected.candidates)
-          const pending = replacePendingVideoScrape({
-            videoId,
-            selectedFields: SCAN_FIELDS,
-            applicableFields: effective,
-            updateMode: 'fillEmpty',
-            request: {
-              scraperName: LOCAL_NFO_SOURCE_NAME,
-              fields: SCAN_FIELDS,
-              mode: 'fillEmpty'
-            },
-            warnings: [
-              ...collected.warnings,
-              ...(identityConflictVideoId == null
-                ? []
-                : [`候选会与影片 ID ${identityConflictVideoId} 的业务身份冲突`]),
-              ...staged.warnings
-            ],
-            sources: [
-              {
-                pluginName: LOCAL_NFO_SOURCE_NAME,
-                pluginSource: 'builtin',
-                pluginVersion: '1',
-                pluginConfig: { sourceId: 'local-nfo', supportedFields: SCAN_FIELDS },
-                sourceName: LOCAL_NFO_SOURCE_NAME,
-                selectedFields: effective,
-                candidates: staged.candidates
-              }
-            ]
-          })
-          return { pending, stageWarnings: staged.warnings }
+          return getDb().transaction(() => {
+            const pending = replacePendingVideoScrape({
+              videoId,
+              selectedFields: SCAN_FIELDS,
+              applicableFields: effective,
+              updateMode: 'fillEmpty',
+              request: {
+                scraperName: LOCAL_NFO_SOURCE_NAME,
+                fields: SCAN_FIELDS,
+                mode: 'fillEmpty'
+              },
+              warnings: [
+                ...collected.warnings,
+                ...(identityConflictVideoId == null
+                  ? []
+                  : [`候选会与影片 ID ${identityConflictVideoId} 的业务身份冲突`]),
+                ...staged.warnings
+              ],
+              sources: [
+                {
+                  pluginName: LOCAL_NFO_SOURCE_NAME,
+                  pluginSource: 'builtin',
+                  pluginVersion: '1',
+                  pluginConfig: { sourceId: 'local-nfo', supportedFields: SCAN_FIELDS },
+                  sourceName: LOCAL_NFO_SOURCE_NAME,
+                  selectedFields: effective,
+                  candidates: staged.candidates
+                }
+              ]
+            })
+            const result = notify({
+              disposition: 'pending-candidate',
+              warnings: [...collected.warnings, ...staged.warnings],
+              pendingScrapeId: pending.pendingScrapeId
+            })
+            return { pending, result }
+          })()
+
         })
-        mediaAssetStore.cleanupVideoScrapeStagingPaths(persisted.pending.obsoletePaths)
-        return {
-          disposition: 'pending-candidate',
-          warnings: [...collected.warnings, ...persisted.stageWarnings],
-          pendingScrapeId: persisted.pending.pendingScrapeId
+        try {
+          mediaAssetStore.cleanupVideoScrapeStagingPaths(persisted.pending.obsoletePaths)
+        } catch (error) {
+          persisted.result.warnings.push(`NFO 旧候选资源清理失败：${(error as Error).message}`)
         }
+        return persisted.result
       }
 
       const candidateStager = createVideoMetadataCandidateStager({
@@ -148,7 +169,11 @@ export function createLocalNfoScanService(
         mode: 'fillEmpty',
         sourceName: LOCAL_NFO_SOURCE_NAME,
         ratingSourceName: LOCAL_NFO_SOURCE_NAME,
-        classificationOptions: { directorAmbiguity: 'preserve' }
+        classificationOptions: { directorAmbiguity: 'preserve' },
+        beforeCommit: (result) => {
+          notify({ disposition: result.applied ? 'imported' : 'skipped',
+            warnings: [...collected.warnings, ...result.warnings] })
+        }
       })
       return {
         disposition: delivery.applied ? 'imported' : 'skipped',

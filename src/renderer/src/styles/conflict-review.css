@@ -580,3 +580,13 @@
 .actress-delete-confirmation__error {
   color: var(--text-danger);
 }
+
+
+.conflict-workbench-owner-pagination {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--form-label-gap);
+  color: var(--text-secondary);
+}

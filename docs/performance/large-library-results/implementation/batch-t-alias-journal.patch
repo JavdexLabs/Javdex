@@ -1,0 +1,467 @@
+diff --git a/src/main/services/assetPathAliases.ts b/src/main/services/assetPathAliases.ts
+index 48aa40a..4c4fb01 100644
+--- a/src/main/services/assetPathAliases.ts
++++ b/src/main/services/assetPathAliases.ts
+@@ -1,66 +1,189 @@
+ import fs from 'node:fs'
+ import path from 'node:path'
++import { randomUUID } from 'node:crypto'
+ import { decryptBlob, encryptPlain, isEncryptedBlob } from './assetCrypto'
+ import { aliasStoreAbsAt, ASSET_PATH_ALIAS_FILENAME, resolveMediaAssetsRoot } from './assetStoragePaths'
+ 
+-function aliasStoreAbs(): string {
+-  return aliasStoreAbsAt(resolveMediaAssetsRoot())
++const MAGIC = Buffer.from('JAVDEX-ALIASES-2\n')
++type AliasRecord = { op: 'set'; key: string; value: string } | { op: 'delete'; key: string }
++  | { op: 'snapshot'; aliases: Record<string, string> }
++interface AliasState {
++  file: string
++  signature: string | null
++  aliases: Map<string, string>
++  legacy: boolean
++  validBytes: number
++  snapshotBytes: number
++  tailBytes: number
++  records: number
+ }
++let cached: AliasState | undefined
+ 
+-function readAliasMap(): Record<string, string> {
+-  const abs = aliasStoreAbs()
+-  if (!fs.existsSync(abs)) return {}
+-  try {
+-    const raw = fs.readFileSync(abs)
+-    if (!isEncryptedBlob(raw)) return {}
+-    const { data } = decryptBlob(raw)
+-    const parsed = JSON.parse(data.toString('utf8')) as unknown
+-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+-    const out: Record<string, string> = {}
+-    for (const [key, value] of Object.entries(parsed)) {
+-      if (typeof key === 'string' && typeof value === 'string' && key && value) {
+-        out[key] = value
++function syncDirectory(directory: string): void {
++  if (process.platform === 'win32') return
++  const fd = fs.openSync(directory, 'r')
++  try { fs.fsyncSync(fd) } finally { fs.closeSync(fd) }
++}
++
++function signature(stat: fs.Stats): string {
++  return JSON.stringify([stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs])
++}
++
++function fileSignature(file: string): string | null {
++  try { return signature(fs.statSync(file)) }
++  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error }
++}
++
++function readMap(value: unknown): Map<string, string> {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid alias snapshot')
++  const result = new Map<string, string>()
++  for (const [key, alias] of Object.entries(value)) {
++    if (!key || typeof alias !== 'string' || !alias) throw new Error('Invalid asset alias')
++    result.set(key, alias)
++  }
++  return result
++}
++
++function load(): AliasState {
++  const file = aliasStoreAbsAt(resolveMediaAssetsRoot())
++  const stamp = fileSignature(file)
++  if (cached?.file === file && cached.signature === stamp) return cached
++  const state: AliasState = { file, signature: stamp, aliases: new Map(), legacy: false,
++    validBytes: 0, snapshotBytes: 0, tailBytes: 0, records: 0 }
++  if (stamp !== null) {
++    const raw = fs.readFileSync(file)
++    if (isEncryptedBlob(raw)) {
++      state.aliases = readMap(JSON.parse(decryptBlob(raw).data.toString('utf8')))
++      state.legacy = true
++      state.validBytes = raw.length
++    } else {
++      if (!raw.subarray(0, MAGIC.length).equals(MAGIC)) throw new Error('Invalid asset alias journal')
++      let offset = MAGIC.length
++      while (offset < raw.length) {
++        if (raw.length - offset < 8) {
++          if (offset === MAGIC.length) throw new Error('Incomplete alias snapshot')
++          break
++        }
++        const length = raw.readUInt32LE(offset)
++        if (!length || raw.readUInt32LE(offset + 4) !== (length ^ 0xffffffff) >>> 0) throw new Error('Invalid alias frame header')
++        if (length > raw.length - offset - 8) {
++          if (offset === MAGIC.length) throw new Error('Incomplete alias snapshot')
++          break
++        }
++        const record = JSON.parse(decryptBlob(raw.subarray(offset + 8, offset + 8 + length)).data.toString('utf8')) as AliasRecord
++        if (record.op === 'snapshot') {
++          if (offset !== MAGIC.length) throw new Error('Unexpected alias snapshot')
++          state.aliases = readMap(record.aliases)
++          state.snapshotBytes = length + 8
++          state.tailBytes = 0
++          state.records = 0
++        } else {
++          if (offset === MAGIC.length) throw new Error('Missing alias snapshot')
++          if (!record.key || typeof record.key !== 'string') throw new Error('Invalid alias record key')
++          if (record.op === 'set' && typeof record.value === 'string' && record.value) state.aliases.set(record.key, record.value)
++          else if (record.op === 'delete') state.aliases.delete(record.key)
++          else throw new Error('Invalid alias operation')
++          state.tailBytes += length + 8
++          state.records++
++        }
++        offset += length + 8
+       }
++      if (offset === MAGIC.length) throw new Error('Missing alias snapshot')
++      state.validBytes = offset
+     }
+-    return out
+-  } catch {
+-    return {}
++    if (fileSignature(file) !== stamp) throw new Error('Alias file changed while reading')
+   }
++  cached = state
++  return state
+ }
+ 
+-function writeAliasMap(map: Record<string, string>): void {
+-  const abs = aliasStoreAbs()
+-  fs.mkdirSync(path.dirname(abs), { recursive: true })
+-  const json = JSON.stringify(map)
+-  const tmp = `${abs}.tmp-${process.pid}`
+-  fs.writeFileSync(tmp, encryptPlain(Buffer.from(json, 'utf8'), '.json'))
+-  fs.renameSync(tmp, abs)
++function frame(record: AliasRecord): Buffer {
++  const encrypted = encryptPlain(Buffer.from(JSON.stringify(record)), '.json')
++  const header = Buffer.alloc(8)
++  header.writeUInt32LE(encrypted.length)
++  header.writeUInt32LE((encrypted.length ^ 0xffffffff) >>> 0, 4)
++  return Buffer.concat([header, encrypted])
+ }
+ 
+-export function getPathAlias(encRel: string): string | undefined {
+-  return readAliasMap()[encRel]
++function writeSnapshot(state: AliasState, aliases: Map<string, string>): void {
++  const body = frame({ op: 'snapshot', aliases: Object.fromEntries(aliases) })
++  fs.mkdirSync(path.dirname(state.file), { recursive: true })
++  const temporary = `${state.file}.${randomUUID()}.tmp`
++  let fd: number | undefined
++  try {
++    fd = fs.openSync(temporary, 'wx')
++    fs.writeFileSync(fd, Buffer.concat([MAGIC, body]))
++    fs.fsyncSync(fd)
++    fs.closeSync(fd)
++    fd = undefined
++    fs.renameSync(temporary, state.file)
++    syncDirectory(path.dirname(state.file))
++  } finally {
++    if (fd !== undefined) fs.closeSync(fd)
++    if (fs.existsSync(temporary)) fs.unlinkSync(temporary)
++  }
++  cached = { ...state, aliases, signature: fileSignature(state.file), legacy: false,
++    validBytes: MAGIC.length + body.length, snapshotBytes: body.length, tailBytes: 0, records: 0 }
++}
++
++function update(record: Exclude<AliasRecord, { op: 'snapshot' }>): void {
++  const state = load()
++  try {
++    if (state.legacy || state.signature === null) {
++      const aliases = new Map(state.aliases)
++      if (record.op === 'set') aliases.set(record.key, record.value)
++      else aliases.delete(record.key)
++      writeSnapshot(state, aliases)
++      return
++    }
++    const body = frame(record)
++    const fd = fs.openSync(state.file, 'r+')
++    try {
++      if (signature(fs.fstatSync(fd)) !== state.signature) throw new Error('Alias file changed before append')
++      fs.ftruncateSync(fd, state.validBytes)
++      let written = 0
++      while (written < body.length) {
++        const count = fs.writeSync(fd, body, written, body.length - written, state.validBytes + written)
++        if (!count) throw new Error('Incomplete alias write')
++        written += count
++      }
++      fs.fsyncSync(fd)
++      if (signature(fs.fstatSync(fd)) !== fileSignature(state.file)) throw new Error('Alias file replaced during append')
++    } finally { fs.closeSync(fd) }
++    if (record.op === 'set') state.aliases.set(record.key, record.value)
++    else state.aliases.delete(record.key)
++    state.validBytes += body.length
++    state.tailBytes += body.length
++    state.records++
++    state.signature = fileSignature(state.file)
++    // Both thresholds prevent repeated whole-map rewrites as the live map grows.
++    if (state.records >= 4096 && state.tailBytes >= state.snapshotBytes) {
++      try { writeSnapshot(state, state.aliases) }
++      catch (error) { cached = undefined; console.error('Alias journal compaction failed:', error) }
++    }
++  } catch (error) { cached = undefined; throw error }
+ }
+ 
++export function getPathAlias(encRel: string): string | undefined { return load().aliases.get(encRel) }
++
+ export function setPathAlias(encRel: string, plainRel: string): void {
+-  const map = readAliasMap()
+-  map[encRel] = plainRel
+-  writeAliasMap(map)
++  if (!encRel || !plainRel) throw new Error('Asset aliases must not be empty')
++  if (load().aliases.get(encRel) !== plainRel) update({ op: 'set', key: encRel, value: plainRel })
+ }
+ 
+ export function removePathAlias(encRel: string): void {
+-  const map = readAliasMap()
+-  if (!(encRel in map)) return
+-  delete map[encRel]
+-  if (Object.keys(map).length === 0) {
+-    clearPathAliasStore()
+-    return
+-  }
+-  writeAliasMap(map)
++  const state = load()
++  if (!state.aliases.has(encRel)) return
++  if (state.aliases.size === 1) clearPathAliasStore()
++  else update({ op: 'delete', key: encRel })
+ }
+ 
+ export function clearPathAliasStore(): void {
+-  const abs = aliasStoreAbs()
+-  if (fs.existsSync(abs)) fs.unlinkSync(abs)
++  const file = aliasStoreAbsAt(resolveMediaAssetsRoot())
++  try {
++    if (fs.existsSync(file)) { fs.unlinkSync(file); syncDirectory(path.dirname(file)) }
++  } finally { cached = undefined }
+ }
+ 
++export function resetPathAliasCacheForTests(): void { cached = undefined }
+ export { ASSET_PATH_ALIAS_FILENAME }
+diff --git a/src/main/services/assetPathAliases.test.ts b/src/main/services/assetPathAliases.test.ts
+new file mode 100644
+index 0000000..2837fe6
+--- /dev/null
++++ b/src/main/services/assetPathAliases.test.ts
+@@ -0,0 +1,170 @@
++import { afterEach, beforeEach, it, mock } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import { resetSettingsCacheForTests } from '../settings/settingsStore'
++import { encryptPlain, resetAssetKeyCacheForTests } from './assetCrypto'
++import { aliasStoreAbsAt, resolveMediaAssetsRoot } from './assetStoragePaths'
++import { getPathAlias, setPathAlias, removePathAlias, resetPathAliasCacheForTests } from './assetPathAliases'
++
++let root: string
++let file: string
++let previous: string | undefined
++beforeEach(() => {
++  previous = process.env.JAVDEX_TEST_USER_DATA
++  root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-alias-journal-'))
++  process.env.JAVDEX_TEST_USER_DATA = root
++  resetSettingsCacheForTests()
++  resetAssetKeyCacheForTests()
++  resetPathAliasCacheForTests()
++  file = aliasStoreAbsAt(resolveMediaAssetsRoot())
++  fs.mkdirSync(path.dirname(file), { recursive: true })
++})
++afterEach(() => {
++  mock.restoreAll()
++  resetPathAliasCacheForTests()
++  resetAssetKeyCacheForTests()
++  resetSettingsCacheForTests()
++  if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
++  else process.env.JAVDEX_TEST_USER_DATA = previous
++  fs.rmSync(root, { recursive: true, force: true })
++})
++
++it('reads legacy without rewriting and migrates on mutation preserving all entries', () => {
++  const legacy = encryptPlain(Buffer.from(JSON.stringify({ a: 'old-a', b: 'old-b' })), '.json')
++  fs.writeFileSync(file, legacy)
++  assert.equal(getPathAlias('a'), 'old-a')
++  assert.deepEqual(fs.readFileSync(file), legacy)
++  setPathAlias('c', 'new-c')
++  resetPathAliasCacheForTests()
++  assert.deepEqual(['a', 'b', 'c'].map(getPathAlias), ['old-a', 'old-b', 'new-c'])
++  assert.equal(fs.readFileSync(file).includes(Buffer.from('old-a')), false)
++})
++
++it('does not reread a warm map or append unchanged values; reloads deletions', () => {
++  setPathAlias('a', 'first')
++  const read = mock.method(fs, 'readFileSync')
++  setPathAlias('b', 'second')
++  setPathAlias('a', 'updated')
++  const bytes = fs.statSync(file).size
++  setPathAlias('a', 'updated')
++  removePathAlias('absent')
++  assert.equal(fs.statSync(file).size, bytes)
++  assert.equal(getPathAlias('b'), 'second')
++  assert.equal(read.mock.callCount(), 0)
++  removePathAlias('a')
++  resetPathAliasCacheForTests()
++  assert.equal(getPathAlias('a'), undefined)
++  assert.equal(getPathAlias('b'), 'second')
++  removePathAlias('b')
++  assert.equal(fs.existsSync(file), false)
++})
++
++it('preserves a legacy file when snapshot rename fails', () => {
++  const legacy = encryptPlain(Buffer.from('{"a":"first"}'), '.json')
++  fs.writeFileSync(file, legacy)
++  const rename = mock.method(fs, 'renameSync', () => { throw new Error('disk failure') })
++  assert.throws(() => setPathAlias('b', 'second'), /disk failure/)
++  assert.deepEqual(fs.readFileSync(file), legacy)
++  rename.mock.restore()
++  setPathAlias('b', 'second')
++  assert.equal(getPathAlias('a'), 'first')
++})
++
++it('recovers an interrupted tail and truncates it before retry', () => {
++  setPathAlias('a', 'first')
++  const bytes = fs.statSync(file).size
++  const write = fs.writeSync
++  let calls = 0
++  const fault = mock.method(fs, 'writeSync', ((fd: number, body: Buffer, offset: number, length: number, position: number) => {
++    if (++calls === 1) return write(fd, body, offset, Math.min(12, length), position)
++    throw new Error('interrupted')
++  }) as typeof fs.writeSync)
++  assert.throws(() => setPathAlias('b', 'second'), /interrupted/)
++  fault.mock.restore()
++  assert.equal(fs.statSync(file).size, bytes + 12)
++  assert.equal(getPathAlias('a'), 'first')
++  assert.equal(getPathAlias('b'), undefined)
++  setPathAlias('b', 'second')
++  resetPathAliasCacheForTests()
++  assert.equal(getPathAlias('b'), 'second')
++  assert.equal(getPathAlias('a'), 'first')
++})
++
++it('rejects corrupted complete ciphertext and preserves it on attempted mutation', () => {
++  setPathAlias('a', 'first')
++  setPathAlias('b', 'second')
++  const body = fs.readFileSync(file)
++  body[body.length - 1] ^= 1
++  fs.writeFileSync(file, body)
++  resetPathAliasCacheForTests()
++  assert.throws(() => getPathAlias('a'))
++  assert.throws(() => setPathAlias('c', 'third'))
++  assert.deepEqual(fs.readFileSync(file), body)
++})
++
++it('rejects missing or incomplete first snapshots', () => {
++  setPathAlias('a', 'first')
++  const body = fs.readFileSync(file)
++  for (const size of [16, 20, body.length - 1]) {
++    fs.writeFileSync(file, body.subarray(0, size))
++    resetPathAliasCacheForTests()
++    assert.throws(() => getPathAlias('a'))
++    assert.equal(fs.statSync(file).size, size)
++  }
++})
++
++it('reloads the actual committed record after an uncertain fsync failure', () => {
++  setPathAlias('a', 'first')
++  const fault = mock.method(fs, 'fsyncSync', () => { throw new Error('sync failure') })
++  assert.throws(() => setPathAlias('b', 'second'), /sync failure/)
++  fault.mock.restore()
++  assert.equal(getPathAlias('b'), 'second')
++  const bytes = fs.statSync(file).size
++  setPathAlias('b', 'second')
++  assert.equal(fs.statSync(file).size, bytes)
++})
++
++it('compacts after sustained updates and reloads the latest values', () => {
++  setPathAlias('a', 'first')
++  setPathAlias('b', 'second')
++  for (let index = 0; index < 4096; index++) setPathAlias('a', String(index))
++  assert.ok(fs.statSync(file).size < 1024)
++  resetPathAliasCacheForTests()
++  assert.equal(getPathAlias('a'), '4095')
++  assert.equal(getPathAlias('b'), 'second')
++})
++
++it('preserves the appended result when compaction rename fails', () => {
++  setPathAlias('a', 'first')
++  // Replay a valid encrypted tail to reach the public compaction threshold without
++  // thousands of redundant fsync calls in this fault-only test.
++  setPathAlias('b', 'second')
++  const body = fs.readFileSync(file)
++  const headerSize = Buffer.byteLength('JAVDEX-ALIASES-2\n')
++  const snapshotEnd = headerSize + 8 + body.readUInt32LE(headerSize)
++  const tail = body.subarray(snapshotEnd)
++  fs.appendFileSync(file, Buffer.concat(Array.from({ length: 4094 }, () => tail)))
++  resetPathAliasCacheForTests()
++  const rename = mock.method(fs, 'renameSync', () => { throw new Error('compaction failure') })
++  const log = mock.method(console, 'error', () => {})
++  setPathAlias('c', 'third')
++  assert.equal(log.mock.callCount(), 1)
++  assert.equal(getPathAlias('c'), 'third')
++  assert.equal(getPathAlias('a'), 'first')
++  rename.mock.restore()
++  setPathAlias('d', 'fourth')
++  resetPathAliasCacheForTests()
++  assert.equal(getPathAlias('d'), 'fourth')
++  assert.equal(getPathAlias('c'), 'third')
++})
++
++it('invalidates the cached map after external replacement', () => {
++  setPathAlias('a', 'first')
++  const replacement = `${file}.replacement`
++  fs.writeFileSync(replacement, encryptPlain(Buffer.from('{"b":"second"}'), '.json'))
++  fs.renameSync(replacement, file)
++  assert.equal(getPathAlias('a'), undefined)
++  assert.equal(getPathAlias('b'), 'second')
++})
+diff --git a/scripts/performance/alias-journal-benchmark.ts b/scripts/performance/alias-journal-benchmark.ts
+new file mode 100644
+index 0000000..29211cc
+--- /dev/null
++++ b/scripts/performance/alias-journal-benchmark.ts
+@@ -0,0 +1,51 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import os from 'node:os'
++import path from 'node:path'
++import crypto from 'node:crypto'
++import { resetSettingsCacheForTests } from '../../src/main/settings/settingsStore'
++import { resetAssetKeyCacheForTests } from '../../src/main/services/assetCrypto'
++import { setPathAlias, getPathAlias, resetPathAliasCacheForTests } from '../../src/main/services/assetPathAliases'
++import { aliasStoreAbsAt, resolveMediaAssetsRoot } from '../../src/main/services/assetStoragePaths'
++
++it('measures encrypted journal growth for 1000 and 2000 aliases', (t) => {
++  const previous = process.env.JAVDEX_TEST_USER_DATA
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-alias-bench-'))
++  const results = []
++  try {
++    for (const count of [1000, 2000]) {
++      process.env.JAVDEX_TEST_USER_DATA = path.join(root, String(count))
++      resetSettingsCacheForTests()
++      resetAssetKeyCacheForTests()
++      resetPathAliasCacheForTests()
++      const cipher = t.mock.method(crypto, 'createCipheriv')
++      const started = performance.now()
++      for (let index = 0; index < count; index++) setPathAlias(`covers/${index}.enc`, `covers/film-${index}.jpg`)
++      const elapsedMs = performance.now() - started
++      const encryptionCalls = cipher.mock.callCount()
++      cipher.mock.restore()
++      assert.equal(encryptionCalls, count)
++      const journalBytes = fs.statSync(aliasStoreAbsAt(resolveMediaAssetsRoot())).size
++      resetPathAliasCacheForTests()
++      for (let index = 0; index < count; index++) assert.equal(getPathAlias(`covers/${index}.enc`), `covers/film-${index}.jpg`)
++      results.push({ aliases: count, journalBytes, encryptionCalls, elapsedMs })
++    }
++    assert.ok(results[1].journalBytes / results[0].journalBytes < 2.1)
++    const report = { measuredAt: new Date().toISOString(), runtime: process.versions, results,
++      notes: ['Real temporary files with fsync, on macOS local storage; not Windows/HDD or p95.',
++        'Journal file size and encryption invocation count, not total physical device writes.',
++        'Below compaction threshold; cold full-file replay and total map memory remain unbounded by a fixed budget.'] }
++    const json = JSON.stringify(report, null, 2) + '\n'
++    if (process.env.JAVDEX_ALIAS_BENCH_OUTPUT) fs.writeFileSync(process.env.JAVDEX_ALIAS_BENCH_OUTPUT, json)
++    else process.stdout.write(json)
++  } finally {
++    t.mock.restoreAll()
++    resetPathAliasCacheForTests()
++    resetAssetKeyCacheForTests()
++    resetSettingsCacheForTests()
++    if (previous === undefined) delete process.env.JAVDEX_TEST_USER_DATA
++    else process.env.JAVDEX_TEST_USER_DATA = previous
++    fs.rmSync(root, { recursive: true, force: true })
++  }
++})

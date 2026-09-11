@@ -29,12 +29,12 @@ afterEach(() => {
   fs.rmSync(tempRoot, { recursive: true, force: true })
 })
 
-function persistSuccessfulRun(input: {
+function beginSuccessfulRun(input: {
   libraryId: number
   rootId: number
   runId: string
   filePath: string
-}): void {
+}): Parameters<typeof finishLibraryScanRun>[0] {
   const startedAt = '2026-08-29T01:00:00.000Z'
   const finishedAt = '2026-08-29T01:00:01.000Z'
   const summary: LibraryScanSummary = {
@@ -87,7 +87,7 @@ function persistSuccessfulRun(input: {
     trigger: 'manual',
     startedAt
   })
-  finishLibraryScanRun({
+  return {
     libraryId: input.libraryId,
     runId: input.runId,
     status: 'completed',
@@ -102,10 +102,51 @@ function persistSuccessfulRun(input: {
         reason: 'unrecognized_code'
       }
     ]
-  })
+  }
+}
+
+function persistSuccessfulRun(input: Parameters<typeof beginSuccessfulRun>[0]): void {
+  finishLibraryScanRun(beginSuccessfulRun(input))
 }
 
 describe('libraryScanRepo latest snapshot', () => {
+  it('keeps a valid summary pinned to its run when its audit is NULL', () => {
+    const directory = path.join(tempRoot, 'pinned-audit')
+    fs.mkdirSync(directory)
+    const library = createMediaLibrary({ name: 'Pinned', roots: [{ path: directory }] })
+    for (const runId of ['older-audit', 'summary-run']) {
+      persistSuccessfulRun({ libraryId: library.id, rootId: library.roots[0].id, runId,
+        filePath: path.join(directory, `${runId}.mp4`) })
+    }
+    getDb().prepare('UPDATE library_scan_runs SET audit_json = NULL WHERE id = ?').run('summary-run')
+    const snapshot = getLatestLibraryScanSnapshot(library.id)
+    assert.equal(snapshot.summary?.runId, 'summary-run')
+    assert.equal(snapshot.audit, null)
+  })
+
+  it('falls back for malformed summary by timestamp then id, excluding NULL bodies without a status filter', () => {
+    const directory = path.join(tempRoot, 'fallback-audit')
+    fs.mkdirSync(directory)
+    const library = createMediaLibrary({ name: 'Fallback', roots: [{ path: directory }] })
+    for (const runId of ['z-older', 'a-newer', 'b-newer', 'c-null']) {
+      persistSuccessfulRun({ libraryId: library.id, rootId: library.roots[0].id, runId,
+        filePath: path.join(directory, `${runId}.mp4`) })
+    }
+    const db = getDb()
+    db.prepare('UPDATE media_library_scan_state SET last_summary_json = ? WHERE library_id = ?')
+      .run('{malformed', library.id)
+    db.prepare('UPDATE library_scan_runs SET started_at = ? WHERE id <> ? AND library_id = ?')
+      .run('2026-09-01T00:00:00.000Z', 'z-older', library.id)
+    db.prepare("UPDATE library_scan_runs SET status = 'running' WHERE id = ?").run('b-newer')
+    db.prepare('UPDATE library_scan_runs SET audit_json = NULL WHERE id = ?').run('c-null')
+    const snapshot = getLatestLibraryScanSnapshot(library.id)
+    assert.equal(snapshot.summary, null)
+    assert.equal(snapshot.audit?.runId, 'b-newer')
+
+    db.prepare('UPDATE library_scan_runs SET audit_json = ? WHERE id = ?').run('{malformed', 'b-newer')
+    assert.equal(getLatestLibraryScanSnapshot(library.id).audit, null)
+  })
+
   it('updates the pending path after a rename without rewriting the original scan audit', () => {
     const directory = path.join(tempRoot, 'library')
     fs.mkdirSync(directory)
@@ -348,4 +389,223 @@ describe('libraryScanRepo latest snapshot', () => {
     })
     assert.throws(() => getLatestLibraryScanSnapshot(99_999), /媒体库不存在/)
   })
+})
+
+it('reads a scoped audit header without loading audit JSON or pending path arrays',async()=>{
+ const {readScanAuditHeader}=await import('../services/scanAuditReadHeader')
+ const directory=path.join(tempRoot,'header');fs.mkdirSync(directory)
+ const library=createMediaLibrary({name:'Header',roots:[{path:directory}]})
+ persistSuccessfulRun({libraryId:library.id,rootId:library.roots[0].id,runId:'header-run',filePath:path.join(directory,'unknown.mp4')})
+ const expected=getLatestLibraryScanSnapshot(library.id),db=getDb(),prepare=db.prepare.bind(db),queries:string[]=[]
+ // The header must not parse even an invalid/large audit body; the page reader validates it separately.
+ db.prepare('UPDATE library_scan_runs SET audit_json=? WHERE id=?').run('x'.repeat(2*1024*1024),'header-run')
+ db.prepare=((sql:string)=>{queries.push(sql);assert.doesNotMatch(sql,/SELECT\s+audit_json|json_each|json_extract|SELECT\s+root_id,\s*file_path/i);return prepare(sql)}) as typeof db.prepare
+ try{
+  const header=readScanAuditHeader(db,library.id)
+  assert.deepEqual(header,{summary:expected.summary,snapshot:{libraryId:library.id,runId:'header-run',finishedAt:expected.summary!.finishedAt},unrecognizedCount:1})
+  assert.ok(queries.some(sql=>sql.includes('COUNT(*)')))
+  assert.equal('audit' in header,false);assert.equal('unrecognized' in header,false)
+  assert.throws(()=>readScanAuditHeader(db,0),/ID/)
+  assert.throws(()=>readScanAuditHeader(db,99999),/不存在/)
+ }finally{db.prepare=prepare}
+})
+
+it('keeps summary failure semantics and rejects oversized summary/header payloads',async()=>{
+ const {readScanAuditHeader}=await import('../services/scanAuditReadHeader'),{SCAN_AUDIT_HEADER_BYTES}=await import('../services/scanAuditReadPolicy')
+ const directory=path.join(tempRoot,'header-errors');fs.mkdirSync(directory)
+ const library=createMediaLibrary({name:'Header errors',roots:[{path:directory}]})
+ persistSuccessfulRun({libraryId:library.id,rootId:library.roots[0].id,runId:'header-errors',filePath:path.join(directory,'unknown.mp4')})
+ const db=getDb(),expected=getLatestLibraryScanSnapshot(library.id).summary!
+ const update=(value:string)=>db.prepare('UPDATE media_library_scan_state SET last_summary_json=? WHERE library_id=?').run(value,library.id)
+ for(const raw of ['{bad',JSON.stringify({...expected,libraryId:999})]){update(raw);assert.deepEqual(readScanAuditHeader(db,library.id),{summary:null,snapshot:null,unrecognizedCount:1})}
+ update(JSON.stringify({...expected,padding:'x'.repeat(SCAN_AUDIT_HEADER_BYTES)}));assert.throws(()=>readScanAuditHeader(db,library.id),/byte budget/)
+ const base={...expected,padding:''},raw=JSON.stringify({...base,padding:'x'.repeat(SCAN_AUDIT_HEADER_BYTES-Buffer.byteLength(JSON.stringify(base))-1)})
+ assert.ok(Buffer.byteLength(raw)<SCAN_AUDIT_HEADER_BYTES);update(raw);assert.throws(()=>readScanAuditHeader(db,library.id),/byte budget/)
+ update(JSON.stringify(expected));assert.deepEqual(readScanAuditHeader(db,library.id).summary,expected)
+})
+
+it('keeps header summary, audit availability and unrecognized count in one WAL snapshot',async()=>{
+ const {default:Database}=await import('better-sqlite3'),{readScanAuditHeader}=await import('../services/scanAuditReadHeader')
+ const directory=path.join(tempRoot,'header-snapshot');fs.mkdirSync(directory)
+ const library=createMediaLibrary({name:'Header snapshot',roots:[{path:directory}]})
+ persistSuccessfulRun({libraryId:library.id,rootId:library.roots[0].id,runId:'old-header',filePath:path.join(directory,'unknown.mp4')})
+ const db=getDb(),old=getLatestLibraryScanSnapshot(library.id).summary!,next={...old,runId:'new-header',finishedAt:'later'},other=new Database(path.join(tempRoot,'library.db'))
+ const prepare=db.prepare.bind(db);let changed=false
+ db.prepare=((sql:string)=>{
+  const statement=prepare(sql)
+  if(sql.startsWith('SELECT last_summary_json AS value')){
+   const get=statement.get.bind(statement)
+   statement.get=((...args:unknown[])=>{
+    const row=get(...args)
+    if(!changed){changed=true;other.transaction(()=>{other.prepare('UPDATE media_library_scan_state SET last_summary_json=? WHERE library_id=?').run(JSON.stringify(next),library.id);other.prepare('DELETE FROM library_unrecognized_files WHERE library_id=?').run(library.id)})()}
+    return row
+   }) as typeof statement.get
+  }
+  return statement
+ }) as typeof db.prepare
+ try{
+  assert.deepEqual(readScanAuditHeader(db,library.id),{summary:old,snapshot:{libraryId:library.id,runId:old.runId,finishedAt:old.finishedAt},unrecognizedCount:1})
+  assert.equal(changed,true)
+  assert.deepEqual(readScanAuditHeader(db,library.id),{summary:next,snapshot:null,unrecognizedCount:0})
+ }finally{db.prepare=prepare;other.close()}
+})
+
+function replacementFixture() {
+  const firstPath = path.join(tempRoot, 'replace-first')
+  const secondPath = path.join(tempRoot, 'replace-second')
+  fs.mkdirSync(firstPath)
+  fs.mkdirSync(secondPath)
+  const library = createMediaLibrary({ name: 'Replacement', roots: [{ path: firstPath }, { path: secondPath }] })
+  const [first, second] = library.roots
+  persistSuccessfulRun({ libraryId: library.id, rootId: first.id, runId: 'old-first', filePath: path.join(firstPath, 'old.mp4') })
+  persistSuccessfulRun({ libraryId: library.id, rootId: second.id, runId: 'old-second', filePath: path.join(secondPath, 'kept.mp4') })
+  const next = () => beginSuccessfulRun({ libraryId: library.id, rootId: first.id, runId: 'replacement', filePath: path.join(firstPath, 'new.mp4') })
+  return { library, first, second, next }
+}
+
+function persistedReplacementState(libraryId: number) {
+  const db = getDb()
+  return {
+    runs: db.prepare('SELECT * FROM library_scan_runs WHERE library_id=? ORDER BY id').all(libraryId),
+    state: db.prepare('SELECT * FROM media_library_scan_state WHERE library_id=?').get(libraryId),
+    files: db.prepare('SELECT * FROM library_unrecognized_files WHERE library_id=? ORDER BY root_id,normalized_path').all(libraryId)
+  }
+}
+
+describe('finishLibraryScanRun unrecognized replacement transaction', () => {
+  it('finishes with 40000 replacement root IDs without exceeding SQLite bind limits', () => {
+    const { library, first, second, next } = replacementFixture()
+    const input = next()
+    input.replaceUnrecognizedRootIds = [first.id, ...Array.from({ length: 39_999 }, (_, index) => 1_000_000 + index)]
+    assert.equal(input.replaceUnrecognizedRootIds.length, 40_000)
+    finishLibraryScanRun(input)
+    const latest = getLatestLibraryScanSnapshot(library.id)
+    assert.deepEqual(latest.summary, input.summary)
+    assert.deepEqual(latest.audit, input.audit)
+    assert.deepEqual(latest.unrecognized, [
+      { rootId: first.id, filePath: input.unrecognizedFiles![0].filePath },
+      { rootId: second.id, filePath: path.join(second.path, 'kept.mp4') }
+    ])
+    assert.deepEqual(getDb().prepare('SELECT status,finished_at FROM library_scan_runs WHERE id=?').get(input.runId),
+      { status: 'completed', finished_at: input.summary.finishedAt })
+    assert.deepEqual(getDb().prepare('SELECT active_run_id,last_status FROM media_library_scan_state WHERE library_id=?').get(library.id),
+      { active_run_id: null, last_status: 'completed' })
+  })
+
+  it('deduplicates replacement roots and skips incoming files outside the selected roots', () => {
+    const { library, first, second, next } = replacementFixture()
+    const input = next()
+    input.replaceUnrecognizedRootIds = [first.id, first.id, first.id]
+    input.unrecognizedFiles = [input.unrecognizedFiles![0],
+      { rootId: second.id, filePath: '/must-not-insert', normalizedPath: '/must-not-insert' },
+      { rootId: 999_999, filePath: '/missing-root', normalizedPath: '/missing-root' }]
+    finishLibraryScanRun(input)
+    assert.deepEqual(getLatestLibraryScanSnapshot(library.id).unrecognized, [
+      { rootId: first.id, filePath: input.unrecognizedFiles[0].filePath },
+      { rootId: second.id, filePath: path.join(second.path, 'kept.mp4') }
+    ])
+  })
+
+  it('clears selected roots when there are no matching incoming files and preserves other roots', () => {
+    const { library, first, second, next } = replacementFixture()
+    const input = next()
+    input.replaceUnrecognizedRootIds = [first.id, first.id]
+    input.unrecognizedFiles = [{ rootId: second.id, filePath: '/not-selected', normalizedPath: '/not-selected' }]
+    finishLibraryScanRun(input)
+    assert.deepEqual(getLatestLibraryScanSnapshot(library.id).unrecognized,
+      [{ rootId: second.id, filePath: path.join(second.path, 'kept.mp4') }])
+  })
+
+  for (const roots of [undefined, []] as const) it(`does not replace files for ${roots === undefined ? 'absent' : 'empty'} root targets`, () => {
+    const { library, next } = replacementFixture()
+    const input = next()
+    const before = persistedReplacementState(library.id).files
+    input.replaceUnrecognizedRootIds = roots
+    finishLibraryScanRun(input)
+    assert.deepEqual(persistedReplacementState(library.id).files, before)
+  })
+
+  for (const status of ['failed', 'cancelled'] as const) it(`${status} run never replaces preexisting unrecognized rows`, () => {
+    const { library, first, next } = replacementFixture()
+    const input = next()
+    const before = persistedReplacementState(library.id).files
+    input.status = status
+    input.summary.status = status
+    input.audit.status = status
+    input.replaceUnrecognizedRootIds = [first.id, ...Array.from({ length: 39_999 }, (_, index) => 1_000_000 + index)]
+    finishLibraryScanRun(input)
+    assert.deepEqual(persistedReplacementState(library.id).files, before)
+    assert.deepEqual(getLatestLibraryScanSnapshot(library.id).summary, input.summary)
+    assert.deepEqual(getDb().prepare('SELECT status FROM library_scan_runs WHERE id=?').get(input.runId), { status })
+  })
+
+  it('rolls back run, state and all original unrecognized rows when a duplicate normalized path fails insertion', () => {
+    const { library, next } = replacementFixture()
+    const input = next()
+    const before = persistedReplacementState(library.id)
+    const file = input.unrecognizedFiles![0]
+    input.unrecognizedFiles = [file, { ...file, filePath: `${file.filePath}.duplicate` }]
+    assert.throws(() => finishLibraryScanRun(input), /UNIQUE constraint failed/)
+    assert.deepEqual(persistedReplacementState(library.id), before,
+      'run completion, revision/summary update, deletion and first insert must all roll back')
+    assert.deepEqual(getDb().prepare('SELECT status,finished_at,summary_json,audit_json FROM library_scan_runs WHERE id=?').get(input.runId),
+      { status: 'running', finished_at: null, summary_json: null, audit_json: null })
+    input.unrecognizedFiles = [file]
+    finishLibraryScanRun(input)
+    assert.equal(getLatestLibraryScanSnapshot(library.id).summary?.runId, input.runId)
+  })
+})
+
+it('does not hold a writer lock during audit stringify before the deferred transaction’s first SQL statement', async () => {
+  const { default: Database } = await import('better-sqlite3')
+  const { library, next } = replacementFixture()
+  const unrelatedPath = path.join(tempRoot, 'unrelated-library')
+  fs.mkdirSync(unrelatedPath)
+  const unrelated = createMediaLibrary({ name: 'Before stringify', roots: [{ path: unrelatedPath }] })
+  const input = next()
+  const other = new Database(path.join(tempRoot, 'library.db'), { timeout: 0 })
+  const stringify = JSON.stringify
+  let intercepted = 0
+  try {
+    JSON.stringify = ((value: unknown, ...args: unknown[]) => {
+      if (value === input.audit) {
+        intercepted++
+        assert.equal(getDb().inTransaction, true, 'the deferred transaction has begun')
+        assert.equal(other.pragma('busy_timeout', { simple: true }), 0)
+        const result = other.prepare('UPDATE media_libraries SET name=? WHERE id=?')
+          .run('Written during stringify', unrelated.id)
+        assert.equal(result.changes, 1, 'a second writer must succeed without waiting')
+      }
+      return Reflect.apply(stringify, JSON, [value, ...args])
+    }) as typeof JSON.stringify
+    finishLibraryScanRun(input)
+  } finally {
+    JSON.stringify = stringify
+    other.close()
+  }
+  assert.equal(intercepted, 1)
+  assert.deepEqual(getDb().prepare('SELECT name FROM media_libraries WHERE id=?').get(unrelated.id),
+    { name: 'Written during stringify' })
+  assert.deepEqual(getLatestLibraryScanSnapshot(library.id).audit, input.audit)
+})
+
+it('does not delete another library’s unrecognized rows even when its root ID is in the replacement set', () => {
+  const { library, first, second, next } = replacementFixture()
+  const otherPath = path.join(tempRoot, 'replacement-other-library')
+  fs.mkdirSync(otherPath)
+  const other = createMediaLibrary({ name: 'Other replacement scope', roots: [{ path: otherPath }] })
+  const otherRoot = other.roots[0]
+  persistSuccessfulRun({ libraryId: other.id, rootId: otherRoot.id, runId: 'other-preserved',
+    filePath: path.join(otherPath, 'untouched.mp4') })
+  const beforeOther = persistedReplacementState(other.id)
+  const input = next()
+  input.replaceUnrecognizedRootIds = [first.id, otherRoot.id, first.id, otherRoot.id]
+  finishLibraryScanRun(input)
+  assert.deepEqual(persistedReplacementState(other.id), beforeOther,
+    'foreign root IDs must not delete files or change the other library’s run/state')
+  assert.deepEqual(getLatestLibraryScanSnapshot(library.id).unrecognized, [
+    { rootId: first.id, filePath: input.unrecognizedFiles![0].filePath },
+    { rootId: second.id, filePath: path.join(second.path, 'kept.mp4') }
+  ])
+  assert.equal(getLatestLibraryScanSnapshot(library.id).summary?.runId, input.runId)
 })

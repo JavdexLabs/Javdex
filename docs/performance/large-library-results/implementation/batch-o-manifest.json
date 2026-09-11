@@ -1,0 +1,11 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "ad028550af590d5b9d65d18d3e25e7264b60be10f6ce1c3c49bd56bf0685cffc",
+  "notes": [
+    "Cumulative patch against HEAD; relies on earlier J-N cache/crypto/queue/flights files and facade integration. Not an incremental standalone patch.",
+    "64MiB encoded-file budget includes encryption envelope. Open-handle stat precedes fixed allocation, 1MiB reads plus one-byte growth probe. All exits await close.",
+    "Full npm test:2050 passed,1 skipped; build passed. Final71 targeted tests,node types and changed-file lint passed after additional test-only coverage.",
+    "Benchmark openCalls replaces previous readFile call counts; excludes handle fstat and bounded read chunks. Warm OS/key; not Windows/HDD/p95.",
+    "Only encoded input allocation bounded here; response/native/pixel/thumbnail and total memory acceptance remain incomplete."
+  ]
+}

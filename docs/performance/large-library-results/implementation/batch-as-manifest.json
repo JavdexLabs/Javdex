@@ -1,0 +1,26 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-as-actor-1000x640.png": "de53f3b2a7b00e2c64c7cf305d94a0f772410ed948de1849e1c8c9a409b02db1",
+    "batch-as-actor-1440x900.png": "fc2bdfd96aa28adfc75e26a56381953e94a18acb29ed8579a9ca470e1a2c5f38",
+    "batch-as-actor-results.json": "8bfdc9ce7a68f001b57eb7506ba6f819a9beaeae308872aa4f1512c3a14c4439",
+    "batch-as-actor-ui.patch": "1e578428678c5aa52122d0b5203ab79cc71671d437f58d521d565a78a40399a0",
+    "batch-as-browser.log": "364660b9ba0d7293d2b90e81e7653b8309afaa387bb6c257b3814dfcbd44ac3e",
+    "batch-as-build.log": "51bcae3dab6ff0f20b84b3ad98e9189bedabdd51321ca18127f66b711b3acf2c",
+    "batch-as-focus-failure.log": "415b5dc47f924e2534374903b8c1ddbb2d9973a79fc897ce891586f295ad63e6",
+    "batch-as-full.log": "384cffd12500f12f5777a7ba840aa0d1bda46877c8088f19b969854f366836b2",
+    "batch-as-lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "batch-as-review.md": "f188dd3a3bb5d35fada5c8425daef77073d10b5538de598648861e8840fab3b1",
+    "batch-as-scan-browser.log": "d1790aff80af0da1dd12aa14dae3a6d31a65f0843f97f9b8b5de350fd79c8f1d",
+    "batch-as-scrape-browser.log": "d91a0cc0db064c94e981fc8675f31636658a9c7416c22978c56ebfe3857c349e",
+    "batch-as-target.log": "fcb632a440e4341e15af1aede6a83514f00d62abbdceaedc649fda17fe5dd13c"
+  },
+  "notes": [
+    "Selected cumulative diff vs HEAD plus full new fixtures; depends on B-AR, not standalone.",
+    "Paged actor UI default50; selected get only after canonical URL/page offsets. Legacy full actor list forbidden by UI fixture.",
+    "Final full2237pass1skip0fail; target81pass; build and final affected-file eslint passed. Three domain browser fixtures passed at1000x640 and1440x900.",
+    "Retains one selected detail snapshot across overlay. Not a global bytes/inflight IPC budget. Metadata sorting, cold maintenance, large single-group merge planning remain unbounded.",
+    "No new backend performance claim, actual native IPC/Windows/HDD/cold/8-hour matrix still pending.",
+    "No user data/schema changes, commit, push or release. Complete15/42 goal remains active."
+  ]
+}

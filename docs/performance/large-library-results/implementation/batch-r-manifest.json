@@ -1,0 +1,12 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "8ab1d4357a1f72c63539016484a9fd893fd84345a06d13e80a6d1250f59659c7",
+  "notes": [
+    "Cumulative HEAD patch; depends on prior Q image variants/backend and api assetUrl size support.",
+    "Additional actress/classification/playlist/card/gallery thumbnail consumers; remote/data/blob URLs retained, gallery preview sources keep original URLs/localPaths.",
+    "Full npm test2072passed/1skipped and buildpassed before adding3React tests. Final4targetedtests inclsharedhelper passed; all types and newtest lintpassed.",
+    "RealChrome320x844/390x844/844x390/1280x800 plus login/pairing checks passed; preview original URL asserted. Syntheticroutes, not realdisk/image performance.",
+    "React gallery clicks exercise real parent with Lightbox boundary replaced; does not test portal/gestures. Actress detail original fallback statically inspected, no fullpage interaction evidence.",
+    "Other editors/filmstrips/imageanalysis and globalmemory/response/DBworkpackages remain pending."
+  ]
+}

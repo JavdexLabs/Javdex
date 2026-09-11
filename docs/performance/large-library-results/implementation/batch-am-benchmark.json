@@ -1,0 +1,73 @@
+{
+  "count": 10000,
+  "candidatesPerItem": 1,
+  "summaryCharacters": 4096,
+  "results": [
+    {
+      "name": "full.list",
+      "samples": [
+        484.55762500000003,
+        496.379583,
+        478.45074999999997
+      ],
+      "medianMs": 484.55762500000003,
+      "jsonBytes": 46503365,
+      "rssBytes": 1411022848
+    },
+    {
+      "name": "summary.first",
+      "samples": [
+        1.6769999999999072,
+        1.4002089999999043,
+        1.3491249999999582
+      ],
+      "medianMs": 1.4002089999999043,
+      "jsonBytes": 6350,
+      "rssBytes": 1411268608
+    },
+    {
+      "name": "summary.deep",
+      "samples": [
+        2.0590420000000904,
+        1.72462500000006,
+        1.6743749999998272
+      ],
+      "medianMs": 1.72462500000006,
+      "jsonBytes": 6789,
+      "rssBytes": 1411334144
+    },
+    {
+      "name": "detail.selected",
+      "samples": [
+        0.06725000000005821,
+        0.05358299999988958,
+        0.0444159999999556
+      ],
+      "medianMs": 0.05358299999988958,
+      "jsonBytes": 4650,
+      "rssBytes": 1411416064
+    },
+    {
+      "name": "existing.ids100",
+      "samples": [
+        0.08491700000013225,
+        0.03416700000002493,
+        0.03104199999984303
+      ],
+      "medianMs": 0.03416700000002493,
+      "jsonBytes": 502,
+      "rssBytes": 1411416064
+    }
+  ],
+  "platform": "darwin",
+  "arch": "arm64",
+  "sqliteVersion": {
+    "version": "3.53.4"
+  },
+  "caveats": [
+    "Three sequential local warm samples on synthetic catalog; not p95/Windows/HDD/full renderer IPC.",
+    "Times cover repository calls only; assertions and JSON sizing excluded. Bytes are JSON-equivalent payload, not actual IPC allocations.",
+    "First metadata page reads at most50 item metadata, but candidate counts/first-candidate JSON extraction and OFFSET/rank are not constant SQL work.",
+    "RSS is sampled after each stage, not peak or independent allocation; full hydration runs first. No OS cache reset."
+  ]
+}

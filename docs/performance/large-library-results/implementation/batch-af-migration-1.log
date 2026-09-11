@@ -1,0 +1,73 @@
+BEGIN startup.current_schema
+{"name":"startup.current_schema","firstMs":575.4019579999995,"warmMedianMs":254.22825000000012,"warmMaxMs":254.9817919999996,"samples":3,"sqlCalls":0,"sqlMsLast":0,"serializedBytes":13,"rssBytesAfter":177209344}
+BEGIN legacy.first
+{"name":"legacy.first","firstMs":4.049915999999939,"warmMedianMs":3.3811249999998836,"warmMaxMs":3.425250000000233,"samples":3,"sqlCalls":2,"sqlMsLast":3.332999999999629,"serializedBytes":41393,"rssBytesAfter":177389568}
+BEGIN legacy.deep
+{"name":"legacy.deep","firstMs":578.6062080000002,"warmMedianMs":583.5659580000001,"warmMaxMs":587.6967920000006,"samples":3,"sqlCalls":2,"sqlMsLast":579.8284169999988,"serializedBytes":40895,"rssBytesAfter":177405952}
+BEGIN legacy.release
+{"name":"legacy.release","firstMs":584.2657919999983,"warmMedianMs":591.5195830000011,"warmMaxMs":591.5423749999991,"samples":3,"sqlCalls":2,"sqlMsLast":589.8472500000007,"serializedBytes":41452,"rssBytesAfter":177471488}
+BEGIN legacy.search_code
+{"name":"legacy.search_code","firstMs":100.38533300000017,"warmMedianMs":97.99308400000155,"warmMaxMs":98.97579200000109,"samples":3,"sqlCalls":2,"sqlMsLast":97.77924999999777,"serializedBytes":708,"rssBytesAfter":177602560}
+BEGIN scoped.library
+{"name":"scoped.library","firstMs":68.11841699999968,"warmMedianMs":67.95575000000099,"warmMaxMs":68.12370899999951,"samples":3,"sqlCalls":2,"sqlMsLast":67.82229200000074,"serializedBytes":50573,"rssBytesAfter":177799168}
+BEGIN scoped.all_single_active
+{"name":"scoped.all_single_active","firstMs":66.95979200000147,"warmMedianMs":67.34299999999894,"warmMaxMs":67.74429099999907,"samples":3,"sqlCalls":3,"sqlMsLast":67.4651249999988,"serializedBytes":50573,"rssBytesAfter":177913856}
+BEGIN scoped.all_selected_one
+{"name":"scoped.all_selected_one","firstMs":68.54812499999935,"warmMedianMs":68.69666700000016,"warmMaxMs":69.1552499999998,"samples":3,"sqlCalls":3,"sqlMsLast":68.40758300000198,"serializedBytes":50573,"rssBytesAfter":178094080}
+BEGIN scoped.release
+{"name":"scoped.release","firstMs":85.9177499999987,"warmMedianMs":84.3140000000003,"warmMaxMs":85.00470900000073,"samples":3,"sqlCalls":2,"sqlMsLast":83.15529099999912,"serializedBytes":50632,"rssBytesAfter":178339840}
+BEGIN scoped.search_code
+{"name":"scoped.search_code","firstMs":369.60112500000105,"warmMedianMs":377.0907499999994,"warmMaxMs":437.8267500000002,"samples":3,"sqlCalls":3,"sqlMsLast":373.2972499999996,"serializedBytes":861,"rssBytesAfter":178831360}
+BEGIN tags.all
+{"name":"tags.all","firstMs":579.4514159999999,"warmMedianMs":579.6533750000017,"warmMaxMs":583.2202909999996,"samples":3,"sqlCalls":1,"sqlMsLast":579.5347079999992,"serializedBytes":46787,"rssBytesAfter":186580992}
+BEGIN tags.manual
+{"name":"tags.manual","firstMs":226.88845800000126,"warmMedianMs":228.09679099999994,"warmMaxMs":228.54075000000012,"samples":3,"sqlCalls":1,"sqlMsLast":228.43479200000002,"serializedBytes":2281,"rssBytesAfter":191643648}
+BEGIN tags.selected_labels
+{"name":"tags.selected_labels","firstMs":0.14637499999662396,"warmMedianMs":0.017625000000407454,"warmMaxMs":0.020250000001396984,"samples":3,"sqlCalls":1,"sqlMsLast":0.006416000000172062,"serializedBytes":76,"rssBytesAfter":191643648}
+BEGIN tags.selected_labels_100
+{"name":"tags.selected_labels_100","firstMs":0.06995800000004238,"warmMedianMs":0.05400000000008731,"warmMaxMs":0.05587499999819556,"samples":3,"sqlCalls":1,"sqlMsLast":0.024292000001878478,"serializedBytes":2685,"rssBytesAfter":191676416}
+BEGIN tags.manual_options
+{"name":"tags.manual_options","firstMs":1.0750829999997222,"warmMedianMs":0.2773750000014843,"warmMaxMs":0.398709000000963,"samples":3,"sqlCalls":1,"sqlMsLast":0.2333330000001297,"serializedBytes":1457,"rssBytesAfter":191725568}
+BEGIN tags.manual_options_search
+{"name":"tags.manual_options_search","firstMs":0.20425000000250293,"warmMedianMs":0.13612500000090222,"warmMaxMs":0.13829099999929895,"samples":3,"sqlCalls":1,"sqlMsLast":0.1251669999983278,"serializedBytes":28,"rssBytesAfter":191758336}
+BEGIN tags.manual_options_deep
+{"name":"tags.manual_options_deep","firstMs":0.25779099999999744,"warmMedianMs":0.22850000000107684,"warmMaxMs":0.24766699999963748,"samples":3,"sqlCalls":1,"sqlMsLast":0.21970799999689916,"serializedBytes":28,"rssBytesAfter":191774720}
+BEGIN actors.first
+{"name":"actors.first","firstMs":438.5570000000007,"warmMedianMs":438.80695800000103,"warmMaxMs":438.94716600000174,"samples":3,"sqlCalls":3,"sqlMsLast":438.7633339999993,"serializedBytes":104927,"rssBytesAfter":192757760}
+BEGIN overview
+{"name":"overview","firstMs":7.2384579999998095,"warmMedianMs":6.833999999998923,"warmMaxMs":7.0572919999976875,"samples":3,"sqlCalls":6,"sqlMsLast":6.241250000006403,"serializedBytes":268,"rssBytesAfter":192905216}
+BEGIN home.single
+{"name":"home.single","firstMs":78.93079099999886,"warmMedianMs":78.27691699999923,"warmMaxMs":79.31391699999949,"samples":3,"sqlCalls":7,"sqlMsLast":78.67612399999416,"serializedBytes":21173,"rssBytesAfter":193691648}
+BEGIN web.first
+{"name":"web.first","firstMs":83.1755000000012,"warmMedianMs":82.62645799999882,"warmMaxMs":83.08962500000052,"samples":3,"sqlCalls":2,"sqlMsLast":82.992209,"serializedBytes":4919,"rssBytesAfter":193757184}
+BEGIN web.search
+{"name":"web.search","firstMs":447.6700830000009,"warmMedianMs":441.12724999999773,"warmMaxMs":441.29741699999795,"samples":3,"sqlCalls":2,"sqlMsLast":440.9357080000009,"serializedBytes":177,"rssBytesAfter":193855488}
+BEGIN web.collections
+{"name":"web.collections","firstMs":39.912208000001556,"warmMedianMs":38.27287499999875,"warmMaxMs":38.5268329999999,"samples":3,"sqlCalls":2,"sqlMsLast":38.42433399999936,"serializedBytes":135,"rssBytesAfter":193953792}
+BEGIN playlist.full
+{"name":"playlist.full","firstMs":96.89187499999753,"warmMedianMs":98.30099999999948,"warmMaxMs":112.05829199999789,"samples":3,"sqlCalls":3,"sqlMsLast":79.18287399999826,"serializedBytes":20601442,"rssBytesAfter":373735424}
+BEGIN playlist.page
+{"name":"playlist.page","firstMs":10.195209000001341,"warmMedianMs":7.633915999998862,"warmMaxMs":7.688000000001921,"samples":3,"sqlCalls":6,"sqlMsLast":7.393207999997685,"serializedBytes":9718,"rssBytesAfter":373800960}
+BEGIN playlist.metadata
+{"name":"playlist.metadata","firstMs":1.2220840000009048,"warmMedianMs":1.1545829999995476,"warmMaxMs":1.1895000000004075,"samples":3,"sqlCalls":3,"sqlMsLast":1.1080409999995027,"serializedBytes":169,"rssBytesAfter":373882880}
+BEGIN playlist.video_page
+{"name":"playlist.video_page","firstMs":6.856874999997672,"warmMedianMs":6.489041000000725,"warmMaxMs":6.632791999996698,"samples":3,"sqlCalls":3,"sqlMsLast":6.352042000002257,"serializedBytes":9550,"rssBytesAfter":373964800}
+BEGIN playlist.deep_page
+{"name":"playlist.deep_page","firstMs":13.965083999999479,"warmMedianMs":13.963708999999653,"warmMaxMs":14.057499999998981,"samples":3,"sqlCalls":6,"sqlMsLast":13.936915999998746,"serializedBytes":9344,"rssBytesAfter":374128640}
+BEGIN experiment.no_distinct.0
+{"name":"experiment.no_distinct.0","firstMs":0.035916000000725035,"warmMedianMs":0.0229170000020531,"warmMaxMs":0.02879200000097626,"samples":3,"sqlCalls":1,"sqlMsLast":0.02058299999771407,"serializedBytes":12,"rssBytesAfter":374177792}
+BEGIN experiment.no_distinct.1
+{"name":"experiment.no_distinct.1","firstMs":0.2525000000023283,"warmMedianMs":0.1880410000012489,"warmMaxMs":0.20120799999858718,"samples":3,"sqlCalls":1,"sqlMsLast":0.17454200000065612,"serializedBytes":41248,"rssBytesAfter":374259712}
+BEGIN scoped.all_overlap
+{"name":"scoped.all_overlap","firstMs":506.4377499999973,"warmMedianMs":509.7414580000004,"warmMaxMs":510.7619999999988,"samples":3,"sqlCalls":3,"sqlMsLast":508.0152079999971,"serializedBytes":51893,"rssBytesAfter":374636544}
+BEGIN home.overlap
+{"name":"home.overlap","firstMs":719.8772079999981,"warmMedianMs":719.3799999999974,"warmMaxMs":721.2379580000015,"samples":3,"sqlCalls":7,"sqlMsLast":718.4909179999959,"serializedBytes":22552,"rssBytesAfter":376389632}
+✔ scripts/performance/large-library-benchmark.ts (32460.848792ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 32464.153333

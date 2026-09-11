@@ -3,6 +3,7 @@
   "include": [
     "src/web/**/*",
     "src/shared/webTypes.ts",
+    "src/shared/imageVariants.ts",
     "src/renderer/src/components/Checkbox.tsx"
   ],
   "compilerOptions": {

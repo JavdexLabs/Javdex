@@ -1,0 +1,15 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cl-audit-schema.patch": "2baea9077f175bac4dd2bd063c8888d9c277146bb8577485b4b4ce2e9e7ebed0",
+    "batch-cl-build.log": "4590227b83ffa75643548d9dbab4890bbff5caadbfd5260a9faa5acad0ef3441",
+    "batch-cl-full.log": "fb1989629bc09092eeca288de9b1ffb965028f77fbfdc65b7d3337e376e9f1c3",
+    "batch-cl-review.md": "8b7f40fbbf558cf95780528d2a07abefd709d43d3a3c3c0cb1a755d2939f3648",
+    "batch-cl-target.log": "7a25d744be544ca2c49c581d74fb55fdb4e97d119a665605c47c18cf48d0af9c"
+  },
+  "notes": [
+    "Selected cumulative patch depends on earlier batches.",
+    "46 focused; full2527pass1skip0fail; build terminal0.",
+    "Schema18 storage only; production dual read and streaming writer incomplete; full15/42 active."
+  ]
+}

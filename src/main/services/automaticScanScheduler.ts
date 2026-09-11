@@ -1,4 +1,4 @@
-import type { LibraryScanTrigger, ScanResult } from '@shared/libraryTypes'
+import type { LibraryScanTrigger, ScanCompletionResult } from '@shared/libraryTypes'
 import type { MediaLibraryAutomaticScanState } from '@shared/mediaLibraryTypes'
 import { listMediaLibraryAutomaticScanStates } from '../db/mediaLibraryRepo'
 import { scanCoordinator } from '../scanner/scanCoordinator'
@@ -16,7 +16,7 @@ export interface AutomaticScanSchedulerDependencies {
   setTimer: (callback: () => void | Promise<void>, delay: number) => TimerToken
   clearTimer: (timer: TimerToken) => void
   isMaintenanceBusy: () => boolean
-  runScan: (libraryId: number, trigger: LibraryScanTrigger) => Promise<ScanResult>
+  runScan: (libraryId: number, trigger: LibraryScanTrigger) => Promise<ScanCompletionResult>
 }
 
 function parsedTimestamp(value: string | null): number | null {

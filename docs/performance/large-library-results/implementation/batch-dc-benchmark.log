@@ -1,0 +1,250 @@
+{
+  "runtime": {
+    "node": "24.18.1",
+    "acorn": "8.16.0",
+    "ada": "3.4.4",
+    "amaro": "1.1.9",
+    "ares": "1.34.6",
+    "brotli": "1.2.0",
+    "cldr": "48.0",
+    "icu": "78.2",
+    "llhttp": "9.4.3",
+    "merve": "1.2.2",
+    "modules": "148",
+    "napi": "10",
+    "nbytes": "0.1.4",
+    "ncrypto": "0.0.1",
+    "nghttp2": "1.69.0",
+    "nghttp3": "",
+    "ngtcp2": "",
+    "openssl": "0.0.0",
+    "simdjson": "4.6.4",
+    "simdutf": "7.7.0",
+    "sqlite": "3.53.1",
+    "tz": "2025c",
+    "undici": "7.29.0",
+    "unicode": "17.0",
+    "uv": "1.52.1",
+    "uvwasi": "0.0.23",
+    "v8": "15.0.245.28-electron.0",
+    "zlib": "1.3.2.1-motley",
+    "zstd": "1.6.0",
+    "electron": "43.4.1",
+    "chrome": "150.0.7871.224"
+  },
+  "results": [
+    {
+      "count": 10000,
+      "mode": "memory",
+      "samples": [
+        {
+          "discoveryMs": 4.225166999999999,
+          "threePassesMs": 2.189916000000011,
+          "totalMs": 6.41508300000001,
+          "maxAppendMs": 0.035916999999997756,
+          "flushes": 0,
+          "checksum": 5760000,
+          "tempStore": 0
+        },
+        {
+          "discoveryMs": 4.0298329999999964,
+          "threePassesMs": 0.7401670000000138,
+          "totalMs": 4.77000000000001,
+          "maxAppendMs": 0.019041999999998893,
+          "flushes": 0,
+          "checksum": 5760000,
+          "tempStore": 0
+        },
+        {
+          "discoveryMs": 4.218332999999973,
+          "threePassesMs": 0.7025830000000042,
+          "totalMs": 4.920915999999977,
+          "maxAppendMs": 0.0397920000000056,
+          "flushes": 0,
+          "checksum": 5760000,
+          "tempStore": 0
+        }
+      ]
+    },
+    {
+      "count": 10000,
+      "mode": "spool",
+      "samples": [
+        {
+          "discoveryMs": 11.454833000000008,
+          "threePassesMs": 11.674999999999983,
+          "totalMs": 23.12983299999999,
+          "maxAppendMs": 0.19174999999998477,
+          "flushes": 39,
+          "checksum": 5760000,
+          "tempStore": 0
+        },
+        {
+          "discoveryMs": 11.291041000000007,
+          "threePassesMs": 11.319249999999982,
+          "totalMs": 22.61029099999999,
+          "maxAppendMs": 0.20783299999999372,
+          "flushes": 39,
+          "checksum": 5760000,
+          "tempStore": 0
+        },
+        {
+          "discoveryMs": 11.002499999999998,
+          "threePassesMs": 10.928042000000005,
+          "totalMs": 21.930542000000003,
+          "maxAppendMs": 0.19129099999997834,
+          "flushes": 39,
+          "checksum": 5760000,
+          "tempStore": 0
+        }
+      ]
+    },
+    {
+      "count": 100000,
+      "mode": "memory",
+      "samples": [
+        {
+          "discoveryMs": 29.730334000000028,
+          "threePassesMs": 9.45474999999999,
+          "totalMs": 39.18508400000002,
+          "maxAppendMs": 0.9805840000000217,
+          "flushes": 0,
+          "checksum": 57600000,
+          "tempStore": 0
+        },
+        {
+          "discoveryMs": 34.90225000000004,
+          "threePassesMs": 8.067207999999994,
+          "totalMs": 42.96945800000003,
+          "maxAppendMs": 1.5966250000000173,
+          "flushes": 0,
+          "checksum": 57600000,
+          "tempStore": 0
+        },
+        {
+          "discoveryMs": 34.43129200000004,
+          "threePassesMs": 6.522999999999968,
+          "totalMs": 40.95429200000001,
+          "maxAppendMs": 1.821957999999995,
+          "flushes": 0,
+          "checksum": 57600000,
+          "tempStore": 0
+        }
+      ]
+    },
+    {
+      "count": 100000,
+      "mode": "spool",
+      "samples": [
+        {
+          "discoveryMs": 120.37320799999998,
+          "threePassesMs": 112.63900000000001,
+          "totalMs": 233.012208,
+          "maxAppendMs": 9.880167000000029,
+          "flushes": 390,
+          "checksum": 57600000,
+          "tempStore": 0
+        },
+        {
+          "discoveryMs": 121.35645799999998,
+          "threePassesMs": 114.92145900000003,
+          "totalMs": 236.277917,
+          "maxAppendMs": 9.376875000000041,
+          "flushes": 390,
+          "checksum": 57600000,
+          "tempStore": 0
+        },
+        {
+          "discoveryMs": 118.27529099999992,
+          "threePassesMs": 112.71170900000016,
+          "totalMs": 230.98700000000008,
+          "maxAppendMs": 9.706583000000137,
+          "flushes": 390,
+          "checksum": 57600000,
+          "tempStore": 0
+        }
+      ]
+    },
+    {
+      "count": 600000,
+      "mode": "memory",
+      "samples": [
+        {
+          "discoveryMs": 173.89466600000014,
+          "threePassesMs": 42.400249999999915,
+          "totalMs": 216.29491600000006,
+          "maxAppendMs": 1.2303329999999733,
+          "flushes": 0,
+          "checksum": 345600000,
+          "tempStore": 0
+        },
+        {
+          "discoveryMs": 179.56508399999984,
+          "threePassesMs": 43.363415999999916,
+          "totalMs": 222.92849999999976,
+          "maxAppendMs": 2.161583000000064,
+          "flushes": 0,
+          "checksum": 345600000,
+          "tempStore": 0
+        },
+        {
+          "discoveryMs": 178.0640000000003,
+          "threePassesMs": 43.807374999999865,
+          "totalMs": 221.87137500000017,
+          "maxAppendMs": 4.751709000000119,
+          "flushes": 0,
+          "checksum": 345600000,
+          "tempStore": 0
+        }
+      ]
+    },
+    {
+      "count": 600000,
+      "mode": "spool",
+      "samples": [
+        {
+          "discoveryMs": 697.878541,
+          "threePassesMs": 677.3535000000002,
+          "totalMs": 1375.2320410000002,
+          "maxAppendMs": 8.965749999999844,
+          "flushes": 2343,
+          "checksum": 345600000,
+          "tempStore": 0
+        },
+        {
+          "discoveryMs": 705.6399160000001,
+          "threePassesMs": 676.8778750000001,
+          "totalMs": 1382.5177910000002,
+          "maxAppendMs": 9.664499999999862,
+          "flushes": 2343,
+          "checksum": 345600000,
+          "tempStore": 0
+        },
+        {
+          "discoveryMs": 697.4553329999999,
+          "threePassesMs": 675.1191250000002,
+          "totalMs": 1372.574458,
+          "maxAppendMs": 9.461249999999382,
+          "flushes": 2343,
+          "checksum": 345600000,
+          "tempStore": 0
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "One warmup and three samples; fixed memory-then-spool order, in-memory synthetic connection with actual TEMP spool.",
+    "Discovery includes path construction and per-append timer overhead. Three passes include checksums; excludes fixture database creation and disposal.",
+    "maxAppendMs is an observed append duration, not a whole-scanner event-loop bound. No explicit event-loop yields in this synchronous probe.",
+    "Spool bounds JS path buffering/projection; total TEMP storage remains O(files). No GC/heap/RSS/whole scan/Windows/HDD/p95 claim."
+  ]
+}
+✔ compares inventory discovery and three sequential passes at 10k, 100k and 600k paths (7938.975125ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 8128.113709

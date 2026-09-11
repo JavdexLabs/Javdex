@@ -1,0 +1,15 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cc-build.log": "fd1772c1672e8a557cb1119db1f42094bde12e07fc2afaea08660025b19afcb0",
+    "batch-cc-full.log": "9daaaba22f370c216568220a446ce4a0d1c28eb93e08c6ca0a1c895997c7e062",
+    "batch-cc-missing-audit.patch": "9ae91542a620ebb4548b07481e9a96c9c0c748fe2a65991632abad4c6af93228",
+    "batch-cc-review.md": "1c2c6db8f2a9c113e09d5f90a955891de40e710c3172f0ca2029fd48b0774a12",
+    "batch-cc-target.log": "6c37059140cb3b7cc4352940e5464fc4d90170a8a879248e32be63724136f4b6"
+  },
+  "notes": [
+    "Selected cumulative patch depends on CA/CB and earlier batches.",
+    "58 focused; full2432pass1skip0fail; build terminal0.",
+    "Missing-body view available but actual UI not cut over; full15/42 incomplete."
+  ]
+}

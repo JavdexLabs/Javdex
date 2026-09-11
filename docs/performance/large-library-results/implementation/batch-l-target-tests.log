@@ -1,0 +1,63 @@
+▶ Web read-only catalog scope
+  ✔ rechecks image authorization after async work when hidden changes (9.867458ms)
+  ✔ rechecks image authorization after async work when archived changes (6.411458ms)
+  ✔ rechecks image authorization after async work when cover changes (6.218167ms)
+  ✔ rechecks image authorization after async work when cast changes (7.476333ms)
+  ✔ rechecks image authorization after async work when sample changes (9.082291ms)
+  ✔ reads only the authorized image path before and after serving, without full details (7.380417ms)
+  ✔ forwards the caller signal to the async Store and drops a cancelled result (6.802208ms)
+  ✔ filters archived/hidden memberships for lists, details, images, and media (9.212584ms)
+  ✔ describes local resources without exposing their directory (6.459209ms)
+  ✔ uses the cover rather than the background for browse, detail and image requests (6.381917ms)
+  ✔ queries with parameters, paginates stably and filters clear membership scopes (13.577583ms)
+  ✔ uses stable desktop discovery and respects library home participation (12.733458ms)
+  ✔ exposes cast display metadata and only serves avatars linked to visible videos (5.633584ms)
+  ✔ downloads non-playable files and exposes only supported external links (8.647ms)
+  ✔ resolves only authorized files and refuses symlink escapes and disabled roots (6.966375ms)
+✔ Web read-only catalog scope (123.659583ms)
+▶ Desktop-approved browser pairing
+  ✔ requires an open window, a desktop decision and a separate secret, consumes only once (1.221083ms)
+  ✔ expires requests, bounds polling, rejection, restart and approvals (0.231083ms)
+  ✔ bounds the total pending requests (0.228875ms)
+✔ Desktop-approved browser pairing (2.034625ms)
+▶ Remembered browser lifecycle
+  ✔ persists only remembered hashes, retains authorization over restart and revokes individual devices (4.927125ms)
+✔ Remembered browser lifecycle (4.983792ms)
+▶ Pairing HTTP boundary
+  ✔ binds exchange to a private cookie, keeps approval desktop-only and remembers across server restarts (160.25375ms)
+✔ Pairing HTTP boundary (160.348333ms)
+▶ Device record recovery
+  ✔ keeps valid sessions usable during activity write failures and retries persistence (3.761375ms)
+  ✔ keeps disk and memory consistent after failed revoke, clear, rename and create (2.121542ms)
+  ✔ resets a damaged snapshot without parsing it or retaining old authorization (0.792875ms)
+  ✔ restores remaining pairing time from server and retains approval on issuance failure (0.1135ms)
+✔ Device record recovery (6.893667ms)
+▶ Per-device streaming revocation
+  ✔ interrupts the revoked stream while another browser finishes its stream (33.201083ms)
+✔ Per-device streaming revocation (33.286542ms)
+▶ Web authentication and streaming
+  ✔ keeps image responses private and reports read queue overload as 503 (6.011542ms)
+  ✔ rechecks an expired session after image work while the connection remains open (40.200667ms)
+  ✔ cancels pending image work on logout and never sends its completed bytes (39.773542ms)
+  ✔ cancels pending image work on disconnect and never sends its completed bytes (34.420959ms)
+  ✔ stores salted password hashes and enforces minimum length (94.499458ms)
+  ✔ requires a session for catalog, artwork, and video, with no credential data in failures (13.28875ms)
+  ✔ serves brand and favicon PNGs without login with the correct MIME and bytes (10.50375ms)
+  ✔ rejects bad credentials; issues HttpOnly SameSite cookies on login (66.086958ms)
+  ✔ blocks cross-origin, missing-origin POSTs, DNS rebinding, and desktop mutation routes (11.090333ms)
+  ✔ streams byte ranges, suffixes and HEAD; rejects invalid or multiple ranges (9.543875ms)
+  ✔ downloads authenticated resources as attachments (3.604917ms)
+  ✔ logout invalidates the cookie; desktop revocation invalidates all browsers (38.285667ms)
+✔ Web authentication and streaming (457.736458ms)
+▶ Session lifetimes and request limits
+  ✔ expires idle and absolute sessions and limits attempts (0.116791ms)
+  ✔ accepts only local peer ranges and handles byte-range edge cases (0.122666ms)
+✔ Session lifetimes and request limits (0.270709ms)
+ℹ tests 39
+ℹ suites 8
+ℹ pass 39
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 703.560833

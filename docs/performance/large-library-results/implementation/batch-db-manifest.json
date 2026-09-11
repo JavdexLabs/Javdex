@@ -1,0 +1,23 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-db-baseline.log": "ace6058f8e35172f00b06bb0c10605a8cd2421010e45da508b47256f9166bf6d",
+    "batch-db-benchmark.log": "9c8ad163ff67ac23d8ed30e3d2ea532343ded38881bf0d86c5468b7ba452c927",
+    "batch-db-build.log": "6f066ed37268ee4c250e3221fcb9e689103c69e801d1243b8eda48cbc2245c3a",
+    "batch-db-direct-red.log": "832093cb6d70e14164119bc022a700b732abc05103373e18dff832e8be3e9690",
+    "batch-db-directory-cache.patch": "095ec8b0059dcb084466b670181f3ec6b69703d662c7e5fba929e0f23b5a1f61",
+    "batch-db-full.log": "c88f215767aa44abf61ab4cb4b12ae15c2eac87b3ce644fca3c1c6fcece9f51f",
+    "batch-db-production-red.log": "8607b0bf04805081df248e94085fb5529d88d35e85b005d2a1adee0affb985e0",
+    "batch-db-review.md": "7065856d265bfae89029b9fd2665d3a210bc997171e9ff5a0806fe7118cd42cf",
+    "batch-db-target.log": "1ac591354bae8629c0fb759aa7ef9d9771b1ca8c296fbab5cbdf51d137b24903",
+    "batch-db-types.log": "a1499b3bc5addd579ca0b5fbe2dfacab17f004bb6597d0b95b5a9d5039c665bc"
+  },
+  "notes": [
+    "Selected cumulative patch depends on earlier batches, not standalone sequential patches.",
+    "108 joint tests passed; final2735pass/1skip/0fail(2736total), typecheck/full/build observed terminal exit0.",
+    "Only testmock type annotation changed after final build; affected tests/typecheck/final full gate passed after correction.",
+    "Intermediate unbounded snapshot retention was replaced with per-layer64scope/1MiB encoded-string admission; production rejected maps are never attached to anchors. Two layers combined128scopes/2MiB of budgeted strings, not total heap.",
+    "Real default title-only adapter1000resources:2000listings/2410-2434ms before vs1listing/84-86ms with final budgets;1warmup+3samples. No whole scan/p95/Windows/RSS claim.",
+    "Full15/42 remains incomplete; no user database/media access, commit/push/release."
+  ]
+}

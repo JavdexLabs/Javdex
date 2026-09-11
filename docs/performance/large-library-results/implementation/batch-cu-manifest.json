@@ -1,0 +1,15 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cu-build.log": "1f263c34019950a5c6bb1d099fd368ff70a9af735e7ecc8da70003082295d95b",
+    "batch-cu-cleanup-audit-transactions.patch": "687653fc5dd5666a66057528c6f382a828f7b33e5f1bc6b43a0556d18688f444",
+    "batch-cu-full.log": "680fa28d900670bc7b7395edc6d47e37418ff37f87f91927327bac274e066e73",
+    "batch-cu-review.md": "62d1b5270448921abe60e4cdaf8e84a9f79b43ba03d1d3db45ce8dac440cac38",
+    "batch-cu-target.log": "9c5f779ca58478bf5481ca98115bc3f4f5aea5a689ac2e89225d86786929115e"
+  },
+  "notes": [
+    "Selected cumulative patch depends on previous batches.",
+    "Final95target; full2624pass1skip0fail; build terminal0.",
+    "Deferred cleanup legacy audit gap fixed; optional same-transaction writer hook; no production entries lifecycle switch or full15/42 completion."
+  ]
+}

@@ -1,4 +1,4 @@
-import type { ScanResult } from './libraryTypes'
+import type { ScanCompletionResult } from './libraryTypes'
 
 export interface LibraryScanNotification {
   message: string
@@ -6,7 +6,7 @@ export interface LibraryScanNotification {
 }
 
 export function buildLibraryScanNotification(
-  result: ScanResult
+  result: ScanCompletionResult
 ): LibraryScanNotification | null {
   if (result.cancelled) {
     return {
@@ -17,7 +17,7 @@ export function buildLibraryScanNotification(
   const strmFailureCount = result.strmFailures.length + result.omittedStrmFailures
   const processingFailures = Math.max(
     0,
-    result.failed - result.unrecognizedFiles.length - strmFailureCount
+    result.failed - result.unrecognizedCount - strmFailureCount
   )
   if (processingFailures > 0) {
     return {
@@ -33,8 +33,8 @@ export function buildLibraryScanNotification(
   }
   if (strmFailureCount > 0) {
     const unrecognizedSuffix =
-      result.unrecognizedFiles.length > 0
-        ? `，另有 ${result.unrecognizedFiles.length} 个文件无法识别`
+      result.unrecognizedCount > 0
+        ? `，另有 ${result.unrecognizedCount} 个文件无法识别`
         : ''
     return {
       message: `扫描完成但有失败项：${strmFailureCount} 个 STRM 文件处理失败${unrecognizedSuffix}，请查看最近一次扫描`,

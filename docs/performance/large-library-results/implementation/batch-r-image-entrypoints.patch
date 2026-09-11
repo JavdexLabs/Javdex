@@ -1,0 +1,349 @@
+diff --git a/src/shared/imageVariants.ts b/src/shared/imageVariants.ts
+new file mode 100644
+index 0000000..8782a66
+--- /dev/null
++++ b/src/shared/imageVariants.ts
+@@ -0,0 +1,16 @@
++export type ImageThumbnailSize = 320 | 640 | 1280
++
++export function parseImageThumbnailSize(value: string | null): ImageThumbnailSize | undefined {
++  if (value === null) return undefined
++  if (value === '320' || value === '640' || value === '1280') return Number(value) as ImageThumbnailSize
++  throw new Error('Invalid image size')
++}
++
++/** Add a finite image variant without changing the original preview URL. */
++export function imageThumbnailUrl(src: string, size: ImageThumbnailSize): string {
++  // Only app-owned URLs implement the size contract. Preserve remote/data/blob sources.
++  if ((!src.startsWith('/') && !src.startsWith('media://')) || src.startsWith('//')) return src
++  const url = new URL(src, 'http://image.invalid')
++  url.searchParams.set('size', String(size))
++  return src.startsWith('/') ? url.pathname + url.search + url.hash : url.toString()
++}
+diff --git a/src/shared/imageVariants.test.ts b/src/shared/imageVariants.test.ts
+new file mode 100644
+index 0000000..cfacf71
+--- /dev/null
++++ b/src/shared/imageVariants.test.ts
+@@ -0,0 +1,14 @@
++import { it } from 'node:test'
++import assert from 'node:assert/strict'
++import { imageThumbnailUrl, parseImageThumbnailSize } from './imageVariants'
++
++it('only accepts finite thumbnail variants and preserves preview URL components', () => {
++  assert.equal(parseImageThumbnailSize(null), undefined)
++  for (const size of [320, 640, 1280]) assert.equal(parseImageThumbnailSize(String(size)), size)
++  for (const value of ['', '0', '0320', '999999', '640.0', 'NaN']) assert.throws(() => parseImageThumbnailSize(value))
++  assert.equal(imageThumbnailUrl('/api/videos/1/images/cover?v=2#preview', 640), '/api/videos/1/images/cover?v=2&size=640#preview')
++  assert.equal(imageThumbnailUrl('media://covers/a%20b.jpg', 320), 'media://covers/a%20b.jpg?size=320')
++  for (const src of ['https://example.test/image.jpg?v=2', '//example.test/image.jpg', 'data:image/png;base64,AAAA', 'blob:http://localhost/abc']) {
++    assert.equal(imageThumbnailUrl(src, 320), src)
++  }
++})
+diff --git a/src/renderer/src/components/ImageThumbnailEntrypoints.test.tsx b/src/renderer/src/components/ImageThumbnailEntrypoints.test.tsx
+new file mode 100644
+index 0000000..f136632
+--- /dev/null
++++ b/src/renderer/src/components/ImageThumbnailEntrypoints.test.tsx
+@@ -0,0 +1,57 @@
++import assert from 'node:assert/strict'
++import { afterEach, it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import type { ActressGalleryAsset, ActressListItem } from '@shared/actressTypes'
++import type { VideoAsset } from '@shared/videoTypes'
++
++Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
++Object.defineProperty(globalThis, 'window', { configurable: true, value: Object.assign(new EventTarget(), {
++  api: {}, location: { href: 'http://localhost/' }, history: { state: null, pushState() {} }
++}) })
++let renderer: TestRenderer.ReactTestRenderer | undefined
++afterEach(async () => { await act(async () => renderer?.unmount()); renderer = undefined })
++
++it('uses a 320 thumbnail for actress cards', async () => {
++  const Card = (await import('./ActressCardTile')).default
++  await act(async () => {
++    renderer = TestRenderer.create(<Card actress={{ id: 1, main_name: 'Example', avatar_path: 'avatars/example.jpg', gender: 'female', video_count: 1, scraped_status: 0 } as ActressListItem}
++      selected={false} selectionMode={false} onToggleSelect={() => {}} onOpen={() => {}} onDelete={() => {}} />)
++  })
++  assert.equal(renderer!.root.findByType('img').props.src, 'media://avatars/example.jpg?size=320')
++})
++
++for (const kind of ['video', 'actress'] as const) {
++  it(`uses thumbnails for local ${kind} gallery tiles and original preview sources`, async (t) => {
++    const { ImagePreviewOverlayProvider } = await import('./ImagePreviewOverlayContext')
++    const sample = { id: 1, video_id: 1, actress_id: 1, type: 'sample', position: 0, local_path: 'samples/local.jpg',
++      remote_url: null, width: 800, height: 600, is_primary: 0, created_at: null }
++    const remote = { ...sample, id: 2, position: 1, local_path: null, remote_url: 'https://example.test/remote.jpg' }
++    const VideoGallery = (await import('./VideoSampleGallery')).default
++    const ActressGallery = (await import('./ActressGalleryPanel')).default
++    const Lightbox = (await import('./ImagePreviewLightbox')).default
++    const createElement = React.createElement
++    // Keep this a parent interaction test: replace only the portal/gesture boundary.
++    t.mock.method(React, 'createElement', (type: unknown, props: unknown, ...children: unknown[]) => {
++      if (type === Lightbox) return createElement('div', { 'data-preview-items': (props as { items: unknown }).items })
++      return Reflect.apply(createElement, React, [type, props, ...children])
++    })
++    await act(async () => {
++      renderer = TestRenderer.create(<ImagePreviewOverlayProvider>
++        {kind === 'video' ? <VideoGallery videoId={1} assets={[sample, remote] as VideoAsset[]} posterPath={null} onChanged={() => {}} />
++          : <ActressGallery actressId={1} gallery={[sample, remote] as ActressGalleryAsset[]} posterPath={null} onChanged={() => {}} />}
++      </ImagePreviewOverlayProvider>)
++    })
++    assert.deepEqual(renderer!.root.findAllByType('img').map(image => image.props.src), [
++      'media://samples/local.jpg?size=640', 'https://example.test/remote.jpg'
++    ])
++    await act(async () => {
++      renderer!.root.findAllByType('button').find(button => button.props['aria-label'] === (kind === 'video' ? '样张 1' : '写真 1'))!.props.onClick()
++    })
++    const preview = renderer!.root.findAllByType('div').find(node => node.props['data-preview-items'])!
++    assert.deepEqual(preview.props['data-preview-items'], [
++      { id: 1, src: 'media://samples/local.jpg', localPath: 'samples/local.jpg' },
++      { id: 2, src: 'https://example.test/remote.jpg', localPath: null }
++    ])
++  })
++}
+diff --git a/src/renderer/src/components/ActressCardTile.tsx b/src/renderer/src/components/ActressCardTile.tsx
+index 146d9af..910cfc3 100644
+--- a/src/renderer/src/components/ActressCardTile.tsx
++++ b/src/renderer/src/components/ActressCardTile.tsx
+@@ -50,7 +50,7 @@ export default function ActressCardTile({
+       >
+         <span className="actress-card-avatar">
+           <ActressAvatar
+-            src={assetUrl(actress.avatar_path)}
++            src={assetUrl(actress.avatar_path, 320)}
+             name={actress.main_name}
+             gender={actress.gender}
+           />
+diff --git a/src/renderer/src/pages/SeriesListPage.tsx b/src/renderer/src/pages/SeriesListPage.tsx
+index 778b063..9c5c77c 100644
+--- a/src/renderer/src/pages/SeriesListPage.tsx
++++ b/src/renderer/src/pages/SeriesListPage.tsx
+@@ -164,7 +164,7 @@ export default function SeriesListPage(): JSX.Element {
+         ) : (
+           <div className="facet-grid">
+             {items.map((item) => {
+-              const cover = assetUrl(item.imagePath ?? item.fallbackCoverPath)
++              const cover = assetUrl(item.imagePath ?? item.fallbackCoverPath, 640)
+               return (
+                 <div className="facet-card-wrap" key={item.id}>
+                   <button
+diff --git a/src/renderer/src/pages/OrganizationListPage.tsx b/src/renderer/src/pages/OrganizationListPage.tsx
+index 7546813..c8da978 100644
+--- a/src/renderer/src/pages/OrganizationListPage.tsx
++++ b/src/renderer/src/pages/OrganizationListPage.tsx
+@@ -185,7 +185,7 @@ export default function OrganizationListPage({ role }: Props): JSX.Element {
+         ) : (
+           <div className="facet-grid">
+             {items.map((item) => {
+-              const cover = assetUrl(item.imagePath ?? item.fallbackCoverPath)
++              const cover = assetUrl(item.imagePath ?? item.fallbackCoverPath, 640)
+               return (
+                 <div key={item.id} className="facet-card-wrap">
+                   <button
+diff --git a/src/renderer/src/pages/PlaylistsPage.tsx b/src/renderer/src/pages/PlaylistsPage.tsx
+index 995b92f..0f6f378 100644
+--- a/src/renderer/src/pages/PlaylistsPage.tsx
++++ b/src/renderer/src/pages/PlaylistsPage.tsx
+@@ -21,7 +21,7 @@ import { usePlaylistImport } from '../components/playlistImport/PlaylistImportCo
+ import { onPlaylistImportCompleted } from '../components/playlistImport/events'
+ 
+ function playlistListCover(item: PlaylistListItem): string | null {
+-  return assetUrl(item.preview_cover_path)
++  return assetUrl(item.preview_cover_path, 640)
+ }
+ 
+ export default function PlaylistsPage(): JSX.Element {
+diff --git a/src/renderer/src/components/AddVideosToPlaylistModal.tsx b/src/renderer/src/components/AddVideosToPlaylistModal.tsx
+index 5477008..cd86b41 100644
+--- a/src/renderer/src/components/AddVideosToPlaylistModal.tsx
++++ b/src/renderer/src/components/AddVideosToPlaylistModal.tsx
+@@ -171,7 +171,7 @@ export default function AddVideosToPlaylistModal({
+           ) : (
+             <div className="playlist-pick-list">
+               {filteredItems.map((item) => {
+-                const cover = assetUrl(item.preview_cover_path)
++                const cover = assetUrl(item.preview_cover_path, 320)
+                 return (
+                   <div key={item.id} className="playlist-pick-row">
+                     <div className="playlist-pick-cover">
+diff --git a/src/renderer/src/components/ClassificationImageModal.tsx b/src/renderer/src/components/ClassificationImageModal.tsx
+index 376aff2..5a71411 100644
+--- a/src/renderer/src/components/ClassificationImageModal.tsx
++++ b/src/renderer/src/components/ClassificationImageModal.tsx
+@@ -380,7 +380,7 @@ export default function ClassificationImageModal({
+                           className={`${styles.candidateCover} classification-image-candidate-cover`}
+                         >
+                           <img
+-                            src={assetUrl(candidate.coverPath) ?? ""}
++                            src={assetUrl(candidate.coverPath, 320) ?? ""}
+                             alt=""
+                             loading="lazy"
+                             draggable={false}
+diff --git a/src/renderer/src/pages/DetailPage.tsx b/src/renderer/src/pages/DetailPage.tsx
+index cf158ed..f2acc6a 100644
+--- a/src/renderer/src/pages/DetailPage.tsx
++++ b/src/renderer/src/pages/DetailPage.tsx
+@@ -1103,7 +1103,7 @@ export default function DetailPage(): JSX.Element {
+           </div>
+           <div className="actress-row-avatars">
+             {video.actresses.map((a) => {
+-              const avatar = assetUrl(a.avatar_path)
++              const avatar = assetUrl(a.avatar_path, 320)
+               return (
+                 <button
+                   key={a.id}
+diff --git a/src/renderer/src/pages/ActressDetailPage.tsx b/src/renderer/src/pages/ActressDetailPage.tsx
+index 162ccb0..f187d2c 100644
+--- a/src/renderer/src/pages/ActressDetailPage.tsx
++++ b/src/renderer/src/pages/ActressDetailPage.tsx
+@@ -294,8 +294,8 @@ export default function ActressDetailPage(): JSX.Element {
+     )
+   }
+ 
+-  const avatar = assetUrl(actress.avatar_path)
+-  const avatarPreview = assetUrl(actress.avatar_source_path) ?? avatar
++  const avatar = assetUrl(actress.avatar_path, 640)
++  const avatarPreview = assetUrl(actress.avatar_source_path) ?? assetUrl(actress.avatar_path)
+   const profileSubtitle = buildActressProfileSubtitle(actress)
+   const profileStats = buildActressProfileStats(actress)
+ 
+diff --git a/src/renderer/src/components/ActressGalleryPanel.tsx b/src/renderer/src/components/ActressGalleryPanel.tsx
+index a28f150..28a1206 100644
+--- a/src/renderer/src/components/ActressGalleryPanel.tsx
++++ b/src/renderer/src/components/ActressGalleryPanel.tsx
+@@ -1,3 +1,4 @@
++import type { ImageThumbnailSize } from '@shared/imageVariants'
+ import { useCallback, useMemo, useState } from 'react'
+ import { useImagePreviewById } from '../hooks/useImagePreviewById'
+ import type { ActressGalleryAsset } from '@shared/actressTypes'
+@@ -21,8 +22,8 @@ import { UI_ICON } from './iconDefaults'
+ const GALLERY_MASONRY_GAP = 10
+ const GALLERY_MASONRY_MIN_COL_WIDTH = 260
+ 
+-function gallerySrc(asset: ActressGalleryAsset): string | null {
+-  return assetUrl(asset.local_path) ?? asset.remote_url
++function gallerySrc(asset: ActressGalleryAsset, size?: ImageThumbnailSize): string | null {
++  return assetUrl(asset.local_path, size) ?? asset.remote_url
+ }
+ 
+ function galleryRatio(asset: ActressGalleryAsset): number {
+@@ -220,7 +221,7 @@ export default function ActressGalleryPanel({
+           style={{ height: masonryLayout.height }}
+         >
+           {masonryLayout.items.map(({ asset, index, x, y, width, height }) => {
+-            const src = gallerySrc(asset)
++            const src = gallerySrc(asset, 640)
+             if (!src) return null
+             return (
+               <div
+diff --git a/src/renderer/src/components/VideoSampleGallery.tsx b/src/renderer/src/components/VideoSampleGallery.tsx
+index 98f6753..0f2d709 100644
+--- a/src/renderer/src/components/VideoSampleGallery.tsx
++++ b/src/renderer/src/components/VideoSampleGallery.tsx
+@@ -1,3 +1,4 @@
++import type { ImageThumbnailSize } from '@shared/imageVariants'
+ import { useCallback, useMemo, useState } from 'react'
+ import { useImagePreviewById } from '../hooks/useImagePreviewById'
+ import type { VideoAsset } from '@shared/videoTypes'
+@@ -18,8 +19,8 @@ import { UI_ICON } from './iconDefaults'
+ const SAMPLE_MASONRY_GAP = 10
+ const SAMPLE_MASONRY_MIN_COL_WIDTH = 260
+ 
+-function sampleSrc(asset: VideoAsset): string | null {
+-  return assetUrl(asset.local_path) ?? asset.remote_url
++function sampleSrc(asset: VideoAsset, size?: ImageThumbnailSize): string | null {
++  return assetUrl(asset.local_path, size) ?? asset.remote_url
+ }
+ 
+ function sampleRatio(asset: VideoAsset, measuredRatios?: Record<number, number>): number {
+@@ -207,7 +208,7 @@ export default function VideoSampleGallery({
+             {masonryColumns.map((column, columnIndex) => (
+               <div key={columnIndex} className="sample-masonry-column">
+                 {column.items.map(({ asset, index }) => {
+-                  const src = sampleSrc(asset)
++                  const src = sampleSrc(asset, 640)
+                   if (!src) return null
+                   return (
+                     <div key={asset.id} className="sample-masonry-item">
+diff --git a/src/web/main.tsx b/src/web/main.tsx
+index 60fa725..8f815ab 100644
+--- a/src/web/main.tsx
++++ b/src/web/main.tsx
+@@ -12,6 +12,7 @@ import {
+   type FormEvent
+ } from 'react'
+ import { createRoot } from 'react-dom/client'
++import { imageThumbnailUrl } from '../shared/imageVariants'
+ const ImagePreview = lazy(() => import('./ImagePreview'))
+ import {
+   ArrowLeft,
+@@ -63,7 +64,7 @@ function Poster({
+     <div className={`poster${large ? ' poster-large' : ''}`}>
+       {video.cover && !failed ? (
+         <img
+-          src={video.cover}
++          src={large ? video.cover : imageThumbnailUrl(video.cover, 640)}
+           alt=""
+           loading={large ? 'eager' : 'lazy'}
+           decoding="async"
+@@ -193,7 +194,7 @@ function CastMember({ actress }: { actress: WebDetail['actresses'][number] }): J
+   const next = new URLSearchParams({ actress: String(actress.id), label: actress.name })
+   return <a className="cast-member" href={route('/browse', next)}>
+     <span className="cast-avatar" aria-hidden="true">
+-      {actress.avatar && !failed ? <img src={actress.avatar} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />
++      {actress.avatar && !failed ? <img src={imageThumbnailUrl(actress.avatar, 320)} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />
+         : <UserRound />}
+     </span>
+     <span className="cast-name">{actress.name}</span>
+@@ -457,7 +458,7 @@ function Detail({
+                     aria-label={`预览剧照 ${index + 1}`}
+                     onClick={event => openPreview(index + (video.cover ? 1 : 0), event.currentTarget)}
+                   >
+-                    <img src={src} alt={`影片剧照 ${index + 1}`} loading="lazy" />
++                    <img src={imageThumbnailUrl(src, 640)} alt={`影片剧照 ${index + 1}`} loading="lazy" />
+                   </button>
+                 ))}
+               </div>
+diff --git a/scripts/check-mobile-web.mjs b/scripts/check-mobile-web.mjs
+index ea5133b..412eab2 100644
+--- a/scripts/check-mobile-web.mjs
++++ b/scripts/check-mobile-web.mjs
+@@ -55,13 +55,13 @@ try {
+   }
+   const items = Array.from({ length: 36 }, (_, i) => ({
+     id: i + 1, title: `Sample film ${i + 1}`, code: `DEMO-${i + 1}`,
+-    cover: null, releaseDate: '2026', duration: 120, rating: 0
++    cover: '/preview-fixture-landscape', releaseDate: '2026', duration: 120, rating: 0
+   }))
+   for (const [width, height, touch] of [[320, 844, true], [390, 844, true], [844, 390, true], [1280, 800, false]]) {
+     const page = await browser.newPage({ viewport: { width, height }, isMobile: touch, hasTouch: touch, acceptDownloads: true })
+     await page.route('**/preview-fixture-*', route => {
+-      if (route.request().url().endsWith('broken')) return route.fulfill({ status: 404, body: '' })
+-      const portrait = route.request().url().endsWith('portrait')
++      if (new URL(route.request().url()).pathname.endsWith('broken')) return route.fulfill({ status: 404, body: '' })
++      const portrait = new URL(route.request().url()).pathname.endsWith('portrait')
+       return route.fulfill({ contentType: 'image/svg+xml', body: `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="${portrait ? 1200 : 450}"><rect width="100%" height="100%" fill="teal"/></svg>` })
+     })
+     await page.route('**/api/**', route => {
+@@ -94,6 +94,9 @@ try {
+     })
+     await page.goto(`${base}/#/browse`)
+     await page.getByRole('heading', { name: '随机发现', exact: true }).waitFor()
++    const cardImage = page.locator('.home-sections .video-card img').first()
++    await cardImage.waitFor()
++    assert.equal(new URL(await cardImage.getAttribute('src'), base).searchParams.get('size'), '640')
+     {
+       await keyboardJourney(page)
+       // Start the independent layout checks from a fresh document.
+@@ -305,6 +308,9 @@ try {
+         await page.keyboard.press('Enter')
+         await page.locator('.image-preview').waitFor()
+         await page.getByRole('button', { name: '关闭预览', exact: true }).waitFor()
++        const previewSources = await page.locator('.image-preview img').evaluateAll(images => images.map(image => image.getAttribute('src')).filter(Boolean))
++        assert.ok(previewSources.length > 0)
++        assert.ok(previewSources.every(src => !new URL(src, base).searchParams.has('size')), 'preview retains original image URLs')
+         await page.keyboard.press('ArrowLeft')
+         await page.waitForFunction(() => document.querySelector('.yarl__counter')?.textContent.trim() === '1 / 4')
+         for (const label of ['关闭预览', '放大', '下一张']) {

@@ -522,6 +522,44 @@ describe('VideoMaintenanceService', () => {
     assert.deepEqual(query.get(1)?.tags.map((tag) => tag.name), ['scraped-tag'])
   })
 
+  it('attaches the exact selected long-name tag, promotes scraped origin, and rejects deleted selections', () => {
+    setupDb()
+    const db = getDb()
+    const name = '😀'.repeat(200) + ' exact identity '
+    const tagId = Number(db.prepare('INSERT INTO tags(name) VALUES (?)').run(name).lastInsertRowid)
+    db.prepare("INSERT INTO video_tag(video_id,tag_id,origin,source) VALUES (1,?,'scraped','fixture')").run(tagId)
+    const videos = createVideoMaintenanceService()
+    videos.addExistingManualTag(1, tagId)
+    const link = db.prepare('SELECT * FROM video_tag WHERE video_id=1 AND tag_id=?').get(tagId)
+    assert.equal((link as { origin: string }).origin, 'manual')
+    assert.equal((link as { source: string | null }).source, null)
+    assert.equal((db.prepare('SELECT name FROM tags WHERE id=?').get(tagId) as { name: string }).name, name)
+    videos.addExistingManualTag(1, tagId)
+    assert.deepEqual(db.prepare('SELECT * FROM video_tag WHERE video_id=1 AND tag_id=?').get(tagId), link)
+    assert.throws(() => videos.addExistingManualTag(1, 999999), /标签已不存在/)
+    assert.throws(() => videos.addExistingManualTag(999999, tagId), /Video not found/)
+    const blankId = Number(db.prepare('INSERT INTO tags(name) VALUES (?)').run('\u3000 ').lastInsertRowid)
+    assert.throws(() => videos.addExistingManualTag(1, blankId), /标签名称不能为空/)
+    assert.equal(db.prepare('SELECT 1 FROM video_tag WHERE tag_id=?').get(blankId), undefined)
+  })
+
+  it('rolls back tag creation or origin promotion when updating the video fails', () => {
+    setupDb()
+    const db = getDb()
+    const videos = createVideoMaintenanceService()
+    const tagId = Number(db.prepare("INSERT INTO tags(name) VALUES ('Existing')").run().lastInsertRowid)
+    db.prepare("INSERT INTO video_tag(video_id,tag_id,origin,source) VALUES (1,?,'scraped','source')").run(tagId)
+    const before = db.prepare('SELECT * FROM video_tag WHERE tag_id=?').get(tagId)
+    db.exec("CREATE TEMP TRIGGER fail_tag_video_update BEFORE UPDATE ON videos BEGIN SELECT RAISE(ABORT,'injected tag update failure'); END")
+    assert.throws(() => videos.addExistingManualTag(1, tagId), /injected tag update failure/)
+    assert.deepEqual(db.prepare('SELECT * FROM video_tag WHERE tag_id=?').get(tagId), before)
+    assert.throws(() => videos.addManualTag(1, 'New during failure'), /injected tag update failure/)
+    assert.equal(db.prepare("SELECT id FROM tags WHERE name='New during failure'").get(), undefined)
+    db.exec('DROP TRIGGER fail_tag_video_update')
+    videos.addExistingManualTag(1, tagId)
+    assert.equal((db.prepare('SELECT origin FROM video_tag WHERE tag_id=?').get(tagId) as { origin: string }).origin, 'manual')
+  })
+
   it('imports and deletes a local sample in the temporary media directory', async () => {
     const { imagePath } = setupDb()
     const videos = createVideoMaintenanceService()
@@ -1898,6 +1936,7 @@ describe('VideoMaintenanceService', () => {
     }).resource
 
     assert.throws(() => videos.edit(1, { title: 'Must not persist' }), /待确认.*刮削/)
+    assert.throws(() => videos.addExistingManualTag(1, 999999), /待确认.*刮削/)
     assert.equal((db.prepare('SELECT title FROM videos WHERE id = 1').get() as { title: string }).title, 'Title')
     assert.doesNotThrow(() => videos.splitResource(1, secondary.id))
   })

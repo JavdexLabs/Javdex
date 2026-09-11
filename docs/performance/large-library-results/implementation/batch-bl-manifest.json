@@ -1,0 +1,17 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bl-target.log": "6d41cc95d594edd9259dedbe2cca84cc815bb67b915b9b8ceb053ec39b6c03fb",
+    "batch-bl-full.log": "453f66999798a420a00a836b8f006f5857e49034b7401015272a7c45402ac416",
+    "batch-bl-build.log": "1cc5beaf00182bc7357ef6addab9dbc0fe6f5022f6565125e6bdb0fdc43d6618",
+    "batch-bl-benchmark.log": "f8ca665d4bfe524b8416782206f9e0a2b99856a9e6624bdbc624acd9ef484a36",
+    "batch-bl-profile-api.patch": "e45c59523e029e95f6b2bd61c5cc051121d994ee368c879a8fb877c8aa0259c0",
+    "batch-bl-review.md": "e5bd92ee2b10585d596ef712c5bd921b39f377095583f3b7a838dc07fc695271",
+    "batch-bl-evaluation.md": "a39065a588cc8706782445c4644841283cd1ce738dca942b634885c5dfc007b5"
+  },
+  "notes": [
+    "Selected cumulative diff and new-file copies; depends on BK repo and prior batches.",
+    "39focused; full2317pass1skip0fail; build and independent benchmark passed.",
+    "Profile backend prepared; UI migration and full15/42scope remain incomplete."
+  ]
+}

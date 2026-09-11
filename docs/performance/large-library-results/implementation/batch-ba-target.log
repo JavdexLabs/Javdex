@@ -1,0 +1,10 @@
+✔ counts avatars through the scalar API without loading targets and propagates failures (27.960833ms)
+✔ serializes startup before target loading and releases ownership on empty, failed or unmounted startup (28.400959ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 214.353

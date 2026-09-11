@@ -1,0 +1,10 @@
+{"pending":1000,"resultSummaryCharacters":4096,"results":[{"name":"full.without-field-previews","samples":[2269.124584,2216.4056250000003,2267.3734590000004],"medianMs":2267.3734590000004,"jsonBytes":5226932},{"name":"summary.first50","samples":[1.6330830000006245,1.1386249999995925,1.0586660000008123],"medianMs":1.1386249999995925,"jsonBytes":7423},{"name":"summary.anchor876","samples":[1.080459000000701,1.2698330000002898,1.002542000000176],"medianMs":1.080459000000701,"jsonBytes":7425},{"name":"detail.selected","samples":[2.6861250000001746,2.6404590000001917,2.535375000001295],"medianMs":2.6404590000001917,"jsonBytes":5332}],"platform":"darwin","arch":"arm64","sqliteVersion":{"version":"3.53.4"},"caveats":["1000 consistent pending groups with4KiB result text, after ANALYZE; three warm samples per stage, not p95/cold/Windows/HDD/full IPC.","Full comparator disables field previews but still includes candidates, resources, claimants and pair preflight; it understates default full UI read cost.","Summary first/deep pages equal old projection in complete order. Selected detail equals its group from the default full legacy API, including field previews and merge pairs.","Metadata grouping/sorting remains global and maintenance is warmed first. A single selected group and its merge pairs remain unbounded.","Oracle objects stay alive throughout; no independent heap or peak RSS claim. Timings exclude assertions and serialization."]}
+✔ measures actor queue metadata and selected details (11458.051291ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11799.759167

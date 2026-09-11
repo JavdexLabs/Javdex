@@ -1,0 +1,254 @@
+[
+  {
+    "viewport": {
+      "width": 1000,
+      "height": 640
+    },
+    "geometry": {
+      "width": 1000,
+      "scrollWidth": 1000,
+      "height": 640
+    },
+    "pager": {
+      "x": 19,
+      "y": 589.1875,
+      "width": 192,
+      "height": 32
+    },
+    "focusAfterDelete": "Actor-51刮削 1 · 历史 0",
+    "pages": [
+      {
+        "limit": 50,
+        "offset": 0
+      },
+      {
+        "limit": 50,
+        "offset": 0,
+        "anchorName": "actor-001"
+      },
+      {
+        "limit": 50,
+        "offset": 0,
+        "anchorName": "actor-001"
+      },
+      {
+        "limit": 50,
+        "offset": 0,
+        "anchorName": "actor-001"
+      },
+      {
+        "limit": 50,
+        "offset": 50
+      },
+      {
+        "limit": 50,
+        "offset": 50,
+        "anchorName": "actor-051"
+      },
+      {
+        "limit": 50,
+        "offset": 100
+      },
+      {
+        "limit": 50,
+        "offset": 100,
+        "anchorName": "actor-101"
+      },
+      {
+        "limit": 50,
+        "offset": 100,
+        "anchorName": "actor-101"
+      },
+      {
+        "limit": 50,
+        "offset": 100,
+        "anchorName": "actor-101"
+      },
+      {
+        "limit": 50,
+        "offset": 50,
+        "anchorName": "actor-051"
+      },
+      {
+        "limit": 50,
+        "offset": 0
+      },
+      {
+        "limit": 50,
+        "offset": 0,
+        "anchorName": "actor-001"
+      },
+      {
+        "limit": 50,
+        "offset": 50
+      },
+      {
+        "limit": 50,
+        "offset": 50
+      },
+      {
+        "limit": 50,
+        "offset": 50,
+        "anchorName": "actor-051"
+      },
+      {
+        "limit": 50,
+        "offset": 50,
+        "anchorName": "actor-052"
+      },
+      {
+        "limit": 50,
+        "offset": 50,
+        "anchorName": "actor-052"
+      },
+      {
+        "limit": 50,
+        "offset": 50,
+        "anchorName": "actor-052"
+      }
+    ],
+    "details": [
+      "actor-001",
+      "actor-001",
+      "actor-001",
+      "actor-051",
+      "actor-101",
+      "actor-101",
+      "actor-101",
+      "actor-051",
+      "actor-001",
+      "actor-051",
+      "actor-052",
+      "actor-052",
+      "actor-052",
+      "actor-052"
+    ],
+    "errors": []
+  },
+  {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "geometry": {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900
+    },
+    "pager": {
+      "x": 19,
+      "y": 849.1875,
+      "width": 240,
+      "height": 32
+    },
+    "focusAfterDelete": "Actor-51刮削 1 · 历史 0",
+    "pages": [
+      {
+        "limit": 50,
+        "offset": 0
+      },
+      {
+        "limit": 50,
+        "offset": 0,
+        "anchorName": "actor-001"
+      },
+      {
+        "limit": 50,
+        "offset": 0,
+        "anchorName": "actor-001"
+      },
+      {
+        "limit": 50,
+        "offset": 0,
+        "anchorName": "actor-001"
+      },
+      {
+        "limit": 50,
+        "offset": 50
+      },
+      {
+        "limit": 50,
+        "offset": 50,
+        "anchorName": "actor-051"
+      },
+      {
+        "limit": 50,
+        "offset": 100
+      },
+      {
+        "limit": 50,
+        "offset": 100,
+        "anchorName": "actor-101"
+      },
+      {
+        "limit": 50,
+        "offset": 100,
+        "anchorName": "actor-101"
+      },
+      {
+        "limit": 50,
+        "offset": 100,
+        "anchorName": "actor-101"
+      },
+      {
+        "limit": 50,
+        "offset": 50,
+        "anchorName": "actor-051"
+      },
+      {
+        "limit": 50,
+        "offset": 0
+      },
+      {
+        "limit": 50,
+        "offset": 0,
+        "anchorName": "actor-001"
+      },
+      {
+        "limit": 50,
+        "offset": 50
+      },
+      {
+        "limit": 50,
+        "offset": 50
+      },
+      {
+        "limit": 50,
+        "offset": 50,
+        "anchorName": "actor-051"
+      },
+      {
+        "limit": 50,
+        "offset": 50,
+        "anchorName": "actor-052"
+      },
+      {
+        "limit": 50,
+        "offset": 50,
+        "anchorName": "actor-052"
+      },
+      {
+        "limit": 50,
+        "offset": 50,
+        "anchorName": "actor-052"
+      }
+    ],
+    "details": [
+      "actor-001",
+      "actor-001",
+      "actor-001",
+      "actor-051",
+      "actor-101",
+      "actor-101",
+      "actor-101",
+      "actor-051",
+      "actor-001",
+      "actor-051",
+      "actor-052",
+      "actor-052",
+      "actor-052",
+      "actor-052"
+    ],
+    "errors": []
+  }
+]

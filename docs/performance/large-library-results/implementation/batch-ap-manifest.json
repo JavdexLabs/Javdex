@@ -1,0 +1,18 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ap-build.log": "26eb5b9c450d442e8cc068d1610ac02f0be473b469733fe86a77291d975ba474",
+    "batch-ap-conflict-read-gating.patch": "76dac47d21de3f42f546c9a3391cbf5dfae2a21d130778d8ea41665a3aa9af5d",
+    "batch-ap-full.log": "68a480789e49833375678103cfab21ed2abfdc103cf9c4463aef146802ba7ee1",
+    "batch-ap-lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "batch-ap-review.md": "2450a894e538feebf80d1d46a9df981d3c8a5511949abd78d21f3badaa33d828",
+    "batch-ap-target.log": "4edb8815822ea54c056cd13ed0927484fd06b45887c0ce345f0bee2587870a10"
+  },
+  "notes": [
+    "Cumulative selected tracked diff and full new test files; depends on B-AO, not standalone.",
+    "Full2214pass1skip0fail/build; final targeted19 includes added ownership preservation test not counted in full.",
+    "No latency/heap benchmark or native UI acceptance claimed. Request count and state regressions prove the limited change.",
+    "Summary still performs JSON-wide conflict maintenance and can write; read-worker dependency documented.",
+    "No schema or user data change, commit, push, release. Full15/42 objective remains active."
+  ]
+}

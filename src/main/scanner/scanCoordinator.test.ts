@@ -6,12 +6,13 @@ import type {
   LibraryScanSummary,
   PendingScanGroup,
   ScanProgress,
-  ScanResult
+  ScanResult,
+  ScanCompletionResult
 } from '@shared/libraryTypes'
 import type { Video, VideoResource } from '@shared/videoTypes'
-import { DEFAULT_MEDIA_LIBRARY_CONFIG } from '@shared/mediaLibraryTypes'
+import { DEFAULT_MEDIA_LIBRARY_CONFIG, type MediaLibraryRoot } from '@shared/mediaLibraryTypes'
 import { MaintenanceTaskGate } from '../services/maintenanceTaskGate'
-import { createScanCoordinator } from './scanCoordinator'
+import { createScanCoordinator, type ScanCoordinatorDependencies } from './scanCoordinator'
 import type { ScanOptions, ScanProgressFn } from './scanner'
 
 interface LegacyCoordinatorDependencies {
@@ -24,7 +25,7 @@ interface LegacyCoordinatorDependencies {
     onProgress?: ScanProgressFn,
     options?: ScanOptions & { unavailableRoots?: string[] }
   ) => Promise<ScanResult>
-  listLocalResources?: () => Array<{ video_id: number; resource_id: number; locator: string }>
+  listLocalResources?: () => Iterable<{ video_id: number; resource_id: number; locator: string }>
   getResourceById?: (resourceId: number) => VideoResource | null
   getVideoById?: (videoId: number) => Video | null
   listResources?: (videoId: number) => VideoResource[]
@@ -55,6 +56,7 @@ interface LegacyCoordinatorDependencies {
   deleteResourceLessVideos?: () => number
   listResourceLessVideos?: () => Array<Pick<Video, 'id' | 'code' | 'title'>>
   listPendingScanGroups?: () => PendingScanGroup[]
+  readPendingScanAuditEntries?: ScanCoordinatorDependencies['readPendingScanAuditEntries']
   recordScanSummary?: (
     summary: LibraryScanSummary,
     unrecognizedFiles: string[] | undefined,
@@ -73,11 +75,12 @@ interface TestScanCoordinatorRequest {
 }
 
 type TestCoordinator = Omit<ReturnType<typeof createScanCoordinator>, 'run'> & {
-  run: (request?: TestScanCoordinatorRequest) => Promise<ScanResult>
+  run: (request?: TestScanCoordinatorRequest) => Promise<ScanCompletionResult>
 }
 
 function createTestScanCoordinator(
-  dependencies: LegacyCoordinatorDependencies
+  dependencies: LegacyCoordinatorDependencies,
+  actualOverrides: Partial<ScanCoordinatorDependencies> = {}
 ): TestCoordinator {
   let rootsBound = !dependencies.initiallyOfflineIdentity
   const configuredFolders = (): string[] => dependencies.getConfiguredFolders?.() ?? ['/online']
@@ -100,6 +103,7 @@ function createTestScanCoordinator(
     roots().find((root) => root.id === rootId)?.path
   const legacyScanFolders = dependencies.scanFolders ?? (async () => emptyScanResult())
   const coordinator = createScanCoordinator({
+    auditStorage: 'json',
     readScanSnapshot: () => ({
       libraryId: 1,
       libraryRevision: rootsBound ? 2 : 1,
@@ -155,11 +159,11 @@ function createTestScanCoordinator(
       libraryId: request.libraryId,
       runId: request.runId
     }),
-    listLocalResources: () =>
-      (dependencies.listLocalResources?.() ?? []).map((resource) => ({
-        library_id: 1,
-        ...resource
-      })),
+    listLocalResources: function* () {
+      for (const resource of dependencies.listLocalResources?.() ?? []) {
+        yield { library_id: 1, ...resource }
+      }
+    },
     getResourceById: (_libraryId, resourceId) =>
       dependencies.getResourceById?.(resourceId) ?? null,
     getVideoById: (videoId) => dependencies.getVideoById?.(videoId) ?? null,
@@ -218,7 +222,14 @@ function createTestScanCoordinator(
         }
       })
     },
-    listPendingScanGroups: () => dependencies.listPendingScanGroups?.() ?? [],
+    readPendingScanAuditEntries: dependencies.readPendingScanAuditEntries ?? ((_libraryId, groupIds, pendingPaths) =>
+      (dependencies.listPendingScanGroups?.() ?? [])
+        .filter(group => groupIds.has(group.id))
+        .map(group => ({
+          groupId: group.id,
+          normalizedCode: group.normalizedCode,
+          resourceCount: group.resources.filter(resource => pendingPaths.has(resource.filePath)).length
+        }))),
     beginRun: () => undefined,
     finishRun: (input) =>
       dependencies.recordScanSummary?.(
@@ -231,7 +242,8 @@ function createTestScanCoordinator(
     gate: dependencies.gate ?? new MaintenanceTaskGate(),
     ...(dependencies.runCleanupTransaction
       ? { runCleanupTransaction: dependencies.runCleanupTransaction }
-      : {})
+      : {}),
+    ...actualOverrides
   })
   const scopedRun = coordinator.run.bind(coordinator)
   coordinator.run = ((request: TestScanCoordinatorRequest = {}) => {
@@ -296,6 +308,44 @@ function resource(input: Partial<VideoResource> & Pick<VideoResource, 'id' | 'vi
 }
 
 describe('ScanCoordinator', () => {
+  it('coalesces display progress while preserving per-file callbacks and the final event', async () => {
+    const size = 300_382
+    const events: LibraryScanEvent[] = []
+    let callbacks = 0
+    const coordinator = createTestScanCoordinator({
+      scanFolders: async (_roots, onProgress) => {
+        for (let scanned = 1; scanned <= size; scanned++) {
+          onProgress?.({ scanned, imported: 0, currentFile: `/online/${scanned}.mp4` })
+        }
+        return { ...emptyScanResult(), scannedFiles: size }
+      }
+    })
+    coordinator.subscribe(event => events.push(event))
+    await coordinator.run({ onProgress: () => { callbacks++ } })
+    assert.equal(callbacks, size)
+    const progress = events.filter(event => event.phase === 'progress')
+    assert.ok(progress.length < size)
+    assert.equal(progress.at(-1)?.progress.scanned, size)
+    assert.equal(events.at(-1)?.phase, 'completed')
+    assert.equal(events.at(-2)?.phase, 'progress')
+  })
+
+  it('flushes pending progress before a failure without delaying the failure event', async () => {
+    const events: LibraryScanEvent[] = []
+    const coordinator = createTestScanCoordinator({
+      scanFolders: async (_roots, onProgress) => {
+        onProgress?.({ scanned: 1, imported: 0, currentFile: '/online/one.mp4' })
+        onProgress?.({ scanned: 2, imported: 0, currentFile: '/online/two.mp4' })
+        throw new Error('scan failed')
+      }
+    })
+    coordinator.subscribe(event => events.push(event))
+    await assert.rejects(coordinator.run(), /scan failed/)
+    assert.equal(events.filter(event => event.phase === 'progress').at(-1)?.progress.scanned, 2)
+    assert.equal(events.at(-1)?.phase, 'failed')
+    assert.equal(coordinator.running, false)
+  })
+
   it('binds an offline-created root identity and refreshes the frozen snapshot before scanning', async () => {
     let bindings = 0
     let scanned = 0
@@ -867,6 +917,89 @@ describe('ScanCoordinator', () => {
     assert.equal(result.removed, 2)
   })
 
+  it('removes many non-primary resources without reading sibling resource lists', async () => {
+    const count = 5000
+    let removed = 0, audited = 0
+    const coordinator = createTestScanCoordinator({
+      listLocalResources: function* () {
+        for (let id = 1; id <= count; id++) {
+          yield { video_id: 1, resource_id: id, locator: `/online/${id}.mp4` }
+        }
+      },
+      getResourceById: id => resource({id, video_id:1, kind:'local', locator:`/online/${id}.mp4`, is_primary:0}),
+      getVideoById: () => ({id:1, code:'MANY', title:null}) as Video,
+      listResources: () => { throw new Error('non-primary removal must not load siblings') },
+      removeResourceRecord: () => { removed++ },
+      setPrimaryResource: () => assert.fail('non-primary removal must not promote a resource'),
+      inspectPath: () => 'missing',
+      recordScanSummary: (_summary, _files, audit) => { audited = audit.removedResources.length }
+    })
+    const result = await coordinator.run()
+    assert.equal(result.removed, count)
+    assert.equal(result.promoted, 0)
+    assert.equal(removed, count)
+    assert.equal(audited, count)
+  })
+
+  it('consumes cleanup references lazily and closes iteration on a path failure', async () => {
+    let removed = 0, closed = false
+    const coordinator = createTestScanCoordinator({
+      listLocalResources: function* () {
+        try {
+          yield { video_id: 1, resource_id: 1, locator: '/online/1.mp4' }
+          assert.equal(removed, 1, 'cleanup must process a reference before asking for the next')
+          yield { video_id: 2, resource_id: 2, locator: '/online/2.mp4' }
+          assert.fail('unknown path must stop enumeration')
+        } finally { closed = true }
+      },
+      getResourceById: id => resource({id, video_id:id, kind:'local', locator:`/online/${id}.mp4`, is_primary:0}),
+      removeResourceRecord: () => { removed++ },
+      inspectPath: value => value.endsWith('/1.mp4') ? 'missing' : 'unknown'
+    })
+    await assert.rejects(coordinator.run(), /无法确认本地资源是否存在/)
+    assert.equal(removed, 1)
+    assert.equal(closed, true)
+  })
+
+  it('preserves all three cleanup audit sequences above the argument limit', async () => {
+    const size = 300_382
+    let audited = false
+    const coordinator = createTestScanCoordinator({
+      listLocalResources: () => Array.from({ length: size }, (_, index) => ({
+        video_id: index + 1, resource_id: index + 1, locator: `/online/${index + 1}.mp4`
+      })),
+      getResourceById: id => resource({
+        id, video_id: id, kind: 'local', locator: `/online/${id}.mp4`, is_primary: 1
+      }),
+      getVideoById: id => ({ id, code: `AUDIT-${id}`, title: null }) as Video,
+      listResources: id => [resource({
+        id: size + id, video_id: id, kind: 'web', locator: `https://example.test/${id}`
+      })],
+      inspectPath: () => 'missing',
+      shouldAutoDeleteResourceLessVideos: () => true,
+      deleteResourceLessVideos: () => size,
+      listResourceLessVideos: () => Array.from({ length: size }, (_, index) => ({
+        id: size * 2 + index, code: `EMPTY-${index}`, title: null
+      })),
+      recordScanSummary: (_summary, _files, audit) => {
+        audited = true
+        assert.equal(audit.removedResources.length, size)
+        assert.equal(audit.promotedResources.length, size)
+        assert.equal(audit.deletedVideos.length, size)
+        for (let index = 0; index < size; index++) {
+          assert.equal(audit.removedResources[index].resourceId, index + 1)
+          assert.equal(audit.promotedResources[index].resourceId, size + index + 1)
+          assert.equal(audit.deletedVideos[index].videoId, size * 2 + index)
+        }
+      }
+    })
+    const result = await coordinator.run()
+    assert.equal(result.removed, size)
+    assert.equal(result.promoted, size)
+    assert.equal(result.deletedVideos, size)
+    assert.equal(audited, true)
+  })
+
   it('removes resource-less memberships after deferred cleanup on a safe full scan', async () => {
     const order: string[] = []
     const summaries: LibraryScanSummary[] = []
@@ -1059,4 +1192,202 @@ describe('ScanCoordinator', () => {
     releaseScan()
     await first
   })
+})
+
+it('reads pending audit summaries with only referenced groups and all exact pending paths', async () => {
+  const calls: Array<{ libraryId: number; groupIds: number[]; paths: string[] }> = []
+  let recorded: LibraryScanAudit | undefined
+  const expected = [
+    { groupId: 9, normalizedCode: 'OLDER', resourceCount: 3 },
+    { groupId: 2, normalizedCode: 'NEWER', resourceCount: 0 }
+  ]
+  const coordinator = createTestScanCoordinator({
+    scanFolders: async (_folders, _progress, options) => {
+      for (const [groupId, filePath] of [
+        [2, '/online/Case.mp4'], [9, '/online/second.mp4'], [2, '/online/Case.mp4'],
+        [null, '/online/no-group.mp4'], [null, '/online/case.mp4']
+      ] as const) options?.onFileResult?.({ outcome: 'pending', rootId: 1, sourceKind: 'local',
+        groupId, filePath, normalizedCode: null, addedToQueue: true })
+      options?.onFileResult?.({ outcome: 'unrecognized', rootId: 1, sourceKind: 'local', filePath: '/online/not-pending.mp4' })
+      return emptyScanResult()
+    },
+    listPendingScanGroups: () => { throw Error('Full pending DTO listing is forbidden') },
+    readPendingScanAuditEntries: (libraryId, groupIds, pendingPaths) => {
+      calls.push({ libraryId, groupIds: [...groupIds], paths: [...pendingPaths] })
+      return expected
+    },
+    recordScanSummary: (_summary, _unrecognized, audit) => { recorded = audit }
+  })
+  await coordinator.run()
+  assert.deepEqual(calls, [{ libraryId: 1, groupIds: [2, 9], paths: [
+    '/online/Case.mp4', '/online/second.mp4', '/online/no-group.mp4', '/online/case.mp4'
+  ] }])
+  assert.deepEqual(recorded?.pendingGroups, expected, 'preserve reader ordering and counts without regrouping')
+})
+
+for (const mode of ['no-files', 'non-pending', 'pending-without-group'] as const) {
+  it(`skips the pending audit DB reader for ${mode}`, async () => {
+    let calls = 0
+    let recorded: LibraryScanAudit | undefined
+    const coordinator = createTestScanCoordinator({
+      scanFolders: async (_folders, _progress, options) => {
+        if (mode === 'non-pending') options?.onFileResult?.({
+          outcome: 'unrecognized', rootId: 1, sourceKind: 'local', filePath: '/online/unknown.mp4'
+        })
+        if (mode === 'pending-without-group') options?.onFileResult?.({
+          outcome: 'pending', rootId: 1, sourceKind: 'local', filePath: '/online/pending.mp4',
+          groupId: null, normalizedCode: null, addedToQueue: true
+        })
+        return emptyScanResult()
+      },
+      readPendingScanAuditEntries: () => { calls++; throw Error('Must skip DB') },
+      recordScanSummary: (_summary, _unrecognized, audit) => { recorded = audit }
+    })
+    await coordinator.run()
+    assert.equal(calls, 0)
+    assert.deepEqual(recorded?.pendingGroups, [])
+  })
+}
+
+function matchingRoot(id: number, rootPath: string, realPath = rootPath): MediaLibraryRoot {
+  return { id, libraryId: 1, path: rootPath, normalizedPath: rootPath, realPath,
+    normalizedRealPath: realPath, deviceId: `device-${id}`, inode: `inode-${id}`,
+    position: id, state: 'active', createdAt: '2026-08-10', updatedAt: '2026-08-10' }
+}
+function matchingCoordinator(roots: MediaLibraryRoot[], overrides: Partial<ScanCoordinatorDependencies>) {
+  return createTestScanCoordinator({ getConfiguredFolders: () => roots.map(root => root.path) }, {
+    readScanSnapshot: () => Object.freeze({ libraryId: 1, libraryRevision: 1, configRevision: 1, capturedAt: '2026-08-10',
+      config: Object.freeze({ ...DEFAULT_MEDIA_LIBRARY_CONFIG, libraryId: 1, revision: 1 }),
+      roots: Object.freeze(roots.map(root => Object.freeze(root))) }),
+    ...overrides
+  })
+}
+
+for (const order of ['parent-first', 'child-first'] as const) {
+  it(`keeps original first root for cleanup and unrecognized summary with ${order}`, async () => {
+    const parent = matchingRoot(1, '/online')
+    const child = matchingRoot(2, '/online/nested')
+    const roots = order === 'parent-first' ? [parent, child] : [child, parent]
+    const filePath = '/online/nested/unknown.mp4'
+    const files: Array<{ root: Readonly<MediaLibraryRoot>; path: string }> = []
+    const deleted: Readonly<MediaLibraryRoot>[] = []
+    const inspected: string[] = []
+    let finished: Parameters<ScanCoordinatorDependencies['finishRun']>[0] | undefined
+    const coordinator = matchingCoordinator(roots, {
+      scanFolders: async () => ({ ...emptyScanResult(), failed: 1, unrecognizedFiles: [filePath] }),
+      inspectPath: path => { inspected.push(path); return path.endsWith('missing.mp4') ? 'missing' : 'present' },
+      authorizeRootFile: (_library, rootId, path, root) => {
+        assert.strictEqual(root, roots[0]); assert.equal(rootId, roots[0].id)
+        files.push({ root: root!, path }); return root!
+      },
+      authorizeRootDeletionTarget: (_library, rootId, _path, root) => {
+        assert.strictEqual(root, roots[0]); assert.equal(rootId, roots[0].id)
+        deleted.push(root!); return root!
+      },
+      reconcilePendingScanResources: (_library, _rootIds, inspect) => {
+        assert.equal(inspect(filePath), 'present')
+        assert.equal(inspect('/online/nested/missing.mp4'), 'missing')
+        assert.equal(inspect('/outside/unknown.mp4'), 'unknown')
+        return { removedResources: 0, removedGroups: 0 }
+      },
+      finishRun: value => { finished = value }
+    })
+    await coordinator.run()
+    assert.deepEqual(inspected, [filePath, '/online/nested/missing.mp4'])
+    assert.deepEqual(files.map(entry => entry.path), [filePath, filePath])
+    assert.deepEqual(deleted, [roots[0]])
+    assert.equal(finished?.unrecognizedFiles?.[0].rootId, roots[0].id)
+    assert.equal(finished?.unrecognizedFiles?.[0].filePath, filePath)
+  })
+}
+
+it('uses the early realPath alias for cleanup but only configured paths for summary', async () => {
+  const alias = matchingRoot(1, '/configured', '/actual')
+  const later = matchingRoot(2, '/actual/nested')
+  const roots = [alias, later]
+  const cleanupPath = '/actual/alias-only.mp4'
+  const sharedPath = '/actual/nested/unknown.mp4'
+  const authorized: Array<{ path: string; root: Readonly<MediaLibraryRoot> }> = []
+  let finished: Parameters<ScanCoordinatorDependencies['finishRun']>[0] | undefined
+  const coordinator = matchingCoordinator(roots, {
+    scanFolders: async () => ({ ...emptyScanResult(), failed: 2, unrecognizedFiles: [cleanupPath, sharedPath] }),
+    authorizeRootFile: (_library, _rootId, path, root) => { authorized.push({ path, root: root! }); return root! },
+    reconcilePendingScanResources: (_library, _rootIds, inspect) => {
+      assert.equal(inspect(cleanupPath), 'present')
+      assert.equal(inspect(sharedPath), 'present')
+      return { removedResources: 0, removedGroups: 0 }
+    },
+    finishRun: value => { finished = value }
+  })
+  await coordinator.run()
+  assert.deepEqual(authorized.map(entry => entry.path), [cleanupPath, sharedPath, sharedPath])
+  assert.strictEqual(authorized[0].root, alias)
+  assert.strictEqual(authorized[1].root, alias)
+  assert.strictEqual(authorized[2].root, later)
+  assert.deepEqual(finished?.unrecognizedFiles?.map(file => ({ path: file.filePath, rootId: file.rootId })),
+    [{ path: sharedPath, rootId: later.id }])
+})
+
+for (const phase of ['cleanup-present', 'cleanup-missing', 'summary'] as const) {
+  it(`does not try a later matching root after ${phase} authorization fails`, async () => {
+    const roots = [matchingRoot(1, '/online'), matchingRoot(2, '/online/nested')]
+    const filePath = '/online/nested/unknown.mp4'
+    const attempts: number[] = []
+    const rejectFirst = (_library: number, rootId: number, _path: string, root?: Readonly<MediaLibraryRoot>): MediaLibraryRoot => {
+      attempts.push(rootId)
+      assert.strictEqual(root, roots[0])
+      throw Error('first matching root authorization failed')
+    }
+    const coordinator = matchingCoordinator(roots, {
+      scanFolders: async () => ({ ...emptyScanResult(), failed: 1, unrecognizedFiles: [filePath] }),
+      inspectPath: () => phase === 'cleanup-missing' ? 'missing' : 'present',
+      authorizeRootFile: rejectFirst,
+      authorizeRootDeletionTarget: rejectFirst,
+      reconcilePendingScanResources: (_library, _rootIds, inspect) => {
+        if (phase !== 'summary') inspect(filePath)
+        return { removedResources: 0, removedGroups: 0 }
+      }
+    })
+    await assert.rejects(coordinator.run(), /first matching root authorization failed/)
+    assert.deepEqual(attempts, [roots[0].id])
+  })
+}
+
+it('reauthorizes the first matching root for unknown pending paths without inspecting unmatched paths or falling back', async () => {
+  const roots = [matchingRoot(1, '/online'), matchingRoot(2, '/online/nested')]
+  const inspected: string[] = []
+  const authorized: number[] = []
+  let insidePendingInspection = false
+  let rejectUnknown = false
+  const coordinator = matchingCoordinator(roots, {
+    inspectPath: filePath => { inspected.push(filePath); return 'unknown' },
+    authorizeRoot: (_library, rootId, root) => {
+      assert.ok(root)
+      if (insidePendingInspection) {
+        authorized.push(rootId)
+        assert.strictEqual(root, roots[0])
+        assert.equal(Object.isFrozen(root), true)
+        if (rejectUnknown) throw Error('unknown root authorization failed')
+      }
+      return root
+    },
+    authorizeRootFile: () => { throw Error('unknown must not authorize a present file') },
+    authorizeRootDeletionTarget: () => { throw Error('unknown must not authorize deletion') },
+    reconcilePendingScanResources: (_library, _rootIds, inspect) => {
+      insidePendingInspection = true
+      try {
+        assert.equal(inspect('/online/nested/unknown.mp4'), 'unknown')
+        assert.equal(inspect('/outside/unknown.mp4'), 'unknown')
+        assert.deepEqual(authorized, [roots[0].id])
+        rejectUnknown = true
+        assert.throws(() => inspect('/online/nested/unknown.mp4'), /unknown root authorization failed/)
+        assert.deepEqual(authorized, [roots[0].id, roots[0].id])
+      } finally {
+        insidePendingInspection = false
+      }
+      return { removedResources: 0, removedGroups: 0 }
+    }
+  })
+  await coordinator.run()
+  assert.deepEqual(inspected, ['/online/nested/unknown.mp4', '/online/nested/unknown.mp4'])
 })

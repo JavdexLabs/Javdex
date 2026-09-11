@@ -111,19 +111,9 @@ describe('pending center resolution state', () => {
   it('labels scan decisions with their owning media library', () => {
     const sections = buildPendingQueueSections(
       {
-        scanGroups: [
-          {
-            id: 9,
-            libraryId: 7,
-            normalizedCode: 'ABC-123',
-            revision: 1,
-            createdAt: '2026-08-29T00:00:00.000Z',
-            updatedAt: '2026-08-29T00:00:00.000Z',
-            resources: []
-          }
-        ],
+        scanItems: [{kind: 'group', id: 9, libraryId: 7, revision: 1, label: 'ABC-123', resourceCount: 0}],
         scrapeItems: [],
-        conflictGroups: [],
+        conflictItems: [],
         libraryNames: new Map([[7, 'NAS 媒体库']])
       },
       'scan'
@@ -135,25 +125,9 @@ describe('pending center resolution state', () => {
   it('shows resource identity conflicts in the scan queue without exposing a local path', () => {
     const sections = buildPendingQueueSections(
       {
-        scanGroups: [],
-        resourceIdentities: [
-          {
-            id: 4,
-            libraryId: 7,
-            rootId: 2,
-            sourceKind: 'local',
-            targetKind: null,
-            targetDisplay: null,
-            displayName: 'FILE-001.mp4',
-            filenameCode: 'FILE-001',
-            nfoCode: 'NFO-002',
-            revision: 1,
-            createdAt: '2026-09-05T00:00:00.000Z',
-            updatedAt: '2026-09-05T00:00:00.000Z'
-          }
-        ],
+        scanItems: [{kind: 'identity', id: 4, libraryId: 7, revision: 1, label: 'FILE-001 ↔ NFO-002', displayName: 'FILE-001.mp4'}],
         scrapeItems: [],
-        conflictGroups: [],
+        conflictItems: [],
         libraryNames: new Map([[7, 'NAS 媒体库']])
       },
       'scan'

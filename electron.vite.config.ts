@@ -115,7 +115,8 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
-          index: resolve('src/main/index.ts')
+          index: resolve('src/main/index.ts'),
+          catalogReadWorker: resolve('src/main/services/catalogReadWorker.ts')
         }
       }
     }

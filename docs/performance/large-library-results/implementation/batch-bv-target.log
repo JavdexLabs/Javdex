@@ -1,0 +1,19 @@
+✔ does not load hidden scan history, including manual refresh and invalidation, and releases completed data (58.437667ms)
+✔ discards pending results after leaving and re-entering or switching libraries (35.79625ms)
+✔ exposes history load errors and retries without treating failure as an empty history (23.666709ms)
+▶ media-library scan event scope
+  ✔ accepts only the current library and, once known, the current run (0.834625ms)
+✔ media-library scan event scope (1.179708ms)
+▶ ScanSettingsTab
+  ✔ builds domain-correct deep links for scan identities and scrape candidates (237.382458ms)
+  ✔ renders automatic local NFO import enabled by default and persists a switch change immediately (9.032833ms)
+✔ ScanSettingsTab (246.854166ms)
+✔ distinguishes scan history loading, failure with retry and an empty result (4.137417ms)
+ℹ tests 7
+ℹ suites 2
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 462.264708

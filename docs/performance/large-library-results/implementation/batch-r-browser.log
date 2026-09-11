@@ -1,0 +1,9 @@
+KEYBOARD journey { searchSteps: 1, actorSteps: 15, yearSteps: 2, pageSteps: 1 }
+PASS 320×844 touch
+KEYBOARD journey { searchSteps: 1, actorSteps: 15, yearSteps: 2, pageSteps: 1 }
+PASS 390×844 touch
+KEYBOARD journey { searchSteps: 1, actorSteps: 15, yearSteps: 2, pageSteps: 1 }
+PASS 844×390 touch
+KEYBOARD journey { searchSteps: 1, actorSteps: 13, yearSteps: 2, pageSteps: 1 }
+PASS 1280×800 desktop
+PASS mobile login and pairing status

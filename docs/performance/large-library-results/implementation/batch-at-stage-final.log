@@ -1,0 +1,30 @@
+[stage:start] database.init
+[stage:end] {"stage":"database.init","ms":6.033665999999982}
+[stage:start] fixture
+[stage:end] {"stage":"fixture","ms":24.947625000000016}
+[stage:start] analyze
+[stage:end] {"stage":"analyze","ms":1.4455829999999992}
+[stage:start] maintenance.cold
+[stage:end] {"stage":"maintenance.cold","ms":26.34899999999999}
+[stage:start] maintenance.warm
+[stage:end] {"stage":"maintenance.warm","ms":0.6577499999999645}
+[stage:start] page.first
+[stage:end] {"stage":"page.first","ms":5.08479200000005}
+[stage:start] detail.selected
+[stage:end] {"stage":"detail.selected","ms":4.00629200000003}
+[stage:start] detail.selected.legacy-sql
+[stage:end] {"stage":"detail.selected.legacy-sql","ms":151.78449999999998}
+[stage:start] legacy.no-field-plans
+[stage:end] {"stage":"legacy.no-field-plans","ms":2270.3255}
+[stage:start] legacy.full
+[stage:end] {"stage":"legacy.full","ms":2335.6956249999994}
+{"count":1000,"records":[{"stage":"database.init","ms":6.033665999999982},{"stage":"fixture","ms":24.947625000000016},{"stage":"analyze","ms":1.4455829999999992},{"stage":"maintenance.cold","ms":26.34899999999999},{"stage":"maintenance.warm","ms":0.6577499999999645},{"stage":"page.first","ms":5.08479200000005},{"stage":"detail.selected","ms":4.00629200000003},{"stage":"detail.selected.legacy-sql","ms":151.78449999999998},{"stage":"legacy.no-field-plans","ms":2270.3255},{"stage":"legacy.full","ms":2335.6956249999994}],"legacySqlReplacements":1,"platform":"darwin","arch":"arm64","notes":["Single stage sample, synthetic shared owner with count aliases, 4KiB result JSON; not p95 or user-data benchmark."]}
+✔ locates skewed actor conflict costs by stage (4851.932917ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5197.725041

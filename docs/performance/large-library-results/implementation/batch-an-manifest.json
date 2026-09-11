@@ -1,0 +1,27 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-an-benchmark.json": "5d62b7f538b0eca3a6274be608805570b6d8f9147920c26500ac0905147e3549",
+    "batch-an-benchmark.log": "372b5ddf6190895fbf77534b4715839ded1f519f8076b2e1c1823aff8e99ef11",
+    "batch-an-browser.log": "514b9a1f2a9e88fc1d293a0c5e1b5843ee4d680e53f438930663575819490096",
+    "batch-an-build.log": "53883eaea706c0060fd1fe3bfdf511cdb61cc929cb1e5255ab2a90c88d08708a",
+    "batch-an-full.log": "a79c2e136f2040d4f7aae50c6ff6e9da3560ca9b4b520ee89ba31c6f1f85744c",
+    "batch-an-review.md": "8a22255b565bed361b97f92f75dadfdee0b7c5da2b304d706ba867614e09b6fb",
+    "batch-an-target.log": "f4ebde02f7f71ded67c74d92ed313e06629e4662979fe601561ebdb5a6682565",
+    "batch-an-ui-1000x640.png": "5b299c893779684ee999003f7917840669ef676c11c9d933e0fb3a6b9e03db3d",
+    "batch-an-ui-1440x900.png": "b525ee0fa7c4239d66f9f38461bf9244625b0c3a101ddc6bb36654df9235f9b1",
+    "batch-an-ui-groups-1000x640.png": "3b72b5ee51ad9a3b09507adfaea906f96acd089e0d6707bee05020f2bf955293",
+    "batch-an-ui-groups-1440x900.png": "501579b4d7f5a42298b1e3c1eb89993917945903ffed93e7d2d2a0f1e188766f",
+    "batch-an-ui-results.json": "db9d8795ff6c0979e6bdcdb95fa049c346217b2778ab1d3f01bf7b2de4fb713a",
+    "batch-an-unified-audit-presence.patch": "9a2c5b2b1df3bffe40ab6af37f6d62b48966294fcf8a3592401c644b0d4ca1bd"
+  },
+  "notes": [
+    "Cumulative selected tracked diff plus full new files; depends on B-AM, not standalone. Old untracked usePendingScrapePresence.ts/test.tsx were replaced by usePendingAuditPresence.ts/test.tsx; remove the old files when reconstructing from AM.",
+    "Final19 targeted/full2203pass1skip0fail/build and browser fixtures passed after stable-anchor fix.",
+    "Single page input totals100 across3 arrays. Query validates library; group/identity scoped, scrape global by existing behavior. No resource/path/JSON projection.",
+    "Benchmark now6 cases and adds10000 scan groups plus10000 resource identities to the10000 pending scrape fixture. Earlier AL4/AM5-case artifacts have a smaller fixture; do not infer cross-batch regression/improvement from their timings.",
+    "Mixed100 complete result equality, median0.109458ms/547B afterANALYZE in3 sequential warm local samples. Repo-only timing excludes serialization/assertions, not full IPC/p95/Windows/HDD. RSS inherits earlier full hydration and is not independent/peak.",
+    "Settings pending-detail full reads removed; raw audit arrays and PendingCenter scan/actress queues remain full. No global cancellation/backpressure, event or target hardware completion claimed.",
+    "No schema change(current17), user data, commit, push or release. Full15/42 plan remains incomplete."
+  ]
+}

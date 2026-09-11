@@ -1,0 +1,41 @@
+▶ actress batch scrape persistence lifecycle
+  ✔ persists one stable job id and advances pending targets across restart (117.774708ms)
+  ✔ loads a legacy task without tri-state fields using a stable fallback job id (56.668667ms)
+  ✔ clears a cancelled task file without deleting its completed pending result (73.021125ms)
+  ✔ persists only a canonical status and the start-time target snapshot (72.340375ms)
+  ✔ recovers a paused checkpoint after an application restart cache reset (49.161708ms)
+  ✔ normalizes a legacy scraped paused job without rewriting progress (48.65625ms)
+  ✔ normalizes an omitted scrapeStatus to all while preserving the snapshot (48.818958ms)
+  ✔ marks an unknown status job unrecoverable without falling back to all (48.566875ms)
+  ✔ blocks resume for an unknown status job but still allows discard (51.316292ms)
+  ✔ resumes from the saved snapshot without re-applying current filters (73.529042ms)
+  ✔ resumes a normalized legacy scraped job with unified scrape result semantics (77.432875ms)
+✔ actress batch scrape persistence lifecycle (718.115708ms)
+✔ coalesces a large burst and flushes the final value without leaking a timer (2.893208ms)
+✔ limits continuous progress to ten updates per second plus the final flush (0.473042ms)
+✔ replaces pending progress with an immediate state and can publish the next state (0.1235ms)
+▶ ScrapeJobController
+  ✔ flushes and detaches UI progress on rejection before accepting another batch (4.011125ms)
+  ✔ coalesces video UI progress while preserving checkpoints and done delivery (18.320083ms)
+  ✔ coalesces video UI progress while preserving checkpoints and paused delivery (14.430583ms)
+  ✔ coalesces video UI progress while preserving checkpoints and cancelled delivery (12.79525ms)
+  ✔ coalesces actress UI progress while preserving checkpoints and done delivery (13.163583ms)
+  ✔ coalesces actress UI progress while preserving checkpoints and paused delivery (12.263833ms)
+  ✔ coalesces actress UI progress while preserving checkpoints and cancelled delivery (12.695375ms)
+  ✔ preserves media-library scope through batch count and start orchestration (0.320084ms)
+  ✔ rejects a single-video scrape outside the requesting active media library (0.272625ms)
+  ✔ forwards an explicit director choice and returns structured classification outcomes (0.092875ms)
+  ✔ serializes single video and actress scrape runs (0.082167ms)
+  ✔ pauses an interrupted persisted job during initialization (0.074875ms)
+  ✔ recovers an on-disk running checkpoint as paused after restart (0.82325ms)
+  ✔ publishes progress and supports pause, resume, and discard for persisted batches (0.480375ms)
+  ✔ prevents starting a scrape batch while automatic crop owns the batch lock (0.060208ms)
+✔ ScrapeJobController (90.570709ms)
+ℹ tests 29
+ℹ suites 2
+ℹ pass 29
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1115.052667

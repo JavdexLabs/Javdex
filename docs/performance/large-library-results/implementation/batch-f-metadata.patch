@@ -1,0 +1,804 @@
+diff --git a/src/main/db/playlistRepo.test.ts b/src/main/db/playlistRepo.test.ts
+index caf7d5e..43172f4 100644
+--- a/src/main/db/playlistRepo.test.ts
++++ b/src/main/db/playlistRepo.test.ts
+@@ -4,11 +4,15 @@ import fs from 'node:fs'
+ import os from 'node:os'
+ import path from 'node:path'
+ import { closeDatabase, getDb, initDatabaseAtPath } from './database'
++import type { VideoResourceFilter } from '@shared/videoTypes'
+ import { insertTestVideoWithFile } from './testVideoFixtures'
+ import {
+   addVideoToPlaylist,
+   createPlaylistRecord,
+   getPlaylistDetail,
++  getPlaylistPage,
++  getPlaylistMetadata,
++  listPlaylistVideoPage,
+   listPlaylists,
+   listPlaylistsForVideo,
+   removeVideoFromPlaylist,
+@@ -49,6 +53,82 @@ afterEach(() => {
+ })
+ 
+ describe('playlistRepo', () => {
++  it('paginates and filters identically to the full playlist without losing zero-resource rows', () => {
++    setupDb()
++    const db = getDb()
++    db.exec("INSERT INTO videos (id, code, release_date) VALUES (3, 'EMPTY-3', ''), (4, 'EMPTY-4', NULL), (5, 'EMPTY-5', '   ')")
++    const id = createPlaylistRecord({ name: 'Paged' })
++    for (const videoId of [1, 2, 3, 4, 5]) addVideoToPlaylist({ playlistId: id, videoId })
++    db.exec(`UPDATE videos SET release_date = '2024-03-01' WHERE id IN (1, 2);
++      INSERT INTO video_resources (library_id, video_id, kind, locator, resource_key)
++      VALUES (1, 2, 'web', 'https://example.test/2', 'web:2');`)
++    const filterSets: VideoResourceFilter[][] = [[], ['local'], ['none'], ['web'], ['local', 'none']]
++    for (const sortBy of ['added_at', 'release_date'] as const) {
++      for (const sortDir of ['asc', 'desc'] as const) {
++        const full = getPlaylistDetail(id, { sortBy, sortDir })!
++        for (const resourceKinds of filterSets) {
++          const filtered = full.videos.filter(video => resourceKinds.length === 0 || resourceKinds.some(kind =>
++            kind === 'none' ? video.resource_kinds?.length === 0 : video.resource_kinds?.includes(kind)))
++          const actual = []
++          for (let offset = 0; offset <= filtered.length; offset++) {
++            const page = getPlaylistPage(id, { sortBy, sortDir, resourceKinds, offset, limit: 1 })!
++            assert.equal(page.total, 5)
++            assert.equal(page.filteredTotal, filtered.length)
++            assert.equal(page.preview_cover_path, full.videos.find(video => video.cover_path)?.cover_path ?? null)
++            assert.ok(page.videos.length <= 1)
++            actual.push(...page.videos)
++          }
++          assert.deepEqual(actual, filtered.map(({ id, code, title, cover_path, scraped_status,
++            has_pending_scrape, resource_kinds }) => ({
++            id, code, title, cover_path, scraped_status, has_pending_scrape, resource_kinds
++          })))
++        }
++      }
++    }
++    assert.equal(getPlaylistPage(-1), null)
++  })
++
++  it('limits a large playlist before returning card details', () => {
++    setupDb()
++    const db = getDb()
++    const id = createPlaylistRecord({ name: 'Large' })
++    db.exec(`WITH RECURSIVE n(id) AS (SELECT 3 UNION ALL SELECT id + 1 FROM n WHERE id < 30002)
++      INSERT INTO videos (id, code) SELECT id, 'PAGE-' || id FROM n;
++      INSERT INTO playlist_video (playlist_id, video_id, position, added_at)
++        SELECT ${id}, id, id, '2026' FROM videos;`)
++    db.exec(`UPDATE videos SET summary = printf('%65536s', 'long description')
++      WHERE id IN (SELECT video_id FROM playlist_video WHERE playlist_id = ${id}
++        ORDER BY added_at DESC, position DESC, video_id DESC LIMIT 200 OFFSET 200)`)
++    const page = getPlaylistPage(id, { offset: 200, limit: 999 })!
++    assert.equal(page.total, 30002)
++    assert.equal(page.videos.length, 200)
++    assert.equal(page.limit, 200)
++    assert.ok(page.videos.every(video => !Object.hasOwn(video, 'summary')))
++    assert.equal(new Set(page.videos.map(video => video.id)).size, 200)
++    assert.ok(Buffer.byteLength(JSON.stringify(page)) < 512 * 1024)
++  })
++
++  it('keeps metadata out of subsequent video-page queries', () => {
++    setupDb()
++    const db = getDb()
++    const description = 'metadata-only '.repeat(10000)
++    const id = createPlaylistRecord({ name: 'Metadata', description })
++    addVideoToPlaylist({ playlistId: id, videoId: 1 })
++    assert.equal(getPlaylistMetadata(id)?.description, description.trim())
++    assert.equal(Object.hasOwn(getPlaylistMetadata(id)!, 'videos'), false)
++    const statements: string[] = []
++    const prepare = db.prepare.bind(db)
++    db.prepare = ((sql: string) => {
++      statements.push(sql)
++      return prepare(sql)
++    }) as typeof db.prepare
++    const page = listPlaylistVideoPage(id)!
++    assert.equal(page.total, 1)
++    assert.equal(Object.hasOwn(page, 'description'), false)
++    assert.equal(statements.some(sql => /SELECT \* FROM playlists|playlist_links|v\.cover_path IS NOT NULL/.test(sql)), false)
++    assert.ok(Buffer.byteLength(JSON.stringify(page)) < 1024)
++  })
++
+   it('creates playlists with required name and optional fields', () => {
+     setupDb()
+ 
+diff --git a/src/main/db/playlistRepo.ts b/src/main/db/playlistRepo.ts
+index 47badb7..7bcc989 100644
+--- a/src/main/db/playlistRepo.ts
++++ b/src/main/db/playlistRepo.ts
+@@ -1,8 +1,11 @@
+ import type { SortDir } from '@shared/commonTypes'
+-import type { Playlist, PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoMembership } from '@shared/playlistTypes'
++import type { Playlist, PlaylistMetadata, PlaylistVideosPage, PlaylistPage, PlaylistPageQuery, PlaylistCreateInput, PlaylistDetail, PlaylistListItem, PlaylistUpdateInput, PlaylistVideoSortBy, PlaylistVideoMembership } from '@shared/playlistTypes'
+ import { getDb } from './database'
+ import {
+   hydrateVideoListRows,
++  hydrateVideoCardRows,
++  videoCardSelect,
++  type VideoCardProjectionRow,
+   videoListSelectExtras,
+   type VideoListProjectionRow
+ } from './videoListProjection'
+@@ -173,6 +176,58 @@ export function getPlaylistDetail(id: number, sort: PlaylistVideoSort = {}): Pla
+   }
+ }
+ 
++/** Bounded detail read: filtering and pagination precede expensive card projection. */
++export function listPlaylistVideoPage(id: number, query: PlaylistPageQuery = {}): PlaylistVideosPage | null {
++  const db = getDb()
++  return db.transaction(() => {
++    if (!db.prepare('SELECT id FROM playlists WHERE id = ?').get(id)) return null
++    const limit = Math.max(1, Math.min(200, Math.trunc(query.limit ?? 60)))
++    const offset = Math.max(0, Math.trunc(query.offset ?? 0))
++    const orderBy = playlistVideoOrderBy(query.sortBy ?? 'added_at', query.sortDir === 'asc' ? 'ASC' : 'DESC')
++    const kinds = [...new Set(query.resourceKinds ?? [])]
++    const concrete = kinds.filter(kind => kind !== 'none')
++    const alternatives: string[] = []
++    if (concrete.length) alternatives.push(`EXISTS (SELECT 1 FROM video_resources vr
++      WHERE vr.video_id = v.id AND vr.kind IN (${concrete.map(() => '?').join(',')}))`)
++    if (kinds.includes('none')) alternatives.push('NOT EXISTS (SELECT 1 FROM video_resources vr WHERE vr.video_id = v.id)')
++    const filter = alternatives.length ? ` AND (${alternatives.join(' OR ')})` : ''
++    const total = (db.prepare('SELECT COUNT(*) AS n FROM playlist_video WHERE playlist_id = ?').get(id) as { n: number }).n
++    const filteredTotal = !filter ? total : (db.prepare(`SELECT COUNT(*) AS n
++      FROM playlist_video pv JOIN videos v ON v.id = pv.video_id
++      WHERE pv.playlist_id = ?${filter}`).get(id, ...concrete) as { n: number }).n
++    const rows = db.prepare(`WITH page AS MATERIALIZED (
++      SELECT pv.video_id, pv.added_at, pv.position FROM playlist_video pv
++      JOIN videos v ON v.id = pv.video_id WHERE pv.playlist_id = ?${filter}
++      ORDER BY ${orderBy} LIMIT ? OFFSET ?
++    ) SELECT ${videoCardSelect()} FROM page pv JOIN videos v ON v.id = pv.video_id
++      ORDER BY ${orderBy}`).all(id, ...concrete, limit, offset) as VideoCardProjectionRow[]
++    return { videos: hydrateVideoCardRows(rows), total, filteredTotal, limit, offset }
++  })()
++}
++
++export function getPlaylistMetadata(id: number, sort: PlaylistVideoSort = {}): PlaylistMetadata | null {
++  const db = getDb()
++  return db.transaction(() => {
++    const playlist = getPlaylistById(id)
++    if (!playlist) return null
++    const orderBy = playlistVideoOrderBy(sort.sortBy ?? 'added_at', sort.sortDir === 'asc' ? 'ASC' : 'DESC')
++    const preview = db.prepare(`SELECT v.cover_path FROM playlist_video pv JOIN videos v ON v.id = pv.video_id
++      WHERE pv.playlist_id = ? AND v.cover_path IS NOT NULL AND v.cover_path != ''
++      ORDER BY ${orderBy} LIMIT 1`).get(id) as { cover_path: string } | undefined
++    return { ...playlist, preview_cover_path: preview?.cover_path ?? null,
++      links: readRelatedLinks(db, 'playlist_links', 'playlist_id', id) }
++  })()
++}
++
++/** Combined read retained for callers needing one snapshot of metadata and the page. */
++export function getPlaylistPage(id: number, query: PlaylistPageQuery = {}): PlaylistPage | null {
++  return getDb().transaction(() => {
++    const metadata = getPlaylistMetadata(id, query)
++    const page = metadata ? listPlaylistVideoPage(id, query) : null
++    return metadata && page ? { ...metadata, ...page } : null
++  })()
++}
++
+ export function listPlaylistsForVideo(videoId: number): PlaylistVideoMembership[] {
+   const db = getDb()
+   const rows = db
+diff --git a/src/main/ipc/ipcCommandSchemas.ts b/src/main/ipc/ipcCommandSchemas.ts
+index db0e4ed..a237f43 100644
+--- a/src/main/ipc/ipcCommandSchemas.ts
++++ b/src/main/ipc/ipcCommandSchemas.ts
+@@ -22,6 +22,13 @@ const record = z.record(z.string(), z.unknown())
+ const object = z.object({}).passthrough()
+ const noArgs = z.tuple([])
+ const sortDirection = z.enum(['asc', 'desc'])
++const playlistPageQuery = z.object({
++    sortBy: z.enum(['added_at', 'release_date']).optional(),
++    sortDir: sortDirection.optional(),
++    resourceKinds: z.array(z.enum(['local', 'direct', 'web', 'magnet', 'ed2k', 'none'])).max(6).optional(),
++    limit: z.number().int().min(1).max(200).optional(),
++    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
++  }).strict()
+ const organizationRole = z.enum(['maker', 'publisher'])
+ const pluginKind = z.enum(['video', 'actress'])
+ const scrapeFields = z.array(text)
+@@ -507,6 +514,7 @@ export const scrapeIpcSchemas = {
+     id.optional(),
+     id.optional()
+   ]),
++  [IPC.PENDING_VIDEO_SCRAPE_COUNT]: noArgs,
+   [IPC.PENDING_VIDEO_SCRAPE_LIST]: noArgs,
+   [IPC.PENDING_VIDEO_SCRAPE_CONFIRM]: z.tuple([
+     z.object({
+@@ -648,6 +656,9 @@ export const appIpcSchemas = {
+     z.enum(['added_at', 'release_date']).optional(),
+     sortDirection.optional()
+   ]),
++  [IPC.PLAYLIST_VIDEO_PAGE]: z.tuple([id, playlistPageQuery]),
++  [IPC.PLAYLIST_METADATA]: z.tuple([id, z.enum(['added_at', 'release_date']).optional(), sortDirection.optional()]),
++  [IPC.PLAYLIST_GET_PAGE]: z.tuple([id, playlistPageQuery]),
+   [IPC.PLAYLIST_CREATE]: z.tuple([profileInput]),
+   [IPC.PLAYLIST_UPDATE]: z.tuple([id, profileInput]),
+   [IPC.PLAYLIST_DELETE]: z.tuple([id]),
+diff --git a/src/main/ipc/playlistHandlers.ts b/src/main/ipc/playlistHandlers.ts
+index 68fa207..3a4c9c1 100644
+--- a/src/main/ipc/playlistHandlers.ts
++++ b/src/main/ipc/playlistHandlers.ts
+@@ -4,6 +4,9 @@ import type { PlaylistDetail, PlaylistListItem, PlaylistVideoSortBy, PlaylistVid
+ import {
+   addVideoToPlaylist,
+   getPlaylistDetail,
++  getPlaylistPage,
++  getPlaylistMetadata,
++  listPlaylistVideoPage,
+   listPlaylists,
+   listPlaylistsForVideo,
+   removeVideoFromPlaylist
+@@ -12,6 +15,9 @@ import { createPlaylist, deletePlaylist, updatePlaylist } from '../services/play
+ import { appCommandAdapter } from './appContractAdapter'
+ 
+ export function registerPlaylistHandlers(): void {
++  appCommandAdapter.register(IPC.PLAYLIST_METADATA, (id, sortBy, sortDir) => getPlaylistMetadata(id, {sortBy, sortDir}))
++  appCommandAdapter.register(IPC.PLAYLIST_VIDEO_PAGE, (id, query) => listPlaylistVideoPage(id, query))
++  appCommandAdapter.register(IPC.PLAYLIST_GET_PAGE, (id, query) => getPlaylistPage(id, query))
+   appCommandAdapter.register(IPC.PLAYLIST_LIST, (): PlaylistListItem[] => listPlaylists())
+ 
+   appCommandAdapter.register(
+diff --git a/src/preload/index.ts b/src/preload/index.ts
+index 744da7d..0fa7833 100644
+--- a/src/preload/index.ts
++++ b/src/preload/index.ts
+@@ -448,6 +448,12 @@ const api = {
+       invokeVideo(IPC.VIDEO_RESOURCE_SPLIT, libraryId, videoId, resourceId)
+   },
+   playlists: {
++    metadata: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
++      invokeApp(IPC.PLAYLIST_METADATA, id, sortBy, sortDir),
++    videoPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_VIDEO_PAGE, id, query),
++    getPage: (id: number, query: import('@shared/playlistTypes').PlaylistPageQuery) =>
++      invokeApp(IPC.PLAYLIST_GET_PAGE, id, query),
+     list: () => invokeApp(IPC.PLAYLIST_LIST),
+     get: (id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir) =>
+       invokeApp(IPC.PLAYLIST_GET, id, sortBy, sortDir),
+@@ -557,6 +563,7 @@ const api = {
+         directorSelectionId,
+         libraryId
+       ),
++    countPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_COUNT),
+     listPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_LIST),
+     confirmPending: (input: PendingVideoScrapeConfirmInput) =>
+       invokeScrape(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, input),
+diff --git a/src/renderer/src/pages/PlaylistDetailPage.tsx b/src/renderer/src/pages/PlaylistDetailPage.tsx
+index 90d0ae8..23dfd4c 100644
+--- a/src/renderer/src/pages/PlaylistDetailPage.tsx
++++ b/src/renderer/src/pages/PlaylistDetailPage.tsx
+@@ -1,9 +1,9 @@
+-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
++import { useCallback, useEffect, useRef, useState } from 'react'
+ import { Outlet, useLocation, useMatch, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+ import { Filter, Import, Inbox, Pencil, SearchX } from 'lucide-react'
+ import type { SortDir } from '@shared/commonTypes'
+-import type { PlaylistDetail, PlaylistUpdateInput, PlaylistVideoSortBy } from '@shared/playlistTypes'
+-import type { Video } from '@shared/videoTypes'
++import type { PlaylistPage, PlaylistMetadata, PlaylistUpdateInput, PlaylistVideoSortBy } from '@shared/playlistTypes'
++import type { VideoCard } from '@shared/videoTypes'
+ import { api, assetUrl } from '../api'
+ import { navigateToPlaylistList } from '../listView/listNavigation'
+ import { ROUTE_MATCH } from '../listView/routePaths'
+@@ -26,7 +26,6 @@ import {
+   patchSearchParams,
+   videoResourceFiltersParam
+ } from '../listView/listQueryParams'
+-import { matchesPlaylistResourceFilter } from './playlistResourceFilter'
+ import { usePlaylistImport } from '../components/playlistImport/PlaylistImportContext'
+ import { onPlaylistImportCompleted } from '../components/playlistImport/events'
+ 
+@@ -35,9 +34,9 @@ const PLAYLIST_VIDEO_SORT_OPTIONS: SortSwitchOption<PlaylistVideoSortBy>[] = [
+   { value: 'release_date', label: '发行', title: '发行日期' }
+ ]
+ 
+-function playlistDetailCover(detail: PlaylistDetail): string | null {
++function playlistDetailCover(detail: PlaylistPage): string | null {
+   return assetUrl(
+-    detail.cover_path ?? detail.videos.find((video) => video.cover_path)?.cover_path ?? null
++    detail.cover_path ?? detail.preview_cover_path ?? null
+   )
+ }
+ 
+@@ -50,11 +49,15 @@ export default function PlaylistDetailPage(): JSX.Element {
+   const toast = useToast()
+   const playlistImport = usePlaylistImport()
+   const videoStackOpen = Boolean(useMatch({ path: ROUTE_MATCH.playlistVideoStack, end: false }))
+-  const [detail, setDetail] = useState<PlaylistDetail | null>(null)
++  const [detail, setDetail] = useState<PlaylistPage | null>(null)
+   const [loading, setLoading] = useState(true)
++  const [loadedKey, setLoadedKey] = useState<string | null>(null)
++  const [page, setPage] = useState(0)
++  const requestSequence = useRef(0)
++  const metadataCache = useRef<{ key: string; value: PlaylistMetadata | null } | null>(null)
+   const [showEdit, setShowEdit] = useState(false)
+   const [confirmDelete, setConfirmDelete] = useState(false)
+-  const [videoRemoveTarget, setVideoRemoveTarget] = useState<Video | null>(null)
++  const [videoRemoveTarget, setVideoRemoveTarget] = useState<VideoCard | null>(null)
+   const [removingVideoId, setRemovingVideoId] = useState<number | null>(null)
+   const [videoSortBy, setVideoSortBy] = useState<PlaylistVideoSortBy>('added_at')
+   const [videoSortDir, setVideoSortDir] = useState<SortDir>('desc')
+@@ -62,6 +65,13 @@ export default function PlaylistDetailPage(): JSX.Element {
+   const resourceFilterButtonRef = useRef<HTMLButtonElement>(null)
+   const previousVideoStackOpenRef = useRef(videoStackOpen)
+   const resourceFilters = parseVideoResourceFilters(searchParams.get(LIST_PARAM.resources))
++  const resourceFilterKey = videoResourceFiltersParam(resourceFilters)
++  const metadataKey = JSON.stringify([playlistId, videoSortBy, videoSortDir])
++  const loadKey = JSON.stringify([playlistId, videoSortBy, videoSortDir, resourceFilterKey, page])
++  const activeLoadKey = useRef(loadKey)
++  activeLoadKey.current = loadKey
++
++  useEffect(() => setPage(0), [playlistId, resourceFilterKey])
+ 
+   const dismissOverlays = useCallback(() => {
+     setShowEdit(false)
+@@ -72,22 +82,47 @@ export default function PlaylistDetailPage(): JSX.Element {
+ 
+   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
+ 
+-  const loadDetail = useCallback(async (): Promise<void> => {
+-    if (Number.isNaN(playlistId)) return
++  const loadDetail = useCallback(async (refreshMetadata = true): Promise<void> => {
++    if (Number.isNaN(playlistId) || activeLoadKey.current !== loadKey) return
++    const sequence = ++requestSequence.current
++    if (refreshMetadata) metadataCache.current = null
+     setLoading(true)
+     try {
+-      setDetail(await api.playlists.get(playlistId, videoSortBy, videoSortDir))
++      const cached = metadataCache.current
++      const [metadata, videoPage] = await Promise.all([
++        !refreshMetadata && cached?.key === metadataKey
++          ? Promise.resolve(cached.value)
++          : api.playlists.metadata(playlistId, videoSortBy, videoSortDir),
++        api.playlists.videoPage(playlistId, {
++          sortBy: videoSortBy, sortDir: videoSortDir,
++          resourceKinds: parseVideoResourceFilters(resourceFilterKey), limit: 60, offset: page * 60
++        })
++      ])
++      if (sequence !== requestSequence.current || activeLoadKey.current !== loadKey) return
++      metadataCache.current = { key: metadataKey, value: metadata }
++      const next = metadata && videoPage ? { ...metadata, ...videoPage } : null
++      if (next && next.offset > 0 && next.offset >= next.filteredTotal) {
++        setPage(Math.max(0, Math.floor((next.filteredTotal - 1) / 60)))
++      }
++      setDetail(next)
++      setLoadedKey(loadKey)
+     } catch (e) {
++      if (sequence !== requestSequence.current || activeLoadKey.current !== loadKey) return
+       toast.show(String((e as Error).message), 'error')
+       setDetail(null)
+     } finally {
+-      setLoading(false)
++      if (sequence === requestSequence.current && activeLoadKey.current === loadKey) setLoading(false)
+     }
+-  }, [playlistId, toast, videoSortBy, videoSortDir])
++  }, [playlistId, toast, videoSortBy, videoSortDir, resourceFilterKey, page, loadKey, metadataKey])
++
++  const invalidatePendingRequest = useCallback(() => {
++    requestSequence.current++
++  }, [])
+ 
+   useEffect(() => {
+-    void loadDetail()
+-  }, [loadDetail])
++    void loadDetail(false)
++    return invalidatePendingRequest
++  }, [loadDetail, invalidatePendingRequest])
+ 
+   useEffect(() => onPlaylistImportCompleted((completedPlaylistId) => {
+     if (completedPlaylistId === playlistId) void loadDetail()
+@@ -110,6 +145,7 @@ export default function PlaylistDetailPage(): JSX.Element {
+   }, [loadDetail, videoStackOpen])
+ 
+   const setResourceFilters = useCallback((filters: typeof resourceFilters): void => {
++    setPage(0)
+     setSearchParams(
+       (current) => patchSearchParams(current, {
+         [LIST_PARAM.resources]: videoResourceFiltersParam(filters)
+@@ -118,10 +154,7 @@ export default function PlaylistDetailPage(): JSX.Element {
+     )
+   }, [setSearchParams])
+ 
+-  const visibleVideos = useMemo(
+-    () => detail?.videos.filter((video) => matchesPlaylistResourceFilter(video, resourceFilters)) ?? [],
+-    [detail, resourceFilters]
+-  )
++  const visibleVideos = detail?.videos ?? []
+ 
+   const updatePlaylist = async (input: PlaylistUpdateInput): Promise<void> => {
+     if (!detail) return
+@@ -147,14 +180,12 @@ export default function PlaylistDetailPage(): JSX.Element {
+     }
+   }
+ 
+-  const removeVideo = async (video: Video): Promise<void> => {
++  const removeVideo = async (video: VideoCard): Promise<void> => {
+     if (!detail || removingVideoId !== null) return
+     setRemovingVideoId(video.id)
+     try {
+       await api.playlists.removeVideo(detail.id, video.id)
+-      setDetail((prev) =>
+-        prev ? { ...prev, videos: prev.videos.filter((item) => item.id !== video.id) } : prev
+-      )
++      await loadDetail()
+       setVideoRemoveTarget(null)
+       toast.show(`已从清单移出 ${video.code}`, 'success')
+     } catch (e) {
+@@ -174,7 +205,7 @@ export default function PlaylistDetailPage(): JSX.Element {
+       </div>
+     ) : null
+ 
+-  if (loading && !detail) {
++  if (loading && (!detail || detail.id !== playlistId)) {
+     return (
+       <div className={`detail-pane${videoStackOpen ? ' detail-pane--stacked' : ''}`}>
+         <EmptyState loading />
+@@ -211,7 +242,7 @@ export default function PlaylistDetailPage(): JSX.Element {
+                 <div className="playlist-detail-kicker">清单</div>
+                 <h2>{detail.name}</h2>
+                 <div className="playlist-detail-meta-row">
+-                  <span>{detail.videos.length} 部影片</span>
++                  <span>{detail.total} 部影片</span>
+                   <span>{detail.cover_path ? '自定义封面' : '自动封面'}</span>
+                 </div>
+                 {detail.description ? (
+@@ -260,9 +291,9 @@ export default function PlaylistDetailPage(): JSX.Element {
+             <div className="playlist-section-head">
+               <div className="section-title">
+                 影片
+-                {resourceFilters.length > 0 && detail.videos.length > 0 ? (
++                {resourceFilters.length > 0 && detail.total > 0 ? (
+                   <span className="section-title-detail">
+-                    匹配 {visibleVideos.length} / 共 {detail.videos.length} 部
++                    匹配 {detail.filteredTotal} / 共 {detail.total} 部
+                   </span>
+                 ) : null}
+               </div>
+@@ -285,15 +316,19 @@ export default function PlaylistDetailPage(): JSX.Element {
+                   dir={videoSortDir}
+                   compact
+                   onChange={(nextSortBy, nextSortDir) => {
++                    setPage(0)
+                     setVideoSortBy(nextSortBy)
+                     setVideoSortDir(nextSortDir)
+                   }}
+                 />
+-                <span className="count-badge">{visibleVideos.length}</span>
++                <span className="count-badge">{detail.filteredTotal}</span>
++                <Button size="sm" disabled={loading || page === 0} onClick={() => setPage(value => value - 1)}>上一页</Button>
++                <span aria-live="polite">{Math.floor(detail.offset / 60) + 1} / {Math.max(1, Math.ceil(detail.filteredTotal / 60))}</span>
++                <Button size="sm" disabled={loading || (page + 1) * 60 >= detail.filteredTotal} onClick={() => setPage(value => value + 1)}>下一页</Button>
+               </div>
+             </div>
+ 
+-            {detail.videos.length === 0 ? (
++            {loading && loadedKey !== loadKey ? <EmptyState loading variant="compact" /> : detail.total === 0 ? (
+               <EmptyState
+                 variant="compact"
+                 icon={<Inbox {...UI_ICON} aria-hidden />}
+diff --git a/src/shared/appIpcContract.ts b/src/shared/appIpcContract.ts
+index 14472f9..4a8702c 100644
+--- a/src/shared/appIpcContract.ts
++++ b/src/shared/appIpcContract.ts
+@@ -31,6 +31,10 @@ import type { TagListItem, SortDir } from './commonTypes'
+ import type {
+   PlaylistCreateInput,
+   PlaylistDetail,
++  PlaylistPage,
++  PlaylistMetadata,
++  PlaylistVideosPage,
++  PlaylistPageQuery,
+   PlaylistListItem,
+   PlaylistUpdateInput,
+   PlaylistVideoMembership,
+@@ -236,6 +240,9 @@ export interface AppIpcContract {
+     args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir]
+     result: PlaylistDetail | null
+   }
++  [IPC.PLAYLIST_METADATA]: { args: [id: number, sortBy?: PlaylistVideoSortBy, sortDir?: SortDir]; result: PlaylistMetadata | null }
++  [IPC.PLAYLIST_VIDEO_PAGE]: { args: [id: number, query: PlaylistPageQuery]; result: PlaylistVideosPage | null }
++  [IPC.PLAYLIST_GET_PAGE]: { args: [id: number, query: PlaylistPageQuery]; result: PlaylistPage | null }
+   [IPC.PLAYLIST_CREATE]: { args: [input: PlaylistCreateInput]; result: number }
+   [IPC.PLAYLIST_UPDATE]: { args: [id: number, input: PlaylistUpdateInput]; result: boolean }
+   [IPC.PLAYLIST_DELETE]: { args: [id: number]; result: boolean }
+diff --git a/src/shared/ipc-channels.ts b/src/shared/ipc-channels.ts
+index 00ed96e..7c98314 100644
+--- a/src/shared/ipc-channels.ts
++++ b/src/shared/ipc-channels.ts
+@@ -114,6 +114,9 @@ export const IPC = {
+   // Playlists
+   PLAYLIST_LIST: 'playlist:list',
+   PLAYLIST_GET: 'playlist:get',
++  PLAYLIST_GET_PAGE: 'playlist:getPage',
++  PLAYLIST_METADATA: 'playlist:metadata',
++  PLAYLIST_VIDEO_PAGE: 'playlist:videoPage',
+   PLAYLIST_CREATE: 'playlist:create',
+   PLAYLIST_UPDATE: 'playlist:update',
+   PLAYLIST_DELETE: 'playlist:delete',
+@@ -182,6 +185,7 @@ export const IPC = {
+ 
+   // Scraping
+   SCRAPE_ONE: 'scrape:one',
++  PENDING_VIDEO_SCRAPE_COUNT: 'pendingVideoScrape:count',
+   PENDING_VIDEO_SCRAPE_LIST: 'pendingVideoScrape:list',
+   PENDING_VIDEO_SCRAPE_CONFIRM: 'pendingVideoScrape:confirm',
+   PENDING_VIDEO_SCRAPE_DISCARD: 'pendingVideoScrape:discard',
+diff --git a/src/shared/playlistTypes.ts b/src/shared/playlistTypes.ts
+index 88efb76..a5174f1 100644
+--- a/src/shared/playlistTypes.ts
++++ b/src/shared/playlistTypes.ts
+@@ -1,4 +1,4 @@
+-import type { Video } from './videoTypes'
++import type { Video, VideoCard, VideoResourceFilter } from './videoTypes'
+ import type { RelatedLink, RelatedLinkInput } from './relatedLinkTypes'
+ 
+ export interface Playlist {
+@@ -38,3 +38,27 @@ export interface PlaylistUpdateInput extends PlaylistCreateInput {
+   /** Remove the custom playlist cover and fall back to the first video cover. */
+   removeCover?: boolean
+ }
++
++
++export interface PlaylistPageQuery {
++  sortBy?: PlaylistVideoSortBy
++  sortDir?: 'asc' | 'desc'
++  resourceKinds?: VideoResourceFilter[]
++  limit?: number
++  offset?: number
++}
++
++export interface PlaylistMetadata extends Playlist {
++  links: RelatedLink[]
++  preview_cover_path: string | null
++}
++
++export interface PlaylistVideosPage {
++  videos: VideoCard[]
++  total: number
++  filteredTotal: number
++  limit: number
++  offset: number
++}
++
++export interface PlaylistPage extends PlaylistMetadata, PlaylistVideosPage {}
+diff --git a/src/renderer/src/pages/PlaylistDetailPage.interaction.test.tsx b/src/renderer/src/pages/PlaylistDetailPage.interaction.test.tsx
+new file mode 100644
+index 0000000..b134d56
+--- /dev/null
++++ b/src/renderer/src/pages/PlaylistDetailPage.interaction.test.tsx
+@@ -0,0 +1,236 @@
++import assert from 'node:assert/strict'
++import { afterEach, it } from 'node:test'
++import React from 'react'
++import TestRenderer, { act } from 'react-test-renderer'
++import { MemoryRouter, Route, Routes, useNavigate, type NavigateFunction } from 'react-router-dom'
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
++import type { PlaylistPage, PlaylistMetadata, PlaylistVideosPage, PlaylistPageQuery } from '@shared/playlistTypes'
++import type { Video } from '@shared/videoTypes'
++import type { ElectronApi } from '../../../preload/index'
++import { LIST_PARAM } from '../listView/listQueryParams'
++
++function deferred<T>() {
++  let resolve!: (value: T) => void
++  const promise = new Promise<T>(done => { resolve = done })
++  return { promise, resolve }
++}
++const requests: Array<{ id: number; query: PlaylistPageQuery } & ReturnType<typeof deferred<PlaylistVideosPage | null>>> = []
++const metadataRequests: number[] = []
++let metadataResponse: ((id: number, sortBy?: string, sortDir?: string) => Promise<PlaylistMetadata | null>) | undefined
++let removal = deferred<boolean>()
++const fakeApi = {
++  playlists: {
++    metadata: async (id: number, sortBy?: string, sortDir?: string) => {
++      metadataRequests.push(id)
++      if (metadataResponse) return metadataResponse(id, sortBy, sortDir)
++      const { videos: _videos, total: _total, filteredTotal: _filtered, limit: _limit, offset: _offset, ...metadata } = page(id)
++      return metadata
++    },
++    videoPage: (id: number, query: PlaylistPageQuery) => {
++      const request = { id, query, ...deferred<PlaylistVideosPage | null>() }
++      requests.push(request)
++      return request.promise
++    },
++    removeVideo: () => removal.promise
++  },
++  playlistImport: { onSnapshotChanged: () => () => {} }
++} as unknown as ElectronApi
++Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
++Object.defineProperty(globalThis, 'window', {
++  configurable: true,
++  value: Object.assign(new EventTarget(), { api: fakeApi, requestAnimationFrame: (fn: () => void) => fn() })
++})
++Object.defineProperty(globalThis, 'document', {
++  configurable: true, value: { body: { style: { overflow: '' } }, activeElement: null }
++})
++
++let renderer: TestRenderer.ReactTestRenderer | undefined
++let client: QueryClient | undefined
++let navigate: NavigateFunction
++function NavigationProbe(): null { navigate = useNavigate(); return null }
++
++function page(id: number, offset = 0, total = 120): PlaylistPage {
++  return {
++    id, name: `Playlist ${id}`, description: null, cover_path: null, preview_cover_path: null,
++    created_at: '2026', updated_at: null, links: [], total, filteredTotal: total, offset, limit: 60,
++    videos: offset < total ? [{
++      id: id * 1000 + offset, code: `VIDEO-${id}-${offset}`, title: null, cover_path: null,
++      scraped_status: 0, resource_kinds: []
++    } as unknown as Video] : []
++  }
++}
++async function mount(): Promise<void> {
++  const PlaylistDetailPage = (await import('./PlaylistDetailPage')).default
++  const { PlaylistImportProvider } = await import('../components/playlistImport/PlaylistImportContext')
++  client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
++  await act(async () => {
++    renderer = TestRenderer.create(
++      <QueryClientProvider client={client!}>
++        <MemoryRouter initialEntries={['/playlists/1']}>
++          <PlaylistImportProvider>
++            <NavigationProbe />
++            <Routes>
++              <Route path="/playlists/:playlistId" element={<PlaylistDetailPage />}>
++                <Route path=":id" element={<div>Nested video</div>} />
++              </Route>
++            </Routes>
++          </PlaylistImportProvider>
++        </MemoryRouter>
++      </QueryClientProvider>
++    )
++  })
++}
++function text(node: TestRenderer.ReactTestInstance): string {
++  return node.children.map(child => typeof child === 'string' ? child : text(child)).join('')
++}
++async function resolveRequest(index: number, value: PlaylistPage): Promise<void> {
++  await act(async () => { requests[index].resolve({videos: value.videos, total: value.total, filteredTotal: value.filteredTotal, limit: value.limit, offset: value.offset}); await Promise.resolve() })
++}
++async function click(label: string): Promise<void> {
++  await act(async () => {
++    const button = renderer!.root.findAllByType('button').find(node => text(node) === label)
++    assert.ok(button, label)
++    assert.equal(Boolean(button.props.disabled), false)
++    button.props.onClick()
++  })
++}
++async function startRemoval(): Promise<void> {
++  const PosterCard = (await import('../components/PosterCard')).default
++  const Modal = (await import('../components/Modal')).default
++  await act(async () => renderer!.root.findByType(PosterCard).props.onRemove())
++  await act(async () => renderer!.root.findByType(Modal).props.onConfirm())
++}
++afterEach(async () => {
++  await act(async () => renderer?.unmount())
++  renderer = undefined
++  client?.clear()
++  requests.length = 0
++  metadataRequests.length = 0
++  metadataResponse = undefined
++  removal = deferred<boolean>()
++})
++
++it('ignores an old playlist response arriving after navigation', async () => {
++  await mount()
++  assert.equal(requests[0].id, 1)
++  await act(async () => navigate('/playlists/2'))
++  assert.equal(requests[1].id, 2)
++  await resolveRequest(1, page(2))
++  await resolveRequest(0, page(1))
++  assert.match(text(renderer!.root), /Playlist 2/)
++  assert.doesNotMatch(text(renderer!.root), /Playlist 1/)
++})
++
++it('does not refresh an old playlist when its removal finishes after navigation', async () => {
++  await mount()
++  await resolveRequest(0, page(1))
++  await startRemoval()
++  await act(async () => navigate('/playlists/2'))
++  await resolveRequest(1, page(2))
++  await act(async () => { removal.resolve(true); await Promise.resolve() })
++  assert.deepEqual(requests.map(request => request.id), [1, 2])
++  assert.match(text(renderer!.root), /Playlist 2/)
++})
++
++it('returns to the previous page when deleting the only item on the last page', async () => {
++  await mount()
++  await resolveRequest(0, page(1, 0, 61))
++  await click('下一页')
++  assert.equal(requests[1].query.offset, 60)
++  await resolveRequest(1, page(1, 60, 61))
++  await startRemoval()
++  await act(async () => { removal.resolve(true); await Promise.resolve() })
++  await resolveRequest(2, page(1, 60, 60))
++  assert.equal(requests[3].query.offset, 0)
++  await resolveRequest(3, page(1, 0, 60))
++  assert.match(text(renderer!.root), /1 \/ 1/)
++})
++
++it('keeps the existing grid mounted during refresh after closing a nested video', async () => {
++  await mount()
++  await resolveRequest(0, page(1))
++  const grid = renderer!.root.findByProps({ className: 'playlist-video-grid' })
++  await act(async () => navigate('/playlists/1/1000'))
++  await act(async () => navigate('/playlists/1'))
++  assert.equal(requests.length, 2)
++  assert.equal(renderer!.root.findByProps({ className: 'playlist-video-grid' }), grid)
++  await resolveRequest(1, page(1))
++  assert.equal(renderer!.root.findByProps({ className: 'playlist-video-grid' }), grid)
++})
++
++it('keeps the latest sort response when requests for the same playlist finish out of order', async () => {
++  await mount()
++  await resolveRequest(0, page(1))
++  const SortSwitch = (await import('../components/SortSwitch')).default
++  await act(async () => renderer!.root.findByType(SortSwitch).props.onChange('release_date', 'asc'))
++  await act(async () => renderer!.root.findByType(SortSwitch).props.onChange('release_date', 'desc'))
++  assert.equal(requests[1].query.sortDir, 'asc')
++  assert.equal(requests[2].query.sortDir, 'desc')
++  await resolveRequest(2, { ...page(1), videos: [{ ...page(1).videos[0], code: 'LATEST-SORT' }] })
++  await resolveRequest(1, { ...page(1), videos: [{ ...page(1).videos[0], code: 'OBSOLETE-SORT' }] })
++  assert.match(text(renderer!.root), /LATEST-SORT/)
++  assert.doesNotMatch(text(renderer!.root), /OBSOLETE-SORT/)
++})
++
++
++it('reuses metadata while paging but refreshes it after a playlist mutation', async () => {
++  await mount()
++  await resolveRequest(0, page(1, 0, 61))
++  assert.equal(metadataRequests.length, 1)
++  await click('下一页')
++  await resolveRequest(1, page(1, 60, 61))
++  assert.equal(metadataRequests.length, 1)
++  await startRemoval()
++  await act(async () => { removal.resolve(true); await Promise.resolve() })
++  assert.equal(metadataRequests.length, 2)
++  await resolveRequest(2, page(1, 60, 60))
++  await resolveRequest(3, page(1, 0, 60))
++  assert.equal(metadataRequests.length, 2)
++})
++
++
++it('does not reuse stale metadata when filtering interrupts a forced refresh', async () => {
++  await mount()
++  await resolveRequest(0, page(1))
++  const forced = deferred<PlaylistMetadata | null>()
++  const filtered = deferred<PlaylistMetadata | null>()
++  let calls = 0
++  metadataResponse = () => (++calls === 1 ? forced.promise : filtered.promise)
++  await act(async () => navigate('/playlists/1/1000'))
++  await act(async () => navigate('/playlists/1'))
++  await act(async () => navigate(`/playlists/1?${LIST_PARAM.resources}=none`))
++  assert.equal(metadataRequests.length, 3, 'filtering must fetch fresh metadata after invalidation')
++  await act(async () => {
++    filtered.resolve({ ...page(1), name: 'Fresh metadata' })
++    requests[2].resolve({ videos: page(1).videos, total: 120, filteredTotal: 120, limit: 60, offset: 0 })
++  })
++  await act(async () => {
++    forced.resolve({ ...page(1), name: 'Obsolete metadata' })
++    requests[1].resolve({ videos: page(1).videos, total: 120, filteredTotal: 120, limit: 60, offset: 0 })
++  })
++  assert.match(text(renderer!.root), /Fresh metadata/)
++  assert.doesNotMatch(text(renderer!.root), /Obsolete metadata/)
++})
++
++it('shows not found when a refreshed metadata read reports a deleted playlist', async () => {
++  metadataResponse = async () => null
++  await mount()
++  await resolveRequest(0, page(1))
++  assert.match(text(renderer!.root), /未找到该清单/)
++  assert.doesNotMatch(text(renderer!.root), /Playlist 1/)
++  assert.equal(renderer!.root.findAllByProps({ className: 'playlist-video-grid' }).length, 0)
++})
++
++
++it('refreshes the fallback cover with the new sort instead of reusing the old metadata', async () => {
++  metadataResponse = async (id, sortBy, sortDir) => ({
++    ...page(id), preview_cover_path: `covers/${sortBy}-${sortDir}.jpg`
++  })
++  await mount()
++  await resolveRequest(0, page(1))
++  assert.ok(renderer!.root.findAllByType('img').some(node => node.props.src === 'media://covers/added_at-desc.jpg'))
++  const SortSwitch = (await import('../components/SortSwitch')).default
++  await act(async () => renderer!.root.findByType(SortSwitch).props.onChange('release_date', 'asc'))
++  await resolveRequest(1, page(1))
++  assert.ok(renderer!.root.findAllByType('img').some(node => node.props.src === 'media://covers/release_date-asc.jpg'))
++})

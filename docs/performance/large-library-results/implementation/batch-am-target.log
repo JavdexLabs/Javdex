@@ -1,0 +1,30 @@
+✔ counts a large pending inbox without decoding its snapshots and follows deletions (58.448542ms)
+✔ pages a 10k inbox without materializing snapshots, locates deep links and clamps deleted pages (76.365792ms)
+▶ scrape IPC schemas
+  ✔ strictly validates media-library-scoped video batch scrape commands (1.549792ms)
+  ✔ validates the optional media-library scope on single-video scrape commands (0.159666ms)
+✔ scrape IPC schemas (2.059458ms)
+✔ bounds pending scrape pages and details at the IPC boundary (0.4395ms)
+✔ bounds audit pending presence lookups (0.31075ms)
+▶ LibraryScanAuditPanel
+  ✔ defaults to the attention tab even when the latest scan has no issues (211.960709ms)
+  ✔ keeps cached unrecognized files visible with their root-scoped resolution controls (3.27375ms)
+  ✔ does not describe current scan failures as resolved (1.175542ms)
+  ✔ offers a processing jump for cached unrecognized rows in the all-files tab (2.178083ms)
+  ✔ shows an NFO identity conflict as a secondary scan disposition and opens the pending center (1.406875ms)
+  ✔ routes a current NFO candidate to its scrape pending item (0.972209ms)
+  ✔ shows historical NFO pending dispositions as resolved when their current rows are gone (1.336791ms)
+  ✔ keeps the attention badge equal to the visible list when only an NFO warning exists (0.964917ms)
+✔ LibraryScanAuditPanel (223.8705ms)
+▶ ScanSettingsTab
+  ✔ builds domain-correct deep links for scan identities and scrape candidates (232.17575ms)
+  ✔ renders automatic local NFO import enabled by default and persists a switch change immediately (6.867542ms)
+✔ ScanSettingsTab (239.419666ms)
+ℹ tests 16
+ℹ suites 3
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 438.842

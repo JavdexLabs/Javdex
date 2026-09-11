@@ -1,0 +1,60 @@
+▶ MediaAssetStore
+  ✔ cancels queued reads before opening files and keeps active slots until reads settle (9.909167ms)
+downloadAvatar failed: Bad Avatar https://example.test/avatar.html response is not a usable image
+Failed to delete media asset: covers/TEST-002_eee58677.jpg Error: file is locked
+    at FailingCleanupStore.delete (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaAssetStore.test.ts:553:15)
+    at FailingCleanupStore.deleteImmediateBestEffort (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaAssetStore.ts:446:12)
+    at FailingCleanupStore.finishCoordinatedChange (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaAssetStore.ts:558:52)
+    at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaAssetStore.ts:524:14)
+    at AsyncLocalStorage.run (node:internal/async_local_storage/async_context_frame:63:14)
+    at FailingCleanupStore.runCoordinatedChange (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaAssetStore.ts:501:31)
+    at FailingCleanupStore.coordinateDatabaseChange (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaAssetStore.ts:462:17)
+    at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/services/mediaAssetStore.test.ts:558:37)
+    at getActual (node:assert:611:5)
+    at strict.doesNotThrow (node:assert:779:32)
+  ✔ serves plain and encrypted images asynchronously without synchronous file reads (38.058166ms)
+  ✔ reads plain and encrypted images and reports a stable plaintext fingerprint (33.673458ms)
+  ✔ rejects stored paths that escape the media root (0.278708ms)
+  ✔ exposes bootstrap and layout paths under the media root (0.798834ms)
+  ✔ encrypts a stored plain asset and lists it under stable subdirectories (34.3165ms)
+  ✔ decrypts a stored encrypted asset back to its plain relative path (33.841166ms)
+  ✔ compensates newly-created resources when the database operation fails (1.099833ms)
+  ✔ compensates newly imported cover and sample files when a database operation fails (1.184834ms)
+  ✔ compensates newly imported playlist covers when a database operation fails (1.018375ms)
+  ✔ compensates async downloads when the database operation fails (0.94325ms)
+  ✔ rejects unusable local image imports instead of storing them (0.412583ms)
+  ✔ rejects unusable avatar downloads instead of storing them (0.373958ms)
+  ✔ keeps an existing download when replacing the same URL later rolls back (1.080375ms)
+  ✔ keeps an existing avatar source when importing the same bytes later rolls back (1.031833ms)
+  ✔ deletes obsolete resources only after the database operation succeeds (0.963667ms)
+  ✔ uses distinct paths for avatar display replacements created in the same millisecond (1.087417ms)
+  ✔ discards newly created resources marked obsolete in the same coordinated change (0.856209ms)
+  ✔ promotes nested created resources so a parent rollback can compensate them (0.942167ms)
+  ✔ defers nested obsolete deletes of pre-existing files until the parent commits (1.296917ms)
+  ✔ keeps nested obsolete pre-existing files when the parent rolls back (1.002417ms)
+  ✔ does not leak nested create-then-obsolete files when the parent rolls back (0.941ms)
+  ✔ runInCoordinatedChange joins an active parent instead of nesting (0.891416ms)
+  ✔ keeps isolated coordinated creates when an outer parent later rolls back (0.962083ms)
+  ✔ keeps independent root work when an awaited outer coordinated change fails (1.0775ms)
+  ✔ keeps relocation exclusive with coordinated and direct media mutations (1.027958ms)
+  ✔ keeps relocation exclusive with a stable read lease (0.20875ms)
+  ✔ keeps caller registrations off an un-awaited nested async coordinated change (1.255917ms)
+  ✔ does not turn a post-commit cleanup failure into a database failure (1.637584ms)
+✔ MediaAssetStore (172.80425ms)
+✔ defaults to four active reads and 256 queued requests with reusable cancellation capacity (2.47ms)
+✔ bounds active and queued reads, removes cancelled work and releases capacity after failures (0.19825ms)
+✔ does not free an active slot before an aborted reader actually settles (0.126042ms)
+▶ mediaProtocol
+  ✔ awaits the image reader and forwards cancellation while serving GET and HEAD (15.91925ms)
+  ✔ skips reads for preflight and forbidden paths, and distinguishes busy from missing (0.604458ms)
+  ✔ resolves media URLs under the asset root (0.061583ms)
+  ✔ rejects path traversal outside the asset root (0.044458ms)
+✔ mediaProtocol (17.011125ms)
+ℹ tests 36
+ℹ suites 2
+ℹ pass 36
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 391.641375

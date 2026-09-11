@@ -1,0 +1,78 @@
+
+> Javdex@0.6.2 pretest
+> npm run check:actress-boundaries && npm run check:media-asset-store-boundaries && npm run check:metadata-source-boundaries && npm run check:classification-entity-boundaries && npm run check:agent-platform-boundaries && npm run lint && npm run check:css-architecture && npm run check:ui-controls
+
+
+> Javdex@0.6.2 check:actress-boundaries
+> node scripts/check-actress-boundaries.mjs
+
+Domain IPC, shared types, and process dependency boundaries are valid.
+
+> Javdex@0.6.2 check:media-asset-store-boundaries
+> node scripts/check-media-asset-store-boundaries.mjs
+
+MediaAssetStore implementation boundaries are valid.
+
+> Javdex@0.6.2 check:metadata-source-boundaries
+> node scripts/check-metadata-source-boundaries.mjs
+
+Video metadata source boundaries are valid.
+
+> Javdex@0.6.2 check:classification-entity-boundaries
+> node scripts/check-classification-entity-boundaries.mjs
+
+Classification entity storage and routing boundaries are valid.
+
+> Javdex@0.6.2 check:agent-platform-boundaries
+> node scripts/check-agent-platform-boundaries.mjs
+
+Agent platform boundaries OK
+
+> Javdex@0.6.2 lint
+> npm run lint:ts && npm run lint:css
+
+
+> Javdex@0.6.2 lint:ts
+> eslint "src/**/*.{ts,tsx}" "electron.vite.config.ts"
+
+
+> Javdex@0.6.2 lint:css
+> stylelint "src/renderer/src/**/*.module.css" --allow-empty-input
+
+
+> Javdex@0.6.2 check:css-architecture
+> node scripts/check-css-architecture.mjs
+
+CSS architecture checks passed.
+┌─────────────────────────────────┬────────┐
+│ (index)                         │ Values │
+├─────────────────────────────────┼────────┤
+│ cssFileCount                    │ 90     │
+│ globalClassCount                │ 1153   │
+│ crossFileDuplicateClassCount    │ 143    │
+│ descendantSelectorCount         │ 801    │
+│ importantDeclarationCount       │ 12     │
+│ hardcodedColorDeclarationCount  │ 166    │
+│ globalStateClassCount           │ 88     │
+│ rawButtonClassOccurrenceCount   │ 3      │
+│ classNameBehaviorInferenceCount │ 0      │
+└─────────────────────────────────┴────────┘
+
+> Javdex@0.6.2 check:ui-controls
+> node scripts/check-ui-controls.mjs
+
+UI control checks passed: shared Switch / Checkbox only.
+
+> Javdex@0.6.2 test
+> npm run typecheck && npm run test:packaging && node scripts/run-electron-tests.mjs
+
+
+> Javdex@0.6.2 typecheck
+> npm run typecheck:node && npm run typecheck:web
+
+
+> Javdex@0.6.2 typecheck:node
+> tsc --noEmit -p tsconfig.node.json --composite false
+
+src/main/db/actressAvatarCropSnapshot.test.ts(42,201): error TS2322: Type 'number | null' is not assignable to type 'number'.
+  Type 'null' is not assignable to type 'number'.

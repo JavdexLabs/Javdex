@@ -1,0 +1,23 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cd-1000x640.png": "0e1a3f97389691e3518056f4616f243e9177b9d921d73466b207b80d28244e0e",
+    "batch-cd-1440x900.png": "28692c80569ec308662b3e36099e63ff42cb0dfacff1483b49d6273cf79c3f02",
+    "batch-cd-anchor-red.log": "9ab6e8b6c90febe0dbaeea2ba900b4671cdaaca4dc4d3261118e5b816c8f6a25",
+    "batch-cd-audit-ui.patch": "1a9d59629d7eb5b05d2a7fe675c5930345a10b980f963aaa5f6110e487a8b1ba",
+    "batch-cd-browser.json": "7edb2373373fd73ee6b3cf645e3be45f3747da6e173dfb3a255f61dc94b3b058",
+    "batch-cd-browser.log": "2e55f8903d2e7cf42471a4347aff697906dd992b72cf744ac8d134afc0c8b5f4",
+    "batch-cd-build.log": "de9055fd676f3427260d2bd8a4f765a94ba89d78cd9f2a626432fe359d38b2d5",
+    "batch-cd-focus-red.log": "68113bcff1899443d6e4f7ebbc28ab7271479b9b7bc086762c24e9a3fcf42a59",
+    "batch-cd-full.log": "b130cf391a7e14e495ad12dacb64f8f6dd55ec46312429d7ccd0e6e8aeaa8b4c",
+    "batch-cd-groups-1000x640.png": "d58c35ef1b2b6292e7ba40cb542b5c29d316e4c1aea264ca0ee3f4db1df4fa7f",
+    "batch-cd-groups-1440x900.png": "161f1f665a1c65620dfb28524511800289345e044ab97cef9bb6ad35c6260dde",
+    "batch-cd-review.md": "4fc96fbe5b13400b4a43b4a2f5e228c713a790f6be3a6d2c80c14c1afe8c2910",
+    "batch-cd-target.log": "e044119ecd2d167e92ac09eda9f2580b677c7b5021ad59ce73d7e57cad187d4c"
+  },
+  "notes": [
+    "Selected cumulative patch depends on CA, CB, CC and earlier batches.",
+    "77 focused; full2456pass1skip0fail; build terminal0; browser8scenarios/2sizes.",
+    "Actual renderer switched to header+100item remote pages; full15/42 remains incomplete."
+  ]
+}

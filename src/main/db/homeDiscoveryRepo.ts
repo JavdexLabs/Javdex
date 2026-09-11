@@ -9,10 +9,10 @@ import type {
 } from '@shared/catalogTypes'
 import type { MediaLibrarySummary } from '@shared/mediaLibraryTypes'
 import { getDb } from './database'
+import { createRevisionReadCache, type ReadCacheMemo } from './revisionReadCache'
 import { listMediaLibraries } from './mediaLibraryRepo'
 import {
   createScopedVideoCatalogRepo,
-  scopedVideoCatalogRepo,
   type ScopedVideoCatalogRepo
 } from './scopedVideoCatalogRepo'
 
@@ -203,97 +203,110 @@ function discoveryVideoSelections(
 ): DiscoveryVideoSelection[] {
   if (libraryIds.length === 0 || limit <= 0) return []
   const ids = libraryIds.join(',')
+  const eligibleResource = (member: string): string => `EXISTS (
+    SELECT 1 FROM video_resources resource
+    LEFT JOIN media_library_roots resource_root
+      ON resource_root.id = resource.root_id
+     AND resource_root.library_id = resource.library_id
+    WHERE resource.library_id = ${member}.library_id
+      AND resource.video_id = ${member}.video_id
+      AND ((resource.root_id IS NULL AND resource.source_identity IS NULL)
+        OR (resource.root_id IS NOT NULL AND resource.source_identity IS NOT NULL
+          AND resource_root.state = 'active'))
+  )`
   const selectRange = (
     operator: '>=' | '<',
     rangeLimit: number
-  ): DiscoveryVideoSelection[] =>
-    (
-      database
-        .prepare(
-          `WITH candidate AS (
-             SELECT membership.video_id,
-                    membership.library_id,
-                    membership.discovery_key,
-                    ROW_NUMBER() OVER (
-                      PARTITION BY membership.video_id
-                      ORDER BY membership.discovery_key ASC, membership.library_id ASC
-                    ) AS source_rank
-             FROM library_video_memberships membership
-             WHERE membership.library_id IN (${ids})
-               AND membership.is_hidden = 0
-               AND EXISTS (
-                 SELECT 1
-                 FROM video_resources resource
-                 LEFT JOIN media_library_roots resource_root
-                   ON resource_root.id = resource.root_id
-                  AND resource_root.library_id = resource.library_id
-                 WHERE resource.library_id = membership.library_id
-                   AND resource.video_id = membership.video_id
-                   AND (
-                     (resource.root_id IS NULL AND resource.source_identity IS NULL)
-                     OR (
-                       resource.root_id IS NOT NULL
-                       AND resource.source_identity IS NOT NULL
-                       AND resource_root.state = 'active'
-                     )
-                   )
-               )
-           )
-           SELECT video_id, library_id, discovery_key
-           FROM candidate
-           WHERE source_rank = 1 AND discovery_key ${operator} ?
-           ORDER BY discovery_key ASC, video_id ASC
-           LIMIT ?`
-        )
-        .all(cursor, rangeLimit) as Array<{
-        video_id: number
-        library_id: number
-        discovery_key: number
-      }>
-    ).map((row) => ({
-      videoId: row.video_id,
-      libraryId: row.library_id,
-      discoveryKey: row.discovery_key
-    }))
+  ): DiscoveryVideoSelection[] => {
+    const result: DiscoveryVideoSelection[] = []
+    // Each video has one canonical eligible membership. The global first N therefore
+    // belongs to the union of each library's first N; no full-catalog ranking is needed.
+    // Bound compound SELECT size independently of the number of configured libraries.
+    for (let offset = 0; offset < libraryIds.length; offset += 64) {
+      const branches = libraryIds.slice(offset, offset + 64).map(libraryId => `
+        SELECT * FROM (
+          SELECT membership.video_id, membership.library_id, membership.discovery_key
+          FROM library_video_memberships membership
+          WHERE membership.library_id = ${libraryId} AND membership.is_hidden = 0
+            AND membership.discovery_key ${operator} ${cursor}
+            AND ${eligibleResource('membership')}
+            ${libraryIds.length === 1 ? '' : `AND NOT EXISTS (
+              SELECT 1 FROM library_video_memberships better
+              WHERE better.video_id = membership.video_id
+                AND better.library_id IN (${ids}) AND better.is_hidden = 0
+                AND (better.discovery_key < membership.discovery_key
+                  OR (better.discovery_key = membership.discovery_key
+                    AND better.library_id < membership.library_id))
+                AND ${eligibleResource('better')}
+            )`}
+          ORDER BY membership.discovery_key ASC, membership.video_id ASC
+          LIMIT ${rangeLimit}
+        )`)
+      const rows = database.prepare(`WITH candidate AS (${branches.join(' UNION ALL ')})
+        SELECT video_id, library_id, discovery_key FROM candidate
+        ORDER BY discovery_key ASC, video_id ASC LIMIT ?`
+      ).all(rangeLimit) as Array<{ video_id: number; library_id: number; discovery_key: number }>
+      for (const row of rows) result.push({
+        videoId: row.video_id, libraryId: row.library_id, discoveryKey: row.discovery_key
+      })
+      result.sort((left, right) => left.discoveryKey - right.discoveryKey || left.videoId - right.videoId)
+      if (result.length > rangeLimit) result.length = rangeLimit
+    }
+    return result
+  }
 
   const first = selectRange('>=', limit)
   if (first.length >= limit) return first
   return [...first, ...selectRange('<', limit - first.length)]
 }
 
+const connectedHomeRepos = new WeakMap<Database.Database, HomeDiscoveryRepo>()
+
 export function createHomeDiscoveryRepo(
   dependencies: Partial<HomeDiscoveryDependencies> = {}
 ): HomeDiscoveryRepo {
   const database = dependencies.database ?? getDb()
-  const catalog =
-    dependencies.catalog ??
-    (dependencies.database ? createScopedVideoCatalogRepo(database) : scopedVideoCatalogRepo)
-  const readLibraries = dependencies.listLibraries ?? (() => listMediaLibraries())
+  // Injected non-DB readers may change independently of the connection revision.
+  const native = !dependencies.catalog && !dependencies.listLibraries
+  const existing = native ? connectedHomeRepos.get(database) : undefined
+  if (existing) return existing
+  const cache = native ? createRevisionReadCache(database, {
+    home: { maxEntries: 2, maxBytes: 1024 * 1024 },
+    libraries: { maxEntries: 1, maxBytes: 512 * 1024 }
+  }) : undefined
+  const catalog = dependencies.catalog ?? createScopedVideoCatalogRepo(database)
+  const readLibraries = dependencies.listLibraries ?? (() => listMediaLibraries({}, database))
 
-  return {
+  const repo: HomeDiscoveryRepo = {
     load(input) {
-      const seed = input.seed.trim() || 'default'
-      const selectedIds = normalizedFilterIds(input.libraryIds)
-      const eligibleLibraryIds = eligibleDiscoveryLibraryIds(database, selectedIds)
-      const libraries = enrichLibraryStatuses(database, readLibraries())
-      if (eligibleLibraryIds.length === 0) {
-        return { seed, recent: [], discovery: [], libraries }
-      }
+      const read = (memo: ReadCacheMemo): HomeSnapshot => {
+        const seed = input.seed.trim() || 'default'
+        const selectedIds = normalizedFilterIds(input.libraryIds)
+        const key = JSON.stringify([seed, selectedIds, normalizedLimit(input.recentLimit, 12), normalizedLimit(input.discoveryLimit, 12)])
+        return memo.get('home', key, () => {
+          const eligibleLibraryIds = eligibleDiscoveryLibraryIds(database, selectedIds)
+          const libraries = memo.get('libraries', 'active', () => enrichLibraryStatuses(database, readLibraries()))
+          if (eligibleLibraryIds.length === 0) {
+            return { seed, recent: [], discovery: [], libraries }
+          }
 
-      const scope = { kind: 'all' as const, libraryIds: eligibleLibraryIds }
-      const recent = catalog.list(scope, {
-        sortBy: 'add_time',
-        sortDir: 'desc',
-        limit: normalizedLimit(input.recentLimit, 12)
-      }).items
-      const candidates = discoveryVideoSelections(
-        database,
-        eligibleLibraryIds,
-        discoveryCursorForSeed(seed),
-        normalizedLimit(input.discoveryLimit, 12)
-      )
-      const discovery = catalog.listByLibrarySelections(candidates)
-      return { seed, recent, discovery, libraries }
+          const scope = { kind: 'all' as const, libraryIds: eligibleLibraryIds }
+          const recent = catalog.listPage(scope, {
+            sortBy: 'add_time',
+            sortDir: 'desc',
+            limit: normalizedLimit(input.recentLimit, 12)
+          })
+          const candidates = discoveryVideoSelections(
+            database,
+            eligibleLibraryIds,
+            discoveryCursorForSeed(seed),
+            normalizedLimit(input.discoveryLimit, 12)
+          )
+          const discovery = catalog.listByLibrarySelections(candidates)
+          return { seed, recent, discovery, libraries }
+        })
+      }
+      return cache ? cache.read(read) : read({ get: (_bucket, _key, load) => load() })
     },
 
     search(input) {
@@ -304,6 +317,8 @@ export function createHomeDiscoveryRepo(
       )
     }
   }
+  if (native) connectedHomeRepos.set(database, repo)
+  return repo
 }
 
 export const homeDiscoveryRepo: HomeDiscoveryRepo = {

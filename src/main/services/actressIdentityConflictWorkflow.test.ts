@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import Database from 'better-sqlite3'
+import { normalizeActressName } from '../db/actressNameNormalization'
 import type { ActressNameConflictGroup } from '@shared/actressConflictTypes'
 import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import {
@@ -182,7 +184,25 @@ describe('ActressIdentityConflictWorkflow', () => {
     })
     editActress(naturalOwnerId, { aliases: [] })
 
+    getDb().exec(`INSERT INTO pending_actress_scrape_resources(pending_scrape_id,field,position,remote_url,staged_path,width,height)
+      SELECT id,'avatar',0,'https://example.test/avatar','/synthetic/avatar-'||id,20,30 FROM pending_actress_scrapes;
+      INSERT INTO pending_actress_scrape_resources(pending_scrape_id,field,position,remote_url,staged_path,width,height)
+      SELECT id,'gallery',0,'https://example.test/gallery','/synthetic/gallery-'||id,40,50 FROM pending_actress_scrapes;`)
     const groups = workflow.listConflictGroups()
+    assert.ok(groups.some(group => group.candidates.some(candidate => candidate.resources.length === 2)))
+    const expectedQueue = groups.map(group => ({normalizedName:group.normalizedName,displayName:group.displayName,
+      status:group.status,candidateCount:group.candidates.length,pendingNameClaimCount:group.pendingNameClaims.length,
+      avatarPath:group.candidates[0]?.actressAvatarPath ?? null}))
+    const firstPage = workflow.pageConflictQueue({limit:2})
+    const secondPage = workflow.pageConflictQueue({limit:2,offset:2})
+    assert.equal(firstPage.total,groups.length)
+    assert.deepEqual([...firstPage.items,...secondPage.items],expectedQueue)
+    for (const [rank,group] of groups.entries()) {
+      assert.deepEqual(workflow.getConflictGroup(group.normalizedName),group)
+      const located = workflow.pageConflictQueue({limit:2,anchorName:group.normalizedName})
+      assert.equal(located.offset,Math.floor(rank/2)*2)
+      assert.ok(located.items.some(item=>item.normalizedName===group.normalizedName))
+    }
     assert.equal(
       groups.find((group) => group.normalizedName === 'sharedcollision')?.candidates.length,
       3
@@ -2565,4 +2585,201 @@ describe('ActressIdentityConflictWorkflow', () => {
     })
     assert.deepEqual(storedFiles, [])
   })
+})
+
+
+function createMaintenanceFixture(): ActressIdentityConflictWorkflow {
+  const owner = createActress('Maintenance Owner')
+  editActress(owner, { aliases: ['Maintenance Collision'] })
+  const target = createActress('Maintenance Target')
+  const workflow = new ActressIdentityConflictWorkflow()
+  workflow.processPreparedScrape({ actressId: target, plugin: {name:'Fixture',source:'builtin'},
+    queryName:'Maintenance Target',selectedFields:['aliases'],applicableFields:['aliases'],mode:'replace',
+    result:{aliases:['Maintenance Collision']},warnings:[],resources:[] })
+  return workflow
+}
+
+it('reuses maintenance only until local writes, schema changes or external commits',()=>{
+  const workflow=createMaintenanceFixture(), db=getDb()
+  const original=db.prepare.bind(db)
+  let scans=0
+  db.prepare=((sql:string)=>{if(sql.includes('SELECT id, actress_id, applicable_fields_json, result_json'))scans++;return original(sql)}) as typeof db.prepare
+  let other:Database.Database|undefined
+  try{
+    const expected=workflow.getConflictReviewSummary()
+    assert.equal(scans,1)
+    assert.deepEqual(workflow.getConflictReviewSummary(),expected);assert.equal(scans,1)
+    db.exec('UPDATE actresses SET revision=revision')
+    assert.deepEqual(workflow.getConflictReviewSummary(),expected);assert.equal(scans,2)
+    db.exec('CREATE TABLE maintenance_schema_probe(id INTEGER)')
+    assert.deepEqual(workflow.getConflictReviewSummary(),expected);assert.equal(scans,3)
+    other=new Database(path.join(tempRoot,'library.db'))
+    other.exec('DELETE FROM pending_actress_scrape_conflicts')
+    assert.deepEqual(workflow.getConflictReviewSummary(),expected);assert.equal(scans,4)
+    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM pending_actress_scrape_conflicts').get() as {n:number}).n,1)
+    assert.deepEqual(workflow.getConflictReviewSummary(),expected);assert.equal(scans,5,'a repair requires a subsequent no-write pass')
+    assert.deepEqual(workflow.getConflictReviewSummary(),expected);assert.equal(scans,5)
+  }finally{other?.close();db.prepare=original}
+})
+
+it('does not publish rolled-back maintenance or skip checks inside a caller transaction',()=>{
+  const workflow=createMaintenanceFixture(),db=getDb()
+  workflow.getConflictReviewSummary()
+  db.exec('DELETE FROM pending_actress_scrape_conflicts')
+  const before=(db.prepare('SELECT revision FROM pending_actress_scrapes').get() as {revision:number}).revision
+  assert.throws(()=>db.transaction(()=>{
+    workflow.getConflictReviewSummary()
+    assert.equal((db.prepare('SELECT revision FROM pending_actress_scrapes').get() as {revision:number}).revision,before+1)
+    db.exec('DELETE FROM pending_actress_scrape_conflicts')
+    workflow.getConflictReviewSummary()
+    assert.equal((db.prepare('SELECT revision FROM pending_actress_scrapes').get() as {revision:number}).revision,before+2)
+    throw new Error('rollback maintenance')
+  })(),/rollback maintenance/)
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM pending_actress_scrape_conflicts').get() as {n:number}).n,0)
+  assert.equal(workflow.getConflictReviewSummary().groupCount,1)
+  assert.equal((db.prepare('SELECT revision FROM pending_actress_scrapes').get() as {revision:number}).revision,before+1)
+})
+
+it('retries failed maintenance and invalidates after reopening the same catalog',()=>{
+  const workflow=createMaintenanceFixture(),db=getDb()
+  workflow.getConflictReviewSummary()
+  db.exec('DELETE FROM pending_actress_scrape_conflicts')
+  const original=db.prepare.bind(db)
+  db.prepare=((sql:string)=>{if(sql.includes('SELECT id, actress_id, applicable_fields_json, result_json'))throw new Error('injected read failure');return original(sql)}) as typeof db.prepare
+  try{assert.throws(()=>workflow.getConflictReviewSummary(),/injected read failure/)}finally{db.prepare=original}
+  assert.equal(workflow.getConflictReviewSummary().groupCount,1)
+  closeDatabase()
+  const other=new Database(path.join(tempRoot,'library.db'))
+  try{other.exec('DELETE FROM pending_actress_scrape_conflicts')}finally{other.close()}
+  const reopened=initDatabaseAtPath(path.join(tempRoot,'library.db'))
+  assert.equal(workflow.getConflictReviewSummary().groupCount,1)
+  assert.equal((reopened.prepare('SELECT COUNT(*) AS n FROM pending_actress_scrape_conflicts').get() as {n:number}).n,1)
+})
+
+it('does not publish a maintenance stamp if an external commit occurs during the check',()=>{
+  const workflow=createMaintenanceFixture(),db=getDb()
+  const other=new Database(path.join(tempRoot,'library.db'))
+  const original=db.prepare.bind(db)
+  let scans=0
+  db.prepare=((sql:string)=>{
+    if(sql.includes('SELECT id, actress_id, applicable_fields_json, result_json')){
+      scans++
+      if(scans===1)other.exec('UPDATE actresses SET revision=revision')
+    }
+    return original(sql)
+  }) as typeof db.prepare
+  try{
+    const expected=workflow.getConflictReviewSummary()
+    assert.equal(scans,1)
+    assert.deepEqual(workflow.getConflictReviewSummary(),expected);assert.equal(scans,2)
+    assert.deepEqual(workflow.getConflictReviewSummary(),expected);assert.equal(scans,2)
+  }finally{db.prepare=original;other.close()}
+})
+
+it('rechecks earlier candidates after a later candidate introduces a new conflict',()=>{
+  const workflow=createMaintenanceFixture(),db=getDb()
+  db.exec(`DELETE FROM pending_actress_scrape_conflicts;
+    UPDATE pending_actress_scrapes SET id=2;
+    INSERT INTO pending_actress_scrapes(id,actress_id,target_actress_revision,plugin_name,plugin_source,query_name,selected_fields_json,applicable_fields_json,update_mode,result_json,warnings_json,created_at)
+    SELECT 1,id,revision,'Fixture','builtin',main_name,'["aliases"]','["aliases"]','replace','{"aliases":["Maintenance Collision"]}','[]','2026'
+    FROM actresses WHERE main_name='Maintenance Owner';`)
+  workflow.getConflictReviewSummary()
+  const ids=()=>db.prepare('SELECT pending_scrape_id AS id FROM pending_actress_scrape_conflicts ORDER BY pending_scrape_id').all()
+  assert.deepEqual(ids(),[{id:2}],'the owner was visited before the new foreign conflict existed')
+  workflow.getConflictReviewSummary()
+  assert.deepEqual(ids(),[{id:1},{id:2}],'the next check must revisit the earlier owner')
+})
+
+it('bounds a 10k legacy-claim queue without hydrating candidates after maintenance',()=>{
+  const id=createActress('Claim fixture'),db=getDb(),workflow=new ActressIdentityConflictWorkflow()
+  db.prepare(`WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
+    INSERT INTO pending_actress_name_claims(normalized_name,actress_id,name,type)
+    SELECT 'claim-'||printf('%05d',x),?,'Claim-'||printf('%05d',x),'alias' FROM n`).run(id)
+  workflow.getConflictReviewSummary()
+  const original=db.prepare.bind(db)
+  db.prepare=((sql:string)=>{assert.ok(!sql.includes('result_json') && !sql.includes('pending_actress_scrape_resources'),'hot page must not hydrate JSON/resources');return original(sql)}) as typeof db.prepare
+  try{
+    const page=workflow.pageConflictQueue({limit:100,anchorName:'claim-09999'})
+    assert.equal(page.total,10000);assert.equal(page.offset,9900);assert.equal(page.items.length,100)
+    assert.deepEqual(page.items[98],{normalizedName:'claim-09999',displayName:'Claim-09999',status:'conflict',candidateCount:0,pendingNameClaimCount:1,avatarPath:null})
+    assert.ok(Buffer.byteLength(JSON.stringify(page))<20000)
+    for(const query of [{limit:101},{offset:-1},{offset:Number.MAX_SAFE_INTEGER+1},{anchorName:''}])assert.throws(()=>workflow.pageConflictQueue(query),/Invalid/)
+  }finally{db.prepare=original}
+  db.exec('DELETE FROM pending_actress_name_claims')
+  assert.deepEqual(workflow.pageConflictQueue({offset:9900}),{items:[],total:0,offset:0})
+})
+
+it('does not hydrate unrelated candidate results for a selected name group',()=>{
+  const workflow=createMaintenanceFixture(),db=getDb()
+  workflow.getConflictReviewSummary()
+  const unrelated=createActress('Unrelated invalid snapshot')
+  db.prepare(`INSERT INTO pending_actress_scrapes(actress_id,target_actress_revision,plugin_name,plugin_source,query_name,selected_fields_json,applicable_fields_json,update_mode,result_json,warnings_json,created_at)
+    VALUES(?,1,'Fixture','builtin','Unrelated','[]','[]','replace','{}','not valid JSON','2026')`).run(unrelated)
+  assert.equal(workflow.getConflictGroup('maintenancecollision')?.candidates.length,1)
+  assert.equal(workflow.getConflictGroup('missing'),null)
+  assert.throws(()=>workflow.getConflictGroup(''),/Invalid/)
+})
+
+it('sorts full conflict names before truncating display captions and preserves exact anchors',()=>{
+  const owner=createActress('Long-name claimant'),db=getDb(),workflow=new ActressIdentityConflictWorkflow()
+  const prefix='😀'.repeat(128)
+  for(const suffix of ['乙','甲'])db.prepare("INSERT INTO pending_actress_name_claims(normalized_name,actress_id,name,type) VALUES(?,?,?,'alias')").run(prefix+suffix,owner,prefix+suffix)
+  const expected=workflow.listConflictGroups(false)
+  for(const [rank,group] of expected.entries()){
+    const page=workflow.pageConflictQueue({limit:1,anchorName:group.normalizedName})
+    assert.equal(page.offset,rank)
+    assert.equal(page.items[0].normalizedName,group.normalizedName)
+    assert.equal(page.items[0].displayName,prefix+'…')
+    assert.deepEqual(workflow.getConflictGroup(group.normalizedName),group)
+  }
+})
+
+it('keeps legacy equal-caption order across pages and clamps missing anchors in a nonempty queue',()=>{
+  const owner=createActress('Tie claimant'),db=getDb(),workflow=new ActressIdentityConflictWorkflow()
+  for(const key of ['tie-b','tie-a'])db.prepare("INSERT INTO pending_actress_name_claims(normalized_name,actress_id,name,type) VALUES(?,?,'Same caption','alias')").run(key,owner)
+  const legacy=workflow.listConflictGroups(false)
+  assert.deepEqual(legacy.map(group=>group.normalizedName),['tie-a','tie-b'])
+  assert.equal(workflow.pageConflictQueue({limit:1}).items[0].normalizedName,'tie-a')
+  const last=workflow.pageConflictQueue({limit:1,offset:9999,anchorName:'missing'})
+  assert.equal(last.offset,1);assert.equal(last.items[0].normalizedName,'tie-b')
+})
+
+
+it('bounds name normalization when merged actors have many third pending conflicts', () => {
+  const db = getDb()
+  const count = 100
+  db.transaction(() => {
+    db.exec(`
+      WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < ${count + 1})
+      INSERT INTO actresses(id, main_name) SELECT x, 'Actor-' || x FROM n;
+      INSERT INTO actress_names(actress_id, name, type, source) SELECT id, main_name, 'main', 'manual' FROM actresses;
+      INSERT INTO actress_name_ownership(normalized_name, actress_id) SELECT normalize_actress_name(main_name), id FROM actresses;
+      INSERT INTO actress_names(actress_id, name, type, source)
+        SELECT ${count + 1}, 'Collision-' || id, 'alias', 'manual' FROM actresses WHERE id <= ${count};
+      INSERT INTO actress_name_ownership(normalized_name, actress_id)
+        SELECT normalize_actress_name('Collision-' || id), ${count + 1} FROM actresses WHERE id <= ${count};
+    `)
+    const insert = db.prepare(`INSERT INTO pending_actress_scrapes
+      (id, actress_id, target_actress_revision, plugin_name, plugin_source, query_name,
+       selected_fields_json, applicable_fields_json, update_mode, result_json, warnings_json, created_at)
+      VALUES (?, ?, 1, 'Fixture', 'builtin', ?, '["aliases"]', '["aliases"]', 'replace', ?, '[]', '2026')`)
+    for (let id = 1; id <= count; id++) {
+      insert.run(id, id, `Actor-${id}`, JSON.stringify({ aliases: [`Collision-${id}`] }))
+    }
+    db.exec(`INSERT INTO pending_actress_scrape_conflicts(pending_scrape_id, normalized_name, name, name_type)
+      SELECT id, normalize_actress_name('Collision-' || id), 'Collision-' || id, 'alias' FROM pending_actress_scrapes`)
+  })()
+  db.exec('ANALYZE')
+  const workflow = new ActressIdentityConflictWorkflow()
+  workflow.getConflictReviewSummary()
+  let normalizedCalls = 0
+  db.function('normalize_actress_name', { deterministic: true }, (value: unknown) => {
+    normalizedCalls++
+    if (typeof value !== 'string') return null
+    try { return normalizeActressName(value) } catch { return null }
+  })
+  const group = workflow.getConflictGroup(normalizeActressName('Collision-1'))!
+  assert.equal(group.candidates[0].pendingId, 1)
+  assert.match(group.mergePairs?.[0].blockedReason ?? '', /第三位演员的待确认结果/)
+  assert.ok(normalizedCalls <= 5 * count, `Repeated normalization: ${normalizedCalls} for ${count} names`)
 })

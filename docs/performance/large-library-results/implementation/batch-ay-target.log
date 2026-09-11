@@ -1,0 +1,45 @@
+✔ counts the same all-gender avatar targets without projecting profiles or joining works (13.597291ms)
+✔ validates manual tag candidate bounds and existing-tag identities (1.75175ms)
+✔ bounds selected tag label IPC requests before repository access (0.303084ms)
+▶ typed IPC adapter
+  ✔ does not expose the legacy unreviewed video deletion command (0.1345ms)
+  ✔ forwards command arguments and returns the application result (0.107125ms)
+  ✔ rejects malformed arguments before invoking the application handler (0.207042ms)
+  ✔ accepts link-resource updates without an import-only target (0.263458ms)
+  ✔ only accepts metadata retention when removing a last video resource (0.059917ms)
+  ✔ accepts one exact plugin approval decision and rejects malformed decisions (0.201666ms)
+  ✔ accepts only explicit plugin continuation kinds (0.071959ms)
+  ✔ accepts only typed plugin user responses with request-bound actions (0.537584ms)
+  ✔ accepts plugin history clearing only without renderer-supplied run ids (0.044292ms)
+  ✔ accepts unrecoverable plugin-session discard only without renderer-supplied run ids (0.050917ms)
+  ✔ keeps legacy model limits out of the generic settings mutation contract (0.28125ms)
+  ✔ validates playlist import start and identity controls at the IPC boundary (0.438291ms)
+  ✔ requires the path-removal impact revision at the settings boundary (0.219125ms)
+  ✔ accepts only the structured model-management command vocabulary (0.561958ms)
+  ✔ serializes successful results and thrown errors (1.226041ms)
+  ✔ sends the contracted event payload unchanged (0.069459ms)
+✔ typed IPC adapter (4.744292ms)
+✔ bounds actress conflict summary pages and keeps detail identities exact (0.211958ms)
+✔ validates bounded actress picker requests (0.151041ms)
+✔ validates narrow actress identity IDs (0.071792ms)
+✔ validates merge candidate paging and keep identity (0.144917ms)
+✔ accepts only zero arguments for avatar crop count (0.022125ms)
+▶ actressQueryService.listActresses
+  ✔ returns a stable page and the full matching total from the real database (9.05325ms)
+  ✔ reuses one exact avatar-filter snapshot across subsequent pages (0.1535ms)
+  ✔ refreshes the avatar-filter snapshot whenever the first page reloads (0.092209ms)
+  ✔ inspects avatar health and fingerprints outside the database repository (9.973291ms)
+✔ actressQueryService.listActresses (19.710042ms)
+▶ actressQueryService.listFaceScanManifest
+  ✔ exposes the dedicated minimal manifest through the query seam (0.129292ms)
+✔ actressQueryService.listFaceScanManifest (0.172875ms)
+✔ delegates avatar count without reading the legacy list or inspecting images (0.132958ms)
+✔ counts avatars through the scalar API without loading targets and propagates failures (47.425125ms)
+ℹ tests 31
+ℹ suites 3
+ℹ pass 31
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 349.342542

@@ -1,0 +1,16 @@
+stage: legacy oracle
+{"name":"full.without-field-previews","samples":[187.72074999999995,189.05379200000004,260.57329200000004],"medianMs":189.05379200000004,"jsonBytes":521222}
+{"name":"summary.first50","samples":[0.6050419999999122,0.2895419999999831,0.40983299999993505],"medianMs":0.40983299999993505,"jsonBytes":7326}
+{"name":"summary.anchor76","samples":[0.30654100000015205,0.20724999999993088,0.35887499999989814],"medianMs":0.30654100000015205,"jsonBytes":7327}
+stage: full selected oracle
+{"name":"detail.selected","samples":[2.1350830000001224,2.0559579999999187,2.2717079999999896],"medianMs":2.1350830000001224,"jsonBytes":5316}
+{"pending":100,"sharedOwnerAliasCount":100,"resultSummaryCharacters":4096,"results":[{"name":"full.without-field-previews","samples":[187.72074999999995,189.05379200000004,260.57329200000004],"medianMs":189.05379200000004,"jsonBytes":521222},{"name":"summary.first50","samples":[0.6050419999999122,0.2895419999999831,0.40983299999993505],"medianMs":0.40983299999993505,"jsonBytes":7326},{"name":"summary.anchor76","samples":[0.30654100000015205,0.20724999999993088,0.35887499999989814],"medianMs":0.30654100000015205,"jsonBytes":7327},{"name":"detail.selected","samples":[2.1350830000001224,2.0559579999999187,2.2717079999999896],"medianMs":2.1350830000001224,"jsonBytes":5316}],"platform":"darwin","arch":"arm64","sqliteVersion":{"version":"3.53.4"},"caveats":["100 consistent pending groups with4KiB result text, after ANALYZE; three warm samples per stage, not p95/cold/Windows/HDD/full IPC.","Full comparator disables field previews but still includes candidates, resources, claimants and pair preflight; it understates default full UI read cost.","Summary first/deep pages equal old projection in complete order. Selected detail equals its group from the default full legacy API, including field previews and merge pairs.","Metadata grouping/sorting remains global and maintenance is warmed first. A single selected group and its merge pairs remain unbounded.","Oracle objects stay alive throughout; no independent heap or peak RSS claim. Timings exclude assertions and serialization."]}
+✔ measures actor queue metadata and selected details (1092.192208ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1393.097375

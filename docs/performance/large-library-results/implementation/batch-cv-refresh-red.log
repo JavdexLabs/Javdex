@@ -1,0 +1,85 @@
+✖ rebuilds ordered pendingGroups repeatedly without duplicates and preserves all other sections (9.675209ms)
+✖ restores the previous section and outer business mutation after native second-group INSERT failure, then retries (6.957167ms)
+✖ rolls back an oversized single pending group together with its outer metadata change (6.849708ms)
+✖ rejects sealed writer state without deleting prior sections (6.297459ms)
+✖ rejects terminal writer state without deleting prior sections (6.8235ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 0
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 274.07375
+
+✖ failing tests:
+
+test at src/main/db/scanAuditPendingRefresh.test.ts:3:2970
+✖ rebuilds ordered pendingGroups repeatedly without duplicates and preserves all other sections (9.675209ms)
+  TypeError: This database connection is busy executing a query
+      at sqliteTransaction (/Users/nut/Project/JavdexLabs/Javdex/node_modules/better-sqlite3/lib/methods/transaction.js:63:9)
+      at writeBatch (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:131:6)
+      at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:189:64)
+      at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/pendingScanAuditRepo.ts:71:33)
+      at sqliteTransaction (/Users/nut/Project/JavdexLabs/Javdex/node_modules/better-sqlite3/lib/methods/transaction.js:65:24)
+      at visitPendingScanAuditEntriesForRun (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/pendingScanAuditRepo.ts:78:4)
+      at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:189:7)
+      at sqliteTransaction (/Users/nut/Project/JavdexLabs/Javdex/node_modules/better-sqlite3/lib/methods/transaction.js:65:24)
+      at Object.refreshPendingGroups (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:190:6)
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditPendingRefresh.test.ts:60:10)
+
+test at src/main/db/scanAuditPendingRefresh.test.ts:3:4282
+✖ restores the previous section and outer business mutation after native second-group INSERT failure, then retries (6.957167ms)
+  TypeError: This database connection is busy executing a query
+      at sqliteTransaction (/Users/nut/Project/JavdexLabs/Javdex/node_modules/better-sqlite3/lib/methods/transaction.js:63:9)
+      at writeBatch (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:131:6)
+      at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:189:64)
+      at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/pendingScanAuditRepo.ts:71:33)
+      at sqliteTransaction (/Users/nut/Project/JavdexLabs/Javdex/node_modules/better-sqlite3/lib/methods/transaction.js:65:24)
+      at visitPendingScanAuditEntriesForRun (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/pendingScanAuditRepo.ts:78:4)
+      at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:189:7)
+      at sqliteTransaction (/Users/nut/Project/JavdexLabs/Javdex/node_modules/better-sqlite3/lib/methods/transaction.js:65:24)
+      at Object.refreshPendingGroups (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:190:6)
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditPendingRefresh.test.ts:80:10)
+
+test at src/main/db/scanAuditPendingRefresh.test.ts:5:1080
+✖ rolls back an oversized single pending group together with its outer metadata change (6.849708ms)
+  TypeError: This database connection is busy executing a query
+      at sqliteTransaction (/Users/nut/Project/JavdexLabs/Javdex/node_modules/better-sqlite3/lib/methods/transaction.js:63:9)
+      at writeBatch (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:131:6)
+      at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:189:64)
+      at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/pendingScanAuditRepo.ts:71:33)
+      at sqliteTransaction (/Users/nut/Project/JavdexLabs/Javdex/node_modules/better-sqlite3/lib/methods/transaction.js:65:24)
+      at visitPendingScanAuditEntriesForRun (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/pendingScanAuditRepo.ts:78:4)
+      at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:189:7)
+      at sqliteTransaction (/Users/nut/Project/JavdexLabs/Javdex/node_modules/better-sqlite3/lib/methods/transaction.js:65:24)
+      at Object.refreshPendingGroups (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:190:6)
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditPendingRefresh.test.ts:99:10)
+
+test at src/main/db/scanAuditPendingRefresh.test.ts:5:1701
+✖ rejects sealed writer state without deleting prior sections (6.297459ms)
+  TypeError: This database connection is busy executing a query
+      at sqliteTransaction (/Users/nut/Project/JavdexLabs/Javdex/node_modules/better-sqlite3/lib/methods/transaction.js:63:9)
+      at writeBatch (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:131:6)
+      at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:189:64)
+      at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/pendingScanAuditRepo.ts:71:33)
+      at sqliteTransaction (/Users/nut/Project/JavdexLabs/Javdex/node_modules/better-sqlite3/lib/methods/transaction.js:65:24)
+      at visitPendingScanAuditEntriesForRun (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/pendingScanAuditRepo.ts:78:4)
+      at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:189:7)
+      at sqliteTransaction (/Users/nut/Project/JavdexLabs/Javdex/node_modules/better-sqlite3/lib/methods/transaction.js:65:24)
+      at Object.refreshPendingGroups (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:190:6)
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditPendingRefresh.test.ts:109:10)
+
+test at src/main/db/scanAuditPendingRefresh.test.ts:5:1701
+✖ rejects terminal writer state without deleting prior sections (6.8235ms)
+  TypeError: This database connection is busy executing a query
+      at sqliteTransaction (/Users/nut/Project/JavdexLabs/Javdex/node_modules/better-sqlite3/lib/methods/transaction.js:63:9)
+      at writeBatch (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:131:6)
+      at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:189:64)
+      at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/pendingScanAuditRepo.ts:71:33)
+      at sqliteTransaction (/Users/nut/Project/JavdexLabs/Javdex/node_modules/better-sqlite3/lib/methods/transaction.js:65:24)
+      at visitPendingScanAuditEntriesForRun (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/pendingScanAuditRepo.ts:78:4)
+      at <anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:189:7)
+      at sqliteTransaction (/Users/nut/Project/JavdexLabs/Javdex/node_modules/better-sqlite3/lib/methods/transaction.js:65:24)
+      at Object.refreshPendingGroups (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditWriter.ts:190:6)
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scanAuditPendingRefresh.test.ts:109:10)

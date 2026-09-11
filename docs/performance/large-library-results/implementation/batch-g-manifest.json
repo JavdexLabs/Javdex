@@ -1,0 +1,11 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "2132f1f8cd4303e163cdd8ea470ca553571dfc032a2655ad9d805ffa4ff5fb99",
+  "notes": [
+    "Patch is against HEAD, not incremental; scanCoordinator includes prior batch B audit aggregation improvements. Scanner changes outside this patch still require batch B.",
+    "Only scanner subscriber progress is coalesced. Per-file request.onProgress and audit callbacks remain unthrottled.",
+    "Batch queue throttling was withdrawn after persistence regression tests showed internal progress listeners also drive pause/cancel. Queue files match HEAD.",
+    "Final retained source matches the successful full run: 1978 passed, 1 skipped. Subsequent targeted regression after withdrawal: 103 passed.",
+    "Deterministic publisher test covers 100 ms periodic rate, final flush, and no delayed events after close; coordinator entry tests cover 300382 progress callbacks and failure ordering. Not Windows or end-to-end renderer timing."
+  ]
+}

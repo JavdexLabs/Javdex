@@ -1,0 +1,21 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ax-1000x640.png": "c094fe7b3bc020f59f13d9369ef6be9fc76ad119dad48fe9dde7e524fd06fcbe",
+    "batch-ax-1440x900.png": "6968a6ecbb0ecb3afaffcfdcb0c80a3e1a68fda8bbc68d5b2b3389011764e199",
+    "batch-ax-browser-initial-failure.log": "52445e4961f9d141fe065994e76304c33ab4cbbe095123ff02f037c849d9c8e8",
+    "batch-ax-browser.json": "6462f964dd7acc86251ffca3323f6e3bd09f1d7b939de0365e381ff6c43908f3",
+    "batch-ax-browser.log": "384034a932bb7bf470959070eac4647fb424f989dd35a2eade56c725b7ed84ef",
+    "batch-ax-build.log": "f97746a6c3830e0e415a91008ce19aa3614101de6eb78047ef00d1e03a2a3e48",
+    "batch-ax-full.log": "1c06a66bee96a2b4fb7c9e97f1ab3afd9793684263a948f4e574a989f31a1561",
+    "batch-ax-merge-ui.patch": "b86529dbaf3b7f49174317a8e572a7e44ae85df864b6c15c43380974bb716471",
+    "batch-ax-review.md": "5978e1765146ee0c832313cfc53384f068be8fbb291facfb128f531a8c57b7c7",
+    "batch-ax-target.log": "b3e11e3a1e0169baa391c987268e8594c4374c3a45be8bbc2ae9187959f812d4"
+  },
+  "notes": [
+    "Selected cumulative diff vs HEAD plus full new test/browser script; depends on earlier batches, not standalone.",
+    "Full2266pass1skip0fail; build exited0. Actual component browser fixture both viewports passed; no real-user DB or IPC performance claim.",
+    "Initial hidden-radio harness failure retained; independent visual overlap fixed and geometry verified.",
+    "Full15work packages/42risks remain active. No schema/user-data/commit/push/release changes in AX."
+  ]
+}

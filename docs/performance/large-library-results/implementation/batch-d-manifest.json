@@ -1,0 +1,9 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "patchSha256": "b432e4d75e93a4a7049a71ba78a762e5431a3f39361d0fd7e4ebd2fb0e287063",
+  "notes": [
+    "Patch is against HEAD and overlaps earlier batch IPC changes; do not apply it incrementally over previous patches.",
+    "Query benchmark reflects the SQL in this snapshot. Renderer load guards and silent-refresh behavior were refined after benchmark; they do not affect repo timing.",
+    "300382 synthetic videos; playlist contains 30000. Three warm samples, not p95 or end-to-end latency."
+  ]
+}

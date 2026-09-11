@@ -1,0 +1,22 @@
+✔ matches final legacy callbacks on equivalent fresh catalogs including merged NFO and repeated paths (73.353875ms)
+✔ commits singleton audit deliveries while the next duration probe is held, outside a database transaction (22.099583ms)
+✔ timer cancellation preserves already committed entries and stops incremental delivery (59.406209ms)
+✔ rejects mutually exclusive sinks before database, directory, probe or callback work (12.269125ms)
+✔ propagates recordFile sink failure without converting it to processing_failure (13.91525ms)
+✔ propagates readFileNfo sink failure without converting it to processing_failure (16.233083ms)
+✔ propagates patchNfo sink failure without converting it to processing_failure (28.762667ms)
+✔ treats a missing NFO patch target after a successful read as fatal (33.548583ms)
+✔ rejects recordFile resolved thenables without late unhandled rejection (37.802458ms)
+✔ rejects recordFile rejected thenables without late unhandled rejection (275.95275ms)
+✔ rejects readFileNfo resolved thenables without late unhandled rejection (297.706958ms)
+✔ rejects readFileNfo rejected thenables without late unhandled rejection (511.977042ms)
+✔ rejects patchNfo resolved thenables without late unhandled rejection (510.768209ms)
+✔ rejects patchNfo rejected thenables without late unhandled rejection (544.591542ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3332.983166

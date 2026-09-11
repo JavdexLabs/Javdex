@@ -1,0 +1,27 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-ca-before-cache.ts": "315722fe6d494be73aba426b147d9be2318a1bc8078e7fd2464216c032e0d9a4",
+    "batch-ca-build.log": "daa862279a537a0b43fb316bcf6e8b412993dfb21b96ce93f92f032a93685071",
+    "batch-ca-combined-view.patch": "4733657fca5dba4a1e4d74bd66fb36722cd28f08dc040f996b514c38a46a746f",
+    "batch-ca-full.log": "723f9c87148c84c7b33c877ca6409c990d2b24f919424c3843a4b14175105135",
+    "batch-ca-items-before.tsx": "67bf642115aa708da5ceef9885a5ba42e097a94a45bf7da9871e9678acfd358c",
+    "batch-ca-items-final.log": "a62fb1d22d4cab8f22c85397382ee069c4c31ae01cc5bdff75e67797b32e62a6",
+    "batch-ca-items-identity.log": "f366b78038bdab49d8124e1a1c9258f0f87a3b7a92cb92ec7823b673865d3a5f",
+    "batch-ca-items-oracle-build.cjs": "d0c14269d396c51c85899000f316ee993afac10a2e8246d9a1889c8fab4ff659",
+    "batch-ca-items-oracle-preload.cjs": "afb41376748f33838e4e9866933b74a868f8e80027b30e1b606569840b8a99ac",
+    "batch-ca-items-oracle.cjs": "3597fc7612a7b94b75fefa999a1df3f4a00cd9a59c5a6b1082fde827dd6f4f45",
+    "batch-ca-items-oracle.log": "926e7c72cfdbe46a1dc368b388b12a82d545a059bd04d0571a834958ddce86dd",
+    "batch-ca-items-oracle.ts": "7a147b8e0a6fba0121ffe8f419eb2c9ed92a43a60b530332d3a0bb1eab731f37",
+    "batch-ca-review.md": "df9451fad76403bf0a0c2da61db0966eed14898bc3bc5a062645a7be408f0ed2",
+    "batch-ca-shared-before.ts": "3799be50636ef307e1f5efbb761e63ba8ef71848f70ca5be111fd50e8e030929",
+    "batch-ca-target.log": "f03961b7abf37b6f42c461d8e9105cb56101f6ddd5ea97dca4370a0ccd49a079",
+    "batch-ca-view-before.log": "efa0f1714a3e2e92ecc7a4d43ec7d07c96efbbb6aaa6531e3bafd1ec2c0b3af0",
+    "batch-ca-view-final.log": "bf039e950926dc0aa64e4a96b970c6bb02c15858df4670a94e32a95d1639ebaf"
+  },
+  "notes": [
+    "Selected cumulative patch depends on earlier batches.",
+    "2421pass1skip0fail; build terminal0.",
+    "Combined view not yet connected to worker/IPC or actual paging UI. Full15/42 incomplete."
+  ]
+}

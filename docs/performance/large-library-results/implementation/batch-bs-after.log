@@ -1,0 +1,252 @@
+{
+  "results": [
+    {
+      "count": 10000,
+      "kind": "organization",
+      "name": "legacy",
+      "offset": 0,
+      "samples": [
+        6.849041,
+        7.318999999999988,
+        7.469707999999997
+      ],
+      "medianMs": 7.318999999999988,
+      "jsonBytes": 5378895
+    },
+    {
+      "count": 10000,
+      "kind": "organization",
+      "name": "first",
+      "offset": 0,
+      "samples": [
+        3.7896249999999725,
+        3.6310000000000002,
+        3.4774170000000026
+      ],
+      "medianMs": 3.6310000000000002,
+      "jsonBytes": 32328
+    },
+    {
+      "count": 10000,
+      "kind": "organization",
+      "name": "last",
+      "offset": 9960,
+      "samples": [
+        5.82691699999998,
+        5.494124999999997,
+        6.0504999999999995
+      ],
+      "medianMs": 5.82691699999998,
+      "jsonBytes": 21481
+    },
+    {
+      "count": 10000,
+      "kind": "director",
+      "name": "legacy",
+      "offset": 0,
+      "samples": [
+        7.51437500000003,
+        7.474625000000003,
+        8.947625000000016
+      ],
+      "medianMs": 7.51437500000003,
+      "jsonBytes": 5378895
+    },
+    {
+      "count": 10000,
+      "kind": "director",
+      "name": "first",
+      "offset": 0,
+      "samples": [
+        3.8459589999999935,
+        3.7452499999999986,
+        3.7884579999999914
+      ],
+      "medianMs": 3.7884579999999914,
+      "jsonBytes": 32328
+    },
+    {
+      "count": 10000,
+      "kind": "director",
+      "name": "last",
+      "offset": 9960,
+      "samples": [
+        5.707334000000003,
+        5.970875000000035,
+        5.658832999999959
+      ],
+      "medianMs": 5.707334000000003,
+      "jsonBytes": 21481
+    },
+    {
+      "count": 10000,
+      "kind": "series",
+      "name": "legacy",
+      "offset": 0,
+      "samples": [
+        6.820334000000003,
+        6.788333000000023,
+        8.205167000000017
+      ],
+      "medianMs": 6.820334000000003,
+      "jsonBytes": 5378895
+    },
+    {
+      "count": 10000,
+      "kind": "series",
+      "name": "first",
+      "offset": 0,
+      "samples": [
+        3.873958000000016,
+        3.7422090000000026,
+        3.901875000000018
+      ],
+      "medianMs": 3.873958000000016,
+      "jsonBytes": 32328
+    },
+    {
+      "count": 10000,
+      "kind": "series",
+      "name": "last",
+      "offset": 9960,
+      "samples": [
+        5.6347920000000045,
+        5.83766700000001,
+        5.787374999999997
+      ],
+      "medianMs": 5.787374999999997,
+      "jsonBytes": 21481
+    },
+    {
+      "count": 50000,
+      "kind": "organization",
+      "name": "legacy",
+      "offset": 0,
+      "samples": [
+        63.897457999999915,
+        63.592750000000024,
+        60.98962499999993
+      ],
+      "medianMs": 63.592750000000024,
+      "jsonBytes": 26938895
+    },
+    {
+      "count": 50000,
+      "kind": "organization",
+      "name": "first",
+      "offset": 0,
+      "samples": [
+        26.988959000000023,
+        26.711250000000064,
+        28.493999999999915
+      ],
+      "medianMs": 26.988959000000023,
+      "jsonBytes": 32387
+    },
+    {
+      "count": 50000,
+      "kind": "organization",
+      "name": "last",
+      "offset": 49980,
+      "samples": [
+        40.08337499999993,
+        40.392249999999876,
+        40.54312499999992
+      ],
+      "medianMs": 40.392249999999876,
+      "jsonBytes": 10762
+    },
+    {
+      "count": 50000,
+      "kind": "director",
+      "name": "legacy",
+      "offset": 0,
+      "samples": [
+        61.73500000000013,
+        63.11008400000014,
+        59.4481659999999
+      ],
+      "medianMs": 61.73500000000013,
+      "jsonBytes": 26938895
+    },
+    {
+      "count": 50000,
+      "kind": "director",
+      "name": "first",
+      "offset": 0,
+      "samples": [
+        27.691125000000056,
+        27.69941599999993,
+        27.254292000000078
+      ],
+      "medianMs": 27.691125000000056,
+      "jsonBytes": 32387
+    },
+    {
+      "count": 50000,
+      "kind": "director",
+      "name": "last",
+      "offset": 49980,
+      "samples": [
+        40.32116700000006,
+        40.82591699999989,
+        41.09833299999991
+      ],
+      "medianMs": 40.82591699999989,
+      "jsonBytes": 10762
+    },
+    {
+      "count": 50000,
+      "kind": "series",
+      "name": "legacy",
+      "offset": 0,
+      "samples": [
+        59.78641599999992,
+        71.76112500000022,
+        62.203791999999794
+      ],
+      "medianMs": 62.203791999999794,
+      "jsonBytes": 26938895
+    },
+    {
+      "count": 50000,
+      "kind": "series",
+      "name": "first",
+      "offset": 0,
+      "samples": [
+        27.78629200000023,
+        27.21225000000004,
+        27.407290999999987
+      ],
+      "medianMs": 27.407290999999987,
+      "jsonBytes": 32387
+    },
+    {
+      "count": 50000,
+      "kind": "series",
+      "name": "last",
+      "offset": 49980,
+      "samples": [
+        40.50016599999981,
+        40.368832999999995,
+        40.501624999999876
+      ],
+      "medianMs": 40.50016599999981,
+      "jsonBytes": 10762
+    }
+  ],
+  "notes": [
+    "All videos linked to the same entity, dual-role organization association, same dates; 256-char titles and >200-char cover paths.",
+    "ANALYZE, one warmup, 3 warm samples, fixed legacy-first order; assertion/JSON time excluded; full oracle retained.",
+    "No p95, IPC, cold, Windows/HDD, actual media, concurrent request or peak memory claim. Count/sort/deep offset remain data-dependent."
+  ]
+}
+✔ compares full cover candidates with bounded pages (2363.901459ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2518.10625

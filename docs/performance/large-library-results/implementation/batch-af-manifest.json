@@ -1,0 +1,27 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-af-build.log": "0a02b8a9026f314b807b2ad8b9103a18d4074ab3721b6f26ed150f6c3b491473",
+    "batch-af-full.log": "300c0557282f8c0872f43f4cb74f7d56babbbd5ec9ed26828e1b231970a109b2",
+    "batch-af-index-baseline-smoke.json": "eb87dee22e581e36a7eeeafb91de80095d3ba24b53f8c0ade75115881fc71e12",
+    "batch-af-index-baseline-smoke.log": "ae3e75c9bbda063b97e7c0937a61dd420b0ceaec994c980d187014fc86655d17",
+    "batch-af-matrix-baseline-smoke.json": "fcb9b23a2ed6cb8beecd4c258c8a6271e585298a18f2c705cca412e4167a949c",
+    "batch-af-matrix-baseline-smoke.log": "66d4c8188feba5e7d1059c1599c07f5c78539199682d7158fefe4364801e0db4",
+    "batch-af-migration-0.json": "b2b457ea13d7e13241310ff574ed651b30036787ee2747cbf651d8fc4e18f79d",
+    "batch-af-migration-0.log": "1cd35d3262e7816430a5f4e90553189e3bd0c4c3d750b901d3c25807fb0855b9",
+    "batch-af-migration-1.json": "e37feae7134127eee3e513dc3acc21a2fbcd86e2e8acaba51329167b41344196",
+    "batch-af-migration-1.log": "bb0c4107c0057e95689244b4b02f7a3d859b5312855c60a6d936e05adac82de5",
+    "batch-af-red.log": "c1dfad1cec5333ced17577b88ee56717a3fa4b7b6c9a3037246858e2f61b502d",
+    "batch-af-target.log": "aaea917062c466ffca28b52800cc40c5009ace5fd2005aa0de807f0ff666eead",
+    "batch-af-v17-tag-index.patch": "f8e10001d98dc851ba9684ac0af7789740c63e3eb7c3b8cb10bf9c84d8e644e6"
+  },
+  "notes": [
+    "Cumulative selected diff vs HEAD; includes earlier schema16 cleanup work and complete untracked tests/scripts, depends on B-AE.",
+    "Production schema17 replaces tag_id index with tag_id,origin; transaction protects DDL/version; no production ANALYZE added.",
+    "V17 three tests first failed on old implementation, then pass. 44 migration/tag targets; full suite2146pass1skip; build successful.",
+    "Two actual300382 file migrations: startup firstMs560.34/575.40ms vs upgraded warm251.98/254.23ms; do not confuse migration with repeated foreign-key check. Each32 cases.",
+    "Reopened readonly version/index/count/FK/integrity verification is not full-field before/after difference; that contract is covered by in-memory V17 table snapshots.",
+    "Final experimental baseline smoke:34 tag records and30/32 complete matrix comparisons; verifies narrow baseline vs covering candidate even after fresh schema17.",
+    "No user data access, commit,push,release,downgrade. Windows/HDD/fault and full plan acceptance incomplete."
+  ]
+}

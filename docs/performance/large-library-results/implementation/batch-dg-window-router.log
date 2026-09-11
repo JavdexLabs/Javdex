@@ -1,0 +1,15 @@
+✔ keeps twenty recent numeric anchors, resets filter changes and clears primary navigation (0.81425ms)
+✔ keeps one related page, preserves URL through nested navigation, resets filters and clamps shrink (47.397958ms)
+✔ canonicalizes malformed URL and recovers initial page failure (7.8025ms)
+✔ holds three pages across 100 forward/backward positions and twenty filters, retaining absolute IDs (333.056584ms)
+✔ preserves geometry on page failure and clamps after shrink; late filter data cannot land (15.398834ms)
+✔ reads half-open selection ranges as identities, rejects changed snapshots, and stops canceled reads (4.036208ms)
+✔ restores an evicted page anchor after remount while retaining no inactive card pages (12.482041ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 626.117125

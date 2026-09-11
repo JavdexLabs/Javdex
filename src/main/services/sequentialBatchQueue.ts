@@ -153,6 +153,10 @@ export class SequentialBatchQueue<TTarget> {
         this.progress.status = 'done'
         this.log('-', 'info', run.doneMessage(this.progress))
       }
+    } catch (error) {
+      this.progress.status = 'paused'
+      this.log('-', 'error', `批量任务异常，已停止后续处理：${String(error)}`)
+      throw error
     } finally {
       this.progress.currentCode = null
       this.running = false

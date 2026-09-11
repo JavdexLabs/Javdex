@@ -1,0 +1,42 @@
+{
+  "actors": 10000,
+  "videos": 100000,
+  "memberships": 150000,
+  "targets": 6667,
+  "results": [
+    {
+      "name": "legacy.full",
+      "samples": [
+        170.32604199999992,
+        224.25320799999986,
+        155.98145799999998
+      ],
+      "medianMs": 170.32604199999992,
+      "jsonBytes": 45421022
+    },
+    {
+      "name": "narrow.targets",
+      "samples": [
+        1.0819169999999758,
+        1.0416250000000673,
+        0.9665830000001279
+      ],
+      "medianMs": 1.0416250000000673,
+      "jsonBytes": 292612
+    }
+  ],
+  "notes": [
+    "ANALYZE; warm-up then 3 warm samples, fixed legacy-first order.",
+    "Timing excludes assertion/serialization; oracle retained, no peak memory claim.",
+    "Full target list remains, work counting removed per user instruction; not bounded paging, p95, cold, Windows/HDD or IPC."
+  ]
+}
+✔ measures narrow avatar targets using user-approved ID order (1625.493292ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1825.386292

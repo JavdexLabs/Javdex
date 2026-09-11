@@ -1,0 +1,49 @@
+import {it} from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import {performance} from 'node:perf_hooks'
+import {initDatabaseAtPath,closeDatabase} from '/Users/nut/Project/JavdexLabs/Javdex/src/main/db/database'
+import {createScopedVideoCatalogRepo as currentFactory} from '/Users/nut/Project/JavdexLabs/Javdex/src/main/db/scopedVideoCatalogRepo'
+import {createScopedVideoCatalogRepo as releaseFactory} from '/tmp/javdex-v062-scoped-search'
+it('compares v0.6.2 scoped search SQL with current using the same synthetic database',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-search-compare-'))
+ try{
+  const db=initDatabaseAtPath(path.join(dir,'catalog.db'))
+  db.exec(`BEGIN;
+   CREATE TABLE search_bench_revision(value INTEGER); INSERT INTO search_bench_revision VALUES(0);
+   WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<300382)
+   INSERT INTO videos(id,code,title,summary) SELECT x,printf('ABC-%06d',x),'中文作品 '||x,printf('%0128d',x) FROM n;
+   INSERT INTO library_video_memberships(library_id,video_id,discovery_key) SELECT 1,id,id FROM videos;
+   WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
+   INSERT INTO actresses(id,main_name,gender) SELECT x,printf('Actor%05d',x),'female' FROM n;
+   INSERT INTO actress_names(actress_id,name,type,source) SELECT id,main_name,'main','manual' FROM actresses;
+   INSERT INTO actress_name_ownership(normalized_name,actress_id) SELECT normalize_actress_name(main_name),id FROM actresses;
+   INSERT INTO video_actress(video_id,actress_id) SELECT id,((id-1)%10000)+1 FROM videos;
+   INSERT INTO video_actress(video_id,actress_id) SELECT id,((id+4999)%10000)+1 FROM videos;
+   COMMIT; ANALYZE;`)
+  const old=releaseFactory(db),now=currentFactory(db),results=[]
+  const business=(r:any)=>({items:r.items,total:r.total})
+  const median=(r:number[])=>[...r].sort((a,b)=>a-b)[1]
+  for(const scope of [{kind:'library' as const,libraryId:1},{kind:'all' as const}])for(const search of ['ABC-123456','中文作品 123','Actor00001']){
+   const query={search,limit:60,offset:0}
+   const expected=old.list(scope,query)
+   assert.deepEqual(business(now.list(scope,query)),expected)
+   const samples:{release:number[];current:number[];cached:number[]}={release:[],current:[],cached:[]}
+   for(let i=0;i<3;i++){
+    for(const key of (i%2?['current','release']:['release','current']) as Array<'release'|'current'>){
+     db.exec('UPDATE search_bench_revision SET value=value+1')
+     const start=performance.now(),value=(key==='release'?old:now).list(scope,query)
+     samples[key].push(performance.now()-start)
+     assert.deepEqual(business(value),expected)
+    }
+   }
+   now.list(scope,query)
+   for(let i=0;i<3;i++){const start=performance.now(),value=now.list(scope,query);samples.cached.push(performance.now()-start);assert.deepEqual(business(value),expected)}
+   const record={scope,search,total:expected.total,samples,medianMs:{release:median(samples.release),current:median(samples.current),cached:median(samples.cached)}}
+   results.push(record);console.log(JSON.stringify(record))
+  }
+  fs.writeFileSync('/tmp/javdex-v062-search-comparison.json',JSON.stringify({videos:300382,actors:10000,videoActressRelations:600764,platform:process.platform,arch:process.arch,sqlite:db.prepare('SELECT sqlite_version() AS version').get(),results,limits:['v0.6.2 scoped repository with current shared dependencies on same current initialized schema; not full old application binary.','Synthetic metadata, ANALYZE, warmed storage, three samples with alternating order and cache invalidation before noncached reads.','Query timing only; no IPC/renderer/images/Windows/HDD/customer data.']},null,2))
+ }finally{closeDatabase();fs.rmSync(dir,{recursive:true,force:true})}
+})

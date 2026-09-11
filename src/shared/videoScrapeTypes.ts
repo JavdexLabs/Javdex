@@ -90,6 +90,30 @@ export interface PendingVideoScrape {
   stagedBytes: number
 }
 
+/** Display-only queue projection; never used to apply a candidate. */
+export interface PendingVideoScrapeSummary {
+  id: number
+  videoId: number
+  revision: number
+  code: string
+  candidateCount: number
+  sourceCount: number
+  stagedCoverPath: string | null
+}
+
+export interface PendingVideoScrapePageQuery {
+  limit?: number
+  offset?: number
+  anchorId?: number
+  videoId?: number
+}
+
+export interface PendingVideoScrapePage {
+  items: PendingVideoScrapeSummary[]
+  total: number
+  offset: number
+}
+
 export interface PendingVideoScrapeResolutionResult {
   status: 'applied' | 'skipped' | 'merge-required'
   applied: boolean

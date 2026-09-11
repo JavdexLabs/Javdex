@@ -4,6 +4,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { LibraryScanAudit } from '@shared/libraryTypes'
+import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
+import { createMediaLibrary } from '../db/mediaLibraryRepo'
 import {
   libraryScanAuditContainsPath,
   readLibraryScanAudit,
@@ -20,6 +22,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  closeDatabase()
   if (previousUserData === undefined) delete process.env.JAVDEX_TEST_USER_DATA
   else process.env.JAVDEX_TEST_USER_DATA = previousUserData
   fs.rmSync(tempRoot, { recursive: true, force: true })
@@ -51,6 +54,32 @@ function audit(): LibraryScanAudit {
 }
 
 describe('libraryScanAuditStore', () => {
+  it('uses the latest non-NULL database body and never falls back to disk on missing or malformed persisted audit', () => {
+    initDatabaseAtPath(path.join(tempRoot, 'library.db'))
+    const directory = path.join(tempRoot, 'media')
+    fs.mkdirSync(directory)
+    const library = createMediaLibrary({ name: 'Audit', roots: [{ path: directory }] })
+    const value = { ...audit(), libraryId: library.id }
+    writeLibraryScanAudit(value)
+    assert.equal(readLibraryScanAudit(library.id), null)
+    const insert = getDb().prepare(`
+      INSERT INTO library_scan_runs(id, library_id, config_revision, trigger, status, started_at, audit_json)
+      VALUES (?, ?, 1, 'manual', 'running', ?, ?)
+    `)
+    for (const [runId, startedAt, body] of [
+      ['z-old', '2026-08-01', JSON.stringify({ ...value, runId: 'z-old' })],
+      ['a-new', '2026-09-01', JSON.stringify({ ...value, runId: 'a-new' })],
+      ['b-new', '2026-09-01', JSON.stringify({ ...value, runId: 'b-new' })],
+      ['c-null', '2026-10-01', null]
+    ]) insert.run(runId, library.id, startedAt, body)
+    assert.equal(readLibraryScanAudit(library.id)?.runId, 'b-new')
+    getDb().prepare('UPDATE library_scan_runs SET audit_json = ? WHERE id = ?').run('{malformed', 'b-new')
+    assert.equal(readLibraryScanAudit(library.id), null)
+    getDb().prepare('UPDATE library_scan_runs SET audit_json = ? WHERE id = ?')
+      .run(JSON.stringify({ ...value, libraryId: library.id + 1 }), 'b-new')
+    assert.equal(readLibraryScanAudit(library.id), null)
+  })
+
   it('atomically replaces and restores the complete latest audit', () => {
     const value = audit()
     writeLibraryScanAudit(value)

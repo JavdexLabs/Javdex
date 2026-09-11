@@ -1,0 +1,15 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-cr-build.log": "20f9aedb2873b7f21457c33c399da9ab701fc10c2470d0f295ae913db6860431",
+    "batch-cr-full.log": "6cf46b8304b7ebc0b447b7f5895b951f4a8bb289f420f9bdf4662a486fc05138",
+    "batch-cr-pending-audit-transactions.patch": "c391d27df6b002b5e35cc05c4dc07e1aa10c5cafcc1d62c541017e6b4ee1c982",
+    "batch-cr-review.md": "8cf2f3660d819adb9bf48bb95dc7659c6a5cb5a4ebc1d93d19b514ecc2901163",
+    "batch-cr-target.log": "b9e4aa5c729ab9de967b7d167a9a7aebe6bd273352ff860ace25a15f381bf678"
+  },
+  "notes": [
+    "Selected cumulative patch depends on previous batches.",
+    "169 focused; full2592pass1skip0fail; build terminal0.",
+    "Six pending same-connection segments; remaining writer paths/coordinator/full15/42 incomplete."
+  ]
+}

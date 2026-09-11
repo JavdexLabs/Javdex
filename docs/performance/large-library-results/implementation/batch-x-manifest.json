@@ -1,0 +1,12 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "732e0bf200bc1e5f1428cd244a9f7d76afa5d68fcb6af9980cac32a284e451b7",
+  "notes": [
+    "Cumulative against HEAD; source subset contains U/V changes and depends on their added modules. Not standalone incremental patch.",
+    "Replace global fullproduct enumeration with useCase/status-filtered TEMP ID snapshot in priorupdated_at order, rowidtie. 128IDpages, fullproduct loadedone-at-time; no long mainDB readtransaction acrossawaits.",
+    "Allthreeproductsrestore ownruns; PluginDeveloper SQL statusfilter matchespriorfourrecoverable statuses. Plugin cleanup and playlistimportlegacyclose useIDonlypath.",
+    "20k unrelated/closed badJSON rows plus260owned candidates: earlybreakonly1getRun; fullownedenumeration260getRun; ID-only settledbadJSON canenumerate. Pageskeeporder duringtimestampchanges; newruns excluded, newlyclosed runskipped; earlybreak/error/enddropTEMP.",
+    "Fullnpmtest2116pass/1skip/0fail and buildpass. Subsequent strengthenedfullownedgetRun count test: final13storetests, node types and changedtestlint pass. Initialcombined43targets passed. Standards/Specno concrete blockers.",
+    "TEMP ID snapshot remainsO(M) insideSQLite (may spill dependingtemp_store); activeproducts/sessionlogs retained elsewhere. No fullstartupmemory/Windows/HDD/p95/retention acceptance. No persistent schema or user data changes."
+  ]
+}

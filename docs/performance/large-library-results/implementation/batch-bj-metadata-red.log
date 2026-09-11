@@ -1,0 +1,30 @@
+✔ loads metadata once while paging 60/60/5 works and preserving the full count (237.112542ms)
+✔ retries page errors, clamps a removed last page, and rejects late actor results (6.657292ms)
+✖ does not invalidate the new actor metadata when the old editor save settles late (10.759583ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 2
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 494.684708
+
+✖ failing tests:
+
+test at src/renderer/src/pages/ActressDetailPage.interaction.test.tsx:2:7592
+✖ does not invalidate the new actor metadata when the old editor save settles late (10.759583ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+  
+    assert.ok(text(renderer!.root).includes('Actor-2'))
+  
+      at TestContext.<anonymous> (/Users/nut/Project/JavdexLabs/Javdex/src/renderer/src/pages/ActressDetailPage.interaction.test.tsx:119:10)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

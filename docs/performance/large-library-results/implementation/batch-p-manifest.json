@@ -1,0 +1,12 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "sha256": "af18af51dee9962efa45d739744f55808baf6780503b9a9e802c130f77e30bc8",
+  "notes": [
+    "Cumulative patch against HEAD; depends on previous J-O async queue/flights/crypto/cache/bounded-reader implementation. Not standalone incremental patch.",
+    "Sharp0.35.4 metadata only, pages1; per-canvas limit67108864 pixels. Reject typed413 before cache; MIME from actual headers. Not total decoded memory or animation-lifetime budget.",
+    "Full npm test2060passed/1skipped, build passed. Final83target tests,node types,changed-test lint passed after test-only additions.",
+    "macOSarm64 unpacked app built with electron-builder; packaged executable RunAsNode loads actual packaged Sharp and performs metadata and resize across JPEG/PNG/WebP/GIF/AVIF. Windows/Linux packages remain unverified.",
+    "Synthetic benchmark now PNG32px plus padding instead of arbitrary transport bytes. Raw times cannot be directly compared as same fixture with previous batches.",
+    "Header metadata is not an adversarial decoder memory guarantee; original synchronous business inspection, thumbnail generation, animation/concurrent pixel and response budgets remain incomplete."
+  ]
+}

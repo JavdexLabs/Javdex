@@ -1,4 +1,4 @@
-import type { ActressListItem } from '@shared/actressTypes'
+import type { ActressCard } from '@shared/cardProjection'
 import { assetUrl } from '../api'
 import ActressAvatar from './ActressAvatar'
 import ActressName from './ActressName'
@@ -6,7 +6,7 @@ import ActressStatusBadge from './ActressStatusBadge'
 import MediaTileActionButton from './MediaTileActionButton'
 
 interface ActressCardTileProps {
-  actress: ActressListItem
+  actress: ActressCard
   selected: boolean
   selectionMode: boolean
   onToggleSelect: (event: React.MouseEvent) => void
@@ -50,7 +50,7 @@ export default function ActressCardTile({
       >
         <span className="actress-card-avatar">
           <ActressAvatar
-            src={assetUrl(actress.avatar_path)}
+            src={assetUrl(actress.avatar_path, 320)}
             name={actress.main_name}
             gender={actress.gender}
           />

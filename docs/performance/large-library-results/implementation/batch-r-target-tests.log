@@ -1,0 +1,12 @@
+✔ uses a 320 thumbnail for actress cards (87.567417ms)
+✔ uses thumbnails for local video gallery tiles and original preview sources (52.347709ms)
+✔ uses thumbnails for local actress gallery tiles and original preview sources (1.892875ms)
+✔ only accepts finite thumbnail variants and preserves preview URL components (0.618917ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 296.148125

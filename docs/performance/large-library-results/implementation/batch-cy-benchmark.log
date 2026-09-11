@@ -1,0 +1,67 @@
+{
+  "results": [
+    {
+      "count": 10000,
+      "titleBytes": 1024,
+      "samples": [
+        {
+          "elapsedMs": 23.322958999999997,
+          "firstMs": 4.005625000000009,
+          "rows": 10000,
+          "checksum": 50005000
+        },
+        {
+          "elapsedMs": 22.666624999999982,
+          "firstMs": 4.129166999999995,
+          "rows": 10000,
+          "checksum": 50005000
+        },
+        {
+          "elapsedMs": 22.76433399999999,
+          "firstMs": 4.246083999999996,
+          "rows": 10000,
+          "checksum": 50005000
+        }
+      ]
+    },
+    {
+      "count": 100000,
+      "titleBytes": 1024,
+      "samples": [
+        {
+          "elapsedMs": 356.9252500000001,
+          "firstMs": 127.45608299999992,
+          "rows": 100000,
+          "checksum": 5000050000
+        },
+        {
+          "elapsedMs": 351.5057079999999,
+          "firstMs": 126.29608299999995,
+          "rows": 100000,
+          "checksum": 5000050000
+        },
+        {
+          "elapsedMs": 304.33283400000005,
+          "firstMs": 81.24491699999999,
+          "rows": 100000,
+          "checksum": 5000050000
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Synthetic in-memory SQLite, ANALYZE, 1 warmup + 3 measured samples at each scale.",
+    "Production cleanup with checksum callback; excludes durable commit, actual audit encoding/writes, scanner and filesystem work.",
+    "Reports synchronous elapsed and first callback latency; no event-loop yielding, RSS bound, p95, Windows/HDD or end-to-end claim.",
+    "TEMP snapshot may still grow with candidates; bounded JavaScript pages do not bound SQLite memory or writer lock duration."
+  ]
+}
+✔ measures complete membership cleanup and first callback at increasing scales (1811.36225ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1972.461833

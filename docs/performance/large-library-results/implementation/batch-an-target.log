@@ -1,0 +1,33 @@
+✔ scopes scan identities and groups while returning only requested IDs from a large catalog (87.854167ms)
+▶ scan latest IPC handler
+  ✔ validates libraryId and forwards the scoped latest snapshot (1.425167ms)
+✔ scan latest IPC handler (1.781458ms)
+✔ bounds the combined audit presence request and validates its library (1.050875ms)
+▶ LibraryScanAuditPanel
+  ✔ defaults to the attention tab even when the latest scan has no issues (932.214875ms)
+  ✔ keeps cached unrecognized files visible with their root-scoped resolution controls (14.826625ms)
+  ✔ does not describe current scan failures as resolved (28.428125ms)
+  ✔ offers a processing jump for cached unrecognized rows in the all-files tab (16.234542ms)
+  ✔ shows an NFO identity conflict as a secondary scan disposition and opens the pending center (9.0005ms)
+  ✔ routes a current NFO candidate to its scrape pending item (5.95025ms)
+  ✔ shows historical NFO pending dispositions as resolved when their current rows are gone (2.879625ms)
+  ✔ keeps the attention badge equal to the visible list when only an NFO warning exists (7.050541ms)
+✔ LibraryScanAuditPanel (1018.418833ms)
+✔ limits a large failed audit to100 visible rows and queries only their pending IDs (49.944583ms)
+✔ routes all three kinds from one mixed pending presence response (4.139625ms)
+✔ keeps a stable audit anchor when a historical group is no longer pending (15.477792ms)
+✔ sends no empty lookup, deduplicates IDs and rejects a stale page response (32.413458ms)
+✔ distinguishes a failed lookup from processed items and retries the same page (6.244917ms)
+✔ does not reuse old ready state when a page is revisited before another lookup finishes (5.417375ms)
+▶ ScanSettingsTab
+  ✔ builds domain-correct deep links for scan identities and scrape candidates (1093.971584ms)
+  ✔ renders automatic local NFO import enabled by default and persists a switch change immediately (99.926875ms)
+✔ ScanSettingsTab (1195.607625ms)
+ℹ tests 19
+ℹ suites 3
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2051.1975

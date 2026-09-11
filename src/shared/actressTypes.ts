@@ -1,5 +1,5 @@
 import type { ScrapedStatus, SortDir } from './commonTypes'
-import type { Video } from './videoTypes'
+import type { Video, VideoCard } from './videoTypes'
 import type { RelatedLink, RelatedLinkInput } from './relatedLinkTypes'
 export type { ActressAvatarCommit, AvatarCropV1 } from './avatarCrop'
 
@@ -172,6 +172,8 @@ export interface ActressListPage {
   items: ActressListItem[]
   total: number
   statusCounts: ActressListStatusCounts
+  /** Opaque read snapshot identity; compare only for equality. */
+  readRevision?: string
 }
 
 /** Read-only source metadata used by renderer-side smart avatar composition. */
@@ -217,4 +219,83 @@ export interface ActressEditInput {
   /** Clear display/source/crop together. */
   clearAvatar?: boolean
   links?: RelatedLinkInput[]
+}
+
+
+/** Narrow identity choices, sorted by full main name then ID; no catalog statistics. */
+export interface ActressPickerItem {
+  id: number
+  /** Display label: at most128 Unicode code points plus ellipsis; fetch detail for edits. */
+  main_name: string
+  /** Omitted when its JSON representation exceeds4096 bytes. */
+  avatar_path: string | null
+}
+export interface ActressPickerQuery {
+  search?: string
+  limit?: number
+  offset?: number
+}
+export interface ActressPickerPage {
+  items: ActressPickerItem[]
+  hasMore: boolean
+  offset: number
+}
+
+
+export interface ActressPickerIdentity extends ActressPickerItem {
+  revision: number
+}
+
+
+export interface ActressMergeCandidate extends ActressPickerItem {
+  gender: ActressGender | null
+  video_count: number
+}
+export interface ActressMergeCandidateQuery extends ActressPickerQuery {
+  keepId: number
+}
+export interface ActressMergeCandidatePage {
+  items: ActressMergeCandidate[]
+  hasMore: boolean
+  offset: number
+}
+
+export type ActressMetadata = Omit<ActressDetail, 'videos'>
+
+/** Associated works only; profile and gallery are separate reads. */
+export interface ActressVideoPageQuery {
+  withCover?: boolean
+  limit?: number
+  offset?: number
+}
+
+export interface ActressVideoPage {
+  videos: VideoCard[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface ActressGalleryPageQuery {
+  /** Locate a stable image in the current display order before paging. */
+  anchorId?: number
+  localOnly?: boolean
+  limit?: number
+  offset?: number
+}
+
+export interface ActressGalleryPage {
+  /** Page-local anchor index; null when a requested anchor is absent. */
+  anchorIndex?: number | null
+  items: ActressGalleryAsset[]
+  total: number
+  limit: number
+  offset: number
+}
+
+/** Profile header without complete work/gallery collections. Counts have explicit scopes. */
+export interface ActressProfile extends Omit<ActressMetadata, 'gallery'> {
+  gallery_count: number
+  display_gallery_count: number
+  first_gallery: ActressGalleryAsset | null
 }

@@ -1,0 +1,20 @@
+✔ detects local writes, external commits and connection replacement without changing schema (11.444334ms)
+✔ opens a separate read-only WAL connection with matching SQL functions and no migration (12.077958ms)
+✔ keeps a read snapshot while the writer commits and observes it on the next transaction (7.456375ms)
+✔ rejects missing, old, newer and non-WAL catalogs without initializing or migrating them (2.686833ms)
+✔ does not publish an unsuccessfully initialized writer and permits a subsequent valid initialization (6.545625ms)
+✔ reuses canonical query pages, isolates caller mutations, and invalidates local and external writes (12.525542ms)
+✔ bypasses cached pages inside transactions and never publishes data that is rolled back (7.169958ms)
+✔ evicts least recently used pages and validates raw search before cache lookup (6.955667ms)
+✔ evicts by serialized byte budget before eight large pages accumulate (10.855458ms)
+✔ observes an external commit during a read and refreshes on the next call (7.565584ms)
+✔ does not cache a failed read and allows the same query to retry (6.760292ms)
+✔ separates connections even when their revision counters match (12.187709ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 263.975917

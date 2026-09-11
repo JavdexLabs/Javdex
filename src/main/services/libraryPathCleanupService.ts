@@ -6,6 +6,7 @@ import {
 } from '@shared/legacyLibraryCleanup'
 import { resolveMediaLibraryRootIdentity } from '@shared/mediaLibraryRootPath'
 import type {
+  LibraryScanResourceAuditEntry,
   LibraryPathRemovalPreview,
   PendingLibraryPathCleanup
 } from '@shared/libraryTypes'
@@ -45,6 +46,10 @@ export interface PendingLibraryPathCleanupResult {
   promoted: number
   consumedRoots: LibraryRootScope[]
 }
+
+export type LibraryPathCleanupAuditEvent =
+  | { section: 'removedResources'; entry: LibraryScanResourceAuditEntry }
+  | { section: 'promotedResources'; entry: LibraryScanResourceAuditEntry }
 
 interface LibraryRow {
   id: number
@@ -694,7 +699,8 @@ export function confirmLibraryPathRemoval(
 }
 
 function applyPendingLibraryPathCleanupsInTransaction(
-  cleanups: PendingLibraryPathCleanup[]
+  cleanups: PendingLibraryPathCleanup[],
+  beforeCommit?: (event: LibraryPathCleanupAuditEvent) => void
 ): PendingLibraryPathCleanupResult {
   if (cleanups.length === 0) return { removed: 0, promoted: 0, consumedRoots: [] }
   const database = getDb()
@@ -714,6 +720,12 @@ function applyPendingLibraryPathCleanupsInTransaction(
   }
 
   const plans: VideoResourceBatchRemovalPlan[] = []
+  const auditSnapshots = beforeCommit
+    ? new Map<string, { code: string; title: string | null; promoted: VideoResource | null }>()
+    : undefined
+  const readAuditVideo = beforeCommit
+    ? database.prepare('SELECT code, title FROM videos WHERE id = ?')
+    : undefined
   for (const affected of resourcesByVideo.values()) {
     const { library_id: libraryId, video_id: videoId } = affected[0]
     const affectedIds = new Set(affected.map((resource) => resource.id))
@@ -723,6 +735,11 @@ function applyPendingLibraryPathCleanupsInTransaction(
     const promoted = removesPrimary
       ? selectPrimaryVideoResourceCandidate(remaining, fs.existsSync)
       : null
+    if (auditSnapshots) {
+      const video = readAuditVideo!.get(videoId) as { code: string; title: string | null } | undefined
+      if (!video) throw new Error('Cannot record cleanup audit for a missing video')
+      auditSnapshots.set(`${libraryId}:${videoId}`, { ...video, promoted })
+    }
     plans.push({
       libraryId,
       videoId,
@@ -732,6 +749,13 @@ function applyPendingLibraryPathCleanupsInTransaction(
   }
 
   const result = removeSourceManagedVideoResourcesBatch(plans)
+  // Each resource belongs to exactly one deduplicated root/video plan. Batch SQL
+  // reports actual changes and may skip missing rows: require every planned write
+  // before emitting historical facts, otherwise roll back the entire cleanup.
+  if (beforeCommit && (result.removed !== affectedResources.length ||
+      result.promoted !== plans.filter((plan) => plan.promotedResourceId !== null).length)) {
+    throw new Error('Cleanup resource changes do not match the audit plan')
+  }
   const timestamp = new Date().toISOString()
   const affectedLibraries = new Set<number>()
   for (const job of jobs) {
@@ -780,6 +804,29 @@ function applyPendingLibraryPathCleanupsInTransaction(
       .run(timestamp, libraryId)
   }
 
+  if (beforeCommit && auditSnapshots) {
+    const notify = (section: LibraryPathCleanupAuditEvent['section'], resource: VideoResource,
+      video: { code: string; title: string | null }): void => {
+      const returned: unknown = beforeCommit({ section, entry: {
+        resourceId: resource.id, videoId: resource.video_id, videoCode: video.code, videoTitle: video.title,
+        resourceKind: resource.kind,
+        sourcePath: resource.kind === 'local' ? resource.locator : resource.strm_source_path,
+        displayName: resource.display_name,
+        reason: section === 'removedResources' ? 'removed_library_path' : 'promoted_after_removal'
+      } })
+      if (returned != null && (typeof returned === 'object' || typeof returned === 'function') &&
+          typeof (returned as { then?: unknown }).then === 'function') {
+        void Promise.resolve(returned).catch(() => {})
+        throw new Error('Cleanup audit callback must be synchronous')
+      }
+    }
+    for (const affected of resourcesByVideo.values()) {
+      const video = auditSnapshots.get(`${affected[0].library_id}:${affected[0].video_id}`)!
+      for (const resource of affected) notify('removedResources', resource, video)
+      if (video.promoted) notify('promotedResources', video.promoted, video)
+    }
+  }
+
   return {
     ...result,
     consumedRoots: jobs.map((job) => ({ libraryId: job.library_id, rootId: job.root_id }))
@@ -787,9 +834,130 @@ function applyPendingLibraryPathCleanupsInTransaction(
 }
 
 export function applyPendingLibraryPathCleanups(
-  cleanups: PendingLibraryPathCleanup[]
+  cleanups: PendingLibraryPathCleanup[],
+  /** Synchronous post-write notification before commit; throwing rolls back the cleanup. */
+  beforeCommit?: (event: LibraryPathCleanupAuditEvent) => void
 ): PendingLibraryPathCleanupResult {
-  return getDb().transaction(() => applyPendingLibraryPathCleanupsInTransaction(cleanups))()
+  return getDb().transaction(() => applyPendingLibraryPathCleanupsInTransaction(cleanups, beforeCommit))()
+}
+
+/** A live-run, paged version of deferred cleanup. Each operation requires the
+ * caller's synchronous business/audit transaction. Jobs remain pending until the
+ * final all-rows barrier; retries discover the remaining rows, never replay deletes.
+ */
+export function createPendingLibraryPathCleanupPages(cleanups: readonly PendingLibraryPathCleanup[], resourceHighWater: number) {
+  if (!Number.isSafeInteger(resourceHighWater) || resourceHighWater < 0) throw new Error('Invalid cleanup resource high water')
+  const db = getDb()
+  const scopes = [...new Map(cleanups.map(item => [item.jobId, { ...item }])).values()]
+  const jobs = scopes.map(requirePendingJob)
+  const rootKeys = new Set(jobs.map(job => `${job.library_id}:${job.root_id}`))
+  const verify = () => {
+    if (!db.inTransaction) throw new Error('Deferred cleanup page requires a transaction')
+    for (let index = 0; index < jobs.length; index++) {
+      const current = requirePendingJob(scopes[index])
+      if (JSON.stringify(current) !== JSON.stringify(jobs[index])) throw new Error('清理任务身份已变化')
+      assertCleanupJobSafe(current)
+    }
+  }
+  const isTarget = (libraryId: number, rootId: number | null) => rootId !== null && rootKeys.has(`${libraryId}:${rootId}`)
+  const validateIds = (ids: readonly number[]) => {
+    if (ids.length > 128 || ids.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error('Invalid deferred cleanup page')
+  }
+  const notify = (callback: (event: LibraryPathCleanupAuditEvent) => void, event: LibraryPathCleanupAuditEvent) => {
+    const returned: unknown = callback(event)
+    if (returned != null && typeof (returned as { then?: unknown }).then === 'function') {
+      void Promise.resolve(returned).catch(() => {})
+      throw new Error('Cleanup audit callback must be synchronous')
+    }
+  }
+  return {
+    resources(ids: readonly number[], beforeCommit: (event: LibraryPathCleanupAuditEvent) => void) {
+      verify(); validateIds(ids)
+      const resources = db.prepare(`SELECT * FROM video_resources WHERE id IN (SELECT value FROM json_each(?))
+        AND (kind='local' OR strm_source_path IS NOT NULL) ORDER BY id`).all(JSON.stringify(ids)) as VideoResource[]
+      const grouped = new Map<string, VideoResource[]>()
+      for (const resource of resources) {
+        if (!isTarget(resource.library_id, resource.root_id)) continue
+        const key = `${resource.library_id}:${resource.video_id}`
+        const group = grouped.get(key) ?? []
+        group.push(resource); grouped.set(key, group)
+      }
+      let removed = 0, promoted = 0
+      const readVideo = db.prepare('SELECT code,title FROM videos WHERE id=?')
+      for (const pageGroup of grouped.values()) {
+        const { library_id: libraryId, video_id: videoId } = pageGroup[0]
+        // A complete video is the indivisible unit, even above the normal page size.
+        // Ordinary links are not cleanup targets merely because they have a root ID.
+        const all = listVideoResources(libraryId, videoId)
+        const targeted = (row: VideoResource) => isTarget(row.library_id, row.root_id) &&
+          (row.kind === 'local' || row.strm_source_path !== null)
+        const affected = all.filter(targeted)
+        if (affected.some(row => row.id > resourceHighWater)) throw new Error('清理期间新增了目标资源，保留当前作品待重试')
+        const remaining = affected.some(row => row.is_primary === 1) ? all.filter(row => !targeted(row)) : []
+        const primary = selectPrimaryVideoResourceCandidate(remaining, fs.existsSync)
+        const video = readVideo.get(videoId) as { code: string; title: string | null } | undefined
+        if (!video) throw new Error('Cannot record cleanup audit for a missing video')
+        const actual = removeSourceManagedVideoResourcesBatch([{ libraryId, videoId,
+          resourceIds: affected.map(row => row.id), promotedResourceId: primary?.id ?? null }])
+        if (actual.removed !== affected.length || actual.promoted !== (primary ? 1 : 0)) {
+          throw new Error('Cleanup resource changes do not match the audit plan')
+        }
+        const event = (section: LibraryPathCleanupAuditEvent['section'], resource: VideoResource): LibraryPathCleanupAuditEvent => ({
+          section, entry: { resourceId: resource.id, videoId, videoCode: video.code, videoTitle: video.title,
+            resourceKind: resource.kind, sourcePath: resource.kind === 'local' ? resource.locator : resource.strm_source_path,
+            displayName: resource.display_name, reason: section === 'removedResources' ? 'removed_library_path' : 'promoted_after_removal' }
+        })
+        for (const resource of affected) notify(beforeCommit, event('removedResources', resource))
+        if (primary) notify(beforeCommit, event('promotedResources', primary))
+        removed += actual.removed; promoted += actual.promoted
+      }
+      return { removed, promoted }
+    },
+    pending(kind: 'pendingScan' | 'pendingIdentity' | 'unrecognized', ids: readonly number[]) {
+      verify(); validateIds(ids)
+      const table = kind === 'pendingScan' ? 'pending_scan_resources'
+        : kind === 'pendingIdentity' ? 'pending_resource_identities' : 'library_unrecognized_files'
+      const key = kind === 'unrecognized' ? 'rowid' : 'id'
+      const rows = db.prepare(`SELECT ${key} AS id,library_id,root_id FROM ${table}
+        WHERE ${key} IN (SELECT value FROM json_each(?)) ORDER BY ${key}`).all(JSON.stringify(ids)) as { id: number; library_id: number; root_id: number }[]
+      const remove = db.prepare(`DELETE FROM ${table} WHERE ${key}=? AND library_id=? AND root_id=?`)
+      for (const row of rows) {
+        if (isTarget(row.library_id, row.root_id) && remove.run(row.id, row.library_id, row.root_id).changes !== 1) {
+          throw new Error('Deferred pending deletion did not take effect')
+        }
+      }
+    },
+    emptyGroups(ids: readonly number[]) {
+      verify(); validateIds(ids)
+      const libraries = [...new Set(jobs.map(job => job.library_id))]
+      db.prepare(`DELETE FROM pending_scan_groups WHERE id IN (SELECT value FROM json_each(?))
+        AND library_id IN (SELECT value FROM json_each(?)) AND NOT EXISTS (
+          SELECT 1 FROM pending_scan_resources r WHERE r.library_id=pending_scan_groups.library_id AND r.group_id=pending_scan_groups.id
+        )`).run(JSON.stringify(ids), JSON.stringify(libraries))
+    },
+    finish(): LibraryRootScope[] {
+      verify()
+      const now = new Date().toISOString()
+      for (const job of jobs) {
+        for (const table of ['video_resources', 'pending_scan_resources', 'pending_resource_identities', 'library_unrecognized_files']) {
+          const managed = table === 'video_resources' ? "AND (kind='local' OR strm_source_path IS NOT NULL)" : ''
+          if (db.prepare(`SELECT 1 FROM ${table} WHERE library_id=? AND root_id=? ${managed} LIMIT 1`).get(job.library_id, job.root_id)) {
+            throw new Error('根目录仍有待清理记录，保留待执行任务')
+          }
+        }
+        if (db.prepare("UPDATE media_library_roots SET state='disabled',updated_at=? WHERE id=? AND library_id=? AND state='pending_removal'")
+          .run(now, job.root_id, job.library_id).changes !== 1) throw new Error('根目录清理状态已变化')
+        if (db.prepare(`UPDATE library_root_cleanup_jobs SET state='completed',started_at=COALESCE(started_at,?),completed_at=?,last_error=NULL
+          WHERE id=? AND library_id=? AND root_id=? AND state='pending'`).run(now, now, job.id, job.library_id, job.root_id).changes !== 1) {
+          throw new Error('根目录清理任务状态已变化')
+        }
+      }
+      for (const libraryId of new Set(jobs.map(job => job.library_id))) {
+        db.prepare('UPDATE media_libraries SET revision=revision+1,updated_at=? WHERE id=?').run(now, libraryId)
+      }
+      return jobs.map(job => ({ libraryId: job.library_id, rootId: job.root_id }))
+    }
+  }
 }
 
 export function consumePendingLibraryPathCleanups(

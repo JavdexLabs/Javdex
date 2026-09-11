@@ -1,4 +1,4 @@
-import type { ActressListItem } from '@shared/actressTypes'
+import type { ActressPickerItem } from '@shared/actressTypes'
 import type {
   ActressNameConflictGroup,
   PendingActressNameClaim,
@@ -43,9 +43,14 @@ export interface ConflictReviewSessionState {
   discardCandidate: PendingActressScrapeCandidate | null
   otherOwnerOpen: boolean
   otherOwnerSearch: string
-  otherOwnerOptions: ActressListItem[]
+  otherOwnerOptions: ActressPickerItem[]
+  otherOwnerOffset: number
+  otherOwnerHasMore: boolean
+  otherOwnerError: string | null
+  otherOwnerRetry: number
+  otherOwnerChoosingId: number | null
   otherOwnerLoading: boolean
-  selectedOtherOwner: ActressListItem | null
+  selectedOtherOwner: ActressPickerItem | null
   editNameOpen: boolean
   editedName: string
   liveEditInspection: { normalizedName: string; status: 'available' | 'conflict' } | null
@@ -68,7 +73,9 @@ export type ConflictReviewIntent =
   | { type: 'openOtherOwner' }
   | { type: 'closeOtherOwner' }
   | { type: 'changeOtherOwnerSearch'; value: string }
-  | { type: 'chooseOtherOwner'; item: ActressListItem; revision: number }
+  | { type: 'changeOtherOwnerPage'; offset: number }
+  | { type: 'retryOtherOwner' }
+  | { type: 'chooseOtherOwner'; item: ActressPickerItem; revision: number }
   | { type: 'openEditName'; sourceName: string }
   | { type: 'closeEditName' }
   | { type: 'changeEditedName'; value: string }
@@ -102,6 +109,11 @@ export const initialConflictReviewSessionState: ConflictReviewSessionState = {
   otherOwnerOpen: false,
   otherOwnerSearch: '',
   otherOwnerOptions: [],
+  otherOwnerOffset: 0,
+  otherOwnerHasMore: false,
+  otherOwnerError: null,
+  otherOwnerRetry: 0,
+  otherOwnerChoosingId: null,
   otherOwnerLoading: false,
   selectedOtherOwner: null,
   editNameOpen: false,
@@ -120,8 +132,15 @@ const EMPTY_REPLACEMENT_CLAIMANTS: ActressNameConflictGroup['claimants'] = []
 function resetTransient(state: ConflictReviewSessionState): ConflictReviewSessionState {
   return {
     ...state,
+    discardCandidate: null,
     otherOwnerOpen: false,
     otherOwnerSearch: '',
+    otherOwnerOffset: 0,
+    otherOwnerOptions: [],
+    otherOwnerError: null,
+    otherOwnerChoosingId: null,
+    otherOwnerHasMore: false,
+    otherOwnerLoading: false,
     selectedOtherOwner: null,
     editNameOpen: false,
     mergeOpen: false,
@@ -177,6 +196,7 @@ export function reduceConflictReviewSession(
     case 'selectOwner':
       return {
         ...state,
+        otherOwnerChoosingId: null,
         selectedOtherOwner: null,
         selection: state.selection
           ? selectConflictProposedOwner(state.selection, intent.owner)
@@ -190,11 +210,15 @@ export function reduceConflictReviewSession(
           : state.selection
       }
     case 'openOtherOwner':
-      return { ...state, otherOwnerOpen: true, otherOwnerSearch: '' }
+      return { ...state, otherOwnerOpen: true, otherOwnerSearch: '', otherOwnerOffset: 0, otherOwnerOptions: [], otherOwnerLoading: true, otherOwnerError: null, otherOwnerHasMore: false }
     case 'closeOtherOwner':
-      return { ...state, otherOwnerOpen: false, otherOwnerSearch: '' }
+      return { ...state, otherOwnerOpen: false, otherOwnerSearch: '', otherOwnerOffset: 0, otherOwnerOptions: [], otherOwnerChoosingId: null, otherOwnerLoading: false, otherOwnerError: null }
     case 'changeOtherOwnerSearch':
-      return { ...state, otherOwnerSearch: intent.value }
+      return { ...state, otherOwnerSearch: intent.value.slice(0, 256), otherOwnerOffset: 0, otherOwnerOptions: [], otherOwnerLoading: true, otherOwnerError: null, otherOwnerHasMore: false, otherOwnerChoosingId: null }
+    case 'changeOtherOwnerPage':
+      return { ...state, otherOwnerOffset: intent.offset, otherOwnerOptions: [], otherOwnerLoading: true, otherOwnerError: null, otherOwnerHasMore: false, otherOwnerChoosingId: null }
+    case 'retryOtherOwner':
+      return { ...state, otherOwnerRetry: state.otherOwnerRetry + 1 }
     case 'chooseOtherOwner':
       return {
         ...state,
@@ -206,6 +230,7 @@ export function reduceConflictReviewSession(
             })
           : state.selection,
         selectedOtherOwner: intent.item,
+        otherOwnerChoosingId: null,
         otherOwnerOpen: false,
         otherOwnerSearch: ''
       }

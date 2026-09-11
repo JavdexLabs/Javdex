@@ -7,7 +7,7 @@ import { closeDatabase, getDb, initDatabaseAtPath } from '../db/database'
 import { getVideoById } from '../db/videoRepo'
 import { classificationMaintenanceService } from './classificationMaintenanceService'
 import { classificationQueryService } from './classificationQueryService'
-import { videoQueryService } from './videoQueryService'
+import { createVideoQueryService } from './videoQueryService'
 
 function withDatabase(run: () => void): void {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-series-'))
@@ -226,7 +226,7 @@ describe('classification series query and maintenance services', () => {
         ]
       )
       assert.deepEqual(
-        videoQueryService
+        createVideoQueryService()
           .list(
             { kind: 'library', libraryId: 1 },
             { seriesId: older, sortBy: 'release_date', sortDir: 'desc' }
@@ -235,7 +235,7 @@ describe('classification series query and maintenance services', () => {
         ['SERIES-LATER', 'SERIES-EARLIER', 'SERIES-SORT']
       )
       assert.deepEqual(
-        videoQueryService
+        createVideoQueryService()
           .list(
             { kind: 'library', libraryId: 1 },
             { seriesId: older, sortBy: 'release_date', sortDir: 'asc' }

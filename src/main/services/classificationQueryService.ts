@@ -1,3 +1,5 @@
+import { listClassificationImagePage } from './classificationImagePage'
+import { listOrganizationPage, listSeriesPage, listDirectorPage } from './classificationListPage'
 import type {
   ClassificationEntityRef,
   ClassificationImageCandidate,
@@ -42,6 +44,10 @@ function searchLikePattern(search: string | undefined): string {
 }
 
 export interface ClassificationQueryService {
+  listImageCandidatesPage: typeof listClassificationImagePage
+  listDirectorsPage: typeof listDirectorPage
+  listOrganizationsPage: typeof listOrganizationPage
+  listSeriesPage: typeof listSeriesPage
   listImageCandidates(entity: ClassificationEntityRef): ClassificationImageCandidate[]
   listOrganizations(query: OrganizationListQuery): OrganizationListItem[]
   getOrganization(id: number, role: OrganizationRole): OrganizationDetail | null
@@ -56,6 +62,10 @@ export interface ClassificationQueryService {
 }
 
 export const classificationQueryService: ClassificationQueryService = {
+  listImageCandidatesPage: listClassificationImagePage,
+  listDirectorsPage: listDirectorPage,
+  listOrganizationsPage: listOrganizationPage,
+  listSeriesPage,
   listImageCandidates(entity): ClassificationImageCandidate[] {
     if (!Number.isInteger(entity.id) || entity.id <= 0) throw new Error('分类实体参数无效')
     const predicate =

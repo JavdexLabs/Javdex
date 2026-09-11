@@ -2104,6 +2104,10 @@ button.tag-chip.clickable:focus-visible {
 }
 
 .tag-chip--custom-pick {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   min-height: 28px;
   padding: 4px 10px;
   border-color: color-mix(in srgb, var(--accent) 28%, var(--border-subtle));

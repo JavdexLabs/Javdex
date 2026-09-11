@@ -1,0 +1,23 @@
+{
+  "baseCommit": "4c953a960d910aed3fb102b39a337b418c6292f9",
+  "artifacts": {
+    "batch-bj-target.log": "5e877d16a037bb31b6d1905fbc08e043bcff9dcdb81c274ef2a78bc5d61c4e9a",
+    "batch-bj-full.log": "c0006978fcfbfb2894a2347f3f161c5efbea006a176e8d63ec03ed5fadc49162",
+    "batch-bj-build.log": "2b03a35e4906d59b1d8d67d1bda0a8e7dc3ded2525795471306d2884155136bd",
+    "batch-bj-initial-css-gate.log": "29b5296bc87d81d80f977022ca8e3389f5464916e9eac0b5d5a7638c48375fa5",
+    "batch-bj-metadata-red.log": "ff2f91b489307234e2c6949a5535343aa64929837320dc1071cc88286e23ad5c",
+    "batch-bj-aba-red.log": "f739ec5120c7766f2a1e68d962854007fe07105c475d0ebb889ecff24107a426",
+    "batch-bj-ui-1000x640-works.png": "587587bb2a4a60cdfa58ad84faf43985250558e6f184ae7a066b0f56df066141",
+    "batch-bj-ui-1440x900-editor.png": "6437aa9ff0bf003eaf20826efb3a76fa91e55b8184bd3031bd34e96601156661",
+    "batch-bj-ui-1440x900-works.png": "11fdec9f78cae86ae339f2e28a5524a22de0fcd9d6b8598a19c98b1ed9a0e65b",
+    "batch-bj-ui-results.json": "5130307df5064d9cd9187d22652d33d54438b37aa3102529ca76f5c19e3d4d56",
+    "batch-bj-ui-1000x640-editor.png": "9cafd8c8e5201a5aece8964dfa3e53f1811dfcd751644040d41aad767252c8f7",
+    "batch-bj-actress-detail-ui.patch": "f9e9da53acb5a1073f4a463948f309d89131b44f9944cc6a29d4cbeacfcd6f8f",
+    "batch-bj-review.md": "0cbe5aa3f76edae23d19c82b2eeca98e44daab4462ccefa977708b696d4c4389"
+  },
+  "notes": [
+    "Selected cumulative source diff plus new files; depends on BH/BI API and earlier batches.",
+    "15focused; full2310pass1skip0fail; build passed.",
+    "Actual UI pagination accepted locally; long strings/gallery/worker/deep pages and full15/42scope remain."
+  ]
+}

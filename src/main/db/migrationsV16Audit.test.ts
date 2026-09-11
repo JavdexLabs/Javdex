@@ -1,8 +1,9 @@
 import { it } from 'node:test'
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
-import { SCHEMA_SQL, SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL } from './schema'
+import { SCHEMA_SQL, SCAN_AUDIT_ENTRIES_SCHEMA_SQL } from './schema'
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
+import { releasedV15Database } from '../testFixtures/releasedV15Database'
 
 interface SchemaRow { type: string; name: string; tbl_name: string; sql: string | null }
 
@@ -24,26 +25,19 @@ function checkIntegrity(db: Database.Database) {
   assert.deepEqual(db.pragma('integrity_check'), [{ integrity_check: 'ok' }])
 }
 
-function v17(): Database.Database {
-  assert.ok(SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL.trim().length > 0)
-  const parts = SCHEMA_SQL.split(SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL)
-  assert.equal(parts.length, 2, 'Remove exactly one complete V18 DDL block, not just change user_version')
-  const db = new Database(':memory:')
+function v15(): Database.Database {
+  const db = releasedV15Database()
   try {
-    db.pragma('foreign_keys = ON')
-    db.exec(parts.join(''))
-    db.pragma('user_version = 17')
     db.exec(`INSERT INTO media_libraries(id,name,status) VALUES (2,'legacy archived','archived');
       INSERT INTO media_library_roots(id,library_id,path,normalized_path) VALUES (10,1,'/legacy/one','/legacy/one'),(20,2,'/legacy/two','/legacy/two');
-      INSERT INTO videos(id,code,title) VALUES (1,'V18-ONE','legacy title'),(2,'V18-TWO','second');
+      INSERT INTO videos(id,code,title) VALUES (1,'V16-ONE','legacy title'),(2,'V16-TWO','second');
       INSERT INTO library_video_memberships(library_id,video_id,is_hidden,discovery_key,added_at,updated_at)
         VALUES (1,1,0,1,'old','old'),(2,1,1,2,'old','old'),(1,2,0,3,'old','old');
       INSERT INTO tags(id,name) VALUES (1,'legacy manual'),(2,'legacy scraped');
       INSERT INTO video_tag(video_id,tag_id,origin,source,created_at)
         VALUES (1,1,'manual',NULL,'old'),(1,2,'scraped','legacy-source','old');
       INSERT INTO agent_runs(id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
-        VALUES ('legacy-agent','plugin-developer','closed','old','invalid config','pi','invalid state','old','old');
-      INSERT INTO agent_resource_cleanup(run_id,requested_at) VALUES ('legacy-agent','old');`)
+        VALUES ('legacy-agent','plugin-developer','closed','old','invalid config','pi','invalid state','old','old');`)
 
     const insert = db.prepare(`INSERT INTO library_scan_runs
       (id,library_id,config_revision,trigger,status,started_at,finished_at,summary_json,audit_json,error_summary)
@@ -71,8 +65,8 @@ function v17(): Database.Database {
 
 function assertUpgrade(db: Database.Database, before: ReturnType<typeof snapshot>) {
   migrateDatabase(db)
-  assert.equal(CURRENT_SCHEMA_VERSION, 18)
-  assert.equal(db.pragma('user_version', { simple: true }), 18)
+  assert.equal(CURRENT_SCHEMA_VERSION, 16)
+  assert.equal(db.pragma('user_version', { simple: true }), 16)
   assert.deepEqual(snapshot(db, before.map(table => table.name)), before)
   checkIntegrity(db)
   const fresh = new Database(':memory:')
@@ -84,8 +78,8 @@ function assertUpgrade(db: Database.Database, before: ReturnType<typeof snapshot
   } finally { fresh.close() }
 }
 
-it('adds V18 to a complete V17 schema without rewriting any legacy data or relationships', () => {
-  const db = v17()
+it('adds combined V16 to the released V15 schema without rewriting any legacy data or relationships', () => {
+  const db = v15()
   try {
     const oldSchema = schema(db)
     const before = snapshot(db, oldSchema.filter(row => row.type === 'table').map(row => row.name))
@@ -94,11 +88,11 @@ it('adds V18 to a complete V17 schema without rewriting any legacy data or relat
     assertUpgrade(db, before)
     assert.equal(db.pragma('foreign_keys', { simple: true }), 1)
     const added = schema(db).filter(row => !oldSchema.some(old => old.name === row.name))
-    assert.equal(added.filter(row => row.type === 'table').length, 2)
+    assert.equal(added.filter(row => row.type === 'table').length, 3)
     for (const table of added.filter(row => row.type === 'table')) {
       assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM ${quote(table.name)}`).get() as { n: number }).n, 0)
     }
-    assert.deepEqual(schema(db).filter(row => oldSchema.some(old => old.name === row.name)), oldSchema)
+    assert.deepEqual(schema(db).filter(row => row.name !== 'idx_video_tag_tag_id' && oldSchema.some(old => old.name === row.name)), oldSchema.filter(row => row.name !== 'idx_video_tag_tag_id'))
     assert.deepEqual(auditBytes(), originalBytes)
     // A second startup must remain data- and schema-idempotent.
     assertUpgrade(db, before)
@@ -107,8 +101,8 @@ it('adds V18 to a complete V17 schema without rewriting any legacy data or relat
 })
 
 for (const foreignKeys of [0, 1]) {
-  it(`rolls back executed V18 DDL and version, preserves foreign_keys=${foreignKeys}, then retries`, (t) => {
-    const db = v17()
+  it(`rolls back all V16 DDL and version, preserves foreign_keys=${foreignKeys}, then retries`, (t) => {
+    const db = v15()
     try {
       db.pragma(`foreign_keys = ${foreignKeys}`)
       const oldSchema = schema(db)
@@ -117,19 +111,19 @@ for (const foreignKeys of [0, 1]) {
       let injected = false
       const fault = t.mock.method(db, 'exec', (sql: string) => {
         const result = exec.call(db, sql)
-        if (sql.includes(SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL.trim())) {
+        if (sql.includes(SCAN_AUDIT_ENTRIES_SCHEMA_SQL.trim())) {
           injected = true
           assert.equal(db.inTransaction, true)
-          assert.equal(schema(db).filter(row => row.type === 'table').length, before.length + 2,
-            'Both new tables must actually exist before injecting the failure')
-          throw new Error('V18 interrupted after new DDL')
+          assert.equal(schema(db).filter(row => row.type === 'table').length, before.length + 3,
+            'All three new tables must actually exist before injecting the failure')
+          throw new Error('V16 interrupted after new DDL')
         }
         return result
       })
-      assert.throws(() => migrateDatabase(db), /V18 interrupted after new DDL/)
+      assert.throws(() => migrateDatabase(db), /V16 interrupted after new DDL/)
       assert.equal(injected, true)
       assert.equal(db.inTransaction, false)
-      assert.equal(db.pragma('user_version', { simple: true }), 17)
+      assert.equal(db.pragma('user_version', { simple: true }), 15)
       assert.equal(db.pragma('foreign_keys', { simple: true }), foreignKeys)
       assert.deepEqual(schema(db), oldSchema)
       assert.deepEqual(snapshot(db, before.map(table => table.name)), before)
@@ -140,19 +134,3 @@ for (const foreignKeys of [0, 1]) {
     } finally { t.mock.restoreAll(); db.close() }
   })
 }
-
-it('upgrades a structurally restored V15 through cleanup, tag index and V18 without losing legacy rows', () => {
-  const db = v17()
-  try {
-    // Undo both actual post-V15 additions, rather than merely relabel a V17 database.
-    db.exec('DROP TABLE agent_resource_cleanup; DROP INDEX idx_video_tag_tag_id; CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id)')
-    db.pragma('user_version = 15')
-    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name='agent_resource_cleanup'").get(), undefined)
-    assert.deepEqual((db.pragma('index_info(idx_video_tag_tag_id)') as { name: string }[]).map(row => row.name), ['tag_id'])
-    const before = snapshot(db, schema(db).filter(row => row.type === 'table').map(row => row.name))
-    assertUpgrade(db, before)
-    assert.equal(db.pragma('foreign_keys', { simple: true }), 1)
-    assert.deepEqual((db.pragma('index_info(idx_video_tag_tag_id)') as { name: string }[]).map(row => row.name), ['tag_id', 'origin'])
-    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM agent_resource_cleanup').get() as { n: number }).n, 0)
-  } finally { db.close() }
-})

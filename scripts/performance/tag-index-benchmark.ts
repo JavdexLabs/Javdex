@@ -22,7 +22,7 @@ const databasePath = path.join(directory, 'synthetic.db')
 const priorUserData = process.env.JAVDEX_TEST_USER_DATA
 process.env.JAVDEX_TEST_USER_DATA = directory
 const db = initDatabaseAtPath(databasePath)
-// Preserve the pre-V17 comparison baseline in disposable index experiments.
+// Preserve the released V15 tag-index comparison baseline in disposable index experiments.
 db.exec('DROP INDEX idx_video_tag_tag_id; CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id)')
 const rawPrepare = db.prepare.bind(db)
 let plans: unknown[] = []

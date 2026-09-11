@@ -55,7 +55,7 @@ const statisticsRuns: any[] = []
 const indexRuns: any[] = []
 const probeActions: Array<{ name: string; action: () => any; before: any }> = []
 let replayingProbe = false
-// Preserve the pre-V17 comparison baseline in disposable index experiments.
+// Preserve the released V15 tag-index comparison baseline in disposable index experiments.
 if (indexProbe || migrationFrom) db.exec('DROP INDEX idx_video_tag_tag_id; CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id)')
 if (migrationFrom) db.pragma('user_version = 16')
 const rawPrepare = db.prepare.bind(db)

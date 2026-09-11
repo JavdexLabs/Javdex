@@ -20,11 +20,11 @@ import {
   PENDING_VIDEO_DECISIONS_SCHEMA_SQL,
   RELATED_LINKS_SCHEMA_SQL,
   SCHEMA_SQL,
-  SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL,
+  SCAN_AUDIT_ENTRIES_SCHEMA_SQL,
   VIDEO_SOURCES_SCHEMA_SQL
 } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 18
+export const CURRENT_SCHEMA_VERSION = 16
 
 type Migration = {
   version: number
@@ -1374,20 +1374,15 @@ const MIGRATIONS: Migration[] = [
   },
   {
     version: 16,
-    migrate: (database) => database.exec(AGENT_RESOURCE_CLEANUP_SCHEMA_SQL)
-  },
-  {
-    version: 17,
+    // All changes since released schema 15 ship together in one migration.
     migrate: (database) => {
+      database.exec(AGENT_RESOURCE_CLEANUP_SCHEMA_SQL)
       // Keep the tag-key contract while covering manual-origin qualification.
       // The enclosing migration transaction rolls back both DDL and version.
       database.exec('DROP INDEX idx_video_tag_tag_id')
       database.exec('CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id,origin)')
+      database.exec(SCAN_AUDIT_ENTRIES_SCHEMA_SQL)
     }
-  },
-  {
-    version: 18,
-    migrate: (database) => database.exec(SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL)
   }
 ]
 
@@ -1400,8 +1395,18 @@ export function migrateDatabase(database: Database.Database): void {
   const current = Number(database.pragma('user_version', { simple: true }) ?? 0)
   if (current > CURRENT_SCHEMA_VERSION) {
     throw new Error(
-      `Database schema version ${current} is no longer supported. Delete the database file and restart.`
+      `Database schema version ${current} is no longer supported. Use a matching application version or restore a pre-upgrade backup; do not lower user_version manually.`
     )
+  }
+  // Before release, schema 16 briefly contained only the cleanup queue. Do not
+  // silently accept that development snapshot as the consolidated schema 16.
+  if (current === 16) {
+    const additions = database.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'
+      AND name IN ('agent_resource_cleanup', 'library_scan_audit_manifests', 'library_scan_audit_entries')`)
+      .all() as { name: string }[]
+    if (additions.length === 1 && additions[0].name === 'agent_resource_cleanup') {
+      throw new Error('Database uses an unreleased schema 16 snapshot. Use its matching development build or restore a pre-upgrade backup; do not change user_version manually.')
+    }
   }
   if (current === 0) {
     database.transaction(() => {

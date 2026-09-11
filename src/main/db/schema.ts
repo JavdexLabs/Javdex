@@ -533,12 +533,12 @@ INSERT OR IGNORE INTO media_library_scan_state (library_id) VALUES (1);
 `
 
 /**
- * V18 storage/state constraints only: audit business fields and writer/page byte
+ * Scan audit storage/state constraints only: audit business fields and writer/page byte
  * budgets remain reader/writer responsibilities. No payload-size ceiling here.
  * Publishing requires the run's terminal update first, in the same transaction;
  * these triggers cannot enforce that callers use one transaction for both steps.
  */
-export const SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL = `
+export const SCAN_AUDIT_ENTRIES_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS library_scan_audit_manifests (
     run_id TEXT NOT NULL PRIMARY KEY REFERENCES library_scan_runs(id) ON DELETE CASCADE,
     format_version INTEGER NOT NULL DEFAULT 1 CHECK(typeof(format_version) = 'integer' AND format_version = 1),
@@ -1461,7 +1461,7 @@ ${PENDING_VIDEO_SCRAPES_SCHEMA_SQL}
 
 ${MEDIA_LIBRARY_SCAN_SCHEMA_SQL}
 
-${SCAN_AUDIT_ENTRIES_V18_SCHEMA_SQL}
+${SCAN_AUDIT_ENTRIES_SCHEMA_SQL}
 
 ${RELATED_LINKS_SCHEMA_SQL}
 

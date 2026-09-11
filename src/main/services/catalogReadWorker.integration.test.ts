@@ -1,3 +1,4 @@
+import { CURRENT_SCHEMA_VERSION } from '../db/migrations'
 import {createMediaLibrary} from '../db/mediaLibraryRepo'
 import {buildScanAuditViewItems} from '@shared/scanAuditView'
 import { listClassificationImagePage, createClassificationImagePageReader } from './classificationImagePage'
@@ -60,10 +61,10 @@ it('executes real read-only tag queries and observes writes through the worker c
 
 it('rejects a changed catalog version at worker startup without migration', async () => {
   const db = setup()
-  db.pragma('user_version=16')
+  db.pragma(`user_version=${CURRENT_SCHEMA_VERSION - 1}`)
   await assert.rejects(client!.read({}), /schema|worker|reader/i)
   await client!.dispose()
-  assert.equal(db.pragma('user_version', { simple: true }), 16)
+  assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION - 1)
   assert.deepEqual(db.prepare('SELECT name FROM tags').all(), [{ name: 'École' }])
 })
 
@@ -96,9 +97,9 @@ it('executes all classification cover pages on the readonly worker and observes 
 })
 
 it('rejects image initialization against an incompatible schema without rewriting it',async()=>{
- const db=setup();db.pragma('user_version=16')
+ const db=setup();db.pragma(`user_version=${CURRENT_SCHEMA_VERSION - 1}`)
  await assert.rejects(client!.readImageCandidates({kind:'director',id:1}),/schema|worker|reader/i)
- await client!.dispose();assert.equal(db.pragma('user_version',{simple:true}),16)
+ await client!.dispose();assert.equal(db.pragma('user_version',{simple:true}),CURRENT_SCHEMA_VERSION - 1)
 })
 
 it('reads bounded audit pages in the real worker, isolates operations and observes audit replacement',async()=>{

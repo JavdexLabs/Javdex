@@ -11,7 +11,7 @@ import { ActressIdentityConflictWorkflow } from '../services/actressIdentityConf
 import { normalizeLocalPathIdentity } from '@shared/localPathIdentity'
 
 /** Older fixtures intentionally model only the tables relevant to their test.
- * Supply the unaffected tag index needed by the later V17 migration. */
+ * Supply the unaffected tag index needed by the combined V16 migration. */
 function ensureTagFixture(db: Database.Database): void {
   if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='video_tag'").get()) {
     db.exec(`CREATE TABLE video_tag (video_id INTEGER NOT NULL, tag_id INTEGER NOT NULL,

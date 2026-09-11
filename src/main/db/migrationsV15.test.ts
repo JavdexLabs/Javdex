@@ -25,7 +25,7 @@ function columnNames(database: Database.Database, table: string): Set<string> {
 function createV14ReleaseFixture(database: Database.Database): void {
   database.exec(`
     PRAGMA foreign_keys = ON;
-    -- Minimal unaffected relationship/index required by the later V17 migration.
+    -- Minimal unaffected relationship/index required by the combined V16 migration.
     CREATE TABLE video_tag (video_id INTEGER NOT NULL, tag_id INTEGER NOT NULL,
       origin TEXT NOT NULL DEFAULT 'manual', PRIMARY KEY(video_id,tag_id));
     CREATE INDEX idx_video_tag_tag_id ON video_tag(tag_id);
@@ -95,7 +95,7 @@ describe('V15 local NFO import migration', () => {
     try {
       database.pragma('foreign_keys = ON')
       migrateDatabase(database)
-      assert.equal(CURRENT_SCHEMA_VERSION, 18)
+      assert.equal(CURRENT_SCHEMA_VERSION, 16)
       assert.equal(database.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
       assert.equal(columnNames(database, 'media_library_configs').has('auto_import_local_nfo'), true)
       assert.equal(tableExists(database, 'pending_resource_identities'), true)

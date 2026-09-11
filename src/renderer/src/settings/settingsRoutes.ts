@@ -97,8 +97,8 @@ export const SETTINGS_GROUPS: SettingsGroupItem[] = [
     id: 'network',
     label: '网络',
     hint: '代理连接',
-    defaultTab: 'proxy',
-    tabs: [{ id: 'proxy', label: '代理' }, { id: 'web', label: '局域网访问' }]
+    defaultTab: 'web',
+    tabs: [{ id: 'web', label: '局域网访问' }, { id: 'proxy', label: '代理' }]
   },
   {
     id: 'about',

@@ -48,6 +48,7 @@
 - Modals: 12px radius, max-height constrained to viewport, actions aligned to the end.
 - Scroll containers: use `scrollbar-gutter: stable` for scrollable panes, lists, logs, code blocks, and popovers. Avoid `stable both-edges` inside dense panels because it creates unnecessary left/right whitespace; reserve it only for rare centered layouts that truly need symmetric gutters. Pair stable gutters with fixed min/max dimensions so loading, filtering, or expanding content never changes the container width. When a scroll container contains bordered cards, sections, logs, or code blocks, keep only a small inner gap between content and the scrollbar track so the thumb never visually covers borders.
 - Text areas: multiline text inputs must reserve a stable scrollbar gutter by default. The readable text column must not rewrap or become narrower when the user types enough content to make the textarea scroll.
+- Focus clipping: scroll/clip containers around form controls must reserve `--focus-ring-space` on every edge. Shared form modals provide this space with padding and compensating margins; custom body styles must preserve it. Do not remove scrolling or replace the outer focus ring to hide clipping.
 - Empty/loading states: concise, centered, and task-oriented; no decorative hero treatment.
 - Empty height: `fill` inside fixed-height panes; `compact` (~140px via `--empty-inline-min-h`) inside scrolling detail sections such as samples/gallery.
 

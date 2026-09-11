@@ -140,6 +140,19 @@
   scrollbar-gutter: auto;
 }
 
+/* Expand the scroll clip into the modal padding without moving form fields. */
+.body.formBody {
+  margin-top: calc(-1 * var(--focus-ring-space));
+  margin-inline: calc(-1 * var(--focus-ring-space));
+  margin-bottom: calc(14px - var(--focus-ring-space));
+  padding: var(--focus-ring-space);
+  padding-inline-end: calc(var(--scrollbar-safe-pad) + var(--focus-ring-space));
+}
+
+.formBody.bodyHidden {
+  padding-inline-end: var(--focus-ring-space);
+}
+
 .body p {
   margin: 0 0 12px;
 }

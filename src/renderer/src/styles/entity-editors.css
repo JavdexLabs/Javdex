@@ -865,7 +865,7 @@ button.alias-tag-chip-name:disabled {
 .modal.modal--scrape .modal-body {
   overflow: hidden;
   margin-bottom: 12px;
-  padding-inline-end: 0;
+  padding-inline-end: var(--focus-ring-space);
 }
 
 .modal.modal--scrape .modal-actions {

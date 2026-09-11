@@ -103,7 +103,7 @@
 }
 
 .modal--plugin-dev-target-picker .modal-body {
-  padding-bottom: 0;
+  padding-bottom: var(--focus-ring-space);
 }
 
 .plugin-dev-target-picker {
